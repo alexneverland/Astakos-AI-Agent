@@ -1,0 +1,25 @@
+# Credentials & Secrets
+.env
+config.py
+*.json
+!*.example.json
+credentials/
+*.md
+!README.md
+
+# Φάκελοι με ευαίσθητα δεδομένα - ΑΠΑΓΟΡΕΥΕΤΑΙ ΤΟ PUSH
+astakos_skills/
+telegram_photos/
+telegram_uploads/
+.cache/
+
+# Databases & Checkpoints
+chroma_db/
+checkpoints.db*
+astakos_chat_history.json
+
+# Python & System
+__pycache__/
+*.pyc
+venv/
+.vscode/
