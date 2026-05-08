@@ -1,0 +1,319 @@
+import os
+import re
+import json
+import urllib.parse
+import unicodedata
+import requests
+import xml.etree.ElementTree as ET
+from langchain_core.tools import tool
+from typing import Annotated
+from playwright.sync_api import sync_playwright
+
+
+def remove_accents(input_str: str) -> str:
+    """Αφαιρεί τόνους και μετατρέπει σε πεζά."""
+    if not isinstance(input_str, str):
+        return ""
+    nfkd_form = unicodedata.normalize('NFKD', input_str)
+    return u"".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower()
+
+
+@tool
+def get_news(topic: str = "Γενικά", limit: int = 15) -> str:
+    """Φέρνει τίτλους ειδήσεων από το Google News."""
+    try:
+        print(f"\033[96m[Web]: Ανάκτηση ειδήσεων για: {topic}...\033[0m")
+        url = (
+            "https://news.google.com/rss?hl=el&gl=GR&ceid=GR:el"
+            if topic.lower() in ["γενικά", "general", ""]
+            else f"https://news.google.com/rss/search?q={urllib.parse.quote(topic)}&hl=el&gl=GR&ceid=GR:el"
+        )
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"}
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            items = ET.fromstring(response.text).findall(".//item")
+            news = [f"{i + 1}. {item.find('title').text}" for i, item in enumerate(items[:limit])]
+            return "\n".join(news) if news else "Δεν βρέθηκαν ειδήσεις."
+        return f"Error: Status {response.status_code}"
+    except Exception as e:
+        return f"News Error: {str(e)}"
+
+
+@tool
+def get_weather_forecast(location: str, days: int = 14) -> str:
+    """Επιστρέφει την αναλυτική πρόγνωση καιρού για μια περιοχή (έως 16 ημέρες)."""
+    try:
+        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={location}&count=1&language=el&format=json"
+        geo_resp = requests.get(geo_url, timeout=10).json()
+
+        if "results" not in geo_resp or not geo_resp["results"]:
+            return f"Δεν μπόρεσα να βρω την τοποθεσία: {location}"
+
+        lat = geo_resp["results"][0]["latitude"]
+        lon = geo_resp["results"][0]["longitude"]
+        place_name = geo_resp["results"][0]["name"]
+
+        weather_url = (
+            f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum"
+            f"&timezone=auto&forecast_days={days}"
+        )
+        weather_resp = requests.get(weather_url, timeout=10).json()
+
+        daily = weather_resp.get("daily", {})
+        if not daily:
+            return "Δεν βρέθηκαν δεδομένα καιρού."
+
+        dates = daily.get("time", [])
+        t_max = daily.get("temperature_2m_max", [])
+        t_min = daily.get("temperature_2m_min", [])
+        precip = daily.get("precipitation_sum", [])
+
+        result = f"Πρόγνωση καιρού για {place_name} ({days} ημέρες):\n"
+        for i in range(len(dates)):
+            rain_info = f"Βροχή: {precip[i]}mm" if precip[i] > 0 else "Χωρίς βροχή"
+            result += f"- {dates[i]}: Max {t_max[i]}°C, Min {t_min[i]}°C, {rain_info}\n"
+
+        return result
+    except Exception as e:
+        return f"Σφάλμα καιρού: {str(e)}"
+
+
+@tool
+def search_supermarket_offers(query: Annotated[str, "Το προϊόν που ψάχνουμε, π.χ. 'φακές'"]) -> str:
+    """Αναζητά τις 5 φθηνότερες τιμές για ένα προϊόν στο e-Katanalotis."""
+    url = "https://warply.s3.amazonaws.com/applications/ed840ad545884deeb6c6b699176797ed/basket-retailers/prices.json?cid=1777896000000"
+    headers = {
+        'sec-ch-ua-platform': '"Windows"',
+        'Referer': 'https://e-katanalotis.gov.gr/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            return f"Σφάλμα σύνδεσης (Status: {response.status_code})"
+
+        data = response.json()
+        merchants_dict = {}
+        items_list = []
+
+        try:
+            result_data = data.get("context", {}).get("MAPP_PRODUCTS", {}).get("result", {})
+            for m in result_data.get("merchants", []):
+                merchants_dict[m.get("merchant_uuid")] = m.get("display_name") or m.get("name") or "Άγνωστο"
+            items_list = result_data.get("products", [])
+        except Exception:
+            pass
+
+        if not items_list:
+            return "Σφάλμα: Δεν βρέθηκαν προϊόντα στο JSON."
+
+        clean_query = remove_accents(query)
+        found_items = []
+
+        for item in items_list:
+            if isinstance(item, dict):
+                name = item.get('name') or item.get('product_name') or item.get('title') or ""
+                clean_name = remove_accents(name)
+
+                if clean_query in clean_name:
+                    prices_data = item.get('prices', [])
+
+                    if isinstance(prices_data, list) and len(prices_data) > 0:
+                        for p_info in prices_data:
+                            p_val = p_info.get('price')
+                            muid = p_info.get('merchant_uuid')
+                            try:
+                                c_price = float(str(p_val).replace(',', '.'))
+                            except:
+                                continue
+                            if c_price > 0:
+                                shop = merchants_dict.get(muid) or 'Super Market'
+                                found_items.append({'name': name, 'price': c_price, 'shop': shop})
+                    else:
+                        p_val = item.get('price') or 0
+                        try:
+                            c_price = float(str(p_val).replace(',', '.'))
+                        except:
+                            c_price = 0.0
+                        if c_price > 0:
+                            muid = item.get('merchant_uuid')
+                            shop = merchants_dict.get(muid) or item.get('retailer_name') or 'Super Market'
+                            found_items.append({'name': name, 'price': c_price, 'shop': shop})
+
+        if not found_items:
+            return f"Δεν βρέθηκαν έγκυρες τιμές για '{query}'."
+
+        found_items.sort(key=lambda x: x['price'])
+        top_5 = found_items[:5]
+
+        res_msg = f"🛒 **Οι καλύτερες τιμές για '{query}':**\n"
+        for i, itm in enumerate(top_5, 1):
+            res_msg += f"{i}. {itm['name']} -> **{itm['price']}€** ({itm['shop']})\n"
+
+        return res_msg
+
+    except Exception as e:
+        return f"Παρουσιάστηκε σφάλμα: {str(e)}"
+
+
+@tool
+def search_goldmall_offers(query: str) -> str:
+    """Deep Scan σε ΟΛΕΣ τις προσφορές του Goldmall χωρίς περιορισμό."""
+    search_term = "σινεμά" if any(x in query.lower() for x in ["σινεμά", "ταινία", "ταινιες"]) else query
+
+    try:
+        print(f"\n\033[94m[DEBUG]: Full Deep Scan for: '{search_term}'\033[0m")
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            page = context.new_page()
+
+            target_url = f"https://www.goldmall.gr/search/term?search_term={search_term}"
+            page.goto(target_url, timeout=30000)
+
+            try:
+                page.wait_for_selector(".deal-tile", timeout=10000)
+            except:
+                return f"Δεν βρέθηκαν αποτελέσματα για '{search_term}'."
+
+            deals = page.locator(".deal-tile").all()
+            results = []
+
+            for i, deal in enumerate(deals):
+                try:
+                    title_text = deal.inner_text().strip().split('\n')[0]
+                    link_el = deal.locator("a").first
+                    relative_link = link_el.get_attribute("href")
+                    full_link = f"https://www.goldmall.gr{relative_link}"
+
+                    print(f"\033[94m[DEBUG]: Opening Offer {i+1}/{len(deals)}: {full_link}\033[0m")
+
+                    detail_page = context.new_page()
+                    detail_page.goto(full_link, timeout=15000, wait_until="domcontentloaded")
+
+                    raw_text = ""
+                    potential_selectors = [".offer-details", ".tab-content", ".description-container"]
+                    for selector in potential_selectors:
+                        element = detail_page.locator(selector).first
+                        if element.is_visible(timeout=2000):
+                            raw_text = element.inner_text()
+                            break
+
+                    if not raw_text:
+                        raw_text = detail_page.locator("body").inner_text()
+
+                    noise_words = ["newsletter", "όρους και τις προϋποθέσεις", "T:2310", "info@", "ΠΩΣ ΛΕΙΤΟΥΡΓΕΙ", "ΤΡΟΠΟΙ ΑΓΟΡΑΣ"]
+                    lines = raw_text.split('\n')
+
+                    schedule_info = []
+                    for line in lines:
+                        clean_line = line.strip()
+                        if len(clean_line) > 5 and not any(noise in clean_line for noise in noise_words):
+                            if any(char.isdigit() for char in clean_line) or any(
+                                day in clean_line for day in ["Σάββατο", "Κυριακή", "Παρασκευή", "Πέμπτη"]
+                            ):
+                                schedule_info.append(clean_line)
+
+                    detail_page.close()
+                    description = " | ".join(schedule_info[:5])
+                    results.append(f"🎬 **{title_text}**\n📅 {description if description else 'Δείτε το link για ώρες.'}")
+
+                except Exception as e:
+                    print(f"\033[91m[DEBUG]: Σφάλμα στην προσφορά {i}: {str(e)}\033[0m")
+                    continue
+
+            browser.close()
+            return "🛒 **Πλήρεις Λεπτομέρειες Goldmall (Θεσσαλονίκη):**\n\n" + "\n\n---\n\n".join(results)
+
+    except Exception as e:
+        return f"Γενικό Σφάλμα Goldmall: {str(e)}"
+
+
+@tool
+def send_messenger_message(target_name: str, message: str) -> str:
+    """Στέλνει μήνυμα στο Facebook Messenger μέσω Playwright."""
+    import time
+    print(f"\033[95m[Messenger]: Αναζήτηση και αποστολή σε '{target_name}'...\033[0m")
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    profile_dir = os.path.join(base_dir, "..", "astakos_skills", "messenger_profile")
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch_persistent_context(
+                user_data_dir=profile_dir,
+                headless=False,
+                args=['--disable-blink-features=AutomationControlled']
+            )
+
+            page = browser.new_page()
+            page.goto("https://www.messenger.com/", wait_until="domcontentloaded", timeout=60000)
+
+            search_box = page.locator('input[aria-label="Αναζήτηση στο Messenger"], input[aria-label="Search Messenger"], input[type="search"]').first
+            search_box.wait_for(state="visible", timeout=10000)
+
+            def attempt_search(name):
+                search_box.click()
+                page.keyboard.press("Control+A")
+                page.keyboard.press("Backspace")
+                search_box.fill(name)
+                
+                # [MASTRO-FIX]: Περιμένουμε λίγο να φορτώσουν τα αποτελέσματα
+                time.sleep(2) 
+                
+                try:
+                    # Επιλέγουμε το πρώτο κελί (gridcell) που εμφανίζεται στα αποτελέσματα
+                    # χωρίς να απαιτούμε να γράφει μόνο "Σοφία"
+                    target_contact = page.locator('div[role="gridcell"]').first
+                    target_contact.wait_for(state="visible", timeout=5000)
+                    target_contact.click(force=True)
+                    return True
+                except:
+                    return False
+
+            if not attempt_search(target_name):
+                first_name = target_name.split()[0]
+                print(f"⚠️ Πλήρες όνομα απέτυχε. Δοκιμή με: {first_name}...")
+                if not attempt_search(first_name):
+                    return f"❌ Σφάλμα: Η επαφή '{target_name}' δεν βρέθηκε."
+
+            time.sleep(2)
+
+            chat_box = page.locator('div[role="textbox"]').last
+            chat_box.wait_for(state="visible", timeout=3000)
+            chat_box.click()
+            chat_box.fill(message)
+            time.sleep(0.5)
+            chat_box.press("Enter")
+            time.sleep(5)
+
+            return f"✅ Επιτυχία: Το μήνυμα στάλθηκε στον/στην '{target_name}'."
+    except Exception as e:
+        return f"❌ Σφάλμα Messenger: {str(e)}"
+    finally:
+        try:
+            browser.close()
+        except:
+            pass
+
+
+@tool
+def get_navigation_info(destination: str) -> str:
+    """Παρέχει κλικαριστά links για χάρτη και πλοήγηση από Piston 7."""
+    home_base = "Piston 7, Thessaloniki"
+    dest_clean = f"{destination}, Thessaloniki".replace(" ", "+")
+    home_clean = home_base.replace(" ", "+")
+
+    search_url = f"https://www.google.com/maps/search/?api=1&query={dest_clean}"
+    directions_url = f"https://www.google.com/maps/dir/?api=1&origin={home_clean}&destination={dest_clean}"
+
+    return (
+        f"📍 **Τοποθεσία:** {destination}\n\n"
+        f"🔗 [Προβολή στον Χάρτη]({search_url})\n"
+        f"🌐 Link: {search_url}\n\n"
+        f"🚗 [Οδηγίες πλοήγησης από Piston 7]({directions_url})\n"
+        f"🛣️ Διαδρομή: {directions_url}"
+    )
