@@ -1,3 +1,10 @@
+# ================================================================
+# Project: Astakos AI Agent 🦞
+# Developer: Lazaros (Piston-7)
+# Description: Modular LLM-agnostic multi-agent framework
+# Copyright (c) 2026 - All Rights Reserved
+# ================================================================
+
 import warnings
 import os
 from langchain_google_genai import ChatGoogleGenerativeAI
