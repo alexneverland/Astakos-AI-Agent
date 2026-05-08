@@ -44,7 +44,7 @@ Copy core/prompts.json.example to core/prompts.json to define agent behaviors.
 2. Environment Variables (.env)
 Create a .env file in the root directory and add the following keys:
 
-Plaintext
+
 # AI Keys
 GEMINI_API_KEY=your_gemini_api_key_here
 GOOGLE_API_KEY=your_google_api_key_here
