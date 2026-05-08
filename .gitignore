@@ -12,6 +12,7 @@ astakos_skills/
 telegram_photos/
 telegram_uploads/
 .cache/
+.cache
 
 # Databases & Checkpoints
 chroma_db/
