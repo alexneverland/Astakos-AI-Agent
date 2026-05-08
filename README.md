@@ -64,6 +64,7 @@ EMAIL_PASSWORD=your_app_password
 GITHUB_TOKEN=your_github_token
 VACUUM_IP=your_vacuum_ip
 VACUUM_TOKEN=your_vacuum_token
+
 3. Run the Agent
 Depending on the mode you want:
 
