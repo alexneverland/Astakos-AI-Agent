@@ -87,23 +87,41 @@ def supervisor_node(state):
 def dev_agent_node(state):
     from core.utils import load_agent_prompt
     from config import BASE_DIR  
+    from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
     
-    history = filter_messages(state["messages"])
+    # 1. Φιλτράρισμα - ΠΡΟΣΟΧΗ: Το filter_messages δεν πρέπει να σπάει τα ζευγάρια AI <-> Tool
+    messages = state["messages"]
     
-    # 1. Φορτώνουμε τις οδηγίες του Dev_Agent από το JSON
+    # Κρατάμε τα τελευταία μηνύματα αλλά φροντίζουμε να μην έχουμε SystemMessages μέσα στο history
+    # Το Gemini θέλει ΜΟΝΟ ΕΝΑ SystemMessage και ΠΑΝΤΑ στην αρχή (index 0).
+    history = [m for m in messages if not isinstance(m, SystemMessage)]
+    
+    # Κρατάμε π.χ. τα τελευταία 20 μηνύματα για να μην βαραίνει το context
+    history = history[-20:]
+    
+    # 2. Φορτώνουμε και προετοιμάζουμε το Prompt
     system_base = load_agent_prompt("Dev_Agent", "Είσαι ο Dev_Agent, ο Αρχιμηχανικός Προγραμματιστής του Αστακού.")
-    
-    # [MASTRO-FIX]: Αντικατάσταση του placeholder με το πραγματικό path
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     
-    # 2. Χτίζουμε το prompt μαζί με το history
-    prompt = build_prompt(history, system_base)
+    # Χτίζουμε το prompt (το build_prompt σου πρέπει να επιστρέφει string)
+    prompt_content = build_prompt(history, system_base)
+    
+    # 3. Η ΚΡΙΣΙΜΗ ΣΥΝΘΕΣΗ
+    # Φτιάχνουμε τη λίστα έτσι ώστε το SystemMessage να είναι ΠΡΩΤΟ και μετά όλο το ιστορικό.
+    # Αυτό εγγυάται ότι δεν θα υπάρχει SystemMessage ανάμεσα σε AI και Tool calls.
+    clean_history = [SystemMessage(content=prompt_content)] + history
 
-    return {"current_agent": "Dev_Agent", "messages": [llm_heavy.bind_tools([
+    # 4. Εκτέλεση με τα Tools
+    tools = [
         write_code, run_code, read_local_file, write_custom_tool,
         delete_from_memory, search_memory, save_to_memory,
         send_messenger_message, control_spotify, control_vacuum, get_navigation_info
-    ]).invoke([SystemMessage(content=prompt)] + history)]}
+    ]
+    
+    # Χρησιμοποιούμε llm_heavy.bind_tools
+    response = llm_heavy.bind_tools(tools).invoke(clean_history)
+
+    return {"current_agent": "Dev_Agent", "messages": [response]}
 
 
 def chat_agent_node(state: AgentState):
