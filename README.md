@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 <div align="center">
+=======
+﻿<div align="center">
+>>>>>>> daded60 (Refine README formatting and icons)
 
 # 🦞 Astakos AI Agent
 
@@ -143,4 +147,8 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 **[alexneverland](https://github.com/alexneverland)**
 
+<<<<<<< HEAD
 </div>
+=======
+</div>
+>>>>>>> daded60 (Refine README formatting and icons)
