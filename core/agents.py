@@ -18,7 +18,7 @@ from core.utils import load_agent_prompt
 # CONFIG & BRAIN
 from config import PHOTOS_DIR, WORKING_MEMORY_FILE
 from core.brain import llm, llm_heavy
-
+from astakos_skills.recipe_expert import recipe_expert, log_meal
 # UTILS & STATE (Εδώ σπάμε το Circular Import)
 from core.utils import AgentState, filter_messages, build_prompt, clean_message
 
@@ -203,7 +203,8 @@ def chat_agent_node(state: AgentState):
     
     chat_tools = [
         send_messenger_message, search_supermarket_offers, control_spotify,
-        search_memory, save_to_memory, retrieve_photo, archive_file, web_search
+        search_memory, save_to_memory, retrieve_photo, archive_file, web_search, recipe_expert,
+    log_meal
     ]
     
     response = llm.bind_tools(chat_tools).invoke(final_messages)
@@ -222,7 +223,8 @@ def home_agent_node(state):
         manage_list, set_reminder, set_local_reminder, delete_from_memory, search_memory,
         search_supermarket_offers, control_spotify, control_vacuum,
         search_goldmall_offers, get_navigation_info,
-        google_calendar_tool, google_tasks_tool
+        google_calendar_tool, google_tasks_tool, recipe_expert,
+    log_meal
     ]
 
     # 1. Τραβάμε τις οδηγίες από το JSON

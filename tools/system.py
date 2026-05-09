@@ -41,6 +41,7 @@ from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
     search_goldmall_offers, send_messenger_message, get_navigation_info
 )
+from astakos_skills.recipe_expert import recipe_expert, log_meal
 # ────────────────────────────────────────────────────────────────
 # PROTECTED SANDBOX
 # ────────────────────────────────────────────────────────────────
@@ -893,7 +894,8 @@ all_tools = [
     set_local_reminder, set_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
-    mail_manager, github_manager, control_vacuum, control_spotify,
+    mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, 
+    log_meal,
     get_news, get_weather_forecast, search_supermarket_offers,
     search_goldmall_offers, send_messenger_message, archive_file, get_navigation_info,
     DuckDuckGoSearchRun()
