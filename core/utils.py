@@ -50,25 +50,76 @@ def clean_message(msg_content):
     return str(msg_content).strip()
 
 def filter_messages(messages: list, k: int = 40) -> list:
-    """Κρατάει το ιστορικό καθαρό από σφάλματα και κενά εργαλεία."""
-    if not messages: 
-        return []
+    """
+    Mastro-Shield v2: Καθαρίζει το ιστορικό από σφάλματα που σπάνε το Gemini API.
     
+    Κανόνες:
+    1. Αφαιρεί κενά ToolMessages
+    2. Αφαιρεί κενά AI μηνύματα χωρίς tool_calls
+    3. [ΚΡΙΣΙΜΟ] Αφαιρεί AI μηνύματα με tool_calls αν ΔΕΝ ακολουθεί ToolMessage
+       (αλλιώς το Gemini πετάει 400 INVALID_ARGUMENT)
+    """
+    if not messages:
+        return []
+
     safe_list = list(messages[-k:])
     cleaned_list = []
-    
+
+    # Πρώτο πέρασμα: βασικός καθαρισμός
     for msg in safe_list:
-        if msg.type == "tool" and (not msg.content or str(msg.content).strip() == ""):
-            msg = ToolMessage(
-                content="System Error: Το εργαλείο δεν επέστρεψε δεδομένα.",
-                tool_call_id=msg.tool_call_id,
-                name=msg.name
+        msg_type = getattr(msg, "type", "")
+
+        if msg_type == "tool":
+            if not msg.content or str(msg.content).strip() == "":
+                msg = ToolMessage(
+                    content="System Error: Το εργαλείο δεν επέστρεψε δεδομένα.",
+                    tool_call_id=msg.tool_call_id,
+                    name=getattr(msg, "name", "unknown")
+                )
+            cleaned_list.append(msg)
+
+        elif msg_type == "ai":
+            if not msg.content and not getattr(msg, "tool_calls", None):
+                continue  # Αδειο AI μήνυμα — πέταξέ το
+            cleaned_list.append(msg)
+
+        else:
+            cleaned_list.append(msg)
+
+    # Δεύτερο πέρασμα: [MASTRO-FIX] Αφαίρεση "ορφανών" tool_calls
+    # Το Gemini απαιτεί: AIMessage(tool_calls) → ToolMessage(s) → AIMessage
+    # Αν λείπει το ToolMessage μετά από tool_calls, σκάει με 400.
+    final_list = []
+    i = 0
+    while i < len(cleaned_list):
+        msg = cleaned_list[i]
+        msg_type = getattr(msg, "type", "")
+        tool_calls = getattr(msg, "tool_calls", None)
+
+        if msg_type == "ai" and tool_calls:
+            # Ελέγχουμε αν υπάρχει ToolMessage αμέσως μετά
+            has_tool_response = (
+                i + 1 < len(cleaned_list) and
+                getattr(cleaned_list[i + 1], "type", "") == "tool"
             )
-        elif msg.type == "ai" and not msg.content and not getattr(msg, "tool_calls", None):
-            continue
-        cleaned_list.append(msg)
-    
-    return cleaned_list
+            if not has_tool_response:
+                # Ορφανό tool_call — μετατρέπουμε σε απλό AI μήνυμα
+                # κρατώντας το content αν υπάρχει, αλλιώς το παρακάμπτουμε
+                if msg.content:
+                    from langchain_core.messages import AIMessage
+                    final_list.append(AIMessage(content=clean_message(msg.content)))
+                # Αν δεν έχει content, το πετάμε τελείως
+                i += 1
+                continue
+
+        final_list.append(msg)
+        i += 1
+
+    # Αν ξεκινά με ToolMessage (χωρίς προηγούμενο AI), κόψε το
+    while final_list and getattr(final_list[0], "type", "") == "tool":
+        final_list.pop(0)
+
+    return final_list
 
 # ────────────────────────────────────────────────────────────────
 # 3. PROMPT LOADING ENGINE
@@ -110,10 +161,16 @@ def build_prompt(state_messages, agent_role="") -> str:
     # Αντικατάσταση του path αν υπάρχει στο identity block
     identity = identity.replace("{BASE_DIR}", BASE_DIR if 'BASE_DIR' in locals() else "C:\\astakos_v2")
 
-    # 2. Similarity Search (Ανάκτηση αναμνήσεων)
+    # 2. Similarity Search (Ανάκτηση αναμνήσεων) - Mastro Filtered
     last_msg = clean_message(state_messages[-1].content) if state_messages else ""
     memories_str = ""
-    if last_msg.strip():
+    
+    clean_text = last_msg.strip().lower()
+    # Λέξεις που αγνοούμε αν το μήνυμα είναι πολύ μικρό
+    ignore_words = ["ναι", "όχι", "οχι", "οκ", "ok", "έγινε", "εγινε", "καλά", "τέλεια", "ευχαριστώ", "γεια", "σωστά"]
+
+    # Ψάξε ΜΟΝΟ αν το μήνυμα έχει πάνω από 10 χαρακτήρες ΚΑΙ δεν είναι σκέτη "λέξη-σκουπίδι"
+    if len(clean_text) > 10 and clean_text not in ignore_words:
         try:
             with vector_lock:
                 results = vector_store.similarity_search(last_msg, k=8)
