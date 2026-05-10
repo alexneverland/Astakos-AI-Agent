@@ -200,9 +200,9 @@ async def lifespan(app: FastAPI):
     global server_loop                               # <--- ΠΡΟΣΘΗΚΗ ΑΥΤΗ ΤΗ ΓΡΑΜΜΗ
     server_loop = asyncio.get_running_loop()
     threads = [
-        threading.Thread(target=reminder_worker,  daemon=True),
-        threading.Thread(target=proactive_worker, daemon=True),
-        threading.Thread(target=queue_worker,     daemon=True),
+        # reminder_worker και proactive_worker τρέχουν ΜΟΝΟ στο telegram_bot.py
+        # Εδώ κρατάμε μόνο τον queue_worker για τα background memory tasks
+        threading.Thread(target=queue_worker, daemon=True),
     ]
     for t in threads:
         t.start()
