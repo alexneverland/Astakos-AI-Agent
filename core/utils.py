@@ -146,61 +146,72 @@ def load_agent_prompt(agent_name: str, default_fallback: str = "") -> str:
 
 def build_prompt(state_messages, agent_role="") -> str:
     """
-    Η κεντρική μηχανή σύνθεσης Prompt.
-    Συνδυάζει: Ταυτότητα, Similarity Search, Working Memory και Session Hints.
+    Η κεντρική μηχανή σύνθεσης Prompt - Αναβαθμισμένη για προτεραιότητα Vision.
     """
-    # Lazy imports για αποφυγή circular imports
     from config import WORKING_MEMORY_FILE, BASE_DIR
     from memory.vector_store import vector_store, vector_lock
     from memory.working_memory import get_capability_context
     from memory.session_memory import load_last_session_hint
+    import os
+    import json
 
-    # 1. Προετοιμασία Ταυτότητας (από το prompts.json)
-    # Εδώ βάζεις το 'identity_block' στο JSON σου με όλα τα ονόματα.
+    # 1. Προετοιμασία Ταυτότητας
     identity = load_agent_prompt("identity_block", "Είσαι ο Αστακός, ο AI συνεργάτης του Λάζαρου.")
-    # Αντικατάσταση του path αν υπάρχει στο identity block
-    identity = identity.replace("{BASE_DIR}", BASE_DIR if 'BASE_DIR' in locals() else "C:\\astakos_v2")
+    identity = identity.replace("{BASE_DIR}", BASE_DIR)
 
-    # 2. Similarity Search (Ανάκτηση αναμνήσεων) - Mastro Filtered
+    # 2. Ανίχνευση Vision Context
     last_msg = clean_message(state_messages[-1].content) if state_messages else ""
-    memories_str = ""
+    is_vision = "[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]" in last_msg or "[CURRENT_PHOTO_PATH]" in last_msg
+    has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
     
+    # 3. Similarity Search (Mastro-Logic)
+    memories_str = ""
     clean_text = last_msg.strip().lower()
-    # Λέξεις που αγνοούμε αν το μήνυμα είναι πολύ μικρό
     ignore_words = ["ναι", "όχι", "οχι", "οκ", "ok", "έγινε", "εγινε", "καλά", "τέλεια", "ευχαριστώ", "γεια", "σωστά"]
 
-    # Ψάξε ΜΟΝΟ αν το μήνυμα έχει πάνω από 10 χαρακτήρες ΚΑΙ δεν είναι σκέτη "λέξη-σκουπίδι"
-    if len(clean_text) > 10 and clean_text not in ignore_words:
+    # Αν έχουμε ΤΩΡΙΝΗ φωτογραφία, ΜΗΝ ψάχνεις μνήμες — ο agent βλέπει ήδη τα πάντα
+    # Αν βλέπουμε εικόνα (χωρίς current photo), μειώνουμε k=3
+    k_value = 0 if has_current_photo else (3 if is_vision else 8)
+
+    if k_value > 0 and len(clean_text) > 10 and clean_text not in ignore_words:
         try:
             with vector_lock:
-                results = vector_store.similarity_search(last_msg, k=8)
+                results = vector_store.similarity_search(last_msg, k=k_value)
                 if results:
-                    memories_str = "\n═══ ΜΝΗΜΕΣ (Αυτά που θυμάμαι) ═══\n"
+                    memories_str = "\n📜 ═══ ΙΣΤΟΡΙΚΟ ΑΡΧΕΙΟ ΜΝΗΜΗΣ (Παλιές Αναμνήσεις) ═══\n"
                     for res in results:
                         memories_str += f" • {res.page_content}\n"
+                    memories_str += "⚠️ Σημείωση: Τα παραπάνω είναι αναμνήσεις, όχι η τρέχουσα κατάσταση.\n"
         except Exception as e:
             print(f"⚠️ Memory Search Error: {e}")
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # 3. Σύνθεση του Βασικού Prompt
-    prompt = (
-        f"{identity}\n"
-        f"Σήμερα: {now_str}.\n"
-        f"ΡΟΛΟΣ ΤΩΡΑ: {agent_role}\n\n"
-    )
+    # 4. Σύνθεση του Βασικού Prompt με Κανόνα Πραγματικότητας
+    prompt = f"{identity}\n"
+    prompt += f"Σήμερα: {now_str}.\n"
+    prompt += f"ΡΟΛΟΣ ΤΩΡΑ: {agent_role}\n\n"
 
-    # 4. Προσθήκη Context από προηγούμενες συνεδρίες
+    # Εμβόλιμος Κανόνας αν υπάρχει Vision
+    if is_vision:
+        prompt += (
+            "🚨 ΚΑΝΟΝΑΣ ΠΡΑΓΜΑΤΙΚΟΤΗΤΑΣ (CRITICAL):\n"
+            "Αυτή τη στιγμή έχεις μπροστά σου μια ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ. Αυτή είναι η ΤΩΡΙΝΗ πραγματικότητα.\n"
+            "Αν οι παλιές μνήμες (π.χ. για κύπελλα ποδοσφαίρου) έρχονται σε σύγκρουση με αυτό που βλέπεις (π.χ. τριανταφυλλιές),\n"
+            "ΠΡΕΠΕΙ να αγνοήσεις το ιστορικό αρχείο και να εστιάσεις ΜΟΝΟ στην εικόνα.\n\n"
+        )
+
+    # 5. Προσθήκη Context από προηγούμενες συνεδρίες
     session_hint = load_last_session_hint()
     if session_hint:
         prompt += f"[ΣΥΝΕΧΕΙΑ ΑΠΟ ΠΡΟΗΓΟΥΜΕΝΗ SESSION]\n{session_hint}\n\n"
 
-    # 5. Προσθήκη Αυτογνωσίας (Capabilities)
+    # 6. Προσθήκη Αυτογνωσίας
     cap_context = get_capability_context()
     if cap_context:
         prompt += f"[ΑΥΤΟΓΝΩΣΙΑ]\n{cap_context}\n\n"
 
-    # 6. Προσθήκη Working Memory (Τι συμβαίνει τώρα)
+    # 7. Προσθήκη Working Memory
     if os.path.exists(WORKING_MEMORY_FILE):
         try:
             with open(WORKING_MEMORY_FILE, "r", encoding="utf-8") as f:
@@ -211,13 +222,13 @@ def build_prompt(state_messages, agent_role="") -> str:
                     prompt += "══════════════════════════════════\n\n"
         except: pass
 
-    # 7. Κανόνες Εργαλείων & Φωτογραφιών (Hardcoded οδηγίες λειτουργίας)
+    # 8. Hardcoded οδηγίες
     prompt += (
         "ΚΑΝΟΝΑΣ ΜΝΗΜΗΣ: Αν σου ζητηθεί πληροφορία που λείπει, κάλεσε το 'search_memory'.\n"
         "ΚΑΝΟΝΑΣ ΦΩΤΟΓΡΑΦΙΩΝ: Αν ζητηθεί φωτό, κάλεσε το 'retrieve_photo' και συμπεριέλαβε το [SEND_PHOTO: path] στην απάντηση.\n\n"
     )
 
-    # 8. Τελικό κόλλημα των αναμνήσεων από τη ChromaDB
+    # 9. Τελικό κόλλημα των αναμνήσεων
     prompt += memories_str
 
     return prompt

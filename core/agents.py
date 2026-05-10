@@ -244,36 +244,62 @@ def home_agent_node(state):
 
 def web_agent_node(state: AgentState):
     """
-    Ο Agent του Internet. Φέρνει καιρό, ειδήσεις, πλοήγηση και κάνει βαριές αναζητήσεις.
+    Ο Agent του Internet με υποστήριξη Vision (Mastro-Vision).
     """
-    from core.utils import load_agent_prompt
-    from config import BASE_DIR  
+    from core.utils import load_agent_prompt, clean_message
+    from config import BASE_DIR, PHOTOS_DIR 
+    import re
+    import os
+    import base64
 
     history = filter_messages(state["messages"])
-    
+    # Παίρνουμε το τελευταίο μήνυμα για να δούμε αν έχει φωτό
+    last_msg_text = clean_message(history[-1].content) if history else ""
+
+    # [MASTRO-VISION]: Ανίχνευση αν υπάρχει φωτογραφία στο τρέχον context
+    path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
+    image_part = None
+
+    if path_match:
+        try:
+            filename = os.path.basename(path_match.group(1).strip().replace("]", ""))
+            file_path = os.path.join(PHOTOS_DIR, filename)
+            if os.path.exists(file_path) and filename.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                with open(file_path, "rb") as f:
+                    img_base64 = base64.b64encode(f.read()).decode("utf-8")
+                    image_part = {
+                        "type": "image_url", 
+                        "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
+                    }
+                print(f"\033[92m[Web-Vision]: Pixels loaded for analysis: {filename}\033[0m")
+        except Exception as e:
+            print(f"⚠️ Web Vision Error: {e}")
+
     # 1. Τραβάμε τις οδηγίες από το JSON
-    system_base = load_agent_prompt("Web_Agent", "Είσαι ο Web_Agent, ο υπεύθυνος δικτύου και αναζητήσεων του Λάζαρου.")
-    
-    # [MASTRO-FIX]: Αντικατάσταση του placeholder για δυναμικά paths
+    system_base = load_agent_prompt("Web_Agent", "Είσαι ο Web_Agent.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     
-    # 2. Χτίζουμε το τελικό prompt
+    # 2. Χτίζουμε το prompt (με τον νέο build_prompt που θα φτιάξουμε παρακάτω)
     system_prompt = build_prompt(history, system_base)
     
-    from langchain_community.tools import DuckDuckGoSearchRun
-    web_search = DuckDuckGoSearchRun()
+    # Προετοιμασία των μηνυμάτων
+    final_messages = [SystemMessage(content=system_prompt)] + history
+    
+    # Αν υπάρχει φωτό, μετατρέπουμε το τελευταίο HumanMessage σε Multimodal
+    if image_part:
+        final_messages[-1] = HumanMessage(content=[
+            {"type": "text", "text": last_msg_text},
+            image_part
+        ])
 
     web_tools = [
-        get_news, 
-        get_weather_forecast, 
-        web_search, 
-        search_memory, 
-        get_navigation_info
+        get_news, get_weather_forecast, DuckDuckGoSearchRun(), 
+        search_memory, get_navigation_info, retrieve_photo, read_local_file
     ]
 
     return {
         "current_agent": "Web_Agent",
-        "messages": [llm.bind_tools(web_tools).invoke([SystemMessage(content=system_prompt)] + history)]
+        "messages": [llm.bind_tools(web_tools).invoke(final_messages)]
     }
 
 
