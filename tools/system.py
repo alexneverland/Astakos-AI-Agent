@@ -358,12 +358,18 @@ def google_calendar_tool(action: str, summary: str, start_time: str, end_time: s
 
 @tool
 def google_tasks_tool(action: str, title: str, due: str = None) -> str:
-    """Διαχειρίζεται τα Google Tasks. action: 'create' για νέα υπενθύμιση."""
+    """
+    Διαχειρίζεται τα Google Tasks. action: 'create' για νέα υπενθύμιση.
+    🚨 [MASTRO-RULE ΓΙΑ ΤΟΝ ΤΙΤΛΟ]: Η παράμετρος 'title' ΠΡΕΠΕΙ να περιγράφει ξεκάθαρα την εργασία (π.χ. 'Φροντίδα τριανταφυλλιάς').
+    ΑΠΑΓΟΡΕΥΕΤΑΙ ΑΥΣΤΗΡΑ να χρησιμοποιείς ρήματα της εντολής (π.χ. 'βάλε', 'κάνε', 'θύμισέ μου', 'υπενθύμιση') ως τίτλο. 
+    Αν ο χρήστης λέει απλά 'βάλε μια υπενθύμιση' χωρίς να διευκρινίζει το θέμα, ΜΗΝ καλείς αυτό το εργαλείο. Ρώτα τον πρώτα τι θέλει να γράψεις!
+    """
     try:
         print(f"\033[93m[Tasks]: Δημιουργία υπενθύμισης '{title}'...\033[0m")
         token_path = 'credentials/token.json'
         creds = Credentials.from_authorized_user_file(token_path, ['https://www.googleapis.com/auth/tasks'])
         service = build('tasks', 'v1', credentials=creds)
+        
         if action == "create":
             # Αν το due είναι μόνο ημερομηνία, μετατρέψτο σε RFC3339
             if due and len(due) == 10:  # format: YYYY-MM-DD
@@ -371,6 +377,7 @@ def google_tasks_tool(action: str, title: str, due: str = None) -> str:
             task = {'title': title, 'due': due}
             service.tasks().insert(tasklist='@default', body=task).execute()
             return f"Η υπενθύμιση '{title}' προστέθηκε στα Google Tasks!"
+            
         return f"System Error: Υποστηρίζεται ΜΟΝΟ action='create'. Έστειλες: '{action}'."
     except Exception as e:
         return f"Tasks Error: {str(e)}"
@@ -503,9 +510,27 @@ def read_local_file(file_path: str) -> str:
                 
             return f"📄 PDF ({filename}):\n{text[:10000]}"
 
+        # 🚀 MASTRO-UPGRADE: Εδώ είναι η αλλαγή για τα Excel 🚀
         elif ext in [".xlsx", ".xls"]:
             import pandas as pd
-            return f"📊 Excel ({filename}):\n{pd.read_excel(full_path).head(20).to_string()}"
+            excel_file = pd.ExcelFile(full_path)
+            sheet_names = excel_file.sheet_names
+            
+            output_text = f"📊 Excel ({filename}) - Φύλλα που βρέθηκαν: {', '.join(sheet_names)}\n\n"
+            
+            for sheet in sheet_names:
+                # Διαβάζουμε το φύλλο και βάζουμε παύλες στα κενά
+                df = pd.read_excel(full_path, sheet_name=sheet).fillna("-")
+                output_text += f"═══ Φύλλο: {sheet} ═══\n"
+                
+                # Κρατάμε τις πρώτες 50 γραμμές ανά φύλλο
+                output_text += df.head(50).to_string(index=False) + "\n\n"
+                
+                # Σταματάμε αν ξεπεράσουμε το όριο για να μη σκάσει το API
+                if len(output_text) > 10000:
+                    break
+                    
+            return output_text[:10000]
 
         elif ext == ".docx":
             import docx
@@ -521,10 +546,9 @@ def read_local_file(file_path: str) -> str:
                 return f"📄 Αρχείο ({filename}):\n{f.read(10000)}"
 
     except ImportError as ie:
-        return f"❌ Error: Λείπει βιβλιοθήκη ({str(ie)}). Μάστορα, τρέξε 'pip install PyPDF2 pandas python-docx openpyxl'."
+        return f"❌ Error: Λείπει βιβλιοθήκη ({str(ie)}). Μάστορα, τρέξε 'pip install PyPDF2 pandas python-docx openpyxl xlrd'."
     except Exception as e:
         return f"❌ Error: Σφάλμα ανάγνωσης {ext}: {str(e)}"
-
 
 @tool
 def write_code(filename: str, code: str) -> str:

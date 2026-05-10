@@ -164,16 +164,27 @@ def build_prompt(state_messages, agent_role="") -> str:
     is_vision = "[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]" in last_msg or "[CURRENT_PHOTO_PATH]" in last_msg
     has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
     
-    # 3. Similarity Search (Mastro-Logic)
+# 3. Similarity Search (Mastro-Logic)
     memories_str = ""
     clean_text = last_msg.strip().lower()
-    ignore_words = ["ναι", "όχι", "οχι", "οκ", "ok", "έγινε", "εγινε", "καλά", "τέλεια", "ευχαριστώ", "γεια", "σωστά"]
+    
+    # [MASTRO-FIX]: Εμπλουτισμένη λίστα για κοφτές εντολές
+    ignore_words = [
+        "ναι", "όχι", "οχι", "οκ", "ok", "έγινε", "εγινε", "καλά", "τέλεια", 
+        "ευχαριστώ", "γεια", "σωστά", "ναι αρχειοθέτησε", "αρχειοθέτησέ το", 
+        "ναι σώστο", "σώστο", "αποθήκευσέ το", "ναι αποθήκευσε", "προχωράμε",
+        "αρχειοθέτηση", "σώσε το"
+    ]
 
     # Αν έχουμε ΤΩΡΙΝΗ φωτογραφία, ΜΗΝ ψάχνεις μνήμες — ο agent βλέπει ήδη τα πάντα
     # Αν βλέπουμε εικόνα (χωρίς current photo), μειώνουμε k=3
     k_value = 0 if has_current_photo else (3 if is_vision else 8)
 
-    if k_value > 0 and len(clean_text) > 10 and clean_text not in ignore_words:
+    # Έξυπνο φίλτρο: Αγνοεί το search αν το κείμενο είναι στη λίστα ή ξεκινάει με "ναι"/"όχι"
+    is_routine_command = clean_text in ignore_words or clean_text.startswith(("ναι ", "οχι ", "όχι "))
+
+    # Ψάχνουμε ΜΟΝΟ αν δεν είναι εντολή ρουτίνας, και οι χαρακτήρες είναι > 10
+    if k_value > 0 and len(clean_text) > 10 and not is_routine_command:
         try:
             with vector_lock:
                 results = vector_store.similarity_search(last_msg, k=k_value)
