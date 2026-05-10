@@ -119,7 +119,8 @@ def dev_agent_node(state):
     ]
     
     # Χρησιμοποιούμε llm_heavy.bind_tools
-    response = llm_heavy.bind_tools(tools).invoke(clean_history)
+    # [MASTRO-FIX]: Χρήση του llm (Gemini 3.1) για σταθερά αλυσιδωτά tool calls
+    response = llm.bind_tools(tools).invoke(clean_history)
 
     return {"current_agent": "Dev_Agent", "messages": [response]}
 
