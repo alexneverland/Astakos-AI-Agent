@@ -203,70 +203,71 @@ def handle_end_session(chat_id: str):
 # ────────────────────────────────────────────────────────────────
 
 def handle_photo(photo_list: list, caption: str, chat_id: str):
-    """Κατεβάζει, αναλύει και αποθηκεύει φωτογραφία που έστειλε ο Λάζαρος."""
+    """
+    [MASTRO-PARITY]: Στέλνει τα PIXELS στο LLM για ανάλυση και μετατρέπει 
+    το αποτέλεσμα σε ασφαλές κείμενο για το Telegram.
+    """
     try:
         import base64
+        from langchain_core.messages import HumanMessage
+        from core.brain import llm  # Χρησιμοποιούμε τον "βαρύ" εγκέφαλο για σιγουριά
+        from core.agents import clean_message  # Προστασία από list errors
 
-        # Παίρνουμε την υψηλότερη ανάλυση
+        # 1. Λήψη αρχείου από Telegram
         best_photo = max(photo_list, key=lambda p: p.get("file_size", 0))
         file_id = best_photo["file_id"]
-
-        # Get file path από Telegram API
-        file_resp = requests.get(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile",
-            params={"file_id": file_id}, timeout=10
-        ).json()
+        file_resp = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile", params={"file_id": file_id}).json()
         file_path_remote = file_resp["result"]["file_path"]
+        img_data = requests.get(f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path_remote}").content
 
-        # Download
-        file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path_remote}"
-        img_data = requests.get(file_url, timeout=30).content
-
-        # Αποθήκευση τοπικά
+        # 2. Αποθήκευση τοπικά
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        local_filename = f"photo_{timestamp}.jpg"
-        local_path = os.path.join(PHOTOS_DIR, local_filename)
+        filename = f"photo_{timestamp}.jpg"
+        local_path = os.path.join(PHOTOS_DIR, filename)
 
         with open(local_path, "wb") as f:
             f.write(img_data)
-        print(f"\033[92m[Photo]: Αποθηκεύτηκε: {local_path}\033[0m")
-
-        # Ανάλυση με Gemini Vision
+        print(f"\033[92m[Photo]: Κατέβηκε επιτυχώς: {filename}\033[0m")
+        
+        # 3. Mastro-Fix: Σωστή φόρτωση των pixels στο Vision LLM
         img_b64 = base64.b64encode(img_data).decode("utf-8")
-        analysis_prompt = f"""
-Ανάλυσε αυτή τη φωτογραφία που έστειλε ο Λάζαρος.
-Caption από τον χρήστη: "{caption or 'Καμία λεζάντα'}"
+        vision_prompt = f"Ανάλυσε τι δείχνει η φωτογραφία. Το σχόλιο του χρήστη είναι: '{caption or 'Κανένα σχόλιο'}'. Απάντησε σε 2-3 προτάσεις στα Ελληνικά."
+        
+        # Φτιάχνουμε το "Multimodal" πακέτο
+        vision_msg = HumanMessage(content=[
+            {"type": "text", "text": vision_prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
+        ])
+        
+        print(f"\033[94m[Vision]: Ξεκινάει η οπτική ανάλυση...\033[0m")
+        analysis_response = llm.invoke([vision_msg])
+        memory_analysis = clean_message(analysis_response.content)
 
-Δώσε:
-1. Τι βλέπεις (αντικείμενα, πρόσωπα, τοποθεσία)
-2. Τι συνέβαινε / context (αν φαίνεται)
-3. 3-5 λέξεις-κλειδιά για να βρεθεί αργότερα
-
-Απάντησε σε 2-3 προτάσεις, στα Ελληνικά.
-"""
-        analysis_response = safe_gemini_call(analysis_prompt)
-        analysis_text = analysis_response.text.strip() if analysis_response else "Φωτογραφία χωρίς ανάλυση."
-
-        # Αποθήκευση στη μνήμη
-        memory.save(
-            memory_type="photo",
-            file_path=local_path,
-            analysis=analysis_text,
-            caption=caption or ""
+        # 4. Σύνθεση του Μηνύματος (Έτοιμο για τον Agent)
+        user_log_msg = (
+            f"[USER_UPLOADED_FILE]: {filename}\n"
+            f"[FILE PATH]: {local_path}\n"
+            f"[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]: {memory_analysis}\n"
+            f"Σχόλιο: {caption if caption else 'Δες τη φωτογραφία.'}"
         )
 
-        # Απάντηση στον χρήστη
-        reply = (
-            f"📸 Φωτογραφία αποθηκεύτηκε!\n\n"
-            f"🔍 *Ανάλυση:* {analysis_text}\n\n"
-            f"💾 Αρχείο: `{local_filename}`"
-        )
-        send_telegram_msg(reply)
+        print(f"\033[94m[Telegram->Graph]: {user_log_msg}\033[0m")
+
+        # 5. Τροφοδοσία του LangGraph
+        for event in graph.stream({"messages": [HumanMessage(content=user_log_msg)]}):
+            for node_name, output in event.items():
+                if "messages" in output:
+                    last_msg = output["messages"][-1]
+                    if last_msg.content:
+                        # Mastro-Fix: Το clean_message προστατεύει το Telegram από το "list error"
+                        safe_text = clean_message(last_msg.content)
+                        if safe_text:
+                            send_telegram_msg(safe_text)
 
     except Exception as e:
-        print(f"\033[91m[Photo Error]: {e}\033[0m")
-        send_telegram_msg(f"❌ Σφάλμα ανάλυσης φωτογραφίας: {str(e)}")
-
+        import traceback
+        print(f"❌ Telegram Photo Error: {e}")
+        send_telegram_msg(f"Μάστορα, σκάλωσε η φωτό. Έλεγξε την κονσόλα. Σφάλμα: {e}")
 
 # ────────────────────────────────────────────────────────────────
 # MESSAGE HANDLER

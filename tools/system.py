@@ -365,6 +365,9 @@ def google_tasks_tool(action: str, title: str, due: str = None) -> str:
         creds = Credentials.from_authorized_user_file(token_path, ['https://www.googleapis.com/auth/tasks'])
         service = build('tasks', 'v1', credentials=creds)
         if action == "create":
+            # Αν το due είναι μόνο ημερομηνία, μετατρέψτο σε RFC3339
+            if due and len(due) == 10:  # format: YYYY-MM-DD
+                due = f"{due}T00:00:00.000Z"
             task = {'title': title, 'due': due}
             service.tasks().insert(tasklist='@default', body=task).execute()
             return f"Η υπενθύμιση '{title}' προστέθηκε στα Google Tasks!"
