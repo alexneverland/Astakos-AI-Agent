@@ -4,10 +4,21 @@
 # Description: Modular LLM-agnostic multi-agent framework
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
-
 import requests
+import re
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
+def format_for_telegram(text: str) -> str:
+    """Mastro-Fix: Μετατρέπει το Markdown του LLM σε ασφαλές HTML για το Telegram."""
+    if not text:
+        return ""
+    # 1. Μετατροπή Headers (### Τίτλος -> <b>Τίτλος</b>)
+    text = re.sub(r'^#{1,3}\s+(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
+    # 2. Μετατροπή Bold (**κείμενο** -> <b>κείμενο</b>)
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    # 3. Διόρθωση στις λίστες (για να μη χτυπάει το HTML)
+    text = re.sub(r'^[\*\-]\s+', r'• ', text, flags=re.MULTILINE)
+    return text
 
 def send_telegram_msg(text: str):
     """Στέλνει μήνυμα στο Telegram."""
@@ -18,17 +29,21 @@ def send_telegram_msg(text: str):
         print("❌ Σφάλμα: Λείπουν τα Telegram credentials από το .env")
         return
 
+    # Περνάμε το κείμενο από το "πλυντήριο"
+    safe_text = format_for_telegram(text)
+
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "Markdown",
+        "text": safe_text,
+        "parse_mode": "HTML",  # <--- Γυρίσαμε σε HTML που είναι πιο ανθεκτικό
         "disable_web_page_preview": True
     }
 
     try:
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code != 200:
+            # Το Fallback σου (αν κάτι πάει στραβά, στέλνει απλό κείμενο)
             payload.pop("parse_mode")
             requests.post(url, json=payload, timeout=10)
             print(f"⚠️ Telegram API Warning: plain text (Status: {response.status_code})")

@@ -115,7 +115,7 @@ def dev_agent_node(state):
     tools = [
         write_code, run_code, read_local_file, write_custom_tool,
         delete_from_memory, search_memory, save_to_memory,
-        send_messenger_message, control_spotify, control_vacuum, get_navigation_info
+        send_messenger_message, control_spotify, control_vacuum, get_navigation_info, recipe_expert, log_meal
     ]
     
     # Χρησιμοποιούμε llm_heavy.bind_tools
@@ -223,8 +223,7 @@ def home_agent_node(state):
         manage_list, set_reminder, set_local_reminder, delete_from_memory, search_memory,
         search_supermarket_offers, control_spotify, control_vacuum,
         search_goldmall_offers, get_navigation_info,
-        google_calendar_tool, google_tasks_tool, recipe_expert,
-    log_meal
+        google_calendar_tool, google_tasks_tool, recipe_expert, log_meal
     ]
 
     # 1. Τραβάμε τις οδηγίες από το JSON
@@ -445,6 +444,7 @@ all_tools = [
     google_calendar_tool, save_to_memory, google_tasks_tool, delete_from_memory,
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info, search_supermarket_offers,
-    control_spotify, search_goldmall_offers, send_messenger_message,
+    control_spotify, search_goldmall_offers, send_messenger_message, 
+    recipe_expert, log_meal,
     DuckDuckGoSearchRun()
 ]
