@@ -33,7 +33,7 @@ from tools.system import (
     set_local_reminder, set_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
-    mail_manager, github_manager, control_vacuum, control_spotify
+    mail_manager, github_manager, control_vacuum, control_spotify, create_file_tool
 )
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
@@ -373,18 +373,16 @@ def tech_agent_node(state: AgentState):
 
     # 5. --- BIND TOOLS ---
     from tools.system import (
-        read_local_file, write_code, run_code, 
-        drive_manager, archive_file, search_memory, save_to_memory
+        read_local_file, drive_manager, archive_file, search_memory, save_to_memory, create_file_tool
     )
     
     tech_tools = [
         archive_file,
         read_local_file, 
         drive_manager,
-        write_code, 
-        run_code,
         search_memory,
-        save_to_memory
+        save_to_memory,
+        create_file_tool
     ]
     
     response = llm_heavy.bind_tools(tech_tools).invoke(final_messages)
@@ -472,6 +470,6 @@ all_tools = [
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info, search_supermarket_offers,
     control_spotify, search_goldmall_offers, send_messenger_message, 
-    recipe_expert, log_meal,
+    recipe_expert, log_meal, create_file_tool,
     DuckDuckGoSearchRun()
 ]

@@ -382,7 +382,64 @@ def google_tasks_tool(action: str, title: str, due: str = None) -> str:
     except Exception as e:
         return f"Tasks Error: {str(e)}"
 
+@tool
+def create_file_tool(file_type: str, filename: str, data: str) -> str:
+    """
+    Δημιουργεί τοπικά αρχεία DOCX, PDF, XLSX ή TXT.
+    file_type: 'docx', 'pdf', 'xlsx', 'txt'
+    filename: Το όνομα του αρχείου (π.χ. 'report.docx')
+    data: Το περιεχόμενο. Για XLSX, στείλε JSON string από λίστα/dict.
+    """
+    import os
+    import json
+    from config import BASE_DIR
+    
+    # Φάκελος εξαγωγής (π.χ. C:\astakos_v2\outputs)
+    output_dir = os.path.join(BASE_DIR, "outputs")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        
+    full_path = os.path.join(output_dir, filename)
+    file_type = file_type.lower()
 
+    try:
+        if file_type == "docx":
+            import docx
+            doc = docx.Document()
+            doc.add_paragraph(data)
+            doc.save(full_path)
+
+        elif file_type == "xlsx":
+            import pandas as pd
+            # Προσπάθεια μετατροπής του string σε data frame
+            try:
+                content = json.loads(data)
+                df = pd.DataFrame(content)
+            except:
+                # Αν δεν είναι JSON, το βάζουμε σε μια απλή στήλη
+                df = pd.DataFrame([data], columns=["Content"])
+            df.to_excel(full_path, index=False)
+
+        elif file_type == "pdf":
+            from fpdf import FPDF
+            pdf = FPDF()
+            pdf.add_page()
+            # Χρήση DejaVu ή standard font (για ελληνικά ίσως χρειαστεί .ttf)
+            pdf.set_font("Arial", size=12)
+            pdf.multi_cell(0, 10, data.encode('latin-1', 'replace').decode('latin-1'))
+            pdf.output(full_path)
+
+        elif file_type in ["txt", "json", "csv", "html", "md"]:
+            with open(full_path, "w", encoding="utf-8") as f:
+                f.write(data)
+
+        else:
+            return f"❌ Σφάλμα: Ο τύπος '{file_type}' δεν υποστηρίζεται."
+
+        return f"✅ Το αρχείο δημιουργήθηκε επιτυχώς: {full_path}"
+
+    except Exception as e:
+        return f"❌ Σφάλμα κατά τη δημιουργία: {str(e)}"
 @tool
 def drive_manager(action: str = "list_files", file_id: str = None, local_path: str = None,
                   folder_id: str = "12YrIZ3uAQWmmwIlEkIkDf-4gcz2P8Ktv") -> str:
@@ -922,7 +979,7 @@ all_tools = [
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, 
-    log_meal,
+    log_meal, create_file_tool,
     get_news, get_weather_forecast, search_supermarket_offers,
     search_goldmall_offers, send_messenger_message, archive_file, get_navigation_info,
     DuckDuckGoSearchRun()
