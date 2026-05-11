@@ -176,7 +176,16 @@ def handle_voice(voice_obj: dict, chat_id: str):
         
     except Exception as e:
         print(f"\033[91m[Voice Error]: {e}\033[0m")
-        send_telegram_msg(f"❌ Σφάλμα φωνητικού: {str(e)}") 
+        send_telegram_msg(f"❌ Σφάλμα φωνητικού: {str(e)}")
+def send_telegram_document(file_path, chat_id=None):
+    if not chat_id: chat_id = ALLOWED_CHAT_ID
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
+        with open(file_path, 'rb') as f:
+            requests.post(url, data={'chat_id': chat_id}, files={'document': f})
+        print(f"\033[92m[Telegram]: Το αρχείο {os.path.basename(file_path)} στάλθηκε!\033[0m")
+    except Exception as e:
+        print(f"❌ Telegram File Error: {e}")         
 def handle_end_session(chat_id: str):
     """Κλείνει τη συνεδρία, σώζει το summary και καθαρίζει το working memory."""
     try:
@@ -253,16 +262,33 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
 
         print(f"\033[94m[Telegram->Graph]: {user_log_msg}\033[0m")
 
-        # 5. Τροφοδοσία του LangGraph
+# 5. Τροφοδοσία του LangGraph
         for event in graph.stream({"messages": [HumanMessage(content=user_log_msg)]}):
             for node_name, output in event.items():
                 if "messages" in output:
                     last_msg = output["messages"][-1]
                     if last_msg.content:
+                        import re
                         # Mastro-Fix: Το clean_message προστατεύει το Telegram από το "list error"
                         safe_text = clean_message(last_msg.content)
-                        if safe_text:
-                            send_telegram_msg(safe_text)
+                        
+                        # --- MASTRO INTERCEPTOR ΓΙΑ TELEGRAM ---
+                        file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", safe_text)
+                        if file_match:
+                            file_path = file_match.group(1).strip()
+                            # Καθαρίζουμε την ταμπέλα από το κείμενο για να μη φαίνεται άσχημα
+                            safe_text = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", "", safe_text).strip()
+                            
+                            # Στέλνουμε το κείμενο (π.χ. "Έτοιμο το έγγραφο!")
+                            if safe_text:
+                                send_telegram_msg(safe_text)
+                            
+                            # ΣΤΕΛΝΟΥΜΕ ΤΟ ΙΔΙΟ ΤΟ ΑΡΧΕΙΟ ΣΤΟ ΚΙΝΗΤΟ
+                            send_telegram_document(file_path)
+                        else:
+                            # Κανονική αποστολή αν δεν υπάρχει αρχείο
+                            if safe_text:
+                                send_telegram_msg(safe_text)
 
     except Exception as e:
         import traceback
@@ -296,17 +322,34 @@ def handle_message(user_text: str, chat_id: str):
                             final_ai_response = candidate
 
         if final_ai_response:
-            # 🎛️ [MASTRO-VOICE-SWITCH]: Ελέγχουμε αν η ερώτηση ήταν φωνητική
-            if "[VOICE_MESSAGE]" in user_text:
-                print("\033[96m[Voice]: Αποστολή φωνητικής απάντησης στο Telegram...\033[0m")
-                send_telegram_voice(final_ai_response)
+            import re
+            
+            # --- MASTRO INTERCEPTOR ΓΙΑ ΕΓΓΡΑΦΑ ---
+            file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_ai_response)
+            if file_match:
+                file_path = file_match.group(1).strip()
+                # Καθαρίζουμε την ταμπέλα από το κείμενο
+                final_ai_response = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", "", final_ai_response).strip()
+                
+                # 1. Στέλνουμε το κείμενο
+                if final_ai_response:
+                    if "[VOICE_MESSAGE]" in user_text:
+                        send_telegram_voice(final_ai_response)
+                    else:
+                        send_telegram_msg(final_ai_response)
+                
+                # 2. ΣΤΕΛΝΟΥΜΕ ΚΑΡΦΙ ΤΟ ΑΡΧΕΙΟ!
+                send_telegram_document(file_path, chat_id)
             else:
-                # Κανονική αποστολή κειμένου
-                send_telegram_msg(final_ai_response)
+                # Κανονική Ροή (χωρίς έγγραφο)
+                if "[VOICE_MESSAGE]" in user_text:
+                    print("\033[96m[Voice]: Αποστολή φωνητικής απάντησης στο Telegram...\033[0m")
+                    send_telegram_voice(final_ai_response)
+                else:
+                    send_telegram_msg(final_ai_response)
 
             # Αν η απάντηση περιέχει [SEND_PHOTO: path], στέλνουμε και τη φωτογραφία
             if "[SEND_PHOTO:" in final_ai_response:
-                import re
                 match = re.search(r"\[SEND_PHOTO:\s*(.+?)\]", final_ai_response)
                 if match:
                     photo_path = match.group(1).strip()
