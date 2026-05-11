@@ -36,7 +36,7 @@ from tools.telegram import send_telegram_msg
 import uuid
 from PIL import Image
 from google import genai
-
+from fastapi.staticfiles import StaticFiles
 from config import PHOTOS_DIR, GEMINI_API_KEY
 console = Console()
 
@@ -228,6 +228,12 @@ async def lifespan(app: FastAPI):
 
 server = FastAPI(lifespan=lifespan)
 server.mount("/photos", StaticFiles(directory=PHOTOS_DIR), name="photos")
+
+# --- [MASTRO-ROUTE]: Επιτρέπουμε το download από τον φάκελο outputs ---
+from config import BASE_DIR
+outputs_dir = os.path.join(BASE_DIR, "outputs")
+os.makedirs(outputs_dir, exist_ok=True)
+server.mount("/outputs", StaticFiles(directory=outputs_dir), name="outputs")
 # Επίτρεψε στο Web UI (frontend) να μιλάει ελεύθερα με τον server
 server.add_middleware(
     CORSMiddleware,
@@ -325,8 +331,23 @@ async def chat_endpoint(request: Request):
         clean_user = clean_message(user_input)
         clean_ai   = clean_message(final_ai_response)
 
+        # --- MASTRO INTERCEPTOR ΓΙΑ LINKS (Web UI) ---
+        file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", clean_ai)
+        if file_match:
+            file_path = file_match.group(1).strip()
+            filename = os.path.basename(file_path)
+            
+            # [MASTRO-UPGRADE]: Παίρνουμε δυναμικά το IP:Port του Server
+            base_url = str(request.base_url).rstrip("/")
+            
+            # Φτιάχνουμε το ΑΠΟΛΥΤΟ link που δουλεύει παντού
+            download_link = f'<br><br><a href="{base_url}/outputs/{filename}" target="_blank" download style="color: #4CAF50; font-weight: bold; text-decoration: none;">📥 Κάνε κλικ εδώ για λήψη: {filename}</a>'
+            
+            # Αντικαθιστούμε την ταμπέλα με το link!
+            clean_ai = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", download_link, clean_ai)
+
         if final_ai_response:
-            # Αποθηκεύουμε παντού τα ΚΑΘΑΡΑ strings
+            # Αποθηκεύουμε παντού τα ΚΑΘΑΡΑ strings (με το Link αν υπάρχει)
             append_to_chat_history("assistant", clean_ai)
             enqueue_task(update_working_memory,             clean_user, clean_ai)
             enqueue_task(trigger_memory_sifter,             clean_user, clean_ai, handling_agent)
@@ -335,7 +356,7 @@ async def chat_endpoint(request: Request):
 
         return JSONResponse({
             "agent":    handling_agent,
-            "response": clean_ai,  # Επιστρέφουμε την καθαρή απάντηση στο Frontend
+            "response": clean_ai,  # Επιστρέφουμε την απάντηση (με το link) στο Frontend
         })
 
     except Exception as e:

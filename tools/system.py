@@ -429,6 +429,7 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
             pdf.multi_cell(0, 10, data.encode('latin-1', 'replace').decode('latin-1'))
             pdf.output(full_path)
 
+        # [MASTRO-UPGRADE]: Εδώ βάλαμε και json, csv, html, md
         elif file_type in ["txt", "json", "csv", "html", "md"]:
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(data)
@@ -436,7 +437,8 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
         else:
             return f"❌ Σφάλμα: Ο τύπος '{file_type}' δεν υποστηρίζεται."
 
-        return f"✅ Το αρχείο δημιουργήθηκε επιτυχώς: {full_path}"
+        # [MASTRO-FIX]: Η ειδική ταμπέλα για την αναχαίτιση!
+        return f"✅ Έτοιμο Μάστορα! Το αρχείο δημιουργήθηκε επιτυχώς.\n[CREATED_FILE: {full_path}]"
 
     except Exception as e:
         return f"❌ Σφάλμα κατά τη δημιουργία: {str(e)}"
