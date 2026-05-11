@@ -548,16 +548,14 @@ def read_local_file(file_path: str) -> str:
     import os
     from config import PHOTOS_DIR
     
-    # Καθαρίζουμε το όνομα του αρχείου από τυχόν έξτρα κενά/quotes
+    # Καθαρισμός path
     file_path = file_path.strip().strip("'").strip('"')
     filename = os.path.basename(file_path)
-
-    # Παίρνουμε τον ΑΠΟΛΥΤΟ φάκελο που τρέχει ο Αστακός (π.χ. C:\astakos_v2)
     base_dir = os.getcwd() 
 
-    # [MASTRO-RADAR]: Όλοι οι πιθανοί φάκελοι με απόλυτα paths
+    # [MASTRO-RADAR]: Λίστα αναζήτησης
     search_dirs = [
-        "",  # Αν το LLM έδωσε ήδη απόλυτο path
+        "",  # Απόλυτο path
         PHOTOS_DIR,
         os.path.join(base_dir, "telegram_uploads"),
         os.path.join(base_dir, "telegram_photos"),
@@ -565,10 +563,8 @@ def read_local_file(file_path: str) -> str:
     ]
 
     full_path = None
-    
     print(f"\033[93m[Tool Debug]: Ψάχνω το αρχείο: {filename}\033[0m")
     
-    # Ψάχνουμε σε όλους τους φακέλους
     for d in search_dirs:
         test_path = os.path.join(d, filename) if d else file_path
         if os.path.exists(test_path) and os.path.isfile(test_path):
@@ -576,69 +572,61 @@ def read_local_file(file_path: str) -> str:
             print(f"\033[92m[Tool Debug]: ✅ Το βρήκα στο -> {full_path}\033[0m")
             break
 
-    # Αν δεν το βρει πουθενά, γυρνάει το σφάλμα με τη λίστα για να ξέρουμε γιατί έσκασε
     if not full_path:
-        error_msg = f"❌ Error: Το αρχείο {filename} δεν βρέθηκε. Έψαξα στους φακέλους: {search_dirs}"
-        print(f"\033[91m{error_msg}\033[0m")
-        return error_msg
+        return f"❌ Error: Το αρχείο {filename} δεν βρέθηκε στους φακέλους αναζήτησης."
 
     ext = os.path.splitext(full_path)[1].lower()
 
     try:
         if ext == ".pdf":
-            from PyPDF2 import PdfReader
+            # Χρήση pypdf (πιο αξιόπιστη από PyPDF2)
+            try:
+                from pypdf import PdfReader
+            except ImportError:
+                from PyPDF2 import PdfReader # Fallback αν δεν έχεις προλάβει το install
+            
             text = ""
-            for page in PdfReader(full_path).pages:
+            reader = PdfReader(full_path)
+            for page in reader.pages:
                 extracted = page.extract_text()
                 if extracted:
                     text += extracted + "\n"
-                if len(text) > 10000:
+                if len(text) > 12000: # Όριο για να μην «πνίξουμε» το context
                     break
             
             if not text.strip():
-                return f"⚠️ Το PDF ({filename}) διαβάστηκε, αλλά είναι σκαναρισμένο (εικόνα) και δεν έχει εξαγώγιμο κείμενο."
+                return f"⚠️ Το PDF ({filename}) φαίνεται να είναι σκαναρισμένο (εικόνα). Χρειάζεται OCR για να διαβαστεί."
                 
-            return f"📄 PDF ({filename}):\n{text[:10000]}"
+            return f"📄 PDF ({filename}):\n{text[:12000]}"
 
-        # 🚀 MASTRO-UPGRADE: Εδώ είναι η αλλαγή για τα Excel 🚀
         elif ext in [".xlsx", ".xls"]:
             import pandas as pd
             excel_file = pd.ExcelFile(full_path)
-            sheet_names = excel_file.sheet_names
-            
-            output_text = f"📊 Excel ({filename}) - Φύλλα που βρέθηκαν: {', '.join(sheet_names)}\n\n"
-            
-            for sheet in sheet_names:
-                # Διαβάζουμε το φύλλο και βάζουμε παύλες στα κενά
+            output_text = f"📊 Excel ({filename}) - Φύλλα: {', '.join(excel_file.sheet_names)}\n\n"
+            for sheet in excel_file.sheet_names:
                 df = pd.read_excel(full_path, sheet_name=sheet).fillna("-")
                 output_text += f"═══ Φύλλο: {sheet} ═══\n"
-                
-                # Κρατάμε τις πρώτες 50 γραμμές ανά φύλλο
                 output_text += df.head(50).to_string(index=False) + "\n\n"
-                
-                # Σταματάμε αν ξεπεράσουμε το όριο για να μη σκάσει το API
-                if len(output_text) > 10000:
-                    break
-                    
-            return output_text[:10000]
+                if len(output_text) > 12000: break
+            return output_text[:12000]
+
+        elif ext == ".csv":
+            import pandas as pd
+            df = pd.read_csv(full_path).fillna("-")
+            return f"📊 CSV ({filename}):\n{df.head(100).to_string(index=False)}"
 
         elif ext == ".docx":
             import docx
-            text = ""
-            for p in docx.Document(full_path).paragraphs:
-                text += p.text + "\n"
-                if len(text) > 10000:
-                    break
-            return f"📝 Word ({filename}):\n{text[:10000]}"
+            doc = docx.Document(full_path)
+            text = "\n".join([p.text for p in doc.paragraphs])
+            return f"📝 Word ({filename}):\n{text[:12000]}"
 
-        else:
-            with open(full_path, "r", encoding="utf-8") as f:
-                return f"📄 Αρχείο ({filename}):\n{f.read(10000)}"
+        else: # TXT, PY, JS, κλπ.
+            with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                return f"📄 Αρχείο ({filename}):\n{f.read(12000)}"
 
-    except ImportError as ie:
-        return f"❌ Error: Λείπει βιβλιοθήκη ({str(ie)}). Μάστορα, τρέξε 'pip install PyPDF2 pandas python-docx openpyxl xlrd'."
     except Exception as e:
-        return f"❌ Error: Σφάλμα ανάγνωσης {ext}: {str(e)}"
+        return f"❌ Error ανάγνωσης {filename}: {str(e)}"
 
 @tool
 def write_code(filename: str, code: str) -> str:
