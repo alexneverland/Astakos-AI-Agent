@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <title>Αστακός - Κέντρο Ελέγχου</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #1e1e1e; color: #cfcfcf; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        #chat-panel { flex: 1; display: flex; flex-direction: column; background: #252526; border-right: 2px solid #007acc; transition: all 0.3s ease; }
+        #header { padding: 12px 20px; background: #333333; color: #fff; font-weight: bold; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; }
+        .header-buttons button { border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; margin-left: 10px; }
+        #toggle-logs-btn { background: #007acc; color: white; }
+        #toggle-logs-btn:hover { background: #005f9e; }
+        #end-session-btn { background: #c9302c; color: white; }
+        #end-session-btn:hover { background: #ac2925; }
+
+        #chat-box { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        .msg { max-width: 85%; padding: 10px 15px; border-radius: 8px; line-height: 1.4; }
+        .msg-user { background: #007acc; color: white; align-self: flex-end; border-bottom-right-radius: 0; }
+        .msg-ai { background: #3e3e42; color: #d4d4d4; align-self: flex-start; border-bottom-left-radius: 0; }
+        .agent-label { font-size: 0.75em; color: #9cdcfe; margin-bottom: 5px; display: block; font-weight: bold; }
+        .chat-img { max-width: 100%; border-radius: 8px; margin-top: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
+        
+        #input-container { background: #2d2d30; border-top: 1px solid #333; padding: 15px; display: flex; flex-direction: column; }
+        #input-area { display: flex; align-items: center; }
+        
+        /* [NEW] Κουμπί Upload */
+        #attach-btn { background: #444; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; margin-right: 10px; font-size: 16px; }
+        #attach-btn:hover { background: #555; }
+        
+        #user-input { flex-grow: 1; padding: 12px; border: 1px solid #444; border-radius: 4px; background: #1e1e1e; color: #fff; font-size: 16px; outline: none; }
+        #user-input:focus { border-color: #007acc; }
+        #send-btn { padding: 12px 20px; margin-left: 10px; border: none; background: #007acc; color: white; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 16px; }
+        #send-btn:hover { background: #005f9e; }
+        #file-label { font-size: 12px; color: #4EC9B0; margin-top: 8px; margin-left: 50px; font-style: italic; }
+        .loading { font-style: italic; color: #888; align-self: flex-start; }
+
+        #terminal-panel { width: 40%; display: flex; flex-direction: column; background: #0c0c0c; transition: width 0.3s ease; }
+        #terminal-header { padding: 10px; background: #1e1e1e; color: #4EC9B0; font-family: monospace; font-weight: bold; border-bottom: 1px solid #333; display: flex; justify-content: space-between; white-space: nowrap;}
+        #log-box { flex-grow: 1; padding: 15px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 13px; color: #cccccc; white-space: pre-wrap; word-wrap: break-word; }
+        .hidden-panel { width: 0 !important; border: none !important; overflow: hidden; }
+    </style>
+</head>
+<body>
+
+<div id="chat-panel">
+    <div id="header">
+        <span>🦞 Αστακός Web UI</span>
+        <div class="header-buttons">
+            <button id="end-session-btn">🛑 Λήξη Συνεδρίας</button>
+            <button id="toggle-logs-btn">🖥️ Logs (On/Off)</button>
+        </div>
+    </div>
+    <div id="chat-box"></div>
+    <div id="input-container">
+        <div id="input-area">
+            <!-- [NEW] File Input -->
+            <input type="file" id="file-input" style="display: none;">
+            <button id="attach-btn" title="Επισύναψη αρχείου/φωτογραφίας">📎</button>
+            
+            <input type="text" id="user-input" placeholder="Δώσε εντολή ή στείλε αρχείο..." autocomplete="off">
+            <button id="send-btn">Αποστολή</button>
+        </div>
+        <!-- [NEW] Ετικέτα για να βλέπεις τι επέλεξες -->
+        <div id="file-label"></div>
+    </div>
+</div>
+
+<div id="terminal-panel">
+    <div id="terminal-header">
+        <span>>_ Terminal Logs</span>
+        <span id="ws-status" style="color: #F44747;">🔴 Offline</span>
+    </div>
+    <div id="log-box"></div>
+</div>
+
+<script>
+    const chatBox = document.getElementById('chat-box');
+    const userInput = document.getElementById('user-input');
+    const sendBtn = document.getElementById('send-btn');
+    const fileInput = document.getElementById('file-input');
+    const attachBtn = document.getElementById('attach-btn');
+    const fileLabel = document.getElementById('file-label');
+    const toggleBtn = document.getElementById('toggle-logs-btn');
+    const endSessionBtn = document.getElementById('end-session-btn');
+    const terminalPanel = document.getElementById('terminal-panel');
+    
+    // [NEW] Global μεταβλητή για να θυμάται ο Browser το path της τελευταίας φωτό
+    let currentPhotoPath = null;
+
+    toggleBtn.addEventListener('click', () => { terminalPanel.classList.toggle('hidden-panel'); });
+
+    endSessionBtn.addEventListener('click', async () => {
+        if (!confirm("Θα αρχειοθετηθούν όλα και θα καθαρίσει το UI. Είσαι σίγουρος Μάστορα;")) return;
+        try {
+            await fetch('http://127.0.0.1:8000/end_session', { method: 'POST' });
+            chatBox.innerHTML = '';
+            appendMessage("✅ Η συνεδρία αρχειοθετήθηκε. Ξεκινάμε νέα σελίδα!", "ai", "System");
+            currentPhotoPath = null; // Καθαρίζουμε και το photo context
+        } catch (error) { alert("Σφάλμα σύνδεσης."); }
+    });
+
+    attachBtn.addEventListener('click', () => { fileInput.click(); });
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            fileLabel.innerText = "📎 Επιλέχθηκε: " + e.target.files[0].name;
+        } else {
+            fileLabel.innerText = "";
+        }
+    });
+
+    function appendMessage(text, sender, agentName = "") {
+        const div = document.createElement('div');
+        div.className = `msg ${sender === 'user' ? 'msg-user' : 'msg-ai'}`;
+        let innerHTML = '';
+        if (agentName) innerHTML += `<span class="agent-label">[${agentName}]</span>`;
+        
+        let processedText = text.replace(/\n/g, '<br>');
+        
+        // Markdown Links [Κείμενο](URL)
+        const linkRegex = /\[(.*?)\]\((https?:\/\/.*?)\)/g;
+        processedText = processedText.replace(linkRegex, '<a href="$2" target="_blank" style="color: #4fc1ff; text-decoration: underline;">$1</a>');
+
+        // Tags φωτογραφιών [SEND_PHOTO: path]
+        const photoRegex = /\[SEND_PHOTO:\s*(.*?)\]/g;
+        processedText = processedText.replace(photoRegex, (match, filepath) => {
+            const filename = filepath.split('\\').pop().split('/').pop();
+            return `<br><img src="http://127.0.0.1:8000/photos/${filename}" class="chat-img" />`;
+        });
+
+        innerHTML += processedText;
+        div.innerHTML = innerHTML;
+        chatBox.appendChild(div);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // --- FIX 1: Σωστό φόρτωμα ιστορικού (Mapping role -> sender, content -> text) ---
+    window.addEventListener('DOMContentLoaded', async () => {
+        try {
+            const response = await fetch('http://127.0.0.1:8000/history');
+            const data = await response.json();
+            if (data.history && data.history.length > 0) {
+                data.history.forEach(msg => {
+                    // Ο server στέλνει 'role' (user/assistant) και 'content'
+                    const sender = (msg.role === 'user' || msg.role === 'Human') ? 'user' : 'ai';
+                    appendMessage(msg.content, sender, msg.agent || (sender === 'user' ? 'Λάζαρος' : 'Αστακός'));
+                });
+            } else {
+                appendMessage("Καλημέρα Μάστορα! Έτοιμος για μερεμέτια;", "ai", "System");
+            }
+        } catch (error) {
+            console.error("History error:", error);
+        }
+    });
+
+    
+
+    async function sendMessage() {
+        const text = userInput.value.trim();
+        const file = fileInput.files[0];
+
+        if (!text && !file) return;
+
+        let displayUserMsg = text;
+        if (file && !text) displayUserMsg = `[Απεστάλη αρχείο: ${file.name}]`;
+        if (file && text) displayUserMsg = `[Αρχείο: ${file.name}]<br>${text}`;
+
+        appendMessage(displayUserMsg, 'user');
+        
+        userInput.value = '';
+        fileInput.value = '';
+        fileLabel.innerText = '';
+        userInput.focus();
+
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'loading';
+        loadingDiv.innerText = 'Ο Αστακός επεξεργάζεται...';
+        chatBox.appendChild(loadingDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+
+        try {
+            let response;
+            if (file) {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('message', text);
+                response = await fetch('http://127.0.0.1:8000/upload', { method: 'POST', body: formData });
+                
+                const data = await response.json();
+                currentPhotoPath = data.file_path; // Αποθήκευση του path για το επόμενο μήνυμα!
+                
+                chatBox.removeChild(loadingDiv);
+                appendMessage(data.ai_message, 'ai', 'Chat_Agent');
+            } else {
+                // [MASTRO-FIX]: Στέλνουμε το currentPhotoPath αν υπάρχει!
+                response = await fetch('http://127.0.0.1:8000/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        message: text,
+                        photo_path: currentPhotoPath // Εδώ γίνεται η σύνδεση
+                    })
+                });
+                
+                const data = await response.json();
+                chatBox.removeChild(loadingDiv);
+                appendMessage(data.response, 'ai', data.agent);
+            }
+        } catch (error) {
+            if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
+            appendMessage("Σφάλμα σύνδεσης με τον Server.", 'ai', 'System');
+        }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    userInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+
+    // WebSockets Logs
+    const logBox = document.getElementById('log-box');
+    const wsStatus = document.getElementById('ws-status');
+    const ws = new WebSocket('ws://127.0.0.1:8000/ws/logs');
+
+    ws.onopen = () => { wsStatus.innerHTML = "🟢 Online"; wsStatus.style.color = "#4EC9B0"; };
+    ws.onclose = () => { wsStatus.innerHTML = "🔴 Offline"; wsStatus.style.color = "#F44747"; };
+
+    function parseANSI(text) {
+        return text.replace(/\x1b\[90m/g, '<span style="color: #808080;">') 
+                   .replace(/\x1b\[91m/g, '<span style="color: #F44747;">') 
+                   .replace(/\x1b\[92m/g, '<span style="color: #4EC9B0;">') 
+                   .replace(/\x1b\[93m/g, '<span style="color: #DCDCAA;">') 
+                   .replace(/\x1b\[94m/g, '<span style="color: #569CD6;">') 
+                   .replace(/\x1b\[95m/g, '<span style="color: #C586C0;">') 
+                   .replace(/\x1b\[96m/g, '<span style="color: #4fc1ff;">') 
+                   .replace(/\x1b\[0m/g, '</span>');                        
+    }
+
+    ws.onmessage = function(event) {
+        const span = document.createElement('span');
+        span.innerHTML = parseANSI(event.data);
+        logBox.appendChild(span);
+        logBox.scrollTop = logBox.scrollHeight;
+    };
+</script>
+
+</body>
+</html>
