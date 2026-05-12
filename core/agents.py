@@ -302,7 +302,7 @@ def web_agent_node(state: AgentState):
         get_news, get_weather_forecast, DuckDuckGoSearchRun(), 
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
         post_to_linkedin,
-        generate_image_tool  # <--- ΤΟ ΜΥΣΤΡΙ ΤΟΥ WEB_AGENT ΜΠΗΚΕ ΕΔΩ!
+        generate_image_tool 
     ]
 
     return {
