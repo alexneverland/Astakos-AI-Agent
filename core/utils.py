@@ -146,7 +146,7 @@ def load_agent_prompt(agent_name: str, default_fallback: str = "") -> str:
 
 def build_prompt(state_messages, agent_role="") -> str:
     """
-    Η κεντρική μηχανή σύνθεσης Prompt - Αναβαθμισμένη για προτεραιότητα Vision.
+    Η κεντρική μηχανή σύνθεσης Prompt - Αναβαθμισμένη για προτεραιότητα Vision και Semantic Graph.
     """
     from config import WORKING_MEMORY_FILE, BASE_DIR
     from memory.vector_store import vector_store, vector_lock
@@ -154,8 +154,10 @@ def build_prompt(state_messages, agent_role="") -> str:
     from memory.session_memory import load_last_session_hint
     import os
     import json
+    from datetime import datetime
 
     # 1. Προετοιμασία Ταυτότητας
+    from core.utils import load_agent_prompt, clean_message # Βεβαιώσου ότι υπάρχουν αυτά τα imports στο αρχείο σου αν λείπουν από την κορυφή
     identity = load_agent_prompt("identity_block", "Είσαι ο Αστακός, ο AI συνεργάτης του Λάζαρου.")
     identity = identity.replace("{BASE_DIR}", BASE_DIR)
 
@@ -164,7 +166,7 @@ def build_prompt(state_messages, agent_role="") -> str:
     is_vision = "[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]" in last_msg or "[CURRENT_PHOTO_PATH]" in last_msg
     has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
     
-# 3. Similarity Search (Mastro-Logic)
+    # 3. Similarity Search & Semantic Graph (Mastro-Logic)
     memories_str = ""
     clean_text = last_msg.strip().lower()
     
@@ -188,13 +190,22 @@ def build_prompt(state_messages, agent_role="") -> str:
         try:
             with vector_lock:
                 results = vector_store.similarity_search(last_msg, k=k_value)
-                if results:
-                    memories_str = "\n📜 ═══ ΙΣΤΟΡΙΚΟ ΑΡΧΕΙΟ ΜΝΗΜΗΣ (Παλιές Αναμνήσεις) ═══\n"
-                    for res in results:
-                        memories_str += f" • {res.page_content}\n"
-                    memories_str += "⚠️ Σημείωση: Τα παραπάνω είναι αναμνήσεις, όχι η τρέχουσα κατάσταση.\n"
+                
+            if results:
+                semantic_facts = []
+                for res in results:
+                    # [MASTRO-GRAPH]: Καθαρίζουμε τα Tags για να μην μπερδεύεται το LLM
+                    clean_fact = res.page_content.split(" [Tags:")[0].strip()
+                    semantic_facts.append(clean_fact)
+                
+                if semantic_facts:
+                    memories_str = "\n🧠 ═══ ΣΗΜΑΣΙΟΛΟΓΙΚΟ ΠΛΑΙΣΙΟ (Semantic Graph) ═══\n"
+                    memories_str += "Έχεις αυτόματα ανακαλέσει τις παρακάτω σχετικές μνήμες (σύνδεσε τα στοιχεία μεταξύ τους):\n"
+                    for f in set(semantic_facts): # Το set αφαιρεί τα διπλότυπα αστραπιαία
+                        memories_str += f" • {f}\n"
+                    memories_str += "⚠️ Μην πεις 'σύμφωνα με τη μνήμη μου', απλά πράξε με βάση αυτά.\n"
         except Exception as e:
-            print(f"⚠️ Memory Search Error: {e}")
+            print(f"\033[91m⚠️ Semantic Graph Error: {e}\033[0m")
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -239,7 +250,7 @@ def build_prompt(state_messages, agent_role="") -> str:
         "ΚΑΝΟΝΑΣ ΦΩΤΟΓΡΑΦΙΩΝ: Αν ζητηθεί φωτό, κάλεσε το 'retrieve_photo' και συμπεριέλαβε το [SEND_PHOTO: path] στην απάντηση.\n\n"
     )
 
-    # 9. Τελικό κόλλημα των αναμνήσεων
+    # 9. Τελικό κόλλημα των αναμνήσεων (Semantic Context)
     prompt += memories_str
 
     return prompt
