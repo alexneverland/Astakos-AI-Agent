@@ -69,7 +69,6 @@ def queue_worker():
                 astakos_queue.task_done()
         except queue.Empty:
             continue
-
 # ────────────────────────────────────────────────────────────────
 # DOCUMENT HANDLER (ΝΕΟ)
 # ────────────────────────────────────────────────────────────────
@@ -119,64 +118,56 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         print(f"\033[91m[Document Error]: {e}\033[0m")
         send_telegram_msg(f"❌ Σφάλμα λήψης εγγράφου: {str(e)}")
 # ────────────────────────────────────────────────────────────────
-# VOICE HANDLER (ΝΕΟ)
+# VOICE HANDLER (CONSOLIDATED)
 # ────────────────────────────────────────────────────────────────
 def handle_voice(voice_obj: dict, chat_id: str):
-    """Λαμβάνει φωνητικό .ogg, το κάνει κείμενο μέσω Gemini και απαντάει."""
-    try:
-        from config import BASE_DIR, GEMINI_API_KEY
-        from google import genai
-        
-        file_id = voice_obj["file_id"]
-        local_path = os.path.join(BASE_DIR, "telegram_uploads", f"voice_{int(time.time())}.ogg")
+    """Λαμβάνει ηχητικό, το κάνει κείμενο και απαντάει φωνητικά."""
+    from config import TELEGRAM_TOKEN
+    from services.gemini import safe_gemini_call
+    from tools.telegram import send_telegram_msg
 
-        # 1. Download του αρχείου ήχου
+    local_path = None
+    try:
+        file_id = voice_obj["file_id"]
+        local_path = os.path.join(os.getcwd(), "telegram_uploads", f"voice_{int(time.time())}.ogg")
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+
         file_resp = requests.get(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile",
             params={"file_id": file_id}, timeout=10
         ).json()
-        file_path_remote = file_resp["result"]["file_path"]
         
+        file_path_remote = file_resp["result"]["file_path"]
         file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path_remote}"
         audio_data = requests.get(file_url, timeout=30).content
         
         with open(local_path, "wb") as f:
             f.write(audio_data)
 
-        # 2. Transcription με το Gemini
-        print(f"\033[96m[Voice]: Αποκωδικοποίηση ηχητικού...\033[0m")
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        print(f"\033[96m[Voice]: Ανάλυση ήχου...\033[0m")
+
+        audio_part = {
+            "inline_data": {
+                "mime_type": "audio/ogg",
+                "data": audio_data
+            }
+        }
         
-        # Το Gemini διαβάζει τα bytes του ήχου κατευθείαν!
-        response = client.models.generate_content(
-            model='gemini-3.1-flash-lite-preview',
-            contents=[
-                {"mime_type": "audio/ogg", "data": audio_data},
-                "Άκουσε το ηχητικό και γράψε μου ΑΚΡΙΒΩΣ τι λέει στα Ελληνικά, χωρίς δικά σου σχόλια."
-            ]
-        )
-        
-        transcription = response.text.strip() if response.text else ""
-        if not transcription:
-            send_telegram_msg("⚠️ Δεν μπόρεσα να καταλάβω τι είπες στο φωνητικό, Μάστορα.")
-            return
-            
-        print(f"\033[92m[Voice]: Ο Λάζαρος είπε -> {transcription}\033[0m")
-        
-        # 3. Στέλνουμε το κείμενο στον Αστακό (με ένα flag για να ξέρει να απαντήσει με φωνή)
-        from core.graph import graph
-        from telegram_bot import send_telegram_msg
-        
-        # Αντί να το στείλουμε στο queue, το τρέχουμε εδώ για να ελέγξουμε την απάντηση
-        # Προσθέτουμε μια οδηγία για να απαντήσει "φωνητικά"
-        user_text = f"[VOICE_MESSAGE]: {transcription}"
-        
-        # Εδώ κανονικά το στέλνεις στον Αστακό. Για να διατηρήσουμε τη ροή σου:
-        handle_message(user_text, chat_id)
-        
+        prompt = "Άκουσε αυτό το μήνυμα και απάντησε σύντομα και μάστορικα."
+        response = safe_gemini_call([prompt, audio_part])
+        ai_reply = response.text if response and response.text else "Δεν έβγαλα άκρη."
+
+        print(f"\033[92m[Voice AI]: {ai_reply}\033[0m")
+        # Στέλνουμε το flag [ΦΩΝΗΤΙΚΟ] για να ξέρει η handle_message να απαντήσει με ήχο
+        handle_message(f"[ΦΩΝΗΤΙΚΟ]: {ai_reply}", chat_id)
+
     except Exception as e:
         print(f"\033[91m[Voice Error]: {e}\033[0m")
-        send_telegram_msg(f"❌ Σφάλμα φωνητικού: {str(e)}")
+        # [FIX]: ΕΔΩ ΗΤΑΝ ΤΟ ΛΑΘΟΣ - Μόνο ένα όρισμα
+        send_telegram_msg("🚨 Μάστορα, σκάλωσε το voice processing.") 
+    finally:
+        if local_path and os.path.exists(local_path):
+            os.remove(local_path)
 def send_telegram_document(file_path, chat_id=None):
     if not chat_id: chat_id = ALLOWED_CHAT_ID
     try:
@@ -294,24 +285,55 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         import traceback
         print(f"❌ Telegram Photo Error: {e}")
         send_telegram_msg(f"Μάστορα, σκάλωσε η φωτό. Έλεγξε την κονσόλα. Σφάλμα: {e}")
+def send_voice_reply(text, chat_id):
+    """Μετατρέπει το κείμενο σε ομιλία και το στέλνει ως voice message."""
+    try:
+        from tools.telegram import send_telegram_voice # Σιγουρέψου ότι υπάρχει στο tools/telegram.py
+        
+        voice_path = os.path.join(os.getcwd(), "telegram_uploads", f"reply_{int(time.time())}.mp3")
+        os.makedirs(os.path.dirname(voice_path), exist_ok=True)
 
+        # Δημιουργία του ήχου (στα ελληνικά)
+        tts = gTTS(text=text, lang='el')
+        tts.save(voice_path)
+
+        # Αποστολή του αρχείου
+        send_telegram_voice(voice_path, chat_id)
+
+        # Καθάρισμα
+        if os.path.exists(voice_path):
+            os.remove(voice_path)
+            
+    except Exception as e:
+        print(f"❌ TTS Error: {e}")
+        send_telegram_msg(f"Μάστορα, μου κόπηκε η φωνή... (Error: {e})", chat_id)
 # ────────────────────────────────────────────────────────────────
 # MESSAGE HANDLER
 # ────────────────────────────────────────────────────────────────
 
 def handle_message(user_text: str, chat_id: str):
-    """Στέλνει το μήνυμα στον Αστακό και επιστρέφει την απάντηση (Κείμενο ή Ήχο)."""
+    """Στέλνει το μήνυμα στον Αστακό και απαντάει (Κείμενο ή Ήχο)."""
     global last_interaction_time
-    from tools.telegram import send_telegram_voice # <--- Το εργαλείο της φωνής
+    from tools.telegram import send_telegram_voice, send_telegram_msg
+    import re
+
+    # 1. Ελέγχουμε αν ζητήθηκε φωνή (από ηχητικό ή /voice)
+    is_voice_mode = "[ΦΩΝΗΤΙΚΟ]" in user_text or "[VOICE_MESSAGE]" in user_text or user_text.lower().startswith("/voice")
+    
+    # 2. Καθαρίζουμε τα tags πριν πάνε στον εγκέφαλο
+    clean_user_text = user_text.replace("/voice", "").replace("[ΦΩΝΗΤΙΚΟ]:", "").replace("[VOICE_MESSAGE]:", "").strip()
+    if not clean_user_text: 
+        clean_user_text = "Γεια σου Αστακέ"
 
     with memory_lock:
         last_interaction_time = time.time()
 
     final_ai_response = ""
-    handling_agent    = "Chat_Agent"
+    handling_agent = "Chat_Agent"
 
     try:
-        for event in graph.stream({"messages": [HumanMessage(content=user_text)]}):
+        # Ροή μέσω LangGraph
+        for event in graph.stream({"messages": [HumanMessage(content=clean_user_text)]}):
             for node, data in event.items():
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node
@@ -322,50 +344,51 @@ def handle_message(user_text: str, chat_id: str):
                             final_ai_response = candidate
 
         if final_ai_response:
-            import re
-            
             # --- MASTRO INTERCEPTOR ΓΙΑ ΕΓΓΡΑΦΑ ---
             file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_ai_response)
             if file_match:
                 file_path = file_match.group(1).strip()
-                # Καθαρίζουμε την ταμπέλα από το κείμενο
                 final_ai_response = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", "", final_ai_response).strip()
                 
-                # 1. Στέλνουμε το κείμενο
                 if final_ai_response:
-                    if "[VOICE_MESSAGE]" in user_text:
-                        send_telegram_voice(final_ai_response)
+                    if is_voice_mode:
+                        send_telegram_voice(final_ai_response) # [FIX]: Κάνει TTS εσωτερικά το εργαλείο σου!
                     else:
-                        send_telegram_msg(final_ai_response)
+                        send_telegram_msg(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
                 
-                # 2. ΣΤΕΛΝΟΥΜΕ ΚΑΡΦΙ ΤΟ ΑΡΧΕΙΟ!
-                send_telegram_document(file_path, chat_id)
+                try:
+                    from tools.telegram import send_telegram_document
+                    send_telegram_document(file_path) # [FIX]: Μόνο ένα όρισμα
+                except:
+                    pass
             else:
-                # Κανονική Ροή (χωρίς έγγραφο)
-                if "[VOICE_MESSAGE]" in user_text:
-                    print("\033[96m[Voice]: Αποστολή φωνητικής απάντησης στο Telegram...\033[0m")
-                    send_telegram_voice(final_ai_response)
+                # Κανονική Ροή (Χωρίς Έγγραφα)
+                if is_voice_mode:
+                    send_telegram_voice(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
                 else:
-                    send_telegram_msg(final_ai_response)
+                    send_telegram_msg(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
 
-            # Αν η απάντηση περιέχει [SEND_PHOTO: path], στέλνουμε και τη φωτογραφία
+            # Φωτογραφίες
             if "[SEND_PHOTO:" in final_ai_response:
                 match = re.search(r"\[SEND_PHOTO:\s*(.+?)\]", final_ai_response)
                 if match:
                     photo_path = match.group(1).strip()
-                    _send_photo_to_telegram(photo_path, chat_id)
+                    try:
+                        _send_photo_to_telegram(photo_path, chat_id)
+                    except:
+                        pass
 
-            # Background tasks (όπως ακριβώς τα είχες)
+            # Background Tasks
             enqueue_task(update_working_memory,             user_text, final_ai_response)
             enqueue_task(trigger_memory_sifter,             user_text, final_ai_response, handling_agent)
-            enqueue_task(log_exchange,                      user_text, final_ai_response, handling_agent)
+            enqueue_task(log_exchange,                       user_text, final_ai_response, handling_agent)
             enqueue_task(update_capabilities_from_exchange, user_text, final_ai_response, handling_agent)
 
     except Exception as e:
         import traceback
         traceback.print_exc()
+        # [FIX]: ΕΔΩ ΗΤΑΝ ΤΟ ΛΑΘΟΣ - Αφαιρέθηκε το chat_id
         send_telegram_msg(f"❌ Σφάλμα: {str(e)}")
-
 
 def _send_photo_to_telegram(photo_path: str, chat_id: str):
     """Στέλνει αρχείο φωτογραφίας στο Telegram chat."""

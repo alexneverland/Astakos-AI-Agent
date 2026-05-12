@@ -54,7 +54,10 @@ def send_telegram_msg(text: str):
 def send_telegram_voice(text: str):
     """Μετατρέπει το κείμενο σε ήχο και το στέλνει ως φωνητικό μήνυμα."""
     import os
+    import re
     from gtts import gTTS
+    from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+    import requests
     
     token = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
@@ -63,9 +66,27 @@ def send_telegram_voice(text: str):
         return
 
     try:
+        # --- MASTRO CLEANER ΓΙΑ ΤΗ ΦΩΝΗ ---
+        clean_text = text
+        # 1. Αφαίρεση blocks κώδικα/JSON (ό,τι είναι ανάμεσα σε ``` )
+        clean_text = re.sub(r'```.*?```', '', clean_text, flags=re.DOTALL)
+        # 2. Αφαίρεση tags σε αγκύλες που τυχόν ξέφυγαν (π.χ. [VOICE_MESSAGE])
+        clean_text = re.sub(r'\[.*?\]', '', clean_text)
+        # 3. Αφαίρεση συμβόλων Markdown (αστερίσκοι, δίεση, underscores, backticks)
+        clean_text = re.sub(r'[*_#`~]', '', clean_text)
+        # 4. Καθαρισμός από πολλαπλά κενά
+        clean_text = " ".join(clean_text.split())
+        
+        # Αν η απάντηση ήταν όλη ένα JSON και σβήστηκε, βάλε ένα fallback
+        if not clean_text.strip():
+            clean_text = "Μάστορα, σου έστειλα κάτι τεχνικό στο τσατ, δες το εκεί."
+
+        print(f"\033[95m[TTS Cleaner]: Στέλνω για φωνή το: {clean_text[:50]}...\033[0m")
+
         # Δημιουργία MP3
-        tts = gTTS(text=text, lang='el')
-        audio_path = "astakos_reply.mp3"
+        tts = gTTS(text=clean_text, lang='el')
+        audio_path = os.path.join(os.getcwd(), "telegram_uploads", f"reply_voice_{int(os.times()[4])}.mp3")
+        os.makedirs(os.path.dirname(audio_path), exist_ok=True)
         tts.save(audio_path)
         
         # Αποστολή στο Telegram
@@ -73,14 +94,13 @@ def send_telegram_voice(text: str):
         with open(audio_path, 'rb') as audio_file:
             response = requests.post(
                 url, 
-                data={"chat_id": chat_id}, 
+                data={"chat_id": chat_id},
                 files={"voice": audio_file},
-                timeout=20
+                timeout=30
             )
         
-        # Καθάρισμα του αρχείου
         if os.path.exists(audio_path):
             os.remove(audio_path)
             
     except Exception as e:
-        print(f"❌ Telegram Voice Error: {e}")        
+        print(f"❌ Voice Output Error: {e}")      
