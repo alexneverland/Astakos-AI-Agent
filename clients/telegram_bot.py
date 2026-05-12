@@ -515,7 +515,72 @@ def reminder_worker():
                 with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
                     json.dump(rems, f, ensure_ascii=False, indent=4)
         shutdown_event.wait(timeout=20)
+def proactive_worker():
+    """
+    Ο 'Νυχτοφύλακας' του Αστακού.
+    Ξυπνάει κάθε 12 ώρες, διαβάζει αρχεία/logs και αν βρει κάτι επείγον, στέλνει μήνυμα.
+    """
+    import os
+    from tools.system import read_local_file # Χρησιμοποιούμε το δικό σου tool για διάβασμα
+    
+    # Φάκελοι που θέλουμε να "κατασκοπεύει" (Βάλε τα δικά σου paths)
+    WATCH_DIR = "C:\\astakos_v2\\watch_folder" 
+    
+    while not shutdown_event.is_set():
+        # Ξυπνάει κάθε 12 ώρες (43200 δευτερόλεπτα). Για δοκιμή βάλτο στα 60 (1 λεπτό).
+        shutdown_event.wait(timeout=43200) 
+        if shutdown_event.is_set():
+            break
+            
+        print("🦞 [Proactive]: Ξεκινάω αθόρυβο σκανάρισμα συστήματος...")
+        
+        try:
+            # 1. Μαζεύουμε τα δεδομένα (π.χ. βρίσκουμε τα αρχεία στον φάκελο)
+            if not os.path.exists(WATCH_DIR):
+                os.makedirs(WATCH_DIR)
+                
+            files_to_scan = os.listdir(WATCH_DIR)
+            if not files_to_scan:
+                continue # Αν δεν έχει τίποτα, ξανακοιμάται
+                
+            collected_data = ""
+            for file in files_to_scan:
+                filepath = os.path.join(WATCH_DIR, file)
+                
+                # [MASTRO-FIX]: Επειδή είναι AI Tool, το καλούμε με .invoke() αντί για απλές παρενθέσεις
+                try:
+                    content = read_local_file.invoke(filepath)
+                except TypeError:
+                    # Fallback αν το εργαλείο ζητάει το όνομα της παραμέτρου
+                    content = read_local_file.invoke({"file_path": filepath})
+                    
+                # Σιγουρευόμαστε ότι είναι string πριν το κόψουμε
+                collected_data += f"\n--- ΑΡΧΕΙΟ: {file} ---\n{str(content)[:2000]}\n"
 
+            # 2. Στέλνουμε τα δεδομένα στον Εγκέφαλο (Gemini) με αυστηρή οδηγία
+            prompt = """
+            Είσαι ο Αστακός. Λειτουργείς στο background ως σύστημα προληπτικής συντήρησης (Proactive Scan).
+            Έχεις μπροστά σου κάποια αρχεία/logs από το σύστημα του Λάζαρου (Piston-7).
+            
+            ΟΔΗΓΙΕΣ:
+            1. Ψάξε για ΗΜΕΡΟΜΗΝΙΕΣ ΛΗΞΗΣ (π.χ. λογαριασμοί, συνδρομές) που είναι κοντά στο σήμερα.
+            2. Ψάξε για ERRORS, ελλείψεις ή προβλήματα (π.χ. στο PraxisERP).
+            3. ΑΝ ΥΠΑΡΧΕΙ ΘΕΜΑ: Γράψε ένα σταράτο, μάστορικο μήνυμα προς τον Λάζαρο ξεκινώντας με "🚨 Μάστορα, ρίξε μια ματιά:".
+            4. ΑΝ ΟΛΑ ΕΙΝΑΙ ΚΑΛΑ: Γράψε ΑΚΡΙΒΩΣ και ΜΟΝΟ τη φράση "ΟΛΑ ΚΑΛΑ".
+            """
+            
+            response = safe_gemini_call(f"{prompt}\n\n[ΔΕΔΟΜΕΝΑ]:\n{collected_data}")
+            reply = response.text.strip()
+            
+            # 3. Αν δεν απάντησε "ΟΛΑ ΚΑΛΑ", χτυπάει συναγερμός στο Telegram!
+            if reply and "ΟΛΑ ΚΑΛΑ" not in reply:
+                send_telegram_msg(reply)
+                print(f"⚠️ [Proactive Alert Sent]: {reply[:50]}...")
+            else:
+                print("✔️ [Proactive]: Όλα καθαρά, πάω για ύπνο.")
+                
+        except Exception as e:
+            print(f"⚠️ Proactive Scan Error: {e}")
 
 # ────────────────────────────────────────────────────────────────
 # ENTRY POINT
@@ -534,6 +599,7 @@ if __name__ == "__main__":
     # Εκκίνηση workers
     threading.Thread(target=queue_worker,   daemon=True).start()
     threading.Thread(target=reminder_worker, daemon=True).start()
+    threading.Thread(target=proactive_worker, daemon=True).start()
 
     print("━" * 50)
     print("  🦞  Αστακός Telegram Bot — Εκκίνηση")
