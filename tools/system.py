@@ -140,7 +140,43 @@ def search_memory(query: str, category: str = "") -> str:
         return output.strip()
     except Exception as e:
         return f"Error: Σφάλμα ανάκλησης μνήμης: {str(e)}"
-
+@tool
+def run_terminal_command(command: str) -> str:
+    """
+    Εκτελεί εντολές PowerShell στο PC του Λάζαρου (Piston-7) και επιστρέφει το αποτέλεσμα.
+    Ιδανικό για:
+    - Ανάγνωση logs (π.χ. 'Get-Content C:\\path\\to\\mastroapp\\logs\\error.log -Tail 50').
+    - Έλεγχο ports (π.χ. 'netstat -ano | findstr 8000').
+    - Εκτέλεση tests (π.χ. 'python manage.py test').
+    """
+    import subprocess
+    
+    print(f"\033[93m[Terminal Execution]: {command}\033[0m")
+    
+    try:
+        # Εκτελούμε την εντολή μέσω PowerShell. Βάζουμε timeout 30s για να μη "κολλήσει" ο Αστακός.
+        result = subprocess.run(
+            ["powershell", "-Command", command], 
+            capture_output=True, 
+            text=True, 
+            timeout=30,
+            encoding='utf-8', 
+            errors='ignore'
+        )
+        
+        # Αν η εντολή πετύχει, παίρνουμε το stdout. Αν σκάσει, παίρνουμε το stderr (το stack trace δηλαδή).
+        output = result.stdout if result.returncode == 0 else f"ERROR:\n{result.stderr}"
+        
+        if not output.strip():
+            return "Η εντολή εκτελέστηκε επιτυχώς (δεν επέστρεψε output)."
+            
+        # Κόβουμε τους χαρακτήρες στους 10.000 για να μην "πνίξουμε" τη μνήμη του Agent
+        return f"💻 Terminal Output:\n{output[-10000:]}"
+        
+    except subprocess.TimeoutExpired:
+        return "❌ Error: Το process πήρε πάνω από 30 δευτερόλεπτα και τερματίστηκε."
+    except Exception as e:
+        return f"❌ Terminal Error: {str(e)}"
 
 @tool
 def save_to_memory(fact: str, entities: str = "", category: str = "general") -> str:

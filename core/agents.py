@@ -33,7 +33,7 @@ from tools.system import (
     set_local_reminder, set_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
-    mail_manager, github_manager, control_vacuum, control_spotify, create_file_tool, generate_image_tool, post_to_linkedin
+    mail_manager, github_manager, control_vacuum, control_spotify, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin
 )
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
@@ -478,6 +478,6 @@ all_tools = [
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info, search_supermarket_offers,
     control_spotify, search_goldmall_offers, send_messenger_message, 
-    recipe_expert, log_meal, create_file_tool,
+    recipe_expert, log_meal, create_file_tool, run_terminal_command,
     DuckDuckGoSearchRun()
 ]
