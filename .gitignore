@@ -29,4 +29,5 @@ astakos_capabilities.json
 __pycache__/
 *.pyc
 venv/
-.vscode/
+.vscode/chroma_db/
+chroma_db - Copy/

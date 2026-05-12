@@ -143,9 +143,35 @@ def search_memory(query: str, category: str = "") -> str:
 
 
 @tool
-def save_to_memory(fact: str) -> str:
-    """Αποθηκεύει πληροφορίες στη μνήμη. Κάλεσέ το ΟΤΑΝ ο χρήστης ζητάει ρητά να θυμάσαι κάτι."""
-    return "System: Έγινε! Η πληροφορία σημειώθηκε και ο Αρχειοθέτης θα την περάσει μόνιμα στη βάση."
+def save_to_memory(fact: str, entities: str = "", category: str = "general") -> str:
+    """
+    Αποθηκεύει πληροφορίες ΣΗΜΑΣΙΟΛΟΓΙΚΑ.
+    fact: Το γεγονός (π.χ. "Ο Αλέξανδρος τρώει μόνο φακές").
+    entities: Λέξεις-κλειδιά χωρισμένες με κόμμα (π.χ. "Αλέξανδρος, Φαγητό, Προτίμηση").
+    category: Η κατηγορία (π.χ. 'family', 'home', 'lazaros', 'tech', 'work').
+    """
+    import datetime
+    from memory.vector_store import vector_store
+    
+    try:
+        # [MASTRO-GRAPH]: Ενώνουμε το γεγονός με τα tags για να "χτυπάει" τέλεια στο vector search
+        semantic_payload = f"{fact} [Tags: {entities}]"
+        
+        # Καρφώνουμε τη μνήμη στη βάση με τα Metadata της
+        vector_store.add_texts(
+            texts=[semantic_payload],
+            metadatas=[{
+                "category": category,
+                "entities": entities,
+                "timestamp": datetime.datetime.now().timestamp(),
+                "type": "semantic_node"
+            }]
+        )
+        
+        print(f"\033[95m🧠 [Semantic Graph]: Καρφώθηκε -> {entities}\033[0m")
+        return f"✅ System: Η σημασιολογική μνήμη καρφώθηκε! Ταμπέλες: [{entities}]"
+    except Exception as e:
+        return f"❌ Error saving to semantic memory: {str(e)}"
 
 
 @tool
