@@ -26,7 +26,8 @@
         /* [NEW] Κουμπί Upload */
         #attach-btn { background: #444; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; margin-right: 10px; font-size: 16px; }
         #attach-btn:hover { background: #555; }
-        
+        #voice-btn { background: #444; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; margin-right: 10px; font-size: 16px; transition: all 0.2s; }
+        #voice-btn:hover { background: #555; }
         #user-input { flex-grow: 1; padding: 12px; border: 1px solid #444; border-radius: 4px; background: #1e1e1e; color: #fff; font-size: 16px; outline: none; }
         #user-input:focus { border-color: #007acc; }
         #send-btn { padding: 12px 20px; margin-left: 10px; border: none; background: #007acc; color: white; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 16px; }
@@ -56,7 +57,7 @@
             <!-- [NEW] File Input -->
             <input type="file" id="file-input" style="display: none;">
             <button id="attach-btn" title="Επισύναψη αρχείου/φωτογραφίας">📎</button>
-            
+            <button id="voice-btn" title="Πάτα και μίλα (Άσε για αποστολή)">🎙️</button>
             <input type="text" id="user-input" placeholder="Δώσε εντολή ή στείλε αρχείο..." autocomplete="off">
             <button id="send-btn">Αποστολή</button>
         </div>
@@ -213,7 +214,80 @@
 
     sendBtn.addEventListener('click', sendMessage);
     userInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+    // --- [MASTRO-VOICE]: Λογική εγγραφής φωνής ---
+    const voiceBtn = document.getElementById('voice-btn');
+    let mediaRecorder;
+    let audioChunks = [];
 
+    async function startRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+            
+            mediaRecorder.ondataavailable = e => {
+                if (e.data.size > 0) audioChunks.push(e.data);
+            };
+            
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                
+                // Δείχνουμε ότι φορτώνει
+                const loadingDiv = document.createElement('div');
+                loadingDiv.className = 'loading';
+                loadingDiv.innerText = '🎙️ Μετατροπή φωνής σε κείμενο...';
+                chatBox.appendChild(loadingDiv);
+                chatBox.scrollTop = chatBox.scrollHeight;
+                
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'web_voice.webm');
+                
+                try {
+                    const res = await fetch('http://127.0.0.1:8000/voice', { method: 'POST', body: formData });
+                    const data = await res.json();
+                    chatBox.removeChild(loadingDiv);
+                    
+                    if (data.transcription) {
+                        // Βάζουμε το κείμενο που ακούσαμε στο input field
+                        userInput.value = data.transcription;
+                        // Και πατάμε "Αποστολή" αυτόματα!
+                        sendMessage(); 
+                    } else {
+                        appendMessage("❌ Σφάλμα: " + data.error, 'ai', 'System');
+                    }
+                } catch (err) {
+                    if(loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
+                    appendMessage("❌ Αποτυχία σύνδεσης για το φωνητικό.", 'ai', 'System');
+                }
+            };
+            
+            mediaRecorder.start();
+            // Κάνουμε το κουμπί κόκκινο για να ξέρεις ότι γράφει
+            voiceBtn.style.backgroundColor = '#F44747'; 
+            voiceBtn.style.transform = 'scale(1.1)';
+        } catch (err) {
+            alert("❌ Δεν βρέθηκε μικρόφωνο ή δεν έδωσες άδεια στον Browser!");
+        }
+    }
+
+    function stopRecording() {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+            // Κλείνουμε το μικρόφωνο για να μη μένει ανοιχτό το "λαμπάκι" στο PC
+            mediaRecorder.stream.getTracks().forEach(t => t.stop());
+            voiceBtn.style.backgroundColor = '#444';
+            voiceBtn.style.transform = 'scale(1)';
+        }
+    }
+
+    // Events για PC (Ποντίκι)
+    voiceBtn.addEventListener('mousedown', startRecording);
+    voiceBtn.addEventListener('mouseup', stopRecording);
+    voiceBtn.addEventListener('mouseleave', stopRecording); // Αν το ποντίκι γλιστρήσει έξω
+    
+    // Events για Κινητό (Οθόνη Αφής)
+    voiceBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
+    voiceBtn.addEventListener('touchend', stopRecording);
     // WebSockets Logs
     const logBox = document.getElementById('log-box');
     const wsStatus = document.getElementById('ws-status');

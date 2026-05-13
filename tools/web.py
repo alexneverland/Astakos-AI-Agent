@@ -241,11 +241,40 @@ def search_goldmall_offers(query: str) -> str:
 
 @tool
 def send_messenger_message(target_name: str, message: str) -> str:
-    """Στέλνει μήνυμα στο Facebook Messenger μέσω Playwright."""
+    """Στέλνει μήνυμα στο Facebook Messenger μέσω Playwright, χρησιμοποιώντας aliases από το προφίλ."""
     import time
-    print(f"\033[95m[Messenger]: Αναζήτηση και αποστολή σε '{target_name}'...\033[0m")
+    import json
+    import os
+    from playwright.sync_api import sync_playwright
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # --- MASTRO FIX: Δυναμικά Aliases από το astakos_profile.json ---
+    # Βρίσκουμε το αρχείο προφίλ (ένα επίπεδο πάνω από το tools/web.py)
+    profile_path = os.path.join(base_dir, "..", "astakos_profile.json")
+    aliases = {}
+    
+    if os.path.exists(profile_path):
+        try:
+            with open(profile_path, 'r', encoding='utf-8') as f:
+                profile_data = json.load(f)
+                aliases = profile_data.get("contacts", {})
+        except Exception as e:
+            print(f"⚠️ [Messenger Error]: Αποτυχία ανάγνωσης προφίλ: {e}")
+
+    # Μετατροπή των κλειδιών σε πεζά για να μην κολλήσουμε στα κεφαλαία ("Σοφία" == "σοφία")
+    aliases_lower = {k.lower(): v for k, v in aliases.items()}
+    search_key = target_name.strip().lower()
+
+    # Αν βρεθεί, παίρνουμε το κανονικό όνομα του Facebook (π.χ. Sopo Putkaradze)
+    final_name = aliases_lower.get(search_key, target_name)
+
+    if final_name != target_name:
+        print(f"\033[93m[Messenger]: Το '{target_name}' αντιστοιχίστηκε σε '{final_name}' (Από Προφίλ)\033[0m")
+    else:
+        print(f"\033[95m[Messenger]: Αναζήτηση και αποστολή σε '{final_name}'...\033[0m")
+    # ----------------------------------------------------------------
+
     profile_dir = os.path.join(base_dir, "..", "astakos_skills", "messenger_profile")
 
     try:
@@ -266,14 +295,17 @@ def send_messenger_message(target_name: str, message: str) -> str:
                 search_box.click()
                 page.keyboard.press("Control+A")
                 page.keyboard.press("Backspace")
-                search_box.fill(name)
+                time.sleep(0.5) # Μικρή παύση να καθαρίσει καλά το πεδίο
                 
-                # [MASTRO-FIX]: Περιμένουμε λίγο να φορτώσουν τα αποτελέσματα
-                time.sleep(2) 
+                # [MASTRO-FIX]: Πληκτρολογεί σαν άνθρωπος (delay=150ms ανά γράμμα) 
+                # για να "ξυπνήσει" τον μηχανισμό αναζήτησης του Messenger!
+                page.keyboard.type(name, delay=150)
+                
+                # Περιμένουμε 3 δευτερόλεπτα να φορτώσει τα αποτελέσματα το Facebook
+                time.sleep(3) 
                 
                 try:
-                    # Επιλέγουμε το πρώτο κελί (gridcell) που εμφανίζεται στα αποτελέσματα
-                    # χωρίς να απαιτούμε να γράφει μόνο "Σοφία"
+                    # Επιλέγουμε το πρώτο κελί
                     target_contact = page.locator('div[role="gridcell"]').first
                     target_contact.wait_for(state="visible", timeout=5000)
                     target_contact.click(force=True)
@@ -281,11 +313,12 @@ def send_messenger_message(target_name: str, message: str) -> str:
                 except:
                     return False
 
-            if not attempt_search(target_name):
-                first_name = target_name.split()[0]
+            # Χρησιμοποιούμε το final_name πλέον για την αναζήτηση
+            if not attempt_search(final_name):
+                first_name = final_name.split()[0]
                 print(f"⚠️ Πλήρες όνομα απέτυχε. Δοκιμή με: {first_name}...")
                 if not attempt_search(first_name):
-                    return f"❌ Σφάλμα: Η επαφή '{target_name}' δεν βρέθηκε."
+                    return f"❌ Σφάλμα: Η επαφή '{final_name}' (αρχικά '{target_name}') δεν βρέθηκε."
 
             time.sleep(2)
 
@@ -297,7 +330,7 @@ def send_messenger_message(target_name: str, message: str) -> str:
             chat_box.press("Enter")
             time.sleep(5)
 
-            return f"✅ Επιτυχία: Το μήνυμα στάλθηκε στον/στην '{target_name}'."
+            return f"✅ Επιτυχία: Το μήνυμα στάλθηκε στον/στην '{final_name}'."
     except Exception as e:
         return f"❌ Σφάλμα Messenger: {str(e)}"
     finally:

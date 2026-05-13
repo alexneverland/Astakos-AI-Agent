@@ -406,7 +406,41 @@ class WsLogger:
                     
     def flush(self):
         self.orig.flush()
-
+@server.post("/voice")
+async def process_web_voice(file: UploadFile = File(...)):
+    """Δέχεται ηχητικό από το Web UI, το κάνει κείμενο με Gemini και το επιστρέφει."""
+    try:
+        from google import genai
+        from config import GEMINI_API_KEY
+        
+        # Διαβάζουμε τα bytes του ηχητικού
+        audio_data = await file.read()
+        
+        print(f"\033[96m[Web Voice]: Αποκωδικοποίηση ηχητικού από τον browser...\033[0m")
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        # Ο browser στέλνει τον ήχο σε μορφή audio/webm
+        response = client.models.generate_content(
+            model='gemini-3.1-flash-lite-preview',
+            contents=[
+                {"inline_data": {"mime_type": "audio/webm", "data": audio_data}},
+                "Άκουσε το ηχητικό και γράψε μου ΑΚΡΙΒΩΣ τι λέει στα Ελληνικά, χωρίς δικά σου σχόλια."
+            ]
+        )
+        
+        transcription = response.text.strip() if response.text else ""
+        if not transcription:
+            return JSONResponse({"error": "Δεν έβγαλα άκρη με τον ήχο."})
+            
+        print(f"\033[92m[Web Voice]: Ο Λάζαρος είπε -> {transcription}\033[0m")
+        
+        # Επιστρέφουμε το κείμενο στο Web UI για να το βάλει στο chat
+        return JSONResponse({"transcription": transcription})
+        
+    except Exception as e:
+        import traceback
+        print(f"\033[91m[Web Voice Error]: {traceback.format_exc()}\033[0m")
+        return JSONResponse({"error": str(e)}, status_code=500)
 # Ενεργοποίηση του "κλέφτη" των logs
 sys.stdout = WsLogger(sys.stdout)
 @server.post("/upload")
