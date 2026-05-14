@@ -15,7 +15,15 @@ import xml.etree.ElementTree as ET
 from langchain_core.tools import tool
 from typing import Annotated
 from playwright.sync_api import sync_playwright
-
+try:
+    from playwright_stealth import stealth_sync
+except ImportError:
+    # [MASTRO-FIX]: Σε κάποιες εκδόσεις η συνάρτηση λέγεται σκέτο 'stealth'
+    try:
+        from playwright_stealth import stealth as stealth_sync
+    except ImportError:
+        print("⚠️ [Web Tool]: Δεν βρέθηκε το stealth_sync. Θα συνεχίσω χωρίς stealth mode.")
+        stealth_sync = None
 
 def remove_accents(input_str: str) -> str:
     """Αφαιρεί τόνους και μετατρέπει σε πεζά."""
@@ -372,7 +380,107 @@ def send_messenger_message(target_name: str = "", message: str = "") -> str:
             browser.close()
         except:
             pass
+@tool
+def search_google_restaurants(query: str, location: str = "Thessaloniki") -> str:
+    """
+    Αναζητά εστιατόρια, καφέ και μέρη για έξοδο μέσω Google Places API (New).
+    Επιστρέφει όνομα, βαθμολογία, διεύθυνση, τύπο και link για πλοήγηση.
+    """
+    import requests
+    import os
+    import urllib.parse
 
+    api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
+    print(f"DEBUG KEY: {api_key[:10]}...")
+    if not api_key:
+        return "❌ Λείπει το GOOGLE_PLACES_API_KEY από το .env"
+
+    # ── 1. Text Search για να βρούμε places ──────────────────────
+    search_text = f"{query} {location}"
+    search_url = "https://places.googleapis.com/v1/places:searchText"
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": (
+            "places.displayName,"
+            "places.rating,"
+            "places.userRatingCount,"
+            "places.formattedAddress,"
+            "places.primaryTypeDisplayName,"
+            "places.regularOpeningHours,"
+            "places.googleMapsUri,"
+            "places.priceLevel"
+        )
+    }
+
+    payload = {
+        "textQuery": search_text,
+        "languageCode": "el",
+        "regionCode": "GR",
+        "maxResultCount": 6
+    }
+
+    try:
+        resp = requests.post(search_url, headers=headers, json=payload, timeout=10)
+        
+        if resp.status_code != 200:
+            return f"❌ Google Places Error {resp.status_code}: {resp.text[:200]}"
+
+        data = resp.json()
+        places = data.get("places", [])
+
+        if not places:
+            return f"❌ Δεν βρέθηκαν αποτελέσματα για '{query}' στην {location}."
+
+        # ── 2. Μορφοποίηση αποτελεσμάτων ─────────────────────────
+        price_map = {
+            "PRICE_LEVEL_FREE": "Δωρεάν",
+            "PRICE_LEVEL_INEXPENSIVE": "€",
+            "PRICE_LEVEL_MODERATE": "€€",
+            "PRICE_LEVEL_EXPENSIVE": "€€€",
+            "PRICE_LEVEL_VERY_EXPENSIVE": "€€€€"
+        }
+
+        lines = [f"📍 Αποτελέσματα για '{query}' — {location}:\n"]
+
+        for i, place in enumerate(places, 1):
+            name = place.get("displayName", {}).get("text", "Άγνωστο")
+            rating = place.get("rating", "—")
+            votes = place.get("userRatingCount", 0)
+            address = place.get("formattedAddress", "Χωρίς διεύθυνση")
+            ptype = place.get("primaryTypeDisplayName", {}).get("text", "")
+            maps_url = place.get("googleMapsUri", "")
+            price = price_map.get(place.get("priceLevel", ""), "")
+
+            # Ώρες λειτουργίας — μόνο αν είναι ανοιχτό τώρα
+            hours_info = ""
+            opening = place.get("regularOpeningHours", {})
+            if opening.get("openNow") is True:
+                hours_info = " · ✅ Ανοιχτό"
+            elif opening.get("openNow") is False:
+                hours_info = " · 🔴 Κλειστό"
+
+            # Nav link
+            nav_link = ""
+            if maps_url:
+                nav_link = f"\n   🗺️ {maps_url}"
+
+            price_str = f" · {price}" if price else ""
+            rating_str = f"⭐ {rating} ({votes} κριτικές)" if rating != "—" else "Χωρίς βαθμολογία"
+            type_str = f" · {ptype}" if ptype else ""
+
+            lines.append(
+                f"{i}. **{name}**{price_str}\n"
+                f"   {rating_str}{type_str}{hours_info}\n"
+                f"   📌 {address}"
+                f"{nav_link}\n"
+            )
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"❌ Σφάλμα: {str(e)}"
 
 @tool
 def get_navigation_info(destination: str) -> str:

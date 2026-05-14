@@ -37,7 +37,7 @@ from tools.system import (
 )
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
-    search_goldmall_offers, send_messenger_message, get_navigation_info, draft_messenger_message
+    search_goldmall_offers, send_messenger_message, get_navigation_info, draft_messenger_message, search_google_restaurants
 )
 from langchain_community.tools import DuckDuckGoSearchRun
 
@@ -303,7 +303,7 @@ def web_agent_node(state: AgentState):
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
         post_to_linkedin,
         generate_image_tool, update_pending_linkedin_post,
-        process_and_clear_linkedin_post, draft_messenger_message
+        process_and_clear_linkedin_post, draft_messenger_message, search_google_restaurants
     ]
 
     return {
@@ -479,6 +479,6 @@ all_tools = [
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info, search_supermarket_offers,
     control_spotify, search_goldmall_offers, send_messenger_message, 
-    recipe_expert, log_meal, create_file_tool, run_terminal_command,
+    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_restaurants,
     DuckDuckGoSearchRun()
 ]
