@@ -24,7 +24,27 @@ def remove_accents(input_str: str) -> str:
     nfkd_form = unicodedata.normalize('NFKD', input_str)
     return u"".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower()
 
-
+@tool
+def draft_messenger_message(target_name: str, message: str) -> str:
+    """
+    Αποθηκεύει ένα προσχέδιο μηνύματος Messenger (Facebook).
+    Χρησιμοποίησέ το ΟΤΑΝ προτείνεις στον χρήστη να στείλει ένα μήνυμα, 
+    πριν πάρεις την τελική του έγκριση.
+    """
+    import os
+    import json
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    draft_file = os.path.join(base_dir, "..", "messenger_draft.json")
+    
+    draft_data = {
+        "target_name": target_name,
+        "message": message
+    }
+    
+    with open(draft_file, "w", encoding="utf-8") as f:
+        json.dump(draft_data, f, ensure_ascii=False, indent=4)
+        
+    return f"✅ Το προσχέδιο για '{target_name}' αποθηκεύτηκε. Ρώτα τον Λάζαρο: 'Να το στείλω;'."
 @tool
 def get_news(topic: str = "Γενικά", limit: int = 15) -> str:
     """Φέρνει τίτλους ειδήσεων από το Google News."""
@@ -240,15 +260,29 @@ def search_goldmall_offers(query: str) -> str:
 
 
 @tool
-def send_messenger_message(target_name: str, message: str) -> str:
-    """Στέλνει μήνυμα στο Facebook Messenger μέσω Playwright, χρησιμοποιώντας aliases από το προφίλ."""
+def send_messenger_message(target_name: str = "", message: str = "") -> str:
+    """Στέλνει μήνυμα στο Facebook Messenger. Αν δεν δοθούν ορίσματα, διαβάζει το έτοιμο προσχέδιο!"""
     import time
     import json
     import os
     from playwright.sync_api import sync_playwright
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    
+    draft_file = os.path.join(base_dir, "..", "messenger_draft.json")
+
+    # --- [MASTRO INTERCEPTOR]: Έλεγχος JSON Buffer ---
+    if not target_name or not message:
+        if os.path.exists(draft_file):
+            with open(draft_file, "r", encoding="utf-8") as f:
+                draft = json.load(f)
+                target_name = target_name or draft.get("target_name", "")
+                message = message or draft.get("message", "")
+            
+            os.remove(draft_file) # Καθαρίζουμε το buffer αφού το πήραμε
+            print(f"\033[93m[Messenger]: Βρέθηκε draft για {target_name}. Εκτέλεση...\033[0m")
+        else:
+            return "❌ Σφάλμα: Δεν μου είπες σε ποιον και τι να στείλω, και δεν βρήκα κανένα προσχέδιο!"
+
     # --- MASTRO FIX: Δυναμικά Aliases από το astakos_profile.json ---
     # Βρίσκουμε το αρχείο προφίλ (ένα επίπεδο πάνω από το tools/web.py)
     profile_path = os.path.join(base_dir, "..", "astakos_profile.json")

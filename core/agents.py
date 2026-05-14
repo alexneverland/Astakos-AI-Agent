@@ -37,7 +37,7 @@ from tools.system import (
 )
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
-    search_goldmall_offers, send_messenger_message, get_navigation_info
+    search_goldmall_offers, send_messenger_message, get_navigation_info, draft_messenger_message
 )
 from langchain_community.tools import DuckDuckGoSearchRun
 
@@ -197,7 +197,7 @@ def chat_agent_node(state: AgentState):
 
     # 5. --- BIND TOOLS & ΕΚΤΕΛΕΣΗ ---
     from tools.system import archive_file, retrieve_photo, save_to_memory, search_memory, control_spotify
-    from tools.web import search_supermarket_offers, send_messenger_message
+    from tools.web import search_supermarket_offers, send_messenger_message, draft_messenger_message
     from langchain_community.tools import DuckDuckGoSearchRun
     
     web_search = DuckDuckGoSearchRun()
@@ -205,7 +205,7 @@ def chat_agent_node(state: AgentState):
     chat_tools = [
         send_messenger_message, search_supermarket_offers, control_spotify,
         search_memory, save_to_memory, retrieve_photo, archive_file, web_search, recipe_expert,
-    log_meal
+    log_meal, draft_messenger_message
     ]
     
     response = llm.bind_tools(chat_tools).invoke(final_messages)
@@ -295,7 +295,7 @@ def web_agent_node(state: AgentState):
         ])
 
     from tools.system import retrieve_photo, read_local_file, post_to_linkedin, generate_image_tool, search_memory
-    from tools.web import get_news, get_weather_forecast, get_navigation_info
+    from tools.web import get_news, get_weather_forecast, get_navigation_info, draft_messenger_message
     from langchain_community.tools import DuckDuckGoSearchRun
 
     web_tools = [
@@ -303,7 +303,7 @@ def web_agent_node(state: AgentState):
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
         post_to_linkedin,
         generate_image_tool, update_pending_linkedin_post,
-        process_and_clear_linkedin_post 
+        process_and_clear_linkedin_post, draft_messenger_message
     ]
 
     return {
