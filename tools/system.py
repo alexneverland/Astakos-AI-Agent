@@ -40,7 +40,7 @@ from memory.vector_store import vector_store, vector_lock, memory
 from services.embeddings import embeddings
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
-    search_goldmall_offers, send_messenger_message, get_navigation_info
+    search_goldmall_offers, send_messenger_message, get_navigation_info, draft_messenger_message
 )
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 # ────────────────────────────────────────────────────────────────
@@ -1155,7 +1155,7 @@ all_tools = [
     read_local_file, write_code, run_code, write_custom_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, 
     log_meal, create_file_tool,
-    get_news, get_weather_forecast, search_supermarket_offers,
+    get_news, get_weather_forecast, search_supermarket_offers, draft_messenger_message,
     search_goldmall_offers, send_messenger_message, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin,
     DuckDuckGoSearchRun()
 ]
