@@ -234,6 +234,12 @@ from config import BASE_DIR
 outputs_dir = os.path.join(BASE_DIR, "outputs")
 os.makedirs(outputs_dir, exist_ok=True)
 server.mount("/outputs", StaticFiles(directory=outputs_dir), name="outputs")
+
+# --- [MASTRO-FIX]: Ξεχωριστός φάκελος για τις φάτσες του UI ---
+avatars_dir = os.path.join(BASE_DIR, "avatars")
+os.makedirs(avatars_dir, exist_ok=True)
+server.mount("/avatars", StaticFiles(directory=avatars_dir), name="avatars")
+
 # Επίτρεψε στο Web UI (frontend) να μιλάει ελεύθερα με τον server
 server.add_middleware(
     CORSMiddleware,
@@ -350,10 +356,15 @@ async def chat_endpoint(request: Request):
             filename = os.path.basename(file_path)
             base_url = str(request.base_url).rstrip("/")
             
-            # Φτιάχνουμε ένα ωραίο HTML img tag για να εμφανιστεί η εικόνα στο chat
-            img_html = f'<br><br><img src="{base_url}/outputs/{filename}" alt="Generated Image" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">'
+            # Ελέγχουμε έξυπνα πού βρίσκεται η φωτογραφία
+            if "outputs" in file_path.lower():
+                img_url = f"{base_url}/outputs/{filename}"
+            else:
+                img_url = f"{base_url}/photos/{filename}"
+                
+            img_html = f'<br><br><img src="{img_url}" alt="Astakos Image" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">'
             
-            # Αντικαθιστούμε την ταμπέλα με την εικόνα!
+            # Αντικαθιστούμε την ταμπέλα με την εικόνα
             clean_ai = re.sub(r"\[SEND_PHOTO:\s*(.*?)\]", img_html, clean_ai)
 
         if final_ai_response:
@@ -373,7 +384,6 @@ async def chat_endpoint(request: Request):
         import traceback
         traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
-
 
 @server.get("/health")
 async def health():
@@ -411,26 +421,34 @@ async def process_web_voice(file: UploadFile = File(...)):
     """Δέχεται ηχητικό από το Web UI, το κάνει κείμενο με Gemini και το επιστρέφει."""
     try:
         from google import genai
-        from config import GEMINI_API_KEY
+        from config import GEMINI_API_KEY, BASE_DIR
+        import os
         
         # Διαβάζουμε τα bytes του ηχητικού
         audio_data = await file.read()
         
-        print(f"\033[96m[Web Voice]: Αποκωδικοποίηση ηχητικού από τον browser...\033[0m")
+        # --- [MASTRO-DEBUG]: Αποθήκευση τοπικά για να ελέγχεις το μικρόφωνο ---
+        debug_path = os.path.join(BASE_DIR, "debug_voice.webm")
+        with open(debug_path, "wb") as f:
+            f.write(audio_data)
+        
+        print(f"\033[96m[Web Voice]: Αποκωδικοποίηση ηχητικού από τον browser ({len(audio_data)} bytes)...\033[0m")
         client = genai.Client(api_key=GEMINI_API_KEY)
         
-        # Ο browser στέλνει τον ήχο σε μορφή audio/webm
+        # Το χαστούκι στο AI: Του απαγορεύουμε να φερθεί σαν Chatbot.
         response = client.models.generate_content(
-            model='gemini-3.1-flash-lite-preview',
+            model='gemini-3.1-flash-lite-preview',  # Κρατάω το δικό σου μοντέλο
             contents=[
                 {"inline_data": {"mime_type": "audio/webm", "data": audio_data}},
-                "Άκουσε το ηχητικό και γράψε μου ΑΚΡΙΒΩΣ τι λέει στα Ελληνικά, χωρίς δικά σου σχόλια."
+                "Είσαι ΑΠΟΚΛΕΙΣΤΙΚΑ ένα εργαλείο Speech-to-Text. Δουλειά σου είναι ΜΟΝΟ να μεταγράψεις τον ήχο σε κείμενο. ΑΠΑΓΟΡΕΥΕΤΑΙ να απαντήσεις, να σχολιάσεις ή να πεις ότι 'δεν έχεις τη δυνατότητα'. Αν δεν ακούς τίποτα ή ο ήχος είναι κενός, επέστρεψε μόνο τη λέξη: [ΣΙΩΠΗ]."
             ]
         )
         
         transcription = response.text.strip() if response.text else ""
-        if not transcription:
-            return JSONResponse({"error": "Δεν έβγαλα άκρη με τον ήχο."})
+        
+        # Αν μας επιστρέψει τη λέξη [ΣΙΩΠΗ], το κόβουμε επιτόπου.
+        if not transcription or "[ΣΙΩΠΗ]" in transcription:
+            return JSONResponse({"error": "Δεν ακούστηκε τίποτα. Έλεγξε το μικρόφωνό σου!"})
             
         print(f"\033[92m[Web Voice]: Ο Λάζαρος είπε -> {transcription}\033[0m")
         
@@ -441,8 +459,53 @@ async def process_web_voice(file: UploadFile = File(...)):
         import traceback
         print(f"\033[91m[Web Voice Error]: {traceback.format_exc()}\033[0m")
         return JSONResponse({"error": str(e)}, status_code=500)
-# Ενεργοποίηση του "κλέφτη" των logs
-sys.stdout = WsLogger(sys.stdout)
+import edge_tts
+import io
+
+@server.post("/tts")
+async def text_to_speech(request: Request):
+    try:
+        body = await request.json()
+        text = body.get("text", "").strip()
+        
+        if not text:
+            return JSONResponse({"error": "Κενό κείμενο"}, status_code=400)
+        
+        import re
+        text = re.sub(r'[*#`]', '', text)
+        text = re.sub(r'\[.*?\]\(.*?\)', '', text)
+        text = re.sub(r'\[SEND_PHOTO:.*?\]', '', text)
+        text = text.strip()
+        
+        voice = "el-GR-NestorasNeural"  # Δοκίμασε την αντρική - συνήθως πιο καθαρή
+        
+        # Rate αργότερα (-10% έως -20%) και volume λίγο πιο δυνατό
+        communicate = edge_tts.Communicate(text, voice, rate="-10%", volume="+10%")
+        
+        audio_buffer = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_buffer.write(chunk["data"])
+        
+        audio_buffer.seek(0)
+        audio_bytes = audio_buffer.read()
+        
+        if not audio_bytes:
+            return JSONResponse({"error": "Αποτυχία δημιουργίας ήχου"}, status_code=500)
+        
+        print(f"\033[95m[TTS]: Φωνή δημιουργήθηκε ({len(audio_bytes)} bytes)\033[0m")
+        
+        from fastapi.responses import Response
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=response.mp3"}
+        )
+        
+    except Exception as e:
+        import traceback
+        print(f"\033[91m[TTS Error]: {traceback.format_exc()}\033[0m")
+        return JSONResponse({"error": str(e)}, status_code=500)
 @server.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     """
@@ -551,6 +614,12 @@ async def upload_file(file: UploadFile = File(...)):
         import traceback
         print(f"\033[91m[Upload Error]: {traceback.format_exc()}\033[0m")
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+from fastapi.responses import FileResponse
+
+@server.get("/")
+async def read_index():
+    # Αυτό λέει στον server: "Όταν κάποιος μπαίνει στο http://127.0.0.1:8000, δείξε του το index.html"
+    return FileResponse('index.html')
 @server.get("/history")
 async def get_history():
     """Δίνει το ιστορικό στο Web UI — διαβάζει από το JSON για να επιβιώνει το F5/restart."""

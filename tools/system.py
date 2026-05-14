@@ -34,6 +34,7 @@ from config import (
     REMINDERS_FILE, LISTS_FILE, WORKSPACE_DIR, PHOTOS_INDEX_FILE,
     EMAIL_ADDRESS, EMAIL_PASSWORD, GITHUB_TOKEN, VACUUM_IP, VACUUM_TOKEN
 )
+from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 from langchain_community.tools import DuckDuckGoSearchRun
 from memory.vector_store import vector_store, vector_lock, memory
 from services.embeddings import embeddings
@@ -545,7 +546,7 @@ def drive_manager(action: str = "list_files", file_id: str = None, local_path: s
         import io
 
         print(f"\033[93m[Drive]: Ενέργεια {action}...\033[0m")
-        creds = Credentials.from_authorized_user_file('credentials/token.json', ['https://www.googleapis.com/auth/drive'])
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
         service = build('drive', 'v3', credentials=creds)
 
         if action == "list_files":
@@ -830,8 +831,12 @@ if __name__ == "__main__":
 # ────────────────────────────────────────────────────────────────
 # EMAIL
 # ────────────────────────────────────────────────────────────────
-
-SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
+SCOPES = [
+    'https://www.googleapis.com/auth/gmail.modify',
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/tasks'
+]
 
 def get_gmail_service():
     """Δημιουργεί το service του Gmail API χρησιμοποιώντας OAuth."""
@@ -1144,7 +1149,7 @@ def control_spotify(
     except Exception as e:
         return f"Spotify Error: {str(e)}. (Μήπως δεν έχεις ανοιχτή την εφαρμογή;)"
 all_tools = [
-    search_memory, save_to_memory, delete_from_memory, retrieve_photo,
+    search_memory, save_to_memory, delete_from_memory, retrieve_photo, update_pending_linkedin_post, process_and_clear_linkedin_post,
     set_local_reminder, set_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
