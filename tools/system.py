@@ -32,7 +32,7 @@ from google.oauth2.credentials import Credentials
 import base64
 from config import (
     REMINDERS_FILE, LISTS_FILE, WORKSPACE_DIR, PHOTOS_INDEX_FILE,
-    EMAIL_ADDRESS, EMAIL_PASSWORD, GITHUB_TOKEN, VACUUM_IP, VACUUM_TOKEN
+    EMAIL_ADDRESS, EMAIL_PASSWORD, GITHUB_TOKEN, VACUUM_IP, VACUUM_TOKEN,GPS_STORAGE_FILE
 )
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -40,7 +40,7 @@ from memory.vector_store import vector_store, vector_lock, memory
 from services.embeddings import embeddings
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
-    search_goldmall_offers, send_messenger_message, get_navigation_info, draft_messenger_message, search_google_restaurants
+    search_goldmall_offers, send_messenger_message, get_navigation_info, draft_messenger_message, search_google_places
 )
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 # ────────────────────────────────────────────────────────────────
@@ -1018,80 +1018,69 @@ def control_vacuum(action: str) -> str:
     except Exception as e:
         return f"Σφάλμα επικοινωνίας με τη σκούπα: {str(e)}"
 @tool
-def post_to_linkedin(text: str, image_path: str = None) -> str:
+def post_to_linkedin(text: str = None, image_path: str = None) -> str:
     """
-    Δημοσιεύει κείμενο και προαιρετικά μια εικόνα στο LinkedIn του Λάζαρου.
-    Αν δοθεί image_path, το εργαλείο ανεβάζει πρώτα την εικόνα και μετά κάνει το post.
+    Δημοσιεύει κείμενο και προαιρετικά μια εικόνα στο LinkedIn.
+    Αν δεν δοθεί text, το τραβάει αυτόματα από το linkedin_draft.json.
     """
     import os
+    import json
     import requests
     from dotenv import load_dotenv, find_dotenv
+    from config import LINKEDIN_DRAFT_FILE
 
+    # [MASTRO-INTERCEPTOR]: Αυτονομία από τη Working Memory
+    if not text:
+        if os.path.exists(LINKEDIN_DRAFT_FILE):
+            try:
+                with open(LINKEDIN_DRAFT_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    text = data.get("content") or data.get("text")
+                    if not image_path:
+                        image_path = data.get("image_path")
+            except Exception as e:
+                print(f"⚠️ Σφάλμα ανάγνωσης draft: {e}")
+
+    if not text:
+        return "❌ Σφάλμα: Δεν βρέθηκε κείμενο (ούτε στο draft, ούτε στα ορίσματα)."
+
+    # --- LinkedIn API Logic ---
     load_dotenv(find_dotenv(), override=True)
-    LINKEDIN_TOKEN = os.getenv("LINKEDIN_TOKEN")
-    
-    if not LINKEDIN_TOKEN:
-        return "❌ Σφάλμα: Λείπει το LINKEDIN_TOKEN."
+    token = os.getenv("LINKEDIN_TOKEN")
+    if not token: return "❌ Λείπει το LINKEDIN_TOKEN."
 
     headers = {
-        "Authorization": f"Bearer {LINKEDIN_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "X-Restli-Protocol-Version": "2.0.0",
         "Content-Type": "application/json"
     }
 
     try:
-        # 1. Ταυτοποίηση Χρήστη
+        # 1. Ταυτοποίηση
         user_res = requests.get("https://api.linkedin.com/v2/userinfo", headers=headers)
-        if user_res.status_code != 200:
-            return f"❌ Σφάλμα Auth: {user_res.text}"
-        
+        if user_res.status_code != 200: return f"❌ Auth Error: {user_res.text}"
         person_urn = f"urn:li:person:{user_res.json().get('sub')}"
         asset_urn = None
 
-        # 2. Αν υπάρχει εικόνα, ξεκινάμε τη διαδικασία Upload
+        # 2. Upload Image (αν υπάρχει)
         if image_path and os.path.exists(image_path):
-            print(f"[LinkedIn]: Registering image upload...")
-            register_url = "https://api.linkedin.com/v2/assets?action=registerUpload"
-            register_data = {
-                "registerUploadRequest": {
-                    "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
-                    "owner": person_urn,
-                    "serviceRelationships": [{
-                        "relationshipType": "OWNER",
-                        "identifier": "urn:li:userGeneratedContent"
-                    }]
-                }
-            }
-            reg_res = requests.post(register_url, headers=headers, json=register_data)
-            if reg_res.status_code != 200:
-                return f"❌ Σφάλμα Register Image: {reg_res.text}"
+            reg_url = "https://api.linkedin.com/v2/assets?action=registerUpload"
+            reg_data = {"registerUploadRequest": {"recipes": ["urn:li:digitalmediaRecipe:feedshare-image"], "owner": person_urn, "serviceRelationships": [{"relationshipType": "OWNER", "identifier": "urn:li:userGeneratedContent"}]}}
+            reg_res = requests.post(reg_url, headers=headers, json=reg_data)
+            if reg_res.status_code == 200:
+                upload_url = reg_res.json()['value']['uploadMechanism']['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl']
+                asset_urn = reg_res.json()['value']['asset']
+                with open(image_path, 'rb') as f:
+                    requests.post(upload_url, headers={"Authorization": f"Bearer {token}"}, data=f.read())
 
-            upload_url = reg_res.json()['value']['uploadMechanism']['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl']
-            asset_urn = reg_res.json()['value']['asset']
-
-            # Ανέβασμα Binary Αρχείου
-            with open(image_path, 'rb') as f:
-                binary_data = f.read()
-            
-            # Εδώ το header θέλει μόνο το Auth, όχι Content-Type JSON
-            upload_headers = {"Authorization": f"Bearer {LINKEDIN_TOKEN}"}
-            up_res = requests.post(upload_url, headers=upload_headers, data=binary_data)
-            if up_res.status_code not in [200, 201]:
-                return f"❌ Σφάλμα Binary Upload: {up_res.text}"
-            print(f"[LinkedIn]: Image uploaded successfully.")
-
-        # 3. Δημιουργία του Post
+        # 3. Δημιουργία Post
         post_url = "https://api.linkedin.com/v2/ugcPosts"
         media_content = {
             "shareCommentary": {"text": text},
             "shareMediaCategory": "IMAGE" if asset_urn else "NONE"
         }
         if asset_urn:
-            media_content["media"] = [{
-                "status": "READY",
-                "media": asset_urn,
-                "title": {"text": "Astakos DevLog Image"}
-            }]
+            media_content["media"] = [{"status": "READY", "media": asset_urn, "title": {"text": "Astakos Post"}}]
 
         payload = {
             "author": person_urn,
@@ -1101,10 +1090,50 @@ def post_to_linkedin(text: str, image_path: str = None) -> str:
         }
 
         res = requests.post(post_url, headers=headers, json=payload)
-        return "✅ Το post ανέβηκε επιτυχώς!" if res.status_code == 201 else f"❌ Αποτυχία: {res.text}"
+        
+        if res.status_code == 201:
+            # [MASTRO-CLEANUP]: Καθαρισμός draft μετά την επιτυχία
+            if os.path.exists(LINKEDIN_DRAFT_FILE):
+                with open(LINKEDIN_DRAFT_FILE, "w", encoding="utf-8") as f:
+                    json.dump({}, f)
+            return "✅ Το LinkedIn post ανέβηκε και το draft καθαρίστηκε!"
+        
+        return f"❌ Αποτυχία: {res.text}"
 
     except Exception as e:
         return f"❌ Κρίσιμο Σφάλμα: {str(e)}"
+@tool
+def get_current_location() -> str:
+    """
+    Επιστρέφει το τελευταίο καταγεγραμμένο GPS στίγμα του Λάζαρου από το last_location.json.
+    Χρησιμοποιείται για να ξέρουμε πού βρίσκεται ο χρήστης σε πραγματικό χρόνο.
+    """
+    import json
+    import os
+    import time
+    from datetime import datetime
+    from config import GPS_STORAGE_FILE
+
+    if not os.path.exists(GPS_STORAGE_FILE):
+        return "📍 Δεν υπάρχει καταγεγραμμένο στίγμα ακόμα. Ζήτα από τον Λάζαρο να στείλει Live Location."
+
+    try:
+        with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            lat = data.get("lat")
+            lon = data.get("lon")
+            ts = data.get("timestamp", 0)
+
+            # Υπολογισμός "φρεσκάδας"
+            diff_minutes = int((time.time() - ts) / 60)
+            last_seen = datetime.fromtimestamp(ts).strftime('%H:%M:%S')
+
+            if diff_minutes > 1440: # Πάνω από μέρα
+                return f"📍 Το στίγμα είναι πολύ παλιό (από εχθές στις {last_seen})."
+            
+            return f"📍 Ο Λάζαρος βρίσκεται στις συντεταγμένες {lat}, {lon} (Ενημερώθηκε πριν από {diff_minutes} λεπτά)."
+    except Exception as e:
+        return f"❌ Σφάλμα κατά την ανάγνωση του GPS: {str(e)}"
 
 @tool
 def control_spotify(
@@ -1153,8 +1182,8 @@ all_tools = [
     set_local_reminder, set_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
-    mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_google_restaurants,
-    log_meal, create_file_tool,
+    mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_google_places,
+    log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_offers, draft_messenger_message,
     search_goldmall_offers, send_messenger_message, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin,
     DuckDuckGoSearchRun()

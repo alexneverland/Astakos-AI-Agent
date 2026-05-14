@@ -381,7 +381,7 @@ def send_messenger_message(target_name: str = "", message: str = "") -> str:
         except:
             pass
 @tool
-def search_google_restaurants(query: str, location: str = "Thessaloniki") -> str:
+def search_google_places(query: str, location: str = "Thessaloniki") -> str:
     """
     Αναζητά εστιατόρια, καφέ και μέρη για έξοδο μέσω Google Places API (New).
     Επιστρέφει όνομα, βαθμολογία, διεύθυνση, τύπο και link για πλοήγηση.
@@ -389,7 +389,19 @@ def search_google_restaurants(query: str, location: str = "Thessaloniki") -> str
     import requests
     import os
     import urllib.parse
-
+    import time
+    from config import GPS_STORAGE_FILE
+    # [MASTRO-GPS-INTERCEPTOR]
+    if "κοντά" in query.lower() or location == "current":
+        if os.path.exists(GPS_STORAGE_FILE):
+            try:
+                with open(GPS_STORAGE_FILE, "r") as f:
+                    gps = json.load(f)
+                    # Αν το στίγμα είναι φρέσκο (τελευταία 24ωρα)
+                    if time.time() - gps['timestamp'] < 86400:
+                        location = f"{gps['lat']},{gps['lon']}"
+                        print(f"📍 [Web Tool]: Χρήση Live GPS στίγματος: {location}")
+            except: pass
     api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
     print(f"DEBUG KEY: {api_key[:10]}...")
     if not api_key:

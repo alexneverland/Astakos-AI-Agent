@@ -52,7 +52,8 @@ SESSIONS_FILE = os.path.join(BASE_DIR, "astakos_sessions.json")
 REMINDERS_FILE = os.path.join(BASE_DIR, "astakos_reminders.json")
 LISTS_FILE = os.path.join(BASE_DIR, "astakos_lists.json")
 CAPABILITIES_FILE = os.path.join(BASE_DIR, "astakos_capabilities.json")
-
+LINKEDIN_DRAFT_FILE = os.path.join(BASE_DIR, "linkedin_draft.json")
+GPS_STORAGE_FILE = os.path.join(BASE_DIR, "last_location.json")
 # ==========================================
 # 4. ΡΥΘΜΙΣΕΙΣ AI
 # ==========================================

@@ -33,11 +33,11 @@ from tools.system import (
     set_local_reminder, set_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
-    mail_manager, github_manager, control_vacuum, control_spotify, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin
+    mail_manager, github_manager, control_vacuum, control_spotify, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location,
 )
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
-    search_goldmall_offers, send_messenger_message, get_navigation_info, draft_messenger_message, search_google_restaurants
+    search_goldmall_offers, send_messenger_message, get_navigation_info, draft_messenger_message, search_google_places
 )
 from langchain_community.tools import DuckDuckGoSearchRun
 
@@ -196,16 +196,18 @@ def chat_agent_node(state: AgentState):
         ])
 
     # 5. --- BIND TOOLS & ΕΚΤΕΛΕΣΗ ---
-    from tools.system import archive_file, retrieve_photo, save_to_memory, search_memory, control_spotify
+    from tools.system import archive_file, retrieve_photo, save_to_memory, search_memory, control_spotify, get_current_location
     from tools.web import search_supermarket_offers, send_messenger_message, draft_messenger_message
     from langchain_community.tools import DuckDuckGoSearchRun
     
     web_search = DuckDuckGoSearchRun()
     
+    # Προσθήκη του get_current_location στα εργαλεία του Chat
     chat_tools = [
+        get_current_location, # <--- Η "πυξίδα" του Αστακού
         send_messenger_message, search_supermarket_offers, control_spotify,
-        search_memory, save_to_memory, retrieve_photo, archive_file, web_search, recipe_expert,
-    log_meal, draft_messenger_message
+        search_memory, save_to_memory, retrieve_photo, archive_file, web_search, 
+        recipe_expert, log_meal, draft_messenger_message
     ]
     
     response = llm.bind_tools(chat_tools).invoke(final_messages)
@@ -215,30 +217,51 @@ def chat_agent_node(state: AgentState):
         "messages": [response]
     }
 
-def home_agent_node(state):
-    from core.utils import load_agent_prompt
-    from config import BASE_DIR  
+def home_agent_node(state: AgentState):
+    """
+    Ο διαχειριστής του σπιτιού. 
+    Πλέον έχει επίγνωση της τοποθεσίας του Λάζαρου για έξυπνα triggers.
+    """
+    from core.utils import load_agent_prompt, build_prompt, filter_messages
+    from config import BASE_DIR
+    from langchain_core.messages import SystemMessage
+    
+    # 1. Imports των εργαλείων (Mastro-style imports για αποφυγή circularity)
+    from tools.system import (
+        manage_list, set_reminder, set_local_reminder, delete_from_memory, 
+        search_memory, control_spotify, control_vacuum, get_current_location # <--- ΠΡΟΣΘΗΚΗ
+    )
+    from tools.web import search_supermarket_offers, get_navigation_info, search_goldmall_offers
+    from astakos_skills.recipe_expert import recipe_expert, log_meal
+    
     history = filter_messages(state["messages"])
 
+    # 2. Λίστα εργαλείων με το GPS μέσα
     tools_to_bind = [
+        get_current_location, # Η "πυξίδα" του σπιτιού
         manage_list, set_reminder, set_local_reminder, delete_from_memory, search_memory,
         search_supermarket_offers, control_spotify, control_vacuum,
         search_goldmall_offers, get_navigation_info,
         google_calendar_tool, google_tasks_tool, recipe_expert, log_meal
     ]
 
-    # 1. Τραβάμε τις οδηγίες από το JSON
+    # 3. Τραβάμε τις οδηγίες από το JSON
     system_base = load_agent_prompt("Home_Agent", "Είσαι ο Home_Agent του Piston-7.")
     
-    # [MASTRO-FIX]: Αντικατάσταση του placeholder για να παίζουν τα paths παντού
+    # Αντικατάσταση placeholders
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     
-    # 2. Χτίζουμε το prompt μαζί με το ιστορικό
+    # 4. Χτίζουμε το τελικό prompt
     system_prompt = build_prompt(history, system_base)
+
+    # 5. Εκτέλεση
+    response = llm.bind_tools(tools_to_bind).invoke(
+        [SystemMessage(content=system_prompt)] + history
+    )
 
     return {
         "current_agent": "Home_Agent",
-        "messages": [llm.bind_tools(tools_to_bind).invoke([SystemMessage(content=system_prompt)] + history)]
+        "messages": [response]
     }
 
 
@@ -294,16 +317,23 @@ def web_agent_node(state: AgentState):
             image_part
         ])
 
-    from tools.system import retrieve_photo, read_local_file, post_to_linkedin, generate_image_tool, search_memory
-    from tools.web import get_news, get_weather_forecast, get_navigation_info, draft_messenger_message
+    # --- ΒΗΜΑ 5: BIND TOOLS & GPS INTEGRATION ---
+    from tools.system import (
+        retrieve_photo, read_local_file, post_to_linkedin, 
+        generate_image_tool, search_memory, get_current_location 
+    )
+    from tools.web import (
+        get_news, get_weather_forecast, get_navigation_info, 
+        draft_messenger_message, search_google_places
+    )
     from langchain_community.tools import DuckDuckGoSearchRun
 
     web_tools = [
+        get_current_location, # <--- Η "πυξίδα" του Web_Agent
         get_news, get_weather_forecast, DuckDuckGoSearchRun(), 
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
-        post_to_linkedin,
-        generate_image_tool, update_pending_linkedin_post,
-        process_and_clear_linkedin_post, draft_messenger_message, search_google_restaurants
+        post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
+        process_and_clear_linkedin_post, draft_messenger_message, search_google_places
     ]
 
     return {
@@ -315,17 +345,17 @@ def web_agent_node(state: AgentState):
 def tech_agent_node(state: AgentState):
     """
     Ο τεχνικός Agent της Piston-7. 
-    Πλέον έχει και αυτός 'μάτια', διαβάζει έγγραφα (PDF/Excel) και αρχειοθετεί αρχεία.
+    Διαχειρίζεται έγγραφα, logs και τεχνικές αναλύσεις με υποστήριξη Vision.
     """
-    from core.utils import load_agent_prompt, clean_message
-    from config import BASE_DIR, PHOTOS_DIR  
+    from core.utils import load_agent_prompt, build_prompt, filter_messages, clean_message
+    from config import BASE_DIR, PHOTOS_DIR 
+    from langchain_core.messages import SystemMessage, HumanMessage
     import re
     import os
     import base64
     
     # 1. Φιλτράρισμα & Καθαρισμός ιστορικού
     history = filter_messages(state["messages"])
-    # [MASTRO-FIX]: Χρήση της clean_message για σίγουρο string (αποφυγή list/strip errors)
     last_msg_text = clean_message(history[-1].content) if history else ""
 
     # 2. --- [SMART-VISION & FILE LOGIC]: Ανίχνευση αρχείου ---
@@ -335,8 +365,8 @@ def tech_agent_node(state: AgentState):
     pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
     image_part = None
 
-    # Φόρτωση pixels αν ο Λάζαρος ζητάει τεχνική λεπτομέρεια
-    tech_keywords = ["κώδικας", "σφάλμα", "διάβασε", "τι γράφει", "error", "log"]
+    # Φόρτωση pixels αν ο Λάζαρος ζητάει τεχνική λεπτομέρεια (logs, σφάλματα)
+    tech_keywords = ["κώδικας", "σφάλμα", "διάβασε", "τι γράφει", "error", "log", "σχέδιο"]
     needs_pixels = any(word in last_msg_text.lower() for word in tech_keywords)
 
     if path_match and (not pre_baked_analysis or needs_pixels):
@@ -360,12 +390,8 @@ def tech_agent_node(state: AgentState):
             print(f"⚠️ Tech Vision Error: {e}")
 
     # 3. --- SYSTEM PROMPT ΑΠΟ JSON ---
-    vision_info = f"\n[CONTEXT ΑΡΧΕΙΟΥ/ΦΩΤΟ]: Έχεις ήδη αυτή την ανάλυση/πληροφορία: '{pre_baked_analysis}'.\n" if pre_baked_analysis else ""
-    
-    # Φορτώνουμε τη βάση του prompt από το JSON
+    vision_info = f"\n[CONTEXT ΑΡΧΕΙΟΥ/ΦΩΤΟ]: Έχεις ήδη αυτή την ανάλυση: '{pre_baked_analysis}'.\n" if pre_baked_analysis else ""
     json_base = load_agent_prompt("Tech_Agent", "Είσαι ο Tech_Agent, ο τεχνικός εμπειρογνώμονας του Λάζαρου.")
-    
-    # [MASTRO-FIX]: Δυναμική αντικατάσταση του path στο prompt
     json_base = json_base.replace("{BASE_DIR}", BASE_DIR)
     
     system_prompt_text = f"{json_base}{vision_info}"
@@ -374,18 +400,19 @@ def tech_agent_node(state: AgentState):
     # 4. --- ΠΡΟΕΤΟΙΜΑΣΙΑ ΜΗΝΥΜΑΤΩΝ ---
     final_messages = [SystemMessage(content=system_prompt)] + history
     if image_part:
-        # Αντικαθιστούμε το τελευταίο μήνυμα με Multimodal αν έχουμε εικόνα
         final_messages[-1] = HumanMessage(content=[
             {"type": "text", "text": last_msg_text},
             image_part
         ])
 
-    # 5. --- BIND TOOLS ---
+    # 5. --- BIND TOOLS (Προσθήκη get_current_location) ---
     from tools.system import (
-        read_local_file, drive_manager, archive_file, search_memory, save_to_memory, create_file_tool
+        read_local_file, drive_manager, archive_file, search_memory, 
+        save_to_memory, create_file_tool, get_current_location # <--- ΕΔΩ
     )
     
     tech_tools = [
+        get_current_location, # Η πυξίδα του Tech_Agent για τοπικά hardware stores
         archive_file,
         read_local_file, 
         drive_manager,
@@ -394,6 +421,7 @@ def tech_agent_node(state: AgentState):
         create_file_tool
     ]
     
+    # Χρήση llm_heavy για δύσκολα τεχνικά tasks
     response = llm_heavy.bind_tools(tech_tools).invoke(final_messages)
 
     return {
@@ -478,7 +506,7 @@ all_tools = [
     google_calendar_tool, save_to_memory, google_tasks_tool, delete_from_memory,
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info, search_supermarket_offers,
-    control_spotify, search_goldmall_offers, send_messenger_message, 
-    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_restaurants,
+    control_spotify, search_goldmall_offers, send_messenger_message, get_current_location,
+    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places,
     DuckDuckGoSearchRun()
 ]
