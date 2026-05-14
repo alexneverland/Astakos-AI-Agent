@@ -408,7 +408,26 @@ def _send_photo_to_telegram(photo_path: str, chat_id: str):
     except Exception as e:
         print(f"\033[91m[TelegramBot Photo Send Error]: {e}\033[0m")
         send_telegram_msg(f"❌ Αδύνατη η αποστολή φωτογραφίας: {str(e)}")
-
+def handle_location(msg):
+    """Πιάνει το στίγμα και το γράφει στο last_location.json."""
+    from config import GPS_STORAGE_FILE
+    import json
+    import time
+    
+    if "location" in msg:
+        lat = msg["location"]["latitude"]
+        lon = msg["location"]["longitude"]
+        data = {
+            "lat": lat,
+            "lon": lon,
+            "timestamp": time.time()
+        }
+        try:
+            with open(GPS_STORAGE_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            print(f"📍 [GPS]: Το στίγμα ενημερώθηκε: {lat}, {lon}")
+        except Exception as e:
+            print(f"❌ Σφάλμα GPS: {e}")
 
 # ────────────────────────────────────────────────────────────────
 # POLLING LOOP
@@ -445,18 +464,28 @@ def run_polling():
             for update in updates:
                 offset = update["update_id"] + 1
 
+                # [MASTRO-FIX]: Πιάνουμε και τα Live Locations που έρχονται ως edited_message
                 msg = update.get("message") or update.get("edited_message")
                 if not msg:
                     continue
-
+                
                 chat_id = str(msg["chat"]["id"])
 
-                # Security: μόνο ο Λάζαρος (Mastro-Shield)
+                # Security: μόνο ο Λάζαρος
                 if chat_id != str(TELEGRAM_CHAT_ID):
                     print(f"\033[93m[TelegramBot]: Μη εξουσιοδοτημένο chat: {chat_id}\033[0m")
                     continue
 
-                # 1. Φωτογραφία
+                # 1. Τοποθεσία (GPS) - Μόνο μία φορά, σε thread, περνώντας όλο το msg
+                if "location" in msg:
+                    threading.Thread(
+                        target=handle_location,
+                        args=(msg,), 
+                        daemon=True
+                    ).start()
+                    continue
+
+                # 2. Φωτογραφία
                 if "photo" in msg:
                     caption = msg.get("caption", "")
                     threading.Thread(
@@ -466,7 +495,7 @@ def run_polling():
                     ).start()
                     continue
 
-                # 2. Φωνητικό (Voice)
+                # 3. Φωνητικό (Voice)
                 if "voice" in msg:
                     threading.Thread(
                         target=handle_voice,
@@ -475,7 +504,7 @@ def run_polling():
                     ).start()
                     continue
 
-                # 3. Έγγραφα (PDF, κλπ)
+                # 4. Έγγραφα (PDF, κλπ)
                 if "document" in msg:
                     caption = msg.get("caption", "")
                     threading.Thread(
@@ -484,8 +513,8 @@ def run_polling():
                         daemon=True
                     ).start()
                     continue
-
-                # 4. Κείμενο & Εντολές
+                
+                # 5. Κείμενο & Εντολές
                 user_text = msg.get("text", "").strip()
                 if not user_text:
                     continue
@@ -494,7 +523,7 @@ def run_polling():
                 if user_text.lower() == "/end":
                     print(f"\033[94m[Telegram]: Εντολή τερματισμού συνεδρίας από Λάζαρο.\033[0m")
                     threading.Thread(
-                        target=handle_end_session, # Η συνάρτηση που φτιάξαμε πριν
+                        target=handle_end_session,
                         args=(chat_id,),
                         daemon=True
                     ).start()
@@ -513,7 +542,6 @@ def run_polling():
         except Exception as e:
             print(f"\033[91m[TelegramBot Polling Error]: {e}\033[0m")
             time.sleep(5)
-
 
 # ────────────────────────────────────────────────────────────────
 # REMINDER WORKER (standalone για τον bot)
