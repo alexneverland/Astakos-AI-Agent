@@ -25,7 +25,7 @@ astakos_lists.json
 astakos_embeddings_cache.json
 astakos_capabilities.json
 token.json
-
+linkedin_draft.json
 # Python & System
 __pycache__/
 *.pyc

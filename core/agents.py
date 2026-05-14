@@ -21,7 +21,7 @@ from core.brain import llm, llm_heavy
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 # UTILS & STATE (Εδώ σπάμε το Circular Import)
 from core.utils import AgentState, filter_messages, build_prompt, clean_message
-
+from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 # MEMORY
 from memory.vector_store import vector_store, vector_lock
 from memory.working_memory import get_capability_context
@@ -302,7 +302,8 @@ def web_agent_node(state: AgentState):
         get_news, get_weather_forecast, DuckDuckGoSearchRun(), 
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
         post_to_linkedin,
-        generate_image_tool 
+        generate_image_tool, update_pending_linkedin_post,
+        process_and_clear_linkedin_post 
     ]
 
     return {
