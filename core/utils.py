@@ -122,20 +122,35 @@ def filter_messages(messages: list, k: int = 40) -> list:
     return final_list
 
 # ────────────────────────────────────────────────────────────────
-# 3. PROMPT LOADING ENGINE
+# 3. PROMPT LOADING ENGINE (MASTRO-MD)
 # ────────────────────────────────────────────────────────────────
 
 def load_agent_prompt(agent_name: str, default_fallback: str = "") -> str:
-    """Διαβάζει οδηγίες από το prompts.json."""
+    """Διαβάζει οδηγίες από το prompts.md με βάση τα headers (##)."""
+    import re
+    import os
     try:
         core_dir = os.path.dirname(os.path.abspath(__file__))
-        json_path = os.path.join(core_dir, "prompts.json")
-        if not os.path.exists(json_path):
+        md_path = os.path.join(core_dir, "prompts.md")  # Αλλάξαμε την κατάληξη σε .md
+        
+        if not os.path.exists(md_path):
             return default_fallback
             
-        with open(json_path, "r", encoding="utf-8") as f:
-            prompts = json.load(f)
-        return prompts.get(agent_name, default_fallback)
+        with open(md_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Κόβουμε το κείμενο σε κομμάτια κάθε φορά που βρίσκει "## " στην αρχή της γραμμής
+        sections = re.split(r'^##\s+', content, flags=re.MULTILINE)[1:]
+        
+        prompts_dict = {}
+        for section in sections:
+            # Το πρώτο μέρος της γραμμής είναι το όνομα (π.χ. Dev_Agent), το υπόλοιπο είναι το κείμενο
+            parts = section.split('\n', 1)
+            key = parts[0].strip()
+            value = parts[1].strip() if len(parts) > 1 else ""
+            prompts_dict[key] = value
+            
+        return prompts_dict.get(agent_name, default_fallback)
     except Exception as e:
         print(f"⚠️ Error loading prompt {agent_name}: {e}")
         return default_fallback
@@ -207,11 +222,15 @@ def build_prompt(state_messages, agent_role="") -> str:
         except Exception as e:
             print(f"\033[91m⚠️ Semantic Graph Error: {e}\033[0m")
 
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
 
     # 4. Σύνθεση του Βασικού Prompt με Κανόνα Πραγματικότητας
     prompt = f"{identity}\n"
-    prompt += f"Σήμερα: {now_str}.\n"
+    days_gr = ["Δευτέρα","Τρίτη","Τετάρτη","Πέμπτη","Παρασκευή","Σάββατο","Κυριακή"]
+    now = datetime.now()
+    day_gr = days_gr[now.weekday()]
+    now_str = now.strftime("%Y-%m-%d %H:%M")
+    prompt += f"Σήμερα: {day_gr} {now_str}.\n"
     prompt += f"ΡΟΛΟΣ ΤΩΡΑ: {agent_role}\n\n"
 
     # Εμβόλιμος Κανόνας αν υπάρχει Vision

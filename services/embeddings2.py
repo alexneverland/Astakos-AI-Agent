@@ -10,16 +10,15 @@ import json
 import hashlib
 import threading
 from langchain_core.embeddings import Embeddings
-from langchain_google_vertexai import VertexAIEmbeddings
-from config import PROJECT_ID, LOCATION, EMBEDDINGS_CACHE_FILE
+from langchain_google_genai import GoogleGenerativeAIEmbeddings  # [MASTRO-FIX]: VertexAI → GenAI
+from config import EMBEDDINGS_CACHE_FILE
 
 emb_cache_lock = threading.Lock()
 
-# Αυτό έλειπε και θα σου πετούσε χοντρό error!
-base_embeddings = VertexAIEmbeddings(
-    model_name="text-embedding-004",
-    project=PROJECT_ID,
-    location=LOCATION
+# [MASTRO-FIX]: Χρησιμοποιούμε το μοντέλο που "παίζει" με όλα τα κλειδιά
+base_embeddings = GoogleGenerativeAIEmbeddings(
+    model="models/embedding-001", # Το standard stable μοντέλο
+    task_type="retrieval_document"
 )
 
 class MastroEmbeddingsCache(Embeddings):

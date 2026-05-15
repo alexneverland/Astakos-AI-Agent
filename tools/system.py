@@ -42,6 +42,7 @@ from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
     search_goldmall_offers, send_messenger_message, get_navigation_info, draft_messenger_message, search_google_places
 )
+from astakos_skills.search_flights import search_flights
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 # ────────────────────────────────────────────────────────────────
 # PROTECTED SANDBOX
@@ -363,9 +364,13 @@ def manage_list(action: str, list_name: str, item: str = "") -> str:
                         lists_db = loaded
                 except:
                     pass
+        if list_name not in lists_db:
+            list_name_lower = list_name.lower()
+            for existing_key in lists_db.keys():
+                if list_name_lower in existing_key.lower() or existing_key.lower().startswith(list_name_lower):
+                    list_name = existing_key  # χρησιμοποίησε το σωστό key
+                    break                    
 
-        if list_name not in lists_db and action != "delete":
-            lists_db[list_name] = []
 
         if action == "read":
             current = lists_db.get(list_name, [])
@@ -714,8 +719,16 @@ def write_code(filename: str, code: str) -> str:
 
 
 @tool
-def run_code(filename: str) -> str:
-    """Εκτελεί ένα αρχείο Python ΜΟΝΟ από τον φάκελο astakos_skills."""
+def run_code(filename: str, script_args: str = "") -> str:
+    """
+    Εκτελεί ένα αρχείο Python ΜΟΝΟ από τον φάκελο astakos_skills.
+    Μπορείς να περάσεις προαιρετικά ορίσματα (script_args) ως string.
+    Παράδειγμα: script_args="SKG KUT 2026-08-09 -r 2026-08-15"
+    """
+    import os
+    import sys
+    import subprocess
+    
     safe_filename = os.path.basename(filename)
     file_path = os.path.join(WORKSPACE_DIR, safe_filename)
 
@@ -723,13 +736,22 @@ def run_code(filename: str) -> str:
         return f"Error: Το αρχείο {file_path} δεν υπάρχει στο Sandbox."
 
     try:
-        print(f"\033[93m[Dev]: Εκτέλεση του {file_path}...\033[0m")
-        venv_python = sys.executable
-        res = subprocess.run([venv_python, file_path], capture_output=True, text=True, timeout=20)
+        # Χτίζουμε τη λίστα της εντολής
+        cmd = [sys.executable, file_path]
+        
+        # Αν μας έδωσε arguments, τα σπάμε και τα κολλάμε στην εντολή
+        if script_args:
+            cmd.extend(script_args.split())
+
+        print(f"\033[93m[Dev]: Εκτέλεση του {safe_filename} με ορίσματα: {script_args}\033[0m")
+        
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         output = res.stdout if res.stdout else ""
         if res.stderr:
             output += f"\nERRORS:\n{res.stderr}"
+            
         return f"Terminal Output:\n{output[:5000]}" if output else "Εκτελέστηκε επιτυχώς (χωρίς output)."
+        
     except subprocess.TimeoutExpired:
         return "Error: Το script κόλλησε (>20 δευτερόλεπτα) και τερματίστηκε."
     except Exception as e:
@@ -1182,7 +1204,7 @@ all_tools = [
     set_local_reminder, set_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
-    mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_google_places,
+    mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_offers, draft_messenger_message,
     search_goldmall_offers, send_messenger_message, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin,
