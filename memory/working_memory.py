@@ -11,10 +11,7 @@ import threading
 from datetime import datetime
 from langchain_core.messages import HumanMessage
 from config import WORKING_MEMORY_FILE, CAPABILITIES_FILE
-from memory.vector_store import memory, is_semantically_duplicate, memory_lock
-from services.gemini import safe_gemini_call
-
-memory_write_lock = threading.Lock()  # Για τις εγγραφές capabilities
+from memory.vector_store import memory, is_semantically_duplicate, memory_lock  # [MASTRO-FIX]: ΕΝΑ lock, όχι δύο
 
 
 # ════════════════════════════════════════════════════════════════
@@ -26,7 +23,6 @@ def update_working_memory(user_text: str, ai_text: str):
     try:
         print("\033[90m[System]: Ξεκίνησε η ανάλυση Προσκηνίου...\033[0m")
 
-        # Lazy import για να αποφύγουμε circular imports
         from core.brain import llm
 
         prompt = f"""
@@ -41,7 +37,6 @@ def update_working_memory(user_text: str, ai_text: str):
         response = llm.invoke([HumanMessage(content=prompt)])
         raw_content = response.content
 
-        # --- [MASTRO-FIX]: Καθαρισμός του Multimodal content σε απλό text ---
         if isinstance(raw_content, list):
             parts = []
             for item in raw_content:
@@ -52,7 +47,6 @@ def update_working_memory(user_text: str, ai_text: str):
             new_tags = " ".join(parts).strip()
         else:
             new_tags = str(raw_content).strip()
-        # ------------------------------------------------------------------
 
         print(f"\n\033[94m[DEBUG Προσκήνιο]: '{new_tags}'\033[0m")
 
@@ -88,7 +82,8 @@ def _load_capabilities() -> dict:
 
 
 def _save_capability(capability_type: str, description: str):
-    with memory_write_lock:
+    # [MASTRO-FIX]: Χρήση του memory_lock από vector_store — ένα lock για όλα
+    with memory_lock:
         data = _load_capabilities()
 
         if capability_type == "can":
@@ -101,7 +96,8 @@ def _save_capability(capability_type: str, description: str):
         else:
             key = "cannot_do"
 
-        if is_semantically_duplicate(description, data[key]):
+        # Threshold 0.88 ΟΚ για capabilities (γενικές ικανότητες)
+        if is_semantically_duplicate(description, data[key], threshold=0.88):
             return
 
         data[key].append(description)
@@ -141,11 +137,9 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
 Λάζαρος: {user_text[:500]}
 Αστακός: {ai_text[:500]}
 """
-        # [MASTRO-FIX]: Αφήνουμε τη δική σου λογική ανέπαφη, αλλάζουμε μόνο το κόψιμο
         from services.gemini import safe_gemini_call
         response = safe_gemini_call(cap_prompt)
         
-        # Έλεγχος μήπως γυρίσει σκέτο null
         resp_text = response.text if hasattr(response, 'text') else str(response)
         if not resp_text or resp_text.strip().lower() == "null":
             return
@@ -158,12 +152,10 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
 
         if data.get("can_do") and str(data["can_do"]).lower() != "null":
             _save_capability("can", data["can_do"])
-            # Αφαιρέθηκε το [:60] και μπήκε γαλάζιο χρώμα
             print(f"\033[96m[Αυτογνωσία]: ✅ can_do: {data['can_do']}\033[0m")
             
         if data.get("cannot_do") and str(data["cannot_do"]).lower() != "null":
             _save_capability("cannot", data["cannot_do"])
-            # Αφαιρέθηκε το [:60] και μπήκε κόκκινο χρώμα
             print(f"\033[91m[Αυτογνωσία]: ❌ cannot_do: {data['cannot_do']}\033[0m")
             
     except Exception as e:
