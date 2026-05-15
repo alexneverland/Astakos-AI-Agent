@@ -102,7 +102,7 @@ class AstakosMemoryManager:
 
         # ── Threshold ανά τύπο fact ──────────────────────────────
         if "[LESSON]" in fact:
-            dup_threshold = 0.78   # τεχνικά μαθήματα — αυστηρό
+            dup_threshold = 0.82   # τεχνικά μαθήματα — αυστηρό
         elif "[USER_FACT]" in fact:
             dup_threshold = 0.82   # γεγονότα — μέτριο
         else:

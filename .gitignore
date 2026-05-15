@@ -33,3 +33,4 @@ venv/
 .vscode/chroma_db/
 chroma_db - Copy/
 watch_folder/
+prompts.md

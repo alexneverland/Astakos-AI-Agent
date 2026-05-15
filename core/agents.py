@@ -26,7 +26,7 @@ from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, 
 from memory.vector_store import vector_store, vector_lock
 from memory.working_memory import get_capability_context
 from memory.session_memory import load_last_session_hint
-
+from astakos_skills.search_flights import search_flights
 # TOOLS (Importing all the logic)
 from tools.system import (
     search_memory, save_to_memory, delete_from_memory, retrieve_photo,
@@ -115,7 +115,7 @@ def dev_agent_node(state):
     tools = [
         write_code, run_code, read_local_file, write_custom_tool,
         delete_from_memory, search_memory, save_to_memory,
-        send_messenger_message, control_spotify, control_vacuum, get_navigation_info, recipe_expert, log_meal, generate_image_tool
+        send_messenger_message, control_spotify, control_vacuum, get_navigation_info, recipe_expert, log_meal, generate_image_tool, search_flights
     ]
     
     # Χρησιμοποιούμε llm_heavy.bind_tools
@@ -507,6 +507,6 @@ all_tools = [
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info, search_supermarket_offers,
     control_spotify, search_goldmall_offers, send_messenger_message, get_current_location,
-    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places,
+    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights,
     DuckDuckGoSearchRun()
 ]
