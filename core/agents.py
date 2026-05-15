@@ -205,7 +205,7 @@ def chat_agent_node(state: AgentState):
     # Προσθήκη του get_current_location στα εργαλεία του Chat
     chat_tools = [
         get_current_location, # <--- Η "πυξίδα" του Αστακού
-        send_messenger_message, search_supermarket_offers, control_spotify,
+        search_supermarket_offers, control_spotify,
         search_memory, save_to_memory, retrieve_photo, archive_file, web_search, 
         recipe_expert, log_meal, draft_messenger_message
     ]
@@ -327,13 +327,13 @@ def web_agent_node(state: AgentState):
         draft_messenger_message, search_google_places
     )
     from langchain_community.tools import DuckDuckGoSearchRun
-
+    from tools.web import send_messenger_message
     web_tools = [
         get_current_location, # <--- Η "πυξίδα" του Web_Agent
         get_news, get_weather_forecast, DuckDuckGoSearchRun(), 
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
-        process_and_clear_linkedin_post, draft_messenger_message, search_google_places
+        process_and_clear_linkedin_post, draft_messenger_message, search_google_places, send_messenger_message
     ]
 
     return {

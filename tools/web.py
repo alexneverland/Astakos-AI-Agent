@@ -278,7 +278,7 @@ def send_messenger_message(target_name: str = "", message: str = "") -> str:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     draft_file = os.path.join(base_dir, "..", "messenger_draft.json")
 
-    # --- [MASTRO INTERCEPTOR]: Έλεγχος JSON Buffer ---
+    # 1. [MASTRO INTERCEPTOR]: Έλεγχος JSON Buffer
     if not target_name or not message:
         if os.path.exists(draft_file):
             with open(draft_file, "r", encoding="utf-8") as f:
@@ -286,36 +286,24 @@ def send_messenger_message(target_name: str = "", message: str = "") -> str:
                 target_name = target_name or draft.get("target_name", "")
                 message = message or draft.get("message", "")
             
-            os.remove(draft_file) # Καθαρίζουμε το buffer αφού το πήραμε
+            os.remove(draft_file)
             print(f"\033[93m[Messenger]: Βρέθηκε draft για {target_name}. Εκτέλεση...\033[0m")
         else:
-            return "❌ Σφάλμα: Δεν μου είπες σε ποιον και τι να στείλω, και δεν βρήκα κανένα προσχέδιο!"
+            return "❌ Σφάλμα: Δεν βρέθηκε προσχέδιο!"
 
-    # --- MASTRO FIX: Δυναμικά Aliases από το astakos_profile.json ---
-    # Βρίσκουμε το αρχείο προφίλ (ένα επίπεδο πάνω από το tools/web.py)
+    # 2. [MASTRO FIX]: Aliases από το astakos_profile.json
     profile_path = os.path.join(base_dir, "..", "astakos_profile.json")
     aliases = {}
-    
     if os.path.exists(profile_path):
         try:
             with open(profile_path, 'r', encoding='utf-8') as f:
                 profile_data = json.load(f)
                 aliases = profile_data.get("contacts", {})
         except Exception as e:
-            print(f"⚠️ [Messenger Error]: Αποτυχία ανάγνωσης προφίλ: {e}")
+            print(f"⚠️ [Messenger Error]: {e}")
 
-    # Μετατροπή των κλειδιών σε πεζά για να μην κολλήσουμε στα κεφαλαία ("Σοφία" == "σοφία")
     aliases_lower = {k.lower(): v for k, v in aliases.items()}
-    search_key = target_name.strip().lower()
-
-    # Αν βρεθεί, παίρνουμε το κανονικό όνομα του Facebook (π.χ. Sopo Putkaradze)
-    final_name = aliases_lower.get(search_key, target_name)
-
-    if final_name != target_name:
-        print(f"\033[93m[Messenger]: Το '{target_name}' αντιστοιχίστηκε σε '{final_name}' (Από Προφίλ)\033[0m")
-    else:
-        print(f"\033[95m[Messenger]: Αναζήτηση και αποστολή σε '{final_name}'...\033[0m")
-    # ----------------------------------------------------------------
+    final_name = aliases_lower.get(target_name.strip().lower(), target_name)
 
     profile_dir = os.path.join(base_dir, "..", "astakos_skills", "messenger_profile")
 
@@ -330,49 +318,62 @@ def send_messenger_message(target_name: str = "", message: str = "") -> str:
             page = browser.new_page()
             page.goto("https://www.messenger.com/", wait_until="domcontentloaded", timeout=60000)
 
+            # Εύρεση του Search Box
             search_box = page.locator('input[aria-label="Αναζήτηση στο Messenger"], input[aria-label="Search Messenger"], input[type="search"]').first
             search_box.wait_for(state="visible", timeout=10000)
 
-            def attempt_search(name):
-                search_box.click()
-                page.keyboard.press("Control+A")
-                page.keyboard.press("Backspace")
-                time.sleep(0.5) # Μικρή παύση να καθαρίσει καλά το πεδίο
-                
-                # [MASTRO-FIX]: Πληκτρολογεί σαν άνθρωπος (delay=150ms ανά γράμμα) 
-                # για να "ξυπνήσει" τον μηχανισμό αναζήτησης του Messenger!
-                page.keyboard.type(name, delay=150)
-                
-                # Περιμένουμε 3 δευτερόλεπτα να φορτώσει τα αποτελέσματα το Facebook
-                time.sleep(3) 
-                
+            # --- [MASTRO-SEARCH-LOGIC]: Βελτιωμένη Αναζήτηση ---
+            search_box.click()
+            page.keyboard.press("Control+A")
+            page.keyboard.press("Backspace")
+            time.sleep(0.5)
+            
+            # Πληκτρολόγηση με καθυστέρηση για να προλάβει το UI
+            page.keyboard.type(final_name, delay=120)
+            print(f"🔍 Αναζήτηση για: {final_name}...")
+
+            # Περιμένουμε να εμφανιστούν τα αποτελέσματα - όχι sleep, αλλά wait για το πρώτο gridcell
+            try:
+                page.wait_for_selector('div[role="gridcell"]', timeout=8000)
+            except:
+                browser.close()
+                return f"❌ Timeout: Δεν φορτώθηκαν αποτελέσματα για '{final_name}'."
+
+            time.sleep(1)  # μικρό buffer μετά την εμφάνιση
+
+            # Παίρνουμε ΟΛΑ τα gridcells και ψάχνουμε exact/partial match
+            gridcells = page.locator('div[role="gridcell"]').all()
+            target_cell = None
+
+            for cell in gridcells:
                 try:
-                    # Επιλέγουμε το πρώτο κελί
-                    target_contact = page.locator('div[role="gridcell"]').first
-                    target_contact.wait_for(state="visible", timeout=5000)
-                    target_contact.click(force=True)
-                    return True
+                    cell_text = cell.inner_text().strip()
+                    print(f"  → gridcell: '{cell_text}'")
+                    if final_name.lower() in cell_text.lower():
+                        target_cell = cell
+                        break
                 except:
-                    return False
+                    continue
 
-            # Χρησιμοποιούμε το final_name πλέον για την αναζήτηση
-            if not attempt_search(final_name):
-                first_name = final_name.split()[0]
-                print(f"⚠️ Πλήρες όνομα απέτυχε. Δοκιμή με: {first_name}...")
-                if not attempt_search(first_name):
-                    return f"❌ Σφάλμα: Η επαφή '{final_name}' (αρχικά '{target_name}') δεν βρέθηκε."
+            if target_cell is None:
+                browser.close()
+                return f"❌ Δεν βρέθηκε η επαφή '{final_name}' στο Messenger."
 
-            time.sleep(2)
-
+            target_cell.click(force=True)
+            print(f"✅ Επιλέχθηκε η επαφή: {final_name}")
+            # Αποστολή μηνύματος
             chat_box = page.locator('div[role="textbox"]').last
-            chat_box.wait_for(state="visible", timeout=3000)
+            chat_box.wait_for(state="visible", timeout=5000)
             chat_box.click()
             chat_box.fill(message)
             time.sleep(0.5)
             chat_box.press("Enter")
-            time.sleep(5)
+            
+            # Περιμένουμε λίγο να φύγει το μήνυμα πριν κλείσουμε
+            time.sleep(3)
 
             return f"✅ Επιτυχία: Το μήνυμα στάλθηκε στον/στην '{final_name}'."
+            
     except Exception as e:
         return f"❌ Σφάλμα Messenger: {str(e)}"
     finally:
