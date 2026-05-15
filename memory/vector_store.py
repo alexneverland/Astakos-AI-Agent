@@ -14,7 +14,7 @@ from config import CHROMA_DB_DIR, PHOTOS_INDEX_FILE, SIM_THRESHOLD_DISTANCE
 from services.embeddings import embeddings
 
 vector_lock = threading.Lock()
-memory_lock = threading.Lock()  # Συγχρονισμός εγγραφών στη μνήμη
+memory_lock = threading.Lock()
 
 vector_store = Chroma(
     collection_name="astakos_long_term",
@@ -68,7 +68,7 @@ class AstakosMemoryManager:
                     return self._save_fact(**kwargs)
                 elif memory_type == "photo":
                     return self._save_photo(**kwargs)
-                elif memory_type == "document":      # <--- [MASTRO-FIX]: Η νέα "πόρτα" για έγγραφα!
+                elif memory_type == "document":
                     return self._save_document(**kwargs)
                 elif memory_type == "session":
                     return self._save_session(**kwargs)
@@ -99,6 +99,15 @@ class AstakosMemoryManager:
 
     def _save_fact(self, fact: str, category: str, agent_name: str, photo_path: str = None):
         from config import PROFILE_FILE
+
+        # ── Threshold ανά τύπο fact ──────────────────────────────
+        if "[LESSON]" in fact:
+            dup_threshold = 0.78   # τεχνικά μαθήματα — αυστηρό
+        elif "[USER_FACT]" in fact:
+            dup_threshold = 0.82   # γεγονότα — μέτριο
+        else:
+            dup_threshold = 0.85   # γενικό
+
         # 1. Semantic Overwrite για [LESSON] / [USER_FACT]
         if "[LESSON]" in fact or "[USER_FACT]" in fact:
             query_emb = embeddings.embed_query(fact)
@@ -111,7 +120,7 @@ class AstakosMemoryManager:
                     vector_store._collection.delete(ids=[old_id])
                     print(f"\033[94m[MemoryManager]: Overwrite! ({old_content} | Dist: {dist:.3f})\033[0m")
 
-        # 2. Duplicate check
+        # 2. Duplicate check με dynamic threshold
         results = vector_store.similarity_search_with_score(fact, k=1)
         for doc, score in results:
             if score < SIM_THRESHOLD_DISTANCE and doc.metadata.get("category") == category:
@@ -130,9 +139,9 @@ class AstakosMemoryManager:
 
         vector_store.add_texts([fact], metadatas=[metadata])
 
-        # 4. Αποθήκευση JSON Profile
+        # 4. Αποθήκευση JSON Profile — με έλεγχο duplicate και όριο 50 ανά category
         if category != "photos":
-            db = {"general": [], "family": [], "projects": [], "work": [], "photos": []}
+            db = {"general": [], "family": [], "projects": [], "work": [], "home": [], "lesson": [], "photos": []}
             if os.path.exists(PROFILE_FILE):
                 with open(PROFILE_FILE, "r", encoding="utf-8") as f:
                     try:
@@ -143,13 +152,25 @@ class AstakosMemoryManager:
             if category not in db:
                 db[category] = []
 
-            if photo_path:
-                db[category].append({"fact": fact, "photo_path": photo_path, "date": datetime.now().strftime("%Y-%m-%d")})
-            else:
-                db[category].append(fact)
+            # [MASTRO-FIX]: Duplicate check στο JSON πριν το append
+            existing_facts = [
+                item if isinstance(item, str) else item.get("fact", "")
+                for item in db[category]
+            ]
+            if fact not in existing_facts and not is_semantically_duplicate(fact, existing_facts, threshold=dup_threshold):
+                if photo_path:
+                    db[category].append({"fact": fact, "photo_path": photo_path, "date": datetime.now().strftime("%Y-%m-%d")})
+                else:
+                    db[category].append(fact)
 
-            with open(PROFILE_FILE, "w", encoding="utf-8") as f:
-                json.dump(db, f, ensure_ascii=False, indent=4)
+                # [MASTRO-FIX]: Κράτα μόνο τα τελευταία 50 ανά category
+                db[category] = db[category][-50:]
+
+                with open(PROFILE_FILE, "w", encoding="utf-8") as f:
+                    json.dump(db, f, ensure_ascii=False, indent=4)
+            else:
+                print(f"\033[90m[MemoryManager]: JSON duplicate skip: {fact[:60]}...\033[0m")
+
         return True
 
     def _save_photo(self, file_path: str, analysis: str, caption: str):
@@ -177,11 +198,7 @@ class AstakosMemoryManager:
             json.dump(index, f, ensure_ascii=False, indent=2)
         return True
 
-    # ────────────────────────────────────────────────────────────────
-    # [MASTRO-FEATURE]: Αποκλειστικό "συρτάρι" για έγγραφα (PDF, Excel)
-    # ────────────────────────────────────────────────────────────────
     def _save_document(self, file_path: str, analysis: str, caption: str):
-        # 1. Αποθήκευση στη ChromaDB με δικό της format και category "documents"
         fact = f"[DOCUMENT]: {caption or 'Έγγραφο'} | {analysis[:1000]}..."
         metadata = {
             "category": "documents", "agent": "Direct_Index", "file_path": file_path,
@@ -190,10 +207,7 @@ class AstakosMemoryManager:
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Έγγραφο 'καρφώθηκε' ({os.path.basename(file_path)})\033[0m")
 
-        # 2. Αποθήκευση σε νέο, δικό του JSON Index!
-        # Φτιάχνουμε το αρχείο 'astakos_docs_index.json' μέσα στον φάκελο memory
         docs_index_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "astakos_docs_index.json")
-        
         entry = {
             "file_path": file_path, "summary": analysis, "caption": caption,
             "date": datetime.now().strftime("%Y-%m-%d"), "timestamp": datetime.now().isoformat(),
