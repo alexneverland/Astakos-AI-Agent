@@ -19,7 +19,7 @@ from core.utils import load_agent_prompt
 from config import PHOTOS_DIR, WORKING_MEMORY_FILE
 from core.brain import llm, llm_heavy
 from astakos_skills.recipe_expert import recipe_expert, log_meal
-# UTILS & STATE (Εδώ σπάμε το Circular Import)
+# UTILS & STATE
 from core.utils import AgentState, filter_messages, build_prompt, clean_message
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 # MEMORY
@@ -27,7 +27,7 @@ from memory.vector_store import vector_store, vector_lock
 from memory.working_memory import get_capability_context
 from memory.session_memory import load_last_session_hint
 from astakos_skills.search_flights import search_flights
-# TOOLS (Importing all the logic)
+# TOOLS
 from tools.system import (
     search_memory, save_to_memory, delete_from_memory, retrieve_photo,
     set_local_reminder, set_reminder, manage_list,
@@ -42,7 +42,34 @@ from tools.web import (
 from langchain_community.tools import DuckDuckGoSearchRun
 
 
+# ────────────────────────────────────────────────────────────────
+# [MASTRO-SHIELD]: Κεντρικός καθαρισμός ορφανών tool_calls
+# Χρησιμοποιείται από ΟΛΟΥΣ τους agents για να αποφύγουν το 400 INVALID_ARGUMENT
+# ────────────────────────────────────────────────────────────────
 
+def clean_orphan_tool_calls(history: list, k: int = 20) -> list:
+    """
+    Αφαιρεί AIMessages με tool_calls που δεν ακολουθούνται από ToolMessage.
+    Το Gemini απαιτεί: AI(tool_call) → Tool(result). Αν λείπει το Tool → 400 error.
+    """
+    # Φιλτράρισμα με filter_messages πρώτα
+    history = filter_messages(history, k=k)
+
+    clean = []
+    for i, msg in enumerate(history):
+        if getattr(msg, "type", "") == "ai" and getattr(msg, "tool_calls", None):
+            next_is_tool = (
+                i + 1 < len(history) and
+                getattr(history[i + 1], "type", "") == "tool"
+            )
+            if not next_is_tool:
+                # Ορφανό tool_call — μετατρέπουμε σε απλό AIMessage
+                if msg.content:
+                    clean.append(AIMessage(content=clean_message(msg.content)))
+                # Αν δεν έχει content, το παρακάμπτουμε εντελώς
+                continue
+        clean.append(msg)
+    return clean
 
 
 # ────────────────────────────────────────────────────────────────
@@ -61,20 +88,10 @@ def supervisor_node(state):
     from config import BASE_DIR  
     
     router_llm = llm.with_structured_output(Router)
-
-    # Χρησιμοποιούμε την clean_message που ήδη φτιάξαμε για να καθαρίσουμε 
-    # το multimodal content (Gemini 3.1) με μία γραμμή.
     last_content = clean_message(state['messages'][-1].content)
-
-    # 1. Φορτώνουμε τις οδηγίες από το JSON
     system_base = load_agent_prompt("supervisor", "Είσαι ο Εργοδηγός του Αστακού.")
-    
-    # [MASTRO-FIX]: Αντικατάσταση του placeholder με το πραγματικό path του project
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    
-    # 2. Συνθέτουμε το τελικό prompt με το τρέχον input του χρήστη
     full_prompt = f"{system_base}\n\nΧρήστης: '{str(last_content)[:500]}'"
-
     decision = router_llm.invoke(full_prompt)
     print(f"\033[95m[Τροχονόμος]: -> {decision.next_agent}\033[0m")
     return {"next_agent": decision.next_agent}
@@ -89,59 +106,36 @@ def dev_agent_node(state):
     from config import BASE_DIR  
     from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
     
-    # 1. Φιλτράρισμα - ΠΡΟΣΟΧΗ: Το filter_messages δεν πρέπει να σπάει τα ζευγάρια AI <-> Tool
     messages = state["messages"]
-    
-    # Κρατάμε τα τελευταία μηνύματα αλλά φροντίζουμε να μην έχουμε SystemMessages μέσα στο history
-    # Το Gemini θέλει ΜΟΝΟ ΕΝΑ SystemMessage και ΠΑΝΤΑ στην αρχή (index 0).
     history = [m for m in messages if not isinstance(m, SystemMessage)]
-    
-    # Κρατάμε π.χ. τα τελευταία 20 μηνύματα για να μην βαραίνει το context
     history = history[-20:]
     
-    # 2. Φορτώνουμε και προετοιμάζουμε το Prompt
     system_base = load_agent_prompt("Dev_Agent", "Είσαι ο Dev_Agent, ο Αρχιμηχανικός Προγραμματιστής του Αστακού.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    
-    # Χτίζουμε το prompt (το build_prompt σου πρέπει να επιστρέφει string)
     prompt_content = build_prompt(history, system_base)
-    
-    # 3. Η ΚΡΙΣΙΜΗ ΣΥΝΘΕΣΗ
-    # Φτιάχνουμε τη λίστα έτσι ώστε το SystemMessage να είναι ΠΡΩΤΟ και μετά όλο το ιστορικό.
-    # Αυτό εγγυάται ότι δεν θα υπάρχει SystemMessage ανάμεσα σε AI και Tool calls.
     clean_history = [SystemMessage(content=prompt_content)] + history
 
-    # 4. Εκτέλεση με τα Tools
     tools = [
         write_code, run_code, read_local_file, write_custom_tool,
         delete_from_memory, search_memory, save_to_memory,
         send_messenger_message, control_spotify, control_vacuum, get_navigation_info, recipe_expert, log_meal, generate_image_tool, search_flights
     ]
     
-    # Χρησιμοποιούμε llm_heavy.bind_tools
-    # [MASTRO-FIX]: Χρήση του llm (Gemini 3.1) για σταθερά αλυσιδωτά tool calls
     response = llm.bind_tools(tools).invoke(clean_history)
-
     return {"current_agent": "Dev_Agent", "messages": [response]}
 
 
 def chat_agent_node(state: AgentState):
-    """
-    Ο κεντρικός Agent του Αστακού. 
-    Διαχειρίζεται το chat, την έξυπνη όραση, την επιλεκτική αρχειοθέτηση κ.λπ.
-    """
     from core.utils import load_agent_prompt, clean_message
     from config import BASE_DIR, PHOTOS_DIR 
     import re
     import os
     import base64
     
-    # 1. Προετοιμασία ιστορικού
-    history = filter_messages(state["messages"])
-    # [MASTRO-FIX]: Χρήση της clean_message για σίγουρο string (Gemini 3.1)
+    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
+    history = clean_orphan_tool_calls(state["messages"], k=20)
     last_msg_text = clean_message(history[-1].content) if history else ""
 
-    # 2. --- [SMART-VISION & FILE LOGIC]: Ανίχνευση Αρχείου ---
     analysis_match = re.search(r"\[ANALYSIS\]:\s*(.*)", last_msg_text)
     path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
     
@@ -171,22 +165,15 @@ def chat_agent_node(state: AgentState):
         except Exception as e:
             print(f"⚠️ [Vision/File Error]: {e}")
 
-    # 3. --- SYSTEM PROMPT ΑΠΟ JSON ---
     vision_context = ""
     if pre_baked_analysis:
         vision_context = f"\n[CONTEXT ΑΡΧΕΙΟΥ/ΦΩΤΟΓΡΑΦΙΑΣ]: Έχεις ήδη αυτή την περιγραφή/πληροφορία: '{pre_baked_analysis}'.\n"
 
-    # Φορτώνουμε τη βάση του prompt από το JSON
     json_base = load_agent_prompt("Chat_Agent", "Είσαι ο Αστακός, το έμπιστο φιλαράκι του Λάζαρου.")
-    
-    # [MASTRO-FIX]: Αντικατάσταση του placeholder με το πραγματικό path
     json_base = json_base.replace("{BASE_DIR}", BASE_DIR)
-    
-    # Συνθέτουμε το τελικό prompt κολλώντας το vision_context αν υπάρχει
     system_prompt_text = f"{json_base}{vision_context}"
     system_prompt = build_prompt(history, system_prompt_text)
 
-    # 4. --- ΣΥΝΤΑΞΗ ΜΗΝΥΜΑΤΩΝ ---
     final_messages = [SystemMessage(content=system_prompt)] + history
     
     if image_part:
@@ -195,93 +182,68 @@ def chat_agent_node(state: AgentState):
             image_part
         ])
 
-    # 5. --- BIND TOOLS & ΕΚΤΕΛΕΣΗ ---
     from tools.system import archive_file, retrieve_photo, save_to_memory, search_memory, control_spotify, get_current_location
     from tools.web import search_supermarket_offers, send_messenger_message, draft_messenger_message
     from langchain_community.tools import DuckDuckGoSearchRun
     
     web_search = DuckDuckGoSearchRun()
     
-    # Προσθήκη του get_current_location στα εργαλεία του Chat
     chat_tools = [
-        get_current_location, # <--- Η "πυξίδα" του Αστακού
+        get_current_location,
         search_supermarket_offers, control_spotify,
         search_memory, save_to_memory, retrieve_photo, archive_file, web_search, 
         recipe_expert, log_meal, draft_messenger_message
     ]
     
     response = llm.bind_tools(chat_tools).invoke(final_messages)
+    return {"current_agent": "Chat_Agent", "messages": [response]}
 
-    return {
-        "current_agent": "Chat_Agent",
-        "messages": [response]
-    }
 
-def home_agent_node(state: AgentState):
-    """
-    Ο διαχειριστής του σπιτιού. 
-    Πλέον έχει επίγνωση της τοποθεσίας του Λάζαρου για έξυπνα triggers.
-    """
-    from core.utils import load_agent_prompt, build_prompt, filter_messages
+def home_agent_node(state):
+    from core.utils import load_agent_prompt
     from config import BASE_DIR
     from langchain_core.messages import SystemMessage
     
-    # 1. Imports των εργαλείων (Mastro-style imports για αποφυγή circularity)
     from tools.system import (
         manage_list, set_reminder, set_local_reminder, delete_from_memory, 
-        search_memory, control_spotify, control_vacuum, get_current_location # <--- ΠΡΟΣΘΗΚΗ
+        search_memory, control_spotify, control_vacuum, get_current_location
     )
     from tools.web import search_supermarket_offers, get_navigation_info, search_goldmall_offers
     from astakos_skills.recipe_expert import recipe_expert, log_meal
     
-    history = filter_messages(state["messages"])
+    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
+    history = clean_orphan_tool_calls(state["messages"], k=20)
 
-    # 2. Λίστα εργαλείων με το GPS μέσα
     tools_to_bind = [
-        get_current_location, # Η "πυξίδα" του σπιτιού
+        get_current_location,
         manage_list, set_reminder, set_local_reminder, delete_from_memory, search_memory,
         search_supermarket_offers, control_spotify, control_vacuum,
         search_goldmall_offers, get_navigation_info,
         google_calendar_tool, google_tasks_tool, recipe_expert, log_meal
     ]
 
-    # 3. Τραβάμε τις οδηγίες από το JSON
     system_base = load_agent_prompt("Home_Agent", "Είσαι ο Home_Agent του Piston-7.")
-    
-    # Αντικατάσταση placeholders
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    
-    # 4. Χτίζουμε το τελικό prompt
     system_prompt = build_prompt(history, system_base)
 
-    # 5. Εκτέλεση
     response = llm.bind_tools(tools_to_bind).invoke(
         [SystemMessage(content=system_prompt)] + history
     )
 
-    return {
-        "current_agent": "Home_Agent",
-        "messages": [response]
-    }
+    return {"current_agent": "Home_Agent", "messages": [response]}
 
 
 def web_agent_node(state: AgentState):
-    """
-    Ο Agent του Internet με υποστήριξη Vision (Mastro-Vision).
-    Πλέον φτιάχνει και δικές του εικόνες για τα Social Media, 
-    χωρίς να περιμένει τον Dev_Agent.
-    """
     from core.utils import load_agent_prompt, clean_message
     from config import BASE_DIR, PHOTOS_DIR 
     import re
     import os
     import base64
 
-    history = filter_messages(state["messages"])
-    # Παίρνουμε το τελευταίο μήνυμα για να δούμε αν έχει φωτό
+    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
+    history = clean_orphan_tool_calls(state["messages"], k=20)
     last_msg_text = clean_message(history[-1].content) if history else ""
 
-    # [MASTRO-VISION]: Ανίχνευση αν υπάρχει φωτογραφία στο τρέχον context
     path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
     image_part = None
 
@@ -300,24 +262,18 @@ def web_agent_node(state: AgentState):
         except Exception as e:
             print(f"⚠️ Web Vision Error: {e}")
 
-    # 1. Τραβάμε τις οδηγίες από το JSON
     system_base = load_agent_prompt("Web_Agent", "Είσαι ο Web_Agent.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    
-    # 2. Χτίζουμε το prompt
     system_prompt = build_prompt(history, system_base)
     
-    # Προετοιμασία των μηνυμάτων
     final_messages = [SystemMessage(content=system_prompt)] + history
     
-    # Αν υπάρχει φωτό, μετατρέπουμε το τελευταίο HumanMessage σε Multimodal
     if image_part:
         final_messages[-1] = HumanMessage(content=[
             {"type": "text", "text": last_msg_text},
             image_part
         ])
 
-    # --- ΒΗΜΑ 5: BIND TOOLS & GPS INTEGRATION ---
     from tools.system import (
         retrieve_photo, read_local_file, post_to_linkedin, 
         generate_image_tool, search_memory, get_current_location 
@@ -329,7 +285,7 @@ def web_agent_node(state: AgentState):
     from langchain_community.tools import DuckDuckGoSearchRun
     from tools.web import send_messenger_message
     web_tools = [
-        get_current_location, # <--- Η "πυξίδα" του Web_Agent
+        get_current_location,
         get_news, get_weather_forecast, DuckDuckGoSearchRun(), 
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
@@ -343,29 +299,23 @@ def web_agent_node(state: AgentState):
 
 
 def tech_agent_node(state: AgentState):
-    """
-    Ο τεχνικός Agent της Piston-7. 
-    Διαχειρίζεται έγγραφα, logs και τεχνικές αναλύσεις με υποστήριξη Vision.
-    """
-    from core.utils import load_agent_prompt, build_prompt, filter_messages, clean_message
+    from core.utils import load_agent_prompt, build_prompt, clean_message
     from config import BASE_DIR, PHOTOS_DIR 
     from langchain_core.messages import SystemMessage, HumanMessage
     import re
     import os
     import base64
     
-    # 1. Φιλτράρισμα & Καθαρισμός ιστορικού
-    history = filter_messages(state["messages"])
+    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls — αυτό έλυσε το 400 error
+    history = clean_orphan_tool_calls(state["messages"], k=20)
     last_msg_text = clean_message(history[-1].content) if history else ""
 
-    # 2. --- [SMART-VISION & FILE LOGIC]: Ανίχνευση αρχείου ---
     analysis_match = re.search(r"\[ANALYSIS\]:\s*(.*)", last_msg_text)
     path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
     
     pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
     image_part = None
 
-    # Φόρτωση pixels αν ο Λάζαρος ζητάει τεχνική λεπτομέρεια (logs, σφάλματα)
     tech_keywords = ["κώδικας", "σφάλμα", "διάβασε", "τι γράφει", "error", "log", "σχέδιο"]
     needs_pixels = any(word in last_msg_text.lower() for word in tech_keywords)
 
@@ -389,15 +339,12 @@ def tech_agent_node(state: AgentState):
         except Exception as e:
             print(f"⚠️ Tech Vision Error: {e}")
 
-    # 3. --- SYSTEM PROMPT ΑΠΟ JSON ---
     vision_info = f"\n[CONTEXT ΑΡΧΕΙΟΥ/ΦΩΤΟ]: Έχεις ήδη αυτή την ανάλυση: '{pre_baked_analysis}'.\n" if pre_baked_analysis else ""
     json_base = load_agent_prompt("Tech_Agent", "Είσαι ο Tech_Agent, ο τεχνικός εμπειρογνώμονας του Λάζαρου.")
     json_base = json_base.replace("{BASE_DIR}", BASE_DIR)
-    
     system_prompt_text = f"{json_base}{vision_info}"
     system_prompt = build_prompt(history, system_prompt_text)
 
-    # 4. --- ΠΡΟΕΤΟΙΜΑΣΙΑ ΜΗΝΥΜΑΤΩΝ ---
     final_messages = [SystemMessage(content=system_prompt)] + history
     if image_part:
         final_messages[-1] = HumanMessage(content=[
@@ -405,14 +352,13 @@ def tech_agent_node(state: AgentState):
             image_part
         ])
 
-    # 5. --- BIND TOOLS (Προσθήκη get_current_location) ---
     from tools.system import (
         read_local_file, drive_manager, archive_file, search_memory, 
-        save_to_memory, create_file_tool, get_current_location # <--- ΕΔΩ
+        save_to_memory, create_file_tool, get_current_location
     )
     
     tech_tools = [
-        get_current_location, # Η πυξίδα του Tech_Agent για τοπικά hardware stores
+        get_current_location,
         archive_file,
         read_local_file, 
         drive_manager,
@@ -421,27 +367,19 @@ def tech_agent_node(state: AgentState):
         create_file_tool
     ]
     
-    # Χρήση llm_heavy για δύσκολα τεχνικά tasks
     response = llm_heavy.bind_tools(tech_tools).invoke(final_messages)
+    return {"current_agent": "Tech_Agent", "messages": [response]}
 
-    return {
-        "current_agent": "Tech_Agent",
-        "messages": [response]
-    }
 
 def git_agent_node(state):
     from core.utils import load_agent_prompt
     from config import BASE_DIR  
     
-    history = filter_messages(state["messages"])
+    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
+    history = clean_orphan_tool_calls(state["messages"], k=20)
     
-    # 1. Φορτώνουμε τις οδηγίες από το JSON
     system_base = load_agent_prompt("Git_Agent", "Είσαι ο Git_Agent. Διαχειρίζεσαι GitHub repos.")
-    
-    # [MASTRO-FIX]: Δυναμική αντικατάσταση του path
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    
-    # 2. Χτίζουμε το prompt
     system_prompt = build_prompt(history, system_base)
     
     return {
@@ -456,15 +394,11 @@ def mail_agent_node(state):
     from core.utils import load_agent_prompt
     from config import BASE_DIR  
     
-    history = filter_messages(state["messages"])
+    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
+    history = clean_orphan_tool_calls(state["messages"], k=20)
     
-    # 1. Φορτώνουμε τις οδηγίες από το JSON
     system_base = load_agent_prompt("Mail_Agent", "Είσαι ο Mail_Agent. Διαχειρίζεσαι το Gmail.")
-    
-    # [MASTRO-FIX]: Δυναμική αντικατάσταση του path στο prompt
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    
-    # 2. Χτίζουμε το τελικό prompt
     system_prompt = build_prompt(history, system_base)
     
     return {
@@ -476,7 +410,7 @@ def mail_agent_node(state):
 
 
 # ────────────────────────────────────────────────────────────────
-# TOOL ROUTER (για επιστροφή μετά από tool call)
+# TOOL ROUTER
 # ────────────────────────────────────────────────────────────────
 
 AGENT_MAP = {
@@ -497,7 +431,7 @@ def tool_router(state):
 
 
 # ────────────────────────────────────────────────────────────────
-# ALL TOOLS LIST (για το ToolNode)
+# ALL TOOLS LIST
 # ────────────────────────────────────────────────────────────────
 
 all_tools = [
