@@ -306,8 +306,12 @@ def retrieve_photo(query: str) -> str:
 # ────────────────────────────────────────────────────────────────
 
 @tool
-def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = None) -> str:
-    """Βάζει τοπική υπενθύμιση. Δώσε minutes_from_now ή exact_time ('YYYY-MM-DD HH:MM')."""
+def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = None, action: str = "add") -> str:
+    """
+    Διαχειρίζεται τοπικές υπενθυμίσεις.
+    action: 'add' (νέα), 'read' (ανάγνωση ΜΟΝΟ pending), 'done' (ολοκλήρωση)
+    task: Για 'add' → περιγραφή. Για 'done' → keyword της υπενθύμισης που κλείνει.
+    """
     try:
         rems = []
         if os.path.exists(REMINDERS_FILE):
@@ -317,19 +321,42 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
                 except:
                     pass
 
-        if minutes_from_now > 0:
-            target_time = (datetime.now() + timedelta(minutes=minutes_from_now)).strftime("%Y-%m-%d %H:%M")
-        elif exact_time:
-            target_time = exact_time
+        # ── READ: Επιστρέφει ΜΟΝΟ pending ──────────────────────
+        if action == "read":
+            pending = [r for r in rems if r.get("status") == "pending"]
+            if not pending:
+                return "✅ Δεν υπάρχουν εκκρεμείς υπενθυμίσεις."
+            lines = [f"• [{r['time']}] {r['task']}" for r in pending]
+            return "📋 Εκκρεμείς υπενθυμίσεις:\n" + "\n".join(lines)
+
+        # ── DONE: Κλείνει υπενθύμιση με keyword ────────────────
+        elif action == "done":
+            found = False
+            for r in rems:
+                if task.lower() in r["task"].lower() and r.get("status") == "pending":
+                    r["status"] = "done"
+                    found = True
+                    break
+            if not found:
+                return f"⚠️ Δεν βρήκα pending υπενθύμιση με '{task}'."
+            with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
+                json.dump(rems, f, ensure_ascii=False, indent=4)
+            return f"✅ Η υπενθύμιση '{task}' ολοκληρώθηκε."
+
+        # ── ADD: Νέα υπενθύμιση ─────────────────────────────────
         else:
-            return "Σφάλμα: Πρέπει να δώσεις λεπτά ή ακριβή ώρα (YYYY-MM-DD HH:MM)."
+            if minutes_from_now > 0:
+                target_time = (datetime.now() + timedelta(minutes=minutes_from_now)).strftime("%Y-%m-%d %H:%M")
+            elif exact_time:
+                target_time = exact_time
+            else:
+                return "Σφάλμα: Πρέπει να δώσεις λεπτά ή ακριβή ώρα (YYYY-MM-DD HH:MM)."
 
-        rems.append({"task": task, "time": target_time, "status": "pending"})
+            rems.append({"task": task, "time": target_time, "status": "pending"})
+            with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
+                json.dump(rems, f, ensure_ascii=False, indent=4)
+            return f"✅ Υπενθύμιση ρυθμίστηκε για τις {target_time}!"
 
-        with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(rems, f, ensure_ascii=False, indent=4)
-
-        return f"✅ Η υπενθύμιση ρυθμίστηκε επιτυχώς για τις {target_time}!"
     except Exception as e:
         return f"Σφάλμα υπενθύμισης: {e}"
 
@@ -887,14 +914,46 @@ def decode_base64(data):
     return base64.urlsafe_b64decode(data.encode("UTF-8")).decode("utf-8", errors="replace")
 
 def extract_body(payload):
-    if 'parts' in payload:
-        for part in payload['parts']:
-            if part['mimeType'] == 'text/plain':
-                if 'data' in part['body']:
-                    return decode_base64(part['body']['data'])
-    elif 'body' in payload and 'data' in payload['body']:
-        return decode_base64(payload['body']['data'])
-    return ""
+    """Εξάγει body με fallback: plain text → HTML → nested parts."""
+    import html
+
+    def _parse_part(part):
+        mime = part.get('mimeType', '')
+        body = part.get('body', {})
+
+        # Αν έχει nested parts (multipart/alternative κλπ) → ψάξε αναδρομικά
+        if 'parts' in part:
+            # Πρώτα ψάξε για plain text
+            for p in part['parts']:
+                if p.get('mimeType') == 'text/plain' and 'data' in p.get('body', {}):
+                    return decode_base64(p['body']['data'])
+            # Fallback: HTML
+            for p in part['parts']:
+                if p.get('mimeType') == 'text/html' and 'data' in p.get('body', {}):
+                    raw_html = decode_base64(p['body']['data'])
+                    # Αφαίρεσε HTML tags
+                    text = re.sub(r'<[^>]+>', ' ', raw_html)
+                    text = html.unescape(text)
+                    return re.sub(r'\s+', ' ', text).strip()
+            # Αναδρομή σε βαθύτερα nested parts
+            for p in part['parts']:
+                result = _parse_part(p)
+                if result:
+                    return result
+
+        # Απλό part με data
+        if 'data' in body:
+            if mime == 'text/plain':
+                return decode_base64(body['data'])
+            elif mime == 'text/html':
+                raw_html = decode_base64(body['data'])
+                text = re.sub(r'<[^>]+>', ' ', raw_html)
+                text = html.unescape(text)
+                return re.sub(r'\s+', ' ', text).strip()
+
+        return ""
+
+    return _parse_part(payload)
 
 def clean_text(text):
     return re.sub(r'\s+', ' ', text).strip()

@@ -91,7 +91,24 @@ def supervisor_node(state):
     last_content = clean_message(state['messages'][-1].content)
     system_base = load_agent_prompt("supervisor", "Είσαι ο Εργοδηγός του Αστακού.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    full_prompt = f"{system_base}\n\nΧρήστης: '{str(last_content)[:500]}'"
+
+    # [MASTRO-FIX]: Context window για τον Supervisor
+    # Παίρνουμε τα 4 τελευταία μηνύματα (εκτός του τελευταίου) για context
+    recent_msgs = state['messages'][-5:-1]
+    context_lines = []
+    for m in recent_msgs:
+        role = "Λάζαρος" if getattr(m, "type", "") == "human" else "Αστακός"
+        text = clean_message(m.content)[:150]
+        if text:
+            context_lines.append(f"{role}: {text}")
+    
+    context_str = "\n".join(context_lines) if context_lines else ""
+    
+    if context_str:
+        full_prompt = f"{system_base}\n\n[ΠΡΟΗΓΟΥΜΕΝΗ ΣΥΝΟΜΙΛΙΑ - για context]\n{context_str}\n\nΝΕΑ ΕΝΤΟΛΗ: '{str(last_content)[:500]}'"
+    else:
+        full_prompt = f"{system_base}\n\nΧρήστης: '{str(last_content)[:500]}'"
+
     decision = router_llm.invoke(full_prompt)
     print(f"\033[95m[Τροχονόμος]: -> {decision.next_agent}\033[0m")
     return {"next_agent": decision.next_agent}

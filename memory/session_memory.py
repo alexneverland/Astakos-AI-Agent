@@ -176,7 +176,19 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
         if not raw_clean.startswith("["):
             return
             
-        memories = json.loads(raw_clean)
+        # --- [MASTRO-JSON-SHIELD]: Αυτόματη διόρθωση για ξεχασμένα κόμματα του LLM ---
+        try:
+            memories = json.loads(raw_clean)
+        except json.JSONDecodeError:
+            try:
+                # Καθαρίζουμε trailing commas πριν από κλείσιμο λίστας ή αντικειμένου
+                fixed_raw = re.sub(r',\s*\]', ']', raw_clean)
+                fixed_raw = re.sub(r',\s*\}', '}', fixed_raw)
+                memories = json.loads(fixed_raw)
+                print("\033[93m[Sifter Fixer]: ✅ Το JSON επισκευάστηκε αυτόματα!\033[0m")
+            except:
+                print("\033[91m⚠️ [Sifter Error]: Το LLM έβγαλε εντελώς κακογραμμένο JSON. Παράκαμψη εγγραφής.\033[0m")
+                return
 
         for mem in memories:
             fact = mem.get("fact", "").strip()
