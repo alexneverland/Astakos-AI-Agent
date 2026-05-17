@@ -156,7 +156,31 @@ def load_agent_prompt(agent_name: str, default_fallback: str = "") -> str:
         return default_fallback
 
 # ────────────────────────────────────────────────────────────────
-# 4. THE BRAIN (Build Prompt)
+# 4. SKIP SEMANTIC SEARCH — Keywords που θέλουν tool/live data
+# Όταν το μήνυμα περιέχει αυτά, ο agent ΔΕΝ φέρνει παλιές μνήμες
+# αλλά καλεί απευθείας το tool ή το web.
+# ────────────────────────────────────────────────────────────────
+
+SKIP_SEMANTIC_KEYWORDS = [
+    # Λίστες
+    "λίστα", "λιστα", "ψώνια", "ψωνια", "shopping", "αγορές", "αγορες",
+    "εργασίες", "εργασιες", "προσθεσε", "πρόσθεσε", "αφαιρεσε", "αφαίρεσε",
+    "διαγραψε", "διάγραψε", "καθαρισε τη λίστα",
+ 
+    # Live πληροφορίες — θέλουν web search, όχι μνήμη
+    "διακοπή νερού", "διακοπη νερου", "διακοπή ρεύματος", "διακοπη ρευματος",
+    "ευαθ", "δεδδηε", "blackout", "βλάβη", "βλαβη",
+    "καιρός", "καιρος", "θερμοκρασία", "θερμοκρασια", "πρόγνωση",
+    "τιμή βενζίνης", "τιμη βενζινης", "τιμές καυσίμων",
+    "δρομολόγια", "δρομολογια", "πλοίο", "πλοιο", "ferry", "ακτοπλοϊκά",
+    "πτήση", "πτηση", "εισιτήρια", "εισιτηρια", "αεροπορικά",
+ 
+    # Υπενθυμίσεις — θέλουν tool
+    "υπενθύμιση", "υπενθυμιση", "reminder", "θύμισέ", "θυμισε",
+]
+
+# ────────────────────────────────────────────────────────────────
+# 5. THE BRAIN (Build Prompt)
 # ────────────────────────────────────────────────────────────────
 
 def build_prompt(state_messages, agent_role="") -> str:
@@ -172,7 +196,6 @@ def build_prompt(state_messages, agent_role="") -> str:
     from datetime import datetime
 
     # 1. Προετοιμασία Ταυτότητας
-    from core.utils import load_agent_prompt, clean_message # Βεβαιώσου ότι υπάρχουν αυτά τα imports στο αρχείο σου αν λείπουν από την κορυφή
     identity = load_agent_prompt("identity_block", "Είσαι ο Αστακός, ο AI συνεργάτης του Λάζαρου.")
     identity = identity.replace("{BASE_DIR}", BASE_DIR)
 
@@ -197,11 +220,12 @@ def build_prompt(state_messages, agent_role="") -> str:
     # Αν βλέπουμε εικόνα (χωρίς current photo), μειώνουμε k=3
     k_value = 0 if has_current_photo else (3 if is_vision else 8)
 
-    # Έξυπνο φίλτρο: Αγνοεί το search αν το κείμενο είναι στη λίστα ή ξεκινάει με "ναι"/"όχι"
+    # Έξυπνα φίλτρα: Έλεγχος για εντολές ρουτίνας ή keywords που απαιτούν live δεδομένα
     is_routine_command = clean_text in ignore_words or clean_text.startswith(("ναι ", "οχι ", "όχι "))
+    has_skip_keyword = any(kw in clean_text for kw in SKIP_SEMANTIC_KEYWORDS)
 
-    # Ψάχνουμε ΜΟΝΟ αν δεν είναι εντολή ρουτίνας, και οι χαρακτήρες είναι > 10
-    if k_value > 0 and len(clean_text) > 10 and not is_routine_command:
+    # Ψάχνουμε στη ChromaDB ΜΟΝΟ αν δεν είναι εντολή ρουτίνας, ΔΕΝ περιέχει skip keywords, και οι χαρακτήρες είναι > 10
+    if k_value > 0 and len(clean_text) > 10 and not is_routine_command and not has_skip_keyword:
         try:
             with vector_lock:
                 results = vector_store.similarity_search(last_msg, k=k_value)
@@ -221,8 +245,8 @@ def build_prompt(state_messages, agent_role="") -> str:
                     memories_str += "⚠️ Μην πεις 'σύμφωνα με τη μνήμη μου', απλά πράξε με βάση αυτά.\n"
         except Exception as e:
             print(f"\033[91m⚠️ Semantic Graph Error: {e}\033[0m")
-
-
+    elif has_skip_keyword:
+        print("\033[93m[Mastro-Radar]: ⚡ Παράκαμψη Semantic Search λόγω Skip Keyword! (Live Data Mode)\033[0m")
 
     # 4. Σύνθεση του Βασικού Prompt με Κανόνα Πραγματικότητας
     prompt = f"{identity}\n"

@@ -92,13 +92,35 @@
         #end-session-btn:hover { background: #ac2925; }
 
         #chat-box { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
-        .msg { max-width: 85%; padding: 10px 15px; border-radius: 8px; line-height: 1.4; }
+
+        .msg { max-width: 85%; padding: 10px 15px; border-radius: 8px; line-height: 1.4; position: relative;}
         .msg-user { background: #007acc; color: white; align-self: flex-end; border-bottom-right-radius: 0; }
         .msg-ai { background: #3e3e42; color: #d4d4d4; align-self: flex-start; border-bottom-left-radius: 0; }
         .agent-label { font-size: 0.75em; color: #9cdcfe; margin-bottom: 5px; display: block; font-weight: bold; }
         .chat-img { max-width: 100%; border-radius: 8px; margin-top: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
-        
-        #input-container { background: #2d2d30; border-top: 1px solid #333; padding: 15px; display: flex; flex-direction: column; position: relative; }
+        .copy-btn {
+                    position: absolute;
+                    top: 5px;
+                    right: 5px;
+                    background: rgba(0, 0, 0, 0.4);
+                    color: #fff;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 3px 6px;
+                    font-size: 11px;
+                    cursor: pointer;
+                    opacity: 0; /* Κρυφό από προεπιλογή */
+                    transition: opacity 0.2s, background 0.2s;
+                }
+
+                .msg:hover .copy-btn {
+                    opacity: 1; /* Εμφανίζεται όταν περνάς το ποντίκι */
+                }
+
+                .copy-btn:hover {
+                    background: #007acc; /* Mastro-blue χρώμα στο hover */
+                }
+                        #input-container { background: #2d2d30; border-top: 1px solid #333; padding: 15px; display: flex; flex-direction: column; position: relative; }
         #input-area { display: flex; align-items: center; }
         
         #attach-btn { background: #444; color: white; border: none; padding: 12px; border-radius: 4px; cursor: pointer; margin-right: 10px; font-size: 16px; transition: 0.3s; }
@@ -110,7 +132,7 @@
         #send-btn:hover { background: #005f9e; }
         #file-label { font-size: 12px; color: #4EC9B0; margin-top: 8px; margin-left: 50px; font-style: italic; }
         .loading { font-style: italic; color: #888; align-self: flex-start; }
-
+        
         /* --- [MASTRO-UI]: Το Συρτάρι του Αστακού --- */
         #astakos-drawer {
             display: none; /* Κρυφό από προεπιλογή */
@@ -469,9 +491,10 @@
         }
     });
 
-    function appendMessage(text, sender, agentName = "") {
+function appendMessage(text, sender, agentName = "") {
         const div = document.createElement('div');
         div.className = `msg ${sender === 'user' ? 'msg-user' : 'msg-ai'}`;
+        
         let innerHTML = '';
         if (agentName) innerHTML += `<span class="agent-label">[${agentName}]</span>`;
         
@@ -488,6 +511,29 @@
 
         innerHTML += processedText;
         div.innerHTML = innerHTML;
+
+        // --- [MASTRO-UI]: Δημιουργία Copy Button ---
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'copy-btn';
+        copyBtn.title = "Αντιγραφή μηνύματος";
+        copyBtn.innerHTML = '📋';
+        
+        // Λειτουργία Αντιγραφής (Χρησιμοποιεί το καθαρό αρχικό text!)
+        copyBtn.onclick = () => {
+            navigator.clipboard.writeText(text).then(() => {
+                copyBtn.innerHTML = '✅'; // Οπτική επιβεβαίωση
+                setTimeout(() => {
+                    copyBtn.innerHTML = '📋'; // Επαναφορά μετά από 2 δευτ.
+                }, 2000);
+            }).catch(err => {
+                console.error("Αποτυχία αντιγραφής:", err);
+            });
+        };
+
+        // Προσθέτουμε το κουμπί μέσα στο συννεφάκι του μηνύματος
+        div.appendChild(copyBtn);
+        // -------------------------------------------
+
         chatBox.appendChild(div);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
