@@ -121,24 +121,26 @@ def supervisor_node(state):
 def dev_agent_node(state):
     from core.utils import load_agent_prompt
     from config import BASE_DIR  
-    from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
     
-    messages = state["messages"]
-    history = [m for m in messages if not isinstance(m, SystemMessage)]
-    history = history[-20:]
+    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls — ίδιο με όλους τους agents
+    history = clean_orphan_tool_calls(state["messages"], k=20)
     
     system_base = load_agent_prompt("Dev_Agent", "Είσαι ο Dev_Agent, ο Αρχιμηχανικός Προγραμματιστής του Αστακού.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     prompt_content = build_prompt(history, system_base)
-    clean_history = [SystemMessage(content=prompt_content)] + history
 
     tools = [
         write_code, run_code, read_local_file, write_custom_tool,
         delete_from_memory, search_memory, save_to_memory,
-        send_messenger_message, control_spotify, control_vacuum, get_navigation_info, recipe_expert, log_meal, generate_image_tool, search_flights
+        send_messenger_message, control_spotify, control_vacuum, 
+        get_navigation_info, recipe_expert, log_meal, 
+        generate_image_tool, search_flights, run_terminal_command,
+        DuckDuckGoSearchRun()
     ]
     
-    response = llm.bind_tools(tools).invoke(clean_history)
+    response = llm.bind_tools(tools).invoke(
+        [SystemMessage(content=prompt_content)] + history
+    )
     return {"current_agent": "Dev_Agent", "messages": [response]}
 
 

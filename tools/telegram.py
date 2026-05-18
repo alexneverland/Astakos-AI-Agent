@@ -12,11 +12,8 @@ def format_for_telegram(text: str) -> str:
     """Mastro-Fix: Μετατρέπει το Markdown του LLM σε ασφαλές HTML για το Telegram."""
     if not text:
         return ""
-    # 1. Μετατροπή Headers (### Τίτλος -> <b>Τίτλος</b>)
     text = re.sub(r'^#{1,3}\s+(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
-    # 2. Μετατροπή Bold (**κείμενο** -> <b>κείμενο</b>)
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-    # 3. Διόρθωση στις λίστες (για να μη χτυπάει το HTML)
     text = re.sub(r'^[\*\-]\s+', r'• ', text, flags=re.MULTILINE)
     return text
 
@@ -29,21 +26,19 @@ def send_telegram_msg(text: str):
         print("❌ Σφάλμα: Λείπουν τα Telegram credentials από το .env")
         return
 
-    # Περνάμε το κείμενο από το "πλυντήριο"
     safe_text = format_for_telegram(text)
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": safe_text,
-        "parse_mode": "HTML",  # <--- Γυρίσαμε σε HTML που είναι πιο ανθεκτικό
+        "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
 
     try:
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code != 200:
-            # Το Fallback σου (αν κάτι πάει στραβά, στέλνει απλό κείμενο)
             payload.pop("parse_mode")
             requests.post(url, json=payload, timeout=10)
             print(f"⚠️ Telegram API Warning: plain text (Status: {response.status_code})")
@@ -51,13 +46,18 @@ def send_telegram_msg(text: str):
         print("❌ Telegram Error: Timeout.")
     except Exception as e:
         print(f"❌ Telegram Connection Error: {e}")
-def send_telegram_voice(text: str):
-    """Μετατρέπει το κείμενο σε ήχο και το στέλνει ως φωνητικό μήνυμα."""
+
+
+async def send_telegram_voice(text: str):
+    """
+    [MASTRO-FIX]: Χρησιμοποιεί edge-tts αντί για gTTS.
+    Ίδια φωνή με το Web UI (el-GR-NestorasNeural), πολύ καλύτερη ποιότητα.
+    """
     import os
     import re
-    from gtts import gTTS
+    import edge_tts
+    import io
     from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
-    import requests
     
     token = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
@@ -66,41 +66,47 @@ def send_telegram_voice(text: str):
         return
 
     try:
-        # --- MASTRO CLEANER ΓΙΑ ΤΗ ΦΩΝΗ ---
+        # Καθαρισμός κειμένου
         clean_text = text
-        # 1. Αφαίρεση blocks κώδικα/JSON (ό,τι είναι ανάμεσα σε ``` )
         clean_text = re.sub(r'```.*?```', '', clean_text, flags=re.DOTALL)
-        # 2. Αφαίρεση tags σε αγκύλες που τυχόν ξέφυγαν (π.χ. [VOICE_MESSAGE])
         clean_text = re.sub(r'\[.*?\]', '', clean_text)
-        # 3. Αφαίρεση συμβόλων Markdown (αστερίσκοι, δίεση, underscores, backticks)
         clean_text = re.sub(r'[*_#`~]', '', clean_text)
-        # 4. Καθαρισμός από πολλαπλά κενά
         clean_text = " ".join(clean_text.split())
         
-        # Αν η απάντηση ήταν όλη ένα JSON και σβήστηκε, βάλε ένα fallback
         if not clean_text.strip():
             clean_text = "Μάστορα, σου έστειλα κάτι τεχνικό στο τσατ, δες το εκεί."
 
-        print(f"\033[95m[TTS Cleaner]: Στέλνω για φωνή το: {clean_text[:50]}...\033[0m")
+        print(f"\033[95m[TTS Telegram]: Δημιουργία φωνής για: {clean_text[:50]}...\033[0m")
 
-        # Δημιουργία MP3
-        tts = gTTS(text=clean_text, lang='el')
-        audio_path = os.path.join(os.getcwd(), "telegram_uploads", f"reply_voice_{int(os.times()[4])}.mp3")
-        os.makedirs(os.path.dirname(audio_path), exist_ok=True)
-        tts.save(audio_path)
+        # edge-tts — ίδια φωνή με το Web UI
+        voice = "el-GR-NestorasNeural"
+        communicate = edge_tts.Communicate(clean_text, voice, rate="-10%", volume="+10%")
         
-        # Αποστολή στο Telegram
+        audio_buffer = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_buffer.write(chunk["data"])
+        
+        audio_buffer.seek(0)
+        audio_bytes = audio_buffer.read()
+        
+        if not audio_bytes:
+            print("❌ edge-tts: Δεν παράχθηκε ήχος.")
+            return
+
+        # Αποστολή στο Telegram ως voice
         url = f"https://api.telegram.org/bot{token}/sendVoice"
-        with open(audio_path, 'rb') as audio_file:
-            response = requests.post(
-                url, 
-                data={"chat_id": chat_id},
-                files={"voice": audio_file},
-                timeout=30
-            )
+        response = requests.post(
+            url,
+            data={"chat_id": chat_id},
+            files={"voice": ("voice.mp3", audio_bytes, "audio/mpeg")},
+            timeout=30
+        )
         
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
+        if response.status_code == 200:
+            print(f"\033[92m[TTS Telegram]: ✅ Φωνητικό στάλθηκε ({len(audio_bytes)} bytes)\033[0m")
+        else:
+            print(f"⚠️ Telegram Voice Error: {response.status_code} - {response.text}")
             
     except Exception as e:
-        print(f"❌ Voice Output Error: {e}")      
+        print(f"❌ Voice Output Error: {e}")
