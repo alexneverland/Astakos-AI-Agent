@@ -207,7 +207,8 @@ class AstakosMemoryManager:
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Έγγραφο 'καρφώθηκε' ({os.path.basename(file_path)})\033[0m")
 
-        docs_index_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "astakos_docs_index.json")
+        from config import DOCS_INDEX_FILE
+        docs_index_file = DOCS_INDEX_FILE
         entry = {
             "file_path": file_path, "summary": analysis, "caption": caption,
             "date": datetime.now().strftime("%Y-%m-%d"), "timestamp": datetime.now().isoformat(),

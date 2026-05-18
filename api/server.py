@@ -526,10 +526,8 @@ async def upload_file(file: UploadFile = File(...)):
             # Οι εικόνες πάνε στον φάκελο PHOTOS_DIR
             target_dir = PHOTOS_DIR
         else:
-            # Τα έγγραφα πάνε στον telegram_uploads
-            target_dir = "telegram_uploads"
-            if not os.path.exists(target_dir):
-                os.makedirs(target_dir)
+            from config import UPLOADS_DIR
+            target_dir = UPLOADS_DIR
 
         file_path = os.path.join(target_dir, filename)
 

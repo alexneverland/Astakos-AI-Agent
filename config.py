@@ -8,10 +8,10 @@
 import os
 from dotenv import load_dotenv
 
-# Φορτώνουμε τα απόρρητα από το .env μια και καλή
 load_dotenv()
-# Βρίσκει αυτόματα τον φάκελο στον οποίο βρίσκεται το project
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ==========================================
 # 1. CREDENTIALS & API KEYS
 # ==========================================
@@ -30,32 +30,32 @@ LOCATION = os.getenv("LOCATION", "us-central1")
 # ==========================================
 # 2. ΦΑΚΕΛΟΙ (DIRECTORIES)
 # ==========================================
-# Βρίσκει αυτόματα πού βρίσκεται το project (absolute path)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKSPACE_DIR     = os.path.join(BASE_DIR, "astakos_skills")
+PHOTOS_DIR        = os.path.join(BASE_DIR, "telegram_photos")
+CHROMA_DB_DIR     = os.path.join(BASE_DIR, "chroma_db")
+UPLOADS_DIR       = os.path.join(BASE_DIR, "telegram_uploads")  # ← κεντρικός uploads φάκελος
 
-WORKSPACE_DIR = os.path.join(BASE_DIR, "astakos_skills")
-PHOTOS_DIR = os.path.join(BASE_DIR, "telegram_photos")
-CHROMA_DB_DIR = os.path.join(BASE_DIR, "chroma_db")
-
-# Πατέντα: Αν δεν υπάρχουν οι φάκελοι, τους φτιάχνει αυτόματα μόλις τρέξει το project!
-for directory in [WORKSPACE_DIR, PHOTOS_DIR, CHROMA_DB_DIR]:
+for directory in [WORKSPACE_DIR, PHOTOS_DIR, CHROMA_DB_DIR, UPLOADS_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # ==========================================
 # 3. ΑΡΧΕΙΑ ΜΝΗΜΗΣ & JSON (PATHS)
 # ==========================================
-WORKING_MEMORY_FILE = os.path.join(BASE_DIR, "astakos_working_memory.json")
-PHOTOS_INDEX_FILE = os.path.join(BASE_DIR, "astakos_photos_index.json")
-EMBEDDINGS_CACHE_FILE = os.path.join(BASE_DIR, "astakos_embeddings_cache.json")
-PROFILE_FILE = os.path.join(BASE_DIR, "astakos_profile.json")
-SESSIONS_FILE = os.path.join(BASE_DIR, "astakos_sessions.json")
-REMINDERS_FILE = os.path.join(BASE_DIR, "astakos_reminders.json")
-LISTS_FILE = os.path.join(BASE_DIR, "astakos_lists.json")
-CAPABILITIES_FILE = os.path.join(BASE_DIR, "astakos_capabilities.json")
-LINKEDIN_DRAFT_FILE = os.path.join(BASE_DIR, "linkedin_draft.json")
-GPS_STORAGE_FILE = os.path.join(BASE_DIR, "last_location.json")
+# Όλα τα JSON μνήμης είναι στον ROOT φάκελο (BASE_DIR)
+WORKING_MEMORY_FILE  = os.path.join(BASE_DIR, "astakos_working_memory.json")
+PHOTOS_INDEX_FILE    = os.path.join(BASE_DIR, "astakos_photos_index.json")
+DOCS_INDEX_FILE      = os.path.join(BASE_DIR, "astakos_docs_index.json")    
+EMBEDDINGS_CACHE_FILE= os.path.join(BASE_DIR, "astakos_embeddings_cache.json")
+PROFILE_FILE         = os.path.join(BASE_DIR, "astakos_profile.json")
+SESSIONS_FILE        = os.path.join(BASE_DIR, "astakos_sessions.json")
+REMINDERS_FILE       = os.path.join(BASE_DIR, "astakos_reminders.json")
+LISTS_FILE           = os.path.join(BASE_DIR, "astakos_lists.json")
+CAPABILITIES_FILE    = os.path.join(BASE_DIR, "astakos_capabilities.json")
+LINKEDIN_DRAFT_FILE  = os.path.join(BASE_DIR, "linkedin_draft.json")
+GPS_STORAGE_FILE     = os.path.join(BASE_DIR, "last_location.json")
+
 # ==========================================
 # 4. ΡΥΘΜΙΣΕΙΣ AI
 # ==========================================
 SIM_THRESHOLD_DISTANCE = 0.30
-SIM_THRESHOLD = 0.88
+SIM_THRESHOLD          = 0.88
