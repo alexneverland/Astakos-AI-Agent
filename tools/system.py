@@ -1025,43 +1025,89 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
 # GITHUB
 # ────────────────────────────────────────────────────────────────
 
+import subprocess
+import shlex
+from github import Github
+from langchain_core.tools import tool
+
 @tool
-def github_manager(action: str, repo_name: str = "", file_path: str = "",
+def github_manager(action: str, repo_name: str = "", target_files: str = "",
                    commit_message: str = "", content: str = "") -> str:
-    """Διαχειρίζεται το GitHub.
-    Actions: 'list_repos', 'read_file', 'create_file', 'update_file'."""
-    token = GITHUB_TOKEN
+    """
+    Manages GitHub operations and local Git commits.
+    
+    Actions: 
+    - 'list_repos', 'read_file', 'create_file', 'update_file' (Cloud API Operations)
+    - 'push_local_commits' (Runs local Git CLI commands)
+    
+    CRITICAL RULES for 'push_local_commits': 
+    - target_files MUST be a comma-separated list of exact paths (e.g. "core/brain.py, api/server.py"). 
+    - Using "." or "*" or "all" is STRICTLY FORBIDDEN.
+    """
+    # Note: Replace GITHUB_TOKEN with your actual env variable load method
+    token = os.getenv("GITHUB_TOKEN") 
     if not token:
-        return "Error: Λείπει το GITHUB_TOKEN."
+        return "Error: Missing GITHUB_TOKEN."
 
     try:
+        # ─── 1. LOCAL GIT CLI OPERATIONS (Mastro-Shielded) ──────────────
+        if action == "push_local_commits":
+            if not target_files or target_files.strip() in [".", "*", "all"]:
+                return "🛡️ [GIT OVERRIDE]: Blind sweeps are forbidden. Specify exact file paths."
+            if not commit_message:
+                return "Error: Commit message is required."
+            
+            # Clean up the file list (e.g., "server.py, core/utils.py" -> ["server.py", "core/utils.py"])
+            files = [f.strip() for f in target_files.split(",") if f.strip()]
+            
+            # 1. Execute: git add <files>
+            add_cmd = ["git", "add"] + files
+            subprocess.run(add_cmd, check=True, capture_output=True, text=True)
+            
+            # 2. Execute: git commit -m "message"
+            commit_cmd = ["git", "commit", "-m", commit_message]
+            subprocess.run(commit_cmd, check=True, capture_output=True, text=True)
+            
+            # 3. Execute: git push origin main
+            push_cmd = ["git", "push", "origin", "main"]
+            subprocess.run(push_cmd, check=True, capture_output=True, text=True)
+            
+            return f"System: Local changes successfully pushed!\nFiles: {files}\nMessage: {commit_message}"
+
+        # ─── 2. GITHUB CLOUD API OPERATIONS ─────────────────────────────
         g = Github(token)
         user = g.get_user()
 
         if action == "list_repos":
             repos = [f"- {r.name} ({'Private' if r.private else 'Public'})" for r in user.get_repos()]
-            return f"Βρέθηκαν {len(repos)} Repositories:\n" + "\n".join(repos)
+            return f"Found {len(repos)} Repositories:\n" + "\n".join(repos)
 
         elif action == "read_file":
             repo = g.get_repo(f"{user.login}/{repo_name}")
-            file_content = repo.get_contents(file_path)
-            return f"Content of {file_path}:\n{file_content.decoded_content.decode('utf-8')[:10000]}"
+            file_content = repo.get_contents(target_files)
+            return f"Content of {target_files}:\n{file_content.decoded_content.decode('utf-8')[:10000]}"
 
         elif action in ["create_file", "update_file"]:
+            # [SECURITY FIX]: Prevent wiping files with empty content
+            if not content.strip():
+                return "🛡️ [GIT OVERRIDE]: Content is empty. Refusing to overwrite file with empty data."
+                
             repo = g.get_repo(f"{user.login}/{repo_name}")
             try:
-                file_info = repo.get_contents(file_path)
-                repo.update_file(file_path, commit_message, content, file_info.sha)
-                return f"System: Το '{file_path}' στο '{repo_name}' ενημερώθηκε!"
+                file_info = repo.get_contents(target_files)
+                repo.update_file(target_files, commit_message, content, file_info.sha)
+                return f"System: '{target_files}' in '{repo_name}' updated via API!"
             except:
-                repo.create_file(file_path, commit_message, content)
-                return f"System: Το '{file_path}' δημιουργήθηκε στο '{repo_name}'!"
+                repo.create_file(target_files, commit_message, content)
+                return f"System: '{target_files}' created in '{repo_name}' via API!"
 
         else:
-            return "Error: Χρησιμοποίησε list_repos, read_file, create_file, ή update_file."
+            return "Error: Invalid action specified."
 
+    except subprocess.CalledProcessError as e:
+        return f"Local Git Command Error: {e.stderr}"
     except Exception as e:
-        return f"GitHub Error: {str(e)}"
+        return f"GitHub API Error: {str(e)}"
 
 
 # ────────────────────────────────────────────────────────────────
