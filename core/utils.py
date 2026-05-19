@@ -297,3 +297,29 @@ def build_prompt(state_messages, agent_role="") -> str:
     prompt += memories_str
 
     return prompt
+import re
+
+def detect_prompt_injection(user_input: str) -> bool:
+    """
+    Checks user input for common direct prompt injection vectors.
+    Returns True if malicious intent is detected, False otherwise.
+    """
+    if not isinstance(user_input, str):
+        return False
+        
+    blacklist_patterns = [
+        r"ignore\s+(all\s+)?previous\s+instructions",
+        r"forget\s+(all\s+)?previous\s+instructions",
+        r"disregard\s+previous",
+        r"drop\s+your\s+system\s+prompt",
+        r"you\s+are\s+now",
+        r"print\s+(your\s+)?system\s+prompt",
+        r"system\s+override"
+    ]
+    
+    input_lower = user_input.lower()
+    for pattern in blacklist_patterns:
+        if re.search(pattern, input_lower):
+            return True
+            
+    return False
