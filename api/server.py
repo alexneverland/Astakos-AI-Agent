@@ -38,6 +38,7 @@ from PIL import Image
 from google import genai
 from fastapi.staticfiles import StaticFiles
 from config import PHOTOS_DIR, GEMINI_API_KEY
+from core.utils import detect_prompt_injection
 console = Console()
 
 # ────────────────────────────────────────────────────────────────
@@ -281,10 +282,25 @@ async def chat_endpoint(request: Request):
     if not user_input:
         return JSONResponse({"error": "Κενό μήνυμα."}, status_code=400)
 
+    # 1. --- PROMPT INJECTION FIREWALL ---
+    # We catch malicious intents before they ever touch the LLM or cost API tokens.
+    if detect_prompt_injection(user_input):
+        print(f"\033[91m🛡️ [SECURITY INTERCEPT]: Blocked malicious input -> {user_input}\033[0m")
+        return JSONResponse({
+            "agent": "Security_Firewall",
+            "response": "🛡️ [SECURITY OVERRIDE]: Prohibited command detected."
+        })
+
+    # 2. --- XML CONTEXT ISOLATION ---
+    # We wrap the user's prompt so Astakos knows it is strictly raw data.
+    isolated_user_input = f"<isolated_data>\n{user_input}\n</isolated_data>"
+
     with memory_lock:
         last_interaction_time = time.time()
 
     # ── Αποθήκευση user message στο history ────────────────────
+    # Note: We save the original `user_input` to the UI chat history, 
+    # not the XML-wrapped version, to keep the frontend looking clean.
     append_to_chat_history("user", user_input)
 
     final_ai_response = ""
@@ -298,7 +314,8 @@ async def chat_endpoint(request: Request):
             ext = os.path.splitext(filename)[1].lower()
             image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
             
-            enhanced_user_input = f"[USER_UPLOADED_FILE]: {filename}\n{user_input}"
+            # We inject the isolated input into the enhanced string
+            enhanced_user_input = f"[USER_UPLOADED_FILE]: {filename}\n{isolated_user_input}"
             
             # Αν είναι ΕΙΚΟΝΑ, το κάνουμε Base64 και το στέλνουμε ως image_url
             if ext in image_exts:
@@ -318,8 +335,11 @@ async def chat_endpoint(request: Request):
             else:
                 human_msg = HumanMessage(content=enhanced_user_input)
                 print(f"\033[94m[Chat]: Text message με αναφορά εγγράφου: {filename}\033[0m")
+        
+        # ── Standard text message ────────────────────────────────
         else:
-            human_msg = HumanMessage(content=user_input)
+            # We feed the LangGraph state the isolated XML payload
+            human_msg = HumanMessage(content=isolated_user_input)
 
         # ── Τρέξιμο του LangGraph ────────────────────────────────
         for event in graph.stream({"messages": [human_msg]}):
@@ -334,6 +354,8 @@ async def chat_endpoint(request: Request):
                             final_ai_response = candidate
 
         # --- [MASTRO-FIX]: Επιπλέον καθάρισμα ΠΡΙΝ την αποθήκευση ---
+        # We use the raw user_input for memory extraction so Astakos 
+        # doesn't memorize the XML tags as part of your data.
         clean_user = clean_message(user_input)
         clean_ai   = clean_message(final_ai_response)
 
