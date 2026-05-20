@@ -8,7 +8,7 @@
 import time
 from google import genai
 from config import GEMINI_API_KEY
-
+from core.brain import FAST_MODEL
 
 def safe_gemini_call(prompt: str, retries: int = 4, base_delay: float = 2.0):
     """
@@ -22,7 +22,7 @@ def safe_gemini_call(prompt: str, retries: int = 4, base_delay: float = 2.0):
     for attempt in range(retries):
         try:
             response = client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+                model=FAST_MODEL,
                 contents=prompt
             )
             return response

@@ -40,7 +40,7 @@ from fastapi.staticfiles import StaticFiles
 from config import PHOTOS_DIR, GEMINI_API_KEY
 from core.utils import detect_prompt_injection
 console = Console()
-
+from core.brain import FAST_MODEL
 # ────────────────────────────────────────────────────────────────
 # GLOBALS
 # ────────────────────────────────────────────────────────────────
@@ -459,7 +459,7 @@ async def process_web_voice(file: UploadFile = File(...)):
         
         # Το χαστούκι στο AI: Του απαγορεύουμε να φερθεί σαν Chatbot.
         response = client.models.generate_content(
-            model='gemini-3.1-flash-lite-preview',  # Κρατάω το δικό σου μοντέλο
+            model=FAST_MODEL,  
             contents=[
                 {"inline_data": {"mime_type": "audio/webm", "data": audio_data}},
                 "Είσαι ΑΠΟΚΛΕΙΣΤΙΚΑ ένα εργαλείο Speech-to-Text. Δουλειά σου είναι ΜΟΝΟ να μεταγράψεις τον ήχο σε κείμενο. ΑΠΑΓΟΡΕΥΕΤΑΙ να απαντήσεις, να σχολιάσεις ή να πεις ότι 'δεν έχεις τη δυνατότητα'. Αν δεν ακούς τίποτα ή ο ήχος είναι κενός, επέστρεψε μόνο τη λέξη: [ΣΙΩΠΗ]."
@@ -570,13 +570,13 @@ async def upload_file(file: UploadFile = File(...)):
             img.thumbnail((1024, 1024))
 
             mem_resp = client.models.generate_content(
-                model="gemini-3.1-flash-lite-preview",
+                model=FAST_MODEL,
                 contents=[img, "Περίγραψε τι βλέπεις στα Ελληνικά, κοφτά, 1-2 προτάσεις."]
             )
             memory_analysis = mem_resp.text.strip() if mem_resp.text else "No analysis available."
 
             chat_resp = client.models.generate_content(
-                model="gemini-3.1-flash-lite-preview",
+                model=FAST_MODEL,
                 contents=[img, "Ανάλυσε τη φωτό λεπτομερώς στα Ελληνικά, με χιούμορ και ζωντάνια."]
             )
             detailed_analysis = chat_resp.text.strip() if chat_resp.text else memory_analysis

@@ -138,7 +138,7 @@ def dev_agent_node(state):
         DuckDuckGoSearchRun()
     ]
     
-    response = llm.bind_tools(tools).invoke(
+    response = llm_heavy.bind_tools(tools).invoke(
         [SystemMessage(content=prompt_content)] + history
     )
     return {"current_agent": "Dev_Agent", "messages": [response]}
