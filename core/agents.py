@@ -37,7 +37,7 @@ from tools.system import (
 )
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
-    search_goldmall_offers, send_messenger_message, get_navigation_info, draft_messenger_message, search_google_places
+    search_goldmall_offers, send_messenger_message, get_navigation_info, relay_local_payload, search_google_places
 )
 from langchain_community.tools import DuckDuckGoSearchRun
 
@@ -202,7 +202,7 @@ def chat_agent_node(state: AgentState):
         ])
 
     from tools.system import archive_file, retrieve_photo, save_to_memory, search_memory, control_spotify, get_current_location
-    from tools.web import search_supermarket_offers, send_messenger_message, draft_messenger_message
+    from tools.web import search_supermarket_offers, send_messenger_message, relay_local_payload
     from langchain_community.tools import DuckDuckGoSearchRun
     
     web_search = DuckDuckGoSearchRun()
@@ -211,7 +211,7 @@ def chat_agent_node(state: AgentState):
         get_current_location,
         search_supermarket_offers, control_spotify,
         search_memory, save_to_memory, retrieve_photo, archive_file, web_search, 
-        recipe_expert, log_meal, draft_messenger_message
+        recipe_expert, log_meal, relay_local_payload
     ]
     
     response = llm.bind_tools(chat_tools).invoke(final_messages)
@@ -299,7 +299,7 @@ def web_agent_node(state: AgentState):
     )
     from tools.web import (
         get_news, get_weather_forecast, get_navigation_info, 
-        draft_messenger_message, search_google_places
+        relay_local_payload, search_google_places
     )
     from langchain_community.tools import DuckDuckGoSearchRun
     from tools.web import send_messenger_message
@@ -308,7 +308,7 @@ def web_agent_node(state: AgentState):
         get_news, get_weather_forecast, DuckDuckGoSearchRun(), 
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
-        process_and_clear_linkedin_post, draft_messenger_message, search_google_places, send_messenger_message
+        process_and_clear_linkedin_post, relay_local_payload, search_google_places, send_messenger_message
     ]
 
     return {
@@ -390,22 +390,42 @@ def tech_agent_node(state: AgentState):
     return {"current_agent": "Tech_Agent", "messages": [response]}
 
 
+
+
+from langchain_core.messages import SystemMessage, AIMessage, ToolMessage
+
 def git_agent_node(state):
-    from core.utils import load_agent_prompt
+    from core.utils import load_agent_prompt, build_prompt
     from config import BASE_DIR  
     
-    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
-    history = clean_orphan_tool_calls(state["messages"], k=20)
+    # [MASTRO-SHIELD v4]: Ο ΑΠΟΛΥΤΟΣ ΑΠΟΣΤΕΙΡΩΤΗΣ ΓΙΑ ΤΟ GEMINI 3.5
+    raw_messages = state["messages"]
+    clean_history = []
+    
+    for i, msg in enumerate(raw_messages):
+        # Αν το μήνυμα είναι από τον AI ΚΑΙ περιέχει κλήση εργαλείου (tool_calls)...
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            # ...πρέπει ΥΠΟΧΡΕΩΤΙΚΑ το αμέσως επόμενο μήνυμα να είναι η απάντηση του εργαλείου (ToolMessage)
+            if i + 1 < len(raw_messages) and isinstance(raw_messages[i+1], ToolMessage):
+                clean_history.append(msg)
+            else:
+                # Βρήκαμε ορφανό/σπασμένο tool_call! Το προσπερνάμε σιωπηλά για να μην κρασάρει το Gemini.
+                continue
+        else:
+            # Όλα τα υπόλοιπα (απλά μηνύματα δικά σου, απαντήσεις AI χωρίς εργαλεία) περνάνε κανονικά
+            clean_history.append(msg)
     
     system_base = load_agent_prompt("Git_Agent", "Είσαι ο Git_Agent. Διαχειρίζεσαι GitHub repos.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    system_prompt = build_prompt(history, system_base)
+    system_prompt = build_prompt(clean_history, system_base)
     
     return {
         "current_agent": "Git_Agent",
-        "messages": [llm.bind_tools([
-            github_manager, read_local_file, search_memory
-        ]).invoke([SystemMessage(content=system_prompt)] + history)]
+        "messages": [
+            llm.bind_tools([
+                github_manager, read_local_file, search_memory
+            ]).invoke([SystemMessage(content=system_prompt)] + clean_history)
+        ]
     }
 
 
