@@ -33,7 +33,7 @@ def remove_accents(input_str: str) -> str:
     return u"".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower()
 
 @tool
-def draft_messenger_message(target_name: str, message: str) -> str:
+def relay_local_payload(target_entity: str, payload_data: str) -> str:
     """
     Αποθηκεύει ένα προσχέδιο μηνύματος Messenger (Facebook).
     Χρησιμοποίησέ το ΟΤΑΝ προτείνεις στον χρήστη να στείλει ένα μήνυμα, 
@@ -361,6 +361,7 @@ def send_messenger_message(target_name: str = "", message: str = "") -> str:
 
             target_cell.click(force=True)
             print(f"✅ Επιλέχθηκε η επαφή: {final_name}")
+            time.sleep(2.5)  # περιμένουμε να φορτώσει η συνομιλία
             # Αποστολή μηνύματος
             chat_box = page.locator('div[role="textbox"]').last
             chat_box.wait_for(state="visible", timeout=5000)
@@ -385,13 +386,15 @@ def send_messenger_message(target_name: str = "", message: str = "") -> str:
 def search_google_places(query: str, location: str = "Thessaloniki") -> str:
     """
     Αναζητά εστιατόρια, καφέ και μέρη για έξοδο μέσω Google Places API (New).
-    Επιστρέφει όνομα, βαθμολογία, διεύθυνση, τύπο και link για πλοήγηση.
+    Επιστρέφει όνομα, βαθμολογία, διεύθυνση, τύπο, τηλέφωνο, website, delivery και reviews.
     """
     import requests
     import os
     import urllib.parse
     import time
+    import json
     from config import GPS_STORAGE_FILE
+    
     # [MASTRO-GPS-INTERCEPTOR]
     if "κοντά" in query.lower() or location == "current":
         if os.path.exists(GPS_STORAGE_FILE):
@@ -403,6 +406,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
                         location = f"{gps['lat']},{gps['lon']}"
                         print(f"📍 [Web Tool]: Χρήση Live GPS στίγματος: {location}")
             except: pass
+            
     api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
     print(f"DEBUG KEY: {api_key[:10]}...")
     if not api_key:
@@ -412,6 +416,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
     search_text = f"{query} {location}"
     search_url = "https://places.googleapis.com/v1/places:searchText"
 
+    # [MASTRO-UPGRADE]: Προσθέσαμε Phone, Website, Takeout, Delivery, DineIn και Reviews στο FieldMask
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": api_key,
@@ -423,7 +428,13 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             "places.primaryTypeDisplayName,"
             "places.regularOpeningHours,"
             "places.googleMapsUri,"
-            "places.priceLevel"
+            "places.priceLevel,"
+            "places.nationalPhoneNumber,"
+            "places.websiteUri,"
+            "places.takeout,"
+            "places.delivery,"
+            "places.dineIn,"
+            "places.reviews"
         )
     }
 
@@ -465,8 +476,27 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             ptype = place.get("primaryTypeDisplayName", {}).get("text", "")
             maps_url = place.get("googleMapsUri", "")
             price = price_map.get(place.get("priceLevel", ""), "")
+            
+            # Νέα Πεδία (Apify-style)
+            phone = place.get("nationalPhoneNumber", "")
+            website = place.get("websiteUri", "")
+            
+            # Επιλογές γεύματος (Delivery κλπ)
+            services = []
+            if place.get("takeout"): services.append("Takeout")
+            if place.get("delivery"): services.append("Delivery")
+            if place.get("dineIn"): services.append("Dine-in")
+            
+            # Κριτικές (παίρνουμε μόνο την πρώτη για να δούμε το "vibe")
+# Κριτικές: Ανεβάσαμε το όριο στους 250 χαρακτήρες για να μη χάνεται το νόημα
+            review_text = ""
+            reviews = place.get("reviews", [])
+            if reviews:
+                first_rev = reviews[0].get("text", {}).get("text", "").replace("\n", " ").strip()
+                if first_rev:
+                    review_text = first_rev[:250] + "..." if len(first_rev) > 250 else first_rev
 
-            # Ώρες λειτουργίας — μόνο αν είναι ανοιχτό τώρα
+            # Ώρες λειτουργίας
             hours_info = ""
             opening = place.get("regularOpeningHours", {})
             if opening.get("openNow") is True:
@@ -474,20 +504,28 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             elif opening.get("openNow") is False:
                 hours_info = " · 🔴 Κλειστό"
 
-            # Nav link
-            nav_link = ""
-            if maps_url:
-                nav_link = f"\n   🗺️ {maps_url}"
-
+            # String Formatting 
             price_str = f" · {price}" if price else ""
             rating_str = f"⭐ {rating} ({votes} κριτικές)" if rating != "—" else "Χωρίς βαθμολογία"
             type_str = f" · {ptype}" if ptype else ""
+            
+            contact_str = ""
+            if phone: contact_str += f"   📞 {phone}\n"
+            # [MASTRO-FIX]: HTML Tags για να είναι σίγουρα κλικαριστά στο Telegram
+            if website: contact_str += f"   🌐 <a href='{website}'>Website Μαγαζιού</a>\n"
+            
+            services_str = f"   🛵 [{', '.join(services)}]\n" if services else ""
+            review_str = f"   💬 \"{review_text}\"\n" if review_text else ""
 
+            # [MASTRO-FIX]: HTML Tag για το Google Maps
             lines.append(
                 f"{i}. **{name}**{price_str}\n"
                 f"   {rating_str}{type_str}{hours_info}\n"
-                f"   📌 {address}"
-                f"{nav_link}\n"
+                f"   📌 {address}\n"
+                f"{contact_str}"
+                f"{services_str}"
+                f"{review_str}"
+                f"   🗺️ <a href='{maps_url}'>Άνοιγμα στο Google Maps</a>\n"
             )
 
         return "\n".join(lines)
