@@ -15,7 +15,6 @@ astakos_skills/food_history.json
 
 # Databases & Checkpoints
 chroma_db/
-checkpoints.db*
 astakos_chat_history.json
 astakos_working_memory.json
 astakos_sessions.json

@@ -18,7 +18,6 @@ import os
 import json
 import time
 import queue
-import sqlite3
 import threading
 import requests
 from datetime import datetime
@@ -44,9 +43,6 @@ shutdown_event        = threading.Event()
 astakos_queue         = queue.Queue()
 memory_lock           = threading.Lock()
 last_interaction_time = time.time()
-
-THREAD_ID = "lazaros_stable_v41"
-
 
 def enqueue_task(func, *args):
     astakos_queue.put((func, args))

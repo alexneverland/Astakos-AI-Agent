@@ -5,11 +5,8 @@
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
 
-import sqlite3
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.checkpoint.sqlite import SqliteSaver
-
 from core.utils import AgentState  # Το παίρνει έτοιμο, δεν το ξαναγράφουμε!
 from tools.system import all_tools
 from core.agents import (
