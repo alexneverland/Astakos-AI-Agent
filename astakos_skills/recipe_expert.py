@@ -12,7 +12,8 @@ from langchain_core.tools import tool
 from config import BASE_DIR
 
 # Mastro-Import: Φέρνουμε τον εγκέφαλο μέσα στο εργαλείο!
-from core.brain import llm 
+from core.brain import llm
+from core.utils import clean_message 
 
 HISTORY_FILE = os.path.join(BASE_DIR, "astakos_skills", "food_history.json")
 
@@ -55,7 +56,9 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
     try:
         # Το εργαλείο κάνει τη δική του κλήση στο Gemini!
         response = llm.invoke(prompt)
-        return response.content
+        # [MASTRO-SHIELD]: clean_message αντί για raw .content
+        # ώστε να χειριστεί σωστά λίστες parts από Gemini 3.x
+        return clean_message(response.content)
     except Exception as e:
         return f"❌ Σφάλμα κατά την παραγωγή της συνταγής από τον Chef: {str(e)}"
 
