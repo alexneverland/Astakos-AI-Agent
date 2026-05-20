@@ -6,26 +6,31 @@
 # ================================================================
 
 import time
-from google import genai
-from config import GEMINI_API_KEY
-from core.brain import FAST_MODEL
+from core.brain import llm
+from core.utils import clean_message  # [MASTRO-FIX]: Φέρνουμε την ασπίδα εδώ!
+
+class MastroResponse:
+    """
+    [MASTRO-WRAPPER]
+    Wrapper που προσομοιώνει τη δομή του native GenAI SDK response.
+    Εξασφαλίζει ότι το property '.text' θα είναι ΠΑΝΤΑ καθαρό string, 
+    αποτρέποντας τα 'list object has no attribute strip' σε όλο το σύστημα.
+    """
+    def __init__(self, text):
+        # [MASTRO-FIX]: Ό,τι και να στείλει η Google (λίστα, dict, null), 
+        # το clean_message το κάνει πεντακάθαρο string.
+        self.text = clean_message(text)
 
 def safe_gemini_call(prompt: str, retries: int = 4, base_delay: float = 2.0):
     """
-    Mastro-Shield v2: Exponential backoff retry για το Gemini API.
-    - 429 (quota)  → περιμένει περισσότερο
-    - 5xx (server) → retry κανονικά
-    - Άλλο error   → raise αμέσως
+    Mastro-Shield v3: Exponential backoff retry που χρησιμοποιεί κεντρικά 
+    το llm object του brain.py.
     """
-    client = genai.Client(api_key=GEMINI_API_KEY)
-
     for attempt in range(retries):
         try:
-            response = client.models.generate_content(
-                model=FAST_MODEL,
-                contents=prompt
-            )
-            return response
+            # Εκτέλεση κλήσης μέσω του ενοποιημένου εγκεφάλου (LangChain)
+            response = llm.invoke(prompt)
+            return MastroResponse(response.content)
 
         except Exception as e:
             err_str = str(e).lower()
@@ -34,20 +39,17 @@ def safe_gemini_call(prompt: str, retries: int = 4, base_delay: float = 2.0):
             is_timeout = "timeout" in err_str or "deadline" in err_str
 
             if attempt >= retries - 1:
-                print(f"\033[91m❌ [Gemini Fatal]: Κατέρρευσε μετά από {retries} προσπάθειες: {e}\033[0m")
+                print(f"\n\033[91m❌ [Gemini Fatal]: Κατέρρευσε μετά από {retries} προσπάθειες: {e}\033[0m")
                 raise e
 
             if is_quota:
-                # Quota → πολύ μεγαλύτερη αναμονή
-                wait = base_delay * (4 ** attempt)  # 8s, 32s, 128s...
+                wait = base_delay * (4 ** attempt)
                 print(f"\033[93m⚠️ [Gemini 429]: Quota limit! Αναμονή {wait:.0f}s... ({attempt+1}/{retries})\033[0m")
             elif is_server or is_timeout:
-                # Server error → exponential backoff
-                wait = base_delay * (2 ** attempt)  # 2s, 4s, 8s...
-                print(f"\033[93m⚠️ [Gemini Retry]: Server error ({e}). Αναμονή {wait:.0f}s... ({attempt+1}/{retries})\033[0m")
+                wait = base_delay * (2 ** attempt)
+                print(f"\033[93m⚠️ [Gemini 5xx]: Server error. Αναμονή {wait:.0f}s... ({attempt+1}/{retries})\033[0m")
             else:
-                # Άγνωστο error → raise αμέσως, μην χάνεις χρόνο
-                print(f"\033[91m❌ [Gemini Error]: Μη αναμενόμενο σφάλμα: {e}\033[0m")
+                print(f"\033[91m❌ [Gemini Error]: Άγνωστο σφάλμα: {e}\033[0m")
                 raise e
 
             time.sleep(wait)
