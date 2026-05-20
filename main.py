@@ -133,7 +133,7 @@ def proactive_worker():
                     if shutdown_event.is_set():
                         break
 
-                    ai_msg = response.content.strip()
+                    ai_msg = clean_message(response.content).strip()
                     print(f"\n🤖 [Proactive]: {ai_msg}")
                     send_telegram_msg(f"🤖 {ai_msg}")
 

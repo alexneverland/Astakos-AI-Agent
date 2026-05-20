@@ -49,25 +49,57 @@ from langchain_community.tools import DuckDuckGoSearchRun
 
 def clean_orphan_tool_calls(history: list, k: int = 20) -> list:
     """
-    Αφαιρεί AIMessages με tool_calls που δεν ακολουθούνται από ToolMessage.
-    Το Gemini απαιτεί: AI(tool_call) → Tool(result). Αν λείπει το Tool → 400 error.
+    [MASTRO-SHIELD v5]: Αποστειρωτής για Gemini 3.x sequence errors.
+
+    Αφαιρεί AIMessages που έχουν κλήση εργαλείου και ΔΕΝ ακολουθούνται από
+    αντίστοιχο ToolMessage. Το Gemini απαιτεί αυστηρή αλληλουχία:
+        AI(tool_call) → Tool(result)
+    Αν λείπει το Tool → 400 INVALID_ARGUMENT.
+
+    Δύο τρόποι να εντοπίσει tool call σε AIMessage:
+      1. Παραδοσιακός: msg.tool_calls populated (Gemini 1.x/2.x).
+      2. [ΝΕΟ v5]: Το content είναι λίστα και περιέχει part τύπου
+         "function_call" ή "tool_use" — συμβαίνει με Gemini 3.x όταν το
+         langchain_google_genai δεν ξετυλίγει σωστά τα native parts σε
+         tool_calls attribute.
+
+    Αν εντοπιστεί ορφανό, κρατάμε μόνο το text part (αν υπάρχει) σαν
+    κανονικό AIMessage. Αν δεν υπάρχει text, το πετάμε εντελώς.
     """
-    # Φιλτράρισμα με filter_messages πρώτα
+    # Πρώτο πέρασμα: βασικό φιλτράρισμα από filter_messages
     history = filter_messages(history, k=k)
 
     clean = []
     for i, msg in enumerate(history):
-        if getattr(msg, "type", "") == "ai" and getattr(msg, "tool_calls", None):
+        if getattr(msg, "type", "") != "ai":
+            clean.append(msg)
+            continue
+
+        # Έλεγχος 1: tool_calls attribute (παραδοσιακός τρόπος)
+        has_tool_calls = bool(getattr(msg, "tool_calls", None))
+
+        # Έλεγχος 2: function_call/tool_use parts μέσα στο content list (Gemini 3.x)
+        has_inline_fc = False
+        raw_content = getattr(msg, "content", None)
+        if isinstance(raw_content, list):
+            for part in raw_content:
+                if isinstance(part, dict) and part.get("type") in ("function_call", "tool_use"):
+                    has_inline_fc = True
+                    break
+
+        if has_tool_calls or has_inline_fc:
             next_is_tool = (
                 i + 1 < len(history) and
                 getattr(history[i + 1], "type", "") == "tool"
             )
             if not next_is_tool:
-                # Ορφανό tool_call — μετατρέπουμε σε απλό AIMessage
-                if msg.content:
-                    clean.append(AIMessage(content=clean_message(msg.content)))
-                # Αν δεν έχει content, το παρακάμπτουμε εντελώς
+                # Ορφανή κλήση εργαλείου — κρατάμε μόνο το text content αν υπάρχει
+                text_only = clean_message(raw_content) if raw_content else ""
+                if text_only:
+                    clean.append(AIMessage(content=text_only))
+                # Αν δεν έχει text, το παρακάμπτουμε εντελώς
                 continue
+
         clean.append(msg)
     return clean
 
@@ -392,39 +424,23 @@ def tech_agent_node(state: AgentState):
 
 
 
-from langchain_core.messages import SystemMessage, AIMessage, ToolMessage
-
 def git_agent_node(state):
     from core.utils import load_agent_prompt, build_prompt
-    from config import BASE_DIR  
-    
-    # [MASTRO-SHIELD v4]: Ο ΑΠΟΛΥΤΟΣ ΑΠΟΣΤΕΙΡΩΤΗΣ ΓΙΑ ΤΟ GEMINI 3.5
-    raw_messages = state["messages"]
-    clean_history = []
-    
-    for i, msg in enumerate(raw_messages):
-        # Αν το μήνυμα είναι από τον AI ΚΑΙ περιέχει κλήση εργαλείου (tool_calls)...
-        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-            # ...πρέπει ΥΠΟΧΡΕΩΤΙΚΑ το αμέσως επόμενο μήνυμα να είναι η απάντηση του εργαλείου (ToolMessage)
-            if i + 1 < len(raw_messages) and isinstance(raw_messages[i+1], ToolMessage):
-                clean_history.append(msg)
-            else:
-                # Βρήκαμε ορφανό/σπασμένο tool_call! Το προσπερνάμε σιωπηλά για να μην κρασάρει το Gemini.
-                continue
-        else:
-            # Όλα τα υπόλοιπα (απλά μηνύματα δικά σου, απαντήσεις AI χωρίς εργαλεία) περνάνε κανονικά
-            clean_history.append(msg)
-    
+    from config import BASE_DIR
+
+    # [MASTRO-SHIELD v5]: Ενιαία ασπίδα για όλους τους agents
+    history = clean_orphan_tool_calls(state["messages"], k=20)
+
     system_base = load_agent_prompt("Git_Agent", "Είσαι ο Git_Agent. Διαχειρίζεσαι GitHub repos.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    system_prompt = build_prompt(clean_history, system_base)
-    
+    system_prompt = build_prompt(history, system_base)
+
     return {
         "current_agent": "Git_Agent",
         "messages": [
             llm.bind_tools([
                 github_manager, read_local_file, search_memory
-            ]).invoke([SystemMessage(content=system_prompt)] + clean_history)
+            ]).invoke([SystemMessage(content=system_prompt)] + history)
         ]
     }
 

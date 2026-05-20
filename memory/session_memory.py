@@ -11,6 +11,7 @@ from datetime import datetime
 from memory.vector_store import memory
 from services.gemini import safe_gemini_call
 import re
+from core.utils import clean_message
 from config import PHOTOS_INDEX_FILE, PHOTOS_DIR, SESSIONS_FILE
 # ════════════════════════════════════════════════════════════════
 # SESSION SUMMARY — "Ημερολόγιο Συνεργάτη"
@@ -19,13 +20,17 @@ from config import PHOTOS_INDEX_FILE, PHOTOS_DIR, SESSIONS_FILE
 SESSION_LOG: list[dict] = []
 
 
-def log_exchange(user_text: str, ai_text: str, agent: str):
+def log_exchange(user_text, ai_text, agent: str):
     """Προσθέτει ένα ζεύγος ερώτησης-απάντησης στο session log."""
+    # Φοράμε τα "γυαλιά" για να πάρουμε μόνο το κείμενο για το Log
+    safe_user = clean_message(user_text)
+    safe_ai = clean_message(ai_text)
+    
     SESSION_LOG.append({
         "time": datetime.now().strftime("%H:%M"),
         "agent": agent,
-        "user": user_text[:300],
-        "ai": ai_text[:300],
+        "user": safe_user[:300],
+        "ai": safe_ai[:300],
     })
 
 
