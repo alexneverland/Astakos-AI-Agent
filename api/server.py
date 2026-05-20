@@ -10,7 +10,6 @@ import json
 import time
 import queue
 import signal
-import sqlite3
 import asyncio
 import threading
 import sys
@@ -22,7 +21,6 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from langchain_core.messages import HumanMessage, AIMessage
-from langgraph.checkpoint.sqlite import SqliteSaver
 from rich.console import Console
 from zoneinfo import ZoneInfo
 
@@ -49,10 +47,6 @@ astakos_queue   = queue.Queue()
 memory_lock     = threading.Lock()
 last_interaction_time = time.time()
 
-THREAD_ID = "lazaros_stable_v41"
-checkpointer = SqliteSaver(sqlite3.connect("checkpoints.db", check_same_thread=False))
-
-# Graph με checkpointer (για REST endpoint)
 from core.graph import build_graph as _build_graph
 app_graph = _build_graph()
 
@@ -250,7 +244,7 @@ server.add_middleware(
     allow_headers=["*"],
 )
 
-config = {"configurable": {"thread_id": THREAD_ID}}
+
 
 # ────────────────────────────────────────────────────────────────
 # ENDPOINTS
