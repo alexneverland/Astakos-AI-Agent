@@ -12,21 +12,20 @@ from rich.console import Console
 # Αγνοούμε τα προειδοποιητικά για να είναι καθαρό το τερματικό
 warnings.filterwarnings("ignore")
 
-# [MASTRO-STRATEGY]: 
-# llm -> Το οικονομικό και ταχύτατο για το 90% των κλήσεων
-# llm_heavy -> Το "σκεπτόμενο" για summaries και μνήμες
+# 1. Δηλώνεις τα ονόματα (strings) μια και έξω στην κορυφή
+FAST_MODEL = "gemini-3.5-flash"
+HEAVY_MODEL = "gemini-3.1-pro"
 
-# Κύριο LLM
+# 2. Τα περνάς στο LangChain
 llm = ChatGoogleGenerativeAI(
-    model="gemini-3.1-flash-lite-preview", 
+    model=FAST_MODEL, 
     temperature=0.7
 )
 
-# Βαρύ LLM
 llm_heavy = ChatGoogleGenerativeAI(
-    model="gemini-3-flash-preview", 
-    temperature=0.2
+    model=HEAVY_MODEL, 
+    temperature=0.1  
 )
 
 console = Console()
-print("\033[92m[Brain]: Gemini 3.1 & 3.0 Engines Loaded (AI Studio Mode) 🦞\033[0m")
+print("\033[92m[Brain]: Gemini Engines Loaded (AI Studio Mode) 🦞\033[0m")
