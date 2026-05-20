@@ -91,7 +91,7 @@ class AstakosMemoryManager:
                     data = []
 
         data.append({"tag": new_tags, "time": datetime.now().strftime("%H:%M")})
-        data = data[-10:]
+        data = data[-15:]
 
         with open(WORKING_MEMORY_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
