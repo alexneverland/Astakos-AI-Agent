@@ -40,7 +40,7 @@ from memory.vector_store import vector_store, vector_lock, memory
 from services.embeddings import embeddings
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
-    search_goldmall_offers, send_messenger_message, get_navigation_info, draft_messenger_message, search_google_places
+    search_goldmall_offers, send_messenger_message, get_navigation_info, relay_local_payload, search_google_places
 )
 from astakos_skills.search_flights import search_flights
 from astakos_skills.recipe_expert import recipe_expert, log_meal
@@ -345,10 +345,24 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
 
         # ── ADD: Νέα υπενθύμιση ─────────────────────────────────
         else:
+            from datetime import datetime, timedelta # Σιγουρέψου ότι υπάρχει
+            
             if minutes_from_now > 0:
                 target_time = (datetime.now() + timedelta(minutes=minutes_from_now)).strftime("%Y-%m-%d %H:%M")
             elif exact_time:
-                target_time = exact_time
+                # [MASTRO-FIX]: Αντικρουστικό σύστημα για τεμπέλικα LLMs
+                exact_time = exact_time.strip()
+                # Αν έδωσε μόνο ώρα (π.χ. "15:30" ή "09:00")
+                if len(exact_time) <= 5 and ":" in exact_time:
+                    today_str = datetime.now().strftime("%Y-%m-%d")
+                    target_time = f"{today_str} {exact_time}"
+                else:
+                    # Έλεγχος ότι η μορφή είναι όντως YYYY-MM-DD HH:MM
+                    try:
+                        datetime.strptime(exact_time, "%Y-%m-%d %H:%M")
+                        target_time = exact_time
+                    except ValueError:
+                        return "Σφάλμα: Η ακριβής ώρα (exact_time) πρέπει να είναι ΜΟΝΟ ώρα (HH:MM) ή πλήρης ημερομηνία (YYYY-MM-DD HH:MM)."
             else:
                 return "Σφάλμα: Πρέπει να δώσεις λεπτά ή ακριβή ώρα (YYYY-MM-DD HH:MM)."
 
@@ -1311,7 +1325,7 @@ all_tools = [
     read_local_file, write_code, run_code, write_custom_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
-    get_news, get_weather_forecast, search_supermarket_offers, draft_messenger_message,
+    get_news, get_weather_forecast, search_supermarket_offers, relay_local_payload,
     search_goldmall_offers, send_messenger_message, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin,
     DuckDuckGoSearchRun()
 ]

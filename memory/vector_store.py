@@ -139,7 +139,7 @@ class AstakosMemoryManager:
 
         vector_store.add_texts([fact], metadatas=[metadata])
 
-        # 4. Αποθήκευση JSON Profile — με έλεγχο duplicate και όριο 50 ανά category
+# 4. Αποθήκευση JSON Profile — με έξυπνο OVERWRITE
         if category != "photos":
             db = {"general": [], "family": [], "projects": [], "work": [], "home": [], "lesson": [], "photos": []}
             if os.path.exists(PROFILE_FILE):
@@ -152,24 +152,48 @@ class AstakosMemoryManager:
             if category not in db:
                 db[category] = []
 
-            # [MASTRO-FIX]: Duplicate check στο JSON πριν το append
+            # Φτιάχνουμε μια λίστα μόνο με τα strings για να τρέξουμε τα embeddings
             existing_facts = [
                 item if isinstance(item, str) else item.get("fact", "")
                 for item in db[category]
             ]
-            if fact not in existing_facts and not is_semantically_duplicate(fact, existing_facts, threshold=dup_threshold):
-                if photo_path:
-                    db[category].append({"fact": fact, "photo_path": photo_path, "date": datetime.now().strftime("%Y-%m-%d")})
-                else:
-                    db[category].append(fact)
+            
+            best_sim = 0.0
+            best_idx = -1
+            
+            # Mastro-Scanner: Αναζήτηση για παλιά εγγραφή που πρέπει να αντικατασταθεί
+            if existing_facts:
+                from services.embeddings import embeddings # Διασφάλιση ότι υπάρχει το εργαλείο
+                new_emb = embeddings.embed_query(fact)
+                existing_embs = embeddings.embed_documents(existing_facts)
+                
+                norm_a = sum(a * a for a in new_emb) ** 0.5
+                if norm_a > 0:
+                    for i, emb in enumerate(existing_embs):
+                        dot = sum(a * b for a, b in zip(new_emb, emb))
+                        norm_b = sum(b * b for b in emb) ** 0.5
+                        if norm_b > 0:
+                            sim = dot / (norm_a * norm_b)
+                            if sim > best_sim:
+                                best_sim = sim
+                                best_idx = i
 
-                # [MASTRO-FIX]: Κράτα μόνο τα τελευταία 50 ανά category
-                db[category] = db[category][-50:]
+            new_entry = {"fact": fact, "photo_path": photo_path, "date": datetime.now().strftime("%Y-%m-%d")} if photo_path else fact
 
-                with open(PROFILE_FILE, "w", encoding="utf-8") as f:
-                    json.dump(db, f, ensure_ascii=False, indent=4)
+            # OVERWRITE: Αν βρήκαμε κάτι με μεγάλη ομοιότητα, το ΑΝΤΙΚΑΘΙΣΤΟΥΜΕ!
+            threshold = dup_threshold if 'dup_threshold' in locals() else 0.88
+            if best_sim >= threshold and best_idx != -1:
+                print(f"\033[94m[JSON Profile]: Αντικατάσταση παλιάς εγγραφής! (Ομοιότητα: {best_sim:.3f})\033[0m")
+                db[category][best_idx] = new_entry
             else:
-                print(f"\033[90m[MemoryManager]: JSON duplicate skip: {fact[:60]}...\033[0m")
+                print(f"\033[92m[JSON Profile]: Νέα εγγραφή προστέθηκε.\033[0m")
+                db[category].append(new_entry)
+
+            # Κρατάμε αυστηρά μέχρι 50 ανά category
+            db[category] = db[category][-50:]
+
+            with open(PROFILE_FILE, "w", encoding="utf-8") as f:
+                json.dump(db, f, ensure_ascii=False, indent=4)
 
         return True
 
