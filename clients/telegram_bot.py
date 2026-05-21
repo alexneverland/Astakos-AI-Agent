@@ -254,10 +254,9 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
             for node_name, output in event.items():
                 if "messages" in output:
                     last_msg = output["messages"][-1]
-                    if last_msg.content:
+                    safe_text = clean_message(last_msg.content)
+                    if safe_text:                                      # ← check στο καθαρό string
                         import re
-                        # Mastro-Fix: Το clean_message προστατεύει το Telegram από το "list error"
-                        safe_text = clean_message(last_msg.content)
                         
                         # --- MASTRO INTERCEPTOR ΓΙΑ TELEGRAM ---
                         file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", safe_text)
