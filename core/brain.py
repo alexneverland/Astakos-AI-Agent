@@ -14,7 +14,7 @@ warnings.filterwarnings("ignore")
 
 # 1. Κεντρικός Ορισμός Μοντέλων (Strings)
 FAST_MODEL = "gemini-3.5-flash"
-HEAVY_MODEL = "gemini-3.1-pro"
+HEAVY_MODEL = "gemini-3.1-pro-preview"
 
 # [MASTRO-SHIELD]: Κατεβάζουμε τελείως τις ασπίδες ασφαλείας (BLOCK_NONE)
 # για να μην μπλοκάρονται αθώα/ανθρώπινα μηνύματα από false positives.
