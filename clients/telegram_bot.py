@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 from langchain_core.messages import HumanMessage, AIMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE
-from memory.event_log import log_event, is_duplicate_notification
+from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
 from core.brain import llm
 from core.graph import graph
 from core.agents import clean_message, filter_messages
@@ -395,16 +395,18 @@ def handle_message(user_text: str, chat_id: str):
         no_words  = ["όχι", "οχι", "no", "σταμάτα", "σταματα", "διέγραψε", "διεγραψε", "βγάλτο", "βγαλτο"]
 
         if any(w in text_words for w in yes_words):
-            from memory.routine_db import confirm_routine, clear_pending_confirmations
+            from memory.routine_db import confirm_routine, mark_routine_responded, clear_pending_confirmations
             for rid in list(pending_routine_confirmations.keys()):
                 confirm_routine(rid)
+                mark_routine_responded(rid)   # Anti-spam: reset cooldown στο default
                 print(f"✅ [Routine Confirmed]: {pending_routine_confirmations[rid]}")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
         elif any(w in text_check for w in no_words):
-            from memory.routine_db import decay_routine, clear_pending_confirmations
+            from memory.routine_db import decay_routine, mark_routine_ignored, clear_pending_confirmations
             for rid in list(pending_routine_confirmations.keys()):
                 decay_routine(rid)
+                mark_routine_ignored(rid)     # Anti-spam: αύξηση cooldown
                 print(f"📉 [Routine Decayed]: {pending_routine_confirmations[rid]}")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
@@ -749,28 +751,64 @@ def job_check_routines():
                 AND (last_triggered IS NULL OR last_triggered != ?)
             """, (*possible_days, target_time_str, today_str))
 
+            # ── Anti-Spam: φιλτράρισμα με per-routine cooldown ──────────
+            from memory.routine_db import (
+                get_routine_notify_info, mark_routine_notified,
+                save_pending_confirmation
+            )
+            due_routines = []
             for r_id, event_name, confidence in cursor.fetchall():
+                info = get_routine_notify_info(r_id)
+                cd_hours = info["cooldown_hours"]
+                if is_duplicate_routine(r_id, cd_hours):
+                    log_event("routines", "skipped", reason="cooldown",
+                              routine_id=r_id, event=event_name,
+                              cooldown_hours=cd_hours)
+                    continue
+                due_routines.append((r_id, event_name, confidence))
+
+            if not due_routines:
+                conn.close()
+                return
+
+            if not can_send_proactive():
+                log_event("routines", "skipped", reason="rate_limit",
+                          count=len(due_routines))
+                print(f"⏸️ [job_check_routines]: Rate limit, {len(due_routines)} routine(s) skipped")
+                conn.close()
+                return
+
+            # ── Batching: πολλές ρουτίνες → ένα μήνυμα ──────────────────
+            if len(due_routines) > 1:
+                names = ", ".join(f"'{e}'" for _, e, _ in due_routines)
+                msg   = f"🧠 **Proactive:** Μάστορα, έχεις {len(due_routines)} ρουτίνες σε ~30': {names}. Όλα έτοιμα;"
+                send_telegram_msg(msg)
+                sent_at = datetime.now()
+                for r_id, event_name, confidence in due_routines:
+                    cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                    mark_routine_notified(r_id)
+                    log_event("routines", "triggered", routine_id=r_id,
+                              event=event_name, confidence=confidence, batch=len(due_routines))
+                    pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
+                    save_pending_confirmation(r_id, event_name, sent_at)
+                conn.commit()
+            else:
+                # Μία ρουτίνα → εξατομικευμένο μήνυμα
+                r_id, event_name, confidence = due_routines[0]
                 if confidence >= 0.8:
                     msg = f"🧠 **Proactive:** Μάστορα, πλησιάζει η ώρα για '{event_name}' (σε 30'). Όλα έτοιμα;"
                 elif confidence >= 0.5:
                     msg = f"🧠 **Proactive:** Συνήθως τέτοια ώρα έχεις '{event_name}'. Ισχύει και σήμερα;"
                 else:
                     msg = f"🧠 **Proactive:** Παλιά είχαμε '{event_name}' τέτοια ώρα, να το βγάλω αν δεν παίζει πια;"
-
-                if not can_send_proactive():
-                    log_event("routines", "skipped", reason="rate_limit", routine_id=r_id, event=event_name)
-                    print(f"⏸️ [job_check_routines]: Rate limit reached, skipping '{event_name}'")
-                    continue
-                if is_duplicate_notification(msg, cooldown_seconds=3600):
-                    log_event("routines", "skipped", reason="dedup", routine_id=r_id, event=event_name)
-                    continue
                 cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                 conn.commit()
+                mark_routine_notified(r_id)
                 send_telegram_msg(msg)
-                log_event("routines", "triggered", routine_id=r_id, event=event_name, confidence=confidence)
+                log_event("routines", "triggered", routine_id=r_id,
+                          event=event_name, confidence=confidence)
                 sent_at = datetime.now()
                 pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
-                from memory.routine_db import save_pending_confirmation
                 save_pending_confirmation(r_id, event_name, sent_at)
 
             conn.close()
@@ -779,15 +817,16 @@ def job_check_routines():
 
     # 2. Timeout decay για εκκρεμείς επιβεβαιώσεις (>30')
     if pending_routine_confirmations:
-        from memory.routine_db import decay_routine
+        from memory.routine_db import decay_routine, mark_routine_ignored, remove_pending_confirmation
         now_check = datetime.now()
         for rid in list(pending_routine_confirmations.keys()):
             if (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds() > 1800:
+                ev = pending_routine_confirmations[rid]["event"]
                 decay_routine(rid)
-                log_event("routines", "timeout_decay", routine_id=rid, event=pending_routine_confirmations[rid]["event"])
-                print(f"⏰ [Routine Timeout Decay]: {pending_routine_confirmations[rid]['event']}")
+                mark_routine_ignored(rid)   # Anti-spam: διπλασιασμός cooldown
+                log_event("routines", "timeout_decay", routine_id=rid, event=ev)
+                print(f"⏰ [Routine Timeout Decay]: {ev}")
                 del pending_routine_confirmations[rid]
-                from memory.routine_db import remove_pending_confirmation
                 remove_pending_confirmation(rid)
 
 

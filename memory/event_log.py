@@ -86,28 +86,29 @@ _dedup_cache: dict = {}   # {msg_hash: sent_at_timestamp}
 _dedup_lock  = threading.Lock()
 DEDUP_COOLDOWN_DEFAULT = 300  # 5 λεπτά default cooldown
 
-def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDOWN_DEFAULT) -> bool:
+
+def is_duplicate_routine(routine_id: int, cooldown_hours: float) -> bool:
     """
-    Επιστρέφει True αν το ίδιο μήνυμα στάλθηκε πρόσφατα (εντός cooldown).
-    Χρήση: if is_duplicate_notification(msg): return
-
-    Αυτόματα καθαρίζει παλιές εγγραφές (>1 ώρα).
+    Per-routine dedup βασισμένο στο last_notified_ts από τη DB.
+    Πολύ πιο αξιόπιστο από text-hash dedup γιατί δεν εξαρτάται από το κείμενο.
+    Επιστρέφει True αν η ρουτίνα ειδοποιήθηκε πρόσφατα (εντός cooldown).
     """
-    import time
-    msg_hash = hashlib.md5(message.strip().encode("utf-8")).hexdigest()[:10]
-    now      = time.time()
-
-    with _dedup_lock:
-        # Cleanup εγγραφών > 1 ώρα
-        cutoff = now - 3600
-        old_keys = [k for k, v in _dedup_cache.items() if v < cutoff]
-        for k in old_keys:
-            del _dedup_cache[k]
-
-        if msg_hash in _dedup_cache:
-            elapsed = now - _dedup_cache[msg_hash]
-            if elapsed < cooldown_seconds:
-                return True  # duplicate
-
-        _dedup_cache[msg_hash] = now
+    try:
+        from memory.routine_db import get_routine_notify_info
+        from datetime import datetime as _dt
+        info     = get_routine_notify_info(routine_id)
+        last_ts  = info.get("last_notified_ts")
+        if not last_ts:
+            return False  # Ποτέ δεν ειδοποιήθηκε → όχι duplicate
+        last_dt       = _dt.fromisoformat(last_ts)
+        elapsed       = (_dt.now() - last_dt).total_seconds()
+        cooldown_secs = cooldown_hours * 3600
+        if elapsed < cooldown_secs:
+            remaining = int((cooldown_secs - elapsed) / 3600)
+            print(f"[event_log]: 🚫 Routine #{routine_id} σε cooldown — {remaining}ω ακόμα")
+            return True
         return False
+    except Exception as e:
+        print(f"[event_log]: is_duplicate_routine error: {e}")
+        return False  # Graceful fallback — επιτρέπουμε αποστολή
+
