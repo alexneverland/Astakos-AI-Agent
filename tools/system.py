@@ -306,11 +306,14 @@ def retrieve_photo(query: str) -> str:
 # ────────────────────────────────────────────────────────────────
 
 @tool
-def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = None, action: str = "add") -> str:
+def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = None, action: str = "add", location: str = None) -> str:
     """
     Διαχειρίζεται τοπικές υπενθυμίσεις.
     action: 'add' (νέα), 'read' (ανάγνωση ΜΟΝΟ pending), 'done' (ολοκλήρωση)
     task: Για 'add' → περιγραφή. Για 'done' → keyword της υπενθύμισης που κλείνει.
+    location: ΜΟΝΟ για τοποθεσία-based υπενθυμίσεις. Χρησιμοποίησε 'home' όταν
+              ο Λάζαρος λέει 'όταν φτάσω σπίτι', 'μόλις πάω σπίτι' κλπ.
+              Όταν δίνεται location, ΜΗΝ δίνεις minutes_from_now ή exact_time.
     """
     try:
         rems = []
@@ -326,7 +329,12 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             pending = [r for r in rems if r.get("status") == "pending"]
             if not pending:
                 return "✅ Δεν υπάρχουν εκκρεμείς υπενθυμίσεις."
-            lines = [f"• [{r['time']}] {r['task']}" for r in pending]
+            lines = []
+            for r in pending:
+                if r.get("type") == "location":
+                    lines.append(f"• [📍 {r.get('location','home')}] {r['task']}")
+                else:
+                    lines.append(f"• [{r['time']}] {r['task']}")
             return "📋 Εκκρεμείς υπενθυμίσεις:\n" + "\n".join(lines)
 
         # ── DONE: Κλείνει υπενθύμιση με keyword ────────────────
@@ -363,8 +371,13 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
                         target_time = exact_time
                     except ValueError:
                         return "Σφάλμα: Η ακριβής ώρα (exact_time) πρέπει να είναι ΜΟΝΟ ώρα (HH:MM) ή πλήρης ημερομηνία (YYYY-MM-DD HH:MM)."
+            elif location:
+                rems.append({"task": task, "type": "location", "location": location, "status": "pending"})
+                with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(rems, f, ensure_ascii=False, indent=4)
+                return f"✅ Υπενθύμιση τοποθεσίας αποθηκεύτηκε! Θα χτυπήσει όταν φτάσεις {location}."
             else:
-                return "Σφάλμα: Πρέπει να δώσεις λεπτά ή ακριβή ώρα (YYYY-MM-DD HH:MM)."
+                return "Σφάλμα: Πρέπει να δώσεις λεπτά, ακριβή ώρα, ή τοποθεσία (π.χ. location='home')."
 
             rems.append({"task": task, "time": target_time, "status": "pending"})
             with open(REMINDERS_FILE, "w", encoding="utf-8") as f:

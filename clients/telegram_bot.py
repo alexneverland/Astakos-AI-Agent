@@ -494,25 +494,74 @@ def _send_photo_to_telegram(photo_path: str, chat_id: str):
         print(f"\033[91m[TelegramBot Photo Send Error]: {e}\033[0m")
         send_telegram_msg(f"❌ Αδύνατη η αποστολή φωτογραφίας: {str(e)}")
 def handle_location(msg):
-    """Πιάνει το στίγμα και το γράφει στο last_location.json."""
-    from config import GPS_STORAGE_FILE
-    import json
-    import time
-    
-    if "location" in msg:
-        lat = msg["location"]["latitude"]
-        lon = msg["location"]["longitude"]
-        data = {
-            "lat": lat,
-            "lon": lon,
-            "timestamp": time.time()
-        }
-        try:
-            with open(GPS_STORAGE_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f)
-            print(f"📍 [GPS]: Το στίγμα ενημερώθηκε: {lat}, {lon}")
-        except Exception as e:
-            print(f"❌ Σφάλμα GPS: {e}")
+    """Λαμβάνει live location και ελέγχει για location-based reminders."""
+    import math
+
+    chat_id = str(msg.get("chat", {}).get("id", ""))
+    loc     = msg.get("location", {})
+    lat     = loc.get("latitude")
+    lon     = loc.get("longitude")
+    if not lat or not lon:
+        return
+
+    print(f"\033[94m[Location]: {lat}, {lon}\033[0m")
+
+    # ── Location Reminders ──────────────────────────────────────
+    try:
+        from config import HOME_COORDS, HOME_RADIUS_M, REMINDERS_FILE
+
+        def haversine(lat1, lon1, lat2, lon2):
+            R = 6371000
+            p = math.pi / 180
+            a = (math.sin((lat2-lat1)*p/2)**2 +
+                 math.cos(lat1*p) * math.cos(lat2*p) *
+                 math.sin((lon2-lon1)*p/2)**2)
+            return 2 * R * math.asin(math.sqrt(a))
+
+        if os.path.exists(REMINDERS_FILE):
+            with open(REMINDERS_FILE, "r", encoding="utf-8") as f:
+                rems = json.load(f)
+
+            changed = False
+            for r in rems:
+                if r.get("status") != "pending" or r.get("type") != "location":
+                    continue
+                target = r.get("location", "home")
+                if target == "home":
+                    dist = haversine(lat, lon, HOME_COORDS[0], HOME_COORDS[1])
+                    if dist <= HOME_RADIUS_M:
+                        send_telegram_msg(f"📍 ΥΠΕΝΘΥΜΙΣΗ (Έφτασες σπίτι!): {r['task']}")
+                        print(f"\033[93m[Location Reminder]: {r['task']} fired ({dist:.0f}m)\033[0m")
+                        r["status"] = "done"
+                        changed = True
+
+            if changed:
+                with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(rems, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"\033[91m[Location Reminder Error]: {e}\033[0m")
+
+    # ── Web Agent για γεωγραφικό context ───────────────────────
+    from core.graph import graph
+    from langchain_core.messages import HumanMessage
+    location_prompt = (
+        f"[GPS_UPDATE] Ο Λάζαρος μοιράστηκε τοποθεσία: lat={lat}, lon={lon}. "
+        "Χρησιμοποίησε το web tool για reverse geocoding και απάντησε σύντομα στα Ελληνικά "
+        "πού βρίσκεται, με Google Maps link και οδηγίες από Piston 7."
+    )
+    try:
+        final = ""
+        for event in graph.stream({"messages": [HumanMessage(content=location_prompt)]}):
+            for node, data in event.items():
+                msgs = data.get("messages", [])
+                if msgs and hasattr(msgs[-1], "content") and msgs[-1].content.strip():
+                    final = msgs[-1].content.strip()
+        if final:
+            from core.agents import clean_message
+            send_telegram_msg(clean_message(final))
+    except Exception as e:
+        print(f"\033[91m[Location Handler Error]: {e}\033[0m")
+        send_telegram_msg(f"📍 Τοποθεσία: {lat}, {lon}")
 
 # ────────────────────────────────────────────────────────────────
 # POLLING LOOP
