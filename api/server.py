@@ -47,6 +47,27 @@ astakos_queue   = queue.Queue()
 memory_lock     = threading.Lock()
 last_interaction_time = time.time()
 
+# ── WebSocket log streaming ────────────────────────────────────
+active_websockets: list = []
+server_loop = None
+
+class WsLogger:
+    """Intercepts print() output and streams it live to Web UI via WebSocket."""
+    def __init__(self, orig):
+        self.orig = orig
+    def write(self, msg):
+        self.orig.write(msg)
+        self.orig.flush()
+        if msg.strip() and server_loop and active_websockets:
+            clean_msg = re.sub(r'\x1b\[[0-9;]*m', '', msg)
+            for ws in active_websockets:
+                try:
+                    asyncio.run_coroutine_threadsafe(ws.send_text(clean_msg), server_loop)
+                except Exception:
+                    pass
+    def flush(self):
+        self.orig.flush()
+
 from core.graph import build_graph as _build_graph
 app_graph = _build_graph()
 
@@ -192,8 +213,9 @@ def proactive_worker():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Ξεκινάει workers, περιμένει, τερματίζει καθαρά."""
-    global server_loop                               # <--- ΠΡΟΣΘΗΚΗ ΑΥΤΗ ΤΗ ΓΡΑΜΜΗ
+    global server_loop
     server_loop = asyncio.get_running_loop()
+    sys.stdout = WsLogger(sys.stdout)
     threads = [
         # reminder_worker και proactive_worker τρέχουν ΜΟΝΟ στο telegram_bot.py
         # Εδώ κρατάμε μόνο τον queue_worker για τα background memory tasks
@@ -401,9 +423,37 @@ async def chat_endpoint(request: Request):
         traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@server.get("/")
+async def read_index():
+    """Σερβίρει το Web UI (index.html)."""
+    from fastapi.responses import FileResponse
+    return FileResponse('index.html')
+
+
 @server.get("/health")
 async def health():
     return {"status": "ok", "time": datetime.now().isoformat()}
+
+
+@server.get("/history")
+async def get_history():
+    """Δίνει το ιστορικό στο Web UI — διαβάζει από JSON για να επιβιώνει το F5/restart."""
+    with chat_history_lock:
+        history = _load_chat_history()
+    return {"history": history}
+
+
+@server.websocket("/ws/logs")
+async def websocket_logs(websocket: WebSocket):
+    """Κρατάει το κανάλι ανοιχτό — στέλνει live print() output στο Web UI."""
+    await websocket.accept()
+    active_websockets.append(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        if websocket in active_websockets:
+            active_websockets.remove(websocket)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -752,7 +802,7 @@ function render(d) {
           <td class="off">#${r.id}</td><td>${r.day}</td><td><b>${r.time}</b></td>
           <td>${r.event}</td>
           <td style="min-width:80px">${confBar(r.confidence)}</td>
-          <td class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null ? r.cooldown_remaining_h+'h' : '—'}</td>
+          <td class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null ? r.cooldown_remaining_h+'h' : '\u2014'}</td>
           <td>${stateBadge(r.state)}</td>
         </tr>`).join('')}
       </table></div>`;
@@ -760,13 +810,13 @@ function render(d) {
 
   const sc = rout.state_counts || {};
   if (Object.keys(sc).length > 0) {
-    html += `<div class="card"><h2>📈 Routine State Counts</h2>
+    html += `<div class="card"><h2>\ud83d\udcc8 Routine State Counts</h2>
       ${Object.entries(sc).map(([st,c]) => `<div class="kv"><span class="k">${stateBadge(st)}</span><span class="v">${c}</span></div>`).join('')}
     </div>`;
   }
 
   if ((rout.non_active||[]).length > 0) {
-    html += `<div class="card"><h2>🔄 Non-Active Routines</h2>
+    html += `<div class="card"><h2>\ud83d\udd04 Non-Active Routines</h2>
       <table><tr><th>ID</th><th>Event</th><th>State</th><th>Conf</th></tr>
       ${rout.non_active.map(r => `<tr>
           <td class="off">#${r.id}</td><td>${r.event}</td>
@@ -779,7 +829,7 @@ function render(d) {
   const tp = evts.throughput || {};
   if (Object.keys(tp).length > 0) {
     const max_tp = Math.max(...Object.values(tp), 1);
-    html += `<div class="card"><h2>⚡ Event Throughput (last 1h)</h2>
+    html += `<div class="card"><h2>\u26a1 Event Throughput (last 1h)</h2>
       ${Object.entries(tp).sort((a,b)=>b[1]-a[1]).map(([k,v]) => {
         const pct = Math.round(v/max_tp*100);
         return `<div style="margin-bottom:5px">
@@ -791,7 +841,7 @@ function render(d) {
   }
 
   if ((evts.last_errors||[]).length > 0) {
-    html += `<div class="card"><h2>❌ Last Errors (1h)</h2>
+    html += `<div class="card"><h2>\u274c Last Errors (1h)</h2>
       ${evts.last_errors.map(e => `<div style="margin-bottom:6px;font-size:12px">
         <span class="off">${e.time}</span> <span class="warn">[${e.job}]</span><br>
         <span class="err">${e.error}</span>
@@ -808,7 +858,7 @@ async function fetchData() {
     const d = await r.json();
     render(d);
   } catch(e) {
-    document.getElementById('ts').innerHTML = `<span class="err">Σφάλμα φόρτωσης: ${e}</span>`;
+    document.getElementById('ts').innerHTML = `<span class="err">\u03a3\u03c6\u03ac\u03bb\u03bc\u03b1 \u03c6\u03cc\u03c1\u03c4\u03c9\u03c3\u03b7\u03c2: ${e}</span>`;
   }
 }
 
