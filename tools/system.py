@@ -379,23 +379,27 @@ from memory.routine_db import upsert_routine
 @tool
 def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: str = "general") -> str:
     """
-    [CRITICAL]: Χρησιμοποίησέ το ΟΤΑΝ ο Λάζαρος αναφέρει μια συνήθεια, 
+    [CRITICAL]: Χρησιμοποίησέ το ΟΤΑΝ ο Λάζαρος αναφέρει μια συνήθεια,
     μια ρουτίνα ή κάτι που επαναλαμβάνεται (π.χ. "Κάθε Παρασκευή στις 13:00 πάω λαϊκή").
-    - day_of_week: Ακριβώς η μέρα (π.χ. "Monday", "Friday") Ή η λέξη "Everyday" αν είναι καθημερινή ρουτίνα.
-    - time_str: Η ώρα σε μορφή HH:MM (π.χ. "13:00")
-    - event_name: Περιγραφή του γεγονότος.
+
+    ΚΑΝΟΝΕΣ ΓΙΑ ΤΑ ΟΡΙΣΜΑΤΑ:
+    - day_of_week: Αγγλικό canonical ("Monday"…"Sunday") ή "Everyday" για καθημερινή ρουτίνα.
+    - time_str: Ώρα σε HH:MM (π.χ. "13:00"). Αν δεν αναφέρεται ώρα, ΜΗΝ καλέσεις το tool.
+    - event_name: ΣΥΝΤΟΜΗ canonical περιγραφή σε 2-4 λέξεις (π.χ. "μήνυμα Κώστα", "λαϊκή αγορά",
+      "γυμναστήριο"). ΜΗΝ βάλεις "Κάθε μέρα", "Κάθε πρωί" ή χρονικές φράσεις — αυτές ανήκουν
+      στο day_of_week/time_str. Το event_name πρέπει να είναι ΣΤΑΘΕΡΟ για την ίδια δραστηριότητα.
     - event_type: "family", "work", "hobby", "general".
+
+    ΠΡΟΣΟΧΗ: Κάλεσέ το ΜΟΝΟ για recurring δραστηριότητες. Αγνόησε one-off γεγονότα
+    ("σήμερα πήγα…", "αύριο έχω…").
     """
     try:
-        # Μικρό normalization
-        day_of_week = day_of_week.capitalize()
-        
-        # Ανέβασμα confidence: 
-        # Επειδή το είπε ρητά στο chat, του δίνουμε ένα γερό boost!
         res = upsert_routine(day_of_week, time_str, event_name, event_type, confidence_boost=0.3)
-        
+
         if res == "created":
-            return f"✅ Ρουτίνα '{event_name}' καταγράφηκε για πρώτη φορά (Confidence: 50%)."
+            return f"✅ Ρουτίνα '{event_name}' καταγράφηκε (θα ενεργοποιηθεί μετά από 2η επιβεβαίωση)."
+        elif res == "merged":
+            return f"✅ Ρουτίνα '{event_name}' αναγνωρίστηκε ως παρόμοια με υπάρχουσα και ενοποιήθηκε."
         else:
             return f"✅ Ρουτίνα '{event_name}' ενισχύθηκε! (Confidence Boosted)."
     except Exception as e:
@@ -416,7 +420,8 @@ def get_routines(day_of_week: str) -> str:
         lines = [f"📅 Ρουτίνες για {day_of_week}:"]
         for r in routines:
             conf_pct = int(r['confidence'] * 100)
-            lines.append(f"  • {r['time']} — {r['event']} ({r['type']}, {conf_pct}% σιγουριά)")
+            mentions = r.get('mentions', 1)
+            lines.append(f"  • {r['time']} — {r['event']} ({r['type']}, {conf_pct}% conf, {mentions}x αναφ.)")
         return "\n".join(lines)
     except Exception as e:
         return f"❌ Σφάλμα ανάκτησης ρουτινών: {e}"
