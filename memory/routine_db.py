@@ -105,6 +105,18 @@ def setup_db():
         cursor.execute("ALTER TABLE routines ADD COLUMN mention_count INTEGER DEFAULT 1")
         print("[routine_db]: Migration → 'mention_count'")
 
+    if "ignore_count" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN ignore_count INTEGER DEFAULT 0")
+        print("[routine_db]: Migration → 'ignore_count'")
+
+    if "notify_cooldown_hours" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN notify_cooldown_hours REAL DEFAULT 20.0")
+        print("[routine_db]: Migration → 'notify_cooldown_hours'")
+
+    if "last_notified_ts" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN last_notified_ts TEXT")
+        print("[routine_db]: Migration → 'last_notified_ts'")
+
     # Backfill fingerprints
     cursor.execute("SELECT id, day_of_week, time_str, event_name FROM routines WHERE fingerprint IS NULL")
     for r_id, day, time, event in cursor.fetchall():
@@ -256,6 +268,89 @@ def get_routines_for_day(day: str) -> list:
     ]
 
 setup_db()
+
+# ────────────────────────────────────────────────────────────────
+# ANTI-SPAM: Adaptive Cooldown
+# ────────────────────────────────────────────────────────────────
+
+COOLDOWN_DEFAULT_HOURS = 20.0   # Κανονική ρουτίνα: δεν ξαναστέλνεται για 20ω
+COOLDOWN_MIN_HOURS     = 4.0    # Ελάχιστο (π.χ. αν επαναφερθεί μετά από confirm)
+COOLDOWN_MAX_HOURS     = 72.0   # Μέγιστο (3 μέρες αν αγνοηθεί πολλές φορές)
+
+
+def mark_routine_notified(routine_id: int):
+    """Αποθηκεύει timestamp τελευταίας ειδοποίησης."""
+    from datetime import datetime as _dt
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE routines SET last_notified_ts=? WHERE id=?",
+        (_dt.now().isoformat(timespec="seconds"), routine_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def mark_routine_ignored(routine_id: int):
+    """
+    Ο χρήστης αγνόησε την ειδοποίηση (timeout).
+    Αυξάνει το cooldown (διπλασιάζει, max 72ω) και το ignore_count.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT ignore_count, notify_cooldown_hours FROM routines WHERE id=?",
+        (routine_id,)
+    )
+    row = cursor.fetchone()
+    if row:
+        ignore_count   = (row[0] or 0) + 1
+        current_cd     = row[1] or COOLDOWN_DEFAULT_HOURS
+        new_cd         = min(COOLDOWN_MAX_HOURS, current_cd * 2)
+        cursor.execute(
+            "UPDATE routines SET ignore_count=?, notify_cooldown_hours=? WHERE id=?",
+            (ignore_count, new_cd, routine_id)
+        )
+        conn.commit()
+        print(f"[routine_db]: 🙉 ignore#{ignore_count} → cooldown {new_cd:.0f}h (id={routine_id})")
+    conn.close()
+
+
+def mark_routine_responded(routine_id: int):
+    """
+    Ο χρήστης απάντησε (yes/no/confirm).
+    Μηδενίζει ignore_count και επαναφέρει cooldown στο default.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE routines SET ignore_count=0, notify_cooldown_hours=? WHERE id=?",
+        (COOLDOWN_DEFAULT_HOURS, routine_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_routine_notify_info(routine_id: int) -> dict:
+    """
+    Επιστρέφει {'cooldown_hours': float, 'last_notified_ts': str|None}
+    για έλεγχο αν επιτρέπεται νέα ειδοποίηση.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT notify_cooldown_hours, last_notified_ts FROM routines WHERE id=?",
+        (routine_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return {"cooldown_hours": COOLDOWN_DEFAULT_HOURS, "last_notified_ts": None}
+    return {
+        "cooldown_hours":  row[0] if row[0] is not None else COOLDOWN_DEFAULT_HOURS,
+        "last_notified_ts": row[1]
+    }
+
 
 # ────────────────────────────────────────────────────────────────
 # PENDING CONFIRMATIONS PERSISTENCE (Recovery After Restart)
