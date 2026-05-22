@@ -78,6 +78,42 @@ def enqueue_task(func, *args):
     astakos_queue.put((func, args))
 
 
+# ── Human Override State ──────────────────────────────────────
+import time as _time
+
+_OVERRIDE_FILE = os.path.join(os.path.dirname(__file__), "..", "scheduler_state.json")
+_override_state = {"pause_reminders": False, "mute_proactive": False, "sleep_until": None}
+_override_lock  = threading.Lock()
+
+def _load_override_state():
+    global _override_state
+    try:
+        if os.path.exists(_OVERRIDE_FILE):
+            with open(_OVERRIDE_FILE, "r", encoding="utf-8") as f:
+                _override_state.update(json.load(f))
+    except Exception:
+        pass
+
+def _save_override_state():
+    try:
+        with open(_OVERRIDE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_override_state, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+def is_reminders_paused() -> bool:
+    with _override_lock:
+        if _override_state.get("sleep_until") and _time.time() < _override_state["sleep_until"]:
+            return True
+        return bool(_override_state.get("pause_reminders"))
+
+def is_proactive_muted() -> bool:
+    with _override_lock:
+        if _override_state.get("sleep_until") and _time.time() < _override_state["sleep_until"]:
+            return True
+        return bool(_override_state.get("mute_proactive"))
+
+
 # ────────────────────────────────────────────────────────────────
 # QUEUE WORKER
 # ────────────────────────────────────────────────────────────────
@@ -359,17 +395,19 @@ def handle_message(user_text: str, chat_id: str):
         no_words  = ["όχι", "οχι", "no", "σταμάτα", "σταματα", "διέγραψε", "διεγραψε", "βγάλτο", "βγαλτο"]
 
         if any(w in text_words for w in yes_words):
-            from memory.routine_db import confirm_routine
+            from memory.routine_db import confirm_routine, clear_pending_confirmations
             for rid in list(pending_routine_confirmations.keys()):
                 confirm_routine(rid)
                 print(f"✅ [Routine Confirmed]: {pending_routine_confirmations[rid]}")
             pending_routine_confirmations.clear()
+            clear_pending_confirmations()
         elif any(w in text_check for w in no_words):
-            from memory.routine_db import decay_routine
+            from memory.routine_db import decay_routine, clear_pending_confirmations
             for rid in list(pending_routine_confirmations.keys()):
                 decay_routine(rid)
                 print(f"📉 [Routine Decayed]: {pending_routine_confirmations[rid]}")
             pending_routine_confirmations.clear()
+            clear_pending_confirmations()
     with memory_lock:
         last_interaction_time = time.time()
 
@@ -565,7 +603,39 @@ def run_polling():
                     continue
 
                 # --- [MASTRO-COMMANDS] ---
-                if user_text.lower() == "/status":
+                cmd = user_text.lower().strip()
+
+                if cmd == "/pause":
+                    with _override_lock:
+                        _override_state["pause_reminders"] = True
+                    _save_override_state()
+                    send_telegram_msg("⏸️ Reminders παγωμένα. `/resume` για επαναφορά.")
+                    continue
+
+                if cmd == "/mute":
+                    with _override_lock:
+                        _override_state["mute_proactive"] = True
+                    _save_override_state()
+                    send_telegram_msg("🔇 Proactive notifications σιωπηλά. `/resume` για επαναφορά.")
+                    continue
+
+                if cmd.startswith("/sleep"):
+                    parts = cmd.split()
+                    hours = float(parts[1]) if len(parts) > 1 else 8.0
+                    with _override_lock:
+                        _override_state["sleep_until"] = _time.time() + hours * 3600
+                    _save_override_state()
+                    send_telegram_msg(f"😴 Sleep mode για {hours:.0f} ώρες. Ησυχία!")
+                    continue
+
+                if cmd == "/resume":
+                    with _override_lock:
+                        _override_state.update({"pause_reminders": False, "mute_proactive": False, "sleep_until": None})
+                    _save_override_state()
+                    send_telegram_msg("✅ Όλα ξανά ενεργά!")
+                    continue
+
+                if cmd == "/status":
                     if astakos_scheduler:
                         send_telegram_msg(astakos_scheduler.status())
                     else:
@@ -601,6 +671,8 @@ def run_polling():
 
 def job_check_reminders():
     """Ελέγχει για υπενθυμίσεις και τις στέλνει στο Telegram."""
+    if is_reminders_paused():
+        return
     from config import REMINDERS_FILE
     if not os.path.exists(REMINDERS_FILE):
         return
@@ -643,7 +715,9 @@ def job_check_routines():
         "Sunday":    ["Sunday", "Κυριακή"],
     }
 
-    # Quiet hours: δεν στέλνουμε proactive routine notifications
+    # Quiet hours ή proactive muted
+    if is_proactive_muted():
+        return
     if is_quiet_hours():
         # Timeout decay τρέχει κανονικά, notifications όχι
         if pending_routine_confirmations:
@@ -694,7 +768,10 @@ def job_check_routines():
                 conn.commit()
                 send_telegram_msg(msg)
                 log_event("routines", "triggered", routine_id=r_id, event=event_name, confidence=confidence)
-                pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": datetime.now()}
+                sent_at = datetime.now()
+                pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
+                from memory.routine_db import save_pending_confirmation
+                save_pending_confirmation(r_id, event_name, sent_at)
 
             conn.close()
     except Exception as e:
@@ -710,6 +787,8 @@ def job_check_routines():
                 log_event("routines", "timeout_decay", routine_id=rid, event=pending_routine_confirmations[rid]["event"])
                 print(f"⏰ [Routine Timeout Decay]: {pending_routine_confirmations[rid]['event']}")
                 del pending_routine_confirmations[rid]
+                from memory.routine_db import remove_pending_confirmation
+                remove_pending_confirmation(rid)
 
 
 def job_proactive_scan():
@@ -719,6 +798,8 @@ def job_proactive_scan():
     from tools.system import read_local_file
     WATCH_DIR = "C:\\astakos_v2\\watch_folder"
 
+    if is_proactive_muted():
+        return
     if is_quiet_hours():
         print("🌙 [job_proactive_scan]: Quiet hours — παραλείπεται.")
         return
@@ -821,7 +902,7 @@ class AstakosScheduler:
                         job["disabled"] = True
                         log_event(job["name"], "disabled", reason="max_failures")
                         print(f"\033[91m🚫 [Scheduler]: '{job['name']}' απενεργοποιήθηκε!\033[0m")
-                        send_telegram_msg(f"⚠️ Watchdog: Job `{job['name']}` απενεργοποιήθηκε μετά από {self.MAX_FAILURES} σφάλματα.\nΤελευταίο: {str(e)[:200]}")
+                        send_telegram_msg(f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 \u03bc\u03b5\u03c4\u03ac \u03b1\u03c0\u03cc {self.MAX_FAILURES} \u03c3\u03c6\u03ac\u03bb\u03bc\u03b1\u03c4\u03b1.\\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}")
 
                 job["last_run"]      = time.time()
                 job["last_duration"] = time.time() - t_start
@@ -830,30 +911,42 @@ class AstakosScheduler:
 
     def status(self) -> str:
         now   = time.time()
-        lines = ["📊 *Scheduler Status:*"]
+        lines = ["\U0001f4ca *Scheduler Status:*"]
         for job in self._jobs:
-            icon = "🚫" if job["disabled"] else "✅"
+            icon = "\U0001f6ab" if job["disabled"] else "\u2705"
             if job["last_run"] > 0:
                 last_str  = datetime.fromtimestamp(job["last_run"]).strftime("%H:%M:%S")
                 next_secs = max(0, int(job["interval"] - (now - job["last_run"])))
                 next_str  = f"{next_secs}s"
             else:
-                last_str = "—"
-                next_str = "αμέσως"
+                last_str = "\u2014"
+                next_str = "\u03b1\u03bc\u03ad\u03c3\u03c9\u03c2"
             lines.append(
                 f"{icon} `{job['name']}` | last: {last_str} | next: {next_str} "
                 f"| {job['last_duration']:.1f}s | fails: {job['fail_count']}"
             )
             if job["last_error"]:
-                lines.append(f"   └─ ⚠️ _{job['last_error'][:100]}_")
+                lines.append(f"   \u2514\u2500 \u26a0\ufe0f _{job['last_error'][:100]}_")
 
         lines.append("")
-        lines.append(f"⏳ Pending confirmations: {len(pending_routine_confirmations)}")
-        lines.append(f"📬 Queue size: {astakos_queue.qsize()}")
+        lines.append(f"\u23f3 Pending confirmations: {len(pending_routine_confirmations)}")
+        lines.append(f"\U0001f4ec Queue size: {astakos_queue.qsize()}")
         quiet = is_quiet_hours()
-        lines.append(f"🌙 Quiet hours: {'ΝΑΙ' if quiet else 'ΟΧΙ'} ({QUIET_HOURS[0]:02d}:00–{QUIET_HOURS[1]:02d}:00)")
+        quiet_label = "\u039d\u0391\u0399" if quiet else "\u039f\u03a7\u0399"
+        lines.append(f"\U0001f319 Quiet hours: {quiet_label} ({QUIET_HOURS[0]:02d}:00\u2013{QUIET_HOURS[1]:02d}:00)")
         with _proactive_lock:
-            lines.append(f"📣 Proactive this hour: {_proactive_count['count']}/{MAX_PROACTIVE_PER_HOUR}")
+            lines.append(f"\U0001f4e3 Proactive this hour: {_proactive_count['count']}/{MAX_PROACTIVE_PER_HOUR}")
+        with _override_lock:
+            paused  = _override_state.get("pause_reminders")
+            muted   = _override_state.get("mute_proactive")
+            sleep_u = _override_state.get("sleep_until")
+            sleeping = sleep_u and _time.time() < sleep_u
+        if paused or muted or sleeping:
+            ovr = []
+            if paused:   ovr.append("reminders paused")
+            if muted:    ovr.append("proactive muted")
+            if sleeping: ovr.append(f"sleep until {datetime.fromtimestamp(sleep_u).strftime('%H:%M')}")
+            lines.append(f"\U0001f6d1 Override: {', '.join(ovr)}")
         return "\n".join(lines)
 
 
@@ -865,7 +958,7 @@ if __name__ == "__main__":
     import signal as _signal
 
     def _handle_exit(*args):
-        print("\n[TelegramBot]: Τερματισμός...")
+        print("\n[TelegramBot]: \u03a4\u03b5\u03c1\u03bc\u03b1\u03c4\u03b9\u03c3\u03bc\u03cc\u03c2...")
         shutdown_event.set()
 
     _signal.signal(_signal.SIGTERM, _handle_exit)
@@ -873,17 +966,24 @@ if __name__ == "__main__":
 
     threading.Thread(target=queue_worker, daemon=True).start()
 
-    global astakos_scheduler
+    # Recovery
+    _load_override_state()
+    from memory.routine_db import load_pending_confirmations
+    pending_routine_confirmations.update(load_pending_confirmations())
+    if pending_routine_confirmations:
+        print(f"\033[93m[Recovery]: \u03a6\u03bf\u03c1\u03c4\u03ce\u03b8\u03b7\u03ba\u03b1\u03bd {len(pending_routine_confirmations)} pending confirmations.\033[0m")
+
+    # Central Scheduler
     astakos_scheduler = AstakosScheduler()
     astakos_scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders")
     astakos_scheduler.register(job_check_routines,  interval_seconds=60,    name="routines")
     astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive")
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
 
-    print("━" * 50)
-    print("  🦞  Αστακός Telegram Bot — Εκκίνηση")
-    print("━" * 50)
-    send_telegram_msg("🦞 Αστακός Bot: Ξεκίνησα! Πώς μπορώ να βοηθήσω, Μάστορη;")
+    print("\u2501" * 50)
+    print("  \U0001f99e  \u0391\u03c3\u03c4\u03b1\u03ba\u03cc\u03c2 Telegram Bot \u2014 \u0395\u03ba\u03ba\u03af\u03bd\u03b7\u03c3\u03b7")
+    print("\u2501" * 50)
+    send_telegram_msg("\U0001f99e \u0391\u03c3\u03c4\u03b1\u03ba\u03cc\u03c2 Bot: \u039e\u03b5\u03ba\u03af\u03bd\u03b1\u03c3\u03b1! \u03a0\u03ce\u03c2 \u03bc\u03c0\u03bf\u03c1\u03ce \u03bd\u03b1 \u03b2\u03bf\u03b7\u03b8\u03ae\u03c3\u03c9, \u039c\u03ac\u03c3\u03c4\u03bf\u03c1\u03b7;")
 
     try:
         run_polling()
@@ -895,4 +995,4 @@ if __name__ == "__main__":
             _run_session_summary()
         except Exception:
             pass
-        print("[TelegramBot]: Τερματίστηκε.")
+        print("[TelegramBot]: \u03a4\u03b5\u03c1\u03bc\u03b1\u03c4\u03af\u03c3\u03c4\u03b7\u03ba\u03b5.")

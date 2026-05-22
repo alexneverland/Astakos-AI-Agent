@@ -256,3 +256,63 @@ def get_routines_for_day(day: str) -> list:
     ]
 
 setup_db()
+
+# ────────────────────────────────────────────────────────────────
+# PENDING CONFIRMATIONS PERSISTENCE (Recovery After Restart)
+# ────────────────────────────────────────────────────────────────
+
+def _setup_pending_table():
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS pending_confirmations (
+            routine_id INTEGER PRIMARY KEY,
+            event_name TEXT,
+            sent_at    TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def save_pending_confirmation(routine_id: int, event_name: str, sent_at: datetime):
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT OR REPLACE INTO pending_confirmations (routine_id, event_name, sent_at) VALUES (?, ?, ?)",
+        (routine_id, event_name, sent_at.isoformat())
+    )
+    conn.commit()
+    conn.close()
+
+def remove_pending_confirmation(routine_id: int):
+    conn = get_connection()
+    conn.execute("DELETE FROM pending_confirmations WHERE routine_id=?", (routine_id,))
+    conn.commit()
+    conn.close()
+
+def clear_pending_confirmations():
+    conn = get_connection()
+    conn.execute("DELETE FROM pending_confirmations")
+    conn.commit()
+    conn.close()
+
+def load_pending_confirmations() -> dict:
+    """
+    Φορτώνει τα pending confirmations από τη DB κατά την εκκίνηση.
+    Επιστρέφει {routine_id: {"event": ..., "sent_at": datetime}}
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT routine_id, event_name, sent_at FROM pending_confirmations")
+    rows   = cursor.fetchall()
+    conn.close()
+    result = {}
+    for r_id, event_name, sent_at_str in rows:
+        try:
+            sent_at = datetime.fromisoformat(sent_at_str)
+        except Exception:
+            sent_at = datetime.now()
+        result[r_id] = {"event": event_name, "sent_at": sent_at}
+    return result
+
+_setup_pending_table()
