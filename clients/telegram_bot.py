@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 from langchain_core.messages import HumanMessage, AIMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE
+from memory.event_log import log_event, is_duplicate_notification
 from core.brain import llm
 from core.graph import graph
 from core.agents import clean_message, filter_messages
@@ -611,7 +612,11 @@ def job_check_reminders():
     now, changed = datetime.now().strftime("%Y-%m-%d %H:%M"), False
     for r in rems:
         if r["status"] == "pending" and now >= r["time"]:
-            send_telegram_msg(f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {r['task']}")
+            msg = f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {r['task']}"
+            if is_duplicate_notification(msg, cooldown_seconds=60):
+                continue
+            send_telegram_msg(msg)
+            log_event("reminders", "sent", task=r["task"])
             r["status"], changed = "done", True
     if changed:
         with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
@@ -679,11 +684,16 @@ def job_check_routines():
                     msg = f"🧠 **Proactive:** Παλιά είχαμε '{event_name}' τέτοια ώρα, να το βγάλω αν δεν παίζει πια;"
 
                 if not can_send_proactive():
+                    log_event("routines", "skipped", reason="rate_limit", routine_id=r_id, event=event_name)
                     print(f"⏸️ [job_check_routines]: Rate limit reached, skipping '{event_name}'")
+                    continue
+                if is_duplicate_notification(msg, cooldown_seconds=3600):
+                    log_event("routines", "skipped", reason="dedup", routine_id=r_id, event=event_name)
                     continue
                 cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                 conn.commit()
                 send_telegram_msg(msg)
+                log_event("routines", "triggered", routine_id=r_id, event=event_name, confidence=confidence)
                 pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": datetime.now()}
 
             conn.close()
@@ -697,6 +707,7 @@ def job_check_routines():
         for rid in list(pending_routine_confirmations.keys()):
             if (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds() > 1800:
                 decay_routine(rid)
+                log_event("routines", "timeout_decay", routine_id=rid, event=pending_routine_confirmations[rid]["event"])
                 print(f"⏰ [Routine Timeout Decay]: {pending_routine_confirmations[rid]['event']}")
                 del pending_routine_confirmations[rid]
 
@@ -742,9 +753,12 @@ def job_proactive_scan():
         reply = response.text.strip()
 
         if reply and "ΟΛΑ ΚΑΛΑ" not in reply:
-            send_telegram_msg(reply)
-            print(f"⚠️ [Proactive Alert Sent]: {reply[:50]}...")
+            if not is_duplicate_notification(reply, cooldown_seconds=3600):
+                send_telegram_msg(reply)
+                log_event("proactive", "alert_sent", preview=reply[:80])
+                print(f"⚠️ [Proactive Alert Sent]: {reply[:50]}...")
         else:
+            log_event("proactive", "all_clear")
             print("✔️ [Proactive]: Όλα καθαρά.")
     except Exception as e:
         print(f"⚠️ [job_proactive_scan]: {e}")
@@ -792,16 +806,20 @@ class AstakosScheduler:
                     continue
 
                 t_start = time.time()
+                log_event(job["name"], "start")
                 try:
                     job["func"]()
                     job["fail_count"] = 0
                     job["last_error"] = None
+                    log_event(job["name"], "complete", duration=round(time.time()-t_start, 2))
                 except Exception as e:
                     job["fail_count"] += 1
                     job["last_error"] = str(e)
+                    log_event(job["name"], "error", error=str(e), fail_count=job["fail_count"])
                     print(f"\033[91m❌ [Scheduler/{job['name']}]: {e} (fail {job['fail_count']}/{self.MAX_FAILURES})\033[0m")
                     if job["fail_count"] >= self.MAX_FAILURES:
                         job["disabled"] = True
+                        log_event(job["name"], "disabled", reason="max_failures")
                         print(f"\033[91m🚫 [Scheduler]: '{job['name']}' απενεργοποιήθηκε!\033[0m")
                         send_telegram_msg(f"⚠️ Watchdog: Job `{job['name']}` απενεργοποιήθηκε μετά από {self.MAX_FAILURES} σφάλματα.\nΤελευταίο: {str(e)[:200]}")
 
@@ -853,10 +871,8 @@ if __name__ == "__main__":
     _signal.signal(_signal.SIGTERM, _handle_exit)
     _signal.signal(_signal.SIGINT,  _handle_exit)
 
-    # Εκκίνηση workers
     threading.Thread(target=queue_worker, daemon=True).start()
 
-    # Central Scheduler
     global astakos_scheduler
     astakos_scheduler = AstakosScheduler()
     astakos_scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders")
