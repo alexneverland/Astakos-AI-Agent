@@ -1,10 +1,14 @@
 import sqlite3
 import os
 import hashlib
+import threading
 from difflib import SequenceMatcher
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "astakos_routines.db")
+from core.exceptions import RoutineConflictError, DBWriteError
+
+DB_PATH      = os.path.join(os.path.dirname(__file__), "..", "astakos_routines.db")
+db_write_lock = threading.Lock()  # Serializes writes — reads χωρίς lock (WAL mode)
 
 # ────────────────────────────────────────────────────────────────
 # CANONICALIZATION LAYER
@@ -72,8 +76,18 @@ def _embedding_similarity(text_a: str, text_b: str) -> float:
 # DB SETUP & MIGRATION
 # ────────────────────────────────────────────────────────────────
 
-def get_connection():
-    return sqlite3.connect(DB_PATH)
+def get_connection(write: bool = False):
+    """
+    Επιστρέφει SQLite connection με WAL mode (graceful fallback αν δεν υποστηρίζεται).
+    check_same_thread=False για multi-thread safety.
+    """
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=3000")
+    except sqlite3.Error:
+        pass  # Fallback: default journal mode (π.χ. network drive, read-only fs)
+    return conn
 
 def setup_db():
     conn   = get_connection()
@@ -137,12 +151,14 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
       Stage 2 — difflib fuzzy match (>= 0.72) για ίδιο day/time slot
       Stage 3 — embedding cosine similarity (>= 0.88) για ίδιο day/time slot
     Νέες ρουτίνες ξεκινούν inactive (mention_count=1) — ενεργοποιούνται στη 2η αναφορά.
+    Raises: DBWriteError αν η εγγραφή αποτύχει.
     """
     c_day   = normalize_day(day)
     c_time  = normalize_time(time)
     c_event = event.strip()
     fp      = make_fingerprint(c_day, c_time, c_event)
 
+    # Reads χωρίς lock (WAL mode επιτρέπει concurrent reads)
     conn   = get_connection()
     cursor = conn.cursor()
 
@@ -153,11 +169,17 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
         r_id, conf, mentions = row
         new_conf = min(1.0, conf + confidence_boost)
         new_m    = (mentions or 1) + 1
-        cursor.execute(
-            "UPDATE routines SET confidence=?, decay_counter=0, is_active=?, mention_count=? WHERE id=?",
-            (new_conf, 1 if new_m >= 2 else 0, new_m, r_id)
-        )
-        conn.commit(); conn.close()
+        try:
+            with db_write_lock:
+                cursor.execute(
+                    "UPDATE routines SET confidence=?, decay_counter=0, is_active=?, mention_count=? WHERE id=?",
+                    (new_conf, 1 if new_m >= 2 else 0, new_m, r_id)
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            raise DBWriteError("upsert_routine/stage1_update", e) from e
+        finally:
+            conn.close()
         return "updated"
 
     # Φέρνουμε candidates ίδιου day/time για Stage 2 & 3
@@ -173,14 +195,20 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
             new_conf = min(1.0, conf + confidence_boost)
             new_m    = (mentions or 1) + 1
             new_fp   = make_fingerprint(c_day, c_time, c_event)
-            cursor.execute(
-                """UPDATE routines
-                   SET event_name=?, confidence=?, decay_counter=0,
-                       is_active=?, mention_count=?, fingerprint=?
-                   WHERE id=?""",
-                (c_event, new_conf, 1 if new_m >= 2 else 0, new_m, new_fp, r_id)
-            )
-            conn.commit(); conn.close()
+            try:
+                with db_write_lock:
+                    cursor.execute(
+                        """UPDATE routines
+                           SET event_name=?, confidence=?, decay_counter=0,
+                               is_active=?, mention_count=?, fingerprint=?
+                           WHERE id=?""",
+                        (c_event, new_conf, 1 if new_m >= 2 else 0, new_m, new_fp, r_id)
+                    )
+                    conn.commit()
+            except sqlite3.Error as e:
+                raise DBWriteError("upsert_routine/stage2_merge", e) from e
+            finally:
+                conn.close()
             print(f"[routine_db S2]: difflib merge '{ex_ev}' → '{c_event}'")
             return "merged"
 
@@ -191,26 +219,42 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
             new_conf = min(1.0, conf + confidence_boost)
             new_m    = (mentions or 1) + 1
             new_fp   = make_fingerprint(c_day, c_time, c_event)
-            cursor.execute(
-                """UPDATE routines
-                   SET event_name=?, confidence=?, decay_counter=0,
-                       is_active=?, mention_count=?, fingerprint=?
-                   WHERE id=?""",
-                (c_event, new_conf, 1 if new_m >= 2 else 0, new_m, new_fp, r_id)
-            )
-            conn.commit(); conn.close()
+            try:
+                with db_write_lock:
+                    cursor.execute(
+                        """UPDATE routines
+                           SET event_name=?, confidence=?, decay_counter=0,
+                               is_active=?, mention_count=?, fingerprint=?
+                           WHERE id=?""",
+                        (c_event, new_conf, 1 if new_m >= 2 else 0, new_m, new_fp, r_id)
+                    )
+                    conn.commit()
+            except sqlite3.Error as e:
+                raise DBWriteError("upsert_routine/stage3_merge", e) from e
+            finally:
+                conn.close()
             print(f"[routine_db S3]: embedding merge '{ex_ev}' → '{c_event}' (sim={sim:.2f})")
             return "merged"
 
     # ── Νέα εγγραφή (inactive μέχρι 2η αναφορά) ─────────────────
-    cursor.execute('''
-        INSERT INTO routines
-            (day_of_week, time_str, event_name, event_type, confidence,
-             decay_counter, is_active, fingerprint, mention_count)
-        VALUES (?, ?, ?, ?, ?, 0, 0, ?, 1)
-    ''', (c_day, c_time, c_event, ev_type, 0.3, fp))
-
-    conn.commit(); conn.close()
+    try:
+        with db_write_lock:
+            cursor.execute('''
+                INSERT INTO routines
+                    (day_of_week, time_str, event_name, event_type, confidence,
+                     decay_counter, is_active, fingerprint, mention_count)
+                VALUES (?, ?, ?, ?, ?, 0, 0, ?, 1)
+            ''', (c_day, c_time, c_event, ev_type, 0.3, fp))
+            conn.commit()
+    except sqlite3.IntegrityError as e:
+        raise RoutineConflictError(
+            f"Fingerprint conflict για '{c_event}' @ {c_day} {c_time}",
+            context={"fingerprint": fp, "error": str(e)}
+        ) from e
+    except sqlite3.Error as e:
+        raise DBWriteError("upsert_routine/insert", e) from e
+    finally:
+        conn.close()
     return "created"
 
 
@@ -222,11 +266,17 @@ def confirm_routine(routine_id):
     if row:
         new_conf = min(1.0, row[0] + 0.2)
         new_m    = (row[1] or 1) + 1
-        cursor.execute(
-            "UPDATE routines SET confidence=?, decay_counter=0, is_active=1, mention_count=? WHERE id=?",
-            (new_conf, new_m, routine_id)
-        )
-    conn.commit(); conn.close()
+        try:
+            with db_write_lock:
+                cursor.execute(
+                    "UPDATE routines SET confidence=?, decay_counter=0, is_active=1, mention_count=? WHERE id=?",
+                    (new_conf, new_m, routine_id)
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            raise DBWriteError("confirm_routine", e) from e
+        finally:
+            conn.close()
 
 
 def decay_routine(routine_id):
@@ -238,12 +288,17 @@ def decay_routine(routine_id):
         new_conf  = max(0.0, row[0] - 0.2)
         new_decay = row[1] + 1
         is_active = 0 if new_conf < 0.1 else 1
-        cursor.execute(
-            "UPDATE routines SET confidence=?, decay_counter=?, is_active=? WHERE id=?",
-            (new_conf, new_decay, is_active, routine_id)
-        )
-    conn.commit(); conn.close()
-
+        try:
+            with db_write_lock:
+                cursor.execute(
+                    "UPDATE routines SET confidence=?, decay_counter=?, is_active=? WHERE id=?",
+                    (new_conf, new_decay, is_active, routine_id)
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            raise DBWriteError("decay_routine", e) from e
+        finally:
+            conn.close()
 
 def get_routines_for_day(day: str) -> list:
     conn   = get_connection()
@@ -252,7 +307,7 @@ def get_routines_for_day(day: str) -> list:
     cursor.execute('''
         SELECT id, time_str, event_name, event_type, confidence, mention_count
         FROM routines
-        WHERE (day_of_week=? OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
+        WHERE (day_of_week=? OR day_of_week='Everyday' OR day_of_week='Everyday')
         AND is_active=1
         ORDER BY time_str ASC
     ''', (c_day,))
@@ -273,29 +328,24 @@ setup_db()
 # ANTI-SPAM: Adaptive Cooldown
 # ────────────────────────────────────────────────────────────────
 
-COOLDOWN_DEFAULT_HOURS = 20.0   # Κανονική ρουτίνα: δεν ξαναστέλνεται για 20ω
-COOLDOWN_MIN_HOURS     = 4.0    # Ελάχιστο (π.χ. αν επαναφερθεί μετά από confirm)
-COOLDOWN_MAX_HOURS     = 72.0   # Μέγιστο (3 μέρες αν αγνοηθεί πολλές φορές)
+COOLDOWN_DEFAULT_HOURS = 20.0
+COOLDOWN_MIN_HOURS     = 4.0
+COOLDOWN_MAX_HOURS     = 72.0
 
 
 def mark_routine_notified(routine_id: int):
-    """Αποθηκεύει timestamp τελευταίας ειδοποίησης."""
-    from datetime import datetime as _dt
     conn   = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE routines SET last_notified_ts=? WHERE id=?",
-        (_dt.now().isoformat(timespec="seconds"), routine_id)
-    )
-    conn.commit()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET last_notified_ts=? WHERE id=?",
+            (datetime.now().isoformat(timespec="seconds"), routine_id)
+        )
+        conn.commit()
     conn.close()
 
 
 def mark_routine_ignored(routine_id: int):
-    """
-    Ο χρήστης αγνόησε την ειδοποίηση (timeout).
-    Αυξάνει το cooldown (διπλασιάζει, max 72ω) και το ignore_count.
-    """
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -304,38 +354,31 @@ def mark_routine_ignored(routine_id: int):
     )
     row = cursor.fetchone()
     if row:
-        ignore_count   = (row[0] or 0) + 1
-        current_cd     = row[1] or COOLDOWN_DEFAULT_HOURS
-        new_cd         = min(COOLDOWN_MAX_HOURS, current_cd * 2)
-        cursor.execute(
-            "UPDATE routines SET ignore_count=?, notify_cooldown_hours=? WHERE id=?",
-            (ignore_count, new_cd, routine_id)
-        )
-        conn.commit()
-        print(f"[routine_db]: 🙉 ignore#{ignore_count} → cooldown {new_cd:.0f}h (id={routine_id})")
+        ignore_count = (row[0] or 0) + 1
+        new_cd       = min(COOLDOWN_MAX_HOURS, (row[1] or COOLDOWN_DEFAULT_HOURS) * 2)
+        with db_write_lock:
+            cursor.execute(
+                "UPDATE routines SET ignore_count=?, notify_cooldown_hours=? WHERE id=?",
+                (ignore_count, new_cd, routine_id)
+            )
+            conn.commit()
+        print(f"[routine_db]: ignore#{ignore_count} -> cooldown {new_cd:.0f}h (id={routine_id})")
     conn.close()
 
 
 def mark_routine_responded(routine_id: int):
-    """
-    Ο χρήστης απάντησε (yes/no/confirm).
-    Μηδενίζει ignore_count και επαναφέρει cooldown στο default.
-    """
     conn   = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE routines SET ignore_count=0, notify_cooldown_hours=? WHERE id=?",
-        (COOLDOWN_DEFAULT_HOURS, routine_id)
-    )
-    conn.commit()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET ignore_count=0, notify_cooldown_hours=? WHERE id=?",
+            (COOLDOWN_DEFAULT_HOURS, routine_id)
+        )
+        conn.commit()
     conn.close()
 
 
 def get_routine_notify_info(routine_id: int) -> dict:
-    """
-    Επιστρέφει {'cooldown_hours': float, 'last_notified_ts': str|None}
-    για έλεγχο αν επιτρέπεται νέα ειδοποίηση.
-    """
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -347,10 +390,9 @@ def get_routine_notify_info(routine_id: int) -> dict:
     if not row:
         return {"cooldown_hours": COOLDOWN_DEFAULT_HOURS, "last_notified_ts": None}
     return {
-        "cooldown_hours":  row[0] if row[0] is not None else COOLDOWN_DEFAULT_HOURS,
+        "cooldown_hours":   row[0] if row[0] is not None else COOLDOWN_DEFAULT_HOURS,
         "last_notified_ts": row[1]
     }
-
 
 # ────────────────────────────────────────────────────────────────
 # PENDING CONFIRMATIONS PERSISTENCE (Recovery After Restart)
@@ -372,30 +414,29 @@ def _setup_pending_table():
 def save_pending_confirmation(routine_id: int, event_name: str, sent_at: datetime):
     conn   = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "INSERT OR REPLACE INTO pending_confirmations (routine_id, event_name, sent_at) VALUES (?, ?, ?)",
-        (routine_id, event_name, sent_at.isoformat())
-    )
-    conn.commit()
+    with db_write_lock:
+        cursor.execute(
+            "INSERT OR REPLACE INTO pending_confirmations (routine_id, event_name, sent_at) VALUES (?, ?, ?)",
+            (routine_id, event_name, sent_at.isoformat())
+        )
+        conn.commit()
     conn.close()
 
 def remove_pending_confirmation(routine_id: int):
     conn = get_connection()
-    conn.execute("DELETE FROM pending_confirmations WHERE routine_id=?", (routine_id,))
-    conn.commit()
+    with db_write_lock:
+        conn.execute("DELETE FROM pending_confirmations WHERE routine_id=?", (routine_id,))
+        conn.commit()
     conn.close()
 
 def clear_pending_confirmations():
     conn = get_connection()
-    conn.execute("DELETE FROM pending_confirmations")
-    conn.commit()
+    with db_write_lock:
+        conn.execute("DELETE FROM pending_confirmations")
+        conn.commit()
     conn.close()
 
 def load_pending_confirmations() -> dict:
-    """
-    Φορτώνει τα pending confirmations από τη DB κατά την εκκίνηση.
-    Επιστρέφει {routine_id: {"event": ..., "sent_at": datetime}}
-    """
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT routine_id, event_name, sent_at FROM pending_confirmations")

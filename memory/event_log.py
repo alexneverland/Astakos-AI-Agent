@@ -112,3 +112,29 @@ def is_duplicate_routine(routine_id: int, cooldown_hours: float) -> bool:
         print(f"[event_log]: is_duplicate_routine error: {e}")
         return False  # Graceful fallback — επιτρέπουμε αποστολή
 
+
+
+def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDOWN_DEFAULT) -> bool:
+    """
+    Επιστρέφει True αν το ίδιο μήνυμα στάλθηκε πρόσφατα (εντός cooldown).
+    Χρήση: if is_duplicate_notification(msg): return
+
+    Αυτόματα καθαρίζει παλιές εγγραφές (>1 ώρα).
+    """
+    import time
+    msg_hash = hashlib.md5(message.strip().encode("utf-8")).hexdigest()[:10]
+    now      = time.time()
+
+    with _dedup_lock:
+        cutoff   = now - 3600
+        old_keys = [k for k, v in _dedup_cache.items() if v < cutoff]
+        for k in old_keys:
+            del _dedup_cache[k]
+
+        if msg_hash in _dedup_cache:
+            elapsed = now - _dedup_cache[msg_hash]
+            if elapsed < cooldown_seconds:
+                return True  # duplicate
+
+        _dedup_cache[msg_hash] = now
+        return False
