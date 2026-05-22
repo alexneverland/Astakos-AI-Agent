@@ -49,6 +49,9 @@ EMBEDDINGS_CACHE_FILE= os.path.join(BASE_DIR, "astakos_embeddings_cache.json")
 PROFILE_FILE         = os.path.join(BASE_DIR, "astakos_profile.json")
 SESSIONS_FILE        = os.path.join(BASE_DIR, "astakos_sessions.json")
 REMINDERS_FILE       = os.path.join(BASE_DIR, "astakos_reminders.json")
+# GPS: Συντεταγμένες σπιτιού για location reminders
+HOME_COORDS   = (40.646558, 22.939036)   # Piston 7 — διόρθωσε αν χρειαστεί
+HOME_RADIUS_M = 150                   # trigger εντός 150 μέτρων
 LISTS_FILE           = os.path.join(BASE_DIR, "astakos_lists.json")
 CAPABILITIES_FILE    = os.path.join(BASE_DIR, "astakos_capabilities.json")
 LINKEDIN_DRAFT_FILE  = os.path.join(BASE_DIR, "linkedin_draft.json")
