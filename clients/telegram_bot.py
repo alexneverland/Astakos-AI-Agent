@@ -216,7 +216,7 @@ def handle_voice(voice_obj: dict, chat_id: str):
             }
         }
         
-        prompt = "Άκουσε αυτό το μήνυμα και απάντησε σύντομα και μάστορικα."
+        prompt = "Άκουσε αυτό το μήνυμα και απάντησε σύντομα και μαστορικά."
         response = safe_gemini_call([prompt, audio_part])
         ai_reply = response.text if response and response.text else "Δεν έβγαλα άκρη."
 
@@ -493,7 +493,7 @@ def _send_photo_to_telegram(photo_path: str, chat_id: str):
     except Exception as e:
         print(f"\033[91m[TelegramBot Photo Send Error]: {e}\033[0m")
         send_telegram_msg(f"❌ Αδύνατη η αποστολή φωτογραφίας: {str(e)}")
-def handle_location(msg):
+def handle_location(msg, live_update=False):
     """Λαμβάνει live location και ελέγχει για location-based reminders."""
     import math
 
@@ -541,7 +541,10 @@ def handle_location(msg):
     except Exception as e:
         print(f"\033[91m[Location Reminder Error]: {e}\033[0m")
 
-    # ── Web Agent για γεωγραφικό context ───────────────────────
+    # ── Web Agent μόνο για manual location (όχι live updates) ──
+    if live_update:
+        return  # Live location update → μόνο reminders, όχι μήνυμα
+
     from core.graph import graph
     from langchain_core.messages import HumanMessage
     location_prompt = (
@@ -554,8 +557,12 @@ def handle_location(msg):
         for event in graph.stream({"messages": [HumanMessage(content=location_prompt)]}):
             for node, data in event.items():
                 msgs = data.get("messages", [])
-                if msgs and hasattr(msgs[-1], "content") and msgs[-1].content.strip():
-                    final = msgs[-1].content.strip()
+                if msgs and hasattr(msgs[-1], "content"):
+                    content = msgs[-1].content
+                    if isinstance(content, list):
+                        content = " ".join(p.get("text","") for p in content if isinstance(p, dict))
+                    if content.strip():
+                        final = content.strip()
         if final:
             from core.agents import clean_message
             send_telegram_msg(clean_message(final))
@@ -612,9 +619,11 @@ def run_polling():
 
                 # 1. Τοποθεσία (GPS) - Μόνο μία φορά, σε thread, περνώντας όλο το msg
                 if "location" in msg:
+                    is_live_update = "edited_message" in update
                     threading.Thread(
                         target=handle_location,
-                        args=(msg,), 
+                        args=(msg,),
+                        kwargs={"live_update": is_live_update},
                         daemon=True
                     ).start()
                     continue
@@ -734,7 +743,7 @@ def job_check_reminders():
         return
     now, changed = datetime.now().strftime("%Y-%m-%d %H:%M"), False
     for r in rems:
-        if r["status"] == "pending" and now >= r["time"]:
+        if r.get("status") == "pending" and r.get("type") != "location" and now >= r.get("time", ""):
             msg = f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {r['task']}"
             if is_duplicate_notification(msg, cooldown_seconds=60):
                 continue
@@ -1092,8 +1101,6 @@ class AstakosScheduler:
         return "\n".join(lines)
 
 
-# ─────────────────────────────────────────────────
-
 # ────────────────────────────────────────────────────────────────
 # ENTRY POINT
 # ────────────────────────────────────────────────────────────────
@@ -1110,7 +1117,6 @@ if __name__ == "__main__":
 
     threading.Thread(target=queue_worker, daemon=True).start()
 
-    # Recovery: \u03c6\u03cc\u03c1\u03c4\u03c9\u03c3\u03b7 state \u03b1\u03c0\u03cc \u03b4\u03af\u03c3\u03ba\u03bf
     _load_override_state()
     from memory.routine_db import load_pending_confirmations
     pending_routine_confirmations.update(load_pending_confirmations())
