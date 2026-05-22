@@ -373,8 +373,53 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
 
     except Exception as e:
         return f"Σφάλμα υπενθύμισης: {e}"
+from langchain_core.tools import tool
+from memory.routine_db import upsert_routine
 
-
+@tool
+def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: str = "general") -> str:
+    """
+    [CRITICAL]: Χρησιμοποίησέ το ΟΤΑΝ ο Λάζαρος αναφέρει μια συνήθεια, 
+    μια ρουτίνα ή κάτι που επαναλαμβάνεται (π.χ. "Κάθε Παρασκευή στις 13:00 πάω λαϊκή").
+    - day_of_week: Ακριβώς η μέρα (π.χ. "Monday", "Friday") Ή η λέξη "Everyday" αν είναι καθημερινή ρουτίνα.
+    - time_str: Η ώρα σε μορφή HH:MM (π.χ. "13:00")
+    - event_name: Περιγραφή του γεγονότος.
+    - event_type: "family", "work", "hobby", "general".
+    """
+    try:
+        # Μικρό normalization
+        day_of_week = day_of_week.capitalize()
+        
+        # Ανέβασμα confidence: 
+        # Επειδή το είπε ρητά στο chat, του δίνουμε ένα γερό boost!
+        res = upsert_routine(day_of_week, time_str, event_name, event_type, confidence_boost=0.3)
+        
+        if res == "created":
+            return f"✅ Ρουτίνα '{event_name}' καταγράφηκε για πρώτη φορά (Confidence: 50%)."
+        else:
+            return f"✅ Ρουτίνα '{event_name}' ενισχύθηκε! (Confidence Boosted)."
+    except Exception as e:
+        return f"❌ Σφάλμα αποθήκευσης ρουτίνας: {e}"
+@tool
+def get_routines(day_of_week: str) -> str:
+    """
+    [QUERY]: Επιστρέφει τις καταγεγραμμένες ρουτίνες για μια συγκεκριμένη μέρα.
+    Χρησιμοποίησέ το όταν ο Λάζαρος ρωτάει "τι έχω την Παρασκευή;" ή "ποιες ρουτίνες ξέρεις;".
+    - day_of_week: π.χ. "Monday", "Friday", "Everyday"
+    """
+    try:
+        from memory.routine_db import get_routines_for_day
+        routines = get_routines_for_day(day_of_week)
+        if not routines:
+            return f"Δεν έχω καταγεγραμμένες ρουτίνες για {day_of_week}."
+        
+        lines = [f"📅 Ρουτίνες για {day_of_week}:"]
+        for r in routines:
+            conf_pct = int(r['confidence'] * 100)
+            lines.append(f"  • {r['time']} — {r['event']} ({r['type']}, {conf_pct}% σιγουριά)")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ Σφάλμα ανάκτησης ρουτινών: {e}"
 @tool
 def set_reminder(task: str, time_str: str) -> str:
     """Δημιουργεί τοπική υπενθύμιση (format time_str: 'YYYY-MM-DD HH:MM')."""
@@ -1311,6 +1356,7 @@ def control_spotify(
             sp.start_playback(uris=[track_uri])
             return f"Έβαλα να παίζει: {res['tracks']['items'][0]['name']} 🎵"
 
+
         elif action == "play":
             sp.start_playback()
             return "Η μουσική ξεκίνησε ξανά!"
@@ -1326,6 +1372,6 @@ all_tools = [
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_offers, relay_local_payload,
-    search_goldmall_offers, send_messenger_message, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin,
+    search_goldmall_offers, send_messenger_message, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines,
     DuckDuckGoSearchRun()
 ]
