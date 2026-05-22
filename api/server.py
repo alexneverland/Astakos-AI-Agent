@@ -407,248 +407,428 @@ async def health():
 
 
 # ────────────────────────────────────────────────────────────────
-# WEB UI SYNC (Ιστορικό & Ζωντανά Logs)
+# OBSERVABILITY: /debug/runtime + /debug
 # ────────────────────────────────────────────────────────────────
 
+def _read_json_file(path: str, default):
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return default
 
-active_websockets = []
-server_loop = None
 
-class WsLogger:
-    """Κλέβει τα print() του τερματικού και τα στέλνει και στο Web UI!"""
-    def __init__(self, orig):
-        self.orig = orig
-        
-    def write(self, msg):
-        self.orig.write(msg)
-        self.orig.flush()
-        if msg.strip() and server_loop and active_websockets:
-            clean_msg = re.sub(r'\x1b\[[0-9;]*m', '', msg) # Αφαιρεί τα χρώματα ANSI
-            for ws in active_websockets:
+@server.get("/debug/runtime")
+async def debug_runtime():
+    """
+    Live runtime snapshot — διαβάζει από:
+      • runtime_snapshot.json   (scheduler jobs — γράφεται κάθε 10s από telegram_bot)
+      • scheduler_state.json    (override state)
+      • astakos_routines.db     (active routines, pending confirmations, cooldowns)
+      • logs/events/YYYY-MM-DD.json  (event throughput, last errors)
+    """
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+
+    # ── 1. Scheduler snapshot ────────────────────────────────────
+    snapshot     = _read_json_file(os.path.join(base, "runtime_snapshot.json"), {})
+    override     = _read_json_file(os.path.join(base, "scheduler_state.json"), {})
+
+    # ── 2. DB: routines + pending confirmations ──────────────────
+    import sqlite3 as _sqlite3
+    db_path      = os.path.join(base, "astakos_routines.db")
+    active_routines   = []
+    pending_from_db   = []
+    cooldown_info     = []
+
+    try:
+        conn   = _sqlite3.connect(db_path, check_same_thread=False)
+        cursor = conn.cursor()
+
+        # Active routines
+        cursor.execute("""
+            SELECT id, day_of_week, time_str, event_name, confidence,
+                   mention_count, notify_cooldown_hours, last_notified_ts, state
+            FROM routines
+            WHERE state='active'
+            ORDER BY day_of_week, time_str
+        """)
+        for row in cursor.fetchall():
+            r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state = row
+            now_dt = datetime.now()
+            cooldown_remaining = None
+            if last_ts:
                 try:
-                    asyncio.run_coroutine_threadsafe(ws.send_text(clean_msg), server_loop)
-                except:
+                    last_dt = datetime.fromisoformat(last_ts)
+                    elapsed = (now_dt - last_dt).total_seconds()
+                    cd_secs = (cd_h or 20.0) * 3600
+                    remaining_secs = cd_secs - elapsed
+                    cooldown_remaining = max(0, round(remaining_secs / 3600, 1))
+                except Exception:
                     pass
-                    
-    def flush(self):
-        self.orig.flush()
-@server.post("/voice")
-async def process_web_voice(file: UploadFile = File(...)):
-    """Δέχεται ηχητικό από το Web UI, το κάνει κείμενο με Gemini και το επιστρέφει."""
-    try:
-        from google import genai
-        from config import GEMINI_API_KEY, BASE_DIR
-        import os
-        
-        # Διαβάζουμε τα bytes του ηχητικού
-        audio_data = await file.read()
-        
-        # --- [MASTRO-DEBUG]: Αποθήκευση τοπικά για να ελέγχεις το μικρόφωνο ---
-        debug_path = os.path.join(BASE_DIR, "debug_voice.webm")
-        with open(debug_path, "wb") as f:
-            f.write(audio_data)
-        
-        print(f"\033[96m[Web Voice]: Αποκωδικοποίηση ηχητικού από τον browser ({len(audio_data)} bytes)...\033[0m")
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        
-        # Το χαστούκι στο AI: Του απαγορεύουμε να φερθεί σαν Chatbot.
-        response = client.models.generate_content(
-            model=FAST_MODEL,  
-            contents=[
-                {"inline_data": {"mime_type": "audio/webm", "data": audio_data}},
-                "Είσαι ΑΠΟΚΛΕΙΣΤΙΚΑ ένα εργαλείο Speech-to-Text. Δουλειά σου είναι ΜΟΝΟ να μεταγράψεις τον ήχο σε κείμενο. ΑΠΑΓΟΡΕΥΕΤΑΙ να απαντήσεις, να σχολιάσεις ή να πεις ότι 'δεν έχεις τη δυνατότητα'. Αν δεν ακούς τίποτα ή ο ήχος είναι κενός, επέστρεψε μόνο τη λέξη: [ΣΙΩΠΗ]."
-            ]
-        )
-        
-        transcription = response.text.strip() if response.text else ""
-        
-        # Αν μας επιστρέψει τη λέξη [ΣΙΩΠΗ], το κόβουμε επιτόπου.
-        if not transcription or "[ΣΙΩΠΗ]" in transcription:
-            return JSONResponse({"error": "Δεν ακούστηκε τίποτα. Έλεγξε το μικρόφωνό σου!"})
-            
-        print(f"\033[92m[Web Voice]: Ο Λάζαρος είπε -> {transcription}\033[0m")
-        
-        # Επιστρέφουμε το κείμενο στο Web UI για να το βάλει στο chat
-        return JSONResponse({"transcription": transcription})
-        
+            active_routines.append({
+                "id":                r_id,
+                "day":               day,
+                "time":              tstr,
+                "event":             ev,
+                "confidence":        round(conf or 0, 2),
+                "mentions":          mentions or 1,
+                "cooldown_hours":    cd_h or 20.0,
+                "last_notified":     last_ts,
+                "cooldown_remaining_h": cooldown_remaining,
+                "state":             state,
+            })
+
+        # Pending confirmations
+        cursor.execute("SELECT routine_id, event_name, sent_at FROM pending_confirmations")
+        for row in cursor.fetchall():
+            rid, ev, sent_at_str = row
+            try:
+                sent_dt  = datetime.fromisoformat(sent_at_str)
+                elapsed  = round((datetime.now() - sent_dt).total_seconds() / 60, 1)
+            except Exception:
+                elapsed  = None
+            pending_from_db.append({
+                "routine_id": rid,
+                "event":      ev,
+                "sent_at":    sent_at_str,
+                "elapsed_min": elapsed,
+                "timeout_in_min": round(max(0, 30 - (elapsed or 0)), 1),
+            })
+
+        # Routines in non-active states (TRIGGER_PENDING, DISMISSED, DECAYED, etc.)
+        cursor.execute("""
+            SELECT id, event_name, state, confidence, last_notified_ts, notify_cooldown_hours
+            FROM routines
+            WHERE state != 'active' AND state != 'archived' AND state != 'learned'
+            ORDER BY state
+        """)
+        for row in cursor.fetchall():
+            r_id, ev, state, conf, last_ts, cd_h = row
+            cooldown_info.append({
+                "id": r_id, "event": ev, "state": state,
+                "confidence": round(conf or 0, 2),
+                "last_notified": last_ts,
+                "cooldown_hours": cd_h or 20.0,
+            })
+
+        # Stats
+        cursor.execute("SELECT state, COUNT(*) FROM routines GROUP BY state")
+        state_counts = dict(cursor.fetchall())
+
+        conn.close()
     except Exception as e:
-        import traceback
-        print(f"\033[91m[Web Voice Error]: {traceback.format_exc()}\033[0m")
-        return JSONResponse({"error": str(e)}, status_code=500)
-import edge_tts
-import io
+        state_counts = {}
+        active_routines.append({"error": str(e)})
 
-@server.post("/tts")
-async def text_to_speech(request: Request):
-    try:
-        body = await request.json()
-        text = body.get("text", "").strip()
-        
-        if not text:
-            return JSONResponse({"error": "Κενό κείμενο"}, status_code=400)
-        
-        import re
-        text = re.sub(r'[*#`]', '', text)
-        text = re.sub(r'\[.*?\]\(.*?\)', '', text)
-        text = re.sub(r'\[SEND_PHOTO:.*?\]', '', text)
-        text = text.strip()
-        
-        voice = "el-GR-NestorasNeural"  # Δοκίμασε την αντρική - συνήθως πιο καθαρή
-        
-        # Rate αργότερα (-10% έως -20%) και volume λίγο πιο δυνατό
-        communicate = edge_tts.Communicate(text, voice, rate="-10%", volume="+10%")
-        
-        audio_buffer = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_buffer.write(chunk["data"])
-        
-        audio_buffer.seek(0)
-        audio_bytes = audio_buffer.read()
-        
-        if not audio_bytes:
-            return JSONResponse({"error": "Αποτυχία δημιουργίας ήχου"}, status_code=500)
-        
-        print(f"\033[95m[TTS]: Φωνή δημιουργήθηκε ({len(audio_bytes)} bytes)\033[0m")
-        
-        from fastapi.responses import Response
-        return Response(
-            content=audio_bytes,
-            media_type="audio/mpeg",
-            headers={"Content-Disposition": "inline; filename=response.mp3"}
-        )
-        
-    except Exception as e:
-        import traceback
-        print(f"\033[91m[TTS Error]: {traceback.format_exc()}\033[0m")
-        return JSONResponse({"error": str(e)}, status_code=500)
-@server.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
-    """
-    Endpoint για το ανέβασμα αρχείων (φωτογραφίες & έγγραφα).
-    Ροή: Διαχωρισμός Φακέλου → Αποθήκευση → (Ανάλυση Vision ΜΟΝΟ για εικόνες) → Επιστροφή & Ερώτηση.
-    """
-    try:
-        # 1. Βρίσκουμε την κατάληξη και φτιάχνουμε το όνομα
-        file_ext = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
-        filename  = f"web_{uuid.uuid4().hex}{file_ext}"
+    # ── 3. Today's event log: throughput + last errors ───────────
+    today      = datetime.now().strftime("%Y-%m-%d")
+    log_file   = os.path.join(base, "logs", "events", f"{today}.json")
+    events     = _read_json_file(log_file, [])
 
-        # 2. [MASTRO-ROUTER]: Πού θα αποθηκευτεί το αρχείο;
-        image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
-        doc_exts = [".pdf", ".docx", ".xlsx", ".xls", ".txt", ".csv", ".json"]
-        is_image = file_ext in image_exts
+    # Throughput: count per (job, action) in last 1h
+    from datetime import timedelta
+    one_hour_ago = datetime.now() - timedelta(hours=1)
+    throughput = {}
+    last_errors = []
+    for ev in events:
+        try:
+            ts  = datetime.fromisoformat(ev.get("timestamp", ""))
+            job = ev.get("job", "?")
+            act = ev.get("action", "?")
+            key = f"{job}/{act}"
+            if ts >= one_hour_ago:
+                throughput[key] = throughput.get(key, 0) + 1
+            if act in ("error", "db_error", "disabled") and ts >= one_hour_ago:
+                last_errors.append({
+                    "time":  ev.get("timestamp", "")[-8:],
+                    "job":   job,
+                    "error": str(ev.get("error", ""))[:120],
+                })
+        except Exception:
+            pass
+    last_errors = last_errors[-10:]  # max 10
 
-        if is_image:
-            # Οι εικόνες πάνε στον φάκελο PHOTOS_DIR
-            target_dir = PHOTOS_DIR
-        else:
-            from config import UPLOADS_DIR
-            target_dir = UPLOADS_DIR
+    # ── 4. Assemble response ─────────────────────────────────────
+    sleep_until = override.get("sleep_until")
+    sleeping    = sleep_until and time.time() < sleep_until
+    sleep_until_str = datetime.fromtimestamp(sleep_until).strftime("%H:%M") if sleeping else None
 
-        file_path = os.path.join(target_dir, filename)
-
-        # 3. Αποθήκευση του αρχείου στον ΣΩΣΤΟ φάκελο
-        content = await file.read()
-        with open(file_path, "wb") as buffer:
-            buffer.write(content)
-        print(f"\033[92m[Upload]: Αποθηκεύτηκε στο {target_dir} → {filename}\033[0m")
-
-        memory_analysis = ""
-        detailed_analysis = ""
-
-        # 4. Ανάλυση (Μόνο αν είναι εικόνα)
-        if is_image:
-            from PIL import Image
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            img = Image.open(file_path)
-            img.thumbnail((1024, 1024))
-
-            mem_resp = client.models.generate_content(
-                model=FAST_MODEL,
-                contents=[img, "Περίγραψε τι βλέπεις στα Ελληνικά, κοφτά, 1-2 προτάσεις."]
-            )
-            memory_analysis = mem_resp.text.strip() if mem_resp.text else "No analysis available."
-
-            chat_resp = client.models.generate_content(
-                model=FAST_MODEL,
-                contents=[img, "Ανάλυσε τη φωτό λεπτομερώς στα Ελληνικά, με χιούμορ και ζωντάνια."]
-            )
-            detailed_analysis = chat_resp.text.strip() if chat_resp.text else memory_analysis
-            print(f"📸 [Vision]: Ανάλυση εικόνας ολοκληρώθηκε.")
-
-            chat_ai_msg = (
-                f"📸 **Φωτογραφία ελήφθη:** `{filename}`\n\n"
-                f"{detailed_analysis}\n\n"
-                "**Λάζαρε, να την αρχειοθετήσω μόνιμα στη μνήμη μου;**"
-            )
-            user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
-
-        elif file_ext in doc_exts:
-            # Έγγραφα (Δεν καλούμε Vision, τα σώσαμε στο telegram_uploads)
-            memory_analysis = f"Έγγραφο τύπου {file_ext} με όνομα {file.filename}."
-            detailed_analysis = f"Έλαβα το αρχείο **{file.filename}** (αποθηκεύτηκε ως `{filename}`). Είναι έγγραφο ({file_ext}) και μπορώ να το διαβάσω αν μου το ζητήσεις."
-            print(f"📄 [Docs]: Το έγγραφο {filename} καταγράφηκε.")
-            
-            chat_ai_msg = (
-                f"📄 **Έγγραφο ελήφθη:** `{filename}` (Αρχικό όνομα: {file.filename})\n\n"
-                f"{detailed_analysis}\n\n"
-                "**Λάζαρε, θέλεις να το διαβάσω ή να το αρχειοθετήσω;**"
-            )
-            user_log_msg = f"[USER_UPLOADED_FILE]: {filename}\n[FILE PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
-
-        else:
-            # Άλλα αρχεία (Zip, exe κλπ.)
-            memory_analysis = f"Αρχείο {file_ext} με όνομα {file.filename}."
-            detailed_analysis = f"Ανέβηκε ένα αρχείο με κατάληξη {file_ext} στον φάκελο {target_dir}."
-            print(f"📁 [File]: Άλλο αρχείο καταγράφηκε.")
-            
-            chat_ai_msg = (
-                f"📁 **Αρχείο ελήφθη:** `{filename}`\n\n"
-                f"{detailed_analysis}\n\n"
-                "**Λάζαρε, τι θέλεις να κάνω με αυτό;**"
-            )
-            user_log_msg = f"[USER_UPLOADED_FILE]: {filename}\n[FILE PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
-
-        # 5. Ενημέρωση Chat History & Session Log
-        append_to_chat_history("user", f"📎 *Ανέβασα αρχείο:* `{filename}`")
-        append_to_chat_history("assistant", chat_ai_msg)
-        
-        log_exchange(user_log_msg, chat_ai_msg, "Chat_Agent")
-
-        return JSONResponse({
-            "status": "success",
-            "filename": filename,
-            "file_path": file_path,
-            "url": f"/photos/{filename}" if is_image else None, 
-            "ai_message": chat_ai_msg,
-            "analysis": memory_analysis,
-        })
-
-    except Exception as e:
-        import traceback
-        print(f"\033[91m[Upload Error]: {traceback.format_exc()}\033[0m")
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
-from fastapi.responses import FileResponse
-
-@server.get("/")
-async def read_index():
-    # Αυτό λέει στον server: "Όταν κάποιος μπαίνει στο http://127.0.0.1:8000, δείξε του το index.html"
-    return FileResponse('index.html')
-@server.get("/history")
-async def get_history():
-    """Δίνει το ιστορικό στο Web UI — διαβάζει από το JSON για να επιβιώνει το F5/restart."""
-    with chat_history_lock:
-        history = _load_chat_history()
-    return {"history": history}
+    return JSONResponse({
+        "snapshot_age_s": round(time.time() - datetime.fromisoformat(snapshot["written_at"]).timestamp(), 0)
+                          if snapshot.get("written_at") else None,
+        "scheduler": {
+            "written_at":         snapshot.get("written_at"),
+            "jobs":               snapshot.get("jobs", []),
+            "queue_size":         snapshot.get("queue_size", "?"),
+            "quiet_hours":        snapshot.get("quiet_hours"),
+            "proactive_muted":    snapshot.get("proactive_muted"),
+            "reminders_paused":   snapshot.get("reminders_paused"),
+            "proactive_this_hour": snapshot.get("proactive_this_hour", 0),
+            "pending_count":      snapshot.get("pending_confirmations", 0),
+        },
+        "overrides": {
+            "pause_reminders": bool(override.get("pause_reminders")),
+            "mute_proactive":  bool(override.get("mute_proactive")),
+            "sleeping":        bool(sleeping),
+            "sleep_until":     sleep_until_str,
+        },
+        "routines": {
+            "state_counts":    state_counts,
+            "active":          active_routines,
+            "non_active":      cooldown_info,
+        },
+        "pending_confirmations": pending_from_db,
+        "events_1h": {
+            "throughput":  throughput,
+            "last_errors": last_errors,
+            "total_today": len(events),
+        },
+    })
 
 
-@server.websocket("/ws/logs")
-async def websocket_logs(websocket: WebSocket):
-    """Κρατάει το κανάλι ανοιχτό για να δέχεται τα logs"""
-    await websocket.accept()
-    active_websockets.append(websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        active_websockets.remove(websocket)
+@server.get("/debug")
+async def debug_panel():
+    """Observability HTML dashboard — auto-refresh κάθε 5 δευτερόλεπτα."""
+    from fastapi.responses import HTMLResponse
+    html = """<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🦞 Astakos Runtime Dashboard</title>
+<style>
+  :root {
+    --bg:      #0d1117; --card:  #161b22; --border: #30363d;
+    --text:    #e6edf3; --muted: #8b949e; --green:  #3fb950;
+    --red:     #f85149; --yellow:#d29922; --blue:   #58a6ff;
+    --purple:  #bc8cff; --orange:#f0883e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', monospace; font-size: 13px; padding: 16px; }
+  h1   { font-size: 20px; margin-bottom: 4px; }
+  .ts  { color: var(--muted); font-size: 11px; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .card h2 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  th    { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; padding: 4px 6px; text-align: left; border-bottom: 1px solid var(--border); }
+  td    { padding: 5px 6px; border-bottom: 1px solid #21262d; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .ok   { color: var(--green); }
+  .warn { color: var(--yellow); }
+  .err  { color: var(--red); }
+  .off  { color: var(--muted); }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .b-green  { background: #1a3a1f; color: var(--green); }
+  .b-yellow { background: #3a2d0a; color: var(--yellow); }
+  .b-red    { background: #3a0d0d; color: var(--red); }
+  .b-blue   { background: #0d2240; color: var(--blue); }
+  .b-purple { background: #220d3a; color: var(--purple); }
+  .b-orange { background: #3a1e0a; color: var(--orange); }
+  .b-muted  { background: #1c2128; color: var(--muted); }
+  .kv   { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #21262d; }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--muted); }
+  .kv .v { font-weight: 600; }
+  .bar-wrap { background: #21262d; border-radius: 4px; height: 6px; width: 100%; margin-top: 3px; }
+  .bar-fill { height: 6px; border-radius: 4px; background: var(--green); transition: width .4s; }
+  #refresh-bar { height: 2px; background: var(--blue); transition: width .1s linear; position: fixed; top:0; left:0; z-index:99; }
+  .stale { color: var(--red); font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="refresh-bar" style="width:0%"></div>
+<h1>🦞 Astakos Runtime Dashboard</h1>
+<div class="ts" id="ts">Φόρτωση...</div>
+<div class="grid" id="grid"></div>
+
+<script>
+const REFRESH = 5000;
+let countdown = REFRESH;
+let rafId;
+
+function stateBadge(state) {
+  const m = {
+    'active':          ['b-green',  'ACTIVE'],
+    'trigger_pending': ['b-yellow', 'TRIGGER_PENDING'],
+    'confirmed':       ['b-blue',   'CONFIRMED'],
+    'ignored':         ['b-orange', 'IGNORED'],
+    'dismissed':       ['b-purple', 'DISMISSED'],
+    'decayed':         ['b-red',    'DECAYED'],
+    'archived':        ['b-muted',  'ARCHIVED'],
+    'learned':         ['b-muted',  'LEARNED'],
+  };
+  const [cls, label] = m[state] || ['b-muted', state];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+function jobRow(j) {
+  const icon = j.disabled ? '🚫' : j.fail_count > 0 ? '⚠️' : '✅';
+  const nextLabel = j.disabled ? '—' : `${j.next_in_secs}s`;
+  const dur  = j.last_duration != null ? `${j.last_duration.toFixed(2)}s` : '—';
+  const failCls = j.fail_count > 0 ? 'warn' : 'ok';
+  return `<tr>
+    <td>${icon} <b>${j.name}</b></td>
+    <td class="off">${j.last_run || '—'}</td>
+    <td class="${j.disabled?'err':'ok'}">${nextLabel}</td>
+    <td>${dur}</td>
+    <td class="${failCls}">${j.fail_count}</td>
+  </tr>${j.last_error ? `<tr><td colspan="5" class="err" style="font-size:11px;padding:2px 6px 6px">↳ ${j.last_error}</td></tr>` : ''}\`;
+}
+
+function confBar(val) {
+  const pct = Math.round(val * 100);
+  const col = val >= 0.8 ? 'var(--green)' : val >= 0.5 ? 'var(--yellow)' : 'var(--red)';
+  return `${pct}% <div class="bar-wrap"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div>`;
+}
+
+function stateBadge(state) {
+  const m = {
+    'active':          ['b-green',  'ACTIVE'],
+    'trigger_pending': ['b-yellow', 'TRIGGER_PENDING'],
+    'confirmed':       ['b-blue',   'CONFIRMED'],
+    'ignored':         ['b-orange', 'IGNORED'],
+    'dismissed':       ['b-purple', 'DISMISSED'],
+    'decayed':         ['b-red',    'DECAYED'],
+    'archived':        ['b-muted',  'ARCHIVED'],
+    'learned':         ['b-muted',  'LEARNED'],
+  };
+  const [cls, label] = m[state] || ['b-muted', state];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+function render(d) {
+  const s     = d.scheduler || {};
+  const ovr   = d.overrides || {};
+  const rout  = d.routines  || {};
+  const evts  = d.events_1h || {};
+  const pend  = d.pending_confirmations || [];
+
+  const stale = d.snapshot_age_s != null && d.snapshot_age_s > 30;
+  const ageStr = d.snapshot_age_s != null ? `(snapshot ${d.snapshot_age_s}s ago${stale ? ' ⚠️ STALE' : ''})` : '(telegram_bot offline?)';
+
+  document.getElementById('ts').innerHTML =
+    `Τελευταία ανανέωση: <b>${new Date().toLocaleTimeString('el-GR')}</b> &nbsp;${ageStr}`;
+
+  const flags = [];
+  if (ovr.sleeping)        flags.push(`<span class="badge b-red">😴 Sleep until ${ovr.sleep_until}</span>`);
+  if (ovr.pause_reminders) flags.push('<span class="badge b-yellow">⏸ Reminders Paused</span>');
+  if (ovr.mute_proactive)  flags.push('<span class="badge b-yellow">🔇 Proactive Muted</span>');
+  if (s.quiet_hours)       flags.push('<span class="badge b-muted">🌙 Quiet Hours</span>');
+
+  let html = '';
+
+  html += `<div class="card"><h2>⚙️ Scheduler Jobs</h2>
+    ${flags.length ? '<div style="margin-bottom:8px">' + flags.join(' ') + '</div>' : ''}
+    <table>
+      <tr><th>Job</th><th>Last Run</th><th>Next</th><th>Dur</th><th>Fails</th></tr>
+      ${(s.jobs||[]).map(jobRow).join('')}
+    </table></div>`;
+
+  html += `<div class="card"><h2>📊 Queue & Rate</h2>
+    <div class="kv"><span class="k">Queue size</span><span class="v ${s.queue_size>5?'warn':''}">${ s.queue_size ?? '?'}</span></div>
+    <div class="kv"><span class="k">Proactive this hour</span><span class="v">${s.proactive_this_hour ?? 0} / 3</span></div>
+    <div class="kv"><span class="k">Pending confirmations</span><span class="v ${s.pending_count>0?'warn':''}">${ s.pending_count ?? 0}</span></div>
+    <div class="kv"><span class="k">Total events today</span><span class="v">${evts.total_today ?? 0}</span></div>
+  </div>`;
+
+  if (pend.length > 0) {
+    html += `<div class="card"><h2>⏳ Pending Confirmations</h2>
+      <table><tr><th>ID</th><th>Event</th><th>Elapsed</th><th>Timeout in</th></tr>
+      ${pend.map(p => `<tr>
+          <td class="off">#${p.routine_id}</td><td>${p.event}</td>
+          <td class="${p.elapsed_min>25?'warn':''}">${ p.elapsed_min}m</td>
+          <td class="${p.timeout_in_min<5?'err':'ok'}">${p.timeout_in_min}m</td>
+        </tr>`).join('')}
+      </table></div>`;
+  }
+
+  if ((rout.active||[]).length > 0) {
+    html += `<div class="card" style="grid-column: span 2"><h2>🗓️ Active Routines (${rout.active.length})</h2>
+      <table><tr><th>ID</th><th>Day</th><th>Time</th><th>Event</th><th>Confidence</th><th>Cooldown left</th><th>State</th></tr>
+      ${rout.active.map(r => `<tr>
+          <td class="off">#${r.id}</td><td>${r.day}</td><td><b>${r.time}</b></td>
+          <td>${r.event}</td>
+          <td style="min-width:80px">${confBar(r.confidence)}</td>
+          <td class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null ? r.cooldown_remaining_h+'h' : '—'}</td>
+          <td>${stateBadge(r.state)}</td>
+        </tr>`).join('')}
+      </table></div>`;
+  }
+
+  const sc = rout.state_counts || {};
+  if (Object.keys(sc).length > 0) {
+    html += `<div class="card"><h2>📈 Routine State Counts</h2>
+      ${Object.entries(sc).map(([st,c]) => `<div class="kv"><span class="k">${stateBadge(st)}</span><span class="v">${c}</span></div>`).join('')}
+    </div>`;
+  }
+
+  if ((rout.non_active||[]).length > 0) {
+    html += `<div class="card"><h2>🔄 Non-Active Routines</h2>
+      <table><tr><th>ID</th><th>Event</th><th>State</th><th>Conf</th></tr>
+      ${rout.non_active.map(r => `<tr>
+          <td class="off">#${r.id}</td><td>${r.event}</td>
+          <td>${stateBadge(r.state)}</td>
+          <td class="${r.confidence<0.1?'err':r.confidence<0.5?'warn':'ok'}">${r.confidence}</td>
+        </tr>`).join('')}
+      </table></div>`;
+  }
+
+  const tp = evts.throughput || {};
+  if (Object.keys(tp).length > 0) {
+    const max_tp = Math.max(...Object.values(tp), 1);
+    html += `<div class="card"><h2>⚡ Event Throughput (last 1h)</h2>
+      ${Object.entries(tp).sort((a,b)=>b[1]-a[1]).map(([k,v]) => {
+        const pct = Math.round(v/max_tp*100);
+        return `<div style="margin-bottom:5px">
+          <div style="display:flex;justify-content:space-between"><span class="off">${k}</span><b>${v}</b></div>
+          <div class="bar-wrap"><div class="bar-fill" style="width:${pct}%;background:var(--blue)"></div></div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  if ((evts.last_errors||[]).length > 0) {
+    html += `<div class="card"><h2>❌ Last Errors (1h)</h2>
+      ${evts.last_errors.map(e => `<div style="margin-bottom:6px;font-size:12px">
+        <span class="off">${e.time}</span> <span class="warn">[${e.job}]</span><br>
+        <span class="err">${e.error}</span>
+      </div>`).join('')}
+    </div>`;
+  }
+
+  document.getElementById('grid').innerHTML = html;
+}
+
+async function fetchData() {
+  try {
+    const r = await fetch('/debug/runtime');
+    const d = await r.json();
+    render(d);
+  } catch(e) {
+    document.getElementById('ts').innerHTML = `<span class="err">Σφάλμα φόρτωσης: ${e}</span>`;
+  }
+}
+
+function startCountdown() {
+  cancelAnimationFrame(rafId);
+  const bar = document.getElementById('refresh-bar');
+  const start = performance.now();
+  function tick(now) {
+    const elapsed = now - start;
+    const pct = Math.min(100, (elapsed / REFRESH) * 100);
+    bar.style.width = pct + '%';
+    if (elapsed < REFRESH) { rafId = requestAnimationFrame(tick); }
+    else { fetchData(); startCountdown(); }
+  }
+  rafId = requestAnimationFrame(tick);
+}
+
+fetchData();
+startCountdown();
+</script>
+</body>
+</html>"""
+    return HTMLResponse(content=html)

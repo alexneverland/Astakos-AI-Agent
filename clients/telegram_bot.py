@@ -922,6 +922,41 @@ class AstakosScheduler:
         })
         print(f"\033[90m[Scheduler]: Registered '{name or func.__name__}' every {interval_seconds}s\033[0m")
 
+    def _write_snapshot(self):
+        """Γράφει runtime_snapshot.json κάθε heartbeat — διαβάζεται από /debug/runtime."""
+        try:
+            from config import BASE_DIR
+            import json as _json
+            now = time.time()
+            snapshot = {
+                "written_at":  datetime.now().isoformat(timespec="seconds"),
+                "jobs": [
+                    {
+                        "name":          j["name"],
+                        "interval":      j["interval"],
+                        "last_run":      datetime.fromtimestamp(j["last_run"]).strftime("%H:%M:%S") if j["last_run"] > 0 else None,
+                        "next_in_secs":  max(0, int(j["interval"] - (now - j["last_run"]))) if j["last_run"] > 0 else 0,
+                        "last_duration": round(j["last_duration"], 3),
+                        "fail_count":    j["fail_count"],
+                        "last_error":    j["last_error"],
+                        "disabled":      j["disabled"],
+                    }
+                    for j in self._jobs
+                ],
+                "pending_confirmations": len(pending_routine_confirmations),
+                "queue_size":            astakos_queue.qsize(),
+                "quiet_hours":           is_quiet_hours(),
+                "proactive_muted":       is_proactive_muted(),
+                "reminders_paused":      is_reminders_paused(),
+            }
+            with _proactive_lock:
+                snapshot["proactive_this_hour"] = _proactive_count["count"]
+            path = os.path.join(BASE_DIR, "runtime_snapshot.json")
+            with open(path, "w", encoding="utf-8") as f:
+                _json.dump(snapshot, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"[Scheduler]: snapshot write error: {e}")
+
     def run(self):
         print("\033[90m[Scheduler]: Central Event Bus ξεκίνησε!\033[0m")
         while not shutdown_event.is_set():
@@ -964,6 +999,7 @@ class AstakosScheduler:
                 job["last_run"]      = time.time()
                 job["last_duration"] = time.time() - t_start
 
+            self._write_snapshot()
             shutdown_event.wait(timeout=10)
 
     def status(self) -> str:
@@ -1051,4 +1087,5 @@ if __name__ == "__main__":
         try:
             _run_session_summary()
         except Exception:
-            pas
+            pass
+        print("[TelegramBot]: Τερματίστηκε.")
