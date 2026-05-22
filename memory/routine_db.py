@@ -80,7 +80,7 @@ def get_routines_for_day(day: str) -> list:
     cursor.execute('''
         SELECT id, time_str, event_name, event_type, confidence
         FROM routines
-        WHERE (day_of_week=? OR day_of_week='Everyday' OR day_of_week='Everyday')
+        WHERE (day_of_week=? OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
         AND is_active=1
         ORDER BY time_str ASC
     ''', (day,))

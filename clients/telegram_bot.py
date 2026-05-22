@@ -323,10 +323,13 @@ def handle_message(user_text: str, chat_id: str):
     # ── ROUTINE FEEDBACK LOOP ──
     if pending_routine_confirmations:
         text_check = clean_user_text.lower()
+        # Βγάζουμε τα σημεία στίξης και κόβουμε την πρόταση σε λίστα λέξεων
+        text_words = text_check.replace(",", "").replace(".", "").replace("!", "").split()
+        
         yes_words = ["ναι", "yes", "οκ", "ok", "ισχύει", "ισχυει", "σωστά", "σωστα"]
         no_words  = ["όχι", "οχι", "no", "σταμάτα", "σταματα", "διέγραψε", "διεγραψε", "βγάλτο", "βγαλτο"]
 
-        if any(w in text_check for w in yes_words):
+        if any(w in text_words for w in yes_words):
             from memory.routine_db import confirm_routine
             for rid in list(pending_routine_confirmations.keys()):
                 confirm_routine(rid)

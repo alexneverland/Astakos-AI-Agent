@@ -163,7 +163,6 @@ class AstakosMemoryManager:
             
             # Mastro-Scanner: Αναζήτηση για παλιά εγγραφή που πρέπει να αντικατασταθεί
             if existing_facts:
-                from services.embeddings import embeddings # Διασφάλιση ότι υπάρχει το εργαλείο
                 new_emb = embeddings.embed_query(fact)
                 existing_embs = embeddings.embed_documents(existing_facts)
                 

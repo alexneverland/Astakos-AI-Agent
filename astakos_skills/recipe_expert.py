@@ -70,11 +70,22 @@ def log_meal(meal_name: str):
     """
     history = []
     print(f"\n[Tool Debug] 📝 Καταγραφή γεύματος στο JSON: {meal_name}")
+    
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
                 history = json.load(f)
         except: pass
+        
+    # [MASTRO-FIX]: Έλεγχος αν το γεύμα έχει ήδη καταγραφεί ΣΗΜΕΡΑ
+    for meal in history:
+        # Παίρνουμε το YYYY-MM-DD από το "2026-05-21 21:30"
+        meal_date = meal.get("date", "").split(" ")[0] 
+        if meal_date == today_str and meal.get("name") == meal_name:
+            print("⚠️ Αποτροπή διπλοεγγραφής γεύματος!")
+            return f"⚠️ Το γεύμα '{meal_name}' έχει ΗΔΗ καταγραφεί για σήμερα. Μην το ξαναγράφεις."
         
     history.append({
         "name": meal_name, 
