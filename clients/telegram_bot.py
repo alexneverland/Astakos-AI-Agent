@@ -43,7 +43,8 @@ shutdown_event        = threading.Event()
 astakos_queue         = queue.Queue()
 memory_lock           = threading.Lock()
 last_interaction_time = time.time()
-
+# Pending routine confirmations: {routine_id: event_name}
+pending_routine_confirmations = {}
 def enqueue_task(func, *args):
     astakos_queue.put((func, args))
 
@@ -319,7 +320,24 @@ def handle_message(user_text: str, chat_id: str):
     clean_user_text = user_text.replace("/voice", "").replace("[ΦΩΝΗΤΙΚΟ]:", "").replace("[VOICE_MESSAGE]:", "").strip()
     if not clean_user_text: 
         clean_user_text = "Γεια σου Αστακέ"
+    # ── ROUTINE FEEDBACK LOOP ──
+    if pending_routine_confirmations:
+        text_check = clean_user_text.lower()
+        yes_words = ["ναι", "yes", "οκ", "ok", "ισχύει", "ισχυει", "σωστά", "σωστα"]
+        no_words  = ["όχι", "οχι", "no", "σταμάτα", "σταματα", "διέγραψε", "διεγραψε", "βγάλτο", "βγαλτο"]
 
+        if any(w in text_check for w in yes_words):
+            from memory.routine_db import confirm_routine
+            for rid in list(pending_routine_confirmations.keys()):
+                confirm_routine(rid)
+                print(f"✅ [Routine Confirmed]: {pending_routine_confirmations[rid]}")
+            pending_routine_confirmations.clear()
+        elif any(w in text_check for w in no_words):
+            from memory.routine_db import decay_routine
+            for rid in list(pending_routine_confirmations.keys()):
+                decay_routine(rid)
+                print(f"📉 [Routine Decayed]: {pending_routine_confirmations[rid]}")
+            pending_routine_confirmations.clear()
     with memory_lock:
         last_interaction_time = time.time()
 
@@ -561,6 +579,91 @@ def reminder_worker():
                 with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
                     json.dump(rems, f, ensure_ascii=False, indent=4)
         shutdown_event.wait(timeout=20)
+# ────────────────────────────────────────────────────────────────
+# ROUTINE WORKER (BEHAVIOR PREDICTION ENGINE)
+# ────────────────────────────────────────────────────────────────
+def routine_worker():
+    """
+    Διαβάζει την SQLite (astakos_routines.db) κάθε 1 λεπτό.
+    Ειδοποιεί αν έρχεται κάποια ρουτίνα με μεγάλο confidence στα επόμενα 30 λεπτά.
+    """
+    import os
+    import sqlite3
+    from datetime import datetime, timedelta
+    from tools.telegram import send_telegram_msg
+    from config import BASE_DIR
+
+    DB_PATH = os.path.join(BASE_DIR, "astakos_routines.db")
+
+    DAYS_MAP = {
+        "Monday":    ["Monday", "Δευτέρα"],
+        "Tuesday":   ["Tuesday", "Τρίτη"],
+        "Wednesday": ["Wednesday", "Τετάρτη"],
+        "Thursday":  ["Thursday", "Πέμπτη"],
+        "Friday":    ["Friday", "Παρασκευή"],
+        "Saturday":  ["Saturday", "Σάββατο"],
+        "Sunday":    ["Sunday", "Κυριακή"]
+    }
+
+    while not shutdown_event.is_set():
+        try:
+            if os.path.exists(DB_PATH):
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+
+                now = datetime.now()
+                target_time = now + timedelta(minutes=30)
+
+                day_en = target_time.strftime("%A")
+                possible_days = DAYS_MAP.get(day_en, [day_en])
+
+                target_time_str = target_time.strftime("%H:%M")
+                today_str = now.strftime("%Y-%m-%d")
+
+                placeholders = ','.join('?' * len(possible_days))
+                query = f'''
+                    SELECT id, event_name, confidence FROM routines 
+                    WHERE (day_of_week IN ({placeholders}) OR day_of_week = 'Everyday' OR day_of_week = 'Καθημερινά')
+                    AND time_str=? AND is_active=1
+                    AND (last_triggered IS NULL OR last_triggered != ?)
+                '''
+                params = (*possible_days, target_time_str, today_str)
+                cursor.execute(query, params)
+
+                upcoming_routines = cursor.fetchall()
+
+                for r_id, event_name, confidence in upcoming_routines:
+                    if confidence >= 0.8:
+                        msg = f"🧠 **Proactive:** Μάστορα, πλησιάζει η ώρα για '{event_name}' (σε 30'). Όλα έτοιμα;"
+                    elif confidence >= 0.5:
+                        msg = f"🧠 **Proactive:** Συνήθως τέτοια ώρα έχεις '{event_name}'. Ισχύει και σήμερα;"
+                    else:
+                        msg = f"🧠 **Proactive:** Παλιά είχαμε '{event_name}' τέτοια ώρα, να το βγάλω απ' το πρόγραμμα αν δεν παίζει πια;"
+
+                    cursor.execute('UPDATE routines SET last_triggered=? WHERE id=?', (today_str, r_id))
+                    conn.commit()
+
+                    send_telegram_msg(msg)
+                    pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": datetime.now()}
+
+                conn.close()
+
+        except Exception as e:
+            print(f"❌ Routine Worker Error: {e}")
+
+        # Timeout decay: αν έχουν περάσει >30' χωρίς απάντηση, decay
+        if pending_routine_confirmations:
+            from memory.routine_db import decay_routine
+            now_check = datetime.now()
+            for rid in list(pending_routine_confirmations.keys()):
+                sent_at = pending_routine_confirmations[rid]["sent_at"]
+                if (now_check - sent_at).total_seconds() > 1800:
+                    decay_routine(rid)
+                    print(f"⏰ [Routine Timeout Decay]: {pending_routine_confirmations[rid]['event']}")
+                    del pending_routine_confirmations[rid]
+
+        # Ελέγχει κάθε 60 δευτερόλεπτα
+        shutdown_event.wait(timeout=60)
 def proactive_worker():
     """
     Ο 'Νυχτοφύλακας' του Αστακού.
@@ -646,6 +749,7 @@ if __name__ == "__main__":
     threading.Thread(target=queue_worker,   daemon=True).start()
     threading.Thread(target=reminder_worker, daemon=True).start()
     threading.Thread(target=proactive_worker, daemon=True).start()
+    threading.Thread(target=routine_worker, daemon=True).start()
 
     print("━" * 50)
     print("  🦞  Αστακός Telegram Bot — Εκκίνηση")

@@ -12,8 +12,10 @@ astakos_skills/messenger_profile/
 astakos_skills/food_history.json
 .cache/
 .cache
-
+outputs/
+_cleaner_backups/
 # Databases & Checkpoints
+*.db
 chroma_db/
 astakos_chat_history.json
 astakos_working_memory.json
@@ -32,4 +34,4 @@ venv/
 .vscode/chroma_db/
 chroma_db - Copy/
 watch_folder/
-prompts.md
+prom
