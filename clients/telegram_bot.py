@@ -560,44 +560,39 @@ def run_polling():
             time.sleep(5)
 
 # ────────────────────────────────────────────────────────────────
-# REMINDER WORKER (standalone για τον bot)
+# SCHEDULER JOBS (χωρίς while loop — ο scheduler τα καλεί)
 # ────────────────────────────────────────────────────────────────
 
-def reminder_worker():
+def job_check_reminders():
     """Ελέγχει για υπενθυμίσεις και τις στέλνει στο Telegram."""
     from config import REMINDERS_FILE
-    while not shutdown_event.is_set():
-        if os.path.exists(REMINDERS_FILE):
-            with open(REMINDERS_FILE, "r", encoding="utf-8") as f:
-                try:
-                    rems = json.load(f)
-                except:
-                    rems = []
-            now, changed = datetime.now().strftime("%Y-%m-%d %H:%M"), False
-            for r in rems:
-                if r["status"] == "pending" and now >= r["time"]:
-                    send_telegram_msg(f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {r['task']}")
-                    r["status"], changed = "done", True
-            if changed:
-                with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(rems, f, ensure_ascii=False, indent=4)
-        shutdown_event.wait(timeout=20)
-# ────────────────────────────────────────────────────────────────
-# ROUTINE WORKER (BEHAVIOR PREDICTION ENGINE)
-# ────────────────────────────────────────────────────────────────
-def routine_worker():
+    if not os.path.exists(REMINDERS_FILE):
+        return
+    try:
+        with open(REMINDERS_FILE, "r", encoding="utf-8") as f:
+            rems = json.load(f)
+    except Exception:
+        return
+    now, changed = datetime.now().strftime("%Y-%m-%d %H:%M"), False
+    for r in rems:
+        if r["status"] == "pending" and now >= r["time"]:
+            send_telegram_msg(f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {r['task']}")
+            r["status"], changed = "done", True
+    if changed:
+        with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(rems, f, ensure_ascii=False, indent=4)
+
+
+def job_check_routines():
     """
-    Διαβάζει την SQLite (astakos_routines.db) κάθε 1 λεπτό.
-    Ειδοποιεί αν έρχεται κάποια ρουτίνα με μεγάλο confidence στα επόμενα 30 λεπτά.
+    Ελέγχει για επερχόμενες ρουτίνες (30' νωρίτερα) και κάνει timeout decay
+    σε εκκρεμείς επιβεβαιώσεις που δεν απαντήθηκαν.
     """
-    import os
     import sqlite3
-    from datetime import datetime, timedelta
-    from tools.telegram import send_telegram_msg
+    from datetime import timedelta
     from config import BASE_DIR
 
     DB_PATH = os.path.join(BASE_DIR, "astakos_routines.db")
-
     DAYS_MAP = {
         "Monday":    ["Monday", "Δευτέρα"],
         "Tuesday":   ["Tuesday", "Τρίτη"],
@@ -605,134 +600,134 @@ def routine_worker():
         "Thursday":  ["Thursday", "Πέμπτη"],
         "Friday":    ["Friday", "Παρασκευή"],
         "Saturday":  ["Saturday", "Σάββατο"],
-        "Sunday":    ["Sunday", "Κυριακή"]
+        "Sunday":    ["Sunday", "Κυριακή"],
     }
 
-    while not shutdown_event.is_set():
-        try:
-            if os.path.exists(DB_PATH):
-                conn = sqlite3.connect(DB_PATH)
-                cursor = conn.cursor()
+    # 1. Upcoming routine notifications
+    try:
+        if os.path.exists(DB_PATH):
+            conn   = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            now          = datetime.now()
+            target_time  = now + timedelta(minutes=30)
+            day_en       = target_time.strftime("%A")
+            possible_days = DAYS_MAP.get(day_en, [day_en])
+            target_time_str = target_time.strftime("%H:%M")
+            today_str       = now.strftime("%Y-%m-%d")
 
-                now = datetime.now()
-                target_time = now + timedelta(minutes=30)
+            placeholders = ",".join("?" * len(possible_days))
+            cursor.execute(f"""
+                SELECT id, event_name, confidence FROM routines
+                WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
+                AND time_str=? AND is_active=1
+                AND (last_triggered IS NULL OR last_triggered != ?)
+            """, (*possible_days, target_time_str, today_str))
 
-                day_en = target_time.strftime("%A")
-                possible_days = DAYS_MAP.get(day_en, [day_en])
+            for r_id, event_name, confidence in cursor.fetchall():
+                if confidence >= 0.8:
+                    msg = f"🧠 **Proactive:** Μάστορα, πλησιάζει η ώρα για '{event_name}' (σε 30'). Όλα έτοιμα;"
+                elif confidence >= 0.5:
+                    msg = f"🧠 **Proactive:** Συνήθως τέτοια ώρα έχεις '{event_name}'. Ισχύει και σήμερα;"
+                else:
+                    msg = f"🧠 **Proactive:** Παλιά είχαμε '{event_name}' τέτοια ώρα, να το βγάλω αν δεν παίζει πια;"
 
-                target_time_str = target_time.strftime("%H:%M")
-                today_str = now.strftime("%Y-%m-%d")
+                cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                conn.commit()
+                send_telegram_msg(msg)
+                pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": datetime.now()}
 
-                placeholders = ','.join('?' * len(possible_days))
-                query = f'''
-                    SELECT id, event_name, confidence FROM routines 
-                    WHERE (day_of_week IN ({placeholders}) OR day_of_week = 'Everyday' OR day_of_week = 'Καθημερινά')
-                    AND time_str=? AND is_active=1
-                    AND (last_triggered IS NULL OR last_triggered != ?)
-                '''
-                params = (*possible_days, target_time_str, today_str)
-                cursor.execute(query, params)
+            conn.close()
+    except Exception as e:
+        print(f"❌ [job_check_routines]: {e}")
 
-                upcoming_routines = cursor.fetchall()
+    # 2. Timeout decay για εκκρεμείς επιβεβαιώσεις (>30')
+    if pending_routine_confirmations:
+        from memory.routine_db import decay_routine
+        now_check = datetime.now()
+        for rid in list(pending_routine_confirmations.keys()):
+            if (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds() > 1800:
+                decay_routine(rid)
+                print(f"⏰ [Routine Timeout Decay]: {pending_routine_confirmations[rid]['event']}")
+                del pending_routine_confirmations[rid]
 
-                for r_id, event_name, confidence in upcoming_routines:
-                    if confidence >= 0.8:
-                        msg = f"🧠 **Proactive:** Μάστορα, πλησιάζει η ώρα για '{event_name}' (σε 30'). Όλα έτοιμα;"
-                    elif confidence >= 0.5:
-                        msg = f"🧠 **Proactive:** Συνήθως τέτοια ώρα έχεις '{event_name}'. Ισχύει και σήμερα;"
-                    else:
-                        msg = f"🧠 **Proactive:** Παλιά είχαμε '{event_name}' τέτοια ώρα, να το βγάλω απ' το πρόγραμμα αν δεν παίζει πια;"
 
-                    cursor.execute('UPDATE routines SET last_triggered=? WHERE id=?', (today_str, r_id))
-                    conn.commit()
-
-                    send_telegram_msg(msg)
-                    pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": datetime.now()}
-
-                conn.close()
-
-        except Exception as e:
-            print(f"❌ Routine Worker Error: {e}")
-
-        # Timeout decay: αν έχουν περάσει >30' χωρίς απάντηση, decay
-        if pending_routine_confirmations:
-            from memory.routine_db import decay_routine
-            now_check = datetime.now()
-            for rid in list(pending_routine_confirmations.keys()):
-                sent_at = pending_routine_confirmations[rid]["sent_at"]
-                if (now_check - sent_at).total_seconds() > 1800:
-                    decay_routine(rid)
-                    print(f"⏰ [Routine Timeout Decay]: {pending_routine_confirmations[rid]['event']}")
-                    del pending_routine_confirmations[rid]
-
-        # Ελέγχει κάθε 60 δευτερόλεπτα
-        shutdown_event.wait(timeout=60)
-def proactive_worker():
+def job_proactive_scan():
     """
-    Ο 'Νυχτοφύλακας' του Αστακού.
-    Ξυπνάει κάθε 12 ώρες, διαβάζει αρχεία/logs και αν βρει κάτι επείγον, στέλνει μήνυμα.
+    Ο 'Νυχτοφύλακας' — σκανάρει το watch_folder και αν βρει θέμα, στέλνει alert.
     """
-    import os
-    from tools.system import read_local_file # Χρησιμοποιούμε το δικό σου tool για διάβασμα
-    
-    # Φάκελοι που θέλουμε να "κατασκοπεύει" (Βάλε τα δικά σου paths)
-    WATCH_DIR = "C:\\astakos_v2\\watch_folder" 
-    
-    while not shutdown_event.is_set():
-        # Ξυπνάει κάθε 12 ώρες (43200 δευτερόλεπτα). Για δοκιμή βάλτο στα 60 (1 λεπτό).
-        shutdown_event.wait(timeout=43200) 
-        if shutdown_event.is_set():
-            break
-            
-        print("🦞 [Proactive]: Ξεκινάω αθόρυβο σκανάρισμα συστήματος...")
-        
-        try:
-            # 1. Μαζεύουμε τα δεδομένα (π.χ. βρίσκουμε τα αρχεία στον φάκελο)
-            if not os.path.exists(WATCH_DIR):
-                os.makedirs(WATCH_DIR)
-                
-            files_to_scan = os.listdir(WATCH_DIR)
-            if not files_to_scan:
-                continue # Αν δεν έχει τίποτα, ξανακοιμάται
-                
-            collected_data = ""
-            for file in files_to_scan:
-                filepath = os.path.join(WATCH_DIR, file)
-                
-                # [MASTRO-FIX]: Επειδή είναι AI Tool, το καλούμε με .invoke() αντί για απλές παρενθέσεις
-                try:
-                    content = read_local_file.invoke(filepath)
-                except TypeError:
-                    # Fallback αν το εργαλείο ζητάει το όνομα της παραμέτρου
-                    content = read_local_file.invoke({"file_path": filepath})
-                    
-                # Σιγουρευόμαστε ότι είναι string πριν το κόψουμε
-                collected_data += f"\n--- ΑΡΧΕΙΟ: {file} ---\n{str(content)[:2000]}\n"
+    from tools.system import read_local_file
+    WATCH_DIR = "C:\\astakos_v2\\watch_folder"
 
-            # 2. Στέλνουμε τα δεδομένα στον Εγκέφαλο (Gemini) με αυστηρή οδηγία
-            prompt = """
-            Είσαι ο Αστακός. Λειτουργείς στο background ως σύστημα προληπτικής συντήρησης (Proactive Scan).
-            Έχεις μπροστά σου κάποια αρχεία/logs από το σύστημα του Λάζαρου (Piston-7).
-            
-            ΟΔΗΓΙΕΣ:
-            1. Ψάξε για ΗΜΕΡΟΜΗΝΙΕΣ ΛΗΞΗΣ (π.χ. λογαριασμοί, συνδρομές) που είναι κοντά στο σήμερα.
-            2. Ψάξε για ERRORS, ελλείψεις ή προβλήματα (π.χ. στο PraxisERP).
-            3. ΑΝ ΥΠΑΡΧΕΙ ΘΕΜΑ: Γράψε ένα σταράτο, μάστορικο μήνυμα προς τον Λάζαρο ξεκινώντας με "🚨 Μάστορα, ρίξε μια ματιά:".
-            4. ΑΝ ΟΛΑ ΕΙΝΑΙ ΚΑΛΑ: Γράψε ΑΚΡΙΒΩΣ και ΜΟΝΟ τη φράση "ΟΛΑ ΚΑΛΑ".
-            """
-            
-            response = safe_gemini_call(f"{prompt}\n\n[ΔΕΔΟΜΕΝΑ]:\n{collected_data}")
-            reply = response.text.strip()
-            
-            # 3. Αν δεν απάντησε "ΟΛΑ ΚΑΛΑ", χτυπάει συναγερμός στο Telegram!
-            if reply and "ΟΛΑ ΚΑΛΑ" not in reply:
-                send_telegram_msg(reply)
-                print(f"⚠️ [Proactive Alert Sent]: {reply[:50]}...")
-            else:
-                print("✔️ [Proactive]: Όλα καθαρά, πάω για ύπνο.")
-                
-        except Exception as e:
-            print(f"⚠️ Proactive Scan Error: {e}")
+    print("🦞 [Proactive]: Ξεκινάω αθόρυβο σκανάρισμα συστήματος...")
+    try:
+        os.makedirs(WATCH_DIR, exist_ok=True)
+        files_to_scan = os.listdir(WATCH_DIR)
+        if not files_to_scan:
+            return
+
+        collected_data = ""
+        for file in files_to_scan:
+            filepath = os.path.join(WATCH_DIR, file)
+            try:
+                content = read_local_file.invoke(filepath)
+            except TypeError:
+                content = read_local_file.invoke({"file_path": filepath})
+            collected_data += f"\n--- ΑΡΧΕΙΟ: {file} ---\n{str(content)[:2000]}\n"
+
+        prompt = (
+            "Είσαι ο Αστακός. Λειτουργείς ως σύστημα προληπτικής συντήρησης.\n"
+            "1. Ψάξε για ΗΜΕΡΟΜΗΝΙΕΣ ΛΗΞΗΣ κοντά στο σήμερα.\n"
+            "2. Ψάξε για ERRORS ή προβλήματα.\n"
+            "3. ΑΝ ΥΠΑΡΧΕΙ ΘΕΜΑ: ξεκίνα με '🚨 Μάστορα, ρίξε μια ματιά:'.\n"
+            "4. ΑΝ ΟΛΑ ΕΙΝΑΙ ΚΑΛΑ: γράψε ΜΟΝΟ 'ΟΛΑ ΚΑΛΑ'."
+        )
+        response = safe_gemini_call(f"{prompt}\n\n[ΔΕΔΟΜΕΝΑ]:\n{collected_data}")
+        reply = response.text.strip()
+
+        if reply and "ΟΛΑ ΚΑΛΑ" not in reply:
+            send_telegram_msg(reply)
+            print(f"⚠️ [Proactive Alert Sent]: {reply[:50]}...")
+        else:
+            print("✔️ [Proactive]: Όλα καθαρά.")
+    except Exception as e:
+        print(f"⚠️ [job_proactive_scan]: {e}")
+
+
+# ────────────────────────────────────────────────────────────────
+# ASTAKOS SCHEDULER (Central Event Bus)
+# ────────────────────────────────────────────────────────────────
+
+class AstakosScheduler:
+    """
+    Ένας thread, όλα τα background jobs.
+    Κάθε job δηλώνει το interval του — ο scheduler τρέχει heartbeat
+    κάθε 10s και εκτελεί όσα "έχει ξεπεράσει" τον χρόνο τους.
+    """
+
+    def __init__(self):
+        self._jobs = []  # list of {"name", "func", "interval", "last_run"}
+
+    def register(self, func, interval_seconds: int, name: str = None):
+        self._jobs.append({
+            "name":     name or func.__name__,
+            "func":     func,
+            "interval": interval_seconds,
+            "last_run": 0,  # 0 = τρέξε αμέσως στο πρώτο tick
+        })
+        print(f"\033[90m[Scheduler]: Registered '{name or func.__name__}' every {interval_seconds}s\033[0m")
+
+    def run(self):
+        print("\033[90m[Scheduler]: Central Event Bus ξεκίνησε!\033[0m")
+        while not shutdown_event.is_set():
+            now = time.time()
+            for job in self._jobs:
+                if now - job["last_run"] >= job["interval"]:
+                    try:
+                        job["func"]()
+                    except Exception as e:
+                        print(f"\033[91m❌ [Scheduler/{job['name']}]: {e}\033[0m")
+                    job["last_run"] = time.time()
+            shutdown_event.wait(timeout=10)
 
 # ────────────────────────────────────────────────────────────────
 # ENTRY POINT
@@ -749,10 +744,14 @@ if __name__ == "__main__":
     _signal.signal(_signal.SIGINT,  _handle_exit)
 
     # Εκκίνηση workers
-    threading.Thread(target=queue_worker,   daemon=True).start()
-    threading.Thread(target=reminder_worker, daemon=True).start()
-    threading.Thread(target=proactive_worker, daemon=True).start()
-    threading.Thread(target=routine_worker, daemon=True).start()
+    threading.Thread(target=queue_worker, daemon=True).start()
+
+    # Central Scheduler (αντικαθιστά reminder/routine/proactive workers)
+    scheduler = AstakosScheduler()
+    scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders")
+    scheduler.register(job_check_routines,  interval_seconds=60,    name="routines")
+    scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive")
+    threading.Thread(target=scheduler.run, daemon=True).start()
 
     print("━" * 50)
     print("  🦞  Αστακός Telegram Bot — Εκκίνηση")
