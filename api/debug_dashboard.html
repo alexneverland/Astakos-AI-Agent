@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🦞 Astakos Runtime Dashboard</title>
+<style>
+  :root {
+    --bg:#0d1117;--card:#161b22;--border:#30363d;
+    --text:#e6edf3;--muted:#8b949e;--green:#3fb950;
+    --red:#f85149;--yellow:#d29922;--blue:#58a6ff;
+    --purple:#bc8cff;--orange:#f0883e;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',monospace;font-size:13px;padding:16px;}
+  h1{font-size:20px;margin-bottom:4px;}
+  .ts{color:var(--muted);font-size:11px;margin-bottom:16px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;}
+  .card h2{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;}
+  table{width:100%;border-collapse:collapse;}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;padding:4px 6px;text-align:left;border-bottom:1px solid var(--border);}
+  td{padding:5px 6px;border-bottom:1px solid #21262d;vertical-align:top;}
+  tr:last-child td{border-bottom:none;}
+  .ok{color:var(--green);}.warn{color:var(--yellow);}.err{color:var(--red);}.off{color:var(--muted);}
+  .badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;}
+  .b-green{background:#1a3a1f;color:var(--green);}
+  .b-yellow{background:#3a2d0a;color:var(--yellow);}
+  .b-red{background:#3a0d0d;color:var(--red);}
+  .b-blue{background:#0d2240;color:var(--blue);}
+  .b-purple{background:#220d3a;color:var(--purple);}
+  .b-orange{background:#3a1e0a;color:var(--orange);}
+  .b-muted{background:#1c2128;color:var(--muted);}
+  .kv{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #21262d;}
+  .kv:last-child{border-bottom:none;}
+  .kv .k{color:var(--muted);}.kv .v{font-weight:600;}
+  .bar-wrap{background:#21262d;border-radius:4px;height:6px;width:100%;margin-top:3px;}
+  .bar-fill{height:6px;border-radius:4px;background:var(--green);transition:width .4s;}
+  #refresh-bar{height:2px;background:var(--blue);transition:width .1s linear;position:fixed;top:0;left:0;z-index:99;}
+</style>
+</head>
+<body>
+<div id="refresh-bar" style="width:0%"></div>
+<h1>🦞 Astakos Runtime Dashboard</h1>
+<div class="ts" id="ts">Φόρτωση...</div>
+<div class="grid" id="grid"></div>
+<script>
+const REFRESH = 5000;
+let rafId;
+
+function stateBadge(s) {
+  const m = {
+    active:['b-green','ACTIVE'], trigger_pending:['b-yellow','TRIGGER_PENDING'],
+    confirmed:['b-blue','CONFIRMED'], ignored:['b-orange','IGNORED'],
+    dismissed:['b-purple','DISMISSED'], decayed:['b-red','DECAYED'],
+    archived:['b-muted','ARCHIVED'], learned:['b-muted','LEARNED'],
+  };
+  const [c,l] = m[s] || ['b-muted', s];
+  return `<span class="badge ${c}">${l}</span>`;
+}
+
+function jobRow(j) {
+  const icon = j.disabled ? '🚫' : j.fail_count > 0 ? '⚠️' : '✅';
+  const next = j.disabled ? '—' : `${j.next_in_secs}s`;
+  const dur  = j.last_duration != null ? `${j.last_duration.toFixed(2)}s` : '—';
+  return `<tr>
+    <td>${icon} <b>${j.name}</b></td>
+    <td class="off">${j.last_run||'—'}</td>
+    <td class="${j.disabled?'err':'ok'}">${next}</td>
+    <td>${dur}</td>
+    <td class="${j.fail_count>0?'warn':'ok'}">${j.fail_count}</td>
+  </tr>${j.last_error?`<tr><td colspan="5" class="err" style="font-size:11px;padding:2px 6px 6px">↳ ${j.last_error}</td></tr>`:''}`;
+}
+
+function confBar(v) {
+  const p = Math.round(v*100);
+  const c = v>=0.8?'var(--green)':v>=0.5?'var(--yellow)':'var(--red)';
+  return `${p}% <div class="bar-wrap"><div class="bar-fill" style="width:${p}%;background:${c}"></div></div>`;
+}
+
+function render(d) {
+  const s = d.scheduler||{}, ovr = d.overrides||{}, rout = d.routines||{};
+  const evts = d.events_1h||{}, pend = d.pending_confirmations||[];
+  const stale = d.snapshot_age_s != null && d.snapshot_age_s > 30;
+  const age = d.snapshot_age_s != null
+    ? `(snapshot ${d.snapshot_age_s}s ago${stale?' ⚠️ STALE':''})` : '(telegram_bot offline?)';
+
+  document.getElementById('ts').innerHTML =
+    `Τελευταία ανανέωση: <b>${new Date().toLocaleTimeString('el-GR')}</b> &nbsp;${age}`;
+
+  const flags = [];
+  if (ovr.sleeping)        flags.push(`<span class="badge b-red">😴 Sleep until ${ovr.sleep_until}</span>`);
+  if (ovr.pause_reminders) flags.push('<span class="badge b-yellow">⏸ Reminders Paused</span>');
+  if (ovr.mute_proactive)  flags.push('<span class="badge b-yellow">🔇 Proactive Muted</span>');
+  if (s.quiet_hours)       flags.push('<span class="badge b-muted">🌙 Quiet Hours</span>');
+
+  let html = '';
+
+  html += `<div class="card"><h2>⚙️ Scheduler Jobs</h2>
+    ${flags.length?'<div style="margin-bottom:8px">'+flags.join(' ')+'</div>':''}
+    <table><tr><th>Job</th><th>Last Run</th><th>Next</th><th>Dur</th><th>Fails</th></tr>
+    ${(s.jobs||[]).map(jobRow).join('')}</table></div>`;
+
+  html += `<div class="card"><h2>📊 Queue &amp; Rate</h2>
+    <div class="kv"><span class="k">Queue size</span><span class="v ${s.queue_size>5?'warn':''}">${s.queue_size??'?'}</span></div>
+    <div class="kv"><span class="k">Proactive this hour</span><span class="v">${s.proactive_this_hour??0} / 3</span></div>
+    <div class="kv"><span class="k">Pending confirmations</span><span class="v ${s.pending_count>0?'warn':''}">${s.pending_count??0}</span></div>
+    <div class="kv"><span class="k">Total events today</span><span class="v">${evts.total_today??0}</span></div>
+  </div>`;
+
+  if (pend.length > 0) {
+    html += `<div class="card"><h2>⏳ Pending Confirmations</h2>
+      <table><tr><th>ID</th><th>Event</th><th>Elapsed</th><th>Timeout in</th></tr>
+      ${pend.map(p=>`<tr>
+        <td class="off">#${p.routine_id}</td><td>${p.event}</td>
+        <td class="${p.elapsed_min>25?'warn':''}">${p.elapsed_min}m</td>
+        <td class="${p.timeout_in_min<5?'err':'ok'}">${p.timeout_in_min}m</td>
+      </tr>`).join('')}</table></div>`;
+  }
+
+  if ((rout.active||[]).length > 0) {
+    html += `<div class="card" style="grid-column:span 2"><h2>🗓️ Active Routines (${rout.active.length})</h2>
+      <table><tr><th>ID</th><th>Day</th><th>Time</th><th>Event</th><th>Confidence</th><th>Cooldown left</th><th>State</th></tr>
+      ${rout.active.map(r=>`<tr>
+        <td class="off">#${r.id}</td><td>${r.day}</td><td><b>${r.time}</b></td>
+        <td>${r.event}</td>
+        <td style="min-width:80px">${confBar(r.confidence)}</td>
+        <td class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null?r.cooldown_remaining_h+'h':'—'}</td>
+        <td>${stateBadge(r.state)}</td>
+      </tr>`).join('')}</table></div>`;
+  }
+
+  const sc = rout.state_counts||{};
+  if (Object.keys(sc).length > 0) {
+    html += `<div class="card"><h2>📈 Routine State Counts</h2>
+      ${Object.entries(sc).map(([st,c])=>`<div class="kv"><span class="k">${stateBadge(st)}</span><span class="v">${c}</span></div>`).join('')}
+    </div>`;
+  }
+
+  if ((rout.non_active||[]).length > 0) {
+    html += `<div class="card"><h2>🔄 Non-Active Routines</h2>
+      <table><tr><th>ID</th><th>Event</th><th>State</th><th>Conf</th></tr>
+      ${rout.non_active.map(r=>`<tr>
+        <td class="off">#${r.id}</td><td>${r.event}</td>
+        <td>${stateBadge(r.state)}</td>
+        <td class="${r.confidence<0.1?'err':r.confidence<0.5?'warn':'ok'}">${r.confidence}</td>
+      </tr>`).join('')}</table></div>`;
+  }
+
+  const tp = evts.throughput||{};
+  if (Object.keys(tp).length > 0) {
+    const mx = Math.max(...Object.values(tp),1);
+    html += `<div class="card"><h2>⚡ Event Throughput (last 1h)</h2>
+      ${Object.entries(tp).sort((a,b)=>b[1]-a[1]).map(([k,v])=>{
+        const p = Math.round(v/mx*100);
+        return `<div style="margin-bottom:5px">
+          <div style="display:flex;justify-content:space-between"><span class="off">${k}</span><b>${v}</b></div>
+          <div class="bar-wrap"><div class="bar-fill" style="width:${p}%;background:var(--blue)"></div></div>
+        </div>`;
+      }).join('')}</div>`;
+  }
+
+  if ((evts.last_errors||[]).length > 0) {
+    html += `<div class="card"><h2>❌ Last Errors (1h)</h2>
+      ${evts.last_errors.map(e=>`<div style="margin-bottom:6px;font-size:12px">
+        <span class="off">${e.time}</span> <span class="warn">[${e.job}]</span><br>
+        <span class="err">${e.error}</span>
+      </div>`).join('')}</div>`;
+  }
+
+  document.getElementById('grid').innerHTML = html;
+}
+
+async function fetchData() {
+  try {
+    const r = await fetch('/debug/runtime');
+    render(await r.json());
+  } catch(e) {
+    document.getElementById('ts').innerHTML = `<span class="err">Σφάλμα φόρτωσης: ${e}</span>`;
+  }
+}
+
+function startCountdown() {
+  cancelAnimationFrame(rafId);
+  const bar = document.getElementById('refresh-bar');
+  const start = performance.now();
+  function tick(now) {
+    const p = Math.min(100, (now-start)/REFRESH*100);
+    bar.style.width = p+'%';
+    if (now-start < REFRESH) rafId = requestAnimationFrame(tick);
+    else { fetchData(); startCountdown(); }
+  }
+  rafId = requestAnimationFrame(tick);
+}
+
+fetchData();
+startCountdown();
+</script>
+</body>
+</html>

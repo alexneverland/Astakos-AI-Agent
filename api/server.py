@@ -423,6 +423,147 @@ async def chat_endpoint(request: Request):
         traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@server.post("/voice")
+async def process_web_voice(file: UploadFile = File(...)):
+    """Δέχεται ηχητικό από το Web UI, το κάνει κείμενο με Gemini και το επιστρέφει."""
+    try:
+        audio_data = await file.read()
+        debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "debug_voice.webm")
+        with open(debug_path, "wb") as f:
+            f.write(audio_data)
+        print(f"\033[96m[Web Voice]: Αποκωδικοποίηση ηχητικού ({len(audio_data)} bytes)...\033[0m")
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model=FAST_MODEL,
+            contents=[
+                {"inline_data": {"mime_type": "audio/webm", "data": audio_data}},
+                "Είσαι ΑΠΟΚΛΕΙΣΤΙΚΑ ένα εργαλείο Speech-to-Text. Δουλειά σου είναι ΜΟΝΟ να μεταγράψεις τον ήχο σε κείμενο. ΑΠΑΓΟΡΕΥΕΤΑΙ να απαντήσεις, να σχολιάσεις ή να πεις ότι 'δεν έχεις τη δυνατότητα'. Αν δεν ακούς τίποτα ή ο ήχος είναι κενός, επέστρεψε μόνο τη λέξη: [ΣΙΩΠΗ]."
+            ]
+        )
+        transcription = response.text.strip() if response.text else ""
+        if not transcription or "[ΣΙΩΠΗ]" in transcription:
+            return JSONResponse({"error": "Δεν ακούστηκε τίποτα. Έλεγξε το μικρόφωνό σου!"})
+        print(f"\033[92m[Web Voice]: Ο Λάζαρος είπε -> {transcription}\033[0m")
+        return JSONResponse({"transcription": transcription})
+    except Exception as e:
+        import traceback
+        print(f"\033[91m[Web Voice Error]: {traceback.format_exc()}\033[0m")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+import edge_tts
+import io
+
+@server.post("/tts")
+async def text_to_speech(request: Request):
+    try:
+        body = await request.json()
+        text = body.get("text", "").strip()
+        if not text:
+            return JSONResponse({"error": "Κενό κείμενο"}, status_code=400)
+        text = re.sub(r'[*#`]', '', text)
+        text = re.sub(r'\[.*?\]\(.*?\)', '', text)
+        text = re.sub(r'\[SEND_PHOTO:.*?\]', '', text)
+        text = text.strip()
+        voice = "el-GR-NestorasNeural"
+        communicate = edge_tts.Communicate(text, voice, rate="-10%", volume="+10%")
+        audio_buffer = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_buffer.write(chunk["data"])
+        audio_buffer.seek(0)
+        audio_bytes = audio_buffer.read()
+        if not audio_bytes:
+            return JSONResponse({"error": "Αποτυχία δημιουργίας ήχου"}, status_code=500)
+        print(f"\033[95m[TTS]: Φωνή δημιουργήθηκε ({len(audio_bytes)} bytes)\033[0m")
+        from fastapi.responses import Response
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=response.mp3"}
+        )
+    except Exception as e:
+        import traceback
+        print(f"\033[91m[TTS Error]: {traceback.format_exc()}\033[0m")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@server.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """Endpoint για ανέβασμα αρχείων (φωτογραφίες & έγγραφα) από το Web UI."""
+    try:
+        file_ext  = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
+        filename  = f"web_{uuid.uuid4().hex}{file_ext}"
+        image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
+        doc_exts   = [".pdf", ".docx", ".xlsx", ".xls", ".txt", ".csv", ".json"]
+        is_image   = file_ext in image_exts
+        if is_image:
+            target_dir = PHOTOS_DIR
+        else:
+            from config import UPLOADS_DIR
+            target_dir = UPLOADS_DIR
+        file_path = os.path.join(target_dir, filename)
+        content = await file.read()
+        with open(file_path, "wb") as buffer:
+            buffer.write(content)
+        print(f"\033[92m[Upload]: Αποθηκεύτηκε → {filename}\033[0m")
+        memory_analysis = ""
+        detailed_analysis = ""
+        if is_image:
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            img = Image.open(file_path)
+            img.thumbnail((1024, 1024))
+            mem_resp = client.models.generate_content(
+                model=FAST_MODEL,
+                contents=[img, "Περίγραψε τι βλέπεις στα Ελληνικά, κοφτά, 1-2 προτάσεις."]
+            )
+            memory_analysis = mem_resp.text.strip() if mem_resp.text else "No analysis available."
+            chat_resp = client.models.generate_content(
+                model=FAST_MODEL,
+                contents=[img, "Ανάλυσε τη φωτό λεπτομερώς στα Ελληνικά, με χιούμορ και ζωντάνια."]
+            )
+            detailed_analysis = chat_resp.text.strip() if chat_resp.text else memory_analysis
+            chat_ai_msg = (
+                f"📸 **Φωτογραφία ελήφθη:** `{filename}`\n\n"
+                f"{detailed_analysis}\n\n"
+                "**Λάζαρε, να την αρχειοθετήσω μόνιμα στη μνήμη μου;**"
+            )
+            user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
+        elif file_ext in doc_exts:
+            memory_analysis = f"Έγγραφο τύπου {file_ext} με όνομα {file.filename}."
+            detailed_analysis = f"Έλαβα το αρχείο **{file.filename}** (αποθηκεύτηκε ως `{filename}`). Είναι έγγραφο ({file_ext}) και μπορώ να το διαβάσω αν μου το ζητήσεις."
+            chat_ai_msg = (
+                f"📄 **Έγγραφο ελήφθη:** `{filename}` (Αρχικό όνομα: {file.filename})\n\n"
+                f"{detailed_analysis}\n\n"
+                "**Λάζαρε, θέλεις να το διαβάσω ή να το αρχειοθετήσω;**"
+            )
+            user_log_msg = f"[USER_UPLOADED_FILE]: {filename}\n[FILE PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
+        else:
+            memory_analysis = f"Αρχείο {file_ext} με όνομα {file.filename}."
+            detailed_analysis = f"Ανέβηκε ένα αρχείο με κατάληξη {file_ext}."
+            chat_ai_msg = (
+                f"📁 **Αρχείο ελήφθη:** `{filename}`\n\n"
+                f"{detailed_analysis}\n\n"
+                "**Λάζαρε, τι θέλεις να κάνω με αυτό;**"
+            )
+            user_log_msg = f"[USER_UPLOADED_FILE]: {filename}\n[FILE PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
+        append_to_chat_history("user", f"📎 *Ανέβασα αρχείο:* `{filename}`")
+        append_to_chat_history("assistant", chat_ai_msg)
+        log_exchange(user_log_msg, chat_ai_msg, "Chat_Agent")
+        return JSONResponse({
+            "status":    "success",
+            "filename":  filename,
+            "file_path": file_path,
+            "url":       f"/photos/{filename}" if is_image else None,
+            "ai_message": chat_ai_msg,
+            "analysis":  memory_analysis,
+        })
+    except Exception as e:
+        import traceback
+        print(f"\033[91m[Upload Error]: {traceback.format_exc()}\033[0m")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
 @server.get("/")
 async def read_index():
     """Σερβίρει το Web UI (index.html)."""
@@ -640,245 +781,13 @@ async def debug_runtime():
 
 @server.get("/debug")
 async def debug_panel():
-    """Observability HTML dashboard — auto-refresh κάθε 5 δευτερόλεπτα."""
+    """Observability HTML dashboard — auto-refresh every 5s."""
     from fastapi.responses import HTMLResponse
-    html = """<!DOCTYPE html>
-<html lang="el">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🦞 Astakos Runtime Dashboard</title>
-<style>
-  :root {
-    --bg:      #0d1117; --card:  #161b22; --border: #30363d;
-    --text:    #e6edf3; --muted: #8b949e; --green:  #3fb950;
-    --red:     #f85149; --yellow:#d29922; --blue:   #58a6ff;
-    --purple:  #bc8cff; --orange:#f0883e;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', monospace; font-size: 13px; padding: 16px; }
-  h1   { font-size: 20px; margin-bottom: 4px; }
-  .ts  { color: var(--muted); font-size: 11px; margin-bottom: 16px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
-  .card h2 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; }
-  table { width: 100%; border-collapse: collapse; }
-  th    { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; padding: 4px 6px; text-align: left; border-bottom: 1px solid var(--border); }
-  td    { padding: 5px 6px; border-bottom: 1px solid #21262d; vertical-align: top; }
-  tr:last-child td { border-bottom: none; }
-  .ok   { color: var(--green); }
-  .warn { color: var(--yellow); }
-  .err  { color: var(--red); }
-  .off  { color: var(--muted); }
-  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-  .b-green  { background: #1a3a1f; color: var(--green); }
-  .b-yellow { background: #3a2d0a; color: var(--yellow); }
-  .b-red    { background: #3a0d0d; color: var(--red); }
-  .b-blue   { background: #0d2240; color: var(--blue); }
-  .b-purple { background: #220d3a; color: var(--purple); }
-  .b-orange { background: #3a1e0a; color: var(--orange); }
-  .b-muted  { background: #1c2128; color: var(--muted); }
-  .kv   { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #21262d; }
-  .kv:last-child { border-bottom: none; }
-  .kv .k { color: var(--muted); }
-  .kv .v { font-weight: 600; }
-  .bar-wrap { background: #21262d; border-radius: 4px; height: 6px; width: 100%; margin-top: 3px; }
-  .bar-fill { height: 6px; border-radius: 4px; background: var(--green); transition: width .4s; }
-  #refresh-bar { height: 2px; background: var(--blue); transition: width .1s linear; position: fixed; top:0; left:0; z-index:99; }
-  .stale { color: var(--red); font-size: 11px; }
-</style>
-</head>
-<body>
-<div id="refresh-bar" style="width:0%"></div>
-<h1>🦞 Astakos Runtime Dashboard</h1>
-<div class="ts" id="ts">Φόρτωση...</div>
-<div class="grid" id="grid"></div>
-
-<script>
-const REFRESH = 5000;
-let countdown = REFRESH;
-let rafId;
-
-function stateBadge(state) {
-  const m = {
-    'active':          ['b-green',  'ACTIVE'],
-    'trigger_pending': ['b-yellow', 'TRIGGER_PENDING'],
-    'confirmed':       ['b-blue',   'CONFIRMED'],
-    'ignored':         ['b-orange', 'IGNORED'],
-    'dismissed':       ['b-purple', 'DISMISSED'],
-    'decayed':         ['b-red',    'DECAYED'],
-    'archived':        ['b-muted',  'ARCHIVED'],
-    'learned':         ['b-muted',  'LEARNED'],
-  };
-  const [cls, label] = m[state] || ['b-muted', state];
-  return `<span class="badge ${cls}">${label}</span>`;
-}
-
-function jobRow(j) {
-  const icon = j.disabled ? '🚫' : j.fail_count > 0 ? '⚠️' : '✅';
-  const nextLabel = j.disabled ? '—' : `${j.next_in_secs}s`;
-  const dur  = j.last_duration != null ? `${j.last_duration.toFixed(2)}s` : '—';
-  const failCls = j.fail_count > 0 ? 'warn' : 'ok';
-  return `<tr>
-    <td>${icon} <b>${j.name}</b></td>
-    <td class="off">${j.last_run || '—'}</td>
-    <td class="${j.disabled?'err':'ok'}">${nextLabel}</td>
-    <td>${dur}</td>
-    <td class="${failCls}">${j.fail_count}</td>
-  </tr>${j.last_error ? `<tr><td colspan="5" class="err" style="font-size:11px;padding:2px 6px 6px">↳ ${j.last_error}</td></tr>` : ''}\`;
-}
-
-function confBar(val) {
-  const pct = Math.round(val * 100);
-  const col = val >= 0.8 ? 'var(--green)' : val >= 0.5 ? 'var(--yellow)' : 'var(--red)';
-  return `${pct}% <div class="bar-wrap"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div>`;
-}
-
-function stateBadge(state) {
-  const m = {
-    'active':          ['b-green',  'ACTIVE'],
-    'trigger_pending': ['b-yellow', 'TRIGGER_PENDING'],
-    'confirmed':       ['b-blue',   'CONFIRMED'],
-    'ignored':         ['b-orange', 'IGNORED'],
-    'dismissed':       ['b-purple', 'DISMISSED'],
-    'decayed':         ['b-red',    'DECAYED'],
-    'archived':        ['b-muted',  'ARCHIVED'],
-    'learned':         ['b-muted',  'LEARNED'],
-  };
-  const [cls, label] = m[state] || ['b-muted', state];
-  return `<span class="badge ${cls}">${label}</span>`;
-}
-
-function render(d) {
-  const s     = d.scheduler || {};
-  const ovr   = d.overrides || {};
-  const rout  = d.routines  || {};
-  const evts  = d.events_1h || {};
-  const pend  = d.pending_confirmations || [];
-
-  const stale = d.snapshot_age_s != null && d.snapshot_age_s > 30;
-  const ageStr = d.snapshot_age_s != null ? `(snapshot ${d.snapshot_age_s}s ago${stale ? ' ⚠️ STALE' : ''})` : '(telegram_bot offline?)';
-
-  document.getElementById('ts').innerHTML =
-    `Τελευταία ανανέωση: <b>${new Date().toLocaleTimeString('el-GR')}</b> &nbsp;${ageStr}`;
-
-  const flags = [];
-  if (ovr.sleeping)        flags.push(`<span class="badge b-red">😴 Sleep until ${ovr.sleep_until}</span>`);
-  if (ovr.pause_reminders) flags.push('<span class="badge b-yellow">⏸ Reminders Paused</span>');
-  if (ovr.mute_proactive)  flags.push('<span class="badge b-yellow">🔇 Proactive Muted</span>');
-  if (s.quiet_hours)       flags.push('<span class="badge b-muted">🌙 Quiet Hours</span>');
-
-  let html = '';
-
-  html += `<div class="card"><h2>⚙️ Scheduler Jobs</h2>
-    ${flags.length ? '<div style="margin-bottom:8px">' + flags.join(' ') + '</div>' : ''}
-    <table>
-      <tr><th>Job</th><th>Last Run</th><th>Next</th><th>Dur</th><th>Fails</th></tr>
-      ${(s.jobs||[]).map(jobRow).join('')}
-    </table></div>`;
-
-  html += `<div class="card"><h2>📊 Queue & Rate</h2>
-    <div class="kv"><span class="k">Queue size</span><span class="v ${s.queue_size>5?'warn':''}">${ s.queue_size ?? '?'}</span></div>
-    <div class="kv"><span class="k">Proactive this hour</span><span class="v">${s.proactive_this_hour ?? 0} / 3</span></div>
-    <div class="kv"><span class="k">Pending confirmations</span><span class="v ${s.pending_count>0?'warn':''}">${ s.pending_count ?? 0}</span></div>
-    <div class="kv"><span class="k">Total events today</span><span class="v">${evts.total_today ?? 0}</span></div>
-  </div>`;
-
-  if (pend.length > 0) {
-    html += `<div class="card"><h2>⏳ Pending Confirmations</h2>
-      <table><tr><th>ID</th><th>Event</th><th>Elapsed</th><th>Timeout in</th></tr>
-      ${pend.map(p => `<tr>
-          <td class="off">#${p.routine_id}</td><td>${p.event}</td>
-          <td class="${p.elapsed_min>25?'warn':''}">${ p.elapsed_min}m</td>
-          <td class="${p.timeout_in_min<5?'err':'ok'}">${p.timeout_in_min}m</td>
-        </tr>`).join('')}
-      </table></div>`;
-  }
-
-  if ((rout.active||[]).length > 0) {
-    html += `<div class="card" style="grid-column: span 2"><h2>🗓️ Active Routines (${rout.active.length})</h2>
-      <table><tr><th>ID</th><th>Day</th><th>Time</th><th>Event</th><th>Confidence</th><th>Cooldown left</th><th>State</th></tr>
-      ${rout.active.map(r => `<tr>
-          <td class="off">#${r.id}</td><td>${r.day}</td><td><b>${r.time}</b></td>
-          <td>${r.event}</td>
-          <td style="min-width:80px">${confBar(r.confidence)}</td>
-          <td class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null ? r.cooldown_remaining_h+'h' : '\u2014'}</td>
-          <td>${stateBadge(r.state)}</td>
-        </tr>`).join('')}
-      </table></div>`;
-  }
-
-  const sc = rout.state_counts || {};
-  if (Object.keys(sc).length > 0) {
-    html += `<div class="card"><h2>\ud83d\udcc8 Routine State Counts</h2>
-      ${Object.entries(sc).map(([st,c]) => `<div class="kv"><span class="k">${stateBadge(st)}</span><span class="v">${c}</span></div>`).join('')}
-    </div>`;
-  }
-
-  if ((rout.non_active||[]).length > 0) {
-    html += `<div class="card"><h2>\ud83d\udd04 Non-Active Routines</h2>
-      <table><tr><th>ID</th><th>Event</th><th>State</th><th>Conf</th></tr>
-      ${rout.non_active.map(r => `<tr>
-          <td class="off">#${r.id}</td><td>${r.event}</td>
-          <td>${stateBadge(r.state)}</td>
-          <td class="${r.confidence<0.1?'err':r.confidence<0.5?'warn':'ok'}">${r.confidence}</td>
-        </tr>`).join('')}
-      </table></div>`;
-  }
-
-  const tp = evts.throughput || {};
-  if (Object.keys(tp).length > 0) {
-    const max_tp = Math.max(...Object.values(tp), 1);
-    html += `<div class="card"><h2>\u26a1 Event Throughput (last 1h)</h2>
-      ${Object.entries(tp).sort((a,b)=>b[1]-a[1]).map(([k,v]) => {
-        const pct = Math.round(v/max_tp*100);
-        return `<div style="margin-bottom:5px">
-          <div style="display:flex;justify-content:space-between"><span class="off">${k}</span><b>${v}</b></div>
-          <div class="bar-wrap"><div class="bar-fill" style="width:${pct}%;background:var(--blue)"></div></div>
-        </div>`;
-      }).join('')}
-    </div>`;
-  }
-
-  if ((evts.last_errors||[]).length > 0) {
-    html += `<div class="card"><h2>\u274c Last Errors (1h)</h2>
-      ${evts.last_errors.map(e => `<div style="margin-bottom:6px;font-size:12px">
-        <span class="off">${e.time}</span> <span class="warn">[${e.job}]</span><br>
-        <span class="err">${e.error}</span>
-      </div>`).join('')}
-    </div>`;
-  }
-
-  document.getElementById('grid').innerHTML = html;
-}
-
-async function fetchData() {
-  try {
-    const r = await fetch('/debug/runtime');
-    const d = await r.json();
-    render(d);
-  } catch(e) {
-    document.getElementById('ts').innerHTML = `<span class="err">\u03a3\u03c6\u03ac\u03bb\u03bc\u03b1 \u03c6\u03cc\u03c1\u03c4\u03c9\u03c3\u03b7\u03c2: ${e}</span>`;
-  }
-}
-
-function startCountdown() {
-  cancelAnimationFrame(rafId);
-  const bar = document.getElementById('refresh-bar');
-  const start = performance.now();
-  function tick(now) {
-    const elapsed = now - start;
-    const pct = Math.min(100, (elapsed / REFRESH) * 100);
-    bar.style.width = pct + '%';
-    if (elapsed < REFRESH) { rafId = requestAnimationFrame(tick); }
-    else { fetchData(); startCountdown(); }
-  }
-  rafId = requestAnimationFrame(tick);
-}
-
-fetchData();
-startCountdown();
-</script>
-</body>
-</html>"""
+    _dir = os.path.dirname(os.path.abspath(__file__))
+    html_path = os.path.join(_dir, "debug_dashboard.html")
+    try:
+        with open(html_path, "r", encoding="utf-8") as f:
+            html = f.read()
+    except FileNotFoundError:
+        html = "<h1>debug_dashboard.html not found</h1>"
     return HTMLResponse(content=html)
