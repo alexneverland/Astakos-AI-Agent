@@ -43,8 +43,36 @@ shutdown_event        = threading.Event()
 astakos_queue         = queue.Queue()
 memory_lock           = threading.Lock()
 last_interaction_time = time.time()
-# Pending routine confirmations: {routine_id: event_name}
+# Pending routine confirmations: {routine_id: {"event": ..., "sent_at": ...}}
 pending_routine_confirmations = {}
+# Scheduler reference (set in __main__, used by /status command)
+astakos_scheduler = None
+
+# ── Rate Limiting ─────────────────────────────────────────────
+QUIET_HOURS          = (23, 8)   # 23:00 → 08:00 χωρίς proactive
+MAX_PROACTIVE_PER_HOUR = 3       # max proactive μηνύματα/ώρα
+
+_proactive_count = {"hour": -1, "count": 0}
+_proactive_lock  = threading.Lock()
+
+def is_quiet_hours() -> bool:
+    """True αν είμαστε εντός quiet window (π.χ. 23:00–08:00)."""
+    h = datetime.now().hour
+    start, end = QUIET_HOURS
+    return h >= start or h < end  # wraps midnight
+
+def can_send_proactive() -> bool:
+    """Rate-limit: max MAX_PROACTIVE_PER_HOUR proactive μηνύματα/ώρα."""
+    with _proactive_lock:
+        h = datetime.now().hour
+        if _proactive_count["hour"] != h:
+            _proactive_count["hour"]  = h
+            _proactive_count["count"] = 0
+        if _proactive_count["count"] >= MAX_PROACTIVE_PER_HOUR:
+            return False
+        _proactive_count["count"] += 1
+        return True
+
 def enqueue_task(func, *args):
     astakos_queue.put((func, args))
 
@@ -535,7 +563,14 @@ def run_polling():
                 if not user_text:
                     continue
 
-                # --- [MASTRO-COMMANDS]: Έλεγχος για /end ---
+                # --- [MASTRO-COMMANDS] ---
+                if user_text.lower() == "/status":
+                    if astakos_scheduler:
+                        send_telegram_msg(astakos_scheduler.status())
+                    else:
+                        send_telegram_msg("⚠️ Scheduler δεν έχει εκκινήσει ακόμα.")
+                    continue
+
                 if user_text.lower() == "/end":
                     print(f"\033[94m[Telegram]: Εντολή τερματισμού συνεδρίας από Λάζαρο.\033[0m")
                     threading.Thread(
@@ -603,6 +638,18 @@ def job_check_routines():
         "Sunday":    ["Sunday", "Κυριακή"],
     }
 
+    # Quiet hours: δεν στέλνουμε proactive routine notifications
+    if is_quiet_hours():
+        # Timeout decay τρέχει κανονικά, notifications όχι
+        if pending_routine_confirmations:
+            from memory.routine_db import decay_routine
+            now_check = datetime.now()
+            for rid in list(pending_routine_confirmations.keys()):
+                if (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds() > 1800:
+                    decay_routine(rid)
+                    del pending_routine_confirmations[rid]
+        return
+
     # 1. Upcoming routine notifications
     try:
         if os.path.exists(DB_PATH):
@@ -631,6 +678,9 @@ def job_check_routines():
                 else:
                     msg = f"🧠 **Proactive:** Παλιά είχαμε '{event_name}' τέτοια ώρα, να το βγάλω αν δεν παίζει πια;"
 
+                if not can_send_proactive():
+                    print(f"⏸️ [job_check_routines]: Rate limit reached, skipping '{event_name}'")
+                    continue
                 cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                 conn.commit()
                 send_telegram_msg(msg)
@@ -657,6 +707,13 @@ def job_proactive_scan():
     """
     from tools.system import read_local_file
     WATCH_DIR = "C:\\astakos_v2\\watch_folder"
+
+    if is_quiet_hours():
+        print("🌙 [job_proactive_scan]: Quiet hours — παραλείπεται.")
+        return
+    if not can_send_proactive():
+        print("⏸️ [job_proactive_scan]: Rate limit reached — παραλείπεται.")
+        return
 
     print("🦞 [Proactive]: Ξεκινάω αθόρυβο σκανάρισμα συστήματος...")
     try:
@@ -700,19 +757,27 @@ def job_proactive_scan():
 class AstakosScheduler:
     """
     Ένας thread, όλα τα background jobs.
-    Κάθε job δηλώνει το interval του — ο scheduler τρέχει heartbeat
-    κάθε 10s και εκτελεί όσα "έχει ξεπεράσει" τον χρόνο τους.
+    - Heartbeat 10s
+    - Watchdog: fail_count + disabled_after_N_failures
+    - Duration tracking
+    - status() για /status command
     """
 
+    MAX_FAILURES = 5  # απενεργοποίηση μετά από τόσα διαδοχικά failures
+
     def __init__(self):
-        self._jobs = []  # list of {"name", "func", "interval", "last_run"}
+        self._jobs = []
 
     def register(self, func, interval_seconds: int, name: str = None):
         self._jobs.append({
-            "name":     name or func.__name__,
-            "func":     func,
-            "interval": interval_seconds,
-            "last_run": 0,  # 0 = τρέξε αμέσως στο πρώτο tick
+            "name":          name or func.__name__,
+            "func":          func,
+            "interval":      interval_seconds,
+            "last_run":      0,
+            "last_duration": 0.0,
+            "fail_count":    0,
+            "last_error":    None,
+            "disabled":      False,
         })
         print(f"\033[90m[Scheduler]: Registered '{name or func.__name__}' every {interval_seconds}s\033[0m")
 
@@ -721,13 +786,58 @@ class AstakosScheduler:
         while not shutdown_event.is_set():
             now = time.time()
             for job in self._jobs:
-                if now - job["last_run"] >= job["interval"]:
-                    try:
-                        job["func"]()
-                    except Exception as e:
-                        print(f"\033[91m❌ [Scheduler/{job['name']}]: {e}\033[0m")
-                    job["last_run"] = time.time()
+                if job["disabled"]:
+                    continue
+                if now - job["last_run"] < job["interval"]:
+                    continue
+
+                t_start = time.time()
+                try:
+                    job["func"]()
+                    job["fail_count"] = 0
+                    job["last_error"] = None
+                except Exception as e:
+                    job["fail_count"] += 1
+                    job["last_error"] = str(e)
+                    print(f"\033[91m❌ [Scheduler/{job['name']}]: {e} (fail {job['fail_count']}/{self.MAX_FAILURES})\033[0m")
+                    if job["fail_count"] >= self.MAX_FAILURES:
+                        job["disabled"] = True
+                        print(f"\033[91m🚫 [Scheduler]: '{job['name']}' απενεργοποιήθηκε!\033[0m")
+                        send_telegram_msg(f"⚠️ Watchdog: Job `{job['name']}` απενεργοποιήθηκε μετά από {self.MAX_FAILURES} σφάλματα.\nΤελευταίο: {str(e)[:200]}")
+
+                job["last_run"]      = time.time()
+                job["last_duration"] = time.time() - t_start
+
             shutdown_event.wait(timeout=10)
+
+    def status(self) -> str:
+        now   = time.time()
+        lines = ["📊 *Scheduler Status:*"]
+        for job in self._jobs:
+            icon = "🚫" if job["disabled"] else "✅"
+            if job["last_run"] > 0:
+                last_str  = datetime.fromtimestamp(job["last_run"]).strftime("%H:%M:%S")
+                next_secs = max(0, int(job["interval"] - (now - job["last_run"])))
+                next_str  = f"{next_secs}s"
+            else:
+                last_str = "—"
+                next_str = "αμέσως"
+            lines.append(
+                f"{icon} `{job['name']}` | last: {last_str} | next: {next_str} "
+                f"| {job['last_duration']:.1f}s | fails: {job['fail_count']}"
+            )
+            if job["last_error"]:
+                lines.append(f"   └─ ⚠️ _{job['last_error'][:100]}_")
+
+        lines.append("")
+        lines.append(f"⏳ Pending confirmations: {len(pending_routine_confirmations)}")
+        lines.append(f"📬 Queue size: {astakos_queue.qsize()}")
+        quiet = is_quiet_hours()
+        lines.append(f"🌙 Quiet hours: {'ΝΑΙ' if quiet else 'ΟΧΙ'} ({QUIET_HOURS[0]:02d}:00–{QUIET_HOURS[1]:02d}:00)")
+        with _proactive_lock:
+            lines.append(f"📣 Proactive this hour: {_proactive_count['count']}/{MAX_PROACTIVE_PER_HOUR}")
+        return "\n".join(lines)
+
 
 # ────────────────────────────────────────────────────────────────
 # ENTRY POINT
@@ -746,12 +856,13 @@ if __name__ == "__main__":
     # Εκκίνηση workers
     threading.Thread(target=queue_worker, daemon=True).start()
 
-    # Central Scheduler (αντικαθιστά reminder/routine/proactive workers)
-    scheduler = AstakosScheduler()
-    scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders")
-    scheduler.register(job_check_routines,  interval_seconds=60,    name="routines")
-    scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive")
-    threading.Thread(target=scheduler.run, daemon=True).start()
+    # Central Scheduler
+    global astakos_scheduler
+    astakos_scheduler = AstakosScheduler()
+    astakos_scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders")
+    astakos_scheduler.register(job_check_routines,  interval_seconds=60,    name="routines")
+    astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive")
+    threading.Thread(target=astakos_scheduler.run, daemon=True).start()
 
     print("━" * 50)
     print("  🦞  Αστακός Telegram Bot — Εκκίνηση")
