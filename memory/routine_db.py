@@ -405,4 +405,163 @@ def decay_routine(routine_id: int):
 def get_routines_for_day(day: str) -> list:
     """Επιστρέφει active ρουτίνες για την ημέρα. Φιλτράρει με state='active'."""
     conn   = get_connection()
-    c
+    cursor = conn.cursor()
+    c_day  = normalize_day(day)
+    cursor.execute("""
+        SELECT id, time_str, event_name, event_type, confidence, mention_count, state
+        FROM routines
+        WHERE (day_of_week=? OR day_of_week='Everyday')
+        AND state='active'
+        ORDER BY time_str ASC
+    """, (c_day,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": r[0], "time": r[1], "event": r[2],
+            "type": r[3], "confidence": round(r[4], 2),
+            "mentions": r[5], "state": r[6],
+        }
+        for r in rows
+    ]
+
+
+setup_db()
+
+# ────────────────────────────────────────────────────────────────
+# ANTI-SPAM: Adaptive Cooldown
+# ────────────────────────────────────────────────────────────────
+
+COOLDOWN_DEFAULT_HOURS = 20.0
+COOLDOWN_MIN_HOURS     = 4.0
+COOLDOWN_MAX_HOURS     = 72.0
+
+
+def mark_routine_notified(routine_id: int):
+    """TRIGGER_PENDING: routine ειδοποιήθηκε — αναμένει επιβεβαίωση."""
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET last_notified_ts=?, state='trigger_pending', is_active=0 WHERE id=?",
+            (datetime.now().isoformat(timespec="seconds"), routine_id)
+        )
+        conn.commit()
+    conn.close()
+
+
+def mark_routine_ignored(routine_id: int):
+    """Timeout (όχι απόρριψη): TRIGGER_PENDING → IGNORED → ACTIVE + διπλασιασμός cooldown."""
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT ignore_count, notify_cooldown_hours FROM routines WHERE id=?",
+        (routine_id,)
+    )
+    row = cursor.fetchone()
+    if row:
+        ignore_count = (row[0] or 0) + 1
+        new_cd       = min(COOLDOWN_MAX_HOURS, (row[1] or COOLDOWN_DEFAULT_HOURS) * 2)
+        with db_write_lock:
+            cursor.execute(
+                "UPDATE routines SET ignore_count=?, notify_cooldown_hours=?, state='active', is_active=1 WHERE id=?",
+                (ignore_count, new_cd, routine_id)
+            )
+            conn.commit()
+        print(f"[routine_db]: timeout ignore#{ignore_count} -> cooldown {new_cd:.0f}h (id={routine_id})")
+    conn.close()
+
+
+def mark_routine_responded(routine_id: int):
+    """Χρήστης ανταποκρίθηκε — reset cooldown."""
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET ignore_count=0, notify_cooldown_hours=?, state='active', is_active=1 WHERE id=?",
+            (COOLDOWN_DEFAULT_HOURS, routine_id)
+        )
+        conn.commit()
+    conn.close()
+
+
+def get_routine_notify_info(routine_id: int) -> dict:
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT notify_cooldown_hours, last_notified_ts FROM routines WHERE id=?",
+        (routine_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return {"cooldown_hours": COOLDOWN_DEFAULT_HOURS, "last_notified_ts": None}
+    return {
+        "cooldown_hours":   row[0] if row[0] is not None else COOLDOWN_DEFAULT_HOURS,
+        "last_notified_ts": row[1],
+    }
+
+
+# ────────────────────────────────────────────────────────────────
+# PENDING CONFIRMATIONS PERSISTENCE (Recovery After Restart)
+# ────────────────────────────────────────────────────────────────
+
+def _setup_pending_table():
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pending_confirmations (
+            routine_id INTEGER PRIMARY KEY,
+            event_name TEXT,
+            sent_at    TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def save_pending_confirmation(routine_id: int, event_name: str, sent_at: datetime):
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "INSERT OR REPLACE INTO pending_confirmations (routine_id, event_name, sent_at) VALUES (?, ?, ?)",
+            (routine_id, event_name, sent_at.isoformat())
+        )
+        conn.commit()
+    conn.close()
+
+
+def remove_pending_confirmation(routine_id: int):
+    conn = get_connection()
+    with db_write_lock:
+        conn.execute("DELETE FROM pending_confirmations WHERE routine_id=?", (routine_id,))
+        conn.commit()
+    conn.close()
+
+
+def clear_pending_confirmations():
+    conn = get_connection()
+    with db_write_lock:
+        conn.execute("DELETE FROM pending_confirmations")
+        conn.commit()
+    conn.close()
+
+
+def load_pending_confirmations() -> dict:
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT routine_id, event_name, sent_at FROM pending_confirmations")
+    rows   = cursor.fetchall()
+    conn.close()
+    result = {}
+    for r_id, event_name, sent_at_str in rows:
+        try:
+            sent_at = datetime.fromisoformat(sent_at_str)
+        except Exception:
+            sent_at = datetime.now()
+        result[r_id] = {"event": event_name, "sent_at": sent_at}
+    return result
+
+
+_setup_pending_table()
