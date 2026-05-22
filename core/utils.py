@@ -52,7 +52,33 @@ def clean_message(msg_content) -> str:
         return " ".join(parts).strip()
     
     return str(msg_content).strip()
+def sanitize_history_for_gemini(messages: list) -> list:
+    """
+    [MASTRO-FIX]: Σιδερώνει το ιστορικό για να μην κρασάρει το Gemini με Error 400.
+    Μετατρέπει τα ToolMessages και τα AI ToolCalls σε απλά κείμενα 
+    ώστε να διατηρείται η πληροφορία χωρίς να παραβιάζεται η αυστηρή δομή του API.
+    """
+    from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
+    sanitized = []
+    for msg in messages:
+        if msg.type == "tool":
+            # Μετατρέπουμε το output του tool σε ένα απλό System/Human context
+            # για να μην μπερδεύεται ο επόμενος Agent
+            sanitized.append(HumanMessage(content=f"[Αποτέλεσμα Εργαλείου {msg.name}]: {clean_message(msg.content)}"))
+        
+        elif msg.type == "ai" and hasattr(msg, "tool_calls") and msg.tool_calls:
+            # Αν το AI έκανε tool_call, κρατάμε μόνο το σκεπτικό του (αν υπάρχει)
+            text_content = clean_message(msg.content)
+            if not text_content:
+                text_content = f"[Κλήση Εργαλείου: {msg.tool_calls[0]['name']}]"
+            sanitized.append(AIMessage(content=text_content))
+            
+        else:
+            # System, Human, ή καθαρά AI messages περνάνε ανέπαφα
+            sanitized.append(msg)
+            
+    return sanitized
 def filter_messages(messages: list, k: int = 40) -> list:
     """Καθαρίζει το ιστορικό από σφάλματα που σπάνε το Gemini API."""
     if not messages:
