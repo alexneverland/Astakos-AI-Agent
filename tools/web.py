@@ -44,15 +44,16 @@ def relay_local_payload(target_entity: str, payload_data: str) -> str:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     draft_file = os.path.join(base_dir, "..", "messenger_draft.json")
     
+    # [MASTRO-FIX]: Τα κλειδιά του JSON παίρνουν τις σωστές μεταβλητές!
     draft_data = {
-        "target_name": target_name,
-        "message": message
+        "target_name": target_entity, 
+        "message": payload_data
     }
     
     with open(draft_file, "w", encoding="utf-8") as f:
         json.dump(draft_data, f, ensure_ascii=False, indent=4)
         
-    return f"✅ Το προσχέδιο για '{target_name}' αποθηκεύτηκε. Ρώτα τον Λάζαρο: 'Να το στείλω;'."
+    return f"✅ Το προσχέδιο για '{target_entity}' αποθηκεύτηκε. Ρώτα τον Λάζαρο: 'Να το στείλω;'."
 @tool
 def get_news(topic: str = "Γενικά", limit: int = 15) -> str:
     """Φέρνει τίτλους ειδήσεων από το Google News."""

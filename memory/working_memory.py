@@ -12,23 +12,25 @@ from datetime import datetime
 from langchain_core.messages import HumanMessage
 from config import WORKING_MEMORY_FILE, CAPABILITIES_FILE
 from memory.vector_store import memory, is_semantically_duplicate, memory_lock  # [MASTRO-FIX]: ΕΝΑ lock, όχι δύο
-
+from core.utils import clean_message
 
 # ════════════════════════════════════════════════════════════════
 # WORKING MEMORY — "Προσκήνιο" (τι κάνει ο Λάζαρος ΤΩΡΑ)
 # ════════════════════════════════════════════════════════════════
 
-def update_working_memory(user_text: str, ai_text: str):
+def update_working_memory(user_text, ai_text):
     """Εξάγει ακαριαία context tags από τον διάλογο."""
     try:
         print("\033[90m[System]: Ξεκίνησε η ανάλυση Προσκηνίου...\033[0m")
-
         from core.brain import llm
 
-# Επιλέγουμε τους τελευταίους 400 χαρακτήρες για να πιάνουμε την ουσία/εντολή που βρίσκεται συνήθως στο τέλος του μηνύματος.
-        # Χρησιμοποιούμε if/else σε περίπτωση που το κείμενο είναι μικρότερο από 400 χαρακτήρες.
-        safe_user_text = user_text[-400:] if len(user_text) > 400 else user_text
-        safe_ai_text = ai_text[-400:] if len(ai_text) > 400 else ai_text
+        # Φοράμε τα "γυαλιά" (Smart Parser) πριν κόψουμε τους χαρακτήρες
+        safe_user = clean_message(user_text)
+        safe_ai = clean_message(ai_text)
+
+        # Επιλέγουμε τους τελευταίους 400 χαρακτήρες
+        user_context = safe_user[-400:] if len(safe_user) > 400 else safe_user
+        ai_context = safe_ai[-400:] if len(safe_ai) > 400 else safe_ai
 
         prompt = f"""
 Είσαι ο μηχανισμός μνήμης (Memory Sifter) του συστήματος.
@@ -44,23 +46,15 @@ def update_working_memory(user_text: str, ai_text: str):
 - Αν ο Λάζαρος λέει απλώς λέξεις επιβεβαίωσης όπως "ΟΚ", "Ναι", "Έγινε", "Τέλεια", ή "Ευχαριστώ" χωρίς νέα πληροφορία, απάντησε ΜΟΝΟ με τη λέξη: ΚΕΝΟ.
 
 ΔΙΑΛΟΓΟΣ ΓΙΑ ΑΝΑΛΥΣΗ:
-Λάζαρος: {safe_user_text}
-Αστακός: {safe_ai_text}
+Λάζαρος: {user_context}
+Αστακός: {ai_context}
 """
 
         response = llm.invoke([HumanMessage(content=prompt)])
-        raw_content = response.content
-
-        if isinstance(raw_content, list):
-            parts = []
-            for item in raw_content:
-                if isinstance(item, dict) and 'text' in item:
-                    parts.append(str(item['text']))
-                elif isinstance(item, str):
-                    parts.append(item)
-            new_tags = " ".join(parts).strip()
-        else:
-            new_tags = str(raw_content).strip()
+        
+        # [MASTRO-CLEAN]: Χρησιμοποιούμε τον Smart Parser ΚΑΙ στην έξοδο! 
+        # Τέλος τα "isinstance(list)" και οι λούπες.
+        new_tags = clean_message(response.content)
 
         print(f"\n\033[94m[DEBUG Προσκήνιο]: '{new_tags}'\033[0m")
 
@@ -68,6 +62,7 @@ def update_working_memory(user_text: str, ai_text: str):
             print("Λάζαρος: ", end="", flush=True)
             return
 
+        from memory.vector_store import memory # Φρόντισε να υπάρχει αυτό το import
         memory.save(memory_type="working", new_tags=new_tags)
         print(f"\033[92m[Προσκήνιο JSON]: ΓΡΑΦΤΗΚΕ -> {new_tags}\033[0m")
         print("Λάζαρος: ", end="", flush=True)

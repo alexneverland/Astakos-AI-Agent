@@ -1,30 +1,30 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Developer: Lazaros (Piston-7)
-# Description: Modular LLM-agnostic multi-agent framework
+# Description: Gemini Service Handler (Multimodal Optimized)
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
 
 import time
 from core.brain import llm
-from core.utils import clean_message  # [MASTRO-FIX]: Φέρνουμε την ασπίδα εδώ!
+from core.utils import clean_message
 
 class MastroResponse:
     """
-    [MASTRO-WRAPPER]
-    Wrapper που προσομοιώνει τη δομή του native GenAI SDK response.
-    Εξασφαλίζει ότι το property '.text' θα είναι ΠΑΝΤΑ καθαρό string, 
-    αποτρέποντας τα 'list object has no attribute strip' σε όλο το σύστημα.
+    [MASTRO-RESPONSE v4]: Υβριδική δομή για πλήρη Multimodal υποστήριξη.
+    Διατηρεί το '.text' ως string για συμβατότητα με Firewalls/Sifters,
+    αλλά κρατάει και το αυθεντικό '.content' (λίστα ή dict) ανέπαφο.
     """
-    def __init__(self, text):
-        # [MASTRO-FIX]: Ό,τι και να στείλει η Google (λίστα, dict, null), 
-        # το clean_message το κάνει πεντακάθαρο string.
-        self.text = clean_message(text)
+    def __init__(self, content):
+        # Κρατάμε τη δομή της Google αυτούσια για μελλοντική χρήση (π.χ. εικόνες/tools)
+        self.content = content
+        # Χρησιμοποιούμε τον Smart Parser για να έχουμε ΠΑΝΤΑ έτοιμο και ένα καθαρό string
+        self.text = clean_message(content)
 
 def safe_gemini_call(prompt: str, retries: int = 4, base_delay: float = 2.0):
     """
-    Mastro-Shield v3: Exponential backoff retry που χρησιμοποιεί κεντρικά 
-    το llm object του brain.py.
+    Mastro-Shield v4: Exponential backoff retry για out-of-band βοηθητικές 
+    κλήσεις (Sifters, Firewalls) με πλήρη υποστήριξη των νέων δομών δομών.
     """
     for attempt in range(retries):
         try:
@@ -44,12 +44,11 @@ def safe_gemini_call(prompt: str, retries: int = 4, base_delay: float = 2.0):
 
             if is_quota:
                 wait = base_delay * (4 ** attempt)
-                print(f"\033[93m⚠️ [Gemini 429]: Quota limit! Αναμονή {wait:.0f}s... ({attempt+1}/{retries})\033[0m")
+                print(f"\033[93m⚠️ [Gemini 429]: Quota limit! Αναμονή {wait:.1f}s πριν τη δοκιμή {attempt+2}/{retries}...\033[0m")
+                time.sleep(wait)
             elif is_server or is_timeout:
                 wait = base_delay * (2 ** attempt)
-                print(f"\033[93m⚠️ [Gemini 5xx]: Server error. Αναμονή {wait:.0f}s... ({attempt+1}/{retries})\033[0m")
+                print(f"\033[93m⚠️ [Gemini Server/Timeout]: Αναμονή {wait:.1f}s πριν τη δοκιμή {attempt+2}/{retries}...\033[0m")
+                time.sleep(wait)
             else:
-                print(f"\033[91m❌ [Gemini Error]: Άγνωστο σφάλμα: {e}\033[0m")
                 raise e
-
-            time.sleep(wait)
