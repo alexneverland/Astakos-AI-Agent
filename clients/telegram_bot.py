@@ -404,11 +404,10 @@ def handle_message(user_text: str, chat_id: str):
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
         elif any(w in text_check for w in no_words):
-            from memory.routine_db import decay_routine, mark_routine_ignored, clear_pending_confirmations
+            from memory.routine_db import decay_routine, clear_pending_confirmations
             for rid in list(pending_routine_confirmations.keys()):
-                decay_routine(rid)
-                mark_routine_ignored(rid)     # Anti-spam: αύξηση cooldown
-                print(f"📉 [Routine Decayed]: {pending_routine_confirmations[rid]}")
+                decay_routine(rid)  # TRIGGER_PENDING → DISMISSED (ή DECAYED αν conf<0.1)
+                print(f"📉 [Routine Dismissed]: {pending_routine_confirmations[rid]}")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
     with memory_lock:
@@ -748,7 +747,7 @@ def job_check_routines():
             cursor.execute(f"""
                 SELECT id, event_name, confidence FROM routines
                 WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
-                AND time_str=? AND is_active=1
+                AND time_str=? AND state='active'
                 AND (last_triggered IS NULL OR last_triggered != ?)
             """, (*possible_days, target_time_str, today_str))
 
@@ -817,16 +816,16 @@ def job_check_routines():
         print(f"❌ [job_check_routines]: {e}")
 
     # 2. Timeout decay για εκκρεμείς επιβεβαιώσεις (>30')
+    # TRIGGER_PENDING → IGNORED → ACTIVE (cooldown doubled, confidence ανέπαφο)
     if pending_routine_confirmations:
-        from memory.routine_db import decay_routine, mark_routine_ignored, remove_pending_confirmation
+        from memory.routine_db import mark_routine_ignored, remove_pending_confirmation
         now_check = datetime.now()
         for rid in list(pending_routine_confirmations.keys()):
             elapsed = (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds()
             if elapsed > 1800:
                 ev = pending_routine_confirmations[rid]["event"]
                 try:
-                    decay_routine(rid)
-                    mark_routine_ignored(rid)
+                    mark_routine_ignored(rid)  # TRIGGER_PENDING → IGNORED → ACTIVE + doubled cooldown
                 except DBWriteError as e:
                     print(f"\033[91m[Timeout Decay DBWriteError]: {e}\033[0m")
                 timeout_err = PendingTimeoutError(rid, ev, elapsed)
@@ -1052,5 +1051,4 @@ if __name__ == "__main__":
         try:
             _run_session_summary()
         except Exception:
-            pass
-        print("[TelegramBot]: Τερματίστηκε.")
+            pas
