@@ -27,6 +27,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE
 from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
+from core.exceptions import SchedulerCrashError, PendingTimeoutError, DBWriteError
 from core.brain import llm
 from core.graph import graph
 from core.agents import clean_message, filter_messages
@@ -820,12 +821,19 @@ def job_check_routines():
         from memory.routine_db import decay_routine, mark_routine_ignored, remove_pending_confirmation
         now_check = datetime.now()
         for rid in list(pending_routine_confirmations.keys()):
-            if (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds() > 1800:
+            elapsed = (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds()
+            if elapsed > 1800:
                 ev = pending_routine_confirmations[rid]["event"]
-                decay_routine(rid)
-                mark_routine_ignored(rid)   # Anti-spam: διπλασιασμός cooldown
-                log_event("routines", "timeout_decay", routine_id=rid, event=ev)
-                print(f"⏰ [Routine Timeout Decay]: {ev}")
+                try:
+                    decay_routine(rid)
+                    mark_routine_ignored(rid)
+                except DBWriteError as e:
+                    print(f"\033[91m[Timeout Decay DBWriteError]: {e}\033[0m")
+                timeout_err = PendingTimeoutError(rid, ev, elapsed)
+                log_event("routines", "timeout_decay",
+                          routine_id=rid, event=ev,
+                          elapsed_s=int(elapsed))
+                print(f"⏰ {timeout_err}")
                 del pending_routine_confirmations[rid]
                 remove_pending_confirmation(rid)
 
@@ -932,17 +940,28 @@ class AstakosScheduler:
                     job["fail_count"] = 0
                     job["last_error"] = None
                     log_event(job["name"], "complete", duration=round(time.time()-t_start, 2))
+                except DBWriteError as e:
+                    job["fail_count"] += 1
+                    job["last_error"] = str(e)
+                    log_event(job["name"], "db_error", error=str(e), fail_count=job["fail_count"])
+                    print(f"\033[91m💾 [Scheduler/{job['name']}]: DBWriteError: {e}\033[0m")
+                    if job["fail_count"] >= self.MAX_FAILURES:
+                        crash = SchedulerCrashError(job["name"], job["fail_count"], str(e))
+                        job["disabled"] = True
+                        log_event(job["name"], "disabled", reason="db_crash", error=str(crash))
+                        print(f"\033[91m\U0001f6ab [Scheduler]: {crash}\033[0m")
+                        send_telegram_msg(f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 (DB errors).\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}")
                 except Exception as e:
                     job["fail_count"] += 1
                     job["last_error"] = str(e)
                     log_event(job["name"], "error", error=str(e), fail_count=job["fail_count"])
-                    print(f"\033[91m❌ [Scheduler/{job['name']}]: {e} (fail {job['fail_count']}/{self.MAX_FAILURES})\033[0m")
+                    print(f"\033[91m\u274c [Scheduler/{job['name']}]: {e} (fail {job['fail_count']}/{self.MAX_FAILURES})\033[0m")
                     if job["fail_count"] >= self.MAX_FAILURES:
+                        crash = SchedulerCrashError(job["name"], job["fail_count"], str(e))
                         job["disabled"] = True
-                        log_event(job["name"], "disabled", reason="max_failures")
-                        print(f"\033[91m🚫 [Scheduler]: '{job['name']}' απενεργοποιήθηκε!\033[0m")
-                        send_telegram_msg(f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 \u03bc\u03b5\u03c4\u03ac \u03b1\u03c0\u03cc {self.MAX_FAILURES} \u03c3\u03c6\u03ac\u03bb\u03bc\u03b1\u03c4\u03b1.\\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}")
-
+                        log_event(job["name"], "disabled", reason="max_failures", error=str(crash))
+                        print(f"\033[91m\U0001f6ab [Scheduler]: {crash}\033[0m")
+                        send_telegram_msg(f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 \u03bc\u03b5\u03c4\u03ac \u03b1\u03c0\u03cc {self.MAX_FAILURES} \u03c3\u03c6\u03ac\u03bb\u03bc\u03b1\u03c4\u03b1.\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}")
                 job["last_run"]      = time.time()
                 job["last_duration"] = time.time() - t_start
 
@@ -997,7 +1016,7 @@ if __name__ == "__main__":
     import signal as _signal
 
     def _handle_exit(*args):
-        print("\n[TelegramBot]: \u03a4\u03b5\u03c1\u03bc\u03b1\u03c4\u03b9\u03c3\u03bc\u03cc\u03c2...")
+        print("\n[TelegramBot]: Τερματισμός...")
         shutdown_event.set()
 
     _signal.signal(_signal.SIGTERM, _handle_exit)
@@ -1005,12 +1024,12 @@ if __name__ == "__main__":
 
     threading.Thread(target=queue_worker, daemon=True).start()
 
-    # Recovery
+    # Recovery: φόρτωση state από δίσκο
     _load_override_state()
     from memory.routine_db import load_pending_confirmations
     pending_routine_confirmations.update(load_pending_confirmations())
     if pending_routine_confirmations:
-        print(f"\033[93m[Recovery]: \u03a6\u03bf\u03c1\u03c4\u03ce\u03b8\u03b7\u03ba\u03b1\u03bd {len(pending_routine_confirmations)} pending confirmations.\033[0m")
+        print(f"\033[93m[Recovery]: Φορτώθηκαν {len(pending_routine_confirmations)} pending confirmations.\033[0m")
 
     # Central Scheduler
     astakos_scheduler = AstakosScheduler()
@@ -1019,10 +1038,10 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive")
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
 
-    print("\u2501" * 50)
-    print("  \U0001f99e  \u0391\u03c3\u03c4\u03b1\u03ba\u03cc\u03c2 Telegram Bot \u2014 \u0395\u03ba\u03ba\u03af\u03bd\u03b7\u03c3\u03b7")
-    print("\u2501" * 50)
-    send_telegram_msg("\U0001f99e \u0391\u03c3\u03c4\u03b1\u03ba\u03cc\u03c2 Bot: \u039e\u03b5\u03ba\u03af\u03bd\u03b1\u03c3\u03b1! \u03a0\u03ce\u03c2 \u03bc\u03c0\u03bf\u03c1\u03ce \u03bd\u03b1 \u03b2\u03bf\u03b7\u03b8\u03ae\u03c3\u03c9, \u039c\u03ac\u03c3\u03c4\u03bf\u03c1\u03b7;")
+    print("━" * 50)
+    print("  \U0001f99e  Αστακός Telegram Bot — Εκκίνηση")
+    print("━" * 50)
+    send_telegram_msg("\U0001f99e Αστακός Bot: Ξεκίνασα! Πώς μπορώ να βοηθήσω, Μάστορη;")
 
     try:
         run_polling()
@@ -1034,4 +1053,4 @@ if __name__ == "__main__":
             _run_session_summary()
         except Exception:
             pass
-        print("[TelegramBot]: \u03a4\u03b5\u03c1\u03bc\u03b1\u03c4\u03af\u03c3\u03c4\u03b7\u03ba\u03b5.")
+        print("[TelegramBot]: Τερματίστηκε.")
