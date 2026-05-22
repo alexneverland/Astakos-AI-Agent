@@ -20,7 +20,7 @@ from config import PHOTOS_DIR, WORKING_MEMORY_FILE
 from core.brain import llm, llm_heavy
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 # UTILS & STATE
-from core.utils import AgentState, filter_messages, build_prompt, clean_message
+from core.utils import AgentState, filter_messages, build_prompt, clean_message, sanitize_history_for_gemini
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 # MEMORY
 from memory.vector_store import vector_store, vector_lock
@@ -170,8 +170,9 @@ def dev_agent_node(state):
         DuckDuckGoSearchRun()
     ]
     
+    safe_history = sanitize_history_for_gemini(history)
     response = llm_heavy.bind_tools(tools).invoke(
-        [SystemMessage(content=prompt_content)] + history
+        [SystemMessage(content=prompt_content)] + safe_history
     )
     return {"current_agent": "Dev_Agent", "messages": [response]}
 
@@ -225,7 +226,8 @@ def chat_agent_node(state: AgentState):
     system_prompt_text = f"{json_base}{vision_context}"
     system_prompt = build_prompt(history, system_prompt_text)
 
-    final_messages = [SystemMessage(content=system_prompt)] + history
+    safe_history = sanitize_history_for_gemini(history)
+    final_messages = [SystemMessage(content=system_prompt)] + safe_history
     
     if image_part:
         final_messages[-1] = HumanMessage(content=[
@@ -277,8 +279,9 @@ def home_agent_node(state):
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base)
 
+    safe_history = sanitize_history_for_gemini(history)
     response = llm.bind_tools(tools_to_bind).invoke(
-        [SystemMessage(content=system_prompt)] + history
+        [SystemMessage(content=system_prompt)] + safe_history
     )
 
     return {"current_agent": "Home_Agent", "messages": [response]}
@@ -317,7 +320,8 @@ def web_agent_node(state: AgentState):
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base)
     
-    final_messages = [SystemMessage(content=system_prompt)] + history
+    safe_history = sanitize_history_for_gemini(history)
+    final_messages = [SystemMessage(content=system_prompt)] + safe_history
     
     if image_part:
         final_messages[-1] = HumanMessage(content=[
@@ -396,7 +400,8 @@ def tech_agent_node(state: AgentState):
     system_prompt_text = f"{json_base}{vision_info}"
     system_prompt = build_prompt(history, system_prompt_text)
 
-    final_messages = [SystemMessage(content=system_prompt)] + history
+    safe_history = sanitize_history_for_gemini(history)
+    final_messages = [SystemMessage(content=system_prompt)] + safe_history
     if image_part:
         final_messages[-1] = HumanMessage(content=[
             {"type": "text", "text": last_msg_text},
@@ -460,7 +465,7 @@ def mail_agent_node(state):
         "current_agent": "Mail_Agent",
         "messages": [llm.bind_tools([
             mail_manager, search_memory
-        ]).invoke([SystemMessage(content=system_prompt)] + history)]
+        ]).invoke([SystemMessage(content=system_prompt)] + sanitize_history_for_gemini(history))]
     }
 
 
