@@ -232,7 +232,7 @@ def handle_voice(voice_obj: dict, chat_id: str):
         if local_path and os.path.exists(local_path):
             os.remove(local_path)
 def send_telegram_document(file_path, chat_id=None):
-    if not chat_id: chat_id = ALLOWED_CHAT_ID
+    if not chat_id: chat_id = TELEGRAM_CHAT_ID
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
         with open(file_path, 'rb') as f:
@@ -399,14 +399,18 @@ def handle_message(user_text: str, chat_id: str):
             from memory.routine_db import confirm_routine, mark_routine_responded, clear_pending_confirmations
             for rid in list(pending_routine_confirmations.keys()):
                 confirm_routine(rid)
-                mark_routine_responded(rid)   # Anti-spam: reset cooldown στο default
+                mark_routine_responded(rid)
+                from memory.event_log import log_event
+                log_event("routines", "confirmed", routine_id=rid, event=pending_routine_confirmations[rid])
                 print(f"✅ [Routine Confirmed]: {pending_routine_confirmations[rid]}")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
         elif any(w in text_check for w in no_words):
             from memory.routine_db import decay_routine, clear_pending_confirmations
             for rid in list(pending_routine_confirmations.keys()):
-                decay_routine(rid)  # TRIGGER_PENDING → DISMISSED (ή DECAYED αν conf<0.1)
+                decay_routine(rid)
+                from memory.event_log import log_event
+                log_event("routines", "dismissed", routine_id=rid, event=pending_routine_confirmations[rid])
                 print(f"📉 [Routine Dismissed]: {pending_routine_confirmations[rid]}")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
@@ -779,16 +783,18 @@ def job_check_routines():
     if is_proactive_muted():
         return
     if is_quiet_hours():
-        # Timeout decay τρέχει κανονικά, notifications όχι
         if pending_routine_confirmations:
-            from memory.routine_db import decay_routine
+            from memory.routine_db import decay_routine, remove_pending_confirmation
             now_check = datetime.now()
             for rid in list(pending_routine_confirmations.keys()):
                 if (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds() > 1800:
                     decay_routine(rid)
+                    log_event("routines", "timeout_decay", routine_id=rid,
+                              event=pending_routine_confirmations[rid]["event"],
+                              elapsed_s=1800)
                     del pending_routine_confirmations[rid]
+                    remove_pending_confirmation(rid)
         return
-
     # 1. Upcoming routine notifications
     try:
         if os.path.exists(DB_PATH):
