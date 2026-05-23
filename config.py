@@ -55,6 +55,7 @@ HOME_RADIUS_M = 150                   # trigger εντός 150 μέτρων
 LISTS_FILE           = os.path.join(BASE_DIR, "astakos_lists.json")
 CAPABILITIES_FILE    = os.path.join(BASE_DIR, "astakos_capabilities.json")
 LINKEDIN_DRAFT_FILE  = os.path.join(BASE_DIR, "linkedin_draft.json")
+
 GPS_STORAGE_FILE     = os.path.join(BASE_DIR, "last_location.json")
 
 # ==========================================
