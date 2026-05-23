@@ -50,7 +50,8 @@ pending_routine_confirmations = {}
 pending_exec_command = None
 # Scheduler reference (set in __main__, used by /status command)
 astakos_scheduler = None
-
+from collections import deque
+_telegram_history: deque = deque(maxlen=10)
 # ── Rate Limiting ─────────────────────────────────────────────
 QUIET_HOURS          = (23, 8)   # 23:00 → 08:00 χωρίς proactive
 MAX_PROACTIVE_PER_HOUR = 3       # max proactive μηνύματα/ώρα
@@ -451,8 +452,12 @@ def handle_message(user_text: str, chat_id: str):
     handling_agent = "Chat_Agent"
 
     try:
-        # Ροή μέσω LangGraph
-        for event in graph.stream({"messages": [HumanMessage(content=clean_user_text)]}):
+        # ── Context: τελευταία exchanges με timestamps ────────────
+        now_ts = datetime.now().strftime("%H:%M")
+        context_msgs = list(_telegram_history)
+        current_msg  = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
+        # ── Ροή μέσω LangGraph ───────────────────────────────────
+        for event in graph.stream({"messages": context_msgs + [current_msg]}):
             for node, data in event.items():
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node
@@ -486,7 +491,9 @@ def handle_message(user_text: str, chat_id: str):
                     send_telegram_voice(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
                 else:
                     send_telegram_msg(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
-
+            # Κρατάμε context για επόμενο μήνυμα
+            _telegram_history.append(HumanMessage(content=f"[{now_ts}] {clean_user_text}"))
+            _telegram_history.append(AIMessage(content=final_ai_response[:500]))
             # Φωτογραφίες
             if "[SEND_PHOTO:" in final_ai_response:
                 match = re.search(r"\[SEND_PHOTO:\s*(.+?)\]", final_ai_response)
