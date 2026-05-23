@@ -111,9 +111,6 @@ def is_duplicate_routine(routine_id: int, cooldown_hours: float) -> bool:
     except Exception as e:
         print(f"[event_log]: is_duplicate_routine error: {e}")
         return False  # Graceful fallback — επιτρέπουμε αποστολή
-
-
-
 def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDOWN_DEFAULT) -> bool:
     """
     Επιστρέφει True αν το ίδιο μήνυμα στάλθηκε πρόσφατα (εντός cooldown).
@@ -138,3 +135,35 @@ def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDO
 
         _dedup_cache[msg_hash] = now
         return False
+
+# ────────────────────────────────────────────────────────────────
+# REPLAY TIMELINE
+# ────────────────────────────────────────────────────────────────
+
+def get_routine_timeline(routine_id: int = None, days: int = 3) -> list:
+    """
+    Επιστρέφει χρονολογικό timeline events για μια ρουτίνα (ή όλες).
+    Ψάχνει στα τελευταία N days.
+    """
+    from datetime import timedelta
+    results = []
+    for i in range(days):
+        date_str = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+        log_file = os.path.join(LOGS_DIR, f"{date_str}.json")
+        if not os.path.exists(log_file):
+            continue
+        try:
+            with open(log_file, "r", encoding="utf-8") as f:
+                entries = json.load(f)
+            for e in entries:
+                if routine_id is None or str(e.get("routine_id")) == str(routine_id):
+                    if e.get("action") in (
+                        "triggered", "sent", "confirmed", "timeout",
+                        "dismissed", "decay", "cooldown_extended", "state_change"
+                    ):
+                        results.append(e)
+        except Exception:
+            continue
+
+    results.sort(key=lambda x: x.get("timestamp", ""))
+    return results
