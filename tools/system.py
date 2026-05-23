@@ -152,33 +152,32 @@ def run_terminal_command(command: str) -> str:
     - Εκτέλεση tests (π.χ. 'python manage.py test').
     """
     import subprocess
-    
+    from core.safe_executor import safe_execute
     print(f"\033[93m[Terminal Execution]: {command}\033[0m")
     
-    try:
-        # Εκτελούμε την εντολή μέσω PowerShell. Βάζουμε timeout 30s για να μη "κολλήσει" ο Αστακός.
-        result = subprocess.run(
-            ["powershell", "-Command", command], 
-            capture_output=True, 
-            text=True, 
-            timeout=30,
-            encoding='utf-8', 
-            errors='ignore'
-        )
-        
-        # Αν η εντολή πετύχει, παίρνουμε το stdout. Αν σκάσει, παίρνουμε το stderr (το stack trace δηλαδή).
-        output = result.stdout if result.returncode == 0 else f"ERROR:\n{result.stderr}"
-        
-        if not output.strip():
-            return "Η εντολή εκτελέστηκε επιτυχώς (δεν επέστρεψε output)."
-            
-        # Κόβουμε τους χαρακτήρες στους 10.000 για να μην "πνίξουμε" τη μνήμη του Agent
-        return f"💻 Terminal Output:\n{output[-10000:]}"
-        
-    except subprocess.TimeoutExpired:
-        return "❌ Error: Το process πήρε πάνω από 30 δευτερόλεπτα και τερματίστηκε."
-    except Exception as e:
-        return f"❌ Terminal Error: {str(e)}"
+    def _executor(cmd):
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command", cmd],
+                capture_output=True, text=True, timeout=30,
+                encoding='utf-8', errors='ignore'
+            )
+            output = result.stdout if result.returncode == 0 else f"ERROR:\n{result.stderr}"
+            if not output.strip():
+                return {"status": "ok", "output": "Εκτελέστηκε επιτυχώς (δεν επέστρεψε output)."}
+            return {"status": "ok", "output": f"💻 Terminal Output:\n{output[-10000:]}"}
+        except subprocess.TimeoutExpired:
+            return {"status": "ok", "output": "❌ Timeout: >30 δευτερόλεπτα."}
+        except Exception as e:
+            return {"status": "ok", "output": f"❌ Terminal Error: {str(e)}"}
+
+    result = safe_execute(command, _executor)
+
+    if result.get("status") == "blocked":
+        return f"🛡️ [SAFE EXECUTOR - BLOCKED]: {result['reason']}"
+    if result.get("status") == "cancelled":
+        return f"⚠️ [SAFE EXECUTOR]: Η εντολή απαιτεί επιβεβαίωσή σου. Ξαναστείλε με `/confirm {command}`"
+    return result.get("output", "")
 
 @tool
 def save_to_memory(fact: str, entities: str = "", category: str = "general") -> str:
@@ -832,30 +831,37 @@ def run_code(filename: str, script_args: str = "") -> str:
     import os
     import sys
     import subprocess
-    
+    from core.safe_executor import safe_execute
+
     safe_filename = os.path.basename(filename)
     file_path = os.path.join(WORKSPACE_DIR, safe_filename)
 
     if not os.path.exists(file_path):
         return f"Error: Το αρχείο {file_path} δεν υπάρχει στο Sandbox."
 
+    # ── SafeExec check ───────────────────────────────────────────
+    cmd_str = f"python {safe_filename} {script_args}".strip()
+    check = safe_execute(cmd_str, lambda c: {"status": "ok"})
+    if check.get("status") == "blocked":
+        return f"🛡️ [SAFE EXECUTOR - BLOCKED]: {check['reason']}"
+    if check.get("status") == "cancelled":
+        return f"⚠️ [SAFE EXECUTOR]: Η εκτέλεση απαιτεί επιβεβαίωση. Ξαναστείλε με `/confirm {cmd_str}`"
+    # ────────────────────────────────────────────────────────────
+
     try:
-        # Χτίζουμε τη λίστα της εντολής
         cmd = [sys.executable, file_path]
-        
-        # Αν μας έδωσε arguments, τα σπάμε και τα κολλάμε στην εντολή
         if script_args:
             cmd.extend(script_args.split())
 
         print(f"\033[93m[Dev]: Εκτέλεση του {safe_filename} με ορίσματα: {script_args}\033[0m")
-        
+
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         output = res.stdout if res.stdout else ""
         if res.stderr:
             output += f"\nERRORS:\n{res.stderr}"
-            
+
         return f"Terminal Output:\n{output[:5000]}" if output else "Εκτελέστηκε επιτυχώς (χωρίς output)."
-        
+
     except subprocess.TimeoutExpired:
         return "Error: Το script κόλλησε (>20 δευτερόλεπτα) και τερματίστηκε."
     except Exception as e:
@@ -1121,7 +1127,6 @@ def github_manager(action: str, repo_name: str = "", target_files: str = "",
     - target_files MUST be a comma-separated list of exact paths (e.g. "core/brain.py, api/server.py"). 
     - Using "." or "*" or "all" is STRICTLY FORBIDDEN.
     """
-    # Note: Replace GITHUB_TOKEN with your actual env variable load method
     token = os.getenv("GITHUB_TOKEN") 
     if not token:
         return "Error: Missing GITHUB_TOKEN."
@@ -1133,22 +1138,30 @@ def github_manager(action: str, repo_name: str = "", target_files: str = "",
                 return "🛡️ [GIT OVERRIDE]: Blind sweeps are forbidden. Specify exact file paths."
             if not commit_message:
                 return "Error: Commit message is required."
-            
-            # Clean up the file list (e.g., "server.py, core/utils.py" -> ["server.py", "core/utils.py"])
+
+            # ── SafeExec check ───────────────────────────────────────────
+            from core.safe_executor import safe_execute
+            push_check = safe_execute("git push origin main", lambda c: {"status": "ok"})
+            if push_check.get("status") == "blocked":
+                return f"🛡️ [SAFE EXECUTOR - BLOCKED]: {push_check['reason']}"
+            if push_check.get("status") == "cancelled":
+                return "⚠️ [SAFE EXECUTOR]: Το git push απαιτεί επιβεβαίωση. Ξαναστείλε με `/confirm`"
+            # ────────────────────────────────────────────────────────────
+
             files = [f.strip() for f in target_files.split(",") if f.strip()]
-            
-            # 1. Execute: git add <files>
+
+            # 1. git add <files>
             add_cmd = ["git", "add"] + files
             subprocess.run(add_cmd, check=True, capture_output=True, text=True)
-            
-            # 2. Execute: git commit -m "message"
+
+            # 2. git commit -m "message"
             commit_cmd = ["git", "commit", "-m", commit_message]
             subprocess.run(commit_cmd, check=True, capture_output=True, text=True)
-            
-            # 3. Execute: git push origin main
+
+            # 3. git push origin main
             push_cmd = ["git", "push", "origin", "main"]
             subprocess.run(push_cmd, check=True, capture_output=True, text=True)
-            
+
             return f"System: Local changes successfully pushed!\nFiles: {files}\nMessage: {commit_message}"
 
         # ─── 2. GITHUB CLOUD API OPERATIONS ─────────────────────────────
@@ -1165,10 +1178,8 @@ def github_manager(action: str, repo_name: str = "", target_files: str = "",
             return f"Content of {target_files}:\n{file_content.decoded_content.decode('utf-8')[:10000]}"
 
         elif action in ["create_file", "update_file"]:
-            # [SECURITY FIX]: Prevent wiping files with empty content
             if not content.strip():
                 return "🛡️ [GIT OVERRIDE]: Content is empty. Refusing to overwrite file with empty data."
-                
             repo = g.get_repo(f"{user.login}/{repo_name}")
             try:
                 file_info = repo.get_contents(target_files)

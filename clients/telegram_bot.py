@@ -47,6 +47,7 @@ memory_lock           = threading.Lock()
 last_interaction_time = time.time()
 # Pending routine confirmations: {routine_id: {"event": ..., "sent_at": ...}}
 pending_routine_confirmations = {}
+pending_exec_command = None
 # Scheduler reference (set in __main__, used by /status command)
 astakos_scheduler = None
 
@@ -414,6 +415,35 @@ def handle_message(user_text: str, chat_id: str):
                 print(f"📉 [Routine Dismissed]: {pending_routine_confirmations[rid]}")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
+    # ── SAFE EXECUTOR CONFIRMATION LOOP ──────────────────────────
+    global pending_exec_command
+    if pending_exec_command:
+        text_check = clean_user_text.lower().strip()
+        if any(w in text_check for w in ["ναι", "yes", "ok", "οκ"]):
+            cmd = pending_exec_command
+            pending_exec_command = None
+            from memory.event_log import log_event
+            log_event("safe_executor", "confirmed_and_executed", cmd=cmd[:80])
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["powershell", "-Command", cmd],
+                    capture_output=True, text=True, timeout=30,
+                    encoding='utf-8', errors='ignore'
+                )
+                output = result.stdout if result.returncode == 0 else f"ERROR:\n{result.stderr}"
+                send_telegram_msg(
+                    f"✅ Εκτελέστηκε:\n💻 {output[:2000]}" if output.strip()
+                    else "✅ Εκτελέστηκε (χωρίς output)."
+                )
+            except Exception as e:
+                send_telegram_msg(f"❌ Σφάλμα εκτέλεσης: {e}")
+            return
+        elif any(w in text_check for w in ["όχι", "οχι", "no", "cancel"]):
+            pending_exec_command = None
+            send_telegram_msg("❌ Ακυρώθηκε.")
+            return
+
     with memory_lock:
         last_interaction_time = time.time()
 
@@ -698,7 +728,16 @@ def run_polling():
                     _save_override_state()
                     send_telegram_msg("✅ Όλα ξανά ενεργά!")
                     continue
-
+                if user_text.lower().startswith("/confirm"):
+                    cmd_to_confirm = user_text[len("/confirm"):].strip()
+                    if not cmd_to_confirm:
+                        send_telegram_msg("⚠️ Χρήση: `/confirm <εντολή>`")
+                        continue
+                    pending_exec_command = cmd_to_confirm
+                    send_telegram_msg(
+                        f"⚠️ *Επιβεβαίωση απαιτείται:*\n`{cmd_to_confirm}`\n\nΘέλεις να εκτελεστεί; (ναι/όχι)"
+                    )
+                    continue
                 if cmd == "/status":
                     if astakos_scheduler:
                         send_telegram_msg(astakos_scheduler.status())
