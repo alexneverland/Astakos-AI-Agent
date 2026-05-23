@@ -201,7 +201,8 @@ def transition_routine(routine_id: int, to_state: RoutineState) -> None:
         conn.close()
 
     print(f"[routine_db]: #{routine_id} {current.value} → {to_state.value}")
-
+    from memory.event_log import log_event
+    log_event("routines", "state_change", routine_id=routine_id, from_state=current.value, to_state=to_state.value)
 
 # ────────────────────────────────────────────────────────────────
 # CORE OPERATIONS
@@ -400,7 +401,8 @@ def decay_routine(routine_id: int):
         finally:
             conn.close()
         print(f"[routine_db]: #{routine_id} decayed → {new_state.value} (conf={new_conf:.2f})")
-
+        from memory.event_log import log_event
+        log_event("routines", "decay", routine_id=routine_id, new_confidence=new_conf, new_state=new_state.value)
 
 def get_routines_for_day(day: str) -> list:
     """Επιστρέφει active ρουτίνες για την ημέρα. Φιλτράρει με state='active'."""
@@ -469,6 +471,8 @@ def mark_routine_ignored(routine_id: int):
             )
             conn.commit()
         print(f"[routine_db]: timeout ignore#{ignore_count} -> cooldown {new_cd:.0f}h (id={routine_id})")
+        from memory.event_log import log_event
+        log_event("routines", "cooldown_extended", routine_id=routine_id, new_cooldown_hours=new_cd, ignore_count=ignore_count)
     conn.close()
 
 

@@ -775,9 +775,18 @@ async def debug_runtime():
             "throughput":  throughput,
             "last_errors": last_errors,
             "total_today": len(events),
+            "recent_logs": events[-100:],
         },
     })
 
+@server.get("/debug/replay")
+async def debug_replay(days: int = 2):
+    from memory.event_log import get_routine_timeline
+    try:
+        events = get_routine_timeline(routine_id=None, days=days)
+        return {"events": events, "count": len(events), "days": days}
+    except Exception as e:
+        return {"events": [], "error": str(e)}
 
 @server.get("/debug")
 async def debug_panel():

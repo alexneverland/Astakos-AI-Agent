@@ -47,6 +47,72 @@
 <script>
 const REFRESH = 5000;
 let rafId;
+let timelineData = [];
+
+function actionIcon(a){
+  return {triggered:'🧠',confirmed:'✅',dismissed:'📉',timeout_decay:'⏰',
+          decay:'💀',cooldown_extended:'🔄',state_change:'🔀',skipped:'⏭️'}[a]||'•';
+}
+function actionColor(a){
+  return {confirmed:'ok',dismissed:'warn',decay:'err',timeout_decay:'warn',
+          cooldown_extended:'warn',skipped:'off'}[a]||'';
+}
+function extraInfo(e){
+  if(e.action==='decay')            return `conf→${e.new_confidence?.toFixed(2)??'?'} (${e.new_state??''})`;
+  if(e.action==='cooldown_extended')return `cd=${e.new_cooldown_hours??'?'}h ignore#${e.ignore_count??'?'}`;
+  if(e.action==='state_change')     return `${e.from_state??'?'}→${e.to_state??'?'}`;
+  if(e.action==='triggered')        return `conf=${e.confidence?.toFixed(2)??'?'}${e.batch?` batch=${e.batch}`:''}`;
+  if(e.action==='timeout_decay')    return `${e.elapsed_s??'?'}s elapsed`;
+  if(e.action==='skipped')          return e.reason??'';
+  return '';
+}
+function logRow(e) {
+  const ts  = (e.timestamp||'').substring(11,19);
+  const act = e.action||'?';
+  const job = e.job||'?';
+  const col = {complete:'ok',error:'err',db_error:'err',disabled:'err',
+               confirmed:'ok',triggered:'',dismissed:'warn',
+               timeout_decay:'warn',decay:'err',skipped:'off',
+               start:'off',alert_sent:'warn'}[act]||'';
+  const extra = Object.entries(e)
+    .filter(([k])=>!['timestamp','job','action'].includes(k))
+    .map(([k,v])=>`<span class="off">${k}:</span>${v}`)
+    .join(' &nbsp;');
+  return `<tr class="log-row" data-filter="${job} ${act}">
+    <td class="off" style="white-space:nowrap;font-size:11px">${ts}</td>
+    <td style="font-size:11px">${job}</td>
+    <td><span class="${col}">${act}</span></td>
+    <td style="font-size:11px;color:var(--muted)">${extra}</td>
+  </tr>`;
+}
+function renderTimelineCard(){
+  const el = document.getElementById('timeline-card');
+  if(!timelineData.length){ if(el) el.remove(); return; }
+  const rows = [...timelineData].reverse().slice(0,60).map(e=>{
+    const ts   = (e.timestamp||'').substring(11,19);
+    const date = (e.timestamp||'').substring(5,10);
+    return `<tr>
+      <td class="off" style="white-space:nowrap;font-size:11px">${date} ${ts}</td>
+      <td>${actionIcon(e.action)} <span class="${actionColor(e.action)}">${e.action}</span></td>
+      <td class="off">#${e.routine_id??'?'}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.event||'—'}</td>
+      <td class="off" style="font-size:11px">${extraInfo(e)}</td>
+    </tr>`;
+  }).join('');
+  const card = `<div class="card" id="timeline-card" style="grid-column:1/-1">
+    <h2>📜 Routine Timeline (last 2 days)</h2>
+    <table><tr><th>Time</th><th>Action</th><th>ID</th><th>Event</th><th>Info</th></tr>
+    ${rows}</table></div>`;
+  if(el) el.outerHTML = card;
+  else   document.getElementById('grid').insertAdjacentHTML('beforeend', card);
+}
+async function fetchTimeline(){
+  try{
+    const r = await fetch('/debug/replay?days=2');
+    timelineData = (await r.json()).events||[];
+    renderTimelineCard();
+  }catch(e){}
+}
 
 function stateBadge(s) {
   const m = {
@@ -167,10 +233,30 @@ function render(d) {
         <span class="err">${e.error}</span>
       </div>`).join('')}</div>`;
   }
-
+  const recentLogs = [...(evts.recent_logs||[])].reverse();
+  if (recentLogs.length > 0) {
+    html += `<div class="card" style="grid-column:1/-1">
+      <h2>📋 Live Log (σήμερα — ${recentLogs.length} entries)</h2>
+      <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+        <input id="log-filter" placeholder="Φίλτρο: job, action..." oninput="filterLogs()"
+          style="background:#21262d;border:1px solid var(--border);color:var(--text);
+                padding:4px 10px;border-radius:4px;width:220px;font-size:12px">
+        <span class="off" style="font-size:11px">Εμφάνιση τελευταίων 100</span>
+      </div>
+      <div style="max-height:320px;overflow-y:auto">
+        <table><tr><th>Time</th><th>Job</th><th>Action</th><th>Details</th></tr>
+        ${recentLogs.map(logRow).join('')}</table>
+      </div>
+    </div>`;
+  }
   document.getElementById('grid').innerHTML = html;
 }
-
+function filterLogs() {
+  const q = document.getElementById('log-filter')?.value.toLowerCase()||'';
+  document.querySelectorAll('.log-row').forEach(row => {
+    row.style.display = row.dataset.filter?.includes(q) ? '' : 'none';
+  });
+}
 async function fetchData() {
   try {
     const r = await fetch('/debug/runtime');
@@ -194,6 +280,8 @@ function startCountdown() {
 }
 
 fetchData();
+fetchTimeline();
+setInterval(fetchTimeline, 30000);
 startCountdown();
 </script>
 </body>
