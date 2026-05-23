@@ -217,7 +217,7 @@ def handle_voice(voice_obj: dict, chat_id: str):
             }
         }
         
-        prompt = "Άκουσε αυτό το μήνυμα και απάντησε σύντομα και μαστορικά."
+        prompt = "Είσαι ΑΠΟΚΛΕΙΣΤΙΚΑ εργαλείο Speech-to-Text. Μετέγραψε ΜΟΝΟ αυτό που ακούς, λέξη προς λέξη, χωρίς σχόλια ή απαντήσεις. Αν δεν ακούς τίποτα, γράψε: [ΣΙΩΠΗ]."
         response = safe_gemini_call([prompt, audio_part])
         ai_reply = response.text if response and response.text else "Δεν έβγαλα άκρη."
 
