@@ -357,8 +357,32 @@ async def chat_endpoint(request: Request):
             # We feed the LangGraph state the isolated XML payload
             human_msg = HumanMessage(content=isolated_user_input)
 
+        # ── Context: τελευταία 10 μηνύματα με timestamps ─────────
+        with chat_history_lock:
+            raw_hist = _load_chat_history()
+        context_msgs = []
+        for entry in raw_hist[-11:-1]:
+            role    = entry.get("role", "")
+            content = entry.get("content", "")
+            ts      = entry.get("time", "")
+            prefix  = f"[{ts}] " if ts else ""
+            if role in ("user", "Human"):
+                context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
+            else:
+                context_msgs.append(AIMessage(content=f"{prefix}{content}"))
+        # Timestamp στο τρέχον μήνυμα
+        now_ts = datetime.now().strftime("%H:%M")
+        if isinstance(human_msg.content, str):
+            human_msg = HumanMessage(content=f"[{now_ts}] {human_msg.content}")
+        elif isinstance(human_msg.content, list):
+            parts = list(human_msg.content)
+            for i, p in enumerate(parts):
+                if isinstance(p, dict) and p.get("type") == "text":
+                    parts[i] = {"type": "text", "text": f"[{now_ts}] {p['text']}"}
+                    break
+            human_msg = HumanMessage(content=parts)
         # ── Τρέξιμο του LangGraph ────────────────────────────────
-        for event in graph.stream({"messages": [human_msg]}):
+        for event in graph.stream({"messages": context_msgs + [human_msg]}):
             for node, data in event.items():
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node
