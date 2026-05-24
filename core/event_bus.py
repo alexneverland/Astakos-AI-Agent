@@ -27,15 +27,15 @@ class EventBus:
         with self._lock:
             self._handlers[event].append(handler)
 
-    def emit(self, event: str, **payload):
+    def emit(self, event_name: str, **payload):
         """Εκπομπή event σε όλους τους subscribers."""
         with self._lock:
-            handlers = list(self._handlers.get(event, []))
+            handlers = list(self._handlers.get(event_name, []))
         for fn in handlers:
             try:
                 fn(**payload)
             except Exception as e:
-                print(f"[EventBus]: ⚠️ handler error on '{event}': {e}")
+                print(f"[EventBus]: ⚠️ handler error on '{event_name}': {e}")
 
     def registered_events(self) -> list:
         """Debug: ποια events έχουν subscribers."""

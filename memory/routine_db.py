@@ -348,7 +348,12 @@ def confirm_routine(routine_id: int):
     TRIGGER_PENDING → CONFIRMED → ACTIVE (double transition, auto-immediate).
     Αυξάνει confidence + mention_count.
     """
-    validate_transition(get_routine_state(routine_id), RoutineState.CONFIRMED)
+    current_state = get_routine_state(routine_id)
+    # Idempotent: ήδη active από προηγούμενη session (pending δεν καθαρίστηκε λόγω crash)
+    if current_state == RoutineState.ACTIVE:
+        remove_pending_confirmation(routine_id)
+        return
+    validate_transition(current_state, RoutineState.CONFIRMED)
     validate_transition(RoutineState.CONFIRMED, RoutineState.ACTIVE)
     conn   = get_connection()
     cursor = conn.cursor()
