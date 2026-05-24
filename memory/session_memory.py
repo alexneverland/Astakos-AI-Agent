@@ -139,7 +139,7 @@ def _run_session_summary(channel: str = "web"):
 # MEMORY SIFTER — "Αρχειοθέτης"
 # ════════════════════════════════════════════════════════════════
 
-def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"):
+def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
     """
     Αναλύει τον διάλογο, εξάγει μνήμες για τη ChromaDB 
     και ενημερώνει το JSON index φωτογραφιών με πλήρη ανάλυση.
@@ -253,6 +253,6 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
         print(f"⚠️ [Sifter Error]: {e}")
 
 
-def trigger_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"):
+def trigger_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
     """Wrapper — εκτελείται μέσω Queue Worker."""
     _run_memory_sifter(user_text, ai_text, agent_name)
