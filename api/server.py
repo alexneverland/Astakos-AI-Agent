@@ -770,9 +770,22 @@ async def debug_runtime():
     sleeping    = sleep_until and time.time() < sleep_until
     sleep_until_str = datetime.fromtimestamp(sleep_until).strftime("%H:%M") if sleeping else None
 
+    # ── 5. Heartbeat health ──────────────────────────────────────
+    snap_age = round(time.time() - datetime.fromisoformat(snapshot["written_at"]).timestamp(), 0) \
+               if snapshot.get("written_at") else None
+    scheduler_alive = snap_age is not None and snap_age < 30
+
+    # ── 6. Channel sessions ──────────────────────────────────────
+    try:
+        from memory.session_memory import SESSION_LOGS
+        channel_sessions = {ch: len(msgs) for ch, msgs in SESSION_LOGS.items()}
+    except Exception:
+        channel_sessions = {}
+
     return JSONResponse({
-        "snapshot_age_s": round(time.time() - datetime.fromisoformat(snapshot["written_at"]).timestamp(), 0)
-                          if snapshot.get("written_at") else None,
+        "snapshot_age_s":  snap_age,
+        "scheduler_alive": scheduler_alive,
+        "channel_sessions": channel_sessions,
         "scheduler": {
             "written_at":         snapshot.get("written_at"),
             "jobs":               snapshot.get("jobs", []),
