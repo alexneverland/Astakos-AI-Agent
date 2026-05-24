@@ -1047,7 +1047,10 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
                  limit: int = 10) -> str:
     """
     Διαχείριση Gmail μέσω Google API. 
-    Actions: 'search' (θέλει query), 'read_full' (θέλει email_id), 'send', 'delete'.
+    Actions: 'search' (θέλει query), 'read_full' (θέλει email_id), 
+             'send' (θέλει to_email, subject, body),
+             'reply' (θέλει email_id, body),
+             'delete' (θέλει email_id).
     """
     try:
         print(f"\033[94m[Mail API]: Εκτέλεση ενέργειας '{action}'...\033[0m")
@@ -1058,10 +1061,55 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         # SEND
         # =========================
         if action == "send":
-            message = f"To: {to_email}\r\nSubject: {subject}\r\n\r\n{body}"
+            message = (
+                f"To: {to_email}\r\n"
+                f"Subject: {subject}\r\n"
+                f"Content-Type: text/plain; charset=utf-8\r\n"
+                f"\r\n"
+                f"{body}"
+            )
             raw = base64.urlsafe_b64encode(message.encode("utf-8")).decode("utf-8")
             service.users().messages().send(userId="me", body={"raw": raw}).execute()
             return "✅ Email στάλθηκε κανονικά."
+
+        # =========================
+        # REPLY
+        # =========================
+        if action == "reply":
+            if not email_id or not body:
+                return "❌ Για reply χρειάζεται email_id και body."
+            
+            # Φόρτωση του αρχικού email για τα headers
+            original = service.users().messages().get(
+                userId="me", id=email_id, format="metadata",
+                metadataHeaders=["Subject", "From", "Message-ID", "References"]
+            ).execute()
+            
+            headers = original["payload"]["headers"]
+            orig_subject = next((h["value"] for h in headers if h["name"] == "Subject"), "Re: (no subject)")
+            orig_from    = next((h["value"] for h in headers if h["name"] == "From"), "")
+            orig_msg_id  = next((h["value"] for h in headers if h["name"] == "Message-ID"), "")
+            orig_refs    = next((h["value"] for h in headers if h["name"] == "References"), "")
+            
+            reply_subject = orig_subject if orig_subject.startswith("Re:") else f"Re: {orig_subject}"
+            references = f"{orig_refs} {orig_msg_id}".strip()
+            
+            reply_message = (
+                f"To: {orig_from}\r\n"
+                f"Subject: {reply_subject}\r\n"
+                f"In-Reply-To: {orig_msg_id}\r\n"
+                f"References: {references}\r\n"
+                f"Content-Type: text/plain; charset=utf-8\r\n"
+                f"\r\n"
+                f"{body}"
+            )
+            raw = base64.urlsafe_b64encode(reply_message.encode("utf-8")).decode("utf-8")
+            thread_id = original.get("threadId")
+            service.users().messages().send(
+                userId="me",
+                body={"raw": raw, "threadId": thread_id}
+            ).execute()
+            return f"✅ Reply στάλθηκε στον {orig_from}."
 
         # =========================
         # SEARCH
