@@ -35,10 +35,11 @@ VALID_TRANSITIONS: dict[RoutineState, list[RoutineState]] = {
         RoutineState.ARCHIVED,         # manual delete
     ],
     RoutineState.TRIGGER_PENDING: [
-        RoutineState.CONFIRMED,   # user: "ναι"
-        RoutineState.IGNORED,     # timeout (30')
+        RoutineState.CONFIRMED,
+        RoutineState.IGNORED,
         RoutineState.DISMISSED,
-        RoutineState.DECAYED,   # user: "όχι"
+        RoutineState.DECAYED,
+        RoutineState.ACTIVE,
     ],
     RoutineState.CONFIRMED: [
         RoutineState.ACTIVE,      # auto-immediate μετά από confirm
