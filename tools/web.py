@@ -409,7 +409,6 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             except: pass
             
     api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
-    print(f"DEBUG KEY: {api_key[:10]}...")
     if not api_key:
         return "❌ Λείπει το GOOGLE_PLACES_API_KEY από το .env"
 
@@ -488,8 +487,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             if place.get("delivery"): services.append("Delivery")
             if place.get("dineIn"): services.append("Dine-in")
             
-            # Κριτικές (παίρνουμε μόνο την πρώτη για να δούμε το "vibe")
-# Κριτικές: Ανεβάσαμε το όριο στους 250 χαρακτήρες για να μη χάνεται το νόημα
+            # Κριτικές: Ανεβάσαμε το όριο στους 250 χαρακτήρες για να μη χάνεται το νόημα
             review_text = ""
             reviews = place.get("reviews", [])
             if reviews:
@@ -512,15 +510,13 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             
             contact_str = ""
             if phone: contact_str += f"   📞 {phone}\n"
-            # [MASTRO-FIX]: HTML Tags για να είναι σίγουρα κλικαριστά στο Telegram
             if website: contact_str += f"   🌐 <a href='{website}'>Website Μαγαζιού</a>\n"
             
             services_str = f"   🛵 [{', '.join(services)}]\n" if services else ""
             review_str = f"   💬 \"{review_text}\"\n" if review_text else ""
 
-            # [MASTRO-FIX]: HTML Tag για το Google Maps
             lines.append(
-                f"{i}. **{name}**{price_str}\n"
+                f"{i}. <b>{name}</b>{price_str}\n"
                 f"   {rating_str}{type_str}{hours_info}\n"
                 f"   📌 {address}\n"
                 f"{contact_str}"
@@ -538,16 +534,16 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
 def get_navigation_info(destination: str) -> str:
     """Παρέχει κλικαριστά links για χάρτη και πλοήγηση από Piston 7."""
     home_base = "Piston 7, Thessaloniki"
-    dest_clean = f"{destination}, Thessaloniki".replace(" ", "+")
+    dest_clean = destination.replace(" ", "+")
     home_clean = home_base.replace(" ", "+")
 
     search_url = f"https://www.google.com/maps/search/?api=1&query={dest_clean}"
     directions_url = f"https://www.google.com/maps/dir/?api=1&origin={home_clean}&destination={dest_clean}"
 
     return (
-        f"📍 **Τοποθεσία:** {destination}\n\n"
-        f"🔗 [Προβολή στον Χάρτη]({search_url})\n"
-        f"🌐 Link: {search_url}\n\n"
-        f"🚗 [Οδηγίες πλοήγησης από Piston 7]({directions_url})\n"
-        f"🛣️ Διαδρομή: {directions_url}"
+        f"📍 <b>Τοποθεσία:</b> {destination}\n\n"
+        f"🔗 <a href='{search_url}'>Προβολή στον Χάρτη</a>\n"
+        f"🌐 {search_url}\n\n"
+        f"🚗 <a href='{directions_url}'>Οδηγίες πλοήγησης από Piston 7</a>\n"
+        f"🛣️ {directions_url}"
     )
