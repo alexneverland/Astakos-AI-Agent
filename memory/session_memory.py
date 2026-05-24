@@ -12,6 +12,7 @@ from memory.vector_store import memory
 from services.gemini import safe_gemini_call
 import re
 from core.utils import clean_message
+from core.event_bus import bus
 from config import PHOTOS_INDEX_FILE, PHOTOS_DIR, SESSIONS_FILE
 # ════════════════════════════════════════════════════════════════
 # SESSION SUMMARY — "Ημερολόγιο Συνεργάτη"
@@ -126,6 +127,7 @@ def _run_session_summary(channel: str = "web"):
         # 5. Αποθήκευση (Εδώ ο MemoryManager θα κάνει και το overwrite αν χρειαστεί)
         memory.save(memory_type="session", summary=summary, session_text=session_text)
         print(f"\033[92m[Session]: ✅ Αρχειοθετήθηκε επιτυχώς! Mood: {summary.get('mood', '?')}\033[0m")
+        bus.emit("session_ended", channel=channel, mood=summary.get("mood", "unknown"), summary=summary.get("summary", ""))
 
     except Exception as e:
         # Recovery σε περίπτωση σφάλματος

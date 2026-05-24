@@ -37,7 +37,7 @@ from memory.session_memory import trigger_memory_sifter, log_exchange, _run_sess
 from tools.telegram import send_telegram_msg, send_telegram_voice
 from services.gemini import safe_gemini_call
 from services.embeddings import embeddings
-
+from core.event_bus import bus
 # ────────────────────────────────────────────────────────────────
 # GLOBALS
 # ────────────────────────────────────────────────────────────────
@@ -434,6 +434,7 @@ def handle_message(user_text: str, chat_id: str):
                 from memory.event_log import log_event
                 log_event("routines", "confirmed", routine_id=rid, event=pending_routine_confirmations[rid])
                 print(f"✅ [Routine Confirmed]: {pending_routine_confirmations[rid]}")
+                bus.emit("routine_confirmed", routine_id=rid, event=pending_routine_confirmations[rid], channel="telegram")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
         elif any(w in text_check for w in no_words):
@@ -443,6 +444,7 @@ def handle_message(user_text: str, chat_id: str):
                 from memory.event_log import log_event
                 log_event("routines", "dismissed", routine_id=rid, event=pending_routine_confirmations[rid])
                 print(f"📉 [Routine Dismissed]: {pending_routine_confirmations[rid]}")
+                bus.emit("routine_dismissed", routine_id=rid, event=pending_routine_confirmations[rid], channel="telegram")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
     # ── SAFE EXECUTOR CONFIRMATION LOOP ──────────────────────────
@@ -936,6 +938,7 @@ def job_check_routines():
                               event=event_name, confidence=confidence, batch=len(due_routines))
                     pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
                     save_pending_confirmation(r_id, event_name, sent_at)
+                    bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel="telegram")
                 conn.commit()
             else:
                 # Μία ρουτίνα → εξατομικευμένο μήνυμα
@@ -955,6 +958,7 @@ def job_check_routines():
                 sent_at = datetime.now()
                 pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
                 save_pending_confirmation(r_id, event_name, sent_at)
+                bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=False, channel="telegram")
 
             conn.close()
     except Exception as e:
@@ -978,6 +982,7 @@ def job_check_routines():
                           routine_id=rid, event=ev,
                           elapsed_s=int(elapsed))
                 print(f"⏰ {timeout_err}")
+                bus.emit("routine_timeout", routine_id=rid, event=ev, elapsed_s=int(elapsed), channel="telegram")
                 del pending_routine_confirmations[rid]
                 remove_pending_confirmation(rid)
 
