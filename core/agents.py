@@ -40,7 +40,22 @@ from tools.web import (
     search_goldmall_offers, execute_local_pipeline, get_navigation_info, relay_local_payload, search_google_places
 )
 from langchain_community.tools import DuckDuckGoSearchRun
-
+# ────────────────────────────────────────────────────────────────
+# [GEMINI-FIX]: Force text response after tool execution
+# ────────────────────────────────────────────────────────────────
+def _ensure_text_response(response, llm_instance, system_prompt: str, safe_history: list):
+    """
+    Gemini quirk: μετά από tool execution επιστρέφει μερικές φορές κενό content.
+    Αν συμβεί αυτό, κάνουμε ένα retry με explicit instruction να απαντήσει.
+    """
+    if clean_message(response.content).strip() or getattr(response, "tool_calls", []):
+        return response  # Όλα ΟΚ, δεν χρειάζεται τίποτα
+    # Retry — ο Gemini "σίγησε" μετά από tool
+    print("\033[93m[Gemini-Fix]: Κενό response μετά από tool — retry...\033[0m")
+    return llm_instance.invoke([
+        SystemMessage(content=system_prompt + "\n\n[ΑΠΑΡΑΙΤΗΤΟ]: Πρέπει να απαντήσεις με κείμενο στον χρήστη. Ενημέρωσέ τον για ό,τι έγινε."),
+        *safe_history
+    ])
 
 # ────────────────────────────────────────────────────────────────
 # [MASTRO-SHIELD]: Κεντρικός καθαρισμός ορφανών tool_calls
@@ -283,6 +298,7 @@ def home_agent_node(state):
     response = llm.bind_tools(tools_to_bind).invoke(
         [SystemMessage(content=system_prompt)] + safe_history
     )
+    response = _ensure_text_response(response, llm, system_prompt, safe_history)
 
     return {"current_agent": "Home_Agent", "messages": [response]}
 
