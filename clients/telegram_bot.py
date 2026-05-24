@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage, AIMessage
 
-from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE, TELEGRAM_HISTORY_FILE
 from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
 from core.exceptions import SchedulerCrashError, PendingTimeoutError, DBWriteError
 from core.brain import llm
@@ -52,6 +52,35 @@ pending_exec_command = None
 astakos_scheduler = None
 from collections import deque
 _telegram_history: deque = deque(maxlen=10)
+
+def _load_telegram_history_file() -> deque:
+    """Φορτώνει το Telegram history από αρχείο (επιβιώνει restarts)."""
+    if not os.path.exists(TELEGRAM_HISTORY_FILE):
+        return deque(maxlen=10)
+    try:
+        with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        d = deque(maxlen=10)
+        for item in raw:
+            if item["role"] == "human":
+                d.append(HumanMessage(content=item["content"]))
+            else:
+                d.append(AIMessage(content=item["content"]))
+        return d
+    except:
+        return deque(maxlen=10)
+
+def _save_telegram_history_file():
+    """Αποθηκεύει το Telegram history στο αρχείο."""
+    try:
+        data = [
+            {"role": "human" if isinstance(msg, HumanMessage) else "ai", "content": msg.content}
+            for msg in _telegram_history
+        ]
+        with open(TELEGRAM_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[TelegramHistory]: Σφάλμα αποθήκευσης: {e}")
 # ── Rate Limiting ─────────────────────────────────────────────
 QUIET_HOURS          = (23, 8)   # 23:00 → 08:00 χωρίς proactive
 MAX_PROACTIVE_PER_HOUR = 3       # max proactive μηνύματα/ώρα
@@ -251,7 +280,7 @@ def handle_end_session(chat_id: str):
         send_telegram_msg("⌛ **Αρχειοθέτηση...** Μαζεύω τις μνήμες της ημέρας και καθαρίζω τον πάγκο.")
         
         # 1. Τρέχουμε το κεντρικό summary (όπως στο server.py)
-        _run_session_summary()
+        _run_session_summary(channel="telegram")
         
         # 2. Καθαρίζουμε το Post-it (Working Memory)
         with open(WORKING_MEMORY_FILE, "w", encoding="utf-8") as f:
@@ -511,8 +540,9 @@ def handle_message(user_text: str, chat_id: str):
 
             # Background Tasks
             enqueue_task(update_working_memory,             user_text, final_ai_response)
-            enqueue_task(trigger_memory_sifter,             user_text, final_ai_response, handling_agent)
-            enqueue_task(log_exchange,                       user_text, final_ai_response, handling_agent)
+            enqueue_task(trigger_memory_sifter,             user_text, final_ai_response, handling_agent, "telegram")
+            enqueue_task(log_exchange,                       user_text, final_ai_response, handling_agent, "telegram")
+            _save_telegram_history_file()
             enqueue_task(update_capabilities_from_exchange, user_text, final_ai_response, handling_agent)
 
     except Exception as e:
@@ -1185,10 +1215,14 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_check_routines,  interval_seconds=60,    name="routines")
     astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive")
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
+    # Φόρτωσε το ιστορικό από τον δίσκο
+    _telegram_history = _load_telegram_history_file()
+    print(f"\033[92m[TelegramHistory]: Φορτώθηκαν {len(_telegram_history)} μηνύματα από δίσκο.\033[0m")
 
     print("\u2501" * 50)
     print("  \U0001f99e  \u0391\u03c3\u03c4\u03b1\u03ba\u03cc\u03c2 Telegram Bot \u2014 \u0395\u03ba\u03ba\u03af\u03bd\u03b7\u03c3\u03b7")
     print("\u2501" * 50)
+    
     send_telegram_msg("🦞 Αστακός Ξεκίνησα! Πώς μπορώ να βοηθήσω Λάζαρε;")
     try:
         run_polling()
@@ -1197,7 +1231,7 @@ if __name__ == "__main__":
     finally:
         shutdown_event.set()
         try:
-            _run_session_summary()
+            _run_session_summary(channel="telegram")
         except Exception:
             pass
         print("[TelegramBot]: \u03a4\u03b5\u03c1\u03bc\u03b1\u03c4\u03af\u03c3\u03c4\u03b7\u03ba\u03b5.")

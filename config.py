@@ -48,6 +48,7 @@ DOCS_INDEX_FILE      = os.path.join(BASE_DIR, "astakos_docs_index.json")
 EMBEDDINGS_CACHE_FILE= os.path.join(BASE_DIR, "astakos_embeddings_cache.json")
 PROFILE_FILE         = os.path.join(BASE_DIR, "astakos_profile.json")
 SESSIONS_FILE        = os.path.join(BASE_DIR, "astakos_sessions.json")
+TELEGRAM_HISTORY_FILE = os.path.join(BASE_DIR, "astakos_telegram_history.json")
 REMINDERS_FILE       = os.path.join(BASE_DIR, "astakos_reminders.json")
 # GPS: Συντεταγμένες σπιτιού για location reminders
 HOME_COORDS   = (40.646558, 22.939036)   # Piston 7 — διόρθωσε αν χρειαστεί

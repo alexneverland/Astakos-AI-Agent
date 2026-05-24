@@ -17,24 +17,23 @@ from config import PHOTOS_INDEX_FILE, PHOTOS_DIR, SESSIONS_FILE
 # SESSION SUMMARY — "Ημερολόγιο Συνεργάτη"
 # ════════════════════════════════════════════════════════════════
 
-SESSION_LOG: list[dict] = []
+SESSION_LOGS: dict = {"telegram": [], "web": [], "terminal": []}
 
 
-def log_exchange(user_text, ai_text, agent: str):
-    """Προσθέτει ένα ζεύγος ερώτησης-απάντησης στο session log."""
-    # Φοράμε τα "γυαλιά" για να πάρουμε μόνο το κείμενο για το Log
+def log_exchange(user_text, ai_text, agent: str, channel: str = "web"):
+    """Προσθέτει ένα ζεύγος ερώτησης-απάντησης στο session log (per channel)."""
     safe_user = clean_message(user_text)
     safe_ai = clean_message(ai_text)
-    
-    SESSION_LOG.append({
+    SESSION_LOGS.setdefault(channel, []).append({
         "time": datetime.now().strftime("%H:%M"),
         "agent": agent,
+        "channel": channel,
         "user": safe_user[:300],
         "ai": safe_ai[:300],
     })
 
 
-def load_last_session_hint() -> str:
+def load_last_session_hint(channel: str = "web") -> str:
     """Φορτώνει το hint της τελευταίας session."""
     try:
         import os
@@ -44,7 +43,11 @@ def load_last_session_hint() -> str:
             sessions = json.load(f)
         if not sessions:
             return ""
-        last = sessions[-1]
+        # Φιλτράρουμε μόνο για το συγκεκριμένο channel
+        filtered = [s for s in sessions if s.get("channel", "web") == channel]
+        if not filtered:
+            return ""
+        last = filtered[-1]
         hint = last.get("next_session_hint", "")
         pending = last.get("pending", [])
         date = last.get("date", "")
@@ -62,21 +65,22 @@ def load_last_session_hint() -> str:
 
 is_summarizing = False  # Πρέπει να οριστεί έξω από τη συνάρτηση
 
-def _run_session_summary():
-    """Αρχειοθετεί τη συνεδρία με προστασία από διπλοεγγραφές."""
-    global is_summarizing, SESSION_LOG
-    
+def _run_session_summary(channel: str = "web"):
+    """Αρχειοθετεί τη συνεδρία (per channel) με προστασία από διπλοεγγραφές."""
+    global is_summarizing, SESSION_LOGS
+
+    current_log = SESSION_LOGS.get(channel, [])
     # 1. Ασπίδα: Αν ήδη τρέχει ή αν δεν υπάρχουν μηνύματα, βγες αμέσως
-    if is_summarizing or not SESSION_LOG:
+    if is_summarizing or not current_log:
         return
 
     try:
         is_summarizing = True
-        print("\n\033[94m[Session]: Έναρξη αρχειοθέτησης συνεδρίας...\033[0m")
+        print(f"\n\033[94m[Session/{channel}]: Έναρξη αρχειοθέτησης...\033[0m")
         
-        # 2. Αδειάζουμε το κεντρικό log ΑΜΕΣΩΣ για να μην το ξαναπιάσει άλλος worker
-        current_batch = list(SESSION_LOG)
-        SESSION_LOG.clear()
+        # 2. Αδειάζουμε ΑΜΕΣΩΣ για να μην το ξαναπιάσει άλλος worker
+        current_batch = list(current_log)
+        SESSION_LOGS[channel] = []
 
         dialogue_text = "\n".join([
             f"[{e['time']} / {e['agent']}] Λάζαρος: {e['user']} | Αστακός: {e['ai']}"
@@ -90,6 +94,7 @@ def _run_session_summary():
 
 {{
   "date": "{datetime.now().strftime('%Y-%m-%d %H:%M')}",
+  "channel": "{channel}",
   "summary": "2-3 προτάσεις τι συζητήθηκε σήμερα",
   "completed": ["λίστα από πράγματα που ολοκληρώθηκαν"],
   "pending": ["λίστα από πράγματα που έμειναν ημιτελή"],
@@ -107,7 +112,7 @@ def _run_session_summary():
             summary = json.loads(raw)
         except json.JSONDecodeError:
             # Αν αποτύχει, ξαναβάζουμε τα μηνύματα πίσω για να μην τα χάσουμε
-            SESSION_LOG.extend(current_batch)
+            SESSION_LOGS[channel] = current_batch + SESSION_LOGS.get(channel, [])
             print("\033[91m[Session]: Μη έγκυρο format. Τα μηνύματα επεστράφησαν στο log.\033[0m")
             return
 
@@ -124,7 +129,7 @@ def _run_session_summary():
 
     except Exception as e:
         # Recovery σε περίπτωση σφάλματος
-        SESSION_LOG.extend(current_batch)
+        SESSION_LOGS[channel] = current_batch + SESSION_LOGS.get(channel, [])
         print(f"\033[91m[Session Error]: {e}\033[0m")
     finally:
         is_summarizing = False
