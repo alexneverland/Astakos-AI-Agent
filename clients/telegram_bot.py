@@ -1189,8 +1189,7 @@ if __name__ == "__main__":
     print("\u2501" * 50)
     print("  \U0001f99e  \u0391\u03c3\u03c4\u03b1\u03ba\u03cc\u03c2 Telegram Bot \u2014 \u0395\u03ba\u03ba\u03af\u03bd\u03b7\u03c3\u03b7")
     print("\u2501" * 50)
-    send_telegram_msg("\U0001f99e \u0391\u03c3\u03c4\u03b1\u03ba\u03cc\u03c2 Bot: \u039e\u03b5\u03ba\u03af\u03bd\u03b1\u03c3\u03b1! \u03a0\u03ce\u03c2 \u03bc\u03c0\u03bf\u03c1\u03ce \u03bd\u03b1 \u03b2\u03bf\u03b7\u03b8\u03ae\u03c3\u03c9, \u039c\u03ac\u03c3\u03c4\u03bf\u03c1\u03b7;")
-
+    send_telegram_msg("🦞 Αστακός Ξεκίνησα! Πώς μπορώ να βοηθήσω Λάζαρε;")
     try:
         run_polling()
     except KeyboardInterrupt:
