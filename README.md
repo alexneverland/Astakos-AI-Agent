@@ -31,6 +31,8 @@ Built with a *local-first* philosophy — orchestrating specialized AI agents th
 | 🔒 **Thread-Safe SQLite** | WAL mode + `db_write_lock` — concurrent reads, serialized writes, 3s busy timeout |
 | 📊 **Structured Exceptions** | `AstakosError` hierarchy: `RoutineConflictError`, `DBWriteError`, `SchedulerCrashError`, `PendingTimeoutError` |
 | 📡 **Multimodal Interfaces** | **Web UI**, **CLI**, and **Telegram Bot** with native image, voice & document processing |
+| 🔀 **Hybrid Channel Memory** | Shared long-term cognitive memory (routines, facts, profiles) + isolated per-channel session history (telegram / web / terminal) |
+| 💬 **Persistent Telegram History** | Telegram conversation history survives restarts — saved to `astakos_telegram_history.json`, restored automatically on startup |
 | 📝 **Event Logging** | Daily JSON logs (`logs/events/YYYY-MM-DD.json`) for every scheduler action, error, and notification |
 | 🏠 **Local-First** | Runs entirely on your machine — your data stays yours |
 
@@ -51,7 +53,7 @@ astakos/
 ├── 📁 memory/
 │   ├── vector_store.py   # ChromaDB long-term memory
 │   ├── working_memory.py # Real-time context tracking ("Foreground")
-│   ├── session_memory.py # Session summaries & Memory Sifter
+│   ├── session_memory.py # Per-channel session summaries & Memory Sifter (telegram/web/terminal)
 │   ├── routine_db.py     # SQLite routine storage — 3-stage dedup, adaptive cooldown
 │   └── event_log.py      # Event logging + dedup protection (per-routine & per-text)
 ├── 📁 tools/
@@ -73,21 +75,30 @@ astakos/
 ## 🧩 Architecture Overview
 
 ```
-User Input (CLI / Web / Telegram)
-         │
-         ▼
-    ┌─────────────┐
-    │  Supervisor │  ← Routes to the right agent
-    └──────┬──────┘
-           │
-    ┌──────▼──────────────────────────────────────┐
-    │  Chat · Home · Web · Tech · Git · Mail · Dev  │
-    └──────┬──────────────────────────────────────┘
-           │
-    ┌──────▼──────┐     ┌──────────────────────┐
-    │  Tool Node  │────▶│  Memory Layer        │
-    │  (LangGraph)│     │  ChromaDB + SQLite   │
-    └─────────────┘     └──────────────────────┘
+   Telegram Bot          Web UI             CLI (terminal)
+   [channel=telegram]  [channel=web]    [channel=terminal]
+         │                  │                   │
+         └──────────────────┼───────────────────┘
+                            ▼
+                    ┌─────────────┐
+                    │  Supervisor │  ← Routes to the right agent
+                    └──────┬──────┘
+                           │
+                ┌──────────▼──────────────────────────────────┐
+                │  Chat · Home · Web · Tech · Git · Mail · Dev  │
+                └──────────┬──────────────────────────────────┘
+                           │
+                ┌──────────▼──────┐     ┌────────────────────────────────┐
+                │   Tool Node     │────▶│  Memory Layer (3-tier)         │
+                │   (LangGraph)   │     │  ┌─ SHARED ──────────────────┐ │
+                └─────────────────┘     │  │ ChromaDB (facts/routines) │ │
+                                        │  │ SQLite (routines/events)  │ │
+                                        │  └───────────────────────────┘ │
+                                        │  ┌─ PER-CHANNEL ─────────────┐ │
+                                        │  │ session history (JSON)    │ │
+                                        │  │ session summaries (tagged)│ │
+                                        │  └───────────────────────────┘ │
+                                        └────────────────────────────────┘
 
 Background (AstakosScheduler — daemon thread)
     ├── job_check_reminders   every 20s
