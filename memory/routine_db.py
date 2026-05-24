@@ -375,23 +375,30 @@ def confirm_routine(routine_id: int):
 def decay_routine(routine_id: int):
     """
     Decay confidence. State transitions:
-      - confidence >= 0.1 → DISMISSED (user said no, αλλά ρουτίνα επιβιώνει)
+      - Everyday + confidence >= 0.1 → ACTIVE (skip today, επιστροφή αύριο)
+      - Non-everyday + confidence >= 0.1 → DISMISSED (user said no, αλλά ρουτίνα επιβιώνει)
       - confidence < 0.1  → DECAYED (προς archived)
     """
     conn   = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT confidence, decay_counter FROM routines WHERE id=?", (routine_id,))
+    cursor.execute("SELECT confidence, decay_counter, day_of_week FROM routines WHERE id=?", (routine_id,))
     row = cursor.fetchone()
     if row:
-        new_conf  = max(0.0, row[0] - 0.2)
-        new_decay = row[1] + 1
+        new_conf    = max(0.0, row[0] - 0.2)
+        new_decay   = row[1] + 1
+        is_everyday = row[2] in ("Everyday", "Καθημερινά")
+
         if new_conf < 0.1:
             new_state   = RoutineState.DECAYED
             active_flag = 0
+        elif is_everyday:
+            new_state   = RoutineState.ACTIVE
+            active_flag = 1
         else:
             new_state   = RoutineState.DISMISSED
             active_flag = 0
-            validate_transition(get_routine_state(routine_id), new_state)
+
+        validate_transition(get_routine_state(routine_id), new_state)
         try:
             with db_write_lock:
                 cursor.execute(
