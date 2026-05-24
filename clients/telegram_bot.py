@@ -457,7 +457,7 @@ def handle_message(user_text: str, chat_id: str):
         context_msgs = list(_telegram_history)
         current_msg  = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
         # ── Ροή μέσω LangGraph ───────────────────────────────────
-        for event in graph.stream({"messages": context_msgs + [current_msg]}):
+        for event in graph.stream({"messages": context_msgs + [current_msg]}, {"recursion_limit": 20}):
             for node, data in event.items():
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node
@@ -466,6 +466,11 @@ def handle_message(user_text: str, chat_id: str):
                         candidate = clean_message(msgs[-1].content).strip()
                         if candidate:
                             final_ai_response = candidate
+
+        if not final_ai_response:
+            # [MASTRO-FIX]: Fallback όταν ο agent δεν παρήγαγε κείμενο (π.χ. loop/recursion)
+            send_telegram_msg("⚠️ Κάτι μπλόκαρε — δεν πήρα σαφή απάντηση. Ξαναστείλε μου.")
+            return
 
         if final_ai_response:
             # --- MASTRO INTERCEPTOR ΓΙΑ ΕΓΓΡΑΦΑ ---

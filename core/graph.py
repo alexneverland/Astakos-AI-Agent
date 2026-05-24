@@ -65,7 +65,7 @@ def build_graph():
         {name: name for name in AGENT_MAP}
     )
 
-    return workflow.compile()
+    return workflow.compile(checkpointer=None)
 
 
 def _should_use_tools(state: AgentState):
