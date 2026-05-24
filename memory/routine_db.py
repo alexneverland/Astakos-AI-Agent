@@ -348,6 +348,8 @@ def confirm_routine(routine_id: int):
     TRIGGER_PENDING → CONFIRMED → ACTIVE (double transition, auto-immediate).
     Αυξάνει confidence + mention_count.
     """
+    validate_transition(get_routine_state(routine_id), RoutineState.CONFIRMED)
+    validate_transition(RoutineState.CONFIRMED, RoutineState.ACTIVE)
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT confidence, mention_count FROM routines WHERE id=?", (routine_id,))
@@ -389,6 +391,7 @@ def decay_routine(routine_id: int):
         else:
             new_state   = RoutineState.DISMISSED
             active_flag = 0
+            validate_transition(get_routine_state(routine_id), new_state)
         try:
             with db_write_lock:
                 cursor.execute(
@@ -441,6 +444,7 @@ COOLDOWN_MAX_HOURS     = 72.0
 
 def mark_routine_notified(routine_id: int):
     """TRIGGER_PENDING: routine ειδοποιήθηκε — αναμένει επιβεβαίωση."""
+    validate_transition(get_routine_state(routine_id), RoutineState.TRIGGER_PENDING)
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
@@ -454,6 +458,8 @@ def mark_routine_notified(routine_id: int):
 
 def mark_routine_ignored(routine_id: int):
     """Timeout (όχι απόρριψη): TRIGGER_PENDING → IGNORED → ACTIVE + διπλασιασμός cooldown."""
+    validate_transition(get_routine_state(routine_id), RoutineState.IGNORED)
+    validate_transition(RoutineState.IGNORED, RoutineState.ACTIVE)
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute(
