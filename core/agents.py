@@ -37,7 +37,7 @@ from tools.system import (
 )
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
-    search_goldmall_offers, send_messenger_message, get_navigation_info, relay_local_payload, search_google_places
+    search_goldmall_offers, execute_local_pipeline, get_navigation_info, relay_local_payload, search_google_places
 )
 from langchain_community.tools import DuckDuckGoSearchRun
 
@@ -164,7 +164,7 @@ def dev_agent_node(state):
     tools = [
         write_code, run_code, read_local_file, write_custom_tool,
         delete_from_memory, search_memory, save_to_memory,
-        send_messenger_message, control_spotify, control_vacuum, 
+        execute_local_pipeline, control_spotify, control_vacuum, 
         get_navigation_info, recipe_expert, log_meal, 
         generate_image_tool, search_flights, run_terminal_command, learn_routine, get_routines,
         DuckDuckGoSearchRun()
@@ -236,7 +236,7 @@ def chat_agent_node(state: AgentState):
         ])
 
     from tools.system import archive_file, retrieve_photo, save_to_memory, search_memory, control_spotify, get_current_location
-    from tools.web import search_supermarket_offers, send_messenger_message, relay_local_payload
+    from tools.web import search_supermarket_offers, execute_local_pipeline, relay_local_payload
     from langchain_community.tools import DuckDuckGoSearchRun
     
     web_search = DuckDuckGoSearchRun()
@@ -338,13 +338,13 @@ def web_agent_node(state: AgentState):
         relay_local_payload, search_google_places
     )
     from langchain_community.tools import DuckDuckGoSearchRun
-    from tools.web import send_messenger_message
+    from tools.web import execute_local_pipeline
     web_tools = [
         get_current_location,
         get_news, get_weather_forecast, DuckDuckGoSearchRun(), 
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
-        process_and_clear_linkedin_post, relay_local_payload, search_google_places, send_messenger_message
+        process_and_clear_linkedin_post, relay_local_payload, search_google_places, execute_local_pipeline
     ]
 
     return {
@@ -500,7 +500,7 @@ all_tools = [
     google_calendar_tool, save_to_memory, google_tasks_tool, delete_from_memory,
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info, search_supermarket_offers,
-    control_spotify, search_goldmall_offers, send_messenger_message, get_current_location,
+    control_spotify, search_goldmall_offers, execute_local_pipeline, get_current_location,
     recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, get_routines,
     DuckDuckGoSearchRun()
 ]
