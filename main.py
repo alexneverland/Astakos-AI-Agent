@@ -138,7 +138,7 @@ def proactive_worker():
                     send_telegram_msg(f"🤖 {ai_msg}")
 
                     with memory_lock:
-                        enqueue_task(log_exchange, "POKE_EVENT", ai_msg, "Proactive_Worker")
+                        enqueue_task(log_exchange, "POKE_EVENT", ai_msg, "Proactive_Worker", "terminal")
 
                 except Exception as e:
                     print(f"\n[Proactive Worker Error]: {e}")
@@ -161,7 +161,7 @@ def _do_session_summary():
     try:
         loop = asyncio.new_event_loop()
         loop.run_until_complete(asyncio.wait_for(
-            loop.run_in_executor(None, _run_session_summary),
+            loop.run_in_executor(None, lambda: _run_session_summary("terminal")),
             timeout=5.0
         ))
     except (asyncio.TimeoutError, Exception):
@@ -224,8 +224,8 @@ def main():
 
                 if final_ai_response:
                     enqueue_task(update_working_memory,             inp, final_ai_response)
-                    enqueue_task(trigger_memory_sifter,             inp, final_ai_response, handling_agent)
-                    enqueue_task(log_exchange,                      inp, final_ai_response, handling_agent)
+                    enqueue_task(trigger_memory_sifter,             inp, final_ai_response, handling_agent, "terminal")
+                    enqueue_task(log_exchange,                      inp, final_ai_response, handling_agent, "terminal")
                     enqueue_task(update_capabilities_from_exchange, inp, final_ai_response, handling_agent)
 
             except Exception as e:

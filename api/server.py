@@ -201,7 +201,7 @@ def proactive_worker():
                     send_telegram_msg(f"🤖 {ai_msg}")
 
                     with memory_lock:
-                        enqueue_task(log_exchange, "POKE_EVENT", ai_msg, "Proactive_Worker")
+                        enqueue_task(log_exchange, "POKE_EVENT", ai_msg, "Proactive_Worker", "web")
 
                 except Exception as e:
                     print(f"\n[Proactive Worker Error]: {e}")
@@ -233,7 +233,7 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
     try:
         await asyncio.wait_for(
-            loop.run_in_executor(None, _run_session_summary),
+            loop.run_in_executor(None, lambda: _run_session_summary("web")),
             timeout=5.0
         )
     except (asyncio.TimeoutError, Exception):
@@ -279,7 +279,7 @@ async def manual_session_save():
     import threading
     
     # Εκτέλεση σε ξεχωριστό thread για να μην κολλήσει το API
-    threading.Thread(target=_run_session_summary, daemon=True).start()
+    threading.Thread(target=_run_session_summary, args=("web",), daemon=True).start()
     return JSONResponse({"status": "Η αρχειοθέτηση ξεκίνησε!"})
 @server.post("/chat")
 async def chat_endpoint(request: Request):
@@ -433,8 +433,8 @@ async def chat_endpoint(request: Request):
             # Αποθηκεύουμε παντού τα ΚΑΘΑΡΑ strings (με το Link/Img αν υπάρχει)
             append_to_chat_history("assistant", clean_ai)
             enqueue_task(update_working_memory,             clean_user, clean_ai)
-            enqueue_task(trigger_memory_sifter,             clean_user, clean_ai, handling_agent)
-            enqueue_task(log_exchange,                      clean_user, clean_ai, handling_agent)
+            enqueue_task(trigger_memory_sifter,             clean_user, clean_ai, handling_agent, "web")
+            enqueue_task(log_exchange,                      clean_user, clean_ai, handling_agent, "web")
             enqueue_task(update_capabilities_from_exchange, clean_user, clean_ai, handling_agent)
 
         return JSONResponse({
@@ -573,7 +573,7 @@ async def upload_file(file: UploadFile = File(...)):
             user_log_msg = f"[USER_UPLOADED_FILE]: {filename}\n[FILE PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
         append_to_chat_history("user", f"📎 *Ανέβασα αρχείο:* `{filename}`")
         append_to_chat_history("assistant", chat_ai_msg)
-        log_exchange(user_log_msg, chat_ai_msg, "Chat_Agent")
+        log_exchange(user_log_msg, chat_ai_msg, "Chat_Agent", channel="web")
         return JSONResponse({
             "status":    "success",
             "filename":  filename,
