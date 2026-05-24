@@ -269,7 +269,7 @@ def search_goldmall_offers(query: str) -> str:
 
 
 @tool
-def send_messenger_message(target_name: str = "", message: str = "") -> str:
+def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     """Στέλνει μήνυμα στο Facebook Messenger. Αν δεν δοθούν ορίσματα, διαβάζει το έτοιμο προσχέδιο!"""
     import time
     import json

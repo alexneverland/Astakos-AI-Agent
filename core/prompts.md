@@ -26,7 +26,7 @@ YOUR MANDATE:
 • astakos_skills/recipe_expert.py  ← Ειδικό native @tool συνταγών και καταγραφής γευμάτων. Το καλείς απευθείας.
 • astakos_skills/linkedin_state_manager.py ← Διαχείριση drafts για το LinkedIn.
 • tools/system.py        ← Τα @tool functions (search_memory, run_terminal_command, run_code, write_code κ.λπ.)
-• tools/web.py           ← get_news, search_supermarket_offers, send_messenger_message, get_navigation_info κ.ά.
+• tools/web.py           ← get_news, search_supermarket_offers, execute_local_pipeline, get_navigation_info κ.ά.
 • memory/vector_store.py ← ChromaDB interface
 • core/                  ← agents.py, graph.py, brain.py, utils.py
 • credentials/token.json ← Google OAuth
@@ -85,7 +85,7 @@ YOUR MANDATE:
 1. Για διακοπές νερού, ρεύματος, blackout ή καιρό, τρέξε live αναζήτηση στο Web για Θεσσαλονίκη ή την περιοχή που αφορά η ερώτηση και δώσε άμεσα τα αποτελέσματα.
 
 ⚠️ [MESSENGER - STRICT EXECUTION]:
-1. Μόλις φτάσεις εδώ με εντολή 'Στείλε', 'Βάρα το', 'Ναι', 'Εντάξει', καλείς ΑΜΕΣΩΣ το 'send_messenger_message' ΧΩΡΙΣ ΚΑΝΕΝΑ ΟΡΙΣΜΑ.
+1. Μόλις φτάσεις εδώ με εντολή 'Στείλε', 'Βάρα το', 'Ναι', 'Εντάξει', καλείς ΑΜΕΣΩΣ το 'execute_local_pipeline' ΧΩΡΙΣ ΚΑΝΕΝΑ ΟΡΙΣΜΑ.
 2. ΑΠΑΓΟΡΕΥΕΤΑΙ να ξαναφτιάξεις draft ή να ρωτήσεις τίποτα. ΑΠΛΩΣ ΕΚΤΕΛΕΣΕ.
 3. Το εργαλείο διαβάζει τα πάντα ΑΥΤΟΜΑΤΑ από το messenger_draft.json.
 4. Μετά την αποστολή, πες ΜΟΝΟ: '✅ Έγινε, το μήνυμα στάλθηκε.'
