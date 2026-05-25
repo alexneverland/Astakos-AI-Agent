@@ -526,7 +526,6 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
     """
     import requests
     import os
-    import urllib.parse
     import time
     import json
     from config import GPS_STORAGE_FILE
@@ -541,14 +540,13 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
                     if time.time() - gps['timestamp'] < 86400:
                         location = f"{gps['lat']},{gps['lon']}"
                         print(f"📍 [Web Tool]: Χρήση Live GPS στίγματος: {location}")
-            except: pass
+            except Exception as e:
+                print(f"⚠️ [Places GPS]: {e}")
             
     api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
     if not api_key:
         return "❌ Λείπει το GOOGLE_PLACES_API_KEY από το .env"
 
-    # ── 1. Text Search για να βρούμε places ──────────────────────
-    search_text = f"{query} {location}"
     search_url = "https://places.googleapis.com/v1/places:searchText"
 
     # [MASTRO-UPGRADE]: Προσθέσαμε Phone, Website, Takeout, Delivery, DineIn και Reviews στο FieldMask
@@ -573,12 +571,31 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
         )
     }
 
-    payload = {
-        "textQuery": search_text,
-        "languageCode": "el",
-        "regionCode": "GR",
-        "maxResultCount": 6
-    }
+    # [MASTRO-FIX]: GPS coords → locationBias (σωστός τρόπος, όχι text append)
+    if "," in location and any(c.isdigit() for c in location):
+        try:
+            lat, lon = location.split(",")
+            payload = {
+                "textQuery": query,
+                "languageCode": "el",
+                "regionCode": "GR",
+                "maxResultCount": 6,
+                "locationBias": {
+                    "circle": {
+                        "center": {"latitude": float(lat), "longitude": float(lon)},
+                        "radius": 2000.0
+                    }
+                }
+            }
+        except ValueError:
+            payload = {"textQuery": f"{query} {location}", "languageCode": "el", "regionCode": "GR", "maxResultCount": 6}
+    else:
+        payload = {
+            "textQuery": f"{query} {location}",
+            "languageCode": "el",
+            "regionCode": "GR",
+            "maxResultCount": 6
+        }
 
     try:
         resp = requests.post(search_url, headers=headers, json=payload, timeout=10)
@@ -592,7 +609,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
         if not places:
             return f"❌ Δεν βρέθηκαν αποτελέσματα για '{query}' στην {location}."
 
-        # ── 2. Μορφοποίηση αποτελεσμάτων ─────────────────────────
+        # ── Μορφοποίηση αποτελεσμάτων ─────────────────────────
         price_map = {
             "PRICE_LEVEL_FREE": "Δωρεάν",
             "PRICE_LEVEL_INEXPENSIVE": "€",
@@ -612,17 +629,14 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             maps_url = place.get("googleMapsUri", "")
             price = price_map.get(place.get("priceLevel", ""), "")
             
-            # Νέα Πεδία (Apify-style)
             phone = place.get("nationalPhoneNumber", "")
             website = place.get("websiteUri", "")
             
-            # Επιλογές γεύματος (Delivery κλπ)
             services = []
             if place.get("takeout"): services.append("Takeout")
             if place.get("delivery"): services.append("Delivery")
             if place.get("dineIn"): services.append("Dine-in")
             
-            # Κριτικές: Ανεβάσαμε το όριο στους 250 χαρακτήρες για να μη χάνεται το νόημα
             review_text = ""
             reviews = place.get("reviews", [])
             if reviews:
@@ -630,7 +644,6 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
                 if first_rev:
                     review_text = first_rev[:250] + "..." if len(first_rev) > 250 else first_rev
 
-            # Ώρες λειτουργίας
             hours_info = ""
             opening = place.get("regularOpeningHours", {})
             if opening.get("openNow") is True:
@@ -638,7 +651,6 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             elif opening.get("openNow") is False:
                 hours_info = " · 🔴 Κλειστό"
 
-            # String Formatting 
             price_str = f" · {price}" if price else ""
             rating_str = f"⭐ {rating} ({votes} κριτικές)" if rating != "—" else "Χωρίς βαθμολογία"
             type_str = f" · {ptype}" if ptype else ""
