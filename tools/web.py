@@ -280,13 +280,14 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     draft_file = os.path.join(base_dir, "..", "messenger_draft.json")
 
     # 1. [MASTRO INTERCEPTOR]: Έλεγχος JSON Buffer
+    already_confirmed = False
     if not target_name or not message:
         if os.path.exists(draft_file):
             with open(draft_file, "r", encoding="utf-8") as f:
                 draft = json.load(f)
                 target_name = target_name or draft.get("target_name", "")
                 message = message or draft.get("message", "")
-            
+                already_confirmed = draft.get("confirmed", False)
             os.remove(draft_file)
             print(f"\033[93m[Messenger]: Βρέθηκε draft για {target_name}. Εκτέλεση...\033[0m")
         else:
@@ -303,10 +304,30 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
         except Exception as e:
             print(f"⚠️ [Messenger Error]: {e}")
 
+    # [MASTRO-ALIAS]: Exact match → partial match → fallback
     aliases_lower = {k.lower(): v for k, v in aliases.items()}
-    final_name = aliases_lower.get(target_name.strip().lower(), target_name)
+    target_lower = target_name.strip().lower()
+    final_name = aliases_lower.get(target_lower, None)
+    if not final_name:
+        for key, val in aliases_lower.items():
+            if key in target_lower or target_lower in key:
+                final_name = val
+                print(f"[Messenger]: Partial alias match '{target_lower}' → '{val}'")
+                break
+    if not final_name:
+        final_name = target_name
 
     profile_dir = os.path.join(base_dir, "..", "astakos_skills", "messenger_profile")
+
+    # 3. [APPROVAL GATE]: Αν δεν έχει επιβεβαιωθεί, ρώτα πρώτα
+    if not already_confirmed:
+        with open(draft_file, "w", encoding="utf-8") as f:
+            json.dump({"target_name": final_name, "message": message, "confirmed": True}, f, ensure_ascii=False)
+        return (
+            f"📋 Έτοιμο να στείλω στη/στον **{final_name}**:\n\n"
+            f"«{message}»\n\n"
+            f"Στέλνω; (ναι/όχι)"
+        )
 
     try:
         with sync_playwright() as p:
@@ -328,22 +349,20 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
             page.keyboard.press("Control+A")
             page.keyboard.press("Backspace")
             time.sleep(0.5)
-            
-            # Πληκτρολόγηση με καθυστέρηση για να προλάβει το UI
+
             page.keyboard.type(final_name, delay=120)
             print(f"🔍 Αναζήτηση για: {final_name}...")
 
-            # Περιμένουμε να εμφανιστούν τα αποτελέσματα - όχι sleep, αλλά wait για το πρώτο gridcell
             try:
                 page.wait_for_selector('div[role="gridcell"]', timeout=8000)
             except:
                 browser.close()
                 return f"❌ Timeout: Δεν φορτώθηκαν αποτελέσματα για '{final_name}'."
 
-            time.sleep(1)  # μικρό buffer μετά την εμφάνιση
+            time.sleep(1.5)  # buffer για να φιλτράρει το UI
 
             # Παίρνουμε ΟΛΑ τα gridcells και ψάχνουμε exact/partial match
-            gridcells = page.locator('div[role="gridcell"]').all()
+            gridcells = page.locator('div[role="gridcells"]').all()
             target_cell = None
 
             for cell in gridcells:
@@ -362,20 +381,18 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
 
             target_cell.click(force=True)
             print(f"✅ Επιλέχθηκε η επαφή: {final_name}")
-            time.sleep(2.5)  # περιμένουμε να φορτώσει η συνομιλία
-            # Αποστολή μηνύματος
+            time.sleep(2.5)
+
             chat_box = page.locator('div[role="textbox"]').last
             chat_box.wait_for(state="visible", timeout=5000)
             chat_box.click()
             chat_box.fill(message)
             time.sleep(0.5)
             chat_box.press("Enter")
-            
-            # Περιμένουμε λίγο να φύγει το μήνυμα πριν κλείσουμε
             time.sleep(3)
 
             return f"✅ Επιτυχία: Το μήνυμα στάλθηκε στον/στην '{final_name}'."
-            
+
     except Exception as e:
         return f"❌ Σφάλμα Messenger: {str(e)}"
     finally:
