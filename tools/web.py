@@ -269,8 +269,9 @@ def search_goldmall_offers(query: str) -> str:
 
 
 @tool
-def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
-    """Στέλνει μήνυμα στο Facebook Messenger. Αν δεν δοθούν ορίσματα, διαβάζει το έτοιμο προσχέδιο!"""
+def execute_local_pipeline(target_name: str = "", message: str = "", confirmed: bool = False) -> str:
+    """Στέλνει μήνυμα στο Facebook Messenger. Αν δεν δοθούν ορίσματα, διαβάζει το έτοιμο προσχέδιο!
+    ΣΗΜΑΝΤΙΚΟ: Πάντα να εμφανίζεις την προεπισκόπηση στον χρήστη και να περιμένεις 'ναι' πριν καλέσεις ξανά με confirmed=True."""
     import time
     import json
     import os
@@ -280,20 +281,17 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     draft_file = os.path.join(base_dir, "..", "messenger_draft.json")
 
     # 1. [MASTRO INTERCEPTOR]: Έλεγχος JSON Buffer
-    already_confirmed = False
     if not target_name or not message:
         if os.path.exists(draft_file):
             with open(draft_file, "r", encoding="utf-8") as f:
                 draft = json.load(f)
                 target_name = target_name or draft.get("target_name", "")
                 message = message or draft.get("message", "")
-                already_confirmed = draft.get("confirmed", False)
-            os.remove(draft_file)
             print(f"\033[93m[Messenger]: Βρέθηκε draft για {target_name}. Εκτέλεση...\033[0m")
         else:
             return "❌ Σφάλμα: Δεν βρέθηκε προσχέδιο!"
 
-    # 2. [MASTRO FIX]: Aliases από το astakos_profile.json
+    # 2. [MASTRO-ALIAS]: Μετατροπή του Ονόματος σε ID (Exact match → partial match)
     profile_path = os.path.join(base_dir, "..", "astakos_profile.json")
     aliases = {}
     if os.path.exists(profile_path):
@@ -304,30 +302,34 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
         except Exception as e:
             print(f"⚠️ [Messenger Error]: {e}")
 
-    # [MASTRO-ALIAS]: Exact match → partial match → fallback
     aliases_lower = {k.lower(): v for k, v in aliases.items()}
     target_lower = target_name.strip().lower()
-    final_name = aliases_lower.get(target_lower, None)
-    if not final_name:
+    
+    # Ψάχνουμε το ID
+    final_id = aliases_lower.get(target_lower, None)
+    if not final_id:
         for key, val in aliases_lower.items():
             if key in target_lower or target_lower in key:
-                final_name = val
-                print(f"[Messenger]: Partial alias match '{target_lower}' → '{val}'")
+                final_id = val
+                print(f"[Messenger]: Partial alias match '{target_lower}' → ID '{val}'")
                 break
-    if not final_name:
-        final_name = target_name
+                
+    # Αν δεν βρέθηκε, ίσως το target_name είναι ήδη το ID
+    if not final_id:
+        final_id = target_name
 
-    profile_dir = os.path.join(base_dir, "..", "astakos_skills", "messenger_profile")
-
-    # 3. [APPROVAL GATE]: Αν δεν έχει επιβεβαιωθεί, ρώτα πρώτα
-    if not already_confirmed:
-        with open(draft_file, "w", encoding="utf-8") as f:
-            json.dump({"target_name": final_name, "message": message, "confirmed": True}, f, ensure_ascii=False)
+    # 3. [APPROVAL GATE]: Εμφάνισε στον χρήστη το προσχέδιο, περίμενε ναι/όχι
+    if not confirmed:
+        # Χρησιμοποιούμε το αρχικό target_name για την εμφάνιση ώστε να είναι φιλικό
+        display_name = target_name if target_name else final_id
         return (
-            f"📋 Έτοιμο να στείλω στη/στον **{final_name}**:\n\n"
+            f"📋 [APPROVAL REQUIRED] Πρόκειται να στείλω στη/στον **{display_name}**:\n\n"
             f"«{message}»\n\n"
-            f"Στέλνω; (ναι/όχι)"
+            f"⚠️ ΜΗΝ καλέσεις ξανά το tool — δείξε αυτό στον Λάζαρο και περίμενε 'ναι'."
         )
+
+    # 4. [SEND]: Μόνο αν confirmed=True (Ο Λάζαρος είπε "ναι")
+    profile_dir = os.path.join(base_dir, "..", "astakos_skills", "messenger_profile")
 
     try:
         with sync_playwright() as p:
@@ -338,60 +340,35 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
             )
 
             page = browser.new_page()
-            page.goto("https://www.messenger.com/", wait_until="domcontentloaded", timeout=60000)
 
-            # Εύρεση του Search Box
-            search_box = page.locator('input[aria-label="Αναζήτηση στο Messenger"], input[aria-label="Search Messenger"], input[type="search"]').first
-            search_box.wait_for(state="visible", timeout=10000)
+            # [MASTRO DIRECT NAVIGATION]: Έλεγχος αν δώσαμε έτοιμο URL ή απλό ID
+            if str(final_id).startswith("http"):
+                chat_url = final_id
+            else:
+                chat_url = f"https://www.messenger.com/t/{final_id}"
+                
+            print(f"🚀 Απευθείας πλοήγηση στο chat: {chat_url}")
+            page.goto(chat_url, wait_until="domcontentloaded", timeout=60000)
 
-            # --- [MASTRO-SEARCH-LOGIC]: Βελτιωμένη Αναζήτηση ---
-            search_box.click()
-            page.keyboard.press("Control+A")
-            page.keyboard.press("Backspace")
-            time.sleep(0.5)
+            # Δίνουμε 5 δευτερόλεπτα να "καθίσει" καλά η σελίδα (χωρίς wait_for_url που μας μπέρδευε)
+            time.sleep(5.0)
 
-            page.keyboard.type(final_name, delay=120)
-            print(f"🔍 Αναζήτηση για: {final_name}...")
-
-            try:
-                page.wait_for_selector('div[role="gridcell"]', timeout=8000)
-            except:
-                browser.close()
-                return f"❌ Timeout: Δεν φορτώθηκαν αποτελέσματα για '{final_name}'."
-
-            time.sleep(1.5)  # buffer για να φιλτράρει το UI
-
-            # Παίρνουμε ΟΛΑ τα gridcells και ψάχνουμε exact/partial match
-            gridcells = page.locator('div[role="gridcells"]').all()
-            target_cell = None
-
-            for cell in gridcells:
-                try:
-                    cell_text = cell.inner_text().strip()
-                    print(f"  → gridcell: '{cell_text}'")
-                    if final_name.lower() in cell_text.lower():
-                        target_cell = cell
-                        break
-                except:
-                    continue
-
-            if target_cell is None:
-                browser.close()
-                return f"❌ Δεν βρέθηκε η επαφή '{final_name}' στο Messenger."
-
-            target_cell.click(force=True)
-            print(f"✅ Επιλέχθηκε η επαφή: {final_name}")
-            time.sleep(2.5)
-
+            # Βρίσκουμε το πεδίο πληκτρολόγησης, γράφουμε και στέλνουμε
             chat_box = page.locator('div[role="textbox"]').last
-            chat_box.wait_for(state="visible", timeout=5000)
+            chat_box.wait_for(state="visible", timeout=10000)
             chat_box.click()
             chat_box.fill(message)
             time.sleep(0.5)
             chat_box.press("Enter")
-            time.sleep(3)
+            
+            # Δίνουμε 3 δεύτερα να προλάβει να φύγει το μήνυμα πριν κλείσουμε
+            time.sleep(3.0)
 
-            return f"✅ Επιτυχία: Το μήνυμα στάλθηκε στον/στην '{final_name}'."
+            # Σβήνουμε το draft ΜΟΝΟ μετά από επιτυχές send
+            if os.path.exists(draft_file):
+                os.remove(draft_file)
+
+            return f"✅ Επιτυχία: Το μήνυμα στάλθηκε κατευθείαν στο ID '{final_id}'."
 
     except Exception as e:
         return f"❌ Σφάλμα Messenger: {str(e)}"
