@@ -117,6 +117,17 @@ def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
 @tool
 def get_weather_forecast(location: str, days: int = 14) -> str:
     """Επιστρέφει την αναλυτική πρόγνωση καιρού για μια περιοχή (έως 16 ημέρες)."""
+
+    WMO_CODES = {
+        0: "☀️ Αίθριος", 1: "🌤 Σχεδόν αίθριος", 2: "⛅ Μερικώς συννεφιά",
+        3: "☁️ Συννεφιά", 45: "🌫 Ομίχλη", 48: "🌫 Παγετός",
+        51: "🌦 Ψιλόβροχο", 53: "🌦 Βροχή", 55: "🌧 Έντονο ψιλόβροχο",
+        61: "🌧 Ελαφριά βροχή", 63: "🌧 Μέτρια βροχή", 65: "🌧 Έντονη βροχή",
+        71: "🌨 Ελαφριά χιονόπτωση", 73: "🌨 Χιονόπτωση", 75: "❄️ Έντονη χιονόπτωση",
+        80: "🌦 Μπόρες", 81: "🌧 Μέτριες μπόρες", 82: "⛈ Έντονες μπόρες",
+        95: "⛈ Καταιγίδα", 96: "⛈ Καταιγίδα με χαλάζι", 99: "⛈ Έντονη καταιγίδα",
+    }
+
     try:
         geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={location}&count=1&language=el&format=json"
         geo_resp = requests.get(geo_url, timeout=10).json()
@@ -130,7 +141,7 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
 
         weather_url = (
             f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum"
+            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode"
             f"&timezone=auto&forecast_days={days}"
         )
         weather_resp = requests.get(weather_url, timeout=10).json()
@@ -143,11 +154,16 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
         t_max = daily.get("temperature_2m_max", [])
         t_min = daily.get("temperature_2m_min", [])
         precip = daily.get("precipitation_sum", [])
+        wcodes = daily.get("weathercode", [])
 
-        result = f"Πρόγνωση καιρού για {place_name} ({days} ημέρες):\n"
+        result = f"🌍 Πρόγνωση καιρού για {place_name} ({days} ημέρες):\n"
         for i in range(len(dates)):
-            rain_info = f"Βροχή: {precip[i]}mm" if precip[i] > 0 else "Χωρίς βροχή"
-            result += f"- {dates[i]}: Max {t_max[i]}°C, Min {t_min[i]}°C, {rain_info}\n"
+            desc = WMO_CODES.get(wcodes[i], "")
+            rain_info = f"🌧 {precip[i]}mm" if precip[i] > 0 else ""
+            line = f"• {dates[i]}: {desc}  {t_min[i]}°C – {t_max[i]}°C"
+            if rain_info:
+                line += f"  {rain_info}"
+            result += line + "\n"
 
         return result
     except Exception as e:
