@@ -681,8 +681,8 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
 def get_navigation_info(destination: str) -> str:
     """Παρέχει κλικαριστά links για χάρτη και πλοήγηση από Piston 7."""
     home_base = "Piston 7, Thessaloniki"
-    dest_clean = destination.replace(" ", "+")
-    home_clean = home_base.replace(" ", "+")
+    dest_clean = urllib.parse.quote_plus(destination)
+    home_clean = urllib.parse.quote_plus(home_base)
 
     search_url = f"https://www.google.com/maps/search/?api=1&query={dest_clean}"
     directions_url = f"https://www.google.com/maps/dir/?api=1&origin={home_clean}&destination={dest_clean}"
