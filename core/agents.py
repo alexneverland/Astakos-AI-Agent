@@ -37,9 +37,9 @@ from tools.system import (
 )
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
-    search_goldmall_offers, execute_local_pipeline, get_navigation_info, relay_local_payload, search_google_places
+    search_goldmall_offers, execute_local_pipeline, get_navigation_info, relay_local_payload, search_google_places, browse_url, duckduckgo_search
 )
-from langchain_community.tools import DuckDuckGoSearchRun
+
 # ────────────────────────────────────────────────────────────────
 # [GEMINI-FIX]: Force text response after tool execution
 # ────────────────────────────────────────────────────────────────
@@ -182,7 +182,7 @@ def dev_agent_node(state):
         execute_local_pipeline, control_spotify, control_vacuum, 
         get_navigation_info, recipe_expert, log_meal, 
         generate_image_tool, search_flights, run_terminal_command, learn_routine, get_routines,
-        DuckDuckGoSearchRun()
+        duckduckgo_search
     ]
     
     safe_history = sanitize_history_for_gemini(history)
@@ -252,14 +252,11 @@ def chat_agent_node(state: AgentState):
 
     from tools.system import archive_file, retrieve_photo, save_to_memory, search_memory, control_spotify, get_current_location
     from tools.web import search_supermarket_offers, execute_local_pipeline, relay_local_payload
-    from langchain_community.tools import DuckDuckGoSearchRun
-    
-    web_search = DuckDuckGoSearchRun()
-    
+       
     chat_tools = [
         get_current_location,
         search_supermarket_offers, control_spotify,
-        search_memory, save_to_memory, retrieve_photo, archive_file, web_search, 
+        search_memory, save_to_memory, retrieve_photo, archive_file, duckduckgo_search, 
         recipe_expert, log_meal, relay_local_payload, learn_routine, get_routines
     ]
     
@@ -351,16 +348,16 @@ def web_agent_node(state: AgentState):
     )
     from tools.web import (
         get_news, get_weather_forecast, get_navigation_info, 
-        relay_local_payload, search_google_places
+        relay_local_payload, search_google_places, browse_url
     )
-    from langchain_community.tools import DuckDuckGoSearchRun
+    
     from tools.web import execute_local_pipeline
     web_tools = [
         get_current_location,
-        get_news, get_weather_forecast, DuckDuckGoSearchRun(), 
+        get_news, get_weather_forecast, duckduckgo_search, 
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
-        process_and_clear_linkedin_post, relay_local_payload, search_google_places, execute_local_pipeline
+        process_and_clear_linkedin_post, relay_local_payload, search_google_places, execute_local_pipeline, browse_url
     ]
 
     return {
@@ -517,6 +514,6 @@ all_tools = [
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info, search_supermarket_offers,
     control_spotify, search_goldmall_offers, execute_local_pipeline, get_current_location,
-    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, get_routines,
-    DuckDuckGoSearchRun()
+    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, get_routines, browse_url,
+    duckduckgo_search
 ]

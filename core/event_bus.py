@@ -53,3 +53,6 @@ bus = EventBus()
 # routine_timeout    (routine_id, event, elapsed_s, channel)
 # session_ended      (channel, mood, summary)
 # proactive_sent     (source, channel)
+# TODO(future): event throttling + max_depth guard
+# Needed when Analytics Engine subscribers go live.
+# Pattern: event_source_tracking + prevent_self_trigger

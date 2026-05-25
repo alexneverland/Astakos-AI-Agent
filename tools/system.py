@@ -35,12 +35,11 @@ from config import (
     EMAIL_ADDRESS, EMAIL_PASSWORD, GITHUB_TOKEN, VACUUM_IP, VACUUM_TOKEN,GPS_STORAGE_FILE
 )
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
-from langchain_community.tools import DuckDuckGoSearchRun
 from memory.vector_store import vector_store, vector_lock, memory
 from services.embeddings import embeddings
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
-    search_goldmall_offers, execute_local_pipeline, get_navigation_info, relay_local_payload, search_google_places
+    search_goldmall_offers, execute_local_pipeline, get_navigation_info, relay_local_payload, search_google_places, browse_url, duckduckgo_search
 )
 from astakos_skills.search_flights import search_flights
 from astakos_skills.recipe_expert import recipe_expert, log_meal
@@ -1449,6 +1448,6 @@ all_tools = [
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_offers, relay_local_payload,
-    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines,
-    DuckDuckGoSearchRun()
+    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
+    duckduckgo_search
 ]
