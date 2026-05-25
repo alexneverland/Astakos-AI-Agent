@@ -38,7 +38,7 @@ def build_graph():
     workflow.add_node("Git_Agent",    git_agent_node)
     workflow.add_node("Mail_Agent",   mail_agent_node)
     workflow.add_node("Dev_Agent",    dev_agent_node)
-    workflow.add_node("tools",        ToolNode(all_tools))
+    workflow.add_node("tools", ToolNode(all_tools, handle_tool_errors=True))
 
     # Entry
     workflow.set_entry_point("supervisor")

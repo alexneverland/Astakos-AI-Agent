@@ -377,6 +377,62 @@ def execute_local_pipeline(target_name: str = "", message: str = "", confirmed: 
             browser.close()
         except:
             pass
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+
+@tool
+def browse_url(url: str) -> str:
+    """Ανοίγει μια διεύθυνση URL με browser και επιστρέφει το κείμενο της σελίδας."""
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080},
+                accept_downloads=False
+            )
+            
+            page = context.new_page()
+            
+            # [MASTRO-FIX]: Αλεξίσφαιρος έλεγχος για το stealth_sync!
+            if 'stealth_sync' in globals() and stealth_sync is not None:
+                try:
+                    if callable(stealth_sync):
+                        stealth_sync(page)  # Αν είναι κανονική συνάρτηση
+                    elif hasattr(stealth_sync, 'stealth_sync'):
+                        stealth_sync.stealth_sync(page)  # Αν είναι module
+                except Exception as e:
+                    print(f"⚠️ [Web Tool]: Το stealth mode απέτυχε, συνεχίζω κανονικά. ({e})")
+
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                page.wait_for_timeout(3000)
+            except PlaywrightTimeoutError:
+                browser.close()
+                return f"⚠️ Σφάλμα Timeout: Η σελίδα '{url}' άργησε υπερβολικά."
+
+            # Αφαιρούμε scripts/styles/banners
+            text = page.evaluate("""() => {
+                const remove = document.querySelectorAll('script,style,nav,footer,header,noscript,[class*="cookie"],[class*="banner"],[id*="cookie"]');
+                remove.forEach(el => el.remove());
+                return document.body.innerText;
+            }""")
+
+            browser.close()
+
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+            clean_text = "\n".join(lines[:200])
+
+            # Cloudflare / Captcha Detector
+            bot_keywords = ["just a moment", "checking if the site connection is secure", "cloudflare", "attention required"]
+            if any(kw in clean_text.lower() for kw in bot_keywords) or len(clean_text) < 30:
+                return f"🛑 Προστασία Bot: Εντοπίστηκε Cloudflare ή Captcha στο {url}."
+
+            return f"📄 Περιεχόμενο από {url}:\n\n{clean_text}"
+
+    except Exception as e:
+        return f"❌ Γενικό Σφάλμα στο browse_url: Το εργαλείο απέτυχε ({str(e)})"       
 @tool
 def search_google_places(query: str, location: str = "Thessaloniki") -> str:
     """
