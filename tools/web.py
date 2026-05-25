@@ -55,22 +55,61 @@ def relay_local_payload(target_entity: str, payload_data: str) -> str:
         
     return f"✅ Το προσχέδιο για '{target_entity}' αποθηκεύτηκε. Ρώτα τον Λάζαρο: 'Να το στείλω;'."
 @tool
-def get_news(topic: str = "Γενικά", limit: int = 15) -> str:
-    """Φέρνει τίτλους ειδήσεων από το Google News."""
+def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
+    """Φέρνει ειδήσεις από το Google News με τίτλο, περίληψη, πηγή και link."""
     try:
         print(f"\033[96m[Web]: Ανάκτηση ειδήσεων για: {topic}...\033[0m")
+
+        has_greek = any('\u0370' <= c <= '\u03ff' or '\u1f00' <= c <= '\u1fff' for c in topic)
+        lang = "el&gl=GR&ceid=GR:el" if has_greek else "en&gl=US&ceid=US:en"
+
         url = (
-            "https://news.google.com/rss?hl=el&gl=GR&ceid=GR:el"
+            f"https://news.google.com/rss?hl={lang}"
             if topic.lower() in ["γενικά", "general", ""]
-            else f"https://news.google.com/rss/search?q={urllib.parse.quote(topic)}&hl=el&gl=GR&ceid=GR:el"
+            else f"https://news.google.com/rss/search?q={urllib.parse.quote(topic)}&hl={lang}"
         )
+
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"}
         response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            items = ET.fromstring(response.text).findall(".//item")
-            news = [f"{i + 1}. {item.find('title').text}" for i, item in enumerate(items[:limit])]
-            return "\n".join(news) if news else "Δεν βρέθηκαν ειδήσεις."
-        return f"Error: Status {response.status_code}"
+        if response.status_code != 200:
+            return f"Error: Status {response.status_code}"
+
+        items = ET.fromstring(response.text).findall(".//item")
+        news = []
+        for i, item in enumerate(items[:limit]):
+            title = item.find('title').text or ""
+            # guid είναι πιο αξιόπιστο από link στο Google News RSS
+            guid_el = item.find('guid')
+            link = guid_el.text if guid_el is not None else ""
+            source_el = item.find('source')
+            source = source_el.text if source_el is not None else ""
+            pub_date = item.find('pubDate').text or ""
+            desc_el = item.find('description')
+            description = ""
+            if desc_el is not None and desc_el.text:
+                # Αφαιρούμε τυχόν HTML tags από την περίληψη
+                description = re.sub(r'<[^>]+>', '', desc_el.text).strip()
+                description = description[:150] + "..." if len(description) > 150 else description
+
+            try:
+                from email.utils import parsedate
+                dt = parsedate(pub_date)
+                time_str = f"{dt[3]:02d}:{dt[4]:02d}" if dt else ""
+            except:
+                time_str = ""
+
+            line = f"{i+1}. {title}"
+            if source:
+                line += f" [{source}]"
+            if time_str:
+                line += f" ({time_str})"
+            if description:
+                line += f"\n   📝 {description}"
+            if link:
+                line += f"\n   🔗 {link}"
+            news.append(line)
+
+        return "\n\n".join(news) if news else "Δεν βρέθηκαν ειδήσεις."
     except Exception as e:
         return f"News Error: {str(e)}"
 
