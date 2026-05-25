@@ -253,8 +253,9 @@ def search_supermarket_offers(query: Annotated[str, "Το προϊόν που ψ
 @tool
 def search_goldmall_offers(query: str) -> str:
     """Deep Scan σε ΟΛΕΣ τις προσφορές του Goldmall χωρίς περιορισμό."""
-    search_term = "σινεμά" if any(x in query.lower() for x in ["σινεμά", "ταινία", "ταινιες"]) else query
+    search_term = "σινεμά" if any(x in query.lower() for x in ["σινεμά", "ταινία", "ταινιες", "ταινίες"]) else query
 
+    browser = None
     try:
         print(f"\n\033[94m[DEBUG]: Full Deep Scan for: '{search_term}'\033[0m")
         with sync_playwright() as p:
@@ -270,10 +271,11 @@ def search_goldmall_offers(query: str) -> str:
             except:
                 return f"Δεν βρέθηκαν αποτελέσματα για '{search_term}'."
 
-            deals = page.locator(".deal-tile").all()
+            deals = page.locator(".deal-tile").all()[:5]  # max 5 για απόδοση
             results = []
 
             for i, deal in enumerate(deals):
+                detail_page = None
                 try:
                     title_text = deal.inner_text().strip().split('\n')[0]
                     link_el = deal.locator("a").first
@@ -286,8 +288,7 @@ def search_goldmall_offers(query: str) -> str:
                     detail_page.goto(full_link, timeout=15000, wait_until="domcontentloaded")
 
                     raw_text = ""
-                    potential_selectors = [".offer-details", ".tab-content", ".description-container"]
-                    for selector in potential_selectors:
+                    for selector in [".offer-details", ".tab-content", ".description-container"]:
                         element = detail_page.locator(selector).first
                         if element.is_visible(timeout=2000):
                             raw_text = element.inner_text()
@@ -297,10 +298,8 @@ def search_goldmall_offers(query: str) -> str:
                         raw_text = detail_page.locator("body").inner_text()
 
                     noise_words = ["newsletter", "όρους και τις προϋποθέσεις", "T:2310", "info@", "ΠΩΣ ΛΕΙΤΟΥΡΓΕΙ", "ΤΡΟΠΟΙ ΑΓΟΡΑΣ"]
-                    lines = raw_text.split('\n')
-
                     schedule_info = []
-                    for line in lines:
+                    for line in raw_text.split('\n'):
                         clean_line = line.strip()
                         if len(clean_line) > 5 and not any(noise in clean_line for noise in noise_words):
                             if any(char.isdigit() for char in clean_line) or any(
@@ -308,19 +307,29 @@ def search_goldmall_offers(query: str) -> str:
                             ):
                                 schedule_info.append(clean_line)
 
-                    detail_page.close()
                     description = " | ".join(schedule_info[:5])
                     results.append(f"🎬 **{title_text}**\n📅 {description if description else 'Δείτε το link για ώρες.'}")
 
                 except Exception as e:
                     print(f"\033[91m[DEBUG]: Σφάλμα στην προσφορά {i}: {str(e)}\033[0m")
                     continue
+                finally:
+                    if detail_page:
+                        try:
+                            detail_page.close()
+                        except:
+                            pass
 
-            browser.close()
             return "🛒 **Πλήρεις Λεπτομέρειες Goldmall (Θεσσαλονίκη):**\n\n" + "\n\n---\n\n".join(results)
 
     except Exception as e:
         return f"Γενικό Σφάλμα Goldmall: {str(e)}"
+    finally:
+        if browser:
+            try:
+                browser.close()
+            except:
+                pass
 
 
 @tool
@@ -432,8 +441,6 @@ def execute_local_pipeline(target_name: str = "", message: str = "", confirmed: 
             browser.close()
         except:
             pass
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 @tool
