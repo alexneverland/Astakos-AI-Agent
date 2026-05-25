@@ -1364,6 +1364,17 @@ def post_to_linkedin(text: str = None, image_path: str = None) -> str:
 
     except Exception as e:
         return f"❌ Κρίσιμο Σφάλμα: {str(e)}"
+import math
+
+def _is_home(lat: float, lon: float, home_lat: float = 40.646537, home_lon: float = 22.939025, radius_m: float = 150) -> bool:
+    """Ελέγχει αν οι συντεταγμένες είναι εντός 150m από το Piston 7."""
+    R = 6371000
+    dlat = math.radians(lat - home_lat)
+    dlon = math.radians(lon - home_lon)
+    a = math.sin(dlat/2)**2 + math.cos(math.radians(home_lat)) * math.cos(math.radians(lat)) * math.sin(dlon/2)**2
+    return R * 2 * math.asin(math.sqrt(a)) < radius_m
+
+
 @tool
 def get_current_location() -> str:
     """
@@ -1390,10 +1401,19 @@ def get_current_location() -> str:
             diff_minutes = int((time.time() - ts) / 60)
             last_seen = datetime.fromtimestamp(ts).strftime('%H:%M:%S')
 
-            if diff_minutes > 1440: # Πάνω από μέρα
-                return f"📍 Το στίγμα είναι πολύ παλιό (από εχθές στις {last_seen})."
-            
-            return f"📍 Ο Λάζαρος βρίσκεται στις συντεταγμένες {lat}, {lon} (Ενημερώθηκε πριν από {diff_minutes} λεπτά)."
+            if diff_minutes > 1440:
+                return f"📍 Το στίγμα είναι πολύ παλιό (ηλικίας {diff_minutes // 60}h, τελευταία ενημέρωση {last_seen})."
+
+            maps_link = f"https://maps.google.com/?q={lat},{lon}"
+            home_status = "🏠 Είναι ΣΠΙΤΙ" if _is_home(float(lat), float(lon)) else "🚶 Είναι ΕΚΤΟΣ σπιτιού"
+
+            return (
+                f"📍 Συντεταγμένες: {lat}, {lon}\n"
+                f"{home_status}\n"
+                f"🗺️ <a href='{maps_link}'>Δες στον Χάρτη</a>\n"
+                f"⏱️ Ενημερώθηκε πριν {diff_minutes} λεπτά (στις {last_seen})."
+            )
+
     except Exception as e:
         return f"❌ Σφάλμα κατά την ανάγνωση του GPS: {str(e)}"
 
