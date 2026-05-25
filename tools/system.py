@@ -1403,10 +1403,10 @@ def control_spotify(
     query: str = ""
 ) -> str:
     """Ελέγχει το Spotify.
-    action: 'play', 'pause', 'next', 'top_tracks', 'search'
+    action: 'play', 'pause', 'next', 'now_playing', 'top_tracks', 'search'
     query: Τίτλος/Καλλιτέχνης για action='search'"""
     try:
-        scope = "user-modify-playback-state user-read-playback-state user-top-read"
+        scope = "user-modify-playback-state user-read-playback-state user-top-read user-read-currently-playing"
         sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=scope))
 
         if action == "top_tracks":
@@ -1418,28 +1418,41 @@ def control_spotify(
 
         elif action == "pause":
             sp.pause_playback()
-            return "Η μουσική σταμάτησε."
+            return "⏸️ Η μουσική σταμάτησε."
 
         elif action == "next":
             sp.next_track()
-            return "Πήγαμε στο επόμενο τραγούδι!"
+            return "⏭️ Πήγαμε στο επόμενο τραγούδι!"
 
-        elif action == "search" and query:
+        elif action == "now_playing":
+            current = sp.current_playback()
+            if not current or not current.get("item"):
+                return "Δεν παίζει τίποτα αυτή τη στιγμή."
+            track = current["item"]
+            artist = track["artists"][0]["name"]
+            name = track["name"]
+            playing = "▶️" if current["is_playing"] else "⏸️"
+            return f"{playing} {name} — {artist}"
+
+        elif action == "search":
+            if not query:
+                return "❌ Δώσε τίτλο ή καλλιτέχνη για αναζήτηση."
             res = sp.search(q=query, type='track', limit=1)
             if not res['tracks']['items']:
-                return f"Δεν βρήκα το '{query}'."
+                return f"❌ Δεν βρήκα το '{query}'."
             track_uri = res['tracks']['items'][0]['uri']
+            track_name = res['tracks']['items'][0]['name']
             sp.start_playback(uris=[track_uri])
-            return f"Έβαλα να παίζει: {res['tracks']['items'][0]['name']} 🎵"
-
+            return f"▶️ Έβαλα να παίζει: {track_name} 🎵"
 
         elif action == "play":
             sp.start_playback()
-            return "Η μουσική ξεκίνησε ξανά!"
+            return "▶️ Η μουσική ξεκίνησε ξανά!"
 
-        return "Άγνωστη εντολή."
+        return "❌ Άγνωστη εντολή. Δοκίμασε: play, pause, next, now_playing, top_tracks, search."
+
     except Exception as e:
-        return f"Spotify Error: {str(e)}. (Μήπως δεν έχεις ανοιχτή την εφαρμογή;)"
+        return f"⚠️ Spotify Error: {str(e)}. (Μήπως δεν έχεις ανοιχτή την εφαρμογή;)"
 all_tools = [
     search_memory, save_to_memory, delete_from_memory, retrieve_photo, update_pending_linkedin_post, process_and_clear_linkedin_post,
     set_local_reminder, set_reminder, manage_list,
