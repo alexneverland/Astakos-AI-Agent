@@ -223,7 +223,7 @@ def delete_from_memory(query: str) -> str:
                 return "Δεν βρήκα κάτι σχετικό για διαγραφή."
 
             content = results['documents'][0][0]
-            distance = results['distances'][0][0] if 'distances' in results and results['distances'] else 0.0
+            distance = results['distances'][0][0] if 'distances' in results and results['distances'] else 1.0
 
             if distance > 0.40:
                 return (
