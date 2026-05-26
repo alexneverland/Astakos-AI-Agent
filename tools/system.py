@@ -66,32 +66,30 @@ def archive_file(filename: str, content_summary: str) -> str:
     """
     try:
         import os
-        from config import PHOTOS_DIR
+        from config import BASE_DIR, PHOTOS_DIR
         from memory.vector_store import memory
-        
-        base_dir = os.getcwd()
+
         search_dirs = [
-            "", PHOTOS_DIR,
-            os.path.join(base_dir, "telegram_uploads"),
-            os.path.join(base_dir, "telegram_photos"),
-            os.path.join(base_dir, "uploads")
+            PHOTOS_DIR,
+            os.path.join(BASE_DIR, "outputs"),
+            os.path.join(BASE_DIR, "telegram_uploads"),
+            os.path.join(BASE_DIR, "telegram_photos"),
+            os.path.join(BASE_DIR, "uploads")
         ]
-        
+
         full_path = None
         for d in search_dirs:
-            test_path = os.path.join(d, filename) if d else filename
+            test_path = os.path.join(d, filename)
             if os.path.exists(test_path) and os.path.isfile(test_path):
                 full_path = test_path
                 break
-                
+
         if not full_path:
             return f"❌ Σφάλμα: Το αρχείο {filename} δεν βρέθηκε."
-        
-        # Καθορίζουμε αν είναι φωτογραφία ή έγγραφο
+
         ext = os.path.splitext(full_path)[1].lower()
         m_type = "photo" if ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"] else "document"
-        
-        # Αποθήκευση στην ChromaDB και το JSON
+
         memory.save(
             memory_type=m_type,
             file_path=full_path,
