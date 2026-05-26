@@ -1060,6 +1060,8 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         # SEND
         # =========================
         if action == "send":
+            if not to_email or not subject or not body:
+                return "❌ Για send χρειάζονται: to_email, subject, body."
             message = (
                 f"To: {to_email}\r\n"
                 f"Subject: {subject}\r\n"
@@ -1074,11 +1076,10 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         # =========================
         # REPLY
         # =========================
-        if action == "reply":
+        elif action == "reply":
             if not email_id or not body:
                 return "❌ Για reply χρειάζεται email_id και body."
             
-            # Φόρτωση του αρχικού email για τα headers
             original = service.users().messages().get(
                 userId="me", id=email_id, format="metadata",
                 metadataHeaders=["Subject", "From", "Message-ID", "References"]
@@ -1113,7 +1114,7 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         # =========================
         # SEARCH
         # =========================
-        if action in ["search", "check_emails", "check", "read"]:
+        elif action in ["search", "check_emails", "check", "read"]:
             results = service.users().messages().list(userId="me", q=query, maxResults=limit).execute()
             messages = results.get("messages", [])
 
@@ -1122,18 +1123,25 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
 
             output = []
             for msg in messages:
-                data = service.users().messages().get(userId="me", id=msg['id']).execute()
+                data = service.users().messages().get(
+                    userId="me", id=msg['id'],
+                    format="metadata",
+                    metadataHeaders=["Subject", "From", "Date"]
+                ).execute()
                 headers = data['payload']['headers']
                 subject_val = next((h['value'] for h in headers if h['name'] == 'Subject'), "No Subject")
-                from_val = next((h['value'] for h in headers if h['name'] == 'From'), "Unknown")
-                output.append(f"ID: {msg['id']} | Από: {from_val} | Θέμα: {subject_val}")
+                from_val    = next((h['value'] for h in headers if h['name'] == 'From'), "Unknown")
+                date_val    = next((h['value'] for h in headers if h['name'] == 'Date'), "")
+                output.append(f"ID: {msg['id']} | {date_val} | Από: {from_val} | Θέμα: {subject_val}")
 
             return "\n".join(output)
 
         # =========================
         # READ FULL
         # =========================
-        elif action == "read_full" and email_id:
+        elif action == "read_full":
+            if not email_id:
+                return "❌ Για read_full χρειάζεται email_id."
             data = service.users().messages().get(userId="me", id=email_id, format="full").execute()
             body_text = extract_body(data['payload'])
             return f"📩 Περιεχόμενο:\n{clean_text(body_text)[:5000]}"
@@ -1141,7 +1149,9 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         # =========================
         # DELETE
         # =========================
-        elif action == "delete" and email_id:
+        elif action == "delete":
+            if not email_id:
+                return "❌ Για delete χρειάζεται email_id."
             service.users().messages().trash(userId="me", id=email_id).execute()
             return f"🗑️ Το email {email_id} μεταφέρθηκε στον κάδο."
 
@@ -1149,7 +1159,6 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
 
     except Exception as e:
         return f"Mail API Error: {str(e)}"
-
 
 # ────────────────────────────────────────────────────────────────
 # GITHUB
