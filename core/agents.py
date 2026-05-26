@@ -457,7 +457,7 @@ def git_agent_node(state):
         "current_agent": "Git_Agent",
         "messages": [
             llm.bind_tools([
-                github_manager, read_local_file, search_memory
+                github_manager, read_local_file, search_memory, run_terminal_command
             ]).invoke([SystemMessage(content=system_prompt)] + history)
         ]
     }
