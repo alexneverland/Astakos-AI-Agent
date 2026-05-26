@@ -333,9 +333,9 @@ def search_goldmall_offers(query: str) -> str:
 
 
 @tool
-def execute_local_pipeline(target_name: str = "", message: str = "", confirmed: bool = False) -> str:
-    """Στέλνει μήνυμα στο Facebook Messenger. Αν δεν δοθούν ορίσματα, διαβάζει το έτοιμο προσχέδιο!
-    ΣΗΜΑΝΤΙΚΟ: Πάντα να εμφανίζεις την προεπισκόπηση στον χρήστη και να περιμένεις 'ναι' πριν καλέσεις ξανά με confirmed=True."""
+def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
+    """Στέλνει μήνυμα στο Facebook Messenger διαβάζοντας το αποθηκευμένο προσχέδιο.
+    ΚΑΛΕΣΕ ΤΟ ΜΟΝΟ αφού ο Λάζαρος επιβεβαιώσει με 'ναι/στείλε'. ΧΩΡΙΣ ΚΑΝΕΝΑ ΟΡΙΣΜΑ."""
     import time
     import json
     import os
@@ -344,7 +344,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "", confirmed: 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     draft_file = os.path.join(base_dir, "..", "messenger_draft.json")
 
-    # 1. [MASTRO INTERCEPTOR]: Έλεγχος JSON Buffer
+    # 1. [MASTRO INTERCEPTOR]: Διάβασε το draft
     if not target_name or not message:
         if os.path.exists(draft_file):
             with open(draft_file, "r", encoding="utf-8") as f:
@@ -355,7 +355,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "", confirmed: 
         else:
             return "❌ Σφάλμα: Δεν βρέθηκε προσχέδιο!"
 
-    # 2. [MASTRO-ALIAS]: Μετατροπή του Ονόματος σε ID (Exact match → partial match)
+    # 2. [MASTRO-ALIAS]: Μετατροπή Ονόματος σε ID
     profile_path = os.path.join(base_dir, "..", "astakos_profile.json")
     aliases = {}
     if os.path.exists(profile_path):
@@ -368,8 +368,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "", confirmed: 
 
     aliases_lower = {k.lower(): v for k, v in aliases.items()}
     target_lower = target_name.strip().lower()
-    
-    # Ψάχνουμε το ID
+
     final_id = aliases_lower.get(target_lower, None)
     if not final_id:
         for key, val in aliases_lower.items():
@@ -377,22 +376,11 @@ def execute_local_pipeline(target_name: str = "", message: str = "", confirmed: 
                 final_id = val
                 print(f"[Messenger]: Partial alias match '{target_lower}' → ID '{val}'")
                 break
-                
-    # Αν δεν βρέθηκε, ίσως το target_name είναι ήδη το ID
+
     if not final_id:
         final_id = target_name
 
-    # 3. [APPROVAL GATE]: Εμφάνισε στον χρήστη το προσχέδιο, περίμενε ναι/όχι
-    if not confirmed:
-        # Χρησιμοποιούμε το αρχικό target_name για την εμφάνιση ώστε να είναι φιλικό
-        display_name = target_name if target_name else final_id
-        return (
-            f"📋 [APPROVAL REQUIRED] Πρόκειται να στείλω στη/στον **{display_name}**:\n\n"
-            f"«{message}»\n\n"
-            f"⚠️ ΜΗΝ καλέσεις ξανά το tool — δείξε αυτό στον Λάζαρο και περίμενε 'ναι'."
-        )
-
-    # 4. [SEND]: Μόνο αν confirmed=True (Ο Λάζαρος είπε "ναι")
+    # 3. [SEND]: Απευθείας αποστολή — έγκριση έγινε ήδη από relay_local_payload
     profile_dir = os.path.join(base_dir, "..", "astakos_skills", "messenger_profile")
 
     try:
@@ -405,34 +393,25 @@ def execute_local_pipeline(target_name: str = "", message: str = "", confirmed: 
 
             page = browser.new_page()
 
-            # [MASTRO DIRECT NAVIGATION]: Έλεγχος αν δώσαμε έτοιμο URL ή απλό ID
             if str(final_id).startswith("http"):
                 chat_url = final_id
             else:
                 chat_url = f"https://www.messenger.com/t/{final_id}"
-                
+
             print(f"🚀 Απευθείας πλοήγηση στο chat: {chat_url}")
             page.goto(chat_url, wait_until="domcontentloaded", timeout=60000)
-
-            # Δίνουμε 5 δευτερόλεπτα να "καθίσει" καλά η σελίδα (χωρίς wait_for_url που μας μπέρδευε)
             time.sleep(5.0)
 
-            # Βρίσκουμε το πεδίο πληκτρολόγησης, γράφουμε και στέλνουμε
             chat_box = page.locator('div[role="textbox"]').last
             chat_box.wait_for(state="visible", timeout=10000)
             chat_box.click()
             chat_box.fill(message)
             time.sleep(0.5)
             chat_box.press("Enter")
-            
-            # Δίνουμε 3 δεύτερα να προλάβει να φύγει το μήνυμα πριν κλείσουμε
             time.sleep(3.0)
 
-            # Σβήνουμε το draft ΜΟΝΟ μετά από επιτυχές send
             if os.path.exists(draft_file):
                 os.remove(draft_file)
-
-            return f"✅ Επιτυχία: Το μήνυμα στάλθηκε κατευθείαν στο ID '{final_id}'."
 
     except Exception as e:
         return f"❌ Σφάλμα Messenger: {str(e)}"
@@ -441,6 +420,8 @@ def execute_local_pipeline(target_name: str = "", message: str = "", confirmed: 
             browser.close()
         except:
             pass
+
+    return f"✅ Το μήνυμα στάλθηκε στον/στη {target_name}!"
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 @tool
