@@ -404,6 +404,25 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
     ΠΡΟΣΟΧΗ: Κάλεσέ το ΜΟΝΟ για recurring δραστηριότητες. Αγνόησε one-off γεγονότα
     ("σήμερα πήγα…", "αύριο έχω…").
     """
+    from datetime import datetime
+
+    VALID_DAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Everyday"}
+    VALID_TYPES = {"family", "work", "hobby", "general"}
+
+    if day_of_week not in VALID_DAYS:
+        return f"❌ Μη έγκυρη μέρα: '{day_of_week}'. Χρησιμοποίησε αγγλικό όνομα (π.χ. 'Friday') ή 'Everyday'."
+
+    try:
+        datetime.strptime(time_str, "%H:%M")
+    except ValueError:
+        return f"❌ Λάθος format ώρας: '{time_str}'. Χρησιμοποίησε 'HH:MM'."
+
+    if len(event_name.strip()) < 3:
+        return "❌ Το event_name είναι πολύ σύντομο. Δώσε 2-4 λέξεις περιγραφή."
+
+    if event_type not in VALID_TYPES:
+        event_type = "general"
+
     try:
         res = upsert_routine(day_of_week, time_str, event_name, event_type, confidence_boost=0.3)
 
@@ -439,17 +458,27 @@ def get_routines(day_of_week: str) -> str:
 @tool
 def set_reminder(task: str, time_str: str) -> str:
     """Δημιουργεί τοπική υπενθύμιση (format time_str: 'YYYY-MM-DD HH:MM')."""
+    from datetime import datetime
+
+    try:
+        datetime.strptime(time_str, "%Y-%m-%d %H:%M")
+    except ValueError:
+        return f"❌ Λάθος format: '{time_str}'. Χρησιμοποίησε 'YYYY-MM-DD HH:MM'."
+
     rems = []
     if os.path.exists(REMINDERS_FILE):
         with open(REMINDERS_FILE, "r", encoding="utf-8") as f:
             try:
                 rems = json.load(f)
-            except:
+            except (json.JSONDecodeError, ValueError):
                 pass
+
     rems.append({"task": task, "time": time_str, "status": "pending"})
+
     with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
         json.dump(rems, f, ensure_ascii=False, indent=4)
-    return "System: Η υπενθύμιση ρυθμίστηκε."
+
+    return f"✅ Υπενθύμιση '{task}' στις {time_str} καταχωρήθηκε."
 
 
 @tool
