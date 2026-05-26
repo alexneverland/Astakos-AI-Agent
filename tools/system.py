@@ -319,7 +319,7 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             with open(REMINDERS_FILE, "r", encoding="utf-8") as f:
                 try:
                     rems = json.load(f)
-                except:
+                except (json.JSONDecodeError, ValueError):
                     pass
 
         # ── READ: Επιστρέφει ΜΟΝΟ pending ──────────────────────
@@ -339,7 +339,7 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
         elif action == "done":
             found = False
             for r in rems:
-                if task.lower() in r["task"].lower() and r.get("status") == "pending":
+                if task.lower() in r.get("task", "").lower() and r.get("status") == "pending":
                     r["status"] = "done"
                     found = True
                     break
@@ -351,19 +351,16 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
 
         # ── ADD: Νέα υπενθύμιση ─────────────────────────────────
         else:
-            from datetime import datetime, timedelta # Σιγουρέψου ότι υπάρχει
-            
+            from datetime import datetime, timedelta
+
             if minutes_from_now > 0:
                 target_time = (datetime.now() + timedelta(minutes=minutes_from_now)).strftime("%Y-%m-%d %H:%M")
             elif exact_time:
-                # [MASTRO-FIX]: Αντικρουστικό σύστημα για τεμπέλικα LLMs
                 exact_time = exact_time.strip()
-                # Αν έδωσε μόνο ώρα (π.χ. "15:30" ή "09:00")
                 if len(exact_time) <= 5 and ":" in exact_time:
                     today_str = datetime.now().strftime("%Y-%m-%d")
                     target_time = f"{today_str} {exact_time}"
                 else:
-                    # Έλεγχος ότι η μορφή είναι όντως YYYY-MM-DD HH:MM
                     try:
                         datetime.strptime(exact_time, "%Y-%m-%d %H:%M")
                         target_time = exact_time
