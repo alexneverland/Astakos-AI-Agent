@@ -24,60 +24,7 @@ _BASE             = os.path.dirname(os.path.abspath(__file__))
 CHAT_HISTORY_FILE = os.path.join(_BASE, "..", "astakos_chat_history.json")
 LOG_FILE          = os.path.join(_BASE, "..", "analytics_engine_log.json")
 
-# ── Stop words ───────────────────────────────────────────────────
-STOP_WORDS = {
-    "και", "να", "στο", "στη", "στον", "στα", "το", "τα", "τη", "τον",
-    "μου", "σου", "του", "της", "μας", "σας", "τους", "τις", "αυτό",
-    "αυτή", "αυτός", "εδώ", "εκεί", "πώς", "τι", "που", "γιατί",
-    "αλλά", "όμως", "ή", "με", "για", "από", "σε", "ότι", "είναι",
-    "ήταν", "έχει", "έχω", "θα", "δεν", "μην", "ναι", "όχι",
-    "ok", "οκ", "εντάξει", "γεια", "χαρά", "κάνε", "κάνω", "έκανα",
-}
-
-# ── Activity keyword map ─────────────────────────────────────────
-# keyword (lowercase) → (canonical_name, event_type)
-ACTIVITY_HINTS = {
-    "καλημέρα":     ("καλημέρα",           "general"),
-    "καλημερα":     ("καλημέρα",           "general"),
-    "καφέ":         ("καφές",              "general"),
-    "καφε":         ("καφές",              "general"),
-    "γυμναστήριο":  ("γυμναστήριο",        "hobby"),
-    "γυμναστηριο":  ("γυμναστήριο",        "hobby"),
-    "λαϊκή":        ("λαϊκή αγορά",        "general"),
-    "λαικη":        ("λαϊκή αγορά",        "general"),
-    "λαϊκη":        ("λαϊκή αγορά",        "general"),
-    "δουλειά":      ("δουλειά",            "work"),
-    "δουλεια":      ("δουλειά",            "work"),
-    "γραφείο":      ("γραφείο",            "work"),
-    "γραφειο":      ("γραφείο",            "work"),
-    "αλέξανδρος":   ("Αλέξανδρος",         "family"),
-    "αλεξανδρος":   ("Αλέξανδρος",         "family"),
-    "σχολείο":      ("σχολείο",            "family"),
-    "σχολειο":      ("σχολείο",            "family"),
-    "βόλτα":        ("βόλτα",              "general"),
-    "βολτα":        ("βόλτα",              "general"),
-    "πάρκο":        ("πάρκο",              "general"),
-    "παρκο":        ("πάρκο",              "general"),
-    "ύπνος":        ("ύπνος",              "general"),
-    "υπνος":        ("ύπνος",              "general"),
-    "κοιμάται":     ("ύπνος Αλέξανδρου",   "family"),
-    "κοιμαται":     ("ύπνος Αλέξανδρου",   "family"),
-    "κοιμήθηκε":    ("ύπνος Αλέξανδρου",   "family"),
-    "κοιμηθηκε":    ("ύπνος Αλέξανδρου",   "family"),
-    "καληνύχτα":    ("καληνύχτα",          "general"),
-    "καληνυχτα":    ("καληνύχτα",          "general"),
-    "καλησπέρα":    ("καλησπέρα",          "general"),
-    "καλησπερα":    ("καλησπέρα",          "general"),
-    "φαγητό":       ("φαγητό",             "general"),
-    "φαγητο":       ("φαγητό",             "general"),
-    "μεσημέρι":     ("μεσημεριανό",        "general"),
-    "μεσημερι":     ("μεσημεριανό",        "general"),
-    "ψώνια":        ("ψώνια",              "general"),
-    "ψωνια":        ("ψώνια",              "general"),
-    "σούπερ μάρκετ":("σούπερ μάρκετ",      "general"),
-    "σκούπα":       ("σκούπα",             "home"),
-    "σκουπα":       ("σκούπα",             "home"),
-}
+BATCH_SIZE = 80   # μηνύματα ανά LLM call
 
 
 # ────────────────────────────────────────────────────────────────
@@ -96,25 +43,52 @@ def _round_to_bucket(time_str: str, bucket_min: int = TIME_BUCKET_MIN) -> str:
         return time_str
 
 
-def _extract_activity(content: str):
-    """Επιστρέφει (event_name, event_type) ή None αν δεν βρεθεί δραστηριότητα."""
-    # Αφαίρεσε timestamps [HH:MM] και URLs
-    text = re.sub(r'\[\d{2}:\d{2}\]', '', content)
-    text = re.sub(r'https?://\S+', '', text)
-    text = text.strip().lower()
+def _extract_activities_llm(msgs: list) -> list:
+    """
+    Batch LLM call: παίρνει N μηνύματα, επιστρέφει list με
+    (event_name, event_type) ή None για κάθε μήνυμα.
+    """
+    from langchain_core.messages import HumanMessage
+    from core.brain import llm
 
-    # Έλεγξε hints
-    for keyword, result in ACTIVITY_HINTS.items():
-        if keyword in text:
-            return result
+    if not msgs:
+        return []
 
-    # Fallback: πρώτες 3 σημαντικές λέξεις
-    words = re.findall(r'[α-ωάέήίόύώΑ-ΩΆΈΉΊΌΎΏa-zA-Z]+', text)
-    meaningful = [w for w in words if w not in STOP_WORDS and len(w) > 3]
-    if len(meaningful) >= 2:
-        return (" ".join(meaningful[:3]), "general")
+    lines = [f"{i}: {m.get('content', '').strip()[:200]}" for i, m in enumerate(msgs)]
 
-    return None
+    prompt = f"""Ανάλυσε τα παρακάτω μηνύματα χρήστη (Ελληνικά/Αγγλικά).
+Για κάθε μήνυμα βρες ΑΝ υπάρχει σαφής δραστηριότητα της καθημερινότητας.
+
+Κανόνες:
+- Επέστρεψε ΜΟΝΟ JSON array, τίποτε άλλο
+- Ένα αντικείμενο ανά μήνυμα (ίδιο idx)
+- Χωρίς δραστηριότητα → {{"idx": N, "event": null}}
+- Με δραστηριότητα → {{"idx": N, "event": "σύντομο όνομα", "type": "κατηγορία"}}
+- Κατηγορίες: general, work, family, hobby, home
+- Συντηρητικός — μόνο ξεκάθαρες δραστηριότητες, όχι ερωτήσεις/συζητήσεις
+
+Μηνύματα:
+{chr(10).join(lines)}
+
+JSON:"""
+
+    try:
+        response = llm.invoke([HumanMessage(content=prompt)])
+        raw = response.content.strip()
+        raw = re.sub(r'^```(?:json)?\s*', '', raw)
+        raw = re.sub(r'\s*```$', '', raw)
+        data = json.loads(raw)
+
+        result = [None] * len(msgs)
+        for item in data:
+            idx = item.get("idx")
+            event = item.get("event")
+            if idx is not None and isinstance(idx, int) and 0 <= idx < len(msgs) and event:
+                result[idx] = (event, item.get("type", "general"))
+        return result
+    except Exception as e:
+        print(f"\033[91m[Analytics LLM Error]: {e}\033[0m")
+        return [None] * len(msgs)
 
 
 def _get_week_id(date_str: str) -> str:
@@ -175,8 +149,14 @@ def run_analytics() -> dict:
     # Value: list of {date, week_id}
     groups = defaultdict(list)
 
-    for msg in user_msgs:
-        activity = _extract_activity(msg.get("content", ""))
+    # Batch LLM extraction — ένα call ανά 80 μηνύματα
+    activities = []
+    for i in range(0, len(user_msgs), BATCH_SIZE):
+        batch = user_msgs[i:i + BATCH_SIZE]
+        print(f"[Analytics]: LLM batch {i//BATCH_SIZE + 1} ({len(batch)} msgs)...")
+        activities.extend(_extract_activities_llm(batch))
+
+    for msg, activity in zip(user_msgs, activities):
         if not activity:
             continue
 
