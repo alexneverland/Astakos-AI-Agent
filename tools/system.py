@@ -153,7 +153,7 @@ def run_terminal_command(command: str) -> str:
     import subprocess
     from core.safe_executor import safe_execute
     print(f"\033[93m[Terminal Execution]: {command}\033[0m")
-    
+
     def _executor(cmd):
         try:
             result = subprocess.run(
@@ -161,10 +161,19 @@ def run_terminal_command(command: str) -> str:
                 capture_output=True, text=True, timeout=30,
                 encoding='utf-8', errors='ignore'
             )
-            output = result.stdout if result.returncode == 0 else f"ERROR:\n{result.stderr}"
+            output = result.stdout or ""
+            if result.returncode != 0:
+                output += f"\nERROR:\n{result.stderr}"
+            elif result.stderr:
+                output += f"\nWARNINGS:\n{result.stderr}"
+
             if not output.strip():
                 return {"status": "ok", "output": "Εκτελέστηκε επιτυχώς (δεν επέστρεψε output)."}
-            return {"status": "ok", "output": f"💻 Terminal Output:\n{output[-10000:]}"}
+
+            if len(output) > 10000:
+                output = output[:10000] + "\n... [output truncated]"
+
+            return {"status": "ok", "output": f"💻 Terminal Output:\n{output}"}
         except subprocess.TimeoutExpired:
             return {"status": "ok", "output": "❌ Timeout: >30 δευτερόλεπτα."}
         except Exception as e:
