@@ -9,40 +9,43 @@ import os
 import re
 import json
 import sys
+import math
 import subprocess
-import imaplib
-import email
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import base64
 from datetime import datetime, timedelta
 from langchain_core.tools import tool
 from pypdf import PdfReader
 from github import Github
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
 from miio import Device
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import docx
 import pandas as pd
-from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.oauth2.credentials import Credentials
-import base64
 from config import (
-    REMINDERS_FILE, LISTS_FILE, WORKSPACE_DIR, PHOTOS_INDEX_FILE,
-    EMAIL_ADDRESS, EMAIL_PASSWORD, GITHUB_TOKEN, VACUUM_IP, VACUUM_TOKEN,GPS_STORAGE_FILE
+    REMINDERS_FILE, LISTS_FILE, WORKSPACE_DIR, PHOTOS_INDEX_FILE, PHOTOS_DIR,
+    EMAIL_ADDRESS, EMAIL_PASSWORD, GITHUB_TOKEN, VACUUM_IP, VACUUM_TOKEN, GPS_STORAGE_FILE
 )
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 from memory.vector_store import vector_store, vector_lock, memory
 from services.embeddings import embeddings
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_offers,
-    search_goldmall_offers, execute_local_pipeline, get_navigation_info, relay_local_payload, search_google_places, browse_url, duckduckgo_search
+    search_goldmall_offers, execute_local_pipeline, get_navigation_info,
+    relay_local_payload, search_google_places, browse_url, duckduckgo_search
 )
 from astakos_skills.search_flights import search_flights
 from astakos_skills.recipe_expert import recipe_expert, log_meal
+
+# ────────────────────────────────────────────────────────────────
+# CREDENTIALS PATHS
+# ────────────────────────────────────────────────────────────────
+_BASE = os.path.dirname(os.path.abspath(__file__))
+TOKEN_PATH = os.path.join(_BASE, '..', 'credentials', 'token.json')
+CREDS_PATH = os.path.join(_BASE, '..', 'credentials', 'credentials.json')
+
 # ────────────────────────────────────────────────────────────────
 # PROTECTED SANDBOX
 # ────────────────────────────────────────────────────────────────
