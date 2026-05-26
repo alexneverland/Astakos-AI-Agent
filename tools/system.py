@@ -464,15 +464,15 @@ def manage_list(action: str, list_name: str, item: str = "") -> str:
                     loaded = json.load(f)
                     if isinstance(loaded, dict):
                         lists_db = loaded
-                except:
+                except (json.JSONDecodeError, ValueError):
                     pass
+
         if list_name not in lists_db:
             list_name_lower = list_name.lower()
             for existing_key in lists_db.keys():
                 if list_name_lower in existing_key.lower() or existing_key.lower().startswith(list_name_lower):
-                    list_name = existing_key  # χρησιμοποίησε το σωστό key
-                    break                    
-
+                    list_name = existing_key
+                    break
 
         if action == "read":
             current = lists_db.get(list_name, [])
@@ -483,6 +483,8 @@ def manage_list(action: str, list_name: str, item: str = "") -> str:
         to_process = [i.strip() for i in item.split(",")] if item else []
 
         if action == "add":
+            if list_name not in lists_db:
+                lists_db[list_name] = []
             for obj in to_process:
                 if obj and obj not in lists_db[list_name]:
                     lists_db[list_name].append(obj)
@@ -514,8 +516,7 @@ def google_calendar_tool(action: str, summary: str, start_time: str, end_time: s
     """Διαχειρίζεται το Google Calendar. action: 'create' για νέο ραντεβού."""
     try:
         print(f"\033[93m[Calendar]: Δημιουργία ραντεβού '{summary}'...\033[0m")
-        token_path = 'credentials/token.json'
-        creds = Credentials.from_authorized_user_file(token_path, ['https://www.googleapis.com/auth/calendar'])
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, ['https://www.googleapis.com/auth/calendar'])
         service = build('calendar', 'v3', credentials=creds)
         if action == "create":
             event = {'summary': summary, 'start': {'dateTime': start_time}, 'end': {'dateTime': end_time or start_time}}
@@ -536,8 +537,7 @@ def google_tasks_tool(action: str, title: str, due: str = None) -> str:
     """
     try:
         print(f"\033[93m[Tasks]: Δημιουργία υπενθύμισης '{title}'...\033[0m")
-        token_path = 'credentials/token.json'
-        creds = Credentials.from_authorized_user_file(token_path, ['https://www.googleapis.com/auth/tasks'])
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, ['https://www.googleapis.com/auth/tasks'])
         service = build('tasks', 'v1', credentials=creds)
         
         if action == "create":
