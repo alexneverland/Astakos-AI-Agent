@@ -244,6 +244,8 @@ def delete_from_memory(query: str) -> str:
 def retrieve_photo(query: str) -> str:
     """Ανακτά φωτογραφία από τη μνήμη. ΟΤΑΝ επιστρέψει [SEND_PHOTO: path], ΣΥΜΠΕΡΙΛΑΒΕ ΤΟ ΑΥΤΟΥΣΙΟ στην απάντησή σου."""
     try:
+        import numpy as np
+
         with vector_lock:
             results = vector_store.similarity_search(query, k=10)
 
@@ -261,7 +263,7 @@ def retrieve_photo(query: str) -> str:
                 index = json.load(f)
 
             if index:
-                query_emb = embeddings.embed_query(query)
+                query_emb = np.array(embeddings.embed_query(query))
                 best_score = -1.0
                 best_entry = None
 
@@ -269,19 +271,21 @@ def retrieve_photo(query: str) -> str:
                     candidate = f"{entry.get('caption', '')} {entry.get('analysis', '')}".strip()
                     if not candidate:
                         continue
-                    cand_emb = embeddings.embed_query(candidate)
-                    dot = sum(a * b for a, b in zip(query_emb, cand_emb))
-                    norm_q = sum(a * a for a in query_emb) ** 0.5
-                    norm_c = sum(b * b for b in cand_emb) ** 0.5
+                    cand_emb = np.array(embeddings.embed_query(candidate))
+                    norm_q = np.linalg.norm(query_emb)
+                    norm_c = np.linalg.norm(cand_emb)
                     if norm_q and norm_c:
-                        sim = dot / (norm_q * norm_c)
+                        sim = float(np.dot(query_emb, cand_emb) / (norm_q * norm_c))
                         if sim > best_score:
                             best_score = sim
                             best_entry = entry
 
+                if best_score < 0.35:
+                    return "System: Δεν βρέθηκε σχετική φωτογραφία για το query αυτό."
+
                 if best_entry:
                     fp = best_entry.get("file_path", "")
-                    note = "" if best_score >= 0.5 else " (Δεν βρήκα ακριβή αντιστοιχία — δίνω την πιο πρόσφατη.)"
+                    note = "" if best_score >= 0.5 else " (Δεν βρήκα ακριβή αντιστοιχία — δίνω την πιο κοντινή.)"
                     if not fp:
                         best_entry = index[-1]
                         fp = best_entry.get("file_path", "")
