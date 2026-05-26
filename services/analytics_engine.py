@@ -21,7 +21,8 @@ SIMILARITY_THRESH = 0.60  # Difflib threshold για grouping
 EVERYDAY_DAYS     = 5     # Αν εμφανίζεται σε 5+ ημέρες → Everyday
 
 _BASE             = os.path.dirname(os.path.abspath(__file__))
-CHAT_HISTORY_FILE = os.path.join(_BASE, "..", "astakos_chat_history.json")
+CHAT_HISTORY_FILE         = os.path.join(_BASE, "..", "astakos_chat_history.json")
+TELEGRAM_HISTORY_FILE     = os.path.join(_BASE, "..", "astakos_telegram_history.json")
 LOG_FILE          = os.path.join(_BASE, "..", "analytics_engine_log.json")
 
 BATCH_SIZE = 80   # μηνύματα ανά LLM call
@@ -119,13 +120,16 @@ def run_analytics() -> dict:
              "updated": 0, "skipped": 0, "errors": 0}
     found_routines = []
 
-    # ── 1. Φόρτωση history ───────────────────────────────────────
-    if not os.path.exists(CHAT_HISTORY_FILE):
+    # ── 1. Φόρτωση history (Web + Telegram) ─────────────────────
+    history = []
+    for path in (CHAT_HISTORY_FILE, TELEGRAM_HISTORY_FILE):
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                history.extend(json.load(f))
+
+    if not history:
         print("[Analytics]: Δεν βρέθηκε chat history.")
         return stats
-
-    with open(CHAT_HISTORY_FILE, "r", encoding="utf-8") as f:
-        history = json.load(f)
 
     cutoff = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
 
@@ -213,7 +217,6 @@ def run_analytics() -> dict:
 
     for (time, event, evtype), data in by_time_event.items():
         if len(data["days"]) >= EVERYDAY_DAYS:
-            # Promote σε Everyday
             final_groups[("Everyday", time, event, evtype)] = data["entries"]
             promoted_to_everyday.update(
                 (day, time, event, evtype) for day in data["days"]

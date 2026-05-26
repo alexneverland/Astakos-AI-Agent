@@ -400,6 +400,25 @@ def send_voice_reply(text, chat_id):
     except Exception as e:
         print(f"❌ TTS Error: {e}")
         send_telegram_msg(f"Μάστορα, μου κόπηκε η φωνή... (Error: {e})", chat_id)
+def _append_to_analytics_log(role: str, content: str):
+    """Append-only log για analytics engine — με date/time."""
+    try:
+        now = datetime.now()
+        entry = {
+            "role": role,
+            "content": content,
+            "date": now.strftime("%Y-%m-%d"),
+            "time": now.strftime("%H:%M")
+        }
+        history = []
+        if os.path.exists(TELEGRAM_HISTORY_FILE):
+            with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        history.append(entry)
+        with open(TELEGRAM_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[TelegramAnalytics]: Σφάλμα: {e}")
 # ────────────────────────────────────────────────────────────────
 # MESSAGE HANDLER
 # ────────────────────────────────────────────────────────────────
@@ -530,6 +549,7 @@ def handle_message(user_text: str, chat_id: str):
             # Κρατάμε context για επόμενο μήνυμα
             _telegram_history.append(HumanMessage(content=f"[{now_ts}] {clean_user_text}"))
             _telegram_history.append(AIMessage(content=final_ai_response[:500]))
+            _append_to_analytics_log("user", clean_user_text)
             # Φωτογραφίες
             if "[SEND_PHOTO:" in final_ai_response:
                 match = re.search(r"\[SEND_PHOTO:\s*(.+?)\]", final_ai_response)
