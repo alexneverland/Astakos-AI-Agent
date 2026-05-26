@@ -962,6 +962,10 @@ if __name__ == "__main__":
 # ────────────────────────────────────────────────────────────────
 # EMAIL
 # ────────────────────────────────────────────────────────────────
+_BASE = os.path.dirname(os.path.abspath(__file__))
+TOKEN_PATH = os.path.join(_BASE, '..', 'credentials', 'token.json')
+CREDS_PATH = os.path.join(_BASE, '..', 'credentials', 'credentials.json')
+
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/drive',
@@ -972,28 +976,29 @@ SCOPES = [
 def get_gmail_service():
     """Δημιουργεί το service του Gmail API χρησιμοποιώντας OAuth."""
     creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    if os.path.exists(TOKEN_PATH):
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
 
     if not creds or not creds.valid:
-        if not os.path.exists('credentials.json'):
+        if not os.path.exists(CREDS_PATH):
             raise Exception("Λείπει το αρχείο credentials.json! Κατέβασέ το από το Google Cloud.")
-        
-        # Αν το token έχει λήξει αλλά έχουμε refresh token
+
         if creds and creds.expired and creds.refresh_token:
             from google.auth.transport.requests import Request
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(CREDS_PATH, SCOPES)
             creds = flow.run_local_server(port=0, prompt='consent', access_type='offline')
 
-        with open('token.json', 'w') as token:
+        with open(TOKEN_PATH, 'w') as token:
             token.write(creds.to_json())
 
     return build('gmail', 'v1', credentials=creds)
 
+
 def decode_base64(data):
     return base64.urlsafe_b64decode(data.encode("UTF-8")).decode("utf-8", errors="replace")
+
 
 def extract_body(payload):
     """Εξάγει body με fallback: plain text → HTML → nested parts."""
@@ -1003,42 +1008,43 @@ def extract_body(payload):
         mime = part.get('mimeType', '')
         body = part.get('body', {})
 
-        # Αν έχει nested parts (multipart/alternative κλπ) → ψάξε αναδρομικά
         if 'parts' in part:
-            # Πρώτα ψάξε για plain text
             for p in part['parts']:
                 if p.get('mimeType') == 'text/plain' and 'data' in p.get('body', {}):
                     return decode_base64(p['body']['data'])
-            # Fallback: HTML
             for p in part['parts']:
                 if p.get('mimeType') == 'text/html' and 'data' in p.get('body', {}):
-                    raw_html = decode_base64(p['body']['data'])
-                    # Αφαίρεσε HTML tags
-                    text = re.sub(r'<[^>]+>', ' ', raw_html)
-                    text = html.unescape(text)
-                    return re.sub(r'\s+', ' ', text).strip()
-            # Αναδρομή σε βαθύτερα nested parts
+                    return _html_to_text(decode_base64(p['body']['data']))
             for p in part['parts']:
                 result = _parse_part(p)
                 if result:
                     return result
 
-        # Απλό part με data
         if 'data' in body:
             if mime == 'text/plain':
                 return decode_base64(body['data'])
             elif mime == 'text/html':
-                raw_html = decode_base64(body['data'])
-                text = re.sub(r'<[^>]+>', ' ', raw_html)
-                text = html.unescape(text)
-                return re.sub(r'\s+', ' ', text).strip()
+                return _html_to_text(decode_base64(body['data']))
 
         return ""
 
+    def _html_to_text(raw_html):
+        # <br> και </p> → newlines για αναγνώσιμο κείμενο
+        raw_html = re.sub(r'<br\s*/?>', '\n', raw_html, flags=re.IGNORECASE)
+        raw_html = re.sub(r'</p>', '\n', raw_html, flags=re.IGNORECASE)
+        text = re.sub(r'<[^>]+>', ' ', raw_html)
+        text = html.unescape(text)
+        return re.sub(r'\s+', ' ', text).strip()
+
     return _parse_part(payload)
 
+
 def clean_text(text):
-    return re.sub(r'\s+', ' ', text).strip()
+    """Καθαρίζει whitespace και αφαιρεί quoted replies (γραμμές με >)."""
+    lines = text.splitlines()
+    lines = [l for l in lines if not l.strip().startswith('>')]
+    cleaned = '\n'.join(lines)
+    return re.sub(r'\s+', ' ', cleaned).strip()
 
 @tool
 def mail_manager(action: str, query: str = None, email_id: str = None,
