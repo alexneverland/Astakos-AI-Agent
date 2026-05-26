@@ -623,7 +623,6 @@ def generate_image_tool(prompt: str) -> str:
     from config import BASE_DIR
     import time
 
-    # Αποθηκεύουμε στον ΙΔΙΟ φάκελο με τα έγγραφα για να τα βλέπει ο Server
     output_dir = os.path.join(BASE_DIR, "outputs")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -631,16 +630,23 @@ def generate_image_tool(prompt: str) -> str:
     filename = f"{safe_filename}_{int(time.time())}.jpg"
     full_path = os.path.join(output_dir, filename)
 
-    api_url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}?nologo=true"
+    api_url = (
+        f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
+        f"?nologo=true&model=flux&width=1024&height=1024"
+    )
 
     try:
-        res = requests.get(api_url)
+        res = requests.get(api_url, timeout=30)
         if res.status_code == 200:
+            content_type = res.headers.get("Content-Type", "")
+            if "image" not in content_type:
+                return f"❌ Το API επέστρεψε μη αναμενόμενο τύπο: {content_type}"
             with open(full_path, 'wb') as f:
                 f.write(res.content)
-            # Στέλνουμε το SEND_PHOTO tag!
             return f"✅ Έτοιμο! Η εικόνα δημιουργήθηκε.\n[SEND_PHOTO: {full_path}]"
-        return "❌ Σφάλμα API. Η μηχανή μπούκωσε."
+        return f"❌ Σφάλμα API ({res.status_code}). Η μηχανή μπούκωσε."
+    except requests.Timeout:
+        return "❌ Timeout: το Pollinations άργησε πάνω από 30 δευτερόλεπτα."
     except Exception as e:
         return f"❌ Σφάλμα: {str(e)}"
 @tool
@@ -653,7 +659,7 @@ def drive_manager(action: str = "list_files", file_id: str = None, local_path: s
         import io
 
         print(f"\033[93m[Drive]: Ενέργεια {action}...\033[0m")
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
         service = build('drive', 'v3', credentials=creds)
 
         if action == "list_files":
@@ -1497,5 +1503,5 @@ all_tools = [
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_offers, relay_local_payload,
     search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
-    duckduckgo_search
+    duckduckgo_search, run_terminal_command
 ]
