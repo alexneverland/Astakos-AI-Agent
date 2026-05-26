@@ -261,6 +261,7 @@ def chat_agent_node(state: AgentState):
     ]
     
     response = llm.bind_tools(chat_tools).invoke(final_messages)
+    response = _ensure_text_response(response, llm, system_prompt, safe_history)
     return {"current_agent": "Chat_Agent", "messages": [response]}
 
 

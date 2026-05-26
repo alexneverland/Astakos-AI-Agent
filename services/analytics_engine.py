@@ -250,7 +250,9 @@ def run_analytics() -> dict:
         weeks   = len(set(e["week"] for e in entries))
         stats["detected"] += 1
 
-        if total >= MIN_OCCURRENCES and weeks >= MIN_WEEKS:
+        required_weeks = 1 if day_of_week == "Everyday" else MIN_WEEKS
+
+        if total >= MIN_OCCURRENCES and weeks >= required_weeks:
             try:
                 result = upsert_routine(
                     day=day_of_week,
