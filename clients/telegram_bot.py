@@ -582,7 +582,7 @@ def handle_location(msg, live_update=False):
     if not lat or not lon:
         return
 
-    print(f"\033[94m[Location]: {lat}, {lon}\033[0m")
+    #print(f"\033[94m[Location]: {lat}, {lon}\033[0m")
 
     # ── Location Reminders ──────────────────────────────────────
     try:
@@ -1040,7 +1040,22 @@ def job_proactive_scan():
     except Exception as e:
         print(f"⚠️ [job_proactive_scan]: {e}")
 
-
+def job_analytics_engine():
+    """Nightly passive routine detection — τρέχει μόνο 03:00–04:00."""
+    now_hour = datetime.now().hour
+    if now_hour != 3:
+        return
+    try:
+        from services.analytics_engine import run_analytics
+        stats = run_analytics()
+        if stats.get("created", 0) + stats.get("merged", 0) > 0:
+            send_telegram_msg(
+                f"🧠 [Analytics]: Εντόπισα νέες ρουτίνες!\n"
+                f"✅ Νέες: {stats['created']} | 🔗 Merged: {stats['merged']} | "
+                f"📊 Ανιχνεύθηκαν: {stats['detected']}"
+            )
+    except Exception as e:
+        print(f"[Analytics Job Error]: {e}")
 # ────────────────────────────────────────────────────────────────
 # ASTAKOS SCHEDULER (Central Event Bus)
 # ────────────────────────────────────────────────────────────────
@@ -1219,6 +1234,7 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders")
     astakos_scheduler.register(job_check_routines,  interval_seconds=60,    name="routines")
     astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive")
+    astakos_scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics")
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
     # Φόρτωσε το ιστορικό από τον δίσκο
     _telegram_history = _load_telegram_history_file()

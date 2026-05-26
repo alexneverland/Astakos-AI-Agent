@@ -100,7 +100,8 @@ def append_to_chat_history(role: str, content: str):
         history.append({
             "role": role,
             "content": content,
-            "time": datetime.now().strftime("%H:%M")
+            "time": datetime.now().strftime("%H:%M"),
+            "date": datetime.now().strftime("%Y-%m-%d")
         })
         _save_chat_history(history)
 
