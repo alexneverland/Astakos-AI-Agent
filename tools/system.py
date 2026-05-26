@@ -563,12 +563,10 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
     import os
     import json
     from config import BASE_DIR
-    
-    # Φάκελος εξαγωγής (π.χ. C:\astakos_v2\outputs)
+
     output_dir = os.path.join(BASE_DIR, "outputs")
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        
+    os.makedirs(output_dir, exist_ok=True)
+
     full_path = os.path.join(output_dir, filename)
     file_type = file_type.lower()
 
@@ -576,30 +574,33 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
         if file_type == "docx":
             import docx
             doc = docx.Document()
-            doc.add_paragraph(data)
+            for line in data.split("\n"):
+                doc.add_paragraph(line)
             doc.save(full_path)
 
         elif file_type == "xlsx":
             import pandas as pd
-            # Προσπάθεια μετατροπής του string σε data frame
             try:
                 content = json.loads(data)
                 df = pd.DataFrame(content)
-            except:
-                # Αν δεν είναι JSON, το βάζουμε σε μια απλή στήλη
+            except (json.JSONDecodeError, ValueError):
                 df = pd.DataFrame([data], columns=["Content"])
             df.to_excel(full_path, index=False)
 
         elif file_type == "pdf":
             from fpdf import FPDF
+            font_path = os.path.join(BASE_DIR, "assets", "DejaVuSans.ttf")
             pdf = FPDF()
             pdf.add_page()
-            # Χρήση DejaVu ή standard font (για ελληνικά ίσως χρειαστεί .ttf)
-            pdf.set_font("Arial", size=12)
-            pdf.multi_cell(0, 10, data.encode('latin-1', 'replace').decode('latin-1'))
+            if os.path.exists(font_path):
+                pdf.add_font("DejaVu", "", font_path, uni=True)
+                pdf.set_font("DejaVu", size=12)
+            else:
+                # Fallback χωρίς ελληνικά αν λείπει το font
+                pdf.set_font("Arial", size=12)
+            pdf.multi_cell(0, 10, data)
             pdf.output(full_path)
 
-        # [MASTRO-UPGRADE]: Εδώ βάλαμε και json, csv, html, md
         elif file_type in ["txt", "json", "csv", "html", "md"]:
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(data)
@@ -607,7 +608,6 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
         else:
             return f"❌ Σφάλμα: Ο τύπος '{file_type}' δεν υποστηρίζεται."
 
-        # [MASTRO-FIX]: Η ειδική ταμπέλα για την αναχαίτιση!
         return f"✅ Έτοιμο Μάστορα! Το αρχείο δημιουργήθηκε επιτυχώς.\n[CREATED_FILE: {full_path}]"
 
     except Exception as e:
