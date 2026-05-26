@@ -188,12 +188,22 @@ def save_to_memory(fact: str, entities: str = "", category: str = "general") -> 
     """
     import datetime
     from memory.vector_store import vector_store
-    
+
     try:
-        # [MASTRO-GRAPH]: Ενώνουμε το γεγονός με τα tags για να "χτυπάει" τέλεια στο vector search
         semantic_payload = f"{fact} [Tags: {entities}]"
-        
-        # Καρφώνουμε τη μνήμη στη βάση με τα Metadata της
+
+        # [MASTRO-DEDUP]: Έλεγχος για duplicate πριν αποθηκευτεί
+        with vector_lock:
+            existing = vector_store._collection.query(
+                query_embeddings=[embeddings.embed_query(semantic_payload)],
+                n_results=1
+            )
+        if (existing['ids'] and existing['ids'][0] and
+                existing['distances'] and existing['distances'][0] and
+                existing['distances'][0][0] < 0.10):
+            print(f"\033[93m⚠️ [Semantic Graph]: Duplicate skip → {fact[:50]}\033[0m")
+            return f"ℹ️ Η μνήμη υπάρχει ήδη (dist: {existing['distances'][0][0]:.3f})."
+
         vector_store.add_texts(
             texts=[semantic_payload],
             metadatas=[{
@@ -203,7 +213,7 @@ def save_to_memory(fact: str, entities: str = "", category: str = "general") -> 
                 "type": "semantic_node"
             }]
         )
-        
+
         print(f"\033[95m🧠 [Semantic Graph]: Καρφώθηκε -> {entities}\033[0m")
         return f"✅ System: Η σημασιολογική μνήμη καρφώθηκε! Ταμπέλες: [{entities}]"
     except Exception as e:
