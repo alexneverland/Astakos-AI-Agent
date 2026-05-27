@@ -449,19 +449,19 @@ def git_agent_node(state):
 
     # [MASTRO-SHIELD v5]: Ενιαία ασπίδα για όλους τους agents
     history = clean_orphan_tool_calls(state["messages"], k=20)
+    safe_history = sanitize_history_for_gemini(history)
 
     system_base = load_agent_prompt("Git_Agent", "Είσαι ο Git_Agent. Διαχειρίζεσαι GitHub repos.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base)
 
-    return {
-        "current_agent": "Git_Agent",
-        "messages": [
-            llm.bind_tools([
-                github_manager, read_local_file, search_memory, run_terminal_command
-            ]).invoke([SystemMessage(content=system_prompt)] + history)
-        ]
-    }
+    git_llm = llm.bind_tools([
+        github_manager, read_local_file, search_memory, run_terminal_command
+    ])
+    response = git_llm.invoke([SystemMessage(content=system_prompt)] + safe_history)
+    response = _ensure_text_response(response, git_llm, system_prompt, safe_history)
+
+    return {"current_agent": "Git_Agent", "messages": [response]}
 
 
 def mail_agent_node(state):

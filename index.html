@@ -174,10 +174,12 @@
         #trigger-voice-btn.active { background: rgba(244,71,71,0.15); border-color: var(--red); color: var(--red); }
 
         #user-input {
-            flex: 1; height: 42px; padding: 0 14px;
+            flex: 1; min-height: 42px; max-height: 200px; padding: 10px 14px;
             background: var(--surface2); border: 1px solid var(--border);
             border-radius: 8px; color: var(--text); font-size: 14px;
             outline: none; transition: border-color 0.2s; min-width: 0;
+            resize: none; overflow-y: hidden; line-height: 1.4;
+            font-family: inherit;
         }
         #user-input:focus { border-color: var(--accent); }
         #user-input::placeholder { color: var(--text-dim); }
@@ -525,7 +527,7 @@
                 <input type="file" id="file-input" style="display:none">
                 <button class="input-btn" id="attach-btn"        title="Επισύναψη αρχείου">📎</button>
                 <button class="input-btn" id="trigger-voice-btn" title="Άνοιξε τον Αστακό">🎙️</button>
-                <input type="text" id="user-input" placeholder="Δώσε εντολή ή στείλε αρχείο…" autocomplete="off">
+                <textarea id="user-input" placeholder="Δώσε εντολή ή στείλε αρχείο…" autocomplete="off" rows="1"></textarea>
                 <button id="send-btn">▶ Αποστολή</button>
             </div>
             <div id="file-label"></div>
@@ -684,7 +686,13 @@
     }
 
     sendBtn.addEventListener('click', sendMessage);
-    userInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+    userInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+    userInput.addEventListener('input', () => {
+        userInput.style.height = 'auto';
+        userInput.style.height = Math.min(userInput.scrollHeight, 200) + 'px';
+    });
 
     /* ── DRAWER & AVATAR ── */
     const drawer        = document.getElementById('astakos-drawer');
