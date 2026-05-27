@@ -18,6 +18,13 @@ Built by a maker, for makers. Local-first, modular, and genuinely useful.
 
 ---
 
+## ⭐ If you find this useful
+
+If Astakos saved you time or inspired your own project, a star goes a long way.
+Got questions or ideas? Open an [issue](https://github.com/alexneverland/Astakos-AI-Agent/issues) — I read them all.
+
+---
+
 ## What is Astakos?
 
 Astakos is a **self-hosted AI agent** you run on your own machine. It connects to Telegram and a Web UI, understands your habits, remembers things about you, and proactively reaches out when it thinks you need it.
