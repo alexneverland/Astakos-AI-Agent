@@ -480,23 +480,16 @@ def browse_url(url: str) -> str:
 def duckduckgo_search(query: str) -> str:
     """Αναζήτηση στο διαδίκτυο.
     ΓΙΑ ΣΥΓΚΕΚΡΙΜΕΝΟ URL χρησιμοποίησε ΠΑΝΤΑ το browse_url."""
-    import requests
-    from bs4 import BeautifulSoup
     try:
-        url = "https://lite.duckduckgo.com/lite/"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        r = requests.post(url, data={"q": query}, headers=headers, timeout=10)
-        soup = BeautifulSoup(r.text, "html.parser")
-        links = soup.find_all("a", class_="result-link")
-        snippets = soup.find_all("td", class_="result-snippet")
-        
-        if not links:
+        from ddgs import DDGS
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=5))
+        if not results:
             return "❌ Κενό αποτέλεσμα."
-        
-        results = []
-        for i, (link, snip) in enumerate(zip(links[:5], snippets[:5])):
-            results.append(f"Τίτλος: {link.text.strip()}\nURL: {link['href']}\nΠερίληψη: {snip.text.strip()}\n")
-        return "\n---\n".join(results)
+        output = []
+        for r in results:
+            output.append(f"Τίτλος: {r['title']}\nURL: {r['href']}\nΠερίληψη: {r['body']}\n")
+        return "\n---\n".join(output)
     except Exception as e:
         return f"⚠️ Σφάλμα: {str(e)}"
 @tool
