@@ -51,7 +51,7 @@ pending_exec_command = None
 # Scheduler reference (set in __main__, used by /status command)
 astakos_scheduler = None
 from collections import deque
-_telegram_history: deque = deque(maxlen=10)
+_telegram_history: deque = deque(maxlen=20)
 
 def _load_telegram_history_file() -> deque:
     """Φορτώνει το Telegram history από αρχείο (επιβιώνει restarts)."""
@@ -507,7 +507,7 @@ def handle_message(user_text: str, chat_id: str):
         context_msgs = list(_telegram_history)
         current_msg  = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
         # ── Ροή μέσω LangGraph ───────────────────────────────────
-        for event in graph.stream({"messages": context_msgs + [current_msg]}, {"recursion_limit": 20}):
+        for event in graph.stream({"messages": context_msgs + [current_msg]}, {"recursion_limit": 50}):
             for node, data in event.items():
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node
@@ -861,7 +861,30 @@ def job_check_reminders():
         with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
             json.dump(rems, f, ensure_ascii=False, indent=4)
 
+def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> str:
+    """LLM φτιάχνει φυσικό proactive μήνυμα αντί για template."""
+    from langchain_core.messages import HumanMessage
+    from core.brain import llm
 
+    if count > 1:
+        context = f"Ο Λάζαρος έχει {count} ρουτίνες σε ~30 λεπτά: {event_name}."
+    elif confidence >= 0.8:
+        context = f"Ο Λάζαρος κάνει σχεδόν πάντα '{event_name}' αυτή την ώρα (υψηλή βεβαιότητα)."
+    elif confidence >= 0.5:
+        context = f"Ο Λάζαρος συνήθως κάνει '{event_name}' αυτή την ώρα."
+    else:
+        context = f"Παλιότερα ο Λάζαρος έκανε '{event_name}' αυτή την ώρα, δεν είμαστε σίγουροι πια."
+
+    prompt = f"""{context}
+
+Στείλε ένα σύντομο, φυσικό μήνυμα σαν φίλος που το θυμάται — όχι υπενθύμιση, όχι ξερό template.
+Μέχρι 2 προτάσεις. Ελληνικά. Χωρίς "Proactive:" prefix."""
+
+    try:
+        response = llm.invoke([HumanMessage(content=prompt)])
+        return response.content.strip()
+    except Exception:
+        return f"Μάστορα, δεν είναι η ώρα για '{event_name}';"
 def job_check_routines():
     """
     Ελέγχει για επερχόμενες ρουτίνες (30' νωρίτερα) και κάνει timeout decay
@@ -948,7 +971,7 @@ def job_check_routines():
             # ── Batching: πολλές ρουτίνες → ένα μήνυμα ──────────────────
             if len(due_routines) > 1:
                 names = ", ".join(f"'{e}'" for _, e, _ in due_routines)
-                msg   = f"🧠 **Proactive:** Μάστορα, έχεις {len(due_routines)} ρουτίνες σε ~30': {names}. Όλα έτοιμα;"
+                msg = _craft_proactive_msg(names, 0.9, count=len(due_routines))
                 send_telegram_msg(msg)
                 sent_at = datetime.now()
                 for r_id, event_name, confidence in due_routines:
@@ -963,12 +986,7 @@ def job_check_routines():
             else:
                 # Μία ρουτίνα → εξατομικευμένο μήνυμα
                 r_id, event_name, confidence = due_routines[0]
-                if confidence >= 0.8:
-                    msg = f"🧠 **Proactive:** Μάστορα, πλησιάζει η ώρα για '{event_name}' (σε 30'). Όλα έτοιμα;"
-                elif confidence >= 0.5:
-                    msg = f"🧠 **Proactive:** Συνήθως τέτοια ώρα έχεις '{event_name}'. Ισχύει και σήμερα;"
-                else:
-                    msg = f"🧠 **Proactive:** Παλιά είχαμε '{event_name}' τέτοια ώρα, να το βγάλω αν δεν παίζει πια;"
+                msg = _craft_proactive_msg(event_name, confidence)
                 cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                 conn.commit()
                 mark_routine_notified(r_id)
