@@ -171,86 +171,6 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
 
 
 @tool
-def search_supermarket_offers(query: Annotated[str, "Το προϊόν που ψάχνουμε, π.χ. 'φακές'"]) -> str:
-    """Αναζητά τις 5 φθηνότερες τιμές για ένα προϊόν στο e-Katanalotis."""
-    url = "https://warply.s3.amazonaws.com/applications/ed840ad545884deeb6c6b699176797ed/basket-retailers/prices.json?cid=1777896000000"
-    headers = {
-        'sec-ch-ua-platform': '"Windows"',
-        'Referer': 'https://e-katanalotis.gov.gr/',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-    }
-
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code != 200:
-            return f"Σφάλμα σύνδεσης (Status: {response.status_code})"
-
-        data = response.json()
-        merchants_dict = {}
-        items_list = []
-
-        try:
-            result_data = data.get("context", {}).get("MAPP_PRODUCTS", {}).get("result", {})
-            for m in result_data.get("merchants", []):
-                merchants_dict[m.get("merchant_uuid")] = m.get("display_name") or m.get("name") or "Άγνωστο"
-            items_list = result_data.get("products", [])
-        except Exception:
-            pass
-
-        if not items_list:
-            return "Σφάλμα: Δεν βρέθηκαν προϊόντα στο JSON."
-
-        clean_query = remove_accents(query)
-        found_items = []
-
-        for item in items_list:
-            if isinstance(item, dict):
-                name = item.get('name') or item.get('product_name') or item.get('title') or ""
-                clean_name = remove_accents(name)
-
-                if clean_query in clean_name:
-                    prices_data = item.get('prices', [])
-
-                    if isinstance(prices_data, list) and len(prices_data) > 0:
-                        for p_info in prices_data:
-                            p_val = p_info.get('price')
-                            muid = p_info.get('merchant_uuid')
-                            try:
-                                c_price = float(str(p_val).replace(',', '.'))
-                            except:
-                                continue
-                            if c_price > 0:
-                                shop = merchants_dict.get(muid) or 'Super Market'
-                                found_items.append({'name': name, 'price': c_price, 'shop': shop})
-                    else:
-                        p_val = item.get('price') or 0
-                        try:
-                            c_price = float(str(p_val).replace(',', '.'))
-                        except:
-                            c_price = 0.0
-                        if c_price > 0:
-                            muid = item.get('merchant_uuid')
-                            shop = merchants_dict.get(muid) or item.get('retailer_name') or 'Super Market'
-                            found_items.append({'name': name, 'price': c_price, 'shop': shop})
-
-        if not found_items:
-            return f"Δεν βρέθηκαν έγκυρες τιμές για '{query}'."
-
-        found_items.sort(key=lambda x: x['price'])
-        top_5 = found_items[:5]
-
-        res_msg = f"🛒 **Οι καλύτερες τιμές για '{query}':**\n"
-        for i, itm in enumerate(top_5, 1):
-            res_msg += f"{i}. {itm['name']} -> **{itm['price']}€** ({itm['shop']})\n"
-
-        return res_msg
-
-    except Exception as e:
-        return f"Παρουσιάστηκε σφάλμα: {str(e)}"
-
-
-@tool
 def search_goldmall_offers(query: str) -> str:
     """Deep Scan σε ΟΛΕΣ τις προσφορές του Goldmall χωρίς περιορισμό."""
     search_term = "σινεμά" if any(x in query.lower() for x in ["σινεμά", "ταινία", "ταινιες", "ταινίες"]) else query
@@ -490,6 +410,52 @@ def duckduckgo_search(query: str) -> str:
         for r in results:
             output.append(f"Τίτλος: {r['title']}\nURL: {r['href']}\nΠερίληψη: {r['body']}\n")
         return "\n---\n".join(output)
+    except Exception as e:
+        return f"⚠️ Σφάλμα: {str(e)}"
+@tool
+def search_supermarket_prices(query: str) -> str:
+    """Αναζητά τιμές προϊόντος από όλα τα σούπερ μάρκετ (e-katanalotis.gov.gr).
+    Παράδειγμα: 'φακές', 'γάλα', 'ελαιόλαδο'"""
+    import requests
+    from difflib import SequenceMatcher
+
+    PRICES_URL = "https://warply.s3.amazonaws.com/applications/ed840ad545884deeb6c6b699176797ed/basket-retailers/prices.json?cid=1779969600000"
+
+    try:
+        r = requests.get(PRICES_URL, timeout=30)
+        data = r.json()
+        result = data['context']['MAPP_PRODUCTS']['result']
+        merchants = {m['merchant_uuid']: m['display_name'] for m in result['merchants']}
+        products = result['products']
+
+        # Fuzzy search — αφαίρεση τόνων για σωστό matching
+        query_clean = remove_accents(query).upper()
+        matches = []
+        for p in products:
+            name = p.get('name', '')
+            if query_clean in remove_accents(name).upper():
+                matches.append(p)
+
+        if not matches:
+            return f"❌ Δεν βρέθηκε '{query}' στο e-katanalotis."
+
+        # Κράτα τα 5 πιο σχετικά
+        matches = sorted(matches, key=lambda p: len(p['name']))[:5]
+
+        output = []
+        for p in matches:
+            name = p['name']
+            prices = p.get('prices', [])
+            if not prices:
+                continue
+            price_lines = []
+            for pr in sorted(prices, key=lambda x: x['price']):
+                shop = merchants.get(pr['merchant_uuid'], f"#{pr['merchant_uuid']}")
+                price_lines.append(f"  {shop}: {pr['price']:.2f}€")
+            output.append(f"📦 {name}\n" + "\n".join(price_lines))
+
+        return "\n\n".join(output) if output else "❌ Δεν βρέθηκαν τιμές."
+
     except Exception as e:
         return f"⚠️ Σφάλμα: {str(e)}"
 @tool
