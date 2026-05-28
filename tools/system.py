@@ -32,7 +32,7 @@ from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, 
 from memory.vector_store import vector_store, vector_lock, memory
 from services.embeddings import embeddings
 from tools.web import (
-    get_news, get_weather_forecast, search_supermarket_offers,
+    get_news, get_weather_forecast, search_supermarket_prices,
     search_goldmall_offers, execute_local_pipeline, get_navigation_info,
     relay_local_payload, search_google_places, browse_url, duckduckgo_search
 )
@@ -1551,7 +1551,7 @@ all_tools = [
     read_local_file, write_code, run_code, write_custom_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
-    get_news, get_weather_forecast, search_supermarket_offers, relay_local_payload,
+    get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
     search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
     duckduckgo_search, run_terminal_command
 ]
