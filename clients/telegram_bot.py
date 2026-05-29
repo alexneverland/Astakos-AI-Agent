@@ -51,16 +51,16 @@ pending_exec_command = None
 # Scheduler reference (set in __main__, used by /status command)
 astakos_scheduler = None
 from collections import deque
-_telegram_history: deque = deque(maxlen=20)
+_telegram_history: deque = deque()
 
 def _load_telegram_history_file() -> deque:
     """Φορτώνει το Telegram history από αρχείο (επιβιώνει restarts)."""
     if not os.path.exists(TELEGRAM_HISTORY_FILE):
-        return deque(maxlen=10)
+        return deque()
     try:
         with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
             raw = json.load(f)
-        d = deque(maxlen=10)
+        d = deque()
         for item in raw:
             if item["role"] == "human":
                 d.append(HumanMessage(content=item["content"]))
@@ -68,10 +68,9 @@ def _load_telegram_history_file() -> deque:
                 d.append(AIMessage(content=item["content"]))
         return d
     except:
-        return deque(maxlen=10)
+        return deque()
 
 def _save_telegram_history_file():
-    """Αποθηκεύει το Telegram history στο αρχείο."""
     try:
         data = [
             {"role": "human" if isinstance(msg, HumanMessage) else "ai", "content": msg.content}
@@ -547,8 +546,8 @@ def handle_message(user_text: str, chat_id: str):
                 else:
                     send_telegram_msg(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
             # Κρατάμε context για επόμενο μήνυμα
-            _telegram_history.append(HumanMessage(content=f"[{now_ts}] {clean_user_text}"))
-            _telegram_history.append(AIMessage(content=final_ai_response[:500]))
+            _telegram_history.append(HumanMessage(content=f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {clean_user_text}"))
+            _telegram_history.append(AIMessage(content=f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {final_ai_response[:500]}"))
             _append_to_analytics_log("user", clean_user_text)
             # Φωτογραφίες
             if "[SEND_PHOTO:" in final_ai_response:
@@ -1297,11 +1296,4 @@ if __name__ == "__main__":
     try:
         run_polling()
     except KeyboardInterrupt:
-        _handle_exit()
-    finally:
-        shutdown_event.set()
-        try:
-            _run_session_summary(channel="telegram")
-        except Exception:
-            pass
-        print("[TelegramBot]: \u03a4\u03b5\u03c1\u03bc\u03b1\u03c4\u03af\u03c3\u03c4\u03b7\u03ba\u03b5.")
+        _
