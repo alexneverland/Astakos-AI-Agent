@@ -5,6 +5,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import time
 import os
+import threading
 
 WATCH_DIRS = ["clients", "core", "tools", "memory", "services"]
 IGNORE_DIRS = ["venv", "__pycache__", ".git"]
@@ -12,6 +13,7 @@ IGNORE_DIRS = ["venv", "__pycache__", ".git"]
 class RestartHandler(FileSystemEventHandler):
     def __init__(self):
         self.process = None
+        self._timer = None
         self.restart()
 
     def restart(self):
@@ -24,14 +26,20 @@ class RestartHandler(FileSystemEventHandler):
             cwd="C:\\astakos_v2"
         )
 
+    def _debounced_restart(self):
+        print(f"\033[93m[Watchdog]: Αλλαγές εντοπίστηκαν — Επανεκκίνηση σε 3s...\033[0m")
+        self.restart()
+
     def on_modified(self, event):
         if event.is_directory:
             return
         if any(d in event.src_path for d in IGNORE_DIRS):
             return
         if event.src_path.endswith(".py"):
-            print(f"\033[93m[Watchdog]: Άλλαξε {event.src_path} — Επανεκκίνηση...\033[0m")
-            self.restart()
+            if self._timer:
+                self._timer.cancel()
+            self._timer = threading.Timer(3.0, self._debounced_restart)
+            self._timer.start()
 
 if __name__ == "__main__":
     handler = RestartHandler()
