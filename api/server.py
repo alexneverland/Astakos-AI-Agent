@@ -89,7 +89,7 @@ def _save_chat_history(history: list):
     """Αποθηκεύει το chat history στο δίσκο (τελευταία 200 μηνύματα)."""
     try:
         with open(CHAT_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(history[-200:], f, ensure_ascii=False, indent=2)
+            json.dump(history, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[ChatHistory]: Σφάλμα αποθήκευσης: {e}")
 
@@ -362,7 +362,7 @@ async def chat_endpoint(request: Request):
         with chat_history_lock:
             raw_hist = _load_chat_history()
         context_msgs = []
-        for entry in raw_hist[-11:-1]:
+        for entry in raw_hist[-21:-1]:
             role    = entry.get("role", "")
             content = entry.get("content", "")
             ts      = entry.get("time", "")

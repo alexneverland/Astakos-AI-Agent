@@ -22,7 +22,8 @@ import threading
 import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
-
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from langchain_core.messages import HumanMessage, AIMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE, TELEGRAM_HISTORY_FILE
@@ -50,36 +51,6 @@ pending_routine_confirmations = {}
 pending_exec_command = None
 # Scheduler reference (set in __main__, used by /status command)
 astakos_scheduler = None
-from collections import deque
-_telegram_history: deque = deque()
-
-def _load_telegram_history_file() -> deque:
-    """Φορτώνει το Telegram history από αρχείο (επιβιώνει restarts)."""
-    if not os.path.exists(TELEGRAM_HISTORY_FILE):
-        return deque()
-    try:
-        with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        d = deque()
-        for item in raw:
-            if item["role"] == "human":
-                d.append(HumanMessage(content=item["content"]))
-            else:
-                d.append(AIMessage(content=item["content"]))
-        return d
-    except:
-        return deque()
-
-def _save_telegram_history_file():
-    try:
-        data = [
-            {"role": "human" if isinstance(msg, HumanMessage) else "ai", "content": msg.content}
-            for msg in _telegram_history
-        ]
-        with open(TELEGRAM_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"[TelegramHistory]: Σφάλμα αποθήκευσης: {e}")
 # ── Rate Limiting ─────────────────────────────────────────────
 QUIET_HOURS          = (23, 8)   # 23:00 → 08:00 χωρίς proactive
 MAX_PROACTIVE_PER_HOUR = 3       # max proactive μηνύματα/ώρα
@@ -503,7 +474,20 @@ def handle_message(user_text: str, chat_id: str):
     try:
         # ── Context: τελευταία exchanges με timestamps ────────────
         now_ts = datetime.now().strftime("%H:%M")
-        context_msgs = list(_telegram_history)
+        context_msgs = []
+        try:
+            if os.path.exists(TELEGRAM_HISTORY_FILE):
+                with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
+                    raw_hist = json.load(f)
+                for entry in raw_hist[-21:-1]:
+                    ts = entry.get("time", "")
+                    prefix = f"[{ts}] " if ts else ""
+                    if entry["role"] == "human":
+                        context_msgs.append(HumanMessage(content=f"{prefix}{entry['content']}"))
+                    else:
+                        context_msgs.append(AIMessage(content=f"{prefix}{entry['content']}"))
+        except:
+            pass
         current_msg  = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
         # ── Ροή μέσω LangGraph ───────────────────────────────────
         for event in graph.stream({"messages": context_msgs + [current_msg]}, {"recursion_limit": 50}):
@@ -546,9 +530,8 @@ def handle_message(user_text: str, chat_id: str):
                 else:
                     send_telegram_msg(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
             # Κρατάμε context για επόμενο μήνυμα
-            _telegram_history.append(HumanMessage(content=f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {clean_user_text}"))
-            _telegram_history.append(AIMessage(content=f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {final_ai_response[:500]}"))
             _append_to_analytics_log("user", clean_user_text)
+            _append_to_analytics_log("ai", final_ai_response)
             # Φωτογραφίες
             if "[SEND_PHOTO:" in final_ai_response:
                 match = re.search(r"\[SEND_PHOTO:\s*(.+?)\]", final_ai_response)
@@ -563,7 +546,6 @@ def handle_message(user_text: str, chat_id: str):
             enqueue_task(update_working_memory,             user_text, final_ai_response)
             enqueue_task(trigger_memory_sifter,             user_text, final_ai_response, handling_agent, "telegram")
             enqueue_task(log_exchange,                       user_text, final_ai_response, handling_agent, "telegram")
-            _save_telegram_history_file()
             enqueue_task(update_capabilities_from_exchange, user_text, final_ai_response, handling_agent)
 
     except Exception as e:
@@ -1285,8 +1267,7 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics")
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
     # Φόρτωσε το ιστορικό από τον δίσκο
-    _telegram_history = _load_telegram_history_file()
-    print(f"\033[92m[TelegramHistory]: Φορτώθηκαν {len(_telegram_history)} μηνύματα από δίσκο.\033[0m")
+
 
     print("\u2501" * 50)
     print("  \U0001f99e  \u0391\u03c3\u03c4\u03b1\u03ba\u03cc\u03c2 Telegram Bot \u2014 \u0395\u03ba\u03ba\u03af\u03bd\u03b7\u03c3\u03b7")
@@ -1296,4 +1277,11 @@ if __name__ == "__main__":
     try:
         run_polling()
     except KeyboardInterrupt:
-        _
+        _handle_exit()
+    finally:
+        shutdown_event.set()
+        try:
+            _run_session_summary(channel="telegram")
+        except Exception:
+            pass
+        print("[TelegramBot]: \u03a4\u03b5\u03c1\u03bc\u03b1\u03c4\u03af\u03c3\u03c4\u03b7\u03ba\u03b5.")

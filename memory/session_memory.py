@@ -45,7 +45,7 @@ def load_last_session_hint(channel: str = "web") -> str:
         if not sessions:
             return ""
         # Φιλτράρουμε μόνο για το συγκεκριμένο channel
-        filtered = [s for s in sessions if s.get("channel", "web") == channel]
+        filtered = sessions
         if not filtered:
             return ""
         last = filtered[-1]

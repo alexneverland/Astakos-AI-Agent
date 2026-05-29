@@ -19,7 +19,10 @@ class RestartHandler(FileSystemEventHandler):
             self.process.terminate()
             self.process.wait()
         print("\033[92m[Watchdog]: Εκκίνηση Telegram Bot...\033[0m")
-        self.process = subprocess.Popen([sys.executable, "clients/telegram_bot.py"])
+        self.process = subprocess.Popen(
+            [sys.executable, "clients/telegram_bot.py"],
+            cwd="C:\\astakos_v2"
+        )
 
     def on_modified(self, event):
         if event.is_directory:

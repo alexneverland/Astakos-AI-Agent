@@ -30,7 +30,7 @@ echo.
 echo  Starting Telegram Bot...
 cd /d C:\astakos_v2
 call venv\Scripts\activate
-python -m clients.telegram_bot
+python run_telegram.py
 goto end
 
 :both
@@ -40,7 +40,7 @@ cd /d C:\astakos_v2
 call venv\Scripts\activate
 start "Astakos Web Server" cmd /k "cd /d C:\astakos_v2 && call venv\Scripts\activate && uvicorn api.server:server --reload"
 timeout /t 3 /nobreak >nul
-python -m clients.telegram_bot
+python run_telegram.py
 goto end
 
 :end
