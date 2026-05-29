@@ -28,17 +28,23 @@ custom_safety = {
 # 2. Αρχιτέκτονας Μοντέλων (LangChain Objects)
 # Κύριο LLM (Για γρήγορες απαντήσεις, Telegram chat, απλά validations)
 llm = ChatGoogleGenerativeAI(
-    model=FAST_MODEL, 
+    model=FAST_MODEL,
     temperature=0.7,
-    safety_settings=custom_safety
+    safety_settings=custom_safety,
+    vertexai=True,
+    project=os.getenv("PROJECT_ID", "astakos-finall"),
+    location=os.getenv("LOCATION", "global"),
 )
 
 # Βαρύ LLM (Για σκανάρισμα ChromaDB, σύνθετο Tool Use, JSON memory parsing, API design)
 llm_heavy = ChatGoogleGenerativeAI(
-    model=HEAVY_MODEL, 
+    model=HEAVY_MODEL,
     temperature=0.1,
-    safety_settings=custom_safety
+    safety_settings=custom_safety,
+    vertexai=True,
+    project=os.getenv("PROJECT_ID", "astakos-finall"),
+    location=os.getenv("LOCATION", "global"),
 )
 
 console = Console()
-print("\033[92m[Brain]: Gemini Engines Loaded (AI Studio Mode - Custom Safety) 🦞\033[0m")
+print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI via GenAI SDK) 🦞\033[0m")

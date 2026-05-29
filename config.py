@@ -24,7 +24,7 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "")
 VACUUM_IP = os.getenv("VACUUM_IP", "")
 VACUUM_TOKEN = os.getenv("VACUUM_TOKEN", "")
 LINKEDIN_TOKEN = os.getenv("LINKEDIN_TOKEN")
-PROJECT_ID = os.getenv("PROJECT_ID", "gen-lang-client-0647896431")
+PROJECT_ID = os.getenv("PROJECT_ID", "astakos-finall")
 LOCATION = os.getenv("LOCATION", "us-central1")
 
 # ==========================================
