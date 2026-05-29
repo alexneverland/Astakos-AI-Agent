@@ -601,7 +601,14 @@ def handle_location(msg, live_update=False):
     lon     = loc.get("longitude")
     if not lat or not lon:
         return
-
+    # Αποθήκευση location στο JSON
+    try:
+        from config import GPS_STORAGE_FILE
+        import time
+        with open(GPS_STORAGE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"lat": lat, "lon": lon, "timestamp": time.time()}, f)
+    except Exception:
+        pass
     #print(f"\033[94m[Location]: {lat}, {lon}\033[0m")
 
     # ── Location Reminders ──────────────────────────────────────
