@@ -40,4 +40,11 @@ llm = ChatGoogleGenerativeAI(
 llm_heavy = ChatGoogleGenerativeAI(
     model=HEAVY_MODEL,
     temperature=0.1,
-    safety_settings=custom_safe
+    safety_settings=custom_safety,
+    vertexai=True,
+    project=os.getenv("PROJECT_ID", "astakos-finall"),
+    location=os.getenv("LOCATION", "global"),
+)
+
+console = Console()
+print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI via GenAI SDK) 🦞\033[0m")

@@ -36,6 +36,7 @@ class RestartHandler(FileSystemEventHandler):
         if any(d in event.src_path for d in IGNORE_DIRS):
             return
         if event.src_path.endswith(".py"):
+            print(f"\033[93m[Watchdog]: Αλλαγή εντοπίστηκε → {event.src_path}\033[0m")
             if self._timer:
                 self._timer.cancel()
             self._timer = threading.Timer(3.0, self._debounced_restart)
