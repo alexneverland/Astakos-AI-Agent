@@ -237,7 +237,9 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
                         try: photo_index = json.load(f)
                         except: photo_index = []
                 
-                if not any(p.get("file_path") == file_path for p in photo_index):
+                save_confirmed = any(w in ai_text.lower() for w in ["αρχειοθετ", "αποθηκεύ", "καταγράφ", "σώθηκε", "index"])
+
+                if not any(p.get("file_path") == file_path for p in photo_index) and save_confirmed:
                     photo_index.append(photo_entry)
                     with open(PHOTOS_INDEX_FILE, "w", encoding="utf-8") as f:
                         json.dump(photo_index, f, indent=4, ensure_ascii=False)
