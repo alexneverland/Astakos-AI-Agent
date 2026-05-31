@@ -1,59 +1,37 @@
 # run_telegram.py — Auto-restart Telegram Bot on code changes
 import subprocess
 import sys
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-import time
 import os
-import threading
+from watchfiles import watch
 
 WATCH_DIRS = ["clients", "core", "tools", "memory", "services"]
-IGNORE_DIRS = ["venv", "__pycache__", ".git"]
 
-class RestartHandler(FileSystemEventHandler):
-    def __init__(self):
-        self.process = None
-        self._timer = None
-        self.restart()
+def run():
+    process = None
+    try:
+        def start():
+            nonlocal process
+            if process:
+                process.terminate()
+                process.wait()
+            print("\033[92m[Watchdog]: Εκκίνηση Telegram Bot...\033[0m")
+            process = subprocess.Popen(
+                [sys.executable, "clients/telegram_bot.py"],
+                cwd="C:\\astakos_v2"
+            )
 
-    def restart(self):
-        if self.process:
-            self.process.terminate()
-            self.process.wait()
-        print("\033[92m[Watchdog]: Εκκίνηση Telegram Bot...\033[0m")
-        self.process = subprocess.Popen(
-            [sys.executable, "clients/telegram_bot.py"],
-            cwd="C:\\astakos_v2"
-        )
-
-    def _debounced_restart(self):
-        print(f"\033[93m[Watchdog]: Αλλαγές εντοπίστηκαν — Επανεκκίνηση σε 3s...\033[0m")
-        self.restart()
-
-    def on_modified(self, event):
-        if event.is_directory:
-            return
-        if any(d in event.src_path for d in IGNORE_DIRS):
-            return
-        if event.src_path.endswith(".py"):
-            print(f"\033[93m[Watchdog]: Αλλαγή εντοπίστηκε → {event.src_path}\033[0m")
-            if self._timer:
-                self._timer.cancel()
-            self._timer = threading.Timer(3.0, self._debounced_restart)
-            self._timer.start()
+        start()
+        dirs = [d for d in WATCH_DIRS if os.path.exists(d)]
+        for changes in watch(*dirs):
+            py_changes = [c for c in changes if str(c[1]).endswith(".py")]
+            if py_changes:
+                for _, path in py_changes:
+                    print(f"\033[93m[Watchdog]: Αλλαγή εντοπίστηκε → {path}\033[0m")
+                print(f"\033[93m[Watchdog]: Επανεκκίνηση...\033[0m")
+                start()
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
 
 if __name__ == "__main__":
-    handler = RestartHandler()
-    observer = Observer()
-    for d in WATCH_DIRS:
-        if os.path.exists(d):
-            observer.schedule(handler, d, recursive=True)
-    observer.start()
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        observer.stop()
-        if handler.process:
-            handler.process.terminate()
-    observer.join()
+    run()

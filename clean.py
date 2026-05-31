@@ -51,10 +51,12 @@ try:
         SESSIONS_FILE,
         PROFILE_FILE,
     )
-    CHAT_HISTORY_FILE = os.path.join(PROJECT_ROOT, "astakos_chat_history.json")
-    CAPABILITIES_FILE = os.path.join(PROJECT_ROOT, "astakos_capabilities.json")
+    CHAT_HISTORY_FILE     = os.path.join(PROJECT_ROOT, "astakos_chat_history.json")
+    TELEGRAM_HISTORY_FILE = os.path.join(PROJECT_ROOT, "astakos_telegram_history.json")
+    CAPABILITIES_FILE     = os.path.join(PROJECT_ROOT, "astakos_capabilities.json")
 except ImportError:
-    CHAT_HISTORY_FILE   = os.path.join(PROJECT_ROOT, "astakos_chat_history.json")
+    CHAT_HISTORY_FILE     = os.path.join(PROJECT_ROOT, "astakos_chat_history.json")
+    TELEGRAM_HISTORY_FILE = os.path.join(PROJECT_ROOT, "astakos_telegram_history.json")
     CAPABILITIES_FILE   = os.path.join(PROJECT_ROOT, "astakos_capabilities.json")
     SESSIONS_FILE       = os.path.join(PROJECT_ROOT, "astakos_sessions.json")
     WORKING_MEMORY_FILE = os.path.join(PROJECT_ROOT, "astakos_working_memory.json")
@@ -243,9 +245,9 @@ def consolidate_capabilities(dry_run: bool = False, backup: bool = True) -> bool
 # TASK 2: CHAT HISTORY — ROTATION
 # ────────────────────────────────────────────────────────────────
 
-def trim_chat_history(keep: int = DEFAULT_CHAT_KEEP, dry_run: bool = False, backup: bool = True) -> bool:
-    header(f"Trim astakos_chat_history.json (κρατά τα τελευταία {keep})")
-    data = safe_load_json(CHAT_HISTORY_FILE)
+def _trim_history_file(path: str, label: str, keep: int, dry_run: bool, backup: bool) -> bool:
+    header(f"Trim {label} (κρατά τα τελευταία {keep})")
+    data = safe_load_json(path)
     if data is None:
         return False
     if not isinstance(data, list):
@@ -266,8 +268,16 @@ def trim_chat_history(keep: int = DEFAULT_CHAT_KEEP, dry_run: bool = False, back
     if dry_run:
         return True
 
-    backup_file(CHAT_HISTORY_FILE, enabled=backup)
-    return safe_save_json(CHAT_HISTORY_FILE, trimmed, dry_run=False)
+    backup_file(path, enabled=backup)
+    return safe_save_json(path, trimmed, dry_run=False)
+
+
+def trim_chat_history(keep: int = DEFAULT_CHAT_KEEP, dry_run: bool = False, backup: bool = True) -> bool:
+    return _trim_history_file(CHAT_HISTORY_FILE, "astakos_chat_history.json", keep, dry_run, backup)
+
+
+def trim_telegram_history(keep: int = DEFAULT_CHAT_KEEP, dry_run: bool = False, backup: bool = True) -> bool:
+    return _trim_history_file(TELEGRAM_HISTORY_FILE, "astakos_telegram_history.json", keep, dry_run, backup)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -519,7 +529,9 @@ def main():
     parser.add_argument("--capabilities", action="store_true",
                         help="Σύμπτυξη can_do / cannot_do με LLM")
     parser.add_argument("--chat-history", action="store_true",
-                        help="Trim παλιών μηνυμάτων από το chat history")
+                        help="Trim παλιών μηνυμάτων από το web chat history")
+    parser.add_argument("--telegram-history", action="store_true",
+                        help="Trim παλιών μηνυμάτων από το telegram history")
     parser.add_argument("--sessions", action="store_true",
                         help="Trim παλιών sessions (κρατά τις πιο πρόσφατες)")
     parser.add_argument("--working-memory", action="store_true",
@@ -539,7 +551,7 @@ def main():
 
     # Αν δεν επιλέχθηκε κανένα συγκεκριμένο task, τα τρέχουμε όλα
     no_specific = not any([
-        args.capabilities, args.chat_history, args.sessions, args.working_memory, args.profile
+        args.capabilities, args.chat_history, args.telegram_history, args.sessions, args.working_memory, args.profile
     ])
     run_all = args.all or no_specific
 
@@ -559,6 +571,11 @@ def main():
 
     if run_all or args.chat_history:
         results["chat_history"] = trim_chat_history(
+            keep=args.chat_keep, dry_run=args.dry_run, backup=backup_enabled
+        )
+
+    if run_all or args.telegram_history:
+        results["telegram_history"] = trim_telegram_history(
             keep=args.chat_keep, dry_run=args.dry_run, backup=backup_enabled
         )
 

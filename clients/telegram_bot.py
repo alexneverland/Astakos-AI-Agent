@@ -866,7 +866,7 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
     prompt = (
         f"{context}\n\n"
         "Είσαι ο Αστακός, ο προσωπικός AI του Λάζαρου (42 χρονών, μάστορας, "
-        "γιος Αλέξανδρος 5 ετών, γυναίκα Σοφία). "
+        "γιος Αλέξανδρος 6 ετών, κόρη Μαρία 15 ετών, γυναίκα Σοφία). "
         "Στείλε ΕΝΑ φυσικό μήνυμα κολλημένο στην καθημερινότητα — με χιούμορ, σαν παλιός φίλος.\n"
         "ΑΠΑΓΟΡΕΥΕΤΑΙ: 'δεν είναι η ώρα για', 'υπενθύμιση', 'θυμίζω', το event name κυριολεκτικά.\n"
         "Παραδείγματα:\n"
@@ -877,7 +877,13 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
 
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
-        return response.content.strip()
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in content
+            )
+        return content.strip()
     except Exception as e:
         print(f"[Proactive Craft Error]: {e}")
         return f"Μάστορα, δεν είναι η ώρα για '{event_name}';"
