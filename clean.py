@@ -17,6 +17,7 @@
 #   python clean.py --chat-keep 50        # Custom όριο για chat history
 #   python clean.py --sessions-keep 20    # Custom όριο για sessions
 #   python clean.py --no-backup           # Παράκαμψη backup (όχι recommended)
+#   python clean.py --photos              # Σβήσε temp φωτογραφίες (αναρχειοθέτητες)
 #
 # Συνδυάζονται:
 #   python clean.py --capabilities --chat-history --dry-run
@@ -54,6 +55,8 @@ try:
     CHAT_HISTORY_FILE     = os.path.join(PROJECT_ROOT, "astakos_chat_history.json")
     TELEGRAM_HISTORY_FILE = os.path.join(PROJECT_ROOT, "astakos_telegram_history.json")
     CAPABILITIES_FILE     = os.path.join(PROJECT_ROOT, "astakos_capabilities.json")
+PHOTOS_INDEX_FILE     = os.path.join(PROJECT_ROOT, "astakos_photos_index.json")
+PHOTOS_DIR            = os.path.join(PROJECT_ROOT, "telegram_photos")
 except ImportError:
     CHAT_HISTORY_FILE     = os.path.join(PROJECT_ROOT, "astakos_chat_history.json")
     TELEGRAM_HISTORY_FILE = os.path.join(PROJECT_ROOT, "astakos_telegram_history.json")
@@ -517,6 +520,63 @@ def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
 
 
 # ────────────────────────────────────────────────────────────────
+# TASK 6: PHOTOS — Σβήσε αναρχειοθέτητες φωτογραφίες
+# ────────────────────────────────────────────────────────────────
+
+def clean_photos(dry_run: bool = False) -> bool:
+    """
+    Διαβάζει το astakos_photos_index.json, βρίσκει ποια .jpg στο telegram_photos/
+    δεν είναι αρχειοθετημένη, και τα σβήνει.
+    """
+    header("Καθαρισμός αναρχειοθέτητων φωτογραφιών (telegram_photos/)")
+
+    if not os.path.isdir(PHOTOS_DIR):
+        log(f"⚠️  Ο φάκελος {PHOTOS_DIR} δεν υπάρχει.", "warn")
+        return True
+
+    # Φόρτωση index
+    index_data = safe_load_json(PHOTOS_INDEX_FILE) or []
+    archived_paths = set()
+    for entry in index_data:
+        fp = entry.get("file_path", "")
+        if fp:
+            # Κρατάμε μόνο το basename για σύγκριση
+            archived_paths.add(os.path.basename(fp).lower())
+
+    log(f"📚 Αρχειοθετημένες φωτό στο index: {len(archived_paths)}", "info")
+
+    # Σάρωση φακέλου
+    all_files = [f for f in os.listdir(PHOTOS_DIR) if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))]
+    log(f"📁 Φωτογραφίες στον φάκελο: {len(all_files)}", "info")
+
+    to_delete = [f for f in all_files if f.lower() not in archived_paths]
+    to_keep   = [f for f in all_files if f.lower() in archived_paths]
+
+    log(f"✅ Αρχειοθετημένες (θα κρατηθούν): {len(to_keep)}", "ok")
+    log(f"🗑️  Temp / αναρχειοθέτητες (θα σβηστούν): {len(to_delete)}", "warn")
+
+    if not to_delete:
+        log("ℹ️  Τίποτα να σβηστεί.", "dim")
+        return True
+
+    for fname in to_delete:
+        fpath = os.path.join(PHOTOS_DIR, fname)
+        if dry_run:
+            log(f"   🧪 DRY-RUN: θα σβηνόταν → {fname}", "warn")
+        else:
+            try:
+                os.remove(fpath)
+                log(f"   🗑️  Σβήστηκε: {fname}", "ok")
+            except Exception as e:
+                log(f"   ❌ Σφάλμα διαγραφής {fname}: {e}", "err")
+
+    if not dry_run:
+        log(f"\n✅ Καθαρίστηκαν {len(to_delete)} αρχεία.", "ok")
+
+    return True
+
+
+# ────────────────────────────────────────────────────────────────
 # MAIN — CLI
 # ────────────────────────────────────────────────────────────────
 
@@ -538,6 +598,8 @@ def main():
                         help="Σύμπτυξη working memory (dedup + LLM)")
     parser.add_argument("--profile", action="store_true",
                         help="Σύμπτυξη astakos_profile.json (LLM ανά category)")
+    parser.add_argument("--photos", action="store_true",
+                        help="Σβήσε αναρχειοθέτητες φωτογραφίες από telegram_photos/")
     parser.add_argument("--chat-keep", type=int, default=DEFAULT_CHAT_KEEP,
                         help=f"Πόσα chat messages να κρατήσει (default {DEFAULT_CHAT_KEEP})")
     parser.add_argument("--sessions-keep", type=int, default=DEFAULT_SESSIONS_KEEP,
@@ -551,7 +613,7 @@ def main():
 
     # Αν δεν επιλέχθηκε κανένα συγκεκριμένο task, τα τρέχουμε όλα
     no_specific = not any([
-        args.capabilities, args.chat_history, args.telegram_history, args.sessions, args.working_memory, args.profile
+        args.capabilities, args.chat_history, args.telegram_history, args.sessions, args.working_memory, args.profile, args.photos
     ])
     run_all = args.all or no_specific
 
@@ -593,6 +655,9 @@ def main():
         results["profile"] = consolidate_profile(
             dry_run=args.dry_run, backup=backup_enabled
         )
+
+    if run_all or args.photos:
+        results["photos"] = clean_photos(dry_run=args.dry_run)
 
     # Summary
     log("\n" + "─" * 60, "dim")
