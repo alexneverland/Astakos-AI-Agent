@@ -223,7 +223,9 @@ function render(d) {
         <td colspan="7" style="padding:8px 12px">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <label style="color:var(--muted);font-size:11px">Day:
-              <input id="edit-day-${r.id}" value="${r.day||''}" style="background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 7px;width:100px;margin-left:4px">
+              <select id="edit-day-${r.id}" style="background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 7px;width:110px;margin-left:4px">
+                ${['Everyday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d=>`<option value="${d}" ${r.day===d?'selected':''}>${d}</option>`).join('')}
+              </select>
             </label>
             <label style="color:var(--muted);font-size:11px">Time:
               <input id="edit-time-${r.id}" value="${r.time||''}" placeholder="HH:MM" style="background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 7px;width:70px;margin-left:4px">
