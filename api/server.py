@@ -555,14 +555,39 @@ async def upload_file(file: UploadFile = File(...)):
             )
             user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
         elif file_ext in doc_exts:
-            memory_analysis = f"Έγγραφο τύπου {file_ext} με όνομα {file.filename}."
-            detailed_analysis = f"Έλαβα το αρχείο **{file.filename}** (αποθηκεύτηκε ως `{filename}`). Είναι έγγραφο ({file_ext}) και μπορώ να το διαβάσω αν μου το ζητήσεις."
+            # Διαβάζουμε το περιεχόμενο του εγγράφου
+            doc_text = ""
+            try:
+                if file_ext == ".txt" or file_ext == ".csv" or file_ext == ".json":
+                    with open(file_path, "r", encoding="utf-8", errors="ignore") as df:
+                        doc_text = df.read()[:8000]
+                elif file_ext == ".pdf":
+                    import pypdf
+                    reader = pypdf.PdfReader(file_path)
+                    doc_text = "\n".join(p.extract_text() or "" for p in reader.pages)[:8000]
+                elif file_ext in (".docx",):
+                    from docx import Document as DocxDoc
+                    doc_text = "\n".join(p.text for p in DocxDoc(file_path).paragraphs)[:8000]
+                elif file_ext in (".xlsx", ".xls"):
+                    import pandas as pd
+                    df_data = pd.read_excel(file_path)
+                    doc_text = df_data.to_string(index=False)[:8000]
+            except Exception as read_err:
+                doc_text = f"[Δεν μπόρεσα να διαβάσω το περιεχόμενο: {read_err}]"
+
+            # Στέλνουμε στο LLM για περίληψη/ανάλυση
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            sum_prompt = f"Διάβασε το παρακάτω έγγραφο '{file.filename}' και κάνε μια σύντομη ανάλυση/περίληψη στα Ελληνικά (5-8 προτάσεις):\n\n{doc_text}"
+            sum_resp = client.models.generate_content(model=FAST_MODEL, contents=[sum_prompt])
+            detailed_analysis = sum_resp.text.strip() if sum_resp and sum_resp.text else "Δεν μπόρεσα να αναλύσω το έγγραφο."
+            memory_analysis = detailed_analysis[:500]
+
             chat_ai_msg = (
-                f"📄 **Έγγραφο ελήφθη:** `{filename}` (Αρχικό όνομα: {file.filename})\n\n"
+                f"📄 **Έγγραφο:** `{file.filename}`\n\n"
                 f"{detailed_analysis}\n\n"
-                "**Λάζαρε, θέλεις να το διαβάσω ή να το αρχειοθετήσω;**"
+                "**Θέλεις να αποθηκεύσω το περιεχόμενο στη μνήμη μου ώστε να το γνωρίζω μελλοντικά;**"
             )
-            user_log_msg = f"[USER_UPLOADED_FILE]: {filename}\n[FILE PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
+            user_log_msg = f"[USER_UPLOADED_FILE]: {filename}\n[FILE PATH]: {file_path}\n[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]: {memory_analysis}"
         else:
             memory_analysis = f"Αρχείο {file_ext} με όνομα {file.filename}."
             detailed_analysis = f"Ανέβηκε ένα αρχείο με κατάληξη {file_ext}."
