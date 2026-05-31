@@ -75,7 +75,13 @@ JSON:"""
 
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
-        raw = response.content.strip()
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in content
+            )
+        raw = content.strip()
         raw = re.sub(r'^```(?:json)?\s*', '', raw)
         raw = re.sub(r'\s*```$', '', raw)
         data = json.loads(raw)
