@@ -49,6 +49,9 @@ last_interaction_time = time.time()
 # Pending routine confirmations: {routine_id: {"event": ..., "sent_at": ...}}
 pending_routine_confirmations = {}
 pending_exec_command = None
+# Pending photo: αποθηκεύει ανάλυση φωτογραφίας που έφτασε χωρίς caption, για να συνδυαστεί με το επόμενο μήνυμα
+pending_photo_lock = threading.Lock()
+pending_photo      = None   # {analysis, filename, path, timestamp}
 # Scheduler reference (set in __main__, used by /status command)
 astakos_scheduler = None
 # ── Rate Limiting ─────────────────────────────────────────────
@@ -268,14 +271,16 @@ def handle_end_session(chat_id: str):
 
 def handle_photo(photo_list: list, caption: str, chat_id: str):
     """
-    [MASTRO-PARITY]: Στέλνει τα PIXELS στο LLM για ανάλυση και μετατρέπει 
-    το αποτέλεσμα σε ασφαλές κείμενο για το Telegram.
+    [MASTRO-PARITY]: Αναλύει φωτογραφία μέσω Vision LLM.
+    - Με caption: επεξεργάζεται αμέσως με το caption ως ερώτηση.
+    - Χωρίς caption: αποθηκεύει ανάλυση ως pending και περιμένει το επόμενο μήνυμα (30s).
     """
+    global pending_photo
     try:
         import base64
-        from langchain_core.messages import HumanMessage
-        from core.brain import llm  # Χρησιμοποιούμε τον "βαρύ" εγκέφαλο για σιγουριά
-        from core.agents import clean_message  # Προστασία από list errors
+        from langchain_core.messages import HumanMessage, AIMessage
+        from core.brain import llm
+        from core.agents import clean_message
 
         # 1. Λήψη αρχείου από Telegram
         best_photo = max(photo_list, key=lambda p: p.get("file_size", 0))
@@ -285,69 +290,111 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         img_data = requests.get(f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path_remote}").content
 
         # 2. Αποθήκευση τοπικά
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"photo_{timestamp}.jpg"
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename  = f"photo_{timestamp_str}.jpg"
         local_path = os.path.join(PHOTOS_DIR, filename)
-
         with open(local_path, "wb") as f:
             f.write(img_data)
-        print(f"\033[92m[Photo]: Κατέβηκε επιτυχώς: {filename}\033[0m")
-        
-        # 3. Mastro-Fix: Σωστή φόρτωση των pixels στο Vision LLM
+        print(f"\033[92m[Photo]: Κατέβηκε: {filename}\033[0m")
+
+        # 3. Vision LLM — αντικειμενική ανάλυση pixels
         img_b64 = base64.b64encode(img_data).decode("utf-8")
-        vision_prompt = f"Ανάλυσε τι δείχνει η φωτογραφία. Το σχόλιο του χρήστη είναι: '{caption or 'Κανένα σχόλιο'}'. Απάντησε σε 2-3 προτάσεις στα Ελληνικά."
-        
-        # Φτιάχνουμε το "Multimodal" πακέτο
+        vision_prompt = "Περίγραψε αναλυτικά τι δείχνει η φωτογραφία (αντικείμενα, κείμενο, χρώματα, πλαίσιο). Απάντησε στα Ελληνικά, 3-5 προτάσεις."
         vision_msg = HumanMessage(content=[
-            {"type": "text", "text": vision_prompt},
+            {"type": "text",      "text": vision_prompt},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
         ])
-        
-        print(f"\033[94m[Vision]: Ξεκινάει η οπτική ανάλυση...\033[0m")
-        analysis_response = llm.invoke([vision_msg])
-        memory_analysis = clean_message(analysis_response.content)
+        print(f"\033[94m[Vision]: Οπτική ανάλυση...\033[0m")
+        analysis_raw  = llm.invoke([vision_msg])
+        memory_analysis = clean_message(analysis_raw.content)
+        print(f"\033[94m[Vision]: {memory_analysis[:120]}...\033[0m")
 
-        # 4. Σύνθεση του Μηνύματος (Έτοιμο για τον Agent)
-        user_log_msg = (
-            f"[USER_UPLOADED_FILE]: {filename}\n"
-            f"[FILE PATH]: {local_path}\n"
-            f"[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]: {memory_analysis}\n"
-            f"Σχόλιο: {caption if caption else 'Δες τη φωτογραφία.'}"
-        )
+        # 4α. ΜΕ caption → επεξεργαζόμαστε αμέσως
+        if caption:
+            _process_photo_with_question(filename, local_path, memory_analysis, caption, chat_id)
 
-        print(f"\033[94m[Telegram->Graph]: {user_log_msg}\033[0m")
-
-# 5. Τροφοδοσία του LangGraph
-        for event in graph.stream({"messages": [HumanMessage(content=user_log_msg)]}):
-            for node_name, output in event.items():
-                if "messages" in output:
-                    last_msg = output["messages"][-1]
-                    safe_text = clean_message(last_msg.content)
-                    if safe_text:                                      # ← check στο καθαρό string
-                        import re
-                        
-                        # --- MASTRO INTERCEPTOR ΓΙΑ TELEGRAM ---
-                        file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", safe_text)
-                        if file_match:
-                            file_path = file_match.group(1).strip()
-                            # Καθαρίζουμε την ταμπέλα από το κείμενο για να μη φαίνεται άσχημα
-                            safe_text = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", "", safe_text).strip()
-                            
-                            # Στέλνουμε το κείμενο (π.χ. "Έτοιμο το έγγραφο!")
-                            if safe_text:
-                                send_telegram_msg(safe_text)
-                            
-                            # ΣΤΕΛΝΟΥΜΕ ΤΟ ΙΔΙΟ ΤΟ ΑΡΧΕΙΟ ΣΤΟ ΚΙΝΗΤΟ
-                            send_telegram_document(file_path)
-                        else:
-                            # Κανονική αποστολή αν δεν υπάρχει αρχείο
-                            if safe_text:
-                                send_telegram_msg(safe_text)
+        # 4β. ΧΩΡΙΣ caption → αποθηκεύουμε pending, ειδοποιούμε
+        else:
+            with pending_photo_lock:
+                pending_photo = {
+                    "analysis":  memory_analysis,
+                    "filename":  filename,
+                    "path":      local_path,
+                    "timestamp": time.time()
+                }
+            send_telegram_msg("📷 Φωτό ελήφθη! Τι θέλεις να κάνω με αυτή;")
 
     except Exception as e:
         import traceback
-        print(f"❌ Telegram Photo Error: {e}")
-        send_telegram_msg(f"Μάστορα, σκάλωσε η φωτό. Έλεγξε την κονσόλα. Σφάλμα: {e}")
+        traceback.print_exc()
+        send_telegram_msg(f"Μάστορα, σκάλωσε η φωτό. Σφάλμα: {e}")
+
+
+def _process_photo_with_question(filename: str, local_path: str, analysis: str, question: str, chat_id: str):
+    """Περνάει φωτογραφία + ερώτηση στο graph και στέλνει ΜΙΑ απάντηση (σωστό streaming pattern)."""
+    import re
+    from langchain_core.messages import HumanMessage, AIMessage
+    from core.agents import clean_message
+
+    # Φόρτωση history (ίδιο με handle_message)
+    context_msgs = []
+    try:
+        if os.path.exists(TELEGRAM_HISTORY_FILE):
+            with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
+                raw_hist = json.load(f)
+            for entry in raw_hist[-21:-1]:
+                ts     = entry.get("time", "")
+                prefix = f"[{ts}] " if ts else ""
+                if entry["role"] == "human":
+                    context_msgs.append(HumanMessage(content=f"{prefix}{entry['content']}"))
+                else:
+                    context_msgs.append(AIMessage(content=f"{prefix}{entry['content']}"))
+    except Exception:
+        pass
+
+    now_ts = datetime.now().strftime("%H:%M")
+    user_log_msg = (
+        f"[{now_ts}] "
+        f"[USER_UPLOADED_PHOTO]: {filename}\n"
+        f"[PHOTO PATH]: {local_path}\n"
+        f"[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]: {analysis}\n"
+        f"Ερώτηση: {question}"
+    )
+    print(f"\033[94m[Photo->Graph]: {user_log_msg[:200]}\033[0m")
+
+    # Streaming — collect, send once (ίδιο pattern με handle_message)
+    final_response = ""
+    try:
+        for event in graph.stream({"messages": context_msgs + [HumanMessage(content=user_log_msg)]}, {"recursion_limit": 50}):
+            for node, data in event.items():
+                if node not in ["supervisor", "tools"]:
+                    msgs = data.get("messages", [])
+                    if msgs and hasattr(msgs[-1], "content"):
+                        candidate = clean_message(msgs[-1].content).strip()
+                        if candidate:
+                            final_response = candidate
+    except Exception as e:
+        send_telegram_msg(f"❌ Σφάλμα επεξεργασίας φωτό: {e}")
+        return
+
+    if not final_response:
+        send_telegram_msg("⚠️ Δεν πήρα σαφή απάντηση για τη φωτογραφία.")
+        return
+
+    # Interceptor για CREATED_FILE
+    file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_response)
+    if file_match:
+        file_path = file_match.group(1).strip()
+        final_response = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", "", final_response).strip()
+        if final_response:
+            send_telegram_msg(final_response)
+        try:
+            from tools.telegram import send_telegram_document
+            send_telegram_document(file_path)
+        except Exception:
+            pass
+    else:
+        send_telegram_msg(final_response)
 def send_voice_reply(text, chat_id):
     """Μετατρέπει το κείμενο σε ομιλία και το στέλνει ως voice message."""
     try:
@@ -467,6 +514,17 @@ def handle_message(user_text: str, chat_id: str):
 
     with memory_lock:
         last_interaction_time = time.time()
+
+    # ── Pending photo: αν ήρθε φωτό χωρίς caption πρόσφατα, συνδύασέ το ──
+    global pending_photo
+    photo_prefix = ""
+    with pending_photo_lock:
+        if pending_photo and (time.time() - pending_photo["timestamp"]) < 30:
+            p = pending_photo
+            pending_photo = None
+            print(f"\033[94m[Photo+Msg]: Συνδυασμός pending φωτό + μήνυμα\033[0m")
+            _process_photo_with_question(p["filename"], p["path"], p["analysis"], clean_user_text, chat_id)
+            return  # Η _process_photo_with_question έστειλε την απάντηση
 
     final_ai_response = ""
     handling_agent = "Chat_Agent"
