@@ -250,13 +250,14 @@ def chat_agent_node(state: AgentState):
             image_part
         ])
 
-    from tools.system import archive_file, retrieve_photo, save_to_memory, search_memory, control_spotify, get_current_location
+    from tools.system import archive_file, retrieve_photo, save_to_memory, search_memory, control_spotify, get_current_location, read_local_file
     from tools.web import execute_local_pipeline, relay_local_payload, search_supermarket_prices
-       
+
     chat_tools = [
         get_current_location, control_spotify,
-        search_memory, save_to_memory, retrieve_photo, archive_file, duckduckgo_search, 
-        recipe_expert, log_meal, relay_local_payload, learn_routine, get_routines, search_supermarket_prices
+        search_memory, save_to_memory, retrieve_photo, archive_file, duckduckgo_search,
+        recipe_expert, log_meal, relay_local_payload, learn_routine, get_routines, search_supermarket_prices,
+        read_local_file
     ]
     
     response = llm.bind_tools(chat_tools).invoke(final_messages)
@@ -357,7 +358,7 @@ def web_agent_node(state: AgentState):
         get_news, get_weather_forecast, duckduckgo_search, 
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
-        process_and_clear_linkedin_post, relay_local_payload, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices
+        process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices
     ]
 
     return {
