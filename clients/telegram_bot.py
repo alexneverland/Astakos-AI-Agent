@@ -309,9 +309,13 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         memory_analysis = clean_message(analysis_raw.content)
         print(f"\033[94m[Vision]: {memory_analysis[:120]}...\033[0m")
 
-        # 4α. ΜΕ caption → επεξεργαζόμαστε αμέσως
+        # 4α. ΜΕ caption → έλεγχος για /nutrition ή κανονική ερώτηση
         if caption:
-            _process_photo_with_question(filename, local_path, memory_analysis, caption, chat_id)
+            if caption.strip().lower() == "/nutrition":
+                send_telegram_msg("🔍 Αναλύω τη διατροφική αξία...")
+                threading.Thread(target=_run_nutrition, args=(local_path, chat_id), daemon=True).start()
+            else:
+                _process_photo_with_question(filename, local_path, memory_analysis, caption, chat_id)
 
         # 4β. ΧΩΡΙΣ caption → αποθηκεύουμε pending, ειδοποιούμε
         else:
@@ -395,6 +399,16 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
             pass
     else:
         send_telegram_msg(final_response)
+def _run_nutrition(image_path: str, chat_id: str):
+    """Τρέχει τον nutrition analyzer και στέλνει αποτέλεσμα."""
+    try:
+        from astakos_skills.nutrition_analyzer import analyze_nutrition
+        result = analyze_nutrition(image_path)
+        send_telegram_msg(result)
+    except Exception as e:
+        send_telegram_msg(f"❌ Σφάλμα nutrition analysis: {e}")
+
+
 def send_voice_reply(text, chat_id):
     """Μετατρέπει το κείμενο σε ομιλία και το στέλνει ως voice message."""
     try:
@@ -853,6 +867,22 @@ def run_polling():
                         send_telegram_msg(astakos_scheduler.status())
                     else:
                         send_telegram_msg("⚠️ Scheduler δεν έχει εκκινήσει ακόμα.")
+                    continue
+
+                if user_text.lower() == "/nutrition":
+                    with pending_photo_lock:
+                        p = pending_photo if (pending_photo and (time.time() - pending_photo["timestamp"]) < 30) else None
+                        if p:
+                            pending_photo = None
+                    if p:
+                        send_telegram_msg("🔍 Αναλύω τη διατροφική αξία...")
+                        threading.Thread(
+                            target=_run_nutrition,
+                            args=(p["path"], chat_id),
+                            daemon=True
+                        ).start()
+                    else:
+                        send_telegram_msg("📷 Στείλε φωτογραφία της ετικέτας/συσκευασίας και μετά /nutrition (εντός 30\").")
                     continue
 
                 if user_text.lower() == "/end":
