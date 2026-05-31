@@ -204,12 +204,19 @@ function render(d) {
   }
 
   if ((rout.non_active||[]).length > 0) {
-    html += `<div class="card"><h2>🔄 Non-Active Routines</h2>
-      <table><tr><th>ID</th><th>Event</th><th>State</th><th>Conf</th></tr>
+    html += `<div class="card" style="grid-column:span 2"><h2>🔄 Non-Active Routines (${rout.non_active.length})</h2>
+      <table><tr><th>ID</th><th>Day</th><th>Time</th><th>Event</th><th>State</th><th>Conf</th><th>Ενέργειες</th></tr>
       ${rout.non_active.map(r=>`<tr>
-        <td class="off">#${r.id}</td><td>${r.event}</td>
+        <td class="off">#${r.id}</td>
+        <td>${r.day||'—'}</td>
+        <td><b>${r.time||'—'}</b></td>
+        <td>${r.event}</td>
         <td>${stateBadge(r.state)}</td>
         <td class="${r.confidence<0.1?'err':r.confidence<0.5?'warn':'ok'}">${r.confidence}</td>
+        <td style="white-space:nowrap">
+          <button onclick="activateRoutine(${r.id})" style="background:#2a7a2a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px">✅ Activate</button>
+          <button onclick="deleteRoutine(${r.id})" style="background:#7a2a2a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer">🗑️ Delete</button>
+        </td>
       </tr>`).join('')}</table></div>`;
   }
 
@@ -264,6 +271,18 @@ async function fetchData() {
   } catch(e) {
     document.getElementById('ts').innerHTML = `<span class="err">Σφάλμα φόρτωσης: ${e}</span>`;
   }
+}
+
+async function deleteRoutine(id) {
+  if (!confirm(`Διαγραφή ρουτίνας #${id};`)) return;
+  await fetch(`/debug/routine/${id}`, {method:'DELETE'});
+  fetchData();
+}
+
+async function activateRoutine(id) {
+  if (!confirm(`Ενεργοποίηση ρουτίνας #${id};`)) return;
+  await fetch(`/debug/routine/${id}/activate`, {method:'POST'});
+  fetchData();
 }
 
 function startCountdown() {

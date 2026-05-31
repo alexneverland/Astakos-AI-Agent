@@ -713,20 +713,19 @@ async def debug_runtime():
                 "timeout_in_min": round(max(0, 30 - (elapsed or 0)), 1),
             })
 
-        # Routines in non-active states (TRIGGER_PENDING, DISMISSED, DECAYED, etc.)
+        # Routines in non-active states (LEARNED, TRIGGER_PENDING, DISMISSED, DECAYED, etc.)
         cursor.execute("""
-            SELECT id, event_name, state, confidence, last_notified_ts, notify_cooldown_hours
+            SELECT id, day_of_week, time_str, event_name, state, confidence
             FROM routines
-            WHERE state != 'active' AND state != 'archived' AND state != 'learned'
-            ORDER BY state
+            WHERE state != 'active' AND state != 'archived'
+            ORDER BY state, day_of_week, time_str
         """)
         for row in cursor.fetchall():
-            r_id, ev, state, conf, last_ts, cd_h = row
+            r_id, day, tstr, ev, state, conf = row
             cooldown_info.append({
-                "id": r_id, "event": ev, "state": state,
+                "id": r_id, "day": day, "time": tstr,
+                "event": ev, "state": state,
                 "confidence": round(conf or 0, 2),
-                "last_notified": last_ts,
-                "cooldown_hours": cd_h or 20.0,
             })
 
         # Stats
@@ -825,6 +824,34 @@ async def debug_replay(days: int = 2):
         return {"events": events, "count": len(events), "days": days}
     except Exception as e:
         return {"events": [], "error": str(e)}
+
+@server.delete("/debug/routine/{routine_id}")
+async def delete_routine(routine_id: int):
+    """Διαγράφει ρουτίνα από τη βάση."""
+    import sqlite3 as _sqlite3
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    try:
+        conn = _sqlite3.connect(db_path)
+        conn.execute("DELETE FROM routines WHERE id=?", (routine_id,))
+        conn.commit()
+        conn.close()
+        return {"ok": True, "deleted": routine_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@server.post("/debug/routine/{routine_id}/activate")
+async def activate_routine(routine_id: int):
+    """Κάνει LEARNED → ACTIVE μια ρουτίνα."""
+    import sqlite3 as _sqlite3
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    try:
+        conn = _sqlite3.connect(db_path)
+        conn.execute("UPDATE routines SET state='active' WHERE id=?", (routine_id,))
+        conn.commit()
+        conn.close()
+        return {"ok": True, "activated": routine_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 @server.get("/debug")
 async def debug_panel():
