@@ -52,6 +52,8 @@ pending_exec_command = None
 # Pending photo: αποθηκεύει ανάλυση φωτογραφίας που έφτασε χωρίς caption, για να συνδυαστεί με το επόμενο μήνυμα
 pending_photo_lock = threading.Lock()
 pending_photo      = None   # {analysis, filename, path, timestamp}
+# Voice mode toggle: όταν True, ΟΛΕΣ οι απαντήσεις είναι φωνητικές ακόμα και αν γράφεις
+voice_mode_enabled = False
 # Scheduler reference (set in __main__, used by /status command)
 astakos_scheduler = None
 # ── Rate Limiting ─────────────────────────────────────────────
@@ -213,20 +215,21 @@ def handle_voice(voice_obj: dict, chat_id: str):
 
         print(f"\033[96m[Voice]: Ανάλυση ήχου...\033[0m")
 
-        audio_part = {
-            "inline_data": {
-                "mime_type": "audio/ogg",
-                "data": audio_data
-            }
-        }
-        
+        import base64 as _b64
+        import vertexai
+        from vertexai.generative_models import GenerativeModel, Part
+        from core.brain import FAST_MODEL
+        vertexai.init(project=os.getenv("PROJECT_ID", "astakos-finall"), location=os.getenv("LOCATION", "global"))
+        stt_model = GenerativeModel(FAST_MODEL)
         prompt = "Είσαι ΑΠΟΚΛΕΙΣΤΙΚΑ εργαλείο Speech-to-Text. Μετέγραψε ΜΟΝΟ αυτό που ακούς, λέξη προς λέξη, χωρίς σχόλια ή απαντήσεις. Αν δεν ακούς τίποτα, γράψε: [ΣΙΩΠΗ]."
-        response = safe_gemini_call([prompt, audio_part])
-        ai_reply = response.text if response and response.text else "Δεν έβγαλα άκρη."
+        audio_part = Part.from_data(data=audio_data, mime_type="audio/ogg")
+        stt_response = stt_model.generate_content([prompt, audio_part])
+        ai_reply = stt_response.text.strip() if stt_response and stt_response.text else "Δεν έβγαλα άκρη."
 
         print(f"\033[92m[Voice AI]: {ai_reply}\033[0m")
-        # Στέλνουμε το flag [ΦΩΝΗΤΙΚΟ] για να ξέρει η handle_message να απαντήσει με ήχο
-        handle_message(f"[ΦΩΝΗΤΙΚΟ]: {ai_reply}", chat_id)
+        # Στέλνουμε το flag [ΦΩΝΗΤΙΚΟ] + [VOICE_INPUT] για να ξέρει η handle_message να απαντήσει με ήχο
+        # και ο Αστακός ότι το μήνυμα ήρθε από φωνή (να απαντά πιο σύντομα και καθομιλούμενα)
+        handle_message(f"[ΦΩΝΗΤΙΚΟ]: [VOICE_INPUT] {ai_reply}", chat_id)
 
     except Exception as e:
         print(f"\033[91m[Voice Error]: {e}\033[0m")
@@ -460,11 +463,16 @@ def handle_message(user_text: str, chat_id: str):
     from tools.telegram import send_telegram_voice, send_telegram_msg
     import re
 
-    # 1. Ελέγχουμε αν ζητήθηκε φωνή (από ηχητικό ή /voice)
-    is_voice_mode = "[ΦΩΝΗΤΙΚΟ]" in user_text or "[VOICE_MESSAGE]" in user_text or user_text.lower().startswith("/voice")
-    
+    # 1. Ελέγχουμε αν ζητήθηκε φωνή (από ηχητικό, /voice εντολή, ή global toggle)
+    is_voice_mode = "[ΦΩΝΗΤΙΚΟ]" in user_text or "[VOICE_MESSAGE]" in user_text or voice_mode_enabled
+    is_voice_input = "[VOICE_INPUT]" in user_text  # το μήνυμα ήρθε από φωνή
+
     # 2. Καθαρίζουμε τα tags πριν πάνε στον εγκέφαλο
     clean_user_text = user_text.replace("/voice", "").replace("[ΦΩΝΗΤΙΚΟ]:", "").replace("[VOICE_MESSAGE]:", "").strip()
+    # Αν είναι voice input, κρατάμε το hint για τον Αστακό αλλά αφαιρούμε το tag
+    if is_voice_input:
+        clean_user_text = clean_user_text.replace("[VOICE_INPUT]", "").strip()
+        clean_user_text = f"[Φωνητικό μήνυμα — απάντησε σύντομα και καθομιλούμενα]: {clean_user_text}"
     if not clean_user_text: 
         clean_user_text = "Γεια σου Αστακέ"
     # ── ROUTINE FEEDBACK LOOP ──
@@ -586,7 +594,8 @@ def handle_message(user_text: str, chat_id: str):
                 
                 if final_ai_response:
                     if is_voice_mode:
-                        send_telegram_voice(final_ai_response) # [FIX]: Κάνει TTS εσωτερικά το εργαλείο σου!
+                        import asyncio
+                        asyncio.run(send_telegram_voice(final_ai_response))
                     else:
                         send_telegram_msg(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
                 
@@ -598,7 +607,8 @@ def handle_message(user_text: str, chat_id: str):
             else:
                 # Κανονική Ροή (Χωρίς Έγγραφα)
                 if is_voice_mode:
-                    send_telegram_voice(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
+                    import asyncio
+                    asyncio.run(send_telegram_voice(final_ai_response))
                 else:
                     send_telegram_msg(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
             # Κρατάμε context για επόμενο μήνυμα
@@ -734,6 +744,7 @@ def handle_location(msg, live_update=False):
 
 def run_polling():
     """Long-polling loop — διαβάζει updates από το Telegram API."""
+    global voice_mode_enabled
     if not TELEGRAM_TOKEN:
         print("\033[91m[TelegramBot]: Λείπει το TELEGRAM_TOKEN!\033[0m")
         return
@@ -863,10 +874,12 @@ def run_polling():
                     )
                     continue
                 if cmd == "/help":
+                    voice_status = "🔊 ON" if voice_mode_enabled else "✍️ OFF"
                     send_telegram_msg(
                         "🦞 *Αστακός — Εντολές*\n\n"
                         "/status — Κατάσταση scheduler & ενεργών jobs\n"
-                        "/nutrition — Ανάλυση διατροφικής αξίας \\(στείλε φωτό πρώτα\\)\n"
+                        "/nutrition — Ανάλυση προϊόντος \\(στείλε φωτό πρώτα\\)\n"
+                        f"/voice — Toggle φωνητικές απαντήσεις \\(τώρα: {voice_status}\\)\n"
                         "/pause — Παύση υπενθυμίσεων\n"
                         "/mute — Σίγαση proactive μηνυμάτων\n"
                         "/resume — Επαναφορά όλων \\(pause/mute/sleep\\)\n"
@@ -881,6 +894,14 @@ def run_polling():
                         send_telegram_msg(astakos_scheduler.status())
                     else:
                         send_telegram_msg("⚠️ Scheduler δεν έχει εκκινήσει ακόμα.")
+                    continue
+
+                if cmd == "/voice":
+                    voice_mode_enabled = not voice_mode_enabled
+                    if voice_mode_enabled:
+                        send_telegram_msg("🔊 *Voice mode ON* — Θα απαντάω με φωνητικά ακόμα και αν γράφεις.")
+                    else:
+                        send_telegram_msg("✍️ *Voice mode OFF* — Πίσω σε γραπτά μηνύματα.")
                     continue
 
                 if user_text.lower() == "/nutrition":

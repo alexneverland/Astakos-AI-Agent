@@ -80,7 +80,7 @@ async def send_telegram_voice(text: str):
 
         # edge-tts — ίδια φωνή με το Web UI
         voice = "el-GR-NestorasNeural"
-        communicate = edge_tts.Communicate(clean_text, voice, rate="-10%", volume="+10%")
+        communicate = edge_tts.Communicate(clean_text, voice, rate="+15%", volume="+10%")
         
         audio_buffer = io.BytesIO()
         async for chunk in communicate.stream():
