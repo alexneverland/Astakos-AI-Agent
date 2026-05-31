@@ -870,6 +870,7 @@ def run_polling():
                     continue
 
                 if user_text.lower() == "/nutrition":
+                    global pending_photo
                     with pending_photo_lock:
                         p = pending_photo if (pending_photo and (time.time() - pending_photo["timestamp"]) < 30) else None
                         if p:
