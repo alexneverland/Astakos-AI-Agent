@@ -8,6 +8,8 @@
 import json
 import os
 import re
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from collections import defaultdict
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
