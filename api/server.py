@@ -853,6 +853,31 @@ async def activate_routine(routine_id: int):
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+@server.patch("/debug/routine/{routine_id}")
+async def edit_routine(routine_id: int, request: Request):
+    """Επεξεργασία day/time/event_name μιας ρουτίνας."""
+    import sqlite3 as _sqlite3
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    try:
+        body = await request.json()
+        day   = body.get("day")
+        time  = body.get("time")
+        event = body.get("event")
+        if not any([day, time, event]):
+            return {"ok": False, "error": "Δεν δόθηκαν πεδία προς ενημέρωση"}
+        conn = _sqlite3.connect(db_path)
+        if day:
+            conn.execute("UPDATE routines SET day_of_week=? WHERE id=?", (day, routine_id))
+        if time:
+            conn.execute("UPDATE routines SET time_str=? WHERE id=?", (time, routine_id))
+        if event:
+            conn.execute("UPDATE routines SET event_name=? WHERE id=?", (event, routine_id))
+        conn.commit()
+        conn.close()
+        return {"ok": True, "updated": routine_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @server.get("/debug")
 async def debug_panel():
     """Observability HTML dashboard — auto-refresh every 5s."""
