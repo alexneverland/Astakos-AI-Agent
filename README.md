@@ -51,6 +51,9 @@ It's not a chatbot wrapper. It's a full multi-agent system built on LangGraph wi
 | 🛡 **Anti-Spam Intelligence** | Adaptive cooldown: 20h → 40h → 72h on repeated ignores. Batch notifications for multiple routines |
 | 🧩 **Formal Event Bus** | Pub/sub via `core/event_bus.py` — `routine_triggered`, `routine_confirmed`, `session_ended` and more |
 | 📡 **Multimodal Interfaces** | Web UI + Telegram Bot with image, voice & document processing |
+| 🎤 **Voice I/O** | STT via Vertex AI Gemini + TTS via edge-tts (el-GR-NestorasNeural) — mirror mode: voice in → voice out |
+| 🔬 **Product Analyzer** | `/nutrition` — universal label scanner for food, cosmetics, household products. Score 1-10 + kids note |
+| 📸 **Smart Photo Pending** | Send photo → 30s window to add caption or `/nutrition`. No double messages, full history context |
 | 🔀 **Dual Channel Memory** | Shared long-term memory + isolated per-channel session history (Telegram / Web) |
 | 📝 **Observability Dashboard** | `/debug/runtime` — scheduler heartbeat, job health, fail counts, pending confirmations |
 | 🔔 **Human Override Commands** | `/pause` `/mute` `/sleep N` `/resume` `/status` — persisted across restarts |
@@ -139,6 +142,7 @@ astakos/
 │   ├── recipe_expert.py
 │   ├── search_ferries.py
 │   ├── search_flights.py
+│   ├── nutrition_analyzer.py # Universal product label analyzer (Vision LLM)
 │   └── linkedin_state_manager.py
 ├── 📁 clients/
 │   └── telegram_bot.py       # Telegram Bot — polling, handlers, scheduler
@@ -182,6 +186,11 @@ astakos/
 | `/sleep N` | Sleep for N hours (pause everything) |
 | `/resume` | Clear all overrides |
 | `/status` | Show scheduler status, job health, queue size |
+| `/voice` | Toggle voice reply mode ON/OFF (text in → voice out) |
+| `/nutrition` | Analyze last photo as product label (food / cosmetic / household) |
+| `/confirm <cmd>` | Execute a shell command with confirmation step |
+| `/end` | Close session, run memory summarizer, clear working memory |
+| `/help` | Show all commands with current voice mode status |
 
 All state is persisted to `scheduler_state.json` and restored on restart.
 
@@ -243,11 +252,14 @@ open http://localhost:8000/debug/runtime
 
 ## 🗺 Roadmap
 
+- [x] Voice I/O — STT + TTS with Greek Neural voice, mirror mode & `/voice` toggle
+- [x] Universal product analyzer (`/nutrition`) via Vision LLM
+- [x] Smart photo pending system (30s window, history context, no double messages)
+- [x] Document reading on upload — instant summary + ask to save to memory
 - [ ] Cross-channel awareness (Telegram ↔ Web context sharing)
 - [ ] Action Approval Levels (auto / confirm / deny per tool)
 - [ ] Analytics dashboard UI in Web interface
 - [ ] Plugin system for third-party skill scripts
-- [ ] Voice-first mode (always-on STT via Whisper)
 
 ---
 
