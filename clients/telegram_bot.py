@@ -862,6 +862,20 @@ def run_polling():
                         f"⚠️ *Επιβεβαίωση απαιτείται:*\n`{cmd_to_confirm}`\n\nΘέλεις να εκτελεστεί; (ναι/όχι)"
                     )
                     continue
+                if cmd == "/help":
+                    send_telegram_msg(
+                        "🦞 *Αστακός — Εντολές*\n\n"
+                        "/status — Κατάσταση scheduler & ενεργών jobs\n"
+                        "/nutrition — Ανάλυση διατροφικής αξίας \\(στείλε φωτό πρώτα\\)\n"
+                        "/pause — Παύση υπενθυμίσεων\n"
+                        "/mute — Σίγαση proactive μηνυμάτων\n"
+                        "/resume — Επαναφορά όλων \\(pause/mute/sleep\\)\n"
+                        "/sleep \\[ώρες\\] — Ησυχία για Χ ώρες \\(π\\.χ\\. /sleep 8\\)\n"
+                        "/confirm \\[εντολή\\] — Εκτέλεση εντολής με επιβεβαίωση\n"
+                        "/end — Τέλος session & περίληψη"
+                    )
+                    continue
+
                 if cmd == "/status":
                     if astakos_scheduler:
                         send_telegram_msg(astakos_scheduler.status())
