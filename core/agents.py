@@ -257,7 +257,7 @@ def chat_agent_node(state: AgentState):
         get_current_location, control_spotify,
         search_memory, save_to_memory, retrieve_photo, archive_file, duckduckgo_search,
         recipe_expert, log_meal, relay_local_payload, learn_routine, get_routines, search_supermarket_prices,
-        read_local_file
+        read_local_file, generate_image_tool
     ]
     
     response = llm.bind_tools(chat_tools).invoke(final_messages)
