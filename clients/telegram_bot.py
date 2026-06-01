@@ -539,7 +539,24 @@ def handle_message(user_text: str, chat_id: str):
         yes_words = ["ναι", "yes", "οκ", "ok", "ισχύει", "ισχυει", "σωστά", "σωστα"]
         no_words  = ["όχι", "οχι", "no", "σταμάτα", "σταματα", "διέγραψε", "διεγραψε", "βγάλτο", "βγαλτο"]
 
-        if any(w in text_words for w in yes_words):
+        # Implicit confirmation: αν το μήνυμα περιέχει λέξη από την ρουτίνα + action word
+        # π.χ. "θα πάμε πάρκο" → confirm ρουτίνα πάρκου
+        action_words = ["πάμε", "πηγαίνουμε", "φεύγουμε", "ξεκινάμε", "πάω", "θα πάμε",
+                        "θα πάω", "πήγαμε", "ήρθαμε", "φτάσαμε", "είμαστε", "ξεκίνησα",
+                        "ξεκίνησε", "αρχίζω", "έγινε", "έτοιμος", "τελειώσαμε", "went",
+                        "going", "done", "finished", "started"]
+        implicit_confirmed = False
+        if any(w in text_check for w in action_words):
+            for rid, rdata in pending_routine_confirmations.items():
+                event_name = rdata.get("event", "") if isinstance(rdata, dict) else str(rdata)
+                # Ελέγχουμε αν κάποια λέξη του event_name υπάρχει στο μήνυμα
+                event_words = [w.lower() for w in event_name.split() if len(w) > 3]
+                if any(ew in text_check for ew in event_words):
+                    implicit_confirmed = True
+                    print(f"🔍 [Routine Implicit Confirm]: '{text_check[:40]}' → '{event_name}'")
+                    break
+
+        if any(w in text_words for w in yes_words) or implicit_confirmed:
             from memory.routine_db import confirm_routine, mark_routine_responded, clear_pending_confirmations
             for rid in list(pending_routine_confirmations.keys()):
                 confirm_routine(rid)
