@@ -470,7 +470,12 @@ def mark_routine_notified(routine_id: int):
 
 def mark_routine_ignored(routine_id: int):
     """Timeout (όχι απόρριψη): TRIGGER_PENDING → IGNORED → ACTIVE + διπλασιασμός cooldown."""
-    validate_transition(get_routine_state(routine_id), RoutineState.IGNORED)
+    current = get_routine_state(routine_id)
+    if current == RoutineState.ACTIVE:
+        # Ήδη confirmed από τον χρήστη — δεν χρειάζεται ignore
+        remove_pending_confirmation(routine_id)
+        return
+    validate_transition(current, RoutineState.IGNORED)
     validate_transition(RoutineState.IGNORED, RoutineState.ACTIVE)
     conn   = get_connection()
     cursor = conn.cursor()
