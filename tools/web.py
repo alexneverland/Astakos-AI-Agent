@@ -341,6 +341,28 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
         except:
             pass
 
+    # ── AUTO-CONFIRM pending routines ──────────────────────────────
+    # Αν υπάρχει TRIGGER_PENDING routine (π.χ. "πρωινό μήνυμα Σοφία"),
+    # το επιβεβαιώνουμε αυτόματα μετά από επιτυχή αποστολή.
+    try:
+        from memory.routine_db import get_connection as _rdb_conn, confirm_routine, \
+            mark_routine_responded, remove_pending_confirmation, clear_pending_confirmations
+        _conn = _rdb_conn()
+        _rows = _conn.execute(
+            "SELECT id, event_name FROM routines WHERE state='trigger_pending'"
+        ).fetchall()
+        _conn.close()
+        for _rid, _ev in _rows:
+            try:
+                confirm_routine(_rid)
+                mark_routine_responded(_rid)
+                remove_pending_confirmation(_rid)
+                print(f"✅ [Messenger Auto-Confirm]: routine #{_rid} ('{_ev}') → active")
+            except Exception as _ce:
+                print(f"⚠️ [Messenger Auto-Confirm]: #{_rid} → {_ce}")
+    except Exception as _ae:
+        print(f"⚠️ [Messenger Auto-Confirm skipped]: {_ae}")
+
     return f"✅ Το μήνυμα στάλθηκε στον/στη {target_name}!"
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
@@ -604,33 +626,4 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
 
             lines.append(
                 f"{i}. <b>{name}</b>{price_str}\n"
-                f"   {rating_str}{type_str}{hours_info}\n"
-                f"   📌 {address}\n"
-                f"{contact_str}"
-                f"{services_str}"
-                f"{review_str}"
-                f"   🗺️ <a href='{maps_url}'>Άνοιγμα στο Google Maps</a>\n"
-            )
-
-        return "\n".join(lines)
-
-    except Exception as e:
-        return f"❌ Σφάλμα: {str(e)}"
-
-@tool
-def get_navigation_info(destination: str) -> str:
-    """Παρέχει κλικαριστά links για χάρτη και πλοήγηση από Piston 7."""
-    home_base = "Piston 7, Thessaloniki"
-    dest_clean = urllib.parse.quote_plus(destination)
-    home_clean = urllib.parse.quote_plus(home_base)
-
-    search_url = f"https://www.google.com/maps/search/?api=1&query={dest_clean}"
-    directions_url = f"https://www.google.com/maps/dir/?api=1&origin={home_clean}&destination={dest_clean}"
-
-    return (
-        f"📍 <b>Τοποθεσία:</b> {destination}\n\n"
-        f"🔗 <a href='{search_url}'>Προβολή στον Χάρτη</a>\n"
-        f"🌐 {search_url}\n\n"
-        f"🚗 <a href='{directions_url}'>Οδηγίες πλοήγησης από Piston 7</a>\n"
-        f"🛣️ {directions_url}"
-    )
+                f"   {rating_str}{type_str}{hours_info}

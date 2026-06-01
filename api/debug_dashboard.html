@@ -214,7 +214,10 @@ function render(d) {
         <td>${stateBadge(r.state)}</td>
         <td class="${r.confidence<0.1?'err':r.confidence<0.5?'warn':'ok'}">${r.confidence}</td>
         <td style="white-space:nowrap">
-          <button onclick="activateRoutine(${r.id})" style="background:#2a7a2a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px">✅ Activate</button>
+          ${r.state==='trigger_pending'
+            ? `<button onclick="confirmRoutine(${r.id})" style="background:#1a5a3a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px">✅ Confirm</button>`
+            : `<button onclick="activateRoutine(${r.id})" style="background:#2a7a2a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px">▶️ Activate</button>`
+          }
           <button onclick="toggleEdit(${r.id})" style="background:#1a3a5a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px">✏️ Edit</button>
           <button onclick="deleteRoutine(${r.id})" style="background:#7a2a2a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer">🗑️ Delete</button>
         </td>
@@ -299,9 +302,17 @@ async function deleteRoutine(id) {
   fetchData();
 }
 
+async function confirmRoutine(id) {
+  if (!confirm(`Force-confirm ρουτίνα #${id} → ACTIVE;`)) return;
+  const r = await fetch(`/debug/routine/${id}/confirm`, {method:'POST'});
+  const j = await r.json();
+  if (!j.ok) alert(`Σφάλμα: ${j.error}`);
+  fetchData();
+}
+
 async function activateRoutine(id) {
   if (!confirm(`Ενεργοποίηση ρουτίνας #${id};`)) return;
-  await fetch(`/debug/routine/${id}/activate`, {method:'POST'});
+  await fetch(`/debug/routine/${id}/state`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({state:'active'})});
   fetchData();
 }
 
@@ -324,27 +335,3 @@ async function saveEdit(id) {
     body: JSON.stringify(body)
   });
   const data = await res.json();
-  if (data.ok) { fetchData(); }
-  else { alert(`Σφάλμα: ${data.error}`); }
-}
-
-function startCountdown() {
-  cancelAnimationFrame(rafId);
-  const bar = document.getElementById('refresh-bar');
-  const start = performance.now();
-  function tick(now) {
-    const p = Math.min(100, (now-start)/REFRESH*100);
-    bar.style.width = p+'%';
-    if (now-start < REFRESH) rafId = requestAnimationFrame(tick);
-    else { fetchData(); startCountdown(); }
-  }
-  rafId = requestAnimationFrame(tick);
-}
-
-fetchData();
-fetchTimeline();
-setInterval(fetchTimeline, 30000);
-startCountdown();
-</script>
-</body>
-</html>
