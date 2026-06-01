@@ -901,4 +901,96 @@ async def delete_routine(routine_id: int, _=Depends(require_token)):
         conn.close()
         return {"ok": True, "deleted": routine_id}
     except Exception as e:
-        return {"ok": False, "error": str(e
+        return {"ok": False, "error": str(e)}
+
+@server.post("/debug/routine/{routine_id}/confirm")
+async def force_confirm_routine(routine_id: int, _=Depends(require_token)):
+    """Force-confirm μια stuck TRIGGER_PENDING ρουτίνα → ACTIVE."""
+    try:
+        from memory.routine_db import confirm_routine, mark_routine_responded, \
+            remove_pending_confirmation, get_routine_state
+        from core.routine_state import RoutineState
+        state = get_routine_state(routine_id)
+        if state != RoutineState.TRIGGER_PENDING:
+            return {"ok": False, "error": f"Routine #{routine_id} is '{state.value}', not trigger_pending"}
+        confirm_routine(routine_id)
+        mark_routine_responded(routine_id)
+        remove_pending_confirmation(routine_id)
+        return {"ok": True, "confirmed": routine_id, "new_state": "active"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@server.patch("/debug/routine/{routine_id}/state")
+async def force_routine_state(routine_id: int, request: Request, _=Depends(require_token)):
+    """Force state αλλαγή για debug — π.χ. {\"state\": \"active\"}."""
+    import sqlite3 as _sqlite3
+    body = await request.json()
+    new_state = body.get("state", "").strip().lower()
+    allowed = {"active", "learned", "decayed", "archived"}
+    if new_state not in allowed:
+        return {"ok": False, "error": f"Allowed states: {allowed}"}
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    try:
+        conn = _sqlite3.connect(db_path)
+        is_active = 1 if new_state == "active" else 0
+        conn.execute(
+            "UPDATE routines SET state=?, is_active=? WHERE id=?",
+            (new_state, is_active, routine_id)
+        )
+        conn.commit()
+        conn.close()
+        return {"ok": True, "routine_id": routine_id, "new_state": new_state}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@server.post("/debug/routine/{routine_id}/activate")
+async def activate_routine(routine_id: int, _=Depends(require_token)):
+    """Κάνει LEARNED → ACTIVE μια ρουτίνα."""
+    import sqlite3 as _sqlite3
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    try:
+        conn = _sqlite3.connect(db_path)
+        conn.execute("UPDATE routines SET state='active' WHERE id=?", (routine_id,))
+        conn.commit()
+        conn.close()
+        return {"ok": True, "activated": routine_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@server.patch("/debug/routine/{routine_id}")
+async def edit_routine(routine_id: int, request: Request, _=Depends(require_token)):
+    """Επεξεργασία day/time/event_name μιας ρουτίνας."""
+    import sqlite3 as _sqlite3
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    try:
+        body = await request.json()
+        day   = body.get("day")
+        time  = body.get("time")
+        event = body.get("event")
+        if not any([day, time, event]):
+            return {"ok": False, "error": "Δεν δόθηκαν πεδία προς ενημέρωση"}
+        conn = _sqlite3.connect(db_path)
+        if day:
+            conn.execute("UPDATE routines SET day_of_week=? WHERE id=?", (day, routine_id))
+        if time:
+            conn.execute("UPDATE routines SET time_str=? WHERE id=?", (time, routine_id))
+        if event:
+            conn.execute("UPDATE routines SET event_name=? WHERE id=?", (event, routine_id))
+        conn.commit()
+        conn.close()
+        return {"ok": True, "updated": routine_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@server.get("/debug")
+async def debug_panel():
+    """Observability HTML dashboard — auto-refresh every 5s."""
+    from fastapi.responses import HTMLResponse
+    _dir = os.path.dirname(os.path.abspath(__file__))
+    html_path = os.path.join(_dir, "debug_dashboard.html")
+    try:
+        with open(html_path, "r", encoding="utf-8") as f:
+            html = f.read()
+    except FileNotFoundError:
+        html = "<h1>debug_dashboard.html not found</h1>"
+    return HTMLResponse(content=html)

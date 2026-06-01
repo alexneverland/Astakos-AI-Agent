@@ -626,4 +626,33 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
 
             lines.append(
                 f"{i}. <b>{name}</b>{price_str}\n"
-                f"   {rating_str}{type_str}{hours_info}
+                f"   {rating_str}{type_str}{hours_info}\n"
+                f"   📌 {address}\n"
+                f"{contact_str}"
+                f"{services_str}"
+                f"{review_str}"
+                f"   🗺️ <a href='{maps_url}'>Άνοιγμα στο Google Maps</a>\n"
+            )
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"❌ Σφάλμα: {str(e)}"
+
+@tool
+def get_navigation_info(destination: str) -> str:
+    """Παρέχει κλικαριστά links για χάρτη και πλοήγηση από Piston 7."""
+    home_base = "Piston 7, Thessaloniki"
+    dest_clean = urllib.parse.quote_plus(destination)
+    home_clean = urllib.parse.quote_plus(home_base)
+
+    search_url = f"https://www.google.com/maps/search/?api=1&query={dest_clean}"
+    directions_url = f"https://www.google.com/maps/dir/?api=1&origin={home_clean}&destination={dest_clean}"
+
+    return (
+        f"📍 <b>Τοποθεσία:</b> {destination}\n\n"
+        f"🔗 <a href='{search_url}'>Προβολή στον Χάρτη</a>\n"
+        f"🌐 {search_url}\n\n"
+        f"🚗 <a href='{directions_url}'>Οδηγίες πλοήγησης από Piston 7</a>\n"
+        f"🛣️ {directions_url}"
+    )

@@ -48,6 +48,31 @@ def send_telegram_msg(text: str):
         print(f"❌ Telegram Connection Error: {e}")
 
 
+async def send_telegram_photo(image_path: str, caption: str = ""):
+    """Στέλνει φωτογραφία στο Telegram από local path."""
+    import os
+    token   = TELEGRAM_TOKEN
+    chat_id = TELEGRAM_CHAT_ID
+    if not token or not chat_id or not os.path.exists(image_path):
+        print(f"⚠️ send_telegram_photo: αρχείο δεν βρέθηκε ή credentials λείπουν ({image_path})")
+        return
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    try:
+        with open(image_path, "rb") as f:
+            response = requests.post(
+                url,
+                data={"chat_id": chat_id, "caption": caption},
+                files={"photo": (os.path.basename(image_path), f, "image/jpeg")},
+                timeout=30
+            )
+        if response.status_code == 200:
+            print(f"✅ [Telegram Photo]: Εικόνα στάλθηκε ({os.path.basename(image_path)})")
+        else:
+            print(f"⚠️ [Telegram Photo]: {response.status_code} — {response.text[:120]}")
+    except Exception as e:
+        print(f"❌ [Telegram Photo Error]: {e}")
+
+
 async def send_telegram_voice(text: str):
     """
     [MASTRO-FIX]: Χρησιμοποιεί edge-tts αντί για gTTS.

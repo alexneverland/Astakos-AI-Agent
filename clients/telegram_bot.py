@@ -412,6 +412,61 @@ def _run_nutrition(image_path: str, chat_id: str):
         send_telegram_msg(f"❌ Σφάλμα nutrition analysis: {e}")
 
 
+def _run_story_maker(theme: str, characters: str, chat_id: str):
+    """Δημιουργεί παραμύθι + εικόνες και τα στέλνει στο Telegram."""
+    try:
+        from astakos_skills.story_maker import make_story
+        from tools.telegram import send_telegram_photo
+        result = make_story(theme, characters)
+
+        if result.get("error") or not result.get("story"):
+            send_telegram_msg(f"❌ {result.get('error', 'Αποτυχία δημιουργίας παραμυθιού')}")
+            return
+
+        # Στέλνουμε πρώτα το κείμενο (σε κομμάτια αν είναι μεγάλο)
+        story_text = f"📖 *Παραμύθι: {theme}*\n\n{result['story']}"
+        # Telegram limit: 4096 chars
+        max_len = 4000
+        chunks = [story_text[i:i+max_len] for i in range(0, len(story_text), max_len)]
+        for chunk in chunks:
+            send_telegram_msg(chunk)
+            time.sleep(0.5)
+
+        # Στέλνουμε τις εικόνες
+        images = result.get("images", [])
+        if images:
+            send_telegram_msg(f"🎨 *{len(images)} εικόνες από το παραμύθι:*")
+            for img_path in images:
+                if os.path.exists(img_path):
+                    try:
+                        import asyncio
+                        asyncio.run(send_telegram_photo(img_path))
+                        time.sleep(1)
+                    except Exception as img_e:
+                        print(f"⚠️ [StoryMaker] Αποτυχία αποστολής εικόνας: {img_e}")
+        else:
+            send_telegram_msg("⚠️ Οι εικόνες δεν δημιουργήθηκαν (Pollinations timeout).")
+
+        print(f"✅ [StoryMaker] Παραμύθι '{theme}' ολοκληρώθηκε.")
+
+        # Ενημερώνουμε τον agent με ΣΥΝΤΟΜΟ note — ώστε να ξέρει ότι έγραψε παραμύθι
+        # και να μη καλέσει search_memory αν ρωτήσει ο Λάζαρος για αυτό
+        char_note = f" με χαρακτήρες: {characters}" if characters else ""
+        img_note = f"{len(images)} εικόνες στάλθηκαν" if images else "εικόνες δεν δημιουργήθηκαν"
+        agent_note = (
+            f"[SYSTEM]: Μόλις έγραψα και έστειλα παραμύθι με θέμα '{theme}'{char_note}. "
+            f"{img_note}. Ο Λάζαρος το έχει ήδη στο Telegram."
+        )
+        threading.Thread(
+            target=handle_message,
+            args=(agent_note, chat_id),
+            daemon=True
+        ).start()
+    except Exception as e:
+        send_telegram_msg(f"❌ Σφάλμα story maker: {e}")
+        print(f"❌ [StoryMaker] {e}")
+
+
 def send_voice_reply(text, chat_id):
     """Μετατρέπει το κείμενο σε ομιλία και το στέλνει ως voice message."""
     try:
@@ -879,6 +934,8 @@ def run_polling():
                         "🦞 *Αστακός — Εντολές*\n\n"
                         "/status — Κατάσταση scheduler & ενεργών jobs\n"
                         "/nutrition — Ανάλυση προϊόντος \\(στείλε φωτό πρώτα\\)\n"
+                        "/story \\[θέμα\\] — Παραμύθι για τον Αλέξανδρο \\+ εικόνες\n"
+                        "             π\\.χ\\. /story δεινόσαυροι \\| Αλέξανδρος και Rex\n"
                         f"/voice — Toggle φωνητικές απαντήσεις \\(τώρα: {voice_status}\\)\n"
                         "/pause — Παύση υπενθυμίσεων\n"
                         "/mute — Σίγαση proactive μηνυμάτων\n"
@@ -926,6 +983,24 @@ def run_polling():
                     threading.Thread(
                         target=handle_end_session,
                         args=(chat_id,),
+                        daemon=True
+                    ).start()
+                    continue
+
+                if cmd.startswith("/story"):
+                    # /story [θέμα]  ή  /story [θέμα] | [χαρακτήρες]
+                    rest = user_text[len("/story"):].strip()
+                    if "|" in rest:
+                        theme_part, chars_part = rest.split("|", 1)
+                        story_theme = theme_part.strip()
+                        story_chars = chars_part.strip()
+                    else:
+                        story_theme = rest or "μαγική περιπέτεια"
+                        story_chars = ""
+                    send_telegram_msg(f"📖 Φτιάχνω παραμύθι για *{story_theme}*\\.\\.\\. \\(30\\-60\"\\)")
+                    threading.Thread(
+                        target=_run_story_maker,
+                        args=(story_theme, story_chars, chat_id),
                         daemon=True
                     ).start()
                     continue

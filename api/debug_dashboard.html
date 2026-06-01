@@ -335,3 +335,27 @@ async function saveEdit(id) {
     body: JSON.stringify(body)
   });
   const data = await res.json();
+  if (data.ok) { fetchData(); }
+  else { alert(`Σφάλμα: ${data.error}`); }
+}
+
+function startCountdown() {
+  cancelAnimationFrame(rafId);
+  const bar = document.getElementById('refresh-bar');
+  const start = performance.now();
+  function tick(now) {
+    const p = Math.min(100, (now-start)/REFRESH*100);
+    bar.style.width = p+'%';
+    if (now-start < REFRESH) rafId = requestAnimationFrame(tick);
+    else { fetchData(); startCountdown(); }
+  }
+  rafId = requestAnimationFrame(tick);
+}
+
+fetchData();
+fetchTimeline();
+setInterval(fetchTimeline, 30000);
+startCountdown();
+</script>
+</body>
+</html>
