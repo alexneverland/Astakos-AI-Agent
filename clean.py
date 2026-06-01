@@ -55,8 +55,6 @@ try:
     CHAT_HISTORY_FILE     = os.path.join(PROJECT_ROOT, "astakos_chat_history.json")
     TELEGRAM_HISTORY_FILE = os.path.join(PROJECT_ROOT, "astakos_telegram_history.json")
     CAPABILITIES_FILE     = os.path.join(PROJECT_ROOT, "astakos_capabilities.json")
-PHOTOS_INDEX_FILE     = os.path.join(PROJECT_ROOT, "astakos_photos_index.json")
-PHOTOS_DIR            = os.path.join(PROJECT_ROOT, "telegram_photos")
 except ImportError:
     CHAT_HISTORY_FILE     = os.path.join(PROJECT_ROOT, "astakos_chat_history.json")
     TELEGRAM_HISTORY_FILE = os.path.join(PROJECT_ROOT, "astakos_telegram_history.json")
@@ -64,6 +62,9 @@ except ImportError:
     SESSIONS_FILE       = os.path.join(PROJECT_ROOT, "astakos_sessions.json")
     WORKING_MEMORY_FILE = os.path.join(PROJECT_ROOT, "astakos_working_memory.json")
     PROFILE_FILE        = os.path.join(PROJECT_ROOT, "astakos_profile.json")
+
+PHOTOS_INDEX_FILE = os.path.join(PROJECT_ROOT, "astakos_photos_index.json")
+PHOTOS_DIR        = os.path.join(PROJECT_ROOT, "telegram_photos")
 
 # LLM loader (lazy, με fallback αν δεν φορτώσει)
 def _load_llm():
