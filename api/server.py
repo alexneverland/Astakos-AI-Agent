@@ -14,12 +14,14 @@ import asyncio
 import threading
 import sys
 import re
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi.staticfiles import StaticFiles
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from langchain_core.messages import HumanMessage, AIMessage
 from rich.console import Console
 from zoneinfo import ZoneInfo
@@ -46,6 +48,36 @@ shutdown_event  = threading.Event()
 astakos_queue   = queue.Queue()
 memory_lock     = threading.Lock()
 last_interaction_time = time.time()
+
+# ── Local Bearer Token Auth ───────────────────────────────────
+_TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".astakos_token")
+
+def _get_or_create_token() -> str:
+    """Φορτώνει ή παράγει ένα random local bearer token."""
+    if os.path.exists(_TOKEN_FILE):
+        with open(_TOKEN_FILE, "r") as f:
+            t = f.read().strip()
+            if t:
+                return t
+    t = secrets.token_hex(32)
+    with open(_TOKEN_FILE, "w") as f:
+        f.write(t)
+    print(f"\033[93m[Security]: Νέο local token δημιουργήθηκε → {_TOKEN_FILE}\033[0m")
+    return t
+
+LOCAL_TOKEN = _get_or_create_token()
+_bearer = HTTPBearer(auto_error=False)
+
+async def require_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer)
+):
+    """Dependency: ελέγχει το bearer token. Επιτρέπει πάντα από loopback."""
+    host = request.client.host if request.client else ""
+    if host in ("127.0.0.1", "::1", "localhost"):
+        return  # loopback always allowed (Web UI στον ίδιο υπολογιστή)
+    if not credentials or not secrets.compare_digest(credentials.credentials, LOCAL_TOKEN):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 # ── WebSocket log streaming ────────────────────────────────────
 active_websockets: list = []
@@ -258,10 +290,10 @@ avatars_dir = os.path.join(BASE_DIR, "avatars")
 os.makedirs(avatars_dir, exist_ok=True)
 server.mount("/avatars", StaticFiles(directory=avatars_dir), name="avatars")
 
-# Επίτρεψε στο Web UI (frontend) να μιλάει ελεύθερα με τον server
+# CORS — μόνο localhost (κανείς εξωτερικός δεν μπορεί να καλέσει τον server)
 server.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -274,7 +306,7 @@ server.add_middleware(
 # ────────────────────────────────────────────────────────────────
 # [MASTRO-FIX]: Προσθήκη του endpoint για το κουμπί του Web UI
 @server.post("/end_session")
-async def manual_session_save():
+async def manual_session_save(_=Depends(require_token)):
     """Επιτρέπει στο Web UI να ζητάει χειροκίνητη αρχειοθέτηση (Κουμπί)"""
     from memory.session_memory import _run_session_summary
     import threading
@@ -283,7 +315,7 @@ async def manual_session_save():
     threading.Thread(target=_run_session_summary, args=("web",), daemon=True).start()
     return JSONResponse({"status": "Η αρχειοθέτηση ξεκίνησε!"})
 @server.post("/chat")
-async def chat_endpoint(request: Request):
+async def chat_endpoint(request: Request, _=Depends(require_token)):
     global last_interaction_time
 
     body       = await request.json()
@@ -513,11 +545,16 @@ async def text_to_speech(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB limit
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf", ".docx", ".xlsx", ".xls", ".txt", ".csv", ".json"}
+
 @server.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(request: Request, file: UploadFile = File(...), _=Depends(require_token)):
     """Endpoint για ανέβασμα αρχείων (φωτογραφίες & έγγραφα) από το Web UI."""
     try:
         file_ext  = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
+        if file_ext not in ALLOWED_EXTENSIONS:
+            return JSONResponse({"status": "error", "message": f"Μη επιτρεπτός τύπος αρχείου: {file_ext}"}, status_code=400)
         filename  = f"web_{uuid.uuid4().hex}{file_ext}"
         image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
         doc_exts   = [".pdf", ".docx", ".xlsx", ".xls", ".txt", ".csv", ".json"]
@@ -529,6 +566,8 @@ async def upload_file(file: UploadFile = File(...)):
             target_dir = UPLOADS_DIR
         file_path = os.path.join(target_dir, filename)
         content = await file.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            return JSONResponse({"status": "error", "message": "Το αρχείο υπερβαίνει το όριο των 20 MB."}, status_code=413)
         with open(file_path, "wb") as buffer:
             buffer.write(content)
         print(f"\033[92m[Upload]: Αποθηκεύτηκε → {filename}\033[0m")
@@ -627,7 +666,7 @@ async def health():
 
 
 @server.get("/history")
-async def get_history():
+async def get_history(_=Depends(require_token)):
     """Δίνει το ιστορικό στο Web UI — διαβάζει από JSON για να επιβιώνει το F5/restart."""
     with chat_history_lock:
         history = _load_chat_history()
@@ -851,7 +890,7 @@ async def debug_replay(days: int = 2):
         return {"events": [], "error": str(e)}
 
 @server.delete("/debug/routine/{routine_id}")
-async def delete_routine(routine_id: int):
+async def delete_routine(routine_id: int, _=Depends(require_token)):
     """Διαγράφει ρουτίνα από τη βάση."""
     import sqlite3 as _sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
@@ -865,7 +904,7 @@ async def delete_routine(routine_id: int):
         return {"ok": False, "error": str(e)}
 
 @server.post("/debug/routine/{routine_id}/activate")
-async def activate_routine(routine_id: int):
+async def activate_routine(routine_id: int, _=Depends(require_token)):
     """Κάνει LEARNED → ACTIVE μια ρουτίνα."""
     import sqlite3 as _sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
@@ -879,7 +918,7 @@ async def activate_routine(routine_id: int):
         return {"ok": False, "error": str(e)}
 
 @server.patch("/debug/routine/{routine_id}")
-async def edit_routine(routine_id: int, request: Request):
+async def edit_routine(routine_id: int, request: Request, _=Depends(require_token)):
     """Επεξεργασία day/time/event_name μιας ρουτίνας."""
     import sqlite3 as _sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
