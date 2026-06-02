@@ -33,7 +33,7 @@ from tools.system import (
     set_local_reminder, set_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
-    mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, get_routines, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location,
+    mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, get_routines, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
 )
 from tools.web import (
     get_news, get_weather_forecast,
@@ -257,7 +257,7 @@ def chat_agent_node(state: AgentState):
         get_current_location, control_spotify,
         search_memory, save_to_memory, retrieve_photo, archive_file, duckduckgo_search,
         recipe_expert, log_meal, relay_local_payload, learn_routine, get_routines, search_supermarket_prices,
-        read_local_file, generate_image_tool
+        read_local_file, generate_image_tool, get_fit_summary
     ]
     
     response = llm.bind_tools(chat_tools).invoke(final_messages)

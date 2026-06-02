@@ -1544,6 +1544,20 @@ def control_spotify(
 
     except Exception as e:
         return f"⚠️ Spotify Error: {str(e)}. (Μήπως δεν έχεις ανοιχτή την εφαρμογή;)"
+
+@tool
+def get_fit_summary(days_ago: int = 1) -> str:
+    """
+    Επιστρέφει σύνοψη Google Fit για τον Λάζαρο.
+    days_ago=0 → σήμερα, days_ago=1 → χθες (default).
+    Περιλαμβάνει: βήματα, ύπνο (ώρες + deep/REM), καρδιακούς παλμούς.
+    """
+    try:
+        from astakos_skills.google_fit import get_daily_summary
+        return get_daily_summary(days_ago=days_ago)
+    except Exception as e:
+        return f"❌ Google Fit σφάλμα: {e}"
+
 all_tools = [
     search_memory, save_to_memory, delete_from_memory, retrieve_photo, update_pending_linkedin_post, process_and_clear_linkedin_post,
     set_local_reminder, set_reminder, manage_list,
@@ -1553,5 +1567,5 @@ all_tools = [
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
     search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
-    duckduckgo_search, run_terminal_command
+    duckduckgo_search, run_terminal_command, get_fit_summary
 ]

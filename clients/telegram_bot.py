@@ -1312,6 +1312,29 @@ def job_analytics_engine():
             )
     except Exception as e:
         print(f"[Analytics Job Error]: {e}")
+
+def job_morning_fit_briefing():
+    """Πρωινό Google Fit briefing — τρέχει μόνο 08:00–09:00, μία φορά."""
+    now_hour = datetime.now().hour
+    if now_hour != 8:
+        return
+    # Αποφυγή διπλής αποστολής — ελέγχουμε αν το στείλαμε ήδη σήμερα
+    flag_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".fit_briefing_sent")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if os.path.exists(flag_file):
+        with open(flag_file, "r") as f:
+            if f.read().strip() == today_str:
+                return
+    try:
+        from astakos_skills.google_fit import get_daily_summary
+        summary = get_daily_summary(days_ago=1)
+        send_telegram_msg(f"🌅 *Καλημέρα Μάστορα!*\n\n{summary}")
+        with open(flag_file, "w") as f:
+            f.write(today_str)
+        print(f"✅ [FitBriefing]: Πρωινό briefing στάλθηκε.")
+    except Exception as e:
+        print(f"⚠️ [FitBriefing]: {e}")
+
 # ────────────────────────────────────────────────────────────────
 # ASTAKOS SCHEDULER (Central Event Bus)
 # ────────────────────────────────────────────────────────────────
@@ -1491,6 +1514,7 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_check_routines,  interval_seconds=60,    name="routines")
     astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive")
     astakos_scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics")
+    astakos_scheduler.register(job_morning_fit_briefing, interval_seconds=3600, name="fit_briefing")
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
     # Φόρτωσε το ιστορικό από τον δίσκο
 
