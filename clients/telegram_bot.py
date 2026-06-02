@@ -623,6 +623,19 @@ def handle_message(user_text: str, chat_id: str):
     final_ai_response = ""
     handling_agent = "Chat_Agent"
 
+    # ── Typing indicator — δείχνει "ο Αστακός πληκτρολογεί..." ──
+    _typing_active = {"on": True}
+    def _typing_loop():
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendChatAction"
+        while _typing_active["on"]:
+            try:
+                requests.post(url, json={"chat_id": chat_id, "action": "typing"}, timeout=5)
+            except Exception:
+                pass
+            time.sleep(4)  # Telegram δείχνει typing για 5s — ανανεώνουμε κάθε 4s
+    typing_thread = threading.Thread(target=_typing_loop, daemon=True)
+    typing_thread.start()
+
     try:
         # ── Context: τελευταία exchanges με timestamps ────────────
         now_ts = datetime.now().strftime("%H:%M")
@@ -684,6 +697,7 @@ def handle_message(user_text: str, chat_id: str):
                 else:
                     send_telegram_msg(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
             # Κρατάμε context για επόμενο μήνυμα
+            _typing_active["on"] = False  # Σταματάμε το typing
             _append_to_analytics_log("user", clean_user_text)
             _append_to_analytics_log("ai", final_ai_response)
             # Φωτογραφίες
@@ -703,9 +717,9 @@ def handle_message(user_text: str, chat_id: str):
             enqueue_task(update_capabilities_from_exchange, user_text, final_ai_response, handling_agent)
 
     except Exception as e:
+        _typing_active["on"] = False  # Σταματάμε το typing και σε error
         import traceback
         traceback.print_exc()
-        # [FIX]: ΕΔΩ ΗΤΑΝ ΤΟ ΛΑΘΟΣ - Αφαιρέθηκε το chat_id
         send_telegram_msg(f"❌ Σφάλμα: {str(e)}")
 
 def _send_photo_to_telegram(photo_path: str, chat_id: str):
