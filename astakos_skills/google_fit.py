@@ -205,4 +205,17 @@ def get_daily_summary(days_ago: int = 1) -> str:
 
 
 if __name__ == "__main__":
-    print(get_daily_summary(days_ago=1))
+    import sys
+    # Χρήση: python google_fit.py [steps|sleep|heart|summary] [days_ago]
+    # Π.χ.: python google_fit.py steps 0  → βήματα σήμερα
+    #        python google_fit.py sleep 1  → ύπνος χθες
+    cmd      = sys.argv[1] if len(sys.argv) > 1 else "summary"
+    days_ago = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    if cmd == "steps":
+        print(f"Βήματα: {get_steps(days_ago)}")
+    elif cmd == "sleep":
+        print(get_sleep(days_ago))
+    elif cmd == "heart":
+        print(get_heart_rate(days_ago))
+    else:
+        print(get_daily_summary(days_ago))
