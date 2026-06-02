@@ -23,7 +23,7 @@ def run():
         start()
         dirs = [d for d in WATCH_DIRS if os.path.exists(d)]
         for changes in watch(*dirs):
-            py_changes = [c for c in changes if str(c[1]).endswith(".py")]
+            py_changes = [c for c in changes if str(c[1]).endswith(".py") or str(c[1]).endswith("prompts.md")]
             if py_changes:
                 for _, path in py_changes:
                     print(f"\033[93m[Watchdog]: Αλλαγή εντοπίστηκε → {path}\033[0m")
