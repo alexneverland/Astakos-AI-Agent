@@ -700,38 +700,97 @@ def generate_image_tool(prompt: str) -> str:
     except Exception as e:
         return f"❌ Σφάλμα: {str(e)}"
 @tool
-def drive_manager(action: str = "list_files", file_id: str = None, local_path: str = None,
-                  folder_id: str = "12YrIZ3uAQWmmwIlEkIkDf-4gcz2P8Ktv") -> str:
-    """Διαχειρίζεται το Google Drive.
-    Actions: 'list_files', 'download' (χρειάζεται file_id), 'upload' (χρειάζεται local_path)."""
+def drive_manager(
+    action: str = "list_files",
+    file_id: str = None,
+    local_path: str = None,
+    folder_id: str = "12YrIZ3uAQWmmwIlEkIkDf-4gcz2P8Ktv",
+    query: str = None,
+    new_name: str = None,
+    target_folder_id: str = None,
+    share_email: str = None,
+    share_role: str = "reader",
+) -> str:
+    """Διαχειρίζεται το Google Drive του Λάζαρου.
+
+    Actions:
+      'list_files'   — Λίστα αρχείων σε folder (default: root astakos folder)
+      'search'       — Αναζήτηση με όνομα ή λέξη-κλειδί (χρειάζεται query=)
+      'download'     — Κατέβασμα αρχείου (χρειάζεται file_id=)
+      'upload'       — Ανέβασμα αρχείου (χρειάζεται local_path=)
+      'delete'       — Διαγραφή αρχείου (χρειάζεται file_id=)
+      'rename'       — Μετονομασία (χρειάζεται file_id= + new_name=)
+      'move'         — Μετακίνηση σε άλλο φάκελο (χρειάζεται file_id= + target_folder_id=)
+      'share'        — Κοινή χρήση (χρειάζεται file_id= + share_email= + share_role='reader'/'writer')
+      'create_folder'— Δημιουργία φακέλου (χρειάζεται new_name=, προαιρετικά folder_id= για parent)
+      'info'         — Πληροφορίες αρχείου (χρειάζεται file_id=)
+    """
     try:
         from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
         import io
 
-        print(f"\033[93m[Drive]: Ενέργεια {action}...\033[0m")
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+        print(f"\033[93m[Drive]: Ενέργεια '{action}'...\033[0m")
+        creds   = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
         service = build('drive', 'v3', credentials=creds)
 
+        # ── LIST FILES ───────────────────────────────────────────
         if action == "list_files":
             results = service.files().list(
                 q=f"'{folder_id}' in parents and trashed=false",
-                fields="files(id, name, mimeType)"
+                fields="files(id, name, mimeType, size, modifiedTime)",
+                orderBy="modifiedTime desc",
+                pageSize=50
             ).execute()
             items = results.get('files', [])
             if not items:
-                return "Ο φάκελος είναι άδειος."
-            output = "📁 Αρχεία στο Drive:\n"
+                return "📁 Ο φάκελος είναι άδειος."
+            lines = ["📁 Αρχεία στο Drive:\n"]
             for i in items:
-                output += f"- {i['name']} (ID: {i['id']}) | Type: {i['mimeType']}\n"
-            return output
+                size_kb = round(int(i.get('size', 0)) / 1024, 1) if i.get('size') else "—"
+                mod = i.get('modifiedTime', '')[:10]
+                lines.append(f"• {i['name']} | ID: `{i['id']}` | {size_kb} KB | {mod}")
+            return "\n".join(lines)
 
-        elif action == "download" and file_id:
-            file_metadata = service.files().get(fileId=file_id).execute()
-            mime_type = file_metadata.get('mimeType')
+        # ── SEARCH ───────────────────────────────────────────────
+        elif action == "search":
+            if not query:
+                return "❌ Χρειάζεται query= για αναζήτηση."
+            q_str = f"name contains '{query}' and trashed=false"
+            results = service.files().list(
+                q=q_str,
+                fields="files(id, name, mimeType, size, modifiedTime, parents)",
+                orderBy="modifiedTime desc",
+                pageSize=20
+            ).execute()
+            items = results.get('files', [])
+            if not items:
+                return f"🔍 Δεν βρέθηκαν αρχεία για '{query}'."
+            lines = [f"🔍 Αποτελέσματα για '{query}':\n"]
+            for i in items:
+                size_kb = round(int(i.get('size', 0)) / 1024, 1) if i.get('size') else "—"
+                mod = i.get('modifiedTime', '')[:10]
+                lines.append(f"• {i['name']} | ID: `{i['id']}` | {size_kb} KB | {mod}")
+            return "\n".join(lines)
+
+        # ── DOWNLOAD ─────────────────────────────────────────────
+        elif action == "download":
+            if not file_id:
+                return "❌ Χρειάζεται file_id=."
+            file_metadata = service.files().get(fileId=file_id, fields="name,mimeType").execute()
+            mime_type = file_metadata.get('mimeType', '')
             file_name = file_metadata.get('name', 'downloaded_file')
 
-            if "vnd.google-apps" in mime_type:
-                request = service.files().export_media(fileId=file_id, mimeType='text/plain')
+            # Google Docs/Sheets/Slides → export as text/xlsx/pptx
+            export_map = {
+                'application/vnd.google-apps.document':     ('text/plain', '.txt'),
+                'application/vnd.google-apps.spreadsheet':  ('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xlsx'),
+                'application/vnd.google-apps.presentation': ('application/vnd.openxmlformats-officedocument.presentationml.presentation', '.pptx'),
+            }
+            if mime_type in export_map:
+                export_mime, ext = export_map[mime_type]
+                request = service.files().export_media(fileId=file_id, mimeType=export_mime)
+                if not file_name.endswith(ext):
+                    file_name += ext
             else:
                 request = service.files().get_media(fileId=file_id)
 
@@ -741,27 +800,99 @@ def drive_manager(action: str = "list_files", file_id: str = None, local_path: s
             while not done:
                 _, done = downloader.next_chunk()
 
-            if local_path or file_name.lower().endswith('.pdf'):
-                save_target = local_path if local_path else file_name
-                with open(save_target, "wb") as f:
-                    f.write(fh.getvalue())
-                return (
-                    f"✅ Το αρχείο '{file_name}' κατέβηκε ως '{save_target}'. "
-                    f"Χρησιμοποίησε 'read_local_file' για να το διαβάσεις."
-                )
-            return f"✅ '{file_name}':\n\n{fh.getvalue().decode('utf-8', errors='ignore')[:8000]}"
+            save_target = local_path if local_path else os.path.join(r"C:\astakos_v2\outputs", file_name)
+            os.makedirs(os.path.dirname(save_target), exist_ok=True)
+            with open(save_target, "wb") as f:
+                f.write(fh.getvalue())
 
-        elif action == "upload" and local_path:
-            if not os.path.exists(local_path):
-                return f"Error: Το αρχείο {local_path} δεν υπάρχει τοπικά."
+            # Αν είναι text, επέστρεψε και το περιεχόμενο
+            if mime_type == 'application/vnd.google-apps.document' or file_name.endswith('.txt'):
+                content = fh.getvalue().decode('utf-8', errors='ignore')[:6000]
+                return f"✅ '{file_name}' κατέβηκε → {save_target}\n\n{content}"
+            return f"✅ '{file_name}' κατέβηκε → {save_target}"
+
+        # ── UPLOAD ───────────────────────────────────────────────
+        elif action == "upload":
+            if not local_path or not os.path.exists(local_path):
+                return f"❌ Αρχείο δεν βρέθηκε: {local_path}"
             file_metadata = {'name': os.path.basename(local_path), 'parents': [folder_id]}
             media = MediaFileUpload(local_path, resumable=True)
-            file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-            return f"✅ Το αρχείο ανέβηκε! (Drive ID: {file.get('id')})"
+            file = service.files().create(body=file_metadata, media_body=media, fields='id,name').execute()
+            return f"✅ '{file.get('name')}' ανέβηκε! (ID: {file.get('id')})"
 
-        return "Error: Λείπουν παράμετροι."
+        # ── DELETE ───────────────────────────────────────────────
+        elif action == "delete":
+            if not file_id:
+                return "❌ Χρειάζεται file_id=."
+            meta = service.files().get(fileId=file_id, fields="name").execute()
+            service.files().delete(fileId=file_id).execute()
+            return f"🗑️ '{meta.get('name')}' διαγράφηκε."
+
+        # ── RENAME ───────────────────────────────────────────────
+        elif action == "rename":
+            if not file_id or not new_name:
+                return "❌ Χρειάζεται file_id= και new_name=."
+            service.files().update(fileId=file_id, body={"name": new_name}).execute()
+            return f"✏️ Μετονομάστηκε σε '{new_name}'."
+
+        # ── MOVE ─────────────────────────────────────────────────
+        elif action == "move":
+            if not file_id or not target_folder_id:
+                return "❌ Χρειάζεται file_id= και target_folder_id=."
+            file = service.files().get(fileId=file_id, fields="parents").execute()
+            old_parents = ",".join(file.get('parents', []))
+            service.files().update(
+                fileId=file_id,
+                addParents=target_folder_id,
+                removeParents=old_parents,
+                fields="id, parents"
+            ).execute()
+            return f"📦 Αρχείο μετακινήθηκε στον φάκελο {target_folder_id}."
+
+        # ── SHARE ────────────────────────────────────────────────
+        elif action == "share":
+            if not file_id or not share_email:
+                return "❌ Χρειάζεται file_id= και share_email=."
+            permission = {"type": "user", "role": share_role, "emailAddress": share_email}
+            service.permissions().create(fileId=file_id, body=permission, sendNotificationEmail=False).execute()
+            return f"🔗 Κοινοποιήθηκε στον/στην {share_email} ως {share_role}."
+
+        # ── CREATE FOLDER ─────────────────────────────────────────
+        elif action == "create_folder":
+            if not new_name:
+                return "❌ Χρειάζεται new_name= για το όνομα του φακέλου."
+            metadata = {
+                "name": new_name,
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": [folder_id]
+            }
+            folder = service.files().create(body=metadata, fields="id, name").execute()
+            return f"📁 Φάκελος '{folder.get('name')}' δημιουργήθηκε (ID: {folder.get('id')})."
+
+        # ── INFO ─────────────────────────────────────────────────
+        elif action == "info":
+            if not file_id:
+                return "❌ Χρειάζεται file_id=."
+            meta = service.files().get(
+                fileId=file_id,
+                fields="name,mimeType,size,modifiedTime,createdTime,parents,webViewLink,owners"
+            ).execute()
+            size_kb = round(int(meta.get('size', 0)) / 1024, 1) if meta.get('size') else "—"
+            owners = ", ".join(o.get('emailAddress','') for o in meta.get('owners', []))
+            return (
+                f"📄 *{meta.get('name')}*\n"
+                f"Type: {meta.get('mimeType')}\n"
+                f"Μέγεθος: {size_kb} KB\n"
+                f"Δημιουργήθηκε: {meta.get('createdTime','')[:10]}\n"
+                f"Τροποποιήθηκε: {meta.get('modifiedTime','')[:10]}\n"
+                f"Ιδιοκτήτης: {owners}\n"
+                f"Link: {meta.get('webViewLink','—')}"
+            )
+
+        return "❌ Άγνωστο action. Δες το docstring για τις επιλογές."
+
     except Exception as e:
-        return f"Drive Error: {str(e)}"
+        return f"❌ Drive Error: {str(e)}"
 
 
 # ────────────────────────────────────────────────────────────────
