@@ -285,7 +285,8 @@ def home_agent_node(state):
         manage_list, set_reminder, set_local_reminder, delete_from_memory, search_memory,
         control_spotify, control_vacuum,
         search_goldmall_offers, get_navigation_info,
-        google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, learn_routine, get_routines, search_supermarket_prices
+        google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, learn_routine, get_routines, search_supermarket_prices,
+        get_fit_summary
     ]
 
     system_base = load_agent_prompt("Home_Agent", "Είσαι ο Home_Agent του Piston-7.")
