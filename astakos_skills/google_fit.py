@@ -1,8 +1,3 @@
-# ================================================================
-# Project: Astakos AI Agent 🦞
-# Skill: Google Fit — βήματα, ύπνος, καρδιακοί παλμοί
-# ================================================================
-
 import os
 import json
 import datetime
@@ -45,9 +40,8 @@ def _day_range_ms(days_ago: int = 0):
     target = now - datetime.timedelta(days=days_ago)
     start = target.replace(hour=0, minute=0, second=0, microsecond=0)
     end   = target.replace(hour=23, minute=59, second=59, microsecond=999999)
-    epoch = datetime.datetime(1970, 1, 1)
-    start_ms = int((start - epoch).total_seconds() * 1000)
-    end_ms   = int((end   - epoch).total_seconds() * 1000)
+    start_ms = int(start.timestamp() * 1000)
+    end_ms   = int(end.timestamp() * 1000)
     return start_ms, end_ms
 
 
@@ -76,46 +70,54 @@ def get_steps(days_ago: int = 0) -> int:
 def get_sleep(days_ago: int = 1) -> dict:
     """
     Επιστρέφει ύπνο για τη νύχτα (default: χθες βράδυ).
+    Διαβάζει απευθείας από Samsung Health data source για αξιοπιστία.
     Returns: {"total_minutes": int, "deep_minutes": int, "light_minutes": int, "rem_minutes": int}
     """
     creds   = _get_credentials()
     service = build("fitness", "v1", credentials=creds)
 
-    # Ύπνος: από 18:00 χθες μέχρι 12:00 σήμερα
+    # Παράθυρο: από 20:00 της προηγούμενης μέρας έως 14:00 της επόμενης
+    # Καλύπτει οποιαδήποτε ώρα ύπνου/αφύπνισης
     now    = datetime.datetime.now()
     target = now - datetime.timedelta(days=days_ago)
-    epoch  = datetime.datetime(1970, 1, 1)
-    start  = target.replace(hour=18, minute=0, second=0, microsecond=0)
-    end    = (target + datetime.timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
-    start_ms = int((start - epoch).total_seconds() * 1000)
-    end_ms   = int((end   - epoch).total_seconds() * 1000)
-
-    body = {
-        "aggregateBy": [{"dataTypeName": "com.google.sleep.segment"}],
-        "bucketByTime": {"durationMillis": int((end - start).total_seconds() * 1000)},
-        "startTimeMillis": start_ms,
-        "endTimeMillis":   end_ms,
-    }
-    res = service.users().dataset().aggregate(userId="me", body=body).execute()
+    start  = (target - datetime.timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
+    end    = target.replace(hour=14, minute=0, second=0, microsecond=0)
+    start_ns = int(start.timestamp() * 1_000_000_000)
+    end_ns   = int(end.timestamp()   * 1_000_000_000)
+    dataset_id = f"{start_ns}-{end_ns}"
 
     # Sleep segment values: 1=awake, 2=sleep, 3=out-of-bed, 4=light, 5=deep, 6=REM
     total = deep = light = rem = 0
-    for bucket in res.get("bucket", []):
-        for dataset in bucket.get("dataset", []):
-            for point in dataset.get("point", []):
-                start_ns = point.get("startTimeNanos", 0)
-                end_ns   = point.get("endTimeNanos", 0)
-                duration_min = (int(end_ns) - int(start_ns)) / 1_000_000_000 / 60
+
+    # Πρώτα δοκιμάζουμε Samsung Health απευθείας
+    SAMSUNG_SOURCE = "raw:com.google.sleep.segment:com.sec.android.app.shealth:health_platform"
+    MERGED_SOURCE  = "derived:com.google.sleep.segment:com.google.android.gms:merged"
+
+    for source_id in [SAMSUNG_SOURCE, MERGED_SOURCE]:
+        try:
+            res = service.users().dataSources().datasets().get(
+                userId="me",
+                dataSourceId=source_id,
+                datasetId=dataset_id
+            ).execute()
+            points = res.get("point", [])
+            if not points:
+                continue
+            for point in points:
+                s_ns = int(point.get("startTimeNanos", 0))
+                e_ns = int(point.get("endTimeNanos",   0))
+                dur  = (e_ns - s_ns) / 1_000_000_000 / 60
                 for val in point.get("value", []):
                     seg = val.get("intVal", 0)
-                    if seg in (2, 4, 5, 6):  # κάποιο είδος ύπνου
-                        total += duration_min
-                    if seg == 5:
-                        deep  += duration_min
-                    elif seg == 4:
-                        light += duration_min
-                    elif seg == 6:
-                        rem   += duration_min
+                    if seg in (2, 4, 5, 6):
+                        total += dur
+                    if   seg == 5: deep  += dur
+                    elif seg == 4: light += dur
+                    elif seg == 6: rem   += dur
+            if total > 0:
+                break  # Βρήκαμε δεδομένα, σταματάμε
+        except Exception:
+            continue
 
     return {
         "total_minutes": round(total),
