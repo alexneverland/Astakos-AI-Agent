@@ -1458,24 +1458,28 @@ def job_goal_followup():
         if not goals:
             return
 
-        # Διαβάζουμε chat history για να βρούμε τελευταία αναφορά κάθε goal
-        chat_file = os.path.join(BASE_DIR, "astakos_chat_history.json")
-        recent_text = ""
-        if os.path.exists(chat_file):
-            with open(chat_file, "r", encoding="utf-8") as f:
-                history = _json.load(f)
-            # Τελευταίες 7 μέρες
-            from datetime import timedelta
-            cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-            recent_msgs = [m for m in history if m.get("date","") >= cutoff]
-            recent_text = " ".join(m.get("content","")[:200] for m in recent_msgs).lower()
+        # Semantic search: ψάχνουμε αν υπάρχουν πρόσφατες μνήμες για κάθε goal
+        from datetime import timedelta
+        from memory.vector_store import vector_store, vector_lock
+        cutoff_ts = (datetime.now() - timedelta(days=7)).timestamp()
 
-        # Βρίσκουμε goals που δεν αναφέρθηκαν πρόσφατα
         stale_goals = []
         for g in goals:
-            project_lower = g["project"].lower()
-            # Αν το project name δεν εμφανίζεται στο πρόσφατο history → stale
-            if project_lower not in recent_text:
+            try:
+                with vector_lock:
+                    results = vector_store._collection.query(
+                        query_texts=[g["project"] + " " + g["description"]],
+                        n_results=3,
+                        where={"timestamp": {"$gte": cutoff_ts}},
+                    )
+                # Αν δεν βρήκε τίποτα πρόσφατο → stale
+                if not results["ids"] or not results["ids"][0]:
+                    stale_goals.append(g)
+                    print(f"[GoalFollowup]: '{g['project']}' → stale (0 recent memories)")
+                else:
+                    print(f"[GoalFollowup]: '{g['project']}' → active ({len(results['ids'][0])} recent memories)")
+            except Exception as _e:
+                print(f"[GoalFollowup]: semantic check error for '{g['project']}': {_e}")
                 stale_goals.append(g)
 
         if not stale_goals:
