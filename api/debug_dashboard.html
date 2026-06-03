@@ -189,6 +189,21 @@ function render(d) {
       </tr>`).join('')}</table></div>`;
   }
 
+  const acts = d.pending_actions||[];
+  if (acts.length > 0) {
+    html += `<div class="card"><h2>🔐 Pending Actions (${acts.length})</h2>
+      <table><tr><th>Tool</th><th>Args</th><th>Requested</th><th>Ενέργειες</th></tr>
+      ${acts.map(a=>`<tr>
+        <td><b>${a.tool_name}</b></td>
+        <td class="off" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${JSON.stringify(a.tool_args||{})}</td>
+        <td class="off">${(a.requested_at||'').slice(11,16)}</td>
+        <td style="white-space:nowrap">
+          <button onclick="resolveAction('${a.tool_call_id}','approve')" style="background:#1a4a2a;color:#4ade80;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;margin-right:4px">✅ Approve</button>
+          <button onclick="resolveAction('${a.tool_call_id}','reject')"  style="background:#4a1a1a;color:#f87171;border:none;padding:3px 10px;border-radius:4px;cursor:pointer">❌ Reject</button>
+        </td>
+      </tr>`).join('')}</table></div>`;
+  }
+
   if ((rout.active||[]).length > 0) {
     html += `<div class="card" style="grid-column:span 2"><h2>🗓️ Active Routines (${rout.active.length})</h2>
       <table><tr><th>ID</th><th>Day</th><th>Time</th><th>Event</th><th>Confidence</th><th>Cooldown left</th><th>State</th><th>Ενέργειες</th></tr>
@@ -431,6 +446,13 @@ async function confirmRoutine(id) {
 async function activateRoutine(id) {
   if (!confirm(`Ενεργοποίηση ρουτίνας #${id};`)) return;
   await fetch(`/debug/routine/${id}/state`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({state:'active'})});
+  fetchData();
+}
+
+async function resolveAction(toolCallId, decision) {
+  const label = decision === 'approve' ? 'Έγκριση' : 'Απόρριψη';
+  if (!confirm(`${label} action ${toolCallId}?`)) return;
+  await fetch(`/debug/action/${toolCallId}/${decision}`, {method:'POST'});
   fetchData();
 }
 

@@ -875,6 +875,7 @@ async def debug_runtime():
             "non_active":      cooldown_info,
         },
         "pending_confirmations": pending_from_db,
+        "pending_actions":       _get_pending_actions(),
         "events_1h": {
             "throughput":  throughput,
             "last_errors": last_errors,
@@ -882,6 +883,38 @@ async def debug_runtime():
             "recent_logs": events[-100:],
         },
     })
+
+
+def _get_pending_actions() -> list:
+    """Επιστρέφει CRITICAL tool calls που περιμένουν approve/reject."""
+    try:
+        from core.approval import list_pending
+        return list_pending()
+    except Exception:
+        return []
+
+
+@server.post("/debug/action/{tool_call_id}/approve")
+async def approve_action(tool_call_id: str, _=Depends(require_token)):
+    """Εγκρίνει CRITICAL pending action."""
+    try:
+        from core.approval import resolve_pending
+        resolve_pending(tool_call_id, approved=True)
+        return {"ok": True, "status": "approved", "tool_call_id": tool_call_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@server.post("/debug/action/{tool_call_id}/reject")
+async def reject_action(tool_call_id: str, _=Depends(require_token)):
+    """Απορρίπτει CRITICAL pending action."""
+    try:
+        from core.approval import resolve_pending
+        resolve_pending(tool_call_id, approved=False)
+        return {"ok": True, "status": "rejected", "tool_call_id": tool_call_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 
 @server.get("/debug/replay")
 async def debug_replay(days: int = 2):
@@ -1069,6 +1102,37 @@ async def debug_goals():
         return {"goals": goals, "count": len(goals)}
     except Exception as e:
         return {"goals": [], "error": str(e)}
+
+
+@server.delete("/debug/goals/{project}")
+async def delete_goal(project: str, _=Depends(require_token)):
+    """Διαγράφει goal με βάση το project name."""
+    try:
+        from memory.vector_store import vector_store, vector_lock
+        with vector_lock:
+            existing = vector_store._collection.get(
+                where={"category": "goal", "project": project}
+            )
+            if not existing["ids"]:
+                return {"ok": False, "error": f"Goal not found"}
+            vector_store._collection.delete(ids=existing["ids"])
+        return {"ok": True, "deleted": project}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@server.get("/debug")
+async def debug_panel():
+    """Observability HTML dashboard — auto-refresh every 5s."""
+    from fastapi.responses import HTMLResponse
+    _dir = os.path.dirname(os.path.abspath(__file__))
+    html_path = os.path.join(_dir, "debug_dashboard.html")
+    try:
+        with open(html_path, "r", encoding="utf-8") as f:
+            html = f.read()
+    except FileNotFoundError:
+        html = "<h1>debug_dashboard.html not found</h1>"
+    return HTMLResponse(content=html)
+[], "error": str(e)}
 
 
 @server.delete("/debug/goals/{project}")
