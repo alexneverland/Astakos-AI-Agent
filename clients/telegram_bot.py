@@ -1705,8 +1705,17 @@ if __name__ == "__main__":
         _handle_exit()
     finally:
         shutdown_event.set()
+        # Drain queue before summary (max 5s)
         try:
-            _run_session_summary(channel="telegram")
+            import threading as _th
+            _done = _th.Event()
+            def _drain(): astakos_queue.join(); _done.set()
+            _th.Thread(target=_drain, daemon=True).start()
+            _done.wait(timeout=5)
         except Exception:
             pass
-        print("[TelegramBot]: \u03a4\u03b5\u03c1\u03bc\u03b1\u03c4\u03af\u03c3\u03c4\u03b7\u03ba\u03b5.")
+        try:
+            _run_session_summary(channel='telegram')
+        except Exception:
+            pass
+        print('[TelegramBot]: Τερματίστηκε.')
