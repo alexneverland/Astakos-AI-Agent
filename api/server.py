@@ -261,17 +261,27 @@ async def lifespan(app: FastAPI):
     yield  # Server τρέχει εδώ
 
     print("\n[Server]: Τερματισμός...")
+
+    # Drain queue πρώτα (max 5s)
+    try:
+        import threading as _th
+        _done = _th.Event()
+        def _drain(): astakos_queue.join(); _done.set()
+        _th.Thread(target=_drain, daemon=True).start()
+        _done.wait(timeout=5)
+    except Exception:
+        pass
+
     shutdown_event.set()
 
     loop = asyncio.get_event_loop()
     try:
         await asyncio.wait_for(
             loop.run_in_executor(None, lambda: _run_session_summary("web")),
-            timeout=5.0
+            timeout=10.0
         )
     except (asyncio.TimeoutError, Exception):
         print("\033[93m[System]: Summary timeout — παράκαμψη.\033[0m")
-
 # ────────────────────────────────────────────────────────────────
 # FASTAPI APP & MIDDLEWARE
 # ────────────────────────────────────────────────────────────────
