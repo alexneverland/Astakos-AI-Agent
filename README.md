@@ -93,7 +93,7 @@ It's not a wrapper around an API. It's a full multi-agent system that lives on y
 | Feature | Description |
 |---|---|
 | 🧩 **Formal Event Bus** | Pub/sub via `core/event_bus.py` — `routine_triggered`, `routine_confirmed`, `session_ended` and more |
-| 🔀 **Dual Channel Memory** | Shared long-term memory + isolated per-channel session history (Telegram / Web) |
+| 🔀 **Unified Session Memory** | Single shared session log across all channels (Telegram / Web / Terminal) — cross-channel context awareness out of the box |
 | 🏃 **Google Fit Integration** | Daily steps, sleep phases (deep/REM/light) & heart rate from Samsung Health via Google Fit API. Morning briefing at 08:00 |
 | 📈 **Memory Scoring** | Every memory has `importance` (auto-inferred by type), `confidence`, `last_accessed`, `retrieval_count`. `compute_score()` = importance×0.4 + retrieval×0.3 + confidence×0.2 + freshness×0.1 |
 | 🔗 **Unified Memory Entry Point** | `memory.save(memory_type=...)` covers facts, photos, sessions, goals, reflections, events — one API for all stores |
@@ -145,7 +145,7 @@ It's not a wrapper around an API. It's a full multi-agent system that lives on y
                                        │  │ SQLite (routines/events) │ │
                                        │  └──────────────────────────┘ │
                                        │  ┌─ PER-CHANNEL ────────────┐ │
-                                       │  │ session history (JSON)   │ │
+                                       │  │ session log (all channels)   │ │
                                        │  │ session summaries        │ │
                                        │  └──────────────────────────┘ │
                                        └───────────────────────────────┘
@@ -227,7 +227,7 @@ astakos/
 ├── 📁 memory/
 │   ├── vector_store.py       # ChromaDB long-term memory
 │   ├── working_memory.py     # Real-time context ("Foreground")
-│   ├── session_memory.py     # Per-channel session summaries & Memory Sifter
+│   ├── session_memory.py     # Unified session log (all channels) + Memory Sifter
 │   ├── routine_db.py         # SQLite routine storage — 3-stage dedup, adaptive cooldown
 │   └── event_log.py          # Event logging + dedup protection
 ├── 📁 services/
@@ -348,10 +348,11 @@ open http://localhost:8000/debug/runtime
 - [x] Unified Memory Entry Point — `memory.save(memory_type=...)` for facts, photos, sessions, goals, reflections, events
 - [x] Pending Actions Dashboard — CRITICAL tool approvals visible in `/debug` with approve/reject buttons from browser
 - [x] Analytics Charts — 📊 modal popup in `/debug` with routine states, agent usage, event throughput, confirmations by hour
+- [x] Unified Session Memory — single shared log across all channels, session summary on shutdown (Ctrl+C drain fix)
+- [x] Cross-channel awareness — unified SESSION_LOGS, Telegram/Web/Terminal share same session context
 
 ### ⬜ Planned
 
-- [ ] Cross-channel awareness — "συνέχισε αυτό που έκανα στο web" → selective Telegram context injection
 - [ ] Planner v2 — Validate step (show plan → ✅/❌ from Telegram before execution), parallel steps, error recovery, progress UI (`[2/5] Τρέχω tests...`), full agentic loop (Goal→Plan→Validate→Execute→Reflect→Re-plan)
 - [ ] Memory cleanup — prune low-score memories (`compute_score() < threshold`) after 6+ months of real data
 - [ ] Personal Knowledge Graph — structured entity relations (Λάζαρος→project→Astakos) in SQLite, parallel to ChromaDB, after 6+ months of usage
