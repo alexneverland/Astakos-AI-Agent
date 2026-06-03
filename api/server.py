@@ -341,8 +341,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         })
 
     # 2. --- XML CONTEXT ISOLATION ---
-    # We wrap the user's prompt so Astakos knows it is strictly raw data.
-    isolated_user_input = f"<isolated_data>\n{user_input}\n</isolated_data>"
+    # Το web/telegram είναι trusted channel (local server, μόνο Λάζαρος).
+    # ΔΕΝ κάνουμε wrap σε isolated_data — αλλιώς οι εντολές του Λάζαρου
+    # μπλοκάρονται από το ίδιο το security prompt.
+    isolated_user_input = user_input
 
     with memory_lock:
         last_interaction_time = time.time()
