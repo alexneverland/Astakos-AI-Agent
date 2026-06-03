@@ -24,6 +24,7 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     next_agent: NotRequired[str]
     current_agent: NotRequired[str]
+    approval_status: NotRequired[str]  # "ok" | "pending"
 
 # ────────────────────────────────────────────────────────────────
 # 2. MESSAGE HELPERS (Mastro-Shield & Smart Parser)

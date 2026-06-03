@@ -828,6 +828,73 @@ def handle_location(msg, live_update=False):
 # POLLING LOOP
 # ────────────────────────────────────────────────────────────────
 
+def _handle_approval_callback(cq: dict):
+    """Χειρίζεται τα ✅/❌ approval callbacks από inline keyboard."""
+    try:
+        from core.approval import pop_pending, resolve_pending
+        from tools.system import all_tools
+
+        cq_id   = cq["id"]
+        data    = cq.get("data", "")
+        chat_id = str(cq["message"]["chat"]["id"])
+        msg_id  = cq["message"]["message_id"]
+
+        # Answer the callback (αφαίρεση loading spinner)
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": cq_id},
+            timeout=5,
+        )
+
+        if ":" not in data:
+            return
+
+        action, tool_call_id = data.split(":", 1)
+
+        if action == "approve":
+            item = pop_pending(tool_call_id)
+            if not item:
+                send_telegram_msg("⚠️ Το pending action δεν βρέθηκε (ίσως έχει ήδη εκτελεστεί).")
+                return
+
+            tool_name = item["tool_name"]
+            tool_args = item["tool_args"]
+
+            # Ενημέρωση keyboard → "✅ Εγκρίθηκε"
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageReplyMarkup",
+                json={"chat_id": chat_id, "message_id": msg_id, "reply_markup": {"inline_keyboard": []}},
+                timeout=5,
+            )
+
+            send_telegram_msg(f"⚙️ Εκτελώ `{tool_name}`...")
+
+            # Βρίσκουμε και εκτελούμε το tool
+            tools_map = {t.name: t for t in all_tools}
+            tool = tools_map.get(tool_name)
+            if not tool:
+                send_telegram_msg(f"❌ Tool `{tool_name}` δεν βρέθηκε.")
+                return
+
+            try:
+                result = tool.invoke(tool_args)
+                send_telegram_msg("✅ `" + tool_name + "` ολοκληρώθηκε:\n\n" + str(result)[:800])
+            except Exception as e:
+                send_telegram_msg(f"❌ `{tool_name}` απέτυχε: {e}")
+
+        elif action == "reject":
+            pop_pending(tool_call_id)
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageReplyMarkup",
+                json={"chat_id": chat_id, "message_id": msg_id, "reply_markup": {"inline_keyboard": []}},
+                timeout=5,
+            )
+            send_telegram_msg("❌ Action ακυρώθηκε.")
+
+    except Exception as e:
+        print(f"\033[91m[ApprovalCallback]: {e}\033[0m")
+
+
 def run_polling():
     """Long-polling loop — διαβάζει updates από το Telegram API."""
     global voice_mode_enabled
@@ -859,6 +926,12 @@ def run_polling():
 
             for update in updates:
                 offset = update["update_id"] + 1
+
+                # ── Approval callbacks (inline keyboard ✅/❌) ──────────
+                cq = update.get("callback_query")
+                if cq:
+                    _handle_approval_callback(cq)
+                    continue
 
                 # [MASTRO-FIX]: Πιάνουμε και τα Live Locations που έρχονται ως edited_message
                 msg = update.get("message") or update.get("edited_message")

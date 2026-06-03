@@ -13,6 +13,7 @@ from core.agents import (
     supervisor_node, chat_agent_node, home_agent_node, web_agent_node,
     tech_agent_node, git_agent_node, mail_agent_node, dev_agent_node, tool_router
 )
+from core.approval import approval_check_node
 
 # [MASTRO-FIX]: Προσθήκη της λίστας με τους agents για να δουλέψει το routing
 AGENT_MAP = [
@@ -38,7 +39,8 @@ def build_graph():
     workflow.add_node("Git_Agent",    git_agent_node)
     workflow.add_node("Mail_Agent",   mail_agent_node)
     workflow.add_node("Dev_Agent",    dev_agent_node)
-    workflow.add_node("tools", ToolNode(all_tools, handle_tool_errors=True))
+    workflow.add_node("tools",          ToolNode(all_tools, handle_tool_errors=True))
+    workflow.add_node("approval_check", approval_check_node)
 
     # Entry
     workflow.set_entry_point("supervisor")
@@ -50,13 +52,20 @@ def build_graph():
         {name: name for name in AGENT_MAP}
     )
 
-    # Κάθε agent: αν έχει tool_calls → tools, αλλιώς → END
+    # Κάθε agent: αν έχει tool_calls → approval_check, αλλιώς → END
     for agent_name in AGENT_MAP:
         workflow.add_conditional_edges(
             agent_name,
             _should_use_tools,
-            {"tools": "tools", END: END}
+            {"tools": "approval_check", END: END}
         )
+
+    # approval_check → tools (ok) ή → END (pending)
+    workflow.add_conditional_edges(
+        "approval_check",
+        lambda state: state.get("approval_status", "ok"),
+        {"ok": "tools", "pending": END}
+    )
 
     # Μετά από tools → επιστροφή στον σωστό agent
     workflow.add_conditional_edges(
