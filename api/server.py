@@ -1132,34 +1132,3 @@ async def debug_panel():
     except FileNotFoundError:
         html = "<h1>debug_dashboard.html not found</h1>"
     return HTMLResponse(content=html)
-[], "error": str(e)}
-
-
-@server.delete("/debug/goals/{project}")
-async def delete_goal(project: str, _=Depends(require_token)):
-    """Διαγράφει goal με βάση το project name."""
-    try:
-        from memory.vector_store import vector_store, vector_lock
-        with vector_lock:
-            existing = vector_store._collection.get(
-                where={"category": "goal", "project": project}
-            )
-            if not existing["ids"]:
-                return {"ok": False, "error": f"Goal not found"}
-            vector_store._collection.delete(ids=existing["ids"])
-        return {"ok": True, "deleted": project}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-@server.get("/debug")
-async def debug_panel():
-    """Observability HTML dashboard — auto-refresh every 5s."""
-    from fastapi.responses import HTMLResponse
-    _dir = os.path.dirname(os.path.abspath(__file__))
-    html_path = os.path.join(_dir, "debug_dashboard.html")
-    try:
-        with open(html_path, "r", encoding="utf-8") as f:
-            html = f.read()
-    except FileNotFoundError:
-        html = "<h1>debug_dashboard.html not found</h1>"
-    return HTMLResponse(content=html)
