@@ -260,6 +260,20 @@ def build_prompt(state_messages, agent_role="") -> str:
     if session_hint:
         prompt += f"[ΣΥΝΕΧΕΙΑ ΑΠΟ ΠΡΟΗΓΟΥΜΕΝΗ SESSION]\n{session_hint}\n\n"
 
+    # ── Long-Term Goals ──────────────────────────────────────────
+    try:
+        from memory.vector_store import get_active_goals
+        active_goals = get_active_goals()
+        if active_goals:
+            prompt += "═══ ΣΤΟΧΟΙ ΣΕ ΕΞΕΛΙΞΗ ═══\n"
+            for g in active_goals:
+                status_icon = "🎯" if g["status"] == "active" else "⏸"
+                prompt += f" {status_icon} [{g['project']}] {g['description']} (από {g['date']})\n"
+            prompt += "💡 Αν η συζητηση αφορά κάποιον από αυτούς, ανέφερε τη συνέχεια φυσικά.\n"
+            prompt += "══════════════════════════\n\n"
+    except Exception as _e:
+        print(f"⚠️ [Goals Context Error]: {_e}")
+
     cap_context = get_capability_context()
     if cap_context:
         prompt += f"[ΑΥΤΟΓΝΩΣΙΑ]\n{cap_context}\n\n"

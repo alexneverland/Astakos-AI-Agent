@@ -1701,5 +1701,34 @@ all_tools = [
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
     search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
-    duckduckgo_search, run_terminal_command, get_fit_summary
+    duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool
 ]
+
+
+@tool
+def save_goal_tool(project: str, description: str, status: str = "active") -> str:
+    """
+    Αποθηκεύει ή ενημερώνει ένα long-term goal του Λάζαρου.
+    project: Σύντομο όνομα project (π.χ. 'ShiftMaster', 'Astakos', 'PraxisERP').
+    description: Τι θέλει να πετύχει (π.χ. 'Να τελειώσει το licensing module').
+    status: 'active' (σε εξέλιξη) | 'paused' (στο ράφι) | 'done' (ολοκληρώθηκε).
+    """
+    from memory.vector_store import save_goal
+    ok = save_goal(project=project, description=description, status=status)
+    if ok:
+        return f"✅ Goal '{project}' αποθηκεύτηκε ({status})."
+    return f"❌ Αποτυχία αποθήκευσης goal '{project}'."
+
+
+@tool
+def update_goal_status_tool(project: str, status: str) -> str:
+    """
+    Ενημερώνει το status ενός υπάρχοντος goal.
+    project: Το όνομα του project (π.χ. 'ShiftMaster').
+    status: 'active' | 'paused' | 'done'
+    """
+    from memory.vector_store import update_goal_status
+    ok = update_goal_status(project=project, status=status)
+    if ok:
+        return f"✅ Goal '{project}' → {status}."
+    return f"❌ Δεν βρέθηκε goal '{project}'."

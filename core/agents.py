@@ -34,6 +34,7 @@ from tools.system import (
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, get_routines, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
+    save_goal_tool, update_goal_status_tool,
 )
 from tools.web import (
     get_news, get_weather_forecast,
@@ -189,6 +190,7 @@ def dev_agent_node(state):
         execute_local_pipeline, control_spotify, control_vacuum, 
         get_navigation_info, recipe_expert, log_meal, 
         generate_image_tool, search_flights, run_terminal_command, learn_routine, get_routines,
+        save_goal_tool, update_goal_status_tool,
         duckduckgo_search
     ]
     

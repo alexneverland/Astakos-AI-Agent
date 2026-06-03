@@ -281,3 +281,90 @@ memory = AstakosMemoryManager()
 def save_photo_to_index(file_path: str, analysis: str, caption: str = ""):
     """Wrapper — στέλνει τα δεδομένα φωτογραφίας στον Memory Manager."""
     memory.save(memory_type="photo", file_path=file_path, analysis=analysis, caption=caption)
+
+
+# ================================================================
+# Long-Term Goals
+# ================================================================
+
+def save_goal(project: str, description: str, status: str = "active") -> bool:
+    """
+    Αποθηκεύει ή ενημερώνει ένα long-term goal στο ChromaDB.
+    Αν υπάρχει ήδη goal με το ίδιο project, κάνει overwrite.
+    status: 'active' | 'paused' | 'done'
+    """
+    try:
+        with vector_lock:
+            # Ψάχνουμε αν υπάρχει ήδη goal για αυτό το project
+            existing = vector_store._collection.get(
+                where={"category": "goal", "project": project}
+            )
+            if existing["ids"]:
+                vector_store._collection.delete(ids=existing["ids"])
+                print(f"\033[94m[Goals]: Overwrite goal '{project}'\033[0m")
+
+            text = f"[GOAL] {project}: {description}"
+            metadata = {
+                "category": "goal",
+                "project": project,
+                "status": status,
+                "agent": "GoalTracker",
+                "timestamp": datetime.now().timestamp(),
+                "date": datetime.now().strftime("%Y-%m-%d"),
+            }
+            vector_store.add_texts([text], metadatas=[metadata])
+            print(f"\033[92m[Goals]: Αποθηκεύτηκε goal '{project}' ({status})\033[0m")
+            return True
+    except Exception as e:
+        print(f"\033[91m[Goals Error]: {e}\033[0m")
+        return False
+
+
+def update_goal_status(project: str, status: str) -> bool:
+    """Αλλάζει το status ενός goal (active/paused/done)."""
+    try:
+        with vector_lock:
+            existing = vector_store._collection.get(
+                where={"category": "goal", "project": project}
+            )
+            if not existing["ids"]:
+                print(f"\033[93m[Goals]: Δεν βρέθηκε goal για '{project}'\033[0m")
+                return False
+
+            # Κρατάμε το παλιό description, αλλάζουμε μόνο το status
+            old_text = existing["documents"][0]
+            old_meta = existing["metadatas"][0]
+            vector_store._collection.delete(ids=existing["ids"])
+
+            new_meta = {**old_meta, "status": status, "timestamp": datetime.now().timestamp()}
+            vector_store.add_texts([old_text], metadatas=[new_meta])
+            print(f"\033[92m[Goals]: Status '{project}' → {status}\033[0m")
+            return True
+    except Exception as e:
+        print(f"\033[91m[Goals Error]: {e}\033[0m")
+        return False
+
+
+def get_active_goals() -> list[dict]:
+    """
+    Επιστρέφει όλα τα active/paused goals.
+    Κάθε dict: { project, description, status, date }
+    """
+    try:
+        with vector_lock:
+            results = vector_store._collection.get(
+                where={"category": "goal"}
+            )
+        goals = []
+        for doc, meta in zip(results.get("documents", []), results.get("metadatas", [])):
+            if meta.get("status") in ("active", "paused"):
+                goals.append({
+                    "project": meta.get("project", ""),
+                    "description": doc,
+                    "status": meta.get("status", "active"),
+                    "date": meta.get("date", ""),
+                })
+        return goals
+    except Exception as e:
+        print(f"\033[91m[Goals Error]: {e}\033[0m")
+        return []
