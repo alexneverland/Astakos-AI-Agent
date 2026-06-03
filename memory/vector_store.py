@@ -101,7 +101,7 @@ class AstakosMemoryManager:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
 
-    def _save_fact(self, fact: str, category: str, agent_name: str, photo_path: str = None, source: str = "unknown", reason: str = "agent_inferred"):
+    def _save_fact(self, fact: str, category: str, agent_name: str, photo_path: str = None, source: str = "unknown", reason: str = "agent_inferred", confidence: float = 0.7):
         from config import PROFILE_FILE
 
         # ── Threshold ανά τύπο fact ──────────────────────────────
@@ -136,10 +136,26 @@ class AstakosMemoryManager:
                 return False
 
         # 3. Αποθήκευση Chroma
+        # Auto-compute importance
+        if "goal" in category:
+            _importance = 10
+        elif reason == "user_stated" or "[USER_FACT]" in fact:
+            _importance = 8
+        elif "[LESSON]" in fact:
+            _importance = 7
+        elif reason == "agent_inferred":
+            _importance = 5
+        else:
+            _importance = 6
+
+        now_ts = datetime.now().timestamp()
         metadata = {
             "category": category, "agent": agent_name,
-            "timestamp": datetime.now().timestamp(), "date": datetime.now().strftime("%Y-%m-%d"),
+            "timestamp": now_ts, "date": datetime.now().strftime("%Y-%m-%d"),
             "retrieval_count": 0,
+            "last_accessed": now_ts,
+            "importance": _importance,
+            "confidence": confidence,
             "source": source,
             "reason": reason,
         }
@@ -213,6 +229,8 @@ class AstakosMemoryManager:
             "category": "photos", "agent": "Direct_Index", "photo_path": file_path,
             "timestamp": datetime.now().timestamp(), "date": datetime.now().strftime("%Y-%m-%d"),
             "retrieval_count": 0,
+            "importance": 4, "confidence": 0.8,
+            "last_accessed": datetime.now().timestamp(),
         }
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Φωτογραφία 'καρφώθηκε' ({os.path.basename(file_path)})\033[0m")
@@ -239,6 +257,8 @@ class AstakosMemoryManager:
             "category": "documents", "agent": "Direct_Index", "file_path": file_path,
             "timestamp": datetime.now().timestamp(), "date": datetime.now().strftime("%Y-%m-%d"),
             "retrieval_count": 0,
+            "importance": 5, "confidence": 0.8,
+            "last_accessed": datetime.now().timestamp(),
         }
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Έγγραφο 'καρφώθηκε' ({os.path.basename(file_path)})\033[0m")
@@ -268,6 +288,8 @@ class AstakosMemoryManager:
             "mood": summary.get("mood", "unknown"), "agent": "SessionSummary",
             "timestamp": datetime.now().timestamp(),
             "retrieval_count": 0,
+            "importance": 4, "confidence": 0.9,
+            "last_accessed": datetime.now().timestamp(),
         }])
 
         sessions = []
@@ -300,6 +322,7 @@ def bump_retrieval_count(doc_ids: list[str]):
             for meta in existing["metadatas"]:
                 m = dict(meta)
                 m["retrieval_count"] = int(m.get("retrieval_count", 0)) + 1
+                m["last_accessed"] = datetime.now().timestamp()
                 new_metas.append(m)
             vector_store._collection.update(ids=existing["ids"], metadatas=new_metas)
     except Exception as e:
@@ -319,6 +342,29 @@ def bump_retrieval_count(doc_ids: list[str]):
         from memory.event_log import log_event
         log_event(job=job, action=action, **kwargs)
         return True
+
+
+def compute_score(metadata: dict) -> float:
+    """
+    Υπολογίζει το score μιας μνήμης.
+    score = importance*0.4 + retrieval_count_norm*0.3 + confidence*0.2 + freshness*0.1
+    """
+    from datetime import datetime as _dt
+    importance     = float(metadata.get("importance", 5)) / 10.0
+    retrieval      = min(float(metadata.get("retrieval_count", 0)) / 20.0, 1.0)  # cap στο 20
+    confidence     = float(metadata.get("confidence", 0.7))
+    # Freshness: 1.0 = σήμερα, 0.0 = 365 μέρες πριν
+    last_ts = metadata.get("last_accessed") or metadata.get("timestamp", 0)
+    days_old = (_dt.now().timestamp() - float(last_ts)) / 86400.0
+    freshness = max(0.0, 1.0 - days_old / 365.0)
+
+    return round(
+        importance * 0.4 +
+        retrieval  * 0.3 +
+        confidence * 0.2 +
+        freshness  * 0.1,
+        3
+    )
 
 
 # Singleton
@@ -346,6 +392,7 @@ def save_goal(project: str, description: str, status: str = "active") -> bool:
                 "category": "goal", "project": project, "status": status,
                 "agent": "GoalTracker", "timestamp": datetime.now().timestamp(),
                 "date": datetime.now().strftime("%Y-%m-%d"), "retrieval_count": 0,
+                "importance": 10, "confidence": 0.95, "last_accessed": datetime.now().timestamp(),
             }
             vector_store.add_texts([text], metadatas=[metadata])
             print(f"\033[92m[Goals]: '{project}' ({status})\033[0m")
