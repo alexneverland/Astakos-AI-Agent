@@ -114,7 +114,7 @@ It's not a wrapper around an API. It's a full multi-agent system that lives on y
 
 | Feature | Description |
 |---|---|
-| 📝 **Observability Dashboard** | `/debug/runtime` — scheduler heartbeat, job health, fail counts, pending confirmations, active goals, pending CRITICAL actions with approve/reject |
+| 📝 **Observability Dashboard** | `/debug/runtime` — scheduler heartbeat, job health, fail counts, pending confirmations, active goals, pending CRITICAL actions with approve/reject, 📊 analytics charts modal (routine states, agent usage, event throughput, confirmations) |
 | 🔒 **Local Security** | Bearer token auth, localhost-only CORS, upload size limits & extension whitelist |
 | 🔁 **Auto-Restart** | `run_telegram.py` watches source files with `watchfiles` — restarts on any `.py` or `prompts.md` change |
 | 🏠 **Local-First** | Runs entirely on your machine. Your data stays yours |
@@ -347,12 +347,13 @@ open http://localhost:8000/debug/runtime
 - [x] Memory Scoring — `importance/confidence/last_accessed` on all save points, `compute_score()` formula, `bump_retrieval_count` updates `last_accessed`
 - [x] Unified Memory Entry Point — `memory.save(memory_type=...)` for facts, photos, sessions, goals, reflections, events
 - [x] Pending Actions Dashboard — CRITICAL tool approvals visible in `/debug` with approve/reject buttons from browser
+- [x] Analytics Charts — 📊 modal popup in `/debug` with routine states, agent usage, event throughput, confirmations by hour
 
 ### ⬜ Planned
 
 - [ ] Cross-channel awareness — "συνέχισε αυτό που έκανα στο web" → selective Telegram context injection
 - [ ] Planner v2 — Validate step before execution (show plan → ✅/❌ from Telegram), then full agentic loop (Goal→Plan→Validate→Execute→Reflect→Re-plan)
-- [ ] Analytics dashboard UI — visual charts for routines, memory stats, agent usage in Web interface
+- [ ] Analytics dashboard UI — expanded charts: memory stats, goal progress, routine trends over time
 - [ ] Memory cleanup — prune low-score memories (`compute_score() < threshold`) after 6+ months of real data
 - [ ] Personal Knowledge Graph — structured entity relations (Λάζαρος→project→Astakos) in SQLite, parallel to ChromaDB, after 6+ months of usage
 - [ ] Tool Execution Journal — log tool calls (tool, agent, result, duration) → SQLite, success rate stats, when 30+ tools exist
