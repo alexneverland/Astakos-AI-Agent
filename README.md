@@ -114,7 +114,7 @@ It's not a wrapper around an API. It's a full multi-agent system that lives on y
 
 | Feature | Description |
 |---|---|
-| 📝 **Observability Dashboard** | `/debug/runtime` — scheduler heartbeat, job health, fail counts, pending confirmations, active goals |
+| 📝 **Observability Dashboard** | `/debug/runtime` — scheduler heartbeat, job health, fail counts, pending confirmations, active goals, pending CRITICAL actions with approve/reject |
 | 🔒 **Local Security** | Bearer token auth, localhost-only CORS, upload size limits & extension whitelist |
 | 🔁 **Auto-Restart** | `run_telegram.py` watches source files with `watchfiles` — restarts on any `.py` or `prompts.md` change |
 | 🏠 **Local-First** | Runs entirely on your machine. Your data stays yours |
@@ -346,12 +346,17 @@ open http://localhost:8000/debug/runtime
 - [x] Goal Follow-up Engine — daily semantic check for stale goals, proactive Telegram ping
 - [x] Memory Scoring — `importance/confidence/last_accessed` on all save points, `compute_score()` formula, `bump_retrieval_count` updates `last_accessed`
 - [x] Unified Memory Entry Point — `memory.save(memory_type=...)` for facts, photos, sessions, goals, reflections, events
+- [x] Pending Actions Dashboard — CRITICAL tool approvals visible in `/debug` with approve/reject buttons from browser
 
 ### ⬜ Planned
 
-- [ ] Cross-channel awareness (Telegram ↔ Web context sharing)
-- [ ] Action Approval Matrix — per-action granularity (read/write/delete per tool)
-- [ ] Planning Agent improvements — parallel steps, error recovery, progress UI
+- [ ] Cross-channel awareness — "συνέχισε αυτό που έκανα στο web" → selective Telegram context injection
+- [ ] Planner v2 — Validate step before execution (show plan → ✅/❌ from Telegram), then full agentic loop (Goal→Plan→Validate→Execute→Reflect→Re-plan)
+- [ ] Analytics dashboard UI — visual charts for routines, memory stats, agent usage in Web interface
+- [ ] Memory cleanup — prune low-score memories (`compute_score() < threshold`) after 6+ months of real data
+- [ ] Personal Knowledge Graph — structured entity relations (Λάζαρος→project→Astakos) in SQLite, parallel to ChromaDB, after 6+ months of usage
+- [ ] Tool Execution Journal — log tool calls (tool, agent, result, duration) → SQLite, success rate stats, when 30+ tools exist
+- [ ] Plugin system — third-party skill scripts with sandboxed execution parallel steps, error recovery, progress UI
 - [ ] Analytics dashboard UI in Web interface
 - [ ] Memory cleanup — prune low-score memories (score < threshold) after 6+ months of real data
 - [ ] Personal Knowledge Graph — memory connection layer (after 6+ months of real usage data)
