@@ -97,7 +97,7 @@ class AstakosMemoryManager:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
 
-    def _save_fact(self, fact: str, category: str, agent_name: str, photo_path: str = None):
+    def _save_fact(self, fact: str, category: str, agent_name: str, photo_path: str = None, source: str = "unknown", reason: str = "agent_inferred"):
         from config import PROFILE_FILE
 
         # ── Threshold ανά τύπο fact ──────────────────────────────
@@ -136,6 +136,8 @@ class AstakosMemoryManager:
             "category": category, "agent": agent_name,
             "timestamp": datetime.now().timestamp(), "date": datetime.now().strftime("%Y-%m-%d"),
             "retrieval_count": 0,
+            "source": source,
+            "reason": reason,
         }
         if photo_path:
             if not os.path.isabs(photo_path):

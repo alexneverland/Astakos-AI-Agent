@@ -417,7 +417,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     break
             human_msg = HumanMessage(content=parts)
         # ── Τρέξιμο του LangGraph ────────────────────────────────
-        for event in graph.stream({"messages": context_msgs + [human_msg]}, {"recursion_limit": 50}):
+        import tools.system as _ts; _ts._CURRENT_CHANNEL = "web"
+        for event in graph.stream({"messages": context_msgs + [human_msg], "channel": "web"}, {"recursion_limit": 50}):
             for node, data in event.items():
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node

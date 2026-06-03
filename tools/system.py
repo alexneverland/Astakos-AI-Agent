@@ -103,6 +103,9 @@ def archive_file(filename: str, content_summary: str) -> str:
     except Exception as e:
         return f"❌ Σφάλμα αρχειοθέτησης: {str(e)}"
 
+# Channel για Memory Provenance — ορίζεται από server.py/telegram_bot.py
+_CURRENT_CHANNEL: str = "unknown"
+
 @tool
 def search_memory(query: str, category: str = "") -> str:
     """Αναζήτηση στη μακροπρόθεσμη μνήμη. Κάλεσέ το ΜΙΑ ΦΟΡΑ ΜΟΝΟ. Αν έχεις ήδη [Πληροφορία από αναζήτηση] στο context ΜΗΝ ξανακαλέσεις. Χρησιμοποίησέ το πριν απαντήσεις σε:
@@ -204,12 +207,13 @@ def run_terminal_command(command: str) -> str:
     return result.get("output", "")
 
 @tool
-def save_to_memory(fact: str, entities: str = "", category: str = "general") -> str:
+def save_to_memory(fact: str, entities: str = "", category: str = "general", reason: str = "agent_inferred") -> str:
     """
     Αποθηκεύει πληροφορίες ΣΗΜΑΣΙΟΛΟΓΙΚΑ.
     fact: Το γεγονός (π.χ. "Ο Αλέξανδρος τρώει μόνο φακές").
     entities: Λέξεις-κλειδιά χωρισμένες με κόμμα (π.χ. "Αλέξανδρος, Φαγητό, Προτίμηση").
     category: Η κατηγορία (π.χ. 'family', 'home', 'lazaros', 'tech', 'work').
+    reason: Γιατί αποθηκεύεται — 'user_stated' αν το είπε ρητά ο χρήστης, 'agent_inferred' αλλιώς.
     """
     import datetime
     from memory.vector_store import vector_store
@@ -229,13 +233,18 @@ def save_to_memory(fact: str, entities: str = "", category: str = "general") -> 
             print(f"\033[93m⚠️ [Semantic Graph]: Duplicate skip → {fact[:50]}\033[0m")
             return f"ℹ️ Η μνήμη υπάρχει ήδη (dist: {existing['distances'][0][0]:.3f})."
 
+        # Προσπαθούμε να πάρουμε το channel από το context (αν υπάρχει)
+        from tools import system as _self; _source = _self._CURRENT_CHANNEL
         vector_store.add_texts(
             texts=[semantic_payload],
             metadatas=[{
                 "category": category,
                 "entities": entities,
                 "timestamp": datetime.datetime.now().timestamp(),
-                "type": "semantic_node"
+                "type": "semantic_node",
+                "source": _source,
+                "reason": reason,
+                "retrieval_count": 0,
             }]
         )
 

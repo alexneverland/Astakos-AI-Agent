@@ -656,7 +656,8 @@ def handle_message(user_text: str, chat_id: str):
             pass
         current_msg  = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
         # ── Ροή μέσω LangGraph ───────────────────────────────────
-        for event in graph.stream({"messages": context_msgs + [current_msg]}, {"recursion_limit": 50}):
+        import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"
+        for event in graph.stream({"messages": context_msgs + [current_msg], "channel": "telegram"}, {"recursion_limit": 50}):
             for node, data in event.items():
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node

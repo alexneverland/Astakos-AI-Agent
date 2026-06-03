@@ -30,6 +30,7 @@ class AgentState(TypedDict):
     plan_index: NotRequired[int]         # τρέχον βήμα
     plan_results: NotRequired[list]      # αποτελέσματα βημάτων
     plan_goal: NotRequired[str]          # το αρχικό goal
+    channel: NotRequired[str]            # "telegram" | "web" | "terminal"
 
 # ────────────────────────────────────────────────────────────────
 # 2. MESSAGE HELPERS (Mastro-Shield & Smart Parser)
