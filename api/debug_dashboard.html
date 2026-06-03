@@ -37,13 +37,26 @@
   .bar-wrap{background:#21262d;border-radius:4px;height:6px;width:100%;margin-top:3px;}
   .bar-fill{height:6px;border-radius:4px;background:var(--green);transition:width .4s;}
   #refresh-bar{height:2px;background:var(--blue);transition:width .1s linear;position:fixed;top:0;left:0;z-index:99;}
+  #charts-btn:hover{background:#0d2240;}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
 <div id="refresh-bar" style="width:0%"></div>
 <h1>🦞 Astakos Runtime Dashboard</h1>
 <div class="ts" id="ts">Φόρτωση...</div>
 <div class="grid" id="grid"></div>
+<div style="margin-top:16px">
+  <button id="charts-btn" onclick="toggleCharts()" style="background:#1a2a3a;color:var(--blue);border:1px solid var(--blue);padding:7px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">📊 Εμφάνιση Γραφημάτων</button>
+</div>
+<div id="charts-section" style="display:none;margin-top:12px">
+  <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px">
+    <div class="card"><h2>🗓️ Routine States</h2><canvas id="chart-routines" height="200"></canvas></div>
+    <div class="card"><h2>⚡ Agent Usage (1h)</h2><canvas id="chart-agents" height="200"></canvas></div>
+    <div class="card"><h2>📈 Event Throughput (1h)</h2><canvas id="chart-throughput" height="200"></canvas></div>
+    <div class="card"><h2>✅ Routine Confirmations (today)</h2><canvas id="chart-confirmations" height="200"></canvas></div>
+  </div>
+</div>
 <div class="grid" id="timeline-section" style="margin-top:16px"></div>
 <div class="grid" id="goals-section" style="margin-top:16px"></div>
 <div class="grid" id="reflections-section" style="margin-top:16px"></div>
@@ -334,7 +347,9 @@ function filterLogs() {
 async function fetchData() {
   try {
     const r = await fetch('/debug/runtime');
-    render(await r.json());
+    const data = await r.json();
+    render(data);
+    renderCharts(data);
   } catch(e) {
     document.getElementById('ts').innerHTML = `<span class="err">Σφάλμα φόρτωσης: ${e}</span>`;
   }
@@ -456,6 +471,95 @@ async function resolveAction(toolCallId, decision) {
   fetchData();
 }
 
+// ── CHARTS ────────────────────────────────────────────────────
+let chartsVisible = false;
+const _charts = {};
+
+function toggleCharts() {
+  chartsVisible = !chartsVisible;
+  document.getElementById('charts-section').style.display = chartsVisible ? 'block' : 'none';
+  document.getElementById('charts-btn').textContent = chartsVisible ? '📊 Απόκρυψη Γραφημάτων' : '📊 Εμφάνιση Γραφημάτων';
+  if (chartsVisible && _lastData) renderCharts(_lastData);
+}
+
+let _lastData = null;
+
+function renderCharts(d) {
+  _lastData = d;
+  if (!chartsVisible) return;
+
+  const COLORS = ['#3fb950','#58a6ff','#d29922','#f85149','#bc8cff','#f0883e','#39d353','#79c0ff'];
+  const darkGrid = { color: '#21262d' };
+
+  function mkChart(id, type, labels, datasets, opts={}) {
+    if (_charts[id]) _charts[id].destroy();
+    const ctx = document.getElementById(id)?.getContext('2d');
+    if (!ctx) return;
+    _charts[id] = new Chart(ctx, {
+      type, data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#8b949e', font: { size: 11 } } } },
+        scales: type !== 'doughnut' ? {
+          x: { ticks: { color: '#8b949e', font:{size:10} }, grid: darkGrid },
+          y: { ticks: { color: '#8b949e', font:{size:10} }, grid: darkGrid, beginAtZero: true }
+        } : undefined,
+        ...opts
+      }
+    });
+  }
+
+  // 1. Routine States — doughnut
+  const stateMap = d.routines?.state_counts || {};
+  const stateLabels = Object.keys(stateMap);
+  mkChart('chart-routines', 'doughnut', stateLabels, [{
+    data: stateLabels.map(k => stateMap[k]),
+    backgroundColor: COLORS,
+    borderColor: '#161b22', borderWidth: 2
+  }]);
+
+  // 2. Agent Usage — bar (από throughput: "job/action" → groupby job)
+  const throughput = d.events_1h?.throughput || {};
+  const agentCounts = {};
+  Object.entries(throughput).forEach(([key, count]) => {
+    const agent = key.split('/')[0];
+    agentCounts[agent] = (agentCounts[agent] || 0) + count;
+  });
+  const agentLabels = Object.keys(agentCounts);
+  mkChart('chart-agents', 'bar', agentLabels, [{
+    label: 'Events',
+    data: agentLabels.map(k => agentCounts[k]),
+    backgroundColor: COLORS,
+    borderRadius: 4
+  }]);
+
+  // 3. Event Throughput — horizontal bar (top 8 job/action combos)
+  const tpEntries = Object.entries(throughput).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  mkChart('chart-throughput', 'bar', tpEntries.map(e=>e[0]), [{
+    label: 'Count',
+    data: tpEntries.map(e=>e[1]),
+    backgroundColor: '#58a6ff',
+    borderRadius: 4
+  }], { indexAxis: 'y' });
+
+  // 4. Routine confirmations today — από event log
+  const events = d.events_1h?.recent_logs || [];
+  const confByHour = {};
+  events.forEach(ev => {
+    if (ev.action === 'confirmed') {
+      const h = (ev.timestamp||'').slice(11,13) + ':00';
+      confByHour[h] = (confByHour[h] || 0) + 1;
+    }
+  });
+  const hours = Object.keys(confByHour).sort();
+  mkChart('chart-confirmations', 'line', hours, [{
+    label: 'Confirmations',
+    data: hours.map(h => confByHour[h]),
+    borderColor: '#3fb950', backgroundColor: '#1a3a1f',
+    fill: true, tension: 0.3, pointRadius: 4
+  }]);
+}
+
 function toggleEdit(id) {
   const row = document.getElementById(`edit-row-${id}`);
   if (row) row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
@@ -496,6 +600,168 @@ fetchData();
 fetchTimeline();
 setInterval(fetchTimeline, 30000);
 startCountdown();
+</script>
+</body>
+</html>
+  await fetch(`/debug/routine/${id}/reset-cooldown`, {method:'POST'});
+  fetchData();
+}
+
+async function deleteRoutine(id) {
+  if (!confirm(`Διαγραφή ρουτίνας #${id};`)) return;
+  await fetch(`/debug/routine/${id}`, {method:'DELETE'});
+  fetchData();
+}
+
+async function confirmRoutine(id) {
+  if (!confirm(`Force-confirm ρουτίνα #${id} → ACTIVE;`)) return;
+  const r = await fetch(`/debug/routine/${id}/confirm`, {method:'POST'});
+  const j = await r.json();
+  if (!j.ok) alert(`Σφάλμα: ${j.error}`);
+  fetchData();
+}
+
+async function activateRoutine(id) {
+  if (!confirm(`Ενεργοποίηση ρουτίνας #${id};`)) return;
+  await fetch(`/debug/routine/${id}/state`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({state:'active'})});
+  fetchData();
+}
+
+async function resolveAction(toolCallId, decision) {
+  const label = decision === 'approve' ? 'Έγκριση' : 'Απόρριψη';
+  if (!confirm(`${label} action ${toolCallId}?`)) return;
+  await fetch(`/debug/action/${toolCallId}/${decision}`, {method:'POST'});
+  fetchData();
+}
+
+function toggleEdit(id) {
+  const row = document.getElementById(`edit-row-${id}`);
+  if (row) row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+}
+
+async function saveEdit(id) {
+  const day   = document.getElementById(`edit-day-${id}`)?.value;
+  const time  = document.getElementById(`edit-time-${id}`)?.value;
+  const event = document.getElementById(`edit-event-${id}`)?.value;
+  await fetch(`/debug/routine/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({day,time,event})});
+  fetchData();
+}
+
+function filterLogs(q) {
+  document.querySelectorAll('.log-row').forEach(row => {
+    row.style.display = row.dataset.filter?.includes(q) ? '' : 'none';
+  });
+}
+
+// ── CHARTS ────────────────────────────────────────────────────
+let chartsVisible = false;
+const _charts = {};
+let _lastData = null;
+
+function toggleCharts() {
+  chartsVisible = !chartsVisible;
+  document.getElementById('charts-section').style.display = chartsVisible ? 'block' : 'none';
+  document.getElementById('charts-btn').textContent = chartsVisible ? '📊 Απόκρυψη Γραφημάτων' : '📊 Εμφάνιση Γραφημάτων';
+  if (chartsVisible && _lastData) renderCharts(_lastData);
+}
+
+function renderCharts(d) {
+  _lastData = d;
+  if (!chartsVisible) return;
+  const COLORS = ['#3fb950','#58a6ff','#d29922','#f85149','#bc8cff','#f0883e','#39d353','#79c0ff'];
+  const darkGrid = { color: '#21262d' };
+
+  function mkChart(id, type, labels, datasets, opts={}) {
+    if (_charts[id]) _charts[id].destroy();
+    const ctx = document.getElementById(id)?.getContext('2d');
+    if (!ctx) return;
+    _charts[id] = new Chart(ctx, {
+      type, data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#8b949e', font: { size: 11 } } } },
+        scales: type !== 'doughnut' ? {
+          x: { ticks: { color: '#8b949e', font:{size:10} }, grid: darkGrid },
+          y: { ticks: { color: '#8b949e', font:{size:10} }, grid: darkGrid, beginAtZero: true }
+        } : undefined,
+        ...opts
+      }
+    });
+  }
+
+  // 1. Routine States
+  const stateMap = d.routines?.state_counts || {};
+  const stateLabels = Object.keys(stateMap);
+  mkChart('chart-routines', 'doughnut', stateLabels, [{
+    data: stateLabels.map(k => stateMap[k]),
+    backgroundColor: COLORS, borderColor: '#161b22', borderWidth: 2
+  }]);
+
+  // 2. Agent Usage
+  const throughput = d.events_1h?.throughput || {};
+  const agentCounts = {};
+  Object.entries(throughput).forEach(([key, count]) => {
+    const agent = key.split('/')[0];
+    agentCounts[agent] = (agentCounts[agent] || 0) + count;
+  });
+  const agentLabels = Object.keys(agentCounts);
+  mkChart('chart-agents', 'bar', agentLabels, [{
+    label: 'Events', data: agentLabels.map(k => agentCounts[k]),
+    backgroundColor: COLORS, borderRadius: 4
+  }]);
+
+  // 3. Event Throughput top 8
+  const tpEntries = Object.entries(throughput).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  mkChart('chart-throughput', 'bar', tpEntries.map(e=>e[0]), [{
+    label: 'Count', data: tpEntries.map(e=>e[1]),
+    backgroundColor: '#58a6ff', borderRadius: 4
+  }], { indexAxis: 'y' });
+
+  // 4. Confirmations by hour
+  const events = d.events_1h?.recent_logs || [];
+  const confByHour = {};
+  events.forEach(ev => {
+    if (ev.action === 'confirmed') {
+      const h = (ev.timestamp||'').slice(11,13) + ':00';
+      confByHour[h] = (confByHour[h] || 0) + 1;
+    }
+  });
+  const hours = Object.keys(confByHour).sort();
+  mkChart('chart-confirmations', 'line', hours, [{
+    label: 'Confirmations', data: hours.map(h => confByHour[h]),
+    borderColor: '#3fb950', backgroundColor: '#1a3a1f',
+    fill: true, tension: 0.3, pointRadius: 4
+  }]);
+}
+
+// ── AUTO REFRESH ──────────────────────────────────────────────
+let _prog = 0, _progTimer;
+function startProgress() {
+  _prog = 0;
+  clearInterval(_progTimer);
+  _progTimer = setInterval(() => {
+    _prog = Math.min(_prog + (100 / (REFRESH / 100)), 100);
+    document.getElementById('refresh-bar').style.width = _prog + '%';
+  }, 100);
+}
+
+fetchData();
+fetchTimeline();
+startProgress();
+setInterval(() => { fetchData(); fetchTimeline(); startProgress(); }, REFRESH);
+</script>
+</body>
+</html>
+  rafId = requestAnimationFrame(tick);
+}
+
+fetchData();
+fetchTimeline();
+startCountdown();
+</script>
+</body>
+</html>
+tdown();
 </script>
 </body>
 </html>
