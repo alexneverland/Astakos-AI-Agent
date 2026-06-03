@@ -44,6 +44,7 @@
 <h1>🦞 Astakos Runtime Dashboard</h1>
 <div class="ts" id="ts">Φόρτωση...</div>
 <div class="grid" id="grid"></div>
+<div class="grid" id="timeline-section" style="margin-top:16px"></div>
 <div class="grid" id="goals-section" style="margin-top:16px"></div>
 <div class="grid" id="reflections-section" style="margin-top:16px"></div>
 <script>
@@ -88,8 +89,12 @@ function logRow(e) {
   </tr>`;
 }
 function renderTimelineCard(){
-  const el = document.getElementById('timeline-card');
-  if(!timelineData.length){ if(el) el.remove(); return; }
+  const container = document.getElementById('timeline-section');
+  if(!container) return;
+  if(!timelineData.length){
+    container.innerHTML = '';
+    return;
+  }
   const rows = [...timelineData].reverse().slice(0,60).map(e=>{
     const ts   = (e.timestamp||'').substring(11,19);
     const date = (e.timestamp||'').substring(5,10);
@@ -101,12 +106,10 @@ function renderTimelineCard(){
       <td class="off" style="font-size:11px">${extraInfo(e)}</td>
     </tr>`;
   }).join('');
-  const card = `<div class="card" id="timeline-card" style="grid-column:1/-1">
+  container.innerHTML = `<div class="card" style="grid-column:1/-1">
     <h2>📜 Routine Timeline (last 2 days)</h2>
     <table><tr><th>Time</th><th>Action</th><th>ID</th><th>Event</th><th>Info</th></tr>
     ${rows}</table></div>`;
-  if(el) el.outerHTML = card;
-  else   document.getElementById('grid').insertAdjacentHTML('beforeend', card);
 }
 async function fetchTimeline(){
   try{
