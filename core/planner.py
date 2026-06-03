@@ -155,12 +155,42 @@ def capture_result_node(state):
 
 
 def _plan_summary(goal: str, tasks: list, results: list) -> dict:
-    """Δημιουργεί summary μετά την ολοκλήρωση όλων των βημάτων."""
+    """Δημιουργεί summary και αποθηκεύει post-plan reflection."""
     summary = f"✅ **Plan ολοκληρώθηκε:** _{goal}_\n\n"
     for i, (task, result) in enumerate(zip(tasks, results)):
         summary += f"**{i+1}. {task['description']}**\n{result[:500]}\n\n"
 
     print(f"\033[92m[Planner]: Plan ολοκληρώθηκε — {len(tasks)} βήματα\033[0m")
+
+    # Post-plan reflection
+    try:
+        from services.gemini import safe_gemini_call
+        from services.reflection_engine import _save_reflection
+
+        steps_text = "\n".join(f"{i+1}. {t['description']}: {r[:200]}" for i,(t,r) in enumerate(zip(tasks, results)))
+        reflect_prompt = f"""Ανέλυσε αυτό το ολοκληρωμένο plan και δώσε σύντομη αξιολόγηση.
+Goal: {goal}
+Steps:
+{steps_text}
+
+Απάντησε με JSON:
+{{"observation": "τι παρατήρησες", "action": "τι θα βελτίωνες στο μέλλον", "confidence": 0.7, "lesson": "το lesson learned"}}
+Μόνο JSON, χωρίς markdown."""
+
+        resp = safe_gemini_call(reflect_prompt)
+        import json, re
+        raw = re.sub(r"```json|```", "", resp.text.strip()).strip()
+        data = json.loads(raw)
+        _save_reflection(
+            source="planner",
+            observation=data.get("observation", ""),
+            action=data.get("action", ""),
+            confidence=float(data.get("confidence", 0.7)),
+            lesson=data.get("lesson", ""),
+        )
+        print(f"\033[92m[Planner]: Post-plan reflection saved\033[0m")
+    except Exception as e:
+        print(f"\033[90m[Planner]: Reflection skip: {e}\033[0m")
 
     return {
         "messages":    [AIMessage(content=summary)],
