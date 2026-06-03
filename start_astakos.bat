@@ -22,7 +22,7 @@ echo.
 echo  Starting Web Server...
 cd /d C:\astakos_v2
 call venv\Scripts\activate
-uvicorn api.server:server --reload
+uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients
 goto end
 
 :telegram
@@ -38,7 +38,7 @@ echo.
 echo  Starting both services...
 cd /d C:\astakos_v2
 call venv\Scripts\activate
-start "Astakos Web Server" cmd /k "cd /d C:\astakos_v2 && call venv\Scripts\activate && uvicorn api.server:server --reload"
+start "Astakos Web Server" cmd /k "cd /d C:\astakos_v2 && call venv\Scripts\activate && uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients"
 timeout /t 3 /nobreak >nul
 python run_telegram.py
 goto end
