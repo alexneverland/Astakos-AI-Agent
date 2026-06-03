@@ -1433,6 +1433,78 @@ def job_morning_fit_briefing():
     except Exception as e:
         print(f"⚠️ [FitBriefing]: {e}")
 
+def job_goal_followup():
+    """
+    Ελέγχει active goals που δεν αναφέρθηκαν τις τελευταίες 7 μέρες.
+    Τρέχει μία φορά την ημέρα στις 10:00.
+    """
+    now_hour = datetime.now().hour
+    if now_hour != 10:
+        return
+
+    flag_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".goal_followup_sent")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if os.path.exists(flag_file):
+        with open(flag_file, "r") as f:
+            if f.read().strip() == today_str:
+                return
+
+    try:
+        from memory.vector_store import get_active_goals
+        from config import BASE_DIR
+        import json as _json
+
+        goals = get_active_goals()
+        if not goals:
+            return
+
+        # Διαβάζουμε chat history για να βρούμε τελευταία αναφορά κάθε goal
+        chat_file = os.path.join(BASE_DIR, "astakos_chat_history.json")
+        recent_text = ""
+        if os.path.exists(chat_file):
+            with open(chat_file, "r", encoding="utf-8") as f:
+                history = _json.load(f)
+            # Τελευταίες 7 μέρες
+            from datetime import timedelta
+            cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            recent_msgs = [m for m in history if m.get("date","") >= cutoff]
+            recent_text = " ".join(m.get("content","")[:200] for m in recent_msgs).lower()
+
+        # Βρίσκουμε goals που δεν αναφέρθηκαν πρόσφατα
+        stale_goals = []
+        for g in goals:
+            project_lower = g["project"].lower()
+            # Αν το project name δεν εμφανίζεται στο πρόσφατο history → stale
+            if project_lower not in recent_text:
+                stale_goals.append(g)
+
+        if not stale_goals:
+            return
+
+        # LLM crafts natural follow-up message
+        from services.gemini import safe_gemini_call
+        goals_text = "\n".join(f"- {g['project']}: {g['description']}" for g in stale_goals[:3])
+        prompt = f"""Είσαι ο Αστακός, ο AI βοηθός του Λάζαρου. 
+Ο Λάζαρος έχει τους εξής ανοιχτούς στόχους που δεν αναφέρθηκαν τις τελευταίες 7 μέρες:
+
+{goals_text}
+
+Γράψε ένα σύντομο, φιλικό και φυσικό μήνυμα (2-3 προτάσεις) που τον υπενθυμίζει για αυτούς.
+ΜΗΝ ακούγεσαι σαν bot. Μίλα σαν συνεργάτης που θυμάται."""
+
+        response = safe_gemini_call(prompt)
+        msg = response.text.strip() if hasattr(response, "text") else str(response).strip()
+
+        if msg:
+            send_telegram_msg(f"🎯 {msg}")
+            with open(flag_file, "w") as f:
+                f.write(today_str)
+            print(f"✅ [GoalFollowup]: Στάλθηκε για {len(stale_goals)} goals.")
+
+    except Exception as e:
+        print(f"⚠️ [GoalFollowup]: {e}")
+
+
 # ────────────────────────────────────────────────────────────────
 # ASTAKOS SCHEDULER (Central Event Bus)
 # ────────────────────────────────────────────────────────────────
@@ -1613,6 +1685,7 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive")
     astakos_scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics")
     astakos_scheduler.register(job_morning_fit_briefing, interval_seconds=3600, name="fit_briefing")
+    astakos_scheduler.register(job_goal_followup,       interval_seconds=3600, name="goal_followup")
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
     # Φόρτωσε το ιστορικό από τον δίσκο
 
