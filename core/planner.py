@@ -139,7 +139,7 @@ def capture_result_node(state):
             last_result = content
             break
 
-    results.append(last_result[:500] if last_result else "(χωρίς αποτέλεσμα)")
+    results.append(last_result[:800] if last_result else "(χωρίς αποτέλεσμα)")
     new_idx = idx + 1
 
     print(f"\033[95m[TaskExecutor]: ✅ Βήμα {idx+1} ολοκληρώθηκε ({len(results)}/{len(tasks)})\033[0m")
@@ -158,7 +158,7 @@ def _plan_summary(goal: str, tasks: list, results: list) -> dict:
     """Δημιουργεί summary μετά την ολοκλήρωση όλων των βημάτων."""
     summary = f"✅ **Plan ολοκληρώθηκε:** _{goal}_\n\n"
     for i, (task, result) in enumerate(zip(tasks, results)):
-        summary += f"**{i+1}. {task['description']}**\n{result[:200]}\n\n"
+        summary += f"**{i+1}. {task['description']}**\n{result[:500]}\n\n"
 
     print(f"\033[92m[Planner]: Plan ολοκληρώθηκε — {len(tasks)} βήματα\033[0m")
 
