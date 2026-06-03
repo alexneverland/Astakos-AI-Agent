@@ -982,6 +982,49 @@ async def edit_routine(routine_id: int, request: Request, _=Depends(require_toke
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+@server.get("/debug/reflections")
+async def get_reflections():
+    """Επιστρέφει τα τελευταία 20 reflections από τη βάση."""
+    import sqlite3 as _sqlite3
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    try:
+        conn = _sqlite3.connect(db_path)
+        conn.row_factory = _sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM reflections ORDER BY created_at DESC LIMIT 20"
+        ).fetchall()
+        conn.close()
+        return {"reflections": [dict(r) for r in rows]}
+    except Exception as e:
+        return {"reflections": [], "error": str(e)}
+
+@server.post("/debug/reflection/{reflection_id}/apply")
+async def apply_reflection(reflection_id: int, _=Depends(require_token)):
+    """Εφαρμόζει χειροκίνητα ένα pending reflection."""
+    import sqlite3 as _sqlite3
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    try:
+        conn   = _sqlite3.connect(db_path)
+        conn.row_factory = _sqlite3.Row
+        row    = conn.execute("SELECT * FROM reflections WHERE id=?", (reflection_id,)).fetchone()
+        conn.close()
+        if not row:
+            return {"ok": False, "error": "Not found"}
+        from services.reflection_engine import _apply_action
+        r = dict(row)
+        success = _apply_action(r)
+        if success:
+            conn2 = _sqlite3.connect(db_path)
+            conn2.execute(
+                "UPDATE reflections SET applied=1, applied_at=? WHERE id=?",
+                (datetime.now().isoformat(timespec="seconds"), reflection_id)
+            )
+            conn2.commit()
+            conn2.close()
+        return {"ok": success}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @server.get("/debug")
 async def debug_panel():
     """Observability HTML dashboard — auto-refresh every 5s."""

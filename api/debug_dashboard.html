@@ -44,6 +44,7 @@
 <h1>🦞 Astakos Runtime Dashboard</h1>
 <div class="ts" id="ts">Φόρτωση...</div>
 <div class="grid" id="grid"></div>
+<div class="grid" id="reflections-section" style="margin-top:16px"></div>
 <script>
 const REFRESH = 5000;
 let rafId;
@@ -294,6 +295,51 @@ async function fetchData() {
   } catch(e) {
     document.getElementById('ts').innerHTML = `<span class="err">Σφάλμα φόρτωσης: ${e}</span>`;
   }
+  // Φόρτωση reflections
+  try {
+    const rr = await fetch('/debug/reflections');
+    const rj = await rr.json();
+    renderReflections(rj.reflections || []);
+  } catch(e) {}
+}
+
+function renderReflections(reflections) {
+  const container = document.getElementById('reflections-section');
+  if (!container) return;
+  if (!reflections.length) {
+    container.innerHTML = '<div class="card" style="grid-column:span 2"><h2>🧠 Reflections</h2><p style="color:var(--muted)">Δεν υπάρχουν reflections ακόμα. Τρέχουν νυχτερινά στις 03:00.</p></div>';
+    return;
+  }
+  const rows = reflections.map(r => `
+    <tr>
+      <td class="off">#${r.id}</td>
+      <td>${r.created_at?.substring(0,16)||'—'}</td>
+      <td><span class="badge b-blue">${r.source||'—'}</span></td>
+      <td style="max-width:300px">${r.observation}</td>
+      <td><code>${r.action}</code></td>
+      <td class="${r.confidence>=0.75?'ok':r.confidence>=0.5?'warn':'err'}">${(r.confidence*100).toFixed(0)}%</td>
+      <td style="max-width:200px;color:var(--muted);font-size:11px">${r.lesson||'—'}</td>
+      <td>${r.applied
+        ? '<span class="ok">✅ Applied</span>'
+        : `<button onclick="applyReflection(${r.id})" style="background:#1a5a3a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer">▶ Apply</button>`
+      }</td>
+    </tr>`).join('');
+  container.innerHTML = `
+    <div class="card" style="grid-column:span 2">
+      <h2>🧠 Reflections (${reflections.length})</h2>
+      <table>
+        <tr><th>ID</th><th>Ημερομηνία</th><th>Πηγή</th><th>Observation</th><th>Action</th><th>Conf</th><th>Lesson</th><th>Status</th></tr>
+        ${rows}
+      </table>
+    </div>`;
+}
+
+async function applyReflection(id) {
+  if (!confirm(`Εφαρμογή reflection #${id};`)) return;
+  const r = await fetch(`/debug/reflection/${id}/apply`, {method:'POST'});
+  const j = await r.json();
+  if (!j.ok) alert(`Σφάλμα: ${j.error}`);
+  fetchData();
 }
 
 async function deleteRoutine(id) {
