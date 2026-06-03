@@ -319,12 +319,18 @@ open http://localhost:8000/debug/runtime
 - [x] Story maker — `/story` with AI-generated illustrations via Pollinations.ai
 - [x] Local security — bearer token auth, localhost CORS, upload limits
 - [x] Auto-restart on code changes — watchfiles monitors source + prompts
+- [x] Capability Registry — keyword routing before LLM Supervisor for instant dispatch
+- [x] Reflection Engine — nightly self-evaluation with auto-apply actions & ChromaDB lessons
+- [x] Long-Term Goals System — ChromaDB goal tracking, injected into every prompt
+- [x] Memory Retrieval Tracking — `retrieval_count` per memory for future scoring
 
 ### ⬜ Planned
 
 - [ ] Cross-channel awareness (Telegram ↔ Web context sharing)
 - [ ] Action Approval Levels (auto / confirm / deny per tool)
 - [ ] Analytics dashboard UI in Web interface
+- [ ] Memory scoring & cleanup — importance/freshness scoring based on retrieval_count data
+- [ ] Personal Knowledge Graph — memory connection layer (after 6+ months of real usage data)
 - [ ] Plugin system for third-party skill scripts
 
 ---
