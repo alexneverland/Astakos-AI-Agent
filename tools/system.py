@@ -1692,18 +1692,6 @@ def get_fit_summary(days_ago: int = 1) -> str:
     except Exception as e:
         return f"❌ Google Fit σφάλμα: {e}"
 
-all_tools = [
-    search_memory, save_to_memory, delete_from_memory, retrieve_photo, update_pending_linkedin_post, process_and_clear_linkedin_post,
-    set_local_reminder, set_reminder, manage_list,
-    google_calendar_tool, google_tasks_tool, drive_manager,
-    read_local_file, write_code, run_code, write_custom_tool,
-    mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
-    log_meal, create_file_tool, get_current_location,
-    get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
-    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
-    duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool
-]
-
 
 @tool
 def save_goal_tool(project: str, description: str, status: str = "active") -> str:
@@ -1732,3 +1720,16 @@ def update_goal_status_tool(project: str, status: str) -> str:
     if ok:
         return f"✅ Goal '{project}' → {status}."
     return f"❌ Δεν βρέθηκε goal '{project}'."
+
+
+all_tools = [
+    search_memory, save_to_memory, delete_from_memory, retrieve_photo, update_pending_linkedin_post, process_and_clear_linkedin_post,
+    set_local_reminder, set_reminder, manage_list,
+    google_calendar_tool, google_tasks_tool, drive_manager,
+    read_local_file, write_code, run_code, write_custom_tool,
+    mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
+    log_meal, create_file_tool, get_current_location,
+    get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
+    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
+    duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool,
+]
