@@ -139,6 +139,11 @@ def supervisor_node(state):
     router_llm = llm.with_structured_output(Router)
     last_content = clean_message(state['messages'][-1].content)
 
+    # ── /plan: υψηλότερη προτεραιότητα από όλα ────────────────────
+    if last_content.strip().startswith("/plan"):
+        print(f"[95m[Τροχονόμος]: -> planner (/plan command)[0m")
+        return {"next_agent": "planner"}
+
     # ── Capability Registry: πρώτο φίλτρο πριν το LLM ───────────
     registry_agent = lookup_agent(str(last_content))
     if registry_agent:
