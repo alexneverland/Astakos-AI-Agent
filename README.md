@@ -95,7 +95,8 @@ It's not a wrapper around an API. It's a full multi-agent system that lives on y
 | 🧩 **Formal Event Bus** | Pub/sub via `core/event_bus.py` — `routine_triggered`, `routine_confirmed`, `session_ended` and more |
 | 🔀 **Dual Channel Memory** | Shared long-term memory + isolated per-channel session history (Telegram / Web) |
 | 🏃 **Google Fit Integration** | Daily steps, sleep phases (deep/REM/light) & heart rate from Samsung Health via Google Fit API. Morning briefing at 08:00 |
-| 📈 **Memory Retrieval Tracking** | `retrieval_count` increments on every semantic hit — foundation for future memory scoring & cleanup |
+| 📈 **Memory Scoring** | Every memory has `importance` (auto-inferred by type), `confidence`, `last_accessed`, `retrieval_count`. `compute_score()` = importance×0.4 + retrieval×0.3 + confidence×0.2 + freshness×0.1 |
+| 🔗 **Unified Memory Entry Point** | `memory.save(memory_type=...)` covers facts, photos, sessions, goals, reflections, events — one API for all stores |
 | 🧠 **Reflection Engine** | Nightly self-evaluation + post-plan reflection: extracts lessons, saves to ChromaDB, auto-applies improvements |
 
 ## 📡 Interfaces & Automation
@@ -343,6 +344,8 @@ open http://localhost:8000/debug/runtime
 - [x] Post-Plan Reflection — after every `/plan`, Astakos self-evaluates and saves lessons to Reflection Engine
 - [x] Memory Provenance — `source` (telegram/web) + `reason` metadata on every saved fact
 - [x] Goal Follow-up Engine — daily semantic check for stale goals, proactive Telegram ping
+- [x] Memory Scoring — `importance/confidence/last_accessed` on all save points, `compute_score()` formula, `bump_retrieval_count` updates `last_accessed`
+- [x] Unified Memory Entry Point — `memory.save(memory_type=...)` for facts, photos, sessions, goals, reflections, events
 
 ### ⬜ Planned
 
@@ -350,7 +353,7 @@ open http://localhost:8000/debug/runtime
 - [ ] Action Approval Matrix — per-action granularity (read/write/delete per tool)
 - [ ] Planning Agent improvements — parallel steps, error recovery, progress UI
 - [ ] Analytics dashboard UI in Web interface
-- [ ] Memory scoring & cleanup — importance/freshness scoring based on retrieval_count data
+- [ ] Memory cleanup — prune low-score memories (score < threshold) after 6+ months of real data
 - [ ] Personal Knowledge Graph — memory connection layer (after 6+ months of real usage data)
 - [ ] Plugin system for third-party skill scripts
 
