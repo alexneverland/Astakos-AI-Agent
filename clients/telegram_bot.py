@@ -1048,7 +1048,7 @@ def run_polling():
                         "/resume — Επαναφορά όλων \\(pause/mute/sleep\\)\n"
                         "/sleep \\[ώρες\\] — Ησυχία για Χ ώρες \\(π\\.χ\\. /sleep 8\\)\n"
                         "/confirm \\[εντολή\\] — Εκτέλεση εντολής με επιβεβαίωση\n"
-                        "/plan \[goal\] — Multi-step εκτέλεση \(π\.χ\. /plan κάνε release v1\.2\)\n"
+                        "/plan [goal] — Multi-step εκτέλεση (π.χ. /plan κάνε release v1.2)\n"
                         "/end — Τέλος session & περίληψη"
                     )
                     continue
