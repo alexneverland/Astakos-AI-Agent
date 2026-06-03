@@ -323,11 +323,16 @@ open http://localhost:8000/debug/runtime
 - [x] Reflection Engine — nightly self-evaluation with auto-apply actions & ChromaDB lessons
 - [x] Long-Term Goals System — ChromaDB goal tracking, injected into every prompt
 - [x] Memory Retrieval Tracking — `retrieval_count` per memory for future scoring
+- [x] Action Approval Levels — SAFE/WARNING/CRITICAL risk registry, Telegram inline ✅/❌
+- [x] Planning Agent — `/plan` command, multi-step task execution with TaskExecutor
+- [x] Memory Provenance — `source` (telegram/web) + `reason` metadata on every saved fact
+- [x] Goal Follow-up Engine — daily semantic check for stale goals, proactive Telegram ping
 
 ### ⬜ Planned
 
 - [ ] Cross-channel awareness (Telegram ↔ Web context sharing)
-- [ ] Action Approval Levels (auto / confirm / deny per tool)
+- [ ] Action Approval Matrix — per-action granularity (read/write/delete per tool)
+- [ ] Planning Agent improvements — parallel steps, error recovery, progress UI
 - [ ] Analytics dashboard UI in Web interface
 - [ ] Memory scoring & cleanup — importance/freshness scoring based on retrieval_count data
 - [ ] Personal Knowledge Graph — memory connection layer (after 6+ months of real usage data)
