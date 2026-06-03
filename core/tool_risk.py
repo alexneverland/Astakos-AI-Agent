@@ -9,7 +9,7 @@
 
 TOOL_RISK: dict[str, str] = {
     # ── CRITICAL: destructive / external send / irreversible ────
-    "run_terminal_command":     "CRITICAL",
+    "run_terminal_command":     "DYNAMIC",  # risk καθορίζεται από classify_command() στο approval.py
     "github_manager":           "CRITICAL",
     "mail_manager":             "CRITICAL",
     "relay_local_payload":      "CRITICAL",  # messenger draft → send

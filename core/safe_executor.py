@@ -37,7 +37,7 @@ def classify_command(cmd: str) -> tuple[ExecPolicy, str]:
             return ExecPolicy.BLOCKED, p
     for p in _REQUIRE_CONFIRM:
         if re.search(p, cmd, re.IGNORECASE):
-            return ExecPolicy.REQUIRE_CONFIRM, p
+            return ExecPolicy.REQUIRE_CONFIRMATION, p
     for p in _WARNING:
         if re.search(p, cmd, re.IGNORECASE):
             return ExecPolicy.WARNING, p

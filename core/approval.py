@@ -8,7 +8,33 @@
 import os
 import json
 from datetime import datetime
-from core.tool_risk import get_risk, is_critical
+from core.tool_risk import get_risk as _get_risk
+
+def _effective_risk(tc: dict) -> str:
+    """
+    Υπολογίζει το πραγματικό risk level ενός tool call.
+    Για run_terminal_command: χρησιμοποιεί classify_command() αντί για static registry.
+    """
+    name = tc["name"]
+    if name == "run_terminal_command":
+        from core.safe_executor import classify_command, ExecPolicy
+        cmd = tc.get("args", {}).get("command", "")
+        policy, _ = classify_command(cmd)
+        if policy == ExecPolicy.BLOCKED:
+            return "CRITICAL"
+        elif policy == ExecPolicy.REQUIRE_CONFIRMATION:
+            return "CRITICAL"
+        elif policy == ExecPolicy.WARNING:
+            return "WARNING"
+        else:
+            return "SAFE"
+    return _get_risk(name)
+
+def is_critical(tc: dict) -> bool:
+    return _effective_risk(tc) == "CRITICAL"
+
+def get_risk(name: str) -> str:
+    return _get_risk(name)
 
 PENDING_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "astakos_pending_approval.json"
@@ -90,13 +116,13 @@ def approval_check_node(state):
     if not tool_calls:
         return {"approval_status": "ok"}
 
-    critical_calls = [tc for tc in tool_calls if is_critical(tc["name"])]
+    critical_calls = [tc for tc in tool_calls if is_critical(tc)]
 
     if not critical_calls:
         # Όλα SAFE/WARNING — πάμε κανονικά
-        risk_levels = [get_risk(tc["name"]) for tc in tool_calls]
+        risk_levels = [_effective_risk(tc) for tc in tool_calls]
         if "WARNING" in risk_levels:
-            names = [tc["name"] for tc in tool_calls if get_risk(tc["name"]) == "WARNING"]
+            names = [tc["name"] for tc in tool_calls if _effective_risk(tc) == "WARNING"]
             print(f"\033[93m[Approval]: ⚠️ WARNING tools: {names}\033[0m")
         return {"approval_status": "ok"}
 
