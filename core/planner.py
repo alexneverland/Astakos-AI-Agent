@@ -22,7 +22,9 @@ def planner_node(state):
     from core.utils import clean_message
 
     last_msg = clean_message(state["messages"][-1].content)
-    goal = last_msg.replace("/plan", "").strip()
+    # Αφαιρούμε timestamp [HH:MM] και /plan prefix
+    goal = re.sub(r'^\[\d{1,2}:\d{2}\]\s*', '', last_msg).strip()
+    goal = re.sub(r'^/plan\b\s*', '', goal).strip()
 
     print(f"\033[95m[Planner]: Αναλύω goal: {goal[:80]}\033[0m")
 

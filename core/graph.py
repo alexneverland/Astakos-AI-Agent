@@ -110,10 +110,11 @@ def _should_use_tools(state: AgentState):
 
 
 def _route_supervisor(state: AgentState) -> str:
-    """Αν το μήνυμα ξεκινά με /plan → planner. Αλλιώς → κανονικός agent."""
+    """Αν το μήνυμα περιέχει /plan → planner. Αλλιώς → κανονικός agent."""
+    import re as _re
     from core.utils import clean_message
     last_msg = clean_message(state["messages"][-1].content)
-    if last_msg.strip().startswith("/plan"):
+    if _re.search(r'(?:^|\])\s*/plan', last_msg.strip()):
         return "planner"
     return state.get("next_agent", "Chat_Agent")
 

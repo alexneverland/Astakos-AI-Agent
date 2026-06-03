@@ -140,8 +140,10 @@ def supervisor_node(state):
     last_content = clean_message(state['messages'][-1].content)
 
     # ── /plan: υψηλότερη προτεραιότητα από όλα ────────────────────
-    if last_content.strip().startswith("/plan"):
-        print(f"[95m[Τροχονόμος]: -> planner (/plan command)[0m")
+    # Χρησιμοποιούμε regex γιατί το server βάζει timestamp [HH:MM] πριν το μήνυμα
+    import re as _re
+    if _re.search(r'(?:^|\])\s*/plan', last_content.strip()):
+        print(f"\033[95m[Τροχονόμος]: -> planner (/plan command)\033[0m")
         return {"next_agent": "planner"}
 
     # ── Capability Registry: πρώτο φίλτρο πριν το LLM ───────────
