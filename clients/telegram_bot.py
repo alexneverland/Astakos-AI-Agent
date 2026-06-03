@@ -1327,6 +1327,14 @@ def job_analytics_engine():
     except Exception as e:
         print(f"[Analytics Job Error]: {e}")
 
+    # Reflection engine — τρέχει αμέσως μετά τα analytics
+    try:
+        from services.reflection_engine import run_reflection
+        r_stats = run_reflection()
+        print(f"[Reflection Job]: applied={r_stats.get('applied',0)}, pending={r_stats.get('pending',0)}")
+    except Exception as re:
+        print(f"[Reflection Job Error]: {re}")
+
 def job_morning_fit_briefing():
     """Πρωινό Google Fit briefing — τρέχει μόνο 08:00–09:00, μία φορά."""
     now_hour = datetime.now().hour
