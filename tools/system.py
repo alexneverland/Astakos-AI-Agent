@@ -125,6 +125,21 @@ def search_memory(query: str, category: str = "") -> str:
         if not results:
             return "System: Δεν βρέθηκε καμία σχετική μνήμη. Απάντα με τις γενικές σου γνώσεις."
 
+        # bump retrieval_count για τα αποτελέσματα
+        try:
+            from memory.vector_store import bump_retrieval_count
+            with vector_lock:
+                kwargs = {"n_results": min(6, len(results))}
+                if category and category in VALID_CATS:
+                    kwargs["where"] = {"category": category}
+                raw = vector_store._collection.query(
+                    query_embeddings=[embeddings.embed_query(query)], **kwargs
+                )
+            if raw.get("ids") and raw["ids"][0]:
+                bump_retrieval_count(raw["ids"][0])
+        except Exception as _be:
+            pass
+
         by_cat: dict = {}
         for res in results:
             cat = res.metadata.get("category", "general")

@@ -223,7 +223,18 @@ def build_prompt(state_messages, agent_role="") -> str:
         try:
             with vector_lock:
                 results = vector_store.similarity_search(last_msg, k=k_value)
-                
+                # bump retrieval_count
+                try:
+                    from memory.vector_store import bump_retrieval_count
+                    raw = vector_store._collection.query(
+                        query_embeddings=[embeddings.embed_query(last_msg)],
+                        n_results=k_value
+                    )
+                    if raw.get("ids") and raw["ids"][0]:
+                        bump_retrieval_count(raw["ids"][0])
+                except Exception:
+                    pass
+
             if results:
                 semantic_facts = []
                 for res in results:
