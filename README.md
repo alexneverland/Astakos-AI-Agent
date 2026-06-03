@@ -51,16 +51,14 @@ It's not a wrapper around an API. It's a full multi-agent system that lives on y
 ## 📸 Screenshots
 
 ### Telegram
-
-<!-- Add Telegram screenshot here -->
+<img width="400" alt="Screenshot_20260603_085050_Telegram" src="https://github.com/user-attachments/assets/c5ca1afd-c290-4c95-a50c-886e2fa6c955" />
 
 ### Web UI
-
-<!-- Add Web UI screenshot here -->
+<img width="800" alt="Screenshot 2026-06-03 085901" src="https://github.com/user-attachments/assets/f112fad5-2480-4a9f-ae2f-719c0106b176" />
 
 ### Runtime Dashboard
+<img width="800" alt="Screenshot 2026-06-03 085933" src="https://github.com/user-attachments/assets/f83756cd-51bb-4208-ac55-8d85b932d471" />
 
-<!-- Add Runtime Dashboard screenshot here -->
 
 ---
 
