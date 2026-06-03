@@ -352,16 +352,10 @@ open http://localhost:8000/debug/runtime
 ### ⬜ Planned
 
 - [ ] Cross-channel awareness — "συνέχισε αυτό που έκανα στο web" → selective Telegram context injection
-- [ ] Planner v2 — Validate step before execution (show plan → ✅/❌ from Telegram), then full agentic loop (Goal→Plan→Validate→Execute→Reflect→Re-plan)
-- [ ] Analytics dashboard UI — expanded charts: memory stats, goal progress, routine trends over time
+- [ ] Planner v2 — Validate step (show plan → ✅/❌ from Telegram before execution), parallel steps, error recovery, progress UI (`[2/5] Τρέχω tests...`), full agentic loop (Goal→Plan→Validate→Execute→Reflect→Re-plan)
 - [ ] Memory cleanup — prune low-score memories (`compute_score() < threshold`) after 6+ months of real data
 - [ ] Personal Knowledge Graph — structured entity relations (Λάζαρος→project→Astakos) in SQLite, parallel to ChromaDB, after 6+ months of usage
 - [ ] Tool Execution Journal — log tool calls (tool, agent, result, duration) → SQLite, success rate stats, when 30+ tools exist
-- [ ] Plugin system — third-party skill scripts with sandboxed execution parallel steps, error recovery, progress UI
-- [ ] Analytics dashboard UI in Web interface
-- [ ] Memory cleanup — prune low-score memories (score < threshold) after 6+ months of real data
-- [ ] Personal Knowledge Graph — memory connection layer (after 6+ months of real usage data)
-- [ ] Plugin system for third-party skill scripts
 
 ---
 
