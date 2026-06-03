@@ -27,6 +27,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from langchain_core.messages import HumanMessage, AIMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE, TELEGRAM_HISTORY_FILE
+
+def _normalize_gr(text: str) -> str:
+    """Αφαιρεί τόνους από ελληνικό κείμενο για accent-insensitive σύγκριση."""
+    import unicodedata
+    return unicodedata.normalize("NFD", text).encode("ascii", "ignore").decode("ascii").lower()
+
 from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
 from core.exceptions import SchedulerCrashError, PendingTimeoutError, DBWriteError
 from core.brain import llm
@@ -533,25 +539,23 @@ def handle_message(user_text: str, chat_id: str):
         clean_user_text = "Γεια σου Αστακέ"
     # ── ROUTINE FEEDBACK LOOP ──
     if pending_routine_confirmations:
-        text_check = clean_user_text.lower()
-        # Βγάζουμε τα σημεία στίξης και κόβουμε την πρόταση σε λίστα λέξεων
+        text_check = _normalize_gr(clean_user_text)
         text_words = text_check.replace(",", "").replace(".", "").replace("!", "").split()
-        
-        yes_words = ["ναι", "yes", "οκ", "ok", "ισχύει", "ισχυει", "σωστά", "σωστα"]
-        no_words  = ["όχι", "οχι", "no", "σταμάτα", "σταματα", "διέγραψε", "διεγραψε", "βγάλτο", "βγαλτο"]
 
-        # Implicit confirmation: αν το μήνυμα περιέχει λέξη από την ρουτίνα + action word
-        # π.χ. "θα πάμε πάρκο" → confirm ρουτίνα πάρκου
-        action_words = ["πάμε", "πηγαίνουμε", "φεύγουμε", "ξεκινάμε", "πάω", "θα πάμε",
-                        "θα πάω", "πήγαμε", "ήρθαμε", "φτάσαμε", "είμαστε", "ξεκίνησα",
-                        "ξεκίνησε", "αρχίζω", "έγινε", "έτοιμος", "τελειώσαμε", "went",
-                        "going", "done", "finished", "started"]
+        yes_words = [_normalize_gr(w) for w in ["ναι", "yes", "οκ", "ok", "ισχύει", "σωστά", "σωστα"]]
+        no_words  = [_normalize_gr(w) for w in ["όχι", "οχι", "no", "σταμάτα", "σταματα", "διέγραψε", "βγάλτο", "βγαλτο"]]
+
+        action_words = [_normalize_gr(w) for w in [
+            "πάμε", "πηγαίνουμε", "φεύγουμε", "ξεκινάμε", "πάω", "θα πάμε",
+            "θα πάω", "πήγαμε", "ήρθαμε", "φτάσαμε", "είμαστε", "ξεκίνησα",
+            "ξεκίνησε", "αρχίζω", "έγινε", "έτοιμος", "τελειώσαμε", "went",
+            "going", "done", "finished", "started"
+        ]]
         implicit_confirmed = False
         if any(w in text_check for w in action_words):
             for rid, rdata in pending_routine_confirmations.items():
                 event_name = rdata.get("event", "") if isinstance(rdata, dict) else str(rdata)
-                # Ελέγχουμε αν κάποια λέξη του event_name υπάρχει στο μήνυμα
-                event_words = [w.lower() for w in event_name.split() if len(w) > 3]
+                event_words = [_normalize_gr(w) for w in event_name.split() if len(w) > 3]
                 if any(ew in text_check for ew in event_words):
                     implicit_confirmed = True
                     print(f"🔍 [Routine Implicit Confirm]: '{text_check[:40]}' → '{event_name}'")
@@ -581,8 +585,8 @@ def handle_message(user_text: str, chat_id: str):
     # ── SAFE EXECUTOR CONFIRMATION LOOP ──────────────────────────
     global pending_exec_command
     if pending_exec_command:
-        text_check = clean_user_text.lower().strip()
-        if any(w in text_check for w in ["ναι", "yes", "ok", "οκ"]):
+        text_check = _normalize_gr(clean_user_text)
+        if any(w in text_check for w in [_normalize_gr(w) for w in ["ναι", "yes", "ok", "οκ"]]):
             cmd = pending_exec_command
             pending_exec_command = None
             from memory.event_log import log_event
@@ -602,7 +606,7 @@ def handle_message(user_text: str, chat_id: str):
             except Exception as e:
                 send_telegram_msg(f"❌ Σφάλμα εκτέλεσης: {e}")
             return
-        elif any(w in text_check for w in ["όχι", "οχι", "no", "cancel"]):
+        elif any(w in text_check for w in [_normalize_gr(w) for w in ["όχι", "οχι", "no", "cancel"]]):
             pending_exec_command = None
             send_telegram_msg("❌ Ακυρώθηκε.")
             return
