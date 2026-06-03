@@ -57,6 +57,10 @@ It's not a chatbot wrapper. It's a full multi-agent system built on LangGraph wi
 | 🔀 **Dual Channel Memory** | Shared long-term memory + isolated per-channel session history (Telegram / Web) |
 | 📝 **Observability Dashboard** | `/debug/runtime` — scheduler heartbeat, job health, fail counts, pending confirmations |
 | 🔔 **Human Override Commands** | `/pause` `/mute` `/sleep N` `/resume` `/status` — persisted across restarts |
+| 🏃 **Google Fit Integration** | Daily steps, sleep phases (deep/REM/light) & heart rate from Samsung Health via Google Fit API. Morning briefing at 08:00 |
+| 📖 **Story Maker** | `/story [theme] \| [characters]` — AI-written children's stories with 3 generated illustrations via Pollinations.ai |
+| ⌨️ **Typing Indicator** | Telegram shows "typing..." while Astakos is processing — no more wondering if it heard you |
+| 🔒 **Local Security** | Bearer token auth, localhost-only CORS, upload size limits & extension whitelist |
 | 🏠 **Local-First** | Runs entirely on your machine. Your data stays yours |
 
 ---
@@ -90,10 +94,11 @@ It's not a chatbot wrapper. It's a full multi-agent system built on LangGraph wi
                                        └───────────────────────────────┘
 
 Background (AstakosScheduler — daemon thread)
-    ├── job_check_reminders   every 20s
-    ├── job_check_routines    every 60s    ← adaptive cooldown + anti-spam
-    ├── job_proactive_scan    every 12h    ← watch_folder analysis
-    └── run_analytics         nightly 03:00 ← LLM batch routine detection
+    ├── job_check_reminders      every 20s
+    ├── job_check_routines       every 60s    ← adaptive cooldown + anti-spam
+    ├── job_proactive_scan       every 12h    ← watch_folder analysis
+    ├── job_morning_fit_briefing every 1h     ← fires at 08:00, Google Fit daily summary
+    └── run_analytics            nightly 03:00 ← LLM batch routine detection
 
 Event Bus (core/event_bus.py)
     ├── routine_triggered  (routine_id, event, confidence, batch, channel)
@@ -139,10 +144,12 @@ astakos/
 ├── 📁 astakos_skills/        # Modular skill scripts
 │   ├── calculate_bill.py
 │   ├── daily_backup.py
+│   ├── google_fit.py         # Google Fit — steps, sleep, heart rate via Samsung Health
+│   ├── nutrition_analyzer.py # Universal product label analyzer (Vision LLM)
 │   ├── recipe_expert.py
 │   ├── search_ferries.py
 │   ├── search_flights.py
-│   ├── nutrition_analyzer.py # Universal product label analyzer (Vision LLM)
+│   ├── story_maker.py        # AI children's story generator + Pollinations.ai images
 │   └── linkedin_state_manager.py
 ├── 📁 clients/
 │   └── telegram_bot.py       # Telegram Bot — polling, handlers, scheduler
@@ -172,6 +179,7 @@ astakos/
 ├── astakos_routines.db       # SQLite: routines + pending confirmations (gitignored)
 ├── config.py                 # Central configuration
 ├── clean.py                  # Maintenance & cleanup script
+├── run_telegram.py           # Auto-restart wrapper — watchfiles monitors .py + prompts.md
 └── main.py                   # Launcher (Web / Telegram / Both)
 ```
 
@@ -188,6 +196,7 @@ astakos/
 | `/status` | Show scheduler status, job health, queue size |
 | `/voice` | Toggle voice reply mode ON/OFF (text in → voice out) |
 | `/nutrition` | Analyze last photo as product label (food / cosmetic / household) |
+| `/story [theme] \| [characters]` | Generate AI children's story + 3 illustrations |
 | `/confirm <cmd>` | Execute a shell command with confirmation step |
 | `/end` | Close session, run memory summarizer, clear working memory |
 | `/help` | Show all commands with current voice mode status |
@@ -256,6 +265,10 @@ open http://localhost:8000/debug/runtime
 - [x] Universal product analyzer (`/nutrition`) via Vision LLM
 - [x] Smart photo pending system (30s window, history context, no double messages)
 - [x] Document reading on upload — instant summary + ask to save to memory
+- [x] Google Fit integration — steps, sleep, heart rate + daily morning briefing
+- [x] Story maker — `/story` with AI-generated illustrations via Pollinations.ai
+- [x] Local security — bearer token auth, localhost CORS, upload limits
+- [x] Auto-restart on code changes — watchfiles monitors source + prompts
 - [ ] Cross-channel awareness (Telegram ↔ Web context sharing)
 - [ ] Action Approval Levels (auto / confirm / deny per tool)
 - [ ] Analytics dashboard UI in Web interface
