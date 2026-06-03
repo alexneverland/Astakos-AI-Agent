@@ -294,8 +294,12 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
 
     # ── Stage 3: embedding cosine similarity ─────────────────────
     for r_id, ex_ev, conf, mentions, cur_state_str in candidates:
+        # Sanity check: αν τα texts είναι πολύ διαφορετικά σε μήκος, skip
+        len_ratio = min(len(c_event), len(ex_ev)) / max(len(c_event), len(ex_ev)) if max(len(c_event), len(ex_ev)) > 0 else 0
+        if len_ratio < 0.4:
+            continue  # π.χ. "πάρκο" vs "μαγείρεμα σνίτσελ" — πολύ διαφορετικά
         sim = _embedding_similarity(c_event, ex_ev)
-        if sim >= 0.88:
+        if sim >= 0.92:  # αυξήθηκε από 0.88 για λιγότερα false positives
             new_conf = min(1.0, conf + confidence_boost)
             new_m    = (mentions or 1) + 1
             new_fp   = make_fingerprint(c_day, c_time, c_event)
