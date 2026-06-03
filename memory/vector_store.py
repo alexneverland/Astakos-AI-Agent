@@ -74,6 +74,10 @@ class AstakosMemoryManager:
                     return self._save_session(**kwargs)
                 elif memory_type == "working":
                     return self._save_working(**kwargs)
+                elif memory_type == "reflection":
+                    return self._save_reflection(**kwargs)
+                elif memory_type == "event":
+                    return self._save_event(**kwargs)
                 else:
                     print(f"⚠️ [MemoryManager]: Άγνωστος τύπος μνήμης '{memory_type}'")
             except Exception as e:
@@ -300,6 +304,21 @@ def bump_retrieval_count(doc_ids: list[str]):
             vector_store._collection.update(ids=existing["ids"], metadatas=new_metas)
     except Exception as e:
         print(f"\033[90m[bump_retrieval_count]: {e}\033[0m")
+
+
+    def _save_reflection(self, source: str, observation: str, action: str,
+                         confidence: float = 0.7, lesson: str = "", applied: bool = False):
+        """Wrapper → services/reflection_engine._save_reflection"""
+        from services.reflection_engine import _save_reflection
+        _save_reflection(source=source, observation=observation, action=action,
+                        confidence=confidence, lesson=lesson, applied=applied)
+        return True
+
+    def _save_event(self, job: str, action: str, **kwargs):
+        """Wrapper → memory/event_log.log_event"""
+        from memory.event_log import log_event
+        log_event(job=job, action=action, **kwargs)
+        return True
 
 
 # Singleton
