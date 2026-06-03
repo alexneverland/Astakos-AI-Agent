@@ -96,7 +96,7 @@ It's not a wrapper around an API. It's a full multi-agent system that lives on y
 | 🔀 **Dual Channel Memory** | Shared long-term memory + isolated per-channel session history (Telegram / Web) |
 | 🏃 **Google Fit Integration** | Daily steps, sleep phases (deep/REM/light) & heart rate from Samsung Health via Google Fit API. Morning briefing at 08:00 |
 | 📈 **Memory Retrieval Tracking** | `retrieval_count` increments on every semantic hit — foundation for future memory scoring & cleanup |
-| 🧠 **Reflection Engine** | Nightly self-evaluation: analyzes past interactions, extracts lessons, auto-applies improvements to behavior |
+| 🧠 **Reflection Engine** | Nightly self-evaluation + post-plan reflection: extracts lessons, saves to ChromaDB, auto-applies improvements |
 
 ## 📡 Interfaces & Automation
 
@@ -340,6 +340,7 @@ open http://localhost:8000/debug/runtime
 - [x] Memory Retrieval Tracking — `retrieval_count` per memory for future scoring
 - [x] Action Approval Levels — SAFE/WARNING/CRITICAL risk registry, Telegram inline ✅/❌
 - [x] Planning Agent — `/plan` command, multi-step task execution with TaskExecutor
+- [x] Post-Plan Reflection — after every `/plan`, Astakos self-evaluates and saves lessons to Reflection Engine
 - [x] Memory Provenance — `source` (telegram/web) + `reason` metadata on every saved fact
 - [x] Goal Follow-up Engine — daily semantic check for stale goals, proactive Telegram ping
 
