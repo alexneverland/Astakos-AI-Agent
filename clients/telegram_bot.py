@@ -524,6 +524,7 @@ def handle_message(user_text: str, chat_id: str):
 
     # 2. Καθαρίζουμε τα tags πριν πάνε στον εγκέφαλο
     clean_user_text = user_text.replace("/voice", "").replace("[ΦΩΝΗΤΙΚΟ]:", "").replace("[VOICE_MESSAGE]:", "").strip()
+    # /plan διατηρείται ώστε ο graph router να το αναγνωρίσει
     # Αν είναι voice input, κρατάμε το hint για τον Αστακό αλλά αφαιρούμε το tag
     if is_voice_input:
         clean_user_text = clean_user_text.replace("[VOICE_INPUT]", "").strip()
@@ -1046,6 +1047,7 @@ def run_polling():
                         "/resume — Επαναφορά όλων \\(pause/mute/sleep\\)\n"
                         "/sleep \\[ώρες\\] — Ησυχία για Χ ώρες \\(π\\.χ\\. /sleep 8\\)\n"
                         "/confirm \\[εντολή\\] — Εκτέλεση εντολής με επιβεβαίωση\n"
+                        "/plan \[goal\] — Multi-step εκτέλεση \(π\.χ\. /plan κάνε release v1\.2\)\n"
                         "/end — Τέλος session & περίληψη"
                     )
                     continue

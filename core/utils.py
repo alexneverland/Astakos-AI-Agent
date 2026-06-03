@@ -24,7 +24,12 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     next_agent: NotRequired[str]
     current_agent: NotRequired[str]
-    approval_status: NotRequired[str]  # "ok" | "pending"
+    approval_status: NotRequired[str]   # "ok" | "pending"
+    plan_active: NotRequired[bool]       # True αν τρέχει plan
+    plan_tasks: NotRequired[list]        # task list από Planner
+    plan_index: NotRequired[int]         # τρέχον βήμα
+    plan_results: NotRequired[list]      # αποτελέσματα βημάτων
+    plan_goal: NotRequired[str]          # το αρχικό goal
 
 # ────────────────────────────────────────────────────────────────
 # 2. MESSAGE HELPERS (Mastro-Shield & Smart Parser)

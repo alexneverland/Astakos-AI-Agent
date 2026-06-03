@@ -14,6 +14,7 @@ from core.agents import (
     tech_agent_node, git_agent_node, mail_agent_node, dev_agent_node, tool_router
 )
 from core.approval import approval_check_node
+from core.planner import planner_node, task_executor_node, capture_result_node
 
 # [MASTRO-FIX]: Προσθήκη της λίστας με τους agents για να δουλέψει το routing
 AGENT_MAP = [
@@ -41,23 +42,36 @@ def build_graph():
     workflow.add_node("Dev_Agent",    dev_agent_node)
     workflow.add_node("tools",          ToolNode(all_tools, handle_tool_errors=True))
     workflow.add_node("approval_check", approval_check_node)
+    workflow.add_node("planner",        planner_node)
+    workflow.add_node("task_executor",  task_executor_node)
+    workflow.add_node("capture_result", capture_result_node)
 
     # Entry
     workflow.set_entry_point("supervisor")
 
-    # Supervisor → Agents
+    # Supervisor → Agents ή Planner
     workflow.add_conditional_edges(
         "supervisor",
-        lambda state: state["next_agent"],
+        _route_supervisor,
+        {**{name: name for name in AGENT_MAP}, "planner": "planner"}
+    )
+
+    # Planner → TaskExecutor
+    workflow.add_edge("planner", "task_executor")
+
+    # TaskExecutor → Agents (routing με Supervisor logic)
+    workflow.add_conditional_edges(
+        "task_executor",
+        lambda state: state.get("next_agent", "Dev_Agent"),
         {name: name for name in AGENT_MAP}
     )
 
-    # Κάθε agent: αν έχει tool_calls → approval_check, αλλιώς → END
+    # Κάθε agent: αν έχει tool_calls → approval_check, αλλιώς → capture_result ή END
     for agent_name in AGENT_MAP:
         workflow.add_conditional_edges(
             agent_name,
             _should_use_tools,
-            {"tools": "approval_check", END: END}
+            {"tools": "approval_check", "capture": "capture_result", END: END}
         )
 
     # approval_check → tools (ok) ή → END (pending)
@@ -74,16 +88,34 @@ def build_graph():
         {name: name for name in AGENT_MAP}
     )
 
+    # capture_result → task_executor (αν υπάρχουν άλλα) ή END
+    workflow.add_conditional_edges(
+        "capture_result",
+        lambda state: "task_executor" if state.get("plan_active") else END,
+        {"task_executor": "task_executor", END: END}
+    )
+
     return workflow.compile(checkpointer=None)
 
 
 def _should_use_tools(state: AgentState):
-    """Αν το τελευταίο μήνυμα έχει tool_calls, πάμε στο tools node."""
+    """Αν tool_calls → tools. Αν plan active → capture. Αλλιώς → END."""
     last_msg = state["messages"][-1]
     tool_calls = getattr(last_msg, "tool_calls", None)
     if tool_calls and len(tool_calls) > 0:
         return "tools"
+    if state.get("plan_active") and state.get("plan_index", 0) < len(state.get("plan_tasks", [])):
+        return "capture"
     return END
+
+
+def _route_supervisor(state: AgentState) -> str:
+    """Αν το μήνυμα ξεκινά με /plan → planner. Αλλιώς → κανονικός agent."""
+    from core.utils import clean_message
+    last_msg = clean_message(state["messages"][-1].content)
+    if last_msg.strip().startswith("/plan"):
+        return "planner"
+    return state.get("next_agent", "Chat_Agent")
 
 
 # Singleton graph — import από παντού
