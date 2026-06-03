@@ -903,6 +903,23 @@ async def delete_routine(routine_id: int, _=Depends(require_token)):
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+@server.post("/debug/routine/{routine_id}/reset-cooldown")
+async def reset_routine_cooldown(routine_id: int, _=Depends(require_token)):
+    """Reset cooldown → ειδοποιεί αμέσως στον επόμενο cycle."""
+    import sqlite3 as _sqlite3
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    try:
+        conn = _sqlite3.connect(db_path)
+        conn.execute(
+            "UPDATE routines SET last_notified_ts=NULL, notify_cooldown_hours=20 WHERE id=?",
+            (routine_id,)
+        )
+        conn.commit()
+        conn.close()
+        return {"ok": True, "routine_id": routine_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @server.post("/debug/routine/{routine_id}/confirm")
 async def force_confirm_routine(routine_id: int, _=Depends(require_token)):
     """Force-confirm μια stuck TRIGGER_PENDING ρουτίνα → ACTIVE."""

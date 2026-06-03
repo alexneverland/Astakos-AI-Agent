@@ -187,13 +187,37 @@ function render(d) {
 
   if ((rout.active||[]).length > 0) {
     html += `<div class="card" style="grid-column:span 2"><h2>🗓️ Active Routines (${rout.active.length})</h2>
-      <table><tr><th>ID</th><th>Day</th><th>Time</th><th>Event</th><th>Confidence</th><th>Cooldown left</th><th>State</th></tr>
+      <table><tr><th>ID</th><th>Day</th><th>Time</th><th>Event</th><th>Confidence</th><th>Cooldown left</th><th>State</th><th>Ενέργειες</th></tr>
       ${rout.active.map(r=>`<tr>
         <td class="off">#${r.id}</td><td>${r.day}</td><td><b>${r.time}</b></td>
         <td>${r.event}</td>
         <td style="min-width:80px">${confBar(r.confidence)}</td>
         <td class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null?r.cooldown_remaining_h+'h':'—'}</td>
         <td>${stateBadge(r.state)}</td>
+        <td style="white-space:nowrap">
+          <button onclick="resetCooldown(${r.id})" title="Reset Cooldown" style="background:#1a3a5a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px">⚡ Reset</button>
+          <button onclick="toggleEdit(${r.id})" style="background:#1a3a5a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px">✏️ Edit</button>
+          <button onclick="deleteRoutine(${r.id})" style="background:#7a2a2a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer">🗑️ Delete</button>
+        </td>
+      </tr>
+      <tr id="edit-row-${r.id}" style="display:none;background:#1a1f2a">
+        <td colspan="8" style="padding:8px 12px">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <label style="color:var(--muted);font-size:11px">Day:
+              <select id="edit-day-${r.id}" style="background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 7px;width:110px;margin-left:4px">
+                ${['Everyday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d=>`<option value="${d}" ${r.day===d?'selected':''}>${d}</option>`).join('')}
+              </select>
+            </label>
+            <label style="color:var(--muted);font-size:11px">Time:
+              <input id="edit-time-${r.id}" value="${r.time}" style="background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 7px;width:70px;margin-left:4px">
+            </label>
+            <label style="color:var(--muted);font-size:11px">Event:
+              <input id="edit-event-${r.id}" value="${r.event}" style="background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 7px;width:220px;margin-left:4px">
+            </label>
+            <button onclick="saveEdit(${r.id})" style="background:#2a5a2a;color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer">💾 Save</button>
+            <button onclick="toggleEdit(${r.id})" style="background:#3a3a3a;color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer">✕</button>
+          </div>
+        </td>
       </tr>`).join('')}</table></div>`;
   }
 
@@ -339,6 +363,11 @@ async function applyReflection(id) {
   const r = await fetch(`/debug/reflection/${id}/apply`, {method:'POST'});
   const j = await r.json();
   if (!j.ok) alert(`Σφάλμα: ${j.error}`);
+  fetchData();
+}
+
+async function resetCooldown(id) {
+  await fetch(`/debug/routine/${id}/reset-cooldown`, {method:'POST'});
   fetchData();
 }
 
