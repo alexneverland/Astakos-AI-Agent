@@ -18,14 +18,14 @@ from config import PHOTOS_INDEX_FILE, PHOTOS_DIR, SESSIONS_FILE
 # SESSION SUMMARY — "Ημερολόγιο Συνεργάτη"
 # ════════════════════════════════════════════════════════════════
 
-SESSION_LOGS: dict = {"telegram": [], "web": [], "terminal": []}
+SESSION_LOGS: list = []  # Ενιαίο log — όλα τα channels μαζί
 
 
 def log_exchange(user_text, ai_text, agent: str, channel: str = "web"):
     """Προσθέτει ένα ζεύγος ερώτησης-απάντησης στο session log (per channel)."""
     safe_user = clean_message(user_text)
     safe_ai = clean_message(ai_text)
-    SESSION_LOGS.setdefault(channel, []).append({
+    SESSION_LOGS.append({
         "time": datetime.now().strftime("%H:%M"),
         "agent": agent,
         "channel": channel,
@@ -44,7 +44,6 @@ def load_last_session_hint(channel: str = "web") -> str:
             sessions = json.load(f)
         if not sessions:
             return ""
-        # Φιλτράρουμε μόνο για το συγκεκριμένο channel
         filtered = sessions
         if not filtered:
             return ""
@@ -70,7 +69,7 @@ def _run_session_summary(channel: str = "web"):
     """Αρχειοθετεί τη συνεδρία (per channel) με προστασία από διπλοεγγραφές."""
     global is_summarizing, SESSION_LOGS
 
-    current_log = SESSION_LOGS.get(channel, [])
+    current_log = list(SESSION_LOGS)
     # 1. Ασπίδα: Αν ήδη τρέχει ή αν δεν υπάρχουν μηνύματα, βγες αμέσως
     if is_summarizing or not current_log:
         return
@@ -81,7 +80,7 @@ def _run_session_summary(channel: str = "web"):
         
         # 2. Αδειάζουμε ΑΜΕΣΩΣ για να μην το ξαναπιάσει άλλος worker
         current_batch = list(current_log)
-        SESSION_LOGS[channel] = []
+        SESSION_LOGS.clear()
 
         dialogue_text = "\n".join([
             f"[{e['time']} / {e['agent']}] Λάζαρος: {e['user']} | Αστακός: {e['ai']}"
@@ -113,7 +112,7 @@ def _run_session_summary(channel: str = "web"):
             summary = json.loads(raw)
         except json.JSONDecodeError:
             # Αν αποτύχει, ξαναβάζουμε τα μηνύματα πίσω για να μην τα χάσουμε
-            SESSION_LOGS[channel] = current_batch + SESSION_LOGS.get(channel, [])
+            SESSION_LOGS[:0] = current_batch  # Επαναφορά στην αρχή
             print("\033[91m[Session]: Μη έγκυρο format. Τα μηνύματα επεστράφησαν στο log.\033[0m")
             return
 
@@ -131,7 +130,7 @@ def _run_session_summary(channel: str = "web"):
 
     except Exception as e:
         # Recovery σε περίπτωση σφάλματος
-        SESSION_LOGS[channel] = current_batch + SESSION_LOGS.get(channel, [])
+        SESSION_LOGS[:0] = current_batch  # Επαναφορά στην αρχή
         print(f"\033[91m[Session Error]: {e}\033[0m")
     finally:
         is_summarizing = False

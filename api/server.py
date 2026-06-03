@@ -845,7 +845,7 @@ async def debug_runtime():
     # ── 6. Channel sessions ──────────────────────────────────────
     try:
         from memory.session_memory import SESSION_LOGS
-        channel_sessions = {ch: len(msgs) for ch, msgs in SESSION_LOGS.items()}
+        channel_sessions = {"all": len(SESSION_LOGS)}
     except Exception:
         channel_sessions = {}
 
