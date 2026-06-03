@@ -1042,6 +1042,48 @@ async def apply_reflection(reflection_id: int, _=Depends(require_token)):
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+
+@server.get("/debug/goals")
+async def debug_goals():
+    """Επιστρέφει όλα τα long-term goals."""
+    try:
+        from memory.vector_store import vector_store, vector_lock
+        with vector_lock:
+            results = vector_store._collection.get(where={"category": "goal"})
+        goals = []
+        docs = results.get("documents", [])
+        metas = results.get("metadatas", [])
+        ids = results.get("ids", [])
+        for i, (doc, meta) in enumerate(zip(docs, metas)):
+            goals.append({
+                "project":     meta.get("project", ""),
+                "description": doc.split(": ", 1)[-1].replace("[GOAL] ", ""),
+                "status":      meta.get("status", "active"),
+                "date":        meta.get("date", ""),
+                "chroma_id":   ids[i] if i < len(ids) else "",
+            })
+        goals.sort(key=lambda g: (g["status"] != "active", g["date"]))
+        return {"goals": goals, "count": len(goals)}
+    except Exception as e:
+        return {"goals": [], "error": str(e)}
+
+
+@server.delete("/debug/goals/{project}")
+async def delete_goal(project: str, _=Depends(require_token)):
+    """Διαγράφει goal με βάση το project name."""
+    try:
+        from memory.vector_store import vector_store, vector_lock
+        with vector_lock:
+            existing = vector_store._collection.get(
+                where={"category": "goal", "project": project}
+            )
+            if not existing["ids"]:
+                return {"ok": False, "error": f"Goal not found"}
+            vector_store._collection.delete(ids=existing["ids"])
+        return {"ok": True, "deleted": project}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @server.get("/debug")
 async def debug_panel():
     """Observability HTML dashboard — auto-refresh every 5s."""

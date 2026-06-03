@@ -44,6 +44,7 @@
 <h1>🦞 Astakos Runtime Dashboard</h1>
 <div class="ts" id="ts">Φόρτωση...</div>
 <div class="grid" id="grid"></div>
+<div class="grid" id="goals-section" style="margin-top:16px"></div>
 <div class="grid" id="reflections-section" style="margin-top:16px"></div>
 <script>
 const REFRESH = 5000;
@@ -319,12 +320,127 @@ async function fetchData() {
   } catch(e) {
     document.getElementById('ts').innerHTML = `<span class="err">Σφάλμα φόρτωσης: ${e}</span>`;
   }
+  // Φόρτωση goals
+  try {
+    const gr = await fetch('/debug/goals');
+    const gj = await gr.json();
+    renderGoals(gj.goals || []);
+  } catch(e) {}
+  // Φόρτωση goals
+  try {
+    const gr = await fetch('/debug/goals');
+    const gj = await gr.json();
+    renderGoals(gj.goals || []);
+  } catch(e) {}
   // Φόρτωση reflections
   try {
     const rr = await fetch('/debug/reflections');
     const rj = await rr.json();
     renderReflections(rj.reflections || []);
   } catch(e) {}
+}
+
+function renderGoals(goals) {
+  const container = document.getElementById('goals-section');
+  const statusIcon = s => s === 'active' ? '🎯' : s === 'paused' ? '⏸' : '✅';
+  const statusColor = s => s === 'active' ? '#22c55e' : s === 'paused' ? '#f59e0b' : '#6b7280';
+
+  if (!goals.length) {
+    container.innerHTML = '<div class="card" style="grid-column:span 2"><h2>🎯 Long-Term Goals</h2><p style="color:var(--muted)">Δεν υπάρχουν goals ακόμα.</p></div>';
+    return;
+  }
+
+  const rows = goals.map(g => `
+    <tr>
+      <td>${statusIcon(g.status)} <span style="color:${statusColor(g.status)};font-weight:600">${g.status}</span></td>
+      <td><strong>${g.project}</strong></td>
+      <td>${g.description}</td>
+      <td style="color:var(--muted);font-size:0.85em">${g.date}</td>
+      <td>
+        <button onclick="deleteGoal('${g.project}')" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:0.85em">🗑 Delete</button>
+      </td>
+    </tr>`).join('');
+
+  container.innerHTML = `
+    <div class="card" style="grid-column:span 2">
+      <h2>🎯 Long-Term Goals (${goals.length})</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:0.9em">
+        <thead><tr style="color:var(--muted);text-align:left">
+          <th style="padding:6px">Status</th>
+          <th style="padding:6px">Project</th>
+          <th style="padding:6px">Description</th>
+          <th style="padding:6px">Date</th>
+          <th style="padding:6px">Action</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+async function deleteGoal(project) {
+  if (!confirm(`Διαγραφή goal "${project}";`)) return;
+  const token = localStorage.getItem('astakos_token') || prompt('Bearer token:');
+  if (!token) return;
+  localStorage.setItem('astakos_token', token);
+  const res = await fetch(`/debug/goals/${encodeURIComponent(project)}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  const j = await res.json();
+  if (j.ok) {
+    const gr = await fetch('/debug/goals');
+    const gj = await gr.json();
+    renderGoals(gj.goals || []);
+  } else {
+    alert('Σφάλμα: ' + (j.error || 'unknown'));
+  }
+}
+
+
+function renderGoals(goals) {
+  const container = document.getElementById('goals-section');
+  const icon = s => s === 'active' ? '🎯' : s === 'paused' ? '⏸' : '✅';
+  const color = s => s === 'active' ? '#22c55e' : s === 'paused' ? '#f59e0b' : '#6b7280';
+  if (!goals.length) {
+    container.innerHTML = '<div class="card" style="grid-column:span 2"><h2>🎯 Long-Term Goals</h2><p style="color:var(--muted)">Δεν υπάρχουν goals ακόμα.</p></div>';
+    return;
+  }
+  const rows = goals.map(g => `
+    <tr>
+      <td>${icon(g.status)} <span style="color:${color(g.status)};font-weight:600">${g.status}</span></td>
+      <td><strong>${g.project}</strong></td>
+      <td>${g.description}</td>
+      <td style="color:var(--muted);font-size:0.85em">${g.date}</td>
+      <td><button onclick="deleteGoal('${g.project}')" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:0.85em">🗑 Delete</button></td>
+    </tr>`).join('');
+  container.innerHTML = `
+    <div class="card" style="grid-column:span 2">
+      <h2>🎯 Long-Term Goals (${goals.length})</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:0.9em">
+        <thead><tr style="color:var(--muted);text-align:left">
+          <th style="padding:6px">Status</th><th style="padding:6px">Project</th>
+          <th style="padding:6px">Description</th><th style="padding:6px">Date</th>
+          <th style="padding:6px">Action</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+async function deleteGoal(project) {
+  if (!confirm('Διαγραφή goal "' + project + '";')) return;
+  let token = localStorage.getItem('astakos_token') || prompt('Bearer token:');
+  if (!token) return;
+  localStorage.setItem('astakos_token', token);
+  const res = await fetch('/debug/goals/' + encodeURIComponent(project), {
+    method: 'DELETE',
+    headers: { 'Authorization': 'Bearer ' + token }
+  });
+  const j = await res.json();
+  if (j.ok) {
+    const gr = await fetch('/debug/goals');
+    renderGoals((await gr.json()).goals || []);
+  } else { alert('Σφάλμα: ' + (j.error || 'unknown')); }
 }
 
 function renderReflections(reflections) {
@@ -356,81 +472,3 @@ function renderReflections(reflections) {
         ${rows}
       </table>
     </div>`;
-}
-
-async function applyReflection(id) {
-  if (!confirm(`Εφαρμογή reflection #${id};`)) return;
-  const r = await fetch(`/debug/reflection/${id}/apply`, {method:'POST'});
-  const j = await r.json();
-  if (!j.ok) alert(`Σφάλμα: ${j.error}`);
-  fetchData();
-}
-
-async function resetCooldown(id) {
-  await fetch(`/debug/routine/${id}/reset-cooldown`, {method:'POST'});
-  fetchData();
-}
-
-async function deleteRoutine(id) {
-  if (!confirm(`Διαγραφή ρουτίνας #${id};`)) return;
-  await fetch(`/debug/routine/${id}`, {method:'DELETE'});
-  fetchData();
-}
-
-async function confirmRoutine(id) {
-  if (!confirm(`Force-confirm ρουτίνα #${id} → ACTIVE;`)) return;
-  const r = await fetch(`/debug/routine/${id}/confirm`, {method:'POST'});
-  const j = await r.json();
-  if (!j.ok) alert(`Σφάλμα: ${j.error}`);
-  fetchData();
-}
-
-async function activateRoutine(id) {
-  if (!confirm(`Ενεργοποίηση ρουτίνας #${id};`)) return;
-  await fetch(`/debug/routine/${id}/state`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({state:'active'})});
-  fetchData();
-}
-
-function toggleEdit(id) {
-  const row = document.getElementById(`edit-row-${id}`);
-  if (row) row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
-}
-
-async function saveEdit(id) {
-  const day   = document.getElementById(`edit-day-${id}`)?.value.trim();
-  const time  = document.getElementById(`edit-time-${id}`)?.value.trim();
-  const event = document.getElementById(`edit-event-${id}`)?.value.trim();
-  const body = {};
-  if (day)   body.day   = day;
-  if (time)  body.time  = time;
-  if (event) body.event = event;
-  const res = await fetch(`/debug/routine/${id}`, {
-    method: 'PATCH',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify(body)
-  });
-  const data = await res.json();
-  if (data.ok) { fetchData(); }
-  else { alert(`Σφάλμα: ${data.error}`); }
-}
-
-function startCountdown() {
-  cancelAnimationFrame(rafId);
-  const bar = document.getElementById('refresh-bar');
-  const start = performance.now();
-  function tick(now) {
-    const p = Math.min(100, (now-start)/REFRESH*100);
-    bar.style.width = p+'%';
-    if (now-start < REFRESH) rafId = requestAnimationFrame(tick);
-    else { fetchData(); startCountdown(); }
-  }
-  rafId = requestAnimationFrame(tick);
-}
-
-fetchData();
-fetchTimeline();
-setInterval(fetchTimeline, 30000);
-startCountdown();
-</script>
-</body>
-</html>
