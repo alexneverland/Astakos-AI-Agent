@@ -200,4 +200,90 @@ def approval_check_node(state):
         if "WARNING" in risk_levels:
             names = [tc["name"] for tc in tool_calls if _effective_risk(tc) == "WARNING"]
             print(f"\033[93m[Approval]: ⚠️ WARNING tools: {names}\033[0m")
-        return {"appr
+        return {"approval_status": "ok"}
+
+    blocked_calls = [tc for tc in tool_calls if _effective_risk(tc) == "BLOCKED"]
+    if blocked_calls:
+        tool_messages = []
+        for tc in blocked_calls:
+            print(f"\033[91m[Approval]: 🛡️ BLOCKED — {tc['name']} rejected by safe executor\033[0m")
+            tool_messages.append(ToolMessage(
+                content=f"🛡️ Η εντολή `{tc['name']}` μπλοκαρίστηκε από τον safe executor και δεν μπορεί να εγκριθεί.",
+                tool_call_id=tc["id"],
+                name=tc["name"],
+            ))
+
+        return {
+            "approval_status": "blocked",
+            "messages": tool_messages,
+        }
+
+    critical_calls = [tc for tc in tool_calls if is_critical(tc)]
+
+    if not critical_calls:
+        # Όλα SAFE/WARNING — πάμε κανονικά
+        risk_levels = [_effective_risk(tc) for tc in tool_calls]
+        if "WARNING" in risk_levels:
+            names = [tc["name"] for tc in tool_calls if _effective_risk(tc) == "WARNING"]
+            print(f"\033[93m[Approval]: ⚠️ WARNING tools: {names}\033[0m")
+        return {"approval_status": "ok"}
+
+    # Υπάρχουν CRITICAL calls — τα αποθηκεύουμε και ζητάμε approval
+    tool_messages = []
+    for tc in critical_calls:
+        save_pending(tc["name"], tc.get("args", {}), tc["id"])
+        print(f"\033[91m[Approval]: 🚨 CRITICAL — {tc['name']} blocked, awaiting approval\033[0m")
+
+        # Στέλνουμε Telegram notification
+        _notify_telegram(tc)
+
+        # Επιστρέφουμε ToolMessage ώστε το graph να μην κολλήσει
+        tool_messages.append(ToolMessage(
+            content=f"⏳ Αναμονή έγκρισης για `{tc['name']}`. Σου έστειλα Telegram για επιβεβαίωση.",
+            tool_call_id=tc["id"],
+            name=tc["name"],
+        ))
+
+    return {
+        "approval_status": "pending",
+        "messages": tool_messages,
+    }
+
+
+def _notify_telegram(tool_call: dict):
+    """Στέλνει Telegram inline keyboard για approval."""
+    try:
+        import requests
+        from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+
+        tool_name = tool_call["name"]
+        args = tool_call.get("args", {})
+        call_id = tool_call["id"]
+
+        args_preview = ", ".join(f"{k}={repr(v)[:40]}" for k, v in args.items()) or "—"
+        text = (
+            f"🚨 *Action Approval Required*\n\n"
+            f"Tool: `{tool_name}`\n"
+            f"Args: `{args_preview}`\n\n"
+            f"Εκτελώ;"
+        )
+
+        keyboard = {
+            "inline_keyboard": [[
+                {"text": "✅ Ναι", "callback_data": f"approve:{call_id}"},
+                {"text": "❌ Όχι", "callback_data": f"reject:{call_id}"},
+            ]]
+        }
+
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": text,
+                "parse_mode": "Markdown",
+                "reply_markup": keyboard,
+            },
+            timeout=5,
+        )
+    except Exception as e:
+        print(f"\033[91m[Approval]: Telegram notify error: {e}\033[0m")

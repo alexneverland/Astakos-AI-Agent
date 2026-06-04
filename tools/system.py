@@ -1832,4 +1832,6 @@ all_tools = [
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
-    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate
+    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
+    duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool,
+]
