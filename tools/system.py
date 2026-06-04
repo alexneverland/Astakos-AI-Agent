@@ -1137,9 +1137,36 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
 
     clean_code = re.sub(r"```(?:python)?", "", tool_code).replace("```", "").strip()
 
-    dangerous_pattern = r"(subprocess|os\s*\.\s*system|__import__|eval\s*\(|exec\s*\()"
-    if re.search(dangerous_pattern, clean_code, re.IGNORECASE):
-        return "System Error: Απορρίφθηκε — ανιχνεύτηκε επικίνδυνη εντολή."
+    # [SECURITY]: Blocklist για generated tool code — filesystem, network, execution
+    _dangerous_patterns = [
+        r"subprocess",
+        r"os\s*\.\s*system",
+        r"__import__",
+        r"eval\s*\(",
+        r"exec\s*\(",
+        r"open\s*\(",                         # filesystem read/write
+        r"pathlib",                           # filesystem ops
+        r"shutil",                            # copy/move/delete files
+        r"import\s+socket",                   # raw network
+        r"import\s+requests",                 # HTTP calls
+        r"import\s+urllib",                   # HTTP calls
+        r"import\s+httpx",                    # HTTP calls
+        r"import\s+aiohttp",                  # async HTTP
+        r"import\s+ftplib",                   # FTP
+        r"import\s+smtplib",                  # email sending
+        r"import\s+paramiko",                 # SSH
+        r"ctypes",                            # low-level OS access
+        r"importlib",                         # dynamic imports
+        r"compile\s*\(",                      # bytecode compile
+        r"globals\s*\(\s*\)",                 # globals manipulation
+        r"locals\s*\(\s*\)",                  # locals manipulation
+        r"__builtins__",                      # builtins override
+    ]
+    for _dp in _dangerous_patterns:
+        if re.search(_dp, clean_code, re.IGNORECASE):
+            return f"System Error: Απορρίφθηκε — ανιχνεύτηκε απαγορευμένο pattern: `{_dp}`."
+    dangerous_pattern = None  # legacy — αντικαταστάθηκε από _dangerous_patterns
+    # (legacy check αντικαταστάθηκε από _dangerous_patterns loop πάνω)
 
     if f"def {tool_name}" not in clean_code:
         return f"System Error: Ο κώδικας πρέπει να περιέχει 'def {tool_name}'."
