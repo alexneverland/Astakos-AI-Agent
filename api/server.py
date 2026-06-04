@@ -127,15 +127,26 @@ def _save_chat_history(history: list):
 
 def append_to_chat_history(role: str, content: str):
     """Thread-safe προσθήκη μηνύματος στο history."""
+    now = datetime.now()
     with chat_history_lock:
         history = _load_chat_history()
         history.append({
             "role": role,
             "content": content,
-            "time": datetime.now().strftime("%H:%M"),
-            "date": datetime.now().strftime("%Y-%m-%d")
+            "time": now.strftime("%H:%M"),
+            "date": now.strftime("%Y-%m-%d")
         })
         _save_chat_history(history)
+    try:
+        from memory.conversation_history import append_message
+        append_message(
+            role=role,
+            content=content,
+            channel="web",
+            timestamp=now,
+        )
+    except Exception as e:
+        print(f"[ConversationHistory/web]: Σφάλμα shared write: {e}")
 
 # ────────────────────────────────────────────────────────────────
 # QUEUE SYSTEM
