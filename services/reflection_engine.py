@@ -108,7 +108,7 @@ def _analyze_with_llm(events: list, routine_stats: list) -> list[dict]:
     try:
         import vertexai
         from vertexai.generative_models import GenerativeModel
-        from core.brain import MAIN_MODEL
+        from core.brain import HEAVY_MODEL as MAIN_MODEL
 
         vertexai.init(
             project=os.getenv("PROJECT_ID", "astakos-finall"),
