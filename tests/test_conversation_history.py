@@ -175,3 +175,56 @@ def test_session_exchanges_can_be_marked_summarized(tmp_path):
 
     remaining = load_unsummarized_exchanges(db_path=db_path)
     assert [e["user"] for e in remaining] == ["u2"]
+
+
+def test_last_user_activity_ignores_assistant_messages(tmp_path):
+    from memory.conversation_history import (
+        append_message,
+        load_last_user_activity,
+        seconds_since_last_user_activity,
+    )
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(
+        role="user",
+        content="web user",
+        channel="web",
+        timestamp=datetime(2026, 6, 4, 10, 0),
+        db_path=db_path,
+    )
+    append_message(
+        role="assistant",
+        content="assistant later",
+        channel="telegram",
+        timestamp=datetime(2026, 6, 4, 10, 10),
+        db_path=db_path,
+    )
+
+    last = load_last_user_activity(db_path=db_path)
+    assert last["content"] == "web user"
+    assert seconds_since_last_user_activity(
+        now=datetime(2026, 6, 4, 10, 15),
+        db_path=db_path,
+    ) == 900
+
+
+def test_last_user_activity_can_filter_channel(tmp_path):
+    from memory.conversation_history import append_message, load_last_user_activity
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(
+        role="user",
+        content="web user",
+        channel="web",
+        timestamp=datetime(2026, 6, 4, 10, 0),
+        db_path=db_path,
+    )
+    append_message(
+        role="user",
+        content="telegram user",
+        channel="telegram",
+        timestamp=datetime(2026, 6, 4, 10, 1),
+        db_path=db_path,
+    )
+
+    assert load_last_user_activity(channel="web", db_path=db_path)["content"] == "web user"

@@ -270,6 +270,50 @@ def load_messages(
     return messages
 
 
+def load_last_user_activity(
+    *,
+    channel: str | None = None,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> dict[str, Any] | None:
+    init_db(db_path)
+    params: list[Any] = []
+    channel_clause = ""
+    if channel:
+        channel_clause = "AND channel = ?"
+        params.append(channel)
+
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            f"""
+            SELECT *
+            FROM conversation_messages
+            WHERE role IN ('user', 'human', 'Human')
+            {channel_clause}
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+            """,
+            params,
+        ).fetchone()
+
+    return _row_to_message(row) if row else None
+
+
+def seconds_since_last_user_activity(
+    *,
+    channel: str | None = None,
+    now: datetime | None = None,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> float | None:
+    last = load_last_user_activity(channel=channel, db_path=db_path)
+    if not last:
+        return None
+    try:
+        last_ts = datetime.fromisoformat(last["timestamp"])
+    except (TypeError, ValueError):
+        return None
+    return ((now or datetime.now()) - last_ts).total_seconds()
+
+
 def load_recent_context(
     *,
     channel: str,

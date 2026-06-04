@@ -65,6 +65,7 @@ astakos_scheduler = None
 # ── Rate Limiting ─────────────────────────────────────────────
 QUIET_HOURS          = (23, 8)   # 23:00 → 08:00 χωρίς proactive
 MAX_PROACTIVE_PER_HOUR = 3       # max proactive μηνύματα/ώρα
+PROACTIVE_RECENT_ACTIVITY_GRACE_SECONDS = 15 * 60
 
 _proactive_count = {"hour": -1, "count": 0}
 _proactive_lock  = threading.Lock()
@@ -86,6 +87,31 @@ def can_send_proactive() -> bool:
             return False
         _proactive_count["count"] += 1
         return True
+
+
+def _seconds_since_user_activity() -> float:
+    """Shared last-user-activity across web/Telegram, with local fallback."""
+    try:
+        from memory.conversation_history import seconds_since_last_user_activity
+        elapsed = seconds_since_last_user_activity()
+        if elapsed is not None:
+            return elapsed
+    except Exception as e:
+        print(f"[Proactive]: Shared activity read failed, using local timer: {e}")
+
+    with memory_lock:
+        return time.time() - last_interaction_time
+
+
+def should_skip_proactive_for_recent_activity(
+    max_age_seconds: int = PROACTIVE_RECENT_ACTIVITY_GRACE_SECONDS,
+) -> bool:
+    elapsed = _seconds_since_user_activity()
+    if elapsed < max_age_seconds:
+        print(f"⏸️ [Proactive]: Recent user activity ({int(elapsed)}s ago) — παραλείπεται.")
+        log_event("proactive", "skipped", reason="recent_activity", elapsed_s=int(elapsed))
+        return True
+    return False
 
 def enqueue_task(func, *args):
     astakos_queue.put((func, args))
@@ -1379,6 +1405,8 @@ def job_proactive_scan():
         return
     if is_quiet_hours():
         print("🌙 [job_proactive_scan]: Quiet hours — παραλείπεται.")
+        return
+    if should_skip_proactive_for_recent_activity():
         return
     if not can_send_proactive():
         print("⏸️ [job_proactive_scan]: Rate limit reached — παραλείπεται.")
