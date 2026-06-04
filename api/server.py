@@ -356,6 +356,54 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     # μπλοκάρονται από το ίδιο το security prompt.
     isolated_user_input = user_input
 
+    # ── Routine Confirmation από Web UI ─────────────────────────
+    # Ίδια λογική με telegram_bot — accent-insensitive
+    import unicodedata
+    def _normalize_gr(t):
+        return unicodedata.normalize("NFD", t).encode("ascii", "ignore").decode("ascii").lower()
+
+    try:
+        from clients.telegram_bot import pending_routine_confirmations
+        if pending_routine_confirmations:
+            txt = _normalize_gr(user_input)
+            txt_words = txt.replace(",","").replace(".","").replace("!","").split()
+            yes_w = [_normalize_gr(w) for w in ["ναι","yes","οκ","ok","ισχύει","σωστά","σωστα"]]
+            no_w  = [_normalize_gr(w) for w in ["όχι","οχι","no","σταμάτα","σταματα","διέγραψε","βγάλτο"]]
+            act_w = [_normalize_gr(w) for w in [
+                "πάμε","πηγαίνουμε","φεύγουμε","ξεκινάμε","πάω","θα πάμε",
+                "πήγαμε","ήρθαμε","φτάσαμε","είμαστε","ξεκίνησα","έγινε",
+                "έτοιμος","τελειώσαμε","went","going","done","finished","started"
+            ]]
+            implicit = False
+            if any(w in txt for w in act_w):
+                for rid, rdata in pending_routine_confirmations.items():
+                    ev = rdata.get("event","") if isinstance(rdata,dict) else str(rdata)
+                    ev_words = [_normalize_gr(w) for w in ev.split() if len(w)>3]
+                    if any(ew in txt for ew in ev_words):
+                        implicit = True
+                        break
+            if any(w in txt_words for w in yes_w) or implicit:
+                from memory.routine_db import confirm_routine, mark_routine_responded, clear_pending_confirmations
+                from memory.event_log import log_event
+                for rid in list(pending_routine_confirmations.keys()):
+                    confirm_routine(rid)
+                    mark_routine_responded(rid)
+                    log_event("routines","confirmed",routine_id=rid,event=pending_routine_confirmations[rid])
+                    print(f"✅ [Web Routine Confirmed]: {pending_routine_confirmations[rid]}")
+                pending_routine_confirmations.clear()
+                clear_pending_confirmations()
+            elif any(w in txt for w in no_w):
+                from memory.routine_db import decay_routine, clear_pending_confirmations
+                from memory.event_log import log_event
+                for rid in list(pending_routine_confirmations.keys()):
+                    decay_routine(rid)
+                    log_event("routines","dismissed",routine_id=rid,event=pending_routine_confirmations[rid])
+                    print(f"📉 [Web Routine Dismissed]: {pending_routine_confirmations[rid]}")
+                pending_routine_confirmations.clear()
+                clear_pending_confirmations()
+    except Exception as _rce:
+        print(f"[Web Routine Confirm]: {_rce}")
+
     with memory_lock:
         last_interaction_time = time.time()
 
