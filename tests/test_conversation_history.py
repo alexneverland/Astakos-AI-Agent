@@ -80,3 +80,65 @@ def test_load_messages_returns_recent_entries_in_chronological_order(tmp_path):
 
     messages = load_messages(limit=3, db_path=db_path)
     assert [m["content"] for m in messages] == ["m2", "m3", "m4"]
+
+
+def test_load_recent_context_merges_global_and_channel_windows(tmp_path):
+    from memory.conversation_history import append_message, load_recent_context
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(
+        role="user",
+        content="old web still relevant",
+        channel="web",
+        timestamp=datetime(2026, 6, 4, 10, 0),
+        db_path=db_path,
+    )
+    append_message(
+        role="user",
+        content="recent telegram",
+        channel="telegram",
+        timestamp=datetime(2026, 6, 4, 10, 1),
+        db_path=db_path,
+    )
+    append_message(
+        role="assistant",
+        content="recent web",
+        channel="web",
+        timestamp=datetime(2026, 6, 4, 10, 2),
+        db_path=db_path,
+    )
+
+    messages = load_recent_context(
+        channel="web",
+        global_limit=2,
+        channel_limit=2,
+        db_path=db_path,
+    )
+
+    assert [m["content"] for m in messages] == [
+        "old web still relevant",
+        "recent telegram",
+        "recent web",
+    ]
+
+
+def test_load_recent_context_deduplicates_overlap(tmp_path):
+    from memory.conversation_history import append_message, load_recent_context
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(
+        role="user",
+        content="web only once",
+        channel="web",
+        timestamp=datetime(2026, 6, 4, 10, 0),
+        db_path=db_path,
+    )
+
+    messages = load_recent_context(
+        channel="web",
+        global_limit=5,
+        channel_limit=5,
+        db_path=db_path,
+    )
+
+    assert [m["content"] for m in messages] == ["web only once"]

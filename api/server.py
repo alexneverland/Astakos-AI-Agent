@@ -128,6 +128,7 @@ def _save_chat_history(history: list):
 def append_to_chat_history(role: str, content: str):
     """Thread-safe προσθήκη μηνύματος στο history."""
     now = datetime.now()
+    shared_message_id = None
     with chat_history_lock:
         history = _load_chat_history()
         history.append({
@@ -139,14 +140,40 @@ def append_to_chat_history(role: str, content: str):
         _save_chat_history(history)
     try:
         from memory.conversation_history import append_message
-        append_message(
+        saved = append_message(
             role=role,
             content=content,
             channel="web",
             timestamp=now,
         )
+        shared_message_id = saved.get("id")
     except Exception as e:
         print(f"[ConversationHistory/web]: Σφάλμα shared write: {e}")
+    return shared_message_id
+
+
+def _load_shared_context_messages(channel: str, exclude_message_id: str | None = None) -> list:
+    """Φορτώνει μικτό shared context. Αν αποτύχει, ο caller κάνει fallback στο legacy history."""
+    try:
+        from memory.conversation_history import load_recent_context
+        entries = load_recent_context(channel=channel, global_limit=12, channel_limit=10, total_limit=20)
+    except Exception as e:
+        print(f"[ConversationHistory/{channel}]: Σφάλμα shared read: {e}")
+        return []
+
+    context_msgs = []
+    for entry in entries:
+        if exclude_message_id and entry.get("id") == exclude_message_id:
+            continue
+        content = entry.get("content", "")
+        if not content:
+            continue
+        prefix = f"[{entry.get('date', '')} {entry.get('time', '')} / {entry.get('channel', '')}] "
+        if entry.get("role") in ("user", "human", "Human"):
+            context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
+        else:
+            context_msgs.append(AIMessage(content=f"{prefix}{content}"))
+    return context_msgs
 
 # ────────────────────────────────────────────────────────────────
 # QUEUE SYSTEM
@@ -421,7 +448,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     # ── Αποθήκευση user message στο history ────────────────────
     # Note: We save the original `user_input` to the UI chat history, 
     # not the XML-wrapped version, to keep the frontend looking clean.
-    append_to_chat_history("user", user_input)
+    current_history_id = append_to_chat_history("user", user_input)
 
     final_ai_response = ""
     handling_agent    = "Chat_Agent"
@@ -461,19 +488,20 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             # We feed the LangGraph state the isolated XML payload
             human_msg = HumanMessage(content=isolated_user_input)
 
-        # ── Context: τελευταία 10 μηνύματα με timestamps ─────────
-        with chat_history_lock:
-            raw_hist = _load_chat_history()
-        context_msgs = []
-        for entry in raw_hist[-21:-1]:
-            role    = entry.get("role", "")
-            content = entry.get("content", "")
-            ts      = entry.get("time", "")
-            prefix  = f"[{ts}] " if ts else ""
-            if role in ("user", "Human"):
-                context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
-            else:
-                context_msgs.append(AIMessage(content=f"{prefix}{content}"))
+        # ── Context: shared mixed history πρώτα, legacy web history ως fallback ─────────
+        context_msgs = _load_shared_context_messages("web", exclude_message_id=current_history_id)
+        if not context_msgs:
+            with chat_history_lock:
+                raw_hist = _load_chat_history()
+            for entry in raw_hist[-21:-1]:
+                role    = entry.get("role", "")
+                content = entry.get("content", "")
+                ts      = entry.get("time", "")
+                prefix  = f"[{ts}] " if ts else ""
+                if role in ("user", "Human"):
+                    context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
+                else:
+                    context_msgs.append(AIMessage(content=f"{prefix}{content}"))
         # Timestamp στο τρέχον μήνυμα
         now_ts = datetime.now().strftime("%H:%M")
         if isinstance(human_msg.content, str):

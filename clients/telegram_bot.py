@@ -349,21 +349,22 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     from langchain_core.messages import HumanMessage, AIMessage
     from core.agents import clean_message
 
-    # Φόρτωση history (ίδιο με handle_message)
-    context_msgs = []
-    try:
-        if os.path.exists(TELEGRAM_HISTORY_FILE):
-            with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
-                raw_hist = json.load(f)
-            for entry in raw_hist[-21:-1]:
-                ts     = entry.get("time", "")
-                prefix = f"[{ts}] " if ts else ""
-                if entry["role"] == "human":
-                    context_msgs.append(HumanMessage(content=f"{prefix}{entry['content']}"))
-                else:
-                    context_msgs.append(AIMessage(content=f"{prefix}{entry['content']}"))
-    except Exception:
-        pass
+    # Φόρτωση history (shared mixed πρώτα, legacy Telegram ως fallback)
+    context_msgs = _load_shared_context_messages("telegram")
+    if not context_msgs:
+        try:
+            if os.path.exists(TELEGRAM_HISTORY_FILE):
+                with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
+                    raw_hist = json.load(f)
+                for entry in raw_hist[-21:-1]:
+                    ts     = entry.get("time", "")
+                    prefix = f"[{ts}] " if ts else ""
+                    if entry["role"] == "human":
+                        context_msgs.append(HumanMessage(content=f"{prefix}{entry['content']}"))
+                    else:
+                        context_msgs.append(AIMessage(content=f"{prefix}{entry['content']}"))
+        except Exception:
+            pass
 
     now_ts = datetime.now().strftime("%H:%M")
     user_log_msg = (
@@ -525,6 +526,30 @@ def _append_to_analytics_log(role: str, content: str):
             print(f"[ConversationHistory/telegram]: Σφάλμα shared write: {shared_error}")
     except Exception as e:
         print(f"[TelegramAnalytics]: Σφάλμα: {e}")
+
+
+def _load_shared_context_messages(channel: str) -> list:
+    """Φορτώνει μικτό shared context. Αν αποτύχει, ο caller κάνει fallback στο legacy history."""
+    try:
+        from memory.conversation_history import load_recent_context
+        entries = load_recent_context(channel=channel, global_limit=12, channel_limit=10, total_limit=20)
+    except Exception as e:
+        print(f"[ConversationHistory/{channel}]: Σφάλμα shared read: {e}")
+        return []
+
+    context_msgs = []
+    for entry in entries:
+        content = entry.get("content", "")
+        if not content:
+            continue
+        prefix = f"[{entry.get('date', '')} {entry.get('time', '')} / {entry.get('channel', '')}] "
+        if entry.get("role") in ("user", "human", "Human"):
+            context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
+        else:
+            context_msgs.append(AIMessage(content=f"{prefix}{content}"))
+    return context_msgs
+
+
 # ────────────────────────────────────────────────────────────────
 # MESSAGE HANDLER
 # ────────────────────────────────────────────────────────────────
@@ -653,22 +678,23 @@ def handle_message(user_text: str, chat_id: str):
     typing_thread.start()
 
     try:
-        # ── Context: τελευταία exchanges με timestamps ────────────
+        # ── Context: shared mixed history πρώτα, legacy Telegram history ως fallback ────────────
         now_ts = datetime.now().strftime("%H:%M")
-        context_msgs = []
-        try:
-            if os.path.exists(TELEGRAM_HISTORY_FILE):
-                with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
-                    raw_hist = json.load(f)
-                for entry in raw_hist[-21:-1]:
-                    ts = entry.get("time", "")
-                    prefix = f"[{ts}] " if ts else ""
-                    if entry["role"] == "human":
-                        context_msgs.append(HumanMessage(content=f"{prefix}{entry['content']}"))
-                    else:
-                        context_msgs.append(AIMessage(content=f"{prefix}{entry['content']}"))
-        except:
-            pass
+        context_msgs = _load_shared_context_messages("telegram")
+        if not context_msgs:
+            try:
+                if os.path.exists(TELEGRAM_HISTORY_FILE):
+                    with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
+                        raw_hist = json.load(f)
+                    for entry in raw_hist[-21:-1]:
+                        ts = entry.get("time", "")
+                        prefix = f"[{ts}] " if ts else ""
+                        if entry["role"] == "human":
+                            context_msgs.append(HumanMessage(content=f"{prefix}{entry['content']}"))
+                        else:
+                            context_msgs.append(AIMessage(content=f"{prefix}{entry['content']}"))
+            except:
+                pass
         current_msg  = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
         # ── Ροή μέσω LangGraph ───────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"

@@ -153,6 +153,35 @@ def load_messages(
     return messages
 
 
+def load_recent_context(
+    *,
+    channel: str,
+    global_limit: int = 12,
+    channel_limit: int = 10,
+    total_limit: int = 20,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> list[dict[str, Any]]:
+    """
+    Returns a small mixed context window.
+
+    It includes recent messages from all channels plus extra recent messages from
+    the current channel, then de-duplicates and returns them chronologically.
+    """
+    mixed = load_messages(limit=global_limit, db_path=db_path)
+    current_channel = load_messages(limit=channel_limit, channel=channel, db_path=db_path)
+
+    by_id = {message["id"]: message for message in mixed}
+    by_id.update({message["id"]: message for message in current_channel})
+
+    messages = sorted(
+        by_id.values(),
+        key=lambda message: (message["timestamp"], message["id"]),
+    )
+    if total_limit and len(messages) > total_limit:
+        messages = messages[-total_limit:]
+    return messages
+
+
 def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
     metadata_raw = row["metadata_json"] or "{}"
     try:
