@@ -954,11 +954,23 @@ def _get_pending_actions() -> list:
 
 @server.post("/debug/action/{tool_call_id}/approve")
 async def approve_action(tool_call_id: str, _=Depends(require_token)):
-    """Εγκρίνει CRITICAL pending action."""
+    """Εγκρίνει και εκτελεί CRITICAL pending action."""
     try:
-        from core.approval import resolve_pending
-        resolve_pending(tool_call_id, approved=True)
-        return {"ok": True, "status": "approved", "tool_call_id": tool_call_id}
+        from core.approval import pop_pending
+        from tools.system import all_tools
+        item = pop_pending(tool_call_id)
+        if not item:
+            return {"ok": False, "error": "Action not found or already executed"}
+        tool_name = item["tool_name"]
+        tool_args = item["tool_args"]
+        tools_map = {t.name: t for t in all_tools}
+        tool = tools_map.get(tool_name)
+        if not tool:
+            return {"ok": False, "error": f"Tool '{tool_name}' not found"}
+        result = tool.invoke(tool_args)
+        from tools.telegram import send_telegram_msg
+        send_telegram_msg(f"✅ [{tool_name}] εκτελέστηκε από dashboard:\n{str(result)[:500]}")
+        return {"ok": True, "status": "executed", "tool": tool_name, "result": str(result)[:500]}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -967,9 +979,12 @@ async def approve_action(tool_call_id: str, _=Depends(require_token)):
 async def reject_action(tool_call_id: str, _=Depends(require_token)):
     """Απορρίπτει CRITICAL pending action."""
     try:
-        from core.approval import resolve_pending
-        resolve_pending(tool_call_id, approved=False)
-        return {"ok": True, "status": "rejected", "tool_call_id": tool_call_id}
+        from core.approval import pop_pending
+        from tools.telegram import send_telegram_msg
+        item = pop_pending(tool_call_id)
+        if item:
+            send_telegram_msg(f"❌ Action `{item['tool_name']}` ακυρώθηκε από dashboard.")
+        return {"ok": True, "status": "rejected"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
