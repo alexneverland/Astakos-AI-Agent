@@ -8,15 +8,28 @@ Tests για το pop-before-execute bug fix.
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 
-def _setup_pending(tmp_path, tool_call_id="tc-safe-1", tool_name="github_manager"):
+class DummyTool:
+    def __init__(self, name, result="success", error=None):
+        self.name = name
+        self.result = result
+        self.error = error
+        self.calls = []
+
+    def invoke(self, args):
+        self.calls.append(args)
+        if self.error:
+            raise self.error
+        return self.result
+
+
+def _setup_pending(tmp_path, tool_call_id="tc-safe-1", tool_name="github_manager", tool_args=None):
     pending_file = str(tmp_path / "pending.json")
     with patch("core.approval.PENDING_FILE", pending_file):
         from core.approval import save_pending, get_pending
-        save_pending(tool_name, {"repo": "astakos"}, tool_call_id)
+        save_pending(tool_name, tool_args or {"repo": "astakos"}, tool_call_id)
         return pending_file
 
 
@@ -24,18 +37,12 @@ def test_pending_survives_missing_tool(tmp_path):
     """Αν το tool δεν βρεθει, το pending action πρεπει να μεινει."""
     pending_file = _setup_pending(tmp_path)
     with patch("core.approval.PENDING_FILE", pending_file):
-        from core.approval import get_pending, pop_pending
+        from core.approval import execute_approved_pending, get_pending
 
-        item = get_pending("tc-safe-1")
-        assert item is not None
+        result = execute_approved_pending("tc-safe-1", [])
 
-        # Simulate: tool not found → δεν καλουμε pop
-        tools_map = {}  # αδειο — tool δεν υπαρχει
-        tool = tools_map.get(item["tool_name"])
-        if not tool:
-            pass  # return χωρις pop
-
-        # Pending πρεπει να εξακολουθει να υπαρχει
+        assert result["ok"] is False
+        assert result["status"] == "tool_not_found"
         assert get_pending("tc-safe-1") is not None
 
 
@@ -43,21 +50,14 @@ def test_pending_survives_invoke_exception(tmp_path):
     """Αν το tool.invoke κανει exception, το pending action πρεπει να μεινει."""
     pending_file = _setup_pending(tmp_path)
     with patch("core.approval.PENDING_FILE", pending_file):
-        from core.approval import get_pending, pop_pending
+        from core.approval import execute_approved_pending, get_pending
 
-        item = get_pending("tc-safe-1")
-        assert item is not None
+        tool = DummyTool("github_manager", error=Exception("Network error"))
+        result = execute_approved_pending("tc-safe-1", [tool])
 
-        mock_tool = MagicMock()
-        mock_tool.invoke.side_effect = Exception("Network error")
-
-        try:
-            mock_tool.invoke(item["tool_args"])
-            pop_pending("tc-safe-1")  # αυτο ΔΕΝ πρεπει να τρεξει
-        except Exception:
-            pass  # exception — ΔΕΝ κανουμε pop
-
-        # Pending πρεπει να εξακολουθει να υπαρχει
+        assert result["ok"] is False
+        assert result["status"] == "failed"
+        assert "Network error" in result["error"]
         assert get_pending("tc-safe-1") is not None
 
 
@@ -65,19 +65,35 @@ def test_pending_removed_only_after_success(tmp_path):
     """Το pending αφαιρειται ΜΟΝΟ μετα απο επιτυχη invoke."""
     pending_file = _setup_pending(tmp_path)
     with patch("core.approval.PENDING_FILE", pending_file):
-        from core.approval import get_pending, pop_pending
+        from core.approval import execute_approved_pending, get_pending
 
-        item = get_pending("tc-safe-1")
-        assert item is not None
+        tool = DummyTool("github_manager", result="success")
+        result = execute_approved_pending("tc-safe-1", [tool])
 
-        mock_tool = MagicMock()
-        mock_tool.invoke.return_value = "success"
-
-        result = mock_tool.invoke(item["tool_args"])
-        pop_pending("tc-safe-1")  # pop μετα απο επιτυχια
-
-        # Τωρα πρεπει να εχει αφαιρεθει
+        assert result["ok"] is True
+        assert result["status"] == "executed"
+        assert result["result"] == "success"
+        assert tool.calls == [{"repo": "astakos"}]
         assert get_pending("tc-safe-1") is None
+
+
+def test_terminal_approval_adds_already_approved_flag(tmp_path):
+    """run_terminal_command παιρνει already_approved=True απο το shared approval helper."""
+    pending_file = _setup_pending(
+        tmp_path,
+        tool_call_id="tc-terminal",
+        tool_name="run_terminal_command",
+        tool_args={"command": "git push origin main"},
+    )
+    with patch("core.approval.PENDING_FILE", pending_file):
+        from core.approval import execute_approved_pending, get_pending
+
+        tool = DummyTool("run_terminal_command", result="pushed")
+        result = execute_approved_pending("tc-terminal", [tool])
+
+        assert result["ok"] is True
+        assert tool.calls == [{"command": "git push origin main", "already_approved": True}]
+        assert get_pending("tc-terminal") is None
 
 
 def test_reject_always_pops(tmp_path):

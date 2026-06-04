@@ -83,6 +83,54 @@ def list_pending() -> list[dict]:
     return [v for v in _load_pending().values() if v["status"] == "pending"]
 
 
+def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
+    """
+    Εκτελεί pending action που έχει εγκριθεί από UI/Telegram.
+    Το pending αφαιρείται μόνο μετά από επιτυχημένο tool.invoke().
+    """
+    item = get_pending(tool_call_id)
+    if not item:
+        return {
+            "ok": False,
+            "status": "missing",
+            "error": "Action not found or already executed",
+        }
+
+    tool_name = item["tool_name"]
+    tool_args = item.get("tool_args", {})
+    tools_map = {getattr(t, "name", None): t for t in tools}
+    tool = tools_map.get(tool_name)
+    if not tool:
+        return {
+            "ok": False,
+            "status": "tool_not_found",
+            "tool": tool_name,
+            "error": f"Tool '{tool_name}' not found",
+        }
+
+    invoke_args = dict(tool_args)
+    if tool_name == "run_terminal_command":
+        invoke_args["already_approved"] = True
+
+    try:
+        result = tool.invoke(invoke_args)
+    except Exception as e:
+        return {
+            "ok": False,
+            "status": "failed",
+            "tool": tool_name,
+            "error": str(e),
+        }
+
+    pop_pending(tool_call_id)
+    return {
+        "ok": True,
+        "status": "executed",
+        "tool": tool_name,
+        "result": result,
+    }
+
+
 def _load_pending() -> dict:
     if not os.path.exists(PENDING_FILE):
         return {}

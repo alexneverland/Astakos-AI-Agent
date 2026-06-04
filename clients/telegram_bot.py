@@ -837,7 +837,7 @@ def handle_location(msg, live_update=False):
 def _handle_approval_callback(cq: dict):
     """Χειρίζεται τα ✅/❌ approval callbacks από inline keyboard."""
     try:
-        from core.approval import get_pending, pop_pending, resolve_pending
+        from core.approval import execute_approved_pending, get_pending, pop_pending
         from tools.system import all_tools
 
         cq_id   = cq["id"]
@@ -864,7 +864,6 @@ def _handle_approval_callback(cq: dict):
                 return
 
             tool_name = item["tool_name"]
-            tool_args = item["tool_args"]
 
             # Ενημέρωση keyboard → "✅ Εγκρίθηκε"
             requests.post(
@@ -875,23 +874,13 @@ def _handle_approval_callback(cq: dict):
 
             send_telegram_msg(f"⚙️ Εκτελώ `{tool_name}`...")
 
-            # Βρίσκουμε και εκτελούμε το tool
-            tools_map = {t.name: t for t in all_tools}
-            tool = tools_map.get(tool_name)
-            if not tool:
+            execution = execute_approved_pending(tool_call_id, all_tools)
+            if execution["ok"]:
+                send_telegram_msg("✅ `" + tool_name + "` ολοκληρώθηκε:\n\n" + str(execution["result"])[:800])
+            elif execution["status"] == "tool_not_found":
                 send_telegram_msg(f"❌ Tool `{tool_name}` δεν βρέθηκε.")
-                return  # pending μενει
-
-            try:
-                # Για run_terminal_command: περνάμε already_approved=True
-                invoke_args = dict(tool_args)
-                if tool_name == 'run_terminal_command':
-                    invoke_args['already_approved'] = True
-                result = tool.invoke(invoke_args)
-                pop_pending(tool_call_id)  # pop mono meta apo epituxia
-                send_telegram_msg("✅ `" + tool_name + "` ολοκληρώθηκε:\n\n" + str(result)[:800])
-            except Exception as e:
-                send_telegram_msg(f"❌ `{tool_name}` απέτυχε: {e}")
+            else:
+                send_telegram_msg(f"❌ `{tool_name}` απέτυχε: {execution['error']}")
 
         elif action == "reject":
             pop_pending(tool_call_id)
