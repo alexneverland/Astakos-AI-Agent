@@ -91,6 +91,25 @@ def test_safe_tool_passes_through():
     result = approval_check_node({"messages": [ai_msg]})
     assert result["approval_status"] == "ok"
 
+def test_blocked_terminal_command_is_not_saved_for_approval():
+    """BLOCKED terminal command → approval_status=blocked και δεν αποθηκεύεται pending."""
+    from core.approval import approval_check_node
+
+    ai_msg = MagicMock()
+    ai_msg.tool_calls = [{
+        "name": "run_terminal_command",
+        "args": {"command": "rm -rf /"},
+        "id": "tc-blocked",
+    }]
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({"messages": [ai_msg]})
+
+    assert result["approval_status"] == "blocked"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
 def test_no_tool_calls_passes_through():
     """approval_check_node χωρίς tool calls → approval_status=ok."""
     from core.approval import approval_check_node

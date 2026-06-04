@@ -74,11 +74,11 @@ def build_graph():
             {"tools": "approval_check", "capture": "capture_result", END: END}
         )
 
-    # approval_check → tools (ok) ή → END (pending)
+    # approval_check → tools (ok) ή → END (pending/blocked)
     workflow.add_conditional_edges(
         "approval_check",
         lambda state: state.get("approval_status", "ok"),
-        {"ok": "tools", "pending": END}
+        {"ok": "tools", "pending": END, "blocked": END}
     )
 
     # Μετά από tools → επιστροφή στον σωστό agent

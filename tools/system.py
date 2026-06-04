@@ -168,10 +168,10 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
     - Ανάγνωση logs (π.χ. 'Get-Content C:\\path\\to\\mastroapp\\logs\\error.log -Tail 50').
     - Έλεγχο ports (π.χ. 'netstat -ano | findstr 8000').
     - Εκτέλεση tests (π.χ. 'python manage.py test').
-    already_approved=True: παρακάμπτει το safe_execute gate (χρησιμοποιείται από approval callback).
+    already_approved=True: παρακάμπτει μόνο το confirmation gate, όχι BLOCKED εντολές.
     """
     import subprocess
-    from core.safe_executor import safe_execute
+    from core.safe_executor import safe_execute, classify_command, ExecPolicy
     print(f"\033[93m[Terminal Execution]: {command}\033[0m")
 
     def _executor(cmd):
@@ -199,9 +199,13 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
         except Exception as e:
             return {"status": "ok", "output": f"❌ Terminal Error: {str(e)}"}
 
-    # Αν εγκρίθηκε ήδη από approval gate → εκτέλεση άμεσα, παράκαμψη safe_execute
+    # Ακόμη και μετά από approval, τα hard-blocked commands δεν εκτελούνται ποτέ.
     if already_approved:
-        result = _executor(command)
+        policy, reason = classify_command(command)
+        if policy == ExecPolicy.BLOCKED:
+            result = {"status": "blocked", "reason": reason}
+        else:
+            result = _executor(command)
     else:
         result = safe_execute(command, _executor)
 

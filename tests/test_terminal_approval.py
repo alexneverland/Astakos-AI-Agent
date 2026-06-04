@@ -50,11 +50,11 @@ def test_normal_safe_command_executes_without_flag():
 
 
 def test_blocked_command_stays_blocked_even_with_approval():
-    """BLOCKED εντολη (rm -rf /) πρεπει να μπλοκαριστει ακομα και με already_approved=False."""
+    """BLOCKED εντολη (rm -rf /) πρεπει να μπλοκαριστει ακομα και με already_approved=True."""
     from tools.system import run_terminal_command
 
     with patch("subprocess.run") as mock_run:
-        result = run_terminal_command.func("rm -rf /", already_approved=False)
+        result = run_terminal_command.func("rm -rf /", already_approved=True)
 
     assert "BLOCKED" in result or "blocked" in result.lower()
     mock_run.assert_not_called()

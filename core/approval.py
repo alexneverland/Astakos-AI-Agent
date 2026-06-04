@@ -21,7 +21,7 @@ def _effective_risk(tc: dict) -> str:
         cmd = tc.get("args", {}).get("command", "")
         policy, _ = classify_command(cmd)
         if policy == ExecPolicy.BLOCKED:
-            return "CRITICAL"
+            return "BLOCKED"
         elif policy == ExecPolicy.REQUIRE_CONFIRMATION:
             return "CRITICAL"
         elif policy == ExecPolicy.WARNING:
@@ -115,6 +115,22 @@ def approval_check_node(state):
 
     if not tool_calls:
         return {"approval_status": "ok"}
+
+    blocked_calls = [tc for tc in tool_calls if _effective_risk(tc) == "BLOCKED"]
+    if blocked_calls:
+        tool_messages = []
+        for tc in blocked_calls:
+            print(f"\033[91m[Approval]: 🛡️ BLOCKED — {tc['name']} rejected by safe executor\033[0m")
+            tool_messages.append(ToolMessage(
+                content=f"🛡️ Η εντολή `{tc['name']}` μπλοκαρίστηκε από τον safe executor και δεν μπορεί να εγκριθεί.",
+                tool_call_id=tc["id"],
+                name=tc["name"],
+            ))
+
+        return {
+            "approval_status": "blocked",
+            "messages": tool_messages,
+        }
 
     critical_calls = [tc for tc in tool_calls if is_critical(tc)]
 
