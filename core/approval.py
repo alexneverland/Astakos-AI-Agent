@@ -106,6 +106,7 @@ def approval_check_node(state):
     """
     Τρέχει πριν το ToolNode.
     - SAFE / WARNING → state["approval_status"] = "ok" → συνεχίζει στα tools
+    - BLOCKED        → κόβεται άμεσα από safe executor, βάζει "blocked"
     - CRITICAL       → αποθηκεύει pending, στέλνει Telegram, βάζει "pending"
     """
     from langchain_core.messages import AIMessage, ToolMessage

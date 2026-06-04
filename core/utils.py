@@ -24,7 +24,7 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     next_agent: NotRequired[str]
     current_agent: NotRequired[str]
-    approval_status: NotRequired[str]   # "ok" | "pending"
+    approval_status: NotRequired[str]   # "ok" | "pending" | "blocked"
     plan_active: NotRequired[bool]       # True αν τρέχει plan
     plan_tasks: NotRequired[list]        # task list από Planner
     plan_index: NotRequired[int]         # τρέχον βήμα
