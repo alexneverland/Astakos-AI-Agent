@@ -53,7 +53,8 @@ If Astakos saves you time or inspires your own project, a star goes a long way. 
 Astakos is local-first:
 
 - Long-term memory is stored on disk with SQLite, ChromaDB, and local JSON state.
-- Telegram/Web/Terminal session state is persisted locally.
+- Telegram/Web conversation history is stored in a shared SQLite database; legacy JSON history files are kept only as local mirrors/fallbacks.
+- Telegram/Web/Terminal session exchanges are persisted locally and summarized on clean shutdown.
 - Runtime data, credentials, uploads, caches, databases, logs, and private JSON files are gitignored.
 - You control the machine, the credentials, and the integrations.
 
@@ -84,6 +85,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 |---|---|
 | Formal Event Bus | Pub/sub through `core/event_bus.py` for `routine_triggered`, `routine_confirmed`, `session_ended`, and more. |
 | Unified Session Memory | One shared session log across Telegram, Web, and Terminal for cross-channel context awareness. |
+| Shared Conversation History | Telegram and Web write to one SQLite conversation store, with legacy JSON backfill, SQLite-first context reads, and analytics using the shared history. |
 | Google Fit Integration | Daily steps, sleep phases (deep / REM / light), and heart rate from Samsung Health via Google Fit. Morning briefing at 08:00. |
 | Memory Scoring | Every memory has `importance`, `confidence`, `last_accessed`, and `retrieval_count`. `compute_score()` = importance × 0.4 + retrieval × 0.3 + confidence × 0.2 + freshness × 0.1. |
 | Unified Memory Entry Point | `memory.save(memory_type=...)` handles facts, photos, documents, sessions, goals, reflections, and events. |
@@ -358,6 +360,13 @@ Observability:
 open http://localhost:8000/debug/runtime
 ```
 
+Shutdown behavior:
+
+- Web/API shutdown through FastAPI lifespan drains queued memory tasks and runs the Web session summary.
+- Telegram shutdown through `clients/telegram_bot.py` runs the Telegram session summary; `run_telegram.py` forwards Ctrl+C/restart signals to the child process before falling back to termination.
+- CLI shutdown through `exit`, Ctrl+C, SIGINT, or SIGTERM drains queued memory tasks and runs the Terminal session summary once.
+- Shared conversation history remains in SQLite; JSON history files are legacy mirrors/fallbacks.
+
 ---
 
 ## Roadmap
@@ -388,6 +397,7 @@ open http://localhost:8000/debug/runtime
 - [x] Unified Session Memory — shared log across all channels, with session summary on shutdown and Ctrl+C drain handling.
 - [x] Cross-channel awareness — unified `SESSION_LOGS` for Telegram, Web, and Terminal context.
 - [x] Shared Conversation History — Telegram and Web write to one SQLite store, with legacy JSON backfill and analytics reading from the shared history.
+- [x] SQLite-first history views and cleanup — Web history and analytics read from shared SQLite, while `clean.py` can check and maintain the conversation database.
 
 ### Planned
 

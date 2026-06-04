@@ -47,6 +47,7 @@ shutdown_event        = threading.Event()
 astakos_queue         = queue.Queue()
 memory_lock           = threading.Lock()
 last_interaction_time = time.time()
+_summary_done        = threading.Event()
 
 
 def enqueue_task(func, *args):
@@ -150,14 +151,33 @@ def proactive_worker():
 
 def _graceful_exit(*args):
     shutdown_event.set()
+    raise KeyboardInterrupt
 
 
 signal.signal(signal.SIGTERM, _graceful_exit)
 signal.signal(signal.SIGINT,  _graceful_exit)
 
 
+def _drain_queue(timeout: float = 5.0) -> None:
+    try:
+        done = threading.Event()
+
+        def _drain():
+            astakos_queue.join()
+            done.set()
+
+        threading.Thread(target=_drain, daemon=True).start()
+        done.wait(timeout=timeout)
+    except Exception:
+        pass
+
+
 def _do_session_summary():
     """Τρέχει session summary με timeout 5s."""
+    if _summary_done.is_set():
+        return
+    _summary_done.set()
+    _drain_queue(timeout=5.0)
     try:
         loop = asyncio.new_event_loop()
         loop.run_until_complete(asyncio.wait_for(
@@ -195,7 +215,6 @@ def main():
             if inp.strip().lower() in ("exit", "quit"):
                 print("\n[System]: Τερματισμός και αρχειοθέτηση...")
                 shutdown_event.set()
-                _do_session_summary()
                 break
 
             if not inp.strip():
@@ -235,6 +254,8 @@ def main():
 
     except KeyboardInterrupt:
         print("\n[System]: Ctrl+C — Τερματισμός...")
+        shutdown_event.set()
+    finally:
         shutdown_event.set()
         _do_session_summary()
 
