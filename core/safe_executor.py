@@ -9,23 +9,24 @@ class ExecPolicy(Enum):
 
 # ── Patterns (σειρά: πιο επικίνδυνα πρώτα) ──────────────────────
 _BLOCKED = [
+    r"rm\s+-[rf]{1,2}\s+/",          # rm -rf / (destructive)
+    r"del\s+.*\*",                  # del /f /s C:\* (Windows mass delete)
     r"format\s+[a-zA-Z]:", r"diskpart", r"bcdedit",
     r"net\s+user.+/add", r"reg\s+delete",
 ]
 _REQUIRE_CONFIRM = [
-    r"rm\s+-[rf]{1,2}\s*/",          # rm -rf /
     r"Remove-Item.+-Recurse.+-Force",
     r"shutdown", r"restart-computer",
     r"taskkill", r"Stop-Process",
-    r"git\s+push\s+.*--force",
+    r"git\s+push",                   # όλα τα pushes — irreversible
     r"DROP\s+TABLE", r"DELETE\s+FROM",
     r"git\s+reset\s+--hard",
     r"Remove-Item\s+.*astakos",      # οτιδήποτε αγγίζει το project root
 ]
 _WARNING = [
     r"Remove-Item",                  # χωρίς -Recurse -Force
-    r"git\s+push",
     r"pip\s+install",
+    r"npm\s+install",                # npm packages
     r"git\s+commit",
     r"Move-Item", r"Rename-Item",
     r"Set-Content", r"Out-File",
