@@ -175,6 +175,35 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
             context_msgs.append(AIMessage(content=f"{prefix}{content}"))
     return context_msgs
 
+
+def _load_shared_history_entries(channel: str = "web", limit: int = 200) -> list:
+    try:
+        from memory.conversation_history import load_messages
+        entries = load_messages(channel=channel, limit=limit)
+    except Exception as e:
+        print(f"[ConversationHistory/{channel}]: Σφάλμα shared history read: {e}")
+        return []
+
+    history = []
+    for entry in entries:
+        content = entry.get("content", "")
+        if not content:
+            continue
+        role = entry.get("role", "")
+        if role in ("human", "Human"):
+            role = "user"
+        elif role in ("ai", "bot"):
+            role = "assistant"
+        history.append({
+            "role": role,
+            "content": content,
+            "time": entry.get("time", ""),
+            "date": entry.get("date", ""),
+            "channel": entry.get("channel", channel),
+            "id": entry.get("id", ""),
+        })
+    return history
+
 # ────────────────────────────────────────────────────────────────
 # QUEUE SYSTEM
 # ────────────────────────────────────────────────────────────────
@@ -767,9 +796,11 @@ async def health():
 
 @server.get("/history")
 async def get_history(_=Depends(require_token)):
-    """Δίνει το ιστορικό στο Web UI — διαβάζει από JSON για να επιβιώνει το F5/restart."""
-    with chat_history_lock:
-        history = _load_chat_history()
+    """Δίνει το ιστορικό στο Web UI από τη shared SQLite, με legacy JSON fallback."""
+    history = _load_shared_history_entries(channel="web", limit=200)
+    if not history:
+        with chat_history_lock:
+            history = _load_chat_history()
     return {"history": history}
 
 

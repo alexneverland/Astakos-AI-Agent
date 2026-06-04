@@ -29,6 +29,7 @@ import sys
 import json
 import shutil
 import argparse
+import sqlite3
 from datetime import datetime
 
 # Προσθήκη του project root στο path για να φορτώσει core/config
@@ -51,6 +52,7 @@ try:
         WORKING_MEMORY_FILE,
         SESSIONS_FILE,
         PROFILE_FILE,
+        CONVERSATION_DB_FILE,
     )
     CHAT_HISTORY_FILE     = os.path.join(PROJECT_ROOT, "astakos_chat_history.json")
     TELEGRAM_HISTORY_FILE = os.path.join(PROJECT_ROOT, "astakos_telegram_history.json")
@@ -62,6 +64,7 @@ except ImportError:
     SESSIONS_FILE       = os.path.join(PROJECT_ROOT, "astakos_sessions.json")
     WORKING_MEMORY_FILE = os.path.join(PROJECT_ROOT, "astakos_working_memory.json")
     PROFILE_FILE        = os.path.join(PROJECT_ROOT, "astakos_profile.json")
+    CONVERSATION_DB_FILE = os.path.join(PROJECT_ROOT, "astakos_conversation_history.db")
 
 PHOTOS_INDEX_FILE = os.path.join(PROJECT_ROOT, "astakos_photos_index.json")
 PHOTOS_DIR        = os.path.join(PROJECT_ROOT, "telegram_photos")
@@ -277,11 +280,59 @@ def _trim_history_file(path: str, label: str, keep: int, dry_run: bool, backup: 
 
 
 def trim_chat_history(keep: int = DEFAULT_CHAT_KEEP, dry_run: bool = False, backup: bool = True) -> bool:
-    return _trim_history_file(CHAT_HISTORY_FILE, "astakos_chat_history.json", keep, dry_run, backup)
+    return _trim_history_file(CHAT_HISTORY_FILE, "legacy astakos_chat_history.json mirror", keep, dry_run, backup)
 
 
 def trim_telegram_history(keep: int = DEFAULT_CHAT_KEEP, dry_run: bool = False, backup: bool = True) -> bool:
-    return _trim_history_file(TELEGRAM_HISTORY_FILE, "astakos_telegram_history.json", keep, dry_run, backup)
+    return _trim_history_file(TELEGRAM_HISTORY_FILE, "legacy astakos_telegram_history.json mirror", keep, dry_run, backup)
+
+
+def maintain_conversation_db(dry_run: bool = False, backup: bool = True) -> bool:
+    header("Shared conversation SQLite maintenance")
+    if not os.path.exists(CONVERSATION_DB_FILE):
+        log(f"Δεν υπάρχει ακόμα: {os.path.basename(CONVERSATION_DB_FILE)}", "warn")
+        return True
+
+    try:
+        conn = sqlite3.connect(CONVERSATION_DB_FILE, timeout=30, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            log(f"SQLite integrity_check: {integrity}", "err")
+            conn.close()
+            return False
+
+        total_messages = conn.execute("SELECT COUNT(*) FROM conversation_messages").fetchone()[0]
+        total_exchanges = conn.execute("SELECT COUNT(*) FROM session_exchanges").fetchone()[0]
+        by_channel = conn.execute(
+            """
+            SELECT channel, COUNT(*) AS count
+            FROM conversation_messages
+            GROUP BY channel
+            ORDER BY channel
+            """
+        ).fetchall()
+        log("SQLite integrity_check: ok", "ok")
+        log(f"conversation_messages: {total_messages}", "info")
+        for row in by_channel:
+            log(f"   - {row['channel']}: {row['count']}", "dim")
+        log(f"session_exchanges: {total_exchanges}", "info")
+
+        if dry_run:
+            log("DRY-RUN: δεν έγινε checkpoint/optimize/vacuum", "warn")
+            conn.close()
+            return True
+
+        backup_file(CONVERSATION_DB_FILE, enabled=backup)
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute("PRAGMA optimize")
+        conn.execute("VACUUM")
+        conn.close()
+        log("SQLite checkpoint + optimize + vacuum ολοκληρώθηκαν", "ok")
+        return True
+    except Exception as e:
+        log(f"Σφάλμα conversation SQLite maintenance: {e}", "err")
+        return False
 
 
 # ────────────────────────────────────────────────────────────────
@@ -590,9 +641,11 @@ def main():
     parser.add_argument("--capabilities", action="store_true",
                         help="Σύμπτυξη can_do / cannot_do με LLM")
     parser.add_argument("--chat-history", action="store_true",
-                        help="Trim παλιών μηνυμάτων από το web chat history")
+                        help="Trim παλιών μηνυμάτων από το legacy web JSON mirror")
     parser.add_argument("--telegram-history", action="store_true",
-                        help="Trim παλιών μηνυμάτων από το telegram history")
+                        help="Trim παλιών μηνυμάτων από το legacy telegram JSON mirror")
+    parser.add_argument("--conversation-db", action="store_true",
+                        help="Έλεγχος/maintenance της shared SQLite conversation history")
     parser.add_argument("--sessions", action="store_true",
                         help="Trim παλιών sessions (κρατά τις πιο πρόσφατες)")
     parser.add_argument("--working-memory", action="store_true",
@@ -614,7 +667,8 @@ def main():
 
     # Αν δεν επιλέχθηκε κανένα συγκεκριμένο task, τα τρέχουμε όλα
     no_specific = not any([
-        args.capabilities, args.chat_history, args.telegram_history, args.sessions, args.working_memory, args.profile, args.photos
+        args.capabilities, args.chat_history, args.telegram_history, args.conversation_db,
+        args.sessions, args.working_memory, args.profile, args.photos
     ])
     run_all = args.all or no_specific
 
@@ -629,6 +683,11 @@ def main():
 
     if run_all or args.capabilities:
         results["capabilities"] = consolidate_capabilities(
+            dry_run=args.dry_run, backup=backup_enabled
+        )
+
+    if run_all or args.conversation_db:
+        results["conversation_db"] = maintain_conversation_db(
             dry_run=args.dry_run, backup=backup_enabled
         )
 
