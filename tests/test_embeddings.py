@@ -4,11 +4,14 @@ Tests για το embeddings layer.
 για να επαληθευσεις οτι η semantic search δεν σπασε.
 
 Απαιτει live Vertex AI connection.
+Τρεξε με: python -m pytest tests/test_embeddings.py -v -m integration
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import math
 import pytest
+
+pytestmark = pytest.mark.integration  # Ολα τα tests εδω απαιτουν live Vertex AI
 
 
 def cosine_similarity(a, b):
