@@ -306,6 +306,21 @@ class AstakosMemoryManager:
         return True
 
 
+    def _save_reflection(self, source: str, observation: str, action: str,
+                         confidence: float = 0.7, lesson: str = "", applied: bool = False):
+        """Wrapper → services/reflection_engine._save_reflection"""
+        from services.reflection_engine import _save_reflection
+        _save_reflection(source=source, observation=observation, action=action,
+                        confidence=confidence, lesson=lesson, applied=applied)
+        return True
+
+    def _save_event(self, job: str, action: str, **kwargs):
+        """Wrapper → memory/event_log.log_event"""
+        from memory.event_log import log_event
+        log_event(job=job, action=action, **kwargs)
+        return True
+
+
 def bump_retrieval_count(doc_ids: list[str]):
     """
     Αυξάνει κατά 1 το retrieval_count για κάθε doc_id.
@@ -329,20 +344,6 @@ def bump_retrieval_count(doc_ids: list[str]):
         print(f"\033[90m[bump_retrieval_count]: {e}\033[0m")
 
 
-    def _save_reflection(self, source: str, observation: str, action: str,
-                         confidence: float = 0.7, lesson: str = "", applied: bool = False):
-        """Wrapper → services/reflection_engine._save_reflection"""
-        from services.reflection_engine import _save_reflection
-        _save_reflection(source=source, observation=observation, action=action,
-                        confidence=confidence, lesson=lesson, applied=applied)
-        return True
-
-    def _save_event(self, job: str, action: str, **kwargs):
-        """Wrapper → memory/event_log.log_event"""
-        from memory.event_log import log_event
-        log_event(job=job, action=action, **kwargs)
-        return True
-
 
 def compute_score(metadata: dict) -> float:
     """
@@ -365,6 +366,7 @@ def compute_score(metadata: dict) -> float:
         freshness  * 0.1,
         3
     )
+
 
 
 # Singleton
