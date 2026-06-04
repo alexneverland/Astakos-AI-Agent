@@ -883,7 +883,11 @@ def _handle_approval_callback(cq: dict):
                 return  # pending μενει
 
             try:
-                result = tool.invoke(tool_args)
+                # Για run_terminal_command: περνάμε already_approved=True
+                invoke_args = dict(tool_args)
+                if tool_name == 'run_terminal_command':
+                    invoke_args['already_approved'] = True
+                result = tool.invoke(invoke_args)
                 pop_pending(tool_call_id)  # pop mono meta apo epituxia
                 send_telegram_msg("✅ `" + tool_name + "` ολοκληρώθηκε:\n\n" + str(result)[:800])
             except Exception as e:

@@ -967,7 +967,11 @@ async def approve_action(tool_call_id: str, _=Depends(require_token)):
         tool = tools_map.get(tool_name)
         if not tool:
             return {"ok": False, "error": f"Tool '{tool_name}' not found"}
-        result = tool.invoke(tool_args)
+        # Για run_terminal_command: περνάμε already_approved=True
+        invoke_args = dict(tool_args)
+        if tool_name == "run_terminal_command":
+            invoke_args["already_approved"] = True
+        result = tool.invoke(invoke_args)
         pop_pending(tool_call_id)  # pop μόνο μετά από επιτυχία
         from tools.telegram import send_telegram_msg
         send_telegram_msg(f"✅ [{tool_name}] εκτελέστηκε από dashboard:\n{str(result)[:500]}")

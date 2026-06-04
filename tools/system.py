@@ -161,13 +161,14 @@ def search_memory(query: str, category: str = "") -> str:
     except Exception as e:
         return f"Error: Σφάλμα ανάκλησης μνήμης: {str(e)}"
 @tool
-def run_terminal_command(command: str) -> str:
+def run_terminal_command(command: str, already_approved: bool = False) -> str:
     """
     Εκτελεί εντολές PowerShell στο PC του Λάζαρου (Piston-7) και επιστρέφει το αποτέλεσμα.
     Ιδανικό για:
     - Ανάγνωση logs (π.χ. 'Get-Content C:\\path\\to\\mastroapp\\logs\\error.log -Tail 50').
     - Έλεγχο ports (π.χ. 'netstat -ano | findstr 8000').
     - Εκτέλεση tests (π.χ. 'python manage.py test').
+    already_approved=True: παρακάμπτει το safe_execute gate (χρησιμοποιείται από approval callback).
     """
     import subprocess
     from core.safe_executor import safe_execute
@@ -198,7 +199,11 @@ def run_terminal_command(command: str) -> str:
         except Exception as e:
             return {"status": "ok", "output": f"❌ Terminal Error: {str(e)}"}
 
-    result = safe_execute(command, _executor)
+    # Αν εγκρίθηκε ήδη από approval gate → εκτέλεση άμεσα, παράκαμψη safe_execute
+    if already_approved:
+        result = _executor(command)
+    else:
+        result = safe_execute(command, _executor)
 
     if result.get("status") == "blocked":
         return f"🛡️ [SAFE EXECUTOR - BLOCKED]: {result['reason']}"
