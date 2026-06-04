@@ -839,7 +839,17 @@ def drive_manager(
             while not done:
                 _, done = downloader.next_chunk()
 
-            save_target = local_path if local_path else os.path.join(r"C:\astakos_v2\outputs", file_name)
+            # [SECURITY]: download πάντα στο outputs — local_path αγνοείται αν είναι εκτός
+            from config import BASE_DIR as _BASE_DIR
+            _outputs_dir = os.path.realpath(os.path.join(_BASE_DIR, "outputs"))
+            os.makedirs(_outputs_dir, exist_ok=True)
+            if local_path:
+                _lp_real = os.path.realpath(local_path)
+                if not _lp_real.startswith(_outputs_dir + os.sep):
+                    return f"❌ Απαγορευμένο download path: επιτρέπεται μόνο εντός outputs/."
+                save_target = _lp_real
+            else:
+                save_target = os.path.join(_outputs_dir, os.path.basename(file_name))
             os.makedirs(os.path.dirname(save_target), exist_ok=True)
             with open(save_target, "wb") as f:
                 f.write(fh.getvalue())
@@ -854,6 +864,17 @@ def drive_manager(
         elif action == "upload":
             if not local_path or not os.path.exists(local_path):
                 return f"❌ Αρχείο δεν βρέθηκε: {local_path}"
+            # [SECURITY]: upload μόνο από allowed dirs — αποτρέπει ανέβασμα credentials/config
+            from config import BASE_DIR as _BASE_DIR
+            _upload_allowed = [
+                os.path.realpath(os.path.join(_BASE_DIR, "outputs")),
+                os.path.realpath(os.path.join(_BASE_DIR, "telegram_uploads")),
+                os.path.realpath(os.path.join(_BASE_DIR, "telegram_photos")),
+                os.path.realpath(os.path.join(_BASE_DIR, "watch_folder")),
+            ]
+            _lp_real = os.path.realpath(local_path)
+            if not any(_lp_real.startswith(d + os.sep) or _lp_real == d for d in _upload_allowed):
+                return f"❌ Απαγορευμένο upload path: επιτρέπεται μόνο από outputs/, telegram_uploads/, telegram_photos/, watch_folder/."
             file_metadata = {'name': os.path.basename(local_path), 'parents': [folder_id]}
             media = MediaFileUpload(local_path, resumable=True)
             file = service.files().create(body=file_metadata, media_body=media, fields='id,name').execute()
