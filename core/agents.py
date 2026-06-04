@@ -142,7 +142,7 @@ def supervisor_node(state):
     # ── /plan: υψηλότερη προτεραιότητα από όλα ────────────────────
     # Χρησιμοποιούμε regex γιατί το server βάζει timestamp [HH:MM] πριν το μήνυμα
     import re as _re
-    if _re.search(r'(?:^|\])\s*/plan', last_content.strip()):
+    if _re.search(r'(?:^|\])\s*/plan', last_content.strip()):
         print(f"\033[95m[Τροχονόμος]: -> planner (/plan command)\033[0m")
         return {"next_agent": "planner"}
 
