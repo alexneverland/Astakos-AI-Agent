@@ -51,14 +51,17 @@ TOOL_RISK: dict[str, str] = {
     "get_fit_summary":          "SAFE",
     "get_routines":             "SAFE",
     "get_current_location":     "SAFE",
-    "run_code":                 "SAFE",
+    "run_code":                 "WARNING",  # εκτελεί Python subprocess
     "recipe_expert":            "SAFE",
-    "log_meal":                 "SAFE",
-    "control_spotify":          "SAFE",
-    "generate_image_tool":      "SAFE",
-    "archive_file":             "SAFE",
+    "log_meal":                 "WARNING",  # γράφει σε food_history.json
+    "control_spotify":          "WARNING",  # side effects: play/pause/next/search
+    "generate_image_tool":      "WARNING",  # γράφει file + external API call
+    "archive_file":             "WARNING",  # γράφει στη μνήμη (ChromaDB + JSON)
 }
 
 def get_risk(tool_name: str) -> str:
     """Επιστρέφει SAFE/WARNING/CRITICAL. Default: WARNING αν άγνωστο."""
-    return TOOL_RISK.get(tool_name, 
+    return TOOL_RISK.get(tool_name, "WARNING")
+
+def is_critical(tool_name: str) -> bool:
+    return get_risk(tool_name) == "CRITICAL"
