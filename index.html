@@ -616,7 +616,10 @@
             if (data.history && data.history.length > 0) {
                 data.history.forEach(msg => {
                     const sender = (msg.role === 'user' || msg.role === 'Human') ? 'user' : 'ai';
-                    appendMessage(msg.content, sender, msg.agent || (sender === 'user' ? 'Λάζαρος' : 'Αστακός'));
+                    const defaultName = sender === 'user' ? 'Λάζαρος' : 'Αστακός';
+                    const channelName = msg.channel ? `${msg.channel.charAt(0).toUpperCase()}${msg.channel.slice(1)}` : '';
+                    const label = channelName ? `${channelName} / ${msg.agent || defaultName}` : (msg.agent || defaultName);
+                    appendMessage(msg.content, sender, label);
                 });
             } else {
                 appendMessage("Καλημέρα Μάστορα! Έτοιμος για μερεμέτια;", "ai", "System");
