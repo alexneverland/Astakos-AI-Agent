@@ -9,19 +9,57 @@ class ExecPolicy(Enum):
 
 # ── Patterns (σειρά: πιο επικίνδυνα πρώτα) ──────────────────────
 _BLOCKED = [
-    r"rm\s+-[rf]{1,2}\s+/",          # rm -rf / (destructive)
-    r"del\s+.*\*",                  # del /f /s C:\* (Windows mass delete)
-    r"format\s+[a-zA-Z]:", r"diskpart", r"bcdedit",
-    r"net\s+user.+/add", r"reg\s+delete",
+    # ── Unix destructive ───────────────────────────────────────
+    r"rm\s+-[rf]{1,2}\s+/",              # rm -rf /
+    # ── Windows CMD destructive ────────────────────────────────
+    r"del\s+.*\*",                       # del /f /s C:\*
+    r"del\s+/[fFsS].*\s+/[sS]",         # del /f /s <path> (subtree)
+    r"rd\s+/[sS]",                        # rd /s (rmdir subtree)
+    r"rmdir\s+/[sS]",                     # rmdir /s
+    r"erase\s+.*\*",                     # erase *.* (mass delete)
+    r"format\s+[a-zA-Z]:",               # format C:
+    r"diskpart",                           # disk partitioning
+    r"bcdedit",                            # boot config editor
+    # ── Windows user/registry ──────────────────────────────────
+    r"net\s+user.+/add",                  # add user
+    r"net\s+localgroup.+/add",            # add to admin group
+    r"reg\s+delete",                      # delete registry key
+    r"reg\s+add",                         # add/modify registry key
+    r"reg\s+import",                      # import registry file
+    # ── PowerShell execution bypass ────────────────────────────
+    r"powershell.*-[eE]ncodedCommand",     # encoded PS command
+    r"powershell.*-[eE]xec.*[bB]ypass",   # execution policy bypass
+    r"Invoke-Expression",                  # PS eval equivalent
+    r"iex\s*\(",                         # PS iex() shorthand
+    r"IEX\s*\(",
+    # ── Dangerous system tools ─────────────────────────────────
+    r"wmic",                               # WMI — can execute code remotely
+    r"schtasks.*(/create|/change)",        # create/modify scheduled tasks
+    r"icacls.*grant.*Everyone",            # grant Everyone access
+    r"takeown\s+/f.*\s+/r",             # recursive ownership takeover
+    r"cipher\s+/w",                       # wipe free space (slow+destructive)
 ]
 _REQUIRE_CONFIRM = [
-    r"Remove-Item.+-Recurse.+-Force",
+    # ── PowerShell file ops ────────────────────────────────────
+    r"Remove-Item.+-Recurse.+-Force",      # rm -rf equivalent
+    r"Remove-Item\s+.*astakos",           # project root protection
+    # ── System state ──────────────────────────────────────────
     r"shutdown", r"restart-computer",
     r"taskkill", r"Stop-Process",
-    r"git\s+push",                   # όλα τα pushes — irreversible
-    r"DROP\s+TABLE", r"DELETE\s+FROM",
-    r"git\s+reset\s+--hard",
-    r"Remove-Item\s+.*astakos",      # οτιδήποτε αγγίζει το project root
+    r"Start-Process",                      # spawn arbitrary process
+    r"net\s+stop\s+\w+",               # stop Windows service
+    r"sc\s+(stop|delete|create)\s+",    # service control
+    r"Set-ExecutionPolicy",               # PS execution policy change
+    # ── Git destructive ────────────────────────────────────────
+    r"git\s+push",                        # irreversible remote push
+    r"git\s+reset\s+--hard",            # lose local changes
+    r"git\s+clean\s+-[fd]",             # delete untracked files
+    # ── SQL destructive ────────────────────────────────────────
+    r"DROP\s+TABLE", r"DROP\s+DATABASE",
+    r"DELETE\s+FROM",
+    r"TRUNCATE\s+TABLE",
+    # ── Network config ─────────────────────────────────────────
+    r"netsh",                              # network configuration
 ]
 _WARNING = [
     r"Remove-Item",                  # χωρίς -Recurse -Force
