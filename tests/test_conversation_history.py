@@ -228,3 +228,57 @@ def test_last_user_activity_can_filter_channel(tmp_path):
     )
 
     assert load_last_user_activity(channel="web", db_path=db_path)["content"] == "web user"
+
+
+def test_import_legacy_message_is_idempotent_and_marks_missing_date(tmp_path):
+    from memory.conversation_history import import_legacy_message, load_messages
+
+    db_path = str(tmp_path / "conversation.db")
+    entry = {
+        "role": "human",
+        "content": "[20:31] old telegram",
+        "date": "",
+        "time": "",
+    }
+
+    first = import_legacy_message(
+        entry=entry,
+        channel="telegram",
+        source="legacy_telegram_json",
+        legacy_index=0,
+        db_path=db_path,
+    )
+    second = import_legacy_message(
+        entry=entry,
+        channel="telegram",
+        source="legacy_telegram_json",
+        legacy_index=0,
+        db_path=db_path,
+    )
+
+    assert first["inserted"] is True
+    assert second["inserted"] is False
+    messages = load_messages(db_path=db_path)
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+    assert messages[0]["date"] == "1970-01-01"
+    assert messages[0]["time"] == "20:31"
+    assert messages[0]["metadata"]["legacy_date_missing"] is True
+
+
+def test_backfill_legacy_history_counts_inserted_skipped_and_empty(tmp_path):
+    from memory.conversation_history import backfill_legacy_history, load_messages
+
+    db_path = str(tmp_path / "conversation.db")
+    history = [
+        {"role": "user", "content": "web user", "date": "2026-06-04", "time": "10:00"},
+        {"role": "assistant", "content": "web assistant", "date": "2026-06-04", "time": "10:01"},
+        {"role": "user", "content": ""},
+    ]
+
+    first = backfill_legacy_history(history, channel="web", source="legacy_web_json", db_path=db_path)
+    second = backfill_legacy_history(history, channel="web", source="legacy_web_json", db_path=db_path)
+
+    assert first == {"total": 3, "inserted": 2, "skipped": 0, "empty": 1}
+    assert second == {"total": 3, "inserted": 0, "skipped": 2, "empty": 1}
+    assert [m["content"] for m in load_messages(db_path=db_path)] == ["web user", "web assistant"]

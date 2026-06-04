@@ -8,12 +8,16 @@ without clobbering each other's writes.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from datetime import datetime
 from typing import Any
 
 from config import CONVERSATION_DB_FILE
+
+LEGACY_FALLBACK_DATE = "1970-01-01"
+LEGACY_UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "astakos:legacy-conversation-history")
 
 
 def _connect(db_path: str = CONVERSATION_DB_FILE) -> sqlite3.Connection:
@@ -143,6 +147,106 @@ def append_message(
             ),
         )
     return message
+
+
+def import_legacy_message(
+    *,
+    entry: dict[str, Any],
+    channel: str,
+    source: str,
+    legacy_index: int,
+    fallback_date: str = LEGACY_FALLBACK_DATE,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> dict[str, Any]:
+    content = str(entry.get("content", "")).strip()
+    if not content:
+        return {"inserted": False, "skipped": True, "reason": "empty_content"}
+
+    original_role = str(entry.get("role", "")).strip()
+    role = _normalize_legacy_role(original_role)
+    ts, date_missing = _parse_legacy_timestamp(entry, fallback_date=fallback_date)
+    metadata = {
+        "legacy_source": source,
+        "legacy_index": legacy_index,
+        "legacy_original_role": original_role,
+        "legacy_date_missing": date_missing,
+    }
+    message_id = _legacy_message_id(
+        source=source,
+        legacy_index=legacy_index,
+        channel=channel,
+        role=role,
+        content=content,
+        timestamp=ts,
+    )
+    message = {
+        "id": message_id,
+        "session_id": default_session_id(ts),
+        "channel": channel,
+        "role": role,
+        "content": content,
+        "timestamp": ts.isoformat(timespec="seconds"),
+        "date": ts.strftime("%Y-%m-%d"),
+        "time": ts.strftime("%H:%M"),
+        "agent": None,
+        "metadata": metadata,
+    }
+
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO conversation_messages (
+                id, session_id, channel, role, content,
+                timestamp, date, time, agent, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                message["id"],
+                message["session_id"],
+                message["channel"],
+                message["role"],
+                message["content"],
+                message["timestamp"],
+                message["date"],
+                message["time"],
+                message["agent"],
+                json.dumps(message["metadata"], ensure_ascii=False),
+            ),
+        )
+    return {"inserted": cursor.rowcount == 1, "skipped": cursor.rowcount == 0, "message": message}
+
+
+def backfill_legacy_history(
+    history: list[dict[str, Any]],
+    *,
+    channel: str,
+    source: str,
+    fallback_date: str = LEGACY_FALLBACK_DATE,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> dict[str, int]:
+    stats = {"total": 0, "inserted": 0, "skipped": 0, "empty": 0}
+    for index, entry in enumerate(history):
+        stats["total"] += 1
+        if not isinstance(entry, dict):
+            stats["skipped"] += 1
+            continue
+        result = import_legacy_message(
+            entry=entry,
+            channel=channel,
+            source=source,
+            legacy_index=index,
+            fallback_date=fallback_date,
+            db_path=db_path,
+        )
+        if result.get("reason") == "empty_content":
+            stats["empty"] += 1
+        elif result["inserted"]:
+            stats["inserted"] += 1
+        else:
+            stats["skipped"] += 1
+    return stats
 
 
 def append_exchange(
@@ -362,6 +466,73 @@ def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
         "agent": row["agent"],
         "metadata": metadata,
     }
+
+
+def _normalize_legacy_role(role: str) -> str:
+    normalized = role.strip().lower()
+    if normalized in ("human", "user"):
+        return "user"
+    if normalized in ("ai", "assistant", "bot"):
+        return "assistant"
+    return normalized or "user"
+
+
+def _parse_legacy_timestamp(entry: dict[str, Any], *, fallback_date: str) -> tuple[datetime, bool]:
+    raw_date = str(entry.get("date", "") or "").strip()
+    raw_time = str(entry.get("time", "") or "").strip()
+    content = str(entry.get("content", "") or "")
+
+    date_missing = not _is_valid_date(raw_date)
+    date_part = raw_date if not date_missing else fallback_date
+
+    if not raw_time:
+        match = re.match(r"^\[(\d{1,2}:\d{2})(?::\d{2})?\]", content)
+        if match:
+            raw_time = match.group(1)
+    time_part = _normalize_time(raw_time)
+
+    try:
+        return datetime.fromisoformat(f"{date_part}T{time_part}"), date_missing
+    except ValueError:
+        return datetime.fromisoformat(f"{fallback_date}T00:00:00"), True
+
+
+def _is_valid_date(value: str) -> bool:
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+
+def _normalize_time(value: str) -> str:
+    match = re.match(r"^(\d{1,2}):(\d{2})(?::(\d{2}))?$", value.strip())
+    if not match:
+        return "00:00:00"
+    hour = max(0, min(23, int(match.group(1))))
+    minute = max(0, min(59, int(match.group(2))))
+    second = max(0, min(59, int(match.group(3) or 0)))
+    return f"{hour:02d}:{minute:02d}:{second:02d}"
+
+
+def _legacy_message_id(
+    *,
+    source: str,
+    legacy_index: int,
+    channel: str,
+    role: str,
+    content: str,
+    timestamp: datetime,
+) -> str:
+    raw = "|".join([
+        source,
+        str(legacy_index),
+        channel,
+        role,
+        timestamp.isoformat(timespec="seconds"),
+        content,
+    ])
+    return str(uuid.uuid5(LEGACY_UUID_NAMESPACE, raw))
 
 
 def _row_to_exchange(row: sqlite3.Row) -> dict[str, Any]:
