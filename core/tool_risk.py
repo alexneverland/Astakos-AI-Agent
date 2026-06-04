@@ -38,7 +38,7 @@ TOOL_RISK: dict[str, str] = {
     # ── SAFE: reads / queries / zero side-effects ────────────────
     "search_memory":            "SAFE",
     "retrieve_photo":           "SAFE",
-    "read_local_file":          "SAFE",
+    "read_local_file":          "WARNING",  # reads filesystem — restricted to allowed dirs
     "get_news":                 "SAFE",
     "get_weather_forecast":     "SAFE",
     "duckduckgo_search":        "SAFE",
@@ -61,7 +61,4 @@ TOOL_RISK: dict[str, str] = {
 
 def get_risk(tool_name: str) -> str:
     """Επιστρέφει SAFE/WARNING/CRITICAL. Default: WARNING αν άγνωστο."""
-    return TOOL_RISK.get(tool_name, "WARNING")
-
-def is_critical(tool_name: str) -> bool:
-    return get_risk(tool_name) == "CRITICAL"
+    return TOOL_RISK.get(tool_name, 

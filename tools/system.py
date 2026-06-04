@@ -941,26 +941,41 @@ def read_local_file(file_path: str) -> str:
     # Καθαρισμός path
     file_path = file_path.strip().strip("'").strip('"')
     filename = os.path.basename(file_path)
-    base_dir = os.getcwd() 
+    base_dir = os.getcwd()
 
-    # [MASTRO-RADAR]: Λίστα αναζήτησης
-    search_dirs = [
-        "",  # Απόλυτο path
-        PHOTOS_DIR,
-        os.path.join(base_dir, "telegram_uploads"),
-        os.path.join(base_dir, "telegram_photos"),
-        os.path.join(base_dir, "uploads")
+    # [SECURITY]: Μόνο αυτοί οι φάκελοι επιτρέπονται για ανάγνωση
+    _allowed_dirs = [
+        os.path.realpath(PHOTOS_DIR),
+        os.path.realpath(os.path.join(base_dir, "telegram_uploads")),
+        os.path.realpath(os.path.join(base_dir, "telegram_photos")),
+        os.path.realpath(os.path.join(base_dir, "uploads")),
+        os.path.realpath(os.path.join(base_dir, "outputs")),
+        os.path.realpath(os.path.join(base_dir, "watch_folder")),
     ]
+
+    def _in_allowed(path):
+        real = os.path.realpath(path)
+        return any(real.startswith(d + os.sep) or real == d for d in _allowed_dirs)
 
     full_path = None
     print(f"\033[93m[Tool Debug]: Ψάχνω το αρχείο: {filename}\033[0m")
-    
-    for d in search_dirs:
-        test_path = os.path.join(d, filename) if d else file_path
-        if os.path.exists(test_path) and os.path.isfile(test_path):
-            full_path = test_path
-            print(f"\033[92m[Tool Debug]: ✅ Το βρήκα στο -> {full_path}\033[0m")
-            break
+
+    # Αν δόθηκε absolute path, έλεγξε ότι είναι εντός allowed dirs
+    if os.path.isabs(file_path):
+        if os.path.exists(file_path) and os.path.isfile(file_path) and _in_allowed(file_path):
+            full_path = file_path
+            print(f"\033[92m[Tool Debug]: ✅ Absolute path εντός allowed -> {full_path}\033[0m")
+        elif os.path.exists(file_path):
+            return f"❌ Απαγορευμένο path: {os.path.basename(file_path)} βρίσκεται εκτός εγκεκριμένων φακέλων."
+
+    # Αναζήτηση με basename στους allowed dirs
+    if not full_path:
+        for d in _allowed_dirs:
+            test_path = os.path.join(d, filename)
+            if os.path.exists(test_path) and os.path.isfile(test_path) and _in_allowed(test_path):
+                full_path = test_path
+                print(f"\033[92m[Tool Debug]: ✅ Το βρήκα στο -> {full_path}\033[0m")
+                break
 
     if not full_path:
         return f"❌ Error: Το αρχείο {filename} δεν βρέθηκε στους φακέλους αναζήτησης."
@@ -1763,6 +1778,4 @@ all_tools = [
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
-    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
-    duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool,
-]
+    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate
