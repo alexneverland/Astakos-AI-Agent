@@ -113,6 +113,45 @@ def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
+def _load_legacy_history() -> list:
+    history = []
+    for path in (CHAT_HISTORY_FILE, TELEGRAM_HISTORY_FILE):
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                history.extend(json.load(f))
+    return history
+
+
+def _filter_recent_user_messages(history: list, cutoff: str) -> list:
+    return [
+        m for m in history
+        if m.get("role") in ("user", "human")
+        and m.get("date", "") >= cutoff
+        and m.get("time")
+        and m.get("date")
+    ]
+
+
+def _load_shared_user_messages(cutoff: str) -> list:
+    from memory.conversation_history import load_messages_since
+
+    return load_messages_since(
+        since_date=cutoff,
+        roles=("user", "human", "Human"),
+    )
+
+
+def _load_user_messages_for_analytics(cutoff: str) -> tuple[list, str]:
+    try:
+        shared_messages = _load_shared_user_messages(cutoff)
+        if shared_messages:
+            return shared_messages, "shared_sqlite"
+    except Exception as e:
+        print(f"[Analytics]: Shared history unavailable, falling back to JSON: {e}")
+
+    return _filter_recent_user_messages(_load_legacy_history(), cutoff), "legacy_json"
+
+
 # ────────────────────────────────────────────────────────────────
 # CORE
 # ────────────────────────────────────────────────────────────────
@@ -128,33 +167,16 @@ def run_analytics() -> dict:
              "updated": 0, "skipped": 0, "errors": 0}
     found_routines = []
 
-    # ── 1. Φόρτωση history (Web + Telegram) ─────────────────────
-    history = []
-    for path in (CHAT_HISTORY_FILE, TELEGRAM_HISTORY_FILE):
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                history.extend(json.load(f))
-
-    if not history:
-        print("[Analytics]: Δεν βρέθηκε chat history.")
-        return stats
-
+    # ── 1. Φόρτωση shared history (Web + Telegram) ───────────────
     cutoff = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
-
-    user_msgs = [
-        m for m in history
-        if m.get("role") in ("user", "human")
-        and m.get("date", "") >= cutoff
-        and m.get("time")
-        and m.get("date")
-    ]
+    user_msgs, history_source = _load_user_messages_for_analytics(cutoff)
 
     if not user_msgs:
         print("[Analytics]: Δεν υπάρχουν μηνύματα με date field (πρόσφατα).")
         _write_log(stats, found_routines)
         return stats
 
-    print(f"[Analytics]: Ανάλυση {len(user_msgs)} μηνυμάτων ({LOOKBACK_DAYS} ημερών)...")
+    print(f"[Analytics]: Ανάλυση {len(user_msgs)} μηνυμάτων ({LOOKBACK_DAYS} ημερών, {history_source})...")
 
     # ── 2. Εξαγωγή & grouping ────────────────────────────────────
     # Key: (day_of_week, time_bucket, event_name, event_type)

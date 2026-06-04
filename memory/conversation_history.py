@@ -374,6 +374,45 @@ def load_messages(
     return messages
 
 
+def load_messages_since(
+    *,
+    since_date: str,
+    roles: list[str] | tuple[str, ...] | None = None,
+    channel: str | None = None,
+    limit: int | None = None,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> list[dict[str, Any]]:
+    init_db(db_path)
+    clauses = ["date >= ?"]
+    params: list[Any] = [since_date]
+    if roles:
+        placeholders = ",".join("?" for _ in roles)
+        clauses.append(f"role IN ({placeholders})")
+        params.extend(roles)
+    if channel:
+        clauses.append("channel = ?")
+        params.append(channel)
+
+    limit_clause = ""
+    if limit is not None:
+        limit_clause = "LIMIT ?"
+        params.append(limit)
+
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM conversation_messages
+            WHERE {' AND '.join(clauses)}
+            ORDER BY timestamp ASC, id ASC
+            {limit_clause}
+            """,
+            params,
+        ).fetchall()
+
+    return [_row_to_message(row) for row in rows]
+
+
 def load_last_user_activity(
     *,
     channel: str | None = None,

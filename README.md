@@ -68,7 +68,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Multi-Agent Orchestration | LangGraph Supervisor routes to Chat, Home, Web, Tech, Git, Mail, and Dev agents. |
 | Hybrid Memory | ChromaDB vector store + SQLite + JSON profile/session state for semantic and structured memory. |
 | Routine State Machine | `LEARNED → ACTIVE → TRIGGER_PENDING → CONFIRMED / IGNORED / DISMISSED → DECAYED → ARCHIVED`. |
-| Nightly Analytics Engine | LLM batch-analyzes the last 30 days of chat history to detect recurring patterns automatically. |
+| Nightly Analytics Engine | LLM batch-analyzes the last 30 days of shared SQLite conversation history to detect recurring patterns automatically. |
 | LLM-Crafted Proactive Messages | Reminder text is generated naturally by the LLM instead of static templates. |
 | Central Scheduler | `AstakosScheduler` runs a single background scheduler with watchdogs, rate limits, and quiet hours. |
 | Anti-Spam Intelligence | Adaptive cooldown: 20h → 40h → 72h on repeated ignores, plus batching for simultaneous routines. |
@@ -148,8 +148,8 @@ Important note: Astakos uses configured external APIs for model calls and integr
           ┌────────────────▼────────────────────────────┐
           │ Memory Layer                                │
           │ - ChromaDB: facts, photos, sessions, goals  │
-          │ - SQLite: routines, events, confirmations   │
-          │ - JSON: working memory, profile, history    │
+          │ - SQLite: conversations, sessions, routines │
+          │ - JSON: working memory and profile state    │
           └─────────────────────────────────────────────┘
 ```
 
@@ -180,7 +180,7 @@ Astakos passively learns habits from conversation and proactively reminds you.
 
 How it works:
 
-1. **Nightly Analytics** — every night at 03:00, the analytics engine reads the last 30 days of chat history from Telegram and Web, sends them in batches to the LLM, and extracts recurring activities with type and timing.
+1. **Nightly Analytics** — every night at 03:00, the analytics engine reads the last 30 days of shared SQLite conversation history across Telegram and Web, sends user messages in batches to the LLM, and extracts recurring activities with type and timing.
 2. **Pattern Detection** — activities are grouped by day/time bucket (±15 min), merged if similar, and promoted to `Everyday` if they appear 5+ days a week.
 3. **Threshold** — a routine is saved only if it appears 3+ times across 2+ different weeks.
 4. **Proactive Message** — when a routine is due in about 30 minutes, the LLM writes a natural message to send you.
@@ -387,6 +387,7 @@ open http://localhost:8000/debug/runtime
 - [x] Analytics Charts — dashboard modal for routine states, agent usage, event throughput, and confirmations by hour.
 - [x] Unified Session Memory — shared log across all channels, with session summary on shutdown and Ctrl+C drain handling.
 - [x] Cross-channel awareness — unified `SESSION_LOGS` for Telegram, Web, and Terminal context.
+- [x] Shared Conversation History — Telegram and Web write to one SQLite store, with legacy JSON backfill and analytics reading from the shared history.
 
 ### Planned
 
