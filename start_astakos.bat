@@ -22,7 +22,7 @@ echo.
 echo  Starting Web Server...
 cd /d C:\astakos_v2
 call venv\Scripts\activate
-uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients --reload-dir astakos_skills --reload-include *.py --reload-include prompts.md --reload-exclude *.json --reload-exclude *.db --reload-exclude *.sqlite --reload-exclude *.sqlite3 --reload-exclude __pycache__/* --reload-exclude outputs/* --reload-exclude telegram_photos/* --reload-exclude telegram_uploads/* --reload-exclude watch_folder/* --reload-exclude chroma_db/* --reload-exclude logs/*
+uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients --reload-include *.py --reload-include prompts.md --reload-exclude *.json --reload-exclude *.db --reload-exclude *.sqlite --reload-exclude *.sqlite3 --reload-exclude __pycache__/* --reload-exclude outputs/* --reload-exclude telegram_photos/* --reload-exclude telegram_uploads/* --reload-exclude watch_folder/* --reload-exclude chroma_db/* --reload-exclude logs/*
 goto end
 
 :telegram
@@ -38,7 +38,7 @@ echo.
 echo  Starting both services...
 cd /d C:\astakos_v2
 call venv\Scripts\activate
-start "Astakos Web Server" cmd /k "cd /d C:\astakos_v2 && call venv\Scripts\activate && uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients --reload-dir astakos_skills --reload-include *.py --reload-include prompts.md --reload-exclude *.json --reload-exclude *.db --reload-exclude *.sqlite --reload-exclude *.sqlite3 --reload-exclude __pycache__/* --reload-exclude outputs/* --reload-exclude telegram_photos/* --reload-exclude telegram_uploads/* --reload-exclude watch_folder/* --reload-exclude chroma_db/* --reload-exclude logs/*"
+start "Astakos Web Server" cmd /k "cd /d C:\astakos_v2 && call venv\Scripts\activate && uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients --reload-include *.py --reload-include prompts.md --reload-exclude *.json --reload-exclude *.db --reload-exclude *.sqlite --reload-exclude *.sqlite3 --reload-exclude __pycache__/* --reload-exclude outputs/* --reload-exclude telegram_photos/* --reload-exclude telegram_uploads/* --reload-exclude watch_folder/* --reload-exclude chroma_db/* --reload-exclude logs/*"
 timeout /t 3 /nobreak >nul
 python run_telegram.py
 goto end
