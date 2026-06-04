@@ -15,7 +15,6 @@ from config import PROJECT_ID, LOCATION, EMBEDDINGS_CACHE_FILE
 
 emb_cache_lock = threading.Lock()
 
-# Αυτό έλειπε και θα σου πετούσε χοντρό error!
 base_embeddings = VertexAIEmbeddings(
     model_name="text-embedding-004",
     project=PROJECT_ID,
