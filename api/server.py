@@ -542,7 +542,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @server.post("/voice")
-async def process_web_voice(file: UploadFile = File(...)):
+async def process_web_voice(file: UploadFile = File(...), _=Depends(require_token)):
     """Δέχεται ηχητικό από το Web UI, το κάνει κείμενο με Gemini και το επιστρέφει."""
     try:
         audio_data = await file.read()
@@ -573,7 +573,7 @@ import edge_tts
 import io
 
 @server.post("/tts")
-async def text_to_speech(request: Request):
+async def text_to_speech(request: Request, _=Depends(require_token)):
     try:
         body = await request.json()
         text = body.get("text", "").strip()
@@ -762,7 +762,7 @@ def _read_json_file(path: str, default):
 
 
 @server.get("/debug/runtime")
-async def debug_runtime():
+async def debug_runtime(_=Depends(require_token)):
     """
     Live runtime snapshot — διαβάζει από:
       • runtime_snapshot.json   (scheduler jobs — γράφεται κάθε 10s από telegram_bot)
@@ -975,7 +975,7 @@ async def reject_action(tool_call_id: str, _=Depends(require_token)):
 
 
 @server.get("/debug/replay")
-async def debug_replay(days: int = 2):
+async def debug_replay(days: int = 2, _=Depends(require_token)):
     from memory.event_log import get_routine_timeline
     try:
         events = get_routine_timeline(routine_id=None, days=days)
@@ -1094,7 +1094,7 @@ async def edit_routine(routine_id: int, request: Request, _=Depends(require_toke
         return {"ok": False, "error": str(e)}
 
 @server.get("/debug/reflections")
-async def get_reflections():
+async def get_reflections(_=Depends(require_token)):
     """Επιστρέφει τα τελευταία 20 reflections από τη βάση."""
     import sqlite3 as _sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
@@ -1138,7 +1138,7 @@ async def apply_reflection(reflection_id: int, _=Depends(require_token)):
 
 
 @server.get("/debug/goals")
-async def debug_goals():
+async def debug_goals(_=Depends(require_token)):
     """Επιστρέφει όλα τα long-term goals."""
     try:
         from memory.vector_store import vector_store, vector_lock
@@ -1179,7 +1179,7 @@ async def delete_goal(project: str, _=Depends(require_token)):
         return {"ok": False, "error": str(e)}
 
 @server.get("/debug")
-async def debug_panel():
+async def debug_panel(_=Depends(require_token)):
     """Observability HTML dashboard — auto-refresh every 5s."""
     from fastapi.responses import HTMLResponse
     _dir = os.path.dirname(os.path.abspath(__file__))
