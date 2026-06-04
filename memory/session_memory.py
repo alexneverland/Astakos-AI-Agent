@@ -14,6 +14,11 @@ import re
 from core.utils import clean_message
 from core.event_bus import bus
 from config import PHOTOS_INDEX_FILE, PHOTOS_DIR, SESSIONS_FILE
+from memory.conversation_history import (
+    append_exchange,
+    load_unsummarized_exchanges,
+    mark_exchanges_summarized,
+)
 # ════════════════════════════════════════════════════════════════
 # SESSION SUMMARY — "Ημερολόγιο Συνεργάτη"
 # ════════════════════════════════════════════════════════════════
@@ -23,15 +28,27 @@ SESSION_LOGS: list = []  # Ενιαίο log — όλα τα channels μαζί
 
 def log_exchange(user_text, ai_text, agent: str, channel: str = "web"):
     """Προσθέτει ένα ζεύγος ερώτησης-απάντησης στο session log (per channel)."""
+    now = datetime.now()
     safe_user = clean_message(user_text)
     safe_ai = clean_message(ai_text)
-    SESSION_LOGS.append({
-        "time": datetime.now().strftime("%H:%M"),
+    entry = {
+        "time": now.strftime("%H:%M"),
         "agent": agent,
         "channel": channel,
         "user": safe_user[:300],
         "ai": safe_ai[:300],
-    })
+    }
+    SESSION_LOGS.append(entry)
+    try:
+        append_exchange(
+            user_text=entry["user"],
+            ai_text=entry["ai"],
+            agent=agent,
+            channel=channel,
+            timestamp=now,
+        )
+    except Exception as e:
+        print(f"\033[93m[SessionLog]: Shared exchange write failed: {e}\033[0m")
 
 
 def load_last_session_hint(channel: str = "web") -> str:
@@ -69,7 +86,13 @@ def _run_session_summary(channel: str = "web"):
     """Αρχειοθετεί τη συνεδρία (per channel) με προστασία από διπλοεγγραφές."""
     global is_summarizing, SESSION_LOGS
 
-    current_log = list(SESSION_LOGS)
+    try:
+        persistent_log = load_unsummarized_exchanges(limit=200)
+    except Exception as e:
+        print(f"\033[93m[SessionLog]: Shared exchange read failed, using memory log: {e}\033[0m")
+        persistent_log = []
+    using_persistent_log = bool(persistent_log)
+    current_log = persistent_log if using_persistent_log else list(SESSION_LOGS)
     # 1. Ασπίδα: Αν ήδη τρέχει ή αν δεν υπάρχουν μηνύματα, βγες αμέσως
     if is_summarizing or not current_log:
         return
@@ -81,9 +104,11 @@ def _run_session_summary(channel: str = "web"):
         # 2. Αδειάζουμε ΑΜΕΣΩΣ για να μην το ξαναπιάσει άλλος worker
         current_batch = list(current_log)
         SESSION_LOGS.clear()
+        channels = sorted({e.get("channel", channel) for e in current_batch})
+        summary_channel = channels[0] if len(channels) == 1 else "mixed"
 
         dialogue_text = "\n".join([
-            f"[{e['time']} / {e['agent']}] Λάζαρος: {e['user']} | Αστακός: {e['ai']}"
+            f"[{e['time']} / {e.get('channel', channel)} / {e['agent']}] Λάζαρος: {e['user']} | Αστακός: {e['ai']}"
             for e in current_batch
         ])
 
@@ -94,7 +119,7 @@ def _run_session_summary(channel: str = "web"):
 
 {{
   "date": "{datetime.now().strftime('%Y-%m-%d %H:%M')}",
-  "channel": "{channel}",
+  "channel": "{summary_channel}",
   "summary": "2-3 προτάσεις τι συζητήθηκε σήμερα",
   "completed": ["λίστα από πράγματα που ολοκληρώθηκαν"],
   "pending": ["λίστα από πράγματα που έμειναν ημιτελή"],
@@ -112,8 +137,11 @@ def _run_session_summary(channel: str = "web"):
             summary = json.loads(raw)
         except json.JSONDecodeError:
             # Αν αποτύχει, ξαναβάζουμε τα μηνύματα πίσω για να μην τα χάσουμε
-            SESSION_LOGS[:0] = current_batch  # Επαναφορά στην αρχή
-            print("\033[91m[Session]: Μη έγκυρο format. Τα μηνύματα επεστράφησαν στο log.\033[0m")
+            if not using_persistent_log:
+                SESSION_LOGS[:0] = current_batch  # Επαναφορά στην αρχή
+                print("\033[91m[Session]: Μη έγκυρο format. Τα μηνύματα επεστράφησαν στο log.\033[0m")
+            else:
+                print("\033[91m[Session]: Μη έγκυρο format. Τα shared exchanges έμειναν unsummarized.\033[0m")
             return
 
         # 4. Εμπλουτισμός του κειμένου για τη Vector DB
@@ -125,12 +153,15 @@ def _run_session_summary(channel: str = "web"):
 
         # 5. Αποθήκευση (Εδώ ο MemoryManager θα κάνει και το overwrite αν χρειαστεί)
         memory.save(memory_type="session", summary=summary, session_text=session_text)
+        if using_persistent_log:
+            mark_exchanges_summarized([e["id"] for e in current_batch])
         print(f"\033[92m[Session]: ✅ Αρχειοθετήθηκε επιτυχώς! Mood: {summary.get('mood', '?')}\033[0m")
-        bus.emit("session_ended", channel=channel, mood=summary.get("mood", "unknown"), summary=summary.get("summary", ""))
+        bus.emit("session_ended", channel=summary_channel, mood=summary.get("mood", "unknown"), summary=summary.get("summary", ""))
 
     except Exception as e:
         # Recovery σε περίπτωση σφάλματος
-        SESSION_LOGS[:0] = current_batch  # Επαναφορά στην αρχή
+        if not using_persistent_log:
+            SESSION_LOGS[:0] = current_batch  # Επαναφορά στην αρχή
         print(f"\033[91m[Session Error]: {e}\033[0m")
     finally:
         is_summarizing = False

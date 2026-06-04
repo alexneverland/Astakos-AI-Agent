@@ -142,3 +142,36 @@ def test_load_recent_context_deduplicates_overlap(tmp_path):
     )
 
     assert [m["content"] for m in messages] == ["web only once"]
+
+
+def test_session_exchanges_can_be_marked_summarized(tmp_path):
+    from memory.conversation_history import (
+        append_exchange,
+        load_unsummarized_exchanges,
+        mark_exchanges_summarized,
+    )
+
+    db_path = str(tmp_path / "conversation.db")
+    first = append_exchange(
+        user_text="u1",
+        ai_text="a1",
+        agent="Chat_Agent",
+        channel="web",
+        timestamp=datetime(2026, 6, 4, 10, 0),
+        db_path=db_path,
+    )
+    append_exchange(
+        user_text="u2",
+        ai_text="a2",
+        agent="Chat_Agent",
+        channel="telegram",
+        timestamp=datetime(2026, 6, 4, 10, 1),
+        db_path=db_path,
+    )
+
+    assert [e["user"] for e in load_unsummarized_exchanges(db_path=db_path)] == ["u1", "u2"]
+
+    mark_exchanges_summarized([first["id"]], timestamp=datetime(2026, 6, 4, 10, 2), db_path=db_path)
+
+    remaining = load_unsummarized_exchanges(db_path=db_path)
+    assert [e["user"] for e in remaining] == ["u2"]

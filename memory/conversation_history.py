@@ -60,6 +60,33 @@ def init_db(db_path: str = CONVERSATION_DB_FILE) -> None:
             ON conversation_messages(session_id, timestamp)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS session_exchanges (
+                id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                date TEXT NOT NULL,
+                time TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                agent TEXT NOT NULL,
+                user_text TEXT NOT NULL,
+                ai_text TEXT NOT NULL,
+                summarized_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_session_exchanges_unsummarized
+            ON session_exchanges(summarized_at, timestamp)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_session_exchanges_channel_time
+            ON session_exchanges(channel, timestamp)
+            """
+        )
 
 
 def default_session_id(ts: datetime | None = None) -> str:
@@ -116,6 +143,96 @@ def append_message(
             ),
         )
     return message
+
+
+def append_exchange(
+    *,
+    user_text: str,
+    ai_text: str,
+    agent: str,
+    channel: str,
+    timestamp: datetime | None = None,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> dict[str, Any]:
+    ts = timestamp or datetime.now()
+    exchange = {
+        "id": str(uuid.uuid4()),
+        "timestamp": ts.isoformat(timespec="seconds"),
+        "date": ts.strftime("%Y-%m-%d"),
+        "time": ts.strftime("%H:%M"),
+        "channel": channel,
+        "agent": agent,
+        "user": user_text,
+        "ai": ai_text,
+        "summarized_at": None,
+    }
+
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO session_exchanges (
+                id, timestamp, date, time, channel, agent,
+                user_text, ai_text, summarized_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                exchange["id"],
+                exchange["timestamp"],
+                exchange["date"],
+                exchange["time"],
+                exchange["channel"],
+                exchange["agent"],
+                exchange["user"],
+                exchange["ai"],
+                exchange["summarized_at"],
+            ),
+        )
+    return exchange
+
+
+def load_unsummarized_exchanges(
+    *,
+    limit: int = 200,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> list[dict[str, Any]]:
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM session_exchanges
+            WHERE summarized_at IS NULL
+            ORDER BY timestamp ASC, id ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [_row_to_exchange(row) for row in rows]
+
+
+def mark_exchanges_summarized(
+    exchange_ids: list[str],
+    *,
+    timestamp: datetime | None = None,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> None:
+    if not exchange_ids:
+        return
+    summarized_at = (timestamp or datetime.now()).isoformat(timespec="seconds")
+    init_db(db_path)
+    placeholders = ",".join("?" for _ in exchange_ids)
+    with _connect(db_path) as conn:
+        conn.execute(
+            f"""
+            UPDATE session_exchanges
+            SET summarized_at = ?
+            WHERE id IN ({placeholders})
+            """,
+            [summarized_at, *exchange_ids],
+        )
 
 
 def load_messages(
@@ -200,4 +317,18 @@ def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
         "time": row["time"],
         "agent": row["agent"],
         "metadata": metadata,
+    }
+
+
+def _row_to_exchange(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "timestamp": row["timestamp"],
+        "date": row["date"],
+        "time": row["time"],
+        "channel": row["channel"],
+        "agent": row["agent"],
+        "user": row["user_text"],
+        "ai": row["ai_text"],
+        "summarized_at": row["summarized_at"],
     }
