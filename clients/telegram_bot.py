@@ -837,7 +837,7 @@ def handle_location(msg, live_update=False):
 def _handle_approval_callback(cq: dict):
     """Χειρίζεται τα ✅/❌ approval callbacks από inline keyboard."""
     try:
-        from core.approval import pop_pending, resolve_pending
+        from core.approval import get_pending, pop_pending, resolve_pending
         from tools.system import all_tools
 
         cq_id   = cq["id"]
@@ -858,7 +858,7 @@ def _handle_approval_callback(cq: dict):
         action, tool_call_id = data.split(":", 1)
 
         if action == "approve":
-            item = pop_pending(tool_call_id)
+            item = get_pending(tool_call_id)  # get πρωτα, OXI pop
             if not item:
                 send_telegram_msg("⚠️ Το pending action δεν βρέθηκε (ίσως έχει ήδη εκτελεστεί).")
                 return
@@ -880,10 +880,11 @@ def _handle_approval_callback(cq: dict):
             tool = tools_map.get(tool_name)
             if not tool:
                 send_telegram_msg(f"❌ Tool `{tool_name}` δεν βρέθηκε.")
-                return
+                return  # pending μενει
 
             try:
                 result = tool.invoke(tool_args)
+                pop_pending(tool_call_id)  # pop mono meta apo epituxia
                 send_telegram_msg("✅ `" + tool_name + "` ολοκληρώθηκε:\n\n" + str(result)[:800])
             except Exception as e:
                 send_telegram_msg(f"❌ `{tool_name}` απέτυχε: {e}")

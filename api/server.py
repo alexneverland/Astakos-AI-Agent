@@ -954,11 +954,11 @@ def _get_pending_actions() -> list:
 
 @server.post("/debug/action/{tool_call_id}/approve")
 async def approve_action(tool_call_id: str, _=Depends(require_token)):
-    """Εγκρίνει και εκτελεί CRITICAL pending action."""
+    """Εγκρίνει και εκτελεί CRITICAL pending action — pop μόνο αν πετύχει."""
     try:
-        from core.approval import pop_pending
+        from core.approval import get_pending, pop_pending
         from tools.system import all_tools
-        item = pop_pending(tool_call_id)
+        item = get_pending(tool_call_id)  # get πρώτα, ΟΧΙ pop
         if not item:
             return {"ok": False, "error": "Action not found or already executed"}
         tool_name = item["tool_name"]
@@ -968,6 +968,7 @@ async def approve_action(tool_call_id: str, _=Depends(require_token)):
         if not tool:
             return {"ok": False, "error": f"Tool '{tool_name}' not found"}
         result = tool.invoke(tool_args)
+        pop_pending(tool_call_id)  # pop μόνο μετά από επιτυχία
         from tools.telegram import send_telegram_msg
         send_telegram_msg(f"✅ [{tool_name}] εκτελέστηκε από dashboard:\n{str(result)[:500]}")
         return {"ok": True, "status": "executed", "tool": tool_name, "result": str(result)[:500]}
