@@ -647,10 +647,16 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
     import json
     from config import BASE_DIR
 
-    output_dir = os.path.join(BASE_DIR, "outputs")
+    output_dir = os.path.realpath(os.path.join(BASE_DIR, "outputs"))
     os.makedirs(output_dir, exist_ok=True)
 
-    full_path = os.path.join(output_dir, filename)
+    # [SECURITY]: basename + resolve check — αποτρέπει path traversal (π.χ. ../config.py)
+    safe_filename = os.path.basename(filename)
+    if not safe_filename:
+        return "❌ Σφάλμα: Μη έγκυρο όνομα αρχείου."
+    full_path = os.path.realpath(os.path.join(output_dir, safe_filename))
+    if not full_path.startswith(output_dir + os.sep) and full_path != output_dir:
+        return "❌ Σφάλμα: Το path εκτός outputs δεν επιτρέπεται."
     file_type = file_type.lower()
 
     try:
