@@ -5,7 +5,7 @@ import os
 import signal
 from watchfiles import watch
 
-WATCH_DIRS = ["clients", "core", "tools", "memory", "services"]
+WATCH_DIRS = ["clients", "core", "tools", "memory", "services", "astakos_skills"]
 SHUTDOWN_TIMEOUT_SECONDS = 20
 
 

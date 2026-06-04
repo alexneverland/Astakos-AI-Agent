@@ -7,6 +7,7 @@
 
 import os
 import json
+import threading
 from datetime import datetime
 from memory.vector_store import memory
 from services.gemini import safe_gemini_call
@@ -24,6 +25,8 @@ from memory.conversation_history import (
 # ════════════════════════════════════════════════════════════════
 
 SESSION_LOGS: list = []  # Ενιαίο log — όλα τα channels μαζί
+AUTO_SESSION_SUMMARY_EXCHANGE_THRESHOLD = 40
+_auto_summary_lock = threading.Lock()
 
 
 def log_exchange(user_text, ai_text, agent: str, channel: str = "web"):
@@ -39,8 +42,9 @@ def log_exchange(user_text, ai_text, agent: str, channel: str = "web"):
         "ai": safe_ai[:300],
     }
     SESSION_LOGS.append(entry)
+    saved_exchange = None
     try:
-        append_exchange(
+        saved_exchange = append_exchange(
             user_text=entry["user"],
             ai_text=entry["ai"],
             agent=agent,
@@ -49,6 +53,30 @@ def log_exchange(user_text, ai_text, agent: str, channel: str = "web"):
         )
     except Exception as e:
         print(f"\033[93m[SessionLog]: Shared exchange write failed: {e}\033[0m")
+    if saved_exchange:
+        _maybe_trigger_auto_session_summary(channel)
+
+
+def _maybe_trigger_auto_session_summary(channel: str) -> None:
+    if is_summarizing:
+        return
+    try:
+        pending = load_unsummarized_exchanges(limit=AUTO_SESSION_SUMMARY_EXCHANGE_THRESHOLD)
+    except Exception as e:
+        print(f"\033[93m[SessionLog]: Auto-summary check failed: {e}\033[0m")
+        return
+    if len(pending) < AUTO_SESSION_SUMMARY_EXCHANGE_THRESHOLD:
+        return
+    if not _auto_summary_lock.acquire(blocking=False):
+        return
+
+    def _worker():
+        try:
+            _run_session_summary(channel=channel)
+        finally:
+            _auto_summary_lock.release()
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def load_last_session_hint(channel: str = "web") -> str:

@@ -112,7 +112,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 |---|---|
 | Observability Dashboard | `/debug/runtime` includes heartbeat, job health, fail counts, pending confirmations, active goals, pending CRITICAL actions, and analytics charts. |
 | Local Security | Bearer token auth, localhost-only CORS, upload size limits, and extension whitelist. |
-| Auto-Restart | `run_telegram.py` watches source files with `watchfiles` and restarts on `.py` or `prompts.md` changes. |
+| Auto-Restart | `run_telegram.py` and the Web launcher watch source files only; runtime JSON/DB/photos/uploads do not trigger restarts. |
 | Safe Executor | `core/safe_executor.py` classifies terminal commands as SAFE, WARNING, REQUIRE_CONFIRMATION, or BLOCKED. |
 | Action Approval Dashboard | Pending CRITICAL tool approvals can be approved or rejected from Telegram and the debug dashboard. |
 | Tool Risk Registry | `core/tool_risk.py` defines SAFE / WARNING / CRITICAL behavior per tool. |
@@ -351,7 +351,7 @@ python run_telegram.py
 ```
 
 ```bash
-uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients
+uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients --reload-dir astakos_skills --reload-include *.py --reload-include prompts.md --reload-exclude *.json --reload-exclude *.db --reload-exclude *.sqlite --reload-exclude *.sqlite3 --reload-exclude __pycache__/* --reload-exclude outputs/* --reload-exclude telegram_photos/* --reload-exclude telegram_uploads/* --reload-exclude watch_folder/* --reload-exclude chroma_db/* --reload-exclude logs/*
 ```
 
 Observability:
@@ -365,6 +365,7 @@ Shutdown behavior:
 - Web/API shutdown through FastAPI lifespan drains queued memory tasks and runs the Web session summary.
 - Telegram shutdown through `clients/telegram_bot.py` runs the Telegram session summary; `run_telegram.py` forwards Ctrl+C/restart signals to the child process before falling back to termination.
 - CLI shutdown through `exit`, Ctrl+C, SIGINT, or SIGTERM drains queued memory tasks and runs the Terminal session summary once.
+- Long sessions are summarized automatically after 40 unsummarized exchanges, so the persistent session log cannot grow forever between manual shutdowns.
 - Shared conversation history remains in SQLite; JSON history files are legacy mirrors/fallbacks.
 
 ---
@@ -380,7 +381,7 @@ Shutdown behavior:
 - [x] Google Fit integration — steps, sleep phases, heart rate, and daily morning briefing.
 - [x] Story maker — `/story` with AI-generated illustrations via Pollinations.ai.
 - [x] Local security — bearer token auth, localhost CORS, upload limits, and extension whitelist.
-- [x] Auto-restart on code changes — `watchfiles` monitors source and prompts.
+- [x] Auto-restart on code changes — source `.py` files and `prompts.md` trigger restarts; runtime data such as JSON, SQLite, photos, uploads, outputs, ChromaDB, logs, and watch-folder files are excluded.
 - [x] Capability Registry — keyword routing before LLM Supervisor for instant dispatch.
 - [x] Reflection Engine — nightly self-evaluation with auto-apply actions and ChromaDB lessons.
 - [x] Long-Term Goals System — ChromaDB goal tracking injected into every prompt.
@@ -398,6 +399,7 @@ Shutdown behavior:
 - [x] Cross-channel awareness — unified `SESSION_LOGS` for Telegram, Web, and Terminal context.
 - [x] Shared Conversation History — Telegram and Web write to one SQLite store, with legacy JSON backfill and analytics reading from the shared history.
 - [x] SQLite-first history views and cleanup — Web history and analytics read from shared SQLite, while `clean.py` can check and maintain the conversation database.
+- [x] Auto Session Rollover — long conversations are summarized automatically after 40 unsummarized exchanges, plus manual and shutdown summaries.
 
 ### Planned
 

@@ -23,6 +23,36 @@ def test_log_exchange_writes_memory_and_shared_exchange(monkeypatch):
     assert calls[0]["channel"] == "telegram"
 
 
+def test_log_exchange_auto_summarizes_when_threshold_reached(monkeypatch):
+    import memory.session_memory as session_memory
+
+    triggered = []
+
+    class ImmediateThread:
+        def __init__(self, target, daemon=False):
+            self.target = target
+            self.daemon = daemon
+
+        def start(self):
+            self.target()
+
+    session_memory.SESSION_LOGS.clear()
+    session_memory.is_summarizing = False
+    monkeypatch.setattr(session_memory, "AUTO_SESSION_SUMMARY_EXCHANGE_THRESHOLD", 2)
+    monkeypatch.setattr(session_memory, "append_exchange", lambda **kwargs: {"id": "ex-new"})
+    monkeypatch.setattr(
+        session_memory,
+        "load_unsummarized_exchanges",
+        lambda limit=200: [{"id": "ex-1"}, {"id": "ex-2"}],
+    )
+    monkeypatch.setattr(session_memory, "_run_session_summary", lambda channel="web": triggered.append(channel))
+    monkeypatch.setattr(session_memory.threading, "Thread", ImmediateThread)
+
+    session_memory.log_exchange("hello", "hi", "Chat_Agent", channel="web")
+
+    assert triggered == ["web"]
+
+
 def test_run_session_summary_uses_persistent_unsummarized_exchanges(monkeypatch):
     import memory.session_memory as session_memory
 
