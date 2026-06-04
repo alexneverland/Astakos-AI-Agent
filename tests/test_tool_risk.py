@@ -19,8 +19,14 @@ def test_mail_manager_is_critical():
 def test_relay_local_payload_is_critical():
     assert get_risk("relay_local_payload") == "CRITICAL"
 
+def test_process_and_clear_linkedin_post_is_critical():
+    assert get_risk("process_and_clear_linkedin_post") == "CRITICAL"
+
 def test_save_to_memory_is_warning():
     assert get_risk("save_to_memory") == "WARNING"
+
+def test_update_pending_linkedin_post_is_warning():
+    assert get_risk("update_pending_linkedin_post") == "WARNING"
 
 def test_drive_manager_is_warning():
     assert get_risk("drive_manager") == "WARNING"
@@ -44,6 +50,10 @@ def test_is_critical_github():
 
 def test_is_critical_mail():
     tc = {"name": "mail_manager", "args": {}, "id": "abc"}
+    assert is_critical(tc) is True
+
+def test_is_critical_process_and_clear_linkedin_post():
+    tc = {"name": "process_and_clear_linkedin_post", "args": {}, "id": "abc"}
     assert is_critical(tc) is True
 
 def test_not_critical_search_memory():

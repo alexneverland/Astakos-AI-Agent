@@ -15,6 +15,7 @@ TOOL_RISK: dict[str, str] = {
     "relay_local_payload":      "CRITICAL",  # messenger draft → send
     "execute_local_pipeline":   "CRITICAL",
     "post_to_linkedin":         "CRITICAL",
+    "process_and_clear_linkedin_post": "CRITICAL",
 
     # ── WARNING: writes / side-effects / money ───────────────────
     "drive_manager":            "WARNING",
@@ -32,6 +33,7 @@ TOOL_RISK: dict[str, str] = {
     "write_code":               "WARNING",
     "create_file_tool":         "WARNING",
     "write_custom_tool":        "WARNING",
+    "update_pending_linkedin_post": "WARNING",
 
     # ── SAFE: reads / queries / zero side-effects ────────────────
     "search_memory":            "SAFE",
