@@ -220,6 +220,57 @@ def test_session_exchanges_can_be_marked_summarized(tmp_path):
     assert [e["user"] for e in remaining] == ["u2"]
 
 
+def test_load_conversation_stats_counts_messages_and_session_backlog(tmp_path):
+    from memory.conversation_history import (
+        append_exchange,
+        append_message,
+        load_conversation_stats,
+        mark_exchanges_summarized,
+    )
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(
+        role="user",
+        content="web user",
+        channel="web",
+        timestamp=datetime(2026, 6, 4, 10, 0),
+        db_path=db_path,
+    )
+    append_message(
+        role="assistant",
+        content="telegram assistant",
+        channel="telegram",
+        timestamp=datetime(2026, 6, 4, 10, 1),
+        db_path=db_path,
+    )
+    first = append_exchange(
+        user_text="u1",
+        ai_text="a1",
+        agent="Chat_Agent",
+        channel="web",
+        timestamp=datetime(2026, 6, 4, 10, 2),
+        db_path=db_path,
+    )
+    append_exchange(
+        user_text="u2",
+        ai_text="a2",
+        agent="Chat_Agent",
+        channel="telegram",
+        timestamp=datetime(2026, 6, 4, 10, 3),
+        db_path=db_path,
+    )
+    mark_exchanges_summarized([first["id"]], timestamp=datetime(2026, 6, 4, 10, 4), db_path=db_path)
+
+    stats = load_conversation_stats(db_path=db_path)
+
+    assert stats["messages_total"] == 2
+    assert stats["messages_by_channel"] == {"telegram": 1, "web": 1}
+    assert stats["messages_by_role"] == {"assistant": 1, "user": 1}
+    assert stats["session_exchanges_total"] == 2
+    assert stats["unsummarized_exchanges"] == 1
+    assert stats["unsummarized_by_channel"] == {"telegram": 1}
+
+
 def test_last_user_activity_ignores_assistant_messages(tmp_path):
     from memory.conversation_history import (
         append_message,

@@ -973,15 +973,48 @@ async def debug_runtime(_=Depends(require_token)):
 
     # ── 6. Channel sessions ──────────────────────────────────────
     try:
-        from memory.session_memory import SESSION_LOGS
+        from memory.conversation_history import (
+            load_conversation_stats,
+            load_last_user_activity,
+            seconds_since_last_user_activity,
+        )
+        from memory.session_memory import AUTO_SESSION_SUMMARY_EXCHANGE_THRESHOLD, SESSION_LOGS
+
+        history_stats = load_conversation_stats()
+        last_user_activity = load_last_user_activity()
+        seconds_since_activity = seconds_since_last_user_activity()
         channel_sessions = {"all": len(SESSION_LOGS)}
-    except Exception:
+        conversation_debug = {
+            "ok": True,
+            "db_path": history_stats["db_path"],
+            "messages_total": history_stats["messages_total"],
+            "messages_by_channel": history_stats["messages_by_channel"],
+            "messages_by_role": history_stats["messages_by_role"],
+            "last_user_activity": last_user_activity,
+            "seconds_since_last_user_activity": seconds_since_activity,
+        }
+        session_debug = {
+            "ok": True,
+            "memory_log_count": len(SESSION_LOGS),
+            "persistent_exchanges_total": history_stats["session_exchanges_total"],
+            "persistent_unsummarized": history_stats["unsummarized_exchanges"],
+            "unsummarized_by_channel": history_stats["unsummarized_by_channel"],
+            "auto_summary_threshold": AUTO_SESSION_SUMMARY_EXCHANGE_THRESHOLD,
+            "auto_summary_due": (
+                history_stats["unsummarized_exchanges"] >= AUTO_SESSION_SUMMARY_EXCHANGE_THRESHOLD
+            ),
+        }
+    except Exception as e:
         channel_sessions = {}
+        conversation_debug = {"ok": False, "error": str(e)}
+        session_debug = {"ok": False, "error": str(e)}
 
     return JSONResponse({
         "snapshot_age_s":  snap_age,
         "scheduler_alive": scheduler_alive,
         "channel_sessions": channel_sessions,
+        "conversation": conversation_debug,
+        "session": session_debug,
         "scheduler": {
             "written_at":         snapshot.get("written_at"),
             "jobs":               snapshot.get("jobs", []),

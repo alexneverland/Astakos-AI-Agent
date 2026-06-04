@@ -59,7 +59,7 @@
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
       <div class="card"><h2>🗓️ Routine States</h2><div style="height:220px;position:relative"><canvas id="chart-routines"></canvas></div></div>
-      <div class="card"><h2>⚡ Agent Usage (1h)</h2><div style="height:220px;position:relative"><canvas id="chart-agents"></canvas></div></div>
+      <div class="card"><h2>⚡ Job/Event Usage (1h)</h2><div style="height:220px;position:relative"><canvas id="chart-agents"></canvas></div></div>
       <div class="card"><h2>📈 Event Throughput (1h)</h2><div style="height:220px;position:relative"><canvas id="chart-throughput"></canvas></div></div>
       <div class="card"><h2>✅ Confirmations (today)</h2><div style="height:220px;position:relative"><canvas id="chart-confirmations"></canvas></div></div>
     </div>
@@ -170,6 +170,28 @@ function confBar(v) {
   return `${p}% <div class="bar-wrap"><div class="bar-fill" style="width:${p}%;background:${c}"></div></div>`;
 }
 
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  }[ch]));
+}
+
+function mapRows(map) {
+  const entries = Object.entries(map || {});
+  if (!entries.length) return '<span class="off">none</span>';
+  return entries.map(([k,v]) =>
+    `<span class="badge b-muted" style="margin:1px 3px 1px 0">${esc(k)}: ${v}</span>`
+  ).join('');
+}
+
+function secondsLabel(v) {
+  if (v == null) return 'unknown';
+  if (v < 60) return `${Math.round(v)}s`;
+  if (v < 3600) return `${Math.round(v/60)}m`;
+  if (v < 86400) return `${Math.round(v/3600)}h`;
+  return `${Math.round(v/86400)}d`;
+}
+
 function render(d) {
   const s = d.scheduler||{}, ovr = d.overrides||{}, rout = d.routines||{};
   const evts = d.events_1h||{}, pend = d.pending_confirmations||[];
@@ -198,6 +220,28 @@ function render(d) {
     <div class="kv"><span class="k">Proactive this hour</span><span class="v">${s.proactive_this_hour??0} / 3</span></div>
     <div class="kv"><span class="k">Pending confirmations</span><span class="v ${s.pending_count>0?'warn':''}">${s.pending_count??0}</span></div>
     <div class="kv"><span class="k">Total events today</span><span class="v">${evts.total_today??0}</span></div>
+  </div>`;
+
+  const conv = d.conversation || {};
+  const last = conv.last_user_activity || {};
+  html += `<div class="card"><h2>Conversation Store</h2>
+    <div class="kv"><span class="k">SQLite status</span><span class="v ${conv.ok===false?'err':'ok'}">${conv.ok===false?'ERROR':'OK'}</span></div>
+    <div class="kv"><span class="k">Messages total</span><span class="v">${conv.messages_total??0}</span></div>
+    <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(conv.messages_by_channel)}</span></div>
+    <div class="kv"><span class="k">By role</span><span class="v" style="text-align:right">${mapRows(conv.messages_by_role)}</span></div>
+    <div class="kv"><span class="k">Last user</span><span class="v">${last.timestamp ? `${esc(last.channel)} ${esc(last.time||'')}` : 'none'}</span></div>
+    <div class="kv"><span class="k">Last user age</span><span class="v ${conv.seconds_since_last_user_activity>1800?'warn':''}">${secondsLabel(conv.seconds_since_last_user_activity)}</span></div>
+    ${last.content ? `<div style="margin-top:6px;color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(last.content)}</div>` : ''}
+  </div>`;
+
+  const sess = d.session || {};
+  html += `<div class="card"><h2>Session Backlog</h2>
+    <div class="kv"><span class="k">SQLite status</span><span class="v ${sess.ok===false?'err':'ok'}">${sess.ok===false?'ERROR':'OK'}</span></div>
+    <div class="kv"><span class="k">RAM exchanges</span><span class="v">${sess.memory_log_count??0}</span></div>
+    <div class="kv"><span class="k">Persistent exchanges</span><span class="v">${sess.persistent_exchanges_total??0}</span></div>
+    <div class="kv"><span class="k">Unsummarized</span><span class="v ${sess.auto_summary_due?'warn':''}">${sess.persistent_unsummarized??0} / ${sess.auto_summary_threshold??'?'}</span></div>
+    <div class="kv"><span class="k">Auto summary due</span><span class="v ${sess.auto_summary_due?'warn':'ok'}">${sess.auto_summary_due?'YES':'NO'}</span></div>
+    <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(sess.unsummarized_by_channel)}</span></div>
   </div>`;
 
   if (pend.length > 0) {
@@ -527,17 +571,17 @@ function renderCharts(d) {
     borderColor: '#161b22', borderWidth: 2
   }]);
 
-  // 2. Agent Usage — bar (από throughput: "job/action" → groupby job)
+  // 2. Job/Event Usage - bar (from throughput: "job/action" -> group by job)
   const throughput = d.events_1h?.throughput || {};
-  const agentCounts = {};
+  const jobCounts = {};
   Object.entries(throughput).forEach(([key, count]) => {
-    const agent = key.split('/')[0];
-    agentCounts[agent] = (agentCounts[agent] || 0) + count;
+    const job = key.split('/')[0];
+    jobCounts[job] = (jobCounts[job] || 0) + count;
   });
-  const agentLabels = Object.keys(agentCounts);
-  mkChart('chart-agents', 'bar', agentLabels, [{
+  const jobLabels = Object.keys(jobCounts);
+  mkChart('chart-agents', 'bar', jobLabels, [{
     label: 'Events',
-    data: agentLabels.map(k => agentCounts[k]),
+    data: jobLabels.map(k => jobCounts[k]),
     backgroundColor: COLORS,
     borderRadius: 4
   }]);

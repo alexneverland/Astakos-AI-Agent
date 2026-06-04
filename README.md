@@ -97,7 +97,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 |---|---|
 | Telegram Bot | Polling bot with text, voice, photo, document, location, routine confirmation, and inline approval handlers. |
 | Web UI | FastAPI server with chat endpoint, upload handling, voice processing, local static assets, and chat history. |
-| Runtime Dashboard | `/debug/runtime` and `/debug` expose scheduler health, jobs, event throughput, routines, goals, pending confirmations, and pending actions. |
+| Runtime Dashboard | `/debug/runtime` and `/debug` expose scheduler health, jobs, event throughput, routines, goals, pending confirmations, pending actions, shared conversation SQLite stats, and session backlog. |
 | Voice I/O | STT via Vertex AI Gemini + TTS via `edge-tts` using `el-GR-NestorasNeural`; mirror mode supports voice in → voice out. |
 | Product Analyzer | `/nutrition` scans food, cosmetics, and household product labels with a score from 1-10 and a kids note. |
 | Smart Photo Pending | Send a photo and Astakos waits 30 seconds for a caption or `/nutrition`, avoiding duplicate responses. |
@@ -110,7 +110,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 
 | Feature | Description |
 |---|---|
-| Observability Dashboard | `/debug/runtime` includes heartbeat, job health, fail counts, pending confirmations, active goals, pending CRITICAL actions, and analytics charts. |
+| Observability Dashboard | `/debug/runtime` includes heartbeat, job health, fail counts, pending confirmations, active goals, pending CRITICAL actions, shared conversation/session health, and analytics charts. |
 | Local Security | Bearer token auth, localhost-only CORS, upload size limits, and extension whitelist. |
 | Auto-Restart | `run_telegram.py` and the Web launcher watch core source files only; runtime JSON/DB/photos/uploads and generated skills do not trigger restarts. |
 | Safe Executor | `core/safe_executor.py` classifies terminal commands as SAFE, WARNING, REQUIRE_CONFIRMATION, or BLOCKED. |

@@ -457,6 +457,59 @@ def seconds_since_last_user_activity(
     return ((now or datetime.now()) - last_ts).total_seconds()
 
 
+def load_conversation_stats(
+    *,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> dict[str, Any]:
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        messages_total = conn.execute(
+            "SELECT COUNT(*) FROM conversation_messages"
+        ).fetchone()[0]
+        messages_by_channel = dict(conn.execute(
+            """
+            SELECT channel, COUNT(*)
+            FROM conversation_messages
+            GROUP BY channel
+            """
+        ).fetchall())
+        messages_by_role = dict(conn.execute(
+            """
+            SELECT role, COUNT(*)
+            FROM conversation_messages
+            GROUP BY role
+            """
+        ).fetchall())
+        session_exchanges_total = conn.execute(
+            "SELECT COUNT(*) FROM session_exchanges"
+        ).fetchone()[0]
+        unsummarized_exchanges = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM session_exchanges
+            WHERE summarized_at IS NULL
+            """
+        ).fetchone()[0]
+        unsummarized_by_channel = dict(conn.execute(
+            """
+            SELECT channel, COUNT(*)
+            FROM session_exchanges
+            WHERE summarized_at IS NULL
+            GROUP BY channel
+            """
+        ).fetchall())
+
+    return {
+        "db_path": db_path,
+        "messages_total": messages_total,
+        "messages_by_channel": messages_by_channel,
+        "messages_by_role": messages_by_role,
+        "session_exchanges_total": session_exchanges_total,
+        "unsummarized_exchanges": unsummarized_exchanges,
+        "unsummarized_by_channel": unsummarized_by_channel,
+    }
+
+
 def load_recent_context(
     *,
     channel: str,
