@@ -209,6 +209,80 @@ def test_register_tool_dry_run_does_not_modify_files(tmp_path):
     assert registry_path.read_text(encoding="utf-8") == before["registry"]
 
 
+def test_tool_creation_end_to_end_write_dry_run_apply_registers_everywhere(tmp_path, monkeypatch):
+    import tools.system as system
+    from astakos_skills.register_tool import register_tool
+
+    proj = _make_fake_project(tmp_path)
+    skill_dir = proj / "astakos_skills"
+    monkeypatch.setattr(system, "WORKSPACE_DIR", str(skill_dir))
+
+    tool_code = '''
+from langchain_core.tools import tool
+
+@tool
+def my_tool(value: str) -> str:
+    """Uppercase text."""
+    return value.upper()
+'''
+
+    created = system.write_custom_tool.func("my_tool", tool_code)
+
+    assert "Tool 'my_tool'" in created
+    assert "TEST_OK: TEST" in created
+    assert (skill_dir / "my_tool.py").exists()
+
+    sys_path = proj / "tools" / "system.py"
+    risk_path = proj / "core" / "tool_risk.py"
+    registry_path = proj / "core" / "capability_registry.json"
+    before = {
+        "system": sys_path.read_text(encoding="utf-8"),
+        "risk": risk_path.read_text(encoding="utf-8"),
+        "registry": registry_path.read_text(encoding="utf-8"),
+    }
+
+    with patch("config.BASE_DIR", str(proj)):
+        dry = register_tool.func(
+            tool_name="my_tool",
+            description="Uppercase text",
+            agent="Chat_Agent",
+            risk="SAFE",
+            triggers="uppercase, κεφαλαία",
+            dry_run=True,
+        )
+
+    assert "DRY RUN" in dry
+    assert "DIFF PREVIEW" in dry
+    assert sys_path.read_text(encoding="utf-8") == before["system"]
+    assert risk_path.read_text(encoding="utf-8") == before["risk"]
+    assert registry_path.read_text(encoding="utf-8") == before["registry"]
+
+    with patch("config.BASE_DIR", str(proj)):
+        applied = register_tool.func(
+            tool_name="my_tool",
+            description="Uppercase text",
+            agent="Chat_Agent",
+            risk="SAFE",
+            triggers="uppercase, κεφαλαία",
+            dry_run=False,
+        )
+
+    assert "my_tool" in applied
+    assert "DRY RUN" not in applied
+    assert "from astakos_skills.my_tool import my_tool" in sys_path.read_text(encoding="utf-8")
+    assert "    my_tool," in sys_path.read_text(encoding="utf-8")
+
+    risk_content = risk_path.read_text(encoding="utf-8")
+    assert '"my_tool"' in risk_content
+    assert '"SAFE"' in risk_content
+
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    entry = next(item for item in registry if item["name"] == "my_tool")
+    assert entry["agent"] == "Chat_Agent"
+    assert entry["description"] == "Uppercase text"
+    assert entry["triggers"] == ["uppercase", "κεφαλαία"]
+
+
 def test_register_tool_missing_anchors_do_not_partially_write(tmp_path):
     from astakos_skills.register_tool import register_tool
     proj = _make_fake_project(tmp_path)

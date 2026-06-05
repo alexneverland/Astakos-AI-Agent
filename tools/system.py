@@ -1148,8 +1148,8 @@ def run_code(filename: str, script_args: str = "") -> str:
 
 @tool
 def write_custom_tool(tool_name: str, tool_code: str) -> str:
-    """Γράφει, τεστάρει και παρουσιάζει νέο tool για έγκριση.
-    ΔΕΝ το προσθέτει αυτόματα — ο Λάζαρος κάνει paste αν εγκρίνει."""
+    """Γράφει και τεστάρει νέο tool στο astakos_skills/.
+    Δεν το καταχωρεί αυτόματα σε system/risk/registry — αυτό γίνεται με register_tool."""
     import ast
 
     clean_code = re.sub(r"```(?:python)?", "", tool_code).replace("```", "").strip()
@@ -1243,9 +1243,16 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
         )
 
     try:
+        workspace_dir = os.path.realpath(WORKSPACE_DIR)
+        final_path = os.path.realpath(os.path.join(workspace_dir, f"{tool_name}.py"))
+        if not final_path.startswith(workspace_dir + os.sep):
+            return "System Error: invalid tool path."
+        if os.path.exists(final_path):
+            return f"System Error: astakos_skills/{tool_name}.py already exists."
         temp_path = os.path.join(WORKSPACE_DIR, f"_test_{tool_name}.py")
     except:
         temp_path = f"_test_{tool_name}.py"
+        final_path = f"{tool_name}.py"
 
     test_script = f"""import math, json, os, requests, inspect
 from langchain_core.tools import tool
@@ -1291,16 +1298,18 @@ if __name__ == "__main__":
 
         sep = "═" * 62
         paste_code = f"from langchain_core.tools import tool\nimport math\n\n{clean_code}"
+        with open(final_path, "w", encoding="utf-8") as f:
+            f.write(paste_code.rstrip() + "\n")
 
         print(f"\n\033[92m{sep}")
-        print(f"  ✅  TOOL ΕΤΟΙΜΟ ΓΙΑ PASTE: {tool_name}")
+        print(f"  ✅  TOOL ΓΡΑΦΤΗΚΕ: {tool_name}")
         print(f"  🧪  Test: {stdout}")
         print(sep)
         print(paste_code)
         print(f"{sep}\033[0m\n")
         print("Λάζαρος: ", end="", flush=True)
 
-        return f"✅ Tool '{tool_name}' γράφτηκε και πέρασε το test ({stdout})."
+        return f"✅ Tool '{tool_name}' γράφτηκε στο astakos_skills/{tool_name}.py και πέρασε το test ({stdout})."
 
     except subprocess.TimeoutExpired:
         try:
