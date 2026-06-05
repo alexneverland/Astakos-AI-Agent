@@ -58,6 +58,7 @@ TOOL_RISK: dict[str, str] = {
     "generate_image_tool":      "WARNING",  # γράφει file + external API call
     "archive_file":             "WARNING",  # γράφει στη μνήμη (ChromaDB + JSON)
     "repo_mapper":              "SAFE",     # read-only AST scan
+    "register_tool":            "CRITICAL", # τροποποιεί system.py + tool_risk.py
 }
 
 def get_risk(tool_name: str) -> str:

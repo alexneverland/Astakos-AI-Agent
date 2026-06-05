@@ -39,6 +39,7 @@ from tools.web import (
 from astakos_skills.search_flights import search_flights
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 from astakos_skills.repo_mapper import repo_mapper
+from astakos_skills.register_tool import register_tool
 
 # ────────────────────────────────────────────────────────────────
 # CREDENTIALS PATHS
@@ -1836,4 +1837,5 @@ all_tools = [
     search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
     duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool,
     repo_mapper,
+    register_tool,
 ]
