@@ -46,6 +46,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .pytest_tmp/
+.pytest_tmp*/
 
 # Local development files
 venv/

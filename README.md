@@ -351,7 +351,7 @@ python run_telegram.py
 ```
 
 ```bash
-uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients --reload-include *.py --reload-include prompts.md --reload-exclude *.json --reload-exclude *.db --reload-exclude *.sqlite --reload-exclude *.sqlite3 --reload-exclude __pycache__/* --reload-exclude outputs/* --reload-exclude telegram_photos/* --reload-exclude telegram_uploads/* --reload-exclude watch_folder/* --reload-exclude chroma_db/* --reload-exclude logs/*
+uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients --reload-include prompts.md
 ```
 
 Observability:
