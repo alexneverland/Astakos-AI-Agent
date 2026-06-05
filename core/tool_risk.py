@@ -57,6 +57,7 @@ TOOL_RISK: dict[str, str] = {
     "control_spotify":          "WARNING",  # side effects: play/pause/next/search
     "generate_image_tool":      "WARNING",  # γράφει file + external API call
     "archive_file":             "WARNING",  # γράφει στη μνήμη (ChromaDB + JSON)
+    "repo_mapper":              "SAFE",     # read-only AST scan
 }
 
 def get_risk(tool_name: str) -> str:
