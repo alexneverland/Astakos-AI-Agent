@@ -94,6 +94,18 @@ def _register_tool_terminal_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
             return ExecPolicy.WARNING, "register_tool dry-run via terminal"
         return ExecPolicy.REQUIRE_CONFIRMATION, "register_tool apply via terminal"
 
+    # ── alias import: "import register_tool as rt; rt(...)" ──
+    alias_match = re.search(r"import\s+register_tool\s+as\s+(\w+)", cmd, re.IGNORECASE)
+    if alias_match:
+        alias = re.escape(alias_match.group(1))
+        if re.search(rf"\b{alias}\s*\(", cmd):
+            if re.search(
+                r"dry_run\s*=\s*(?:true|1|['\"](?:true|yes|y|nai|\u03bd\u03b1\u03b9)['\"])",
+                cmd, re.IGNORECASE,
+            ):
+                return ExecPolicy.WARNING, "register_tool alias dry-run via terminal"
+            return ExecPolicy.REQUIRE_CONFIRMATION, "register_tool alias apply via terminal"
+
     return None, ""
 
 def classify_command(cmd: str) -> tuple[ExecPolicy, str]:

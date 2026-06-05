@@ -111,3 +111,24 @@ def test_capability_registry_json_read_is_safe():
     cmd = "python -c \"import json; d=json.load(open('core/capability_registry.json'))\""
     policy, _ = classify_command(cmd)
     assert policy == ExecPolicy.SAFE
+
+
+# -- alias bypass -----------------------------------------------
+
+def test_alias_import_apply_requires_confirmation():
+    cmd = (
+        "python -c \"from astakos_skills.register_tool import register_tool as rt; "
+        "rt(tool_name='scan_receipt', dry_run=False)\""
+    )
+    policy, reason = classify_command(cmd)
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+    assert "alias" in reason
+
+def test_alias_import_dry_run_is_warning():
+    cmd = (
+        "python -c \"from astakos_skills.register_tool import register_tool as rt; "
+        "rt(tool_name='scan_receipt', dry_run=True)\""
+    )
+    policy, reason = classify_command(cmd)
+    assert policy == ExecPolicy.WARNING
+    assert "alias" in reason
