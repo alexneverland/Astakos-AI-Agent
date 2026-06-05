@@ -37,7 +37,8 @@ import uuid
 from PIL import Image
 from google import genai
 from fastapi.staticfiles import StaticFiles
-from config import PHOTOS_DIR, GEMINI_API_KEY, PROJECT_ID, LOCATION
+from config import PHOTOS_DIR
+from core.brain import vertex_client, FAST_MODEL, llm
 from core.utils import detect_prompt_injection
 console = Console()
 from core.brain import FAST_MODEL
@@ -619,7 +620,7 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
         with open(debug_path, "wb") as f:
             f.write(audio_data)
         print(f"\033[96m[Web Voice]: Αποκωδικοποίηση ηχητικού ({len(audio_data)} bytes)...\033[0m")
-        client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
+        client = vertex_client
         response = client.models.generate_content(
             model=FAST_MODEL,
             contents=[
@@ -704,7 +705,7 @@ async def upload_file(request: Request, file: UploadFile = File(...), _=Depends(
         memory_analysis = ""
         detailed_analysis = ""
         if is_image:
-            client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
+            client = vertex_client
             img = Image.open(file_path)
             img.thumbnail((1024, 1024))
             mem_resp = client.models.generate_content(
@@ -745,10 +746,10 @@ async def upload_file(request: Request, file: UploadFile = File(...), _=Depends(
                 doc_text = f"[Δεν μπόρεσα να διαβάσω το περιεχόμενο: {read_err}]"
 
             # Στέλνουμε στο LLM για περίληψη/ανάλυση
-            client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
             sum_prompt = f"Διάβασε το παρακάτω έγγραφο '{file.filename}' και κάνε μια σύντομη ανάλυση/περίληψη στα Ελληνικά (5-8 προτάσεις):\n\n{doc_text}"
-            sum_resp = client.models.generate_content(model=FAST_MODEL, contents=[sum_prompt])
-            detailed_analysis = sum_resp.text.strip() if sum_resp and sum_resp.text else "Δεν μπόρεσα να αναλύσω το έγγραφο."
+            from langchain_core.messages import HumanMessage as _HM
+            sum_resp = llm.invoke([_HM(content=sum_prompt)])
+            detailed_analysis = sum_resp.content.strip() if sum_resp and sum_resp.content else "Δεν μπόρεσα να αναλύσω το έγγραφο."
             memory_analysis = detailed_analysis[:500]
 
             chat_ai_msg = (

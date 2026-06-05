@@ -8,6 +8,7 @@ import warnings
 import os
 from langchain_google_genai import ChatGoogleGenerativeAI, HarmCategory, HarmBlockThreshold
 from rich.console import Console
+from google import genai
 
 # Αγνοούμε τα προειδοποιητικά για να είναι καθαρό το τερματικό
 warnings.filterwarnings("ignore")
@@ -41,6 +42,14 @@ llm_heavy = ChatGoogleGenerativeAI(
     model=HEAVY_MODEL,
     temperature=0.1,
     safety_settings=custom_safety,
+    vertexai=True,
+    project=os.getenv("PROJECT_ID", "astakos-finall"),
+    location=os.getenv("LOCATION", "global"),
+)
+
+# 3. Shared Vertex AI raw client (για multimodal: εικόνες, ήχος, έγγραφα)
+# Όλο το codebase τραβάει από εδώ — ένα σημείο αρχικοποίησης.
+vertex_client = genai.Client(
     vertexai=True,
     project=os.getenv("PROJECT_ID", "astakos-finall"),
     location=os.getenv("LOCATION", "global"),
