@@ -89,3 +89,25 @@ def test_git_status_is_safe():
 def test_git_log_is_safe():
     policy, _ = classify_command("git log --oneline -10")
     assert policy == ExecPolicy.SAFE
+
+
+# -- capability_registry.json direct write -----------------------
+
+def test_capability_registry_json_write_requires_confirmation():
+    cmd = (
+        "python -c \"import json; d=json.load(open('core/capability_registry.json')); "
+        "d['tools']['scan_receipt']={'name':'scan_receipt'}; "
+        "json.dump(d, open('core/capability_registry.json', 'w'))\""
+    )
+    policy, _ = classify_command(cmd)
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+def test_capability_registry_json_append_requires_confirmation():
+    cmd = "python -c \"open('core/capability_registry.json', 'a').write('x')\""
+    policy, _ = classify_command(cmd)
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+def test_capability_registry_json_read_is_safe():
+    cmd = "python -c \"import json; d=json.load(open('core/capability_registry.json'))\""
+    policy, _ = classify_command(cmd)
+    assert policy == ExecPolicy.SAFE

@@ -60,6 +60,8 @@ _REQUIRE_CONFIRM = [
     r"TRUNCATE\s+TABLE",
     # ── Network config ─────────────────────────────────────────
     r"netsh",                              # network configuration
+    # ── Capability registry direct write ─────────────────────
+    r"open\s*\([^)]*capability_registry\.json[^)]*[\x27\x22][wa]",  # write/append open
 ]
 _WARNING = [
     r"Remove-Item",                  # χωρίς -Recurse -Force
