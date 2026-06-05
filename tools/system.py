@@ -1154,6 +1154,22 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
 
     clean_code = re.sub(r"```(?:python)?", "", tool_code).replace("```", "").strip()
 
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tool_name):
+        return "System Error: invalid tool_name. Use a Python identifier, e.g. my_tool."
+
+    def _decorator_name(decorator):
+        if isinstance(decorator, ast.Call):
+            return _decorator_name(decorator.func)
+        if isinstance(decorator, ast.Name):
+            return decorator.id
+        if isinstance(decorator, ast.Attribute):
+            base = _decorator_name(decorator.value)
+            return f"{base}.{decorator.attr}" if base else decorator.attr
+        return ""
+
+    def _has_tool_decorator(function_node):
+        return any(_decorator_name(dec).split(".")[-1] == "tool" for dec in function_node.decorator_list)
+
     # [SECURITY]: Blocklist για generated tool code — filesystem, network, execution
     _dangerous_patterns = [
         r"subprocess",
@@ -1197,15 +1213,34 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
     dangerous_pattern = None  # legacy — αντικαταστάθηκε από _dangerous_patterns
     # (legacy check αντικαταστάθηκε από _dangerous_patterns loop πάνω)
 
-    if f"def {tool_name}" not in clean_code:
-        return f"System Error: Ο κώδικας πρέπει να περιέχει 'def {tool_name}'."
-    if "@tool" not in clean_code:
-        return "System Error: Λείπει ο @tool decorator."
-
     try:
-        ast.parse(clean_code)
+        tree = ast.parse(clean_code)
     except SyntaxError as se:
         return f"❌ Συντακτικό σφάλμα (γραμμή {se.lineno}): {se.msg}\nΚοίτα: {se.text}"
+
+    top_level_functions = [
+        node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    matching_functions = [node for node in top_level_functions if node.name == tool_name]
+    if len(matching_functions) != 1:
+        return (
+            f"System Error: code must contain exactly one top-level function "
+            f"named '{tool_name}'."
+        )
+
+    target_function = matching_functions[0]
+    if not _has_tool_decorator(target_function):
+        return f"System Error: function '{tool_name}' must have the @tool decorator."
+
+    extra_tool_functions = [
+        node.name for node in top_level_functions
+        if node.name != tool_name and _has_tool_decorator(node)
+    ]
+    if extra_tool_functions:
+        return (
+            "System Error: only one @tool function is allowed. "
+            f"Extra decorated functions: {', '.join(extra_tool_functions)}."
+        )
 
     try:
         temp_path = os.path.join(WORKSPACE_DIR, f"_test_{tool_name}.py")
