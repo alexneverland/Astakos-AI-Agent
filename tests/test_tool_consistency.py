@@ -17,6 +17,7 @@ CAPABILITY_ALIASES = {
     "calendar_tasks": {"google_calendar_tool", "google_tasks_tool"},
     "child_activities": {"get_weather_forecast", "search_memory"},
     "code_git": {"run_terminal_command", "github_manager", "write_code", "run_code"},
+    "git_ops": {"run_terminal_command", "github_manager"},
     "drive": {"drive_manager"},
     "email": {"mail_manager"},
     "ferries": {"duckduckgo_search"},

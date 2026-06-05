@@ -13,6 +13,29 @@ import re
 _REGISTRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "capability_registry.json")
 _registry: list[dict] = []
 
+_GIT_TRIGGERS = [
+    "git",
+    "commit",
+    "commits",
+    "push",
+    "pull",
+    "branch",
+    "branches",
+    "status",
+    "diff",
+    "log",
+    "git log",
+    "git status",
+    "git diff",
+    "git show",
+    "head",
+    "origin/main",
+    "δες commit",
+    "τελευταία commit",
+    "τελευταία commits",
+    "ιστορικό commit",
+]
+
 def _load_registry():
     global _registry
     if _registry:
@@ -27,6 +50,11 @@ def _load_registry():
 def _normalize(text: str) -> str:
     return text.lower().strip()
 
+
+def _matches_trigger(msg: str, trigger: str) -> bool:
+    t = _normalize(trigger)
+    return bool(re.search(r'\b' + re.escape(t) + r'\b', msg)) or t in msg
+
 def lookup_agent(user_message: str) -> str | None:
     """
     Ψάχνει στο registry για keyword match.
@@ -39,14 +67,19 @@ def lookup_agent(user_message: str) -> str | None:
         return None
 
     msg = _normalize(user_message)
+
+    for trigger in _GIT_TRIGGERS:
+        if _matches_trigger(msg, trigger):
+            print(f"🎯 [CapabilityRegistry]: '{trigger}' → Git_Agent (git_ops)")
+            return "Git_Agent"
+
     matches = []
 
     for cap in _registry:
         triggers = cap.get("triggers", [])
         for trigger in triggers:
-            t = _normalize(trigger)
             # Ελέγχουμε αν το trigger υπάρχει ως λέξη/φράση στο μήνυμα
-            if re.search(r'\b' + re.escape(t) + r'\b', msg) or t in msg:
+            if _matches_trigger(msg, trigger):
                 matches.append({
                     "name":     cap["name"],
                     "agent":    cap["agent"],
