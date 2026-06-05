@@ -260,3 +260,10 @@ def repo_mapper(folder_path: str, max_depth: int = 4) -> str:
         output = output[:18000] + "\n\n... [αποκοπή — χρησιμοποίησε μικρότερο max_depth ή πιο συγκεκριμένο subfolder]"
 
     return output
+
+
+if __name__ == "__main__":
+    import sys
+    folder = sys.argv[1] if len(sys.argv) > 1 else "."
+    depth  = int(sys.argv[2]) if len(sys.argv) > 2 else 4
+    print(repo_mapper.func(folder, depth))
