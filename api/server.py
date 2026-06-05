@@ -1010,12 +1010,20 @@ async def debug_runtime(_=Depends(require_token)):
         conversation_debug = {"ok": False, "error": str(e)}
         session_debug = {"ok": False, "error": str(e)}
 
+    pending_actions = _get_pending_actions()
+    messenger_draft = _get_messenger_draft_debug()
+
     return JSONResponse({
         "snapshot_age_s":  snap_age,
         "scheduler_alive": scheduler_alive,
         "channel_sessions": channel_sessions,
         "conversation": conversation_debug,
         "session": session_debug,
+        "approvals": {
+            "pending_count": len(pending_actions),
+            "pending_tools": [a.get("tool_name") for a in pending_actions],
+        },
+        "messenger_draft": messenger_draft,
         "scheduler": {
             "written_at":         snapshot.get("written_at"),
             "jobs":               snapshot.get("jobs", []),
@@ -1038,7 +1046,7 @@ async def debug_runtime(_=Depends(require_token)):
             "non_active":      cooldown_info,
         },
         "pending_confirmations": pending_from_db,
-        "pending_actions":       _get_pending_actions(),
+        "pending_actions":       pending_actions,
         "events_1h": {
             "throughput":  throughput,
             "last_errors": last_errors,
@@ -1052,9 +1060,33 @@ def _get_pending_actions() -> list:
     """Επιστρέφει CRITICAL tool calls που περιμένουν approve/reject."""
     try:
         from core.approval import list_pending
-        return list_pending()
+        actions = []
+        for item in list_pending():
+            action = dict(item)
+            requested_at = action.get("requested_at") or action.get("created_at")
+            action["requested_at"] = requested_at
+            action["age_seconds"] = _age_seconds(requested_at)
+            actions.append(action)
+        return actions
     except Exception:
         return []
+
+
+def _age_seconds(iso_value: str | None) -> int | None:
+    if not iso_value:
+        return None
+    try:
+        return int((datetime.now() - datetime.fromisoformat(iso_value)).total_seconds())
+    except Exception:
+        return None
+
+
+def _get_messenger_draft_debug() -> dict:
+    try:
+        from core.messenger_draft import debug_draft_state
+        return debug_draft_state()
+    except Exception as e:
+        return {"exists": False, "active": False, "reason": "error", "error": str(e)}
 
 
 @server.post("/debug/action/{tool_call_id}/approve")

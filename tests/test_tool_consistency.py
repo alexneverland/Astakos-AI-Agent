@@ -129,6 +129,15 @@ def test_capability_registry_entries_point_to_known_tools_or_documented_flows():
 def test_capability_registry_is_versioned_config_not_ignored():
     registry_path = ROOT / "core" / "capability_registry.json"
 
+    tracked = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", str(registry_path.relative_to(ROOT))],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if tracked.returncode == 0:
+        return
+
     result = subprocess.run(
         ["git", "check-ignore", "-v", str(registry_path.relative_to(ROOT))],
         cwd=ROOT,

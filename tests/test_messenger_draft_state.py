@@ -60,3 +60,21 @@ def test_execute_local_pipeline_refuses_missing_draft(monkeypatch, tmp_path):
     result = execute_local_pipeline.func()
 
     assert "Δεν βρέθηκε προσχέδιο" in result
+
+
+def test_debug_draft_state_exposes_metadata_not_message(monkeypatch, tmp_path):
+    import config
+    from core.messenger_draft import debug_draft_state, save_draft
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+
+    save_draft("Sofia", "private message text")
+    state = debug_draft_state()
+
+    assert state["exists"] is True
+    assert state["active"] is True
+    assert state["target_name"] == "Sofia"
+    assert state["message_chars"] == len("private message text")
+    assert "message" not in state
+    assert "private message text" not in json.dumps(state, ensure_ascii=False)

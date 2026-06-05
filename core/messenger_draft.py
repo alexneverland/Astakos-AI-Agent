@@ -88,3 +88,46 @@ def inactive_draft_message(reason: str) -> str:
     if reason == "not_pending":
         return "❌ Σφάλμα: Δεν υπάρχει ενεργό προσχέδιο για αποστολή."
     return "❌ Σφάλμα: Δεν βρέθηκε προσχέδιο!"
+
+
+def _seconds_between(start: datetime | None, end: datetime | None) -> int | None:
+    if not start or not end:
+        return None
+    return int((end - start).total_seconds())
+
+
+def debug_draft_state(*, now: datetime | None = None) -> dict:
+    now = now or datetime.now()
+    active, reason, draft = active_draft_status(now=now)
+    if not draft:
+        return {
+            "exists": False,
+            "active": False,
+            "reason": reason,
+            "status": None,
+            "target_name": None,
+            "created_at": None,
+            "expires_at": None,
+            "age_seconds": None,
+            "expires_in_seconds": None,
+            "message_chars": 0,
+        }
+
+    created_at = _parse_datetime(draft.get("created_at", ""))
+    expires_at = _parse_datetime(draft.get("expires_at", ""))
+    expires_in = _seconds_between(now, expires_at)
+    if expires_in is not None:
+        expires_in = max(0, expires_in)
+
+    return {
+        "exists": True,
+        "active": active,
+        "reason": reason,
+        "status": draft.get("status", "pending"),
+        "target_name": draft.get("target_name") or None,
+        "created_at": draft.get("created_at"),
+        "expires_at": draft.get("expires_at"),
+        "age_seconds": _seconds_between(created_at, now),
+        "expires_in_seconds": expires_in,
+        "message_chars": len(draft.get("message") or ""),
+    }

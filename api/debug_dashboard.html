@@ -254,14 +254,34 @@ function render(d) {
       </tr>`).join('')}</table></div>`;
   }
 
+  const md = d.messenger_draft || {};
+  html += `<div class="card"><h2>Messenger Draft</h2>
+    <div class="kv"><span class="k">Exists</span><span class="v ${md.exists?'ok':'off'}">${md.exists?'YES':'NO'}</span></div>
+    <div class="kv"><span class="k">Active</span><span class="v ${md.active?'ok':md.exists?'warn':'off'}">${md.active?'YES':'NO'}</span></div>
+    <div class="kv"><span class="k">Reason</span><span class="v">${md.reason||'—'}</span></div>
+    <div class="kv"><span class="k">Target</span><span class="v">${md.target_name||'—'}</span></div>
+    <div class="kv"><span class="k">Status</span><span class="v">${md.status||'—'}</span></div>
+    <div class="kv"><span class="k">Created</span><span class="v">${(md.created_at||'').replace('T',' ')||'—'}</span></div>
+    <div class="kv"><span class="k">Expires in</span><span class="v ${md.active?'ok':'warn'}">${md.expires_in_seconds!=null?Math.round(md.expires_in_seconds/60)+'m':'—'}</span></div>
+    <div class="kv"><span class="k">Message chars</span><span class="v">${md.message_chars??0}</span></div>
+  </div>`;
+
+  const approvals = d.approvals || {};
   const acts = d.pending_actions||[];
+  if (acts.length === 0) {
+    html += `<div class="card"><h2>🔐 Pending Actions</h2>
+      <div class="kv"><span class="k">Pending approvals</span><span class="v ok">${approvals.pending_count??0}</span></div>
+      <div class="kv"><span class="k">Tools</span><span class="v off">—</span></div>
+    </div>`;
+  }
   if (acts.length > 0) {
     html += `<div class="card"><h2>🔐 Pending Actions (${acts.length})</h2>
-      <table><tr><th>Tool</th><th>Args</th><th>Requested</th><th>Ενέργειες</th></tr>
+      <table><tr><th>Tool</th><th>Args</th><th>Requested</th><th>Age</th><th>Ενέργειες</th></tr>
       ${acts.map(a=>`<tr>
         <td><b>${a.tool_name}</b></td>
         <td class="off" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${JSON.stringify(a.tool_args||{})}</td>
-        <td class="off">${(a.requested_at||'').slice(11,16)}</td>
+        <td class="off">${(a.requested_at||'').replace('T',' ').slice(0,16)||'—'}</td>
+        <td class="${(a.age_seconds||0)>900?'warn':'off'}">${a.age_seconds!=null?Math.round(a.age_seconds/60)+'m':'—'}</td>
         <td style="white-space:nowrap">
           <button onclick="resolveAction('${a.tool_call_id}','approve')" style="background:#1a4a2a;color:#4ade80;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;margin-right:4px">✅ Approve</button>
           <button onclick="resolveAction('${a.tool_call_id}','reject')"  style="background:#4a1a1a;color:#f87171;border:none;padding:3px 10px;border-radius:4px;cursor:pointer">❌ Reject</button>
