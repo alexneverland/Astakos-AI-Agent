@@ -1,9 +1,9 @@
 import json
 import os
 from langchain_core.tools import tool
+from config import LINKEDIN_DRAFT_FILE
 
-# Το αρχείο που θα σώζεται το draft
-MEMORY_FILE = 'linkedin_draft.json'
+MEMORY_FILE = LINKEDIN_DRAFT_FILE
 
 @tool
 def update_pending_linkedin_post(draft_text: str, photo_path: str) -> str:
@@ -16,6 +16,9 @@ def update_pending_linkedin_post(draft_text: str, photo_path: str) -> str:
             except json.JSONDecodeError:
                 pass
     
+    data["text"] = draft_text
+    data["content"] = draft_text
+    data["image_path"] = photo_path
     data['pending_linkedin_post'] = {
         'text': draft_text,
         'photo_path': photo_path
@@ -45,15 +48,20 @@ def process_and_clear_linkedin_post() -> str:
         from tools.system import post_to_linkedin
         
         # [MASTRO-FIX 2]: Επειδή είναι @tool, το καλούμε με .invoke()
-        post_to_linkedin.invoke({
+        result = post_to_linkedin.invoke({
             "text": post_data['text'], 
             "image_path": post_data.get('photo_path')
         })
+        if isinstance(result, str) and result.strip().startswith("❌"):
+            return result
     except Exception as e:
         return f"Σφάλμα κατά τη δημοσίευση: {e}"
     
     # Καθαρισμός
-    del data['pending_linkedin_post']
+    data.pop('pending_linkedin_post', None)
+    data.pop('text', None)
+    data.pop('content', None)
+    data.pop('image_path', None)
     
     with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
