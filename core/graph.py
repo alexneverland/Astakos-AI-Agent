@@ -15,6 +15,7 @@ from core.agents import (
 )
 from core.approval import approval_check_node
 from core.planner import planner_node, task_executor_node, capture_result_node
+from core.tool_loop_guard import inspect_tool_loop
 
 # [MASTRO-FIX]: Προσθήκη της λίστας με τους agents για να δουλέψει το routing
 AGENT_MAP = [
@@ -42,6 +43,7 @@ def build_graph():
     workflow.add_node("Dev_Agent",    dev_agent_node)
     workflow.add_node("tools",          ToolNode(all_tools, handle_tool_errors=True))
     workflow.add_node("approval_check", approval_check_node)
+    workflow.add_node("tool_loop_block", tool_loop_block_node)
     workflow.add_node("planner",        planner_node)
     workflow.add_node("task_executor",  task_executor_node)
     workflow.add_node("capture_result", capture_result_node)
@@ -71,7 +73,7 @@ def build_graph():
         workflow.add_conditional_edges(
             agent_name,
             _should_use_tools,
-            {"tools": "approval_check", "capture": "capture_result", END: END}
+            {"tools": "approval_check", "tool_loop_block": "tool_loop_block", "capture": "capture_result", END: END}
         )
 
     # approval_check → tools (ok) ή → END (pending/blocked)
@@ -80,6 +82,8 @@ def build_graph():
         lambda state: state.get("approval_status", "ok"),
         {"ok": "tools", "pending": END, "blocked": END}
     )
+
+    workflow.add_edge("tool_loop_block", END)
 
     # Μετά από tools → επιστροφή στον σωστό agent
     workflow.add_conditional_edges(
@@ -103,10 +107,27 @@ def _should_use_tools(state: AgentState):
     last_msg = state["messages"][-1]
     tool_calls = getattr(last_msg, "tool_calls", None)
     if tool_calls and len(tool_calls) > 0:
+        allowed, reason = inspect_tool_loop(state.get("messages", []))
+        if not allowed:
+            print(f"\033[91m[Tool Loop Guard]: {reason}\033[0m")
+            return "tool_loop_block"
         return "tools"
     if state.get("plan_active") and state.get("plan_index", 0) < len(state.get("plan_tasks", [])):
         return "capture"
     return END
+
+
+def tool_loop_block_node(state: AgentState):
+    """Stops repeated tool loops with a visible answer instead of recursion errors."""
+    from langchain_core.messages import AIMessage
+
+    _, reason = inspect_tool_loop(state.get("messages", []))
+    text = (
+        "Σταματάω εδώ γιατί ανίχνευσα επαναλαμβανόμενες κλήσεις εργαλείων "
+        f"({reason or 'tool loop guard'}). "
+        "Δεν εκτελώ άλλες εντολές. Θέλει έλεγχο του τελευταίου tool/result πριν συνεχίσω."
+    )
+    return {"messages": [AIMessage(content=text)]}
 
 
 def _route_supervisor(state: AgentState) -> str:

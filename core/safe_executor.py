@@ -70,10 +70,37 @@ _WARNING = [
     r"Set-Content", r"Out-File",
 ]
 
+def _register_tool_terminal_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
+    """Detect register_tool apply attempts hidden inside terminal commands."""
+    lowered = cmd.lower().replace("\\", "/")
+    if "register_tool" not in lowered:
+        return None, ""
+
+    if "register_tool.py" in lowered:
+        if "--help" in lowered or re.search(r"(?:^|\s)-h(?:\s|$)", lowered):
+            return ExecPolicy.SAFE, "register_tool.py help"
+        if re.search(r"(?:true|1|yes|y|nai|ναι)\s*['\"]?\s*$", lowered):
+            return ExecPolicy.WARNING, "register_tool.py dry-run via terminal"
+        return ExecPolicy.REQUIRE_CONFIRMATION, "register_tool.py apply via terminal"
+
+    if re.search(r"register_tool\s*(?:\.func)?\s*\(", cmd, re.IGNORECASE):
+        if re.search(
+            r"dry_run\s*=\s*(?:true|1|['\"](?:true|yes|y|nai|ναι)['\"])",
+            cmd,
+            re.IGNORECASE,
+        ):
+            return ExecPolicy.WARNING, "register_tool dry-run via terminal"
+        return ExecPolicy.REQUIRE_CONFIRMATION, "register_tool apply via terminal"
+
+    return None, ""
+
 def classify_command(cmd: str) -> tuple[ExecPolicy, str]:
     for p in _BLOCKED:
         if re.search(p, cmd, re.IGNORECASE):
             return ExecPolicy.BLOCKED, p
+    register_policy, register_reason = _register_tool_terminal_policy(cmd)
+    if register_policy is not None:
+        return register_policy, register_reason
     for p in _REQUIRE_CONFIRM:
         if re.search(p, cmd, re.IGNORECASE):
             return ExecPolicy.REQUIRE_CONFIRMATION, p

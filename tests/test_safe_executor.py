@@ -33,6 +33,29 @@ def test_git_reset_hard_requires_confirmation():
     policy, _ = classify_command("git reset --hard HEAD~1")
     assert policy == ExecPolicy.REQUIRE_CONFIRMATION
 
+def test_register_tool_apply_via_python_requires_confirmation():
+    cmd = (
+        "python -c \"from astakos_skills.register_tool import register_tool; "
+        "register_tool.func(tool_name='scan_receipt', dry_run=False)\""
+    )
+    policy, reason = classify_command(cmd)
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+    assert "register_tool" in reason
+
+def test_register_tool_apply_via_script_requires_confirmation():
+    policy, reason = classify_command("python astakos_skills/register_tool.py scan_receipt")
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+    assert "register_tool" in reason
+
+def test_register_tool_dry_run_via_python_is_warning():
+    cmd = (
+        "python -c \"from astakos_skills.register_tool import register_tool; "
+        "register_tool.func(tool_name='scan_receipt', dry_run=True)\""
+    )
+    policy, reason = classify_command(cmd)
+    assert policy == ExecPolicy.WARNING
+    assert "dry-run" in reason
+
 
 # -- WARNING commands ---------------------------------------------
 

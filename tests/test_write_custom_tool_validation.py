@@ -78,3 +78,22 @@ def my_tool(value: str) -> str:
     assert "Tool 'my_tool'" in result
     assert "TEST_OK: TEST" in result
     assert not (tmp_path / "_test_my_tool.py").exists()
+
+
+def test_write_code_rejects_tool_files(tmp_path, monkeypatch):
+    import tools.system as system
+
+    monkeypatch.setattr(system, "WORKSPACE_DIR", str(tmp_path))
+    code = '''
+from langchain_core.tools import tool
+
+@tool
+def my_tool(value: str) -> str:
+    """Echo text."""
+    return value
+'''
+
+    result = system.write_code.func("my_tool.py", code)
+
+    assert "write_custom_tool" in result
+    assert not (tmp_path / "my_tool.py").exists()

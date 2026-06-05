@@ -1084,6 +1084,12 @@ def write_code(filename: str, code: str) -> str:
     if safe_filename in PROTECTED_FILES:
         return f"System Error: ΑΠΑΓΟΡΕΥΕΤΑΙ να τροποποιήσεις το {safe_filename}."
 
+    if re.search(r"(^|\n)\s*@tool\b|langchain_core\.tools\s+import\s+tool", code):
+        return (
+            "System Error: skill tools must be created with write_custom_tool, "
+            "then registered with register_tool dry_run/apply."
+        )
+
     for word in DANGEROUS_WORDS:
         if word in code:
             return f"System Error: Ο κώδικας απορρίφθηκε ({word})."
@@ -1254,7 +1260,7 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
         temp_path = f"_test_{tool_name}.py"
         final_path = f"{tool_name}.py"
 
-    test_script = f"""import math, json, os, requests, inspect
+    test_script = f"""import math, json, inspect
 from langchain_core.tools import tool
 
 {clean_code}
@@ -1297,7 +1303,13 @@ if __name__ == "__main__":
             return f"❌ Tool '{tool_name}' ΔΕΝ πέρασε το test.\nΣφάλμα: {error_detail[:600]}"
 
         sep = "═" * 62
-        paste_code = f"from langchain_core.tools import tool\nimport math\n\n{clean_code}"
+        code_body = re.sub(
+            r"^\s*from\s+langchain_core\.tools\s+import\s+tool\s*\n",
+            "",
+            clean_code,
+            flags=re.MULTILINE,
+        ).strip()
+        paste_code = f"from langchain_core.tools import tool\nimport math\n\n{code_body}"
         with open(final_path, "w", encoding="utf-8") as f:
             f.write(paste_code.rstrip() + "\n")
 
