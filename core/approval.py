@@ -202,32 +202,6 @@ def approval_check_node(state):
             print(f"\033[93m[Approval]: ⚠️ WARNING tools: {names}\033[0m")
         return {"approval_status": "ok"}
 
-    blocked_calls = [tc for tc in tool_calls if _effective_risk(tc) == "BLOCKED"]
-    if blocked_calls:
-        tool_messages = []
-        for tc in blocked_calls:
-            print(f"\033[91m[Approval]: 🛡️ BLOCKED — {tc['name']} rejected by safe executor\033[0m")
-            tool_messages.append(ToolMessage(
-                content=f"🛡️ Η εντολή `{tc['name']}` μπλοκαρίστηκε από τον safe executor και δεν μπορεί να εγκριθεί.",
-                tool_call_id=tc["id"],
-                name=tc["name"],
-            ))
-
-        return {
-            "approval_status": "blocked",
-            "messages": tool_messages,
-        }
-
-    critical_calls = [tc for tc in tool_calls if is_critical(tc)]
-
-    if not critical_calls:
-        # Όλα SAFE/WARNING — πάμε κανονικά
-        risk_levels = [_effective_risk(tc) for tc in tool_calls]
-        if "WARNING" in risk_levels:
-            names = [tc["name"] for tc in tool_calls if _effective_risk(tc) == "WARNING"]
-            print(f"\033[93m[Approval]: ⚠️ WARNING tools: {names}\033[0m")
-        return {"approval_status": "ok"}
-
     # Υπάρχουν CRITICAL calls — τα αποθηκεύουμε και ζητάμε approval
     tool_messages = []
     for tc in critical_calls:

@@ -16,8 +16,14 @@ def test_github_manager_is_critical():
 def test_mail_manager_is_critical():
     assert get_risk("mail_manager") == "CRITICAL"
 
-def test_relay_local_payload_is_critical():
-    assert get_risk("relay_local_payload") == "CRITICAL"
+def test_relay_local_payload_is_warning():
+    assert get_risk("relay_local_payload") == "WARNING"
+
+def test_execute_local_pipeline_is_critical():
+    assert get_risk("execute_local_pipeline") == "CRITICAL"
+
+def test_register_tool_is_critical():
+    assert get_risk("register_tool") == "CRITICAL"
 
 def test_process_and_clear_linkedin_post_is_critical():
     assert get_risk("process_and_clear_linkedin_post") == "CRITICAL"
@@ -55,6 +61,30 @@ def test_is_critical_mail():
 def test_is_critical_process_and_clear_linkedin_post():
     tc = {"name": "process_and_clear_linkedin_post", "args": {}, "id": "abc"}
     assert is_critical(tc) is True
+
+def test_relay_local_payload_is_not_critical():
+    tc = {"name": "relay_local_payload", "args": {}, "id": "abc"}
+    assert is_critical(tc) is False
+
+def test_is_critical_execute_local_pipeline():
+    tc = {"name": "execute_local_pipeline", "args": {}, "id": "abc"}
+    assert is_critical(tc) is True
+
+def test_drive_delete_is_critical():
+    tc = {"name": "drive_manager", "args": {"action": "delete"}, "id": "abc"}
+    assert is_critical(tc) is True
+
+def test_drive_share_is_critical():
+    tc = {"name": "drive_manager", "args": {"action": "share"}, "id": "abc"}
+    assert is_critical(tc) is True
+
+def test_drive_download_is_not_critical():
+    tc = {"name": "drive_manager", "args": {"action": "download"}, "id": "abc"}
+    assert is_critical(tc) is False
+
+def test_drive_list_files_is_not_critical():
+    tc = {"name": "drive_manager", "args": {"action": "list_files"}, "id": "abc"}
+    assert is_critical(tc) is False
 
 def test_not_critical_search_memory():
     tc = {"name": "search_memory", "args": {}, "id": "abc"}

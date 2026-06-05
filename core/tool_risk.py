@@ -12,7 +12,6 @@ TOOL_RISK: dict[str, str] = {
     "run_terminal_command":     "DYNAMIC",  # risk καθορίζεται από classify_command() στο approval.py
     "github_manager":           "CRITICAL",
     "mail_manager":             "CRITICAL",
-    "relay_local_payload":      "CRITICAL",  # messenger draft → send
     "execute_local_pipeline":   "CRITICAL",
     "post_to_linkedin":         "CRITICAL",
     "process_and_clear_linkedin_post": "CRITICAL",
@@ -34,6 +33,7 @@ TOOL_RISK: dict[str, str] = {
     "create_file_tool":         "WARNING",
     "write_custom_tool":        "WARNING",
     "update_pending_linkedin_post": "WARNING",
+    "relay_local_payload":      "WARNING",  # writes Messenger draft only; send is execute_local_pipeline
 
     # ── SAFE: reads / queries / zero side-effects ────────────────
     "search_memory":            "SAFE",

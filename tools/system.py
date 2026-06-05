@@ -965,12 +965,12 @@ def drive_manager(
 def read_local_file(file_path: str) -> str:
     """Διαβάζει PDF, XLSX, CSV, DOCX, TXT, PY, JS (Mastro-Optimized)."""
     import os
-    from config import PHOTOS_DIR
+    from config import BASE_DIR, PHOTOS_DIR
     
     # Καθαρισμός path
     file_path = file_path.strip().strip("'").strip('"')
     filename = os.path.basename(file_path)
-    base_dir = os.getcwd()
+    base_dir = BASE_DIR
 
     # [SECURITY]: Μόνο αυτοί οι φάκελοι επιτρέπονται για ανάγνωση
     _allowed_dirs = [
@@ -981,21 +981,36 @@ def read_local_file(file_path: str) -> str:
         os.path.realpath(os.path.join(base_dir, "outputs")),
         os.path.realpath(os.path.join(base_dir, "watch_folder")),
     ]
+    _allowed_files = [
+        os.path.realpath(os.path.join(BASE_DIR, "messenger_draft.json")),
+    ]
 
     def _in_allowed(path):
         real = os.path.realpath(path)
         return any(real.startswith(d + os.sep) or real == d for d in _allowed_dirs)
+
+    def _is_allowed_file(path):
+        real = os.path.realpath(path)
+        return any(real == f for f in _allowed_files)
 
     full_path = None
     print(f"\033[93m[Tool Debug]: Ψάχνω το αρχείο: {filename}\033[0m")
 
     # Αν δόθηκε absolute path, έλεγξε ότι είναι εντός allowed dirs
     if os.path.isabs(file_path):
-        if os.path.exists(file_path) and os.path.isfile(file_path) and _in_allowed(file_path):
+        if os.path.exists(file_path) and os.path.isfile(file_path) and (_in_allowed(file_path) or _is_allowed_file(file_path)):
             full_path = file_path
             print(f"\033[92m[Tool Debug]: ✅ Absolute path εντός allowed -> {full_path}\033[0m")
         elif os.path.exists(file_path):
             return f"❌ Απαγορευμένο path: {os.path.basename(file_path)} βρίσκεται εκτός εγκεκριμένων φακέλων."
+
+    # Exact allowlist for root-level runtime files such as the Messenger draft.
+    if not full_path:
+        for allowed_file in _allowed_files:
+            if filename == os.path.basename(allowed_file) and os.path.exists(allowed_file) and os.path.isfile(allowed_file):
+                full_path = allowed_file
+                print(f"\033[92m[Tool Debug]: ✅ Exact allowed file -> {full_path}\033[0m")
+                break
 
     # Αναζήτηση με basename στους allowed dirs
     if not full_path:
@@ -1150,13 +1165,25 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
         r"pathlib",                           # filesystem ops
         r"shutil",                            # copy/move/delete files
         r"import\s+socket",                   # raw network
+        r"from\s+socket\s+import",            # raw network
         r"import\s+requests",                 # HTTP calls
+        r"from\s+requests\s+import",          # HTTP calls
+        r"requests\s*\.",                     # HTTP calls
         r"import\s+urllib",                   # HTTP calls
+        r"from\s+urllib\s+import",            # HTTP calls
+        r"urllib\s*\.",                       # HTTP calls
         r"import\s+httpx",                    # HTTP calls
+        r"from\s+httpx\s+import",             # HTTP calls
+        r"httpx\s*\.",                        # HTTP calls
         r"import\s+aiohttp",                  # async HTTP
+        r"from\s+aiohttp\s+import",           # async HTTP
+        r"aiohttp\s*\.",                      # async HTTP
         r"import\s+ftplib",                   # FTP
+        r"from\s+ftplib\s+import",            # FTP
         r"import\s+smtplib",                  # email sending
+        r"from\s+smtplib\s+import",           # email sending
         r"import\s+paramiko",                 # SSH
+        r"from\s+paramiko\s+import",          # SSH
         r"ctypes",                            # low-level OS access
         r"importlib",                         # dynamic imports
         r"compile\s*\(",                      # bytecode compile

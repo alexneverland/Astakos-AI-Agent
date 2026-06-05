@@ -5,6 +5,7 @@
 # ================================================================
 import os
 import json
+import re
 from langchain_core.tools import tool
 
 
@@ -35,10 +36,16 @@ def register_tool(
     agent       = agent.strip()
     description = description.strip()
 
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tool_name):
+        return "System Error: invalid tool_name. Use a Python identifier, e.g. my_tool."
+
     if risk not in ("SAFE", "WARNING", "CRITICAL"):
         return f"❌ Μη έγκυρο risk: '{risk}'. Επίτρεπτα: SAFE, WARNING, CRITICAL."
 
-    skill_path = os.path.join(BASE_DIR, "astakos_skills", f"{tool_name}.py")
+    skills_dir = os.path.realpath(os.path.join(BASE_DIR, "astakos_skills"))
+    skill_path = os.path.realpath(os.path.join(skills_dir, f"{tool_name}.py"))
+    if not skill_path.startswith(skills_dir + os.sep):
+        return "System Error: invalid skill path."
     if not os.path.exists(skill_path):
         return f"❌ Δεν βρέθηκε το αρχείο: astakos_skills/{tool_name}.py"
 
