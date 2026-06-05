@@ -473,7 +473,7 @@ def git_agent_node(state):
     system_prompt = build_prompt(history, system_base)
 
     git_llm = llm.bind_tools([
-        github_manager, read_local_file, search_memory, run_terminal_command
+        github_manager, search_memory, run_terminal_command
     ])
     response = git_llm.invoke([SystemMessage(content=system_prompt)] + safe_history)
     response = _ensure_text_response(response, git_llm, system_prompt, safe_history)
