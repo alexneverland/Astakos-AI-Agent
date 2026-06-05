@@ -76,6 +76,9 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Capability Registry | Keyword-based pre-routing before the LLM Supervisor for faster dispatch and fewer wasted tokens. |
 | Long-Term Goals | ChromaDB goal tracking injected into prompts, with `/plan` for multi-step execution. |
 | Action Approval Levels | SAFE / WARNING / CRITICAL risk levels per tool. CRITICAL actions require approval before execution. |
+| Approval TTL Cleanup | Pending CRITICAL approvals auto-expire after 60 min via `expire_stale_pending()`; stale entries are marked `expired` and blocked from execution. |
+| Web UI Live Refresh | `/messages/poll?after_id=N&channel=telegram` endpoint + frontend `setInterval` polling every 5 s; Telegram messages appear in Web UI without manual page reload. |
+| register_tool dry_run | `register_tool(dry_run=True)` previews all file changes (system.py, tool_risk.py, capability_registry) without writing; path traversal protection and Python identifier validation added. |
 | Memory Provenance | Saved facts include `source` (`telegram` / `web`) and `reason` (`user_stated` / `agent_inferred`). |
 | Goal Follow-up Engine | Daily semantic check for stale goals; Astakos can proactively follow up after 7 quiet days. |
 
@@ -110,7 +113,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 
 | Feature | Description |
 |---|---|
-| Observability Dashboard | `/debug/runtime` includes heartbeat, job health, fail counts, pending confirmations, active goals, pending CRITICAL actions, shared conversation/session health, and analytics charts. |
+| Observability Dashboard | `/debug/runtime` includes heartbeat, job health, fail counts, pending confirmations, active goals, pending CRITICAL actions (with age + warn >15 min), Messenger Draft state (exists/active/reason/target/age/expires_in), shared conversation/session health, and analytics charts. |
 | Local Security | Bearer token auth, localhost-only CORS, upload size limits, and extension whitelist. |
 | Auto-Restart | `run_telegram.py` and the Web launcher watch core source files only; runtime JSON/DB/photos/uploads and generated skills do not trigger restarts. |
 | Safe Executor | `core/safe_executor.py` classifies terminal commands as SAFE, WARNING, REQUIRE_CONFIRMATION, or BLOCKED. |
@@ -244,6 +247,7 @@ astakos/
 │   ├── routine_db.py         # SQLite routines, dedup, cooldowns
 │   ├── session_memory.py     # Unified session log + Memory Sifter
 │   ├── vector_store.py       # ChromaDB long-term memory
+│   ├── conversation_history.py # Shared SQLite conversation store; load_messages_after_rowid + get_max_rowid for polling
 │   └── working_memory.py     # Real-time foreground context
 ├── services/
 │   ├── analytics_engine.py   # Nightly LLM routine detection
@@ -400,6 +404,12 @@ Shutdown behavior:
 - [x] Shared Conversation History — Telegram and Web write to one SQLite store, with legacy JSON backfill and analytics reading from the shared history.
 - [x] SQLite-first history views and cleanup — Web history and analytics read from shared SQLite, while `clean.py` can check and maintain the conversation database.
 - [x] Auto Session Rollover — long conversations are summarized automatically after 40 unsummarized exchanges, plus manual and shutdown summaries.
+- [x] Pending Approval TTL — `expire_stale_pending()` runs on every store read and marks CRITICAL approvals older than 60 min as `expired`; expired actions are blocked from execution even if approved late.
+- [x] Messenger Draft in Dashboard — `/debug/runtime` exposes full draft state: exists, active, reason, target name, age, expires_in (minutes), and message character count.
+- [x] Web UI Live Telegram Refresh — `GET /messages/poll?after_id=N&channel=telegram` returns only new messages via SQLite `rowid` cursor; frontend polls every 5 s; `notify_telegram_message()` writes to shared SQLite from the Telegram process; `load_messages_after_rowid` + `get_max_rowid` power the incremental cursor.
+- [x] register_tool dry_run — `dry_run=True` parameter previews every file change without writing; tool_name validated as Python identifier; skill path checked with `realpath` to prevent path traversal.
+- [x] relay_local_payload hardened — demoted from CRITICAL to WARNING (writes draft only, does not send); clean tool return value so Gemini cannot leak internal meta-instructions into the chat.
+- [x] Cross-Channel Context Awareness — Chat_Agent checks shared SQLite history before saying "I don't remember", covering messages from both Telegram and Web UI sessions.
 
 ### Planned
 
