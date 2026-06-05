@@ -540,14 +540,20 @@ def _append_to_analytics_log(role: str, content: str):
         with open(TELEGRAM_HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
         try:
-            from memory.conversation_history import append_message
             shared_role = "assistant" if role in ("ai", "assistant") else role
-            append_message(
-                role=shared_role,
-                content=content,
-                channel="telegram",
-                timestamp=now,
-            )
+            # notify_telegram_message: αποθηκεύει στη shared SQLite + WebSocket broadcast στο Web UI
+            try:
+                from api.server import notify_telegram_message
+                notify_telegram_message(role=shared_role, content=content)
+            except Exception:
+                # Fallback: άμεσο append χωρίς broadcast (αν ο server δεν τρέχει)
+                from memory.conversation_history import append_message
+                append_message(
+                    role=shared_role,
+                    content=content,
+                    channel="telegram",
+                    timestamp=now,
+                )
         except Exception as shared_error:
             print(f"[ConversationHistory/telegram]: Σφάλμα shared write: {shared_error}")
     except Exception as e:
