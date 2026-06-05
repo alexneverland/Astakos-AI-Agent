@@ -28,6 +28,12 @@ def _effective_risk(tc: dict) -> str:
             return "WARNING"
         else:
             return "SAFE"
+    if name == "execute_local_pipeline":
+        args = tc.get("args", {})
+        if args.get("target_name") or args.get("message"):
+            return "CRITICAL"
+        from core.messenger_draft import has_active_draft
+        return "CRITICAL" if has_active_draft() else "SAFE"
     if name == "drive_manager":
         action = tc.get("args", {}).get("action", "list_files")
         _DRIVE_CRITICAL = {"delete", "share", "move"}

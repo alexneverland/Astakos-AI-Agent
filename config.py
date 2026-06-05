@@ -56,6 +56,8 @@ HOME_COORDS   = (40.646558, 22.939036)   # Piston 7 — διόρθωσε αν χ
 HOME_RADIUS_M = 150                   # trigger εντός 150 μέτρων
 LISTS_FILE           = os.path.join(BASE_DIR, "astakos_lists.json")
 CAPABILITIES_FILE    = os.path.join(BASE_DIR, "astakos_capabilities.json")
+MESSENGER_DRAFT_FILE = os.path.join(BASE_DIR, "messenger_draft.json")
+MESSENGER_DRAFT_TTL_SECONDS = int(os.getenv("MESSENGER_DRAFT_TTL_SECONDS", "1800"))
 LINKEDIN_DRAFT_FILE  = os.path.join(BASE_DIR, "linkedin_draft.json")
 
 GPS_STORAGE_FILE     = os.path.join(BASE_DIR, "last_location.json")

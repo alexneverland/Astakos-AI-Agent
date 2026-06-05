@@ -1,9 +1,10 @@
 """
 Tests για core/tool_risk.py — get_risk() και core/approval.py — is_critical().
 """
-import sys, os
+import sys, os, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from datetime import datetime, timedelta
 from core.tool_risk import get_risk
 from core.approval import is_critical
 
@@ -66,9 +67,34 @@ def test_relay_local_payload_is_not_critical():
     tc = {"name": "relay_local_payload", "args": {}, "id": "abc"}
     assert is_critical(tc) is False
 
-def test_is_critical_execute_local_pipeline():
+def test_is_critical_execute_local_pipeline(monkeypatch, tmp_path):
+    import config
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    draft_file.write_text(
+        json.dumps(
+            {
+                "target_name": "Sofia",
+                "message": "hello",
+                "status": "pending",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "expires_at": (datetime.now() + timedelta(minutes=30)).isoformat(timespec="seconds"),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     tc = {"name": "execute_local_pipeline", "args": {}, "id": "abc"}
     assert is_critical(tc) is True
+
+
+def test_is_not_critical_execute_local_pipeline_without_active_draft(monkeypatch, tmp_path):
+    import config
+
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(tmp_path / "missing.json"))
+    tc = {"name": "execute_local_pipeline", "args": {}, "id": "abc"}
+    assert is_critical(tc) is False
 
 def test_drive_delete_is_critical():
     tc = {"name": "drive_manager", "args": {"action": "delete"}, "id": "abc"}

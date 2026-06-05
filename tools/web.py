@@ -39,19 +39,9 @@ def relay_local_payload(target_entity: str, payload_data: str) -> str:
     Χρησιμοποίησέ το ΟΤΑΝ προτείνεις στον χρήστη να στείλει ένα μήνυμα, 
     πριν πάρεις την τελική του έγκριση.
     """
-    import os
-    import json
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    draft_file = os.path.join(base_dir, "..", "messenger_draft.json")
-    
-    # [MASTRO-FIX]: Τα κλειδιά του JSON παίρνουν τις σωστές μεταβλητές!
-    draft_data = {
-        "target_name": target_entity, 
-        "message": payload_data
-    }
-    
-    with open(draft_file, "w", encoding="utf-8") as f:
-        json.dump(draft_data, f, ensure_ascii=False, indent=4)
+    from core.messenger_draft import save_draft
+
+    save_draft(target_entity, payload_data)
 
     # Επιστρέφουμε clean output — οι οδηγίες εμφάνισης είναι στο prompts.md
     # Το Gemini δεν πρέπει να τυπώνει meta-instructions verbatim στο chat
@@ -261,21 +251,21 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     import time
     import json
     import os
+    from core.messenger_draft import active_draft_status, inactive_draft_message
+    from config import MESSENGER_DRAFT_FILE
     from playwright.sync_api import sync_playwright
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    draft_file = os.path.join(base_dir, "..", "messenger_draft.json")
+    draft_file = MESSENGER_DRAFT_FILE
 
     # 1. [MASTRO INTERCEPTOR]: Διάβασε το draft
     if not target_name or not message:
-        if os.path.exists(draft_file):
-            with open(draft_file, "r", encoding="utf-8") as f:
-                draft = json.load(f)
-                target_name = target_name or draft.get("target_name", "")
-                message = message or draft.get("message", "")
-            print(f"\033[93m[Messenger]: Βρέθηκε draft για {target_name}. Εκτέλεση...\033[0m")
-        else:
-            return "❌ Σφάλμα: Δεν βρέθηκε προσχέδιο!"
+        is_active, reason, draft = active_draft_status()
+        if not is_active:
+            return inactive_draft_message(reason)
+        target_name = target_name or draft.get("target_name", "")
+        message = message or draft.get("message", "")
+        print(f"\033[93m[Messenger]: Βρέθηκε draft για {target_name}. Εκτέλεση...\033[0m")
 
     # 2. [MASTRO-ALIAS]: Μετατροπή Ονόματος σε ID
     profile_path = os.path.join(base_dir, "..", "astakos_profile.json")

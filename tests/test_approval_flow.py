@@ -5,6 +5,7 @@ Tests για το approval flow — save/get/resolve/pop pending + is_critical r
 import sys, os, json, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 import pytest
 
@@ -90,6 +91,57 @@ def test_safe_tool_passes_through():
 
     result = approval_check_node({"messages": [ai_msg]})
     assert result["approval_status"] == "ok"
+
+def test_execute_local_pipeline_without_active_draft_does_not_request_approval(monkeypatch, tmp_path):
+    """No active Messenger draft -> no Telegram approval prompt."""
+    import config
+    from core.approval import approval_check_node
+
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(tmp_path / "missing.json"))
+
+    ai_msg = MagicMock()
+    ai_msg.tool_calls = [{"name": "execute_local_pipeline", "args": {}, "id": "tc-send"}]
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({"messages": [ai_msg]})
+
+    assert result["approval_status"] == "ok"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
+def test_execute_local_pipeline_with_active_draft_requests_approval(monkeypatch, tmp_path):
+    """Active Messenger draft -> send remains CRITICAL."""
+    import config
+    from core.approval import approval_check_node
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    draft_file.write_text(
+        json.dumps(
+            {
+                "target_name": "Sofia",
+                "message": "hello",
+                "status": "pending",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "expires_at": (datetime.now() + timedelta(minutes=30)).isoformat(timespec="seconds"),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    ai_msg = MagicMock()
+    ai_msg.tool_calls = [{"name": "execute_local_pipeline", "args": {}, "id": "tc-send"}]
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({"messages": [ai_msg]})
+
+    assert result["approval_status"] == "pending"
+    save_pending.assert_called_once()
+    notify.assert_called_once()
 
 def test_blocked_terminal_command_is_not_saved_for_approval():
     """BLOCKED terminal command → approval_status=blocked και δεν αποθηκεύεται pending."""
