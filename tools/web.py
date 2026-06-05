@@ -53,14 +53,9 @@ def relay_local_payload(target_entity: str, payload_data: str) -> str:
     with open(draft_file, "w", encoding="utf-8") as f:
         json.dump(draft_data, f, ensure_ascii=False, indent=4)
 
-    # ΚΡΙΣΙΜΟ: επιστρέφουμε ΑΚΡΙΒΩΣ το κείμενο που σώθηκε
-    # ώστε ο agent να το εμφανίσει copy-paste στον Λάζαρο — χωρίς καμία αλλαγή
-    return (
-        f"✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\n"
-        f"ΕΜΦΑΝΙΣΕ ΑΚΡΙΒΩΣ ΤΟ ΠΑΡΑΚΑΤΩ ΚΕΙΜΕΝΟ ΣΤΟΝ ΛΑΖΑΡΟ (copy-paste, καμία αλλαγή):\n\n"
-        f"{payload_data}\n\n"
-        f"Μετά ρώτα: 'Θέλεις αλλαγές ή να το στείλω;'"
-    )
+    # Επιστρέφουμε clean output — οι οδηγίες εμφάνισης είναι στο prompts.md
+    # Το Gemini δεν πρέπει να τυπώνει meta-instructions verbatim στο chat
+    return f"✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: {payload_data}"
 @tool
 def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
     """Φέρνει ειδήσεις από το Google News με τίτλο, περίληψη, πηγή και link."""
