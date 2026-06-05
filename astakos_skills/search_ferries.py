@@ -4,12 +4,10 @@
 # astakos_skills/search_ferries.py ← Αναζήτηση ακτοπλοϊκών δρομολογίων
 # ================================================================
 
-from langchain_core.tools import tool
 from langchain_community.tools import DuckDuckGoSearchRun
 
 _search = DuckDuckGoSearchRun()
 
-@tool
 def search_ferries(origin: str, destination: str, date: str) -> str:
     """
     Αναζητά ακτοπλοϊκά δρομολόγια και τιμές ferry.
@@ -43,11 +41,11 @@ def search_ferries(origin: str, destination: str, date: str) -> str:
 if __name__ == "__main__":
     import sys
     if len(sys.argv) >= 4:
-        result = search_ferries.invoke({
-            "origin": sys.argv[1],
-            "destination": sys.argv[2],
-            "date": sys.argv[3]
-        })
+        result = search_ferries(
+            origin=sys.argv[1],
+            destination=sys.argv[2],
+            date=sys.argv[3],
+        )
         print(result)
     else:
         print("Χρήση: python search_ferries.py [origin] [destination] [date]")
