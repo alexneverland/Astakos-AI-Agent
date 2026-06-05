@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import memory.conversation_history as ch
 from datetime import datetime
 
-DB = "/tmp/test_tg_polling.db"
+DB = os.path.join(tempfile.gettempdir(), "test_tg_polling.db")
 
 def setup():
     if os.path.exists(DB): os.unlink(DB)
