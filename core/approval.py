@@ -7,7 +7,7 @@
 
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from core.tool_risk import get_risk as _get_risk
 
 def _effective_risk(tc: dict) -> str:
@@ -56,6 +56,9 @@ def get_risk(name: str) -> str:
 PENDING_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "astakos_pending_approval.json"
 )
+
+# Pending actions παλαιότερα από αυτό θεωρούνται expired και αφαιρούνται αυτόματα.
+PENDING_TTL_SECONDS: int = 3600  # 60 λεπτά
 
 # ────────────────────────────────────────────────────────────────
 # Pending approval store
@@ -148,7 +151,8 @@ def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
     }
 
 
-def _load_pending() -> dict:
+def _load_pending_raw() -> dict:
+    """Φορτώνει το pending store χωρίς TTL cleanup (χρησιμοποιείται εσωτερικά)."""
     if not os.path.exists(PENDING_FILE):
         return {}
     try:
@@ -156,6 +160,40 @@ def _load_pending() -> dict:
             return json.load(f)
     except:
         return {}
+
+
+def expire_stale_pending() -> list:
+    """
+    Αφαιρεί pending actions που έχουν υπερβεί το PENDING_TTL_SECONDS.
+    Επιστρέφει λίστα με τα tool_call_ids που έγιναν expired.
+    Καλείται αυτόματα σε κάθε _load_pending().
+    """
+    pending = _load_pending_raw()
+    now = datetime.now()
+    expired_ids = []
+    for call_id, item in list(pending.items()):
+        if item.get("status") != "pending":
+            continue
+        created_raw = item.get("created_at", "")
+        try:
+            created_at = datetime.fromisoformat(created_raw)
+        except (ValueError, TypeError):
+            continue
+        age = (now - created_at).total_seconds()
+        if age > PENDING_TTL_SECONDS:
+            item["status"] = "expired"
+            item["expired_at"] = now.isoformat(timespec="seconds")
+            expired_ids.append(call_id)
+            print(f"\033[93m[Approval]: \u23f0 Expired stale pending: {item['tool_name']} (age={int(age)}s)\033[0m")
+    if expired_ids:
+        _save_pending(pending)
+    return expired_ids
+
+
+def _load_pending() -> dict:
+    """Φορτώνει μόνο ενεργά (non-expired, non-resolved) pending entries."""
+    expire_stale_pending()
+    return _load_pending_raw()
 
 
 def _save_pending(data: dict):
