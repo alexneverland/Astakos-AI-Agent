@@ -16,6 +16,7 @@ def register_tool(
     agent: str = "Dev_Agent",
     risk: str = "WARNING",
     triggers: str = "",
+    dry_run: bool = False,
 ) -> str:
     """
     Καταχωρεί αυτόματα ένα νέο tool που βρίσκεται στο astakos_skills/ σε όλα τα απαραίτητα σημεία:
@@ -28,6 +29,7 @@ def register_tool(
     agent:       Ποιος agent το χειρίζεται (default: Dev_Agent)
     risk:        SAFE / WARNING / CRITICAL (default: WARNING)
     triggers:    Comma-separated λέξεις-κλειδιά για routing (π.χ. 'my tool, κάνε x, do x')
+    dry_run:     True = preview only, no files are changed. False = apply changes.
     """
     from config import BASE_DIR
 
@@ -35,6 +37,8 @@ def register_tool(
     risk        = risk.strip().upper()
     agent       = agent.strip()
     description = description.strip()
+    if isinstance(dry_run, str):
+        dry_run = dry_run.strip().lower() in ("1", "true", "yes", "y", "nai", "ναι")
 
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tool_name):
         return "System Error: invalid tool_name. Use a Python identifier, e.g. my_tool."
@@ -69,7 +73,11 @@ def register_tool(
                 f"{last_import}\n{import_line}",
                 1
             )
-            results.append(f"✅ system.py: import προστέθηκε")
+            results.append(
+                f"DRY RUN system.py: would add import {import_line}"
+                if dry_run else
+                f"✅ system.py: import προστέθηκε"
+            )
         else:
             results.append(f"⚠️  system.py: δεν βρέθηκε anchor για import — πρόσθεσε χειροκίνητα: {import_line}")
 
@@ -82,7 +90,11 @@ def register_tool(
             f"    {tool_name},\n    register_tool,\n]",
             1
         )
-        results.append(f"✅ system.py: προστέθηκε στο all_tools")
+        results.append(
+            f"DRY RUN system.py: would add {tool_name} to all_tools"
+            if dry_run else
+            f"✅ system.py: προστέθηκε στο all_tools"
+        )
 
     # system.py θα γραφτεί ΤΕΛΕΥΤΑΙΟ μετά το registry
 
@@ -102,10 +114,15 @@ def register_tool(
             new_entry + insert_before,
             1
         )
-        risk_content = risk_content.replace("\r\n", "\n").replace("\n", "\r\n")
-        with open(risk_path, "wb") as f:
-            f.write(risk_content.encode("utf-8"))
-        results.append(f"✅ tool_risk.py: {tool_name} → {risk}")
+        if not dry_run:
+            risk_content = risk_content.replace("\r\n", "\n").replace("\n", "\r\n")
+            with open(risk_path, "wb") as f:
+                f.write(risk_content.encode("utf-8"))
+        results.append(
+            f"DRY RUN tool_risk.py: would add {tool_name} -> {risk}"
+            if dry_run else
+            f"✅ tool_risk.py: {tool_name} → {risk}"
+        )
 
     # ── 3. core/capability_registry.json ────────────────────────
     registry_path = os.path.join(BASE_DIR, "core", "capability_registry.json")
@@ -124,32 +141,45 @@ def register_tool(
                 "priority":    9,
                 "triggers":    trigger_list,
             })
-            with open(registry_path, "w", encoding="utf-8") as f:
-                json.dump(registry, f, ensure_ascii=False, indent=2)
-            results.append(f"✅ capability_registry: {tool_name} → {agent} ({len(trigger_list)} triggers)")
+            if not dry_run:
+                with open(registry_path, "w", encoding="utf-8") as f:
+                    json.dump(registry, f, ensure_ascii=False, indent=2)
+            results.append(
+                f"DRY RUN capability_registry: would add {tool_name} -> {agent} ({len(trigger_list)} triggers)"
+                if dry_run else
+                f"✅ capability_registry: {tool_name} → {agent} ({len(trigger_list)} triggers)"
+            )
     except Exception as e:
         results.append(f"⚠️  capability_registry error: {e}")
 
     # ── system.py ΤΕΛΕΥΤΑΙΟ — debounce ξεκινά εδώ ────────────────
-    sys_content = sys_content.replace("\r\n", "\n").replace("\n", "\r\n")
-    with open(sys_path, "wb") as f:
-        f.write(sys_content.encode("utf-8"))
+    if not dry_run:
+        sys_content = sys_content.replace("\r\n", "\n").replace("\n", "\r\n")
+        with open(sys_path, "wb") as f:
+            f.write(sys_content.encode("utf-8"))
 
     summary = "\n".join(results)
+    mode = "DRY RUN " if dry_run else ""
+    footer = (
+        "No files were changed. Run again with dry_run=False to apply."
+        if dry_run else
+        "⚡ Ο server θα κάνει auto-restart για να φορτώσει το νέο tool."
+    )
     return (
-        f"🔧 register_tool: '{tool_name}'\n"
+        f"🔧 {mode}register_tool: '{tool_name}'\n"
         f"{summary}\n\n"
-        f"⚡ Ο server θα κάνει auto-restart για να φορτώσει το νέο tool."
+        f"{footer}"
     )
 
 
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: register_tool.py <tool_name> [agent] [risk] [triggers]")
+        print("Usage: register_tool.py <tool_name> [agent] [risk] [triggers] [dry_run]")
         sys.exit(1)
     name    = sys.argv[1]
     ag      = sys.argv[2] if len(sys.argv) > 2 else "Dev_Agent"
     rk      = sys.argv[3] if len(sys.argv) > 3 else "WARNING"
     trg     = sys.argv[4] if len(sys.argv) > 4 else ""
-    print(register_tool.func(tool_name=name, agent=ag, risk=rk, triggers=trg))
+    dry     = sys.argv[5] if len(sys.argv) > 5 else False
+    print(register_tool.func(tool_name=name, agent=ag, risk=rk, triggers=trg, dry_run=dry))
