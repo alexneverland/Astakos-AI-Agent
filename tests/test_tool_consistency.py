@@ -6,6 +6,7 @@ files with AST so they do not touch credentials, browsers, APIs, or local state.
 """
 import ast
 import json
+import subprocess
 from pathlib import Path
 
 
@@ -123,3 +124,17 @@ def test_capability_registry_entries_point_to_known_tools_or_documented_flows():
 
     assert unknown_capabilities == []
     assert missing_alias_tools == {}
+
+
+def test_capability_registry_is_versioned_config_not_ignored():
+    registry_path = ROOT / "core" / "capability_registry.json"
+
+    result = subprocess.run(
+        ["git", "check-ignore", "-v", str(registry_path.relative_to(ROOT))],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "!core/capability_registry.json" in result.stdout

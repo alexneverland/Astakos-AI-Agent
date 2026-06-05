@@ -11,6 +11,9 @@ token.json
 *.jsonl
 *.ndjson
 
+# Versioned config/schema JSON
+!core/capability_registry.json
+
 # Databases and vector stores
 *.db
 *.db-shm
