@@ -6,7 +6,20 @@
 import os
 import json
 import re
+import difflib
 from langchain_core.tools import tool
+
+
+def _unified_diff(label: str, before: str, after: str) -> str:
+    if before == after:
+        return ""
+    return "\n".join(difflib.unified_diff(
+        before.splitlines(),
+        after.splitlines(),
+        fromfile=f"a/{label}",
+        tofile=f"b/{label}",
+        lineterm="",
+    ))
 
 
 @tool
@@ -54,11 +67,14 @@ def register_tool(
         return f"❌ Δεν βρέθηκε το αρχείο: astakos_skills/{tool_name}.py"
 
     results = []
+    errors = []
+    diffs = []
 
     # ── 1. tools/system.py ──────────────────────────────────────
     sys_path = os.path.join(BASE_DIR, "tools", "system.py")
     with open(sys_path, "r", encoding="utf-8") as f:
         sys_content = f.read()
+    sys_original = sys_content
 
     import_line = f"from astakos_skills.{tool_name} import {tool_name}"
 
@@ -79,22 +95,28 @@ def register_tool(
                 f"✅ system.py: import προστέθηκε"
             )
         else:
+            errors.append(f"system.py: missing import anchor `{last_import}`")
             results.append(f"⚠️  system.py: δεν βρέθηκε anchor για import — πρόσθεσε χειροκίνητα: {import_line}")
 
     if f"    {tool_name}," in sys_content or f", {tool_name}," in sys_content:
         results.append(f"⚠️  system.py: all_tools ήδη περιέχει {tool_name}")
     else:
         # Εισαγωγή πριν το κλείσιμο ]
-        sys_content = sys_content.replace(
-            "    register_tool,\n]",
-            f"    {tool_name},\n    register_tool,\n]",
-            1
-        )
-        results.append(
-            f"DRY RUN system.py: would add {tool_name} to all_tools"
-            if dry_run else
-            f"✅ system.py: προστέθηκε στο all_tools"
-        )
+        all_tools_anchor = "    register_tool,\n]"
+        if all_tools_anchor in sys_content:
+            sys_content = sys_content.replace(
+                all_tools_anchor,
+                f"    {tool_name},\n    register_tool,\n]",
+                1
+            )
+            results.append(
+                f"DRY RUN system.py: would add {tool_name} to all_tools"
+                if dry_run else
+                f"✅ system.py: προστέθηκε στο all_tools"
+            )
+        else:
+            errors.append(f"system.py: missing all_tools anchor `{all_tools_anchor}`")
+            results.append(f"⚠️  system.py: δεν βρέθηκε anchor για all_tools — πρόσθεσε χειροκίνητα: {tool_name}")
 
     # system.py θα γραφτεί ΤΕΛΕΥΤΑΙΟ μετά το registry
 
@@ -102,6 +124,7 @@ def register_tool(
     risk_path = os.path.join(BASE_DIR, "core", "tool_risk.py")
     with open(risk_path, "r", encoding="utf-8") as f:
         risk_content = f.read()
+    risk_original = risk_content
 
     risk_line = f'    "{tool_name}":'
     if risk_line in risk_content:
@@ -109,29 +132,33 @@ def register_tool(
     else:
         insert_before = '}\n\ndef get_risk'
         new_entry = f'    "{tool_name}":{" " * max(1, 24 - len(tool_name))}"{risk}",\n'
-        risk_content = risk_content.replace(
-            insert_before,
-            new_entry + insert_before,
-            1
-        )
-        if not dry_run:
-            risk_content = risk_content.replace("\r\n", "\n").replace("\n", "\r\n")
-            with open(risk_path, "wb") as f:
-                f.write(risk_content.encode("utf-8"))
-        results.append(
-            f"DRY RUN tool_risk.py: would add {tool_name} -> {risk}"
-            if dry_run else
-            f"✅ tool_risk.py: {tool_name} → {risk}"
-        )
+        if insert_before in risk_content:
+            risk_content = risk_content.replace(
+                insert_before,
+                new_entry + insert_before,
+                1
+            )
+            results.append(
+                f"DRY RUN tool_risk.py: would add {tool_name} -> {risk}"
+                if dry_run else
+                f"✅ tool_risk.py: {tool_name} → {risk}"
+            )
+        else:
+            errors.append(f"tool_risk.py: missing risk insert anchor `{insert_before}`")
+            results.append(f"⚠️  tool_risk.py: δεν βρέθηκε anchor για risk insert")
 
     # ── 3. core/capability_registry.json ────────────────────────
     registry_path = os.path.join(BASE_DIR, "core", "capability_registry.json")
+    registry_content = ""
+    registry_new_content = ""
     try:
         with open(registry_path, "r", encoding="utf-8") as f:
-            registry = json.load(f)
+            registry_content = f.read()
+            registry = json.loads(registry_content)
 
         if any(e["name"] == tool_name for e in registry):
             results.append(f"⚠️  capability_registry: {tool_name} ήδη υπάρχει")
+            registry_new_content = registry_content
         else:
             trigger_list = [t.strip() for t in triggers.split(",") if t.strip()] if triggers else [tool_name.replace("_", " ")]
             registry.insert(0, {
@@ -141,25 +168,52 @@ def register_tool(
                 "priority":    9,
                 "triggers":    trigger_list,
             })
-            if not dry_run:
-                with open(registry_path, "w", encoding="utf-8") as f:
-                    json.dump(registry, f, ensure_ascii=False, indent=2)
+            registry_new_content = json.dumps(registry, ensure_ascii=False, indent=2)
             results.append(
                 f"DRY RUN capability_registry: would add {tool_name} -> {agent} ({len(trigger_list)} triggers)"
                 if dry_run else
                 f"✅ capability_registry: {tool_name} → {agent} ({len(trigger_list)} triggers)"
             )
     except Exception as e:
+        errors.append(f"capability_registry.json: {e}")
         results.append(f"⚠️  capability_registry error: {e}")
 
     # ── system.py ΤΕΛΕΥΤΑΙΟ — debounce ξεκινά εδώ ────────────────
+    for label, before, after in (
+        ("tools/system.py", sys_original, sys_content),
+        ("core/tool_risk.py", risk_original, risk_content),
+        ("core/capability_registry.json", registry_content, registry_new_content or registry_content),
+    ):
+        diff = _unified_diff(label, before, after)
+        if diff:
+            diffs.append(f"```diff\n{diff}\n```")
+
+    if errors:
+        summary = "\n".join(results)
+        error_text = "\n".join(f"- {e}" for e in errors)
+        return (
+            f"🔧 register_tool: '{tool_name}'\n"
+            f"{summary}\n\n"
+            f"❌ Δεν εφαρμόστηκε τίποτα γιατί λείπουν απαραίτητα anchors/δεδομένα:\n"
+            f"{error_text}\n\n"
+            f"No files were changed."
+        )
+
     if not dry_run:
+        if risk_content != risk_original:
+            risk_content = risk_content.replace("\r\n", "\n").replace("\n", "\r\n")
+            with open(risk_path, "wb") as f:
+                f.write(risk_content.encode("utf-8"))
+        if registry_new_content and registry_new_content != registry_content:
+            with open(registry_path, "w", encoding="utf-8") as f:
+                f.write(registry_new_content)
         sys_content = sys_content.replace("\r\n", "\n").replace("\n", "\r\n")
         with open(sys_path, "wb") as f:
             f.write(sys_content.encode("utf-8"))
 
     summary = "\n".join(results)
     mode = "DRY RUN " if dry_run else ""
+    diff_text = ("\n\nDIFF PREVIEW:\n" + "\n\n".join(diffs)) if dry_run and diffs else ""
     footer = (
         "No files were changed. Run again with dry_run=False to apply."
         if dry_run else
@@ -167,7 +221,7 @@ def register_tool(
     )
     return (
         f"🔧 {mode}register_tool: '{tool_name}'\n"
-        f"{summary}\n\n"
+        f"{summary}{diff_text}\n\n"
         f"{footer}"
     )
 

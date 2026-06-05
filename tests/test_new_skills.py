@@ -199,6 +199,44 @@ def test_register_tool_dry_run_does_not_modify_files(tmp_path):
         )
 
     assert "DRY RUN" in result
+    assert "DIFF PREVIEW" in result
+    assert "--- a/tools/system.py" in result
+    assert "--- a/core/tool_risk.py" in result
+    assert "--- a/core/capability_registry.json" in result
+    assert "No files were changed" in result
+    assert sys_path.read_text(encoding="utf-8") == before["system"]
+    assert risk_path.read_text(encoding="utf-8") == before["risk"]
+    assert registry_path.read_text(encoding="utf-8") == before["registry"]
+
+
+def test_register_tool_missing_anchors_do_not_partially_write(tmp_path):
+    from astakos_skills.register_tool import register_tool
+    proj = _make_fake_project(tmp_path)
+    (proj / "astakos_skills" / "my_tool.py").write_text("x=1", encoding="utf-8")
+
+    sys_path = proj / "tools" / "system.py"
+    risk_path = proj / "core" / "tool_risk.py"
+    registry_path = proj / "core" / "capability_registry.json"
+    sys_path.write_text("all_tools = []\n", encoding="utf-8")
+    before = {
+        "system": sys_path.read_text(encoding="utf-8"),
+        "risk": risk_path.read_text(encoding="utf-8"),
+        "registry": registry_path.read_text(encoding="utf-8"),
+    }
+
+    with patch("config.BASE_DIR", str(proj)):
+        result = register_tool.func(
+            tool_name="my_tool",
+            description="Test tool",
+            agent="Home_Agent",
+            risk="SAFE",
+            triggers="test trigger",
+            dry_run=False,
+        )
+
+    assert "Δεν εφαρμόστηκε τίποτα" in result
+    assert "missing import anchor" in result
+    assert "missing all_tools anchor" in result
     assert "No files were changed" in result
     assert sys_path.read_text(encoding="utf-8") == before["system"]
     assert risk_path.read_text(encoding="utf-8") == before["risk"]
