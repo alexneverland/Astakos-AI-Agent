@@ -115,6 +115,13 @@ def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
             "status": "missing",
             "error": "Action not found or already executed",
         }
+    if item.get("status") != "pending":
+        return {
+            "ok": False,
+            "status": item.get("status", "not_pending"),
+            "tool": item.get("tool_name"),
+            "error": "Action is no longer pending and cannot be executed",
+        }
 
     tool_name = item["tool_name"]
     tool_args = item.get("tool_args", {})
