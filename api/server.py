@@ -84,6 +84,19 @@ async def require_token(
 active_websockets: list = []
 server_loop = None
 
+
+def _broadcast_ws(payload: dict):
+    """Στέλνει JSON event σε όλα τα συνδεδεμένα WebSocket clients."""
+    import json as _json
+    if not server_loop or not active_websockets:
+        return
+    msg = _json.dumps(payload, ensure_ascii=False)
+    for ws in active_websockets:
+        try:
+            asyncio.run_coroutine_threadsafe(ws.send_text(msg), server_loop)
+        except Exception:
+            pass
+
 class WsLogger:
     """Intercepts print() output and streams it live to Web UI via WebSocket."""
     def __init__(self, orig):
@@ -151,6 +164,38 @@ def append_to_chat_history(role: str, content: str):
     except Exception as e:
         print(f"[ConversationHistory/web]: Σφάλμα shared write: {e}")
     return shared_message_id
+
+
+def notify_telegram_message(role: str, content: str, agent: str | None = None) -> int | None:
+    """
+    Καλείται από τον Telegram handler όταν φτάνει/αποστέλλεται μήνυμα.
+    Αποθηκεύει στη shared SQLite και ειδοποιεί το Web UI μέσω WebSocket.
+    Επιστρέφει το νέο message id ή None αν αποτύχει.
+    """
+    now = datetime.now()
+    try:
+        from memory.conversation_history import append_message
+        from memory.conversation_history import get_max_rowid
+        saved = append_message(
+            role=role,
+            content=content,
+            channel="telegram",
+            timestamp=now,
+            agent=agent,
+        )
+        msg_id = get_max_rowid()
+        _broadcast_ws({
+            "type": "new_message",
+            "channel": "telegram",
+            "id": msg_id,
+            "role": role,
+            "agent": agent,
+            "time": now.strftime("%H:%M"),
+        })
+        return msg_id
+    except Exception as e:
+        print(f"[ConversationHistory/telegram]: Σφάλμα write: {e}")
+        return None
 
 
 def _load_shared_context_messages(channel: str, exclude_message_id: str | None = None) -> list:
@@ -794,6 +839,22 @@ async def read_index():
 @server.get("/health")
 async def health():
     return {"status": "ok", "time": datetime.now().isoformat()}
+
+
+@server.get("/messages/poll")
+async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends(require_token)):
+    """
+    Polling endpoint για το Web UI.
+    Επιστρέφει μηνύματα με id > after_id (default: 0 = όλα).
+    Χρήση: GET /messages/poll?after_id=42&channel=telegram
+    """
+    try:
+        from memory.conversation_history import load_messages_after_rowid, get_max_rowid
+        messages = load_messages_after_rowid(after_rowid=after_id, channel=channel or None, limit=50)
+        current_max = get_max_rowid()
+        return {"messages": messages, "max_id": current_max}
+    except Exception as e:
+        return {"messages": [], "max_id": after_id, "error": str(e)}
 
 
 @server.get("/history")

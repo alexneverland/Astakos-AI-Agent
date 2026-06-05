@@ -609,21 +609,45 @@
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
+    /* ── Telegram live refresh ── */
+    let lastKnownMsgId = 0;
+
+    function renderHistoryMsg(msg) {
+        const sender = (msg.role === 'user' || msg.role === 'Human') ? 'user' : 'ai';
+        const defaultName = sender === 'user' ? 'Λάζαρος' : 'Αστακός';
+        const channelName = msg.channel ? `${msg.channel.charAt(0).toUpperCase()}${msg.channel.slice(1)}` : '';
+        const label = channelName ? `${channelName} / ${msg.agent || defaultName}` : (msg.agent || defaultName);
+        appendMessage(msg.content, sender, label);
+        if (msg.id && msg.id > lastKnownMsgId) lastKnownMsgId = msg.id;
+    }
+
+    async function fetchNewMessages() {
+        try {
+            const res = await fetch(`http://127.0.0.1:8000/messages/poll?after_id=${lastKnownMsgId}&channel=telegram`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.messages && data.messages.length > 0) {
+                data.messages.forEach(renderHistoryMsg);
+            }
+            if (data.max_id && data.max_id > lastKnownMsgId) lastKnownMsgId = data.max_id;
+        } catch (e) { /* server offline, skip */ }
+    }
+
     window.addEventListener('DOMContentLoaded', async () => {
         try {
             const response = await fetch('http://127.0.0.1:8000/history');
             const data = await response.json();
             if (data.history && data.history.length > 0) {
-                data.history.forEach(msg => {
-                    const sender = (msg.role === 'user' || msg.role === 'Human') ? 'user' : 'ai';
-                    const defaultName = sender === 'user' ? 'Λάζαρος' : 'Αστακός';
-                    const channelName = msg.channel ? `${msg.channel.charAt(0).toUpperCase()}${msg.channel.slice(1)}` : '';
-                    const label = channelName ? `${channelName} / ${msg.agent || defaultName}` : (msg.agent || defaultName);
-                    appendMessage(msg.content, sender, label);
-                });
+                data.history.forEach(msg => renderHistoryMsg(msg));
             } else {
                 appendMessage("Καλημέρα Μάστορα! Έτοιμος για μερεμέτια;", "ai", "System");
             }
+            // Φόρτωσε max_id ώστε το polling να ξεκινά από εδώ
+            try {
+                const pr = await fetch(`http://127.0.0.1:8000/messages/poll?after_id=0`);
+                const pd = await pr.json();
+                if (pd.max_id) lastKnownMsgId = pd.max_id;
+            } catch(e) {}
         } catch (error) { console.error("History error:", error); }
     });
 
@@ -810,6 +834,16 @@
     }
 
     ws.onmessage = function(event) {
+        // Δοκιμή: αν είναι JSON event από _broadcast_ws, χειρίσου ανάλογα
+        try {
+            const evt = JSON.parse(event.data);
+            if (evt.type === 'new_message' && evt.channel === 'telegram') {
+                // Νέο Telegram μήνυμα — κάνε fetch μόνο τα νέα
+                fetchNewMessages();
+                return;
+            }
+        } catch(e) { /* plain text log line, συνέχισε κανονικά */ }
+
         const span = document.createElement('span');
         span.innerHTML = parseANSI(event.data);
         logBox.appendChild(span);

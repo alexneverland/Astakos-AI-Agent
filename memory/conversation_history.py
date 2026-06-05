@@ -413,6 +413,54 @@ def load_messages_since(
     return [_row_to_message(row) for row in rows]
 
 
+def load_messages_after_rowid(
+    *,
+    after_rowid: int,
+    channel: str | None = None,
+    limit: int = 50,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> list[dict[str, Any]]:
+    """
+    Επιστρέφει μηνύματα με rowid > after_rowid, ταξινομημένα chronologically.
+    Το rowid είναι το implicit SQLite integer key — monotonically increasing.
+    Χρησιμοποιείται για polling από το Web UI ώστε να πάρει μόνο νέα μηνύματα.
+    """
+    init_db(db_path)
+    clauses = ["rowid > ?"]
+    params: list[Any] = [after_rowid]
+    if channel:
+        clauses.append("channel = ?")
+        params.append(channel)
+    params.append(limit)
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT rowid, * FROM conversation_messages
+            WHERE {' AND '.join(clauses)}
+            ORDER BY rowid ASC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+    msgs = [_row_to_message(row) for row in rows]
+    # Προσθήκη rowid στο dict για να το χρησιμοποιήσει το frontend
+    for msg, row in zip(msgs, rows):
+        msg["rowid"] = row["rowid"] if hasattr(row, "keys") else row[0]
+    return msgs
+
+
+def get_max_rowid(
+    *,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> int:
+    """Επιστρέφει το μέγιστο rowid στο conversation_messages table (0 αν είναι κενό)."""
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        row = conn.execute("SELECT MAX(rowid) FROM conversation_messages").fetchone()
+    val = row[0] if row else None
+    return int(val) if val is not None else 0
+
+
 def load_last_user_activity(
     *,
     channel: str | None = None,
