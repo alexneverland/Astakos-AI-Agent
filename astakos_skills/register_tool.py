@@ -55,7 +55,7 @@ def register_tool(
         results.append(f"⚠️  system.py: import ήδη υπάρχει")
     else:
         # Εισαγωγή μετά από το τελευταίο astakos_skills import
-        last_import = "from astakos_skills.repo_mapper import repo_mapper"
+        last_import = "from astakos_skills.register_tool import register_tool"
         if last_import in sys_content:
             sys_content = sys_content.replace(
                 last_import,
@@ -71,15 +71,13 @@ def register_tool(
     else:
         # Εισαγωγή πριν το κλείσιμο ]
         sys_content = sys_content.replace(
-            "    repo_mapper,\n]",
-            f"    repo_mapper,\n    {tool_name},\n]",
+            "    register_tool,\n]",
+            f"    {tool_name},\n    register_tool,\n]",
             1
         )
         results.append(f"✅ system.py: προστέθηκε στο all_tools")
 
-    sys_content = sys_content.replace("\r\n", "\n").replace("\n", "\r\n")
-    with open(sys_path, "wb") as f:
-        f.write(sys_content.encode("utf-8"))
+    # system.py θα γραφτεί ΤΕΛΕΥΤΑΙΟ μετά το registry
 
     # ── 2. core/tool_risk.py ────────────────────────────────────
     risk_path = os.path.join(BASE_DIR, "core", "tool_risk.py")
@@ -124,6 +122,11 @@ def register_tool(
             results.append(f"✅ capability_registry: {tool_name} → {agent} ({len(trigger_list)} triggers)")
     except Exception as e:
         results.append(f"⚠️  capability_registry error: {e}")
+
+    # ── system.py ΤΕΛΕΥΤΑΙΟ — debounce ξεκινά εδώ ────────────────
+    sys_content = sys_content.replace("\r\n", "\n").replace("\n", "\r\n")
+    with open(sys_path, "wb") as f:
+        f.write(sys_content.encode("utf-8"))
 
     summary = "\n".join(results)
     return (
