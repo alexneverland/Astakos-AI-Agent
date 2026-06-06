@@ -112,6 +112,21 @@ def test_capability_registry_json_read_is_safe():
     policy, _ = classify_command(cmd)
     assert policy == ExecPolicy.SAFE
 
+def test_astakos_skill_direct_python_write_requires_confirmation():
+    cmd = (
+        "python -c \"path='C:/astakos_v2/astakos_skills/scan_receipt.py'; "
+        "f=open(path, 'w', encoding='utf-8'); f.write('x'); f.close()\""
+    )
+    policy, reason = classify_command(cmd)
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+    assert "protected file write" in reason
+
+def test_core_file_set_content_requires_confirmation():
+    cmd = "Set-Content C:\\astakos_v2\\core\\safe_executor.py 'x'"
+    policy, reason = classify_command(cmd)
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+    assert "protected file write" in reason
+
 
 # -- alias bypass -----------------------------------------------
 

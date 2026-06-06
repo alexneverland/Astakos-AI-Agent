@@ -133,6 +133,18 @@ def _make_fake_project(tmp_path):
     return tmp_path
 
 
+def _write_minimal_skill(path):
+    path.write_text(
+        "from langchain_core.tools import tool\n"
+        "\n"
+        "@tool\n"
+        "def my_tool(value: str) -> str:\n"
+        "    \"\"\"Echo text.\"\"\"\n"
+        "    return value\n",
+        encoding="utf-8",
+    )
+
+
 def test_register_tool_missing_skill_file(tmp_path):
     from astakos_skills.register_tool import register_tool
     proj = _make_fake_project(tmp_path)
@@ -174,10 +186,32 @@ def test_register_tool_rejects_invalid_tool_name(tmp_path):
     assert "invalid tool_name" in result
 
 
+def test_register_tool_rejects_skill_without_tool_decorator(tmp_path):
+    from astakos_skills.register_tool import register_tool
+    proj = _make_fake_project(tmp_path)
+    (proj / "astakos_skills" / "my_tool.py").write_text(
+        "def my_tool(value: str) -> str:\n"
+        "    return value\n",
+        encoding="utf-8",
+    )
+
+    with patch("config.BASE_DIR", str(proj)):
+        result = register_tool.func(
+            tool_name="my_tool",
+            agent="Dev_Agent",
+            risk="WARNING",
+            dry_run=True,
+        )
+
+    assert "not a valid tool skill" in result
+    assert "must have @tool" in result
+    assert "No files were changed" in result
+
+
 def test_register_tool_dry_run_does_not_modify_files(tmp_path):
     from astakos_skills.register_tool import register_tool
     proj = _make_fake_project(tmp_path)
-    (proj / "astakos_skills" / "my_tool.py").write_text("x=1", encoding="utf-8")
+    _write_minimal_skill(proj / "astakos_skills" / "my_tool.py")
 
     sys_path = proj / "tools" / "system.py"
     risk_path = proj / "core" / "tool_risk.py"
@@ -286,7 +320,7 @@ def my_tool(value: str) -> str:
 def test_register_tool_missing_anchors_do_not_partially_write(tmp_path):
     from astakos_skills.register_tool import register_tool
     proj = _make_fake_project(tmp_path)
-    (proj / "astakos_skills" / "my_tool.py").write_text("x=1", encoding="utf-8")
+    _write_minimal_skill(proj / "astakos_skills" / "my_tool.py")
 
     sys_path = proj / "tools" / "system.py"
     risk_path = proj / "core" / "tool_risk.py"
@@ -362,7 +396,7 @@ def test_register_tool_idempotent(tmp_path):
     """Δεύτερη κλήση δεν κάνει διπλοεγγραφή."""
     from astakos_skills.register_tool import register_tool
     proj = _make_fake_project(tmp_path)
-    (proj / "astakos_skills" / "my_tool.py").write_text("x=1", encoding="utf-8")
+    _write_minimal_skill(proj / "astakos_skills" / "my_tool.py")
 
     with patch("config.BASE_DIR", str(proj)):
         register_tool.func(tool_name="my_tool", risk="WARNING")

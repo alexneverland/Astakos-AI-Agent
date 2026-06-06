@@ -7,6 +7,7 @@ import os
 import json
 import re
 import difflib
+import ast
 from langchain_core.tools import tool
 
 
@@ -20,6 +21,58 @@ def _unified_diff(label: str, before: str, after: str) -> str:
         tofile=f"b/{label}",
         lineterm="",
     ))
+
+
+def _decorator_name(decorator) -> str:
+    if isinstance(decorator, ast.Call):
+        return _decorator_name(decorator.func)
+    if isinstance(decorator, ast.Name):
+        return decorator.id
+    if isinstance(decorator, ast.Attribute):
+        base = _decorator_name(decorator.value)
+        return f"{base}.{decorator.attr}" if base else decorator.attr
+    return ""
+
+
+def _validate_skill_tool(skill_path: str, tool_name: str) -> str:
+    try:
+        with open(skill_path, "r", encoding="utf-8") as f:
+            source = f.read()
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        return f"Skill syntax error on line {exc.lineno}: {exc.msg}"
+    except Exception as exc:
+        return f"Could not read skill file: {exc}"
+
+    functions = [
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    matching = [node for node in functions if node.name == tool_name]
+    if len(matching) != 1:
+        return f"Skill must contain exactly one top-level function named '{tool_name}'."
+
+    has_tool = any(
+        _decorator_name(dec).split(".")[-1] == "tool"
+        for dec in matching[0].decorator_list
+    )
+    if not has_tool:
+        return (
+            f"Function '{tool_name}' must have @tool. "
+            "Create or rewrite the skill with write_custom_tool first."
+        )
+
+    extra_tools = [
+        node.name for node in functions
+        if node.name != tool_name and any(
+            _decorator_name(dec).split(".")[-1] == "tool"
+            for dec in node.decorator_list
+        )
+    ]
+    if extra_tools:
+        return f"Only one @tool function is allowed. Extra tools: {', '.join(extra_tools)}."
+
+    return ""
 
 
 @tool
@@ -65,6 +118,14 @@ def register_tool(
         return "System Error: invalid skill path."
     if not os.path.exists(skill_path):
         return f"❌ Δεν βρέθηκε το αρχείο: astakos_skills/{tool_name}.py"
+
+    validation_error = _validate_skill_tool(skill_path, tool_name)
+    if validation_error:
+        return (
+            f"System Error: astakos_skills/{tool_name}.py is not a valid tool skill.\n"
+            f"{validation_error}\n"
+            "No files were changed."
+        )
 
     results = []
     errors = []

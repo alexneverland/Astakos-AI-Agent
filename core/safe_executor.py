@@ -72,6 +72,37 @@ _WARNING = [
     r"Set-Content", r"Out-File",
 ]
 
+_PROTECTED_WRITE_PATHS = (
+    r"astakos_skills[/][^/\s'\";]+\.py",
+    r"tools[/]system\.py",
+    r"core[/]tool_risk\.py",
+    r"core[/]capability_registry\.json",
+    r"core[/]safe_executor\.py",
+    r"core[/]graph\.py",
+    r"core[/]prompts\.md",
+)
+
+
+def _protected_file_write_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
+    """Require approval for terminal writes to skill/registry/core files."""
+    normalized = cmd.replace("\\", "/")
+    protected = "|".join(_PROTECTED_WRITE_PATHS)
+    if not re.search(protected, normalized, re.IGNORECASE):
+        return None, ""
+
+    write_patterns = (
+        r"\bopen\s*\([^)]*,\s*['\"][wax+]",
+        r"\b(Set-Content|Out-File|Add-Content)\b",
+        r">\s*[^&|]+",
+        r">>\s*[^&|]+",
+        r"\.write\s*\(",
+        r"\.write_text\s*\(",
+    )
+    if any(re.search(pattern, cmd, re.IGNORECASE) for pattern in write_patterns):
+        return ExecPolicy.REQUIRE_CONFIRMATION, "protected file write via terminal"
+
+    return None, ""
+
 def _register_tool_terminal_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
     """Detect register_tool apply attempts hidden inside terminal commands."""
     lowered = cmd.lower().replace("\\", "/")
@@ -112,6 +143,9 @@ def classify_command(cmd: str) -> tuple[ExecPolicy, str]:
     for p in _BLOCKED:
         if re.search(p, cmd, re.IGNORECASE):
             return ExecPolicy.BLOCKED, p
+    protected_policy, protected_reason = _protected_file_write_policy(cmd)
+    if protected_policy is not None:
+        return protected_policy, protected_reason
     register_policy, register_reason = _register_tool_terminal_policy(cmd)
     if register_policy is not None:
         return register_policy, register_reason

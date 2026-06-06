@@ -97,3 +97,27 @@ def my_tool(value: str) -> str:
 
     assert "write_custom_tool" in result
     assert not (tmp_path / "my_tool.py").exists()
+
+
+def test_write_custom_tool_allows_attribute_image_open(tmp_path, monkeypatch):
+    import tools.system as system
+
+    monkeypatch.setattr(system, "WORKSPACE_DIR", str(tmp_path))
+    code = '''
+from langchain_core.tools import tool
+
+class Image:
+    @staticmethod
+    def open(value: str) -> str:
+        return value
+
+@tool
+def image_tool(value: str) -> str:
+    """Uses Image.open without using builtin open."""
+    return Image.open(value)
+'''
+
+    result = system.write_custom_tool.func("image_tool", code)
+
+    assert "forbidden pattern" not in result
+    assert "Tool 'image_tool'" in result

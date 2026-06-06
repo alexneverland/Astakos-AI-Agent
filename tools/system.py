@@ -1183,7 +1183,6 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
         r"__import__",
         r"eval\s*\(",
         r"exec\s*\(",
-        r"open\s*\(",                         # filesystem read/write
         r"pathlib",                           # filesystem ops
         r"shutil",                            # copy/move/delete files
         r"import\s+socket",                   # raw network
@@ -1223,6 +1222,10 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
         tree = ast.parse(clean_code)
     except SyntaxError as se:
         return f"❌ Συντακτικό σφάλμα (γραμμή {se.lineno}): {se.msg}\nΚοίτα: {se.text}"
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "open":
+            return "System Error: Απορρίφθηκε — ανιχνεύτηκε απαγορευμένο built-in open() call."
 
     top_level_functions = [
         node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
