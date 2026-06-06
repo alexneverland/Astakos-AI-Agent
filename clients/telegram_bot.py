@@ -1279,6 +1279,7 @@ def _load_recent_proactive_context(limit: int = 10) -> str:
     for entry in entries[-limit:]:
         role = entry.get("role", "unknown")
         channel = entry.get("channel", "?")
+        time_label = entry.get("time") or str(entry.get("timestamp", ""))[11:16]
         content = clean_message(str(entry.get("content", ""))).strip()
         if not content:
             continue
@@ -1286,7 +1287,7 @@ def _load_recent_proactive_context(limit: int = 10) -> str:
         if len(content) > 220:
             content = content[:217].rstrip() + "..."
         speaker = "Λάζαρος" if role == "user" else "Αστακός"
-        lines.append(f"- [{channel}] {speaker}: {content}")
+        lines.append(f"- [{channel} {time_label}] {speaker}: {content}")
 
     return "\n".join(lines[-limit:])
 
@@ -1321,6 +1322,10 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
         "Πριν γράψεις, διάβασε το πρόσφατο ιστορικό. Αν υπάρχει ζωντανό context "
         "(π.χ. παίζουν επιτραπέζιο, είναι σε ποδόσφαιρο, δουλεύει, είναι έξω), "
         "δέσε την ατάκα φυσικά με αυτό. Αν το ιστορικό δεν σχετίζεται, αγνόησέ το.\n"
+        "Χρησιμοποίησε τις ώρες στα πρόσφατα μηνύματα: μην παρουσιάζεις σαν τελειωμένο "
+        "κάτι που ξεκίνησε πριν λίγα λεπτά ή δεν δηλώθηκε ότι ολοκληρώθηκε. "
+        "Αν ο Λάζαρος είπε μόλις 'μαγειρεύω', 'παίζουμε', 'φεύγουμε' ή 'πάμε', "
+        "μίλα σαν να είναι σε εξέλιξη, όχι σαν να έγινε ήδη.\n"
         "ΑΠΑΓΟΡΕΥΕΤΑΙ: 'δεν είναι η ώρα για', 'υπενθύμιση', 'θυμίζω', το event name κυριολεκτικά.\n"
         "Παραδείγματα:\n"
         "- 'Μάστορα, ο μικρός θα σε κυνηγάει αν δεν τον πας για ύπνο σε λίγο 😄'\n"
