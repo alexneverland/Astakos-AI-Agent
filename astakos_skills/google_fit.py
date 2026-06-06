@@ -155,6 +155,59 @@ def get_heart_rate(days_ago: int = 0) -> dict:
     return {"avg_bpm": round(avg_bpm), "max_bpm": round(max_bpm)}
 
 
+def get_morning_summary() -> str:
+    """
+    Morning briefing:
+    - steps: yesterday's full day
+    - sleep: last night (yesterday evening -> today noon)
+    - heart: yesterday, with today fallback if yesterday has no data
+    """
+    lines = ["\U0001f305 *Morning Google Fit briefing:*\n"]
+
+    try:
+        steps = get_steps(1)
+        if steps > 0:
+            emoji = "\U0001f525" if steps >= 10000 else "\U0001f463" if steps >= 5000 else "\U0001f40c"
+            lines.append(f"{emoji} Steps yesterday: *{steps:,}*")
+        else:
+            lines.append("\U0001f463 Steps yesterday: no data found")
+    except Exception as e:
+        lines.append(f"\U0001f463 Steps yesterday: error ({e})")
+
+    try:
+        sleep = get_sleep(0)
+        if sleep["total_minutes"] > 0:
+            h = sleep["total_minutes"] // 60
+            m = sleep["total_minutes"] % 60
+            sleep_emoji = "\U0001f634" if h >= 7 else "\U0001f610" if h >= 5 else "\U0001f635"
+            detail = []
+            if sleep["deep_minutes"] > 0:
+                detail.append(f"deep {sleep['deep_minutes']}'")
+            if sleep["rem_minutes"] > 0:
+                detail.append(f"REM {sleep['rem_minutes']}'")
+            detail_str = f" ({', '.join(detail)})" if detail else ""
+            lines.append(f"{sleep_emoji} Sleep last night: *{h}h {m}'*{detail_str}")
+        else:
+            lines.append("\U0001f634 Sleep last night: no data found")
+    except Exception as e:
+        lines.append(f"\U0001f634 Sleep last night: error ({e})")
+
+    try:
+        hr = get_heart_rate(1)
+        hr_label = "yesterday"
+        if hr["avg_bpm"] <= 0:
+            hr = get_heart_rate(0)
+            hr_label = "today so far"
+        if hr["avg_bpm"] > 0:
+            lines.append(f"\u2764\ufe0f Heart {hr_label}: avg *{hr['avg_bpm']} bpm* / max {hr['max_bpm']} bpm")
+        else:
+            lines.append("\u2764\ufe0f Heart: no data found")
+    except Exception as e:
+        lines.append(f"\u2764\ufe0f Heart: error ({e})")
+
+    return "\n".join(lines)
+
+
 def get_daily_summary(days_ago: int = 1) -> str:
     """
     Πλήρης σύνοψη για μία μέρα — βήματα + ύπνος + παλμοί.

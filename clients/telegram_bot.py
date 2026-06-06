@@ -1578,8 +1578,8 @@ def job_morning_fit_briefing():
             if f.read().strip() == today_str:
                 return
     try:
-        from astakos_skills.google_fit import get_daily_summary
-        summary = get_daily_summary(days_ago=1)
+        from astakos_skills.google_fit import get_morning_summary
+        summary = get_morning_summary()
         send_telegram_msg(f"🌅 *Καλημέρα Μάστορα!*\n\n{summary}")
         with open(flag_file, "w") as f:
             f.write(today_str)
