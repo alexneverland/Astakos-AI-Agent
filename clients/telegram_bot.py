@@ -344,11 +344,15 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         memory_analysis = clean_message(analysis_raw.content)
         print(f"\033[94m[Vision]: {memory_analysis[:120]}...\033[0m")
 
-        # 4α. ΜΕ caption → έλεγχος για /nutrition ή κανονική ερώτηση
+        # 4α. ΜΕ caption → έλεγχος για /nutrition, /receipt ή κανονική ερώτηση
         if caption:
-            if caption.strip().lower() == "/nutrition":
+            caption_cmd = caption.strip().lower()
+            if caption_cmd == "/nutrition":
                 send_telegram_msg("🔍 Αναλύω τη διατροφική αξία...")
                 threading.Thread(target=_run_nutrition, args=(local_path, chat_id), daemon=True).start()
+            elif caption_cmd == "/receipt":
+                send_telegram_msg("🧾 Σκανάρω την απόδειξη...")
+                threading.Thread(target=_run_receipt, args=(local_path, chat_id), daemon=True).start()
             else:
                 _process_photo_with_question(filename, local_path, memory_analysis, caption, chat_id)
 
@@ -443,6 +447,16 @@ def _run_nutrition(image_path: str, chat_id: str):
         send_telegram_msg(result)
     except Exception as e:
         send_telegram_msg(f"❌ Σφάλμα nutrition analysis: {e}")
+
+
+def _run_receipt(image_path: str, chat_id: str):
+    """Τρέχει το receipt scanner και στέλνει αποτέλεσμα."""
+    try:
+        from astakos_skills.scan_receipt import scan_receipt
+        result = scan_receipt.invoke({"image_path": image_path})
+        send_telegram_msg(result)
+    except Exception as e:
+        send_telegram_msg(f"❌ Σφάλμα receipt scan: {e}")
 
 
 def _run_story_maker(theme: str, characters: str, chat_id: str):
@@ -1107,6 +1121,7 @@ def run_polling():
                         "🦞 *Αστακός — Εντολές*\n\n"
                         "/status — Κατάσταση scheduler & ενεργών jobs\n"
                         "/nutrition — Ανάλυση προϊόντος \\(στείλε φωτό πρώτα\\)\n"
+                        "/receipt — Σκανάρισμα απόδειξης \\(στείλε φωτό πρώτα\\)\n"
                         "/story \\[θέμα\\] — Παραμύθι για τον Αλέξανδρο \\+ εικόνες\n"
                         "             π\\.χ\\. /story δεινόσαυροι \\| Αλέξανδρος και Rex\n"
                         f"/voice — Toggle φωνητικές απαντήσεις \\(τώρα: {voice_status}\\)\n"
@@ -1150,6 +1165,22 @@ def run_polling():
                         ).start()
                     else:
                         send_telegram_msg("📷 Στείλε φωτογραφία της ετικέτας/συσκευασίας και μετά /nutrition (εντός 30\").")
+                    continue
+
+                if user_text.lower() == "/receipt":
+                    with pending_photo_lock:
+                        p = pending_photo if (pending_photo and (time.time() - pending_photo["timestamp"]) < 30) else None
+                        if p:
+                            pending_photo = None
+                    if p:
+                        send_telegram_msg("🧾 Σκανάρω την απόδειξη...")
+                        threading.Thread(
+                            target=_run_receipt,
+                            args=(p["path"], chat_id),
+                            daemon=True
+                        ).start()
+                    else:
+                        send_telegram_msg("📷 Στείλε φωτογραφία απόδειξης και μετά /receipt (εντός 30\").")
                     continue
 
                 if user_text.lower() == "/end":
