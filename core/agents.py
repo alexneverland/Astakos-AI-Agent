@@ -32,7 +32,7 @@ from tools.system import (
     search_memory, save_to_memory, delete_from_memory, retrieve_photo,
     set_local_reminder, set_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
-    read_local_file, write_code, run_code, write_custom_tool,
+    read_local_file, write_code, run_code, write_custom_tool, register_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, get_routines, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
     save_goal_tool, update_goal_status_tool,
 )
@@ -192,7 +192,7 @@ def dev_agent_node(state):
     prompt_content = build_prompt(history, system_base)
 
     tools = [
-        write_code, run_code, read_local_file, write_custom_tool,
+        write_code, run_code, read_local_file, write_custom_tool, register_tool,
         delete_from_memory, search_memory, save_to_memory,
         execute_local_pipeline, control_spotify, control_vacuum, 
         get_navigation_info, recipe_expert, log_meal, 

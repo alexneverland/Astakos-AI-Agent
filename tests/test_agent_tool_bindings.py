@@ -19,3 +19,10 @@ def test_git_agent_uses_terminal_not_read_local_file():
 
     assert "run_terminal_command" in source
     assert "read_local_file" not in source
+
+
+def test_dev_agent_binds_register_tool():
+    source = _function_source("dev_agent_node")
+
+    assert "write_custom_tool" in source
+    assert "register_tool" in source
