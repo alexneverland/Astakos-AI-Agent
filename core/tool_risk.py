@@ -60,6 +60,7 @@ TOOL_RISK: dict[str, str] = {
     "repo_mapper":              "SAFE",     # read-only AST scan
     "register_tool":            "CRITICAL", # τροποποιεί system.py + tool_risk.py
     "scan_receipt":            "WARNING",
+    "text_stats":              "SAFE",
 }
 
 def get_risk(tool_name: str) -> str:

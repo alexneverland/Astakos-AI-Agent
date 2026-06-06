@@ -1,5 +1,17 @@
 [
   {
+    "name": "text_stats",
+    "description": "Calculates text statistics including characters, words, lines, and estimated reading time.",
+    "agent": "Dev_Agent",
+    "priority": 9,
+    "triggers": [
+      "text stats",
+      "count words",
+      "count characters",
+      "reading time"
+    ]
+  },
+  {
     "name": "scan_receipt",
     "description": "Σκανάρει φωτογραφία απόδειξης και επιστρέφει JSON με κατάστημα, ημερομηνία, σύνολο και προϊόντα.",
     "agent": "Dev_Agent",

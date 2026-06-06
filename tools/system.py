@@ -40,6 +40,7 @@ from astakos_skills.search_flights import search_flights
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 from astakos_skills.repo_mapper import repo_mapper
 from astakos_skills.register_tool import register_tool
+from astakos_skills.text_stats import text_stats
 from astakos_skills.scan_receipt import scan_receipt
 
 # ────────────────────────────────────────────────────────────────
@@ -1925,5 +1926,6 @@ all_tools = [
     duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool,
     repo_mapper,
     scan_receipt,
+    text_stats,
     register_tool,
 ]
