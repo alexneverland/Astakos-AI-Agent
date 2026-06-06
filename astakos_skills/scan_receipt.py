@@ -1,7 +1,6 @@
 import json
 import os
 
-from google import genai
 from google.genai import types
 from langchain_core.tools import tool
 from PIL import Image
@@ -13,13 +12,6 @@ def scan_receipt(image_path: str) -> str:
     if not image_path or not os.path.exists(image_path):
         return json.dumps(
             {"error": f"Image file not found: {image_path}"},
-            ensure_ascii=False,
-        )
-
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        return json.dumps(
-            {"error": "Missing GEMINI_API_KEY or GOOGLE_API_KEY."},
             ensure_ascii=False,
         )
 
@@ -40,9 +32,10 @@ Use null when a field is not visible.
 """
 
     try:
-        client = genai.Client(api_key=api_key)
+        from core.brain import vertex_client
+
         image = Image.open(image_path)
-        response = client.models.generate_content(
+        response = vertex_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=[prompt, image],
             config=types.GenerateContentConfig(temperature=0.1),

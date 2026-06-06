@@ -1,5 +1,4 @@
 from langchain_core.tools import tool
-import math
 
 import json
 @tool
@@ -13,7 +12,7 @@ def text_stats(text: str) -> str:
     lines = len(text.splitlines())
     
     # Average reading speed: ~200 words per minute -> ~3.33 words per second
-    estimated_reading_seconds = int(words / 3.33)
+    estimated_reading_seconds = max(1, round(words / 3.33)) if words > 0 else 0
     
     result = {
         "characters": characters,

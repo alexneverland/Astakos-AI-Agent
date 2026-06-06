@@ -943,7 +943,14 @@ def _handle_approval_callback(cq: dict):
         if action == "approve":
             item = get_pending(tool_call_id)  # get πρωτα, OXI pop
             if not item:
-                send_telegram_msg("⚠️ Το pending action δεν βρέθηκε (ίσως έχει ήδη εκτελεστεί).")
+                # Duplicate/stale callback after a reload or an already executed action.
+                # Keep the chat quiet and just remove the old inline keyboard if possible.
+                requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageReplyMarkup",
+                    json={"chat_id": chat_id, "message_id": msg_id, "reply_markup": {"inline_keyboard": []}},
+                    timeout=5,
+                )
+                print(f"\033[93m[ApprovalCallback]: stale approve callback ignored ({tool_call_id})\033[0m")
                 return
 
             tool_name = item["tool_name"]
