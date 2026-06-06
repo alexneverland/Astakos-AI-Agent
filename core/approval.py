@@ -44,6 +44,13 @@ def _effective_risk(tc: dict) -> str:
         elif action in _DRIVE_SAFE:
             return "SAFE"
         return "WARNING"  # upload/download/rename/create_folder
+    if name == "mail_manager":
+        action = str(tc.get("args", {}).get("action", "")).lower()
+        if action in {"send", "reply", "delete"}:
+            return "CRITICAL"
+        if action in {"search", "check_emails", "check", "read", "read_full"}:
+            return "WARNING"
+        return "CRITICAL"
 
     return _get_risk(name)
 

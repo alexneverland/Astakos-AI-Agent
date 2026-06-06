@@ -55,8 +55,28 @@ def test_is_critical_github():
     tc = {"name": "github_manager", "args": {}, "id": "abc"}
     assert is_critical(tc) is True
 
-def test_is_critical_mail():
-    tc = {"name": "mail_manager", "args": {}, "id": "abc"}
+def test_mail_send_is_critical():
+    tc = {"name": "mail_manager", "args": {"action": "send"}, "id": "abc"}
+    assert is_critical(tc) is True
+
+def test_mail_reply_is_critical():
+    tc = {"name": "mail_manager", "args": {"action": "reply"}, "id": "abc"}
+    assert is_critical(tc) is True
+
+def test_mail_delete_is_critical():
+    tc = {"name": "mail_manager", "args": {"action": "delete"}, "id": "abc"}
+    assert is_critical(tc) is True
+
+def test_mail_search_is_not_critical():
+    tc = {"name": "mail_manager", "args": {"action": "search"}, "id": "abc"}
+    assert is_critical(tc) is False
+
+def test_mail_read_full_is_not_critical():
+    tc = {"name": "mail_manager", "args": {"action": "read_full"}, "id": "abc"}
+    assert is_critical(tc) is False
+
+def test_mail_unknown_action_stays_critical():
+    tc = {"name": "mail_manager", "args": {"action": "surprise"}, "id": "abc"}
     assert is_critical(tc) is True
 
 def test_is_critical_process_and_clear_linkedin_post():

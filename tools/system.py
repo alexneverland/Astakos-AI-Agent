@@ -13,6 +13,7 @@ import math
 import subprocess
 import base64
 from datetime import datetime, timedelta
+from email.message import EmailMessage
 from langchain_core.tools import tool
 from pypdf import PdfReader
 from github import Github
@@ -1428,6 +1429,29 @@ def clean_text(text):
     cleaned = '\n'.join(lines)
     return re.sub(r'\s+', ' ', cleaned).strip()
 
+
+def _encode_gmail_message(message: EmailMessage) -> str:
+    return base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+
+
+def _build_plain_email(to_email: str, subject: str, body: str) -> EmailMessage:
+    message = EmailMessage()
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.set_content(body, charset="utf-8")
+    return message
+
+
+def _build_plain_reply(to_email: str, subject: str, body: str,
+                       message_id: str = "", references: str = "") -> EmailMessage:
+    message = _build_plain_email(to_email, subject, body)
+    if message_id:
+        message["In-Reply-To"] = message_id
+    if references:
+        message["References"] = references
+    return message
+
+
 @tool
 def mail_manager(action: str, query: str = None, email_id: str = None,
                  to_email: str = None, subject: str = None, body: str = None,
@@ -1440,9 +1464,12 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
              'delete' (θέλει email_id).
     """
     try:
+        if not action:
+            return "❌ Δώσε action: search, read_full, send, reply ή delete."
+
         print(f"\033[94m[Mail API]: Εκτέλεση ενέργειας '{action}'...\033[0m")
-        service = get_gmail_service()
         action = action.lower()
+        service = get_gmail_service()
 
         # =========================
         # SEND
@@ -1450,14 +1477,7 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         if action == "send":
             if not to_email or not subject or not body:
                 return "❌ Για send χρειάζονται: to_email, subject, body."
-            message = (
-                f"To: {to_email}\r\n"
-                f"Subject: {subject}\r\n"
-                f"Content-Type: text/plain; charset=utf-8\r\n"
-                f"\r\n"
-                f"{body}"
-            )
-            raw = base64.urlsafe_b64encode(message.encode("utf-8")).decode("utf-8")
+            raw = _encode_gmail_message(_build_plain_email(to_email, subject, body))
             service.users().messages().send(userId="me", body={"raw": raw}).execute()
             return "✅ Email στάλθηκε κανονικά."
 
@@ -1481,21 +1501,22 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
             
             reply_subject = orig_subject if orig_subject.startswith("Re:") else f"Re: {orig_subject}"
             references = f"{orig_refs} {orig_msg_id}".strip()
-            
-            reply_message = (
-                f"To: {orig_from}\r\n"
-                f"Subject: {reply_subject}\r\n"
-                f"In-Reply-To: {orig_msg_id}\r\n"
-                f"References: {references}\r\n"
-                f"Content-Type: text/plain; charset=utf-8\r\n"
-                f"\r\n"
-                f"{body}"
+
+            reply_message = _build_plain_reply(
+                orig_from,
+                reply_subject,
+                body,
+                message_id=orig_msg_id,
+                references=references,
             )
-            raw = base64.urlsafe_b64encode(reply_message.encode("utf-8")).decode("utf-8")
+            raw = _encode_gmail_message(reply_message)
             thread_id = original.get("threadId")
+            send_body = {"raw": raw}
+            if thread_id:
+                send_body["threadId"] = thread_id
             service.users().messages().send(
                 userId="me",
-                body={"raw": raw, "threadId": thread_id}
+                body=send_body
             ).execute()
             return f"✅ Reply στάλθηκε στον {orig_from}."
 
