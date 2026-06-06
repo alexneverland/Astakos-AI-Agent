@@ -70,7 +70,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Hybrid Memory | ChromaDB vector store + SQLite + JSON profile/session state for semantic and structured memory. |
 | Routine State Machine | `LEARNED → ACTIVE → TRIGGER_PENDING → CONFIRMED / IGNORED / DISMISSED → DECAYED → ARCHIVED`. |
 | Nightly Analytics Engine | LLM batch-analyzes the last 30 days of shared SQLite conversation history to detect recurring patterns automatically. |
-| LLM-Crafted Proactive Messages | Reminder text is generated naturally by the LLM instead of static templates. |
+| LLM-Crafted Proactive Messages | Reminder text is generated naturally by the LLM instead of static templates, with recent Telegram/Web history and timestamps injected so messages feel contextual instead of random. |
 | Central Scheduler | `AstakosScheduler` runs a single background scheduler with watchdogs, rate limits, and quiet hours. |
 | Anti-Spam Intelligence | Adaptive cooldown: 20h → 40h → 72h on repeated ignores, plus batching for simultaneous routines. |
 | Capability Registry | Keyword-based pre-routing before the LLM Supervisor for faster dispatch and fewer wasted tokens. |
@@ -89,7 +89,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Formal Event Bus | Pub/sub through `core/event_bus.py` for `routine_triggered`, `routine_confirmed`, `session_ended`, and more. |
 | Unified Session Memory | One shared session log across Telegram, Web, and Terminal for cross-channel context awareness. |
 | Shared Conversation History | Telegram and Web write to one SQLite conversation store, with legacy JSON backfill, SQLite-first context reads, and analytics using the shared history. |
-| Google Fit Integration | Daily steps, sleep phases (deep / REM / light), and heart rate from Samsung Health via Google Fit. Morning briefing at 08:00. |
+| Google Fit Integration | Daily steps, sleep phases (deep / REM / light), and heart rate from Samsung Health via Google Fit. Morning briefing at 08:00 uses yesterday's steps, last night's sleep, and heart-rate fallback logic. |
 | Memory Scoring | Every memory has `importance`, `confidence`, `last_accessed`, and `retrieval_count`. `compute_score()` = importance × 0.4 + retrieval × 0.3 + confidence × 0.2 + freshness × 0.1. |
 | Unified Memory Entry Point | `memory.save(memory_type=...)` handles facts, photos, documents, sessions, goals, reflections, and events. |
 | Reflection Engine | Nightly self-evaluation and post-plan reflection extract lessons, save them to ChromaDB, and auto-apply supported improvements. |
@@ -103,7 +103,8 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Runtime Dashboard | `/debug/runtime` and `/debug` expose scheduler health, jobs, event throughput, routines, goals, pending confirmations, pending actions, shared conversation SQLite stats, and session backlog. |
 | Voice I/O | STT via Vertex AI Gemini + TTS via `edge-tts` using `el-GR-NestorasNeural`; mirror mode supports voice in → voice out. |
 | Product Analyzer | `/nutrition` scans food, cosmetics, and household product labels with a score from 1-10 and a kids note. |
-| Smart Photo Pending | Send a photo and Astakos waits 30 seconds for a caption or `/nutrition`, avoiding duplicate responses. |
+| Receipt Scanner | `/receipt` scans the last Telegram photo as a shopping receipt and returns structured JSON with store, date, total, currency, and items. |
+| Smart Photo Pending | Send a photo and Astakos waits 30 seconds for a caption, `/nutrition`, or `/receipt`, avoiding duplicate responses. |
 | Document Reading | Uploaded documents are summarized and can be saved into memory. |
 | Story Maker | `/story [theme] \| [characters]` generates a children's story plus 3 Pollinations.ai illustrations. |
 | Typing Indicator | Telegram shows typing while Astakos is processing. |
@@ -119,6 +120,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Safe Executor | `core/safe_executor.py` classifies terminal commands as SAFE, WARNING, REQUIRE_CONFIRMATION, or BLOCKED. |
 | Action Approval Dashboard | Pending CRITICAL tool approvals can be approved or rejected from Telegram and the debug dashboard. |
 | Tool Risk Registry | `core/tool_risk.py` defines SAFE / WARNING / CRITICAL behavior per tool. |
+| Skill Creation Flow | New skills are created with `write_custom_tool`, validated for `@tool`, previewed with `register_tool(dry_run=True)`, and applied only after approval. Skills that need Gemini/vision use shared `core.brain` clients instead of raw API keys. |
 | Planner Agent | `/plan` decomposes a goal into tasks, executes them step-by-step, captures results, and reflects afterward. |
 
 ---
@@ -165,7 +167,7 @@ Background jobs run through `AstakosScheduler`:
 | `job_check_reminders` | 20s | Local reminders. |
 | `job_check_routines` | 60s | Adaptive routine reminders and anti-spam cooldowns. |
 | `job_proactive_scan` | 12h | Watch-folder analysis and proactive scan. |
-| `job_morning_fit_briefing` | 1h | Fires at 08:00 for Google Fit daily summary. |
+| `job_morning_fit_briefing` | 1h | Fires at 08:00 for the Google Fit morning summary: yesterday's steps, last night's sleep, and heart rate. |
 | `job_goal_followup` | 1h | Fires at 10:00 for stale-goal semantic checks. |
 | `run_analytics` | Nightly 03:00 | LLM batch routine detection. |
 
@@ -188,7 +190,7 @@ How it works:
 1. **Nightly Analytics** — every night at 03:00, the analytics engine reads the last 30 days of shared SQLite conversation history across Telegram and Web, sends user messages in batches to the LLM, and extracts recurring activities with type and timing.
 2. **Pattern Detection** — activities are grouped by day/time bucket (±15 min), merged if similar, and promoted to `Everyday` if they appear 5+ days a week.
 3. **Threshold** — a routine is saved only if it appears 3+ times across 2+ different weeks.
-4. **Proactive Message** — when a routine is due in about 30 minutes, the LLM writes a natural message to send you.
+4. **Proactive Message** — when a routine is due in about 30 minutes, the LLM writes a natural message using the routine context plus recent shared Telegram/Web history with timestamps.
 
 Routine lifecycle:
 
@@ -224,9 +226,12 @@ astakos/
 │   ├── linkedin_state_manager.py
 │   ├── nutrition_analyzer.py # Universal product label analyzer
 │   ├── recipe_expert.py
+│   ├── register_tool.py      # Safe skill registration with dry-run previews
+│   ├── scan_receipt.py       # Receipt image parser for /receipt
 │   ├── search_ferries.py
 │   ├── search_flights.py
-│   └── story_maker.py        # Children's story generator + illustrations
+│   ├── story_maker.py        # Children's story generator + illustrations
+│   └── text_stats.py         # Example generated skill
 ├── clients/
 │   └── telegram_bot.py       # Telegram polling, handlers, scheduler
 ├── core/
@@ -292,6 +297,7 @@ Runtime files such as `*.json`, `*.db`, `chroma_db/`, `logs/`, uploads, credenti
 | `/status` | Show scheduler status, job health, queue size, quiet hours, and overrides. |
 | `/voice` | Toggle voice reply mode ON/OFF. |
 | `/nutrition` | Analyze the last photo as a product label (food / cosmetic / household). |
+| `/receipt` | Analyze the last photo as a shopping receipt and return structured expense JSON. |
 | `/story [theme] \| [characters]` | Generate a children's story plus 3 illustrations. |
 | `/plan [goal]` | Break a goal into tasks and execute them step by step. |
 | `/confirm <cmd>` | Execute a shell command after confirmation. |
@@ -380,9 +386,10 @@ Shutdown behavior:
 
 - [x] Voice I/O — STT + TTS with Greek Neural voice, mirror mode, and `/voice` toggle.
 - [x] Universal product analyzer (`/nutrition`) via Vision LLM.
+- [x] Receipt scanner (`/receipt`) for Telegram photos, returning store/date/total/items JSON through the shared Vertex AI client.
 - [x] Smart photo pending system with a 30s caption window, history context, and no double messages.
 - [x] Document reading on upload with instant summary and optional save to memory.
-- [x] Google Fit integration — steps, sleep phases, heart rate, and daily morning briefing.
+- [x] Google Fit integration — steps, sleep phases, heart rate, and morning briefing with correct day/night windows.
 - [x] Story maker — `/story` with AI-generated illustrations via Pollinations.ai.
 - [x] Local security — bearer token auth, localhost CORS, upload limits, and extension whitelist.
 - [x] Auto-restart on code changes — core source `.py` files and `prompts.md` trigger restarts; runtime data and generated `astakos_skills/` files are excluded so skill creation does not interrupt the agent.
@@ -402,12 +409,14 @@ Shutdown behavior:
 - [x] Unified Session Memory — shared log across all channels, with session summary on shutdown and Ctrl+C drain handling.
 - [x] Cross-channel awareness — unified `SESSION_LOGS` for Telegram, Web, and Terminal context.
 - [x] Shared Conversation History — Telegram and Web write to one SQLite store, with legacy JSON backfill and analytics reading from the shared history.
+- [x] Contextual Proactive Messages — routine pings include recent shared history and message timestamps so the LLM can reference current activity naturally.
 - [x] SQLite-first history views and cleanup — Web history and analytics read from shared SQLite, while `clean.py` can check and maintain the conversation database.
 - [x] Auto Session Rollover — long conversations are summarized automatically after 40 unsummarized exchanges, plus manual and shutdown summaries.
 - [x] Pending Approval TTL — `expire_stale_pending()` runs on every store read and marks CRITICAL approvals older than 60 min as `expired`; expired actions are blocked from execution even if approved late.
 - [x] Messenger Draft in Dashboard — `/debug/runtime` exposes full draft state: exists, active, reason, target name, age, expires_in (minutes), and message character count.
 - [x] Web UI Live Telegram Refresh — `GET /messages/poll?after_id=N&channel=telegram` returns only new messages via SQLite `rowid` cursor; frontend polls every 5 s; `notify_telegram_message()` writes to shared SQLite from the Telegram process; `load_messages_after_rowid` + `get_max_rowid` power the incremental cursor.
 - [x] register_tool dry_run — `dry_run=True` parameter previews every file change without writing; tool_name validated as Python identifier; skill path checked with `realpath` to prevent path traversal.
+- [x] Hardened skill creation — generated skills must use `write_custom_tool`, keep `@tool`, pass validation before registration, and use shared `core.brain` LLM clients when model calls are needed.
 - [x] relay_local_payload hardened — demoted from CRITICAL to WARNING (writes draft only, does not send); clean tool return value so Gemini cannot leak internal meta-instructions into the chat.
 - [x] Cross-Channel Context Awareness — Chat_Agent checks shared SQLite history before saying "I don't remember", covering messages from both Telegram and Web UI sessions.
 
