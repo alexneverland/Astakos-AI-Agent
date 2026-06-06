@@ -743,6 +743,10 @@ def generate_image_tool(prompt: str) -> str:
         return "❌ Timeout: το Pollinations άργησε πάνω από 30 δευτερόλεπτα."
     except Exception as e:
         return f"❌ Σφάλμα: {str(e)}"
+def _escape_drive_query_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
 @tool
 def drive_manager(
     action: str = "list_files",
@@ -773,6 +777,7 @@ def drive_manager(
         from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
         import io
 
+        action = (action or "list_files").strip().lower()
         print(f"\033[93m[Drive]: Ενέργεια '{action}'...\033[0m")
         creds   = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
         service = build('drive', 'v3', credentials=creds)
@@ -799,7 +804,7 @@ def drive_manager(
         elif action == "search":
             if not query:
                 return "❌ Χρειάζεται query= για αναζήτηση."
-            q_str = f"name contains '{query}' and trashed=false"
+            q_str = f"name contains '{_escape_drive_query_value(query)}' and trashed=false"
             results = service.files().list(
                 q=q_str,
                 fields="files(id, name, mimeType, size, modifiedTime, parents)",
@@ -890,8 +895,8 @@ def drive_manager(
             if not file_id:
                 return "❌ Χρειάζεται file_id=."
             meta = service.files().get(fileId=file_id, fields="name").execute()
-            service.files().delete(fileId=file_id).execute()
-            return f"🗑️ '{meta.get('name')}' διαγράφηκε."
+            service.files().update(fileId=file_id, body={"trashed": True}).execute()
+            return f"🗑️ '{meta.get('name')}' μεταφέρθηκε στον κάδο."
 
         # ── RENAME ───────────────────────────────────────────────
         elif action == "rename":
@@ -918,6 +923,8 @@ def drive_manager(
         elif action == "share":
             if not file_id or not share_email:
                 return "❌ Χρειάζεται file_id= και share_email=."
+            if share_role not in {"reader", "writer", "commenter"}:
+                return "❌ share_role πρέπει να είναι reader, writer ή commenter."
             permission = {"type": "user", "role": share_role, "emailAddress": share_email}
             service.permissions().create(fileId=file_id, body=permission, sendNotificationEmail=False).execute()
             return f"🔗 Κοινοποιήθηκε στον/στην {share_email} ως {share_role}."

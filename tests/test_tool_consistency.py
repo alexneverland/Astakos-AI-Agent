@@ -126,6 +126,14 @@ def test_capability_registry_entries_point_to_known_tools_or_documented_flows():
     assert missing_alias_tools == {}
 
 
+def test_drive_delete_moves_to_trash_instead_of_hard_delete():
+    source = (ROOT / "tools" / "system.py").read_text(encoding="utf-8", errors="ignore")
+    drive_block = source[source.index("def drive_manager("):source.index("# ────────────────────────────────────────────────────────────────\n# FILE & DEV TOOLS")]
+
+    assert ".delete(fileId=file_id)" not in drive_block
+    assert 'body={"trashed": True}' in drive_block
+
+
 def test_capability_registry_is_versioned_config_not_ignored():
     registry_path = ROOT / "core" / "capability_registry.json"
 
