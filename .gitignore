@@ -52,6 +52,7 @@ __pycache__/
 venv/
 .venv/
 prompts.md
+docs/
 
 # System artifacts
 .fuse_hidden*
