@@ -143,6 +143,16 @@ def test_google_tasks_tool_supports_full_task_flow():
     assert "service.tasks().delete" in tasks_block
 
 
+def test_news_and_weather_tools_clamp_untrusted_limits():
+    source = (ROOT / "tools" / "web.py").read_text(encoding="utf-8", errors="ignore")
+    news_block = source[source.index("def get_news("):source.index("def get_weather_forecast(")]
+    weather_block = source[source.index("def get_weather_forecast("):source.index("@tool\ndef search_goldmall_offers")]
+
+    assert "min(int(limit or 10), 20)" in news_block
+    assert "min(int(days or 14), 16)" in weather_block
+    assert "urllib.parse.quote(location)" in weather_block
+
+
 def test_capability_registry_is_versioned_config_not_ignored():
     registry_path = ROOT / "core" / "capability_registry.json"
 

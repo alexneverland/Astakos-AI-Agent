@@ -11,6 +11,7 @@ import json
 import urllib.parse
 import unicodedata
 import requests
+import html
 import xml.etree.ElementTree as ET
 from langchain_core.tools import tool
 from typing import Annotated
@@ -73,6 +74,43 @@ def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
     return False, f"unknown Messenger contact '{target_entity}'"
 
 
+def _rss_text(item, tag: str) -> str:
+    node = item.find(tag)
+    return (node.text or "").strip() if node is not None else ""
+
+
+def _clean_news_description(raw: str, max_chars: int = 220) -> str:
+    if not raw:
+        return ""
+    text = html.unescape(raw)
+    text = re.sub(r"<li>.*?</li>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    noise = [
+        "Full coverage",
+        "Πλήρης κάλυψη",
+        "View Full Coverage",
+    ]
+    for marker in noise:
+        text = text.replace(marker, "").strip()
+    if len(text) > max_chars:
+        text = text[: max_chars - 3].rstrip() + "..."
+    return text
+
+
+def _format_rss_pub_date(pub_date: str) -> str:
+    if not pub_date:
+        return ""
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(pub_date)
+        if not dt:
+            return ""
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return pub_date
+
+
 @tool
 def relay_local_payload(target_entity: str, payload_data: str) -> str:
     """
@@ -101,15 +139,17 @@ def relay_local_payload(target_entity: str, payload_data: str) -> str:
 def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
     """Φέρνει ειδήσεις από το Google News με τίτλο, περίληψη, πηγή και link."""
     try:
+        topic = (topic or "Γενικά").strip()
+        limit = max(1, min(int(limit or 10), 20))
         print(f"\033[96m[Web]: Ανάκτηση ειδήσεων για: {topic}...\033[0m")
 
         has_greek = any('\u0370' <= c <= '\u03ff' or '\u1f00' <= c <= '\u1fff' for c in topic)
-        lang = "el&gl=GR&ceid=GR:el" if has_greek else "en&gl=US&ceid=US:en"
+        locale = "el&gl=GR&ceid=GR:el" if has_greek else "en&gl=US&ceid=US:en"
 
         url = (
-            f"https://news.google.com/rss?hl={lang}"
+            f"https://news.google.com/rss?hl={locale}"
             if topic.lower() in ["γενικά", "general", ""]
-            else f"https://news.google.com/rss/search?q={urllib.parse.quote(topic)}&hl={lang}"
+            else f"https://news.google.com/rss/search?q={urllib.parse.quote(topic)}&hl={locale}"
         )
 
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"}
@@ -120,26 +160,14 @@ def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
         items = ET.fromstring(response.text).findall(".//item")
         news = []
         for i, item in enumerate(items[:limit]):
-            title = item.find('title').text or ""
-            # guid είναι πιο αξιόπιστο από link στο Google News RSS
-            guid_el = item.find('guid')
-            link = guid_el.text if guid_el is not None else ""
+            title = _rss_text(item, "title")
+            link = _rss_text(item, "link") or _rss_text(item, "guid")
             source_el = item.find('source')
-            source = source_el.text if source_el is not None else ""
-            pub_date = item.find('pubDate').text or ""
-            desc_el = item.find('description')
-            description = ""
-            if desc_el is not None and desc_el.text:
-                # Αφαιρούμε τυχόν HTML tags από την περίληψη
-                description = re.sub(r'<[^>]+>', '', desc_el.text).strip()
-                description = description[:150] + "..." if len(description) > 150 else description
-
-            try:
-                from email.utils import parsedate
-                dt = parsedate(pub_date)
-                time_str = f"{dt[3]:02d}:{dt[4]:02d}" if dt else ""
-            except:
-                time_str = ""
+            source = (source_el.text or "").strip() if source_el is not None else ""
+            source_url = source_el.attrib.get("url", "") if source_el is not None else ""
+            pub_date = _rss_text(item, "pubDate")
+            description = _clean_news_description(_rss_text(item, "description"))
+            time_str = _format_rss_pub_date(pub_date)
 
             line = f"{i+1}. {title}"
             if source:
@@ -150,6 +178,8 @@ def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
                 line += f"\n   📝 {description}"
             if link:
                 line += f"\n   🔗 {link}"
+            if source_url:
+                line += f"\n   Πηγή: {source_url}"
             news.append(line)
 
         return "\n\n".join(news) if news else "Δεν βρέθηκαν ειδήσεις."
@@ -172,7 +202,13 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
     }
 
     try:
-        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={location}&count=1&language=el&format=json"
+        location = (location or "Θεσσαλονίκη").strip()
+        days = max(1, min(int(days or 14), 16))
+
+        geo_url = (
+            "https://geocoding-api.open-meteo.com/v1/search"
+            f"?name={urllib.parse.quote(location)}&count=1&language=el&format=json"
+        )
         geo_resp = requests.get(geo_url, timeout=10).json()
 
         if "results" not in geo_resp or not geo_resp["results"]:
@@ -181,6 +217,8 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
         lat = geo_resp["results"][0]["latitude"]
         lon = geo_resp["results"][0]["longitude"]
         place_name = geo_resp["results"][0]["name"]
+        country = geo_resp["results"][0].get("country", "")
+        admin = geo_resp["results"][0].get("admin1", "")
 
         weather_url = (
             f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
@@ -199,10 +237,19 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
         precip = daily.get("precipitation_sum", [])
         wcodes = daily.get("weathercode", [])
 
-        result = f"🌍 Πρόγνωση καιρού για {place_name} ({days} ημέρες):\n"
-        for i in range(len(dates)):
-            desc = WMO_CODES.get(wcodes[i], "")
-            rain_info = f"🌧 {precip[i]}mm" if precip[i] > 0 else ""
+        count = min(len(dates), len(t_max), len(t_min), len(precip), len(wcodes), days)
+        if count == 0:
+            return "Δεν βρέθηκαν πλήρη δεδομένα καιρού."
+
+        place_bits = [place_name]
+        if admin and admin != place_name:
+            place_bits.append(admin)
+        if country:
+            place_bits.append(country)
+        result = f"🌍 Πρόγνωση καιρού για {', '.join(place_bits)} ({count} ημέρες):\n"
+        for i in range(count):
+            desc = WMO_CODES.get(wcodes[i], f"Κωδικός καιρού {wcodes[i]}")
+            rain_info = f"🌧 {precip[i]:.1f}mm" if precip[i] > 0 else ""
             line = f"• {dates[i]}: {desc}  {t_min[i]}°C – {t_max[i]}°C"
             if rain_info:
                 line += f"  {rain_info}"
