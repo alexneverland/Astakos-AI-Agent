@@ -134,6 +134,15 @@ def test_drive_delete_moves_to_trash_instead_of_hard_delete():
     assert 'body={"trashed": True}' in drive_block
 
 
+def test_google_tasks_tool_supports_full_task_flow():
+    source = (ROOT / "tools" / "system.py").read_text(encoding="utf-8", errors="ignore")
+    tasks_block = source[source.index("def google_tasks_tool("):source.index("@tool\ndef create_file_tool")]
+
+    for action in ['action == "list"', 'action == "create"', 'action == "complete"', 'action == "update"', 'action == "delete"']:
+        assert action in tasks_block
+    assert "service.tasks().delete" in tasks_block
+
+
 def test_capability_registry_is_versioned_config_not_ignored():
     registry_path = ROOT / "core" / "capability_registry.json"
 

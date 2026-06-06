@@ -615,28 +615,105 @@ def google_calendar_tool(action: str, summary: str, start_time: str, end_time: s
         return f"Calendar Error: {str(e)}"
 
 
+def _normalize_google_task_due(due: str | None) -> str | None:
+    if not due:
+        return None
+    due = due.strip()
+    if len(due) == 10:
+        return f"{due}T00:00:00.000Z"
+    return due
+
+
 @tool
-def google_tasks_tool(action: str, title: str, due: str = None) -> str:
+def google_tasks_tool(
+    action: str,
+    title: str = "",
+    due: str = None,
+    task_id: str = None,
+    notes: str = "",
+    tasklist_id: str = "@default",
+    max_results: int = 20,
+) -> str:
     """
-    Διαχειρίζεται τα Google Tasks. action: 'create' για νέα υπενθύμιση.
+    Διαχειρίζεται Google Tasks.
+    Actions:
+      'create'   — νέα εργασία (θέλει title, προαιρετικά due/notes)
+      'list'     — λίστα ανοιχτών εργασιών
+      'complete' — ολοκλήρωση εργασίας (θέλει task_id)
+      'update'   — αλλαγή title/due/notes (θέλει task_id και ένα πεδίο)
+      'delete'   — διαγραφή εργασίας (θέλει task_id, CRITICAL approval)
     🚨 [MASTRO-RULE ΓΙΑ ΤΟΝ ΤΙΤΛΟ]: Η παράμετρος 'title' ΠΡΕΠΕΙ να περιγράφει ξεκάθαρα την εργασία (π.χ. 'Φροντίδα τριανταφυλλιάς').
-    ΑΠΑΓΟΡΕΥΕΤΑΙ ΑΥΣΤΗΡΑ να χρησιμοποιείς ρήματα της εντολής (π.χ. 'βάλε', 'κάνε', 'θύμισέ μου', 'υπενθύμιση') ως τίτλο. 
+    ΑΠΑΓΟΡΕΥΕΤΑΙ ΑΥΣΤΗΡΑ να χρησιμοποιείς ρήματα της εντολής (π.χ. 'βάλε', 'κάνε', 'θύμισέ μου', 'υπενθύμιση') ως τίτλο.
     Αν ο χρήστης λέει απλά 'βάλε μια υπενθύμιση' χωρίς να διευκρινίζει το θέμα, ΜΗΝ καλείς αυτό το εργαλείο. Ρώτα τον πρώτα τι θέλει να γράψεις!
     """
     try:
-        print(f"\033[93m[Tasks]: Δημιουργία υπενθύμισης '{title}'...\033[0m")
+        action = (action or "list").strip().lower()
+        tasklist_id = tasklist_id or "@default"
+        print(f"\033[93m[Tasks]: Ενέργεια '{action}'...\033[0m")
         creds = Credentials.from_authorized_user_file(TOKEN_PATH, ['https://www.googleapis.com/auth/tasks'])
         service = build('tasks', 'v1', credentials=creds)
-        
+
+        if action == "list":
+            result = service.tasks().list(
+                tasklist=tasklist_id,
+                showCompleted=False,
+                maxResults=max(1, min(int(max_results or 20), 50)),
+            ).execute()
+            items = result.get("items", [])
+            if not items:
+                return "✅ Δεν υπάρχουν ανοιχτά Google Tasks."
+            lines = ["📋 Ανοιχτά Google Tasks:"]
+            for task in items:
+                due_text = task.get("due", "")[:10]
+                due_part = f" | due: {due_text}" if due_text else ""
+                lines.append(f"• {task.get('title', '(χωρίς τίτλο)')} | ID: `{task.get('id')}`{due_part}")
+            return "\n".join(lines)
+
         if action == "create":
-            # Αν το due είναι μόνο ημερομηνία, μετατρέψτο σε RFC3339
-            if due and len(due) == 10:  # format: YYYY-MM-DD
-                due = f"{due}T00:00:00.000Z"
-            task = {'title': title, 'due': due}
-            service.tasks().insert(tasklist='@default', body=task).execute()
-            return f"Η υπενθύμιση '{title}' προστέθηκε στα Google Tasks!"
-            
-        return f"System Error: Υποστηρίζεται ΜΟΝΟ action='create'. Έστειλες: '{action}'."
+            if not title:
+                return "❌ Για create χρειάζεται title."
+            task = {"title": title}
+            normalized_due = _normalize_google_task_due(due)
+            if normalized_due:
+                task["due"] = normalized_due
+            if notes:
+                task["notes"] = notes
+            created = service.tasks().insert(tasklist=tasklist_id, body=task).execute()
+            return f"✅ Η εργασία '{created.get('title', title)}' προστέθηκε στα Google Tasks! ID: `{created.get('id')}`"
+
+        if action == "complete":
+            if not task_id:
+                return "❌ Για complete χρειάζεται task_id."
+            service.tasks().patch(
+                tasklist=tasklist_id,
+                task=task_id,
+                body={"status": "completed"},
+            ).execute()
+            return f"✅ Το Google Task `{task_id}` ολοκληρώθηκε."
+
+        if action == "update":
+            if not task_id:
+                return "❌ Για update χρειάζεται task_id."
+            body = {}
+            if title:
+                body["title"] = title
+            normalized_due = _normalize_google_task_due(due)
+            if normalized_due:
+                body["due"] = normalized_due
+            if notes:
+                body["notes"] = notes
+            if not body:
+                return "❌ Για update δώσε title, due ή notes."
+            updated = service.tasks().patch(tasklist=tasklist_id, task=task_id, body=body).execute()
+            return f"✅ Το Google Task ενημερώθηκε: {updated.get('title', task_id)}"
+
+        if action == "delete":
+            if not task_id:
+                return "❌ Για delete χρειάζεται task_id."
+            service.tasks().delete(tasklist=tasklist_id, task=task_id).execute()
+            return f"🗑️ Το Google Task `{task_id}` διαγράφηκε."
+
+        return "❌ Άγνωστο action. Δοκίμασε: list, create, complete, update, delete."
     except Exception as e:
         return f"Tasks Error: {str(e)}"
 

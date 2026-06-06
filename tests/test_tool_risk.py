@@ -132,6 +132,18 @@ def test_drive_list_files_is_not_critical():
     tc = {"name": "drive_manager", "args": {"action": "list_files"}, "id": "abc"}
     assert is_critical(tc) is False
 
+def test_google_tasks_delete_is_critical():
+    tc = {"name": "google_tasks_tool", "args": {"action": "delete"}, "id": "abc"}
+    assert is_critical(tc) is True
+
+def test_google_tasks_list_is_not_critical():
+    tc = {"name": "google_tasks_tool", "args": {"action": "list"}, "id": "abc"}
+    assert is_critical(tc) is False
+
+def test_google_tasks_create_is_not_critical():
+    tc = {"name": "google_tasks_tool", "args": {"action": "create"}, "id": "abc"}
+    assert is_critical(tc) is False
+
 def test_not_critical_search_memory():
     tc = {"name": "search_memory", "args": {}, "id": "abc"}
     assert is_critical(tc) is False
