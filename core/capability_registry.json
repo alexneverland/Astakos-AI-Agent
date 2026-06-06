@@ -1,5 +1,19 @@
 [
   {
+    "name": "scan_receipt",
+    "description": "Σκανάρει φωτογραφία απόδειξης και επιστρέφει JSON με κατάστημα, ημερομηνία, σύνολο και προϊόντα.",
+    "agent": "Dev_Agent",
+    "priority": 9,
+    "triggers": [
+      "scan receipt",
+      "απόδειξη",
+      "αποδείξεις",
+      "σκανάρισμα απόδειξης",
+      "έξοδα",
+      "καταγραφή εξόδων"
+    ]
+  },
+  {
     "name": "repo_mapper",
     "description": "Σκανάρει project folder και επιστρέφει αρχιτεκτονικό δέντρο με AST ανάλυση (classes, functions, decorators)",
     "agent": "Dev_Agent",

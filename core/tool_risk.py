@@ -59,6 +59,7 @@ TOOL_RISK: dict[str, str] = {
     "archive_file":             "WARNING",  # γράφει στη μνήμη (ChromaDB + JSON)
     "repo_mapper":              "SAFE",     # read-only AST scan
     "register_tool":            "CRITICAL", # τροποποιεί system.py + tool_risk.py
+    "scan_receipt":            "WARNING",
 }
 
 def get_risk(tool_name: str) -> str:
