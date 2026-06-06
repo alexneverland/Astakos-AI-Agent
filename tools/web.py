@@ -32,6 +32,47 @@ def remove_accents(input_str: str) -> str:
     nfkd_form = unicodedata.normalize('NFKD', input_str)
     return u"".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower()
 
+
+_AMBIGUOUS_MESSENGER_TARGETS = {
+    "friend", "friends", "φιλε", "φιλος", "φιλους", "μαστορα", "mastora",
+    "user", "χρηστη", "αυτον", "αυτην", "καποιον", "καποια", "unknown",
+}
+
+
+def _load_messenger_contacts() -> dict[str, str]:
+    try:
+        from config import BASE_DIR
+        profile_path = os.path.join(BASE_DIR, "astakos_profile.json")
+        if not os.path.exists(profile_path):
+            return {}
+        with open(profile_path, "r", encoding="utf-8") as f:
+            profile = json.load(f)
+        contacts = profile.get("contacts", {})
+        if not isinstance(contacts, dict):
+            return {}
+        return {remove_accents(str(k).strip()): str(v) for k, v in contacts.items()}
+    except Exception:
+        return {}
+
+
+def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
+    target = (target_entity or "").strip()
+    normalized = remove_accents(target)
+    if not target:
+        return False, "missing target"
+    if normalized in _AMBIGUOUS_MESSENGER_TARGETS:
+        return False, f"ambiguous target '{target_entity}'"
+    if target.startswith("http") or target.isdigit():
+        return True, "direct target"
+
+    contacts = _load_messenger_contacts()
+    if normalized in contacts:
+        return True, "known contact"
+    if any(alias and (alias in normalized or normalized in alias) for alias in contacts):
+        return True, "known contact"
+    return False, f"unknown Messenger contact '{target_entity}'"
+
+
 @tool
 def relay_local_payload(target_entity: str, payload_data: str) -> str:
     """
@@ -40,6 +81,16 @@ def relay_local_payload(target_entity: str, payload_data: str) -> str:
     πριν πάρεις την τελική του έγκριση.
     """
     from core.messenger_draft import save_draft
+
+    ok, reason = _messenger_target_status(target_entity)
+    if not ok:
+        return (
+            "❌ Δεν αποθήκευσα Messenger draft.\n"
+            f"Λόγος: {reason}.\n"
+            "Δώσε ρητό παραλήπτη από τις επαφές, π.χ. `Σοφία`, ή Messenger URL/ID."
+        )
+    if not (payload_data or "").strip():
+        return "❌ Δεν αποθήκευσα Messenger draft. Λείπει το κείμενο του μηνύματος."
 
     save_draft(target_entity, payload_data)
 

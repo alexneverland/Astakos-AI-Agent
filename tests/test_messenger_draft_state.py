@@ -78,3 +78,37 @@ def test_debug_draft_state_exposes_metadata_not_message(monkeypatch, tmp_path):
     assert state["message_chars"] == len("private message text")
     assert "message" not in state
     assert "private message text" not in json.dumps(state, ensure_ascii=False)
+
+
+def test_relay_local_payload_rejects_ambiguous_friend_target(monkeypatch, tmp_path):
+    import config
+    from tools.web import relay_local_payload
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+
+    result = relay_local_payload.func("friend", "hello")
+
+    assert "Δεν αποθήκευσα Messenger draft" in result
+    assert "ambiguous target" in result
+    assert not draft_file.exists()
+
+
+def test_relay_local_payload_accepts_known_contact(monkeypatch, tmp_path):
+    import config
+    from tools.web import relay_local_payload
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    (tmp_path / "astakos_profile.json").write_text(
+        json.dumps({"contacts": {"sofia": "123"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    result = relay_local_payload.func("Sofia", "hello")
+
+    assert "DRAFT" in result
+    data = json.loads(draft_file.read_text(encoding="utf-8"))
+    assert data["target_name"] == "Sofia"
+    assert data["message"] == "hello"
