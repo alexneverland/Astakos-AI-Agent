@@ -160,11 +160,11 @@ def test_event_memory_candidate_captures_personal_day_event():
     assert "συνέντευξη" in candidate["fact"]
 
 
-def test_gift_memory_candidate_captures_confirmed_sofia_watch():
+def test_confirmed_memory_candidate_captures_family_watch():
     import datetime
     import memory.session_memory as session_memory
 
-    candidate = session_memory._extract_gift_memory_candidate(
+    candidate = session_memory._extract_confirmed_memory_candidate(
         "Ναι κράτα το για δώρο στη Σοφία",
         "Αποθηκεύτηκε στη μνήμη στα μελλοντικά δώρα για τη Σοφία (Rosefield Bangle S - White Gold).",
         agent_name="Chat_Agent",
@@ -179,3 +179,32 @@ def test_gift_memory_candidate_captures_confirmed_sofia_watch():
     assert "2026-06-05" in candidate["fact"]
     assert "Rosefield Bangle S - White Gold" in candidate["fact"]
     assert "Σοφία" in candidate["fact"]
+
+
+def test_confirmed_memory_candidate_infers_project_category():
+    import datetime
+    import memory.session_memory as session_memory
+
+    candidate = session_memory._extract_confirmed_memory_candidate(
+        "Κράτα στη μνήμη ότι στο Mastroapp θέλουμε το API να γυρνάει μόνο JSON",
+        "Το αποθήκευσα στη μνήμη.",
+        agent_name="Dev_Agent",
+        channel="web",
+        now=datetime.datetime(2026, 6, 7, 18, 10),
+    )
+
+    assert candidate["category"] == "projects"
+    assert "Mastroapp" in candidate["fact"]
+
+
+def test_confirmed_memory_candidate_ignores_message_drafts():
+    import memory.session_memory as session_memory
+
+    candidate = session_memory._extract_confirmed_memory_candidate(
+        "Στείλε ένα μήνυμα στη Σοφία",
+        "Το προσχέδιο αποθηκεύτηκε. Θέλεις αλλαγές ή να το στείλω;",
+        agent_name="Chat_Agent",
+        channel="telegram",
+    )
+
+    assert candidate is None

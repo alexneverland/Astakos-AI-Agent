@@ -228,7 +228,20 @@ def _extract_event_memory_candidate(
     }
 
 
-def _extract_gift_memory_candidate(
+def _infer_memory_category(text: str) -> str:
+    clean = _normalize_text(text)
+    if any(marker in clean for marker in ("σοφια", "αλεξανδρ", "μαρια", "μικρο", "παιδι", "γενεθλια", "δωρο")):
+        return "family"
+    if any(marker in clean for marker in ("mastroapp", "praxis", "astakos", "αστακο", "github", "project", "repo")):
+        return "projects"
+    if any(marker in clean for marker in ("σπιτι", "κουζινα", "ψυγειο", "αφυγραντηρ", "σκουπα", "ρολοι", "συσκευ")):
+        return "home"
+    if any(marker in clean for marker in ("κανόνας", "κανονας", "bug", "tool", "prompt", "lesson", "μαθημα")):
+        return "lesson"
+    return "lazaros"
+
+
+def _extract_confirmed_memory_candidate(
     user_text: str,
     ai_text: str,
     *,
@@ -236,48 +249,48 @@ def _extract_gift_memory_candidate(
     channel: str = "web",
     now: datetime | None = None,
 ) -> dict | None:
-    """Capture confirmed future-gift ideas that should survive as family facts."""
+    """Capture explicit save/remember confirmations without relying only on the LLM sifter."""
     safe_user = clean_message(user_text)
     safe_ai = clean_message(ai_text)
     combined = _normalize_text(f"{safe_user} {safe_ai}")
 
-    if "σοφια" not in combined:
-        return None
-    if not any(marker in combined for marker in ("δωρο", "γενεθλια", "future gift", "μελλοντικ")):
-        return None
     if not any(marker in combined for marker in ("αποθηκευ", "μνημη", "σημειω", "υποψιν", "κρατα")):
         return None
-
-    product = None
-    product_markers = {
-        "rosefield": "Rosefield Bangle S - White Gold",
-        "bangle": "Rosefield Bangle S - White Gold",
-        "mother of pearl": "Rosefield Bangle S - White Gold",
-        "white gold": "Rosefield Bangle S - White Gold",
-        "ρολοι": "ρολόι",
-        "watch": "ρολόι",
-    }
-    for marker, label in product_markers.items():
-        if marker in combined:
-            product = label
-            break
-
-    if not product:
-        source = safe_ai or safe_user
-        match = re.search(r"(?:δώρο|δωρο|gift)[^\n.!?]{0,140}", source, flags=re.IGNORECASE)
-        product = match.group(0).strip() if match else ""
-    if not product:
+    if any(marker in combined for marker in ("draft", "προσχεδιο", "προσχεδια", "να το στειλω", "να το στείλω")):
         return None
+
+    source_text = " ".join(safe_user.split())
+    confirmation_text = " ".join(safe_ai.split())
+    if not source_text and not confirmation_text:
+        return None
+    if len(source_text) < 8 and len(confirmation_text) < 20:
+        return None
+
+    detail = source_text
+    if confirmation_text:
+        memory_match = re.search(
+            r"(?:αποθηκεύτηκε|αποθηκευτηκε|σημειώθηκε|σημειωθηκε|κρατήθηκε|κρατηθηκε)[^\n]{0,220}",
+            confirmation_text,
+            flags=re.IGNORECASE,
+        )
+        if memory_match:
+            detail = memory_match.group(0).strip()
+    if not detail:
+        detail = confirmation_text[:220].strip()
+    if len(detail) > 300:
+        detail = detail[:297].rstrip() + "..."
+
+    category = _infer_memory_category(f"{safe_user} {safe_ai}")
 
     ts = now or datetime.now()
     fact = (
-        f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, ο Λάζαρος αποθήκευσε "
-        f"ως μελλοντικό δώρο για τη Σοφία: {product}."
+        f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, ο Λάζαρος ζήτησε ή επιβεβαίωσε "
+        f"να αποθηκευτεί στη μνήμη: {detail}"
     )
     return {
         "memory_type": "fact",
         "fact": fact,
-        "category": "family",
+        "category": category,
         "agent_name": agent_name,
         "source": channel,
         "reason": "user_stated",
@@ -396,7 +409,7 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
                 agent_name=agent_name,
                 channel=channel,
             ),
-            _extract_gift_memory_candidate(
+            _extract_confirmed_memory_candidate(
                 user_text,
                 ai_text,
                 agent_name=agent_name,
