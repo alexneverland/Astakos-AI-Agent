@@ -9,6 +9,7 @@ import os
 import json
 import threading
 from datetime import datetime
+import unicodedata
 from memory.vector_store import memory
 from services.gemini import safe_gemini_call
 import re
@@ -109,6 +110,12 @@ def load_last_session_hint(channel: str = "web") -> str:
 
 
 is_summarizing = False  # Πρέπει να οριστεί έξω από τη συνάρτηση
+
+
+def _normalize_text(value: str) -> str:
+    text = unicodedata.normalize("NFD", str(value or "").lower())
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    return " ".join(text.split())
 
 
 def _extract_event_memory_candidate(
@@ -220,6 +227,64 @@ def _extract_event_memory_candidate(
         "confidence": 0.85,
     }
 
+
+def _extract_gift_memory_candidate(
+    user_text: str,
+    ai_text: str,
+    *,
+    agent_name: str = "Unknown",
+    channel: str = "web",
+    now: datetime | None = None,
+) -> dict | None:
+    """Capture confirmed future-gift ideas that should survive as family facts."""
+    safe_user = clean_message(user_text)
+    safe_ai = clean_message(ai_text)
+    combined = _normalize_text(f"{safe_user} {safe_ai}")
+
+    if "σοφια" not in combined:
+        return None
+    if not any(marker in combined for marker in ("δωρο", "γενεθλια", "future gift", "μελλοντικ")):
+        return None
+    if not any(marker in combined for marker in ("αποθηκευ", "μνημη", "σημειω", "υποψιν", "κρατα")):
+        return None
+
+    product = None
+    product_markers = {
+        "rosefield": "Rosefield Bangle S - White Gold",
+        "bangle": "Rosefield Bangle S - White Gold",
+        "mother of pearl": "Rosefield Bangle S - White Gold",
+        "white gold": "Rosefield Bangle S - White Gold",
+        "ρολοι": "ρολόι",
+        "watch": "ρολόι",
+    }
+    for marker, label in product_markers.items():
+        if marker in combined:
+            product = label
+            break
+
+    if not product:
+        source = safe_ai or safe_user
+        match = re.search(r"(?:δώρο|δωρο|gift)[^\n.!?]{0,140}", source, flags=re.IGNORECASE)
+        product = match.group(0).strip() if match else ""
+    if not product:
+        return None
+
+    ts = now or datetime.now()
+    fact = (
+        f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, ο Λάζαρος αποθήκευσε "
+        f"ως μελλοντικό δώρο για τη Σοφία: {product}."
+    )
+    return {
+        "memory_type": "fact",
+        "fact": fact,
+        "category": "family",
+        "agent_name": agent_name,
+        "source": channel,
+        "reason": "user_stated",
+        "confidence": 0.9,
+    }
+
+
 def _run_session_summary(channel: str = "web"):
     """Αρχειοθετεί τη συνεδρία (per channel) με προστασία από διπλοεγγραφές."""
     global is_summarizing, SESSION_LOGS
@@ -324,14 +389,23 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
     }
 
     try:
-        event_candidate = _extract_event_memory_candidate(
-            user_text,
-            ai_text,
-            agent_name=agent_name,
-            channel=channel,
+        deterministic_candidates = (
+            _extract_event_memory_candidate(
+                user_text,
+                ai_text,
+                agent_name=agent_name,
+                channel=channel,
+            ),
+            _extract_gift_memory_candidate(
+                user_text,
+                ai_text,
+                agent_name=agent_name,
+                channel=channel,
+            ),
         )
-        if event_candidate:
-            memory.save(**event_candidate)
+        for candidate in deterministic_candidates:
+            if candidate:
+                memory.save(**candidate)
 
         # 1. Προετοιμασία Prompt για το Gemini
         cats_desc = "\n".join([f'  - "{k}": {v}' for k, v in MEMORY_CATS.items()])

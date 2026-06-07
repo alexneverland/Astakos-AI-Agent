@@ -107,6 +107,7 @@ def test_temporal_history_for_yesterday_morning_uses_sqlite_messages():
 def test_history_lookup_uses_sqlite_even_without_date_words():
     def fake_history_loader(**kwargs):
         assert kwargs["since_date"] == "2026-05-08"
+        assert kwargs["limit"] == 1500
         return [
             {
                 "channel": "web",
@@ -133,6 +134,43 @@ def test_history_lookup_uses_sqlite_even_without_date_words():
 
     assert any("πάρκο με τη Σοφία" in line for line in lines)
     assert all("μαγείρεμα" not in line for line in lines)
+
+
+def test_history_lookup_boosts_sofia_watch_gift_context():
+    def fake_history_loader(**kwargs):
+        return [
+            {
+                "channel": "telegram",
+                "date": "2026-06-05",
+                "time": "19:27",
+                "role": "assistant",
+                "content": "Πολύ κομψό κομμάτι, το Rosefield Bangle S, χρυσό με λευκό καντράν Mother of Pearl. Ψήνεις δωράκι για τη Σοφία;",
+            },
+            {
+                "channel": "telegram",
+                "date": "2026-06-05",
+                "time": "19:30",
+                "role": "assistant",
+                "content": "Αποθηκεύτηκε στη μνήμη στα μελλοντικά δώρα για τη Σοφία (Rosefield Bangle S - White Gold).",
+            },
+            {
+                "channel": "telegram",
+                "date": "2026-06-07",
+                "time": "17:01",
+                "role": "assistant",
+                "content": "Άσχετη συζήτηση για λινκ και αρχεία.",
+            },
+        ]
+
+    lines = temporal_history_for_query(
+        "Ένα ρολόι σου είχα ανεβάσει ένα λινκ",
+        channel="telegram",
+        history_loader=fake_history_loader,
+        now=__import__("datetime").datetime(2026, 6, 7, 17, 55),
+    )
+
+    assert any("Rosefield Bangle S" in line for line in lines)
+    assert any("μελλοντικά δώρα για τη Σοφία" in line for line in lines)
 
 
 def test_tool_output_query_disables_memory_lookup():

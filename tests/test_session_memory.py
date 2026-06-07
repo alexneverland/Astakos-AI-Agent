@@ -158,3 +158,24 @@ def test_event_memory_candidate_captures_personal_day_event():
     assert candidate["source"] == "web"
     assert "2026-06-07" in candidate["fact"]
     assert "συνέντευξη" in candidate["fact"]
+
+
+def test_gift_memory_candidate_captures_confirmed_sofia_watch():
+    import datetime
+    import memory.session_memory as session_memory
+
+    candidate = session_memory._extract_gift_memory_candidate(
+        "Ναι κράτα το για δώρο στη Σοφία",
+        "Αποθηκεύτηκε στη μνήμη στα μελλοντικά δώρα για τη Σοφία (Rosefield Bangle S - White Gold).",
+        agent_name="Chat_Agent",
+        channel="telegram",
+        now=datetime.datetime(2026, 6, 5, 19, 30),
+    )
+
+    assert candidate["memory_type"] == "fact"
+    assert candidate["category"] == "family"
+    assert candidate["source"] == "telegram"
+    assert candidate["confidence"] == 0.9
+    assert "2026-06-05" in candidate["fact"]
+    assert "Rosefield Bangle S - White Gold" in candidate["fact"]
+    assert "Σοφία" in candidate["fact"]

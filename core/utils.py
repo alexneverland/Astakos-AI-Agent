@@ -296,7 +296,8 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
         except: pass
 
     prompt += (
-        "ΚΑΝΟΝΑΣ ΜΝΗΜΗΣ: Αν σου ζητηθεί πληροφορία που λείπει, κάλεσε το 'search_memory'.\n"
+        "ΚΑΝΟΝΑΣ ΜΝΗΜΗΣ: Αν σου ζητηθεί πληροφορία που λείπει, κάλεσε το 'search_memory' μία φορά. "
+        "Αν έχεις ήδη αποτέλεσμα μνήμης στο context, απάντησε από αυτό και ΜΗΝ ξανακαλέσεις search_memory στο ίδιο turn.\n"
         "ΚΑΝΟΝΑΣ ΦΩΤΟΓΡΑΦΙΩΝ: Αν ζητηθεί φωτό, κάλεσε το 'retrieve_photo' και συμπεριέλαβε το [SEND_PHOTO: path] στην απάντηση.\n\n"
     )
 

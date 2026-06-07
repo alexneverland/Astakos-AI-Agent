@@ -163,7 +163,7 @@ def temporal_history_for_query(
         history_loader = load_messages_since
 
     try:
-        messages = history_loader(since_date=since_date, limit=500)
+        messages = history_loader(since_date=since_date, limit=1500)
     except Exception:
         return []
 
@@ -191,6 +191,19 @@ def temporal_history_for_query(
             marker in content for marker in ("ποδοσφ", "αγων", "τελικο", "μεταλλ")
         ):
             value += 3
+        if any(marker in clean_query for marker in ("δωρο", "σοφια", "ρολοι", "watch", "λινκ", "link")) and any(
+            marker in content
+            for marker in (
+                "rosefield",
+                "bangle",
+                "mother of pearl",
+                "white gold",
+                "καντραν",
+                "ρολοι",
+                "μελλοντικα δωρα",
+            )
+        ):
+            value += 4
         return value
 
     scored = [(score(message), index, message) for index, message in enumerate(pool)]

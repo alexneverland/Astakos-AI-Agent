@@ -184,6 +184,11 @@ def search_memory(query: str, category: str = "") -> str:
         else:
             output_parts.append("  • Δεν βρέθηκαν Chroma facts για αυτό το query.")
 
+        output_parts.append(
+            "\n[ΟΔΗΓΙΑ]\n"
+            "  • Απάντησε τώρα με βάση τα παραπάνω. Μην καλέσεις ξανά search_memory "
+            "για το ίδιο ερώτημα στο ίδιο turn."
+        )
         return "\n".join(output_parts).strip()
     except Exception as e:
         return f"Error: Σφάλμα ανάκλησης μνήμης: {str(e)}"
