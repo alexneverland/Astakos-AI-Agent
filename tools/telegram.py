@@ -8,6 +8,19 @@ import requests
 import re
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
+def send_telegram_msg_full(text: str, prefix: str = "", max_len: int = 3500):
+    """Στέλνει ολόκληρο το κείμενο σε Telegram, σπάζοντάς το σε κομμάτια αν χρειαστεί
+    (αντί να το κόβει στη μέση). Telegram hard limit = 4096 chars/μήνυμα."""
+    full = f"{prefix}{text}" if prefix else text
+    if len(full) <= max_len:
+        send_telegram_msg(full)
+        return
+    chunks = [full[i:i + max_len] for i in range(0, len(full), max_len)]
+    for idx, chunk in enumerate(chunks, 1):
+        suffix = f"\n\n[{idx}/{len(chunks)}]" if len(chunks) > 1 else ""
+        send_telegram_msg(chunk + suffix)
+
+
 def format_for_telegram(text: str) -> str:
     """Mastro-Fix: Μετατρέπει το Markdown του LLM σε ασφαλές HTML για το Telegram."""
     if not text:

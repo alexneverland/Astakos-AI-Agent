@@ -266,12 +266,12 @@ def chat_agent_node(state: AgentState):
             image_part
         ])
 
-    from tools.system import archive_file, retrieve_photo, save_to_memory, search_memory, control_spotify, get_current_location, read_local_file
+    from tools.system import archive_file, retrieve_photo, save_to_memory, delete_from_memory, search_memory, control_spotify, get_current_location, read_local_file
     from tools.web import execute_local_pipeline, relay_local_payload, search_supermarket_prices
 
     chat_tools = [
         get_current_location, control_spotify,
-        search_memory, save_to_memory, retrieve_photo, archive_file, duckduckgo_search,
+        search_memory, save_to_memory, delete_from_memory, retrieve_photo, archive_file, duckduckgo_search,
         recipe_expert, log_meal, relay_local_payload, learn_routine, get_routines, search_supermarket_prices,
         read_local_file, generate_image_tool, get_fit_summary
     ]

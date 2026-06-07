@@ -426,11 +426,57 @@ def save_to_memory(fact: str, entities: str = "", category: str = "general", rea
 
 @tool
 def delete_from_memory(query: str) -> str:
-    """Διαγράφει μια πληροφορία από τη μνήμη."""
+    """Διαγράφει ΟΡΙΣΤΙΚΑ μια πληροφορία από τη μνήμη (Chroma).
+
+    ΧΡΗΣΙΜΟΠΟΙΗΣΕ ΑΥΤΟ ΤΟ TOOL (όχι save_to_memory) όποτε ο χρήστης ζητάει ρητά
+    να σβήσεις/διαγράψεις/αφαιρέσεις μια ήδη αποθηκευμένη πληροφορία επειδή είναι
+    λάθος, ξεπερασμένη ή άσχετη — π.χ. "σβήσε τη μνήμη που λέει Χ", "διέγραψε αυτό
+    για το Υ", "αυτό που είπα για Χ είναι λάθος, βγάλε το" κ.λπ.
+    Το save_to_memory ΜΟΝΟ προσθέτει νέες εγγραφές· σε αίτημα διαγραφής/διόρθωσης
+    αφήνει τη λάθος εγγραφή στη θέση της — γι' αυτό σε τέτοιες περιπτώσεις πάντα
+    προτίμησε το delete_from_memory (αν χρειάζεται, μπορείς μετά να καλέσεις και
+    save_to_memory με το σωστό περιεχόμενο σε ξεχωριστό βήμα).
+
+    query: Δώσε ΣΥΝΤΟΜΗ, ΣΥΓΚΕΚΡΙΜΕΝΗ φράση που ταυτοποιεί ΜΟΝΟ τη λάθος εγγραφή
+    (π.χ. "Πεστών 7"), όχι ολόκληρη την πρόταση/διόρθωση του χρήστη.
+    """
     try:
-        query_emb = embeddings.embed_query(query)
+        def _norm(t: str) -> str:
+            t = unicodedata.normalize("NFD", str(t or "").lower())
+            return "".join(ch for ch in t if unicodedata.category(ch) != "Mn")
+
+        norm_query = _norm(query).strip()
+
         with vector_lock:
             collection = vector_store._collection
+            data = collection.get(include=["documents", "metadatas"])
+
+        # 1) Ακριβές substring match ΠΡΩΤΑ — πιο αξιόπιστο από embeddings όταν
+        # οι φράσεις είναι κοντινές/παρόμοιες (π.χ. "Πεστών 7" vs "Πίστων 7":
+        # τα embeddings τα βλέπουν σχεδόν ίδια και μπορεί να σβήσει λάθος εγγραφή).
+        literal_hits = [
+            (doc_id, doc) for doc_id, doc in zip(data.get("ids", []), data.get("documents", []))
+            if norm_query and norm_query in _norm(doc)
+        ]
+
+        if len(literal_hits) == 1:
+            target_id, content = literal_hits[0]
+            with vector_lock:
+                collection.delete(ids=[target_id])
+            print(f"\n🔥 [DATABASE ACTION]: ΔΙΕΓΡΑΦΗΚΕ (exact match): {content}")
+            return f"Η μνήμη '{content}' διαγράφηκε επιτυχώς."
+
+        if len(literal_hits) > 1:
+            previews = "\n".join(f"  • {str(c).strip()[:140]}" for _, c in literal_hits[:6])
+            return (
+                f"⚠️ Βρήκα {len(literal_hits)} εγγραφές που ταιριάζουν με '{query}'. "
+                f"Πες μου πιο συγκεκριμένα ποια να σβήσω:\n{previews}"
+            )
+
+        # 2) Fallback: σημασιολογική αναζήτηση (embeddings), μόνο όταν δεν
+        # υπάρχει κανένα literal match.
+        query_emb = embeddings.embed_query(query)
+        with vector_lock:
             results = collection.query(query_embeddings=[query_emb], n_results=1)
 
             if not results['ids'] or not results['ids'][0]:

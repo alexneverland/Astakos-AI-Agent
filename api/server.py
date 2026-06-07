@@ -1168,9 +1168,9 @@ async def approve_action(tool_call_id: str, _=Depends(require_token)):
 
         tool_name = execution["tool"]
         result = execution["result"]
-        from tools.telegram import send_telegram_msg
-        send_telegram_msg(f"✅ [{tool_name}] εκτελέστηκε από dashboard:\n{str(result)[:500]}")
-        return {"ok": True, "status": "executed", "tool": tool_name, "result": str(result)[:500]}
+        from tools.telegram import send_telegram_msg_full
+        send_telegram_msg_full(str(result), prefix=f"✅ [{tool_name}] εκτελέστηκε από dashboard:\n")
+        return {"ok": True, "status": "executed", "tool": tool_name, "result": str(result)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 

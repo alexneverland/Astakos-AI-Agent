@@ -41,7 +41,7 @@ from core.agents import clean_message, filter_messages
 from memory.vector_store import memory
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
 from memory.session_memory import trigger_memory_sifter, log_exchange, _run_session_summary
-from tools.telegram import send_telegram_msg, send_telegram_voice
+from tools.telegram import send_telegram_msg, send_telegram_voice, send_telegram_msg_full
 from services.gemini import safe_gemini_call
 from services.embeddings import embeddings
 from core.event_bus import bus
@@ -691,10 +691,10 @@ def handle_message(user_text: str, chat_id: str):
                     encoding='utf-8', errors='ignore'
                 )
                 output = result.stdout if result.returncode == 0 else f"ERROR:\n{result.stderr}"
-                send_telegram_msg(
-                    f"✅ Εκτελέστηκε:\n💻 {output[:2000]}" if output.strip()
-                    else "✅ Εκτελέστηκε (χωρίς output)."
-                )
+                if output.strip():
+                    send_telegram_msg_full(output, prefix="✅ Εκτελέστηκε:\n💻 ")
+                else:
+                    send_telegram_msg("✅ Εκτελέστηκε (χωρίς output).")
             except Exception as e:
                 send_telegram_msg(f"❌ Σφάλμα εκτέλεσης: {e}")
             return
@@ -976,7 +976,7 @@ def _handle_approval_callback(cq: dict):
 
             execution = execute_approved_pending(tool_call_id, all_tools)
             if execution["ok"]:
-                send_telegram_msg("✅ `" + tool_name + "` ολοκληρώθηκε:\n\n" + str(execution["result"])[:800])
+                send_telegram_msg_full(str(execution["result"]), prefix="✅ `" + tool_name + "` ολοκληρώθηκε:\n\n")
             elif execution["status"] == "tool_not_found":
                 send_telegram_msg(f"❌ Tool `{tool_name}` δεν βρέθηκε.")
             else:
@@ -1352,7 +1352,7 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
         return content.strip()
     except Exception as e:
         print(f"[Proactive Craft Error]: {e}")
-        return f"Μάστορα, δεν είναι η ώρα για '{event_name}';"
+        return f"Μάστορα, ώρα για '{event_name}' (μου κόλλησε λίγο ο εγκέφαλος 😅)"
 def job_check_routines():
     """
     Ελέγχει για επερχόμενες ρουτίνες (30' νωρίτερα) και κάνει timeout decay
