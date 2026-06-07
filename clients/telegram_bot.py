@@ -626,6 +626,10 @@ def handle_message(user_text: str, chat_id: str):
 
         yes_words = [_normalize_gr(w) for w in ["ναι", "yes", "οκ", "ok", "ισχύει", "σωστά", "σωστα"]]
         no_words  = [_normalize_gr(w) for w in ["όχι", "οχι", "no", "σταμάτα", "σταματα", "διέγραψε", "βγάλτο", "βγαλτο"]]
+        question_words = [_normalize_gr(w) for w in [
+            "δείξε", "δειξε", "πες", "γιατί", "γιατι", "τι", "πως", "πώς",
+            "έλεγξε", "ελεγξε", "δες", "δωσε", "δώσε", "show", "check", "why"
+        ]]
 
         action_words = [_normalize_gr(w) for w in [
             "πάμε", "πηγαίνουμε", "φεύγουμε", "ξεκινάμε", "πάω", "θα πάμε",
@@ -633,8 +637,14 @@ def handle_message(user_text: str, chat_id: str):
             "ξεκίνησε", "αρχίζω", "έγινε", "έτοιμος", "τελειώσαμε", "went",
             "going", "done", "finished", "started"
         ]]
+        is_question_like = any(w in text_words for w in question_words) or "?" in clean_user_text
+        explicit_yes = (
+            not is_question_like
+            and len(text_words) <= 4
+            and any(w in text_words for w in yes_words)
+        )
         implicit_confirmed = False
-        if any(w in text_check for w in action_words):
+        if not is_question_like and any(w in text_check for w in action_words):
             for rid, rdata in pending_routine_confirmations.items():
                 event_name = rdata.get("event", "") if isinstance(rdata, dict) else str(rdata)
                 event_words = [_normalize_gr(w) for w in event_name.split() if len(w) > 3]
@@ -643,7 +653,7 @@ def handle_message(user_text: str, chat_id: str):
                     print(f"🔍 [Routine Implicit Confirm]: '{text_check[:40]}' → '{event_name}'")
                     break
 
-        if any(w in text_words for w in yes_words) or implicit_confirmed:
+        if explicit_yes or implicit_confirmed:
             from memory.routine_db import confirm_routine, mark_routine_responded, clear_pending_confirmations
             for rid in list(pending_routine_confirmations.keys()):
                 confirm_routine(rid)
@@ -1322,6 +1332,11 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
         "Πριν γράψεις, διάβασε το πρόσφατο ιστορικό. Αν υπάρχει ζωντανό context "
         "(π.χ. παίζουν επιτραπέζιο, είναι σε ποδόσφαιρο, δουλεύει, είναι έξω), "
         "δέσε την ατάκα φυσικά με αυτό. Αν το ιστορικό δεν σχετίζεται, αγνόησέ το.\n"
+        "ΚΡΙΣΙΜΟ: Το μήνυμα ΠΡΕΠΕΙ να αφορά ΜΟΝΟ τη συγκεκριμένη ρουτίνα/event. "
+        "Το πρόσφατο ιστορικό είναι μόνο φόντο για ύφος, όχι αφορμή να αλλάξεις θέμα. "
+        "Μην κάνεις status για tools, υγεία, Google Fit, debug ή άλλο θέμα αν δεν είναι το event.\n"
+        "Αν το event αφορά σύνταξη/αποστολή μηνύματος στη Σοφία, μίλα μόνο για αυτό "
+        "και ρώτα διακριτικά αν θέλει να ετοιμάσετε/στείλετε το μήνυμα.\n"
         "Χρησιμοποίησε τις ώρες στα πρόσφατα μηνύματα: μην παρουσιάζεις σαν τελειωμένο "
         "κάτι που ξεκίνησε πριν λίγα λεπτά ή δεν δηλώθηκε ότι ολοκληρώθηκε. "
         "Αν ο Λάζαρος είπε μόλις 'μαγειρεύω', 'παίζουμε', 'φεύγουμε' ή 'πάμε', "
@@ -1438,7 +1453,8 @@ def job_check_routines():
                     cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                     mark_routine_notified(r_id)
                     log_event("routines", "triggered", routine_id=r_id,
-                              event=event_name, confidence=confidence, batch=len(due_routines))
+                              event=event_name, confidence=confidence,
+                              batch=len(due_routines), preview=msg[:160])
                     pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
                     save_pending_confirmation(r_id, event_name, sent_at)
                     bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel="telegram")
@@ -1452,7 +1468,8 @@ def job_check_routines():
                 mark_routine_notified(r_id)
                 send_telegram_msg(msg)
                 log_event("routines", "triggered", routine_id=r_id,
-                          event=event_name, confidence=confidence)
+                          event=event_name, confidence=confidence,
+                          preview=msg[:160])
                 sent_at = datetime.now()
                 pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
                 save_pending_confirmation(r_id, event_name, sent_at)
