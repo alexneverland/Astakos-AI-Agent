@@ -1273,33 +1273,18 @@ def job_check_reminders():
 def _load_recent_proactive_context(limit: int = 10) -> str:
     """Return a compact mixed-channel conversation snippet for proactive messages."""
     try:
-        from memory.conversation_history import load_recent_context
+        from memory.context_builder import build_memory_context
 
-        entries = load_recent_context(
+        context = build_memory_context(
+            "",
             channel="telegram",
-            global_limit=limit,
-            channel_limit=limit,
-            total_limit=limit,
+            recent_limit=limit,
+            semantic_k=0,
         )
+        return "\n".join(context.recent_lines)
     except Exception as exc:
         print(f"\033[93m[ProactiveContext]: failed to load recent context: {exc}\033[0m")
         return ""
-
-    lines = []
-    for entry in entries[-limit:]:
-        role = entry.get("role", "unknown")
-        channel = entry.get("channel", "?")
-        time_label = entry.get("time") or str(entry.get("timestamp", ""))[11:16]
-        content = clean_message(str(entry.get("content", ""))).strip()
-        if not content:
-            continue
-        content = " ".join(content.split())
-        if len(content) > 220:
-            content = content[:217].rstrip() + "..."
-        speaker = "Λάζαρος" if role == "user" else "Αστακός"
-        lines.append(f"- [{channel} {time_label}] {speaker}: {content}")
-
-    return "\n".join(lines[-limit:])
 
 
 def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> str:
@@ -1316,16 +1301,23 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
     else:
         context = f"Παλιότερα ο Λάζαρος έκανε '{event_name}' αυτή την ώρα, δεν είμαστε σίγουροι πια."
 
-    recent_context = _load_recent_proactive_context()
-    recent_block = (
-        f"\n\n[ΠΡΟΣΦΑΤΟ ΙΣΤΟΡΙΚΟ WEB+TELEGRAM]\n{recent_context}\n"
-        if recent_context
-        else ""
-    )
+    try:
+        from memory.context_builder import build_memory_context
+
+        memory_context = build_memory_context(
+            event_name,
+            channel="telegram",
+            recent_limit=8,
+            semantic_k=4,
+        ).render()
+    except Exception as exc:
+        print(f"\033[93m[ProactiveContext]: context builder failed: {exc}\033[0m")
+        memory_context = ""
+    memory_block = f"\n\n{memory_context}\n" if memory_context else ""
 
     prompt = (
         f"{context}\n\n"
-        f"{recent_block}"
+        f"{memory_block}"
         "Είσαι ο Αστακός, ο προσωπικός AI του Λάζαρου (42 χρονών, μάστορας, "
         "γιος Αλέξανδρος 6 ετών, κόρη Μαρία 15 ετών, γυναίκα Σοφία). "
         "Στείλε ΕΝΑ φυσικό μήνυμα κολλημένο στην καθημερινότητα — με χιούμορ, σαν παλιός φίλος.\n"
