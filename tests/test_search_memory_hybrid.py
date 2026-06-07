@@ -8,8 +8,10 @@ class _VectorStore:
     def __init__(self, results):
         self.results = results
         self._collection = self
+        self.calls = []
 
     def similarity_search(self, query, k=6, filter=None):
+        self.calls.append({"query": query, "k": k, "filter": filter})
         return self.results
 
     def query(self, **kwargs):

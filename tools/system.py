@@ -12,6 +12,8 @@ import sys
 import math
 import subprocess
 import base64
+import unicodedata
+from types import SimpleNamespace
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from langchain_core.tools import tool
@@ -111,6 +113,100 @@ def archive_file(filename: str, content_summary: str) -> str:
 # Channel για Memory Provenance — ορίζεται από server.py/telegram_bot.py
 _CURRENT_CHANNEL: str = "unknown"
 
+
+def _normalize_memory_query(value: str) -> str:
+    text = unicodedata.normalize("NFD", str(value or "").lower())
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    return " ".join(text.split())
+
+
+def _expand_memory_query(query: str) -> tuple[list[str], str | None]:
+    clean = _normalize_memory_query(query)
+    expanded = [query]
+
+    family_markers = ("σοφια", "αλεξανδρ", "μαρια", "μικρο", "παιδι", "γενεθλια")
+    project_markers = ("astakos", "αστακο", "mastroapp", "github", "repo", "tool", "skill", "bug", "prompt")
+    home_markers = ("σπιτι", "συσκευ", "αφυγραντηρ", "κουζινα", "ψυγειο", "ρολοι", "google fit")
+    lesson_markers = ("κανονας", "διορθωσ", "bug", "lesson", "λαθος", "πρεπει")
+
+    inferred_category = None
+    if any(marker in clean for marker in family_markers):
+        inferred_category = "family"
+        expanded.append(f"{query} οικογένεια Σοφία Αλέξανδρος γενέθλια πλάνο γεγονός")
+    elif any(marker in clean for marker in project_markers):
+        inferred_category = "projects"
+        expanded.append(f"{query} project tool skill bug κανόνας αλλαγή υλοποίηση")
+    elif any(marker in clean for marker in home_markers):
+        inferred_category = "home"
+        expanded.append(f"{query} σπίτι συσκευή συντήρηση εργασία κατάσταση")
+    elif any(marker in clean for marker in lesson_markers):
+        inferred_category = "lesson"
+        expanded.append(f"{query} μάθημα κανόνας bug λύση συμπεριφορά")
+
+    is_gift_or_product = any(
+        marker in clean
+        for marker in ("δωρο", "γενεθλια", "αγορα", "προιον", "ρολοι", "watch", "link", "λινκ")
+    )
+    if is_gift_or_product:
+        expanded.append(f"{query} μελλοντικό δώρο ιδέα αγορά προϊόν σύνδεσμος link γενέθλια υπενθύμιση")
+        if inferred_category is None and any(marker in clean for marker in family_markers):
+            inferred_category = "family"
+
+    # Keep order, remove exact duplicates.
+    unique = []
+    seen = set()
+    for item in expanded:
+        key = _normalize_memory_query(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique, inferred_category
+
+
+def _memory_query_tokens(query: str) -> list[str]:
+    stopwords = {
+        "και", "που", "την", "τον", "τους", "στις", "στα", "στο", "για", "κατι",
+        "θυμασαι", "ειχαμε", "σημειωσει", "παρω", "μου", "σου", "what", "with",
+    }
+    tokens = re.findall(r"[a-zA-Zα-ωΑ-Ωάέήίόύώϊϋΐΰ]+", _normalize_memory_query(query))
+    return [token for token in tokens if len(token) >= 4 and token not in stopwords]
+
+
+def _lexical_memory_matches(query: str, category: str = "", limit: int = 4) -> list:
+    """Keyword fallback over Chroma docs; complements embeddings for exact user terms."""
+    tokens = _memory_query_tokens(query)
+    if len(tokens) < 2:
+        return []
+    try:
+        kwargs = {"include": ["documents", "metadatas"]}
+        if category:
+            kwargs["where"] = {"category": category}
+        data = vector_store._collection.get(**kwargs)
+    except Exception:
+        return []
+
+    clean_query = _normalize_memory_query(query)
+    scored = []
+    for document, metadata in zip(data.get("documents", []), data.get("metadatas", [])):
+        clean_doc = _normalize_memory_query(document)
+        score = sum(1 for token in tokens if token in clean_doc)
+        if "link" in clean_query or "λινκ" in clean_query:
+            score += 1 if ("http" in clean_doc or "link" in clean_doc) else 0
+        if "δωρο" in clean_query:
+            score += 1 if ("δωρο" in clean_doc or "αγορα" in clean_doc or "μελλοντικ" in clean_doc) else 0
+        if "γενεθλια" in clean_query:
+            score += 1 if ("γενεθλια" in clean_doc or "υπενθυμιση" in clean_doc) else 0
+        if score < 2:
+            continue
+        scored.append((score, len(str(document)), document, metadata or {}))
+
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [
+        SimpleNamespace(page_content=document, metadata=metadata)
+        for _, _, document, metadata in scored[:limit]
+    ]
+
 @tool
 def search_memory(query: str, category: str = "") -> str:
     """Αναζήτηση στη μακροπρόθεσμη μνήμη. Κάλεσέ το ΜΙΑ ΦΟΡΑ ΜΟΝΟ. Αν έχεις ήδη [Πληροφορία από αναζήτηση] στο context ΜΗΝ ξανακαλέσεις. Χρησιμοποίησέ το πριν απαντήσεις σε:
@@ -124,13 +220,16 @@ def search_memory(query: str, category: str = "") -> str:
     """
     VALID_CATS = {"lazaros", "family", "projects", "home", "lesson", "session", "photos"}
     try:
+        search_queries, inferred_category = _expand_memory_query(query)
+        primary_query = search_queries[-1]
+        effective_category = category if category in VALID_CATS else (inferred_category or "")
         sql_lines = []
         try:
             from memory.context_builder import temporal_history_for_query
             from tools import system as _self
 
             sql_lines = temporal_history_for_query(
-                query,
+                primary_query,
                 channel=getattr(_self, "_CURRENT_CHANNEL", "telegram") or "telegram",
                 limit=8,
             )
@@ -138,10 +237,26 @@ def search_memory(query: str, category: str = "") -> str:
             sql_lines = []
 
         with vector_lock:
-            if category and category in VALID_CATS:
-                results = vector_store.similarity_search(query, k=6, filter={"category": category})
-            else:
-                results = vector_store.similarity_search(query, k=6)
+            merged_results = []
+            seen_docs = set()
+            for doc in _lexical_memory_matches(primary_query, effective_category, limit=4):
+                key = getattr(doc, "page_content", str(doc))
+                if key in seen_docs:
+                    continue
+                seen_docs.add(key)
+                merged_results.append(doc)
+            for search_query in search_queries[:3]:
+                if effective_category:
+                    batch = vector_store.similarity_search(search_query, k=5, filter={"category": effective_category})
+                else:
+                    batch = vector_store.similarity_search(search_query, k=5)
+                for doc in batch:
+                    key = getattr(doc, "page_content", str(doc))
+                    if key in seen_docs:
+                        continue
+                    seen_docs.add(key)
+                    merged_results.append(doc)
+            results = merged_results[:8 if effective_category else 6]
 
         if not results and not sql_lines:
             return "System: Δεν βρέθηκε σχετικό ιστορικό SQLite ή μνήμη Chroma. Απάντα με τις γενικές σου γνώσεις."
@@ -152,10 +267,10 @@ def search_memory(query: str, category: str = "") -> str:
                 from memory.vector_store import bump_retrieval_count
                 with vector_lock:
                     kwargs = {"n_results": min(6, len(results))}
-                    if category and category in VALID_CATS:
-                        kwargs["where"] = {"category": category}
+                    if effective_category:
+                        kwargs["where"] = {"category": effective_category}
                     raw = vector_store._collection.query(
-                        query_embeddings=[embeddings.embed_query(query)], **kwargs
+                        query_embeddings=[embeddings.embed_query(primary_query)], **kwargs
                     )
                 if raw.get("ids") and raw["ids"][0]:
                     bump_retrieval_count(raw["ids"][0])
