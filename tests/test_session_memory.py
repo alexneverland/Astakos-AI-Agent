@@ -208,3 +208,74 @@ def test_confirmed_memory_candidate_ignores_message_drafts():
     )
 
     assert candidate is None
+
+
+def test_memory_sifter_includes_recent_session_context_in_prompt(monkeypatch):
+    import memory.session_memory as session_memory
+
+    captured = {}
+
+    class EmptyResponse:
+        text = "ΚΕΝΟ"
+
+    session_memory.SESSION_LOGS[:] = [
+        {"time": "10:00", "agent": "Chat_Agent", "channel": "web",
+         "user": "Πάμε για ΛΕΓΚΟ;", "ai": "Ναι, ωραία ιδέα!"},
+        {"time": "10:05", "agent": "Chat_Agent", "channel": "web",
+         "user": "Τι θα φτιάξουμε;", "ai": "Ένα διαστημόπλοιο."},
+    ]
+    monkeypatch.setattr(session_memory, "_extract_event_memory_candidate", lambda *a, **k: None)
+    monkeypatch.setattr(session_memory, "_extract_confirmed_memory_candidate", lambda *a, **k: None)
+
+    def fake_gemini(prompt):
+        captured["prompt"] = prompt
+        return EmptyResponse()
+
+    monkeypatch.setattr(session_memory, "safe_gemini_call", fake_gemini)
+
+    session_memory._run_memory_sifter(
+        "Ωραία τα φτιάξαμε", "Ναι, τέλειο αποτέλεσμα!",
+        agent_name="Chat_Agent", channel="web",
+    )
+
+    prompt = captured["prompt"]
+    assert "ΠΡΟΗΓΟΥΜΕΝΟ ΠΛΑΙΣΙΟ" in prompt
+    assert "ΜΗΝ εξάγεις facts από αυτό το τμήμα" in prompt
+    assert "Πάμε για ΛΕΓΚΟ;" in prompt
+    assert "Τι θα φτιάξουμε;" in prompt
+    assert "ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ" in prompt
+    assert "Ωραία τα φτιάξαμε" in prompt
+    # Σειρά: παλιό πλαίσιο -> δείκτης τρέχουσας -> τρέχουσα ανταλλαγή
+    assert (
+        prompt.index("ΠΡΟΗΓΟΥΜΕΝΟ ΠΛΑΙΣΙΟ")
+        < prompt.index("ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ")
+        < prompt.index("Ωραία τα φτιάξαμε")
+    )
+    session_memory.SESSION_LOGS.clear()
+
+
+def test_memory_sifter_omits_context_block_when_session_logs_empty(monkeypatch):
+    import memory.session_memory as session_memory
+
+    captured = {}
+
+    class EmptyResponse:
+        text = "ΚΕΝΟ"
+
+    session_memory.SESSION_LOGS.clear()
+    monkeypatch.setattr(session_memory, "_extract_event_memory_candidate", lambda *a, **k: None)
+    monkeypatch.setattr(session_memory, "_extract_confirmed_memory_candidate", lambda *a, **k: None)
+
+    def fake_gemini(prompt):
+        captured["prompt"] = prompt
+        return EmptyResponse()
+
+    monkeypatch.setattr(session_memory, "safe_gemini_call", fake_gemini)
+
+    session_memory._run_memory_sifter(
+        "Γεια σου", "Γεια!", agent_name="Chat_Agent", channel="web",
+    )
+
+    prompt = captured["prompt"]
+    assert "ΠΡΟΗΓΟΥΜΕΝΟ ΠΛΑΙΣΙΟ" not in prompt
+    assert "ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ" in prompt

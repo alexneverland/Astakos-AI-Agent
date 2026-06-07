@@ -423,6 +423,26 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
         # 1. Προετοιμασία Prompt για το Gemini
         cats_desc = "\n".join([f'  - "{k}": {v}' for k, v in MEMORY_CATS.items()])
         
+        # ── Sliding-window context: τελευταία exchanges πριν το τρέχον ──
+        # Ο sifter μπαίνει στην ουρά ΠΡΙΝ το log_exchange (βλ. enqueue σειρά
+        # στο api/server.py), άρα το SESSION_LOGS εδώ ΔΕΝ περιέχει ακόμα το
+        # τρέχον exchange -> καμία διπλοεγγραφή/race condition.
+        recent_context_block = ""
+        try:
+            recent_entries = SESSION_LOGS[-4:]
+            if recent_entries:
+                ctx_lines = "\n".join(
+                    f"Λάζαρος: {e['user']} | Αστακός: {e['ai']}"
+                    for e in recent_entries
+                )
+                recent_context_block = (
+                    "\n[ΠΡΟΗΓΟΥΜΕΝΟ ΠΛΑΙΣΙΟ — μόνο για να καταλάβεις τη ροή της "
+                    "συζήτησης, ΜΗΝ εξάγεις facts από αυτό το τμήμα]\n"
+                    f"{ctx_lines}\n"
+                )
+        except Exception:
+            recent_context_block = ""
+
         sifter_prompt = f"""
 Είσαι ο Αρχειοθέτης του Αστακού. Εξάγεις ΜΟΝΟ αξιόλογες, νέες μνήμες.
 Δεν περιμένεις να πει ο χρήστης "αποθήκευσέ το". Κρίνεις μόνος σου από το περιεχόμενο
@@ -456,6 +476,8 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
 8. Μην αποθηκεύεις απλές απαντήσεις ευγένειας, προσωρινά drafts, αστεία χωρίς μελλοντική αξία,
    ή πληροφορίες που είναι ήδη γνωστές εκτός αν η νέα εκδοχή είναι πιο πλούσια/ακριβής.
 
+{recent_context_block}
+[ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ — εδώ, και ΜΟΝΟ εδώ, εξάγεις νέα facts]
 [Ημερομηνία/Ώρα: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Channel: {channel}]
 [Agent: {agent_name}]
 Λάζαρος: {user_text}
