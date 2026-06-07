@@ -125,6 +125,40 @@ def test_load_messages_since_filters_role_channel_and_date(tmp_path):
     assert [m["content"] for m in messages] == ["recent web"]
 
 
+def test_load_messages_since_returns_most_recent_when_window_exceeds_limit(tmp_path):
+    """Bug πραγματικού περιστατικού: σε 30 μέρες υπήρχαν 1968 μηνύματα, ενώ το
+    temporal_history_for_query καλεί load_messages_since με limit=1500. Πριν, η
+    'ORDER BY timestamp ASC ... LIMIT' επέστρεφε τα 1500 ΠΑΛΙΟΤΕΡΑ μέσα στο
+    παράθυρο -- κόβοντας έξω ολόκληρη την πιο πρόσφατη εβδομάδα (το SQL/temporal
+    επίπεδο μνήμης ήταν τυφλό ακριβώς για το 'τι είπαμε πρόσφατα').
+
+    Εδώ αναπαράγουμε το ίδιο σε μικρή κλίμακα: 5 μηνύματα στο παράθυρο, limit=3
+    -- πρέπει να επιστρέφονται τα 3 πιο ΠΡΟΣΦΑΤΑ (σε σωστή χρονολογική σειρά),
+    όχι τα 3 παλιότερα.
+    """
+    from memory.conversation_history import append_message, load_messages_since
+
+    db_path = str(tmp_path / "conversation.db")
+    for day, content in [
+        (1, "πολύ παλιό"),
+        (2, "παλιό"),
+        (3, "μεσαίο"),
+        (4, "πρόσφατο"),
+        (5, "πιο πρόσφατο"),
+    ]:
+        append_message(
+            role="user",
+            content=content,
+            channel="telegram",
+            timestamp=datetime(2026, 6, day, 10, 0),
+            db_path=db_path,
+        )
+
+    messages = load_messages_since(since_date="2026-06-01", limit=3, db_path=db_path)
+
+    assert [m["content"] for m in messages] == ["μεσαίο", "πρόσφατο", "πιο πρόσφατο"]
+
+
 def test_load_recent_context_merges_global_and_channel_windows(tmp_path):
     from memory.conversation_history import append_message, load_recent_context
 

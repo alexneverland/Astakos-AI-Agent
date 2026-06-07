@@ -393,22 +393,45 @@ def load_messages_since(
         clauses.append("channel = ?")
         params.append(channel)
 
-    limit_clause = ""
-    if limit is not None:
-        limit_clause = "LIMIT ?"
-        params.append(limit)
+    where_clause = " AND ".join(clauses)
 
     with _connect(db_path) as conn:
-        rows = conn.execute(
-            f"""
-            SELECT *
-            FROM conversation_messages
-            WHERE {' AND '.join(clauses)}
-            ORDER BY timestamp ASC, id ASC
-            {limit_clause}
-            """,
-            params,
-        ).fetchall()
+        if limit is not None:
+            # Παίρνουμε τα ΠΙΟ ΠΡΟΣΦΑΤΑ `limit` μηνύματα μέσα στο παράθυρο
+            # (ORDER BY ... DESC + LIMIT) και μετά τα ξαναταξινομούμε
+            # χρονολογικά (ASC) στο τελικό αποτέλεσμα.
+            #
+            # Πριν, το LIMIT έπεφτε πάνω σε ήδη ASC ταξινομημένα δεδομένα:
+            # όταν το παράθυρο (since_date..σήμερα) περιείχε περισσότερα
+            # μηνύματα από το `limit` (π.χ. 1968 μηνύματα σε 30 μέρες ενώ
+            # το temporal_history_for_query καλεί με limit=1500), η query
+            # επέστρεφε τα 1500 ΠΑΛΙΟΤΕΡΑ -- κόβοντας ολόκληρη την πιο
+            # πρόσφατη εβδομάδα έξω από το αποτέλεσμα. Έτσι το SQL/temporal
+            # επίπεδο μνήμης ήταν ουσιαστικά τυφλό για το "τι είπαμε
+            # πρόσφατα", παρότι η ερώτηση ζητούσε ακριβώς αυτό.
+            rows = conn.execute(
+                f"""
+                SELECT * FROM (
+                    SELECT *
+                    FROM conversation_messages
+                    WHERE {where_clause}
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT ?
+                )
+                ORDER BY timestamp ASC, id ASC
+                """,
+                params + [limit],
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM conversation_messages
+                WHERE {where_clause}
+                ORDER BY timestamp ASC, id ASC
+                """,
+                params,
+            ).fetchall()
 
     return [_row_to_message(row) for row in rows]
 
