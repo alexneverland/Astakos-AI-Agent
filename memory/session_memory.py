@@ -125,6 +125,21 @@ def _extract_event_memory_candidate(
     combined = f"{safe_user} {safe_ai}".lower()
 
     family_markers = ("αλέξανδρ", "αλεξανδρ", "σοφία", "σοφια", "μικρό", "μικρο", "μικρός", "μικρος")
+    personal_markers = (
+        "εγώ",
+        "εγω",
+        "εμένα",
+        "εμενα",
+        "μου",
+        "δουλειά",
+        "δουλεια",
+        "συνέντευξη",
+        "συνεντευξη",
+        "υγεία",
+        "υγεια",
+        "ύπνο",
+        "υπνο",
+    )
     event_markers = (
         "ποδόσφ",
         "ποδοσφ",
@@ -142,12 +157,28 @@ def _extract_event_memory_candidate(
         "σχολειο",
         "δουλειά",
         "δουλεια",
+        "συνέντευξη",
+        "συνεντευξη",
+        "γιατρό",
+        "γιατρο",
+        "υγεία",
+        "υγεια",
+        "ύπνο",
+        "υπνο",
+        "γυμναστήριο",
+        "γυμναστηριο",
+        "δουλεύω",
+        "δουλευω",
     )
     statement_markers = (
         "είμαστε",
         "ειμαστε",
         "πήγαμε",
         "πηγαμε",
+        "πήγε",
+        "πηγε",
+        "είχα",
+        "ειχα",
         "πήρε",
         "πηρε",
         "τέλος",
@@ -162,7 +193,9 @@ def _extract_event_memory_candidate(
         "ειναι στη",
     )
 
-    if not any(marker in combined for marker in family_markers):
+    has_family_marker = any(marker in combined for marker in family_markers)
+    has_personal_marker = any(marker in combined for marker in personal_markers)
+    if not (has_family_marker or has_personal_marker):
         return None
     if not any(marker in combined for marker in event_markers):
         return None
@@ -180,7 +213,7 @@ def _extract_event_memory_candidate(
     return {
         "memory_type": "fact",
         "fact": fact,
-        "category": "family",
+        "category": "family" if has_family_marker else "lazaros",
         "agent_name": agent_name,
         "source": channel,
         "reason": "user_stated",

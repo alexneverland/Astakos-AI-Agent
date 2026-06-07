@@ -139,3 +139,22 @@ def test_event_memory_candidate_ignores_plain_question():
     )
 
     assert candidate is None
+
+
+def test_event_memory_candidate_captures_personal_day_event():
+    import datetime
+    import memory.session_memory as session_memory
+
+    candidate = session_memory._extract_event_memory_candidate(
+        "Σήμερα είχα συνέντευξη για δουλειά και πήγε καλά",
+        "Μπράβο, σημαντικό νέο για τη δουλειά σου.",
+        agent_name="Chat_Agent",
+        channel="web",
+        now=datetime.datetime(2026, 6, 7, 16, 0),
+    )
+
+    assert candidate["memory_type"] == "fact"
+    assert candidate["category"] == "lazaros"
+    assert candidate["source"] == "web"
+    assert "2026-06-07" in candidate["fact"]
+    assert "συνέντευξη" in candidate["fact"]

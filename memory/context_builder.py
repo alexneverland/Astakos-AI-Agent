@@ -139,19 +139,23 @@ def temporal_history_for_query(
     *,
     channel: str = "telegram",
     limit: int = 8,
+    lookback_days: int = 30,
     now: datetime | None = None,
     history_loader: Callable[..., list[dict[str, Any]]] | None = None,
 ) -> list[str]:
     clean_query = _normalize_text(query)
-    if limit <= 0 or not _has_temporal_marker(clean_query):
+    tokens = _query_tokens(clean_query)
+    has_temporal_marker = _has_temporal_marker(clean_query)
+    if limit <= 0:
+        return []
+    if not has_temporal_marker and len(tokens) < 2:
         return []
 
     current = now or datetime.now()
     target_date = None
     if any(marker in clean_query for marker in ("χτες", "χθες", "χθεσιν", "yesterday")):
         target_date = (current - timedelta(days=1)).strftime("%Y-%m-%d")
-    if not target_date:
-        return []
+    since_date = target_date or (current - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
     if history_loader is None:
         from memory.conversation_history import load_messages_since
@@ -159,17 +163,17 @@ def temporal_history_for_query(
         history_loader = load_messages_since
 
     try:
-        messages = history_loader(since_date=target_date, limit=300)
+        messages = history_loader(since_date=since_date, limit=500)
     except Exception:
         return []
 
     filtered = []
     wants_morning = any(marker in clean_query for marker in ("πρωι", "πρωί", "morning"))
     for message in messages:
-        if message.get("date") != target_date:
+        if target_date and message.get("date") != target_date:
             continue
         time_label = str(message.get("time") or "")
-        if wants_morning and not ("05:00" <= time_label <= "13:00"):
+        if target_date and wants_morning and not ("05:00" <= time_label <= "13:00"):
             continue
         filtered.append(message)
 
@@ -179,7 +183,6 @@ def temporal_history_for_query(
     # Prefer the current channel, but keep mixed-channel context if needed.
     current_channel = [msg for msg in filtered if msg.get("channel") == channel]
     pool = current_channel if len(current_channel) >= max(2, limit // 2) else filtered
-    tokens = _query_tokens(clean_query)
 
     def score(message: dict[str, Any]) -> int:
         content = _normalize_text(message.get("content", ""))

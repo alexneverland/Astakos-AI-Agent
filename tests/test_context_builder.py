@@ -104,6 +104,37 @@ def test_temporal_history_for_yesterday_morning_uses_sqlite_messages():
     assert all("Άσχετο απόγευμα" not in line for line in lines)
 
 
+def test_history_lookup_uses_sqlite_even_without_date_words():
+    def fake_history_loader(**kwargs):
+        assert kwargs["since_date"] == "2026-05-08"
+        return [
+            {
+                "channel": "web",
+                "date": "2026-06-01",
+                "time": "18:00",
+                "role": "user",
+                "content": "Μιλήσαμε για το πάρκο με τη Σοφία και τον Αλέξανδρο.",
+            },
+            {
+                "channel": "telegram",
+                "date": "2026-06-02",
+                "time": "19:00",
+                "role": "assistant",
+                "content": "Άσχετο για μαγείρεμα.",
+            },
+        ]
+
+    lines = temporal_history_for_query(
+        "θυμάσαι τι λέγαμε για πάρκο Σοφία;",
+        channel="web",
+        history_loader=fake_history_loader,
+        now=__import__("datetime").datetime(2026, 6, 7, 15, 0),
+    )
+
+    assert any("πάρκο με τη Σοφία" in line for line in lines)
+    assert all("μαγείρεμα" not in line for line in lines)
+
+
 def test_tool_output_query_disables_memory_lookup():
     calls = {"recent": 0, "semantic": 0}
 
