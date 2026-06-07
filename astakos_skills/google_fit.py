@@ -34,6 +34,21 @@ def _ns_to_ms(ns: int) -> int:
 def _ms_to_ns(ms: int) -> int:
     return ms * 1_000_000
 
+
+def _fitness_service():
+    creds = _get_credentials()
+    return build("fitness", "v1", credentials=creds)
+
+
+def _list_data_sources(service, data_type_name: str) -> list[str]:
+    sources = service.users().dataSources().list(userId="me").execute().get("dataSource", [])
+    return [
+        s.get("dataStreamId", "")
+        for s in sources
+        if s.get("dataType", {}).get("name") == data_type_name and s.get("dataStreamId")
+    ]
+
+
 def _day_range_ms(days_ago: int = 0):
     """Επιστρέφει (start_ms, end_ms) για X ημέρες πίσω (0 = σήμερα, 1 = χθες)."""
     now = datetime.datetime.now()
@@ -47,8 +62,7 @@ def _day_range_ms(days_ago: int = 0):
 
 def get_steps(days_ago: int = 0) -> int:
     """Επιστρέφει αριθμό βημάτων για την ημέρα."""
-    creds   = _get_credentials()
-    service = build("fitness", "v1", credentials=creds)
+    service = _fitness_service()
     start_ms, end_ms = _day_range_ms(days_ago)
 
     body = {
@@ -73,15 +87,14 @@ def get_sleep(days_ago: int = 1) -> dict:
     Διαβάζει απευθείας από Samsung Health data source για αξιοπιστία.
     Returns: {"total_minutes": int, "deep_minutes": int, "light_minutes": int, "rem_minutes": int}
     """
-    creds   = _get_credentials()
-    service = build("fitness", "v1", credentials=creds)
+    service = _fitness_service()
 
     # Παράθυρο: από 20:00 της προηγούμενης μέρας έως 14:00 της επόμενης
     # Καλύπτει οποιαδήποτε ώρα ύπνου/αφύπνισης
     now    = datetime.datetime.now()
     target = now - datetime.timedelta(days=days_ago)
     start  = (target - datetime.timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
-    end    = target.replace(hour=14, minute=0, second=0, microsecond=0)
+    end    = min(target.replace(hour=14, minute=0, second=0, microsecond=0), now)
     start_ns = int(start.timestamp() * 1_000_000_000)
     end_ns   = int(end.timestamp()   * 1_000_000_000)
     dataset_id = f"{start_ns}-{end_ns}"
@@ -89,11 +102,18 @@ def get_sleep(days_ago: int = 1) -> dict:
     # Sleep segment values: 1=awake, 2=sleep, 3=out-of-bed, 4=light, 5=deep, 6=REM
     total = deep = light = rem = 0
 
-    # Πρώτα δοκιμάζουμε Samsung Health απευθείας
-    SAMSUNG_SOURCE = "raw:com.google.sleep.segment:com.sec.android.app.shealth:health_platform"
-    MERGED_SOURCE  = "derived:com.google.sleep.segment:com.google.android.gms:merged"
+    preferred_sources = [
+        "derived:com.google.sleep.segment:com.google.android.gms:merged",
+        "raw:com.google.sleep.segment:com.sec.android.app.shealth:health_platform",
+        "raw:com.google.sleep.segment:com.urbandroid.sleep:saa-generic",
+    ]
+    dynamic_sources = _list_data_sources(service, "com.google.sleep.segment")
+    source_ids = []
+    for source_id in preferred_sources + dynamic_sources:
+        if source_id and source_id not in source_ids:
+            source_ids.append(source_id)
 
-    for source_id in [SAMSUNG_SOURCE, MERGED_SOURCE]:
+    for source_id in source_ids:
         try:
             res = service.users().dataSources().datasets().get(
                 userId="me",
@@ -127,11 +147,32 @@ def get_sleep(days_ago: int = 1) -> dict:
     }
 
 
+def _collect_raw_heart_rates(service, start_ms: int, end_ms: int) -> list[float]:
+    dataset_id = f"{_ms_to_ns(start_ms)}-{_ms_to_ns(end_ms)}"
+    values = []
+    for source_id in _list_data_sources(service, "com.google.heart_rate.bpm"):
+        try:
+            res = service.users().dataSources().datasets().get(
+                userId="me",
+                dataSourceId=source_id,
+                datasetId=dataset_id,
+            ).execute()
+        except Exception:
+            continue
+        for point in res.get("point", []):
+            for val in point.get("value", []):
+                bpm = val.get("fpVal", 0)
+                if bpm > 0:
+                    values.append(float(bpm))
+    return values
+
+
 def get_heart_rate(days_ago: int = 0) -> dict:
     """Επιστρέφει μέσο και μέγιστο καρδιακό παλμό."""
-    creds   = _get_credentials()
-    service = build("fitness", "v1", credentials=creds)
+    service = _fitness_service()
     start_ms, end_ms = _day_range_ms(days_ago)
+    if days_ago == 0:
+        end_ms = min(end_ms, int(datetime.datetime.now().timestamp() * 1000))
 
     body = {
         "aggregateBy": [{"dataTypeName": "com.google.heart_rate.bpm"}],
@@ -140,18 +181,18 @@ def get_heart_rate(days_ago: int = 0) -> dict:
         "endTimeMillis":   end_ms,
     }
     res = service.users().dataset().aggregate(userId="me", body=body).execute()
-    avg_bpm = max_bpm = 0
+    values = []
     for bucket in res.get("bucket", []):
         for dataset in bucket.get("dataset", []):
             for point in dataset.get("point", []):
                 for val in point.get("value", []):
                     fp = val.get("fpVal", 0)
                     if fp > 0:
-                        if avg_bpm == 0:
-                            avg_bpm = fp
-                        else:
-                            avg_bpm = (avg_bpm + fp) / 2
-                        max_bpm = max(max_bpm, fp)
+                        values.append(float(fp))
+    if not values:
+        values = _collect_raw_heart_rates(service, start_ms, end_ms)
+    avg_bpm = sum(values) / len(values) if values else 0
+    max_bpm = max(values) if values else 0
     return {"avg_bpm": round(avg_bpm), "max_bpm": round(max_bpm)}
 
 
