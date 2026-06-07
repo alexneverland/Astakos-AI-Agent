@@ -2,7 +2,9 @@ from memory.context_builder import (
     MemoryContext,
     build_memory_context,
     format_recent_messages,
+    looks_like_tool_output,
     semantic_facts_for_query,
+    temporal_history_for_query,
 )
 
 
@@ -64,5 +66,65 @@ def test_build_memory_context_combines_recent_and_semantic():
     assert "Ο Αλέξανδρος θέλει πάρκο" in rendered
 
 
+def test_temporal_history_for_yesterday_morning_uses_sqlite_messages():
+    def fake_history_loader(**kwargs):
+        return [
+            {
+                "channel": "telegram",
+                "date": "2026-06-06",
+                "time": "09:15",
+                "role": "user",
+                "content": "Είμαστε όλοι μαζί στους αγώνες ποδοσφαίρου του Αλέξανδρου.",
+            },
+            {
+                "channel": "telegram",
+                "date": "2026-06-06",
+                "time": "12:38",
+                "role": "user",
+                "content": "Τέλος το ποδόσφαιρο, πήρε και μετάλλιο.",
+            },
+            {
+                "channel": "telegram",
+                "date": "2026-06-06",
+                "time": "18:00",
+                "role": "user",
+                "content": "Άσχετο απόγευμα.",
+            },
+        ]
+
+    lines = temporal_history_for_query(
+        "ο Αλέξανδρος τι έκανε χτες το πρωί που πήγαμε όλοι μαζί;",
+        channel="telegram",
+        history_loader=fake_history_loader,
+        now=__import__("datetime").datetime(2026, 6, 7, 15, 0),
+    )
+
+    assert any("αγώνες ποδοσφαίρου" in line for line in lines)
+    assert any("μετάλλιο" in line for line in lines)
+    assert all("Άσχετο απόγευμα" not in line for line in lines)
+
+
+def test_tool_output_query_disables_memory_lookup():
+    calls = {"recent": 0, "semantic": 0}
+
+    def fake_recent_loader(**kwargs):
+        calls["recent"] += 1
+        return [{"channel": "web", "time": "10:00", "role": "user", "content": "recent"}]
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] stale")]
+
+    context = build_memory_context(
+        "ΜΝΗΜΕΣ ΠΟΥ ΒΡΕΘΗΚΑΝ: [FAMILY] • Ο Αλέξανδρος έφαγε μπριζόλα",
+        recent_loader=fake_recent_loader,
+        semantic_search=fake_search,
+    )
+
+    assert looks_like_tool_output("ΜΝΗΜΕΣ ΠΟΥ ΒΡΕΘΗΚΑΝ: κάτι")
+    assert context.render() == ""
+    assert calls == {"recent": 0, "semantic": 0}
+
+
 def test_empty_memory_context_renders_empty():
-    assert MemoryContext([], []).render() == ""
+    assert MemoryContext([], [], []).render() == ""

@@ -110,6 +110,83 @@ def load_last_session_hint(channel: str = "web") -> str:
 
 is_summarizing = False  # Πρέπει να οριστεί έξω από τη συνάρτηση
 
+
+def _extract_event_memory_candidate(
+    user_text: str,
+    ai_text: str,
+    *,
+    agent_name: str = "Unknown",
+    channel: str = "web",
+    now: datetime | None = None,
+) -> dict | None:
+    """Deterministic safety net for day-specific events the LLM sifter may skip."""
+    safe_user = clean_message(user_text)
+    safe_ai = clean_message(ai_text)
+    combined = f"{safe_user} {safe_ai}".lower()
+
+    family_markers = ("αλέξανδρ", "αλεξανδρ", "σοφία", "σοφια", "μικρό", "μικρο", "μικρός", "μικρος")
+    event_markers = (
+        "ποδόσφ",
+        "ποδοσφ",
+        "αγών",
+        "αγων",
+        "τελικό",
+        "τελικο",
+        "μετάλλ",
+        "μεταλλ",
+        "πάρκο",
+        "παρκο",
+        "βόλτα",
+        "βολτα",
+        "σχολείο",
+        "σχολειο",
+        "δουλειά",
+        "δουλεια",
+    )
+    statement_markers = (
+        "είμαστε",
+        "ειμαστε",
+        "πήγαμε",
+        "πηγαμε",
+        "πήρε",
+        "πηρε",
+        "τέλος",
+        "τελος",
+        "γυρνάμε",
+        "γυρναμε",
+        "φεύγουμε",
+        "φευγουμε",
+        "πάμε",
+        "παμε",
+        "είναι στη",
+        "ειναι στη",
+    )
+
+    if not any(marker in combined for marker in family_markers):
+        return None
+    if not any(marker in combined for marker in event_markers):
+        return None
+    if not any(marker in combined for marker in statement_markers):
+        return None
+
+    source_text = " ".join(safe_user.split())
+    if not source_text:
+        return None
+    if len(source_text) > 280:
+        source_text = source_text[:277].rstrip() + "..."
+
+    ts = now or datetime.now()
+    fact = f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, {source_text}"
+    return {
+        "memory_type": "fact",
+        "fact": fact,
+        "category": "family",
+        "agent_name": agent_name,
+        "source": channel,
+        "reason": "user_stated",
+        "confidence": 0.85,
+    }
+
 def _run_session_summary(channel: str = "web"):
     """Αρχειοθετεί τη συνεδρία (per channel) με προστασία από διπλοεγγραφές."""
     global is_summarizing, SESSION_LOGS
@@ -214,6 +291,15 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
     }
 
     try:
+        event_candidate = _extract_event_memory_candidate(
+            user_text,
+            ai_text,
+            agent_name=agent_name,
+            channel=channel,
+        )
+        if event_candidate:
+            memory.save(**event_candidate)
+
         # 1. Προετοιμασία Prompt για το Gemini
         cats_desc = "\n".join([f'  - "{k}": {v}' for k, v in MEMORY_CATS.items()])
         
@@ -231,7 +317,10 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
 1. Κάθε μνήμη (fact) ΠΡΕΠΕΙ να ξεκινάει με: [USER_FACT], [CAPABILITY], [LESSON], ή [PHOTO].
 2. ΜΟΡΦΗ JSON array: [{{"fact": "[TAG]: ...", "category": "...", "caption": "...", "analysis": "..."}}]
 3. Αν δεν υπάρχει νέα πληροφορία → απάντησε ΜΟΝΟ: ΚΕΝΟ.
+4. Κράτα ημερομηνία για ημερήσια γεγονότα/οικογενειακές δραστηριότητες (π.χ. αγώνες, πάρκο, σχολείο, δουλειά): "Στις YYYY-MM-DD, ...".
+5. Μην αποθηκεύεις απλά drafts/προσχέδια μηνυμάτων ως facts. Αποθήκευσε μόνο πραγματικά γεγονότα, προτιμήσεις, αποφάσεις ή μαθήματα.
 
+[Ημερομηνία/Ώρα: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Channel: {channel}]
 [Agent: {agent_name}]
 Λάζαρος: {user_text}
 Αστακός: {ai_text}
@@ -317,4 +406,4 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
 
 def trigger_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
     """Wrapper — εκτελείται μέσω Queue Worker."""
-    _run_memory_sifter(user_text, ai_text, agent_name)
+    _run_memory_sifter(user_text, ai_text, agent_name, channel)

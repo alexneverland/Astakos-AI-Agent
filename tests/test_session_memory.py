@@ -106,3 +106,36 @@ def test_run_session_summary_uses_persistent_unsummarized_exchanges(monkeypatch)
     assert session_memory.SESSION_LOGS == []
     assert emitted[0][1]["channel"] == "mixed"
     session_memory.is_summarizing = False
+
+
+def test_event_memory_candidate_captures_family_day_event():
+    import datetime
+    import memory.session_memory as session_memory
+
+    candidate = session_memory._extract_event_memory_candidate(
+        "Τέλος το ποδόσφαιρο ωραία ήταν πήρε και μετάλλιο τώρα γυρνάμε",
+        "Μπράβο στον μικρό για το μετάλλιο!",
+        agent_name="Chat_Agent",
+        channel="telegram",
+        now=datetime.datetime(2026, 6, 6, 12, 38),
+    )
+
+    assert candidate["memory_type"] == "fact"
+    assert candidate["category"] == "family"
+    assert candidate["source"] == "telegram"
+    assert candidate["reason"] == "user_stated"
+    assert "2026-06-06" in candidate["fact"]
+    assert "μετάλλιο" in candidate["fact"]
+
+
+def test_event_memory_candidate_ignores_plain_question():
+    import memory.session_memory as session_memory
+
+    candidate = session_memory._extract_event_memory_candidate(
+        "Ο Αλέξανδρος τι έκανε χτες το πρωί;",
+        "Δεν ξέρω ακόμα.",
+        agent_name="Chat_Agent",
+        channel="web",
+    )
+
+    assert candidate is None

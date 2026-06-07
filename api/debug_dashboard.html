@@ -247,11 +247,12 @@ function render(d) {
   const mem = d.memory_context || {};
   const memPreview = []
     .concat((mem.recent_preview || []).slice(0, 2))
+    .concat((mem.historical_preview || []).slice(0, 2).map(x => 'SQL ' + x))
     .concat((mem.semantic_preview || []).slice(0, 2).map(x => '• ' + x));
   html += `<div class="card"><h2>Memory Context</h2>
     <div class="kv"><span class="k">Last build</span><span class="v">${mem.written_at ? esc(mem.written_at.slice(11,19)) : 'none'}</span></div>
     <div class="kv"><span class="k">Channel</span><span class="v">${esc(mem.channel || '-')}</span></div>
-    <div class="kv"><span class="k">Recent / Chroma</span><span class="v">${mem.recent_count ?? 0} / ${mem.semantic_count ?? 0}</span></div>
+    <div class="kv"><span class="k">Recent / SQL / Chroma</span><span class="v">${mem.recent_count ?? 0} / ${mem.historical_count ?? 0} / ${mem.semantic_count ?? 0}</span></div>
     <div class="kv"><span class="k">Query</span><span class="v" style="text-align:right">${esc(mem.query_preview || '-')}</span></div>
     ${memPreview.length ? `<div style="margin-top:6px;color:var(--muted);font-size:10px;line-height:1.35">${memPreview.map(esc).join('<br>')}</div>` : ''}
   </div>`;
