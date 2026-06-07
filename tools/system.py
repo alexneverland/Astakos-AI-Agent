@@ -124,29 +124,43 @@ def search_memory(query: str, category: str = "") -> str:
     """
     VALID_CATS = {"lazaros", "family", "projects", "home", "lesson", "session", "photos"}
     try:
+        sql_lines = []
+        try:
+            from memory.context_builder import temporal_history_for_query
+            from tools import system as _self
+
+            sql_lines = temporal_history_for_query(
+                query,
+                channel=getattr(_self, "_CURRENT_CHANNEL", "telegram") or "telegram",
+                limit=8,
+            )
+        except Exception:
+            sql_lines = []
+
         with vector_lock:
             if category and category in VALID_CATS:
                 results = vector_store.similarity_search(query, k=6, filter={"category": category})
             else:
                 results = vector_store.similarity_search(query, k=6)
 
-        if not results:
-            return "System: Δεν βρέθηκε καμία σχετική μνήμη. Απάντα με τις γενικές σου γνώσεις."
+        if not results and not sql_lines:
+            return "System: Δεν βρέθηκε σχετικό ιστορικό SQLite ή μνήμη Chroma. Απάντα με τις γενικές σου γνώσεις."
 
-        # bump retrieval_count για τα αποτελέσματα
-        try:
-            from memory.vector_store import bump_retrieval_count
-            with vector_lock:
-                kwargs = {"n_results": min(6, len(results))}
-                if category and category in VALID_CATS:
-                    kwargs["where"] = {"category": category}
-                raw = vector_store._collection.query(
-                    query_embeddings=[embeddings.embed_query(query)], **kwargs
-                )
-            if raw.get("ids") and raw["ids"][0]:
-                bump_retrieval_count(raw["ids"][0])
-        except Exception as _be:
-            pass
+        # bump retrieval_count για τα Chroma αποτελέσματα
+        if results:
+            try:
+                from memory.vector_store import bump_retrieval_count
+                with vector_lock:
+                    kwargs = {"n_results": min(6, len(results))}
+                    if category and category in VALID_CATS:
+                        kwargs["where"] = {"category": category}
+                    raw = vector_store._collection.query(
+                        query_embeddings=[embeddings.embed_query(query)], **kwargs
+                    )
+                if raw.get("ids") and raw["ids"][0]:
+                    bump_retrieval_count(raw["ids"][0])
+            except Exception:
+                pass
 
         by_cat: dict = {}
         for res in results:
@@ -157,12 +171,20 @@ def search_memory(query: str, category: str = "") -> str:
                 content += f" [PHOTO_PATH: {photo_path}]"
             by_cat.setdefault(cat, []).append(content)
 
-        output = "ΜΝΗΜΕΣ ΠΟΥ ΒΡΕΘΗΚΑΝ:\n"
-        for cat, facts in by_cat.items():
-            output += f"\n[{cat.upper()}]\n"
-            for f in facts:
-                output += f"  • {f}\n"
-        return output.strip()
+        output_parts = ["ΜΝΗΜΕΣ ΠΟΥ ΒΡΕΘΗΚΑΝ:"]
+        if sql_lines:
+            output_parts.append("\n[ΣΧΕΤΙΚΟ ΙΣΤΟΡΙΚΟ SQLITE]")
+            output_parts.extend(f"  • {line}" for line in sql_lines)
+
+        output_parts.append("\n[ΣΧΕΤΙΚΕΣ ΜΝΗΜΕΣ CHROMA]")
+        if by_cat:
+            for cat, facts in by_cat.items():
+                output_parts.append(f"\n[{cat.upper()}]")
+                output_parts.extend(f"  • {f}" for f in facts)
+        else:
+            output_parts.append("  • Δεν βρέθηκαν Chroma facts για αυτό το query.")
+
+        return "\n".join(output_parts).strip()
     except Exception as e:
         return f"Error: Σφάλμα ανάκλησης μνήμης: {str(e)}"
 @tool
