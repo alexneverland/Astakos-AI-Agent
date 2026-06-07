@@ -129,22 +129,50 @@ def _stem_token(token: str) -> str:
     return token
 
 
-def format_recent_messages(messages: Iterable[dict[str, Any]], *, limit: int = 10) -> list[str]:
+def _date_marker(message_date: str, today: str, yesterday: str) -> str:
+    """Ένδειξη μέρας στις γραμμές 'πρόσφατου ιστορικού' ώστε να μη μπερδεύονται
+    χθεσινά με σημερινά μηνύματα μέσα στο ίδιο context-window (π.χ. 'χθες 20:48'
+    αντί για ένα γυμνό '20:48' που μοιάζει σαν να μόλις ειπώθηκε σήμερα — αυτό
+    ακριβώς έκανε τον Αστακό να περάσει χθεσινές μπριζόλες για σημερινό φαγητό).
+    Άδειο string για το 'σήμερα' -> καμία αλλαγή στην υπάρχουσα μορφή για την
+    συντριπτική πλειοψηφία των γραμμών.
+    """
+    if not message_date or message_date == today:
+        return ""
+    if message_date == yesterday:
+        return "χθες "
+    try:
+        year, month, day = message_date.split("-")
+        return f"{day}/{month} "
+    except ValueError:
+        return f"{message_date} "
+
+
+def format_recent_messages(
+    messages: Iterable[dict[str, Any]],
+    *,
+    limit: int = 10,
+    now: datetime | None = None,
+) -> list[str]:
     if limit <= 0:
         return []
+    current = now or datetime.now()
+    today_str = current.strftime("%Y-%m-%d")
+    yesterday_str = (current - timedelta(days=1)).strftime("%Y-%m-%d")
     lines = []
     for message in list(messages)[-limit:]:
         role = message.get("role", "")
         speaker = "Λάζαρος" if role == "user" else "Αστακός"
         channel = message.get("channel", "?")
         time_label = message.get("time") or str(message.get("timestamp", ""))[-8:-3]
+        date_label = _date_marker(str(message.get("date") or ""), today_str, yesterday_str)
         content = str(message.get("content", "")).strip()
         if not content:
             continue
         content = " ".join(content.split())
         if len(content) > 260:
             content = content[:257].rstrip() + "..."
-        lines.append(f"- [{channel} {time_label}] {speaker}: {content}")
+        lines.append(f"- [{channel} {date_label}{time_label}] {speaker}: {content}")
     return lines
 
 

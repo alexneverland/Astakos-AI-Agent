@@ -27,6 +27,46 @@ def test_format_recent_messages_keeps_order_and_speaker_labels():
     ]
 
 
+def test_format_recent_messages_marks_yesterday_so_it_is_not_confused_with_today():
+    """Bug πραγματικού περιστατικού: ο Αστακός είδε ένα χθεσινοβραδινό μήνυμα για
+    μπριζόλες δίπλα σε ένα σημερινό για φακές, και τα μπέρδεψε -- επειδή και τα
+    δύο εμφανίζονταν σαν γυμνό '[telegram 20:Χ]' χωρίς ένδειξη μέρας. Η γραμμή
+    του 'σήμερα' πρέπει να μένει ΑΚΡΙΒΩΣ όπως πριν (καμία αλλαγή για την
+    συντριπτική πλειοψηφία), ενώ η χθεσινή πρέπει να σημαδεύεται καθαρά.
+    """
+    import datetime as dt
+
+    lines = format_recent_messages(
+        [
+            {
+                "channel": "telegram",
+                "date": "2026-06-06",
+                "time": "20:48",
+                "role": "user",
+                "content": "Έφτιαξα μπριζόλες απόψε.",
+            },
+            {
+                "channel": "telegram",
+                "date": "2026-06-07",
+                "time": "20:53",
+                "role": "user",
+                "content": "Σήμερα έκανα φακές.",
+            },
+            {
+                "channel": "web",
+                "time": "10:00",
+                "role": "user",
+                "content": "Μήνυμα χωρίς date -- πρέπει να μείνει όπως πριν.",
+            },
+        ],
+        now=dt.datetime(2026, 6, 7, 21, 0),
+    )
+
+    assert lines[0] == "- [telegram χθες 20:48] Λάζαρος: Έφτιαξα μπριζόλες απόψε."
+    assert lines[1] == "- [telegram 20:53] Λάζαρος: Σήμερα έκανα φακές."
+    assert lines[2] == "- [web 10:00] Λάζαρος: Μήνυμα χωρίς date -- πρέπει να μείνει όπως πριν."
+
+
 def test_semantic_facts_dedupes_and_strips_tags():
     def fake_search(query, k):
         return [
