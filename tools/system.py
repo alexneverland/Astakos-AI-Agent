@@ -173,6 +173,20 @@ def _memory_query_tokens(query: str) -> list[str]:
     return [token for token in tokens if len(token) >= 4 and token not in stopwords]
 
 
+def _stem_token(token: str) -> str:
+    """Πρόχειρο ελληνικό stemming: κόβει τις πιο συνηθισμένες κλιτικές καταλήξεις
+    (πτώσεις/αριθμός: -ος/-ου/-ο/-οι/-ων/-ους, -α/-ας/-ες κ.λπ.) ώστε
+    'γενεθλια' να ταιριάζει με 'γενεθλιων' και 'αλεξανδρος' με 'αλεξανδρου'.
+    Κρατάει πάντα στέλεχος >= 4 χαρακτήρων (ίδιο όριο με τα tokens) για να
+    μην αυξάνεται ο θόρυβος από πολύ κοντά στελέχη.
+    """
+    if len(token) >= 7:
+        return token[:-2]
+    if len(token) >= 5:
+        return token[:-1]
+    return token
+
+
 def _lexical_memory_matches(query: str, category: str = "", limit: int = 4) -> list:
     """Keyword fallback over Chroma docs; complements embeddings for exact user terms."""
     tokens = _memory_query_tokens(query)
@@ -190,7 +204,7 @@ def _lexical_memory_matches(query: str, category: str = "", limit: int = 4) -> l
     scored = []
     for document, metadata in zip(data.get("documents", []), data.get("metadatas", [])):
         clean_doc = _normalize_memory_query(document)
-        score = sum(1 for token in tokens if token in clean_doc)
+        score = sum(1 for token in tokens if _stem_token(token) in clean_doc)
         if "link" in clean_query or "λινκ" in clean_query:
             score += 1 if ("http" in clean_doc or "link" in clean_doc) else 0
         if "δωρο" in clean_query:

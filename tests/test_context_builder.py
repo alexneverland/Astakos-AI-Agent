@@ -197,3 +197,36 @@ def test_tool_output_query_disables_memory_lookup():
 
 def test_empty_memory_context_renders_empty():
     assert MemoryContext([], [], []).render() == ""
+
+
+def test_temporal_history_matches_inflected_query_against_stored_form():
+    """Η αποθηκευμένη φράση χρησιμοποιεί 'γενέθλια'/'Αλέξανδρου' (ονομαστική/γενική),
+    η ερώτηση χρησιμοποιεί 'γενεθλιών' (γενική πληθυντικού) — φυσιολογική διατύπωση
+    που πριν το stemming θα έχανε το scoring boost λόγω ακριβούς substring match."""
+    def fake_history_loader(**kwargs):
+        return [
+            {
+                "channel": "telegram",
+                "date": "2026-06-01",
+                "time": "10:00",
+                "role": "user",
+                "content": "Τα γενέθλια του Αλέξανδρου είναι 25 Μαρτίου, θέλει LEGO διαστημόπλοιο.",
+            },
+            {
+                "channel": "telegram",
+                "date": "2026-06-02",
+                "time": "11:00",
+                "role": "assistant",
+                "content": "Άσχετο, για συνταγή με φακές.",
+            },
+        ]
+
+    lines = temporal_history_for_query(
+        "τι να πάρουμε για τα γενεθλιών του Αλεξάνδρου;",
+        channel="telegram",
+        history_loader=fake_history_loader,
+        now=__import__("datetime").datetime(2026, 6, 7, 12, 0),
+    )
+
+    assert any("LEGO διαστημόπλοιο" in line for line in lines)
+    assert all("φακές" not in line for line in lines)

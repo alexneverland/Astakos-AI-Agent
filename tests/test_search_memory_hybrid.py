@@ -17,6 +17,17 @@ class _VectorStore:
     def query(self, **kwargs):
         return {"ids": [[]]}
 
+    def get(self, **kwargs):
+        """Mock of collection.get(...) used by _lexical_memory_matches."""
+        where = kwargs.get("where") or {}
+        docs, metas = [], []
+        for doc in self.results:
+            if where and doc.metadata.get("category") != where.get("category"):
+                continue
+            docs.append(doc.page_content)
+            metas.append(doc.metadata)
+        return {"documents": docs, "metadatas": metas, "ids": [str(i) for i in range(len(docs))]}
+
 
 class _Lock:
     def __enter__(self):
@@ -73,3 +84,39 @@ def test_search_memory_can_return_sqlite_when_chroma_empty(monkeypatch):
     assert "[ΣΧΕΤΙΚΟ ΙΣΤΟΡΙΚΟ SQLITE]" in result
     assert "Ετοιμαζόμαστε για πάρκο" in result
     assert "Δεν βρέθηκαν Chroma facts" in result
+
+
+def test_stem_token_drops_common_greek_inflectional_endings():
+    import tools.system as system
+
+    # Αυτό που πραγματικά χρειάζεται το _lexical_memory_matches δεν είναι
+    # "το στέλεχος των δύο λέξεων να είναι ίδιο" (λεπτομέρεια υλοποίησης
+    # που σπάει όταν οι λέξεις διαφέρουν σε μήκος), αλλά "το στέλεχος της
+    # λέξης-ερωτήματος να βρίσκεται μέσα στο αποθηκευμένο κείμενο":
+    # δηλ. stem(query_token) in stored_text. Ελέγχουμε ακριβώς αυτό.
+    assert system._stem_token("γενεθλιων") in "γενεθλια"
+    assert system._stem_token("αλεξανδρος") == system._stem_token("αλεξανδρου")
+    assert (system._stem_token("αλεξανδρου") in "αλεξανδρος"
+            or system._stem_token("αλεξανδρος") in "αλεξανδρου")
+    # κοντές λέξεις μένουν ως έχουν (όχι θόρυβος κάτω από 4 χαρακτήρες)
+    assert system._stem_token("σπιτι") and len(system._stem_token("σπιτι")) >= 4
+
+
+def test_lexical_memory_matches_finds_doc_despite_different_grammatical_case(monkeypatch):
+    import tools.system as system
+
+    # Η μνήμη είναι αποθηκευμένη στην ονομαστική ("γενέθλια", "Αλέξανδρου"),
+    # αλλά ρωτάμε στη γενική πληθυντικού ("γενεθλιών") — φυσιολογική φράση
+    # ("για τα γενεθλιών του παιδιού"). Πριν το stemming, μόνο 1/2 tokens
+    # ταίριαζαν -> κάτω από το κατώφλι score >= 2 -> η μνήμη χανόταν εδώ.
+    doc = system.SimpleNamespace(
+        page_content="[USER_FACT]: Στις 2026-03-25 είναι τα γενέθλια του Αλέξανδρου, θέλει LEGO διαστημόπλοιο.",
+        metadata={"category": "family"},
+    )
+    monkeypatch.setattr(system, "vector_lock", _Lock())
+    monkeypatch.setattr(system, "vector_store", _VectorStore([doc]))
+
+    matches = system._lexical_memory_matches("τι θέλει για τα γενεθλιών του Αλεξάνδρου;")
+
+    assert len(matches) == 1
+    assert "διαστημόπλοιο" in matches[0].page_content

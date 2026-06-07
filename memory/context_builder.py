@@ -115,6 +115,20 @@ def _query_tokens(query: str) -> list[str]:
     return [token for token in tokens if len(token) >= 4 and token not in _TOKEN_STOPWORDS]
 
 
+def _stem_token(token: str) -> str:
+    """Πρόχειρο ελληνικό stemming: κόβει τις πιο συνηθισμένες κλιτικές καταλήξεις
+    (πτώσεις/αριθμός: -ος/-ου/-ο/-οι/-ων/-ους, -α/-ας/-ες κ.λπ.) ώστε
+    'γενεθλια' να ταιριάζει με 'γενεθλιων' και 'αλεξανδρος' με 'αλεξανδρου'.
+    Κρατάει πάντα στέλεχος >= 4 χαρακτήρων (ίδιο όριο με τα tokens) για να
+    μην αυξάνεται ο θόρυβος από πολύ κοντά στελέχη.
+    """
+    if len(token) >= 7:
+        return token[:-2]
+    if len(token) >= 5:
+        return token[:-1]
+    return token
+
+
 def format_recent_messages(messages: Iterable[dict[str, Any]], *, limit: int = 10) -> list[str]:
     if limit <= 0:
         return []
@@ -186,7 +200,7 @@ def temporal_history_for_query(
 
     def score(message: dict[str, Any]) -> int:
         content = _normalize_text(message.get("content", ""))
-        value = sum(1 for token in tokens if token in content)
+        value = sum(1 for token in tokens if _stem_token(token) in content)
         if "αλεξανδρ" in clean_query and any(
             marker in content for marker in ("ποδοσφ", "αγων", "τελικο", "μεταλλ")
         ):
