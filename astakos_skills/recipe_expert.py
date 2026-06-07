@@ -7,6 +7,8 @@
 
 import os
 import json
+import re
+import unicodedata
 from datetime import datetime
 from langchain_core.tools import tool
 from config import BASE_DIR
@@ -16,6 +18,39 @@ from core.brain import llm
 from core.utils import clean_message 
 
 HISTORY_FILE = os.path.join(BASE_DIR, "astakos_skills", "food_history.json")
+
+_MEAL_STOPWORDS = {
+    "με", "και", "στο", "στον", "στη", "στην", "το", "τη", "την", "τα", "ο", "η",
+    "οι", "σε", "για", "απο", "από", "μεσημερι", "βραδυ", "σημερα", "αυριο"
+}
+
+
+def _normalize_meal_name(meal_name: str) -> set[str]:
+    text = meal_name.lower().strip()
+    text = "".join(
+        char for char in unicodedata.normalize("NFD", text)
+        if unicodedata.category(char) != "Mn"
+    )
+    text = re.sub(r"[^a-zα-ω0-9]+", " ", text)
+    return {
+        token for token in text.split()
+        if len(token) > 1 and token not in _MEAL_STOPWORDS
+    }
+
+
+def _is_same_meal(left: str, right: str) -> bool:
+    left_tokens = _normalize_meal_name(left)
+    right_tokens = _normalize_meal_name(right)
+    if not left_tokens or not right_tokens:
+        return left.strip().lower() == right.strip().lower()
+
+    intersection = left_tokens & right_tokens
+    shorter = min(len(left_tokens), len(right_tokens))
+    longer = max(len(left_tokens), len(right_tokens))
+
+    if shorter >= 2 and len(intersection) == shorter:
+        return True
+    return len(intersection) / longer >= 0.75
 
 def get_recent_meals():
     if not os.path.exists(HISTORY_FILE):
@@ -79,13 +114,21 @@ def log_meal(meal_name: str):
                 history = json.load(f)
         except: pass
         
-    # [MASTRO-FIX]: Έλεγχος αν το γεύμα έχει ήδη καταγραφεί ΣΗΜΕΡΑ
+    meal_name = meal_name.strip()
+    if not meal_name:
+        return "⚠️ Δεν δόθηκε όνομα γεύματος για καταγραφή."
+
+    # [MASTRO-FIX]: Έλεγχος αν παρόμοιο γεύμα έχει ήδη καταγραφεί ΣΗΜΕΡΑ
     for meal in history:
         # Παίρνουμε το YYYY-MM-DD από το "2026-05-21 21:30"
         meal_date = meal.get("date", "").split(" ")[0] 
-        if meal_date == today_str and meal.get("name") == meal_name:
+        existing_name = meal.get("name", "")
+        if meal_date == today_str and _is_same_meal(existing_name, meal_name):
             print("⚠️ Αποτροπή διπλοεγγραφής γεύματος!")
-            return f"⚠️ Το γεύμα '{meal_name}' έχει ΗΔΗ καταγραφεί για σήμερα. Μην το ξαναγράφεις."
+            return (
+                f"⚠️ Παρόμοιο γεύμα έχει ΗΔΗ καταγραφεί για σήμερα: "
+                f"'{existing_name}'. Μην το ξαναγράφεις."
+            )
         
     history.append({
         "name": meal_name, 
