@@ -55,6 +55,7 @@ Astakos is local-first:
 - Long-term memory is stored on disk with SQLite, ChromaDB, and local JSON state.
 - Telegram/Web conversation history is stored in a shared SQLite database; legacy JSON history files are kept only as local mirrors/fallbacks.
 - Telegram/Web/Terminal session exchanges are persisted locally and summarized on clean shutdown.
+- Memory recall is hybrid: recent context and relevant SQLite history are checked alongside ChromaDB facts before the assistant answers.
 - Runtime data, credentials, uploads, caches, databases, logs, and private JSON files are gitignored.
 - You control the machine, the credentials, and the integrations.
 
@@ -67,7 +68,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Feature | Description |
 |---|---|
 | Multi-Agent Orchestration | LangGraph Supervisor routes to Chat, Home, Web, Tech, Git, Mail, and Dev agents. |
-| Hybrid Memory | ChromaDB vector store + SQLite + JSON profile/session state for semantic and structured memory. |
+| Hybrid Memory | ChromaDB vector store + shared SQLite history + JSON profile/session state for semantic, temporal, and structured memory. |
 | Routine State Machine | `LEARNED → ACTIVE → TRIGGER_PENDING → CONFIRMED / IGNORED / DISMISSED → DECAYED → ARCHIVED`. |
 | Nightly Analytics Engine | LLM batch-analyzes the last 30 days of shared SQLite conversation history to detect recurring patterns automatically. |
 | LLM-Crafted Proactive Messages | Reminder text is generated naturally by the LLM instead of static templates, with recent Telegram/Web history and timestamps injected so messages feel contextual instead of random. |
@@ -80,6 +81,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Web UI Live Refresh | `/messages/poll?after_id=N&channel=telegram` endpoint + frontend `setInterval` polling every 5 s; Telegram messages appear in Web UI without manual page reload. |
 | register_tool dry_run | `register_tool(dry_run=True)` previews all file changes (system.py, tool_risk.py, capability_registry) without writing; path traversal protection and Python identifier validation added. |
 | Memory Provenance | Saved facts include `source` (`telegram` / `web`) and `reason` (`user_stated` / `agent_inferred`). |
+| Hybrid `search_memory` | The memory tool returns both relevant SQLite conversation history and ChromaDB facts in one response. |
 | Goal Follow-up Engine | Daily semantic check for stale goals; Astakos can proactively follow up after 7 quiet days. |
 
 ## Memory & Learning
@@ -89,6 +91,8 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Formal Event Bus | Pub/sub through `core/event_bus.py` for `routine_triggered`, `routine_confirmed`, `session_ended`, and more. |
 | Unified Session Memory | One shared session log across Telegram, Web, and Terminal for cross-channel context awareness. |
 | Shared Conversation History | Telegram and Web write to one SQLite conversation store, with legacy JSON backfill, SQLite-first context reads, and analytics using the shared history. |
+| Broad SQL Context Recall | Substantive questions search recent SQLite history even without explicit date words; temporal queries like "yesterday morning" narrow to the right day/time window. |
+| Personal Event Capture | Personal and family events are saved as dated ChromaDB `[USER_FACT]` memories when the conversation clearly states them. |
 | Google Fit Integration | Daily steps, sleep phases (deep / REM / light), and heart rate from Samsung Health via Google Fit. Morning briefing at 08:00 uses yesterday's steps, last night's sleep, and heart-rate fallback logic. |
 | Memory Scoring | Every memory has `importance`, `confidence`, `last_accessed`, and `retrieval_count`. `compute_score()` = importance × 0.4 + retrieval × 0.3 + confidence × 0.2 + freshness × 0.1. |
 | Unified Memory Entry Point | `memory.save(memory_type=...)` handles facts, photos, documents, sessions, goals, reflections, and events. |
@@ -100,7 +104,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 |---|---|
 | Telegram Bot | Polling bot with text, voice, photo, document, location, routine confirmation, and inline approval handlers. |
 | Web UI | FastAPI server with chat endpoint, upload handling, voice processing, local static assets, and chat history. |
-| Runtime Dashboard | `/debug/runtime` and `/debug` expose scheduler health, jobs, event throughput, routines, goals, pending confirmations, pending actions, shared conversation SQLite stats, and session backlog. |
+| Runtime Dashboard | `/debug/runtime` and `/debug` expose scheduler health, jobs, event throughput, routines, goals, pending confirmations, pending actions, memory-context previews, shared SQLite stats, and session backlog. |
 | Voice I/O | STT via Vertex AI Gemini + TTS via `edge-tts` using `el-GR-NestorasNeural`; mirror mode supports voice in → voice out. |
 | Product Analyzer | `/nutrition` scans food, cosmetics, and household product labels with a score from 1-10 and a kids note. |
 | Receipt Scanner | `/receipt` scans the last Telegram photo as a shopping receipt and returns structured JSON with store, date, total, currency, and items. |
@@ -156,6 +160,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
           │ Memory Layer                                │
           │ - ChromaDB: facts, photos, sessions, goals  │
           │ - SQLite: conversations, sessions, routines │
+          │ - Hybrid recall: SQLite history + Chroma    │
           │ - JSON: working memory and profile state    │
           └─────────────────────────────────────────────┘
 ```
@@ -419,6 +424,9 @@ Shutdown behavior:
 - [x] Hardened skill creation — generated skills must use `write_custom_tool`, keep `@tool`, pass validation before registration, and use shared `core.brain` LLM clients when model calls are needed.
 - [x] relay_local_payload hardened — demoted from CRITICAL to WARNING (writes draft only, does not send); clean tool return value so Gemini cannot leak internal meta-instructions into the chat.
 - [x] Cross-Channel Context Awareness — Chat_Agent checks shared SQLite history before saying "I don't remember", covering messages from both Telegram and Web UI sessions.
+- [x] Hybrid Memory Search — `search_memory` returns both relevant SQLite conversation history and ChromaDB semantic facts, so tool-based recall uses the same memory model as prompt context.
+- [x] Personal/Family Event Capture — clear personal and family day-events are saved as dated ChromaDB facts while the full conversation remains in SQLite.
+- [x] Memory Context Debugging — `/debug` shows recent, SQLite, and Chroma context counts/previews for the last prompt build.
 
 ### Planned
 
