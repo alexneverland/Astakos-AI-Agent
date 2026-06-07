@@ -197,10 +197,9 @@ SKIP_SEMANTIC_KEYWORDS = [
 # 5. THE BRAIN (Build Prompt)
 # ────────────────────────────────────────────────────────────────
 
-def build_prompt(state_messages, agent_role="") -> str:
+def build_prompt(state_messages, agent_role="", channel: str | None = None) -> str:
     """Η κεντρική μηχανή σύνθεσης Prompt."""
     from config import WORKING_MEMORY_FILE, BASE_DIR
-    from memory.vector_store import vector_store, vector_lock
     from memory.working_memory import get_capability_context
     from memory.session_memory import load_last_session_hint
 
@@ -212,7 +211,7 @@ def build_prompt(state_messages, agent_role="") -> str:
     is_vision = "[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]" in last_msg or "[CURRENT_PHOTO_PATH]" in last_msg
     has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
     
-    memories_str = ""
+    memory_context_str = ""
     clean_text = last_msg.lower()
     
     ignore_words = [
@@ -226,36 +225,26 @@ def build_prompt(state_messages, agent_role="") -> str:
     is_routine_command = clean_text in ignore_words or clean_text.startswith(("ναι ", "οχι ", "όχι "))
     has_skip_keyword = any(kw in clean_text for kw in SKIP_SEMANTIC_KEYWORDS)
 
-    if k_value > 0 and len(clean_text) > 10 and not is_routine_command and not has_skip_keyword:
-        try:
-            with vector_lock:
-                results = vector_store.similarity_search(last_msg, k=k_value)
-                # bump retrieval_count
-                try:
-                    from memory.vector_store import bump_retrieval_count
-                    raw = vector_store._collection.query(
-                        query_embeddings=[embeddings.embed_query(last_msg)],
-                        n_results=k_value
-                    )
-                    if raw.get("ids") and raw["ids"][0]:
-                        bump_retrieval_count(raw["ids"][0])
-                except Exception:
-                    pass
+    semantic_k = k_value if len(clean_text) > 10 and not is_routine_command and not has_skip_keyword else 0
+    recent_limit = 6 if channel and not has_current_photo else 0
 
-            if results:
-                semantic_facts = []
-                for res in results:
-                    clean_fact = res.page_content.split(" [Tags:")[0].strip()
-                    semantic_facts.append(clean_fact)
-                
-                if semantic_facts:
-                    memories_str = "\n🧠 ═══ ΣΗΜΑΣΙΟΛΟΓΙΚΟ ΠΛΑΙΣΙΟ (Semantic Graph) ═══\n"
-                    memories_str += "Έχεις αυτόματα ανακαλέσει τις παρακάτω σχετικές μνήμες:\n"
-                    for f in set(semantic_facts):
-                        memories_str += f" • {f}\n"
-                    memories_str += "⚠️ Μην πεις 'σύμφωνα με τη μνήμη μου', απλά πράξε με βάση αυτά.\n"
+    if semantic_k > 0 or recent_limit > 0:
+        try:
+            from memory.context_builder import build_memory_context
+
+            context = build_memory_context(
+                last_msg,
+                channel=channel or "telegram",
+                recent_limit=recent_limit,
+                semantic_k=semantic_k,
+            )
+            rendered_context = context.render()
+            if rendered_context:
+                memory_context_str = "\n🧠 ═══ ΕΝΙΑΙΟ ΠΛΑΙΣΙΟ ΜΝΗΜΗΣ ═══\n"
+                memory_context_str += rendered_context + "\n"
+                memory_context_str += "⚠️ Μην πεις 'σύμφωνα με τη μνήμη μου', απλά πράξε με βάση αυτά.\n"
         except Exception as e:
-            print(f"\033[91m⚠️ Semantic Graph Error: {e}\033[0m")
+            print(f"\033[91m⚠️ Memory Context Error: {e}\033[0m")
     elif has_skip_keyword:
         print("\033[93m[Mastro-Radar]: ⚡ Παράκαμψη Semantic Search λόγω Skip Keyword! (Live Data Mode)\033[0m")
 
@@ -311,7 +300,7 @@ def build_prompt(state_messages, agent_role="") -> str:
         "ΚΑΝΟΝΑΣ ΦΩΤΟΓΡΑΦΙΩΝ: Αν ζητηθεί φωτό, κάλεσε το 'retrieve_photo' και συμπεριέλαβε το [SEND_PHOTO: path] στην απάντηση.\n\n"
     )
 
-    prompt += memories_str
+    prompt += memory_context_str
 
     return prompt
 

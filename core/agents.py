@@ -189,7 +189,7 @@ def dev_agent_node(state):
     
     system_base = load_agent_prompt("Dev_Agent", "Είσαι ο Dev_Agent, ο Αρχιμηχανικός Προγραμματιστής του Αστακού.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    prompt_content = build_prompt(history, system_base)
+    prompt_content = build_prompt(history, system_base, channel=state.get("channel"))
 
     tools = [
         write_code, run_code, read_local_file, write_custom_tool, register_tool,
@@ -255,7 +255,7 @@ def chat_agent_node(state: AgentState):
     json_base = load_agent_prompt("Chat_Agent", "Είσαι ο Αστακός, το έμπιστο φιλαράκι του Λάζαρου.")
     json_base = json_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt_text = f"{json_base}{vision_context}"
-    system_prompt = build_prompt(history, system_prompt_text)
+    system_prompt = build_prompt(history, system_prompt_text, channel=state.get("channel"))
 
     safe_history = sanitize_history_for_gemini(history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
@@ -307,7 +307,7 @@ def home_agent_node(state):
 
     system_base = load_agent_prompt("Home_Agent", "Είσαι ο Home_Agent του Piston-7.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    system_prompt = build_prompt(history, system_base)
+    system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
     safe_history = sanitize_history_for_gemini(history)
     response = llm.bind_tools(tools_to_bind).invoke(
@@ -349,7 +349,7 @@ def web_agent_node(state: AgentState):
 
     system_base = load_agent_prompt("Web_Agent", "Είσαι ο Web_Agent.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    system_prompt = build_prompt(history, system_base)
+    system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
     
     safe_history = sanitize_history_for_gemini(history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
@@ -429,7 +429,7 @@ def tech_agent_node(state: AgentState):
     json_base = load_agent_prompt("Tech_Agent", "Είσαι ο Tech_Agent, ο τεχνικός εμπειρογνώμονας του Λάζαρου.")
     json_base = json_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt_text = f"{json_base}{vision_info}"
-    system_prompt = build_prompt(history, system_prompt_text)
+    system_prompt = build_prompt(history, system_prompt_text, channel=state.get("channel"))
 
     safe_history = sanitize_history_for_gemini(history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
@@ -470,7 +470,7 @@ def git_agent_node(state):
 
     system_base = load_agent_prompt("Git_Agent", "Είσαι ο Git_Agent. Διαχειρίζεσαι GitHub repos.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    system_prompt = build_prompt(history, system_base)
+    system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
     git_llm = llm.bind_tools([
         github_manager, search_memory, run_terminal_command
@@ -490,7 +490,7 @@ def mail_agent_node(state):
     
     system_base = load_agent_prompt("Mail_Agent", "Είσαι ο Mail_Agent. Διαχειρίζεσαι το Gmail.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    system_prompt = build_prompt(history, system_base)
+    system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
     
     return {
         "current_agent": "Mail_Agent",

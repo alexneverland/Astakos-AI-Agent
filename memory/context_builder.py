@@ -30,6 +30,8 @@ class MemoryContext:
 
 
 def format_recent_messages(messages: Iterable[dict[str, Any]], *, limit: int = 10) -> list[str]:
+    if limit <= 0:
+        return []
     lines = []
     for message in list(messages)[-limit:]:
         role = message.get("role", "")
@@ -89,14 +91,17 @@ def build_memory_context(
 
         recent_loader = load_recent_context
 
-    try:
-        recent_messages = recent_loader(
-            channel=channel,
-            global_limit=12,
-            channel_limit=10,
-            total_limit=max(recent_limit, 1) * 2,
-        )
-    except Exception:
+    if recent_limit > 0:
+        try:
+            recent_messages = recent_loader(
+                channel=channel,
+                global_limit=12,
+                channel_limit=10,
+                total_limit=recent_limit * 2,
+            )
+        except Exception:
+            recent_messages = []
+    else:
         recent_messages = []
 
     return MemoryContext(
