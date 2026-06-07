@@ -181,18 +181,30 @@ def get_heart_rate(days_ago: int = 0) -> dict:
         "endTimeMillis":   end_ms,
     }
     res = service.users().dataset().aggregate(userId="me", body=body).execute()
-    values = []
+    avg_values = []
+    max_values = []
+    raw_values = []
     for bucket in res.get("bucket", []):
         for dataset in bucket.get("dataset", []):
             for point in dataset.get("point", []):
-                for val in point.get("value", []):
-                    fp = val.get("fpVal", 0)
+                point_values = [val.get("fpVal", 0) for val in point.get("value", [])]
+                if point.get("dataTypeName") == "com.google.heart_rate.summary" and len(point_values) >= 3:
+                    avg, max_bpm, _min_bpm = point_values[:3]
+                    if avg > 0:
+                        avg_values.append(float(avg))
+                    if max_bpm > 0:
+                        max_values.append(float(max_bpm))
+                    continue
+                for fp in point_values:
                     if fp > 0:
-                        values.append(float(fp))
-    if not values:
-        values = _collect_raw_heart_rates(service, start_ms, end_ms)
-    avg_bpm = sum(values) / len(values) if values else 0
-    max_bpm = max(values) if values else 0
+                        raw_values.append(float(fp))
+    if avg_values or max_values:
+        avg_bpm = sum(avg_values) / len(avg_values) if avg_values else 0
+        max_bpm = max(max_values) if max_values else 0
+    else:
+        raw_values = raw_values or _collect_raw_heart_rates(service, start_ms, end_ms)
+        avg_bpm = sum(raw_values) / len(raw_values) if raw_values else 0
+        max_bpm = max(raw_values) if raw_values else 0
     return {"avg_bpm": round(avg_bpm), "max_bpm": round(max_bpm)}
 
 
