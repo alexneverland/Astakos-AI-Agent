@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+import json
+import os
 from typing import Callable, Iterable, Any
+
+from config import BASE_DIR
+
+
+MEMORY_CONTEXT_DEBUG_FILE = os.path.join(BASE_DIR, "runtime_memory_context.json")
 
 
 @dataclass(frozen=True)
@@ -104,7 +112,54 @@ def build_memory_context(
     else:
         recent_messages = []
 
-    return MemoryContext(
+    context = MemoryContext(
         recent_lines=format_recent_messages(recent_messages, limit=recent_limit),
         semantic_facts=semantic_facts_for_query(query, k=semantic_k, search_fn=semantic_search),
     )
+    _record_memory_context_debug(
+        channel=channel,
+        query=query,
+        recent_count=len(context.recent_lines),
+        semantic_count=len(context.semantic_facts),
+        recent_preview=context.recent_lines[:3],
+        semantic_preview=context.semantic_facts[:3],
+    )
+    return context
+
+
+def _record_memory_context_debug(
+    *,
+    channel: str,
+    query: str,
+    recent_count: int,
+    semantic_count: int,
+    recent_preview: list[str],
+    semantic_preview: list[str],
+) -> None:
+    payload = {
+        "written_at": datetime.now().isoformat(timespec="seconds"),
+        "channel": channel,
+        "query_preview": " ".join(str(query or "").split())[:180],
+        "recent_count": recent_count,
+        "semantic_count": semantic_count,
+        "recent_preview": recent_preview,
+        "semantic_preview": semantic_preview,
+    }
+    print(
+        f"\033[90m[MemoryContext]: channel={channel} "
+        f"recent={recent_count} semantic={semantic_count} "
+        f"query='{payload['query_preview'][:80]}'\033[0m"
+    )
+    try:
+        with open(MEMORY_CONTEXT_DEBUG_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print(f"\033[93m[MemoryContext]: debug write failed: {exc}\033[0m")
+
+
+def load_memory_context_debug() -> dict[str, Any]:
+    try:
+        with open(MEMORY_CONTEXT_DEBUG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}

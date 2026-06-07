@@ -1710,6 +1710,12 @@ class AstakosScheduler:
             from config import BASE_DIR
             import json as _json
             now = time.time()
+            memory_context_path = os.path.join(BASE_DIR, "runtime_memory_context.json")
+            try:
+                with open(memory_context_path, "r", encoding="utf-8") as f:
+                    memory_context_debug = _json.load(f)
+            except Exception:
+                memory_context_debug = {}
             snapshot = {
                 "written_at":  datetime.now().isoformat(timespec="seconds"),
                 "jobs": [
@@ -1730,6 +1736,7 @@ class AstakosScheduler:
                 "quiet_hours":           is_quiet_hours(),
                 "proactive_muted":       is_proactive_muted(),
                 "reminders_paused":      is_reminders_paused(),
+                "memory_context":        memory_context_debug,
             }
             with _proactive_lock:
                 snapshot["proactive_this_hour"] = _proactive_count["count"]

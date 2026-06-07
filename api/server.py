@@ -15,6 +15,7 @@ import threading
 import sys
 import re
 import secrets
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi.staticfiles import StaticFiles
@@ -401,6 +402,9 @@ async def lifespan(app: FastAPI):
 # ────────────────────────────────────────────────────────────────
 
 server = FastAPI(lifespan=lifespan)
+
+# Keep terminal output useful: app debug prints stay visible, noisy polling access logs do not.
+logging.getLogger("uvicorn.access").disabled = True
 server.mount("/photos", StaticFiles(directory=PHOTOS_DIR), name="photos")
 
 # --- [MASTRO-ROUTE]: Επιτρέπουμε το download από τον φάκελο outputs ---
@@ -908,6 +912,7 @@ async def debug_runtime(_=Depends(require_token)):
     # ── 1. Scheduler snapshot ────────────────────────────────────
     snapshot     = _read_json_file(os.path.join(base, "runtime_snapshot.json"), {})
     override     = _read_json_file(os.path.join(base, "scheduler_state.json"), {})
+    memory_context = _read_json_file(os.path.join(base, "runtime_memory_context.json"), {})
 
     # ── 2. DB: routines + pending confirmations ──────────────────
     import sqlite3 as _sqlite3
@@ -1080,6 +1085,7 @@ async def debug_runtime(_=Depends(require_token)):
         "channel_sessions": channel_sessions,
         "conversation": conversation_debug,
         "session": session_debug,
+        "memory_context": memory_context,
         "approvals": {
             "pending_count": len(pending_actions),
             "pending_tools": [a.get("tool_name") for a in pending_actions],

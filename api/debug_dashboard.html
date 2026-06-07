@@ -244,6 +244,18 @@ function render(d) {
     <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(sess.unsummarized_by_channel)}</span></div>
   </div>`;
 
+  const mem = d.memory_context || {};
+  const memPreview = []
+    .concat((mem.recent_preview || []).slice(0, 2))
+    .concat((mem.semantic_preview || []).slice(0, 2).map(x => '• ' + x));
+  html += `<div class="card"><h2>Memory Context</h2>
+    <div class="kv"><span class="k">Last build</span><span class="v">${mem.written_at ? esc(mem.written_at.slice(11,19)) : 'none'}</span></div>
+    <div class="kv"><span class="k">Channel</span><span class="v">${esc(mem.channel || '-')}</span></div>
+    <div class="kv"><span class="k">Recent / Chroma</span><span class="v">${mem.recent_count ?? 0} / ${mem.semantic_count ?? 0}</span></div>
+    <div class="kv"><span class="k">Query</span><span class="v" style="text-align:right">${esc(mem.query_preview || '-')}</span></div>
+    ${memPreview.length ? `<div style="margin-top:6px;color:var(--muted);font-size:10px;line-height:1.35">${memPreview.map(esc).join('<br>')}</div>` : ''}
+  </div>`;
+
   if (pend.length > 0) {
     html += `<div class="card"><h2>⏳ Pending Confirmations</h2>
       <table><tr><th>ID</th><th>Event</th><th>Elapsed</th><th>Timeout in</th></tr>
