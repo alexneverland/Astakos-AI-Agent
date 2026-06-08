@@ -509,29 +509,33 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             filename = os.path.basename(photo_path)
             ext = os.path.splitext(filename)[1].lower()
             image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
-            
+            file_size = os.path.getsize(photo_path)
+            print(f"\033[92m[Upload]: Λήφθηκε αρχείο για ανάλυση: {filename} ({file_size} bytes)\033[0m")
+
             # We inject the isolated input into the enhanced string
             enhanced_user_input = f"[USER_UPLOADED_FILE]: {filename}\n{isolated_user_input}"
-            
+
             # Αν είναι ΕΙΚΟΝΑ, το κάνουμε Base64 και το στέλνουμε ως image_url
             if ext in image_exts:
+                print(f"\033[94m[Vision]: Κωδικοποίηση εικόνας σε base64 ({ext})...\033[0m")
                 with open(photo_path, "rb") as f:
                     img_b64 = base64.b64encode(f.read()).decode("utf-8")
-                
+
                 mime = {"png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                         ".gif": "image/gif", ".webp": "image/webp"}.get(ext, "image/jpeg")
-                
+
                 human_msg = HumanMessage(content=[
                     {"type": "text", "text": enhanced_user_input},
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_b64}"}}
                 ])
                 print(f"\033[92m[Chat]: Multimodal message (Εικόνα): {filename}\033[0m")
-            
+                print(f"\033[94m[Vision]: Έτοιμο για ανάλυση από το LLM — μήνυμα: '{isolated_user_input[:120]}'\033[0m")
+
             # Αν είναι ΕΓΓΡΑΦΟ (PDF, Word, Excel), το στέλνουμε μόνο ως κείμενο/όνομα
             else:
                 human_msg = HumanMessage(content=enhanced_user_input)
                 print(f"\033[94m[Chat]: Text message με αναφορά εγγράφου: {filename}\033[0m")
-        
+
         # ── Standard text message ────────────────────────────────
         else:
             # We feed the LangGraph state the isolated XML payload
@@ -552,6 +556,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             human_msg = HumanMessage(content=parts)
         # ── Τρέξιμο του LangGraph ────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "web"
+        if photo_path and os.path.exists(photo_path):
+            print(f"\033[95m[Web->Graph]: Προώθηση multimodal μηνύματος στο γράφημα — '{isolated_user_input[:120]}'\033[0m")
+        else:
+            print(f"\033[95m[Web->Graph]: Προώθηση μηνύματος στο γράφημα — '{isolated_user_input[:120]}'\033[0m")
         for event in graph.stream({"messages": context_msgs + [human_msg], "channel": "web"}, {"recursion_limit": 50}):
             for node, data in event.items():
                 if node not in ["supervisor", "tools"]:
@@ -562,6 +570,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                         candidate = clean_message(msgs[-1].content).strip()
                         if candidate:
                             final_ai_response = candidate
+                            print(f"\033[90m[Web->Graph]: Agent '{handling_agent}' απάντησε ({len(candidate)} χαρ.)\033[0m")
 
         # --- [MASTRO-FIX]: Επιπλέον καθάρισμα ΠΡΙΝ την αποθήκευση ---
         # We use the raw user_input for memory extraction so Astakos 
