@@ -1310,6 +1310,169 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
     except Exception as e:
         print(f"[Proactive Craft Error]: {e}")
         return f"Μάστορα, ώρα για '{event_name}' (μου κόλλησε λίγο ο εγκέφαλος 😅)"
+
+
+def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int) -> str:
+    """
+    LLM φτιάχνει deferred follow-up: ξέρει ότι ήταν offline και η ώρα πέρασε.
+    Αντί για reminder, ρωτάει/σχολιάζει αν έγινε το event — σαν φίλος που ήρθε αργά.
+    Ίδιο full pipeline (memory context, personality) με το κανονικό proactive.
+    """
+    from langchain_core.messages import HumanMessage
+    from core.brain import llm
+
+    if confidence >= 0.8:
+        certainty = f"Ο Λάζαρος κάνει σχεδόν πάντα '{event_name}' αυτή την ώρα."
+    else:
+        certainty = f"Συνήθως αυτή την ώρα ο Λάζαρος κάνει '{event_name}'."
+
+    try:
+        from memory.context_builder import build_memory_context
+        memory_context = build_memory_context(
+            event_name,
+            channel="telegram",
+            recent_limit=8,
+            semantic_k=4,
+        ).render()
+    except Exception as exc:
+        print(f"\033[93m[DeferredMsg]: context builder failed: {exc}\033[0m")
+        memory_context = ""
+    memory_block = f"\n\n{memory_context}\n" if memory_context else ""
+
+    prompt = (
+        f"{certainty}\n\n"
+        f"Ο Αστακός ήταν offline/εκτός λειτουργίας και η ώρα της ρουτίνας πέρασε "
+        f"πριν από {missed_minutes} λεπτά.\n"
+        f"{memory_block}"
+        "Είσαι ο Αστακός, ο προσωπικός AI του Λάζαρου (42 χρονών, μάστορας, "
+        "γιος Αλέξανδρος 6 ετών, κόρη Μαρία 15 ετών, γυναίκα Σοφία). "
+        "Δεν στέλνεις υπενθύμιση — η ώρα πέρασε. Στέλνεις φυσικό follow-up: "
+        "ρωτάς/σχολιάζεις αν το event έγινε, πώς πήγε, κάτι ανάλογο. "
+        "Σαν να ήρθες αργά και ρωτάς τι έγινε — χωρίς να εξηγείς γιατί έλειπες.\n"
+        "Χρησιμοποίησε το πρόσφατο ιστορικό αν ταιριάζει φυσικά. "
+        "ΑΠΑΓΟΡΕΥΕΤΑΙ: 'υπενθύμιση', 'reminder', 'έχασα', 'δεν ήμουν', το event name κυριολεκτικά.\n"
+        "Παραδείγματα:\n"
+        "- 'Ε, πήγατε τελικά πάρκο; 🌳'\n"
+        "- 'Κατάφερε ο μικρός να κοιμηθεί; 😴'\n"
+        "- 'Τι κάνατε σήμερα το απόγευμα;'\n"
+        "Μέχρι 1-2 προτάσεις. Ελληνικά."
+    )
+
+    try:
+        response = llm.invoke([HumanMessage(content=prompt)])
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in content
+            )
+        return content.strip()
+    except Exception as e:
+        print(f"[Deferred Craft Error]: {e}")
+        return "Ε, πήγε καλά; 😊"
+
+
+def startup_check_missed_routines():
+    """
+    Εκτελείται ΜΙΑ φορά στην εκκίνηση (με μικρή καθυστέρηση αρχικοποίησης).
+    Ψάχνει active ρουτίνες που έπρεπε να πυροδοτηθούν ενώ ο bot ήταν offline,
+    εντός ROUTINE_MISS_GRACE_MINUTES, και στέλνει deferred follow-up με full memory context.
+    """
+    import sqlite3
+    import time as _time
+    from datetime import timedelta
+    from config import BASE_DIR, ROUTINE_MISS_GRACE_MINUTES
+
+    if is_quiet_hours() or is_proactive_muted():
+        print("\033[90m[MissedRoutines]: Quiet hours / muted — skip startup check.\033[0m")
+        return
+
+    DB_PATH = os.path.join(BASE_DIR, "astakos_routines.db")
+    if not os.path.exists(DB_PATH):
+        return
+
+    DAYS_MAP = {
+        "Monday":    ["Monday", "Δευτέρα"],
+        "Tuesday":   ["Tuesday", "Τρίτη"],
+        "Wednesday": ["Wednesday", "Τετάρτη"],
+        "Thursday":  ["Thursday", "Πέμπτη"],
+        "Friday":    ["Friday", "Παρασκευή"],
+        "Saturday":  ["Saturday", "Σάββατο"],
+        "Sunday":    ["Sunday", "Κυριακή"],
+    }
+
+    try:
+        now           = datetime.now()
+        today_str     = now.strftime("%Y-%m-%d")
+        now_str       = now.strftime("%H:%M")
+        grace_start   = (now - timedelta(minutes=ROUTINE_MISS_GRACE_MINUTES)).strftime("%H:%M")
+        day_en        = now.strftime("%A")
+        possible_days = DAYS_MAP.get(day_en, [day_en])
+        placeholders  = ",".join("?" * len(possible_days))
+
+        conn   = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT id, event_name, confidence, time_str FROM routines
+            WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
+              AND state='active'
+              AND (last_triggered IS NULL OR last_triggered != ?)
+              AND time_str <  ?
+              AND time_str >= ?
+        """, (*possible_days, today_str, now_str, grace_start))
+        missed = cursor.fetchall()
+        conn.close()
+
+        if not missed:
+            print("\033[90m[MissedRoutines]: Καμία χαμένη ρουτίνα εντός grace window.\033[0m")
+            return
+
+        print(f"\033[93m[MissedRoutines]: {len(missed)} χαμένη/ες ρουτίνα/ες — deferred follow-up.\033[0m")
+
+        from memory.routine_db import get_routine_notify_info, mark_routine_notified, save_pending_confirmation
+
+        for r_id, event_name, confidence, time_str in missed:
+            # Cooldown check — αποφεύγουμε spam αν ειδοποιήθηκε πρόσφατα
+            info = get_routine_notify_info(r_id)
+            if is_duplicate_routine(r_id, info["cooldown_hours"]):
+                print(f"\033[90m[MissedRoutines]: #{r_id} '{event_name}' — cooldown, skip.\033[0m")
+                continue
+
+            try:
+                h, m       = map(int, time_str.split(":"))
+                routine_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                missed_min = max(1, int((now - routine_dt).total_seconds() / 60))
+            except Exception:
+                missed_min = ROUTINE_MISS_GRACE_MINUTES // 2
+
+            msg = _craft_deferred_msg(event_name, confidence, missed_min)
+
+            # Μάρκαρε ως triggered ώστε το κανονικό job να μην το ξαναστείλει σήμερα
+            conn2   = sqlite3.connect(DB_PATH)
+            cursor2 = conn2.cursor()
+            cursor2.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+            conn2.commit()
+            conn2.close()
+
+            mark_routine_notified(r_id)
+            send_telegram_msg(msg)
+            sent_at = datetime.now()
+            pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
+            save_pending_confirmation(r_id, event_name, sent_at)
+            log_event("routines", "deferred_followup",
+                      routine_id=r_id, event=event_name,
+                      missed_minutes=missed_min, preview=msg[:160])
+            bus.emit("routine_triggered", routine_id=r_id, event=event_name,
+                     confidence=confidence, deferred=True, channel="telegram")
+            print(f"\033[92m[MissedRoutines]: ✅ Deferred '{event_name}' ({missed_min} λεπτά αργά) → '{msg[:80]}'\033[0m")
+
+            if len(missed) > 1:
+                _time.sleep(300)  # 5 λεπτά παύση — ώστε να απαντήσει στο πρώτο
+
+    except Exception as e:
+        print(f"\033[91m[MissedRoutines]: {e}\033[0m")
+
+
 def job_check_routines():
     """
     Ελέγχει για επερχόμενες ρουτίνες (30' νωρίτερα) και κάνει timeout decay
@@ -1819,6 +1982,14 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_morning_fit_briefing, interval_seconds=3600, name="fit_briefing")
     astakos_scheduler.register(job_goal_followup,       interval_seconds=3600, name="goal_followup")
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
+
+    # Startup check για χαμένες ρουτίνες (10s καθυστέρηση για πλήρη αρχικοποίηση)
+    def _delayed_missed_check():
+        import time as _t
+        _t.sleep(10)
+        startup_check_missed_routines()
+    threading.Thread(target=_delayed_missed_check, daemon=True).start()
+
     # Φόρτωσε το ιστορικό από τον δίσκο
 
 

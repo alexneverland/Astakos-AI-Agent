@@ -66,3 +66,10 @@ GPS_STORAGE_FILE     = os.path.join(BASE_DIR, "last_location.json")
 # ==========================================
 SIM_THRESHOLD_DISTANCE = 0.30
 SIM_THRESHOLD          = 0.88
+
+# ==========================================
+# 5. ΡΥΘΜΙΣΕΙΣ ROUTINES
+# ==========================================
+# Αν ο bot ήταν offline και μια ρουτίνα χάθηκε, στέλνει deferred follow-up
+# μόνο αν το χαμένο trigger δεν είναι παλαιότερο από X λεπτά.
+ROUTINE_MISS_GRACE_MINUTES = 90
