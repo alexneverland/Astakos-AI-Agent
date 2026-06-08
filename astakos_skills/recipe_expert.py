@@ -52,6 +52,26 @@ def _is_same_meal(left: str, right: str) -> bool:
         return True
     return len(intersection) / longer >= 0.75
 
+
+def _parse_meal_datetime(value: str):
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(str(value or "").strip(), fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _is_recent_same_meal(existing_meal: dict, meal_name: str, now: datetime, hours: int = 36) -> bool:
+    if not _is_same_meal(existing_meal.get("name", ""), meal_name):
+        return False
+    meal_dt = _parse_meal_datetime(existing_meal.get("date", ""))
+    if not meal_dt:
+        return False
+    delta_hours = (now - meal_dt).total_seconds() / 3600
+    return 0 <= delta_hours <= hours
+
+
 def get_recent_meals():
     if not os.path.exists(HISTORY_FILE):
         return []
@@ -106,7 +126,8 @@ def log_meal(meal_name: str):
     history = []
     print(f"\n[Tool Debug] 📝 Καταγραφή γεύματος στο JSON: {meal_name}")
     
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
     
     if os.path.exists(HISTORY_FILE):
         try:
@@ -123,16 +144,16 @@ def log_meal(meal_name: str):
         # Παίρνουμε το YYYY-MM-DD από το "2026-05-21 21:30"
         meal_date = meal.get("date", "").split(" ")[0] 
         existing_name = meal.get("name", "")
-        if meal_date == today_str and _is_same_meal(existing_name, meal_name):
+        if (meal_date == today_str and _is_same_meal(existing_name, meal_name)) or _is_recent_same_meal(meal, meal_name, now):
             print("⚠️ Αποτροπή διπλοεγγραφής γεύματος!")
             return (
-                f"⚠️ Παρόμοιο γεύμα έχει ΗΔΗ καταγραφεί για σήμερα: "
+                f"⚠️ Παρόμοιο γεύμα έχει ΗΔΗ καταγραφεί πρόσφατα: "
                 f"'{existing_name}'. Μην το ξαναγράφεις."
             )
         
     history.append({
         "name": meal_name, 
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+        "date": now.strftime("%Y-%m-%d %H:%M")
     })
     
     with open(HISTORY_FILE, 'w', encoding='utf-8') as f:

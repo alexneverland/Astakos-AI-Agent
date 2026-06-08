@@ -34,7 +34,7 @@ def test_log_meal_allows_similar_on_different_day(tmp_path, monkeypatch):
             [
                 {
                     "name": "Μπριζόλες λαιμού με πατάτες τηγανιτές",
-                    "date": "2026-06-06 12:00",
+                    "date": "2026-06-05 12:00",
                 }
             ],
             ensure_ascii=False,
@@ -51,9 +51,39 @@ def test_log_meal_allows_similar_on_different_day(tmp_path, monkeypatch):
     assert len(data) == 2
 
 
+def test_log_meal_blocks_same_meal_from_previous_day_leftovers(tmp_path, monkeypatch):
+    history_file = tmp_path / "food_history.json"
+    history_file.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "φακές",
+                    "date": "2026-06-06 20:00",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(recipe_expert, "HISTORY_FILE", str(history_file))
+    monkeypatch.setattr(recipe_expert, "datetime", _FixedDateTime)
+
+    result = recipe_expert.log_meal.func("φακές")
+    data = json.loads(history_file.read_text(encoding="utf-8"))
+
+    assert "ΗΔΗ καταγραφεί" in result
+    assert len(data) == 1
+
+
 class _FixedDateTime:
     @classmethod
     def now(cls):
         from datetime import datetime
 
         return datetime(2026, 6, 7, 13, 15)
+
+    @classmethod
+    def strptime(cls, value, fmt):
+        from datetime import datetime
+
+        return datetime.strptime(value, fmt)
