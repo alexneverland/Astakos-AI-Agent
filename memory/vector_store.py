@@ -58,6 +58,103 @@ def is_semantically_duplicate(new_text: str, existing_list: list, threshold: flo
     return False
 
 
+CORRECTION_MARKERS = (
+    "διορθω", "διόρθω", "λάθος", "λαθος", "όχι αυτό", "οχι αυτο",
+    "το σωστό ε", "σωστό είναι", "σωστό:", "τελικά", "τελικα",
+    "δεν ισχύει", "δεν ισχυει", "άλλαξε", "αλλαξε", "ενημερωμέν",
+    "πλέον είναι", "ξαναλέω", "ξαναλεω",
+    "correction", "update", "actually",
+)
+
+MEMORY_ENTITY_MARKERS = (
+    "σοφια", "σοφία", "αλεξανδρ", "αλέξανδρ", "μαρια", "μαρία",
+    "mastroapp", "praxis", "shiftmaster", "paletes", "astakos", "αστακο",
+)
+MEMORY_LINK_MARKERS = ("http", "https", "/", "\\", ".py", ".json", ".md", ".db")
+MEMORY_EVENT_MARKERS = (
+    "πηγαμε", "πήγαμε", "εκανε", "έκανε", "εγινε", "έγινε",
+    "πηρε", "πήρε", "εφαγε", "έφαγε", "βρηκαμε", "βρήκαμε",
+    "αγορασ", "αγόρασ", "διαβασ", "διάβασ",
+)
+
+
+def looks_like_memory_correction(fact: str) -> bool:
+    return any(marker in str(fact).lower() for marker in CORRECTION_MARKERS)
+
+
+def memory_age_days(metadata: dict | None, *, now: datetime | None = None) -> int | None:
+    try:
+        old_ts = float((metadata or {}).get("timestamp") or 0)
+        if old_ts > 0:
+            current = now or datetime.now()
+            return max(0, (current - datetime.fromtimestamp(old_ts)).days)
+    except (TypeError, ValueError, OSError):
+        pass
+    return None
+
+
+def memory_has_date(text: str) -> bool:
+    low = str(text).lower()
+    if "στις" in low:
+        return True
+    run = 0
+    for ch in str(text):
+        run = run + 1 if ch.isdigit() else 0
+        if run >= 4:
+            return True
+    return False
+
+
+def memory_richness(text: str, metadata: dict | None) -> float:
+    low = str(text).lower()
+    score = 0.0
+    if memory_has_date(text):
+        score += 1
+    if any(marker in low for marker in MEMORY_ENTITY_MARKERS):
+        score += 1
+    if any(marker in low for marker in MEMORY_LINK_MARKERS):
+        score += 1
+    if any(marker in low for marker in MEMORY_EVENT_MARKERS):
+        score += 1
+    try:
+        score += float((metadata or {}).get("confidence", 0) or 0)
+    except (TypeError, ValueError):
+        pass
+    return score
+
+
+def decide_memory_overwrite(
+    new_fact: str,
+    old_content: str,
+    old_metadata: dict | None,
+    *,
+    new_confidence: float = 0.7,
+    stale_days: int = 30,
+    now: datetime | None = None,
+) -> dict:
+    """Return the same keep/overwrite decision used by _save_fact."""
+    looks_like_correction = looks_like_memory_correction(new_fact)
+    old_age = memory_age_days(old_metadata, now=now)
+    stale = old_age is not None and old_age > stale_days
+    new_richness = memory_richness(new_fact, {"confidence": new_confidence})
+    old_richness = memory_richness(old_content, old_metadata)
+    much_longer = len(str(old_content)) > len(str(new_fact)) * 1.3
+    keep_old = (
+        not looks_like_correction
+        and not stale
+        and (old_richness > new_richness or (old_richness == new_richness and much_longer))
+    )
+    return {
+        "keep_old": keep_old,
+        "looks_like_correction": looks_like_correction,
+        "stale": stale,
+        "old_age_days": old_age,
+        "new_richness": new_richness,
+        "old_richness": old_richness,
+        "much_longer": much_longer,
+    }
+
+
 class AstakosMemoryManager:
     """Κεντρικός Memory Manager — το ΕΝΑ και ΜΟΝΑΔΙΚΟ σημείο εγγραφής."""
 
@@ -158,97 +255,28 @@ class AstakosMemoryManager:
                     )
 
             if old_id is not None:
-                # Σήμα 1: ρητή διόρθωση/ενημέρωση στη ΝΕΑ φράση -> πάντα προτεραιότητα στο νέο
-                correction_markers = (
-                    "διορθω", "διόρθω", "λάθος", "λαθος", "όχι αυτό", "οχι αυτο",
-                    "το σωστό ε", "σωστό είναι", "σωστό:", "τελικά", "τελικα",
-                    "δεν ισχύει", "δεν ισχυει", "άλλαξε", "αλλαξε", "ενημερωμέν",
-                    "πλέον είναι", "ξαναλέω", "ξαναλεω",
-                    "correction", "update", "actually",
-                )
-                looks_like_correction = any(m in fact.lower() for m in correction_markers)
-
-                # Σήμα 2: πόσο παλιά είναι η παλιά εγγραφή (σε μέρες, από πραγματικό timestamp)
-                old_age_days = None
-                try:
-                    old_ts = float((old_meta or {}).get("timestamp") or 0)
-                    if old_ts > 0:
-                        old_age_days = max(0, (datetime.now() - datetime.fromtimestamp(old_ts)).days)
-                except (TypeError, ValueError, OSError):
-                    old_age_days = None
-                stale = old_age_days is not None and old_age_days > 30
-
-                # Σήμα 3: "πλούτος" περιεχομένου — ΟΧΙ απλά μήκος. Μετράμε πόσα
-                # ουσιαστικά στοιχεία κουβαλάει η κάθε εκδοχή (ημερομηνία, πρόσωπο/
-                # project, link/path, συγκεκριμένο γεγονός) + confidence από metadata,
-                # γιατί μια μεγάλη παλιά εγγραφή μπορεί απλώς να είναι φλύαρη, όχι σωστότερη.
-                def _has_date(text):
-                    low = str(text).lower()
-                    if "στις" in low:
-                        return True
-                    run = 0
-                    for ch in str(text):
-                        run = run + 1 if ch.isdigit() else 0
-                        if run >= 4:
-                            return True
-                    return False
-
-                entity_markers = (
-                    "σοφια", "σοφία", "αλεξανδρ", "αλέξανδρ", "μαρια", "μαρία",
-                    "mastroapp", "praxis", "shiftmaster", "paletes", "astakos", "αστακο",
-                )
-                link_markers = ("http", "https", "/", "\\", ".py", ".json", ".md", ".db")
-                event_markers = (
-                    "πηγαμε", "πήγαμε", "εκανε", "έκανε", "εγινε", "έγινε",
-                    "πηρε", "πήρε", "εφαγε", "έφαγε", "βρηκαμε", "βρήκαμε",
-                    "αγορασ", "αγόρασ", "διαβασ", "διάβασ",
+                decision = decide_memory_overwrite(
+                    fact,
+                    old_content,
+                    old_meta,
+                    new_confidence=confidence,
                 )
 
-                def _richness(text, meta):
-                    low = str(text).lower()
-                    score = 0.0
-                    if _has_date(text):
-                        score += 1
-                    if any(m in low for m in entity_markers):
-                        score += 1
-                    if any(m in low for m in link_markers):
-                        score += 1
-                    if any(m in low for m in event_markers):
-                        score += 1
-                    try:
-                        score += float((meta or {}).get("confidence", 0) or 0)
-                    except (TypeError, ValueError):
-                        pass
-                    return score
-
-                new_richness = _richness(fact, {"confidence": confidence})
-                old_richness = _richness(old_content, old_meta)
-                much_longer = len(old_content) > len(str(fact)) * 1.3
-
-                # Απόφαση: ρητή διόρθωση -> πάντα overwrite. Αλλιώς κρατάμε την παλιά
-                # ΜΟΝΟ αν είναι ουσιαστικά πιο "πλούσια" (όχι απλώς μακρύτερη) ΚΑΙ δεν
-                # είναι stale. Σε κάθε άλλη περίπτωση -> overwrite.
-                keep_old = (
-                    not looks_like_correction
-                    and not stale
-                    and (old_richness > new_richness or (old_richness == new_richness and much_longer))
-                )
-
-                if keep_old:
+                if decision["keep_old"]:
                     print(
-                        f"\033[90m[MemoryManager]: Keep richer! Παλιά (richness={old_richness:.1f}, "
-                        f"{len(old_content)} χαρ.) > Νέα (richness={new_richness:.1f}, {len(str(fact))} χαρ.) "
+                        f"\033[90m[MemoryManager]: Keep richer! Παλιά (richness={decision['old_richness']:.1f}, "
+                        f"{len(old_content)} χαρ.) > Νέα (richness={decision['new_richness']:.1f}, {len(str(fact))} χαρ.) "
                         f"— παραμένει η λεπτομερής.\033[0m"
                     )
                 else:
                     vector_store._collection.delete(ids=[old_id])
                     reason_tag = []
-                    if looks_like_correction:
+                    if decision["looks_like_correction"]:
                         reason_tag.append("ρητή διόρθωση")
-                    if stale:
-                        reason_tag.append(f"παλιά εγγραφή ({old_age_days}d)")
-                    if not looks_like_correction and not stale:
-                        reason_tag.append(f"richness {new_richness:.1f}≥{old_richness:.1f}")
+                    if decision["stale"]:
+                        reason_tag.append(f"παλιά εγγραφή ({decision['old_age_days']}d)")
+                    if not decision["looks_like_correction"] and not decision["stale"]:
+                        reason_tag.append(f"richness {decision['new_richness']:.1f}≥{decision['old_richness']:.1f}")
                     tag_str = f" [{', '.join(reason_tag)}]" if reason_tag else ""
                     print(f"\033[94m[MemoryManager]: Overwrite!{tag_str} ({old_content[:80]} | Dist: {dist:.3f})\033[0m")
 
