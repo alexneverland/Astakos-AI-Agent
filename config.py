@@ -48,7 +48,6 @@ DOCS_INDEX_FILE      = os.path.join(BASE_DIR, "astakos_docs_index.json")
 EMBEDDINGS_CACHE_FILE= os.path.join(BASE_DIR, "astakos_embeddings_cache.json")
 PROFILE_FILE         = os.path.join(BASE_DIR, "astakos_profile.json")
 SESSIONS_FILE        = os.path.join(BASE_DIR, "astakos_sessions.json")
-TELEGRAM_HISTORY_FILE = os.path.join(BASE_DIR, "astakos_telegram_history.json")
 CONVERSATION_DB_FILE = os.path.join(BASE_DIR, "astakos_conversation_history.db")
 REMINDERS_FILE       = os.path.join(BASE_DIR, "astakos_reminders.json")
 # GPS: Συντεταγμένες σπιτιού για location reminders

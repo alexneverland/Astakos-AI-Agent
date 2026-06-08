@@ -26,7 +26,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from langchain_core.messages import HumanMessage, AIMessage
 
-from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE, TELEGRAM_HISTORY_FILE
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE
 
 def _normalize_gr(text: str) -> str:
     """Αφαιρεί τόνους από ελληνικό κείμενο για accent-insensitive σύγκριση."""
@@ -380,22 +380,8 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     from langchain_core.messages import HumanMessage, AIMessage
     from core.agents import clean_message
 
-    # Φόρτωση history (shared mixed πρώτα, legacy Telegram ως fallback)
+    # Φόρτωση history από shared SQLite
     context_msgs = _load_shared_context_messages("telegram")
-    if not context_msgs:
-        try:
-            if os.path.exists(TELEGRAM_HISTORY_FILE):
-                with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
-                    raw_hist = json.load(f)
-                for entry in raw_hist[-21:-1]:
-                    ts     = entry.get("time", "")
-                    prefix = f"[{ts}] " if ts else ""
-                    if entry["role"] == "human":
-                        context_msgs.append(HumanMessage(content=f"{prefix}{entry['content']}"))
-                    else:
-                        context_msgs.append(AIMessage(content=f"{prefix}{entry['content']}"))
-        except Exception:
-            pass
 
     now_ts = datetime.now().strftime("%H:%M")
     user_log_msg = (
@@ -538,41 +524,25 @@ def send_voice_reply(text, chat_id):
         print(f"❌ TTS Error: {e}")
         send_telegram_msg(f"Μάστορα, μου κόπηκε η φωνή... (Error: {e})", chat_id)
 def _append_to_analytics_log(role: str, content: str):
-    """Append-only log για analytics engine — με date/time."""
+    """Καταγραφή μηνύματος στο shared SQLite conversation history (telegram channel)."""
     try:
         now = datetime.now()
-        entry = {
-            "role": role,
-            "content": content,
-            "date": now.strftime("%Y-%m-%d"),
-            "time": now.strftime("%H:%M")
-        }
-        history = []
-        if os.path.exists(TELEGRAM_HISTORY_FILE):
-            with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
-                history = json.load(f)
-        history.append(entry)
-        with open(TELEGRAM_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(history, f, ensure_ascii=False, indent=2)
+        shared_role = "assistant" if role in ("ai", "assistant") else role
         try:
-            shared_role = "assistant" if role in ("ai", "assistant") else role
             # notify_telegram_message: αποθηκεύει στη shared SQLite + WebSocket broadcast στο Web UI
-            try:
-                from api.server import notify_telegram_message
-                notify_telegram_message(role=shared_role, content=content)
-            except Exception:
-                # Fallback: άμεσο append χωρίς broadcast (αν ο server δεν τρέχει)
-                from memory.conversation_history import append_message
-                append_message(
-                    role=shared_role,
-                    content=content,
-                    channel="telegram",
-                    timestamp=now,
-                )
-        except Exception as shared_error:
-            print(f"[ConversationHistory/telegram]: Σφάλμα shared write: {shared_error}")
+            from api.server import notify_telegram_message
+            notify_telegram_message(role=shared_role, content=content)
+        except Exception:
+            # Fallback: άμεσο append χωρίς broadcast (αν ο server δεν τρέχει)
+            from memory.conversation_history import append_message
+            append_message(
+                role=shared_role,
+                content=content,
+                channel="telegram",
+                timestamp=now,
+            )
     except Exception as e:
-        print(f"[TelegramAnalytics]: Σφάλμα: {e}")
+        print(f"[ConversationHistory/telegram]: Σφάλμα shared write: {e}")
 
 
 def _load_shared_context_messages(channel: str) -> list:
@@ -735,23 +705,9 @@ def handle_message(user_text: str, chat_id: str):
     typing_thread.start()
 
     try:
-        # ── Context: shared mixed history πρώτα, legacy Telegram history ως fallback ────────────
+        # ── Context: shared mixed history από τη SQLite ────────────
         now_ts = datetime.now().strftime("%H:%M")
         context_msgs = _load_shared_context_messages("telegram")
-        if not context_msgs:
-            try:
-                if os.path.exists(TELEGRAM_HISTORY_FILE):
-                    with open(TELEGRAM_HISTORY_FILE, "r", encoding="utf-8") as f:
-                        raw_hist = json.load(f)
-                    for entry in raw_hist[-21:-1]:
-                        ts = entry.get("time", "")
-                        prefix = f"[{ts}] " if ts else ""
-                        if entry["role"] == "human":
-                            context_msgs.append(HumanMessage(content=f"{prefix}{entry['content']}"))
-                        else:
-                            context_msgs.append(AIMessage(content=f"{prefix}{entry['content']}"))
-            except:
-                pass
         current_msg  = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
         # ── Ροή μέσω LangGraph ───────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"

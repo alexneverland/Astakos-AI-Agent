@@ -118,41 +118,10 @@ class WsLogger:
 from core.graph import build_graph as _build_graph
 app_graph = _build_graph()
 
-# ── Κεντρικό chat history (επιβιώνει restarts μέσω JSON) ──────
-CHAT_HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_chat_history.json")
-chat_history_lock = threading.Lock()
-
-def _load_chat_history() -> list:
-    """Φορτώνει το chat history από δίσκο."""
-    if not os.path.exists(CHAT_HISTORY_FILE):
-        return []
-    try:
-        with open(CHAT_HISTORY_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return []
-
-def _save_chat_history(history: list):
-    """Αποθηκεύει το chat history στο δίσκο (τελευταία 200 μηνύματα)."""
-    try:
-        with open(CHAT_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(history, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"[ChatHistory]: Σφάλμα αποθήκευσης: {e}")
-
 def append_to_chat_history(role: str, content: str):
-    """Thread-safe προσθήκη μηνύματος στο history."""
+    """Προσθήκη μηνύματος στο shared SQLite conversation history (web channel)."""
     now = datetime.now()
     shared_message_id = None
-    with chat_history_lock:
-        history = _load_chat_history()
-        history.append({
-            "role": role,
-            "content": content,
-            "time": now.strftime("%H:%M"),
-            "date": now.strftime("%Y-%m-%d")
-        })
-        _save_chat_history(history)
     try:
         from memory.conversation_history import append_message
         saved = append_message(
@@ -568,20 +537,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             # We feed the LangGraph state the isolated XML payload
             human_msg = HumanMessage(content=isolated_user_input)
 
-        # ── Context: shared mixed history πρώτα, legacy web history ως fallback ─────────
+        # ── Context: shared mixed history από τη SQLite ─────────
         context_msgs = _load_shared_context_messages("web", exclude_message_id=current_history_id)
-        if not context_msgs:
-            with chat_history_lock:
-                raw_hist = _load_chat_history()
-            for entry in raw_hist[-21:-1]:
-                role    = entry.get("role", "")
-                content = entry.get("content", "")
-                ts      = entry.get("time", "")
-                prefix  = f"[{ts}] " if ts else ""
-                if role in ("user", "Human"):
-                    context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
-                else:
-                    context_msgs.append(AIMessage(content=f"{prefix}{content}"))
         # Timestamp στο τρέχον μήνυμα
         now_ts = datetime.now().strftime("%H:%M")
         if isinstance(human_msg.content, str):
@@ -863,11 +820,8 @@ async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends
 
 @server.get("/history")
 async def get_history(_=Depends(require_token)):
-    """Δίνει το ιστορικό στο Web UI από τη shared SQLite, με legacy JSON fallback."""
+    """Δίνει το ιστορικό στο Web UI από τη shared SQLite."""
     history = _load_shared_history_entries(limit=200)
-    if not history:
-        with chat_history_lock:
-            history = _load_chat_history()
     return {"history": history}
 
 

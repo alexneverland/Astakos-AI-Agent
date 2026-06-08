@@ -11,16 +11,14 @@
 #   python clean.py                       # Όλα τα tasks (default)
 #   python clean.py --dry-run             # Δες τι θα έκανε χωρίς αλλαγή
 #   python clean.py --capabilities        # Μόνο σύμπτυξη capabilities
-#   python clean.py --chat-history        # Μόνο trim chat history
 #   python clean.py --sessions            # Μόνο trim sessions
 #   python clean.py --working-memory      # Μόνο σύμπτυξη working memory
-#   python clean.py --chat-keep 50        # Custom όριο για chat history
 #   python clean.py --sessions-keep 20    # Custom όριο για sessions
 #   python clean.py --no-backup           # Παράκαμψη backup (όχι recommended)
 #   python clean.py --photos              # Σβήσε temp φωτογραφίες (αναρχειοθέτητες)
 #
 # Συνδυάζονται:
-#   python clean.py --capabilities --chat-history --dry-run
+#   python clean.py --capabilities --sessions --dry-run
 #
 # ================================================================
 
@@ -43,7 +41,6 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 BACKUP_DIR   = os.path.join(PROJECT_ROOT, "_cleaner_backups")
 
 # Προεπιλεγμένα όρια rotation
-DEFAULT_CHAT_KEEP     = 100
 DEFAULT_SESSIONS_KEEP = 30
 
 # Paths αρχείων (με fallback αν δεν φορτώσει το config)
@@ -54,12 +51,8 @@ try:
         PROFILE_FILE,
         CONVERSATION_DB_FILE,
     )
-    CHAT_HISTORY_FILE     = os.path.join(PROJECT_ROOT, "astakos_chat_history.json")
-    TELEGRAM_HISTORY_FILE = os.path.join(PROJECT_ROOT, "astakos_telegram_history.json")
     CAPABILITIES_FILE     = os.path.join(PROJECT_ROOT, "astakos_capabilities.json")
 except ImportError:
-    CHAT_HISTORY_FILE     = os.path.join(PROJECT_ROOT, "astakos_chat_history.json")
-    TELEGRAM_HISTORY_FILE = os.path.join(PROJECT_ROOT, "astakos_telegram_history.json")
     CAPABILITIES_FILE   = os.path.join(PROJECT_ROOT, "astakos_capabilities.json")
     SESSIONS_FILE       = os.path.join(PROJECT_ROOT, "astakos_sessions.json")
     WORKING_MEMORY_FILE = os.path.join(PROJECT_ROOT, "astakos_working_memory.json")
@@ -246,45 +239,6 @@ def consolidate_capabilities(dry_run: bool = False, backup: bool = True) -> bool
 
     backup_file(CAPABILITIES_FILE, enabled=backup)
     return safe_save_json(CAPABILITIES_FILE, new_data, dry_run=False)
-
-
-# ────────────────────────────────────────────────────────────────
-# TASK 2: CHAT HISTORY — ROTATION
-# ────────────────────────────────────────────────────────────────
-
-def _trim_history_file(path: str, label: str, keep: int, dry_run: bool, backup: bool) -> bool:
-    header(f"Trim {label} (κρατά τα τελευταία {keep})")
-    data = safe_load_json(path)
-    if data is None:
-        return False
-    if not isinstance(data, list):
-        log("⚠️  Άκυρο schema — περίμενα list", "warn")
-        return False
-
-    total = len(data)
-    log(f"📊 Πριν: {total} μηνύματα", "info")
-
-    if total <= keep:
-        log(f"ℹ️  Δεν χρειάζεται trim (≤ {keep}).", "dim")
-        return True
-
-    trimmed = data[-keep:]
-    removed = total - keep
-    log(f"📊 Μετά: {len(trimmed)} μηνύματα (−{removed})", "ok")
-
-    if dry_run:
-        return True
-
-    backup_file(path, enabled=backup)
-    return safe_save_json(path, trimmed, dry_run=False)
-
-
-def trim_chat_history(keep: int = DEFAULT_CHAT_KEEP, dry_run: bool = False, backup: bool = True) -> bool:
-    return _trim_history_file(CHAT_HISTORY_FILE, "legacy astakos_chat_history.json mirror", keep, dry_run, backup)
-
-
-def trim_telegram_history(keep: int = DEFAULT_CHAT_KEEP, dry_run: bool = False, backup: bool = True) -> bool:
-    return _trim_history_file(TELEGRAM_HISTORY_FILE, "legacy astakos_telegram_history.json mirror", keep, dry_run, backup)
 
 
 def maintain_conversation_db(dry_run: bool = False, backup: bool = True) -> bool:
@@ -640,10 +594,6 @@ def main():
                         help="Τρέξε όλα τα tasks (default αν δεν δοθεί άλλο)")
     parser.add_argument("--capabilities", action="store_true",
                         help="Σύμπτυξη can_do / cannot_do με LLM")
-    parser.add_argument("--chat-history", action="store_true",
-                        help="Trim παλιών μηνυμάτων από το legacy web JSON mirror")
-    parser.add_argument("--telegram-history", action="store_true",
-                        help="Trim παλιών μηνυμάτων από το legacy telegram JSON mirror")
     parser.add_argument("--conversation-db", action="store_true",
                         help="Έλεγχος/maintenance της shared SQLite conversation history")
     parser.add_argument("--sessions", action="store_true",
@@ -654,8 +604,6 @@ def main():
                         help="Σύμπτυξη astakos_profile.json (LLM ανά category)")
     parser.add_argument("--photos", action="store_true",
                         help="Σβήσε αναρχειοθέτητες φωτογραφίες από telegram_photos/")
-    parser.add_argument("--chat-keep", type=int, default=DEFAULT_CHAT_KEEP,
-                        help=f"Πόσα chat messages να κρατήσει (default {DEFAULT_CHAT_KEEP})")
     parser.add_argument("--sessions-keep", type=int, default=DEFAULT_SESSIONS_KEEP,
                         help=f"Πόσες sessions να κρατήσει (default {DEFAULT_SESSIONS_KEEP})")
     parser.add_argument("--dry-run", action="store_true",
@@ -667,7 +615,7 @@ def main():
 
     # Αν δεν επιλέχθηκε κανένα συγκεκριμένο task, τα τρέχουμε όλα
     no_specific = not any([
-        args.capabilities, args.chat_history, args.telegram_history, args.conversation_db,
+        args.capabilities, args.conversation_db,
         args.sessions, args.working_memory, args.profile, args.photos
     ])
     run_all = args.all or no_specific
@@ -691,15 +639,6 @@ def main():
             dry_run=args.dry_run, backup=backup_enabled
         )
 
-    if run_all or args.chat_history:
-        results["chat_history"] = trim_chat_history(
-            keep=args.chat_keep, dry_run=args.dry_run, backup=backup_enabled
-        )
-
-    if run_all or args.telegram_history:
-        results["telegram_history"] = trim_telegram_history(
-            keep=args.chat_keep, dry_run=args.dry_run, backup=backup_enabled
-        )
 
     if run_all or args.sessions:
         results["sessions"] = trim_sessions(

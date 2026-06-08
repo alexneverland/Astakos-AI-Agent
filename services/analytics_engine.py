@@ -23,8 +23,6 @@ SIMILARITY_THRESH = 0.60  # Difflib threshold για grouping
 EVERYDAY_DAYS     = 5     # Αν εμφανίζεται σε 5+ ημέρες → Everyday
 
 _BASE             = os.path.dirname(os.path.abspath(__file__))
-CHAT_HISTORY_FILE         = os.path.join(_BASE, "..", "astakos_chat_history.json")
-TELEGRAM_HISTORY_FILE     = os.path.join(_BASE, "..", "astakos_telegram_history.json")
 LOG_FILE          = os.path.join(_BASE, "..", "analytics_engine_log.json")
 
 BATCH_SIZE = 80   # μηνύματα ανά LLM call
@@ -113,25 +111,6 @@ def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
-def _load_legacy_history() -> list:
-    history = []
-    for path in (CHAT_HISTORY_FILE, TELEGRAM_HISTORY_FILE):
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                history.extend(json.load(f))
-    return history
-
-
-def _filter_recent_user_messages(history: list, cutoff: str) -> list:
-    return [
-        m for m in history
-        if m.get("role") in ("user", "human")
-        and m.get("date", "") >= cutoff
-        and m.get("time")
-        and m.get("date")
-    ]
-
-
 def _load_shared_user_messages(cutoff: str) -> list:
     from memory.conversation_history import load_messages_since
 
@@ -142,14 +121,7 @@ def _load_shared_user_messages(cutoff: str) -> list:
 
 
 def _load_user_messages_for_analytics(cutoff: str) -> tuple[list, str]:
-    try:
-        shared_messages = _load_shared_user_messages(cutoff)
-        if shared_messages:
-            return shared_messages, "shared_sqlite"
-    except Exception as e:
-        print(f"[Analytics]: Shared history unavailable, falling back to JSON: {e}")
-
-    return _filter_recent_user_messages(_load_legacy_history(), cutoff), "legacy_json"
+    return _load_shared_user_messages(cutoff), "shared_sqlite"
 
 
 # ────────────────────────────────────────────────────────────────
