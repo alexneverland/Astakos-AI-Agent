@@ -18,7 +18,7 @@ def planner_node(state):
     Παίρνει το goal (μήνυμα μετά το /plan) και βγάζει structured task list.
     Αποθηκεύει στο state: plan_tasks, plan_index=0, plan_results=[]
     """
-    from core.brain import llm_heavy
+    from core.brain import llm_heavy, safe_llm_invoke
     from core.utils import clean_message
 
     last_msg = clean_message(state["messages"][-1].content)
@@ -43,7 +43,7 @@ GOAL: {goal}
 Μέγιστο 7 βήματα. Κάθε instruction να είναι σαφής και αυτόνομη."""
 
     try:
-        response = llm_heavy.invoke([HumanMessage(content=prompt)])
+        response = safe_llm_invoke(llm_heavy, [HumanMessage(content=prompt)])
         raw = clean_message(response.content)
         raw = re.sub(r"```json|```", "", raw).strip()
         tasks = json.loads(raw)

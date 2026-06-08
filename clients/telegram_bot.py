@@ -36,7 +36,7 @@ def _normalize_gr(text: str) -> str:
 
 from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
 from core.exceptions import SchedulerCrashError, PendingTimeoutError, DBWriteError
-from core.brain import llm
+from core.brain import llm, safe_llm_invoke
 from core.graph import graph
 from core.agents import clean_message, filter_messages
 from memory.vector_store import memory
@@ -341,7 +341,7 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
         ])
         print(f"\033[94m[Vision]: Οπτική ανάλυση...\033[0m")
-        analysis_raw  = llm.invoke([vision_msg])
+        analysis_raw  = safe_llm_invoke(llm, [vision_msg])
         memory_analysis = clean_message(analysis_raw.content)
         print(f"\033[94m[Vision]: {memory_analysis[:120]}...\033[0m")
 
@@ -1299,7 +1299,7 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
     )
 
     try:
-        response = llm.invoke([HumanMessage(content=prompt)])
+        response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
         content = response.content
         if isinstance(content, list):
             content = "".join(
@@ -1359,7 +1359,7 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
     )
 
     try:
-        response = llm.invoke([HumanMessage(content=prompt)])
+        response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
         content = response.content
         if isinstance(content, list):
             content = "".join(

@@ -36,7 +36,11 @@ def safe_gemini_call(prompt: str, retries: int = 4, base_delay: float = 2.0):
             err_str = str(e).lower()
             is_quota   = "429" in err_str or "quota" in err_str or "resource exhausted" in err_str
             is_server  = "500" in err_str or "503" in err_str or "502" in err_str
-            is_timeout = "timeout" in err_str or "deadline" in err_str
+            is_timeout = any(t in err_str for t in (
+                "timeout", "deadline", "transport", "connection refused",
+                "connection reset", "remote disconnected", "eof occurred",
+                "10060", "10054"
+            ))
 
             if attempt >= retries - 1:
                 print(f"\n\033[91m❌ [Gemini Fatal]: Κατέρρευσε μετά από {retries} προσπάθειες: {e}\033[0m")

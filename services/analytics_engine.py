@@ -50,7 +50,7 @@ def _extract_activities_llm(msgs: list) -> list:
     (event_name, event_type) ή None για κάθε μήνυμα.
     """
     from langchain_core.messages import HumanMessage
-    from core.brain import llm
+    from core.brain import llm, safe_llm_invoke
 
     if not msgs:
         return []
@@ -74,7 +74,7 @@ def _extract_activities_llm(msgs: list) -> list:
 JSON:"""
 
     try:
-        response = llm.invoke([HumanMessage(content=prompt)])
+        response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
         content = response.content
         if isinstance(content, list):
             content = "".join(

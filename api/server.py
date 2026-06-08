@@ -28,7 +28,7 @@ from rich.console import Console
 from zoneinfo import ZoneInfo
 
 from config import REMINDERS_FILE
-from core.brain import llm
+from core.brain import llm, safe_llm_invoke
 from core.graph import graph, AgentState
 from core.agents import clean_message
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
@@ -309,7 +309,7 @@ def proactive_worker():
                     break
 
                 try:
-                    response = llm.invoke([HumanMessage(content=poke_prompt)])
+                    response = safe_llm_invoke(llm, [HumanMessage(content=poke_prompt)])
                     if shutdown_event.is_set():
                         break
 
@@ -763,7 +763,7 @@ async def upload_file(request: Request, file: UploadFile = File(...), _=Depends(
             # Στέλνουμε στο LLM για περίληψη/ανάλυση
             sum_prompt = f"Διάβασε το παρακάτω έγγραφο '{file.filename}' και κάνε μια σύντομη ανάλυση/περίληψη στα Ελληνικά (5-8 προτάσεις):\n\n{doc_text}"
             from langchain_core.messages import HumanMessage as _HM
-            sum_resp = llm.invoke([_HM(content=sum_prompt)])
+            sum_resp = safe_llm_invoke(llm, [_HM(content=sum_prompt)])
             detailed_analysis = sum_resp.content.strip() if sum_resp and sum_resp.content else "Δεν μπόρεσα να αναλύσω το έγγραφο."
             memory_analysis = detailed_analysis[:500]
 

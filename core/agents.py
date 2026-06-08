@@ -17,7 +17,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AI
 from core.utils import load_agent_prompt
 # CONFIG & BRAIN
 from config import PHOTOS_DIR, WORKING_MEMORY_FILE
-from core.brain import llm, llm_heavy
+from core.brain import llm, llm_heavy, safe_llm_invoke
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 # UTILS & STATE
 from core.utils import AgentState, filter_messages, build_prompt, clean_message, sanitize_history_for_gemini
@@ -171,7 +171,7 @@ def supervisor_node(state):
     else:
         full_prompt = f"{system_base}\n\nΧρήστης: '{str(last_content)[:500]}'"
 
-    decision = router_llm.invoke(full_prompt)
+    decision = safe_llm_invoke(router_llm, full_prompt)
     print(f"\033[95m[Τροχονόμος]: -> {decision.next_agent} (llm)\033[0m")
     return {"next_agent": decision.next_agent}
 
@@ -475,7 +475,7 @@ def git_agent_node(state):
     git_llm = llm.bind_tools([
         github_manager, search_memory, run_terminal_command
     ])
-    response = git_llm.invoke([SystemMessage(content=system_prompt)] + safe_history)
+    response = safe_llm_invoke(git_llm, [SystemMessage(content=system_prompt)] + safe_history)
     response = _ensure_text_response(response, git_llm, system_prompt, safe_history)
 
     return {"current_agent": "Git_Agent", "messages": [response]}

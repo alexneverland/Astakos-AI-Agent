@@ -31,7 +31,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from rich.console import Console
 
 from config import REMINDERS_FILE
-from core.brain import llm
+from core.brain import llm, safe_llm_invoke
 from core.graph import graph
 from core.agents import clean_message
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
@@ -130,7 +130,7 @@ def proactive_worker():
                     break
 
                 try:
-                    response = llm.invoke([HumanMessage(content=poke_prompt)])
+                    response = safe_llm_invoke(llm, [HumanMessage(content=poke_prompt)])
                     if shutdown_event.is_set():
                         break
 

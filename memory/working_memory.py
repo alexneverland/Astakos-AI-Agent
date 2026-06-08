@@ -22,7 +22,7 @@ def update_working_memory(user_text, ai_text):
     """Εξάγει ακαριαία context tags από τον διάλογο."""
     try:
         print("\033[90m[System]: Ξεκίνησε η ανάλυση Προσκηνίου...\033[0m")
-        from core.brain import llm
+        from core.brain import llm, safe_llm_invoke
 
         # Φοράμε τα "γυαλιά" (Smart Parser) πριν κόψουμε τους χαρακτήρες
         safe_user = clean_message(user_text)
@@ -50,7 +50,7 @@ def update_working_memory(user_text, ai_text):
 Αστακός: {ai_context}
 """
 
-        response = llm.invoke([HumanMessage(content=prompt)])
+        response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
         
         # [MASTRO-CLEAN]: Χρησιμοποιούμε τον Smart Parser ΚΑΙ στην έξοδο! 
         # Τέλος τα "isinstance(list)" και οι λούπες.
