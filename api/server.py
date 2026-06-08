@@ -764,7 +764,7 @@ async def upload_file(request: Request, file: UploadFile = File(...), _=Depends(
             sum_prompt = f"Διάβασε το παρακάτω έγγραφο '{file.filename}' και κάνε μια σύντομη ανάλυση/περίληψη στα Ελληνικά (5-8 προτάσεις):\n\n{doc_text}"
             from langchain_core.messages import HumanMessage as _HM
             sum_resp = safe_llm_invoke(llm, [_HM(content=sum_prompt)])
-            detailed_analysis = sum_resp.content.strip() if sum_resp and sum_resp.content else "Δεν μπόρεσα να αναλύσω το έγγραφο."
+            detailed_analysis = clean_message(sum_resp.content).strip() if sum_resp and sum_resp.content else "Δεν μπόρεσα να αναλύσω το έγγραφο."
             memory_analysis = detailed_analysis[:500]
 
             chat_ai_msg = (
