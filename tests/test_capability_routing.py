@@ -13,6 +13,14 @@ def test_commit_requests_route_to_git_agent():
     assert lookup_agent("git log -n 5 --oneline") == "Git_Agent"
 
 
+def test_logistics_profile_does_not_route_to_git_agent():
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent("Lazaros works as Orders and Logistics Manager at Passias S.A.") != "Git_Agent"
+
+
 def test_dev_requests_still_route_to_dev_agent():
     from core.capability_lookup import lookup_agent, reload_registry
 

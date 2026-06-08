@@ -23,7 +23,6 @@ _GIT_TRIGGERS = [
     "branches",
     "status",
     "diff",
-    "log",
     "git log",
     "git status",
     "git diff",

@@ -402,7 +402,7 @@ def tech_agent_node(state: AgentState):
     pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
     image_part = None
 
-    tech_keywords = ["κώδικας", "σφάλμα", "διάβασε", "τι γράφει", "error", "log", "σχέδιο"]
+    tech_keywords = ["κώδικας", "σφάλμα", "διάβασε", "τι γράφει", "error", "logs", "σχέδιο"]
     needs_pixels = any(word in last_msg_text.lower() for word in tech_keywords)
 
     if path_match and (not pre_baked_analysis or needs_pixels):
