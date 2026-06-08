@@ -115,18 +115,56 @@ class AstakosMemoryManager:
 # 1. Semantic Overwrite για [LESSON] / [USER_FACT]
         if "[LESSON]" in fact or "[USER_FACT]" in fact:
             query_emb = embeddings.embed_query(fact)
-            old_results = vector_store._collection.query(query_embeddings=[query_emb], n_results=1)
+            old_results = vector_store._collection.query(
+                query_embeddings=[query_emb], n_results=1,
+                include=["documents", "metadatas", "distances"],
+            )
             if old_results['ids'] and old_results['ids'][0]:
                 dist = old_results['distances'][0][0]
                 if dist < 0.25:
                     old_id = old_results['ids'][0][0]
                     old_content = old_results['documents'][0][0]
-                    # Κράτα την πιο λεπτομερή — αν η παλιά είναι >30% μεγαλύτερη, ΜΗΝ αντικαταστήσεις
-                    if len(old_content) > len(fact) * 1.3:
+                    old_meta = {}
+                    try:
+                        old_meta = (old_results.get('metadatas') or [[]])[0][0] or {}
+                    except (IndexError, TypeError):
+                        old_meta = {}
+
+                    # Σήμα 1: η ΝΕΑ φράση μοιάζει με ρητή διόρθωση/ενημέρωση —
+                    # τότε προτεραιότητα στο νέο περιεχόμενο, ανεξαρτήτως μήκους.
+                    correction_markers = (
+                        "διορθω", "διόρθω", "το σωστό ε", "σωστό είναι", "σωστό:",
+                        "δεν ισχύει πλέον", "άλλαξε", "ενημερωμέν", "πλέον είναι",
+                        "correction", "update", "actually",
+                    )
+                    looks_like_correction = any(m in fact.lower() for m in correction_markers)
+
+                    # Σήμα 2: πόσο παλιά είναι η παλιά εγγραφή (σε μέρες)
+                    old_age_days = None
+                    try:
+                        old_ts = float(old_meta.get("timestamp") or 0)
+                        if old_ts > 0:
+                            old_age_days = max(0, (datetime.now() - datetime.fromtimestamp(old_ts)).days)
+                    except (TypeError, ValueError, OSError):
+                        old_age_days = None
+
+                    much_longer = len(old_content) > len(fact) * 1.3
+                    stale = old_age_days is not None and old_age_days > 30
+
+                    # Το μήκος από μόνο του δεν αποδεικνύει ότι η παλιά εγγραφή είναι
+                    # πιο σωστή — μπορεί απλώς να είναι παλιά και φλύαρη. Κρατάμε την
+                    # "πλουσιότερη" μόνο όταν ΔΕΝ είναι ρητή διόρθωση ΚΑΙ δεν φαίνεται stale.
+                    if not looks_like_correction and much_longer and not stale:
                         print(f"\033[90m[MemoryManager]: Keep richer! Παλιά ({len(old_content)} χαρ.) > Νέα ({len(fact)} χαρ.) — παραμένει η λεπτομερής.\033[0m")
                     else:
                         vector_store._collection.delete(ids=[old_id])
-                        print(f"\033[94m[MemoryManager]: Overwrite! ({old_content[:80]} | Dist: {dist:.3f})\033[0m")
+                        reason_tag = []
+                        if looks_like_correction:
+                            reason_tag.append("ρητή διόρθωση")
+                        if stale:
+                            reason_tag.append(f"παλιά εγγραφή ({old_age_days}d)")
+                        tag_str = f" [{', '.join(reason_tag)}]" if reason_tag else ""
+                        print(f"\033[94m[MemoryManager]: Overwrite!{tag_str} ({old_content[:80]} | Dist: {dist:.3f})\033[0m")
 
         # 2. Duplicate check με dynamic threshold
         results = vector_store.similarity_search_with_score(fact, k=1)

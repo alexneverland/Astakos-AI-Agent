@@ -369,7 +369,7 @@ def _record_memory_context_debug(
     print(
         f"\033[90m[MemoryContext]: channel={channel} "
         f"recent={recent_count} sqlite={historical_count} semantic={semantic_count} "
-        f"query='{payload['query_preview'][:80]}'\033[0m"
+        f"query='{payload['query_preview']}'\033[0m"
     )
     try:
         with open(MEMORY_CONTEXT_DEBUG_FILE, "w", encoding="utf-8") as f:
