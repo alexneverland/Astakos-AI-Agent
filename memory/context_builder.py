@@ -304,7 +304,8 @@ def build_memory_context(
     temporal_limit: int = 8,
     semantic_k: int = 5,
 ) -> MemoryContext:
-    if looks_like_tool_output(query):
+    is_tool_output = looks_like_tool_output(query)
+    if is_tool_output:
         recent_limit = 0
         temporal_limit = 0
         semantic_k = 0
@@ -340,6 +341,7 @@ def build_memory_context(
     _record_memory_context_debug(
         channel=channel,
         query=query,
+        is_tool_output=is_tool_output,
         recent_count=len(context.recent_lines),
         historical_count=len(context.historical_lines),
         semantic_count=len(context.semantic_facts),
@@ -354,6 +356,7 @@ def _record_memory_context_debug(
     *,
     channel: str,
     query: str,
+    is_tool_output: bool = False,
     recent_count: int,
     historical_count: int,
     semantic_count: int,
@@ -365,6 +368,7 @@ def _record_memory_context_debug(
         "written_at": datetime.now().isoformat(timespec="seconds"),
         "channel": channel,
         "query_preview": " ".join(str(query or "").split())[:180],
+        "is_tool_output": is_tool_output,
         "recent_count": recent_count,
         "historical_count": historical_count,
         "semantic_count": semantic_count,
@@ -372,11 +376,22 @@ def _record_memory_context_debug(
         "historical_preview": historical_preview,
         "semantic_preview": semantic_preview,
     }
-    print(
-        f"\033[90m[MemoryContext]: channel={channel} "
-        f"recent={recent_count} sqlite={historical_count} semantic={semantic_count} "
-        f"query='{payload['query_preview']}'\033[0m"
-    )
+    if is_tool_output:
+        # [MASTRO-FIX]: Το query εδώ είναι εσωτερικό tool-output (όχι πραγματικό
+        # ερώτημα χρήστη) — το looks_like_tool_output() ήδη μηδένισε όλες τις
+        # αναζητήσεις μνήμης. Δείχνουμε ξεκάθαρα ΓΙΑΤΙ recent/sqlite/semantic=0,
+        # αντί να τυπώνουμε το garbage string σαν να ήταν πραγματικό query.
+        print(
+            f"\033[90m[MemoryContext]: channel={channel} — tool-output εντοπίστηκε "
+            f"('{payload['query_preview'][:60]}...'), παράλειψη αναζήτησης μνήμης "
+            f"(recent=0 sqlite=0 semantic=0)\033[0m"
+        )
+    else:
+        print(
+            f"\033[90m[MemoryContext]: channel={channel} "
+            f"recent={recent_count} sqlite={historical_count} semantic={semantic_count} "
+            f"query='{payload['query_preview']}'\033[0m"
+        )
     try:
         with open(MEMORY_CONTEXT_DEBUG_FILE, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)

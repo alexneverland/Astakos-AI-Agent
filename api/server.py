@@ -521,7 +521,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 with open(photo_path, "rb") as f:
                     img_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-                mime = {"png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                         ".gif": "image/gif", ".webp": "image/webp"}.get(ext, "image/jpeg")
 
                 human_msg = HumanMessage(content=[
