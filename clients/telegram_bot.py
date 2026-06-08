@@ -31,7 +31,8 @@ from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FI
 def _normalize_gr(text: str) -> str:
     """Αφαιρεί τόνους από ελληνικό κείμενο για accent-insensitive σύγκριση."""
     import unicodedata
-    return unicodedata.normalize("NFD", text).encode("ascii", "ignore").decode("ascii").lower()
+    normalized = unicodedata.normalize("NFD", str(text))
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
 
 from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
 from core.exceptions import SchedulerCrashError, PendingTimeoutError, DBWriteError

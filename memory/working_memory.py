@@ -116,6 +116,29 @@ def _save_capability(capability_type: str, description: str):
             json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+_USER_SUBJECT_MARKERS = (
+    "ο λάζαρος", "ο λαζαρος", "η σοφία", "η σοφια", "ο αλέξανδρος", "ο αλεξανδρος",
+    "του λάζαρου", "του λαζαρου", "της σοφίας", "της σοφιας", "του αλέξανδρου", "του αλεξανδρου",
+    "τον γιο του", "το παιδί του", "το παιδι του", "την οικογένεια", "την οικογενεια",
+)
+
+_ASSISTANT_SUBJECT_MARKERS = (
+    "ο αστακός", "ο αστακος", "το σύστημα", "το συστημα", "ο assistant",
+    "δυνατότητα", "δυνατοτητα",
+    "εργαλείο", "εργαλειο", "api", "tool", "pipeline",
+)
+
+
+def _looks_like_user_fact_not_capability(description: str) -> bool:
+    """Prevent personal/family facts from being stored as Astakos capabilities."""
+    text = str(description or "").strip().lower()
+    if not text:
+        return True
+    if any(marker in text for marker in _ASSISTANT_SUBJECT_MARKERS):
+        return False
+    return any(marker in text for marker in _USER_SUBJECT_MARKERS)
+
+
 def get_capability_context() -> str:
     data = _load_capabilities()
     parts = []
@@ -133,7 +156,7 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
     import json
     try:
         cap_prompt = f"""
-Ανάλυσε τη συνομιλία και εντόπισε ΝΕΕΣ ικανότητες (can_do) ή συγκεκριμένες αποτυχίες (cannot_do).
+Ανάλυσε τη συνομιλία και εντόπισε ΝΕΕΣ ικανότητες ΤΟΥ ΑΣΤΑΚΟΥ (can_do) ή συγκεκριμένες αποτυχίες ΤΟΥ ΑΣΤΑΚΟΥ (cannot_do).
 Απάντησε ΜΟΝΟ με JSON:
 {{
   "can_do": "Σύντομη περιγραφή",
@@ -141,6 +164,14 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
 }}
 Αν δεν υπάρχει νέα πληροφορία, βάλε null.
 ΠΡΟΣΟΧΗ: Γράψε τις προτάσεις γενικά, όχι για τη συγκεκριμένη στιγμή.
+ΑΠΑΓΟΡΕΥΕΤΑΙ να γράψεις ως can_do/cannot_do πράγματα που κάνει, μπορεί ή έζησε ο Λάζαρος, η Σοφία, ο Αλέξανδρος ή η οικογένεια. Αυτά είναι USER_FACT, όχι αυτογνωσία.
+Παραδείγματα που ΠΡΕΠΕΙ να είναι null:
+- "Ο Λάζαρος μπορεί να πηγαίνει τον γιο του στο σχολείο"
+- "Ο Αλέξανδρος ξεκινάει δημοτικό"
+- "Η Σοφία είναι σπίτι"
+Παραδείγματα έγκυρου can_do:
+- "Ο Αστακός μπορεί να στέλνει μήνυμα Messenger μετά από approval"
+- "Ο Αστακός μπορεί να αναζητά shared SQLite history και Chroma memories"
 
 [Agent: {agent}]
 Λάζαρος: {user_text[:500]}
@@ -160,12 +191,18 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
         data = json.loads(raw)
 
         if data.get("can_do") and str(data["can_do"]).lower() != "null":
-            _save_capability("can", data["can_do"])
-            print(f"\033[96m[Αυτογνωσία]: ✅ can_do: {data['can_do']}\033[0m")
+            if _looks_like_user_fact_not_capability(data["can_do"]):
+                print(f"\033[90m[Αυτογνωσία]: skip user fact, not can_do: {data['can_do']}\033[0m")
+            else:
+                _save_capability("can", data["can_do"])
+                print(f"\033[96m[Αυτογνωσία]: ✅ can_do: {data['can_do']}\033[0m")
             
         if data.get("cannot_do") and str(data["cannot_do"]).lower() != "null":
-            _save_capability("cannot", data["cannot_do"])
-            print(f"\033[91m[Αυτογνωσία]: ❌ cannot_do: {data['cannot_do']}\033[0m")
+            if _looks_like_user_fact_not_capability(data["cannot_do"]):
+                print(f"\033[90m[Αυτογνωσία]: skip user fact, not cannot_do: {data['cannot_do']}\033[0m")
+            else:
+                _save_capability("cannot", data["cannot_do"])
+                print(f"\033[91m[Αυτογνωσία]: ❌ cannot_do: {data['cannot_do']}\033[0m")
             
     except Exception as e:
         print(f"\033[90m[Αυτογνωσία Error]: {e}\033[0m")
