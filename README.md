@@ -81,6 +81,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Web UI Live Refresh | `/messages/poll?after_id=N&channel=telegram` endpoint + frontend `setInterval` polling every 5 s; Telegram messages appear in Web UI without manual page reload. |
 | register_tool dry_run | `register_tool(dry_run=True)` previews all file changes (system.py, tool_risk.py, capability_registry) without writing; path traversal protection and Python identifier validation added. |
 | Memory Provenance | Saved facts include `source` (`telegram` / `web`) and `reason` (`user_stated` / `agent_inferred`). |
+| Category-Safe Memory Overwrite | ChromaDB facts are overwritten only after same-category semantic matching plus helper-tested checks for correction language, stale age, and information richness. |
 | Hybrid `search_memory` | The memory tool returns both relevant SQLite conversation history and ChromaDB facts in one response. |
 | Goal Follow-up Engine | Daily semantic check for stale goals; Astakos can proactively follow up after 7 quiet days. |
 
@@ -94,6 +95,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Broad SQL Context Recall | Substantive questions search recent SQLite history even without explicit date words; temporal queries like "yesterday morning" narrow to the right day/time window. |
 | Personal Event Capture | Personal and family events are saved as dated ChromaDB `[USER_FACT]` memories when the conversation clearly states them. |
 | Google Fit Integration | Daily steps, sleep phases (deep / REM / light), and heart rate from Samsung Health via Google Fit. Morning briefing at 08:00 uses yesterday's steps, last night's sleep, and heart-rate fallback logic. |
+| Memory Overwrite Helpers | `memory.vector_store` exposes tested helper functions for correction detection, memory age, richness scoring, and overwrite decisions. |
 | Memory Scoring | Every memory has `importance`, `confidence`, `last_accessed`, and `retrieval_count`. `compute_score()` = importance × 0.4 + retrieval × 0.3 + confidence × 0.2 + freshness × 0.1. |
 | Unified Memory Entry Point | `memory.save(memory_type=...)` handles facts, photos, documents, sessions, goals, reflections, and events. |
 | Reflection Engine | Nightly self-evaluation and post-plan reflection extract lessons, save them to ChromaDB, and auto-apply supported improvements. |
@@ -427,6 +429,7 @@ Shutdown behavior:
 - [x] Hybrid Memory Search — `search_memory` returns both relevant SQLite conversation history and ChromaDB semantic facts, so tool-based recall uses the same memory model as prompt context.
 - [x] Personal/Family Event Capture — clear personal and family day-events are saved as dated ChromaDB facts while the full conversation remains in SQLite.
 - [x] Memory Context Debugging — `/debug` shows recent, SQLite, and Chroma context counts/previews for the last prompt build.
+- [x] Category-Safe Memory Overwrite — same-category Chroma matches use helper-tested correction, staleness, richness, and length tie-break rules before replacing old facts.
 
 ### Planned
 
