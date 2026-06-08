@@ -112,59 +112,145 @@ class AstakosMemoryManager:
         else:
             dup_threshold = 0.85   # γενικό
 
-# 1. Semantic Overwrite για [LESSON] / [USER_FACT]
+# 1. Semantic Overwrite για [LESSON] / [USER_FACT] — category-safe πρώτα
         if "[LESSON]" in fact or "[USER_FACT]" in fact:
             query_emb = embeddings.embed_query(fact)
-            old_results = vector_store._collection.query(
+
+            def _meta_of(res):
+                try:
+                    return (res.get('metadatas') or [[]])[0][0] or {}
+                except (IndexError, TypeError):
+                    return {}
+
+            # Ψάξε ΠΡΩΤΑ μέσα στην ΙΔΙΑ category — αποφεύγουμε να συγκρίνουμε
+            # (και ενδεχομένως να σβήσουμε) άσχετη μνήμη άλλης κατηγορίας απλά
+            # επειδή το embedding της έτυχε να μοιάζει.
+            same_cat = vector_store._collection.query(
                 query_embeddings=[query_emb], n_results=1,
+                where={"category": category},
                 include=["documents", "metadatas", "distances"],
             )
-            if old_results['ids'] and old_results['ids'][0]:
-                dist = old_results['distances'][0][0]
-                if dist < 0.25:
-                    old_id = old_results['ids'][0][0]
-                    old_content = old_results['documents'][0][0]
-                    old_meta = {}
-                    try:
-                        old_meta = (old_results.get('metadatas') or [[]])[0][0] or {}
-                    except (IndexError, TypeError):
-                        old_meta = {}
 
-                    # Σήμα 1: η ΝΕΑ φράση μοιάζει με ρητή διόρθωση/ενημέρωση —
-                    # τότε προτεραιότητα στο νέο περιεχόμενο, ανεξαρτήτως μήκους.
-                    correction_markers = (
-                        "διορθω", "διόρθω", "το σωστό ε", "σωστό είναι", "σωστό:",
-                        "δεν ισχύει πλέον", "άλλαξε", "ενημερωμέν", "πλέον είναι",
-                        "correction", "update", "actually",
+            old_id = old_content = old_meta = None
+            dist = None
+            if same_cat['ids'] and same_cat['ids'][0]:
+                d = same_cat['distances'][0][0]
+                if d < 0.25:
+                    old_id = same_cat['ids'][0][0]
+                    old_content = same_cat['documents'][0][0]
+                    old_meta = _meta_of(same_cat)
+                    dist = d
+
+            if old_id is None:
+                # Τίποτα κοντινό μέσα στην category — δες αν υπάρχει κάτι ύποπτα
+                # κοντινό cross-category. Μόνο ενημέρωση, ΔΕΝ σβήνουμε ποτέ cross-category.
+                cross = vector_store._collection.query(
+                    query_embeddings=[query_emb], n_results=1,
+                    include=["documents", "metadatas", "distances"],
+                )
+                if cross['ids'] and cross['ids'][0] and cross['distances'][0][0] < 0.20:
+                    c_meta = _meta_of(cross)
+                    c_doc = cross['documents'][0][0]
+                    print(
+                        f"\033[93m[MemoryManager]: ⚠️ Κοντινή μνήμη σε άλλη category "
+                        f"({c_meta.get('category', '?')}, dist={cross['distances'][0][0]:.3f}): "
+                        f"{c_doc[:80]} — δεν την πειράζω (άλλη κατηγορία).\033[0m"
                     )
-                    looks_like_correction = any(m in fact.lower() for m in correction_markers)
 
-                    # Σήμα 2: πόσο παλιά είναι η παλιά εγγραφή (σε μέρες)
+            if old_id is not None:
+                # Σήμα 1: ρητή διόρθωση/ενημέρωση στη ΝΕΑ φράση -> πάντα προτεραιότητα στο νέο
+                correction_markers = (
+                    "διορθω", "διόρθω", "λάθος", "λαθος", "όχι αυτό", "οχι αυτο",
+                    "το σωστό ε", "σωστό είναι", "σωστό:", "τελικά", "τελικα",
+                    "δεν ισχύει", "δεν ισχυει", "άλλαξε", "αλλαξε", "ενημερωμέν",
+                    "πλέον είναι", "ξαναλέω", "ξαναλεω",
+                    "correction", "update", "actually",
+                )
+                looks_like_correction = any(m in fact.lower() for m in correction_markers)
+
+                # Σήμα 2: πόσο παλιά είναι η παλιά εγγραφή (σε μέρες, από πραγματικό timestamp)
+                old_age_days = None
+                try:
+                    old_ts = float((old_meta or {}).get("timestamp") or 0)
+                    if old_ts > 0:
+                        old_age_days = max(0, (datetime.now() - datetime.fromtimestamp(old_ts)).days)
+                except (TypeError, ValueError, OSError):
                     old_age_days = None
+                stale = old_age_days is not None and old_age_days > 30
+
+                # Σήμα 3: "πλούτος" περιεχομένου — ΟΧΙ απλά μήκος. Μετράμε πόσα
+                # ουσιαστικά στοιχεία κουβαλάει η κάθε εκδοχή (ημερομηνία, πρόσωπο/
+                # project, link/path, συγκεκριμένο γεγονός) + confidence από metadata,
+                # γιατί μια μεγάλη παλιά εγγραφή μπορεί απλώς να είναι φλύαρη, όχι σωστότερη.
+                def _has_date(text):
+                    low = str(text).lower()
+                    if "στις" in low:
+                        return True
+                    run = 0
+                    for ch in str(text):
+                        run = run + 1 if ch.isdigit() else 0
+                        if run >= 4:
+                            return True
+                    return False
+
+                entity_markers = (
+                    "σοφια", "σοφία", "αλεξανδρ", "αλέξανδρ", "μαρια", "μαρία",
+                    "mastroapp", "praxis", "shiftmaster", "paletes", "astakos", "αστακο",
+                )
+                link_markers = ("http", "https", "/", "\\", ".py", ".json", ".md", ".db")
+                event_markers = (
+                    "πηγαμε", "πήγαμε", "εκανε", "έκανε", "εγινε", "έγινε",
+                    "πηρε", "πήρε", "εφαγε", "έφαγε", "βρηκαμε", "βρήκαμε",
+                    "αγορασ", "αγόρασ", "διαβασ", "διάβασ",
+                )
+
+                def _richness(text, meta):
+                    low = str(text).lower()
+                    score = 0.0
+                    if _has_date(text):
+                        score += 1
+                    if any(m in low for m in entity_markers):
+                        score += 1
+                    if any(m in low for m in link_markers):
+                        score += 1
+                    if any(m in low for m in event_markers):
+                        score += 1
                     try:
-                        old_ts = float(old_meta.get("timestamp") or 0)
-                        if old_ts > 0:
-                            old_age_days = max(0, (datetime.now() - datetime.fromtimestamp(old_ts)).days)
-                    except (TypeError, ValueError, OSError):
-                        old_age_days = None
+                        score += float((meta or {}).get("confidence", 0) or 0)
+                    except (TypeError, ValueError):
+                        pass
+                    return score
 
-                    much_longer = len(old_content) > len(fact) * 1.3
-                    stale = old_age_days is not None and old_age_days > 30
+                new_richness = _richness(fact, {"confidence": confidence})
+                old_richness = _richness(old_content, old_meta)
+                much_longer = len(old_content) > len(str(fact)) * 1.3
 
-                    # Το μήκος από μόνο του δεν αποδεικνύει ότι η παλιά εγγραφή είναι
-                    # πιο σωστή — μπορεί απλώς να είναι παλιά και φλύαρη. Κρατάμε την
-                    # "πλουσιότερη" μόνο όταν ΔΕΝ είναι ρητή διόρθωση ΚΑΙ δεν φαίνεται stale.
-                    if not looks_like_correction and much_longer and not stale:
-                        print(f"\033[90m[MemoryManager]: Keep richer! Παλιά ({len(old_content)} χαρ.) > Νέα ({len(fact)} χαρ.) — παραμένει η λεπτομερής.\033[0m")
-                    else:
-                        vector_store._collection.delete(ids=[old_id])
-                        reason_tag = []
-                        if looks_like_correction:
-                            reason_tag.append("ρητή διόρθωση")
-                        if stale:
-                            reason_tag.append(f"παλιά εγγραφή ({old_age_days}d)")
-                        tag_str = f" [{', '.join(reason_tag)}]" if reason_tag else ""
-                        print(f"\033[94m[MemoryManager]: Overwrite!{tag_str} ({old_content[:80]} | Dist: {dist:.3f})\033[0m")
+                # Απόφαση: ρητή διόρθωση -> πάντα overwrite. Αλλιώς κρατάμε την παλιά
+                # ΜΟΝΟ αν είναι ουσιαστικά πιο "πλούσια" (όχι απλώς μακρύτερη) ΚΑΙ δεν
+                # είναι stale. Σε κάθε άλλη περίπτωση -> overwrite.
+                keep_old = (
+                    not looks_like_correction
+                    and not stale
+                    and (old_richness > new_richness or (old_richness == new_richness and much_longer))
+                )
+
+                if keep_old:
+                    print(
+                        f"\033[90m[MemoryManager]: Keep richer! Παλιά (richness={old_richness:.1f}, "
+                        f"{len(old_content)} χαρ.) > Νέα (richness={new_richness:.1f}, {len(str(fact))} χαρ.) "
+                        f"— παραμένει η λεπτομερής.\033[0m"
+                    )
+                else:
+                    vector_store._collection.delete(ids=[old_id])
+                    reason_tag = []
+                    if looks_like_correction:
+                        reason_tag.append("ρητή διόρθωση")
+                    if stale:
+                        reason_tag.append(f"παλιά εγγραφή ({old_age_days}d)")
+                    if not looks_like_correction and not stale:
+                        reason_tag.append(f"richness {new_richness:.1f}≥{old_richness:.1f}")
+                    tag_str = f" [{', '.join(reason_tag)}]" if reason_tag else ""
+                    print(f"\033[94m[MemoryManager]: Overwrite!{tag_str} ({old_content[:80]} | Dist: {dist:.3f})\033[0m")
 
         # 2. Duplicate check με dynamic threshold
         results = vector_store.similarity_search_with_score(fact, k=1)
