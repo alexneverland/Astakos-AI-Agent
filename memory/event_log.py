@@ -13,6 +13,10 @@ from datetime import datetime
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), "..", "logs", "events")
 
+# Lock για thread-safety: ο scheduler τρέχει πολλά jobs παράλληλα
+# και το log_event καλείται από πολλά threads ταυτόχρονα.
+_log_lock = threading.Lock()
+
 # ────────────────────────────────────────────────────────────────
 # EVENT LOGGING
 # ────────────────────────────────────────────────────────────────
@@ -25,6 +29,9 @@ def log_event(job: str, action: str, **kwargs):
         log_event("routine_scan", "triggered", routine_id=14, confidence=0.8)
         log_event("reminder",     "sent",      task="Φάρμακο Αλέξανδρος")
         log_event("proactive",    "skipped",   reason="quiet_hours")
+
+    Atomic write: γράφει πρώτα σε .tmp, fsync, μετά os.replace → αν
+    crashάρει στη μέση δεν μένει corrupted αρχείο (ούτε truncated JSON).
     """
     try:
         os.makedirs(LOGS_DIR, exist_ok=True)
@@ -40,18 +47,29 @@ def log_event(job: str, action: str, **kwargs):
                for k, v in kwargs.items()}
         }
 
-        entries = []
-        if os.path.exists(log_file):
-            try:
-                with open(log_file, "r", encoding="utf-8") as f:
-                    entries = json.load(f)
-            except Exception:
-                entries = []
+        with _log_lock:
+            entries = []
+            if os.path.exists(log_file):
+                try:
+                    with open(log_file, "r", encoding="utf-8") as f:
+                        entries = json.load(f)
+                except Exception:
+                    entries = []   # corrupted → ξεκινάμε φρέσκο για σήμερα
 
-        entries.append(entry)
+            entries.append(entry)
 
-        with open(log_file, "w", encoding="utf-8") as f:
-            json.dump(entries, f, ensure_ascii=False, indent=2)
+            # Atomic write: .tmp → fsync → os.replace
+            # Αν κοπεί το ρεύμα/crash πριν το replace: παλιό αρχείο ανέπαφο.
+            # Αν κοπεί μετά το replace: νέο αρχείο πλήρες.
+            tmp_file = log_file + ".tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(entries, f, ensure_ascii=False, indent=2)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError:
+                    pass  # fsync δεν υποστηρίζεται παντού — flush αρκεί
+            os.replace(tmp_file, log_file)
 
     except Exception as e:
         print(f"⚠️ [event_log]: {e}")
