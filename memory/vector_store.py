@@ -209,7 +209,14 @@ class AstakosMemoryManager:
         else:
             dup_threshold = 0.85   # γενικό
 
-# 1. Semantic Overwrite για [LESSON] / [USER_FACT] — category-safe πρώτα
+        # [MASTRO-FIX]: Ενοποιημένο overwrite — ΜΙΑ απόφαση (decide_memory_overwrite) για
+        # ΟΛΑ τα stores. Αν εδώ αποφασίσουμε ότι πρέπει να αντικατασταθεί η παλιά
+        # Chroma-εγγραφή, αποθηκεύουμε το ΑΚΡΙΒΕΣ κείμενό της ώστε το βήμα 4
+        # (JSON Profile) να βρει και να αντικαταστήσει ΤΗΝ ΙΔΙΑ εγγραφή — όχι να
+        # τρέξει ξεχωριστό, ενδεχομένως αντικρουόμενο, similarity-check.
+        replace_old_fact_text = None
+
+        # 1. Semantic Overwrite για [LESSON] / [USER_FACT] — category-safe πρώτα
         if "[LESSON]" in fact or "[USER_FACT]" in fact:
             query_emb = embeddings.embed_query(fact)
 
@@ -266,8 +273,14 @@ class AstakosMemoryManager:
                     print(
                         f"\033[90m[MemoryManager]: Keep richer! Παλιά (richness={decision['old_richness']:.1f}, "
                         f"{len(old_content)} χαρ.) > Νέα (richness={decision['new_richness']:.1f}, {len(str(fact))} χαρ.) "
-                        f"— παραμένει η λεπτομερής.\033[0m"
+                        f"— παραμένει η λεπτομερής, η νέα ΔΕΝ αποθηκεύεται (αποφυγή διπλοεγγραφής).\033[0m"
                     )
+                    # [MASTRO-FIX]: keep_old σήμαινε μέχρι τώρα μόνο "μη σβήσεις την
+                    # παλιά" — αλλά ο κώδικας συνέχιζε ούτως ή άλλως στην αποθήκευση
+                    # της νέας, καταλήγοντας με ΔΥΟ σχεδόν-ίδιες εγγραφές στη Chroma
+                    # (το loose SIM_THRESHOLD_DISTANCE=0.30 δεν την έπιανε πάντα).
+                    # Αν αποφασίσαμε "κράτα την παλιά", σταματάμε εδώ — σε ΚΑΝΕΝΑ store.
+                    return False
                 else:
                     vector_store._collection.delete(ids=[old_id])
                     reason_tag = []
@@ -279,6 +292,9 @@ class AstakosMemoryManager:
                         reason_tag.append(f"richness {decision['new_richness']:.1f}≥{decision['old_richness']:.1f}")
                     tag_str = f" [{', '.join(reason_tag)}]" if reason_tag else ""
                     print(f"\033[94m[MemoryManager]: Overwrite!{tag_str} ({old_content[:80]} | Dist: {dist:.3f})\033[0m")
+                    # Η ΙΔΙΑ απόφαση θα καθοδηγήσει και το JSON Profile παρακάτω —
+                    # κρατάμε το ακριβές κείμενο της παλιάς εγγραφής για να τη βρούμε εκεί.
+                    replace_old_fact_text = old_content
 
         # 2. Duplicate check με dynamic threshold
         results = vector_store.similarity_search_with_score(fact, k=1)
@@ -331,40 +347,35 @@ class AstakosMemoryManager:
             if category not in db:
                 db[category] = []
 
-            # Φτιάχνουμε μια λίστα μόνο με τα strings για να τρέξουμε τα embeddings
-            existing_facts = [
-                item if isinstance(item, str) else item.get("fact", "")
-                for item in db[category]
-            ]
-            
-            best_sim = 0.0
-            best_idx = -1
-            
-            # Mastro-Scanner: Αναζήτηση για παλιά εγγραφή που πρέπει να αντικατασταθεί
-            if existing_facts:
-                new_emb = embeddings.embed_query(fact)
-                existing_embs = embeddings.embed_documents(existing_facts)
-                
-                norm_a = sum(a * a for a in new_emb) ** 0.5
-                if norm_a > 0:
-                    for i, emb in enumerate(existing_embs):
-                        dot = sum(a * b for a, b in zip(new_emb, emb))
-                        norm_b = sum(b * b for b in emb) ** 0.5
-                        if norm_b > 0:
-                            sim = dot / (norm_a * norm_b)
-                            if sim > best_sim:
-                                best_sim = sim
-                                best_idx = i
-
             new_entry = {"fact": fact, "photo_path": photo_path, "date": datetime.now().strftime("%Y-%m-%d")} if photo_path else fact
 
-            # OVERWRITE: Αν βρήκαμε κάτι με μεγάλη ομοιότητα, το ΑΝΤΙΚΑΘΙΣΤΟΥΜΕ!
-            threshold = dup_threshold if 'dup_threshold' in locals() else 0.88
-            if best_sim >= threshold and best_idx != -1:
-                print(f"\033[94m[JSON Profile]: Αντικατάσταση παλιάς εγγραφής! (Ομοιότητα: {best_sim:.3f})\033[0m")
-                db[category][best_idx] = new_entry
+            # [MASTRO-FIX]: ΕΝΟΠΟΙΗΜΕΝΟ overwrite — όχι δεύτερο, ανεξάρτητο
+            # cosine-similarity πέρασμα (που μπορούσε να καταλήξει σε ΑΝΤΙΘΕΤΗ
+            # απόφαση από τη Chroma — π.χ. Chroma "κράτα την πλούσια παλιά" ενώ
+            # JSON Profile "αντικατέστησε", οδηγώντας τα δύο stores σε διάσταση).
+            # Αν το βήμα 1 αποφάσισε overwrite, ξέρουμε ΑΚΡΙΒΩΣ ποια παλιά εγγραφή
+            # να αντικαταστήσουμε (exact text match — Chroma & JSON γράφονται πάντα
+            # με το ίδιο fact string). Αλλιώς, απλώς προσθέτουμε (ίδια συμπεριφορά
+            # με τη Chroma για γενικά facts).
+            target_idx = -1
+            if replace_old_fact_text is not None:
+                for i, existing in enumerate(db[category]):
+                    existing_text = existing if isinstance(existing, str) else existing.get("fact", "")
+                    if existing_text == replace_old_fact_text:
+                        target_idx = i
+                        break
+
+            if target_idx != -1:
+                print(f"\033[94m[JSON Profile]: Αντικατάσταση παλιάς εγγραφής (ίδια απόφαση με Chroma)\033[0m")
+                db[category][target_idx] = new_entry
             else:
-                print(f"\033[92m[JSON Profile]: Νέα εγγραφή προστέθηκε.\033[0m")
+                if replace_old_fact_text is not None:
+                    # Η Chroma αποφάσισε overwrite αλλά δεν βρέθηκε αντίστοιχη
+                    # εγγραφή στο JSON Profile (προϋπάρχουσα απόκλιση) — προσθήκη
+                    # αντί για σιωπηλή απώλεια του νέου fact.
+                    print(f"\033[93m[JSON Profile]: Δεν βρέθηκε αντίστοιχη παλιά εγγραφή για αντικατάσταση — προσθήκη νέας.\033[0m")
+                else:
+                    print(f"\033[92m[JSON Profile]: Νέα εγγραφή προστέθηκε.\033[0m")
                 db[category].append(new_entry)
 
             # Κρατάμε αυστηρά μέχρι 50 ανά category
