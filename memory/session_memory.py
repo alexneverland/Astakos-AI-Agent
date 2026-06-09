@@ -475,6 +475,9 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
    - "photos": φωτογραφίες/αρχεία με περιγραφές.
 8. Μην αποθηκεύεις απλές απαντήσεις ευγένειας, προσωρινά drafts, αστεία χωρίς μελλοντική αξία,
    ή πληροφορίες που είναι ήδη γνωστές εκτός αν η νέα εκδοχή είναι πιο πλούσια/ακριβής.
+9. ΑΠΑΓΟΡΕΥΕΤΑΙ να αποθηκεύεις ερωτήσεις του χρήστη — αν το μήνυμα είναι ερώτηση (τελειώνει με ";" ή "?"
+   ή ξεκινά με "τι", "πώς", "γιατί", "πού", "ποιος", "πόσο", "πότε") → ΚΕΝΟ.
+   Ειδικά αν αφορά τη λειτουργία του Αστακού, debug, logs, ή τεχνικές ερωτήσεις για το σύστημα → ΚΕΝΟ.
 
 {recent_context_block}
 [ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ — εδώ, και ΜΟΝΟ εδώ, εξάγεις νέα facts]
@@ -510,7 +513,20 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
         for mem in memories:
             fact = mem.get("fact", "").strip()
             category = mem.get("category", "lazaros")
-            
+
+            # [QUESTION GUARD]: Αν το fact είναι ερώτηση, παράκαμψε το
+            _fact_body = re.sub(r"^\[USER_FACT\]:\s*", "", fact).strip()
+            _question_starters = ("τι ", "πώς ", "πως ", "γιατί ", "γιατι ", "πού ",
+                                  "που ", "ποιος ", "ποια ", "ποιο ", "πόσο ", "ποσο ",
+                                  "πότε ", "ποτε ", "εδω ", "αυτο ")
+            _is_question = (
+                _fact_body.endswith("?") or _fact_body.endswith(";") or
+                any(_fact_body.lower().startswith(s) for s in _question_starters)
+            )
+            if _is_question:
+                print(f"\033[93m[Sifter]: Question guard — skipping fact: {_fact_body[:60]}\033[0m")
+                continue
+
             # 2. --- ΤΟ ΣΩΣΤΟ JSON INDEXING (Mastro-Restore) ---
             if "[PHOTO]" in fact or category == "photos":
                 # Regex για να βρούμε το filename από το user_text
