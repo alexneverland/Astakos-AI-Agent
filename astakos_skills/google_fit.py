@@ -228,7 +228,7 @@ def get_morning_summary() -> str:
         lines.append(f"\U0001f463 Steps yesterday: error ({e})")
 
     try:
-        sleep = get_sleep(0)
+        sleep = get_sleep(1)  # Samsung Health stores sleep by start night, not wake morning
         if sleep["total_minutes"] > 0:
             h = sleep["total_minutes"] // 60
             m = sleep["total_minutes"] % 60
