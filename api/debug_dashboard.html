@@ -68,7 +68,8 @@
 <div class="grid" id="timeline-section" style="margin-top:16px"></div>
 <div class="grid" id="goals-section" style="margin-top:16px"></div>
 <div class="grid" id="reflections-section" style="margin-top:16px"></div>
-<div class="grid" id="traces-section" style="margin-top:16px"></div>
+<div id="traces-section" style="margin-top:16px;padding:0"></div>
+<div id="log-section" style="margin-top:16px;padding:0 0 24px 0"></div>
 <script>
 const REFRESH = 5000;
 let rafId;
@@ -406,23 +407,31 @@ function render(d) {
         <span class="err">${e.error}</span>
       </div>`).join('')}</div>`;
   }
+  document.getElementById('grid').innerHTML = html;
+  // Live Log — ξεχωριστό section στο κάτω μέρος
   const recentLogs = [...(evts.recent_logs||[])].reverse();
+  const logContainer = document.getElementById('log-section');
   if (recentLogs.length > 0) {
-    html += `<div class="card" style="grid-column:1/-1">
-      <h2>📋 Live Log (σήμερα — ${recentLogs.length} entries)</h2>
-      <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
-        <input id="log-filter" placeholder="Φίλτρο: job, action..." oninput="filterLogs()"
-          style="background:#21262d;border:1px solid var(--border);color:var(--text);
-                padding:4px 10px;border-radius:4px;width:220px;font-size:12px">
-        <span class="off" style="font-size:11px">Εμφάνιση τελευταίων 100</span>
-      </div>
-      <div style="max-height:320px;overflow-y:auto">
-        <table><tr><th>Time</th><th>Job</th><th>Action</th><th>Details</th></tr>
-        ${recentLogs.map(logRow).join('')}</table>
+    logContainer.innerHTML = `<div class="card" style="grid-column:1/-1">
+      <h2 style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'">
+        📋 Live Log <span style="color:var(--muted);font-size:12px;font-weight:400">(σήμερα — ${recentLogs.length} entries) ▾</span>
+      </h2>
+      <div>
+        <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+          <input id="log-filter" placeholder="Φίλτρο: job, action..." oninput="filterLogs()"
+            style="background:#21262d;border:1px solid var(--border);color:var(--text);
+                  padding:4px 10px;border-radius:4px;width:220px;font-size:12px">
+          <span class="off" style="font-size:11px">τελευταίων 100</span>
+        </div>
+        <div style="max-height:200px;overflow-y:auto">
+          <table><tr><th>Time</th><th>Job</th><th>Action</th><th>Details</th></tr>
+          ${recentLogs.map(logRow).join('')}</table>
+        </div>
       </div>
     </div>`;
+  } else {
+    logContainer.innerHTML = '';
   }
-  document.getElementById('grid').innerHTML = html;
 }
 function filterLogs() {
   const q = document.getElementById('log-filter')?.value.toLowerCase()||'';
@@ -433,41 +442,50 @@ function filterLogs() {
 async function fetchTraces() {
   const container = document.getElementById('traces-section');
   try {
-    const r = await fetch('/debug/traces?limit=30');
+    const r = await fetch('/debug/traces?limit=50');
     const d = await r.json();
     const traces = d.traces || [];
     if (!traces.length) {
-      container.innerHTML = '<div class="card"><b>📋 Execution Traces</b><p style="color:#888;margin-top:8px">Δεν υπάρχουν traces για σήμερα ακόμα.</p></div>';
+      container.innerHTML = '<div class="card" style="border-left:3px solid var(--blue)"><h2>🔍 Execution Traces</h2><p style="color:var(--muted);margin-top:8px">Δεν υπάρχουν traces για σήμερα ακόμα. Στείλε ένα μήνυμα στον Αστακό.</p></div>';
       return;
     }
     const rows = traces.slice().reverse().map(t => {
-      const tools = (t.tool_calls || []).map(tc =>
-        `<span style="background:#1e3a5f;padding:2px 6px;border-radius:4px;margin:2px;display:inline-block;font-size:11px">
-          ${tc.tool} <span style="color:#aaa">${tc.duration_ms}ms</span>
-          ${tc.error ? '<span style="color:#f66">⚠</span>' : ''}
-        </span>`
-      ).join('');
-      const loopBadge = t.loop_guard ? '<span style="color:#f90;font-size:11px">🔁 loop</span>' : '';
-      const errBadge = t.error ? `<span style="color:#f66;font-size:11px" title="${t.error}">❌</span>` : '';
-      const dur = t.duration_ms ? `<span style="color:#888;font-size:11px">${t.duration_ms}ms</span>` : '';
+      const tools = (t.tool_calls || []).map(tc => {
+        const col = tc.error ? '#f66' : tc.duration_ms > 3000 ? '#f90' : '#7ec8e3';
+        return `<span style="background:#161b22;border:1px solid ${col}33;padding:2px 7px;border-radius:4px;margin:2px;display:inline-block;font-size:11px;color:${col}">
+          ${tc.tool} <span style="color:#666">${tc.duration_ms != null ? tc.duration_ms+'ms' : ''}</span>
+          ${tc.error ? ' ⚠' : ''}
+        </span>`;
+      }).join('');
+      const badges = [];
+      if (t.loop_guard) badges.push('<span style="background:#7a3a00;color:#f90;padding:1px 6px;border-radius:3px;font-size:11px">🔁 loop</span>');
+      if (t.error)      badges.push('<span style="background:#4a1010;color:#f66;padding:1px 6px;border-radius:3px;font-size:11px">❌ error</span>');
+      const dur = t.duration_ms ? `<span style="color:#555;font-size:11px">${t.duration_ms}ms</span>` : '';
       const ts = (t.timestamp||'').slice(11,19);
+      const ch = t.channel === 'telegram' ? '📱' : '🌐';
+      const msg = (t.user_message||'').replace(/</g,'&lt;');
+      const resp = (t.response||'').replace(/</g,'&lt;');
       return `<tr>
-        <td style="color:#888;font-size:11px;white-space:nowrap">${ts}</td>
-        <td style="font-size:11px">${t.channel||''}</td>
-        <td style="font-size:12px;color:#7ec8e3">${t.agent||'—'}</td>
-        <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(t.user_message||'').replace(/"/g,'')}">${t.user_message||''}</td>
-        <td>${tools}</td>
-        <td>${loopBadge}${errBadge}${dur}</td>
+        <td style="color:var(--muted);font-size:11px;white-space:nowrap">${ts}</td>
+        <td style="font-size:13px" title="${t.channel}">${ch}</td>
+        <td style="font-size:12px;color:#7ec8e3;white-space:nowrap"><b>${t.agent||'—'}</b></td>
+        <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${msg}">${msg}</td>
+        <td style="max-width:300px">${tools || '<span style="color:#444">—</span>'}</td>
+        <td style="font-size:11px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${resp}">${resp}</td>
+        <td style="white-space:nowrap">${badges.join(' ')} ${dur}</td>
       </tr>`;
     }).join('');
-    container.innerHTML = \`<div class="card">
-      <b>📋 Execution Traces</b> <span style="color:#888;font-size:12px">(${traces.length} turns σήμερα)</span>
-      <div style="overflow-x:auto;margin-top:8px">
-      <table><tr>
-        <th>Time</th><th>Channel</th><th>Agent</th><th>Message</th><th>Tools</th><th>Info</th>
-      </tr>${rows}</table></div></div>\`;
+    container.innerHTML = `<div class="card" style="border-left:3px solid var(--blue)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h2 style="margin:0">🔍 Execution Traces</h2>
+        <span style="color:var(--muted);font-size:12px">${traces.length} turns σήμερα · ανανέωση κάθε 30s</span>
+      </div>
+      <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
+      <table style="width:100%"><tr>
+        <th>Ώρα</th><th>Ch</th><th>Agent</th><th>Μήνυμα</th><th>Tools</th><th>Απάντηση</th><th>Info</th>
+      </tr>${rows}</table></div></div>`;
   } catch(e) {
-    container.innerHTML = '<div class="card"><b>📋 Execution Traces</b><p style="color:#f66">Error: ' + e + '</p></div>';
+    container.innerHTML = '<div class="card" style="border-left:3px solid #f66"><h2>🔍 Execution Traces</h2><p style="color:#f66">Σφάλμα φόρτωσης: ' + e + '</p></div>';
   }
 }
 
