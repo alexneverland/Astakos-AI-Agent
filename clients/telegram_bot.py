@@ -567,6 +567,37 @@ def _load_shared_context_messages(channel: str) -> list:
     return context_msgs
 
 
+def _llm_routine_judge(user_msg: str, events: list) -> str:
+    """
+    Κρίνει αν το μήνυμα του χρήστη επιβεβαιώνει ή απορρίπτει pending routine events.
+    Επιστρέφει: "YES" / "NO" / "UNCLEAR"
+    Χρησιμοποιεί safe_gemini_call με fallback σε UNCLEAR αν αποτύχει.
+    """
+    try:
+        from services.gemini import safe_gemini_call
+        events_str = chr(10).join(f"- {e}" for e in events)
+        prompt = (
+            "You are a routine tracking assistant. A user has a pending activity check."
+            + chr(10) + chr(10)
+            + "Pending events:" + chr(10) + events_str
+            + chr(10) + chr(10)
+            + f'User message: "{user_msg}"'
+            + chr(10) + chr(10)
+            + "Does this message indicate the user confirmed they did (or will do) one of the above events? "
+            + "Or does it clearly refuse/cancel? "
+            + "Reply with exactly one word: YES (confirmed), NO (refused/cancelled), or UNCLEAR (unrelated or ambiguous)."
+        )
+        result = safe_gemini_call(prompt, retries=2, base_delay=1.0)
+        verdict = result.text.strip().upper().split()[0] if result and result.text.strip() else "UNCLEAR"
+        if verdict not in ("YES", "NO", "UNCLEAR"):
+            verdict = "UNCLEAR"
+        print(f"\033[96m🤖 [Routine LLM Judge]: '{user_msg[:50]}' \u2192 {verdict}\033[0m")
+        return verdict
+    except Exception as e:
+        print(f"\033[93m[Routine LLM Judge]: Σφάλμα, fallback σε UNCLEAR: {e}\033[0m")
+        return "UNCLEAR"
+
+
 # ────────────────────────────────────────────────────────────────
 # MESSAGE HANDLER
 # ────────────────────────────────────────────────────────────────
@@ -615,14 +646,18 @@ def handle_message(user_text: str, chat_id: str):
             and any(w in text_words for w in yes_words)
         )
         implicit_confirmed = False
-        if not is_question_like and any(w in text_check for w in action_words):
-            for rid, rdata in pending_routine_confirmations.items():
-                event_name = rdata.get("event", "") if isinstance(rdata, dict) else str(rdata)
-                event_words = [_normalize_gr(w) for w in event_name.split() if len(w) > 3]
-                if any(ew in text_check for ew in event_words):
-                    implicit_confirmed = True
-                    print(f"🔍 [Routine Implicit Confirm]: '{text_check[:40]}' → '{event_name}'")
-                    break
+        llm_dismissed = False
+        if not explicit_yes and not is_question_like and not any(w in text_check for w in no_words):
+            # LLM κρίνει αν το μήνυμα είναι implicit confirmation/dismissal
+            event_names = [
+                (rdata.get("event", "") if isinstance(rdata, dict) else str(rdata))
+                for rdata in pending_routine_confirmations.values()
+            ]
+            verdict = _llm_routine_judge(clean_user_text, event_names)
+            if verdict == "YES":
+                implicit_confirmed = True
+            elif verdict == "NO":
+                llm_dismissed = True
 
         if explicit_yes or implicit_confirmed:
             from memory.routine_db import confirm_routine, mark_routine_responded, clear_pending_confirmations
@@ -635,7 +670,7 @@ def handle_message(user_text: str, chat_id: str):
                 bus.emit("routine_confirmed", routine_id=rid, event=pending_routine_confirmations[rid], channel="telegram")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
-        elif any(w in text_check for w in no_words):
+        elif any(w in text_check for w in no_words) or llm_dismissed:
             from memory.routine_db import decay_routine, clear_pending_confirmations
             for rid in list(pending_routine_confirmations.keys()):
                 decay_routine(rid)
