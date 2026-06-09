@@ -61,22 +61,20 @@ def _effective_risk(tc: dict) -> str:
             return "WARNING"
         return "WARNING"
 
+    if name == "edit_project_file":
+        _CORE = {"agents.py", "brain.py", "graph.py", "approval.py",
+                 "tool_risk.py", "prompts.md", "config.py"}
+        file_path = tc.get("args", {}).get("file_path", "")
+        fname = file_path.strip().strip(chr(39)).strip(chr(34)).replace(chr(92), chr(47)).split(chr(47))[-1]
+        if fname in _CORE:
+            return "CRITICAL"
+        return "WARNING"
     return _get_risk(name)
 
 def is_critical(tc: dict) -> bool:
     return _effective_risk(tc) == "CRITICAL"
 
 def get_risk(name: str) -> str:
-    if name == "edit_project_file":
-        # Core files escalate to CRITICAL — everything else stays WARNING
-        _CORE = {"agents.py", "brain.py", "graph.py", "approval.py",
-                 "tool_risk.py", "prompts.md", "config.py"}
-        file_path = tc.get("args", {}).get("file_path", "")
-        fname = os.path.basename(file_path.strip().strip("'\""))
-        if fname in _CORE:
-            return "CRITICAL"
-        return "WARNING"
-
     return _get_risk(name)
 
 PENDING_FILE = os.path.join(

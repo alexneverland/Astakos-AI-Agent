@@ -51,7 +51,6 @@ _REQUIRE_CONFIRM = [
     r"sc\s+(stop|delete|create)\s+",    # service control
     r"Set-ExecutionPolicy",               # PS execution policy change
     # ── Git destructive ────────────────────────────────────────
-    r"git\s+push",                        # irreversible remote push
     r"git\s+reset\s+--hard",            # lose local changes
     r"git\s+clean\s+-[fd]",             # delete untracked files
     # ── SQL destructive ────────────────────────────────────────

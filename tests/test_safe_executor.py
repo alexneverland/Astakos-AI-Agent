@@ -25,9 +25,14 @@ def test_del_star_is_blocked():
 
 # -- REQUIRE_CONFIRMATION commands --------------------------------
 
-def test_git_push_requires_confirmation():
+def test_git_push_is_warning():
+    # git push μετακινήθηκε σε WARNING (Jun 2026) — εκτελείται + Telegram notification
     policy, _ = classify_command("git push origin main")
-    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+    assert policy == ExecPolicy.WARNING
+
+def test_git_push_force_is_warning():
+    policy, _ = classify_command("git push --force origin main")
+    assert policy == ExecPolicy.WARNING
 
 def test_git_reset_hard_requires_confirmation():
     policy, _ = classify_command("git reset --hard HEAD~1")
