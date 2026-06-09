@@ -31,9 +31,11 @@ def inspect_tool_loop(
         return True, ""
 
     if len(tool_rounds) > max_tool_rounds:
+        last_tools = [c.get("name", "unknown") for c in (tool_rounds[-1] if tool_rounds else [])]
+        last_tool_str = ", ".join(last_tools) if last_tools else "unknown"
         return (
             False,
-            f"Tool loop stopped after {len(tool_rounds)} tool rounds in one turn.",
+            f"Tool loop stopped after {len(tool_rounds)} tool rounds in one turn. Last tool(s): {last_tool_str}.",
         )
 
     counts: dict[str, int] = {}
