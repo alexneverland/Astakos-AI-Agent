@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
+import time
 import uuid
 from datetime import datetime
 from typing import Any
@@ -17,6 +19,31 @@ from typing import Any
 from config import CONVERSATION_DB_FILE
 
 LEGACY_FALLBACK_DATE = "1970-01-01"
+
+# [DEDUP GUARD]: In-memory set — αποτρέπει rapid double-writes για το ίδιο
+# (channel, role, content) μέσα σε DEDUP_TTL_SECONDS δευτερόλεπτα.
+_dedup_lock = threading.Lock()
+_dedup_recent: dict[tuple, float] = {}  # key → last_write_epoch
+DEDUP_TTL_SECONDS = 5.0
+
+
+def _dedup_key(channel: str, role: str, content: str) -> tuple:
+    return (channel, role, content[:200])
+
+
+def _is_recent_duplicate(key: tuple) -> bool:
+    """True αν το ίδιο (channel, role, content[:200]) γράφτηκε πριν < DEDUP_TTL_SECONDS."""
+    now = time.monotonic()
+    with _dedup_lock:
+        # Καθαρισμός παλιών εγγραφών
+        expired = [k for k, t in _dedup_recent.items() if now - t > DEDUP_TTL_SECONDS * 10]
+        for k in expired:
+            del _dedup_recent[k]
+        last = _dedup_recent.get(key)
+        if last is not None and (now - last) < DEDUP_TTL_SECONDS:
+            return True
+        _dedup_recent[key] = now
+        return False
 LEGACY_UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "astakos:legacy-conversation-history")
 
 
@@ -123,11 +150,17 @@ def append_message(
         "metadata": metadata or {},
     }
 
+    # [DEDUP GUARD]: Αποτρέπει rapid double-writes
+    _key = _dedup_key(channel, role, content)
+    if _is_recent_duplicate(_key):
+        print(f"\033[93m[ConvHistory]: Dedup skip — {channel}/{role} '{content[:40]}'[0m")
+        return message
+
     init_db(db_path)
     with _connect(db_path) as conn:
         conn.execute(
             """
-            INSERT INTO conversation_messages (
+            INSERT OR IGNORE INTO conversation_messages (
                 id, session_id, channel, role, content,
                 timestamp, date, time, agent, metadata_json
             )
