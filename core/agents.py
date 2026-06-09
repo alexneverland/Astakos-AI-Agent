@@ -269,13 +269,22 @@ def chat_agent_node(state: AgentState):
     from tools.system import archive_file, retrieve_photo, save_to_memory, delete_from_memory, search_memory, control_spotify, get_current_location, read_local_file
     from tools.web import execute_local_pipeline, relay_local_payload, search_supermarket_prices
 
+    # [FAREWELL GUARD]: Αν ο χρήστης αποχαιρετά, αφαιρούμε archive_file
+    # ώστε το LLM να μην αρχειοθετεί αυτόματα αρχεία που βρίσκονται στο context.
+    _FAREWELL_WORDS = (
+        "καληνύχτα", "καλη νύχτα", "gn ", "good night", "αντίο", "bye",
+        "ta leme", "τα λέμε", "γεια σου", "γεια χαρα", "ciao", "adio",
+    )
+    _is_farewell = any(w in last_msg_text.lower() for w in _FAREWELL_WORDS)
+
     chat_tools = [
         get_current_location, control_spotify,
-        search_memory, save_to_memory, delete_from_memory, retrieve_photo, archive_file, duckduckgo_search,
+        search_memory, save_to_memory, delete_from_memory, retrieve_photo, duckduckgo_search,
         recipe_expert, log_meal, relay_local_payload, learn_routine, get_routines, search_supermarket_prices,
-        read_local_file, generate_image_tool, get_fit_summary
+        read_local_file, generate_image_tool, get_fit_summary,
+        *([archive_file] if not _is_farewell else []),
     ]
-    
+
     response = llm.bind_tools(chat_tools).invoke(final_messages)
     response = _ensure_text_response(response, llm, system_prompt, safe_history)
     return {"current_agent": "Chat_Agent", "messages": [response]}
