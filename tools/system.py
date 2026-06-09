@@ -44,7 +44,7 @@ from astakos_skills.recipe_expert import recipe_expert, log_meal
 from astakos_skills.repo_mapper import repo_mapper
 from tools.project_tools import (
     grant_project_access, list_project_files, read_project_file,
-    edit_project_file, write_project_file,
+    edit_project_file, write_project_file, grep_project_files,
 )
 from astakos_skills.register_tool import register_tool
 from astakos_skills.text_stats import text_stats

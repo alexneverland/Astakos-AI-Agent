@@ -62,6 +62,7 @@ TOOL_RISK: dict[str, str] = {
     # ── Project Tools: code navigation & editing ────────────────
     "grant_project_access":     "CRITICAL", # permanent permission change
     "list_project_files":       "SAFE",     # read-only glob
+    "grep_project_files":       "SAFE",     # read-only regex search
     "read_project_file":        "SAFE",     # read-only
     "edit_project_file":        "WARNING",  # patch; escalates to CRITICAL for core files (approval.py)
     "write_project_file":       "CRITICAL", # full rewrite

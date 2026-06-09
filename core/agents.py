@@ -43,7 +43,7 @@ from tools.web import (
 )
 from tools.project_tools import (
     grant_project_access, list_project_files, read_project_file,
-    edit_project_file, write_project_file,
+    edit_project_file, write_project_file, grep_project_files,
 )
 
 # ────────────────────────────────────────────────────────────────
@@ -215,7 +215,7 @@ def dev_agent_node(state):
         duckduckgo_search,
         # Project tools — code navigation & editing
         grant_project_access, list_project_files, read_project_file,
-        edit_project_file, write_project_file, repo_mapper,
+        edit_project_file, write_project_file, grep_project_files, repo_mapper,
     ]
     
     safe_history = sanitize_history_for_gemini(history)

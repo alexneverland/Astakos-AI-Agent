@@ -346,6 +346,108 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
 
 
 @tool
+def grep_project_files(folder_path: str, pattern: str, file_pattern: str = "*.py", context_lines: int = 2) -> str:
+    """
+    Ψάχνει για pattern μέσα στα αρχεία ενός εγκεκριμένου project folder.
+    Επιστρέφει αρχείο + γραμμή + περιεχόμενο (σαν ripgrep).
+
+    folder_path:   Ο φάκελος του project (π.χ. C:\mastro_app)
+    pattern:       Regex pattern (π.χ. "CustomerSerializer", "def create", "temp_id=None")
+    file_pattern:  Glob για τύπο αρχείων (default: *.py). Παραδείγματα: "*.js", "*.py", "*"
+    context_lines: Γραμμές context πριν/μετά από κάθε match (default: 2, max: 5)
+    """
+    import re
+
+    folder_path = folder_path.strip().strip("'\"")
+
+    ok, err = _check_permission(os.path.join(folder_path, "_"))
+    if not ok:
+        ok, err = _check_permission(folder_path + os.sep + "x")
+        if not ok:
+            return err
+
+    if not os.path.isdir(folder_path):
+        return f"❌ Ο φάκελος '{folder_path}' δεν υπάρχει."
+
+    context_lines = max(0, min(context_lines, 5))
+
+    _SKIP_DIRS = {
+        "venv", ".venv", "__pycache__", ".git", "node_modules",
+        "dist", "build", ".tox", ".mypy_cache", "migrations",
+        "chroma_db", "telegram_photos", "telegram_uploads",
+        "outputs", "avatars", ".ruff_cache",
+    }
+
+    try:
+        regex = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        return f"❌ Μη έγκυρο regex pattern: {e}"
+
+    flat_pattern = file_pattern.replace("**/", "").replace("**\\", "")
+    matches_by_file: list[tuple[str, list]] = []
+    total_matches = 0
+
+    for root, dirs, files in os.walk(folder_path):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
+        for fname in sorted(files):
+            if not fnmatch.fnmatch(fname, flat_pattern):
+                continue
+            full = os.path.join(root, fname)
+            rel  = os.path.relpath(full, folder_path)
+            try:
+                with open(full, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
+            except Exception:
+                continue
+
+            file_matches = []
+            for i, line in enumerate(lines):
+                if regex.search(line):
+                    start = max(0, i - context_lines)
+                    end   = min(len(lines), i + context_lines + 1)
+                    file_matches.append({
+                        "match_line": i + 1,
+                        "start":      start + 1,
+                        "lines":      lines[start:end],
+                    })
+                    total_matches += 1
+                    if total_matches >= 200:  # safety cap
+                        break
+
+            if file_matches:
+                matches_by_file.append((rel, file_matches))
+
+            if total_matches >= 200:
+                break
+
+    if not matches_by_file:
+        return (
+            f"🔍 Κανένα αποτέλεσμα για `{pattern}` "
+            f"(pattern: {file_pattern}) στο '{folder_path}'."
+        )
+
+    lines_out = [
+        f"🔍 **grep** `{pattern}` — {total_matches} αποτελέσματα "
+        f"σε {len(matches_by_file)} αρχεία (folder: {os.path.basename(folder_path)}/)",
+        ""
+    ]
+
+    for rel, file_matches in matches_by_file:
+        lines_out.append(f"📄 **{rel}** ({len(file_matches)} matches)")
+        for m in file_matches:
+            for j, line in enumerate(m["lines"]):
+                lineno = m["start"] + j
+                marker = "▶" if lineno == m["match_line"] else " "
+                lines_out.append(f"  {marker} {lineno:4d} │ {line.rstrip()}")
+            lines_out.append("")
+
+    if total_matches >= 200:
+        lines_out.append("⚠️ Αποτελέσματα περικόπηκαν στα 200. Χρησιμοποίησε πιο συγκεκριμένο pattern.")
+
+    return "\n".join(lines_out)
+
+
+@tool
 def write_project_file(file_path: str, content: str) -> str:
     """
     Γράφει ολόκληρο αρχείο σε εγκεκριμένο project folder (full rewrite).
