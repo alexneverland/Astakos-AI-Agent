@@ -281,6 +281,10 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
     except Exception as e:
         return f"❌ Σφάλμα ανάγνωσης: {e}"
 
+    # No-op guard
+    if old_str == new_str:
+        return "⚠️ old_str και new_str είναι πανομοιότυπα — καμία αλλαγή έγινε."
+
     # Μέτρηση εμφανίσεων
     count = original.count(old_str)
     if count == 0:
@@ -319,8 +323,24 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
     delta = new_lines - old_lines
     delta_str = f"+{delta}" if delta >= 0 else str(delta)
 
+    # Βρίσκουμε σε ποια γραμμή έγινε η αλλαγή
+    for i, (a, b) in enumerate(zip(original.splitlines(), patched.splitlines()), 1):
+        if a != b:
+            change_line = i
+            break
+    else:
+        change_line = old_lines  # προσθήκη στο τέλος
+
+    syn_msg = f"✅ Syntax check: OK" if fname.endswith(".py") else "➖ Syntax check: N/A (non-python)"
+
     return (
-        f"✅ {fname} ενημερώθηκε ({old_lines}→{new_lines} γραμμές, {delta_str}).\n\n"
+        f"✅ **{fname}** ενημερώθηκε επιτυχώς.\n\n"
+        f"📋 **Σύνοψη αλλαγών:**\n"
+        f"• Αρχείο: `{file_path}`\n"
+        f"• Γραμμές: {old_lines} → {new_lines} ({delta_str})\n"
+        f"• Περιοχή αλλαγής: ~γραμμή {change_line}\n"
+        f"• Εμφανίσεις old_str: 1 (μοναδικό ✅)\n"
+        f"• {syn_msg}\n\n"
         f"```diff\n{diff}\n```"
     )
 
