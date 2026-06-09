@@ -2013,6 +2013,14 @@ if __name__ == "__main__":
             _done.wait(timeout=5)
         except Exception:
             pass
+        # Graceful ChromaDB shutdown — περίμενε να τελειώσει τυχόν write
+        try:
+            from memory.vector_store import vector_lock
+            acquired = vector_lock.acquire(timeout=3)
+            if acquired:
+                vector_lock.release()
+        except Exception:
+            pass
         try:
             _run_session_summary(channel='telegram')
         except Exception:

@@ -231,11 +231,15 @@ class AstakosMemoryManager:
             # Ψάξε ΠΡΩΤΑ μέσα στην ΙΔΙΑ category — αποφεύγουμε να συγκρίνουμε
             # (και ενδεχομένως να σβήσουμε) άσχετη μνήμη άλλης κατηγορίας απλά
             # επειδή το embedding της έτυχε να μοιάζει.
-            same_cat = vector_store._collection.query(
-                query_embeddings=[query_emb], n_results=1,
-                where={"category": category},
-                include=["documents", "metadatas", "distances"],
-            )
+            try:
+                same_cat = vector_store._collection.query(
+                    query_embeddings=[query_emb], n_results=1,
+                    where={"category": category},
+                    include=["documents", "metadatas", "distances"],
+                )
+            except Exception as _chroma_err:
+                print(f"[93m[MemoryManager]: ChromaDB index error (graceful skip): {_chroma_err}[0m")
+                same_cat = {"ids": [[]], "distances": [[]], "documents": [[]], "metadatas": [[]]}
 
             old_id = old_content = old_meta = None
             dist = None
