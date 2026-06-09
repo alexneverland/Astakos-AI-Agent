@@ -42,6 +42,10 @@ from tools.web import (
 from astakos_skills.search_flights import search_flights
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 from astakos_skills.repo_mapper import repo_mapper
+from tools.project_tools import (
+    grant_project_access, list_project_files, read_project_file,
+    edit_project_file, write_project_file,
+)
 from astakos_skills.register_tool import register_tool
 from astakos_skills.text_stats import text_stats
 from astakos_skills.scan_receipt import scan_receipt
@@ -2235,4 +2239,7 @@ all_tools = [
     scan_receipt,
     text_stats,
     register_tool,
+    # Project tools
+    grant_project_access, list_project_files, read_project_file,
+    edit_project_file, write_project_file,
 ]
