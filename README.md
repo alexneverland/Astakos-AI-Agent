@@ -75,6 +75,9 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Central Scheduler | `AstakosScheduler` runs a single background scheduler with watchdogs, rate limits, and quiet hours. |
 | Anti-Spam Intelligence | Adaptive cooldown: 20h → 40h → 72h on repeated ignores, plus batching for simultaneous routines. |
 | Capability Registry | Keyword-based pre-routing before the LLM Supervisor for faster dispatch and fewer wasted tokens. |
+| LLM Routine Judge | Routine confirmation uses a fast Gemini call to interpret natural-language replies ("θα πάω να τους βρω") instead of keyword-only matching. Falls back to UNCLEAR on failure. |
+| File Generator Tools | `generate_excel`, `generate_word_doc`, `generate_pdf`, `generate_csv` — create formatted files from agent-supplied data and save to any path (defaults to Desktop). |
+| Project Code Tools | `read_project_file`, `edit_project_file`, `write_project_file`, `grep_project_files`, `list_project_files` — permission-gated code navigation and editing with syntax check and rollback. |
 | Long-Term Goals | ChromaDB goal tracking injected into prompts, with `/plan` for multi-step execution. |
 | Action Approval Levels | SAFE / WARNING / CRITICAL risk levels per tool. CRITICAL actions require approval before execution. |
 | Approval TTL Cleanup | Pending CRITICAL approvals auto-expire after 60 min via `expire_stale_pending()`; stale entries are marked `expired` and blocked from execution. |
@@ -268,8 +271,14 @@ astakos/
 │   └── reflection_engine.py  # Nightly/post-plan self-reflection
 ├── tools/
 │   ├── system.py             # Files, GitHub, Gmail, IoT, reminders, routines, Fit
+│   ├── file_generator.py     # Excel, Word, PDF, CSV file creation tools
+│   ├── project_tools.py      # Permission-gated code navigation and editing tools
 │   ├── telegram.py           # Telegram messaging helpers
 │   └── web.py                # News, weather, Places, navigation, Messenger, web search
+├── tests/
+│   ├── test_project_tools.py # 48 tests: permissions, read/edit/grep/list, syntax check, risk levels
+│   ├── test_safe_executor.py # Terminal command risk classification tests
+│   └── test_*.py             # Full test suite (pytest)
 ├── assets/                   # Fonts and static assets
 ├── avatars/                  # UI avatars
 ├── logs/events/              # Daily scheduler event logs (gitignored)
@@ -430,6 +439,15 @@ Shutdown behavior:
 - [x] Personal/Family Event Capture — clear personal and family day-events are saved as dated ChromaDB facts while the full conversation remains in SQLite.
 - [x] Memory Context Debugging — `/debug` shows recent, SQLite, and Chroma context counts/previews for the last prompt build.
 - [x] Category-Safe Memory Overwrite — same-category Chroma matches use helper-tested correction, staleness, richness, and length tie-break rules before replacing old facts.
+
+- [x] Web UI Agent Name in History — `agent_name` is stored in SQLite alongside each message and returned by `/history`; the Web UI now shows the correct agent label (e.g. `Web / Dev_Agent`) for both live and historical messages.
+- [x] File Generator Tools — `generate_excel` (styled headers, zebra rows, freeze pane), `generate_word_doc` (Markdown-style headings and bullets), `generate_pdf` (reportlab with custom styles), and `generate_csv` (UTF-8 BOM for Excel compatibility). All route via Capability Registry to Dev_Agent. Risk: WARNING.
+- [x] Project Code Tools — `read_project_file`, `edit_project_file` (old→new patch + syntax check + rollback), `write_project_file`, `grep_project_files`, `list_project_files` with a JSON permission model (`project_access.json`). Core files escalate to CRITICAL; other edits are WARNING.
+- [x] LLM Routine Judge — implicit routine confirmation replaced with a fast Gemini call that returns YES / NO / UNCLEAR. Natural phrases like "θα πάω να τους βρω" now correctly confirm a pending park routine without requiring event keywords. Fallback to UNCLEAR on LLM error.
+- [x] WARNING Telegram Notifications — WARNING-tier tool calls (e.g. `git push`) send an informational Telegram message without blocking execution; only CRITICAL actions require approval.
+- [x] ChromaDB Graceful Shutdown — both Telegram bot and Web server wait for `vector_lock` before shutting down, preventing mid-write index corruption.
+- [x] ChromaDB HNSW Index Resilience — orphaned vector index IDs (HNSW/SQLite mismatch) are caught with a try/except in `vector_store.py`; the query returns empty results instead of crashing, and the affected category is auto-repaired on next write.
+- [x] Test Suite for Project Tools — `tests/test_project_tools.py` covers 48 cases: permission model (grant/deny/read-only), syntax check, read with line ranges, edit with rollback on syntax error, noop guard, grep, list, and tool risk levels (SAFE/WARNING/CRITICAL). pytest runs cleanly on the FUSE-mounted repo.
 
 ### Planned
 
