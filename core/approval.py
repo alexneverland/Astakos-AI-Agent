@@ -308,29 +308,18 @@ def _notify_telegram_warning(tool_call: dict):
     try:
         import requests
         from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
-
         tool_name = tool_call["name"]
         args = tool_call.get("args", {})
         args_preview = ", ".join(f"{k}={repr(v)[:40]}" for k, v in args.items()) or "—"
-        text = (
-            f"⚠️ *WARNING Action Executed*
-
-"
-            f"Tool: `{tool_name}`
-"
-            f"Args: `{args_preview}`"
-        )
+        sep = chr(10)
+        text = "⚠️ *WARNING Action Executed*" + sep*2 + "Tool: " + tool_name + sep + "Args: " + args_preview
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": text,
-                "parse_mode": "Markdown",
-            },
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
             timeout=5,
         )
     except Exception as e:
-        print(f"\033[91m[Approval]: Telegram warning notify error: {e}\033[0m")
+        print(f"[Approval]: Telegram warning notify error: {e}")
 
 
 def _notify_telegram(tool_call: dict):
