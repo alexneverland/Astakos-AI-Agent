@@ -69,7 +69,18 @@ def log_event(job: str, action: str, **kwargs):
                     os.fsync(f.fileno())
                 except OSError:
                     pass  # fsync δεν υποστηρίζεται παντού — flush αρκεί
-            os.replace(tmp_file, log_file)
+            # Windows Defender / antivirus μπορεί να κλειδώσει το αρχείο
+            # για λίγα ms κατά τη σάρωση → retry με backoff
+            for _attempt in range(5):
+                try:
+                    os.replace(tmp_file, log_file)
+                    break
+                except OSError:
+                    if _attempt < 4:
+                        import time as _time
+                        _time.sleep(0.05 * (_attempt + 1))
+                    else:
+                        raise
 
     except Exception as e:
         print(f"⚠️ [event_log]: {e}")
