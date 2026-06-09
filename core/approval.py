@@ -275,8 +275,10 @@ def approval_check_node(state):
         # Όλα SAFE/WARNING — πάμε κανονικά
         risk_levels = [_effective_risk(tc) for tc in tool_calls]
         if "WARNING" in risk_levels:
-            names = [tc["name"] for tc in tool_calls if _effective_risk(tc) == "WARNING"]
-            print(f"\033[93m[Approval]: ⚠️ WARNING tools: {names}\033[0m")
+            for tc in tool_calls:
+                if _effective_risk(tc) == "WARNING":
+                    print(f"\033[93m[Approval]: ⚠️ WARNING tool: {tc['name']}\033[0m")
+                    _notify_telegram_warning(tc)
         return {"approval_status": "ok"}
 
     # Υπάρχουν CRITICAL calls — τα αποθηκεύουμε και ζητάμε approval
@@ -299,6 +301,36 @@ def approval_check_node(state):
         "approval_status": "pending",
         "messages": tool_messages,
     }
+
+
+def _notify_telegram_warning(tool_call: dict):
+    """Στέλνει απλό Telegram info για WARNING tools (χωρίς approve/reject)."""
+    try:
+        import requests
+        from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+
+        tool_name = tool_call["name"]
+        args = tool_call.get("args", {})
+        args_preview = ", ".join(f"{k}={repr(v)[:40]}" for k, v in args.items()) or "—"
+        text = (
+            f"⚠️ *WARNING Action Executed*
+
+"
+            f"Tool: `{tool_name}`
+"
+            f"Args: `{args_preview}`"
+        )
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": text,
+                "parse_mode": "Markdown",
+            },
+            timeout=5,
+        )
+    except Exception as e:
+        print(f"\033[91m[Approval]: Telegram warning notify error: {e}\033[0m")
 
 
 def _notify_telegram(tool_call: dict):

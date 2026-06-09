@@ -68,6 +68,7 @@ _WARNING = [
     r"pip\s+install",
     r"npm\s+install",                # npm packages
     r"git\s+commit",
+    r"git\s+push",
     r"Move-Item", r"Rename-Item",
     r"Set-Content", r"Out-File",
 ]
