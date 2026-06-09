@@ -1,84 +1,156 @@
 # ================================================================
-# Project: Astakos AI Agent 🦞
-# Developer: Lazaros (Piston-7)
-# Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Project: Astakos AI Agent
+# Module:  Embeddings Cache - SQLite backend
+# L1: in-memory dict (session, resets on restart)
+# L2: SQLite (persistent, WAL, per-row writes - no full rewrites)
 # ================================================================
 
-import os
-import json
 import hashlib
+import json
+import sqlite3
 import threading
+from datetime import datetime
+
 from langchain_core.embeddings import Embeddings
 from langchain_google_vertexai import VertexAIEmbeddings
-from config import PROJECT_ID, LOCATION, EMBEDDINGS_CACHE_FILE
 
-emb_cache_lock = threading.Lock()
+from config import PROJECT_ID, LOCATION, EMBEDDINGS_CACHE_DB
+
+
+# -- DB helpers --------------------------------------------------
+
+def _db_connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(EMBEDDINGS_CACHE_DB, timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
+def _init_db() -> int:
+    """Creates table if missing. Returns count of cached entries."""
+    with _db_connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS embeddings_cache (
+                key        TEXT PRIMARY KEY,
+                embedding  TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        count = conn.execute("SELECT COUNT(*) FROM embeddings_cache").fetchone()[0]
+    return count
+
+
+# -- Base Vertex model -------------------------------------------
 
 base_embeddings = VertexAIEmbeddings(
     model_name="text-embedding-004",
     project=PROJECT_ID,
-    location=LOCATION
+    location=LOCATION,
 )
 
+
+# -- Cache class -------------------------------------------------
+
 class MastroEmbeddingsCache(Embeddings):
-    def __init__(self, base):
+    """
+    Two-layer embeddings cache:
+      L1 - in-memory dict  (fast, resets on restart)
+      L2 - SQLite          (persistent, single-row INSERT per miss)
+    """
+
+    def __init__(self, base: Embeddings):
         self.base = base
-        self.cache = {}
-        if os.path.exists(EMBEDDINGS_CACHE_FILE):
-            try:
-                with open(EMBEDDINGS_CACHE_FILE, "r", encoding="utf-8") as f:
-                    self.cache = json.load(f)
-                print(f"\033[92m[Cache]: Φορτώθηκαν {len(self.cache)} embeddings από το δίσκο!\033[0m")
-            except:
-                pass
+        self._lock = threading.Lock()
+        self._l1: dict = {}  # key -> embedding
 
-    def _get_key(self, text: str):
-        return hashlib.md5(text.strip().encode('utf-8')).hexdigest()
+        count = _init_db()
+        print(f"\033[92m[EmbeddingsCache]: SQLite primed - {count} cached vectors.\033[0m")
 
-    def embed_query(self, text: str) -> list[float]:
-        key = self._get_key(text)
-        with emb_cache_lock:
-            if key in self.cache:
-                return self.cache[key]
+    # -- internal ------------------------------------------------
+
+    @staticmethod
+    def _key(text: str) -> str:
+        return hashlib.md5(text.strip().encode("utf-8")).hexdigest()
+
+    def _l2_get(self, key: str):
+        try:
+            with _db_connect() as conn:
+                row = conn.execute(
+                    "SELECT embedding FROM embeddings_cache WHERE key = ?", (key,)
+                ).fetchone()
+            if row:
+                return json.loads(row[0])
+        except Exception as e:
+            print(f"\033[91m[EmbeddingsCache]: L2 read error: {e}\033[0m")
+        return None
+
+    def _l2_put(self, key: str, emb: list) -> None:
+        try:
+            with _db_connect() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO embeddings_cache (key, embedding, created_at) VALUES (?, ?, ?)",
+                    (key, json.dumps(emb), datetime.now().isoformat(timespec="seconds")),
+                )
+        except Exception as e:
+            print(f"\033[91m[EmbeddingsCache]: L2 write error: {e}\033[0m")
+
+    # -- public API ----------------------------------------------
+
+    def embed_query(self, text: str) -> list:
+        key = self._key(text)
+
+        # L1
+        with self._lock:
+            if key in self._l1:
+                return self._l1[key]
+
+        # L2
+        emb = self._l2_get(key)
+        if emb is not None:
+            with self._lock:
+                self._l1[key] = emb
+            return emb
+
+        # API call
         emb = self.base.embed_query(text)
-        with emb_cache_lock:
-            self.cache[key] = emb
-            self._save()
+        with self._lock:
+            self._l1[key] = emb
+        self._l2_put(key, emb)
         return emb
 
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+    def embed_documents(self, texts: list) -> list:
         results = [None] * len(texts)
         missing_texts = []
-        missing_indices = []
+        missing_idx = []
 
-        with emb_cache_lock:
-            for i, text in enumerate(texts):
-                key = self._get_key(text)
-                if key in self.cache:
-                    results[i] = self.cache[key]
-                else:
-                    missing_texts.append(text)
-                    missing_indices.append(i)
+        for i, text in enumerate(texts):
+            key = self._key(text)
+            # L1
+            with self._lock:
+                if key in self._l1:
+                    results[i] = self._l1[key]
+                    continue
+            # L2
+            emb = self._l2_get(key)
+            if emb is not None:
+                with self._lock:
+                    self._l1[key] = emb
+                results[i] = emb
+            else:
+                missing_texts.append(text)
+                missing_idx.append(i)
 
         if missing_texts:
             new_embs = self.base.embed_documents(missing_texts)
-            with emb_cache_lock:
-                for i, text in enumerate(missing_texts):
-                    key = self._get_key(text)
-                    self.cache[key] = new_embs[i]
-                    results[missing_indices[i]] = new_embs[i]
-                self._save()
+            for j, text in enumerate(missing_texts):
+                key = self._key(text)
+                emb = new_embs[j]
+                with self._lock:
+                    self._l1[key] = emb
+                self._l2_put(key, emb)
+                results[missing_idx[j]] = emb
+
         return results
 
-    def _save(self):
-        cache_copy = self.cache.copy()
-        def write_file():
-            try:
-                with open(EMBEDDINGS_CACHE_FILE, "w", encoding="utf-8") as f:
-                    json.dump(cache_copy, f, ensure_ascii=False)
-            except Exception:
-                pass
-        threading.Thread(target=write_file, daemon=True).start()
 
 embeddings = MastroEmbeddingsCache(base_embeddings)
