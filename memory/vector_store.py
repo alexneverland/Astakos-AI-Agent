@@ -178,7 +178,9 @@ class AstakosMemoryManager:
                 else:
                     print(f"⚠️ [MemoryManager]: Άγνωστος τύπος μνήμης '{memory_type}'")
             except Exception as e:
+                import traceback
                 print(f"\033[91m[MemoryManager Error]: {e}\033[0m")
+                traceback.print_exc()
                 return False
 
     def _save_working(self, new_tags: str):
@@ -282,7 +284,13 @@ class AstakosMemoryManager:
                     # Αν αποφασίσαμε "κράτα την παλιά", σταματάμε εδώ — σε ΚΑΝΕΝΑ store.
                     return False
                 else:
-                    vector_store._collection.delete(ids=[old_id])
+                    try:
+                        vector_store._collection.delete(ids=[old_id])
+                    except Exception as _del_err:
+                        # Ορισμένες εκδόσεις ChromaDB ρίχνουν "Error finding id"
+                        # αν το ID δεν υπάρχει (π.χ. διαγράφηκε από concurrent thread).
+                        # Graceful skip — η νέα εγγραφή θα προστεθεί κανονικά.
+                        print(f"\033[90m[MemoryManager]: delete skip (ID not found): {_del_err}\033[0m")
                     reason_tag = []
                     if decision["looks_like_correction"]:
                         reason_tag.append("ρητή διόρθωση")
@@ -493,7 +501,7 @@ def bump_retrieval_count(doc_ids: list[str]):
         return
     try:
         with vector_lock:
-            existing = vector_store._collection.get(ids=doc_ids, include=["metadatas", "documents", "embeddings"])
+            existing = vector_store._collection.get(ids=doc_ids, include=["metadatas", "documents"])
             if not existing["ids"]:
                 return
             new_metas = []
