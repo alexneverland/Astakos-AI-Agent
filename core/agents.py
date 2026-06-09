@@ -52,16 +52,25 @@ from tools.project_tools import (
 def _ensure_text_response(response, llm_instance, system_prompt: str, safe_history: list):
     """
     Gemini quirk: μετά από tool execution επιστρέφει μερικές φορές κενό content.
-    Αν συμβεί αυτό, κάνουμε ένα retry με explicit instruction να απαντήσει.
+    Retry μέχρι 3 φορές με escalating instruction.
     """
     if clean_message(response.content).strip() or getattr(response, "tool_calls", []):
-        return response  # Όλα ΟΚ, δεν χρειάζεται τίποτα
-    # Retry — ο Gemini "σίγησε" μετά από tool
-    print("\033[93m[Gemini-Fix]: Κενό response μετά από tool — retry...\033[0m")
-    return llm_instance.invoke([
-        SystemMessage(content=system_prompt + "\n\n[ΑΠΑΡΑΙΤΗΤΟ]: Πρέπει να απαντήσεις με κείμενο στον χρήστη. Ενημέρωσέ τον για ό,τι έγινε."),
-        *safe_history
-    ])
+        return response  # Όλα ΟΚ
+
+    suffixes = [
+        "\n\n[ΑΠΑΡΑΙΤΗΤΟ]: Πρέπει να απαντήσεις με κείμενο στον χρήστη. Ενημέρωσέ τον για ό,τι έγινε.",
+        "\n\n[ΚΡΙΣΙΜΟ]: Γράψε ΑΜΕΣΩΣ μια σύνοψη των αποτελεσμάτων που βρήκες. Μην κάνεις άλλα tool calls.",
+        "\n\n[ΤΕΛΙΚΟ]: Δώσε μια σύντομη απάντηση έστω 1 πρότασης στον χρήστη τώρα.",
+    ]
+    for attempt, suffix in enumerate(suffixes, 1):
+        print(f"\033[93m[Gemini-Fix]: Κενό response — retry {attempt}/3...\033[0m")
+        retry = llm_instance.invoke([
+            SystemMessage(content=system_prompt + suffix),
+            *safe_history
+        ])
+        if clean_message(retry.content).strip():
+            return retry
+    return response  # Επιστρέφουμε το original αν όλα αποτύχουν
 
 # ────────────────────────────────────────────────────────────────
 # [MASTRO-SHIELD]: Κεντρικός καθαρισμός ορφανών tool_calls
