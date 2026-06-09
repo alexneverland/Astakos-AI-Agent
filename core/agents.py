@@ -213,6 +213,7 @@ def dev_agent_node(state):
     response = llm_heavy.bind_tools(tools).invoke(
         [SystemMessage(content=prompt_content)] + safe_history
     )
+    response = _ensure_text_response(response, llm_heavy, prompt_content, safe_history)
     return {"current_agent": "Dev_Agent", "messages": [response]}
 
 
