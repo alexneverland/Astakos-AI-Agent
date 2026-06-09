@@ -21,9 +21,7 @@ def test_repeated_same_tool_call_is_blocked():
         _ai_tool_call("run_terminal_command", {"command": "git status"}),
         _ai_tool_call("run_terminal_command", {"command": "git status"}),
     ]
-
     allowed, reason = inspect_tool_loop(messages, max_repeated_calls=2)
-
     assert allowed is False
     assert "Repeated tool call" in reason
 
@@ -33,11 +31,21 @@ def test_many_tool_rounds_are_blocked():
         _ai_tool_call("run_terminal_command", {"command": f"git log -n {i}"})
         for i in range(9)
     ]
-
     allowed, reason = inspect_tool_loop(messages, max_tool_rounds=8)
-
     assert allowed is False
     assert "Tool loop stopped" in reason
+
+
+def test_many_tool_rounds_includes_last_tool_name():
+    """Νέο: το error message περιέχει το όνομα του τελευταίου tool."""
+    messages = [
+        _ai_tool_call("web_search", {"query": f"search {i}"})
+        for i in range(9)
+    ]
+    allowed, reason = inspect_tool_loop(messages, max_tool_rounds=8)
+    assert allowed is False
+    assert "Tool loop stopped" in reason
+    assert "web_search" in reason
 
 
 def test_small_tool_sequence_is_allowed():
@@ -45,8 +53,6 @@ def test_small_tool_sequence_is_allowed():
         _ai_tool_call("run_terminal_command", {"command": "git status"}),
         _ai_tool_call("run_terminal_command", {"command": "git log -n 1"}),
     ]
-
     allowed, reason = inspect_tool_loop(messages)
-
     assert allowed is True
     assert reason == ""
