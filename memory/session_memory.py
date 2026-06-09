@@ -478,6 +478,12 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
 9. ΑΠΑΓΟΡΕΥΕΤΑΙ να αποθηκεύεις ερωτήσεις του χρήστη — αν το μήνυμα είναι ερώτηση (τελειώνει με ";" ή "?"
    ή ξεκινά με "τι", "πώς", "γιατί", "πού", "ποιος", "πόσο", "πότε") → ΚΕΝΟ.
    Ειδικά αν αφορά τη λειτουργία του Αστακού, debug, logs, ή τεχνικές ερωτήσεις για το σύστημα → ΚΕΝΟ.
+10. ΑΠΑΓΟΡΕΥΕΤΑΙ να αποθηκεύεις δεδομένα code editing session: diffs, file paths αλλαγών, αποτελέσματα
+    terminal commands, grep output, syntax errors, γραμμές κώδικα, αριθμούς γραμμών (π.χ. "Διόρθωσα
+    serializers.py γραμμή 408", "edit_project_file επέστρεψε +5 γραμμές") → ΚΕΝΟ.
+    ΕΞΑΙΡΕΣΗ: Αποθήκευσε ΜΟΝΟ υψηλού επιπέδου γεγονότα χωρίς τεχνικές λεπτομέρειες:
+    π.χ. "Το project mastro_app βρίσκεται στο C:\mastro_app" ή
+    "Στο mastro_app υπάρχει πρόβλημα με get_or_create όταν temp_id=None" (lesson/projects).
 
 {recent_context_block}
 [ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ — εδώ, και ΜΟΝΟ εδώ, εξάγεις νέα facts]
