@@ -2241,5 +2241,5 @@ all_tools = [
     register_tool,
     # Project tools
     grant_project_access, list_project_files, read_project_file,
-    edit_project_file, write_project_file,
+    edit_project_file, write_project_file, grep_project_files,
 ]
