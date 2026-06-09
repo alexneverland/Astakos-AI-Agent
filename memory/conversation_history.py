@@ -125,6 +125,50 @@ def default_session_id(ts: datetime | None = None) -> str:
     return current.strftime("%Y-%m-%d")
 
 
+
+# ── Code-session content truncation ─────────────────────────────
+# Τα assistant μηνύματα που περιέχουν diffs/terminal output/grep results
+# αποθηκεύονται truncated: μόνο το πρώτο summary paragraph.
+# Έτσι δεν μολύνουν το load_recent_context και το temporal search.
+_CODE_MARKERS = (
+    "```diff",
+    "terminal output",
+    "💻 terminal",
+    "grep_project_files",
+    "── γραμμές",
+    "read_project_file",
+    "edit_project_file",
+    "▶ ",   # grep match marker
+    "+++ b/",
+    "--- a/",
+)
+_MAX_ASSISTANT_CONTENT = 600  # chars — πάνω από αυτό + code marker → truncate
+
+
+def _truncate_code_content(role: str, text: str) -> str:
+    """
+    Αν το μήνυμα είναι assistant και περιέχει code session markers,
+    κρατάμε μόνο το πρώτο μη-κενό paragraph (summary line) + marker.
+    """
+    if role not in ("assistant", "ai"):
+        return text
+    if len(text) <= _MAX_ASSISTANT_CONTENT:
+        return text
+    low = text.lower()
+    if not any(m in low for m in _CODE_MARKERS):
+        return text
+
+    # Κρατάμε μέχρι το πρώτο ``` block ή μέχρι 400 chars
+    cut = text.find("```")
+    if cut == -1:
+        # Χωρίς code block: κρατάμε πρώτο paragraph
+        cut = text.find("\n\n")
+    if cut == -1 or cut > 400:
+        cut = 400
+    truncated = text[:cut].rstrip()
+    return truncated + "  \n[...αποκόπηκε — code session content]"
+
+
 def append_message(
     *,
     role: str,
@@ -142,7 +186,7 @@ def append_message(
         "session_id": session_id or default_session_id(ts),
         "channel": channel,
         "role": role,
-        "content": content,
+        "content": _truncate_code_content(role, content),
         "timestamp": ts.isoformat(timespec="seconds"),
         "date": ts.strftime("%Y-%m-%d"),
         "time": ts.strftime("%H:%M"),
