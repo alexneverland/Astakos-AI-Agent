@@ -69,6 +69,20 @@ def _load_today_events(days_back=1) -> list[dict]:
         return []
 
 
+def _load_conversation_traces(days_back=1) -> list[dict]:
+    """Φορτώνει conversation traces από το ExecutionTrace σύστημα."""
+    try:
+        traces_dir = os.path.join(_BASE, "..", "logs", "traces")
+        target = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        trace_file = os.path.join(traces_dir, f"{target}.json")
+        if not os.path.exists(trace_file):
+            return []
+        with open(trace_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
 def _get_routine_stats() -> list[dict]:
     """Στατιστικά ρουτινών — ignore_count, mention_count, state, cooldown."""
     try:
@@ -99,7 +113,7 @@ def _get_routine_stats() -> list[dict]:
 
 # ── LLM Analysis ─────────────────────────────────────────────────
 
-def _analyze_with_llm(events: list, routine_stats: list) -> list[dict]:
+def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[dict]:
     """
     Στέλνει δεδομένα στο Gemini και παίρνει reflections.
     Επιστρέφει λίστα από:
@@ -116,15 +130,22 @@ def _analyze_with_llm(events: list, routine_stats: list) -> list[dict]:
         )
         model = GenerativeModel(MAIN_MODEL)
 
-        # Φτιάχνουμε σύνοψη events
-        event_summary = []
-        for ev in events[-200:]:  # max 200 events
-            job    = ev.get("job", "")
-            action = ev.get("action", "")
-            detail = str(ev.get("details", ""))[:80]
-            event_summary.append(f"{job}/{action}: {detail}")
+        # Σύνοψη traces (conversations)
+        trace_summary = []
+        for t in traces[-30:]:  # max 30 traces
+            channel  = t.get("channel", "?")
+            agent    = t.get("agent", "?")
+            user_msg = t.get("user_message", "")[:60]
+            tools    = [tc.get("tool", "") for tc in t.get("tool_calls", [])]
+            dur      = t.get("duration_ms", 0)
+            err      = t.get("error") or any(tc.get("error") for tc in t.get("tool_calls", []))
+            loop     = t.get("loop_guard", False)
+            line     = f"[{channel}/{agent}] '{user_msg}' tools={tools} dur={dur}ms"
+            if err:   line += " ❌error"
+            if loop:  line += " 🔁loop"
+            trace_summary.append(line)
 
-        # Φτιάχνουμε σύνοψη routines
+        # Σύνοψη routines
         routine_summary = []
         for r in routine_stats:
             routine_summary.append(
@@ -133,31 +154,31 @@ def _analyze_with_llm(events: list, routine_stats: list) -> list[dict]:
                 f"mentions={r['mention_count']}, cooldown={r['cooldown_hours']}h"
             )
 
-        prompt = f"""Είσαι ο Αστακός, ένας AI agent που κάνει self-reflection.
-Αναλύεις τα events της χθεσινής μέρας και τις ρουτίνες του Λάζαρου.
-Σκοπός: να βρεις patterns που δείχνουν ότι κάτι δεν λειτουργεί καλά
-και να προτείνεις συγκεκριμένες βελτιώσεις.
+        prompt = f"""Είσαι ο Αστακός, ένας AI agent που κάνει νυχτερινό self-reflection.
+Αναλύεις τις συνομιλίες και τις ρουτίνες της χθεσινής μέρας.
+Σκοπός: να βρεις patterns, λάθη ή βελτιώσεις — και να τα καταγράψεις ως lessons.
 
-EVENTS ΧΘΕΣ:
-{chr(10).join(event_summary) if event_summary else "Δεν υπάρχουν events."}
+ΣΥΝΟΜΙΛΙΕΣ ΧΘΕΣ ({len(traces)} συνολικά):
+{chr(10).join(trace_summary) if trace_summary else "Δεν υπάρχουν."}
 
 ΣΤΑΤΙΣΤΙΚΑ ΡΟΥΤΙΝΩΝ:
 {chr(10).join(routine_summary) if routine_summary else "Δεν υπάρχουν ρουτίνες."}
 
 Γράψε ένα JSON array με observations. Κάθε observation:
 {{
-  "source": "routine" | "reminder" | "general",
-  "routine_id": <int ή null>,
+  "source": "conversation" | "routine" | "general",
+  "routine_id": <int ή null — μόνο για routine observations>,
   "observation": "<τι παρατήρησες σε 1 πρόταση>",
-  "action": "<τι πρέπει να αλλάξει> — π.χ. 'increase_cooldown', 'reduce_frequency', 'change_time', 'save_to_memory'",
-  "action_value": <αριθμός ή null, π.χ. νέο cooldown σε ώρες>,
+  "action": "increase_cooldown" | "reduce_frequency" | "change_time" | "save_to_memory",
+  "action_value": <αριθμός ή null>,
   "confidence": <0.0-1.0>,
-  "lesson": "<τι έμαθες για τον Λάζαρο σε 1 πρόταση>"
+  "lesson": "<τι έμαθες για τον Λάζαρο ή την κατάσταση σε 1 πρόταση>"
 }}
 
 ΚΑΝΟΝΕΣ:
-- Μόνο αν υπάρχει ΣΑΦΕΣ pattern (ignore_count >= 3 ή repeated failures)
-- confidence > 0.75 μόνο αν είσαι πολύ σίγουρος
+- Για ρουτίνες: αν ignore_count >= 2 → πρότεινε αλλαγή
+- Για συνομιλίες: αν βλέπεις επαναλαμβανόμενα errors, loops, ή patterns → καταγράψτο ως lesson με action="save_to_memory"
+- confidence > 0.75 μόνο αν είσαι σίγουρος
 - Μέγιστο 5 observations
 - Αν δεν υπάρχει τίποτα αξιοσημείωτο: επέστρεψε []
 - Απάντησε ΜΟΝΟ με JSON, χωρίς εξήγηση"""
@@ -253,12 +274,15 @@ def run_reflection() -> dict:
 
     events        = _load_today_events(days_back=1)
     routine_stats = _get_routine_stats()
+    traces        = _load_conversation_traces(days_back=1)
 
-    if not events and not routine_stats:
+    print(f"[Reflection]: events={len(events)}, routines={len(routine_stats)}, traces={len(traces)}")
+
+    if not events and not routine_stats and not traces:
         print("[Reflection]: Δεν υπάρχουν δεδομένα για ανάλυση.")
         return {"analyzed": 0, "applied": 0, "pending": 0, "skipped": 0}
 
-    reflections = _analyze_with_llm(events, routine_stats)
+    reflections = _analyze_with_llm(events, routine_stats, traces)
 
     if not reflections:
         print("[Reflection]: Δεν βρέθηκαν observations.")
@@ -287,6 +311,39 @@ def run_reflection() -> dict:
                 telegram_lines.append(f"✅ *{obs}*\n→ Εφαρμόστηκε: `{action}`\n💡 _{lesson}_")
             else:
                 # Αποτυχία εφαρμογής — αποθηκεύουμε χωρίς apply
+                _save_reflection(source, obs, action, confidence, lesson, applied=False)
+                skipped += 1
+
+        elif confidence >= ASK_THRESHOLD:
+            # Ρωτάει τον Λάζαρο
+            _save_reflection(source, obs, action, confidence, lesson, applied=False)
+            pending += 1
+            telegram_lines.append(
+                f"🤔 *Παρατήρηση:* {obs}\n"
+                f"→ Προτείνω: `{action}` (confidence: {confidence:.0%})\n"
+                f"Να το εφαρμόσω; (ναι/όχι)"
+            )
+        else:
+            # Χαμηλή confidence — αποθηκεύω μόνο
+            _save_reflection(source, obs, action, confidence, lesson, applied=False)
+            skipped += 1
+
+    # Αποστολή Telegram
+    if telegram_lines:
+        header = "🧠 *Astakos Self-Reflection — Νυχτερινή Ανάλυση*\n\n"
+        msg    = header + "\n\n---\n\n".join(telegram_lines)
+        if len(msg) > 4000:
+            msg = msg[:3990] + "..."
+        send_telegram_msg(msg)
+
+    stats = {"analyzed": len(reflections), "applied": applied, "pending": pending, "skipped": skipped}
+    print(f"[Reflection]: ✅ {stats}")
+    return stats
+
+
+if __name__ == "__main__":
+    print(run_reflection())
+ apply
                 _save_reflection(source, obs, action, confidence, lesson, applied=False)
                 skipped += 1
 
