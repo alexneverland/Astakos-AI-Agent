@@ -995,13 +995,13 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
 @tool
 def generate_image_tool(prompt: str) -> str:
     """
-    Δημιουργεί μια εικόνα βασισμένη σε μια περιγραφή (prompt).
+    Δημιουργεί μια εικόνα βασισμένη σε μια περιγραφή (prompt) χρησιμοποιώντας Vertex AI Imagen.
     """
     import os
-    import requests
+    import time
+    import base64
     from slugify import slugify
     from config import BASE_DIR
-    import time
 
     output_dir = os.path.join(BASE_DIR, "outputs")
     os.makedirs(output_dir, exist_ok=True)
@@ -1010,25 +1010,30 @@ def generate_image_tool(prompt: str) -> str:
     filename = f"{safe_filename}_{int(time.time())}.jpg"
     full_path = os.path.join(output_dir, filename)
 
-    api_url = (
-        f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
-        f"?nologo=true&model=flux&width=1024&height=1024"
-    )
-
     try:
-        res = requests.get(api_url, timeout=30)
-        if res.status_code == 200:
-            content_type = res.headers.get("Content-Type", "")
-            if "image" not in content_type:
-                return f"❌ Το API επέστρεψε μη αναμενόμενο τύπο: {content_type}"
-            with open(full_path, 'wb') as f:
-                f.write(res.content)
-            return f"✅ Έτοιμο! Η εικόνα δημιουργήθηκε.\n[SEND_PHOTO: {full_path}]"
-        return f"❌ Σφάλμα API ({res.status_code}). Η μηχανή μπούκωσε."
-    except requests.Timeout:
-        return "❌ Timeout: το Pollinations άργησε πάνω από 30 δευτερόλεπτα."
+        import vertexai
+        from vertexai.preview.vision_models import ImageGenerationModel
+
+        vertexai.init(
+            project=os.getenv("PROJECT_ID", "astakos-finall"),
+            location=os.getenv("LOCATION", "us-central1")
+        )
+
+        model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
+        response = model.generate_images(
+            prompt=prompt,
+            number_of_images=1,
+            aspect_ratio="1:1",
+        )
+
+        if not response.images:
+            return "❌ Το Vertex AI Imagen δεν επέστρεψε εικόνα."
+
+        response.images[0].save(location=full_path, include_generation_parameters=False)
+        return f"✅ Έτοιμο! Η εικόνα δημιουργήθηκε.\n[SEND_PHOTO: {full_path}]"
+
     except Exception as e:
-        return f"❌ Σφάλμα: {str(e)}"
+        return f"❌ Σφάλμα Vertex AI Imagen: {str(e)}"
 def _escape_drive_query_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
