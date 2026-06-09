@@ -430,9 +430,7 @@ function filterLogs() {
     row.style.display = row.dataset.filter?.includes(q) ? '' : 'none';
   });
 }
-async function fetchData() {
-  try {
-  async function fetchTraces() {
+async function fetchTraces() {
   const container = document.getElementById('traces-section');
   try {
     const r = await fetch('/debug/traces?limit=30');
@@ -473,6 +471,8 @@ async function fetchData() {
   }
 }
 
+async function fetchData() {
+  try {
   const r = await fetch('/debug/runtime');
     const data = await r.json();
     render(data);
