@@ -46,6 +46,9 @@ from tools.project_tools import (
     grant_project_access, list_project_files, read_project_file,
     edit_project_file, write_project_file, grep_project_files,
 )
+from tools.file_generator import (
+    generate_excel, generate_word_doc, generate_pdf, generate_csv,
+)
 from astakos_skills.register_tool import register_tool
 from astakos_skills.text_stats import text_stats
 from astakos_skills.scan_receipt import scan_receipt
@@ -2242,4 +2245,6 @@ all_tools = [
     # Project tools
     grant_project_access, list_project_files, read_project_file,
     edit_project_file, write_project_file, grep_project_files,
+    # File generator
+    generate_excel, generate_word_doc, generate_pdf, generate_csv,
 ]
