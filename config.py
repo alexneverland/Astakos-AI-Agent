@@ -46,6 +46,7 @@ WORKING_MEMORY_FILE  = os.path.join(BASE_DIR, "astakos_working_memory.json")
 PHOTOS_INDEX_FILE    = os.path.join(BASE_DIR, "astakos_photos_index.json")
 DOCS_INDEX_FILE      = os.path.join(BASE_DIR, "astakos_docs_index.json")    
 EMBEDDINGS_CACHE_FILE= os.path.join(BASE_DIR, "astakos_embeddings_cache.json")  # legacy, unused
+PROJECT_ACCESS_FILE  = os.path.join(BASE_DIR, "project_access.json")
 EMBEDDINGS_CACHE_DB  = os.path.join(BASE_DIR, "astakos_embeddings_cache.db")
 PROFILE_FILE         = os.path.join(BASE_DIR, "astakos_profile.json")
 SESSIONS_FILE        = os.path.join(BASE_DIR, "astakos_sessions.json")

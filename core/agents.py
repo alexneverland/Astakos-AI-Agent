@@ -27,6 +27,7 @@ from memory.vector_store import vector_store, vector_lock
 from memory.working_memory import get_capability_context
 from memory.session_memory import load_last_session_hint
 from astakos_skills.search_flights import search_flights
+from astakos_skills.repo_mapper import repo_mapper
 # TOOLS
 from tools.system import (
     search_memory, save_to_memory, delete_from_memory, retrieve_photo,
@@ -39,6 +40,10 @@ from tools.system import (
 from tools.web import (
     get_news, get_weather_forecast,
     search_goldmall_offers, execute_local_pipeline, get_navigation_info, relay_local_payload, search_google_places, browse_url, duckduckgo_search, search_supermarket_prices
+)
+from tools.project_tools import (
+    grant_project_access, list_project_files, read_project_file,
+    edit_project_file, write_project_file,
 )
 
 # ────────────────────────────────────────────────────────────────
@@ -198,7 +203,10 @@ def dev_agent_node(state):
         get_navigation_info, recipe_expert, log_meal, 
         generate_image_tool, search_flights, run_terminal_command, learn_routine, get_routines,
         save_goal_tool, update_goal_status_tool,
-        duckduckgo_search
+        duckduckgo_search,
+        # Project tools — code navigation & editing
+        grant_project_access, list_project_files, read_project_file,
+        edit_project_file, write_project_file, repo_mapper,
     ]
     
     safe_history = sanitize_history_for_gemini(history)

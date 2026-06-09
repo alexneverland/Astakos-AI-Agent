@@ -58,6 +58,13 @@ TOOL_RISK: dict[str, str] = {
     "generate_image_tool":      "WARNING",  # γράφει file + external API call
     "archive_file":             "WARNING",  # γράφει στη μνήμη (ChromaDB + JSON)
     "repo_mapper":              "SAFE",     # read-only AST scan
+
+    # ── Project Tools: code navigation & editing ────────────────
+    "grant_project_access":     "CRITICAL", # permanent permission change
+    "list_project_files":       "SAFE",     # read-only glob
+    "read_project_file":        "SAFE",     # read-only
+    "edit_project_file":        "WARNING",  # patch; escalates to CRITICAL for core files (approval.py)
+    "write_project_file":       "CRITICAL", # full rewrite
     "register_tool":            "CRITICAL", # τροποποιεί system.py + tool_risk.py
     "scan_receipt":            "WARNING",
     "text_stats":              "SAFE",
