@@ -356,6 +356,15 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
+    # Graceful ChromaDB shutdown
+    try:
+        from memory.vector_store import vector_lock
+        acquired = vector_lock.acquire(timeout=3)
+        if acquired:
+            vector_lock.release()
+    except Exception:
+        pass
+
     shutdown_event.set()
 
     loop = asyncio.get_event_loop()
