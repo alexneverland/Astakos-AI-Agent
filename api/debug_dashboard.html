@@ -68,6 +68,7 @@
 <div class="grid" id="timeline-section" style="margin-top:16px"></div>
 <div class="grid" id="goals-section" style="margin-top:16px"></div>
 <div class="grid" id="reflections-section" style="margin-top:16px"></div>
+<div class="grid" id="traces-section" style="margin-top:16px"></div>
 <script>
 const REFRESH = 5000;
 let rafId;
@@ -431,7 +432,48 @@ function filterLogs() {
 }
 async function fetchData() {
   try {
-    const r = await fetch('/debug/runtime');
+  async function fetchTraces() {
+  const container = document.getElementById('traces-section');
+  try {
+    const r = await fetch('/debug/traces?limit=30');
+    const d = await r.json();
+    const traces = d.traces || [];
+    if (!traces.length) {
+      container.innerHTML = '<div class="card"><b>📋 Execution Traces</b><p style="color:#888;margin-top:8px">Δεν υπάρχουν traces για σήμερα ακόμα.</p></div>';
+      return;
+    }
+    const rows = traces.slice().reverse().map(t => {
+      const tools = (t.tool_calls || []).map(tc =>
+        `<span style="background:#1e3a5f;padding:2px 6px;border-radius:4px;margin:2px;display:inline-block;font-size:11px">
+          ${tc.tool} <span style="color:#aaa">${tc.duration_ms}ms</span>
+          ${tc.error ? '<span style="color:#f66">⚠</span>' : ''}
+        </span>`
+      ).join('');
+      const loopBadge = t.loop_guard ? '<span style="color:#f90;font-size:11px">🔁 loop</span>' : '';
+      const errBadge = t.error ? `<span style="color:#f66;font-size:11px" title="${t.error}">❌</span>` : '';
+      const dur = t.duration_ms ? `<span style="color:#888;font-size:11px">${t.duration_ms}ms</span>` : '';
+      const ts = (t.timestamp||'').slice(11,19);
+      return `<tr>
+        <td style="color:#888;font-size:11px;white-space:nowrap">${ts}</td>
+        <td style="font-size:11px">${t.channel||''}</td>
+        <td style="font-size:12px;color:#7ec8e3">${t.agent||'—'}</td>
+        <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(t.user_message||'').replace(/"/g,'')}">${t.user_message||''}</td>
+        <td>${tools}</td>
+        <td>${loopBadge}${errBadge}${dur}</td>
+      </tr>`;
+    }).join('');
+    container.innerHTML = \`<div class="card">
+      <b>📋 Execution Traces</b> <span style="color:#888;font-size:12px">(${traces.length} turns σήμερα)</span>
+      <div style="overflow-x:auto;margin-top:8px">
+      <table><tr>
+        <th>Time</th><th>Channel</th><th>Agent</th><th>Message</th><th>Tools</th><th>Info</th>
+      </tr>${rows}</table></div></div>\`;
+  } catch(e) {
+    container.innerHTML = '<div class="card"><b>📋 Execution Traces</b><p style="color:#f66">Error: ' + e + '</p></div>';
+  }
+}
+
+  const r = await fetch('/debug/runtime');
     const data = await r.json();
     render(data);
     renderCharts(data);
@@ -684,7 +726,9 @@ function startCountdown() {
 
 fetchData();
 fetchTimeline();
+fetchTraces();
 setInterval(fetchTimeline, 30000);
+setInterval(fetchTraces, 30000);
 startCountdown();
 </script>
 </body>
