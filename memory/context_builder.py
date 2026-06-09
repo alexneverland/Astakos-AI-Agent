@@ -111,6 +111,24 @@ def looks_like_tool_output(query: str) -> bool:
     return any(marker in clean for marker in _TOOL_OUTPUT_MARKERS)
 
 
+# Prefixes που βάζει το σύστημα σε μηνύματα (upload, vision, tool results).
+# Στριπάρονται πριν το semantic search ώστε να ψάχνουμε με το πραγματικό
+# κείμενο του χρήστη, όχι με filenames/system tags.
+_SYSTEM_PREFIX_RE = re.compile(
+    r"^\s*\["
+    r"(?:USER_UPLOADED_FILE|CURRENT_PHOTO_PATH|ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ|SYSTEM|TOOL_RESULT)"
+    r"\][:\s]*\S+\s*",
+    re.IGNORECASE,
+)
+
+
+def _clean_query_for_search(query: str) -> str:
+    """Αφαιρεί system prefixes (π.χ. [USER_UPLOADED_FILE]: web_xxx.txt) από το query.
+    Κρατάει μόνο το πραγματικό κείμενο του χρήστη για semantic search."""
+    cleaned = _SYSTEM_PREFIX_RE.sub("", query).strip()
+    return cleaned if cleaned else query
+
+
 def _has_temporal_marker(query: str) -> bool:
     clean = _normalize_text(query)
     return any(marker in clean for marker in _TEMPORAL_MARKERS)
@@ -304,6 +322,11 @@ def build_memory_context(
     temporal_limit: int = 8,
     semantic_k: int = 5,
 ) -> MemoryContext:
+    # Χρησιμοποιούμε clean_query για semantic search & debug — αφαιρούμε
+    # system prefixes ([USER_UPLOADED_FILE], [CURRENT_PHOTO_PATH] κ.λπ.)
+    # ώστε το embedding να γίνει με το πραγματικό κείμενο του χρήστη.
+    clean_query = _clean_query_for_search(query)
+
     is_tool_output = looks_like_tool_output(query)
     if is_tool_output:
         recent_limit = 0
@@ -331,16 +354,16 @@ def build_memory_context(
     context = MemoryContext(
         recent_lines=format_recent_messages(recent_messages, limit=recent_limit),
         historical_lines=temporal_history_for_query(
-            query,
+            clean_query,
             channel=channel,
             limit=temporal_limit,
             history_loader=temporal_loader,
         ),
-        semantic_facts=semantic_facts_for_query(query, k=semantic_k, search_fn=semantic_search),
+        semantic_facts=semantic_facts_for_query(clean_query, k=semantic_k, search_fn=semantic_search),
     )
     _record_memory_context_debug(
         channel=channel,
-        query=query,
+        query=clean_query,  # debug panel shows clean query, not raw with filename
         is_tool_output=is_tool_output,
         recent_count=len(context.recent_lines),
         historical_count=len(context.historical_lines),
