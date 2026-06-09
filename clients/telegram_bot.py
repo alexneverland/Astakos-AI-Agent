@@ -396,7 +396,10 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     # Streaming — collect, send once (ίδιο pattern με handle_message)
     final_response = ""
     try:
+        from memory.execution_trace import ExecutionTrace
+        _ptrace = ExecutionTrace(channel="telegram", user_message=user_log_msg)
         for event in graph.stream({"messages": context_msgs + [HumanMessage(content=user_log_msg)], "channel": "telegram"}, {"recursion_limit": 50}):
+            _ptrace.process_event(event)
             for node, data in event.items():
                 if node not in ["supervisor", "tools"]:
                     msgs = data.get("messages", [])
@@ -404,6 +407,8 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
                         candidate = clean_message(msgs[-1].content).strip()
                         if candidate:
                             final_response = candidate
+        _ptrace.finalize(response=final_response or None)
+        _ptrace.save()
     except Exception as e:
         send_telegram_msg(f"❌ Σφάλμα επεξεργασίας φωτό: {e}")
         return
@@ -746,7 +751,10 @@ def handle_message(user_text: str, chat_id: str):
         current_msg  = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
         # ── Ροή μέσω LangGraph ───────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"
+        from memory.execution_trace import ExecutionTrace
+        _trace = ExecutionTrace(channel="telegram", user_message=clean_user_text)
         for event in graph.stream({"messages": context_msgs + [current_msg], "channel": "telegram"}, {"recursion_limit": 50}):
+            _trace.process_event(event)
             for node, data in event.items():
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node
@@ -761,6 +769,8 @@ def handle_message(user_text: str, chat_id: str):
             send_telegram_msg("⚠️ Κάτι μπλόκαρε — δεν πήρα σαφή απάντηση. Ξαναστείλε μου.")
             return
 
+        _trace.finalize(response=final_ai_response or None)
+        _trace.save()
         if final_ai_response:
             # --- MASTRO INTERCEPTOR ΓΙΑ ΕΓΓΡΑΦΑ ---
             file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_ai_response)

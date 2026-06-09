@@ -571,7 +571,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             print(f"\033[95m[Web->Graph]: Προώθηση multimodal μηνύματος στο γράφημα — '{isolated_user_input[:120]}'\033[0m")
         else:
             print(f"\033[95m[Web->Graph]: Προώθηση μηνύματος στο γράφημα — '{isolated_user_input[:120]}'\033[0m")
+        from memory.execution_trace import ExecutionTrace
+        _trace = ExecutionTrace(channel="web", user_message=user_input)
         for event in graph.stream({"messages": context_msgs + [human_msg], "channel": "web"}, {"recursion_limit": 50}):
+            _trace.process_event(event)
             for node, data in event.items():
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node
@@ -621,6 +624,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         if final_ai_response:
             # Αποθηκεύουμε παντού τα ΚΑΘΑΡΑ strings (με το Link/Img αν υπάρχει)
+            _trace.finalize(response=clean_ai)
+            _trace.save()
             append_to_chat_history("assistant", clean_ai, agent=handling_agent)
             enqueue_task(update_working_memory,             clean_user, clean_ai)
             enqueue_task(trigger_memory_sifter,             clean_user, clean_ai, handling_agent, "web")
@@ -859,7 +864,7 @@ async def websocket_logs(websocket: WebSocket):
 
 
 # ────────────────────────────────────────────────────────────────
-# OBSERVABILITY: /debug/runtime + /debug
+# OBSERVABILITY: /debug/runtime + /debug + /debug/traces
 # ────────────────────────────────────────────────────────────────
 
 def _read_json_file(path: str, default):
@@ -1366,6 +1371,22 @@ async def delete_goal(project: str, _=Depends(require_token)):
         return {"ok": True, "deleted": project}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+@server.get("/debug/traces")
+async def debug_traces(date: str | None = None, limit: int = 50, _=Depends(require_token)):
+    """
+    Επιστρέφει execution traces (agent routing + tool calls) για debugging.
+    ?date=YYYY-MM-DD  (default: σήμερα)
+    ?limit=N           (default: 50, max 200)
+    """
+    from memory.execution_trace import load_traces
+    limit = min(int(limit), 200)
+    try:
+        traces = load_traces(date=date, limit=limit)
+        return {"traces": traces, "count": len(traces), "date": date or "today"}
+    except Exception as e:
+        return {"error": str(e), "traces": []}
+
 
 @server.get("/debug")
 async def debug_panel(_=Depends(require_token)):
