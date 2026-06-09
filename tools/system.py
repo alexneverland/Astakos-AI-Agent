@@ -995,12 +995,10 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
 @tool
 def generate_image_tool(prompt: str) -> str:
     """
-    Δημιουργεί μια εικόνα βασισμένη σε μια περιγραφή (prompt).
-    Πρώτα δοκιμάζει Pollinations (δωρεάν, γρήγορο), fallback στο Vertex AI Imagen.
+    Δημιουργεί μια εικόνα βασισμένη σε μια περιγραφή (prompt) μέσω Vertex AI Imagen.
     """
     import os
     import time
-    import requests
     from slugify import slugify
     from config import BASE_DIR
 
@@ -1011,22 +1009,7 @@ def generate_image_tool(prompt: str) -> str:
     filename = f"{safe_filename}_{int(time.time())}.jpg"
     full_path = os.path.join(output_dir, filename)
 
-    # ── 1. Pollinations (primary) ─────────────────────────────────
-    try:
-        api_url = (
-            f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
-            f"?nologo=true&model=flux&width=1024&height=1024"
-        )
-        res = requests.get(api_url, timeout=30)
-        if res.status_code == 200 and "image" in res.headers.get("Content-Type", ""):
-            with open(full_path, 'wb') as f:
-                f.write(res.content)
-            return f"✅ Έτοιμο! Η εικόνα δημιουργήθηκε (Pollinations).\n[SEND_PHOTO: {full_path}]"
-        print(f"[ImageTool]: Pollinations απέτυχε ({res.status_code}) — fallback σε Vertex AI")
-    except Exception as e:
-        print(f"[ImageTool]: Pollinations error: {e} — fallback σε Vertex AI")
-
-    # ── 2. Vertex AI Imagen (fallback) ────────────────────────────
+    # ── Vertex AI Imagen ──────────────────────────────────────────
     try:
         import vertexai
         from vertexai.preview.vision_models import ImageGenerationModel
@@ -1044,10 +1027,10 @@ def generate_image_tool(prompt: str) -> str:
         if not response.images:
             return "❌ Το Vertex AI Imagen δεν επέστρεψε εικόνα."
         response.images[0].save(location=full_path, include_generation_parameters=False)
-        return f"✅ Έτοιμο! Η εικόνα δημιουργήθηκε (Vertex AI).\n[SEND_PHOTO: {full_path}]"
+        return f"✅ Έτοιμο! Η εικόνα δημιουργήθηκε.\n[SEND_PHOTO: {full_path}]"
 
     except Exception as e:
-        return f"❌ Και τα δύο backends απέτυχαν. Vertex error: {str(e)}"
+        return f"❌ Σφάλμα Vertex AI Imagen: {str(e)}"
 def _escape_drive_query_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
