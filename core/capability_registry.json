@@ -389,5 +389,80 @@
       "να κυκλοφορήσω",
       "να λανσάρω"
     ]
+  },
+  {
+    "name": "generate_excel",
+    "description": "Δημιουργεί Excel αρχείο (.xlsx) από δεδομένα με headers, styling και auto-width.",
+    "agent": "Dev_Agent",
+    "priority": 9,
+    "triggers": [
+      "φτιάξε excel",
+      "δημιούργησε excel",
+      "κάνε excel",
+      "φτιάξε xlsx",
+      "φτιάξε spreadsheet",
+      "δημιούργησε spreadsheet",
+      "make excel",
+      "create excel",
+      "generate excel",
+      "excel αρχείο",
+      "xlsx αρχείο"
+    ]
+  },
+  {
+    "name": "generate_word_doc",
+    "description": "Δημιουργεί Word αρχείο (.docx) από κείμενο με headings και bullets.",
+    "agent": "Dev_Agent",
+    "priority": 9,
+    "triggers": [
+      "φτιάξε word",
+      "δημιούργησε word",
+      "κάνε word doc",
+      "φτιάξε docx",
+      "φτιάξε έγγραφο",
+      "δημιούργησε έγγραφο",
+      "γράψε έγγραφο",
+      "make word",
+      "create word",
+      "generate word",
+      "word document",
+      "word αρχείο",
+      "docx αρχείο"
+    ]
+  },
+  {
+    "name": "generate_pdf",
+    "description": "Δημιουργεί PDF αρχείο από κείμενο με τίτλο, headings και bullets.",
+    "agent": "Dev_Agent",
+    "priority": 9,
+    "triggers": [
+      "φτιάξε pdf",
+      "δημιούργησε pdf",
+      "κάνε pdf",
+      "εξαγωγή pdf",
+      "αποθήκευσε ως pdf",
+      "save as pdf",
+      "make pdf",
+      "create pdf",
+      "generate pdf",
+      "pdf αρχείο"
+    ]
+  },
+  {
+    "name": "generate_csv",
+    "description": "Δημιουργεί CSV αρχείο από δεδομένα.",
+    "agent": "Dev_Agent",
+    "priority": 9,
+    "triggers": [
+      "φτιάξε csv",
+      "δημιούργησε csv",
+      "κάνε csv",
+      "εξαγωγή csv",
+      "make csv",
+      "create csv",
+      "generate csv",
+      "csv αρχείο",
+      "εξαγωγή δεδομένων"
+    ]
   }
 ]
