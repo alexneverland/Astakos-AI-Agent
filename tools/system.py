@@ -46,7 +46,7 @@ from tools.project_tools import (
     grant_project_access, list_project_files, read_project_file,
     edit_project_file, write_project_file, grep_project_files,
 )
-from tools.file_generator import (
+from astakos_skills.file_generator import (
     generate_excel, generate_word_doc, generate_pdf, generate_csv,
 )
 from astakos_skills.register_tool import register_tool
