@@ -118,7 +118,7 @@ class WsLogger:
 from core.graph import build_graph as _build_graph
 app_graph = _build_graph()
 
-def append_to_chat_history(role: str, content: str):
+def append_to_chat_history(role: str, content: str, agent: str | None = None):
     """Προσθήκη μηνύματος στο shared SQLite conversation history (web channel)."""
     now = datetime.now()
     shared_message_id = None
@@ -128,6 +128,7 @@ def append_to_chat_history(role: str, content: str):
             role=role,
             content=content,
             channel="web",
+            agent=agent,
             timestamp=now,
         )
         shared_message_id = saved.get("id")
@@ -218,6 +219,7 @@ def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -
             "date": entry.get("date", ""),
             "channel": entry.get("channel", channel or ""),
             "id": entry.get("id", ""),
+            "agent": entry.get("agent") or "",
         })
     return history
 
@@ -619,7 +621,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         if final_ai_response:
             # Αποθηκεύουμε παντού τα ΚΑΘΑΡΑ strings (με το Link/Img αν υπάρχει)
-            append_to_chat_history("assistant", clean_ai)
+            append_to_chat_history("assistant", clean_ai, agent=handling_agent)
             enqueue_task(update_working_memory,             clean_user, clean_ai)
             enqueue_task(trigger_memory_sifter,             clean_user, clean_ai, handling_agent, "web")
             enqueue_task(log_exchange,                      clean_user, clean_ai, handling_agent, "web")
