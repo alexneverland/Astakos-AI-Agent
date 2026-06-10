@@ -23,11 +23,7 @@ Astakos is built to feel less like a disposable chatbot and more like a personal
 
 </div>
 
-<p align="center">
-  <a href="https://openagentsource.com/agents/astakos-ai-agent">
-    <img src="https://openagentsource.com/badges/astakos-ai-agent.svg" alt="Listed on OpenAgentSource" />
-  </a>
-</p>
+[![OpenAgentSource](https://img.shields.io/badge/OpenAgentSource-Listed-4A90D9?style=for-the-badge)](https://openagentsource.com/agents/astakos-ai-agent)
 
 ---
 
