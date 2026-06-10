@@ -18,7 +18,7 @@ TOOL_RISK: dict[str, str] = {
 
     # ── WARNING: writes / side-effects / money ───────────────────
     "drive_manager":            "WARNING",
-    "save_to_memory":           "WARNING",
+    "save_to_memory":           "SAFE",    # non-destructive, γίνεται αυτόματα
     "save_goal_tool":           "WARNING",
     "update_goal_status_tool":  "WARNING",
     "delete_from_memory":       "WARNING",
