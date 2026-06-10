@@ -211,6 +211,23 @@ def _apply_action(reflection: dict) -> bool:
     routine_id = reflection.get("routine_id")
     value      = reflection.get("action_value")
 
+    # save_to_memory δεν χρειάζεται routine_id — handle πρώτα
+    if action == "save_to_memory":
+        lesson = reflection.get("lesson", "")
+        if lesson:
+            try:
+                from memory.vector_store import vector_store
+                vector_store.add_texts(
+                    [f"[REFLECTION]: {lesson}"],
+                    metadatas=[{"category": "reflection", "source": "reflection_engine"}]
+                )
+                print(f"🧠 [Reflection]: Lesson saved to ChromaDB")
+                return True
+            except Exception as me:
+                print(f"⚠️ [Reflection] ChromaDB save failed: {me}")
+                return False
+        return False
+
     if not routine_id:
         return False
 
@@ -310,8 +327,6 @@ def run_reflection() -> dict:
                 applied += 1
                 telegram_lines.append(f"✅ *{obs}*\n→ Εφαρμόστηκε: `{action}`\n💡 _{lesson}_")
             else:
-                # Αποτυχία εφαρμογής — αποθηκεύουμε χωρίς apply
-                _save_reflection(source, obs, action, confidence, lesson, applied=False)
                 skipped += 1
 
         elif confidence >= ASK_THRESHOLD:

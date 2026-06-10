@@ -580,7 +580,8 @@ async function applyReflection(id) {
   if (!confirm(`Εφαρμογή reflection #${id};`)) return;
   const r = await fetch(`/debug/reflection/${id}/apply`, {method:'POST'});
   const j = await r.json();
-  if (!j.ok) alert(`Σφάλμα: ${j.error}`);
+  if (j.ok) alert('✅ Εφαρμόστηκε!');
+  else alert(`Σφάλμα: ${j.error || 'Αποτυχία εφαρμογής'}`);
   fetchData();
 }
 
