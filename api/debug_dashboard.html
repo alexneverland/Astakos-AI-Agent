@@ -552,7 +552,9 @@ function renderReflections(reflections) {
     container.innerHTML = '<div class="card" style="grid-column:span 2"><h2>🧠 Reflections</h2><p style="color:var(--muted)">Δεν υπάρχουν reflections ακόμα. Τρέχουν νυχτερινά στις 03:00.</p></div>';
     return;
   }
-  const rows = reflections.map(r => `
+  let showApplied = false;
+  const visible = showApplied ? reflections : reflections.filter(r => !r.applied);
+  const rows = visible.map(r => `
     <tr>
       <td class="off">#${r.id}</td>
       <td>${r.created_at?.substring(0,16)||'—'}</td>
@@ -561,19 +563,72 @@ function renderReflections(reflections) {
       <td><code>${r.action}</code></td>
       <td class="${r.confidence>=0.75?'ok':r.confidence>=0.5?'warn':'err'}">${(r.confidence*100).toFixed(0)}%</td>
       <td style="max-width:200px;color:var(--muted);font-size:11px">${r.lesson||'—'}</td>
-      <td>${r.applied
-        ? '<span class="ok">✅ Applied</span>'
-        : `<button onclick="applyReflection(${r.id})" style="background:#1a5a3a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer">▶ Apply</button>`
-      }</td>
+      <td style="white-space:nowrap">
+        ${r.applied
+          ? '<span class="ok">✅ Applied</span>'
+          : `<button onclick="applyReflection(${r.id})" style="background:#1a5a3a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px">▶ Apply</button>`
+        }
+        <button onclick="deleteReflection(${r.id})" style="background:#5a1a1a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer">🗑</button>
+      </td>
     </tr>`).join('');
   container.innerHTML = `
     <div class="card" style="grid-column:span 2">
-      <h2>🧠 Reflections (${reflections.length})</h2>
+      <h2>🧠 Reflections (${visible.length}/${reflections.length})
+        <button onclick="toggleAppliedReflections()" style="margin-left:10px;font-size:12px;padding:2px 8px;border-radius:4px;border:1px solid var(--muted);background:transparent;color:var(--muted);cursor:pointer">
+          ${showApplied ? 'Κρύψε applied' : 'Δείξε όλα'}
+        </button>
+      </h2>
       <table>
         <tr><th>ID</th><th>Ημερομηνία</th><th>Πηγή</th><th>Observation</th><th>Action</th><th>Conf</th><th>Lesson</th><th>Status</th></tr>
-        ${rows}
+        ${rows || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">Δεν υπάρχουν εκκρεμή reflections</td></tr>'}
       </table>
     </div>`;
+
+  // Attach toggle — επειδή το innerHTML αλλάζει, κρατάμε state έξω
+  window._reflectionsData = reflections;
+  window._showApplied = showApplied;
+}
+
+function toggleAppliedReflections() {
+  window._showApplied = !window._showApplied;
+  renderReflections(window._reflectionsData, window._showApplied);
+}
+
+function renderReflections(reflections, showApplied = false) {
+  const container = document.getElementById('reflections-section');
+  if (!container) return;
+  const visible = showApplied ? reflections : reflections.filter(r => !r.applied);
+  const rows = visible.map(r => `
+    <tr>
+      <td class="off">#${r.id}</td>
+      <td>${r.created_at?.substring(0,16)||'—'}</td>
+      <td><span class="badge b-blue">${r.source||'—'}</span></td>
+      <td style="max-width:300px">${r.observation}</td>
+      <td><code>${r.action}</code></td>
+      <td class="${r.confidence>=0.75?'ok':r.confidence>=0.5?'warn':'err'}">${(r.confidence*100).toFixed(0)}%</td>
+      <td style="max-width:200px;color:var(--muted);font-size:11px">${r.lesson||'—'}</td>
+      <td style="white-space:nowrap">
+        ${r.applied
+          ? '<span class="ok">✅ Applied</span>'
+          : `<button onclick="applyReflection(${r.id})" style="background:#1a5a3a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;margin-right:4px">▶ Apply</button>`
+        }
+        <button onclick="deleteReflection(${r.id})" style="background:#5a1a1a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer">🗑</button>
+      </td>
+    </tr>`).join('');
+  container.innerHTML = `
+    <div class="card" style="grid-column:span 2">
+      <h2>🧠 Reflections (${visible.length}/${reflections.length})
+        <button onclick="toggleAppliedReflections()" style="margin-left:10px;font-size:12px;padding:2px 8px;border-radius:4px;border:1px solid var(--muted);background:transparent;color:var(--muted);cursor:pointer">
+          ${showApplied ? 'Κρύψε applied' : 'Δείξε όλα'}
+        </button>
+      </h2>
+      <table>
+        <tr><th>ID</th><th>Ημερομηνία</th><th>Πηγή</th><th>Observation</th><th>Action</th><th>Conf</th><th>Lesson</th><th>Status</th></tr>
+        ${rows || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">Δεν υπάρχουν εκκρεμή reflections</td></tr>'}
+      </table>
+    </div>`;
+  window._reflectionsData = reflections;
+  window._showApplied = showApplied;
 }
 
 async function applyReflection(id) {
@@ -582,6 +637,14 @@ async function applyReflection(id) {
   const j = await r.json();
   if (j.ok) alert('✅ Εφαρμόστηκε!');
   else alert(`Σφάλμα: ${j.error || 'Αποτυχία εφαρμογής'}`);
+  fetchData();
+}
+
+async function deleteReflection(id) {
+  if (!confirm(`Διαγραφή reflection #${id};`)) return;
+  const r = await fetch(`/debug/reflection/${id}`, {method:'DELETE'});
+  const j = await r.json();
+  if (!j.ok) alert(`Σφάλμα: ${j.error || 'Αποτυχία διαγραφής'}`);
   fetchData();
 }
 

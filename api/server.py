@@ -1331,6 +1331,21 @@ async def apply_reflection(reflection_id: int, _=Depends(require_token)):
         return {"ok": False, "error": str(e)}
 
 
+@server.delete("/debug/reflection/{reflection_id}")
+async def delete_reflection(reflection_id: int, _=Depends(require_token)):
+    """Διαγράφει ένα reflection."""
+    import sqlite3 as _sqlite3
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    try:
+        conn = _sqlite3.connect(db_path)
+        conn.execute("DELETE FROM reflections WHERE id=?", (reflection_id,))
+        conn.commit()
+        conn.close()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @server.get("/debug/goals")
 async def debug_goals(_=Depends(require_token)):
     """Επιστρέφει όλα τα long-term goals."""

@@ -43,6 +43,20 @@ def _ensure_table():
     conn.close()
 
 
+def _already_reflected(observation: str, action: str) -> bool:
+    """Ελέγχει αν υπάρχει ήδη applied reflection με ίδιο observation+action (αποφυγή duplicates)."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute(
+            "SELECT id FROM reflections WHERE observation=? AND action=? AND applied=1 LIMIT 1",
+            (observation, action)
+        ).fetchone()
+        conn.close()
+        return row is not None
+    except Exception:
+        return False
+
+
 def _save_reflection(source, observation, action, confidence, lesson, applied=False):
     conn = sqlite3.connect(DB_PATH)
     now  = datetime.now().isoformat(timespec="seconds")
@@ -316,6 +330,12 @@ def run_reflection() -> dict:
         source     = r.get("source", "general")
 
         if not obs or not action:
+            skipped += 1
+            continue
+
+        # Skip αν έχει ήδη εφαρμοστεί το ίδιο observation+action
+        if _already_reflected(obs, action):
+            print(f"[Reflection]: ⏭ Skip duplicate: '{obs[:40]}...'")
             skipped += 1
             continue
 
