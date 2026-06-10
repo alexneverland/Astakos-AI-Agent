@@ -20,6 +20,7 @@ Astakos is built to feel less like a disposable chatbot and more like a personal
 [![ChromaDB](https://img.shields.io/badge/ChromaDB-Vector_Store-FF6B35?style=for-the-badge)](https://www.trychroma.com/)
 [![SQLite](https://img.shields.io/badge/SQLite-WAL_Mode-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
+[![Listed on OpenAgentSource](https://openagentsource.com/badges/astakos-ai-agent.svg)](https://openagentsource.com/agents/astakos-ai-agent)
 
 </div>
 
@@ -76,7 +77,9 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Anti-Spam Intelligence | Adaptive cooldown: 20h → 40h → 72h on repeated ignores, plus batching for simultaneous routines. |
 | Capability Registry | Keyword-based pre-routing before the LLM Supervisor for faster dispatch and fewer wasted tokens. |
 | LLM Routine Judge | Routine confirmation uses a fast Gemini call to interpret natural-language replies ("θα πάω να τους βρω") instead of keyword-only matching. Falls back to UNCLEAR on failure. |
-| File Generator Tools | `generate_excel`, `generate_word_doc`, `generate_pdf`, `generate_csv` — create formatted files from agent-supplied data and save to any path (defaults to Desktop). |
+| File Generator Tools | `generate_excel`, `generate_word_doc`, `generate_pdf`, `generate_csv` — create formatted files from agent-supplied data and save to any path (defaults to Desktop). Risk: SAFE. |
+| File Delivery | When a file is created, the Web UI shows a file card with a **📂 Google Drive** button (upload-on-click + inline preview iframe). Telegram receives the actual file via `sendDocument`. |
+| Google Drive Upload | `tools/gdrive.py` — uploads any local file to Google Drive via ADC, sets public read permissions, and returns a shareable view URL. Used by the Web UI `/upload-to-drive` endpoint. |
 | Project Code Tools | `read_project_file`, `edit_project_file`, `write_project_file`, `grep_project_files`, `list_project_files` — permission-gated code navigation and editing with syntax check and rollback. |
 | Long-Term Goals | ChromaDB goal tracking injected into prompts, with `/plan` for multi-step execution. |
 | Action Approval Levels | SAFE / WARNING / CRITICAL risk levels per tool. CRITICAL actions require approval before execution. |
@@ -272,6 +275,7 @@ astakos/
 ├── tools/
 │   ├── system.py             # Files, GitHub, Gmail, IoT, reminders, routines, Fit
 │   ├── file_generator.py     # Excel, Word, PDF, CSV file creation tools
+│   ├── gdrive.py             # Google Drive upload via ADC + public link
 │   ├── project_tools.py      # Permission-gated code navigation and editing tools
 │   ├── telegram.py           # Telegram messaging helpers
 │   └── web.py                # News, weather, Places, navigation, Messenger, web search
@@ -441,7 +445,9 @@ Shutdown behavior:
 - [x] Category-Safe Memory Overwrite — same-category Chroma matches use helper-tested correction, staleness, richness, and length tie-break rules before replacing old facts.
 
 - [x] Web UI Agent Name in History — `agent_name` is stored in SQLite alongside each message and returned by `/history`; the Web UI now shows the correct agent label (e.g. `Web / Dev_Agent`) for both live and historical messages.
-- [x] File Generator Tools — `generate_excel` (styled headers, zebra rows, freeze pane), `generate_word_doc` (Markdown-style headings and bullets), `generate_pdf` (reportlab with custom styles), and `generate_csv` (UTF-8 BOM for Excel compatibility). All route via Capability Registry to Dev_Agent. Risk: WARNING.
+- [x] File Generator Tools — `generate_excel` (styled headers, zebra rows, freeze pane), `generate_word_doc` (Markdown-style headings and bullets), `generate_pdf` (reportlab with custom styles), and `generate_csv` (UTF-8 BOM for Excel compatibility). All route via Capability Registry to Dev_Agent. Risk: SAFE.
+- [x] File Delivery — when a file is created (`[CREATED_FILE:]` tag), the Web UI renders a file card with a **📂 Google Drive** button; clicking uploads to Drive via ADC and opens an inline preview iframe. Telegram sends the actual file via `sendDocument` with an optional inline Drive link button.
+- [x] Tool Risk Rationalization — file creation tools (`create_file_tool`, `generate_excel`, `generate_word_doc`, `generate_pdf`, `generate_csv`), `save_to_memory`, and mail read actions (`search`, `read`, `read_full`) demoted from WARNING to SAFE to eliminate notification noise.
 - [x] Project Code Tools — `read_project_file`, `edit_project_file` (old→new patch + syntax check + rollback), `write_project_file`, `grep_project_files`, `list_project_files` with a JSON permission model (`project_access.json`). Core files escalate to CRITICAL; other edits are WARNING.
 - [x] LLM Routine Judge — implicit routine confirmation replaced with a fast Gemini call that returns YES / NO / UNCLEAR. Natural phrases like "θα πάω να τους βρω" now correctly confirm a pending park routine without requiring event keywords. Fallback to UNCLEAR on LLM error.
 - [x] WARNING Telegram Notifications — WARNING-tier tool calls (e.g. `git push`) send an informational Telegram message without blocking execution; only CRITICAL actions require approval.
