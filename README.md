@@ -21,9 +21,11 @@ Astakos is built to feel less like a disposable chatbot and more like a personal
 [![SQLite](https://img.shields.io/badge/SQLite-WAL_Mode-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
 
-</div>
+<br>
 
 [![OpenAgentSource](https://img.shields.io/badge/OpenAgentSource-Listed-4A90D9?style=for-the-badge)](https://openagentsource.com/agents/astakos-ai-agent)
+
+</div>
 
 ---
 
