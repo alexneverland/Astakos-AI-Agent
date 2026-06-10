@@ -777,19 +777,23 @@ def handle_message(user_text: str, chat_id: str):
             if file_match:
                 file_path = file_match.group(1).strip()
                 final_ai_response = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", "", final_ai_response).strip()
-                
+
                 if final_ai_response:
                     if is_voice_mode:
                         import asyncio
                         asyncio.run(send_telegram_voice(final_ai_response))
                     else:
-                        send_telegram_msg(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
-                
+                        send_telegram_msg(final_ai_response)
+
+                # Στείλε το αρχείο στο Telegram ως document
                 try:
                     from tools.telegram import send_telegram_document
-                    send_telegram_document(file_path) # [FIX]: Μόνο ένα όρισμα
-                except:
-                    pass
+                    import os as _os
+                    _fname = _os.path.basename(file_path)
+                    send_telegram_document(file_path, caption=f"📎 <b>{_fname}</b>")
+                except Exception as _de:
+                    print(f"❌ [Doc send error]: {_de}")
+                    send_telegram_msg(f"📎 Αρχείο: <code>{file_path}</code>")
             else:
                 # Κανονική Ροή (Χωρίς Έγγραφα)
                 if is_voice_mode:

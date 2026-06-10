@@ -596,13 +596,24 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", clean_ai)
         if file_match:
             file_path = file_match.group(1).strip()
-            filename = os.path.basename(file_path)
-            
-            base_url = str(request.base_url).rstrip("/")
-            
-            download_link = f'<br><br><a href="{base_url}/outputs/{filename}" target="_blank" download style="color: #4CAF50; font-weight: bold; text-decoration: none;">📥 Κάνε κλικ εδώ για λήψη: {filename}</a>'
-            
-            clean_ai = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", download_link, clean_ai)
+            filename  = os.path.basename(file_path)
+            base_url  = str(request.base_url).rstrip("/")
+
+            # File card με κουμπί που ανεβάζει on-demand στο Drive
+            import json as _json
+            safe_path = _json.dumps(file_path)  # properly escaped JSON string
+            file_card = (
+                f'<br><br><div style="display:flex;align-items:center;gap:10px;'
+                f'padding:10px 14px;background:#f8f9fa;border-radius:8px;border:1px solid #dee2e6;">'
+                f'<span style="font-size:1.3em;">📎</span>'
+                f'<span style="flex:1;font-weight:bold;color:#333;">{filename}</span>'
+                f'<button onclick="window.astakosOpenDrive(this)" data-path={safe_path} '
+                f'style="padding:6px 16px;background:#1a73e8;color:#fff;border:none;'
+                f'border-radius:6px;cursor:pointer;font-weight:bold;font-size:.9em;">'
+                f'📂 Google Drive</button>'
+                f'</div>'
+            )
+            clean_ai = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", lambda m: file_card, clean_ai)
 
         # 2. --- MASTRO INTERCEPTOR ΓΙΑ ΕΙΚΟΝΕΣ (Web UI) ---
         photo_match = re.search(r"\[SEND_PHOTO:\s*(.*?)\]", clean_ai)
@@ -1329,6 +1340,23 @@ async def apply_reflection(reflection_id: int, _=Depends(require_token)):
         return {"ok": success}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@server.post("/upload-to-drive")
+async def upload_to_drive_endpoint(request: Request, _=Depends(require_token)):
+    """Ανεβάζει τοπικό αρχείο στο Google Drive, επιστρέφει το shareable URL."""
+    try:
+        body     = await request.json()
+        filepath = body.get("path", "").strip()
+        if not filepath or not os.path.exists(filepath):
+            return JSONResponse({"ok": False, "error": "Αρχείο δεν βρέθηκε"}, status_code=404)
+        from tools.gdrive import upload_to_drive
+        url = upload_to_drive(filepath)
+        if url:
+            return {"ok": True, "url": url}
+        return JSONResponse({"ok": False, "error": "Αποτυχία ανεβάσματος στο Drive"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @server.delete("/debug/reflection/{reflection_id}")

@@ -298,7 +298,8 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
     prompt += (
         "ΚΑΝΟΝΑΣ ΜΝΗΜΗΣ: Αν σου ζητηθεί πληροφορία που λείπει, κάλεσε το 'search_memory' μία φορά. "
         "Αν έχεις ήδη αποτέλεσμα μνήμης στο context, απάντησε από αυτό και ΜΗΝ ξανακαλέσεις search_memory στο ίδιο turn.\n"
-        "ΚΑΝΟΝΑΣ ΦΩΤΟΓΡΑΦΙΩΝ: Αν ζητηθεί φωτό, κάλεσε το 'retrieve_photo' και συμπεριέλαβε το [SEND_PHOTO: path] στην απάντηση.\n\n"
+        "ΚΑΝΟΝΑΣ ΦΩΤΟΓΡΑΦΙΩΝ: Αν ζητηθεί φωτό, κάλεσε το 'retrieve_photo' και συμπεριέλαβε το [SEND_PHOTO: path] στην απάντηση.\n"
+        "ΚΑΝΟΝΑΣ ΑΡΧΕΙΩΝ: Όταν δημιουργείς αρχείο με το create_file_tool, ΠΑΝΤΑ συμπεριέλαβε αυτούσιο το [CREATED_FILE: path] στην απάντησή σου. ΜΗΝ το αντικαταστήσεις με το path ως κείμενο.\n\n"
     )
 
     prompt += memory_context_str

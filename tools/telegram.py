@@ -86,6 +86,55 @@ async def send_telegram_photo(image_path: str, caption: str = ""):
         print(f"❌ [Telegram Photo Error]: {e}")
 
 
+def send_telegram_document(file_path: str, caption: str = "", drive_url: str = ""):
+    """
+    Στέλνει αρχείο στο Telegram ως document (sendDocument).
+    Αν δοθεί drive_url, προσθέτει inline keyboard κουμπί "Άνοιγμα στο Google Drive".
+    """
+    import os, json
+    token   = TELEGRAM_TOKEN
+    chat_id = TELEGRAM_CHAT_ID
+    if not token or not chat_id:
+        print("⚠️ send_telegram_document: λείπουν credentials")
+        return
+    if not os.path.exists(file_path):
+        send_telegram_msg(f"⚠️ Αρχείο δεν βρέθηκε: <code>{file_path}</code>")
+        return
+
+    filename = os.path.basename(file_path)
+    msg_caption = caption or f"📎 <b>{filename}</b>"
+
+    payload = {
+        "chat_id":    chat_id,
+        "caption":    msg_caption,
+        "parse_mode": "HTML",
+    }
+    if drive_url:
+        payload["reply_markup"] = json.dumps({
+            "inline_keyboard": [[{
+                "text": "📂 Άνοιγμα στο Google Drive",
+                "url":  drive_url
+            }]]
+        })
+
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
+    try:
+        with open(file_path, "rb") as f:
+            resp = requests.post(
+                url,
+                data=payload,
+                files={"document": (filename, f, "application/octet-stream")},
+                timeout=60
+            )
+        if resp.status_code == 200:
+            print(f"✅ [Telegram Doc]: {filename} στάλθηκε" + (" + Drive link" if drive_url else ""))
+        else:
+            print(f"⚠️ [Telegram Doc]: {resp.status_code} — {resp.text[:120]}")
+    except Exception as e:
+        print(f"❌ [Telegram Doc Error]: {e}")
+        send_telegram_msg(f"❌ Αποτυχία αποστολής αρχείου: {str(e)}")
+
+
 async def send_telegram_voice(text: str):
     """
     [MASTRO-FIX]: Χρησιμοποιεί edge-tts αντί για gTTS.

@@ -894,6 +894,51 @@
             await currentAudio.play();
         } catch (err) { console.error('[TTS Fetch Error]:', err); setAvatar('idle'); }
     }
+
+    // ── Google Drive upload on-demand ──────────────────────────
+    async function astakosOpenDrive(btn) {
+        const path = btn.getAttribute('data-path');
+        if (!path) return;
+        btn.disabled = true;
+        btn.textContent = '⏳ Ανέβασμα...';
+        try {
+            const r = await fetch('/upload-to-drive', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path })
+            });
+            const d = await r.json();
+            if (d.ok) {
+                // Κουμπί → Άνοιγμα
+                btn.textContent = '📂 Άνοιγμα';
+                btn.style.background = '#0f5132';
+                btn.disabled = false;
+                btn.onclick = () => window.open(d.url, '_blank');
+
+                // Preview iframe κάτω από το card
+                const card = btn.closest('div');
+                if (card) {
+                    const fileId = d.url.match(/\/d\/([^/]+)\//)?.[1];
+                    if (fileId) {
+                        const previewUrl = `https://drive.google.com/file/d/${fileId}/preview`;
+                        const wrap = document.createElement('div');
+                        wrap.style.cssText = 'margin-top:8px;border-radius:8px;overflow:hidden;border:1px solid #dee2e6;';
+                        wrap.innerHTML = `<iframe src="${previewUrl}" width="100%" height="400"
+                            frameborder="0" allowfullscreen
+                            style="display:block;background:#f8f9fa;"></iframe>`;
+                        card.parentNode.insertBefore(wrap, card.nextSibling);
+                    }
+                }
+            } else {
+                btn.textContent = '❌ ' + (d.error || 'Σφάλμα');
+                btn.style.background = '#dc3545';
+            }
+        } catch (e) {
+            btn.textContent = '❌ Σφάλμα';
+            btn.style.background = '#dc3545';
+        }
+    }
+    window.astakosOpenDrive = astakosOpenDrive;
 </script>
 </body>
 </html>
