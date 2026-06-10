@@ -301,59 +301,64 @@ def approval_check_node(state):
     }
 
 
+def _args_preview(args: dict) -> str:
+    """Φτιάχνει ασφαλές preview των args χωρίς special chars."""
+    import html
+    parts = []
+    for k, v in args.items():
+        val = repr(v)[:60].replace("<", "").replace(">", "")
+        parts.append(f"{html.escape(k)}={html.escape(val)}")
+    return ", ".join(parts) or "—"
+
+
 def _notify_telegram_warning(tool_call: dict):
-    """Στέλνει απλό Telegram info για WARNING tools (χωρίς approve/reject)."""
+    """Στέλνει Telegram info για WARNING tools (χωρίς approve/reject)."""
     try:
-        import requests
-        from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+        from tools.telegram import send_telegram_msg
         tool_name = tool_call["name"]
-        args = tool_call.get("args", {})
-        args_preview = ", ".join(f"{k}={repr(v)[:40]}" for k, v in args.items()) or "—"
-        sep = chr(10)
-        text = "⚠️ *WARNING Action Executed*" + sep*2 + "Tool: " + tool_name + sep + "Args: " + args_preview
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
-            timeout=5,
+        args_prev = _args_preview(tool_call.get("args", {}))
+        text = (
+            f"⚠️ <b>WARNING — {tool_name}</b>\n"
+            f"<code>{args_prev}</code>"
         )
+        send_telegram_msg(text)
     except Exception as e:
-        print(f"[Approval]: Telegram warning notify error: {e}")
+        print(f"\033[93m[Approval]: Telegram warning notify error: {e}\033[0m")
 
 
 def _notify_telegram(tool_call: dict):
-    """Στέλνει Telegram inline keyboard για approval."""
+    """Στέλνει Telegram inline keyboard για CRITICAL approval."""
     try:
         import requests
         from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
         tool_name = tool_call["name"]
-        args = tool_call.get("args", {})
-        call_id = tool_call["id"]
+        call_id   = tool_call["id"]
+        args_prev = _args_preview(tool_call.get("args", {}))
 
-        args_preview = ", ".join(f"{k}={repr(v)[:40]}" for k, v in args.items()) or "—"
         text = (
-            f"🚨 *Action Approval Required*\n\n"
-            f"Tool: `{tool_name}`\n"
-            f"Args: `{args_preview}`\n\n"
+            f"🚨 <b>Απαιτείται Έγκριση</b>\n\n"
+            f"Tool: <code>{tool_name}</code>\n"
+            f"Args: <code>{args_prev}</code>\n\n"
             f"Εκτελώ;"
         )
-
         keyboard = {
             "inline_keyboard": [[
                 {"text": "✅ Ναι", "callback_data": f"approve:{call_id}"},
                 {"text": "❌ Όχι", "callback_data": f"reject:{call_id}"},
             ]]
         }
-
-        requests.post(
+        resp = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": text,
-                "parse_mode": "Markdown",
+                "chat_id":      TELEGRAM_CHAT_ID,
+                "text":         text,
+                "parse_mode":   "HTML",
                 "reply_markup": keyboard,
             },
-            timeout=5,
+            timeout=15,
         )
+        if resp.status_code != 200:
+            print(f"\033[91m[Approval]: Telegram CRITICAL notify failed: {resp.status_code} {resp.text[:80]}\033[0m")
     except Exception as e:
         print(f"\033[91m[Approval]: Telegram notify error: {e}\033[0m")
