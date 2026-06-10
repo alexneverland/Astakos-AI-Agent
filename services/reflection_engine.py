@@ -343,36 +343,3 @@ def run_reflection() -> dict:
 
 if __name__ == "__main__":
     print(run_reflection())
- apply
-                _save_reflection(source, obs, action, confidence, lesson, applied=False)
-                skipped += 1
-
-        elif confidence >= ASK_THRESHOLD:
-            # Ρωτάει τον Λάζαρο
-            _save_reflection(source, obs, action, confidence, lesson, applied=False)
-            pending += 1
-            telegram_lines.append(
-                f"🤔 *Παρατήρηση:* {obs}\n"
-                f"→ Προτείνω: `{action}` (confidence: {confidence:.0%})\n"
-                f"Να το εφαρμόσω; (ναι/όχι)"
-            )
-        else:
-            # Χαμηλή confidence — αποθηκεύω μόνο
-            _save_reflection(source, obs, action, confidence, lesson, applied=False)
-            skipped += 1
-
-    # Αποστολή Telegram
-    if telegram_lines:
-        header = "🧠 *Astakos Self-Reflection — Νυχτερινή Ανάλυση*\n\n"
-        msg    = header + "\n\n---\n\n".join(telegram_lines)
-        if len(msg) > 4000:
-            msg = msg[:3990] + "..."
-        send_telegram_msg(msg)
-
-    stats = {"analyzed": len(reflections), "applied": applied, "pending": pending, "skipped": skipped}
-    print(f"[Reflection]: ✅ {stats}")
-    return stats
-
-
-if __name__ == "__main__":
-    print(run_reflection())
