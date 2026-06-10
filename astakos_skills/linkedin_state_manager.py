@@ -6,8 +6,8 @@ from config import LINKEDIN_DRAFT_FILE
 MEMORY_FILE = LINKEDIN_DRAFT_FILE
 
 @tool
-def update_pending_linkedin_post(draft_text: str, photo_path: str) -> str:
-    """Αποθηκεύει το draft του LinkedIn και το path της φωτό στο working_memory."""
+def update_pending_linkedin_post(draft_text: str, photo_path: str = "") -> str:
+    """Αποθηκεύει το draft του LinkedIn post. photo_path προαιρετικό — αν η εικόνα απέτυχε, αποθήκευσε χωρίς αυτή και σταμάτα."""
     data = {}
     if os.path.exists(MEMORY_FILE):
         with open(MEMORY_FILE, 'r', encoding='utf-8') as f:

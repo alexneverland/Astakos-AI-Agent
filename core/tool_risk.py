@@ -30,11 +30,11 @@ TOOL_RISK: dict[str, str] = {
     "google_tasks_tool":        "WARNING",
     "learn_routine":            "WARNING",
     "write_code":               "WARNING",
-    "create_file_tool":         "WARNING",
-    "generate_excel":           "WARNING",
-    "generate_word_doc":        "WARNING",
-    "generate_pdf":             "WARNING",
-    "generate_csv":             "WARNING",
+    "create_file_tool":         "SAFE",    # τοπικό outputs/, μη καταστροφικό
+    "generate_excel":           "SAFE",    # τοπικό outputs/, μη καταστροφικό
+    "generate_word_doc":        "SAFE",    # τοπικό outputs/, μη καταστροφικό
+    "generate_pdf":             "SAFE",    # τοπικό outputs/, μη καταστροφικό
+    "generate_csv":             "SAFE",    # τοπικό outputs/, μη καταστροφικό
     "write_custom_tool":        "WARNING",
     "update_pending_linkedin_post": "WARNING",
     "relay_local_payload":      "WARNING",  # writes Messenger draft only; send is execute_local_pipeline

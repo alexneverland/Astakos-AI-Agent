@@ -14,25 +14,24 @@ _REGISTRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "capab
 _registry: list[dict] = []
 
 _GIT_TRIGGERS = [
-    "git",
-    "commit",
-    "commits",
-    "push",
-    "pull",
-    "branch",
-    "branches",
-    "status",
-    "diff",
+    "git commit",
+    "git push",
+    "git pull",
     "git log",
     "git status",
     "git diff",
     "git show",
-    "head",
+    "git branch",
     "origin/main",
     "δες commit",
     "τελευταία commit",
     "τελευταία commits",
     "ιστορικό commit",
+]
+
+_LINKEDIN_CREATION = [
+    "φτιάξε", "γράψε", "ανέβασε", "post", "ποστ",
+    "δημιούργησε", "σκέψου", "βάλε", "φτιαξε",
 ]
 
 def _load_registry():
@@ -52,7 +51,8 @@ def _normalize(text: str) -> str:
 
 def _matches_trigger(msg: str, trigger: str) -> bool:
     t = _normalize(trigger)
-    return bool(re.search(r'\b' + re.escape(t) + r'\b', msg)) or t in msg
+    # Word boundary μόνο — αποφεύγουμε substring matches (π.χ. "git" μέσα σε "github")
+    return bool(re.search(r'(?<!\w)' + re.escape(t) + r'(?!\w)', msg))
 
 def lookup_agent(user_message: str) -> str | None:
     """
@@ -66,6 +66,13 @@ def lookup_agent(user_message: str) -> str | None:
         return None
 
     msg = _normalize(user_message)
+
+    # LinkedIn check ΠΡΩΤΑ — override όλα τα άλλα
+    if _matches_trigger(msg, "linkedin"):
+        for ct in _LINKEDIN_CREATION:
+            if _matches_trigger(msg, ct):
+                print(f"🎯 [CapabilityRegistry]: 'linkedin+{ct}' → Web_Agent (linkedin_post)")
+                return "Web_Agent"
 
     for trigger in _GIT_TRIGGERS:
         if _matches_trigger(msg, trigger):
