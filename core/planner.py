@@ -111,9 +111,9 @@ def task_executor_node(state):
     results      = state.get("plan_results", [])
     goal         = state.get("plan_goal", "")
 
-    # Αν τελειώσαμε → summary
+    # Αν τελειώσαμε → ασυνήθιστη κατάσταση, ο graph θα δρομολογήσει σε end_check
     if idx >= len(tasks):
-        return _plan_summary(goal, tasks, results)
+        return {"plan_active": False}
 
     task = tasks[idx]
     print(f"\033[95m[TaskExecutor]: Βήμα {idx+1}/{len(tasks)}: {task['description']}\033[0m")
@@ -174,13 +174,11 @@ def capture_result_node(state):
 
     print(f"\033[95m[TaskExecutor]: ✅ Βήμα {idx+1} ολοκληρώθηκε ({len(results)}/{len(tasks)})\033[0m")
 
-    if new_idx >= len(tasks):
-        # Τελευταίο βήμα — βγάζουμε summary
-        return _plan_summary(state.get("plan_goal", ""), tasks, results)
-
+    plan_active = new_idx < len(tasks)
     return {
         "plan_index":   new_idx,
         "plan_results": results,
+        "plan_active":  plan_active,
     }
 
 
@@ -359,3 +357,119 @@ def validate_step_node(state):
 
     print(f"\033[92m[ValidateStep]: Βήμα {idx+1} — OK\033[0m")
     return {"plan_step_failed": False}
+
+
+# ────────────────────────────────────────────────────────────────
+# Replan Node — auto-skip αποτυχημένου βήματος
+# ────────────────────────────────────────────────────────────────
+
+def replan_node(state):
+    """
+    Καλείται όταν validate_step ανιχνεύσει αποτυχία.
+    Auto-skip: παραλείπει το αποτυχημένο βήμα, συνεχίζει στο επόμενο.
+    Αν δεν υπάρχει επόμενο → plan_active=False → graph → end_check.
+    """
+    tasks   = state.get("plan_tasks", [])
+    idx     = state.get("plan_index", 0)
+    results = list(state.get("plan_results", []))
+    skipped = list(state.get("replan_skipped_steps", []))
+
+    task_desc = tasks[idx]["description"] if idx < len(tasks) else f"Βήμα {idx + 1}"
+
+    # Καταγραφή skip
+    skipped.append(idx)
+    results.append(f"⚠️ Παραλείφθηκε: {task_desc}")
+
+    new_idx    = idx + 1
+    plan_active = new_idx < len(tasks)
+
+    action_msg = f"⚠️ Βήμα {idx + 1} ({task_desc}) παραλείφθηκε."
+    if plan_active:
+        action_msg += f" Συνεχίζω στο Βήμα {new_idx + 1}..."
+    else:
+        action_msg += " Τελείωσαν όλα τα βήματα."
+
+    print(f"\033[93m[Replan]: Βήμα {idx+1} skipped → {'task_executor' if plan_active else 'end_check'}\033[0m")
+
+    return {
+        "messages":             [AIMessage(content=action_msg)],
+        "plan_index":           new_idx,
+        "plan_results":         results,
+        "plan_active":          plan_active,
+        "plan_step_failed":     False,
+        "replan_skipped_steps": skipped,
+    }
+
+
+# ────────────────────────────────────────────────────────────────
+# End Check Node — τελικό summary + reflection
+# ────────────────────────────────────────────────────────────────
+
+def end_check_node(state):
+    """
+    Τρέχει μετά το τέλος ΟΛΩΝ των βημάτων (επιτυχή ή skip).
+    Δημιουργεί final summary, αποθηκεύει post-plan reflection.
+    """
+    goal    = state.get("plan_goal", "")
+    tasks   = state.get("plan_tasks", [])
+    results = state.get("plan_results", [])
+    skipped = state.get("replan_skipped_steps", [])
+
+    skipped_count = len(skipped)
+    total         = len(tasks)
+    success_count = total - skipped_count
+
+    if skipped_count == 0:
+        header = f"✅ **Plan ολοκληρώθηκε:** _{goal}_\n\n"
+    else:
+        header = (
+            f"⚠️ **Plan ολοκληρώθηκε** ({success_count}/{total} βήματα επιτυχή): _{goal}_\n\n"
+        )
+
+    summary = header
+    for i, task in enumerate(tasks):
+        result     = results[i] if i < len(results) else "(χωρίς αποτέλεσμα)"
+        skip_badge = " ⚠️ _παραλείφθηκε_" if i in skipped else ""
+        summary   += f"**{i + 1}. {task['description']}**{skip_badge}\n{result[:500]}\n\n"
+
+    print(f"\033[92m[EndCheck]: Plan done — {success_count}/{total} βήματα επιτυχή\033[0m")
+
+    # Post-plan reflection
+    try:
+        from services.gemini import safe_gemini_call
+        from services.reflection_engine import _save_reflection
+
+        steps_text = "\n".join(
+            f"{i+1}. {t['description']}: {(results[i] if i < len(results) else '')[:200]}"
+            for i, t in enumerate(tasks)
+        )
+        reflect_prompt = (
+            f"Ανέλυσε αυτό το ολοκληρωμένο plan και δώσε σύντομη αξιολόγηση.\n"
+            f"Goal: {goal}\nSteps:\n{steps_text}\n\n"
+            "Απάντησε με JSON:\n"
+            '{"observation": "τι παρατήρησες", "action": "τι θα βελτίωνες στο μέλλον", '
+            '"confidence": 0.7, "lesson": "το lesson learned"}\n'
+            "Μόνο JSON, χωρίς markdown."
+        )
+        resp = safe_gemini_call(reflect_prompt)
+        raw  = re.sub(r"```json|```", "", resp.text.strip()).strip()
+        data = json.loads(raw)
+        _save_reflection(
+            source="planner",
+            observation=data.get("observation", ""),
+            action=data.get("action", ""),
+            confidence=float(data.get("confidence", 0.7)),
+            lesson=data.get("lesson", ""),
+        )
+        print(f"\033[92m[EndCheck]: Post-plan reflection saved\033[0m")
+    except Exception as e:
+        print(f"\033[90m[EndCheck]: Reflection skip: {e}\033[0m")
+
+    return {
+        "messages":             [AIMessage(content=summary)],
+        "plan_active":          False,
+        "plan_tasks":           [],
+        "plan_index":           0,
+        "plan_results":         [],
+        "replan_skipped_steps": [],
+    }

@@ -32,6 +32,7 @@ class AgentState(TypedDict):
     plan_results: NotRequired[list]                 # αποτελέσματα βημάτων
     plan_goal: NotRequired[str]                     # το αρχικό goal
     plan_step_failed: NotRequired[bool]             # True αν το τελευταίο βήμα έδειξε αποτυχία
+    replan_skipped_steps: NotRequired[list]         # indices βημάτων που παραλείφθηκαν (replan)
     channel: NotRequired[str]                       # "telegram" | "web" | "terminal"
 
 # ────────────────────────────────────────────────────────────────

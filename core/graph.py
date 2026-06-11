@@ -14,7 +14,11 @@ from core.agents import (
     tech_agent_node, git_agent_node, mail_agent_node, dev_agent_node, tool_router
 )
 from core.approval import approval_check_node
-from core.planner import planner_node, task_executor_node, capture_result_node, pre_check_node, cancel_plan_node, validate_step_node
+from core.planner import (
+    planner_node, task_executor_node, capture_result_node,
+    pre_check_node, cancel_plan_node, validate_step_node,
+    replan_node, end_check_node,
+)
 from core.tool_loop_guard import inspect_tool_loop
 
 # [MASTRO-FIX]: Προσθήκη της λίστας με τους agents για να δουλέψει το routing
@@ -49,6 +53,8 @@ def build_graph():
     workflow.add_node("planner",        planner_node)
     workflow.add_node("task_executor",  task_executor_node)
     workflow.add_node("validate_step",  validate_step_node)
+    workflow.add_node("replan_node",    replan_node)
+    workflow.add_node("end_check",      end_check_node)
     workflow.add_node("capture_result", capture_result_node)
 
     # Entry → pre_check (ελέγχει pending plan πριν τον supervisor)
@@ -104,15 +110,29 @@ def build_graph():
         {name: name for name in AGENT_MAP}
     )
 
-    # validate_step → capture_result (πάντα, ανεξάρτητα από αποτέλεσμα)
-    workflow.add_edge("validate_step", "capture_result")
+    # validate_step → capture_result (OK) ή replan_node (failed)
+    workflow.add_conditional_edges(
+        "validate_step",
+        lambda state: "replan_node" if state.get("plan_step_failed") else "capture_result",
+        {"replan_node": "replan_node", "capture_result": "capture_result"}
+    )
 
-    # capture_result → task_executor (αν υπάρχουν άλλα) ή END
+    # replan_node → task_executor (αν υπάρχουν άλλα) ή end_check
+    workflow.add_conditional_edges(
+        "replan_node",
+        lambda state: "task_executor" if state.get("plan_active") else "end_check",
+        {"task_executor": "task_executor", "end_check": "end_check"}
+    )
+
+    # capture_result → task_executor (αν υπάρχουν άλλα) ή end_check
     workflow.add_conditional_edges(
         "capture_result",
-        lambda state: "task_executor" if state.get("plan_active") else END,
-        {"task_executor": "task_executor", END: END}
+        lambda state: "task_executor" if state.get("plan_active") else "end_check",
+        {"task_executor": "task_executor", "end_check": "end_check"}
     )
+
+    # end_check → END
+    workflow.add_edge("end_check", END)
 
     return workflow.compile(checkpointer=None)
 
