@@ -1278,17 +1278,40 @@ def read_local_file(file_path: str) -> str:
         os.path.realpath(os.path.join(base_dir, "uploads")),
         os.path.realpath(os.path.join(base_dir, "outputs")),
         os.path.realpath(os.path.join(base_dir, "watch_folder")),
+        # [SELF-DIAGNOSIS]: Source code φάκελοι — ο Αστακός μπορεί να διαβάζει
+        # τον κώδικά του για self-debugging (π.χ. γιατί απέτυχε ένα tool).
+        os.path.realpath(os.path.join(base_dir, "tools")),
+        os.path.realpath(os.path.join(base_dir, "core")),
+        os.path.realpath(os.path.join(base_dir, "memory")),
+        os.path.realpath(os.path.join(base_dir, "services")),
+        os.path.realpath(os.path.join(base_dir, "clients")),
+        os.path.realpath(os.path.join(base_dir, "astakos_skills")),
+        os.path.realpath(os.path.join(base_dir, "api")),
     ]
     _allowed_files = [
         os.path.realpath(os.path.join(BASE_DIR, "messenger_draft.json")),
     ]
+    # [SECURITY]: Sensitive αρχεία που δεν επιτρέπονται ακόμα και αν είναι σε allowed dir
+    _blocked_filenames = {
+        "config.py", ".env", "secrets.py",
+    }
+    _blocked_extensions = {".db", ".sqlite", ".sqlite3", ".key", ".pem"}
+
+    def _is_blocked(path):
+        name = os.path.basename(path)
+        ext  = os.path.splitext(name)[1].lower()
+        return name in _blocked_filenames or ext in _blocked_extensions
 
     def _in_allowed(path):
         real = os.path.realpath(path)
+        if _is_blocked(path):
+            return False
         return any(real.startswith(d + os.sep) or real == d for d in _allowed_dirs)
 
     def _is_allowed_file(path):
         real = os.path.realpath(path)
+        if _is_blocked(path):
+            return False
         return any(real == f for f in _allowed_files)
 
     full_path = None
@@ -2230,6 +2253,63 @@ def update_goal_status_tool(project: str, status: str) -> str:
     return f"❌ Δεν βρέθηκε goal '{project}'."
 
 
+@tool
+def tool_stats(days: int = 7) -> str:
+    """
+    Εμφανίζει στατιστικά απόδοσης των tools για τις τελευταίες N μέρες.
+    days: Πόσες μέρες πίσω να κοιτάξει (default 7).
+    Επιστρέφει ανά tool: κλήσεις, σφάλματα, error rate, μέση διάρκεια.
+    """
+    import os, json
+    from datetime import datetime, timedelta
+    from collections import defaultdict
+
+    traces_dir = os.path.join(os.path.dirname(__file__), "..", "logs", "traces")
+    if not os.path.isdir(traces_dir):
+        return "❌ Δεν βρέθηκε φάκελος traces."
+
+    stats: dict[str, dict] = defaultdict(lambda: {"calls": 0, "errors": 0, "durations": []})
+
+    today = datetime.now().date()
+    loaded_days = 0
+    for i in range(days):
+        day = today - timedelta(days=i)
+        path = os.path.join(traces_dir, f"{day}.json")
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                entries = json.load(f)
+        except Exception:
+            continue
+        loaded_days += 1
+        for entry in entries:
+            for tc in entry.get("tool_calls", []):
+                name = tc.get("tool", "unknown")
+                stats[name]["calls"] += 1
+                if tc.get("error"):
+                    stats[name]["errors"] += 1
+                dur = tc.get("duration_ms")
+                if dur is not None:
+                    stats[name]["durations"].append(dur)
+
+    if not stats:
+        return f"📊 Δεν βρέθηκαν traces για τις τελευταίες {days} μέρες."
+
+    # Ταξινόμηση: πρώτα όσα έχουν errors, μετά αλφαβητικά
+    rows = []
+    for name, s in sorted(stats.items(), key=lambda x: (-x[1]["errors"], x[0])):
+        calls = s["calls"]
+        errors = s["errors"]
+        rate = f"{errors/calls*100:.0f}%" if calls else "—"
+        avg_dur = f"{sum(s['durations'])//len(s['durations'])}ms" if s["durations"] else "—"
+        err_icon = "🔴" if errors > 0 else "✅"
+        rows.append(f"{err_icon} {name}: {calls} κλήσεις, {errors} σφάλματα ({rate}), avg {avg_dur}")
+
+    header = f"📊 Tool Stats — τελευταίες {days} μέρες ({loaded_days} αρχεία traces)\n"
+    return header + "\n".join(rows)
+
+
 all_tools = [
     search_memory, save_to_memory, delete_from_memory, retrieve_photo, update_pending_linkedin_post, process_and_clear_linkedin_post,
     set_local_reminder, set_reminder, manage_list,
@@ -2239,7 +2319,7 @@ all_tools = [
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
     search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
-    duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool,
+    duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, tool_stats,
     repo_mapper,
     scan_receipt,
     text_stats,

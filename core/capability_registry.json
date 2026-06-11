@@ -1,5 +1,13 @@
 [
   {
+    "name": "tool_stats",
+    "description": "Εμφανίζει στατιστικά απόδοσης tools: κλήσεις, σφάλματα, error rate, avg duration για τις τελευταίες N μέρες.",
+    "agent": "Tech_Agent",
+    "risk_level": "SAFE",
+    "priority": 8,
+    "triggers": ["tool stats", "ποια tools αποτυγχάνουν", "tool performance", "tool errors", "στατιστικά tools", "αποτυχίες tools", "tool failures", "πόσες φορές καλέστηκε"]
+  },
+  {
     "name": "text_stats",
     "description": "Calculates text statistics including characters, words, lines, and estimated reading time.",
     "agent": "Dev_Agent",
