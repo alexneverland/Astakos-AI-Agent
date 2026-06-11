@@ -43,7 +43,7 @@ def _effective_risk(tc: dict) -> str:
             return "CRITICAL"
         elif action in _DRIVE_SAFE:
             return "SAFE"
-        return "WARNING"  # upload/download/rename/create_folder
+        return "NOTIFY"  # upload/download/rename/create_folder → inform but don't block
     if name == "mail_manager":
         action = str(tc.get("args", {}).get("action", "")).lower()
         if action in {"send", "reply", "delete"}:
@@ -270,13 +270,21 @@ def approval_check_node(state):
     critical_calls = [tc for tc in tool_calls if is_critical(tc)]
 
     if not critical_calls:
-        # Όλα SAFE/WARNING — πάμε κανονικά
         risk_levels = [_effective_risk(tc) for tc in tool_calls]
-        if "WARNING" in risk_levels:
+
+        # NOTIFY: εκτελεί + Telegram info (χωρίς buttons)
+        if "NOTIFY" in risk_levels:
+            for tc in tool_calls:
+                if _effective_risk(tc) == "NOTIFY":
+                    print(f"\033[96m[Approval]: 📣 NOTIFY tool: {tc['name']}\033[0m")
+                    _notify_telegram_notify(tc)
+
+        # WARNING: εκτελεί + log μόνο στο console, χωρίς Telegram
+        elif "WARNING" in risk_levels:
             for tc in tool_calls:
                 if _effective_risk(tc) == "WARNING":
                     print(f"\033[93m[Approval]: ⚠️ WARNING tool: {tc['name']}\033[0m")
-                    _notify_telegram_warning(tc)
+
         return {"approval_status": "ok"}
 
     # Υπάρχουν CRITICAL calls — τα αποθηκεύουμε και ζητάμε approval
@@ -311,19 +319,19 @@ def _args_preview(args: dict) -> str:
     return ", ".join(parts) or "—"
 
 
-def _notify_telegram_warning(tool_call: dict):
-    """Στέλνει Telegram info για WARNING tools (χωρίς approve/reject)."""
+def _notify_telegram_notify(tool_call: dict):
+    """Στέλνει Telegram info για NOTIFY tools (εκτελείται, χωρίς approve/reject)."""
     try:
         from tools.telegram import send_telegram_msg
         tool_name = tool_call["name"]
         args_prev = _args_preview(tool_call.get("args", {}))
         text = (
-            f"⚠️ <b>WARNING — {tool_name}</b>\n"
+            f"📣 <b>{tool_name}</b>\n"
             f"<code>{args_prev}</code>"
         )
         send_telegram_msg(text)
     except Exception as e:
-        print(f"\033[93m[Approval]: Telegram warning notify error: {e}\033[0m")
+        print(f"\033[93m[Approval]: Telegram notify error: {e}\033[0m")
 
 
 def _notify_telegram(tool_call: dict):
