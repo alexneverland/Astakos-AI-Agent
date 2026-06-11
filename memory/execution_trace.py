@@ -64,6 +64,8 @@ class ExecutionTrace:
     def process_event(self, event: dict):
         """Καλείται για κάθε event του graph.stream()."""
         for node, data in event.items():
+            if data is None:
+                continue
             msgs = data.get("messages", [])
             for msg in msgs:
                 self._process_message(node, msg)
