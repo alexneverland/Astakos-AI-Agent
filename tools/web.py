@@ -112,11 +112,12 @@ def _format_rss_pub_date(pub_date: str) -> str:
 
 
 @tool
-def relay_local_payload(target_entity: str, payload_data: str) -> str:
+def relay_local_payload(target_entity: str, payload_data: str, image_path: str = "") -> str:
     """
     Αποθηκεύει ένα προσχέδιο μηνύματος Messenger (Facebook).
-    Χρησιμοποίησέ το ΟΤΑΝ προτείνεις στον χρήστη να στείλει ένα μήνυμα, 
+    Χρησιμοποίησέ το ΟΤΑΝ προτείνεις στον χρήστη να στείλει ένα μήνυμα,
     πριν πάρεις την τελική του έγκριση.
+    Προαιρετικά, δώσε image_path για να επισυναφθεί εικόνα μαζί με το μήνυμα.
     """
     from core.messenger_draft import save_draft
 
@@ -130,11 +131,15 @@ def relay_local_payload(target_entity: str, payload_data: str) -> str:
     if not (payload_data or "").strip():
         return "❌ Δεν αποθήκευσα Messenger draft. Λείπει το κείμενο του μηνύματος."
 
-    save_draft(target_entity, payload_data)
+    # Validate image path if provided
+    if image_path and not os.path.exists(image_path):
+        return f"❌ Δεν αποθήκευσα Messenger draft. Η εικόνα δεν βρέθηκε: {image_path}"
+
+    save_draft(target_entity, payload_data, image_path=image_path)
 
     # Επιστρέφουμε clean output — οι οδηγίες εμφάνισης είναι στο prompts.md
-    # Το Gemini δεν πρέπει να τυπώνει meta-instructions verbatim στο chat
-    return f"✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: {payload_data}"
+    img_info = f"\nimage: {image_path}" if image_path else ""
+    return f"✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: {payload_data}{img_info}"
 @tool
 def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
     """Φέρνει ειδήσεις από το Google News με τίτλο, περίληψη, πηγή και link."""
@@ -357,12 +362,14 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     draft_file = MESSENGER_DRAFT_FILE
 
     # 1. [MASTRO INTERCEPTOR]: Διάβασε το draft
+    image_path = ""
     if not target_name or not message:
         is_active, reason, draft = active_draft_status()
         if not is_active:
             return inactive_draft_message(reason)
         target_name = target_name or draft.get("target_name", "")
         message = message or draft.get("message", "")
+        image_path = draft.get("image_path", "")
         print(f"\033[93m[Messenger]: Βρέθηκε draft για {target_name}. Εκτέλεση...\033[0m")
 
     # 2. [MASTRO-ALIAS]: Μετατροπή Ονόματος σε ID
@@ -412,11 +419,32 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
             page.goto(chat_url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(5.0)
 
+            # 4a. [IMAGE ATTACHMENT]: Επισύναψε εικόνα αν υπάρχει
+            if image_path and os.path.exists(image_path):
+                print(f"\033[96m[Messenger]: Επισύναψη εικόνας: {image_path}\033[0m")
+                try:
+                    # Messenger έχει hidden file input — το βρίσκουμε και βάζουμε το αρχείο
+                    file_input = page.locator('input[type="file"]').first
+                    file_input.set_input_files(image_path)
+                    # Περιμένουμε να εμφανιστεί preview της εικόνας (max 15s)
+                    page.wait_for_selector(
+                        'img[src*="blob:"], div[aria-label*="εικόν"], div[aria-label*="photo"], '
+                        'div[aria-label*="image"], div[class*="image"], div[class*="photo"]',
+                        timeout=15000,
+                    )
+                    print("\033[92m[Messenger]: Εικόνα επισυνάφθηκε ✓\033[0m")
+                    time.sleep(1.0)
+                except Exception as img_err:
+                    print(f"\033[93m[Messenger]: ⚠️ Αποτυχία επισύναψης εικόνας: {img_err}\033[0m")
+                    print("\033[93m[Messenger]: Συνεχίζω με αποστολή μόνο κειμένου.\033[0m")
+
+            # 4b. [SEND TEXT]: Πληκτρολόγηση + Enter
             chat_box = page.locator('div[role="textbox"]').last
             chat_box.wait_for(state="visible", timeout=10000)
             chat_box.click()
-            chat_box.fill(message)
-            time.sleep(0.5)
+            if message:
+                chat_box.fill(message)
+                time.sleep(0.5)
             chat_box.press("Enter")
             time.sleep(3.0)
 
@@ -453,7 +481,8 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     except Exception as _ae:
         print(f"⚠️ [Messenger Auto-Confirm skipped]: {_ae}")
 
-    return f"✅ Το μήνυμα στάλθηκε στον/στη {target_name}!"
+    img_suffix = f" (με εικόνα: {os.path.basename(image_path)})" if image_path and os.path.exists(image_path) else ""
+    return f"✅ Το μήνυμα στάλθηκε στον/στη {target_name}!{img_suffix}"
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 @tool

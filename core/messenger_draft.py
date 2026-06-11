@@ -24,22 +24,25 @@ def _parse_datetime(value: str):
         return None
 
 
-def build_draft(target_name: str, message: str, *, now: datetime | None = None) -> dict:
+def build_draft(target_name: str, message: str, *, image_path: str = "", now: datetime | None = None) -> dict:
     _, ttl_seconds = _settings()
     now = now or datetime.now()
     expires_at = now + timedelta(seconds=ttl_seconds)
-    return {
+    draft = {
         "target_name": target_name,
         "message": message,
         "status": "pending",
         "created_at": now.isoformat(timespec="seconds"),
         "expires_at": expires_at.isoformat(timespec="seconds"),
     }
+    if image_path:
+        draft["image_path"] = image_path
+    return draft
 
 
-def save_draft(target_name: str, message: str) -> dict:
+def save_draft(target_name: str, message: str, *, image_path: str = "") -> dict:
     draft_file, _ = _settings()
-    draft = build_draft(target_name, message)
+    draft = build_draft(target_name, message, image_path=image_path)
     with open(draft_file, "w", encoding="utf-8") as f:
         json.dump(draft, f, ensure_ascii=False, indent=4)
     return draft
