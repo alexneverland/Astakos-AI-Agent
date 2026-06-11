@@ -126,7 +126,11 @@ def task_executor_node(state):
             context += f"Βήμα {i+1}: {r[:300]}\n"
         context += "[/ΑΠΟΤΕΛΕΣΜΑΤΑ]\n\n"
 
-    instruction = f"{context}[PLAN ΒΗΜΑ {idx+1}/{len(tasks)}]: {task['instruction']}"
+    instruction = (
+        f"{context}"
+        f"[PLAN ΒΗΜΑ {idx+1}/{len(tasks)}]: {task['instruction']}\n\n"
+        f"⚠️ Εκτέλεσε ΜΟΝΟ αυτό το βήμα. Μη προχωρήσεις στο επόμενο βήμα."
+    )
 
     # Routing: χρησιμοποιούμε capability_lookup για να βρούμε τον σωστό agent
     try:
@@ -345,8 +349,17 @@ def validate_step_node(state):
                 last_result = content
                 break
 
-    result_lower = last_result.lower()
-    detected_failure = any(sig in result_lower for sig in _FAILURE_SIGNALS)
+    # Ελέγχουμε και το τελευταίο tool output (ToolMessage) για error signals
+    last_tool_result = ""
+    for msg in reversed(state["messages"]):
+        if getattr(msg, "type", "") == "tool" or msg.__class__.__name__ == "ToolMessage":
+            content = clean_message(getattr(msg, "content", ""))
+            if content:
+                last_tool_result = content
+                break
+
+    check_text = (last_result + " " + last_tool_result).lower()
+    detected_failure = any(sig in check_text for sig in _FAILURE_SIGNALS)
 
     if detected_failure:
         warning = (
