@@ -111,6 +111,13 @@ function logRow(e) {
     <td style="font-size:11px;color:var(--muted)">${extra}</td>
   </tr>`;
 }
+function cleanEventName(raw){
+  if(!raw) return '—';
+  // Legacy format: str({'event': 'Foo', 'sent_at': datetime(...)}) → εξάγω μόνο το όνομα
+  const m = raw.match(/['\"]event['\"]\s*:\s*['\"]([^'"]+)['"]/);
+  if(m) return m[1];
+  return raw;
+}
 function renderTimelineCard(){
   const container = document.getElementById('timeline-section');
   if(!container) return;
@@ -125,7 +132,7 @@ function renderTimelineCard(){
       <td class="off" style="white-space:nowrap;font-size:11px">${date} ${ts}</td>
       <td>${actionIcon(e.action)} <span class="${actionColor(e.action)}">${e.action}</span></td>
       <td class="off">#${e.routine_id??'?'}</td>
-      <td style="max-width:420px;white-space:normal;word-break:break-word">${e.event||'—'}</td>
+      <td style="max-width:420px;white-space:normal;word-break:break-word">${cleanEventName(e.event)}</td>
       <td class="off" style="font-size:11px">${extraInfo(e)}</td>
     </tr>`;
   }).join('');
