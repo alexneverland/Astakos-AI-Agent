@@ -540,8 +540,24 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
                 if match:
                     filename = os.path.basename(match.group(1).strip().replace("]", ""))
                 else:
-                    filename = os.path.basename(fact.split(":")[-1].strip().replace("]", ""))
-                
+                    # Fallback: ψάξε για πραγματικό filename (.jpg/.png/κλπ) στα texts
+                    file_match = re.search(
+                        r"\b([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|gif|webp|pdf|txt|md))\b",
+                        user_text + " " + ai_text,
+                        re.IGNORECASE,
+                    )
+                    if file_match:
+                        filename = file_match.group(1)
+                    else:
+                        # Δεν βρέθηκε έγκυρο filename — αποφυγή corrupted entry
+                        print(f"\033[93m[Sifter]: [PHOTO] χωρίς έγκυρο filename — παράκαμψη photo index.\033[0m")
+                        filename = None
+
+                if not filename:
+                    # Συνέχισε στο ChromaDB save, αλλά μην γράψεις στο photos index
+                    memory.save(memory_type="fact", fact=fact, category=category, agent_name=agent_name)
+                    continue
+
                 file_path = os.path.join(PHOTOS_DIR, filename)
 
                 # Αν το Gemini δεν έβγαλε analysis, παίρνουμε την απάντηση του AI ως analysis
