@@ -41,7 +41,7 @@ from core.graph import graph
 from core.agents import clean_message, filter_messages
 from memory.vector_store import memory
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
-from memory.session_memory import trigger_memory_sifter, log_exchange, _run_session_summary
+from memory.session_memory import trigger_memory_sifter, log_exchange, _run_session_summary, startup_stale_cleanup
 from tools.telegram import send_telegram_msg, send_telegram_voice, send_telegram_msg_full
 from services.gemini import safe_gemini_call
 from services.embeddings import embeddings
@@ -2039,7 +2039,8 @@ if __name__ == "__main__":
         startup_check_missed_routines()
     threading.Thread(target=_delayed_missed_check, daemon=True).start()
 
-    # Φόρτωσε το ιστορικό από τον δίσκο
+    # Stale working memory cleanup (hard restart recovery)
+    startup_stale_cleanup(channel="telegram")
 
 
     print("\u2501" * 50)

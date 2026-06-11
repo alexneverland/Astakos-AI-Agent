@@ -587,3 +587,70 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
 def trigger_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
     """Wrapper — εκτελείται μέσω Queue Worker."""
     _run_memory_sifter(user_text, ai_text, agent_name, channel)
+
+
+# ════════════════════════════════════════════════════════════════
+# STARTUP STALE CLEANUP
+# ════════════════════════════════════════════════════════════════
+
+def startup_stale_cleanup(channel: str = "telegram") -> bool:
+    """
+    Εκτελείται κατά την εκκίνηση.
+    Αν το astakos_working_memory.json έχει entries από προηγούμενη μέρα
+    (δηλ. δεν έτρεξε /end λόγω hard restart), τρέχει πρώτα session summary
+    (για να αποθηκευτούν οι ανεπεξέργαστοι exchanges) και μετά σβήνει τα tags.
+
+    Επιστρέφει True αν εκτελέστηκε cleanup, False αν δεν χρειαζόταν.
+    """
+    try:
+        from config import WORKING_MEMORY_FILE
+        from datetime import date as _date
+
+        if not os.path.exists(WORKING_MEMORY_FILE):
+            print("\033[90m[Startup]: Δεν βρέθηκε working memory file — παράκαμψη.\033[0m")
+            return False
+
+        # Έλεγξε αν το αρχείο έχει entries
+        try:
+            with open(WORKING_MEMORY_FILE, "r", encoding="utf-8") as f:
+                tags = json.load(f)
+        except Exception:
+            tags = []
+
+        if not tags:
+            print("\033[90m[Startup]: Working memory κενό — παράκαμψη.\033[0m")
+            return False
+
+        # Έλεγξε αν το αρχείο τροποποιήθηκε πριν από σήμερα
+        mtime = os.path.getmtime(WORKING_MEMORY_FILE)
+        file_date = _date.fromtimestamp(mtime)
+        today = _date.today()
+
+        if file_date >= today:
+            print(f"\033[90m[Startup]: Working memory είναι από σήμερα ({file_date}) — παράκαμψη.\033[0m")
+            return False
+
+        print(
+            f"\033[93m[Startup]: ⚠️  Βρέθηκαν {len(tags)} stale tags από {file_date} "
+            f"(hard restart εντοπίστηκε). Εκτέλεση session summary πριν τον καθαρισμό...\033[0m"
+        )
+
+        # 1. Τρέξε πρώτα το session summary (αποθηκεύει unsummarized exchanges)
+        _run_session_summary(channel=channel)
+
+        # 2. Σβήσε τα stale tags
+        try:
+            with open(WORKING_MEMORY_FILE, "w", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            print(
+                f"\033[92m[Startup]: ✅ Working memory cleared — {len(tags)} stale tags "
+                f"από {file_date} επεξεργάστηκαν και αφαιρέθηκαν.\033[0m"
+            )
+            return True
+        except Exception as e:
+            print(f"\033[91m[Startup]: ❌ Αποτυχία καθαρισμού working memory: {e}\033[0m")
+            return False
+
+    except Exception as e:
+        print(f"\033[91m[Startup Cleanup Error]: {e}\033[0m")
+        return False
