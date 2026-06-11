@@ -1866,7 +1866,11 @@ class AstakosScheduler:
     def __init__(self):
         self._jobs = []
 
-    def register(self, func, interval_seconds: int, name: str = None):
+    def register(self, func, interval_seconds: int, name: str = None, verbose: bool = True):
+        """
+        verbose=True  → log start/complete κάθε run (για σπάνια/σημαντικά jobs)
+        verbose=False → log μόνο errors (για frequent jobs: reminders, routines)
+        """
         self._jobs.append({
             "name":          name or func.__name__,
             "func":          func,
@@ -1876,8 +1880,9 @@ class AstakosScheduler:
             "fail_count":    0,
             "last_error":    None,
             "disabled":      False,
+            "verbose":       verbose,
         })
-        print(f"\033[90m[Scheduler]: Registered '{name or func.__name__}' every {interval_seconds}s\033[0m")
+        print(f"\033[90m[Scheduler]: Registered '{name or func.__name__}' every {interval_seconds}s (verbose={verbose})\033[0m")
 
     def _write_snapshot(self):
         """Γράφει runtime_snapshot.json κάθε heartbeat — διαβάζεται από /debug/runtime."""
@@ -1932,12 +1937,14 @@ class AstakosScheduler:
                     continue
 
                 t_start = time.time()
-                log_event(job["name"], "start")
+                if job.get("verbose", True):
+                    log_event(job["name"], "start")
                 try:
                     job["func"]()
                     job["fail_count"] = 0
                     job["last_error"] = None
-                    log_event(job["name"], "complete", duration=round(time.time()-t_start, 2))
+                    if job.get("verbose", True):
+                        log_event(job["name"], "complete", duration=round(time.time()-t_start, 2))
                 except DBWriteError as e:
                     job["fail_count"] += 1
                     job["last_error"] = str(e)
@@ -2030,12 +2037,12 @@ if __name__ == "__main__":
         print(f"\033[93m[Recovery]: \u03a6\u03bf\u03c1\u03c4\u03ce\u03b8\u03b7\u03ba\u03b1\u03bd {len(pending_routine_confirmations)} pending confirmations.\033[0m")
 
     astakos_scheduler = AstakosScheduler()
-    astakos_scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders")
-    astakos_scheduler.register(job_check_routines,  interval_seconds=60,    name="routines")
-    astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive")
-    astakos_scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics")
-    astakos_scheduler.register(job_morning_fit_briefing, interval_seconds=3600, name="fit_briefing")
-    astakos_scheduler.register(job_goal_followup,       interval_seconds=3600, name="goal_followup")
+    astakos_scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders",   verbose=False)
+    astakos_scheduler.register(job_check_routines,  interval_seconds=60,    name="routines",    verbose=False)
+    astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive",   verbose=True)
+    astakos_scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics",   verbose=True)
+    astakos_scheduler.register(job_morning_fit_briefing, interval_seconds=3600, name="fit_briefing", verbose=True)
+    astakos_scheduler.register(job_goal_followup,       interval_seconds=3600, name="goal_followup", verbose=True)
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
 
     # Startup check για χαμένες ρουτίνες (10s καθυστέρηση για πλήρη αρχικοποίηση)
