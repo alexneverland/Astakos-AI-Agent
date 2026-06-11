@@ -486,7 +486,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 for rid in list(pending_routine_confirmations.keys()):
                     confirm_routine(rid)
                     mark_routine_responded(rid)
-                    log_event("routines","confirmed",routine_id=rid,event=pending_routine_confirmations[rid])
+                    log_event("routines","confirmed",routine_id=rid,event=pending_routine_confirmations[rid].get("event","?"))
                     print(f"✅ [Web Routine Confirmed]: {pending_routine_confirmations[rid]}")
                 pending_routine_confirmations.clear()
                 clear_pending_confirmations()
@@ -495,7 +495,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 from memory.event_log import log_event
                 for rid in list(pending_routine_confirmations.keys()):
                     decay_routine(rid)
-                    log_event("routines","dismissed",routine_id=rid,event=pending_routine_confirmations[rid])
+                    log_event("routines","dismissed",routine_id=rid,event=pending_routine_confirmations[rid].get("event","?"))
                     print(f"📉 [Web Routine Dismissed]: {pending_routine_confirmations[rid]}")
                 pending_routine_confirmations.clear()
                 clear_pending_confirmations()

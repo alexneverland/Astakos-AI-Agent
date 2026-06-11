@@ -672,9 +672,9 @@ def handle_message(user_text: str, chat_id: str):
                 confirm_routine(rid)
                 mark_routine_responded(rid)
                 from memory.event_log import log_event
-                log_event("routines", "confirmed", routine_id=rid, event=pending_routine_confirmations[rid])
+                log_event("routines", "confirmed", routine_id=rid, event=pending_routine_confirmations[rid].get("event","?"))
                 print(f"✅ [Routine Confirmed]: {pending_routine_confirmations[rid]}")
-                bus.emit("routine_confirmed", routine_id=rid, event=pending_routine_confirmations[rid], channel="telegram")
+                bus.emit("routine_confirmed", routine_id=rid, event=pending_routine_confirmations[rid].get("event","?"), channel="telegram")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
         elif any(w in text_check for w in no_words) or llm_dismissed:
@@ -682,9 +682,9 @@ def handle_message(user_text: str, chat_id: str):
             for rid in list(pending_routine_confirmations.keys()):
                 decay_routine(rid)
                 from memory.event_log import log_event
-                log_event("routines", "dismissed", routine_id=rid, event=pending_routine_confirmations[rid])
+                log_event("routines", "dismissed", routine_id=rid, event=pending_routine_confirmations[rid].get("event","?"))
                 print(f"📉 [Routine Dismissed]: {pending_routine_confirmations[rid]}")
-                bus.emit("routine_dismissed", routine_id=rid, event=pending_routine_confirmations[rid], channel="telegram")
+                bus.emit("routine_dismissed", routine_id=rid, event=pending_routine_confirmations[rid].get("event","?"), channel="telegram")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
     # ── SAFE EXECUTOR CONFIRMATION LOOP ──────────────────────────

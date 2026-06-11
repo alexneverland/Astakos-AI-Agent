@@ -207,10 +207,13 @@ def get_routine_timeline(routine_id: int = None, days: int = 3) -> list:
             with open(log_file, "r", encoding="utf-8") as f:
                 entries = json.load(f)
             for e in entries:
+                if e.get("job") != "routines":
+                    continue  # αγνοούμε events από άλλα jobs (reminders, proactive κ.λπ.)
                 if routine_id is None or str(e.get("routine_id")) == str(routine_id):
                     if e.get("action") in (
                         "triggered", "sent", "confirmed", "timeout",
-                        "dismissed", "decay", "cooldown_extended", "state_change"
+                        "dismissed", "decay", "cooldown_extended", "state_change",
+                        "deferred_followup", "timeout_decay", "skipped",
                     ):
                         results.append(e)
         except Exception:
