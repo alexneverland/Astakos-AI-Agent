@@ -75,14 +75,14 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | LLM-Crafted Proactive Messages | Reminder text is generated naturally by the LLM instead of static templates, with recent Telegram/Web history and timestamps injected so messages feel contextual instead of random. |
 | Central Scheduler | `AstakosScheduler` runs a single background scheduler with watchdogs, rate limits, and quiet hours. |
 | Anti-Spam Intelligence | Adaptive cooldown: 20h → 40h → 72h on repeated ignores, plus batching for simultaneous routines. |
-| Capability Registry | Keyword-based pre-routing before the LLM Supervisor for faster dispatch and fewer wasted tokens. |
+| Capability Registry | Keyword-based pre-routing before the LLM Supervisor for faster dispatch and fewer wasted tokens. 37 capabilities with `name`, `agent`, `risk_level`, `priority`, and `triggers` fields. |
 | LLM Routine Judge | Routine confirmation uses a fast Gemini call to interpret natural-language replies ("θα πάω να τους βρω") instead of keyword-only matching. Falls back to UNCLEAR on failure. |
 | File Generator Tools | `generate_excel`, `generate_word_doc`, `generate_pdf`, `generate_csv` — create formatted files from agent-supplied data and save to any path (defaults to Desktop). Risk: SAFE. |
 | File Delivery | When a file is created, the Web UI shows a file card with a **📂 Google Drive** button (upload-on-click + inline preview iframe). Telegram receives the actual file via `sendDocument`. |
 | Google Drive Upload | `tools/gdrive.py` — uploads any local file to Google Drive via ADC, sets public read permissions, and returns a shareable view URL. Used by the Web UI `/upload-to-drive` endpoint. |
 | Project Code Tools | `read_project_file`, `edit_project_file`, `write_project_file`, `grep_project_files`, `list_project_files` — permission-gated code navigation and editing with syntax check and rollback. |
 | Long-Term Goals | ChromaDB goal tracking injected into prompts, with `/plan` for multi-step execution. |
-| Action Approval Levels | SAFE / WARNING / CRITICAL risk levels per tool. CRITICAL actions require approval before execution. |
+| Action Approval Levels | 4-level risk system: **SAFE** (silent), **WARNING** (console log only, no Telegram), **NOTIFY** (execute + Telegram info, no buttons), **CRITICAL** (block + Telegram ✅/❌ approval). Defined in `core/tool_risk.py`; dynamic override per tool in `core/approval.py`. |
 | Approval TTL Cleanup | Pending CRITICAL approvals auto-expire after 60 min via `expire_stale_pending()`; stale entries are marked `expired` and blocked from execution. |
 | Web UI Live Refresh | `/messages/poll?after_id=N&channel=telegram` endpoint + frontend `setInterval` polling every 5 s; Telegram messages appear in Web UI without manual page reload. |
 | register_tool dry_run | `register_tool(dry_run=True)` previews all file changes (system.py, tool_risk.py, capability_registry) without writing; path traversal protection and Python identifier validation added. |
