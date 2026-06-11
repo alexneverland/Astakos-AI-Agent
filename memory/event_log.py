@@ -70,7 +70,9 @@ def log_event(job: str, action: str, **kwargs):
                 except OSError:
                     pass  # fsync δεν υποστηρίζεται παντού — flush αρκεί
             # Windows Defender / antivirus μπορεί να κλειδώσει το αρχείο
-            # για λίγα ms κατά τη σάρωση → retry με backoff
+            # για λίγα ms κατά τη σάρωση → retry με backoff.
+            # WinError 5 (PermissionError) μπορεί να εμφανιστεί κατά τα
+            # watchdog restarts όταν τρέχουν 2 processes ταυτόχρονα.
             for _attempt in range(5):
                 try:
                     os.replace(tmp_file, log_file)
@@ -80,7 +82,27 @@ def log_event(job: str, action: str, **kwargs):
                         import time as _time
                         _time.sleep(0.05 * (_attempt + 1))
                     else:
-                        raise
+                        # WinError 5: cross-process contention (watchdog restart).
+                        # Fallback: αναμένουμε 500ms και γράφουμε απευθείας.
+                        # Non-atomic αλλά το event δεν χάνεται σιωπηλά.
+                        import time as _time
+                        _time.sleep(0.5)
+                        _written = False
+                        try:
+                            with open(log_file, "w", encoding="utf-8") as _f:
+                                json.dump(entries, _f, ensure_ascii=False, indent=2)
+                            _written = True
+                            print("⚠️ [event_log]: os.replace WinError 5 → direct write fallback OK")
+                        except Exception as _fe:
+                            print(f"⚠️ [event_log]: direct write also failed: {_fe}")
+                        finally:
+                            try:
+                                os.unlink(tmp_file)
+                            except OSError:
+                                pass
+                        if not _written:
+                            raise
+                        break
 
     except Exception as e:
         print(f"⚠️ [event_log]: {e}")
