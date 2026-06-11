@@ -109,8 +109,8 @@ def register_tool(
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tool_name):
         return "System Error: invalid tool_name. Use a Python identifier, e.g. my_tool."
 
-    if risk not in ("SAFE", "WARNING", "CRITICAL"):
-        return f"❌ Μη έγκυρο risk: '{risk}'. Επίτρεπτα: SAFE, WARNING, CRITICAL."
+    if risk not in ("SAFE", "WARNING", "NOTIFY", "CRITICAL"):
+        return f"❌ Μη έγκυρο risk: '{risk}'. Επίτρεπτα: SAFE, WARNING, NOTIFY, CRITICAL."
 
     skills_dir = os.path.realpath(os.path.join(BASE_DIR, "astakos_skills"))
     skill_path = os.path.realpath(os.path.join(skills_dir, f"{tool_name}.py"))
@@ -226,6 +226,7 @@ def register_tool(
                 "name":        tool_name,
                 "description": description or f"Tool: {tool_name}",
                 "agent":       agent,
+                "risk_level":  risk,
                 "priority":    9,
                 "triggers":    trigger_list,
             })
