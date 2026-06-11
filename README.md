@@ -135,6 +135,8 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Skill Creation Flow | New skills are created with `write_custom_tool`, validated for `@tool`, previewed with `register_tool(dry_run=True)`, and applied only after approval. Skills that need Gemini/vision use shared `core.brain` clients instead of raw API keys. |
 | Planner v2 | `/plan` decomposes a goal into tasks with a **confirmation gate** before execution. Auto-plan LLM judge detects multi-step intent without needing `/plan`. Progress UI shows `⏳ Βήμα X/N` per step. `validate_step_node` detects failures via AI response + tool output heuristics. `replan_node` auto-skips failed steps and continues. `end_check_node` generates a final summary (`✅` / `⚠️ X/N βήματα επιτυχή`) and saves a post-plan reflection. |
 | Execution Trace System | Every agent turn records agent name, tools called, duration, errors, and loop events to `logs/traces/YYYY-MM-DD.json`. Viewable at `/debug/traces` with full-width colored tool names and response preview. |
+| Tool Performance Stats | `tool_stats(days=N)` reads execution traces and returns per-tool call count, error count, error rate, and average duration — sorted by errors descending. Ask Astakos "tool stats last 7 days" for an instant health report. |
+| Self-Diagnosis via Source Read | `read_local_file` now allows reading from `tools/`, `core/`, `memory/`, `services/`, `clients/`, `astakos_skills/`, and `api/`. Sensitive files (`config.py`, `.env`, `*.db`) remain blocked. Astakos can inspect its own code when debugging a failed tool call. |
 
 ---
 
@@ -476,6 +478,9 @@ Shutdown behavior:
 - [x] Project Code Tools — `read_project_file`, `edit_project_file` (old→new patch + syntax check + rollback), `write_project_file`, `grep_project_files`, `list_project_files` with a JSON permission model (`project_access.json`). Core files escalate to CRITICAL; other edits are WARNING.
 - [x] LLM Routine Judge — implicit routine confirmation replaced with a fast Gemini call that returns YES / NO / UNCLEAR. Natural phrases like "θα πάω να τους βρω" now correctly confirm a pending park routine without requiring event keywords. Fallback to UNCLEAR on LLM error.
 - [x] WARNING Telegram Notifications — WARNING-tier tool calls (e.g. `git push`) send an informational Telegram message without blocking execution; only CRITICAL actions require approval.
+- [x] Tool Performance Stats — `tool_stats(days=N)` aggregates execution traces and reports per-tool calls, errors, error rate, and avg duration sorted by error count. Registered in Capability Registry under Tech_Agent.
+- [x] Self-Diagnosis via Source Read — `read_local_file` whitelist expanded to include all source directories (`tools/`, `core/`, `memory/`, `services/`, `clients/`, `astakos_skills/`, `api/`); sensitive files (`config.py`, `.env`, `*.db`, `*.key`) remain blocked via explicit blocklist.
+- [x] Reflection Apply Fix — planner and conversation reflections (no `routine_id`) now correctly apply by saving the lesson to ChromaDB instead of silently returning `False`.
 - [x] ChromaDB Graceful Shutdown — both Telegram bot and Web server wait for `vector_lock` before shutting down, preventing mid-write index corruption.
 - [x] ChromaDB HNSW Index Resilience — orphaned vector index IDs (HNSW/SQLite mismatch) are caught with a try/except in `vector_store.py`; the query returns empty results instead of crashing, and the affected category is auto-repaired on next write.
 - [x] Test Suite for Project Tools — `tests/test_project_tools.py` covers 48 cases: permission model (grant/deny/read-only), syntax check, read with line ranges, edit with rollback on syntax error, noop guard, grep, list, and tool risk levels (SAFE/WARNING/CRITICAL). pytest runs cleanly on the FUSE-mounted repo.
@@ -485,7 +490,7 @@ Shutdown behavior:
 - [ ] Planner v2 — validate plan before execution, approve/reject from Telegram, parallel steps, error recovery, progress UI (`[2/5] Τρέχω tests...`), and full agentic loop: Goal → Plan → Validate → Execute → Reflect → Re-plan.
 - [ ] Memory cleanup — prune low-score memories (`compute_score() < threshold`) after 6+ months of real data.
 - [ ] Personal Knowledge Graph — structured entity relations such as `Λάζαρος → project → Astakos` in SQLite, parallel to ChromaDB, after 6+ months of usage.
-- [ ] Tool Execution Journal — log tool calls (`tool`, `agent`, `result`, `duration`) to SQLite, with success-rate stats once 30+ tools exist.
+- [ ] Tool Execution Journal — aggregate `tool_stats` data to SQLite for long-term trend analysis (currently read from daily trace files).
 
 ---
 
