@@ -14,7 +14,7 @@ from core.agents import (
     tech_agent_node, git_agent_node, mail_agent_node, dev_agent_node, tool_router
 )
 from core.approval import approval_check_node
-from core.planner import planner_node, task_executor_node, capture_result_node, pre_check_node, cancel_plan_node
+from core.planner import planner_node, task_executor_node, capture_result_node, pre_check_node, cancel_plan_node, validate_step_node
 from core.tool_loop_guard import inspect_tool_loop
 
 # [MASTRO-FIX]: Προσθήκη της λίστας με τους agents για να δουλέψει το routing
@@ -48,6 +48,7 @@ def build_graph():
     workflow.add_node("tool_loop_block", tool_loop_block_node)
     workflow.add_node("planner",        planner_node)
     workflow.add_node("task_executor",  task_executor_node)
+    workflow.add_node("validate_step",  validate_step_node)
     workflow.add_node("capture_result", capture_result_node)
 
     # Entry → pre_check (ελέγχει pending plan πριν τον supervisor)
@@ -84,7 +85,7 @@ def build_graph():
         workflow.add_conditional_edges(
             agent_name,
             _should_use_tools,
-            {"tools": "approval_check", "tool_loop_block": "tool_loop_block", "capture": "capture_result", END: END}
+            {"tools": "approval_check", "tool_loop_block": "tool_loop_block", "validate_step": "validate_step", END: END}
         )
 
     # approval_check → tools (ok) ή → END (pending/blocked)
@@ -102,6 +103,9 @@ def build_graph():
         tool_router,
         {name: name for name in AGENT_MAP}
     )
+
+    # validate_step → capture_result (πάντα, ανεξάρτητα από αποτέλεσμα)
+    workflow.add_edge("validate_step", "capture_result")
 
     # capture_result → task_executor (αν υπάρχουν άλλα) ή END
     workflow.add_conditional_edges(
@@ -134,7 +138,7 @@ def _should_use_tools(state: AgentState):
             return "tool_loop_block"
         return "tools"
     if state.get("plan_active") and state.get("plan_index", 0) < len(state.get("plan_tasks", [])):
-        return "capture"
+        return "validate_step"
     return END
 
 
