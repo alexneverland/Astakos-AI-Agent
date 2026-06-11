@@ -60,7 +60,7 @@ Astakos is local-first:
 - Runtime data, credentials, uploads, caches, databases, logs, and private JSON files are gitignored.
 - You control the machine, the credentials, and the integrations.
 
-Important note: Astakos uses configured external APIs for model calls and integrations, including Gemini / Vertex AI, Telegram, Google APIs, GitHub, Spotify, LinkedIn, Pollinations.ai, and others when those features are enabled. Local-first means the memory and runtime state live on your machine; prompts, uploaded media, or tool payloads may be sent to the external service required by the feature you use.
+Important note: Astakos uses configured external APIs for model calls and integrations, including Gemini / Vertex AI, Telegram, Google APIs, GitHub, Spotify, LinkedIn, and others when those features are enabled. Local-first means the memory and runtime state live on your machine; prompts, uploaded media, or tool payloads may be sent to the external service required by the feature you use.
 
 ---
 
@@ -118,7 +118,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Receipt Scanner | `/receipt` scans the last Telegram photo as a shopping receipt and returns structured JSON with store, date, total, currency, and items. |
 | Smart Photo Pending | Send a photo and Astakos waits 30 seconds for a caption, `/nutrition`, or `/receipt`, avoiding duplicate responses. |
 | Document Reading | Uploaded documents are summarized and can be saved into memory. |
-| Story Maker | `/story [theme] \| [characters]` generates a children's story plus 3 Pollinations.ai illustrations. |
+| Story Maker | `/story [theme] \| [characters]` generates a children's story plus 3 Vertex AI Imagen illustrations. |
 | Typing Indicator | Telegram shows typing while Astakos is processing. |
 | Human Override Commands | `/pause`, `/mute`, `/sleep N`, `/resume`, and `/status` persist across restarts. |
 
@@ -134,6 +134,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Tool Risk Registry | `core/tool_risk.py` defines SAFE / WARNING / CRITICAL behavior per tool. |
 | Skill Creation Flow | New skills are created with `write_custom_tool`, validated for `@tool`, previewed with `register_tool(dry_run=True)`, and applied only after approval. Skills that need Gemini/vision use shared `core.brain` clients instead of raw API keys. |
 | Planner Agent | `/plan` decomposes a goal into tasks, executes them step-by-step, captures results, and reflects afterward. |
+| Execution Trace System | Every agent turn records agent name, tools called, duration, errors, and loop events to `logs/traces/YYYY-MM-DD.json`. Viewable at `/debug/traces` with full-width colored tool names and response preview. |
 
 ---
 
@@ -183,6 +184,7 @@ Background jobs run through `AstakosScheduler`:
 | `job_morning_fit_briefing` | 1h | Fires at 08:00 for the Google Fit morning summary: yesterday's steps, last night's sleep, and heart rate. |
 | `job_goal_followup` | 1h | Fires at 10:00 for stale-goal semantic checks. |
 | `run_analytics` | Nightly 03:00 | LLM batch routine detection. |
+| `run_reflection` | Nightly 03:00 | Self-evaluation after analytics: lessons extracted, auto-applied to routines and ChromaDB. |
 
 Event Bus events include:
 
@@ -234,16 +236,18 @@ astakos/
 ├── astakos_skills/           # Modular skill scripts
 │   ├── calculate_bill.py
 │   ├── daily_backup.py       # Nightly backup to Google Drive
+│   ├── file_generator.py     # Excel, Word, PDF, CSV file creation tools
 │   ├── flight_monitor.py
 │   ├── google_fit.py         # Google Fit: steps, sleep, heart rate
 │   ├── linkedin_state_manager.py
 │   ├── nutrition_analyzer.py # Universal product label analyzer
 │   ├── recipe_expert.py
 │   ├── register_tool.py      # Safe skill registration with dry-run previews
+│   ├── repo_mapper.py        # AST shallow scan of any Python project — text tree + JSON
 │   ├── scan_receipt.py       # Receipt image parser for /receipt
 │   ├── search_ferries.py
 │   ├── search_flights.py
-│   ├── story_maker.py        # Children's story generator + illustrations
+│   ├── story_maker.py        # Children's story generator + Vertex AI Imagen illustrations
 │   └── text_stats.py         # Example generated skill
 ├── clients/
 │   └── telegram_bot.py       # Telegram polling, handlers, scheduler
@@ -274,7 +278,6 @@ astakos/
 │   └── reflection_engine.py  # Nightly/post-plan self-reflection
 ├── tools/
 │   ├── system.py             # Files, GitHub, Gmail, IoT, reminders, routines, Fit
-│   ├── file_generator.py     # Excel, Word, PDF, CSV file creation tools
 │   ├── gdrive.py             # Google Drive upload via ADC + public link
 │   ├── project_tools.py      # Permission-gated code navigation and editing tools
 │   ├── telegram.py           # Telegram messaging helpers
@@ -286,6 +289,7 @@ astakos/
 ├── assets/                   # Fonts and static assets
 ├── avatars/                  # UI avatars
 ├── logs/events/              # Daily scheduler event logs (gitignored)
+├── logs/traces/              # Per-turn execution traces: agent, tools, duration, errors (gitignored)
 ├── chroma_db/                # Vector store data (gitignored)
 ├── credentials/              # Local credentials (gitignored)
 ├── telegram_photos/          # Telegram photo storage (gitignored)
@@ -410,7 +414,7 @@ Shutdown behavior:
 - [x] Smart photo pending system with a 30s caption window, history context, and no double messages.
 - [x] Document reading on upload with instant summary and optional save to memory.
 - [x] Google Fit integration — steps, sleep phases, heart rate, and morning briefing with correct day/night windows.
-- [x] Story maker — `/story` with AI-generated illustrations via Pollinations.ai.
+- [x] Story maker — `/story` with AI-generated illustrations via Vertex AI Imagen.
 - [x] Local security — bearer token auth, localhost CORS, upload limits, and extension whitelist.
 - [x] Auto-restart on code changes — core source `.py` files and `prompts.md` trigger restarts; runtime data and generated `astakos_skills/` files are excluded so skill creation does not interrupt the agent.
 - [x] Capability Registry — keyword routing before LLM Supervisor for instant dispatch.
