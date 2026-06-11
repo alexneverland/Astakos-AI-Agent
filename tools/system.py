@@ -391,44 +391,52 @@ def save_to_memory(fact: str, entities: str = "", category: str = "general", rea
     entities: Λέξεις-κλειδιά χωρισμένες με κόμμα (π.χ. "Αλέξανδρος, Φαγητό, Προτίμηση").
     category: Η κατηγορία (π.χ. 'family', 'home', 'lazaros', 'tech', 'work').
     reason: Γιατί αποθηκεύεται — 'user_stated' αν το είπε ρητά ο χρήστης, 'agent_inferred' αλλιώς.
+
+    ⚡ Fire-and-forget: η ChromaDB/Vertex AI δουλειά γίνεται σε background thread.
+    Επιστρέφει αμέσως ώστε ο agent να μη μπλοκάρει τον χρήστη ~11s.
     """
     import datetime
-    from memory.vector_store import vector_store
+    import threading
+    from tools import system as _self
 
-    try:
-        semantic_payload = f"{fact} [Tags: {entities}]"
+    # Capture channel context ΠΡΙΝ το thread (module-level var, thread-unsafe αν διαβαστεί αργότερα)
+    _source = _self._CURRENT_CHANNEL
 
-        # [MASTRO-DEDUP]: Έλεγχος για duplicate πριν αποθηκευτεί
-        with vector_lock:
-            existing = vector_store._collection.query(
-                query_embeddings=[embeddings.embed_query(semantic_payload)],
-                n_results=1
+    def _do_save():
+        try:
+            from memory.vector_store import vector_store
+            semantic_payload = f"{fact} [Tags: {entities}]"
+
+            # [MASTRO-DEDUP]: Έλεγχος για duplicate
+            with vector_lock:
+                existing = vector_store._collection.query(
+                    query_embeddings=[embeddings.embed_query(semantic_payload)],
+                    n_results=1
+                )
+            if (existing['ids'] and existing['ids'][0] and
+                    existing['distances'] and existing['distances'][0] and
+                    existing['distances'][0][0] < 0.10):
+                print(f"\033[93m⚠️ [Semantic Graph bg]: Duplicate skip → {fact[:50]}\033[0m")
+                return
+
+            vector_store.add_texts(
+                texts=[semantic_payload],
+                metadatas=[{
+                    "category": category,
+                    "entities": entities,
+                    "timestamp": datetime.datetime.now().timestamp(),
+                    "type": "semantic_node",
+                    "source": _source,
+                    "reason": reason,
+                    "retrieval_count": 0,
+                }]
             )
-        if (existing['ids'] and existing['ids'][0] and
-                existing['distances'] and existing['distances'][0] and
-                existing['distances'][0][0] < 0.10):
-            print(f"\033[93m⚠️ [Semantic Graph]: Duplicate skip → {fact[:50]}\033[0m")
-            return f"ℹ️ Η μνήμη υπάρχει ήδη (dist: {existing['distances'][0][0]:.3f})."
+            print(f"\033[95m🧠 [Semantic Graph bg]: Καρφώθηκε -> {entities}\033[0m")
+        except Exception as e:
+            print(f"⚠️ [save_to_memory bg]: {e}")
 
-        # Προσπαθούμε να πάρουμε το channel από το context (αν υπάρχει)
-        from tools import system as _self; _source = _self._CURRENT_CHANNEL
-        vector_store.add_texts(
-            texts=[semantic_payload],
-            metadatas=[{
-                "category": category,
-                "entities": entities,
-                "timestamp": datetime.datetime.now().timestamp(),
-                "type": "semantic_node",
-                "source": _source,
-                "reason": reason,
-                "retrieval_count": 0,
-            }]
-        )
-
-        print(f"\033[95m🧠 [Semantic Graph]: Καρφώθηκε -> {entities}\033[0m")
-        return f"✅ System: Η σημασιολογική μνήμη καρφώθηκε! Ταμπέλες: [{entities}]"
-    except Exception as e:
-        return f"❌ Error saving to semantic memory: {str(e)}"
+    threading.Thread(target=_do_save, daemon=True).start()
+    return f"✅ Αποθηκεύεται σε background: [{entities}]"
 
 
 @tool
