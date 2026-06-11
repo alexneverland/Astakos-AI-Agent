@@ -242,7 +242,22 @@ def _apply_action(reflection: dict) -> bool:
                 return False
         return False
 
+    # Planner/conversation reflections δεν έχουν routine_id —
+    # fallback: αποθήκευση lesson στο ChromaDB ως γνώση.
     if not routine_id:
+        lesson = reflection.get("lesson", "")
+        if lesson:
+            try:
+                from memory.vector_store import vector_store
+                vector_store.add_texts(
+                    [f"[REFLECTION]: {lesson}"],
+                    metadatas=[{"category": "reflection", "source": "reflection_engine"}]
+                )
+                print(f"🧠 [Reflection]: Lesson saved to ChromaDB (no routine_id)")
+                return True
+            except Exception as me:
+                print(f"⚠️ [Reflection] ChromaDB save failed: {me}")
+                return False
         return False
 
     try:
