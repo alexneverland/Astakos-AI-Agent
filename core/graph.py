@@ -152,12 +152,33 @@ def tool_loop_block_node(state: AgentState):
 
 
 def _route_supervisor(state: AgentState) -> str:
-    """Αν το μήνυμα περιέχει /plan → planner. Αλλιώς → κανονικός agent."""
+    """
+    Routing από supervisor.
+    1. Explicit /plan command → planner
+    2. Auto-plan LLM judge → planner αν εντοπίσει multi-step intent
+    3. Κανονικός agent αλλιώς
+    """
     import re as _re
     from core.utils import clean_message
+
     last_msg = clean_message(state["messages"][-1].content)
+
+    # ── 1. Explicit /plan ────────────────────────────────────────
     if _re.search(r'(?:^|\])\s*/plan', last_msg.strip()):
         return "planner"
+
+    # ── 2. Auto-plan judge ───────────────────────────────────────
+    # Αφαιρούμε timestamp [HH:MM] πριν το evaluation
+    clean = _re.sub(r'^\[\d{1,2}:\d{2}\]\s*', '', last_msg).strip()
+    try:
+        from core.plan_judge import should_auto_plan
+        if should_auto_plan(clean):
+            print(f"\033[95m[Supervisor]: Auto-plan → planner\033[0m")
+            return "planner"
+    except Exception as e:
+        print(f"\033[90m[Supervisor]: PlanJudge error, skipping: {e}\033[0m")
+
+    # ── 3. Κανονικός agent ───────────────────────────────────────
     return state.get("next_agent", "Chat_Agent")
 
 
