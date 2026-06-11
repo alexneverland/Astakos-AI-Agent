@@ -576,6 +576,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         for event in graph.stream({"messages": context_msgs + [human_msg], "channel": "web"}, {"recursion_limit": 50}):
             _trace.process_event(event)
             for node, data in event.items():
+                if data is None:
+                    continue
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node
                     msgs = data.get("messages", [])

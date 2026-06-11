@@ -229,6 +229,8 @@ def main():
             try:
                 for event in graph.stream({"messages": [HumanMessage(content=inp)]}):
                     for node, data in event.items():
+                        if data is None:
+                            continue
                         if node not in ["supervisor", "tools"]:
                             handling_agent = node
                             msgs = data.get("messages", [])

@@ -401,6 +401,8 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         for event in graph.stream({"messages": context_msgs + [HumanMessage(content=user_log_msg)], "channel": "telegram"}, {"recursion_limit": 50}):
             _ptrace.process_event(event)
             for node, data in event.items():
+                if data is None:
+                    continue
                 if node not in ["supervisor", "tools"]:
                     msgs = data.get("messages", [])
                     if msgs and hasattr(msgs[-1], "content"):
@@ -756,6 +758,8 @@ def handle_message(user_text: str, chat_id: str):
         for event in graph.stream({"messages": context_msgs + [current_msg], "channel": "telegram"}, {"recursion_limit": 50}):
             _trace.process_event(event)
             for node, data in event.items():
+                if data is None:
+                    continue
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node
                     msgs = data.get("messages", [])
@@ -915,6 +919,8 @@ def handle_location(msg, live_update=False):
         final = ""
         for event in graph.stream({"messages": [HumanMessage(content=location_prompt)]}):
             for node, data in event.items():
+                if data is None:
+                    continue
                 msgs = data.get("messages", [])
                 if msgs and hasattr(msgs[-1], "content"):
                     content = msgs[-1].content
