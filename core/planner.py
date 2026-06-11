@@ -43,9 +43,101 @@ def planner_node(state):
     goal = re.sub(r'^\[\d{1,2}:\d{2}\]\s*', '', last_msg).strip()
     goal = re.sub(r'^/plan\b\s*', '', goal).strip()
 
+    print(f"\033[95m[Planner]: Αναλύω goal: {goal[:80]}\033[0m")
+
+    prompt = f"""Είσαι ο Αστακός, AI βοηθός. Ο χρήστης θέλει να εκτελέσεις το εξής:
+
+GOAL: {goal}
+
+Σπάσε το σε συγκεκριμένα, εκτελέσιμα βήματα. Κάθε βήμα πρέπει να είναι μια απλή εντολή που μπορεί να εκτελέσει ένας agent.
+
+Απάντησε ΜΟΝΟ με JSON array, χωρίς markdown:
+[
+  {{"step": 1, "description": "Σύντομη περιγραφή", "instruction": "Ακριβής εντολή προς τον agent"}},
+  {{"step": 2, "description": "...", "instruction": "..."}}
+]
+
+Μέγιστο 7 βήματα. Κάθε instruction να είναι σαφής και αυτόνομη."""
+
+    try:
+        response = safe_llm_invoke(llm_heavy, [HumanMessage(content=prompt)])
+        raw = clean_message(response.content)
+        raw = re.sub(r"```json|```", "", raw).strip()
+        tasks = json.loads(raw)
+        if not isinstance(tasks, list) or not tasks:
+            raise ValueError("Empty task list")
+        print(f"\033[95m[Planner]: {len(tasks)} βήματα δημιουργήθηκαν\033[0m")
+    except Exception as e:
+        print(f"\033[91m[Planner Error]: {e}\033[0m")
+        tasks = [{"step": 1, "description": goal, "instruction": goal}]
+
+    # Εμφανίζουμε το plan στον χρήστη — δεν ξεκινάμε εκτέλεση ακόμα
+    plan_text = f"📋 **Plan για:** _{goal}_\n\n"
+    for t in tasks:
+        plan_text += f"{t['step']}. {t['description']}\n"
+    plan_text += f"\n▶️ Ξεκινάω; (ναι / όχι)"
+
+    # Αποθηκεύουμε το plan σε pending file — θα το φορτώσει ο pre_check_node
+    try:
+        pending = {
+            "goal": goal,
+            "tasks": tasks,
+            "created_at": datetime.now().isoformat(),
+        }
+        with open(PLAN_PENDING_PATH, "w", encoding="utf-8") as f:
+            json.dump(pending, f, ensure_ascii=False, indent=2)
+        print(f"\033[95m[Planner]: Plan saved to pending — αναμένω επιβεβαίωση\033[0m")
+    except Exception as e:
+        print(f"\033[91m[Planner]: Error saving pending plan: {e}\033[0m")
+
+    return {
+        "messages":                    [AIMessage(content=plan_text)],
+        "plan_awaiting_confirmation":   True,
+        "plan_goal":                   goal,
+    }
+
+
+# ────────────────────────────────────────────────────────────────
+# Task Executor Node — εκτελεί ένα task τη φορά
+# ────────────────────────────────────────────────────────────────
+
+def task_executor_node(state):
+    """
+    Εκτελεί το τρέχον task από το plan.
+    Αν υπάρχουν αποτελέσματα προηγούμενων βημάτων, τα περνά ως context.
+    """
+    tasks        = state.get("plan_tasks", [])
+    idx          = state.get("plan_index", 0)
+    results      = state.get("plan_results", [])
+    goal         = state.get("plan_goal", "")
+
+    # Αν τελειώσαμε → summary
+    if idx >= len(tasks):
+        return _plan_summary(goal, tasks, results)
+
+    task = tasks[idx]
+    print(f"\033[95m[TaskExecutor]: Βήμα {idx+1}/{len(tasks)}: {task['description']}\033[0m")
+
+    # Χτίζουμε context από προηγούμενα αποτελέσματα
+    context = ""
+    if results:
+        context = "\n\n[ΑΠΟΤΕΛΕΣΜΑΤΑ ΠΡΟΗΓΟΥΜΕΝΩΝ ΒΗΜΑΤΩΝ]\n"
+        for i, r in enumerate(results[-3:]):  # τελευταία 3 μόνο
+            context += f"Βήμα {i+1}: {r[:300]}\n"
+        context += "[/ΑΠΟΤΕΛΕΣΜΑΤΑ]\n\n"
+
+    instruction = f"{context}[PLAN ΒΗΜΑ {idx+1}/{len(tasks)}]: {task['instruction']}"
+
+    # Routing: χρησιμοποιούμε capability_lookup για να βρούμε τον σωστό agent
+    try:
+        from core.capability_lookup import lookup_agent
+        agent = lookup_agent(task["instruction"]) or "Dev_Agent"
+    except Exception:
+        agent = "Dev_Agent"
+
     print(f"[95m[TaskExecutor]: Routing βήμα {idx+1} → {agent}[0m")
 
-    # Progress indicator ορατό στον χρήστη
+    # Progress indicator
     progress_msg = f"⏳ **Βήμα {idx+1}/{len(tasks)}:** {task['description']}"
 
     return {
@@ -211,7 +303,6 @@ def cancel_plan_node(state):
 # Validate Step Node — ελέγχει αν το τελευταίο βήμα πέτυχε
 # ────────────────────────────────────────────────────────────────
 
-# Λέξεις που υποδεικνύουν αποτυχία στην απάντηση του agent
 _FAILURE_SIGNALS = [
     "αποτυχία", "αποτύχηκε", "αποτυχηκε", "αποτυχε", "αποτύχε",
     "δεν μπόρεσα", "δεν μπορεσα", "δεν μπόρεσε", "δεν μπορεσε",
@@ -232,7 +323,6 @@ def validate_step_node(state):
     """
     from core.utils import clean_message
 
-    # Αν δεν τρέχει plan → skip
     if not state.get("plan_active"):
         return {}
 
@@ -244,12 +334,11 @@ def validate_step_node(state):
 
     task = tasks[idx]
 
-    # Βρίσκουμε την τελευταία απάντηση του agent
+    # Βρίσκουμε την τελευταία απάντηση του agent (αγνοούμε τα δικά μας progress msgs)
     last_result = ""
     for msg in reversed(state["messages"]):
         if getattr(msg, "type", "") == "ai":
             content = clean_message(msg.content)
-            # Αγνοούμε το progress_msg που εμείς εκπέμψαμε (ξεκινάει με ⏳)
             if content and not content.startswith("⏳"):
                 last_result = content
                 break
@@ -264,7 +353,7 @@ def validate_step_node(state):
         )
         print(f"\033[93m[ValidateStep]: Βήμα {idx+1} — failure signal detected\033[0m")
         return {
-            "messages":       [AIMessage(content=warning)],
+            "messages":         [AIMessage(content=warning)],
             "plan_step_failed": True,
         }
 
