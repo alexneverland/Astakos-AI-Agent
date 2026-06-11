@@ -99,7 +99,6 @@ This release marks Astakos's transformation from a smart assistant into a **proa
 - **Planner v2 — Agentic Loop**: Goal → Plan → Validate → Execute → Reflect → Re-plan
 - **Behavior Analytics Engine**: auto-shift routine triggers based on ignore patterns
 - **Cross-Channel Awareness**: "continue what I was doing in the web" → inject recent web session into Telegram context
-- **JSON → SQLite Migration**: `embeddings_cache` (816KB) and `chat_history` fully in SQLite
 
 ---
 
