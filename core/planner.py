@@ -5,8 +5,25 @@
 # ================================================================
 
 import json
+import os
 import re
+from datetime import datetime
 from langchain_core.messages import HumanMessage, AIMessage
+
+# Path του pending plan file (project root)
+_PLANNER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PLAN_PENDING_PATH = os.path.join(_PLANNER_DIR, "plan_pending.json")
+
+# Λέξεις επιβεβαίωσης / ακύρωσης
+_CONFIRM_WORDS = {
+    "ναι", "ναι!", "yes", "εντάξει", "εντάξει!", "εντοξει", "ok", "οκ", "οκ!",
+    "ξεκίνα", "ξεκινα", "ξεκίνα!", "ξεκινα!", "go", "proceed",
+    "ναι παμε", "ναι πάμε", "παμε", "πάμε",
+}
+_CANCEL_WORDS = {
+    "όχι", "οχι", "no", "cancel", "ακύρωσε", "ακυρωσε", "ακύρωση", "ακυρωση",
+    "σταμάτα", "σταματα", "άκυρο", "ακυρο",
+}
 
 
 # ────────────────────────────────────────────────────────────────
@@ -54,19 +71,29 @@ GOAL: {goal}
         print(f"\033[91m[Planner Error]: {e}\033[0m")
         tasks = [{"step": 1, "description": goal, "instruction": goal}]
 
-    # Εμφανίζουμε το plan στον χρήστη
+    # Εμφανίζουμε το plan στον χρήστη — δεν ξεκινάμε εκτέλεση ακόμα
     plan_text = f"📋 **Plan για:** _{goal}_\n\n"
     for t in tasks:
         plan_text += f"{t['step']}. {t['description']}\n"
-    plan_text += f"\n⚙️ Ξεκινάω εκτέλεση..."
+    plan_text += f"\n▶️ Ξεκινάω; (ναι / όχι)"
+
+    # Αποθηκεύουμε το plan σε pending file — θα το φορτώσει ο pre_check_node
+    try:
+        pending = {
+            "goal": goal,
+            "tasks": tasks,
+            "created_at": datetime.now().isoformat(),
+        }
+        with open(PLAN_PENDING_PATH, "w", encoding="utf-8") as f:
+            json.dump(pending, f, ensure_ascii=False, indent=2)
+        print(f"\033[95m[Planner]: Plan saved to pending — αναμένω επιβεβαίωση\033[0m")
+    except Exception as e:
+        print(f"\033[91m[Planner]: Error saving pending plan: {e}\033[0m")
 
     return {
-        "messages":     [AIMessage(content=plan_text)],
-        "plan_tasks":   tasks,
-        "plan_index":   0,
-        "plan_results": [],
-        "plan_active":  True,
-        "plan_goal":    goal,
+        "messages":                    [AIMessage(content=plan_text)],
+        "plan_awaiting_confirmation":   True,
+        "plan_goal":                   goal,
     }
 
 
@@ -199,3 +226,71 @@ Steps:
         "plan_index":  0,
         "plan_results": [],
     }
+
+
+# ────────────────────────────────────────────────────────────────
+# Pre-Check Node — τρέχει ΠΡΙΝ τον supervisor σε κάθε turn
+# Ελέγχει αν υπάρχει pending plan και αν ο χρήστης επιβεβαίωσε
+# ────────────────────────────────────────────────────────────────
+
+def pre_check_node(state):
+    """
+    Entry point του graph. Ελέγχει plan_pending.json και κατευθύνει:
+    - "ναι" + pending  → φορτώνει plan, route: task_executor
+    - "όχι" + pending  → σβήνει plan,  route: cancel
+    - άλλο / no pending → route: supervisor (κανονική ροή)
+    """
+    from core.utils import clean_message
+
+    last_msg = clean_message(state["messages"][-1].content)
+    # Αφαίρεση timestamp [HH:MM]
+    last_msg = re.sub(r'^\[\d{1,2}:\d{2}\]\s*', '', last_msg).strip().lower()
+    # Κανονικοποίηση: αφαίρεση περιττών σημείων στίξης
+    last_msg_norm = last_msg.rstrip("!.;").strip()
+
+    if not os.path.exists(PLAN_PENDING_PATH):
+        return {}
+
+    # ── Επιβεβαίωση ──────────────────────────────────────────────
+    if last_msg in _CONFIRM_WORDS or last_msg_norm in _CONFIRM_WORDS:
+        try:
+            with open(PLAN_PENDING_PATH, "r", encoding="utf-8") as f:
+                pending = json.load(f)
+            os.remove(PLAN_PENDING_PATH)
+            print(f"\033[95m[PreCheck]: ✅ Plan επιβεβαιώθηκε — {len(pending['tasks'])} βήματα\033[0m")
+            return {
+                "plan_tasks":                  pending["tasks"],
+                "plan_index":                  0,
+                "plan_results":                [],
+                "plan_active":                 True,
+                "plan_goal":                   pending["goal"],
+                "plan_awaiting_confirmation":  False,
+                "next_agent":                  "__plan_confirmed__",
+            }
+        except Exception as e:
+            print(f"\033[91m[PreCheck]: Error loading pending plan: {e}\033[0m")
+
+    # ── Ακύρωση ──────────────────────────────────────────────────
+    elif last_msg in _CANCEL_WORDS or last_msg_norm in _CANCEL_WORDS:
+        try:
+            os.remove(PLAN_PENDING_PATH)
+        except Exception:
+            pass
+        print(f"\033[95m[PreCheck]: ❌ Plan ακυρώθηκε από τον χρήστη\033[0m")
+        return {
+            "plan_awaiting_confirmation": False,
+            "next_agent": "__plan_cancelled__",
+        }
+
+    # ── Άλλο μήνυμα ενώ υπάρχει pending → stale, σβήσε ─────────
+    try:
+        os.remove(PLAN_PENDING_PATH)
+        print(f"\033[90m[PreCheck]: Stale pending plan removed\033[0m")
+    except Exception:
+        pass
+    return {}
+
+
+def cancel_plan_node(state):
+    """Επιστρέφει μήνυμα ακύρωσης plan."""
+    return {"messages": [AIMessage(content="❌ Plan ακυρώθηκε.")], "plan_awaiting_confirmation": False}

@@ -14,7 +14,7 @@ from core.agents import (
     tech_agent_node, git_agent_node, mail_agent_node, dev_agent_node, tool_router
 )
 from core.approval import approval_check_node
-from core.planner import planner_node, task_executor_node, capture_result_node
+from core.planner import planner_node, task_executor_node, capture_result_node, pre_check_node, cancel_plan_node
 from core.tool_loop_guard import inspect_tool_loop
 
 # [MASTRO-FIX]: Προσθήκη της λίστας με τους agents για να δουλέψει το routing
@@ -33,6 +33,8 @@ def build_graph():
     workflow = StateGraph(AgentState)
 
     # Nodes
+    workflow.add_node("pre_check",    pre_check_node)
+    workflow.add_node("cancel_plan",  cancel_plan_node)
     workflow.add_node("supervisor",   supervisor_node)
     workflow.add_node("Chat_Agent",   chat_agent_node)
     workflow.add_node("Home_Agent",   home_agent_node)
@@ -48,8 +50,17 @@ def build_graph():
     workflow.add_node("task_executor",  task_executor_node)
     workflow.add_node("capture_result", capture_result_node)
 
-    # Entry
-    workflow.set_entry_point("supervisor")
+    # Entry → pre_check (ελέγχει pending plan πριν τον supervisor)
+    workflow.set_entry_point("pre_check")
+
+    # pre_check → supervisor | task_executor | cancel_plan
+    workflow.add_conditional_edges(
+        "pre_check",
+        _route_pre_check,
+        {"supervisor": "supervisor", "task_executor": "task_executor", "cancel_plan": "cancel_plan"}
+    )
+
+    workflow.add_edge("cancel_plan", END)
 
     # Supervisor → Agents ή Planner
     workflow.add_conditional_edges(
@@ -58,8 +69,8 @@ def build_graph():
         {**{name: name for name in AGENT_MAP}, "planner": "planner"}
     )
 
-    # Planner → TaskExecutor
-    workflow.add_edge("planner", "task_executor")
+    # Planner → END (περιμένει επιβεβαίωση — ο pre_check_node χειρίζεται το επόμενο turn)
+    workflow.add_edge("planner", END)
 
     # TaskExecutor → Agents (routing με Supervisor logic)
     workflow.add_conditional_edges(
@@ -100,6 +111,16 @@ def build_graph():
     )
 
     return workflow.compile(checkpointer=None)
+
+
+def _route_pre_check(state: AgentState) -> str:
+    """Routing μετά τον pre_check_node."""
+    next_a = state.get("next_agent", "")
+    if next_a == "__plan_confirmed__":
+        return "task_executor"
+    if next_a == "__plan_cancelled__":
+        return "cancel_plan"
+    return "supervisor"
 
 
 def _should_use_tools(state: AgentState):

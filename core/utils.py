@@ -25,12 +25,13 @@ class AgentState(TypedDict):
     next_agent: NotRequired[str]
     current_agent: NotRequired[str]
     approval_status: NotRequired[str]   # "ok" | "pending" | "blocked"
-    plan_active: NotRequired[bool]       # True αν τρέχει plan
-    plan_tasks: NotRequired[list]        # task list από Planner
-    plan_index: NotRequired[int]         # τρέχον βήμα
-    plan_results: NotRequired[list]      # αποτελέσματα βημάτων
-    plan_goal: NotRequired[str]          # το αρχικό goal
-    channel: NotRequired[str]            # "telegram" | "web" | "terminal"
+    plan_active: NotRequired[bool]                  # True αν τρέχει plan
+    plan_awaiting_confirmation: NotRequired[bool]   # True αν περιμένει "ναι/όχι"
+    plan_tasks: NotRequired[list]                   # task list από Planner
+    plan_index: NotRequired[int]                    # τρέχον βήμα
+    plan_results: NotRequired[list]                 # αποτελέσματα βημάτων
+    plan_goal: NotRequired[str]                     # το αρχικό goal
+    channel: NotRequired[str]                       # "telegram" | "web" | "terminal"
 
 # ────────────────────────────────────────────────────────────────
 # 2. MESSAGE HELPERS (Mastro-Shield & Smart Parser)
