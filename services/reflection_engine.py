@@ -279,11 +279,19 @@ def _apply_action(reflection: dict) -> bool:
             print(f"🔧 [Reflection]: #{routine_id} frequency reduced")
 
         elif action == "change_time" and value:
+            # Sanitize: float 14.5 → "14:30", int/str "14" → "14:00"
+            try:
+                fval = float(str(value))
+                hours = int(fval)
+                mins  = int(round((fval - hours) * 60))
+                time_str = f"{hours:02d}:{mins:02d}"
+            except (ValueError, TypeError):
+                time_str = str(value)  # αν είναι ήδη "HH:MM", κρατάμε ως έχει
             conn.execute(
                 "UPDATE routines SET time_str=? WHERE id=?",
-                (str(value), routine_id)
+                (time_str, routine_id)
             )
-            print(f"🔧 [Reflection]: #{routine_id} time → {value}")
+            print(f"🔧 [Reflection]: #{routine_id} time → {time_str} (raw: {value})")
 
         elif action == "save_to_memory":
             lesson = reflection.get("lesson", "")
