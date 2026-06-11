@@ -161,11 +161,11 @@ def capture_result_node(state):
     idx     = state.get("plan_index", 0)
     results = list(state.get("plan_results", []))
 
-    # Βρίσκουμε το αποτέλεσμα του agent (τελευταίο AI message)
+    # Βρίσκουμε το αποτέλεσμα του agent — αγνοούμε ⏳ progress msgs
     last_result = ""
     for msg in reversed(state["messages"]):
         content = clean_message(getattr(msg, "content", ""))
-        if content and getattr(msg, "type", "") == "ai":
+        if content and getattr(msg, "type", "") == "ai" and not content.startswith("⏳"):
             last_result = content
             break
 
@@ -305,10 +305,14 @@ _FAILURE_SIGNALS = [
     "αποτυχία", "αποτύχηκε", "αποτυχηκε", "αποτυχε", "αποτύχε",
     "δεν μπόρεσα", "δεν μπορεσα", "δεν μπόρεσε", "δεν μπορεσε",
     "σφάλμα", "σφαλμα", "αδύνατο", "αδυνατο",
-    "δεν βρήκα", "δεν βρηκα", "δεν υπάρχει", "δεν υπαρχει",
+    "δεν βρήκα", "δεν βρηκα", "δεν βρέθηκε", "δεν βρεθηκε",
+    "δεν εντοπίστηκε", "δεν εντοπιστηκε",
+    "δεν υπάρχει", "δεν υπαρχει",
     "δεν είναι δυνατό", "δεν ειναι δυνατο",
+    "cannot find", "cannot access",
     "error", "failed", "failure", "exception", "traceback",
     "could not", "unable to", "not found", "does not exist",
+    "access denied", "permission denied",
 ]
 
 
