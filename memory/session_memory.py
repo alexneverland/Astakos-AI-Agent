@@ -666,4 +666,9 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
             )
             return True
         except Exception as e:
-            print(f"\033[91
+            print(f"\033[91m[Startup]: ❌ Αποτυχία καθαρισμού working memory: {e}\033[0m")
+            return False
+
+    except Exception as e:
+        print(f"\033[91m[Startup Cleanup Error]: {e}\033[0m")
+        return False
