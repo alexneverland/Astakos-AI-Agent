@@ -266,7 +266,8 @@ def _extract_confirmed_memory_candidate(
     if len(source_text) < 8 and len(confirmation_text) < 20:
         return None
 
-    detail = source_text
+    # Απαιτείται ρητή επιβεβαίωση από τον AI — ΔΕΝ αποθηκεύουμε raw user text ως fact
+    detail = None
     if confirmation_text:
         memory_match = re.search(
             r"(?:αποθηκεύτηκε|αποθηκευτηκε|σημειώθηκε|σημειωθηκε|κρατήθηκε|κρατηθηκε)[^\n]{0,220}",
@@ -276,7 +277,8 @@ def _extract_confirmed_memory_candidate(
         if memory_match:
             detail = memory_match.group(0).strip()
     if not detail:
-        detail = confirmation_text[:220].strip()
+        # Ο AI δεν επιβεβαίωσε ρητά → παράκαμψη, ο LLM sifter θα αποφασίσει
+        return None
     if len(detail) > 300:
         detail = detail[:297].rstrip() + "..."
 
@@ -664,9 +666,4 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
             )
             return True
         except Exception as e:
-            print(f"\033[91m[Startup]: ❌ Αποτυχία καθαρισμού working memory: {e}\033[0m")
-            return False
-
-    except Exception as e:
-        print(f"\033[91m[Startup Cleanup Error]: {e}\033[0m")
-        return False
+            print(f"\033[91
