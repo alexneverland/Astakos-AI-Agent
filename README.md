@@ -133,7 +133,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Action Approval Dashboard | Pending CRITICAL tool approvals can be approved or rejected from Telegram and the debug dashboard. |
 | Tool Risk Registry | `core/tool_risk.py` defines SAFE / WARNING / CRITICAL behavior per tool. |
 | Skill Creation Flow | New skills are created with `write_custom_tool`, validated for `@tool`, previewed with `register_tool(dry_run=True)`, and applied only after approval. Skills that need Gemini/vision use shared `core.brain` clients instead of raw API keys. |
-| Planner Agent | `/plan` decomposes a goal into tasks, executes them step-by-step, captures results, and reflects afterward. |
+| Planner v2 | `/plan` decomposes a goal into tasks with a **confirmation gate** before execution. Auto-plan LLM judge detects multi-step intent without needing `/plan`. Progress UI shows `⏳ Βήμα X/N` per step. `validate_step_node` detects failures via AI response + tool output heuristics. `replan_node` auto-skips failed steps and continues. `end_check_node` generates a final summary (`✅` / `⚠️ X/N βήματα επιτυχή`) and saves a post-plan reflection. |
 | Execution Trace System | Every agent turn records agent name, tools called, duration, errors, and loop events to `logs/traces/YYYY-MM-DD.json`. Viewable at `/debug/traces` with full-width colored tool names and response preview. |
 
 ---
@@ -146,32 +146,49 @@ Important note: Astakos uses configured external APIs for model calls and integr
          │                  │                  │
          └──────────────────┼──────────────────┘
                             ▼
-                    ┌─────────────┐
-                    │ Supervisor  │
-                    └──────┬──────┘
-                           │
-          ┌────────────────▼────────────────────────────┐
-          │ Chat · Home · Web · Tech · Git · Mail · Dev │
-          └────────────────┬────────────────────────────┘
-                           │
-                 ┌─────────▼─────────┐
-                 │ Approval Check    │
-                 │ SAFE / WARN /     │
-                 │ CRITICAL pending  │
-                 └─────────┬─────────┘
-                           │
-                 ┌─────────▼─────────┐
-                 │ Tool Node         │
-                 │ LangGraph tools   │
-                 └─────────┬─────────┘
-                           │
-          ┌────────────────▼────────────────────────────┐
-          │ Memory Layer                                │
-          │ - ChromaDB: facts, photos, sessions, goals  │
-          │ - SQLite: conversations, sessions, routines │
-          │ - Hybrid recall: SQLite history + Chroma    │
-          │ - JSON: working memory and profile state    │
-          └─────────────────────────────────────────────┘
+                   ┌──────────────────┐
+                   │   pre_check_node │  ← pending plan? ναι/όχι?
+                   └────────┬─────────┘
+                            │
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+        task_executor   Supervisor   cancel_plan
+              │             │
+              │    ┌────────┴────────────────────────────┐
+              │    │ Chat · Home · Web · Tech · Git ·    │
+              │    │ Mail · Dev  ←── auto-plan judge      │
+              │    └────────┬────────────────────────────┘
+              │             │ (or → Planner → plan_pending.json → END)
+              │             ▼
+              └──────► Agent Node
+                            │
+                   ┌────────▼────────┐
+                   │ Approval Check  │  SAFE / WARN / CRITICAL
+                   └────────┬────────┘
+                            │
+                   ┌────────▼────────┐
+                   │   Tool Node     │
+                   └────────┬────────┘
+                            │
+                   ┌────────▼──────────┐
+                   │ validate_step_node│  failure? → replan_node → skip
+                   └────────┬──────────┘           → task_executor (next)
+                            │ OK
+                   ┌────────▼──────────┐
+                   │ capture_result    │  plan_active? → task_executor
+                   └────────┬──────────┘            → end_check
+                            ▼
+                   ┌──────────────────┐
+                   │  end_check_node  │  ✅ / ⚠️ summary + reflection
+                   └──────────────────┘
+                            │
+          ┌─────────────────▼───────────────────────────┐
+          │ Memory Layer                                 │
+          │ - ChromaDB: facts, photos, sessions, goals   │
+          │ - SQLite: conversations, sessions, routines  │
+          │ - Hybrid recall: SQLite history + Chroma     │
+          │ - JSON: working memory and profile state     │
+          └──────────────────────────────────────────────┘
 ```
 
 Background jobs run through `AstakosScheduler`:
@@ -259,7 +276,8 @@ astakos/
 │   ├── event_bus.py          # Pub/sub Event Bus singleton
 │   ├── exceptions.py         # Structured exception hierarchy
 │   ├── graph.py              # LangGraph state machine
-│   ├── planner.py            # Planning agent and task execution loop
+│   ├── plan_judge.py         # Auto-plan LLM judge: detects multi-step intent without /plan
+│   ├── planner.py            # Planner v2: confirmation gate, progress UI, validate/replan/end_check
 │   ├── routine_state.py      # Routine lifecycle and valid transitions
 │   ├── safe_executor.py      # Terminal command classifier
 │   ├── tool_risk.py          # Tool risk registry
@@ -283,9 +301,12 @@ astakos/
 │   ├── telegram.py           # Telegram messaging helpers
 │   └── web.py                # News, weather, Places, navigation, Messenger, web search
 ├── tests/
-│   ├── test_project_tools.py # 48 tests: permissions, read/edit/grep/list, syntax check, risk levels
-│   ├── test_safe_executor.py # Terminal command risk classification tests
-│   └── test_*.py             # Full test suite (pytest)
+│   ├── test_project_tools.py  # 48 tests: permissions, read/edit/grep/list, syntax check, risk levels
+│   ├── test_safe_executor.py  # Terminal command risk classification tests
+│   ├── test_plan_judge.py     # 14 tests: auto-plan heuristic + LLM judge
+│   ├── test_validate_step.py  # 13 tests: step failure detection (AI + tool output)
+│   ├── test_pr3.py            # 15 tests: replan_node + end_check_node
+│   └── test_*.py              # Full test suite (pytest)
 ├── assets/                   # Fonts and static assets
 ├── avatars/                  # UI avatars
 ├── logs/events/              # Daily scheduler event logs (gitignored)
@@ -323,7 +344,7 @@ Runtime files such as `*.json`, `*.db`, `chroma_db/`, `logs/`, uploads, credenti
 | `/nutrition` | Analyze the last photo as a product label (food / cosmetic / household). |
 | `/receipt` | Analyze the last photo as a shopping receipt and return structured expense JSON. |
 | `/story [theme] \| [characters]` | Generate a children's story plus 3 illustrations. |
-| `/plan [goal]` | Break a goal into tasks and execute them step by step. |
+| `/plan [goal]` | Break a goal into tasks, show the plan for confirmation, then execute step by step with progress indicators, failure recovery, and a final summary. Multi-step requests are also auto-detected without the prefix. |
 | `/confirm <cmd>` | Execute a shell command after confirmation. |
 | `/end` | Close the session, run memory summarizer, and clear working memory. |
 | `/help` | Show available commands and current voice mode status. |
