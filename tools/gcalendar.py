@@ -1,27 +1,38 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Google Calendar Tool
-# Χρησιμοποιεί Application Default Credentials (ίδια με Drive/Vertex AI).
-# Απαιτεί scope: https://www.googleapis.com/auth/calendar
-# Setup: gcloud auth application-default login \
-#   --scopes=https://www.googleapis.com/auth/calendar,\
-#            https://www.googleapis.com/auth/cloud-platform
+# Auth: OAuth2 token.json (ίδιο με mail/drive/tasks)
 # ================================================================
 
 import os
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 from langchain_core.tools import tool
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
 
 TIMEZONE = "Europe/Athens"
 CALENDAR_ID = "primary"
 
+TOKEN_PATH       = r"C:\astakos_v2\credentials\token.json"
+CREDENTIALS_PATH = r"C:\astakos_v2\credentials\credentials.json"
+_CALENDAR_SCOPE  = "https://www.googleapis.com/auth/calendar"
+
 
 def _get_service():
-    """Επιστρέφει authenticated Google Calendar service."""
-    from google.auth import default as google_auth_default
-    from googleapiclient.discovery import build
-    creds, _ = google_auth_default()
+    """Επιστρέφει authenticated Google Calendar service (μέσω token.json)."""
+    creds = None
+    if os.path.exists(TOKEN_PATH):
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, [_CALENDAR_SCOPE])
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            raise Exception(
+                "Google Calendar: δεν υπάρχει έγκυρο token. "
+                "Διέγραψε credentials/token.json και κάνε νέο login (OAuth)."
+            )
     return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
 
