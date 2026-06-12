@@ -108,6 +108,38 @@ def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
     return False, f"unknown Messenger contact '{target_entity}'"
 
 
+_CHATBOT_NOISE_PATTERNS = [
+    # Chatbot meta-text που δεν πρέπει να σταλεί
+    r"θέλεις αλλαγές[^.]*\?",
+    r"θελεις αλλαγεσ[^.]*\?",
+    r"να το στείλω[^.]*\?",
+    r"να το στειλω[^.]*\?",
+    r"το αποθήκευσα[^.]*\.",
+    r"το αποθηκευσα[^.]*\.",
+    r"αποθήκευσα[^.]*\.",
+    r"αποθηκευσα[^.]*\.",
+    r"ετοιμάζω[^.]*\.",
+    r"ετοιμαζω[^.]*\.",
+    r"μήνυμα(?:\s+προς\s+\S+)?\s*:\s*",  # "Μήνυμα προς Σοφία:"
+    r"(?:στέλνω|στελνω|στέλνουμε|στελνουμε)\s+(?:το\s+)?μήνυμα[^.]*\.",
+]
+
+def _sanitize_message_payload(text: str) -> str:
+    """
+    Αφαιρεί chatbot meta-text από το payload πριν αποθηκευτεί ως draft.
+    Κρατά μόνο το πραγματικό μήνυμα προς αποστολή.
+    """
+    if not text:
+        return ""
+    cleaned = text.strip()
+    for pattern in _CHATBOT_NOISE_PATTERNS:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+    # Αφαίρεση πολλαπλών κενών γραμμών
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = cleaned.strip()
+    return cleaned
+
+
 def _rss_text(item, tag: str) -> str:
     node = item.find(tag)
     return (node.text or "").strip() if node is not None else ""
@@ -169,11 +201,18 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
     if image_path and not os.path.exists(image_path):
         return f"❌ Δεν αποθήκευσα Messenger draft. Η εικόνα δεν βρέθηκε: {image_path}"
 
-    save_draft(target_entity, payload_data, image_path=image_path)
+    # ── Payload sanitization: αφαίρεση chatbot meta-text ─────────────
+    # Στο plan mode το LLM μπορεί να συμπεριλάβει conversational prompts
+    # ή system feedback μαζί με το πραγματικό μήνυμα. Τα αφαιρούμε.
+    clean_payload = _sanitize_message_payload(payload_data)
+    if not clean_payload:
+        return "❌ Δεν αποθήκευσα Messenger draft. Το μήνυμα ήταν κενό μετά το sanitization."
+
+    save_draft(target_entity, clean_payload, image_path=image_path)
 
     # Επιστρέφουμε clean output — οι οδηγίες εμφάνισης είναι στο prompts.md
     img_info = f"\nimage: {image_path}" if image_path else ""
-    return f"✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: {payload_data}{img_info}"
+    return f"✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: {clean_payload}{img_info}"
 @tool
 def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
     """Φέρνει ειδήσεις από το Google News με τίτλο, περίληψη, πηγή και link."""

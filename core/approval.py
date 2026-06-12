@@ -269,6 +269,18 @@ def approval_check_node(state):
 
     critical_calls = [tc for tc in tool_calls if is_critical(tc)]
 
+    # ── Plan mode bypass ───────────────────────────────────────────
+    # Αν εκτελούμε βήμα εγκεκριμένου plan, τα CRITICAL tools εκτελούνται
+    # χωρίς επιπλέον Telegram confirmation — ο χρήστης ενέκρινε ήδη το plan.
+    # Εξαιρούνται: run_terminal_command (πάντα χρειάζεται ρητή έγκριση).
+    if critical_calls and state.get("plan_active"):
+        bypassed = [tc for tc in critical_calls if tc["name"] != "run_terminal_command"]
+        still_critical = [tc for tc in critical_calls if tc["name"] == "run_terminal_command"]
+        if bypassed:
+            print(f"\033[93m[Approval]: 📋 Plan mode — bypassing CRITICAL approval for: "
+                  f"{[tc['name'] for tc in bypassed]}\033[0m")
+        critical_calls = still_critical
+
     if not critical_calls:
         risk_levels = [_effective_risk(tc) for tc in tool_calls]
 
