@@ -30,14 +30,14 @@ def format_for_telegram(text: str) -> str:
     text = re.sub(r'^[\*\-]\s+', r'• ', text, flags=re.MULTILINE)
     return text
 
-def send_telegram_msg(text: str):
-    """Στέλνει μήνυμα στο Telegram."""
+def send_telegram_msg(text: str) -> int | None:
+    """Στέλνει μήνυμα στο Telegram. Επιστρέφει το message_id ή None."""
     token = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
 
     if not token or not chat_id:
         print("❌ Σφάλμα: Λείπουν τα Telegram credentials από το .env")
-        return
+        return None
 
     safe_text = format_for_telegram(text)
 
@@ -53,12 +53,16 @@ def send_telegram_msg(text: str):
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code != 200:
             payload.pop("parse_mode")
-            requests.post(url, json=payload, timeout=10)
+            response = requests.post(url, json=payload, timeout=10)
             print(f"⚠️ Telegram API Warning: plain text (Status: {response.status_code})")
+        data = response.json()
+        return data.get("result", {}).get("message_id")
     except requests.exceptions.Timeout:
         print("❌ Telegram Error: Timeout.")
+        return None
     except Exception as e:
         print(f"❌ Telegram Connection Error: {e}")
+        return None
 
 
 async def send_telegram_photo(image_path: str, caption: str = ""):

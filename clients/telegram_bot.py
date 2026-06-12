@@ -52,6 +52,22 @@ from core.event_bus import bus
 shutdown_event        = threading.Event()
 astakos_queue         = queue.Queue()
 memory_lock           = threading.Lock()
+
+# Cache: telegram message_id → full text (τελευταία 50 bot μηνύματα)
+# Χρησιμοποιείται από _handle_message_reaction για exact match
+_bot_message_cache: dict[int, str] = {}
+_bot_message_cache_lock = threading.Lock()
+_BOT_CACHE_MAX = 50
+
+def _cache_bot_message(message_id: int | None, text: str) -> None:
+    if not message_id:
+        return
+    with _bot_message_cache_lock:
+        _bot_message_cache[message_id] = text
+        # Κράτα μόνο τα τελευταία N
+        if len(_bot_message_cache) > _BOT_CACHE_MAX:
+            oldest = sorted(_bot_message_cache.keys())[0]
+            del _bot_message_cache[oldest]
 last_interaction_time = time.time()
 # Pending routine confirmations: {routine_id: {"event": ..., "sent_at": ...}}
 pending_routine_confirmations = {}
@@ -787,7 +803,8 @@ def handle_message(user_text: str, chat_id: str):
                         import asyncio
                         asyncio.run(send_telegram_voice(final_ai_response))
                     else:
-                        send_telegram_msg(final_ai_response)
+                        _mid = send_telegram_msg(final_ai_response)
+                        _cache_bot_message(_mid, final_ai_response)
 
                 # Στείλε το αρχείο στο Telegram ως document
                 try:
@@ -804,7 +821,8 @@ def handle_message(user_text: str, chat_id: str):
                     import asyncio
                     asyncio.run(send_telegram_voice(final_ai_response))
                 else:
-                    send_telegram_msg(final_ai_response) # [FIX]: Μόνο ένα όρισμα!
+                    _mid = send_telegram_msg(final_ai_response)
+                    _cache_bot_message(_mid, final_ai_response)
             # Κρατάμε context για επόμενο μήνυμα
             _typing_active["on"] = False  # Σταματάμε το typing
             _append_to_analytics_log("user", clean_user_text)
@@ -1007,6 +1025,74 @@ def _handle_approval_callback(cq: dict):
         print(f"\033[91m[ApprovalCallback]: {e}\033[0m")
 
 
+def _handle_message_reaction(reaction: dict) -> None:
+    """
+    Όταν ο Λάζαρος κάνει ❤️ react σε μήνυμα του Αστακού,
+    αποθηκεύει το περιεχόμενο του μηνύματος στη long-term memory.
+    """
+    try:
+        chat_id = str(reaction.get("chat", {}).get("id", ""))
+        if chat_id != str(TELEGRAM_CHAT_ID):
+            return
+
+        # Μόνο νέα reactions (όχι αφαίρεση)
+        new_reactions = reaction.get("new_reaction", [])
+        emojis = [r.get("emoji", "") for r in new_reactions if r.get("type") == "emoji"]
+        if "❤" not in emojis and "❤️" not in emojis:
+            return
+
+        # Βρες το περιεχόμενο του μηνύματος που έγινε react
+        msg_id = reaction.get("message_id")
+        bot_text = None
+
+        # 1. Πρώτα ψάξε στο in-memory cache (exact match)
+        with _bot_message_cache_lock:
+            bot_text = _bot_message_cache.get(msg_id)
+
+        # 2. Fallback: τελευταίο assistant μήνυμα από SQLite
+        if not bot_text:
+            try:
+                from memory.conversation_history import load_messages
+                recent = load_messages(channel="telegram", limit=20)
+                for entry in reversed(recent):
+                    if entry.get("role") in ("assistant", "ai", "bot"):
+                        bot_text = entry.get("content", "")
+                        break
+            except Exception as e:
+                print(f"⚠️ [Reaction]: history lookup failed: {e}")
+
+        if not bot_text:
+            send_telegram_msg("❤️ Έπιασα το react αλλά δεν βρήκα το μήνυμα στη μνήμη μου.")
+            return
+
+        # Αποθήκευσε στη long-term memory
+        preview = bot_text[:80].replace("\n", " ")
+        print(f"\033[92m[Reaction ❤️]: Αποθήκευση: {preview}...\033[0m")
+        threading.Thread(
+            target=_save_reaction_to_memory,
+            args=(bot_text,),
+            daemon=True
+        ).start()
+
+    except Exception as e:
+        print(f"⚠️ [Reaction Handler]: {e}")
+
+
+def _save_reaction_to_memory(text: str) -> None:
+    """Background: αποθηκεύει το κείμενο στη ChromaDB και ειδοποιεί."""
+    try:
+        from tools.system import save_to_memory
+        preview = text[:60].replace("\n", " ")
+        result = save_to_memory.invoke({
+            "fact": text,
+            "entities": "Αστακός, απάντηση",
+            "category": "saved_by_user",
+        })
+        send_telegram_msg(f"❤️ Αποθηκεύτηκε στη μνήμη μου:\n_\"{preview}…\"_")
+    except Exception as e:
+        print(f"⚠️ [Reaction Save]: {e}")
+
+
 def run_polling():
     """Long-polling loop — διαβάζει updates από το Telegram API."""
     global voice_mode_enabled
@@ -1025,7 +1111,7 @@ def run_polling():
         try:
             resp = requests.get(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
-                params={"offset": offset, "timeout": 30},
+                params={"offset": offset, "timeout": 30, "allowed_updates": '["message","callback_query","message_reaction","edited_message"]'},
                 timeout=35
             )
 
@@ -1043,6 +1129,12 @@ def run_polling():
                 cq = update.get("callback_query")
                 if cq:
                     _handle_approval_callback(cq)
+                    continue
+
+                # ── ❤️ Reaction → save bot message to memory ──────────
+                reaction = update.get("message_reaction")
+                if reaction:
+                    _handle_message_reaction(reaction)
                     continue
 
                 # [MASTRO-FIX]: Πιάνουμε και τα Live Locations που έρχονται ως edited_message
