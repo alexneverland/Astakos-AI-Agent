@@ -48,7 +48,6 @@ def _parse_dt(dt_str: str, tz: ZoneInfo) -> datetime:
     s = dt_str.strip()
     now = datetime.now(tz)
 
-    # Relative: αύριο, σήμερα
     low = s.lower()
     day_offset = None
     time_part = None
@@ -62,7 +61,6 @@ def _parse_dt(dt_str: str, tz: ZoneInfo) -> datetime:
         rest = s[6:].strip()
         time_part = rest if rest else "09:00"
     else:
-        # Ελληνικές μέρες
         _DAYS_EL = {
             "δευτέρα": 0, "δευτερα": 0,
             "τρίτη": 1,   "τριτη": 1,
@@ -82,14 +80,12 @@ def _parse_dt(dt_str: str, tz: ZoneInfo) -> datetime:
 
     if day_offset is not None:
         target_date = (now + timedelta(days=day_offset)).date()
-        # Parse ώρα
         try:
             t = datetime.strptime(time_part, "%H:%M").time()
         except ValueError:
             t = datetime.strptime("09:00", "%H:%M").time()
         return datetime.combine(target_date, t, tzinfo=tz)
 
-    # ISO / custom formats
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d",
                 "%d/%m/%Y %H:%M", "%d/%m/%Y"):
         try:
@@ -110,7 +106,6 @@ def _format_event(e: dict) -> str:
     desc  = e.get("description", "")
     eid   = e.get("id", "")
 
-    # Ώρα έναρξης
     if "dateTime" in start:
         dt = datetime.fromisoformat(start["dateTime"])
         start_str = dt.strftime("%d/%m %H:%M")
@@ -290,7 +285,6 @@ def google_calendar_tool(
         if action == "delete":
             if not event_id:
                 return "❌ Λείπει το event_id."
-            # Πρώτα βρίσκουμε τον τίτλο για confirmation message
             try:
                 evt = svc.events().get(calendarId=CALENDAR_ID, eventId=event_id).execute()
                 evt_title = evt.get("summary", "(χωρίς τίτλο)")

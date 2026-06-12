@@ -816,7 +816,7 @@ def manage_list(action: str, list_name: str, item: str = "") -> str:
 # GOOGLE SERVICES
 # ────────────────────────────────────────────────────────────────
 
-from tools.gcalendar import google_calendar_tool
+from astakos_skills.gcalendar import google_calendar_tool
 
 
 def _normalize_google_task_due(due: str | None) -> str | None:

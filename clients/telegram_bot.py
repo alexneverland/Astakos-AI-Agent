@@ -1878,7 +1878,7 @@ def job_morning_calendar_briefing():
                 return
 
     try:
-        from tools.gcalendar import google_calendar_tool
+        from astakos_skills.gcalendar import google_calendar_tool
 
         today_events = google_calendar_tool.invoke({"action": "today"})
         week_events  = google_calendar_tool.invoke({"action": "week"})
