@@ -2218,7 +2218,7 @@ if __name__ == "__main__":
         except Exception:
             pass
         try:
-            _run_session_summary(channel='telegram')
+            handle_end_session(TELEGRAM_CHAT_ID)
         except Exception:
             pass
         print('[TelegramBot]: Τερματίστηκε.')
