@@ -69,6 +69,7 @@ TOOL_RISK: dict[str, str] = {
     "grep_project_files":       "SAFE",
     "read_project_file":        "SAFE",
     "text_stats":               "SAFE",
+    "tool_stats":               "SAFE",
     "create_file_tool":         "SAFE",
     "generate_excel":           "SAFE",
     "generate_word_doc":        "SAFE",

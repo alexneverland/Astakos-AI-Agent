@@ -17,7 +17,7 @@ from memory.execution_trace import ExecutionTrace, load_traces, _truncate
 
 # ── Fixture helper (χωρίς pytest tmp_path — FUSE permission issues) ───────────
 def _tmpdir():
-    return tempfile.mkdtemp(dir="/tmp", prefix="astakos_trace_test_")
+    return tempfile.mkdtemp(dir=tempfile.gettempdir(), prefix="astakos_trace_test_")
 
 
 # ═══════════════════════════════════════════════════════════════

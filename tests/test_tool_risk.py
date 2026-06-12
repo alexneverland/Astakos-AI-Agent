@@ -35,8 +35,8 @@ def test_save_to_memory_is_warning():
 def test_update_pending_linkedin_post_is_warning():
     assert get_risk("update_pending_linkedin_post") == "WARNING"
 
-def test_drive_manager_is_warning():
-    assert get_risk("drive_manager") == "WARNING"
+def test_drive_manager_is_notify():
+    assert get_risk("drive_manager") == "NOTIFY"
 
 def test_search_memory_is_safe():
     assert get_risk("search_memory") == "SAFE"

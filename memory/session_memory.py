@@ -241,6 +241,40 @@ def _infer_memory_category(text: str) -> str:
     return "lazaros"
 
 
+def _extract_explicit_memory_payload(text: str) -> str | None:
+    """Extract the actual payload from explicit commands like 'Κράτα στη μνήμη ότι ...'."""
+    compact = " ".join(clean_message(text).split())
+    if not compact:
+        return None
+
+    patterns = (
+        r"(?:κράτα|κρατα|αποθήκευσε|αποθηκευσε|σημείωσε|σημειωσε)\s+(?:στη\s+)?(?:μνήμη|μνημη)\s+(?:ότι|οτι)\s+(.+)",
+        r"(?:κράτα|κρατα|αποθήκευσε|αποθηκευσε|σημείωσε|σημειωσε)\s+(?:ότι|οτι)\s+(.+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, compact, flags=re.IGNORECASE)
+        if match:
+            payload = match.group(1).strip(" .")
+            return payload or None
+    return None
+
+
+def _looks_like_generic_memory_confirmation(text: str) -> bool:
+    clean = _normalize_text(text)
+    generic_markers = (
+        "το αποθηκευσα στη μνημη",
+        "αποθηκευσα στη μνημη",
+        "το αποθηκευσα",
+        "αποθηκευσα",
+        "το σημειωσα",
+        "σημειωσα",
+        "το σημείωσα",
+        "κρατηθηκε στη μνημη",
+        "κρατήθηκε στη μνήμη",
+    )
+    return any(marker in clean for marker in generic_markers) and len(clean) < 80
+
+
 def _extract_confirmed_memory_candidate(
     user_text: str,
     ai_text: str,
@@ -266,11 +300,14 @@ def _extract_confirmed_memory_candidate(
     if len(source_text) < 8 and len(confirmation_text) < 20:
         return None
 
-    # Απαιτείται ρητή επιβεβαίωση από τον AI — ΔΕΝ αποθηκεύουμε raw user text ως fact
+    # Απαιτείται ρητή επιβεβαίωση από τον AI — και αν ο χρήστης έδωσε ρητό
+    # "Κράτα στη μνήμη ότι X", κρατάμε το X, όχι meta-κείμενο τύπου
+    # "ο χρήστης ζήτησε να αποθηκευτεί".
     detail = None
+    explicit_payload = _extract_explicit_memory_payload(source_text)
     if confirmation_text:
         memory_match = re.search(
-            r"(?:αποθηκεύτηκε|αποθηκευτηκε|σημειώθηκε|σημειωθηκε|κρατήθηκε|κρατηθηκε)[^\n]{0,220}",
+            r"(?:αποθηκεύτηκε|αποθηκευτηκε|αποθήκευσα|αποθηκευσα|σημειώθηκε|σημειωθηκε|σημείωσα|σημειωσα|κρατήθηκε|κρατηθηκε)[^\n]{0,220}",
             confirmation_text,
             flags=re.IGNORECASE,
         )
@@ -279,16 +316,15 @@ def _extract_confirmed_memory_candidate(
     if not detail:
         # Ο AI δεν επιβεβαίωσε ρητά → παράκαμψη, ο LLM sifter θα αποφασίσει
         return None
+    if explicit_payload and _looks_like_generic_memory_confirmation(detail):
+        detail = explicit_payload
     if len(detail) > 300:
         detail = detail[:297].rstrip() + "..."
 
     category = _infer_memory_category(f"{safe_user} {safe_ai}")
 
     ts = now or datetime.now()
-    fact = (
-        f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, ο Λάζαρος ζήτησε ή επιβεβαίωσε "
-        f"να αποθηκευτεί στη μνήμη: {detail}"
-    )
+    fact = f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, {detail}"
     return {
         "memory_type": "fact",
         "fact": fact,

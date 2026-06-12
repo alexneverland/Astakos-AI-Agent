@@ -9,15 +9,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from unittest.mock import patch, MagicMock
 
 
-def test_require_confirmation_without_approval_returns_cancelled():
-    """Χωρις already_approved, REQUIRE_CONFIRMATION εντολη επιστρεφει cancelled."""
-    from core.safe_executor import safe_execute, ExecPolicy
+def test_warning_command_without_approval_executes():
+    """git push είναι WARNING πλέον: εκτελείται χωρίς approval gate, με warning policy."""
+    from core.safe_executor import safe_execute
 
     mock_executor = MagicMock(return_value={"status": "ok", "output": "done"})
     result = safe_execute("git push origin main", mock_executor, confirm_callback=None)
 
-    assert result.get("status") in ("blocked", "cancelled")
-    mock_executor.assert_not_called()
+    assert result.get("status") == "ok"
+    mock_executor.assert_called_once()
 
 
 def test_already_approved_bypasses_safe_execute():

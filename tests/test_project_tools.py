@@ -10,13 +10,13 @@ from unittest.mock import patch, MagicMock
 
 
 # ── Helpers ──────────────────────────────────────────────────────
-# Χρησιμοποιούμε /tmp απευθείας (αποφεύγουμε FUSE mount PermissionError)
+# Cross-platform temp dir. On Windows, /tmp does not necessarily exist.
 
 @pytest.fixture
 def tmp_path():
-    """Override pytest tmp_path να χρησιμοποιεί /tmp."""
+    """Override pytest tmp_path with a deterministic temporary folder."""
     import pathlib
-    d = tempfile.mkdtemp(prefix="test_astakos_", dir="/tmp")
+    d = tempfile.mkdtemp(prefix="test_astakos_", dir=tempfile.gettempdir())
     yield pathlib.Path(d)
     shutil.rmtree(d, ignore_errors=True)
 

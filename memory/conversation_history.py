@@ -8,6 +8,7 @@ without clobbering each other's writes.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import threading
@@ -27,8 +28,8 @@ _dedup_recent: dict[tuple, float] = {}  # key → last_write_epoch
 DEDUP_TTL_SECONDS = 5.0
 
 
-def _dedup_key(channel: str, role: str, content: str) -> tuple:
-    return (channel, role, content[:200])
+def _dedup_key(channel: str, role: str, content: str, db_path: str = CONVERSATION_DB_FILE) -> tuple:
+    return (os.path.abspath(db_path), channel, role, content[:200])
 
 
 def _is_recent_duplicate(key: tuple) -> bool:
@@ -195,7 +196,7 @@ def append_message(
     }
 
     # [DEDUP GUARD]: Αποτρέπει rapid double-writes
-    _key = _dedup_key(channel, role, content)
+    _key = _dedup_key(channel, role, content, db_path)
     if _is_recent_duplicate(_key):
         print(f"\033[93m[ConvHistory]: Dedup skip — {channel}/{role} '{content[:40]}'[0m")
         return message

@@ -8,6 +8,7 @@ import json
 import csv
 import tempfile
 import shutil
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -24,7 +25,11 @@ SAMPLE_DATA = json.dumps([
 ])
 
 def _tmp():
-    return tempfile.mkdtemp(dir="/tmp", prefix="astakos_fg_test_")
+    return tempfile.mkdtemp(dir=tempfile.gettempdir(), prefix="astakos_fg_test_")
+
+
+def _require_reportlab():
+    pytest.importorskip("reportlab")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -57,7 +62,7 @@ def test_generate_excel_file_is_valid_xlsx():
         shutil.rmtree(d, ignore_errors=True)
 
 def test_generate_excel_invalid_json():
-    result = generate_excel.func(output_path="/tmp/bad_astakos.xlsx", data_json="not json")
+    result = generate_excel.func(output_path=os.path.join(tempfile.gettempdir(), "bad_astakos.xlsx"), data_json="not json")
     assert "❌" in result
 
 def test_generate_excel_empty_data():
@@ -144,6 +149,7 @@ def test_generate_word_empty_content():
 # ═══════════════════════════════════════════════════════════════
 
 def test_generate_pdf_creates_file():
+    _require_reportlab()
     d = _tmp()
     try:
         out = os.path.join(d, "test.pdf")
@@ -155,6 +161,7 @@ def test_generate_pdf_creates_file():
         shutil.rmtree(d, ignore_errors=True)
 
 def test_generate_pdf_is_valid_pdf():
+    _require_reportlab()
     d = _tmp()
     try:
         out = os.path.join(d, "valid.pdf")
@@ -165,6 +172,7 @@ def test_generate_pdf_is_valid_pdf():
         shutil.rmtree(d, ignore_errors=True)
 
 def test_generate_pdf_with_author():
+    _require_reportlab()
     d = _tmp()
     try:
         out = os.path.join(d, "authored.pdf")
@@ -213,7 +221,7 @@ def test_generate_csv_custom_delimiter():
         shutil.rmtree(d, ignore_errors=True)
 
 def test_generate_csv_invalid_json():
-    result = generate_csv.func(output_path="/tmp/bad_astakos.csv", data_json="{invalid}")
+    result = generate_csv.func(output_path=os.path.join(tempfile.gettempdir(), "bad_astakos.csv"), data_json="{invalid}")
     assert "❌" in result
 
 def test_generate_csv_utf8_bom():

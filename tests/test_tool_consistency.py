@@ -31,10 +31,19 @@ CAPABILITY_ALIASES = {
     "messenger": {"relay_local_payload", "execute_local_pipeline"},
     "news": {"get_news"},
     "nutrition_analysis": set(),  # Telegram /nutrition command flow.
+    "archive": {"archive_file"},
+    "location": {"get_current_location"},
+    "photos": {"retrieve_photo"},
+    "project_tools": {"list_project_files", "read_project_file", "edit_project_file", "grep_project_files"},
     "recipe": {"recipe_expert", "log_meal"},
+    "routines": {"learn_routine", "get_routines"},
     "shopping_list": {"manage_list"},
+    "spotify": {"control_spotify"},
     "story_maker": set(),  # Telegram /story command flow.
+    "supermarket_prices": {"search_supermarket_prices"},
+    "terminal": {"run_terminal_command"},
     "vacuum": {"control_vacuum"},
+    "web_search": {"duckduckgo_search", "browse_url"},
     "weather": {"get_weather_forecast"},
 }
 
