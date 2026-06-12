@@ -1864,6 +1864,46 @@ def job_morning_fit_briefing():
     except Exception as e:
         print(f"⚠️ [FitBriefing]: {e}")
 
+def job_morning_calendar_briefing():
+    """Πρωινό Google Calendar briefing — τρέχει μόνο 08:00–09:00, μία φορά."""
+    now_hour = datetime.now().hour
+    if now_hour != 8:
+        return
+
+    flag_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".calendar_briefing_sent")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if os.path.exists(flag_file):
+        with open(flag_file, "r") as f:
+            if f.read().strip() == today_str:
+                return
+
+    try:
+        from tools.gcalendar import google_calendar_tool
+
+        today_events = google_calendar_tool.invoke({"action": "today"})
+        week_events  = google_calendar_tool.invoke({"action": "week"})
+
+        # Αν δεν υπάρχουν events σήμερα, στέλνουμε μόνο σύνοψη εβδομάδας
+        if "Δεν υπάρχουν events" in today_events:
+            msg = (
+                f"🌅 *Καλημέρα Λάζαρε!*\n\n"
+                f"📅 Σήμερα δεν έχεις τίποτα προγραμματισμένο.\n\n"
+                f"*Επόμενες 7 μέρες:*\n{week_events}"
+            )
+        else:
+            msg = (
+                f"🌅 *Καλημέρα Λάζαρε!*\n\n"
+                f"*Σημερινό πρόγραμμα:*\n{today_events}"
+            )
+
+        send_telegram_msg(msg)
+        with open(flag_file, "w") as f:
+            f.write(today_str)
+        print("✅ [CalendarBriefing]: Πρωινό briefing στάλθηκε.")
+    except Exception as e:
+        print(f"⚠️ [CalendarBriefing]: {e}")
+
+
 def job_goal_followup():
     """
     Ελέγχει active goals που δεν αναφέρθηκαν τις τελευταίες 7 μέρες.
@@ -2133,8 +2173,9 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_check_routines,  interval_seconds=60,    name="routines",    verbose=False)
     astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive",   verbose=True)
     astakos_scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics",   verbose=True)
-    astakos_scheduler.register(job_morning_fit_briefing, interval_seconds=3600, name="fit_briefing", verbose=True)
-    astakos_scheduler.register(job_goal_followup,       interval_seconds=3600, name="goal_followup", verbose=True)
+    astakos_scheduler.register(job_morning_fit_briefing,       interval_seconds=3600, name="fit_briefing",      verbose=True)
+    astakos_scheduler.register(job_morning_calendar_briefing,  interval_seconds=3600, name="cal_briefing",      verbose=True)
+    astakos_scheduler.register(job_goal_followup,              interval_seconds=3600, name="goal_followup",     verbose=True)
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
 
     # Startup check για χαμένες ρουτίνες (10s καθυστέρηση για πλήρη αρχικοποίηση)
