@@ -22,7 +22,7 @@ TOOL_RISK: dict[str, str] = {
 
     # ── NOTIFY: εκτελεί + Telegram info (χωρίς buttons) ─────────
     "drive_manager":            "NOTIFY",    # upload/download/rename — handled by _effective_risk
-    "google_calendar_tool":     "NOTIFY",    # δημιουργεί/αλλάζει events στο Google Calendar
+    "google_calendar_tool":     "SAFE",      # per-action risk handled by _effective_risk() in approval.py
 
     # ── WARNING: writes / side-effects — log μόνο στο web UI ────
     "save_goal_tool":           "WARNING",

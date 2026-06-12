@@ -816,20 +816,7 @@ def manage_list(action: str, list_name: str, item: str = "") -> str:
 # GOOGLE SERVICES
 # ────────────────────────────────────────────────────────────────
 
-@tool
-def google_calendar_tool(action: str, summary: str, start_time: str, end_time: str = None) -> str:
-    """Διαχειρίζεται το Google Calendar. action: 'create' για νέο ραντεβού."""
-    try:
-        print(f"\033[93m[Calendar]: Δημιουργία ραντεβού '{summary}'...\033[0m")
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, ['https://www.googleapis.com/auth/calendar'])
-        service = build('calendar', 'v3', credentials=creds)
-        if action == "create":
-            event = {'summary': summary, 'start': {'dateTime': start_time}, 'end': {'dateTime': end_time or start_time}}
-            service.events().insert(calendarId='primary', body=event).execute()
-            return f"Το ραντεβού '{summary}' δημιουργήθηκε επιτυχώς!"
-        return f"System Error: Υποστηρίζεται ΜΟΝΟ action='create'. Έστειλες: '{action}'."
-    except Exception as e:
-        return f"Calendar Error: {str(e)}"
+from tools.gcalendar import google_calendar_tool
 
 
 def _normalize_google_task_due(due: str | None) -> str | None:

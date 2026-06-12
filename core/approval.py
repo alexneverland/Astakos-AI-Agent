@@ -60,6 +60,15 @@ def _effective_risk(tc: dict) -> str:
         if action in {"create", "complete", "update"}:
             return "WARNING"
         return "WARNING"
+    if name == "google_calendar_tool":
+        action = str(tc.get("args", {}).get("action", "list")).lower()
+        if action == "delete":
+            return "CRITICAL"
+        if action in {"list", "today", "week", "search"}:
+            return "SAFE"
+        if action in {"create", "update"}:
+            return "WARNING"
+        return "WARNING"
 
     if name == "edit_project_file":
         _CORE = {"agents.py", "brain.py", "graph.py", "approval.py",
