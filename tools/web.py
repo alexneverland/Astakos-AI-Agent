@@ -34,6 +34,21 @@ def remove_accents(input_str: str) -> str:
     return u"".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower()
 
 
+def _greek_to_latin(s: str) -> str:
+    """
+    Βασική Greek→Latin transliteration για contact matching.
+    π.χ. "σοφια" → "sofia", "αλεξανδρος" → "alexandros"
+    Χρησιμοποιείται ως fallback όταν το query είναι λατινικό.
+    """
+    _MAP = {
+        'α':'a','β':'v','γ':'g','δ':'d','ε':'e','ζ':'z','η':'i',
+        'θ':'th','ι':'i','κ':'k','λ':'l','μ':'m','ν':'n','ξ':'x',
+        'ο':'o','π':'p','ρ':'r','σ':'s','ς':'s','τ':'t','υ':'i',
+        'φ':'f','χ':'h','ψ':'ps','ω':'o',
+    }
+    return ''.join(_MAP.get(c, c) for c in s.lower())
+
+
 _AMBIGUOUS_MESSENGER_TARGETS = {
     "friend", "friends", "φιλε", "φιλος", "φιλους", "μαστορα", "mastora",
     "user", "χρηστη", "αυτον", "αυτην", "καποιον", "καποια", "unknown",
@@ -67,10 +82,29 @@ def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
         return True, "direct target"
 
     contacts = _load_messenger_contacts()
+    # 1) Exact match (accent-normalized)
     if normalized in contacts:
         return True, "known contact"
+    # 2) Partial alias match
     if any(alias and (alias in normalized or normalized in alias) for alias in contacts):
         return True, "known contact"
+    # 3) Greek↔Latin transliteration fallback:
+    #    Αν το query είναι λατινικό (π.χ. "Sophia"), transliterate τα Greek contact keys
+    #    και σύγκρινε. Επίσης, "ph" → "f" phonetic equivalence (sophia → sofia).
+    _is_latin_query = all(ord(c) < 0x0370 or c.isdigit() or not c.isalpha() for c in normalized)
+    if _is_latin_query:
+        # phonetic variants: ph→f, ck→k, c→k (πριν από a/o/u/l/r)
+        def _phonetic(s: str) -> str:
+            s = s.replace("ph", "f").replace("ck", "k").replace("th", "θ")
+            return s
+        normalized_ph = _phonetic(normalized)
+        for alias in contacts:
+            alias_latin = _greek_to_latin(alias)
+            alias_latin_ph = _phonetic(alias_latin)
+            if alias_latin == normalized or alias_latin_ph == normalized_ph:
+                return True, "known contact"
+            if alias_latin in normalized or normalized in alias_latin:
+                return True, "known contact"
     return False, f"unknown Messenger contact '{target_entity}'"
 
 
@@ -400,6 +434,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     # 3. [SEND]: Απευθείας αποστολή — έγκριση έγινε ήδη από relay_local_payload
     profile_dir = os.path.join(base_dir, "..", "astakos_skills", "messenger_profile")
 
+    _sent_ok = False
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch_persistent_context(
@@ -447,9 +482,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
                 time.sleep(0.5)
             chat_box.press("Enter")
             time.sleep(3.0)
-
-            if os.path.exists(draft_file):
-                os.remove(draft_file)
+            _sent_ok = True
 
     except Exception as e:
         return f"❌ Σφάλμα Messenger: {str(e)}"
@@ -458,6 +491,11 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
             browser.close()
         except:
             pass
+        if _sent_ok and os.path.exists(draft_file):
+            try:
+                os.remove(draft_file)
+            except OSError as _de:
+                print(f"⚠️ [execute_local_pipeline]: draft delete failed: {_de}")
 
     # ── AUTO-CONFIRM pending routines ──────────────────────────────
     # Αν υπάρχει TRIGGER_PENDING routine (π.χ. "πρωινό μήνυμα Σοφία"),
