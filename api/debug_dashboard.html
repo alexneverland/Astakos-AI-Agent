@@ -456,7 +456,24 @@ async function fetchTraces() {
       container.innerHTML = '<div class="card" style="border-left:3px solid var(--blue)"><h2>🔍 Execution Traces</h2><p style="color:var(--muted);margin-top:8px">Δεν υπάρχουν traces για σήμερα ακόμα. Στείλε ένα μήνυμα στον Αστακό.</p></div>';
       return;
     }
-    const rows = traces.slice().reverse().map(t => {
+    const mode = window._traceMode || 'all';
+    const hideOld = window._traceHideOldIssues !== false;
+    const now = Date.now();
+    const isIssue = t => Boolean(t.error || t.loop_guard || (t.tool_calls || []).some(tc => tc.error));
+    const isOldIssue = t => {
+      const ts = Date.parse(t.timestamp || '');
+      return isIssue(t) && Number.isFinite(ts) && (now - ts) > 4 * 60 * 60 * 1000;
+    };
+    const allCount = traces.length;
+    const issueCount = traces.filter(isIssue).length;
+    const oldIssueCount = traces.filter(isOldIssue).length;
+    const filtered = traces.filter(t => {
+      if (hideOld && isOldIssue(t)) return false;
+      if (mode === 'issues') return isIssue(t);
+      if (mode === 'clean') return !isIssue(t);
+      return true;
+    });
+    const rows = filtered.slice().reverse().map(t => {
       const tools = (t.tool_calls || []).map(tc => {
         const col = tc.error ? '#f66' : tc.duration_ms > 3000 ? '#f90' : '#7ec8e3';
         return `<span style="background:#161b22;border:1px solid ${col}33;padding:2px 7px;border-radius:4px;margin:2px;display:inline-block;font-size:11px;color:${col}">
@@ -481,11 +498,24 @@ async function fetchTraces() {
         <td style="font-size:11px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${resp}">${resp}</td>
         <td style="white-space:nowrap">${badges.join(' ')} ${dur}</td>
       </tr>`;
-    }).join('');
+    }).join('') || `<tr><td colspan="7" style="color:var(--muted);padding:12px">Δεν υπάρχουν traces για το τρέχον φίλτρο.</td></tr>`;
+    const btn = (id, label) =>
+      `<button onclick="window._traceMode='${id}';fetchTraces()"
+        style="background:${mode===id?'#0d2240':'#161b22'};color:${mode===id?'var(--blue)':'var(--muted)'};
+        border:1px solid ${mode===id?'var(--blue)':'var(--border)'};padding:4px 9px;border-radius:5px;cursor:pointer;font-size:12px">${label}</button>`;
     container.innerHTML = `<div class="card" style="border-left:3px solid var(--blue)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <h2 style="margin:0">🔍 Execution Traces</h2>
-        <span style="color:var(--muted);font-size:12px">${traces.length} turns σήμερα · ανανέωση κάθε 30s</span>
+        <span style="color:var(--muted);font-size:12px">${filtered.length}/${allCount} turns · issues ${issueCount} · old hidden ${hideOld?oldIssueCount:0}</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        ${btn('all','All')}
+        ${btn('issues','Issues only')}
+        ${btn('clean','Clean only')}
+        <label style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:5px">
+          <input type="checkbox" ${hideOld?'checked':''} onchange="window._traceHideOldIssues=this.checked;fetchTraces()">
+          hide old issues (&gt;4h)
+        </label>
       </div>
       <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
       <table style="width:100%"><tr>
