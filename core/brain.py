@@ -57,7 +57,7 @@ vertex_client = genai.Client(
 )
 
 console = Console()
-print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI via GenAI SDK) 🦞\033[0m")
+print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI via GenAI SDK)\033[0m")
 
 
 def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
