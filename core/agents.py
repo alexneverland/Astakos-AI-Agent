@@ -35,7 +35,7 @@ from tools.system import (
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool, register_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, get_routines, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
-    save_goal_tool, update_goal_status_tool,
+    save_goal_tool, update_goal_status_tool, tool_stats, system_doctor,
 )
 from tools.web import (
     get_news, get_weather_forecast,
@@ -467,8 +467,8 @@ def tech_agent_node(state: AgentState):
         ])
 
     from tools.system import (
-        read_local_file, drive_manager, archive_file, search_memory, 
-        save_to_memory, create_file_tool, get_current_location
+        read_local_file, drive_manager, archive_file, search_memory,
+        save_to_memory, create_file_tool, get_current_location, tool_stats, system_doctor
     )
     
     tech_tools = [
@@ -478,7 +478,9 @@ def tech_agent_node(state: AgentState):
         drive_manager,
         search_memory,
         save_to_memory,
-        create_file_tool
+        create_file_tool,
+        tool_stats,
+        system_doctor
     ]
     
     response = llm_heavy.bind_tools(tech_tools).invoke(final_messages)
@@ -560,5 +562,5 @@ all_tools = [
     control_vacuum, get_navigation_info,
     control_spotify, search_goldmall_offers, execute_local_pipeline, get_current_location,
     recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, get_routines, browse_url,
-    duckduckgo_search, search_supermarket_prices
+    duckduckgo_search, search_supermarket_prices, tool_stats, system_doctor
 ]

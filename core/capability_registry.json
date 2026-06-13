@@ -8,6 +8,14 @@
     "triggers": ["tool stats", "ποια tools αποτυγχάνουν", "tool performance", "tool errors", "στατιστικά tools", "αποτυχίες tools", "tool failures", "πόσες φορές καλέστηκε"]
   },
   {
+    "name": "system_doctor",
+    "description": "Γρήγορος read-only έλεγχος υγείας του Astakos runtime από logs, traces, approvals, drafts, sessions και routines.",
+    "agent": "Tech_Agent",
+    "risk_level": "SAFE",
+    "priority": 10,
+    "triggers": ["/doctor", "doctor", "system doctor", "health check", "runtime health", "έλεγχος συστήματος", "όλα καλά με το σύστημα", "όλα καλά με το debug", "πως πάει ο αστακός", "δες αν όλα πάνε καλά", "τι δείχνει το debug"]
+  },
+  {
     "name": "text_stats",
     "description": "Calculates text statistics including characters, words, lines, and estimated reading time.",
     "agent": "Dev_Agent",
