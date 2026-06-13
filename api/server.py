@@ -1433,6 +1433,30 @@ async def debug_traces(date: str | None = None, limit: int = 50, _=Depends(requi
         return {"error": str(e), "traces": []}
 
 
+@server.get("/debug/memory-audit")
+async def debug_memory_audit(days: int = 1, _=Depends(require_token)):
+    """Επιστρέφει το memory audit log (add/overwrite/skip/reflection) για N ημέρες."""
+    from config import MEMORY_AUDIT_DIR
+    from datetime import date, timedelta
+    import json as _json
+    entries = []
+    today = date.today()
+    for i in range(min(int(days), 7)):
+        day = today - timedelta(days=i)
+        path = os.path.join(MEMORY_AUDIT_DIR, f"{day.isoformat()}.json")
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                    if isinstance(data, list):
+                        for e in data:
+                            e["date"] = day.isoformat()
+                        entries.extend(data)
+            except Exception:
+                pass
+    return {"entries": entries, "count": len(entries)}
+
+
 @server.get("/debug")
 async def debug_panel(_=Depends(require_token)):
     """Observability HTML dashboard — auto-refresh every 5s."""

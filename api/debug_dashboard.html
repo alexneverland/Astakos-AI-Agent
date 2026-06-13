@@ -68,6 +68,7 @@
 <div class="grid" id="timeline-section" style="margin-top:16px"></div>
 <div class="grid" id="goals-section" style="margin-top:16px"></div>
 <div class="grid" id="reflections-section" style="margin-top:16px"></div>
+<div id="memory-audit-section" style="margin-top:16px"></div>
 <div id="traces-section" style="margin-top:16px;padding:0"></div>
 <div id="log-section" style="margin-top:16px;padding:0 0 24px 0"></div>
 <script>
@@ -799,11 +800,77 @@ function startCountdown() {
   rafId = requestAnimationFrame(tick);
 }
 
+async function fetchMemoryAudit() {
+  const container = document.getElementById('memory-audit-section');
+  try {
+    const r = await fetch('/debug/memory-audit?days=1');
+    const d = await r.json();
+    const entries = d.entries || [];
+    const opIcon = {
+      add:              '✅',
+      overwrite:        '🔄',
+      skip_duplicate:   '⏭️',
+      skip_keep_old:    '🔒',
+      reflection_saved: '💡',
+      reflection_applied:'⚡',
+    };
+    const opColor = {
+      add:              '#22c55e',
+      overwrite:        '#f59e0b',
+      skip_duplicate:   '#6b7280',
+      skip_keep_old:    '#6b7280',
+      reflection_saved: '#60a5fa',
+      reflection_applied:'#a78bfa',
+    };
+    // group by op
+    const groups = {};
+    for (const e of entries) {
+      groups[e.op] = (groups[e.op] || 0) + 1;
+    }
+    const total = entries.length;
+    const summary = Object.entries(groups)
+      .map(([op, n]) => `<span style="color:${opColor[op]||'#fff'};margin-right:12px">${opIcon[op]||'•'} ${op}: <strong>${n}</strong></span>`)
+      .join('');
+
+    const rows = entries.slice().reverse().slice(0, 50).map(e => {
+      const ic = opIcon[e.op] || '•';
+      const col = opColor[e.op] || '#ccc';
+      const fact = e.fact || e.lesson || e.observation || '';
+      const extra = e.reason ? ` <span style="color:var(--muted);font-size:11px">(${e.reason})</span>` : '';
+      const dist  = e.distance != null ? ` <span style="color:var(--muted);font-size:11px">sim=${e.distance}</span>` : '';
+      const cat   = e.category ? `<span style="color:var(--muted);font-size:11px;margin-right:6px">[${e.category}]</span>` : '';
+      return `<tr>
+        <td style="color:var(--muted);font-size:11px;white-space:nowrap">${e.ts||''}</td>
+        <td><span style="color:${col}">${ic} ${e.op}</span></td>
+        <td>${cat}<span style="font-size:12px">${fact.slice(0,90)}${extra}${dist}</span></td>
+      </tr>`;
+    }).join('');
+
+    container.innerHTML = `<div class="card" style="border-left:3px solid #a78bfa">
+      <h2>🧠 Memory Audit — σήμερα (${total} ops)</h2>
+      <div style="margin:8px 0 12px">${summary || '<span style="color:var(--muted)">Δεν υπάρχουν εγγραφές ακόμα.</span>'}</div>
+      ${rows ? `<div style="max-height:260px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="color:var(--muted);text-align:left;border-bottom:1px solid #333">
+          <th style="padding:4px 8px;min-width:60px">Ώρα</th>
+          <th style="padding:4px 8px;min-width:130px">Op</th>
+          <th style="padding:4px 8px">Περιεχόμενο</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>` : ''}
+    </div>`;
+  } catch(e) {
+    document.getElementById('memory-audit-section').innerHTML =
+      '<div class="card" style="border-left:3px solid #f66"><h2>🧠 Memory Audit</h2><p style="color:#f66">Σφάλμα: ' + e + '</p></div>';
+  }
+}
+
 fetchData();
 fetchTimeline();
 fetchTraces();
+fetchMemoryAudit();
 setInterval(fetchTimeline, 30000);
 setInterval(fetchTraces, 30000);
+setInterval(fetchMemoryAudit, 60000);
 startCountdown();
 </script>
 </body>
