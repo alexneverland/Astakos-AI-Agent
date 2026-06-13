@@ -34,8 +34,9 @@ WORKSPACE_DIR     = os.path.join(BASE_DIR, "astakos_skills")
 PHOTOS_DIR        = os.path.join(BASE_DIR, "telegram_photos")
 CHROMA_DB_DIR     = os.path.join(BASE_DIR, "chroma_db")
 UPLOADS_DIR       = os.path.join(BASE_DIR, "telegram_uploads")  # ← κεντρικός uploads φάκελος
+MEMORY_AUDIT_DIR  = os.path.join(BASE_DIR, "logs", "memory_audit")
 
-for directory in [WORKSPACE_DIR, PHOTOS_DIR, CHROMA_DB_DIR, UPLOADS_DIR]:
+for directory in [WORKSPACE_DIR, PHOTOS_DIR, CHROMA_DB_DIR, UPLOADS_DIR, MEMORY_AUDIT_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # ==========================================
@@ -73,5 +74,4 @@ SIM_THRESHOLD          = 0.88
 # 5. ΡΥΘΜΙΣΕΙΣ ROUTINES
 # ==========================================
 # Αν ο bot ήταν offline και μια ρουτίνα χάθηκε, στέλνει deferred follow-up
-# μόνο αν το χαμένο trigger δεν είναι παλαιότερο από X λεπτά.
-ROUTINE_MISS_GRACE_MINUTES = 90
+# μόνο αν το χαμένο trigger δεν 

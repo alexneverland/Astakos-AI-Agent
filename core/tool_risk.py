@@ -71,6 +71,7 @@ TOOL_RISK: dict[str, str] = {
     "text_stats":               "SAFE",
     "tool_stats":               "SAFE",
     "system_doctor":            "SAFE",
+    "memory_review":            "SAFE",
     "create_file_tool":         "SAFE",
     "generate_excel":           "SAFE",
     "generate_word_doc":        "SAFE",
@@ -82,5 +83,4 @@ def get_risk(tool_name: str) -> str:
     """Επιστρέφει SAFE/WARNING/NOTIFY/CRITICAL. Default: WARNING αν άγνωστο."""
     return TOOL_RISK.get(tool_name, "WARNING")
 
-def is_critical(tool_name: str) -> bool:
-    return get_risk(tool_name) == "CRITICAL"
+def is

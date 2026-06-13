@@ -300,14 +300,4 @@ def test_save_atomic_on_corrupt_file():
         et_module._TRACES_DIR = d
         from datetime import datetime
         today = datetime.now().strftime("%Y-%m-%d")
-        with open(os.path.join(d, f"{today}.json"), "w") as f:
-            f.write("CORRUPT{{{")
-        t = ExecutionTrace("web", "after corrupt")
-        t.finalize()
-        t.save()
-        data = json.loads(open(os.path.join(d, f"{today}.json"), encoding="utf-8").read())
-        assert len(data) == 1
-        assert data[0]["user_message"] == "after corrupt"
-    finally:
-        et_module._TRACES_DIR = old_dir
-        shutil.rmtree(d, ignore_errors=True)
+        with open(os.path.join(d

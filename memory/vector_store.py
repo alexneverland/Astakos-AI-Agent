@@ -10,8 +10,28 @@ import json
 import threading
 from datetime import datetime
 from langchain_chroma import Chroma
-from config import CHROMA_DB_DIR, PHOTOS_INDEX_FILE, SIM_THRESHOLD_DISTANCE
+from config import CHROMA_DB_DIR, PHOTOS_INDEX_FILE, SIM_THRESHOLD_DISTANCE, MEMORY_AUDIT_DIR
 from services.embeddings import embeddings
+
+
+def _audit_log(op: str, **kwargs):
+    """Γράφει μια εγγραφή στο daily memory audit log (logs/memory_audit/YYYY-MM-DD.json)."""
+    try:
+        today    = datetime.now().strftime("%Y-%m-%d")
+        log_file = os.path.join(MEMORY_AUDIT_DIR, f"{today}.json")
+        entry    = {"ts": datetime.now().strftime("%H:%M:%S"), "op": op, **kwargs}
+        entries  = []
+        if os.path.exists(log_file):
+            with open(log_file, "r", encoding="utf-8") as f:
+                try:
+                    entries = json.load(f)
+                except Exception:
+                    entries = []
+        entries.append(entry)
+        with open(log_file, "w", encoding="utf-8") as f:
+            json.dump(entries, f, ensure_ascii=False, indent=2)
+    except Exception as _e:
+        print(f"\033[90m[AuditLog]: {_e}\033[0m")
 
 vector_lock = threading.Lock()
 memory_lock = threading.Lock()
@@ -286,6 +306,10 @@ class AstakosMemoryManager:
                     # της νέας, καταλήγοντας με ΔΥΟ σχεδόν-ίδιες εγγραφές στη Chroma
                     # (το loose SIM_THRESHOLD_DISTANCE=0.30 δεν την έπιανε πάντα).
                     # Αν αποφασίσαμε "κράτα την παλιά", σταματάμε εδώ — σε ΚΑΝΕΝΑ store.
+                    _audit_log("skip_keep_old", category=category,
+                               fact=str(fact)[:100], old=str(old_content)[:100],
+                               old_richness=round(decision["old_richness"], 1),
+                               new_richness=round(decision["new_richness"], 1))
                     return False
                 else:
                     try:
@@ -304,6 +328,9 @@ class AstakosMemoryManager:
                         reason_tag.append(f"richness {decision['new_richness']:.1f}≥{decision['old_richness']:.1f}")
                     tag_str = f" [{', '.join(reason_tag)}]" if reason_tag else ""
                     print(f"\033[94m[MemoryManager]: Overwrite!{tag_str} ({old_content[:80]} | Dist: {dist:.3f})\033[0m")
+                    _audit_log("overwrite", category=category,
+                               fact=str(fact)[:100], old=str(old_content)[:100],
+                               reason=", ".join(reason_tag) if reason_tag else "richness")
                     # Η ΙΔΙΑ απόφαση θα καθοδηγήσει και το JSON Profile παρακάτω —
                     # κρατάμε το ακριβές κείμενο της παλιάς εγγραφής για να τη βρούμε εκεί.
                     replace_old_fact_text = old_content
@@ -313,6 +340,9 @@ class AstakosMemoryManager:
         for doc, score in results:
             if score < SIM_THRESHOLD_DISTANCE and doc.metadata.get("category") == category:
                 print(f"\033[90m[MemoryManager]: Duplicate skip (distance={score:.3f}): {doc.page_content}\033[0m")
+                _audit_log("skip_duplicate", category=category,
+                           fact=str(fact)[:100], existing=doc.page_content[:100],
+                           distance=round(float(score), 3))
                 return False
 
         # 3. Αποθήκευση Chroma
@@ -345,6 +375,8 @@ class AstakosMemoryManager:
             metadata["photo_path"] = photo_path
 
         vector_store.add_texts([fact], metadatas=[metadata])
+        _audit_log("add", category=category, fact=str(fact)[:100],
+                   importance=_importance, confidence=confidence, source=source)
 
 # 4. Αποθήκευση JSON Profile — με έξυπνο OVERWRITE
         if category != "photos":
@@ -572,46 +604,4 @@ def save_goal(project: str, description: str, status: str = "active") -> bool:
                 "importance": 10, "confidence": 0.95, "last_accessed": datetime.now().timestamp(),
             }
             vector_store.add_texts([text], metadatas=[metadata])
-            print(f"\033[92m[Goals]: '{project}' ({status})\033[0m")
-            return True
-    except Exception as e:
-        print(f"\033[91m[Goals Error]: {e}\033[0m")
-        return False
-
-
-def update_goal_status(project: str, status: str) -> bool:
-    """Αλλάζει το status ενός goal."""
-    try:
-        with vector_lock:
-            existing = vector_store._collection.get(where={"category": "goal", "project": project})
-            if not existing["ids"]:
-                return False
-            old_meta = dict(existing["metadatas"][0])
-            vector_store._collection.delete(ids=existing["ids"])
-            new_meta = {**old_meta, "status": status, "timestamp": datetime.now().timestamp()}
-            vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
-            print(f"\033[92m[Goals]: '{project}' → {status}\033[0m")
-            return True
-    except Exception as e:
-        print(f"\033[91m[Goals Error]: {e}\033[0m")
-        return False
-
-
-def get_active_goals() -> list[dict]:
-    """Επιστρέφει active/paused goals."""
-    try:
-        with vector_lock:
-            results = vector_store._collection.get(where={"category": "goal"})
-        goals = []
-        for doc, meta in zip(results.get("documents", []), results.get("metadatas", [])):
-            if meta.get("status") in ("active", "paused"):
-                goals.append({
-                    "project":     meta.get("project", ""),
-                    "description": doc.split(": ", 1)[-1].replace("[GOAL] ", ""),
-                    "status":      meta.get("status", "active"),
-                    "date":        meta.get("date", ""),
-                })
-        return goals
-    except Exception as e:
-        print(f"\033[91m[Goals Error]: {e}\033[0m")
-        return []
+            print(f"\033[92m[Goals]: '{project}'

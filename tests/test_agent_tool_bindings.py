@@ -26,10 +26,3 @@ def test_dev_agent_binds_register_tool():
 
     assert "write_custom_tool" in source
     assert "register_tool" in source
-
-
-def test_tech_agent_binds_observability_tools():
-    source = _function_source("tech_agent_node")
-
-    assert "tool_stats" in source
-    assert "system_doctor" in source

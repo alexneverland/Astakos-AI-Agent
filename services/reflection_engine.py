@@ -66,6 +66,18 @@ def _save_reflection(source, observation, action, confidence, lesson, applied=Fa
     )
     conn.commit()
     conn.close()
+    # Audit log
+    try:
+        from memory.vector_store import _audit_log
+        _audit_log(
+            "reflection_applied" if applied else "reflection_saved",
+            lesson=str(lesson)[:120] if lesson else "",
+            observation=str(observation)[:80],
+            action=str(action)[:60],
+            source=str(source),
+        )
+    except Exception:
+        pass
 
 
 # ── Data Collection ──────────────────────────────────────────────
@@ -388,16 +400,4 @@ def run_reflection() -> dict:
 
     # Αποστολή Telegram
     if telegram_lines:
-        header = "🧠 *Astakos Self-Reflection — Νυχτερινή Ανάλυση*\n\n"
-        msg    = header + "\n\n---\n\n".join(telegram_lines)
-        if len(msg) > 4000:
-            msg = msg[:3990] + "..."
-        send_telegram_msg(msg)
-
-    stats = {"analyzed": len(reflections), "applied": applied, "pending": pending, "skipped": skipped}
-    print(f"[Reflection]: ✅ {stats}")
-    return stats
-
-
-if __name__ == "__main__":
-    print(run_reflection())
+        header = "🧠 *Astakos Self-Reflection — Νυχτερινή Ανάλυση

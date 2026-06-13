@@ -16,6 +16,14 @@
     "triggers": ["/doctor", "doctor", "system doctor", "health check", "runtime health", "έλεγχος συστήματος", "όλα καλά με το σύστημα", "όλα καλά με το debug", "πως πάει ο αστακός", "δες αν όλα πάνε καλά", "τι δείχνει το debug"]
   },
   {
+    "name": "memory_review",
+    "description": "Εμφανίζει τι αποθήκευσε ο Αστακός στη μνήμη: νέες εγγραφές, overwrites, duplicates που παραλείφθηκαν, reflections.",
+    "agent": "Tech_Agent",
+    "risk_level": "SAFE",
+    "priority": 10,
+    "triggers": ["memory review", "τι έμαθε", "τι αποθήκευσε", "τι έβαλε στη μνήμη", "memory panel", "μνήμη review", "τι ξέρει", "memory log", "τι κατέγραψε", "review memory", "τι έγραψε στη μνήμη", "έλεγξε τη μνήμη"]
+  },
+  {
     "name": "text_stats",
     "description": "Calculates text statistics including characters, words, lines, and estimated reading time.",
     "agent": "Dev_Agent",
@@ -297,18 +305,4 @@
   },
   {
     "name": "generate_pdf",
-    "description": "Δημιουργεί PDF αρχείο από κείμενο.",
-    "agent": "Dev_Agent",
-    "risk_level": "SAFE",
-    "priority": 9,
-    "triggers": ["φτιάξε pdf", "δημιούργησε pdf", "κάνε pdf", "εξαγωγή pdf", "make pdf", "create pdf", "generate pdf", "pdf αρχείο"]
-  },
-  {
-    "name": "generate_csv",
-    "description": "Δημιουργεί CSV αρχείο από δεδομένα.",
-    "agent": "Dev_Agent",
-    "risk_level": "SAFE",
-    "priority": 9,
-    "triggers": ["φτιάξε csv", "δημιούργησε csv", "κάνε csv", "εξαγωγή csv", "make csv", "create csv", "generate csv", "csv αρχείο"]
-  }
-]
+    "description": "Δημιουργεί PDF αρχείο από κε�
