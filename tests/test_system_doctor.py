@@ -93,7 +93,7 @@ def test_memory_audit_ops_summary_counts_main_operations():
     assert counts["skip_duplicate"] == 1
     assert counts["skip_keep_old"] == 1
     assert counts["reflection"] == 2
-    assert _format_memory_ops_summary(counts) == "6 ops (add 1, overwrite 1, skipped 2, reflections 2)"
+    assert _format_memory_ops_summary(counts) == "6 ops (add 1, overwrite 1, alongside 0, skipped 2, reflections 2)"
 
 
 def test_memory_review_tool_returns_readable_report():

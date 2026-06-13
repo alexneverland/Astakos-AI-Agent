@@ -2393,6 +2393,7 @@ def _count_memory_audit_ops(entries: list[dict]) -> dict[str, int]:
     counts = {
         "add": 0,
         "overwrite": 0,
+        "add_alongside": 0,
         "skip_duplicate": 0,
         "skip_keep_old": 0,
         "reflection": 0,
@@ -2413,6 +2414,7 @@ def _format_memory_ops_summary(counts: dict[str, int]) -> str:
     parts = [
         f"add {counts.get('add', 0)}",
         f"overwrite {counts.get('overwrite', 0)}",
+        f"alongside {counts.get('add_alongside', 0)}",
         f"skipped {counts.get('skip_duplicate', 0) + counts.get('skip_keep_old', 0)}",
         f"reflections {counts.get('reflection', 0)}",
     ]
@@ -2560,6 +2562,9 @@ def _normalize_memory_review_op(op: str | None) -> str:
         "overwrite": "overwrite",
         "overwrites": "overwrite",
         "διόρθωση": "overwrite",
+        "add_alongside": "add_alongside",
+        "alongside": "add_alongside",
+        "keep_both": "add_alongside",
         "skip": "skip",
         "skipped": "skip",
         "duplicate": "skip_duplicate",
@@ -2616,7 +2621,7 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
     Εμφανίζει τι αποθήκευσε ο Αστακός στη μνήμη τις τελευταίες X ημέρες.
     Περιλαμβάνει: νέες εγγραφές, overwrites, duplicates που παραλείφθηκαν, reflections.
     days: πόσες μέρες πίσω (default=1 = σήμερα).
-    op: προαιρετικό φίλτρο (add, overwrite, skip, skip_duplicate, skip_keep_old, reflection).
+    op: προαιρετικό φίλτρο (add, overwrite, add_alongside, skip, skip_duplicate, skip_keep_old, reflection).
     category: προαιρετικό φίλτρο category (π.χ. family, lazeros, projects).
     """
     all_entries = _load_audit_log(days)
@@ -2634,6 +2639,7 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
     # Ομαδοποίηση ανά operation
     adds        = [e for e in entries if e.get("op") == "add"]
     overwrites  = [e for e in entries if e.get("op") == "overwrite"]
+    alongside   = [e for e in entries if e.get("op") == "add_alongside"]
     skip_dup    = [e for e in entries if e.get("op") == "skip_duplicate"]
     skip_old    = [e for e in entries if e.get("op") == "skip_keep_old"]
     reflections = [e for e in entries if e.get("op") in ("reflection_applied", "reflection_saved")]
@@ -2662,6 +2668,14 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
         has_filter=has_filter,
         limit=5,
         formatter=lambda e: f"  [{e.get('ts','')}] {e.get('fact','')[:60]} ← {e.get('old','')[:40]} ({e.get('reason','')})",
+    )
+    _append_memory_review_section(
+        lines,
+        title="🧩 *Κράτησα κοντινές μνήμες ως ξεχωριστές*",
+        entries=alongside,
+        has_filter=has_filter,
+        limit=5,
+        formatter=lambda e: f"  [{e.get('ts','')}] {e.get('fact','')[:70]} (dist={e.get('distance','?')}, overlap={e.get('overlap','?')})",
     )
     _append_memory_review_section(
         lines,

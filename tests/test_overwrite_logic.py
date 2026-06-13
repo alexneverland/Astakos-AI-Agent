@@ -1,6 +1,11 @@
 from datetime import datetime, timedelta
 
-from memory.vector_store import decide_memory_overwrite, memory_richness
+from memory.vector_store import (
+    decide_memory_overwrite,
+    decide_memory_storage_action,
+    memory_overlap_ratio,
+    memory_richness,
+)
 
 
 def test_cross_category_close_match_never_enters_delete_path():
@@ -93,3 +98,76 @@ def test_memory_richness_counts_signals_and_confidence():
     fact = "[USER_FACT]: Στις 2026-06-08 η Σοφία αγόρασε δώρο από https://example.com"
 
     assert memory_richness(fact, {"confidence": 0.8}) == 4.8
+
+
+def test_close_family_facts_add_alongside_when_not_correction():
+    old_content = "[USER_FACT]: On 2026-06-13, Lazaros and Alexandros went to the park after lunch."
+    new_fact = "[USER_FACT]: On 2026-06-13, the family ate fish for lunch at home."
+    decision = {
+        "keep_old": False,
+        "looks_like_correction": False,
+        "stale": False,
+        "old_age_days": 0,
+        "new_richness": 3.7,
+        "old_richness": 3.7,
+        "much_longer": False,
+    }
+
+    action = decide_memory_storage_action(decision, new_fact, old_content, distance=0.05)
+
+    assert memory_overlap_ratio(new_fact, old_content) < 0.55
+    assert action["action"] == "add_alongside"
+
+
+def test_explicit_correction_still_overwrites_close_family_fact():
+    old_content = "[USER_FACT]: Lazaros lives at old address Peston 7."
+    new_fact = "[USER_FACT]: Correction, the right address is Piston 7."
+    decision = {
+        "keep_old": False,
+        "looks_like_correction": True,
+        "stale": False,
+        "old_age_days": 0,
+        "new_richness": 1.7,
+        "old_richness": 2.7,
+        "much_longer": False,
+    }
+
+    action = decide_memory_storage_action(decision, new_fact, old_content, distance=0.05)
+
+    assert action["action"] == "overwrite"
+
+
+def test_generic_low_signal_fact_keeps_richer_old_memory():
+    old_content = "[USER_FACT]: On 2026-06-13, Alexandros played at the park with Sofia after school."
+    new_fact = "[USER_FACT]: Alexandros often goes for walks."
+    decision = {
+        "keep_old": True,
+        "looks_like_correction": False,
+        "stale": False,
+        "old_age_days": 0,
+        "new_richness": 1.0,
+        "old_richness": 3.0,
+        "much_longer": False,
+    }
+
+    action = decide_memory_storage_action(decision, new_fact, old_content, distance=0.10)
+
+    assert action["action"] == "keep_old"
+
+
+def test_meaningful_dated_event_adds_alongside_even_if_old_is_richer():
+    old_content = "[USER_FACT]: On 2026-06-13, the family ate fish and Alexandros ate a lot."
+    new_fact = "[USER_FACT]: On 2026-06-13, Lazaros and Alexandros went to the park."
+    decision = {
+        "keep_old": True,
+        "looks_like_correction": False,
+        "stale": False,
+        "old_age_days": 0,
+        "new_richness": 3.0,
+        "old_richness": 3.7,
+        "much_longer": False,
+    }
+
+    action = decide_memory_storage_action(decision, new_fact, old_content, distance=0.05)
+
+    assert action["action"] == "add_alongside"

@@ -153,6 +153,74 @@ def memory_richness(text: str, metadata: dict | None) -> float:
     return score
 
 
+MEMORY_TOKEN_STOPWORDS = {
+    "user_fact", "lesson", "στις", "στην", "στον", "στο", "στη", "και", "που",
+    "για", "τον", "την", "του", "της", "των", "ένα", "μια", "είναι", "ήταν",
+    "lazaros", "λαζαρος", "λάζαρος", "alexandros", "αλεξανδρος", "αλέξανδρος",
+    "sofia", "σοφια", "σοφία",
+}
+
+
+def memory_content_tokens(text: str) -> set[str]:
+    tokens = []
+    current = []
+    for ch in str(text).lower():
+        if ch.isalnum() or ch == "_":
+            current.append(ch)
+        elif current:
+            tokens.append("".join(current))
+            current = []
+    if current:
+        tokens.append("".join(current))
+
+    return {
+        token
+        for token in tokens
+        if len(token) >= 4
+        and not any(ch.isdigit() for ch in token)
+        and token not in MEMORY_TOKEN_STOPWORDS
+    }
+
+
+def memory_overlap_ratio(new_fact: str, old_content: str) -> float:
+    new_tokens = memory_content_tokens(new_fact)
+    old_tokens = memory_content_tokens(old_content)
+    if not new_tokens or not old_tokens:
+        return 0.0
+    return len(new_tokens & old_tokens) / min(len(new_tokens), len(old_tokens))
+
+
+def decide_memory_storage_action(
+    decision: dict,
+    new_fact: str,
+    old_content: str,
+    *,
+    distance: float | None,
+    duplicate_overlap: float = 0.55,
+) -> dict:
+    """Choose keep/overwrite/add-alongside after a close same-category match.
+
+    Embedding distance alone is too broad for personal/family memories: two
+    different family events can be close enough to look related. Only explicit
+    corrections are allowed to delete old memories automatically.
+    """
+    overlap = memory_overlap_ratio(new_fact, old_content)
+    if decision.get("looks_like_correction"):
+        action = "overwrite"
+    elif overlap >= duplicate_overlap:
+        action = "keep_old"
+    elif decision.get("keep_old") and float(decision.get("new_richness") or 0) < 1.5:
+        action = "keep_old"
+    else:
+        action = "add_alongside"
+
+    return {
+        "action": action,
+        "overlap": overlap,
+        "distance": distance,
+    }
+
+
 def decide_memory_overwrite(
     new_fact: str,
     old_content: str,
@@ -247,6 +315,7 @@ class AstakosMemoryManager:
         # (JSON Profile) να βρει και να αντικαταστήσει ΤΗΝ ΙΔΙΑ εγγραφή — όχι να
         # τρέξει ξεχωριστό, ενδεχομένως αντικρουόμενο, similarity-check.
         replace_old_fact_text = None
+        add_alongside_old_text = None
 
         # 1. Semantic Overwrite για [LESSON] / [USER_FACT] — category-safe πρώτα
         if "[LESSON]" in fact or "[USER_FACT]" in fact:
@@ -304,8 +373,14 @@ class AstakosMemoryManager:
                     old_meta,
                     new_confidence=confidence,
                 )
+                storage = decide_memory_storage_action(
+                    decision,
+                    fact,
+                    old_content,
+                    distance=dist,
+                )
 
-                if decision["keep_old"]:
+                if storage["action"] == "keep_old":
                     print(
                         f"\033[90m[MemoryManager]: Keep richer! Παλιά (richness={decision['old_richness']:.1f}, "
                         f"{len(old_content)} χαρ.) > Νέα (richness={decision['new_richness']:.1f}, {len(str(fact))} χαρ.) "
@@ -319,8 +394,20 @@ class AstakosMemoryManager:
                     _audit_log("skip_keep_old", category=category,
                                fact=str(fact)[:100], old=str(old_content)[:100],
                                old_richness=round(decision["old_richness"], 1),
-                               new_richness=round(decision["new_richness"], 1))
+                               new_richness=round(decision["new_richness"], 1),
+                               distance=round(float(dist), 3) if dist is not None else None,
+                               overlap=round(float(storage["overlap"]), 3))
                     return False
+                elif storage["action"] == "add_alongside":
+                    add_alongside_old_text = old_content
+                    print(
+                        f"\033[90m[MemoryManager]: Add alongside close memory "
+                        f"(dist={dist:.3f}, overlap={storage['overlap']:.2f}) - keeping both.\033[0m"
+                    )
+                    _audit_log("add_alongside", category=category,
+                               fact=str(fact)[:100], old=str(old_content)[:100],
+                               distance=round(float(dist), 3) if dist is not None else None,
+                               overlap=round(float(storage["overlap"]), 3))
                 else:
                     try:
                         vector_store._collection.delete(ids=[old_id])
@@ -340,7 +427,9 @@ class AstakosMemoryManager:
                     print(f"\033[94m[MemoryManager]: Overwrite!{tag_str} ({old_content[:80]} | Dist: {dist:.3f})\033[0m")
                     _audit_log("overwrite", category=category,
                                fact=str(fact)[:100], old=str(old_content)[:100],
-                               reason=", ".join(reason_tag) if reason_tag else "richness")
+                               reason=", ".join(reason_tag) if reason_tag else "richness",
+                               distance=round(float(dist), 3) if dist is not None else None,
+                               overlap=round(float(storage["overlap"]), 3))
                     # Η ΙΔΙΑ απόφαση θα καθοδηγήσει και το JSON Profile παρακάτω —
                     # κρατάμε το ακριβές κείμενο της παλιάς εγγραφής για να τη βρούμε εκεί.
                     replace_old_fact_text = old_content
@@ -349,6 +438,8 @@ class AstakosMemoryManager:
         results = vector_store.similarity_search_with_score(fact, k=1)
         for doc, score in results:
             if score < SIM_THRESHOLD_DISTANCE and doc.metadata.get("category") == category:
+                if add_alongside_old_text is not None and doc.page_content == add_alongside_old_text:
+                    continue
                 print(f"\033[90m[MemoryManager]: Duplicate skip (distance={score:.3f}): {doc.page_content}\033[0m")
                 _audit_log("skip_duplicate", category=category,
                            fact=str(fact)[:100], existing=doc.page_content[:100],

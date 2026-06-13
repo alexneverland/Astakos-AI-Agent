@@ -198,3 +198,34 @@ def test_general_fact_with_no_close_match_appends_to_both_stores(tmp_path):
     assert len(db_after["general"]) == 2
     assert db_after["general"][0] == "Κάτι παλιό άσχετο"
     assert db_after["general"][1] == new_fact
+
+
+def test_close_unrelated_family_fact_adds_alongside_instead_of_overwrite(tmp_path):
+    old_content = "[USER_FACT]: On 2026-06-13, Lazaros and Alexandros went to the park after lunch."
+    new_fact = "[USER_FACT]: On 2026-06-13, the family ate fish for lunch at home."
+
+    decision = {
+        "keep_old": False, "looks_like_correction": False, "stale": False,
+        "old_age_days": 0, "new_richness": 3.7, "old_richness": 3.7, "much_longer": False,
+    }
+    same_cat = _make_same_cat_result("old-id-family", old_content, 0.05)
+    profile_seed = {"family": [old_content]}
+
+    dup_doc = MagicMock()
+    dup_doc.metadata = {"category": "family"}
+    dup_doc.page_content = old_content
+
+    result, mock_collection, mock_vs, db_after = _run_save_fact(
+        tmp_path,
+        new_fact,
+        "family",
+        decision,
+        same_cat,
+        profile_seed=profile_seed,
+        dup_results=[(dup_doc, 0.05)],
+    )
+
+    assert result is True
+    mock_collection.delete.assert_not_called()
+    mock_vs.add_texts.assert_called_once()
+    assert db_after["family"] == [old_content, new_fact]
