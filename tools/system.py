@@ -2590,6 +2590,26 @@ def _filter_memory_audit_entries(entries: list[dict], *, op: str = "", category:
     return filtered
 
 
+def _memory_review_has_filter(op: str = "", category: str = "") -> bool:
+    return bool((op or "").strip() or (category or "").strip())
+
+
+def _append_memory_review_section(
+    lines: list[str],
+    *,
+    title: str,
+    entries: list[dict],
+    has_filter: bool,
+    limit: int,
+    formatter,
+) -> None:
+    if has_filter and not entries:
+        return
+    lines.append(f"\n{title}: {len(entries)}")
+    for entry in entries[-limit:]:
+        lines.append(formatter(entry))
+
+
 @tool
 def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
     """
@@ -2624,34 +2644,49 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
     if category:
         filters.append(f"category={category}")
     filter_text = f" ({', '.join(filters)})" if filters else ""
+    has_filter = _memory_review_has_filter(op=op, category=category)
     lines = [f"📋 *Memory Review — {period}{filter_text}: {len(entries)} κινήσεις μνήμης*\n"]
 
-    # ── Νέες εγγραφές
-    lines.append(f"✅ *Έμαθα / κράτησα νέα: {len(adds)}*")
-    for e in adds[-5:]:
-        lines.append(f"  [{e.get('ts','')}] [{e.get('category','?')}] {e.get('fact','')[:80]}")
-
-    # ── Overwrites
-    lines.append(f"\n♻️ *Διόρθωσα παλιές μνήμες: {len(overwrites)}*")
-    for e in overwrites[-5:]:
-        lines.append(f"  [{e.get('ts','')}] {e.get('fact','')[:60]} ← {e.get('old','')[:40]} ({e.get('reason','')})")
-
-    # ── Duplicates παραλείφθηκαν
-    lines.append(f"\n🔁 *Αγνόησα ως διπλότυπα: {len(skip_dup)}*")
-    for e in skip_dup[-3:]:
-        lines.append(f"  [{e.get('ts','')}] {e.get('fact','')[:70]} (dist={e.get('distance','?')})")
-
-    # ── Keep old (πλουσιότερη παλιά εγγραφή)
-    lines.append(f"\n🔒 *Κράτησα την παλιότερη/πλουσιότερη μνήμη: {len(skip_old)}*")
-    for e in skip_old[-3:]:
-        lines.append(f"  [{e.get('ts','')}] {e.get('fact','')[:70]}")
-
-    # ── Reflections
-    lines.append(f"\n🧠 *Μαθήματα / reflections: {len(reflections)}*")
-    for e in reflections[-5:]:
-        op_label = "✓ applied" if e.get("op") == "reflection_applied" else "saved"
-        lesson = e.get("lesson") or e.get("observation") or ""
-        lines.append(f"  [{e.get('ts','')}] {op_label}: {lesson[:80]}")
+    _append_memory_review_section(
+        lines,
+        title="✅ *Έμαθα / κράτησα νέα*",
+        entries=adds,
+        has_filter=has_filter,
+        limit=5,
+        formatter=lambda e: f"  [{e.get('ts','')}] [{e.get('category','?')}] {e.get('fact','')[:80]}",
+    )
+    _append_memory_review_section(
+        lines,
+        title="♻️ *Διόρθωσα παλιές μνήμες*",
+        entries=overwrites,
+        has_filter=has_filter,
+        limit=5,
+        formatter=lambda e: f"  [{e.get('ts','')}] {e.get('fact','')[:60]} ← {e.get('old','')[:40]} ({e.get('reason','')})",
+    )
+    _append_memory_review_section(
+        lines,
+        title="🔁 *Αγνόησα ως διπλότυπα*",
+        entries=skip_dup,
+        has_filter=has_filter,
+        limit=3,
+        formatter=lambda e: f"  [{e.get('ts','')}] {e.get('fact','')[:70]} (dist={e.get('distance','?')})",
+    )
+    _append_memory_review_section(
+        lines,
+        title="🔒 *Κράτησα την παλιότερη/πλουσιότερη μνήμη*",
+        entries=skip_old,
+        has_filter=has_filter,
+        limit=3,
+        formatter=lambda e: f"  [{e.get('ts','')}] {e.get('fact','')[:70]}",
+    )
+    _append_memory_review_section(
+        lines,
+        title="🧠 *Μαθήματα / reflections*",
+        entries=reflections,
+        has_filter=has_filter,
+        limit=5,
+        formatter=lambda e: f"  [{e.get('ts','')}] {'✓ applied' if e.get('op') == 'reflection_applied' else 'saved'}: {(e.get('lesson') or e.get('observation') or '')[:80]}",
+    )
 
     return "\n".join(lines)
 

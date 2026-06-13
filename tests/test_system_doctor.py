@@ -134,3 +134,17 @@ def test_filter_memory_audit_entries_by_op_and_category():
     assert [e["fact"] for e in _filter_memory_audit_entries(entries, op="reflection")] == ["d"]
     assert [e["fact"] for e in _filter_memory_audit_entries(entries, category="family")] == ["a", "b"]
     assert [e["fact"] for e in _filter_memory_audit_entries(entries, op="overwrite", category="family")] == ["b"]
+
+
+def test_memory_review_filter_hides_empty_sections(monkeypatch):
+    import tools.system as system_tools
+
+    monkeypatch.setattr(system_tools, "_load_audit_log", lambda days: [
+        {"op": "overwrite", "category": "family", "ts": "10:00", "fact": "new fact", "old": "old fact", "reason": "test"},
+    ])
+
+    result = memory_review.invoke({"days": 1, "op": "overwrite"})
+
+    assert "Διόρθωσα παλιές μνήμες" in result
+    assert "Έμαθα / κράτησα νέα" not in result
+    assert "Αγνόησα ως διπλότυπα" not in result

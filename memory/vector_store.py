@@ -8,10 +8,13 @@
 import os
 import json
 import threading
+import uuid
 from datetime import datetime
 from langchain_chroma import Chroma
 from config import CHROMA_DB_DIR, PHOTOS_INDEX_FILE, SIM_THRESHOLD_DISTANCE, MEMORY_AUDIT_DIR
 from services.embeddings import embeddings
+
+_audit_lock = threading.Lock()
 
 
 def _audit_log(op: str, **kwargs):
@@ -19,17 +22,24 @@ def _audit_log(op: str, **kwargs):
     try:
         today    = datetime.now().strftime("%Y-%m-%d")
         log_file = os.path.join(MEMORY_AUDIT_DIR, f"{today}.json")
+        tmp_file = f"{log_file}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
         entry    = {"ts": datetime.now().strftime("%H:%M:%S"), "op": op, **kwargs}
-        entries  = []
-        if os.path.exists(log_file):
-            with open(log_file, "r", encoding="utf-8") as f:
-                try:
-                    entries = json.load(f)
-                except Exception:
-                    entries = []
-        entries.append(entry)
-        with open(log_file, "w", encoding="utf-8") as f:
-            json.dump(entries, f, ensure_ascii=False, indent=2)
+        os.makedirs(MEMORY_AUDIT_DIR, exist_ok=True)
+        with _audit_lock:
+            entries = []
+            if os.path.exists(log_file):
+                with open(log_file, "r", encoding="utf-8") as f:
+                    try:
+                        loaded = json.load(f)
+                        entries = loaded if isinstance(loaded, list) else []
+                    except Exception:
+                        entries = []
+            entries.append(entry)
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(entries, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, log_file)
     except Exception as _e:
         print(f"\033[90m[AuditLog]: {_e}\033[0m")
 
