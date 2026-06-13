@@ -2011,10 +2011,13 @@ def control_vacuum(action: str) -> str:
     except Exception as e:
         return f"Σφάλμα επικοινωνίας με τη σκούπα: {str(e)}"
 @tool
-def post_to_linkedin(text: str = None, image_path: str = None) -> str:
+def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str = None) -> str:
     """
-    Δημοσιεύει κείμενο και προαιρετικά μια εικόνα στο LinkedIn.
+    Δημοσιεύει κείμενο και προαιρετικά εικόνες στο LinkedIn.
     Αν δεν δοθεί text, το τραβάει αυτόματα από το linkedin_draft.json.
+    image_path: μία εικόνα (backward compat)
+    image_paths: πολλαπλές εικόνες χωρισμένες με κόμμα, π.χ. "C:/a.jpg,C:/b.jpg,C:/c.jpg"
+                 Οι εικόνες ανεβαίνουν ως carousel στο LinkedIn (έως 9).
     """
     import os
     import json
@@ -2029,13 +2032,26 @@ def post_to_linkedin(text: str = None, image_path: str = None) -> str:
                 with open(LINKEDIN_DRAFT_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     text = data.get("content") or data.get("text")
-                    if not image_path:
+                    if not image_paths and not image_path:
+                        image_paths = data.get("image_paths")
                         image_path = data.get("image_path")
             except Exception as e:
                 print(f"⚠️ Σφάλμα ανάγνωσης draft: {e}")
 
     if not text:
         return "❌ Σφάλμα: Δεν βρέθηκε κείμενο (ούτε στο draft, ούτε στα ορίσματα)."
+
+    # Συγκέντρωση όλων των paths σε μια λίστα
+    all_paths = []
+    if image_paths:
+        all_paths = [p.strip() for p in image_paths.split(",") if p.strip()]
+    elif image_path:
+        all_paths = [image_path]
+
+    # Validate paths
+    for p in all_paths:
+        if not os.path.exists(p):
+            return f"❌ Εικόνα δεν βρέθηκε: {p}"
 
     # --- LinkedIn API Logic ---
     load_dotenv(find_dotenv(), override=True)
@@ -2053,27 +2069,31 @@ def post_to_linkedin(text: str = None, image_path: str = None) -> str:
         user_res = requests.get("https://api.linkedin.com/v2/userinfo", headers=headers)
         if user_res.status_code != 200: return f"❌ Auth Error: {user_res.text}"
         person_urn = f"urn:li:person:{user_res.json().get('sub')}"
-        asset_urn = None
 
-        # 2. Upload Image (αν υπάρχει)
-        if image_path and os.path.exists(image_path):
+        # 2. Upload Images (μία ή πολλαπλές)
+        asset_urns = []
+        for path in all_paths[:9]:  # LinkedIn max 9 εικόνες
             reg_url = "https://api.linkedin.com/v2/assets?action=registerUpload"
             reg_data = {"registerUploadRequest": {"recipes": ["urn:li:digitalmediaRecipe:feedshare-image"], "owner": person_urn, "serviceRelationships": [{"relationshipType": "OWNER", "identifier": "urn:li:userGeneratedContent"}]}}
             reg_res = requests.post(reg_url, headers=headers, json=reg_data)
             if reg_res.status_code == 200:
                 upload_url = reg_res.json()['value']['uploadMechanism']['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl']
                 asset_urn = reg_res.json()['value']['asset']
-                with open(image_path, 'rb') as f:
+                with open(path, 'rb') as f:
                     requests.post(upload_url, headers={"Authorization": f"Bearer {token}"}, data=f.read())
+                asset_urns.append(asset_urn)
 
         # 3. Δημιουργία Post
         post_url = "https://api.linkedin.com/v2/ugcPosts"
         media_content = {
             "shareCommentary": {"text": text},
-            "shareMediaCategory": "IMAGE" if asset_urn else "NONE"
+            "shareMediaCategory": "IMAGE" if asset_urns else "NONE"
         }
-        if asset_urn:
-            media_content["media"] = [{"status": "READY", "media": asset_urn, "title": {"text": "Astakos Post"}}]
+        if asset_urns:
+            media_content["media"] = [
+                {"status": "READY", "media": urn, "title": {"text": f"Photo {i+1}"}}
+                for i, urn in enumerate(asset_urns)
+            ]
 
         payload = {
             "author": person_urn,
@@ -2083,14 +2103,16 @@ def post_to_linkedin(text: str = None, image_path: str = None) -> str:
         }
 
         res = requests.post(post_url, headers=headers, json=payload)
-        
+
         if res.status_code == 201:
             # [MASTRO-CLEANUP]: Καθαρισμός draft μετά την επιτυχία
             if os.path.exists(LINKEDIN_DRAFT_FILE):
                 with open(LINKEDIN_DRAFT_FILE, "w", encoding="utf-8") as f:
                     json.dump({}, f)
-            return "✅ Το LinkedIn post ανέβηκε και το draft καθαρίστηκε!"
-        
+            img_count = len(asset_urns)
+            img_msg = f" με {img_count} εικόν{'α' if img_count == 1 else 'ες'}" if img_count else ""
+            return f"✅ Το LinkedIn post ανέβηκε{img_msg} και το draft καθαρίστηκε!"
+
         return f"❌ Αποτυχία: {res.text}"
 
     except Exception as e:
