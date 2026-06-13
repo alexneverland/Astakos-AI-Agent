@@ -2,7 +2,13 @@ import json
 import os
 from datetime import datetime
 
-from tools.system import _doctor_summarize_logs, system_doctor
+from tools.system import (
+    _count_memory_audit_ops,
+    _doctor_summarize_logs,
+    _format_memory_ops_summary,
+    memory_review,
+    system_doctor,
+)
 
 
 def _write_json(path, data):
@@ -65,3 +71,30 @@ def test_system_doctor_tool_returns_readable_report():
     assert "Astakos Doctor" in result
     assert "Logs" in result
     assert "Pending approvals" in result
+    assert "Memory ops" in result
+
+
+def test_memory_audit_ops_summary_counts_main_operations():
+    counts = _count_memory_audit_ops([
+        {"op": "add"},
+        {"op": "overwrite"},
+        {"op": "skip_duplicate"},
+        {"op": "skip_keep_old"},
+        {"op": "reflection_saved"},
+        {"op": "reflection_applied"},
+    ])
+
+    assert counts["total"] == 6
+    assert counts["add"] == 1
+    assert counts["overwrite"] == 1
+    assert counts["skip_duplicate"] == 1
+    assert counts["skip_keep_old"] == 1
+    assert counts["reflection"] == 2
+    assert _format_memory_ops_summary(counts) == "6 ops (add 1, overwrite 1, skipped 2, reflections 2)"
+
+
+def test_memory_review_tool_returns_readable_report():
+    result = memory_review.invoke({"days": 1})
+
+    assert isinstance(result, str)
+    assert "Memory Review" in result

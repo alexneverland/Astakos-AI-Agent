@@ -800,6 +800,15 @@ function startCountdown() {
   rafId = requestAnimationFrame(tick);
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 async function fetchMemoryAudit() {
   const container = document.getElementById('memory-audit-section');
   try {
@@ -829,20 +838,20 @@ async function fetchMemoryAudit() {
     }
     const total = entries.length;
     const summary = Object.entries(groups)
-      .map(([op, n]) => `<span style="color:${opColor[op]||'#fff'};margin-right:12px">${opIcon[op]||'•'} ${op}: <strong>${n}</strong></span>`)
+      .map(([op, n]) => `<span style="color:${opColor[op]||'#fff'};margin-right:12px">${opIcon[op]||'•'} ${escapeHtml(op)}: <strong>${n}</strong></span>`)
       .join('');
 
     const rows = entries.slice().reverse().slice(0, 50).map(e => {
       const ic = opIcon[e.op] || '•';
       const col = opColor[e.op] || '#ccc';
       const fact = e.fact || e.lesson || e.observation || '';
-      const extra = e.reason ? ` <span style="color:var(--muted);font-size:11px">(${e.reason})</span>` : '';
-      const dist  = e.distance != null ? ` <span style="color:var(--muted);font-size:11px">sim=${e.distance}</span>` : '';
-      const cat   = e.category ? `<span style="color:var(--muted);font-size:11px;margin-right:6px">[${e.category}]</span>` : '';
+      const extra = e.reason ? ` <span style="color:var(--muted);font-size:11px">(${escapeHtml(e.reason)})</span>` : '';
+      const dist  = e.distance != null ? ` <span style="color:var(--muted);font-size:11px">sim=${escapeHtml(e.distance)}</span>` : '';
+      const cat   = e.category ? `<span style="color:var(--muted);font-size:11px;margin-right:6px">[${escapeHtml(e.category)}]</span>` : '';
       return `<tr>
-        <td style="color:var(--muted);font-size:11px;white-space:nowrap">${e.ts||''}</td>
-        <td><span style="color:${col}">${ic} ${e.op}</span></td>
-        <td>${cat}<span style="font-size:12px">${fact.slice(0,90)}${extra}${dist}</span></td>
+        <td style="color:var(--muted);font-size:11px;white-space:nowrap">${escapeHtml(e.ts||'')}</td>
+        <td><span style="color:${col}">${ic} ${escapeHtml(e.op)}</span></td>
+        <td>${cat}<span style="font-size:12px">${escapeHtml(fact.slice(0,90))}${extra}${dist}</span></td>
       </tr>`;
     }).join('');
 
@@ -860,7 +869,7 @@ async function fetchMemoryAudit() {
     </div>`;
   } catch(e) {
     document.getElementById('memory-audit-section').innerHTML =
-      '<div class="card" style="border-left:3px solid #f66"><h2>🧠 Memory Audit</h2><p style="color:#f66">Σφάλμα: ' + e + '</p></div>';
+      '<div class="card" style="border-left:3px solid #f66"><h2>🧠 Memory Audit</h2><p style="color:#f66">Σφάλμα: ' + escapeHtml(e) + '</p></div>';
   }
 }
 

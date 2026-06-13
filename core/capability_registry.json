@@ -21,7 +21,7 @@
     "agent": "Tech_Agent",
     "risk_level": "SAFE",
     "priority": 10,
-    "triggers": ["memory review", "τι έμαθε", "τι αποθήκευσε", "τι έβαλε στη μνήμη", "memory panel", "μνήμη review", "τι ξέρει", "memory log", "τι κατέγραψε", "review memory", "τι έγραψε στη μνήμη", "έλεγξε τη μνήμη"]
+    "triggers": ["memory review", "τι αποθήκευσε στη μνήμη", "τι έβαλε στη μνήμη", "memory panel", "μνήμη review", "memory log", "τι κατέγραψε στη μνήμη", "review memory", "τι έγραψε στη μνήμη", "έλεγξε τη μνήμη", "audit μνήμης"]
   },
   {
     "name": "text_stats",

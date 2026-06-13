@@ -2389,6 +2389,36 @@ def _doctor_compact_map(values: dict | None) -> str:
     return ", ".join(f"{k}:{v}" for k, v in values.items())
 
 
+def _count_memory_audit_ops(entries: list[dict]) -> dict[str, int]:
+    counts = {
+        "add": 0,
+        "overwrite": 0,
+        "skip_duplicate": 0,
+        "skip_keep_old": 0,
+        "reflection": 0,
+        "total": len(entries),
+    }
+    for entry in entries:
+        op = entry.get("op")
+        if op in counts:
+            counts[op] += 1
+        elif op in ("reflection_applied", "reflection_saved"):
+            counts["reflection"] += 1
+    return counts
+
+
+def _format_memory_ops_summary(counts: dict[str, int]) -> str:
+    if not counts.get("total"):
+        return "0 ops"
+    parts = [
+        f"add {counts.get('add', 0)}",
+        f"overwrite {counts.get('overwrite', 0)}",
+        f"skipped {counts.get('skip_duplicate', 0) + counts.get('skip_keep_old', 0)}",
+        f"reflections {counts.get('reflection', 0)}",
+    ]
+    return f"{counts.get('total', 0)} ops (" + ", ".join(parts) + ")"
+
+
 @tool
 def system_doctor(days: int = 1) -> str:
     """
@@ -2441,6 +2471,12 @@ def system_doctor(days: int = 1) -> str:
         pending_routines = {}
         warnings.append("routine pending store unreadable")
 
+    try:
+        memory_ops = _count_memory_audit_ops(_load_audit_log(days=days))
+    except Exception:
+        memory_ops = {"total": 0}
+        warnings.append("memory audit unreadable")
+
     status = "OK" if not warnings and not pending_actions else "Θέλει ματιά"
     lines.append(f"🩺 Astakos Doctor: {status}")
     lines.append(f"• Logs ({logs['days']}d): events {logs['events']} / errors {logs['event_errors']}, traces {logs['traces']} / issues {logs['trace_issues']}")
@@ -2448,6 +2484,7 @@ def system_doctor(days: int = 1) -> str:
     lines.append(f"• Pending approvals: {len(pending_actions)}" + (f" ({', '.join(a.get('tool_name', '?') for a in pending_actions[:3])})" if pending_actions else ""))
     lines.append(f"• Messenger draft: {'active' if draft.get('active') else 'no'}" + (f" → {draft.get('target_name')}" if draft.get("active") and draft.get("target_name") else ""))
     lines.append(f"• Session backlog: {unsummarized}/{threshold} unsummarized ({_doctor_compact_map(conv.get('unsummarized_by_channel'))})")
+    lines.append(f"• Memory ops: {_format_memory_ops_summary(memory_ops)}")
     lines.append(f"• Pending routine confirmations: {len(pending_routines)}")
 
     if logs["last_issues"]:
@@ -2487,6 +2524,10 @@ def _load_audit_log(days: int = 1) -> list[dict]:
     return entries
 
 
+def _memory_review_period(days: int) -> str:
+    return "Σήμερα" if days <= 1 else f"Τις τελευταίες {days} μέρες"
+
+
 @tool
 def memory_review(days: int = 1) -> str:
     """
@@ -2495,8 +2536,9 @@ def memory_review(days: int = 1) -> str:
     days: πόσες μέρες πίσω (default=1 = σήμερα).
     """
     entries = _load_audit_log(days)
+    period = _memory_review_period(days)
     if not entries:
-        return f"📋 Memory Review ({days}d): δεν υπάρχουν εγγραφές ακόμα. Το audit log ξεκινά μόλις τρέξει ο Αστακός."
+        return f"📋 Memory Review: {period.lower()} δεν υπάρχουν εγγραφές ακόμα. Το audit log ξεκινά μόλις τρέξει ο Αστακός."
 
     # Ομαδοποίηση ανά operation
     adds        = [e for e in entries if e.get("op") == "add"]
@@ -2505,30 +2547,30 @@ def memory_review(days: int = 1) -> str:
     skip_old    = [e for e in entries if e.get("op") == "skip_keep_old"]
     reflections = [e for e in entries if e.get("op") in ("reflection_applied", "reflection_saved")]
 
-    lines = [f"📋 *Memory Review (τελευταίες {days} μέρα/ες) — {len(entries)} operations:*\n"]
+    lines = [f"📋 *Memory Review — {period}: {len(entries)} κινήσεις μνήμης*\n"]
 
     # ── Νέες εγγραφές
-    lines.append(f"✅ *Νέες εγγραφές: {len(adds)}*")
+    lines.append(f"✅ *Έμαθα / κράτησα νέα: {len(adds)}*")
     for e in adds[-5:]:
         lines.append(f"  [{e.get('ts','')}] [{e.get('category','?')}] {e.get('fact','')[:80]}")
 
     # ── Overwrites
-    lines.append(f"\n♻️ *Overwrites: {len(overwrites)}*")
+    lines.append(f"\n♻️ *Διόρθωσα παλιές μνήμες: {len(overwrites)}*")
     for e in overwrites[-5:]:
         lines.append(f"  [{e.get('ts','')}] {e.get('fact','')[:60]} ← {e.get('old','')[:40]} ({e.get('reason','')})")
 
     # ── Duplicates παραλείφθηκαν
-    lines.append(f"\n🔁 *Duplicates παραλείφθηκαν: {len(skip_dup)}*")
+    lines.append(f"\n🔁 *Αγνόησα ως διπλότυπα: {len(skip_dup)}*")
     for e in skip_dup[-3:]:
         lines.append(f"  [{e.get('ts','')}] {e.get('fact','')[:70]} (dist={e.get('distance','?')})")
 
     # ── Keep old (πλουσιότερη παλιά εγγραφή)
-    lines.append(f"\n🔒 *Κρατήθηκε παλιά εγγραφή (πλουσιότερη): {len(skip_old)}*")
+    lines.append(f"\n🔒 *Κράτησα την παλιότερη/πλουσιότερη μνήμη: {len(skip_old)}*")
     for e in skip_old[-3:]:
         lines.append(f"  [{e.get('ts','')}] {e.get('fact','')[:70]}")
 
     # ── Reflections
-    lines.append(f"\n🧠 *Reflections: {len(reflections)}*")
+    lines.append(f"\n🧠 *Μαθήματα / reflections: {len(reflections)}*")
     for e in reflections[-5:]:
         op_label = "✓ applied" if e.get("op") == "reflection_applied" else "saved"
         lesson = e.get("lesson") or e.get("observation") or ""

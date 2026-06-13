@@ -33,3 +33,4 @@ def test_tech_agent_binds_observability_tools():
 
     assert "tool_stats" in source
     assert "system_doctor" in source
+    assert "memory_review" in source
