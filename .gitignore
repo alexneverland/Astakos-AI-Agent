@@ -58,3 +58,5 @@ docs/
 .fuse_hidden*
 Thumbs.db
 Desktop.ini
+
+.calendar_briefing_sent

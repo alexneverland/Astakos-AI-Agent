@@ -1,5 +1,14 @@
+# ================================================================
+# Project: Astakos AI Agent 🦞
+# Module:  Google Fit REST API
+# Auth:    OAuth2 token.json (ίδιο με mail/drive/calendar)
+#
+# Σημείωση: Google Fit API είναι deprecated αλλά λειτουργικό.
+# Για αξιόπιστο background sync χωρίς να ανοίγεις app:
+#   Samsung Health → Settings → Connected services → Google Fit → ON
+# ================================================================
+
 import os
-import json
 import datetime
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -11,6 +20,8 @@ CREDENTIALS_PATH = r"C:\astakos_v2\credentials\credentials.json"
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/fitness.activity.read",
     "https://www.googleapis.com/auth/fitness.sleep.read",
     "https://www.googleapis.com/auth/fitness.heart_rate.read",
@@ -36,8 +47,7 @@ def _ms_to_ns(ms: int) -> int:
 
 
 def _fitness_service():
-    creds = _get_credentials()
-    return build("fitness", "v1", credentials=creds)
+    return build("fitness", "v1", credentials=_get_credentials(), cache_discovery=False)
 
 
 def _list_data_sources(service, data_type_name: str) -> list[str]:
@@ -84,13 +94,10 @@ def get_steps(days_ago: int = 0) -> int:
 def get_sleep(days_ago: int = 1) -> dict:
     """
     Επιστρέφει ύπνο για τη νύχτα (default: χθες βράδυ).
-    Διαβάζει απευθείας από Samsung Health data source για αξιοπιστία.
     Returns: {"total_minutes": int, "deep_minutes": int, "light_minutes": int, "rem_minutes": int}
     """
     service = _fitness_service()
 
-    # Παράθυρο: από 20:00 της προηγούμενης μέρας έως 14:00 της επόμενης
-    # Καλύπτει οποιαδήποτε ώρα ύπνου/αφύπνισης
     now    = datetime.datetime.now()
     target = now - datetime.timedelta(days=days_ago)
     start  = (target - datetime.timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
@@ -99,7 +106,6 @@ def get_sleep(days_ago: int = 1) -> dict:
     end_ns   = int(end.timestamp()   * 1_000_000_000)
     dataset_id = f"{start_ns}-{end_ns}"
 
-    # Sleep segment values: 1=awake, 2=sleep, 3=out-of-bed, 4=light, 5=deep, 6=REM
     total = deep = light = rem = 0
 
     preferred_sources = [
@@ -135,7 +141,7 @@ def get_sleep(days_ago: int = 1) -> dict:
                     elif seg == 4: light += dur
                     elif seg == 6: rem   += dur
             if total > 0:
-                break  # Βρήκαμε δεδομένα, σταματάμε
+                break
         except Exception:
             continue
 
@@ -209,64 +215,51 @@ def get_heart_rate(days_ago: int = 0) -> dict:
 
 
 def get_morning_summary() -> str:
-    """
-    Morning briefing:
-    - steps: yesterday's full day
-    - sleep: last night (yesterday evening -> today noon)
-    - heart: yesterday, with today fallback if yesterday has no data
-    """
-    lines = ["\U0001f305 *Morning Google Fit briefing:*\n"]
+    lines = ["🌅 *Morning Google Fit briefing:*\n"]
 
     try:
         steps = get_steps(1)
         if steps > 0:
-            emoji = "\U0001f525" if steps >= 10000 else "\U0001f463" if steps >= 5000 else "\U0001f40c"
-            lines.append(f"{emoji} Steps yesterday: *{steps:,}*")
+            emoji = "🔥" if steps >= 10000 else "👣" if steps >= 5000 else "🐌"
+            lines.append(f"{emoji} Βήματα χθες: *{steps:,}*")
         else:
-            lines.append("\U0001f463 Steps yesterday: no data found")
+            lines.append("👣 Βήματα χθες: δεν βρέθηκαν δεδομένα")
     except Exception as e:
-        lines.append(f"\U0001f463 Steps yesterday: error ({e})")
+        lines.append(f"👣 Βήματα χθες: σφάλμα ({e})")
 
     try:
-        sleep = get_sleep(1)  # Samsung Health stores sleep by start night, not wake morning
+        sleep = get_sleep(1)
         if sleep["total_minutes"] > 0:
             h = sleep["total_minutes"] // 60
             m = sleep["total_minutes"] % 60
-            sleep_emoji = "\U0001f634" if h >= 7 else "\U0001f610" if h >= 5 else "\U0001f635"
+            emoji = "😴" if h >= 7 else "😐" if h >= 5 else "😵"
             detail = []
             if sleep["deep_minutes"] > 0:
-                detail.append(f"deep {sleep['deep_minutes']}'")
+                detail.append(f"βαθύς {sleep['deep_minutes']}′")
             if sleep["rem_minutes"] > 0:
-                detail.append(f"REM {sleep['rem_minutes']}'")
+                detail.append(f"REM {sleep['rem_minutes']}′")
             detail_str = f" ({', '.join(detail)})" if detail else ""
-            lines.append(f"{sleep_emoji} Sleep last night: *{h}h {m}'*{detail_str}")
+            lines.append(f"{emoji} Ύπνος: *{h}ω {m}′*{detail_str}")
         else:
-            lines.append("\U0001f634 Sleep last night: no data found")
+            lines.append("😴 Ύπνος: δεν βρέθηκαν δεδομένα")
     except Exception as e:
-        lines.append(f"\U0001f634 Sleep last night: error ({e})")
+        lines.append(f"😴 Ύπνος: σφάλμα ({e})")
 
     try:
         hr = get_heart_rate(1)
-        hr_label = "yesterday"
-        if hr["avg_bpm"] <= 0:
+        if hr["avg_bpm"] == 0:
             hr = get_heart_rate(0)
-            hr_label = "today so far"
         if hr["avg_bpm"] > 0:
-            lines.append(f"\u2764\ufe0f Heart {hr_label}: avg *{hr['avg_bpm']} bpm* / max {hr['max_bpm']} bpm")
+            lines.append(f"❤️ Καρδιά: avg *{hr['avg_bpm']} bpm* / max {hr['max_bpm']} bpm")
         else:
-            lines.append("\u2764\ufe0f Heart: no data found")
+            lines.append("❤️ Καρδιά: δεν βρέθηκαν δεδομένα")
     except Exception as e:
-        lines.append(f"\u2764\ufe0f Heart: error ({e})")
+        lines.append(f"❤️ Καρδιά: σφάλμα ({e})")
 
     return "\n".join(lines)
 
 
 def get_daily_summary(days_ago: int = 1) -> str:
-    """
-    Πλήρης σύνοψη για μία μέρα — βήματα + ύπνος + παλμοί.
-    Επιστρέφει έτοιμο κείμενο για τον Αστακό.
-    days_ago=0 → σήμερα, days_ago=1 → χθες
-    """
     label = "σήμερα" if days_ago == 0 else "χθες"
     lines = [f"📊 *Σύνοψη {label}:*\n"]
 
@@ -285,14 +278,14 @@ def get_daily_summary(days_ago: int = 1) -> str:
         if sleep["total_minutes"] > 0:
             h = sleep["total_minutes"] // 60
             m = sleep["total_minutes"] % 60
-            sleep_emoji = "😴" if h >= 7 else "😐" if h >= 5 else "😵"
+            emoji = "😴" if h >= 7 else "😐" if h >= 5 else "😵"
             detail = []
             if sleep["deep_minutes"] > 0:
                 detail.append(f"βαθύς {sleep['deep_minutes']}′")
             if sleep["rem_minutes"] > 0:
                 detail.append(f"REM {sleep['rem_minutes']}′")
             detail_str = f" ({', '.join(detail)})" if detail else ""
-            lines.append(f"{sleep_emoji} Ύπνος: *{h}ω {m}′*{detail_str}")
+            lines.append(f"{emoji} Ύπνος: *{h}ω {m}′*{detail_str}")
         else:
             lines.append("😴 Ύπνος: δεν βρέθηκαν δεδομένα")
     except Exception as e:
@@ -312,9 +305,6 @@ def get_daily_summary(days_ago: int = 1) -> str:
 
 if __name__ == "__main__":
     import sys
-    # Χρήση: python google_fit.py [steps|sleep|heart|summary] [days_ago]
-    # Π.χ.: python google_fit.py steps 0  → βήματα σήμερα
-    #        python google_fit.py sleep 1  → ύπνος χθες
     cmd      = sys.argv[1] if len(sys.argv) > 1 else "summary"
     days_ago = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     if cmd == "steps":
