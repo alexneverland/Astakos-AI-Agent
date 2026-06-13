@@ -64,6 +64,8 @@ class ExecutionTrace:
     def process_event(self, event: dict):
         """Καλείται για κάθε event του graph.stream()."""
         for node, data in event.items():
+            if node == "tool_loop_block":
+                self.loop_guard = True
             if data is None:
                 continue
             msgs = data.get("messages", [])
@@ -118,6 +120,8 @@ class ExecutionTrace:
         """Κλείνει το trace με final response και error."""
         if response:
             self.response = _truncate(response, _MAX_MSG)
+            if "Tool loop stopped" in response or "Repeated tool call" in response or "επαναλαμβανόμενες κλήσεις εργαλείων" in response:
+                self.loop_guard = True
         if error:
             self.error = _truncate(str(error), 200)
         self.duration_ms = int((time.monotonic() - self.start_ts) * 1000)

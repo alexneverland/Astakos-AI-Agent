@@ -144,6 +144,19 @@ def test_loop_guard_detected():
     t._process_message("tools", tool_msg)
     assert t.loop_guard is True
 
+
+def test_tool_loop_block_node_sets_loop_guard():
+    t = ExecutionTrace("telegram", "test")
+    t.process_event({"tool_loop_block": {"messages": []}})
+    assert t.agent == "tool_loop_block"
+    assert t.loop_guard is True
+
+
+def test_repeated_tool_final_response_sets_loop_guard():
+    t = ExecutionTrace("telegram", "test")
+    t.finalize(response="Repeated tool call blocked: get_fit_summary.")
+    assert t.loop_guard is True
+
 def test_multiple_tools_recorded():
     t = ExecutionTrace("web", "test")
     for i in range(3):
