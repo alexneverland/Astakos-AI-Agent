@@ -83,4 +83,5 @@ def get_risk(tool_name: str) -> str:
     """Επιστρέφει SAFE/WARNING/NOTIFY/CRITICAL. Default: WARNING αν άγνωστο."""
     return TOOL_RISK.get(tool_name, "WARNING")
 
-def is
+def is_critical(tool_name: str) -> bool:
+    return get_risk(tool_name) == "CRITICAL"

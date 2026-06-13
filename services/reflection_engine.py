@@ -400,4 +400,16 @@ def run_reflection() -> dict:
 
     # Αποστολή Telegram
     if telegram_lines:
-        header = "🧠 *Astakos Self-Reflection — Νυχτερινή Ανάλυση
+        header = "🧠 *Astakos Self-Reflection — Νυχτερινή Ανάλυση*\n\n"
+        msg    = header + "\n\n---\n\n".join(telegram_lines)
+        if len(msg) > 4000:
+            msg = msg[:3990] + "..."
+        send_telegram_msg(msg)
+
+    stats = {"analyzed": len(reflections), "applied": applied, "pending": pending, "skipped": skipped}
+    print(f"[Reflection]: ✅ {stats}")
+    return stats
+
+
+if __name__ == "__main__":
+    print(run_reflection())

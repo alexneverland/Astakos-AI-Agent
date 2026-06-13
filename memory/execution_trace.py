@@ -169,4 +169,13 @@ class ExecutionTrace:
 
 def load_traces(date: str | None = None, limit: int = 50) -> list:
     """Διαβάζει traces ημέρας (default: σήμερα). Επιστρέφει τα τελευταία N."""
-    day      = date or datetime.now().strftime("%Y-%m
+    day      = date or datetime.now().strftime("%Y-%m-%d")
+    log_file = os.path.join(_TRACES_DIR, f"{day}.json")
+    if not os.path.exists(log_file):
+        return []
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+        return entries[-limit:]
+    except Exception:
+        return []

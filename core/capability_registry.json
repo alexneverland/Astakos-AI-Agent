@@ -305,4 +305,18 @@
   },
   {
     "name": "generate_pdf",
-    "description": "Δημιουργεί PDF αρχείο από κε�
+    "description": "Δημιουργεί PDF αρχείο από κείμενο.",
+    "agent": "Dev_Agent",
+    "risk_level": "SAFE",
+    "priority": 9,
+    "triggers": ["φτιάξε pdf", "δημιούργησε pdf", "κάνε pdf", "εξαγωγή pdf", "make pdf", "create pdf", "generate pdf", "pdf αρχείο"]
+  },
+  {
+    "name": "generate_csv",
+    "description": "Δημιουργεί CSV αρχείο από δεδομένα.",
+    "agent": "Dev_Agent",
+    "risk_level": "SAFE",
+    "priority": 9,
+    "triggers": ["φτιάξε csv", "δημιούργησε csv", "κάνε csv", "εξαγωγή csv", "make csv", "create csv", "generate csv", "csv αρχείο"]
+  }
+]

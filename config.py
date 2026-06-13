@@ -74,4 +74,5 @@ SIM_THRESHOLD          = 0.88
 # 5. ΡΥΘΜΙΣΕΙΣ ROUTINES
 # ==========================================
 # Αν ο bot ήταν offline και μια ρουτίνα χάθηκε, στέλνει deferred follow-up
-# μόνο αν το χαμένο trigger δεν 
+# μόνο αν το χαμένο trigger δεν είναι παλαιότερο από X λεπτά.
+ROUTINE_MISS_GRACE_MINUTES = 90

@@ -562,4 +562,6 @@ all_tools = [
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info,
     control_spotify, search_goldmall_offers, execute_local_pipeline, get_current_location,
-    recipe_expert, log_meal, create_file_tool, run_term
+    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, get_routines, browse_url,
+    duckduckgo_search, search_supermarket_prices, tool_stats, system_doctor
+]

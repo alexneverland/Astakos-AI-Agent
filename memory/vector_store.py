@@ -604,4 +604,46 @@ def save_goal(project: str, description: str, status: str = "active") -> bool:
                 "importance": 10, "confidence": 0.95, "last_accessed": datetime.now().timestamp(),
             }
             vector_store.add_texts([text], metadatas=[metadata])
-            print(f"\033[92m[Goals]: '{project}'
+            print(f"\033[92m[Goals]: '{project}' ({status})\033[0m")
+            return True
+    except Exception as e:
+        print(f"\033[91m[Goals Error]: {e}\033[0m")
+        return False
+
+
+def update_goal_status(project: str, status: str) -> bool:
+    """Αλλάζει το status ενός goal."""
+    try:
+        with vector_lock:
+            existing = vector_store._collection.get(where={"category": "goal", "project": project})
+            if not existing["ids"]:
+                return False
+            old_meta = dict(existing["metadatas"][0])
+            vector_store._collection.delete(ids=existing["ids"])
+            new_meta = {**old_meta, "status": status, "timestamp": datetime.now().timestamp()}
+            vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
+            print(f"\033[92m[Goals]: '{project}' → {status}\033[0m")
+            return True
+    except Exception as e:
+        print(f"\033[91m[Goals Error]: {e}\033[0m")
+        return False
+
+
+def get_active_goals() -> list[dict]:
+    """Επιστρέφει active/paused goals."""
+    try:
+        with vector_lock:
+            results = vector_store._collection.get(where={"category": "goal"})
+        goals = []
+        for doc, meta in zip(results.get("documents", []), results.get("metadatas", [])):
+            if meta.get("status") in ("active", "paused"):
+                goals.append({
+                    "project":     meta.get("project", ""),
+                    "description": doc.split(": ", 1)[-1].replace("[GOAL] ", ""),
+                    "status":      meta.get("status", "active"),
+                    "date":        meta.get("date", ""),
+                })
+        return goals
+    except Exception as e:
+        print(f"\033[91m[Goals Error]: {e}\033[0m")
+        return []
