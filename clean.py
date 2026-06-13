@@ -14,6 +14,8 @@
 #   python clean.py --sessions            # Μόνο trim sessions
 #   python clean.py --working-memory      # Μόνο σύμπτυξη working memory
 #   python clean.py --sessions-keep 20    # Custom όριο για sessions
+#   python clean.py --memory-audit        # Μόνο rotation logs/memory_audit
+#   python clean.py --memory-audit-keep 60
 #   python clean.py --no-backup           # Παράκαμψη backup (όχι recommended)
 #   python clean.py --photos              # Σβήσε temp φωτογραφίες (αναρχειοθέτητες)
 #
@@ -42,6 +44,7 @@ BACKUP_DIR   = os.path.join(PROJECT_ROOT, "_cleaner_backups")
 
 # Προεπιλεγμένα όρια rotation
 DEFAULT_SESSIONS_KEEP = 30
+DEFAULT_MEMORY_AUDIT_KEEP_DAYS = 60
 
 # Paths αρχείων (με fallback αν δεν φορτώσει το config)
 try:
@@ -50,6 +53,7 @@ try:
         SESSIONS_FILE,
         PROFILE_FILE,
         CONVERSATION_DB_FILE,
+        MEMORY_AUDIT_DIR,
     )
     CAPABILITIES_FILE     = os.path.join(PROJECT_ROOT, "astakos_capabilities.json")
 except ImportError:
@@ -58,6 +62,7 @@ except ImportError:
     WORKING_MEMORY_FILE = os.path.join(PROJECT_ROOT, "astakos_working_memory.json")
     PROFILE_FILE        = os.path.join(PROJECT_ROOT, "astakos_profile.json")
     CONVERSATION_DB_FILE = os.path.join(PROJECT_ROOT, "astakos_conversation_history.db")
+    MEMORY_AUDIT_DIR    = os.path.join(PROJECT_ROOT, "logs", "memory_audit")
 
 PHOTOS_INDEX_FILE = os.path.join(PROJECT_ROOT, "astakos_photos_index.json")
 PHOTOS_DIR        = os.path.join(PROJECT_ROOT, "telegram_photos")
@@ -582,6 +587,51 @@ def clean_photos(dry_run: bool = False) -> bool:
     return True
 
 
+def rotate_memory_audit_logs(
+    keep_days: int = DEFAULT_MEMORY_AUDIT_KEEP_DAYS,
+    dry_run: bool = False,
+    audit_dir: str = MEMORY_AUDIT_DIR,
+) -> bool:
+    """Σβήνει παλιά daily memory audit JSON files, κρατώντας τις τελευταίες keep_days ημέρες."""
+    header(f"Memory audit retention (κρατά {keep_days} μέρες)")
+    if keep_days < 1:
+        log("❌ Το keep_days πρέπει να είναι >= 1.", "err")
+        return False
+    if not os.path.isdir(audit_dir):
+        log(f"Δεν υπάρχει ακόμα memory audit dir: {audit_dir}", "dim")
+        return True
+
+    cutoff = datetime.now().date().toordinal() - keep_days
+    removed = 0
+    kept = 0
+    for fname in sorted(os.listdir(audit_dir)):
+        if not fname.endswith(".json"):
+            continue
+        stem = fname[:-5]
+        try:
+            file_day = datetime.strptime(stem, "%Y-%m-%d").date()
+        except ValueError:
+            kept += 1
+            continue
+        path = os.path.join(audit_dir, fname)
+        if file_day.toordinal() < cutoff:
+            removed += 1
+            if dry_run:
+                log(f"   🧪 DRY-RUN: θα σβηνόταν → {fname}", "warn")
+            else:
+                try:
+                    os.remove(path)
+                    log(f"   🗑️  Σβήστηκε: {fname}", "ok")
+                except Exception as e:
+                    log(f"   ❌ Σφάλμα διαγραφής {fname}: {e}", "err")
+                    return False
+        else:
+            kept += 1
+
+    log(f"📊 Κρατήθηκαν: {kept} | Παλιά προς διαγραφή/σβησμένα: {removed}", "ok")
+    return True
+
+
 # ────────────────────────────────────────────────────────────────
 # MAIN — CLI
 # ────────────────────────────────────────────────────────────────
@@ -604,8 +654,12 @@ def main():
                         help="Σύμπτυξη astakos_profile.json (LLM ανά category)")
     parser.add_argument("--photos", action="store_true",
                         help="Σβήσε αναρχειοθέτητες φωτογραφίες από telegram_photos/")
+    parser.add_argument("--memory-audit", action="store_true",
+                        help="Rotation παλιών logs/memory_audit/*.json")
     parser.add_argument("--sessions-keep", type=int, default=DEFAULT_SESSIONS_KEEP,
                         help=f"Πόσες sessions να κρατήσει (default {DEFAULT_SESSIONS_KEEP})")
+    parser.add_argument("--memory-audit-keep", type=int, default=DEFAULT_MEMORY_AUDIT_KEEP_DAYS,
+                        help=f"Πόσες μέρες memory audit logs να κρατήσει (default {DEFAULT_MEMORY_AUDIT_KEEP_DAYS})")
     parser.add_argument("--dry-run", action="store_true",
                         help="Δείξε τι θα γίνει χωρίς να αλλάξεις αρχεία")
     parser.add_argument("--no-backup", action="store_true",
@@ -616,7 +670,7 @@ def main():
     # Αν δεν επιλέχθηκε κανένα συγκεκριμένο task, τα τρέχουμε όλα
     no_specific = not any([
         args.capabilities, args.conversation_db,
-        args.sessions, args.working_memory, args.profile, args.photos
+        args.sessions, args.working_memory, args.profile, args.photos, args.memory_audit
     ])
     run_all = args.all or no_specific
 
@@ -657,6 +711,11 @@ def main():
 
     if run_all or args.photos:
         results["photos"] = clean_photos(dry_run=args.dry_run)
+
+    if run_all or args.memory_audit:
+        results["memory_audit"] = rotate_memory_audit_logs(
+            keep_days=args.memory_audit_keep, dry_run=args.dry_run
+        )
 
     # Summary
     log("\n" + "─" * 60, "dim")

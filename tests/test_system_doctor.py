@@ -5,7 +5,10 @@ from datetime import datetime
 from tools.system import (
     _count_memory_audit_ops,
     _doctor_summarize_logs,
+    _doctor_status_label,
+    _filter_memory_audit_entries,
     _format_memory_ops_summary,
+    _format_pending_routines,
     memory_review,
     system_doctor,
 )
@@ -98,3 +101,36 @@ def test_memory_review_tool_returns_readable_report():
 
     assert isinstance(result, str)
     assert "Memory Review" in result
+
+
+def test_doctor_status_label_escalates_by_severity():
+    assert _doctor_status_label(warnings=[], pending_actions=[], logs={"event_errors": 0, "trace_issues": 0, "loop_guards": 0}) == "OK"
+    assert _doctor_status_label(warnings=[], pending_actions=[{"tool_name": "x"}], logs={"event_errors": 0, "trace_issues": 0, "loop_guards": 0}) == "Προσοχή"
+    assert _doctor_status_label(warnings=[], pending_actions=[], logs={"event_errors": 0, "trace_issues": 1, "loop_guards": 0}) == "Προσοχή"
+    assert _doctor_status_label(warnings=[], pending_actions=[], logs={"event_errors": 1, "trace_issues": 0, "loop_guards": 0}) == "Άμεσος έλεγχος"
+
+
+def test_format_pending_routines_includes_event_names():
+    result = _format_pending_routines({
+        12: {"event": "Σύνταξη μηνύματος στη Σοφία", "sent_at": object()},
+        13: {"event": "Πάρκο με Αλέξανδρο", "sent_at": object()},
+    })
+
+    assert result.startswith("2 — ")
+    assert "Σύνταξη μηνύματος στη Σοφία" in result
+    assert "Πάρκο με Αλέξανδρο" in result
+
+
+def test_filter_memory_audit_entries_by_op_and_category():
+    entries = [
+        {"op": "add", "category": "family", "fact": "a"},
+        {"op": "overwrite", "category": "family", "fact": "b"},
+        {"op": "skip_duplicate", "category": "projects", "fact": "c"},
+        {"op": "reflection_saved", "category": "", "fact": "d"},
+    ]
+
+    assert [e["fact"] for e in _filter_memory_audit_entries(entries, op="add")] == ["a"]
+    assert [e["fact"] for e in _filter_memory_audit_entries(entries, op="skip")] == ["c"]
+    assert [e["fact"] for e in _filter_memory_audit_entries(entries, op="reflection")] == ["d"]
+    assert [e["fact"] for e in _filter_memory_audit_entries(entries, category="family")] == ["a", "b"]
+    assert [e["fact"] for e in _filter_memory_audit_entries(entries, op="overwrite", category="family")] == ["b"]

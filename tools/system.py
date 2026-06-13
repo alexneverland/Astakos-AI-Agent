@@ -2419,6 +2419,28 @@ def _format_memory_ops_summary(counts: dict[str, int]) -> str:
     return f"{counts.get('total', 0)} ops (" + ", ".join(parts) + ")"
 
 
+def _format_pending_routines(pending_routines: dict) -> str:
+    if not pending_routines:
+        return "0"
+    names = []
+    for routine_id, item in list(pending_routines.items())[:3]:
+        event = item.get("event") if isinstance(item, dict) else ""
+        event = str(event or f"routine #{routine_id}").strip()
+        names.append(event[:60])
+    suffix = ", ".join(names)
+    if len(pending_routines) > 3:
+        suffix += f", +{len(pending_routines) - 3}"
+    return f"{len(pending_routines)} — {suffix}"
+
+
+def _doctor_status_label(*, warnings: list[str], pending_actions: list, logs: dict) -> str:
+    if logs.get("event_errors") or any("unreadable" in w for w in warnings):
+        return "Άμεσος έλεγχος"
+    if pending_actions or logs.get("trace_issues") or logs.get("loop_guards") or warnings:
+        return "Προσοχή"
+    return "OK"
+
+
 @tool
 def system_doctor(days: int = 1) -> str:
     """
@@ -2477,7 +2499,7 @@ def system_doctor(days: int = 1) -> str:
         memory_ops = {"total": 0}
         warnings.append("memory audit unreadable")
 
-    status = "OK" if not warnings and not pending_actions else "Θέλει ματιά"
+    status = _doctor_status_label(warnings=warnings, pending_actions=pending_actions, logs=logs)
     lines.append(f"🩺 Astakos Doctor: {status}")
     lines.append(f"• Logs ({logs['days']}d): events {logs['events']} / errors {logs['event_errors']}, traces {logs['traces']} / issues {logs['trace_issues']}")
     lines.append(f"• Loop guards: {logs['loop_guards']} | Slow turns: {logs['slow_traces']}")
@@ -2485,7 +2507,7 @@ def system_doctor(days: int = 1) -> str:
     lines.append(f"• Messenger draft: {'active' if draft.get('active') else 'no'}" + (f" → {draft.get('target_name')}" if draft.get("active") and draft.get("target_name") else ""))
     lines.append(f"• Session backlog: {unsummarized}/{threshold} unsummarized ({_doctor_compact_map(conv.get('unsummarized_by_channel'))})")
     lines.append(f"• Memory ops: {_format_memory_ops_summary(memory_ops)}")
-    lines.append(f"• Pending routine confirmations: {len(pending_routines)}")
+    lines.append(f"• Pending routine confirmations: {_format_pending_routines(pending_routines)}")
 
     if logs["last_issues"]:
         lines.append("• Recent things to inspect:")
@@ -2528,17 +2550,66 @@ def _memory_review_period(days: int) -> str:
     return "Σήμερα" if days <= 1 else f"Τις τελευταίες {days} μέρες"
 
 
+def _normalize_memory_review_op(op: str | None) -> str:
+    value = (op or "").strip().lower()
+    aliases = {
+        "add": "add",
+        "adds": "add",
+        "new": "add",
+        "νέα": "add",
+        "overwrite": "overwrite",
+        "overwrites": "overwrite",
+        "διόρθωση": "overwrite",
+        "skip": "skip",
+        "skipped": "skip",
+        "duplicate": "skip_duplicate",
+        "duplicates": "skip_duplicate",
+        "skip_duplicate": "skip_duplicate",
+        "skip_keep_old": "skip_keep_old",
+        "keep_old": "skip_keep_old",
+        "reflection": "reflection",
+        "reflections": "reflection",
+        "lesson": "reflection",
+    }
+    return aliases.get(value, value)
+
+
+def _filter_memory_audit_entries(entries: list[dict], *, op: str = "", category: str = "") -> list[dict]:
+    normalized_op = _normalize_memory_review_op(op)
+    category_value = (category or "").strip().lower()
+    filtered = entries
+    if normalized_op:
+        if normalized_op == "skip":
+            filtered = [e for e in filtered if e.get("op") in ("skip_duplicate", "skip_keep_old")]
+        elif normalized_op == "reflection":
+            filtered = [e for e in filtered if e.get("op") in ("reflection_applied", "reflection_saved")]
+        else:
+            filtered = [e for e in filtered if e.get("op") == normalized_op]
+    if category_value:
+        filtered = [e for e in filtered if str(e.get("category", "")).strip().lower() == category_value]
+    return filtered
+
+
 @tool
-def memory_review(days: int = 1) -> str:
+def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
     """
     Εμφανίζει τι αποθήκευσε ο Αστακός στη μνήμη τις τελευταίες X ημέρες.
     Περιλαμβάνει: νέες εγγραφές, overwrites, duplicates που παραλείφθηκαν, reflections.
     days: πόσες μέρες πίσω (default=1 = σήμερα).
+    op: προαιρετικό φίλτρο (add, overwrite, skip, skip_duplicate, skip_keep_old, reflection).
+    category: προαιρετικό φίλτρο category (π.χ. family, lazeros, projects).
     """
-    entries = _load_audit_log(days)
+    all_entries = _load_audit_log(days)
+    entries = _filter_memory_audit_entries(all_entries, op=op, category=category)
     period = _memory_review_period(days)
     if not entries:
-        return f"📋 Memory Review: {period.lower()} δεν υπάρχουν εγγραφές ακόμα. Το audit log ξεκινά μόλις τρέξει ο Αστακός."
+        filters = []
+        if op:
+            filters.append(f"op={op}")
+        if category:
+            filters.append(f"category={category}")
+        filter_text = f" με φίλτρα ({', '.join(filters)})" if filters else ""
+        return f"📋 Memory Review: {period.lower()}{filter_text} δεν υπάρχουν εγγραφές."
 
     # Ομαδοποίηση ανά operation
     adds        = [e for e in entries if e.get("op") == "add"]
@@ -2547,7 +2618,13 @@ def memory_review(days: int = 1) -> str:
     skip_old    = [e for e in entries if e.get("op") == "skip_keep_old"]
     reflections = [e for e in entries if e.get("op") in ("reflection_applied", "reflection_saved")]
 
-    lines = [f"📋 *Memory Review — {period}: {len(entries)} κινήσεις μνήμης*\n"]
+    filters = []
+    if op:
+        filters.append(f"op={op}")
+    if category:
+        filters.append(f"category={category}")
+    filter_text = f" ({', '.join(filters)})" if filters else ""
+    lines = [f"📋 *Memory Review — {period}{filter_text}: {len(entries)} κινήσεις μνήμης*\n"]
 
     # ── Νέες εγγραφές
     lines.append(f"✅ *Έμαθα / κράτησα νέα: {len(adds)}*")
