@@ -541,6 +541,23 @@ def mail_agent_node(state):
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
+    # [MASTRO-FIX v4]: Inject known email IDs into system_prompt
+    import re as _re_mail
+    _known_ids = []
+    for _hmsg in history:
+        _hc = clean_message(getattr(_hmsg, 'content', '') or '')
+        for _hm in _re_mail.finditer(r'ID: ([a-f0-9]{16})', _hc):
+            _heid = _hm.group(1)
+            if _heid not in _known_ids:
+                _known_ids.append(_heid)
+    if _known_ids:
+        _top_id = _known_ids[0]
+        _id_str = ', '.join("'" + e + "'" for e in _known_ids[:5])
+        system_prompt = system_prompt + ('\n\n[EMAIL IDs APO ANAZHTHSH]: '
+            + _id_str + '. An thelei na diavazeis email, kalese AMESA '
+            'mail_manager(action=read, email_id=' + _top_id + '). '
+            'MHN kaneis search xana.')
+
     # [MASTRO-FIX v3]: Elegxos MONO tool results apo to trexon turn
     # (meta to teleutaio human message) — apofigee cross-turn triggering
     # pou mplokarei to read action prin kathesei na ginei.
@@ -560,6 +577,25 @@ def mail_agent_node(state):
         # [MASTRO-FIX v2]: Bypass sanitize_history - to LLM antigrafe to
         # "[Klisi Ergaleiou: mail_manager]" pou paragei sanitize_history gia to
         # proto tool-call AIMessage. Ant autou: katharo 2-msg prompt me embedded results.
+        # [MASTRO-FIX v4 auto-read]: An mono search results, auto-do read
+        import re as _re_ar
+        _search_hits = [r for r in mail_tool_results if r.startswith('ID: ')]
+        _read_hits = [r for r in mail_tool_results
+                      if 'Περιεχόμενο:' in r]
+        if _search_hits and not _read_hits:
+            _ar_match = _re_ar.search(r'ID: ([a-f0-9]{16})', _search_hits[0])
+            if _ar_match:
+                _ar_eid = _ar_match.group(1)
+                _auto_msg = AIMessage(
+                    content='',
+                    tool_calls=[{
+                        'name': 'mail_manager',
+                        'id': 'auto-read-' + _ar_eid[:8],
+                        'args': {'action': 'read', 'email_id': _ar_eid}
+                    }]
+                )
+                return {'current_agent': 'Mail_Agent', 'messages': [_auto_msg]}
+        # Has read results or no valid ID -> synthesize below
         joined_results = "\n\n".join(mail_tool_results[:5])[:4000]
         user_q = next(
             (clean_message(m.content) for m in reversed(history)
