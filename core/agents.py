@@ -555,7 +555,7 @@ def mail_agent_node(state):
         _id_str = ', '.join("'" + e + "'" for e in _known_ids[:5])
         system_prompt = system_prompt + ('\n\n[EMAIL IDs APO ANAZHTHSH]: '
             + _id_str + '. An thelei na diavazeis email, kalese AMESA '
-            'mail_manager(action=read, email_id=' + _top_id + '). '
+            'mail_manager(action=read_full, email_id=' + _top_id + '). '
             'MHN kaneis search xana.')
 
     # [MASTRO-FIX v3]: Elegxos MONO tool results apo to trexon turn
@@ -582,7 +582,14 @@ def mail_agent_node(state):
         _search_hits = [r for r in mail_tool_results if r.startswith('ID: ')]
         _read_hits = [r for r in mail_tool_results
                       if 'Περιεχόμενο:' in r]
-        if _search_hits and not _read_hits:
+        # Guard: if read_full already dispatched this turn, skip auto-read
+        _read_dispatched = any(
+            any(tc.get('args', {}).get('action') == 'read_full'
+                for tc in (getattr(msg, 'tool_calls', None) or []))
+            for msg in history[last_human_idx:]
+            if getattr(msg, 'type', '') == 'ai'
+        )
+        if _search_hits and not _read_hits and not _read_dispatched:
             _ar_match = _re_ar.search(r'ID: ([a-f0-9]{16})', _search_hits[0])
             if _ar_match:
                 _ar_eid = _ar_match.group(1)
@@ -591,7 +598,7 @@ def mail_agent_node(state):
                     tool_calls=[{
                         'name': 'mail_manager',
                         'id': 'auto-read-' + _ar_eid[:8],
-                        'args': {'action': 'read', 'email_id': _ar_eid}
+                        'args': {'action': 'read_full', 'email_id': _ar_eid}
                     }]
                 )
                 return {'current_agent': 'Mail_Agent', 'messages': [_auto_msg]}
