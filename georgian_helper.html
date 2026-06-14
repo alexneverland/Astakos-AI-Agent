@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🇬🇪 Γεωργιανός Βοηθός</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    min-height: 100vh;
+    padding: 16px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 1.4rem;
+    margin-bottom: 16px;
+    color: #f0c040;
+    letter-spacing: 1px;
+  }
+
+  /* TABS */
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab {
+    flex: 1;
+    padding: 10px;
+    background: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 10px;
+    cursor: pointer;
+    text-align: center;
+    font-size: 0.9rem;
+    color: #aaa;
+    transition: all 0.2s;
+  }
+  .tab.active { background: #0f3460; color: #f0c040; border-color: #f0c040; font-weight: bold; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* TRANSLATOR */
+  .lang-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .lang-label {
+    flex: 1;
+    text-align: center;
+    font-size: 0.85rem;
+    background: #16213e;
+    padding: 8px;
+    border-radius: 8px;
+    color: #f0c040;
+    font-weight: bold;
+  }
+  .swap-btn {
+    background: #0f3460;
+    border: none;
+    color: #f0c040;
+    font-size: 1.3rem;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+  .swap-btn:hover { transform: rotate(180deg); }
+
+  textarea {
+    width: 100%;
+    background: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 10px;
+    color: #eee;
+    font-size: 1rem;
+    padding: 12px;
+    resize: vertical;
+    min-height: 90px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  textarea:focus { border-color: #f0c040; }
+
+  .translate-btn {
+    width: 100%;
+    margin: 10px 0;
+    padding: 12px;
+    background: linear-gradient(135deg, #f0c040, #e0952a);
+    border: none;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: bold;
+    color: #1a1a2e;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .translate-btn:hover { opacity: 0.9; }
+  .translate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .result-box {
+    background: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 10px;
+    padding: 14px;
+    min-height: 60px;
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .result-ka {
+    font-size: 1.4rem;
+    color: #f0c040;
+    margin-bottom: 6px;
+    line-height: 1.6;
+  }
+  .result-phonetic {
+    font-size: 0.9rem;
+    color: #88c0d0;
+    font-style: italic;
+  }
+  .result-label {
+    font-size: 0.7rem;
+    color: #666;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .copy-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #0f3460;
+    border: none;
+    color: #f0c040;
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: background 0.2s;
+  }
+  .copy-btn:hover { background: #1a4a80; }
+  .copy-btn.copied { background: #2d7a4f; color: #fff; }
+
+  /* PHRASES */
+  .cat-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .cat-tab {
+    padding: 7px 12px;
+    background: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    color: #aaa;
+    transition: all 0.2s;
+  }
+  .cat-tab.active { background: #0f3460; color: #f0c040; border-color: #f0c040; }
+
+  .phrase-grid { display: flex; flex-direction: column; gap: 8px; }
+
+  .phrase-card {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .phrase-card:hover { border-color: #f0c040; background: #1a2a50; }
+  .phrase-card:active { transform: scale(0.98); }
+
+  .phrase-el { font-size: 0.9rem; color: #ccc; margin-bottom: 4px; }
+  .phrase-ka { font-size: 1.1rem; color: #f0c040; margin-bottom: 3px; }
+  .phrase-ph { font-size: 0.78rem; color: #88c0d0; font-style: italic; }
+
+  .phrase-copy-hint {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    font-size: 0.7rem;
+    color: #555;
+  }
+  .phrase-card.flash { background: #1a4a2e; border-color: #4CAF50; }
+
+  /* LOADING */
+  .loading { text-align: center; color: #888; padding: 20px; font-size: 0.9rem; }
+
+  /* STATUS */
+  .status-msg {
+    text-align: center;
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 8px;
+    min-height: 20px;
+  }
+  .status-msg.error { color: #e74c3c; }
+  .status-msg.ok { color: #2ecc71; }
+</style>
+</head>
+<body>
+
+<h1>🇬🇪 Γεωργιανός Βοηθός</h1>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('translator')">🔤 Μεταφραστής</div>
+  <div class="tab" onclick="switchTab('phrases')">⚡ Γρήγορες Φράσεις</div>
+</div>
+
+<!-- TRANSLATOR -->
+<div id="panel-translator" class="panel active">
+  <div class="lang-bar">
+    <div class="lang-label" id="src-label">🇬🇷 Ελληνικά</div>
+    <button class="swap-btn" onclick="swapLangs()" title="Εναλλαγή γλώσσας">⇄</button>
+    <div class="lang-label" id="tgt-label">🇬🇪 Γεωργιανά</div>
+  </div>
+
+  <textarea id="input-text" placeholder="Γράψε εδώ..." oninput="clearResult()"></textarea>
+
+  <button class="translate-btn" id="trans-btn" onclick="doTranslate()">🔄 Μετάφρασε</button>
+
+  <div class="result-box" id="result-box" style="display:none">
+    <div class="result-label" id="result-label-ka">Γεωργιανά</div>
+    <div class="result-ka" id="result-ka">—</div>
+    <div class="result-label" style="margin-top:8px">Προφορά (Latin)</div>
+    <div class="result-phonetic" id="result-ph">—</div>
+    <button class="copy-btn" id="copy-main-btn" onclick="copyResult()">📋 Αντιγραφή</button>
+  </div>
+
+  <div class="status-msg" id="status-msg"></div>
+</div>
+
+<!-- PHRASES -->
+<div id="panel-phrases" class="panel">
+  <div class="cat-tabs" id="cat-tabs"></div>
+  <div class="phrase-grid" id="phrase-grid"></div>
+</div>
+
+<script>
+// ─── Georgian phonetic mapping ────────────────────────────────
+const KA_PHONETICS = {
+  'ა':'a','ბ':'b','გ':'g','დ':'d','ე':'e','ვ':'v','ზ':'z',
+  'თ':'t','ი':'i','კ':'k','ლ':'l','მ':'m','ნ':'n','ო':'o',
+  'პ':'p','ჟ':'zh','რ':'r','ს':'s','ტ':'t','უ':'u','ფ':'p\'',
+  'ქ':'k\'','ღ':'gh','ყ':'q','შ':'sh','ჩ':'ch','ც':'ts',
+  'ძ':'dz','წ':'ts\'','ჭ':'ch\'','ხ':'kh','ჯ':'j','ჰ':'h'
+};
+
+function toPhonetic(text) {
+  return text.split('').map(c => KA_PHONETICS[c] || c).join('');
+}
+
+// ─── Language state ───────────────────────────────────────────
+let srcLang = 'el';
+let tgtLang = 'ka';
+
+function swapLangs() {
+  [srcLang, tgtLang] = [tgtLang, srcLang];
+  const labels = { el: '🇬🇷 Ελληνικά', ka: '🇬🇪 Γεωργιανά', en: '🇬🇧 Αγγλικά' };
+  document.getElementById('src-label').textContent = labels[srcLang];
+  document.getElementById('tgt-label').textContent = labels[tgtLang];
+  document.getElementById('input-text').placeholder =
+    srcLang === 'el' ? 'Γράψε εδώ...' : 'დაწერე აქ...';
+  clearResult();
+}
+
+function clearResult() {
+  document.getElementById('result-box').style.display = 'none';
+  document.getElementById('status-msg').textContent = '';
+  document.getElementById('status-msg').className = 'status-msg';
+}
+
+// ─── Translate ────────────────────────────────────────────────
+async function doTranslate() {
+  const text = document.getElementById('input-text').value.trim();
+  if (!text) return;
+
+  const btn = document.getElementById('trans-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Μεταφράζω...';
+  setStatus('');
+
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${srcLang}&tl=${tgtLang}&dt=t&dt=rm&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+
+    // Extract translation
+    let translated = '';
+    if (data[0]) {
+      for (const part of data[0]) {
+        if (part && part[0]) translated += part[0];
+      }
+    }
+
+    // Extract romanization (if translating TO Georgian)
+    let phonetic = '';
+    if (tgtLang === 'ka' && translated) {
+      phonetic = toPhonetic(translated);
+    } else if (data[0]) {
+      // Try to get romanization from response
+      for (const part of data[0]) {
+        if (part && part[3]) { phonetic += part[3]; }
+      }
+    }
+
+    const box = document.getElementById('result-box');
+    box.style.display = 'block';
+    document.getElementById('result-ka').textContent = translated || '—';
+    document.getElementById('result-ph').textContent = phonetic || '(δεν υπάρχει φωνητική)';
+    document.getElementById('result-label-ka').textContent =
+      tgtLang === 'ka' ? 'Γεωργιανά' : 'Ελληνικά / Μετάφραση';
+
+    setStatus('✅ Έτοιμο!', 'ok');
+
+  } catch (e) {
+    setStatus('❌ Σφάλμα σύνδεσης. Έλεγξε το internet.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 Μετάφρασε';
+  }
+}
+
+function copyResult() {
+  const text = document.getElementById('result-ka').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy-main-btn');
+    btn.textContent = '✅ Αντιγράφηκε!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '📋 Αντιγραφή'; btn.classList.remove('copied'); }, 1500);
+  });
+}
+
+function setStatus(msg, cls = '') {
+  const el = document.getElementById('status-msg');
+  el.textContent = msg;
+  el.className = 'status-msg' + (cls ? ' ' + cls : '');
+}
+
+// Allow Enter to translate
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('input-text').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.ctrlKey) doTranslate();
+  });
+});
+
+// ─── Quick Phrases ────────────────────────────────────────────
+const PHRASES = {
+  '💕 Αγάπη': [
+    { el: 'Σ\'αγαπώ', ka: 'გიყვარხარ', ph: 'giq\'varxar' },
+    { el: 'Μου λείπεις', ka: 'მენატრები', ph: 'menat\'rebi' },
+    { el: 'Είσαι όμορφη', ka: 'ლამაზი ხარ', ph: 'lamazi xar' },
+    { el: 'Καλημέρα αγάπη μου', ka: 'დილა მშვიდობისა, სიყვარულო', ph: 'dila mshvidobisa, siq\'varulo' },
+    { el: 'Καληνύχτα αγάπη μου', ka: 'ღამე მშვიდობისა, სიყვარულო', ph: 'ghame mshvidobisa, siq\'varulo' },
+    { el: 'Σκέφτομαι εσένα', ka: 'შენზე ვფიქრობ', ph: 'shenze vpik\'rob' },
+    { el: 'Σε χρειάζομαι', ka: 'მჭირდები', ph: 'mch\'irdbi' },
+    { el: 'Είσαι τέλεια', ka: 'სრულყოფილი ხარ', ph: 'srulq\'opili xar' },
+  ],
+  '🏠 Σπίτι': [
+    { el: 'Φαΐ έτοιμο', ka: 'საჭმელი მზადაა', ph: 'sachmeli mzadaa' },
+    { el: 'Έλα να φάμε', ka: 'მოდი ვიჭამოთ', ph: 'modi vichamot\'' },
+    { el: 'Είμαι στο σπίτι', ka: 'სახლში ვარ', ph: 'saxlshi var' },
+    { el: 'Πού είσαι;', ka: 'სად ხარ?', ph: 'sad xar?' },
+    { el: 'Θα αργήσω', ka: 'დავაგვიანდები', ph: 'davagviandebi' },
+    { el: 'Τηλεφώνησέ μου', ka: 'დამირეკე', ph: 'damireke' },
+    { el: 'Έρχομαι', ka: 'მოვდივარ', ph: 'movdivar' },
+    { el: 'Κάτσε, περίμενε λίγο', ka: 'დაჯექი, ცოტა დაელოდე', ph: 'dajeq\'i, tsota daelode' },
+    { el: 'Μπάνιο ελεύθερο', ka: 'სააბაზანო თავისუფალია', ph: 'saabazano t\'avisupalia' },
+    { el: 'Κρύο είναι / Κλείσε παράθυρο', ka: 'ცივა, დახურე ფანჯარა', ph: 'tsiva, daxure panjara' },
+  ],
+  '👶 Αλέξανδρος': [
+    { el: 'Πάμε για ύπνο', ka: 'სძინავს, წავიძინოთ', ph: 'ts\'avidzinot\'' },
+    { el: 'Φάε το φαγητό σου', ka: 'შეჭამე საჭმელი', ph: 'shechamle sachmeli' },
+    { el: 'Μπράβο!', ka: 'ბრავო! / კარგი ბიჭი!', ph: 'bravo! / k\'argi bichi!' },
+    { el: 'Σταμάτα!', ka: 'გაჩერდი!', ph: 'gacherdi!' },
+    { el: 'Ησύχασε', ka: 'დამშვიდდი', ph: 'damshviddi' },
+    { el: 'Έλα εδώ', ka: 'მოდი აქ', ph: 'modi ak\'' },
+    { el: 'Όχι, μη το αγγίζεις', ka: 'არა, ნუ შეეხები', ph: 'ara, nu sheexebi' },
+    { el: 'Πλύνε τα χέρια σου', ka: 'ხელები დაიბანე', ph: 'xelebi daibane' },
+    { el: 'Τι έγινε;', ka: 'რა მოხდა?', ph: 'ra moxda?' },
+    { el: 'Σ\'αγαπώ Αλέξανδρε', ka: 'გიყვარხარ ალექსანდრე', ph: 'giq\'varxar aleks\'andre' },
+  ],
+  '😄 Καθημερινά': [
+    { el: 'Ναι', ka: 'კი / დიახ', ph: 'k\'i / diax' },
+    { el: 'Όχι', ka: 'არა', ph: 'ara' },
+    { el: 'Ευχαριστώ', ka: 'მადლობა', ph: 'madloba' },
+    { el: 'Παρακαλώ', ka: 'გთხოვ / სიამოვნებით', ph: 'gtxov / siamovnebit\'' },
+    { el: 'Συγγνώμη', ka: 'ბოდიში', ph: 'bodishi' },
+    { el: 'Εντάξει', ka: 'კარგი', ph: 'k\'argi' },
+    { el: 'Δεν ξέρω', ka: 'არ ვიცი', ph: 'ar vitsi' },
+    { el: 'Τι κάνεις;', ka: 'როგორ ხარ?', ph: 'rogor xar?' },
+    { el: 'Καλά, ευχαριστώ', ka: 'კარგად, მადლობა', ph: 'k\'argad, madloba' },
+    { el: 'Κουράστηκα', ka: 'დავიღალე', ph: 'davighale' },
+    { el: 'Πεινάω', ka: 'მშია', ph: 'mshia' },
+    { el: 'Διψάω', ka: 'მწყურია', ph: 'mts\'q\'uria' },
+  ],
+};
+
+let currentCat = null;
+
+function buildPhrases() {
+  const catTabsEl = document.getElementById('cat-tabs');
+  catTabsEl.innerHTML = '';
+  const cats = Object.keys(PHRASES);
+
+  cats.forEach((cat, i) => {
+    const el = document.createElement('div');
+    el.className = 'cat-tab' + (i === 0 ? ' active' : '');
+    el.textContent = cat;
+    el.onclick = () => selectCat(cat, el);
+    catTabsEl.appendChild(el);
+  });
+
+  selectCat(cats[0], catTabsEl.children[0]);
+}
+
+function selectCat(cat, tabEl) {
+  document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+  tabEl.classList.add('active');
+  currentCat = cat;
+  renderPhrases(cat);
+}
+
+function renderPhrases(cat) {
+  const grid = document.getElementById('phrase-grid');
+  grid.innerHTML = '';
+  PHRASES[cat].forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'phrase-card';
+    card.innerHTML = `
+      <div class="phrase-el">${p.el}</div>
+      <div class="phrase-ka">${p.ka}</div>
+      <div class="phrase-ph">📢 ${p.ph}</div>
+      <span class="phrase-copy-hint">📋 tap</span>
+    `;
+    card.onclick = () => {
+      navigator.clipboard.writeText(p.ka).then(() => {
+        card.classList.add('flash');
+        setTimeout(() => card.classList.remove('flash'), 500);
+      });
+    };
+    grid.appendChild(card);
+  });
+}
+
+// ─── Tab switching ─────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', ['translator', 'phrases'][i] === tab);
+  });
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + tab).classList.add('active');
+}
+
+// ─── Init ──────────────────────────────────────────────────────
+buildPhrases();
+</script>
+</body>
+</html>
