@@ -20,6 +20,7 @@ from langchain_core.tools import tool
 from pypdf import PdfReader
 from github import Github
 from google.oauth2.credentials import Credentials
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from miio import Device
@@ -1681,8 +1682,15 @@ def get_gmail_service():
 
         if creds and creds.expired and creds.refresh_token:
             from google.auth.transport.requests import Request
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except RefreshError as e:
+                if "invalid_scope" not in str(e).lower():
+                    raise
+                print("[GoogleAuth] token invalid_scope - forcing fresh OAuth consent.")
+                creds = None
+
+        if not creds or not creds.valid:
             flow = InstalledAppFlow.from_client_secrets_file(CREDS_PATH, SCOPES)
             creds = flow.run_local_server(port=0, prompt='consent', access_type='offline')
 

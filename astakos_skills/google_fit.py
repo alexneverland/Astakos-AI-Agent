@@ -8,35 +8,130 @@
 #   Samsung Health → Settings → Connected services → Google Fit → ON
 # ================================================================
 
-import os
 import datetime
+import json
+import os
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 TOKEN_PATH       = r"C:\astakos_v2\credentials\token.json"
 CREDENTIALS_PATH = r"C:\astakos_v2\credentials\credentials.json"
 
-SCOPES = [
+SHARED_GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/tasks",
+]
+
+FIT_SCOPES = [
     "https://www.googleapis.com/auth/fitness.activity.read",
     "https://www.googleapis.com/auth/fitness.sleep.read",
     "https://www.googleapis.com/auth/fitness.heart_rate.read",
 ]
 
+SCOPES = SHARED_GOOGLE_SCOPES + FIT_SCOPES
+
+
+class GoogleFitAuthError(RuntimeError):
+    """Raised when the shared Google token cannot authorize Google Fit reads."""
+
+
+def _read_token_scopes() -> set[str]:
+    if not os.path.exists(TOKEN_PATH):
+        return set()
+
+    try:
+        with open(TOKEN_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return set()
+
+    scopes = data.get("scopes") or data.get("scope") or []
+    if isinstance(scopes, str):
+        scopes = scopes.split()
+    return {scope for scope in scopes if isinstance(scope, str)}
+
+
+def _missing_fit_scopes(token_scopes: set[str]) -> list[str]:
+    return [scope for scope in FIT_SCOPES if scope not in token_scopes]
+
+
+def _ensure_fit_token_scopes() -> None:
+    token_scopes = _read_token_scopes()
+    if not token_scopes:
+        return
+
+    missing = _missing_fit_scopes(token_scopes)
+    if not missing:
+        return
+
+    has_google_health = any("googlehealth." in scope for scope in token_scopes)
+    if has_google_health:
+        raise GoogleFitAuthError(
+            "Το Google token έχει μείνει με Google Health/Health Connect scopes "
+            "από παλιότερη δοκιμή, όχι με τα κλασικά Google Fit scopes. "
+            "Χρειάζεται νέο OAuth consent με fitness.activity.read, "
+            "fitness.sleep.read και fitness.heart_rate.read."
+        )
+
+    raise GoogleFitAuthError(
+        "Το Google token δεν έχει όλα τα απαιτούμενα Google Fit scopes: "
+        + ", ".join(missing)
+    )
+
+
+def _save_credentials(creds: Credentials) -> None:
+    with open(TOKEN_PATH, "w", encoding="utf-8") as token:
+        token.write(creds.to_json())
+
+
+def authorize_google_fit() -> str:
+    if not os.path.exists(CREDENTIALS_PATH):
+        raise GoogleFitAuthError("Λείπει το credentials.json για νέο Google OAuth consent.")
+
+    flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
+    creds = flow.run_local_server(port=0, prompt="consent", access_type="offline")
+    _save_credentials(creds)
+    return "✅ Google OAuth token ενημερώθηκε με τα Google Fit scopes."
+
+
 def _get_credentials():
     creds = None
     if os.path.exists(TOKEN_PATH):
+        _ensure_fit_token_scopes()
         creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+                _save_credentials(creds)
+            except RefreshError as e:
+                if "invalid_scope" in str(e).lower():
+                    raise GoogleFitAuthError(
+                        "Το Google token απορρίφθηκε με invalid_scope. "
+                        "Κάνε νέο OAuth consent με τα Google Fit scopes."
+                    ) from e
+                raise
         else:
             raise Exception("Token λήξε ή δεν υπάρχει. Διέγραψε token.json και κάνε νέο login.")
     return creds
+
+
+def _fit_auth_summary(title: str) -> str | None:
+    try:
+        _get_credentials()
+    except GoogleFitAuthError as e:
+        return "\n".join([
+            title,
+            "",
+            f"⚠️ Google Fit auth: {e}",
+            "Τα υπόλοιπα Google εργαλεία μπορεί να δουλεύουν κανονικά, αλλά το Fit θέλει token με Fit scopes.",
+        ])
+    return None
 
 
 def _ns_to_ms(ns: int) -> int:
@@ -215,6 +310,10 @@ def get_heart_rate(days_ago: int = 0) -> dict:
 
 
 def get_morning_summary() -> str:
+    auth_problem = _fit_auth_summary("🌅 *Morning Google Fit briefing:*")
+    if auth_problem:
+        return auth_problem
+
     lines = ["🌅 *Morning Google Fit briefing:*\n"]
 
     try:
@@ -261,7 +360,12 @@ def get_morning_summary() -> str:
 
 def get_daily_summary(days_ago: int = 1) -> str:
     label = "σήμερα" if days_ago == 0 else "χθες"
-    lines = [f"📊 *Σύνοψη {label}:*\n"]
+    title = f"📊 *Σύνοψη {label}:*"
+    auth_problem = _fit_auth_summary(title)
+    if auth_problem:
+        return auth_problem
+
+    lines = [f"{title}\n"]
 
     try:
         steps = get_steps(days_ago)
@@ -307,7 +411,9 @@ if __name__ == "__main__":
     import sys
     cmd      = sys.argv[1] if len(sys.argv) > 1 else "summary"
     days_ago = int(sys.argv[2]) if len(sys.argv) > 2 else 1
-    if cmd == "steps":
+    if cmd == "auth":
+        print(authorize_google_fit())
+    elif cmd == "steps":
         print(f"Βήματα: {get_steps(days_ago)}")
     elif cmd == "sleep":
         print(get_sleep(days_ago))
