@@ -1194,7 +1194,7 @@ def run_polling():
     # ── Ορισμός εντολών στο Telegram menu (το "/" autocomplete) ──────────────
     _bot_commands = [
         {"command": "g",                "description": "Ελληνικά → Γεωργιανά (+ ήχος)"},
-        {"command": "s",                "description": "Γεωργιανά → Ελληνικά (μήνυμα Σοφίας)"},
+        {"command": "gr",               "description": "Γεωργιανά → Ελληνικά (μετάφραση σε Greek)"},
         {"command": "g_phrases",        "description": "Γρήγορες γεωργιανές φράσεις"},
         {"command": "nutrition",        "description": "Ανάλυση διατροφικής αξίας (στείλε φωτό)"},
         {"command": "receipt",          "description": "Ανάλυση απόδειξης (στείλε φωτό)"},
@@ -1317,7 +1317,7 @@ def run_polling():
                 if not cmd.startswith("/") and _consume_pending_sofia():
                     _send_georgian_translation(user_text, force_src="ka")
                     continue
-                if cmd.startswith("/") and cmd not in ("/georgian", "/geo", "/g", "/georgian_phrases", "/s", "/sofia"):
+                if cmd.startswith("/") and cmd not in ("/georgian", "/geo", "/g", "/georgian_phrases", "/gr", "/greek"):
                     _clear_pending_georgian()
                     _clear_pending_sofia()
 
@@ -1368,7 +1368,7 @@ def run_polling():
                         "<code>/nutrition</code> — Ανάλυση προϊόντος (στείλε φωτό πρώτα)\n"
                         "<code>/receipt</code> — Ανάλυση απόδειξης (στείλε φωτό πρώτα)\n"
                         "<code>/g κείμενο</code> — Μετάφραση + ήχος Ελληνικά→Γεωργιανά\n"
-                        "<code>/s κείμενο</code> — Γεωργιανά→Ελληνικά (μήνυμα Σοφίας)\n"
+                        "<code>/gr κείμενο</code> — Γεωργιανά→Ελληνικά (translate to Greek)\n"
                         "<code>/g phrases</code> — Γρήγορες γεωργιανές φράσεις\n"
                         "<code>/story θέμα</code> — Παραμύθι για Αλέξανδρο + εικόνες\n\n"
                         "<b>Έλεγχος</b>\n"
@@ -1431,7 +1431,7 @@ def run_polling():
                     _send_georgian_translation(rest)
                     continue
 
-                if cmd in ("/s", "/sofia"):
+                if cmd in ("/gr", "/greek"):
                     rest = user_text[len(cmd):].strip()
                     if rest:
                         # Άμεση μετάφραση ka→el
@@ -1439,7 +1439,7 @@ def run_polling():
                     else:
                         # Pending mode: επόμενο μήνυμα θεωρείται Γεωργιανό
                         _arm_pending_sofia()
-                        send_telegram_msg("🇬🇪 Στείλε το γεωργιανό κείμενο της Σοφίας.")
+                        send_telegram_msg("🇬🇪 Στείλε το γεωργιανό κείμενο για μετάφραση σε Ελληνικά.")
                     continue
 
                 if user_text.lower() == "/nutrition":
