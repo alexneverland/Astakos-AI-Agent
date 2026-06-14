@@ -541,8 +541,16 @@ def mail_agent_node(state):
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
+    # [MASTRO-FIX v3]: Elegxos MONO tool results apo to trexon turn
+    # (meta to teleutaio human message) — apofigee cross-turn triggering
+    # pou mplokarei to read action prin kathesei na ginei.
+    last_human_idx = next(
+        (len(history) - 1 - i for i, m in enumerate(reversed(history))
+         if getattr(m, "type", "") == "human"),
+        0
+    )
     mail_tool_results = []
-    for msg in history[-12:]:
+    for msg in history[last_human_idx:]:
         if getattr(msg, "type", "") == "tool":
             content = clean_message(getattr(msg, "content", "")).strip()
             if content.startswith("ID: ") or content.startswith("📩 Περιεχόμενο:"):
