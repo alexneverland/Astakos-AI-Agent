@@ -54,6 +54,9 @@ def translate(text: str, *, src: str = "auto", tgt: str = "ka") -> dict[str, str
     if src == "auto":
         src = "ka" if _is_georgian(text) else "el"
         tgt = "el" if src == "ka" else "ka"
+    else:
+        # Forced direction: tgt = αντίθετο του src
+        tgt = "el" if src == "ka" else "ka"
 
     resp = requests.get(
         "https://translate.googleapis.com/translate_a/single",

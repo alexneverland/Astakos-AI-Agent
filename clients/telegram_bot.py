@@ -78,6 +78,8 @@ pending_photo      = None   # {analysis, filename, path, timestamp}
 pending_georgian_lock = threading.Lock()
 pending_georgian_until = 0.0
 PENDING_GEORGIAN_TTL_SECONDS = 120
+pending_sofia_lock = threading.Lock()
+pending_sofia_until = 0.0   # ka→el mode (Σοφία γράφει Γεωργιανά)
 # Voice mode toggle: όταν True, ΟΛΕΣ οι απαντήσεις είναι φωνητικές ακόμα και αν γράφεις
 voice_mode_enabled = False
 # Scheduler reference (set in __main__, used by /status command)
@@ -600,11 +602,33 @@ def _consume_pending_georgian() -> bool:
         return False
 
 
-def _send_georgian_translation(text: str):
+def _arm_pending_sofia():
+    global pending_sofia_until
+    with pending_sofia_lock:
+        pending_sofia_until = time.time() + PENDING_GEORGIAN_TTL_SECONDS
+
+
+def _clear_pending_sofia():
+    global pending_sofia_until
+    with pending_sofia_lock:
+        pending_sofia_until = 0.0
+
+
+def _consume_pending_sofia() -> bool:
+    global pending_sofia_until
+    with pending_sofia_lock:
+        if pending_sofia_until and time.time() <= pending_sofia_until:
+            pending_sofia_until = 0.0
+            return True
+        pending_sofia_until = 0.0
+        return False
+
+
+def _send_georgian_translation(text: str, *, force_src: str = "auto"):
     from tools.georgian import translate, tts_audio
 
     try:
-        result = translate(text)
+        result = translate(text, src=force_src)
     except Exception as e:
         send_telegram_msg(f"❌ Σφάλμα μετάφρασης: {e}")
         return
@@ -1263,8 +1287,12 @@ def run_polling():
                 if not cmd.startswith("/") and _consume_pending_georgian():
                     _send_georgian_translation(user_text)
                     continue
-                if cmd.startswith("/") and cmd not in ("/georgian", "/geo", "/g", "/georgian_phrases"):
+                if not cmd.startswith("/") and _consume_pending_sofia():
+                    _send_georgian_translation(user_text, force_src="ka")
+                    continue
+                if cmd.startswith("/") and cmd not in ("/georgian", "/geo", "/g", "/georgian_phrases", "/s", "/sofia"):
                     _clear_pending_georgian()
+                    _clear_pending_sofia()
 
                 if cmd == "/pause":
                     with _override_lock:
@@ -1312,7 +1340,8 @@ def run_polling():
                         "<b>Καθημερινά</b>\n"
                         "<code>/nutrition</code> — Ανάλυση προϊόντος (στείλε φωτό πρώτα)\n"
                         "<code>/receipt</code> — Ανάλυση απόδειξης (στείλε φωτό πρώτα)\n"
-                        "<code>/g κείμενο</code> — Μετάφραση + ήχος Ελληνικά↔Γεωργιανά\n"
+                        "<code>/g κείμενο</code> — Μετάφραση + ήχος Ελληνικά→Γεωργιανά\n"
+                        "<code>/s κείμενο</code> — Γεωργιανά→Ελληνικά (μήνυμα Σοφίας)\n"
                         "<code>/g phrases</code> — Γρήγορες γεωργιανές φράσεις\n"
                         "<code>/story θέμα</code> — Παραμύθι για Αλέξανδρο + εικόνες\n\n"
                         "<b>Έλεγχος</b>\n"
@@ -1373,6 +1402,17 @@ def run_polling():
                         continue
 
                     _send_georgian_translation(rest)
+                    continue
+
+                if cmd in ("/s", "/sofia"):
+                    rest = user_text[len(cmd):].strip()
+                    if rest:
+                        # Άμεση μετάφραση ka→el
+                        _send_georgian_translation(rest, force_src="ka")
+                    else:
+                        # Pending mode: επόμενο μήνυμα θεωρείται Γεωργιανό
+                        _arm_pending_sofia()
+                        send_telegram_msg("🇬🇪 Στείλε το γεωργιανό κείμενο της Σοφίας.")
                     continue
 
                 if user_text.lower() == "/nutrition":
