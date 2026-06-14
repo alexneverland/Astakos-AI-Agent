@@ -193,6 +193,32 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
     return context_msgs
 
 
+def _tool_results_fallback_response(user_text: str, tool_results: list[str]) -> str:
+    """Συνθέτει τελική απάντηση όταν το graph γύρισε μόνο tool results."""
+    clean_results = [clean_message(r).strip() for r in tool_results if clean_message(r).strip()]
+    if not clean_results:
+        return ""
+
+    joined_results = "\n\n---\n\n".join(clean_results[-5:])[:6000]
+    prompt = (
+        "Σύνθεσε σύντομη, καθαρή απάντηση στα Ελληνικά για τον χρήστη με βάση ΜΟΝΟ "
+        "τα παρακάτω αποτελέσματα εργαλείων. Μην καλέσεις εργαλεία. "
+        "Αν τα στοιχεία δεν επαρκούν για ακριβή απάντηση, πες τι λείπει και δώσε "
+        "προσεκτική σύνοψη.\n\n"
+        f"Ερώτηση χρήστη:\n{user_text}\n\n"
+        f"Αποτελέσματα εργαλείων:\n{joined_results}"
+    )
+    try:
+        response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
+        content = clean_message(getattr(response, "content", "")).strip()
+        if content and not content.startswith("[Κλήση Εργαλείου:"):
+            return content
+    except Exception as e:
+        print(f"\033[93m[Web ToolFallback]: synthesis failed — {e}\033[0m")
+
+    return "Βρήκα αυτά τα σχετικά στοιχεία, αλλά δεν μπόρεσα να τα συνθέσω καθαρά:\n\n" + joined_results[:1800]
+
+
 def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -> list:
     try:
         from memory.conversation_history import load_messages
@@ -573,20 +599,33 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             print(f"\033[95m[Web->Graph]: Προώθηση μηνύματος στο γράφημα — '{isolated_user_input[:120]}'\033[0m")
         from memory.execution_trace import ExecutionTrace
         _trace = ExecutionTrace(channel="web", user_message=user_input)
+        tool_result_fallbacks = []
         for event in graph.stream({"messages": context_msgs + [human_msg], "channel": "web"}, {"recursion_limit": 50}):
             _trace.process_event(event)
             for node, data in event.items():
                 if data is None:
                     continue
+                if node == "tools":
+                    for msg in data.get("messages", []):
+                        if getattr(msg, "type", "") == "tool":
+                            tool_content = clean_message(getattr(msg, "content", "")).strip()
+                            if tool_content:
+                                tool_result_fallbacks.append(tool_content)
                 if node not in ["supervisor", "tools"]:
                     handling_agent = node
                     msgs = data.get("messages", [])
                     if msgs and hasattr(msgs[-1], "content"):
                         # Εδώ "τσιμπάμε" την απάντηση μέσα από το loop
+                        last_msg = msgs[-1]
+                        if getattr(last_msg, "tool_calls", None):
+                            continue
                         candidate = clean_message(msgs[-1].content).strip()
-                        if candidate:
+                        if candidate and not candidate.startswith("[Κλήση Εργαλείου:"):
                             final_ai_response = candidate
                             print(f"\033[90m[Web->Graph]: Agent '{handling_agent}' απάντησε ({len(candidate)} χαρ.)\033[0m")
+
+        if not final_ai_response:
+            final_ai_response = _tool_results_fallback_response(isolated_user_input, tool_result_fallbacks)
 
         # --- [MASTRO-FIX]: Επιπλέον καθάρισμα ΠΡΙΝ την αποθήκευση ---
         # We use the raw user_input for memory extraction so Astakos 
