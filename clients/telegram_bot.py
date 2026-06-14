@@ -1368,17 +1368,7 @@ def run_polling():
                     if not rest:
                         _arm_pending_georgian()
                         send_telegram_msg(
-                            "🇬🇪 <b>Georgian Helper</b>\n\n"
-                            "Στείλε τώρα το κείμενο που θέλεις να μεταφράσω.\n\n"
-                            "Ή γράψε απευθείας:\n"
-                            "<code>/georgian σ'αγαπώ</code>\n"
-                            "<code>/geo Γεια σου Σοφία</code>\n"
-                            "<code>/g καλημέρα</code>\n"
-                            "\n"
-                            "Γρήγορες φράσεις:\n"
-                            "<code>/georgian_phrases</code>\n"
-                            "<code>/g phrases</code>\n\n"
-                            "<i>Auto-detect: στείλε Γεωργιανά → μεταφράζω σε Ελληνικά</i>"
+                            "🇬🇪 Στείλε τώρα το κείμενο που θέλεις να μεταφράσω."
                         )
                         continue
 
