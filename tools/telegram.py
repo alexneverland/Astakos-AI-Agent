@@ -6,6 +6,7 @@
 # ================================================================
 import requests
 import re
+import html
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
 def send_telegram_msg_full(text: str, prefix: str = "", max_len: int = 3500):
@@ -25,10 +26,40 @@ def format_for_telegram(text: str) -> str:
     """Mastro-Fix: Μετατρέπει το Markdown του LLM σε ασφαλές HTML για το Telegram."""
     if not text:
         return ""
+
+    # Telegram HTML rejects stray angle brackets like "(<0,5g)".
+    # Keep the small tag subset we intentionally support, escape everything else.
+    allowed_tags = {
+        "<b>": "__TG_B_OPEN__",
+        "</b>": "__TG_B_CLOSE__",
+        "<i>": "__TG_I_OPEN__",
+        "</i>": "__TG_I_CLOSE__",
+        "<u>": "__TG_U_OPEN__",
+        "</u>": "__TG_U_CLOSE__",
+        "<s>": "__TG_S_OPEN__",
+        "</s>": "__TG_S_CLOSE__",
+        "<code>": "__TG_CODE_OPEN__",
+        "</code>": "__TG_CODE_CLOSE__",
+        "<pre>": "__TG_PRE_OPEN__",
+        "</pre>": "__TG_PRE_CLOSE__",
+    }
+    for tag, placeholder in allowed_tags.items():
+        text = text.replace(tag, placeholder)
+
+    text = html.escape(text, quote=False)
+
+    for tag, placeholder in allowed_tags.items():
+        text = text.replace(placeholder, tag)
+
     text = re.sub(r'^#{1,3}\s+(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'^[\*\-]\s+', r'• ', text, flags=re.MULTILINE)
     return text
+
+
+def _plain_telegram_fallback(text: str) -> str:
+    text = re.sub(r'</?(?:b|i|u|s|code|pre)>', '', text)
+    return html.unescape(text)
 
 def send_telegram_msg(text: str) -> int | None:
     """Στέλνει μήνυμα στο Telegram. Επιστρέφει το message_id ή None."""
@@ -53,6 +84,7 @@ def send_telegram_msg(text: str) -> int | None:
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code != 200:
             payload.pop("parse_mode")
+            payload["text"] = _plain_telegram_fallback(safe_text)
             response = requests.post(url, json=payload, timeout=10)
             print(f"⚠️ Telegram API Warning: plain text (Status: {response.status_code})")
         data = response.json()
