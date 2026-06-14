@@ -18,13 +18,21 @@ warnings.filterwarnings("ignore")
 FAST_MODEL = "gemini-3.5-flash"
 HEAVY_MODEL = "gemini-3.1-pro-preview"
 
-# [MASTRO-SHIELD]: Κατεβάζουμε τελείως τις ασπίδες ασφαλείας (BLOCK_NONE)
-# για να μην μπλοκάρονται αθώα/ανθρώπινα μηνύματα από false positives.
+# [MASTRO-SHIELD v2]: Κατεβάζουμε ΟΛΕΣ τις ασπίδες ασφαλείας (BLOCK_NONE)
+# Περιλαμβάνει τις νέες κατηγορίες: CIVIC_INTEGRITY, JAILBREAK, IMAGE_*
+# που δεν υπήρχαν στην αρχική έκδοση και έκοβαν αθώα μηνύματα (π.χ. στατιστικά).
+_BN = HarmBlockThreshold.BLOCK_NONE
 custom_safety = {
-    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_HARASSMENT:         _BN,
+    HarmCategory.HARM_CATEGORY_HATE_SPEECH:        _BN,
+    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT:  _BN,
+    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT:  _BN,
+    HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY:    _BN,
+    HarmCategory.HARM_CATEGORY_JAILBREAK:          _BN,
+    HarmCategory.HARM_CATEGORY_IMAGE_DANGEROUS_CONTENT: _BN,
+    HarmCategory.HARM_CATEGORY_IMAGE_HARASSMENT:   _BN,
+    HarmCategory.HARM_CATEGORY_IMAGE_HATE:         _BN,
+    HarmCategory.HARM_CATEGORY_IMAGE_SEXUALLY_EXPLICIT: _BN,
 }
 
 # 2. Αρχιτέκτονας Μοντέλων (LangChain Objects)
