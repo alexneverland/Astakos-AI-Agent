@@ -405,9 +405,28 @@ def web_agent_node(state: AgentState):
         process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices
     ]
 
+    result = llm.bind_tools(web_tools).invoke(final_messages)
+    content = clean_message(result.content).strip() if result.content else ""
+    has_tool_calls = bool(getattr(result, "tool_calls", None))
+
+    # [MASTRO-FIX]: Αν η σύνθεση είναι κενή (blocked server-side) και υπάρχουν
+    # tool results στο history, επιστρέφουμε τα raw αποτελέσματα ως fallback.
+    if not content and not has_tool_calls:
+        tool_results = [m for m in history if getattr(m, "type", "") == "tool"]
+        if tool_results:
+            print(f"\033[93m[Web_Agent]: ⚠️ Κενή σύνθεση — fallback σε raw tool results.\033[0m")
+            parts = []
+            for tm in tool_results[-3:]:
+                raw = clean_message(tm.content).strip()[:900]
+                if raw:
+                    parts.append(raw)
+            if parts:
+                from langchain_core.messages import AIMessage as _AIMsg
+                result = _AIMsg(content="📊 " + "\n\n".join(parts))
+
     return {
         "current_agent": "Web_Agent",
-        "messages": [llm.bind_tools(web_tools).invoke(final_messages)]
+        "messages": [result]
     }
 
 

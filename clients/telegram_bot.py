@@ -867,8 +867,13 @@ def handle_message(user_text: str, chat_id: str):
                     handling_agent = node
                     msgs = data.get("messages", [])
                     if msgs and hasattr(msgs[-1], "content"):
-                        candidate = clean_message(msgs[-1].content).strip()
-                        if candidate:
+                        last_msg = msgs[-1]
+                        # [MASTRO-FIX]: Skip intermediate tool-call steps
+                        if getattr(last_msg, "tool_calls", None):
+                            continue
+                        candidate = clean_message(last_msg.content).strip()
+                        # Skip tool-call announcement strings (internal debug output)
+                        if candidate and not candidate.startswith("[Κλήση Εργαλείου:"):
                             final_ai_response = candidate
 
         if not final_ai_response:
