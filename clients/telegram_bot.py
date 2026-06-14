@@ -1191,6 +1191,33 @@ def run_polling():
         print("\033[91m[TelegramBot]: Λείπει το TELEGRAM_CHAT_ID!\033[0m")
         return
 
+    # ── Ορισμός εντολών στο Telegram menu (το "/" autocomplete) ──────────────
+    _bot_commands = [
+        {"command": "g",                "description": "Ελληνικά → Γεωργιανά (+ ήχος)"},
+        {"command": "s",                "description": "Γεωργιανά → Ελληνικά (μήνυμα Σοφίας)"},
+        {"command": "g_phrases",        "description": "Γρήγορες γεωργιανές φράσεις"},
+        {"command": "nutrition",        "description": "Ανάλυση διατροφικής αξίας (στείλε φωτό)"},
+        {"command": "receipt",          "description": "Ανάλυση απόδειξης (στείλε φωτό)"},
+        {"command": "story",            "description": "Παραμύθι για τον Αλέξανδρο"},
+        {"command": "voice",            "description": "Φωνητικές απαντήσεις ON/OFF"},
+        {"command": "status",           "description": "Κατάσταση scheduler & jobs"},
+        {"command": "doctor",           "description": "Health status Αστακού"},
+        {"command": "mute",             "description": "Σίγαση proactive μηνυμάτων"},
+        {"command": "pause",            "description": "Παύση υπενθυμίσεων"},
+        {"command": "resume",           "description": "Επαναφορά όλων"},
+        {"command": "end",              "description": "Τέλος session & περίληψη"},
+        {"command": "help",             "description": "Λίστα εντολών"},
+    ]
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setMyCommands",
+            json={"commands": _bot_commands},
+            timeout=10,
+        )
+        print("\033[92m[TelegramBot]: Bot commands menu ενημερώθηκε ✓\033[0m")
+    except Exception as _e:
+        print(f"\033[93m[TelegramBot]: setMyCommands απέτυχε: {_e}\033[0m")
+
     offset = 0
     print(f"\033[92m[TelegramBot]: Polling ξεκίνησε (allowed chat: {TELEGRAM_CHAT_ID})\033[0m")
 
