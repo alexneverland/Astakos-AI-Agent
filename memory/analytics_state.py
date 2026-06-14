@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Any
@@ -30,8 +31,19 @@ def _connect(db_path: str = DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+@contextmanager
+def _conn(db_path: str = DB_PATH):
+    """Context manager: opens a connection, commits/rolls back, then closes it."""
+    c = _connect(db_path)
+    try:
+        with c:  # commit on success, rollback on exception
+            yield c
+    finally:
+        c.close()
+
+
 def init_db(db_path: str = DB_PATH) -> None:
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS analytics_progress (
@@ -100,7 +112,7 @@ def get_progress(
     elif not os.path.exists(db_path):
         return {"key": key, "last_rowid": 0, "bootstrap_completed": False, "updated_at": None}
 
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         row = conn.execute(
             "SELECT * FROM analytics_progress WHERE key=?",
             (key,),
@@ -126,7 +138,7 @@ def set_progress(
     current = get_progress(key, db_path=db_path)
     completed = current["bootstrap_completed"] if bootstrap_completed is None else bool(bootstrap_completed)
     now = datetime.now().isoformat(timespec="seconds")
-    with _db_lock, _connect(db_path) as conn:
+    with _db_lock, _conn(db_path) as conn:
         conn.execute(
             """
             INSERT INTO analytics_progress(key, last_rowid, bootstrap_completed, updated_at)
@@ -191,7 +203,7 @@ def add_occurrence(
     if rowid <= 0:
         raise ValueError("message rowid is required for incremental analytics")
 
-    with _db_lock, _connect(db_path) as conn:
+    with _db_lock, _conn(db_path) as conn:
         existing = conn.execute(
             "SELECT candidate_id FROM analytics_occurrences WHERE message_rowid=?",
             (rowid,),
@@ -273,7 +285,7 @@ def list_candidates(
     if status:
         where = "WHERE c.status=?"
         params.append(status)
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         rows = conn.execute(
             f"""
             SELECT
@@ -317,7 +329,7 @@ def mark_promoted(
 ) -> None:
     init_db(db_path)
     now = datetime.now().isoformat(timespec="seconds")
-    with _db_lock, _connect(db_path) as conn:
+    with _db_lock, _conn(db_path) as conn:
         conn.execute(
             """
             UPDATE analytics_candidates
@@ -330,7 +342,7 @@ def mark_promoted(
 
 def state_stats(*, db_path: str = DB_PATH) -> dict[str, int]:
     init_db(db_path)
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         candidate_count = conn.execute("SELECT COUNT(*) FROM analytics_candidates").fetchone()[0]
         occurrence_count = conn.execute("SELECT COUNT(*) FROM analytics_occurrences").fetchone()[0]
         promoted_count = conn.execute(
