@@ -2,7 +2,7 @@
 tools/georgian.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Εργαλείο μετάφρασης Ελληνικά ↔ Γεωργιανά
-με φωνητική αναπαραγωγή (gTTS).
+με φωνητική αναπαραγωγή μέσω edge-tts.
 
 Χρησιμοποιεί Google Translate unofficial API
 (client=gtx) — χωρίς API key.
@@ -90,7 +90,7 @@ async def _tts_edge(text: str, voice: str) -> bytes:
 
 def tts_audio(text: str, lang: str = "ka") -> bytes:
     """
-    Παράγει MP3 bytes μέσω edge-tts.
+    Παράγει audio bytes μέσω edge-tts.
     Γεωργιανά: ka-GE-EkaNeural (Microsoft neural voice — υποστηρίζει ka).
     """
     import asyncio
@@ -143,13 +143,12 @@ QUICK_PHRASES: dict[str, list[dict[str, str]]] = {
 
 def phrases_message() -> str:
     """Επιστρέφει ένα Telegram-ready κείμενο με όλες τις γρήγορες φράσεις."""
-    lines = ["🇬🇪 *Γρήγορες Φράσεις Ελληνικά → Γεωργιανά*\n"]
+    lines = ["🇬🇪 <b>Γρήγορες Φράσεις Ελληνικά → Γεωργιανά</b>\n"]
     for cat, phrases in QUICK_PHRASES.items():
-        lines.append(f"*{cat}*")
+        lines.append(f"<b>{cat}</b>")
         for p in phrases:
-            # escape MarkdownV2 special chars in phonetic
-            lines.append(f"• {p['el']} → `{p['ka']}`")
-            lines.append(f"  _📢 {p['ph']}_")
+            lines.append(f"• {p['el']} → <code>{p['ka']}</code>")
+            lines.append(f"  <i>📢 {p['ph']}</i>")
         lines.append("")
-    lines.append("_Tip: /georgian \\<κείμενο\\> για ελεύθερη μετάφραση \\+ ήχο_")
+    lines.append("Tip: <code>/g &lt;κείμενο&gt;</code> για ελεύθερη μετάφραση + ήχο")
     return "\n".join(lines)
