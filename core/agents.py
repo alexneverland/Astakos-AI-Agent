@@ -549,14 +549,31 @@ def mail_agent_node(state):
                 mail_tool_results.append(content)
 
     if mail_tool_results:
-        no_tools_prompt = (
-            f"{system_prompt}\n\n"
-            "Έχεις ήδη αποτελέσματα από mail_manager στο context. "
-            "ΑΠΑΓΟΡΕΥΕΤΑΙ να καλέσεις άλλο εργαλείο. "
-            "Απάντησε τώρα στον Λάζαρο με σύντομη περίληψη των σχετικών email "
-            "και σημείωσε τυχόν πρακτικό επόμενο βήμα."
+        # [MASTRO-FIX v2]: Bypass sanitize_history - to LLM antigrafe to
+        # "[Klisi Ergaleiou: mail_manager]" pou paragei sanitize_history gia to
+        # proto tool-call AIMessage. Ant autou: katharo 2-msg prompt me embedded results.
+        joined_results = "\n\n".join(mail_tool_results[:5])[:4000]
+        user_q = next(
+            (clean_message(m.content) for m in reversed(history)
+             if getattr(m, "type", "") == "human"),
+            "Τι βρήκες;"
         )
-        response = safe_llm_invoke(llm, [SystemMessage(content=no_tools_prompt)] + sanitize_history_for_gemini(history))
+        synthesis_prompt = (
+            f"{system_base}\n\n"
+            "ΑΠΟΤΕΛΕΣΜΑΤΑ ΑΝΑΖΗΤΗΣΗΣ EMAIL (από mail_manager):\\n"
+            f"{joined_results}\n\n"
+            "Με βάση τα παραπάνω, δώσε σύντομη καθαρή απάντηση στον Λάζαρο. "
+            "ΜΗΝ καλέσεις εργαλεία. Απλή περίληψη στα Ελληνικά."
+        )
+        response = safe_llm_invoke(llm, [
+            SystemMessage(content=synthesis_prompt),
+            HumanMessage(content=user_q),
+        ])
+        resp_text = clean_message(getattr(response, "content", "")).strip()
+        # An to LLM epistrefei tool-call string, xrisimopoioume ta raw results
+        if not resp_text or resp_text.startswith("[Κλήση Εργαλείου:"):
+            resp_text = "📩 " + "\n\n".join(mail_tool_results[:3])[:1500]
+            response = AIMessage(content=resp_text)
         return {"current_agent": "Mail_Agent", "messages": [response]}
 
     mail_llm = llm.bind_tools([
