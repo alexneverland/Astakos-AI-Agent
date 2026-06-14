@@ -454,9 +454,9 @@ def _run_nutrition(image_path: str, chat_id: str):
     try:
         from astakos_skills.nutrition_analyzer import analyze_nutrition
         result = analyze_nutrition(image_path)
-        send_telegram_msg(result)
+        _send_and_record_assistant(result, chat_id)
     except Exception as e:
-        send_telegram_msg(f"❌ Σφάλμα nutrition analysis: {e}")
+        _send_and_record_assistant(f"❌ Σφάλμα nutrition analysis: {e}", chat_id)
 
 
 def _run_receipt(image_path: str, chat_id: str):
@@ -464,9 +464,9 @@ def _run_receipt(image_path: str, chat_id: str):
     try:
         from astakos_skills.scan_receipt import scan_receipt
         result = scan_receipt.invoke({"image_path": image_path})
-        send_telegram_msg(result)
+        _send_and_record_assistant(result, chat_id)
     except Exception as e:
-        send_telegram_msg(f"❌ Σφάλμα receipt scan: {e}")
+        _send_and_record_assistant(f"❌ Σφάλμα receipt scan: {e}", chat_id)
 
 
 def _run_story_maker(theme: str, characters: str, chat_id: str):
@@ -545,7 +545,7 @@ def send_voice_reply(text, chat_id):
             
     except Exception as e:
         print(f"❌ TTS Error: {e}")
-        send_telegram_msg(f"Μάστορα, μου κόπηκε η φωνή... (Error: {e})", chat_id)
+        send_telegram_msg(f"Μάστορα, μου κόπηκε η φωνή... (Error: {e})")
 def _append_to_analytics_log(role: str, content: str):
     """Καταγραφή μηνύματος στο shared SQLite conversation history (telegram channel)."""
     try:
@@ -566,6 +566,13 @@ def _append_to_analytics_log(role: str, content: str):
             )
     except Exception as e:
         print(f"[ConversationHistory/telegram]: Σφάλμα shared write: {e}")
+
+
+def _send_and_record_assistant(content: str, chat_id: str | None = None):
+    """Στέλνει assistant reply στο Telegram και το γράφει στο shared history."""
+    message_id = send_telegram_msg(content)
+    _append_to_analytics_log("ai", content)
+    return message_id
 
 
 def _load_shared_context_messages(channel: str) -> list:
