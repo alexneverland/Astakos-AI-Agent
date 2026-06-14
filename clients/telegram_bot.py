@@ -75,6 +75,9 @@ pending_exec_command = None
 # Pending photo: αποθηκεύει ανάλυση φωτογραφίας που έφτασε χωρίς caption, για να συνδυαστεί με το επόμενο μήνυμα
 pending_photo_lock = threading.Lock()
 pending_photo      = None   # {analysis, filename, path, timestamp}
+pending_georgian_lock = threading.Lock()
+pending_georgian_until = 0.0
+PENDING_GEORGIAN_TTL_SECONDS = 120
 # Voice mode toggle: όταν True, ΟΛΕΣ οι απαντήσεις είναι φωνητικές ακόμα και αν γράφεις
 voice_mode_enabled = False
 # Scheduler reference (set in __main__, used by /status command)
@@ -573,6 +576,59 @@ def _send_and_record_assistant(content: str, chat_id: str | None = None):
     message_id = send_telegram_msg(content)
     _append_to_analytics_log("ai", content)
     return message_id
+
+
+def _arm_pending_georgian():
+    global pending_georgian_until
+    with pending_georgian_lock:
+        pending_georgian_until = time.time() + PENDING_GEORGIAN_TTL_SECONDS
+
+
+def _clear_pending_georgian():
+    global pending_georgian_until
+    with pending_georgian_lock:
+        pending_georgian_until = 0.0
+
+
+def _consume_pending_georgian() -> bool:
+    global pending_georgian_until
+    with pending_georgian_lock:
+        if pending_georgian_until and time.time() <= pending_georgian_until:
+            pending_georgian_until = 0.0
+            return True
+        pending_georgian_until = 0.0
+        return False
+
+
+def _send_georgian_translation(text: str):
+    from tools.georgian import translate, tts_audio
+
+    try:
+        result = translate(text)
+    except Exception as e:
+        send_telegram_msg(f"❌ Σφάλμα μετάφρασης: {e}")
+        return
+
+    flag = "🇬🇪" if result["tgt"] == "ka" else "🇬🇷"
+    direction = "el→ka" if result["tgt"] == "ka" else "ka→el"
+
+    reply = f"{flag} <code>{result['translated']}</code>"
+    if result["phonetic"]:
+        reply += f"\n📢 <i>{result['phonetic']}</i>"
+    send_telegram_msg(reply)
+
+    try:
+        audio_bytes = tts_audio(result["translated"], lang=result["tgt"])
+        tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendAudio"
+        requests.post(
+            tg_url,
+            data={"chat_id": TELEGRAM_CHAT_ID},
+            files={"audio": ("georgian.mp3", audio_bytes, "audio/mpeg")},
+            timeout=20,
+        )
+        print(f"\033[92m[Georgian]: {direction} '{text}' → '{result['translated']}' + audio\033[0m")
+    except Exception as e_audio:
+        print(f"\033[93m[Georgian]: audio skip — {e_audio}\033[0m")
 
 
 def _load_shared_context_messages(channel: str) -> list:
@@ -1204,6 +1260,12 @@ def run_polling():
                 # --- [MASTRO-COMMANDS] ---
                 cmd = user_text.lower().strip()
 
+                if not cmd.startswith("/") and _consume_pending_georgian():
+                    _send_georgian_translation(user_text)
+                    continue
+                if cmd.startswith("/") and cmd not in ("/georgian", "/geo", "/g", "/georgian_phrases"):
+                    _clear_pending_georgian()
+
                 if cmd == "/pause":
                     with _override_lock:
                         _override_state["pause_reminders"] = True
@@ -1294,7 +1356,7 @@ def run_polling():
                     continue
 
                 if cmd in ("/georgian", "/geo", "/g", "/georgian_phrases"):
-                    from tools.georgian import translate, tts_audio, phrases_message
+                    from tools.georgian import phrases_message
                     rest = user_text[len(cmd):].strip()
 
                     # /georgian_phrases → γρήγορη λίστα
@@ -1304,9 +1366,11 @@ def run_polling():
 
                     # /georgian χωρίς κείμενο → οδηγίες
                     if not rest:
+                        _arm_pending_georgian()
                         send_telegram_msg(
                             "🇬🇪 <b>Georgian Helper</b>\n\n"
-                            "Μετάφρασε + άκουσε:\n"
+                            "Στείλε τώρα το κείμενο που θέλεις να μεταφράσω.\n\n"
+                            "Ή γράψε απευθείας:\n"
                             "<code>/georgian σ'αγαπώ</code>\n"
                             "<code>/geo Γεια σου Σοφία</code>\n"
                             "<code>/g καλημέρα</code>\n"
@@ -1318,34 +1382,7 @@ def run_polling():
                         )
                         continue
 
-                    try:
-                        result = translate(rest)
-                    except Exception as e:
-                        send_telegram_msg(f"❌ Σφάλμα μετάφρασης: {e}")
-                        continue
-
-                    flag = "🇬🇪" if result["tgt"] == "ka" else "🇬🇷"
-                    direction = "el→ka" if result["tgt"] == "ka" else "ka→el"
-
-                    # Κείμενο — πάντα στέλνεται
-                    reply = f"{flag} <code>{result['translated']}</code>"
-                    if result["phonetic"]:
-                        reply += f"\n📢 <i>{result['phonetic']}</i>"
-                    send_telegram_msg(reply)
-
-                    # Audio (edge-tts ka-GE-EkaNeural) — αθόρυβη αποτυχία
-                    try:
-                        audio_bytes = tts_audio(result["translated"], lang=result["tgt"])
-                        tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendAudio"
-                        requests.post(
-                            tg_url,
-                            data={"chat_id": TELEGRAM_CHAT_ID},
-                            files={"audio": ("georgian.mp3", audio_bytes, "audio/mpeg")},
-                            timeout=20,
-                        )
-                        print(f"\033[92m[Georgian]: {direction} '{rest}' → '{result['translated']}' + audio\033[0m")
-                    except Exception as e_audio:
-                        print(f"\033[93m[Georgian]: audio skip — {e_audio}\033[0m")
+                    _send_georgian_translation(rest)
                     continue
 
                 if user_text.lower() == "/nutrition":
