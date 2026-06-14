@@ -490,7 +490,7 @@ def load_messages_since(
             rows = conn.execute(
                 f"""
                 SELECT * FROM (
-                    SELECT *
+                    SELECT rowid, *
                     FROM conversation_messages
                     WHERE {where_clause}
                     ORDER BY timestamp DESC, id DESC
@@ -503,7 +503,7 @@ def load_messages_since(
         else:
             rows = conn.execute(
                 f"""
-                SELECT *
+                SELECT rowid, *
                 FROM conversation_messages
                 WHERE {where_clause}
                 ORDER BY timestamp ASC, id ASC
@@ -511,7 +511,10 @@ def load_messages_since(
                 params,
             ).fetchall()
 
-    return [_row_to_message(row) for row in rows]
+    msgs = [_row_to_message(row) for row in rows]
+    for msg, row in zip(msgs, rows):
+        msg["rowid"] = row["rowid"] if hasattr(row, "keys") else row[0]
+    return msgs
 
 
 def load_messages_after_rowid(

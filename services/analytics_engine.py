@@ -9,6 +9,7 @@ import json
 import os
 import re
 import sys
+import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -26,6 +27,8 @@ _BASE             = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE          = os.path.join(_BASE, "..", "analytics_engine_log.json")
 
 BATCH_SIZE = 80   # μηνύματα ανά LLM call
+MAX_INCREMENTAL_ROWS = 2000
+ANALYTICS_STATE_KEY = "routine_analytics"
 
 
 # ────────────────────────────────────────────────────────────────
@@ -124,44 +127,31 @@ def _load_user_messages_for_analytics(cutoff: str) -> tuple[list, str]:
     return _load_shared_user_messages(cutoff), "shared_sqlite"
 
 
-# ────────────────────────────────────────────────────────────────
-# CORE
-# ────────────────────────────────────────────────────────────────
+def _is_user_message(msg: dict) -> bool:
+    return msg.get("role") in ("user", "human", "Human")
 
-def run_analytics() -> dict:
-    """
-    Κύρια συνάρτηση του Analytics Engine.
-    Επιστρέφει stats dict: {detected, created, merged, updated, skipped, errors}
-    """
-    from memory.routine_db import upsert_routine
 
-    stats = {"detected": 0, "created": 0, "merged": 0,
-             "updated": 0, "skipped": 0, "errors": 0}
-    found_routines = []
-
-    # ── 1. Φόρτωση shared history (Web + Telegram) ───────────────
-    cutoff = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
-    user_msgs, history_source = _load_user_messages_for_analytics(cutoff)
-
-    if not user_msgs:
-        print("[Analytics]: Δεν υπάρχουν μηνύματα με date field (πρόσφατα).")
-        _write_log(stats, found_routines)
-        return stats
-
-    print(f"[Analytics]: Ανάλυση {len(user_msgs)} μηνυμάτων ({LOOKBACK_DAYS} ημερών, {history_source})...")
-
-    # ── 2. Εξαγωγή & grouping ────────────────────────────────────
-    # Key: (day_of_week, time_bucket, event_name, event_type)
-    # Value: list of {date, week_id}
-    groups = defaultdict(list)
-
-    # Batch LLM extraction — ένα call ανά 80 μηνύματα
+def _extract_activities_batched(user_msgs: list, *, stats: dict | None = None) -> list:
     activities = []
+    batch_durations = []
     for i in range(0, len(user_msgs), BATCH_SIZE):
         batch = user_msgs[i:i + BATCH_SIZE]
-        print(f"[Analytics]: LLM batch {i//BATCH_SIZE + 1} ({len(batch)} msgs)...")
-        activities.extend(_extract_activities_llm(batch))
+        batch_no = i // BATCH_SIZE + 1
+        print(f"[Analytics]: LLM batch {batch_no} ({len(batch)} msgs)...")
+        t0 = time.time()
+        extracted = _extract_activities_llm(batch)
+        duration = round(time.time() - t0, 2)
+        batch_durations.append({"batch": batch_no, "messages": len(batch), "duration": duration})
+        print(f"[Analytics]: batch {batch_no} done in {duration}s")
+        activities.extend(extracted)
+    if stats is not None:
+        stats["llm_batches"] = len(batch_durations)
+        stats["batch_durations"] = batch_durations
+    return activities
 
+
+def _group_activities(user_msgs: list, activities: list) -> dict:
+    groups = defaultdict(list)
     for msg, activity in zip(user_msgs, activities):
         if not activity:
             continue
@@ -181,8 +171,10 @@ def run_analytics() -> dict:
             "date": msg["date"],
             "week": week_id
         })
+    return groups
 
-    # ── 3. Merge παρόμοια groups (same day/time, similar event) ──
+
+def _merge_activity_groups(groups: dict) -> dict:
     merged = {}
     used = set()
     group_list = list(groups.items())
@@ -203,36 +195,38 @@ def run_analytics() -> dict:
 
         merged[k1] = combined
         used.add(k1)
+    return merged
 
-    # ── 4. Everyday detection ────────────────────────────────────
-    # Αν ίδιο event/time εμφανίζεται σε 5+ διαφορετικές ημέρες → Everyday
-    # Ομαδοποίηση ανά (time_bucket, event_name) αγνοώντας day
+
+def _promote_everyday_groups(merged: dict) -> dict:
     by_time_event = defaultdict(lambda: {"entries": [], "days": set()})
-    for (day, time, event, evtype), entries in merged.items():
-        key = (time, event, evtype)
+    for (day, time_bucket, event, evtype), entries in merged.items():
+        key = (time_bucket, event, evtype)
         by_time_event[key]["entries"].extend(entries)
         by_time_event[key]["days"].add(day)
 
-    # Αν εμφανίζεται σε 5+ διαφορετικές μέρες, αντικατέστησε με Everyday
     final_groups = {}
     promoted_to_everyday = set()
 
-    for (time, event, evtype), data in by_time_event.items():
+    for (time_bucket, event, evtype), data in by_time_event.items():
         if len(data["days"]) >= EVERYDAY_DAYS:
-            final_groups[("Everyday", time, event, evtype)] = data["entries"]
+            final_groups[("Everyday", time_bucket, event, evtype)] = data["entries"]
             promoted_to_everyday.update(
-                (day, time, event, evtype) for day in data["days"]
+                (day, time_bucket, event, evtype) for day in data["days"]
             )
 
-    # Πρόσθεσε τα μη-promoted
     for key, entries in merged.items():
         if key not in promoted_to_everyday:
             final_groups[key] = entries
+    return final_groups
 
-    # ── 5. Threshold check & upsert ──────────────────────────────
+
+def _promote_groups_to_routines(final_groups: dict, *, stats: dict, found_routines: list) -> None:
+    from memory.routine_db import upsert_routine
+
     for (day_of_week, time_bucket, event_name, event_type), entries in final_groups.items():
-        total   = len(entries)
-        weeks   = len(set(e["week"] for e in entries))
+        total = len(entries)
+        weeks = len(set(e["week"] for e in entries))
         stats["detected"] += 1
 
         required_weeks = 1 if day_of_week == "Everyday" else MIN_WEEKS
@@ -261,8 +255,216 @@ def run_analytics() -> dict:
         else:
             stats["skipped"] += 1
 
+
+def _load_incremental_messages(after_rowid: int, *, limit: int = MAX_INCREMENTAL_ROWS) -> tuple[list, int, int]:
+    from memory.conversation_history import load_messages_after_rowid
+
+    rows = load_messages_after_rowid(after_rowid=after_rowid, limit=limit)
+    max_seen = max((int(m.get("rowid") or 0) for m in rows), default=after_rowid)
+    user_msgs = [m for m in rows if _is_user_message(m)]
+    return user_msgs, max_seen, len(rows)
+
+
+def _record_incremental_activities(user_msgs: list, activities: list, *, state_db_path: str | None = None) -> dict:
+    from memory import analytics_state
+
+    stats = {
+        "recorded": 0,
+        "created_candidate": 0,
+        "merged_candidate": 0,
+        "added_occurrence": 0,
+        "duplicate_occurrence": 0,
+    }
+    kwargs = {"db_path": state_db_path} if state_db_path else {}
+
+    for msg, activity in zip(user_msgs, activities):
+        if not activity:
+            continue
+        event_name, event_type = activity
+        try:
+            d = datetime.strptime(msg["date"], "%Y-%m-%d")
+            day_of_week = d.strftime("%A")
+        except Exception:
+            continue
+        result = analytics_state.add_occurrence(
+            day_of_week=day_of_week,
+            time_bucket=_round_to_bucket(msg["time"]),
+            event_name=event_name,
+            event_type=event_type,
+            message=msg,
+            week_id=_get_week_id(msg["date"]),
+            **kwargs,
+        )
+        stats["recorded"] += 1
+        action = result.get("action")
+        if action in stats:
+            stats[action] += 1
+    return stats
+
+
+def _promote_incremental_candidates(*, dry_run: bool = False, state_db_path: str | None = None) -> tuple[dict, list]:
+    from memory import analytics_state
+    from memory.routine_db import upsert_routine
+
+    kwargs = {"db_path": state_db_path} if state_db_path else {}
+    stats = {"detected": 0, "created": 0, "merged": 0, "updated": 0, "skipped": 0, "errors": 0, "would_promote": 0}
+    promoted = []
+    ready = analytics_state.eligible_candidates(
+        min_occurrences=MIN_OCCURRENCES,
+        min_weeks=MIN_WEEKS,
+        everyday_days=EVERYDAY_DAYS,
+        **kwargs,
+    )
+    stats["detected"] = len(ready)
+
+    for candidate in ready:
+        if dry_run:
+            result = "dry_run"
+            stats["would_promote"] += 1
+        else:
+            try:
+                result = upsert_routine(
+                    day=candidate["day_of_week"],
+                    time=candidate["time_bucket"],
+                    event=candidate["event_name"],
+                    ev_type=candidate["event_type"],
+                    confidence_boost=0.2,
+                )
+                if result in stats:
+                    stats[result] += 1
+                analytics_state.mark_promoted(candidate["id"], result=result, **kwargs)
+            except Exception as e:
+                stats["errors"] += 1
+                print(f"[Analytics Incremental ERROR]: {e}")
+                continue
+        promoted.append({
+            "day": candidate["day_of_week"],
+            "time": candidate["time_bucket"],
+            "event": candidate["event_name"],
+            "count": candidate["occurrence_count"],
+            "weeks": candidate["week_count"],
+            "result": result,
+        })
+    return stats, promoted
+
+
+# ────────────────────────────────────────────────────────────────
+# CORE
+# ────────────────────────────────────────────────────────────────
+
+def run_analytics() -> dict:
+    """
+    Κύρια συνάρτηση του Analytics Engine.
+    Επιστρέφει stats dict: {detected, created, merged, updated, skipped, errors}
+    """
+    from memory import analytics_state
+
+    progress = analytics_state.get_progress(key=ANALYTICS_STATE_KEY)
+    if progress.get("bootstrap_completed"):
+        return run_analytics_incremental()
+
+    stats = {"detected": 0, "created": 0, "merged": 0,
+             "updated": 0, "skipped": 0, "errors": 0}
+    found_routines = []
+
+    # ── 1. Φόρτωση shared history (Web + Telegram) ───────────────
+    cutoff = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    user_msgs, history_source = _load_user_messages_for_analytics(cutoff)
+
+    if not user_msgs:
+        print("[Analytics]: Δεν υπάρχουν μηνύματα με date field (πρόσφατα).")
+        _write_log(stats, found_routines)
+        return stats
+
+    print(f"[Analytics]: Ανάλυση {len(user_msgs)} μηνυμάτων ({LOOKBACK_DAYS} ημερών, {history_source})...")
+
+    activities = _extract_activities_batched(user_msgs, stats=stats)
+    groups = _group_activities(user_msgs, activities)
+    merged = _merge_activity_groups(groups)
+    final_groups = _promote_everyday_groups(merged)
+    _promote_groups_to_routines(final_groups, stats=stats, found_routines=found_routines)
+
     print(f"[Analytics]: Ολοκληρώθηκε → {stats}")
     _write_log(stats, found_routines)
+    return stats
+
+
+def run_analytics_incremental(
+    *,
+    bootstrap: bool = False,
+    dry_run: bool = False,
+    state_db_path: str | None = None,
+    max_rows: int = MAX_INCREMENTAL_ROWS,
+) -> dict:
+    from memory import analytics_state
+    from memory.conversation_history import get_max_rowid
+
+    kwargs = {"db_path": state_db_path} if state_db_path else {}
+    progress = analytics_state.get_progress(
+        key=ANALYTICS_STATE_KEY,
+        initialize=not dry_run,
+        **kwargs,
+    )
+    stats = {
+        "mode": "bootstrap" if bootstrap else "incremental",
+        "dry_run": dry_run,
+        "loaded": 0,
+        "user_messages": 0,
+        "last_rowid_before": progress["last_rowid"],
+        "last_rowid_after": progress["last_rowid"],
+        "detected": 0,
+        "created": 0,
+        "merged": 0,
+        "updated": 0,
+        "skipped": 0,
+        "errors": 0,
+    }
+
+    if bootstrap:
+        cutoff = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+        user_msgs, history_source = _load_user_messages_for_analytics(cutoff)
+        stats["history_source"] = history_source
+        stats["loaded"] = len(user_msgs)
+        max_seen = get_max_rowid()
+    else:
+        user_msgs, max_seen, loaded_rows = _load_incremental_messages(progress["last_rowid"], limit=max_rows)
+        stats["loaded"] = loaded_rows
+
+    stats["user_messages"] = len(user_msgs)
+    stats["last_rowid_after"] = max_seen
+
+    if not user_msgs:
+        if not dry_run:
+            analytics_state.set_progress(
+                key=ANALYTICS_STATE_KEY,
+                last_rowid=max_seen,
+                bootstrap_completed=progress["bootstrap_completed"] or bootstrap,
+                **kwargs,
+            )
+            _write_log(stats, [])
+        return stats
+
+    activities = _extract_activities_batched(user_msgs, stats=stats)
+    if dry_run:
+        stats["detected"] = sum(1 for activity in activities if activity)
+        stats["skipped"] = len(activities) - stats["detected"]
+        return stats
+
+    record_stats = _record_incremental_activities(user_msgs, activities, state_db_path=state_db_path)
+    promotion_stats, promoted = _promote_incremental_candidates(dry_run=False, state_db_path=state_db_path)
+
+    stats.update({f"state_{k}": v for k, v in record_stats.items()})
+    for key in ("detected", "created", "merged", "updated", "skipped", "errors"):
+        stats[key] = promotion_stats.get(key, 0)
+
+    analytics_state.set_progress(
+        key=ANALYTICS_STATE_KEY,
+        last_rowid=max_seen,
+        bootstrap_completed=progress["bootstrap_completed"] or bootstrap,
+        **kwargs,
+    )
+    print(f"[Analytics Incremental]: Ολοκληρώθηκε → {stats}")
+    _write_log(stats, promoted)
     return stats
 
 

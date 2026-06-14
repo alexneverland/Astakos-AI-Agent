@@ -41,6 +41,7 @@ _cleaner_backups/
 
 # Logs and caches
 logs/
+bootstrap_*.log
 .cache/
 __pycache__/
 *.pyc

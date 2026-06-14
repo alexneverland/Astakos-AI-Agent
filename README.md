@@ -203,7 +203,7 @@ Background jobs run through `AstakosScheduler`:
 | `job_proactive_scan` | 12h | Watch-folder analysis and proactive scan. |
 | `job_morning_fit_briefing` | 1h | Fires at 08:00 for the Google Fit morning summary: yesterday's steps, last night's sleep, and heart rate. |
 | `job_goal_followup` | 1h | Fires at 10:00 for stale-goal semantic checks. |
-| `run_analytics` | Nightly 03:00 | LLM batch routine detection. |
+| `run_analytics` | Nightly 03:00 | Incremental LLM routine detection after bootstrap; falls back to 30-day scan until `analytics_state.db` is initialized. |
 | `run_reflection` | Nightly 03:00 | Self-evaluation after analytics: lessons extracted, auto-applied to routines and ChromaDB. |
 
 Event Bus events include:
@@ -222,10 +222,18 @@ Astakos passively learns habits from conversation and proactively reminds you.
 
 How it works:
 
-1. **Nightly Analytics** — every night at 03:00, the analytics engine reads the last 30 days of shared SQLite conversation history across Telegram and Web, sends user messages in batches to the LLM, and extracts recurring activities with type and timing.
-2. **Pattern Detection** — activities are grouped by day/time bucket (±15 min), merged if similar, and promoted to `Everyday` if they appear 5+ days a week.
-3. **Threshold** — a routine is saved only if it appears 3+ times across 2+ different weeks.
-4. **Proactive Message** — when a routine is due in about 30 minutes, the LLM writes a natural message using the routine context plus recent shared Telegram/Web history with timestamps.
+1. **Bootstrap Analytics** — the first pass can be run with `scripts/bootstrap_incremental_analytics.py`; it reads the shared SQLite history, extracts candidate routines, and writes `analytics_state.db`.
+2. **Incremental Nightly Analytics** — after bootstrap, every 03:00 run reads only new shared SQLite messages after the last processed `rowid`, instead of re-reading the full 30-day window.
+3. **Pattern Detection** — candidate activities are grouped by day/time bucket (±15 min), merged if similar, and promoted only after they meet the routine threshold.
+4. **Threshold** — a routine is saved only if it appears 3+ times across 2+ different weeks. Final writes always go through `upsert_routine`, preserving fingerprint/fuzzy/embedding dedupe.
+5. **Proactive Message** — when a routine is due in about 30 minutes, the LLM writes a natural message using the routine context plus recent shared Telegram/Web history with timestamps.
+
+Bootstrap command:
+
+```powershell
+.\venv\Scripts\python.exe scripts\bootstrap_incremental_analytics.py
+.\venv\Scripts\python.exe scripts\bootstrap_incremental_analytics.py --apply
+```
 
 Routine lifecycle:
 
@@ -467,6 +475,7 @@ Shutdown behavior:
 - [x] Hardened skill creation — generated skills must use `write_custom_tool`, keep `@tool`, pass validation before registration, and use shared `core.brain` LLM clients when model calls are needed.
 - [x] relay_local_payload hardened — demoted from CRITICAL to WARNING (writes draft only, does not send); clean tool return value so Gemini cannot leak internal meta-instructions into the chat.
 - [x] Cross-Channel Context Awareness — Chat_Agent checks shared SQLite history before saying "I don't remember", covering messages from both Telegram and Web UI sessions.
+- [x] Incremental Routine Analytics — `analytics_state.db` stores last processed conversation `rowid`, candidate routine occurrences, and promoted status so nightly analytics can process only new messages after bootstrap.
 - [x] Hybrid Memory Search — `search_memory` returns both relevant SQLite conversation history and ChromaDB semantic facts, so tool-based recall uses the same memory model as prompt context.
 - [x] Personal/Family Event Capture — clear personal and family day-events are saved as dated ChromaDB facts while the full conversation remains in SQLite.
 - [x] Memory Context Debugging — `/debug` shows recent, SQLite, and Chroma context counts/previews for the last prompt build.
