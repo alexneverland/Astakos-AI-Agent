@@ -71,16 +71,17 @@ def translate(text: str, *, src: str = "auto", tgt: str = "ka") -> dict[str, str
 
 def tts_audio(text: str, lang: str = "ka") -> bytes:
     """
-    Παράγει MP3 bytes για το κείμενο χρησιμοποιώντας gTTS.
-    lang="ka" για Γεωργιανά, "el" για Ελληνικά.
+    Παράγει MP3 bytes χρησιμοποιώντας Google Translate TTS (unofficial endpoint).
+    Υποστηρίζει Γεωργιανά (ka) — το gTTS ΔΕΝ υποστηρίζει ka.
     """
-    from gtts import gTTS  # lazy import
-
-    tts = gTTS(text=text, lang=lang, slow=False)
-    fp = io.BytesIO()
-    tts.write_to_fp(fp)
-    fp.seek(0)
-    return fp.read()
+    resp = requests.get(
+        "https://translate.google.com/translate_tts",
+        params={"ie": "UTF-8", "q": text, "tl": lang, "client": "tw-ob", "ttsspeed": "0.8"},
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.content
 
 
 # ── Γρήγορες φράσεις (pre-translated) ───────────────────────────────────────
