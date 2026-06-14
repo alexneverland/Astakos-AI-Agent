@@ -540,12 +540,34 @@ def mail_agent_node(state):
     system_base = load_agent_prompt("Mail_Agent", "Είσαι ο Mail_Agent. Διαχειρίζεσαι το Gmail.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
-    
+
+    mail_tool_results = []
+    for msg in history[-12:]:
+        if getattr(msg, "type", "") == "tool":
+            content = clean_message(getattr(msg, "content", "")).strip()
+            if content.startswith("ID: ") or content.startswith("📩 Περιεχόμενο:"):
+                mail_tool_results.append(content)
+
+    if mail_tool_results:
+        no_tools_prompt = (
+            f"{system_prompt}\n\n"
+            "Έχεις ήδη αποτελέσματα από mail_manager στο context. "
+            "ΑΠΑΓΟΡΕΥΕΤΑΙ να καλέσεις άλλο εργαλείο. "
+            "Απάντησε τώρα στον Λάζαρο με σύντομη περίληψη των σχετικών email "
+            "και σημείωσε τυχόν πρακτικό επόμενο βήμα."
+        )
+        response = safe_llm_invoke(llm, [SystemMessage(content=no_tools_prompt)] + sanitize_history_for_gemini(history))
+        return {"current_agent": "Mail_Agent", "messages": [response]}
+
+    mail_llm = llm.bind_tools([
+        mail_manager, search_memory
+    ])
+    response = safe_llm_invoke(mail_llm, [SystemMessage(content=system_prompt)] + sanitize_history_for_gemini(history))
+    response = _ensure_text_response(response, mail_llm, system_prompt, sanitize_history_for_gemini(history))
+
     return {
         "current_agent": "Mail_Agent",
-        "messages": [llm.bind_tools([
-            mail_manager, search_memory
-        ]).invoke([SystemMessage(content=system_prompt)] + sanitize_history_for_gemini(history))]
+        "messages": [response]
     }
 
 
