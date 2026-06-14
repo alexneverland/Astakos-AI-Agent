@@ -69,19 +69,34 @@ def translate(text: str, *, src: str = "auto", tgt: str = "ka") -> dict[str, str
     return {"translated": translated, "phonetic": phonetic, "src": src, "tgt": tgt}
 
 
+_EDGE_VOICES: dict[str, str] = {
+    "ka": "ka-GE-EkaNeural",   # Georgian female neural voice
+    "el": "el-GR-NestorasNeural",
+}
+
+
+async def _tts_edge(text: str, voice: str) -> bytes:
+    """Async helper: παράγει audio μέσω edge-tts."""
+    import edge_tts
+
+    buf = io.BytesIO()
+    communicate = edge_tts.Communicate(text, voice)
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            buf.write(chunk["data"])
+    buf.seek(0)
+    return buf.read()
+
+
 def tts_audio(text: str, lang: str = "ka") -> bytes:
     """
-    Παράγει MP3 bytes χρησιμοποιώντας Google Translate TTS (unofficial endpoint).
-    Υποστηρίζει Γεωργιανά (ka) — το gTTS ΔΕΝ υποστηρίζει ka.
+    Παράγει MP3 bytes μέσω edge-tts.
+    Γεωργιανά: ka-GE-EkaNeural (Microsoft neural voice — υποστηρίζει ka).
     """
-    resp = requests.get(
-        "https://translate.google.com/translate_tts",
-        params={"ie": "UTF-8", "q": text, "tl": lang, "client": "tw-ob", "ttsspeed": "0.8"},
-        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.content
+    import asyncio
+
+    voice = _EDGE_VOICES.get(lang, "ka-GE-EkaNeural")
+    return asyncio.run(_tts_edge(text, voice))
 
 
 # ── Γρήγορες φράσεις (pre-translated) ───────────────────────────────────────

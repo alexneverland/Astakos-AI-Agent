@@ -1304,16 +1304,21 @@ def run_polling():
 
                     try:
                         result = translate(rest)
-                        flag = "🇬🇪" if result["tgt"] == "ka" else "🇬🇷"
-                        direction = "el→ka" if result["tgt"] == "ka" else "ka→el"
+                    except Exception as e:
+                        send_telegram_msg(f"❌ Σφάλμα μετάφρασης: {e}")
+                        continue
 
-                        # Κείμενο
-                        reply = f"{flag} `{result['translated']}`"
-                        if result["phonetic"]:
-                            reply += f"\n📢 _{result['phonetic']}_"
-                        send_telegram_msg(reply)
+                    flag = "🇬🇪" if result["tgt"] == "ka" else "🇬🇷"
+                    direction = "el→ka" if result["tgt"] == "ka" else "ka→el"
 
-                        # Audio φωνής (gTTS)
+                    # Κείμενο — πάντα στέλνεται
+                    reply = f"{flag} `{result['translated']}`"
+                    if result["phonetic"]:
+                        reply += f"\n📢 _{result['phonetic']}_"
+                    send_telegram_msg(reply)
+
+                    # Audio (edge-tts ka-GE-EkaNeural) — αθόρυβη αποτυχία
+                    try:
                         audio_bytes = tts_audio(result["translated"], lang=result["tgt"])
                         tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVoice"
                         requests.post(
@@ -1322,10 +1327,9 @@ def run_polling():
                             files={"voice": ("georgian.ogg", audio_bytes, "audio/mpeg")},
                             timeout=20,
                         )
-                        print(f"\033[92m[Georgian]: {direction} '{rest}' → '{result['translated']}'\033[0m")
-
-                    except Exception as e:
-                        send_telegram_msg(f"❌ Σφάλμα μετάφρασης: {e}")
+                        print(f"\033[92m[Georgian]: {direction} '{rest}' → '{result['translated']}' + audio\033[0m")
+                    except Exception as e_audio:
+                        print(f"\033[93m[Georgian]: audio skip — {e_audio}\033[0m")
                     continue
 
                 if user_text.lower() == "/nutrition":
