@@ -37,7 +37,7 @@ def test_send_georgian_translation_sends_text_and_audio(monkeypatch):
     monkeypatch.setattr(
         georgian,
         "translate",
-        lambda text: {"translated": "გამარჯობა", "phonetic": "gamarjoba", "src": "el", "tgt": "ka"},
+        lambda text, src="auto": {"translated": "გამარჯობა", "phonetic": "gamarjoba", "src": "el", "tgt": "ka"},
     )
     monkeypatch.setattr(georgian, "tts_audio", lambda text, lang="ka": b"audio-bytes")
     monkeypatch.setattr(bot, "send_telegram_msg", lambda msg: sent.append(msg) or 123)
