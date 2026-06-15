@@ -34,6 +34,7 @@ from config import (
 )
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 from memory.vector_store import vector_store, vector_lock, memory
+_lexical_cache: dict = {}  # {cache_key: (timestamp, data)} — TTL 60s
 from services.embeddings import embeddings
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_prices,
@@ -196,15 +197,23 @@ def _stem_token(token: str) -> str:
 
 
 def _lexical_memory_matches(query: str, category: str = "", limit: int = 4) -> list:
-    """Keyword fallback over Chroma docs; complements embeddings for exact user terms."""
+    """Keyword fallback over Chroma docs; complements embeddings for exact user terms.
+    L1 cache (60s TTL) αποφεύγει full collection.get() σε κάθε κλήση."""
+    import time as _time
     tokens = _memory_query_tokens(query)
     if len(tokens) < 2:
         return []
     try:
-        kwargs = {"include": ["documents", "metadatas"]}
-        if category:
-            kwargs["where"] = {"category": category}
-        data = vector_store._collection.get(**kwargs)
+        cache_key = category or "__all__"
+        cached = _lexical_cache.get(cache_key)
+        if cached and (_time.monotonic() - cached[0]) < 60:
+            data = cached[1]
+        else:
+            kwargs = {"include": ["documents", "metadatas"]}
+            if category:
+                kwargs["where"] = {"category": category}
+            data = vector_store._collection.get(**kwargs)
+            _lexical_cache[cache_key] = (_time.monotonic(), data)
     except Exception:
         return []
 
@@ -267,11 +276,12 @@ def search_memory(query: str, category: str = "") -> str:
                     continue
                 seen_docs.add(key)
                 merged_results.append(doc)
-            for search_query in search_queries[:3]:
+            # [PERF]: 1 similarity_search αντί 3 — primary_query αρκεί (expanded queries δεν βελτιώνουν σημαντικά)
+            for search_query in search_queries[:1]:
                 if effective_category:
-                    batch = vector_store.similarity_search(search_query, k=5, filter={"category": effective_category})
+                    batch = vector_store.similarity_search(search_query, k=6, filter={"category": effective_category})
                 else:
-                    batch = vector_store.similarity_search(search_query, k=5)
+                    batch = vector_store.similarity_search(search_query, k=6)
                 for doc in batch:
                     key = getattr(doc, "page_content", str(doc))
                     if key in seen_docs:
@@ -283,21 +293,24 @@ def search_memory(query: str, category: str = "") -> str:
         if not results and not sql_lines:
             return "System: Δεν βρέθηκε σχετικό ιστορικό SQLite ή μνήμη Chroma. Απάντα με τις γενικές σου γνώσεις."
 
-        # bump retrieval_count για τα Chroma αποτελέσματα
+        # bump retrieval_count async — δεν μπλοκάρει την απάντηση
         if results:
-            try:
-                from memory.vector_store import bump_retrieval_count
-                with vector_lock:
-                    kwargs = {"n_results": min(6, len(results))}
-                    if effective_category:
-                        kwargs["where"] = {"category": effective_category}
-                    raw = vector_store._collection.query(
-                        query_embeddings=[embeddings.embed_query(primary_query)], **kwargs
-                    )
-                if raw.get("ids") and raw["ids"][0]:
-                    bump_retrieval_count(raw["ids"][0])
-            except Exception:
-                pass
+            import threading as _thr
+            def _bump_async():
+                try:
+                    from memory.vector_store import bump_retrieval_count
+                    with vector_lock:
+                        kwargs = {"n_results": min(6, len(results))}
+                        if effective_category:
+                            kwargs["where"] = {"category": effective_category}
+                        raw = vector_store._collection.query(
+                            query_embeddings=[embeddings.embed_query(primary_query)], **kwargs
+                        )
+                    if raw.get("ids") and raw["ids"][0]:
+                        bump_retrieval_count(raw["ids"][0])
+                except Exception:
+                    pass
+            _thr.Thread(target=_bump_async, daemon=True).start()
 
         by_cat: dict = {}
         for res in results:
@@ -432,6 +445,7 @@ def save_to_memory(fact: str, entities: str = "", category: str = "general", rea
                     "retrieval_count": 0,
                 }]
             )
+            _lexical_cache.clear()  # invalidate lexical cache on write
             print(f"\033[95m🧠 [Semantic Graph bg]: Καρφώθηκε -> {entities}\033[0m")
         except Exception as e:
             print(f"⚠️ [save_to_memory bg]: {e}")
