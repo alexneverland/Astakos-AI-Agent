@@ -14,6 +14,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
@@ -56,8 +57,18 @@ def _connect(db_path: str = CONVERSATION_DB_FILE) -> sqlite3.Connection:
     return conn
 
 
+@contextmanager
+def _conn(db_path: str = CONVERSATION_DB_FILE):
+    c = _connect(db_path)
+    try:
+        with c:
+            yield c
+    finally:
+        c.close()
+
+
 def init_db(db_path: str = CONVERSATION_DB_FILE) -> None:
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS conversation_messages (
@@ -202,7 +213,7 @@ def append_message(
         return message
 
     init_db(db_path)
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         conn.execute(
             """
             INSERT OR IGNORE INTO conversation_messages (
@@ -271,7 +282,7 @@ def import_legacy_message(
     }
 
     init_db(db_path)
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         cursor = conn.execute(
             """
             INSERT OR IGNORE INTO conversation_messages (
@@ -350,7 +361,7 @@ def append_exchange(
     }
 
     init_db(db_path)
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         conn.execute(
             """
             INSERT INTO session_exchanges (
@@ -380,7 +391,7 @@ def load_unsummarized_exchanges(
     db_path: str = CONVERSATION_DB_FILE,
 ) -> list[dict[str, Any]]:
     init_db(db_path)
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         rows = conn.execute(
             """
             SELECT *
@@ -406,7 +417,7 @@ def mark_exchanges_summarized(
     summarized_at = (timestamp or datetime.now()).isoformat(timespec="seconds")
     init_db(db_path)
     placeholders = ",".join("?" for _ in exchange_ids)
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         conn.execute(
             f"""
             UPDATE session_exchanges
@@ -444,7 +455,7 @@ def load_messages(
     """
     params.append(limit)
 
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         rows = conn.execute(query, params).fetchall()
 
     messages = [_row_to_message(row) for row in rows]
@@ -473,7 +484,7 @@ def load_messages_since(
 
     where_clause = " AND ".join(clauses)
 
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         if limit is not None:
             # Παίρνουμε τα ΠΙΟ ΠΡΟΣΦΑΤΑ `limit` μηνύματα μέσα στο παράθυρο
             # (ORDER BY ... DESC + LIMIT) και μετά τα ξαναταξινομούμε
@@ -536,7 +547,7 @@ def load_messages_after_rowid(
         clauses.append("channel = ?")
         params.append(channel)
     params.append(limit)
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         rows = conn.execute(
             f"""
             SELECT rowid, * FROM conversation_messages
@@ -559,7 +570,7 @@ def get_max_rowid(
 ) -> int:
     """Επιστρέφει το μέγιστο rowid στο conversation_messages table (0 αν είναι κενό)."""
     init_db(db_path)
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         row = conn.execute("SELECT MAX(rowid) FROM conversation_messages").fetchone()
     val = row[0] if row else None
     return int(val) if val is not None else 0
@@ -577,7 +588,7 @@ def load_last_user_activity(
         channel_clause = "AND channel = ?"
         params.append(channel)
 
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         row = conn.execute(
             f"""
             SELECT *
@@ -614,7 +625,7 @@ def load_conversation_stats(
     db_path: str = CONVERSATION_DB_FILE,
 ) -> dict[str, Any]:
     init_db(db_path)
-    with _connect(db_path) as conn:
+    with _conn(db_path) as conn:
         messages_total = conn.execute(
             "SELECT COUNT(*) FROM conversation_messages"
         ).fetchone()[0]

@@ -15,7 +15,8 @@ from services.gemini import safe_gemini_call
 import re
 from core.utils import clean_message
 from core.event_bus import bus
-from config import PHOTOS_INDEX_FILE, PHOTOS_DIR, SESSIONS_FILE
+import sqlite3
+from config import PHOTOS_INDEX_FILE, PHOTOS_DIR, STATE_DB
 from memory.conversation_history import (
     append_exchange,
     load_unsummarized_exchanges,
@@ -82,31 +83,43 @@ def _maybe_trigger_auto_session_summary(channel: str) -> None:
 
 def load_last_session_hint(channel: str = "web") -> str:
     """Φορτώνει το hint της τελευταίας session."""
+    conn = None
     try:
-        import os
-        if not os.path.exists(SESSIONS_FILE):
+        conn = sqlite3.connect(STATE_DB)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT date, pending, next_session_hint 
+            FROM sessions 
+            ORDER BY id DESC LIMIT 1
+        ''')
+        row = cursor.fetchone()
+        
+        if not row:
             return ""
-        with open(SESSIONS_FILE, "r", encoding="utf-8") as f:
-            sessions = json.load(f)
-        if not sessions:
-            return ""
-        filtered = sessions
-        if not filtered:
-            return ""
-        last = filtered[-1]
-        hint = last.get("next_session_hint", "")
-        pending = last.get("pending", [])
-        date = last.get("date", "")
+            
+        date_str, pending_json, hint = row
+        pending = []
+        try:
+            if pending_json:
+                pending = json.loads(pending_json)
+        except:
+            pass
+            
         if not hint and not pending:
             return ""
-        parts = [f"[Τελευταία session: {date}]"]
+            
+        out = ""
         if hint:
-            parts.append(f"Να θυμάσαι: {hint}")
+            out += f"Hint από προηγούμενη session ({date_str}): {hint}\n"
         if pending:
-            parts.append(f"Εκκρεμή: {', '.join(pending[:3])}")
-        return " | ".join(parts)
-    except:
+            out += f"Εκκρεμότητες/Σκέψεις:\n" + "\n".join(f"- {p}" for p in pending)
+        return out.strip()
+    except Exception as e:
+        print(f"Error loading last session hint: {e}")
         return ""
+    finally:
+        if conn:
+            conn.close()
 
 
 is_summarizing = False  # Πρέπει να οριστεί έξω από τη συνάρτηση

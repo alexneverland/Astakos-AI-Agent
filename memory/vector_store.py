@@ -10,8 +10,9 @@ import json
 import threading
 import uuid
 from datetime import datetime
+import sqlite3
 from langchain_chroma import Chroma
-from config import CHROMA_DB_DIR, PHOTOS_INDEX_FILE, SIM_THRESHOLD_DISTANCE, MEMORY_AUDIT_DIR
+from config import CHROMA_DB_DIR, PHOTOS_INDEX_FILE, SIM_THRESHOLD_DISTANCE, MEMORY_AUDIT_DIR, STATE_DB
 from services.embeddings import embeddings
 
 _audit_lock = threading.Lock()
@@ -590,7 +591,6 @@ class AstakosMemoryManager:
         return True
 
     def _save_session(self, summary: dict, session_text: str):
-        from config import SESSIONS_FILE
         vector_store.add_texts([session_text], metadatas=[{
             "category": "session", "date": summary.get("date"),
             "mood": summary.get("mood", "unknown"), "agent": "SessionSummary",
@@ -600,17 +600,39 @@ class AstakosMemoryManager:
             "last_accessed": datetime.now().timestamp(),
         }])
 
-        sessions = []
-        if os.path.exists(SESSIONS_FILE):
-            with open(SESSIONS_FILE, "r", encoding="utf-8") as f:
-                try:
-                    sessions = json.load(f)
-                except:
-                    pass
-        sessions.append(summary)
-        sessions = sessions[-30:]
-        with open(SESSIONS_FILE, "w", encoding="utf-8") as f:
-            json.dump(sessions, f, ensure_ascii=False, indent=2)
+        conn = None
+        try:
+            conn = sqlite3.connect(STATE_DB)
+            cursor = conn.cursor()
+            
+            completed = json.dumps(summary.get("completed", []), ensure_ascii=False)
+            pending = json.dumps(summary.get("pending", []), ensure_ascii=False)
+            
+            cursor.execute('''
+                INSERT INTO sessions (date, channel, summary, completed, pending, next_session_hint, mood)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                summary.get("date", ""),
+                summary.get("channel", ""),
+                summary.get("summary", ""),
+                completed,
+                pending,
+                summary.get("next_session_hint", ""),
+                summary.get("mood", "")
+            ))
+            
+            cursor.execute("SELECT id FROM sessions ORDER BY id DESC LIMIT -1 OFFSET 30")
+            old_ids = cursor.fetchall()
+            for (old_id,) in old_ids:
+                cursor.execute("DELETE FROM sessions WHERE id=?", (old_id,))
+                
+            conn.commit()
+        except Exception as e:
+            print(f"Error saving session to DB: {e}")
+        finally:
+            if conn:
+                conn.close()
+            
         return True
 
 

@@ -62,6 +62,8 @@ MESSENGER_DRAFT_FILE = os.path.join(BASE_DIR, "messenger_draft.json")
 MESSENGER_DRAFT_TTL_SECONDS = int(os.getenv("MESSENGER_DRAFT_TTL_SECONDS", "1800"))
 LINKEDIN_DRAFT_FILE  = os.path.join(BASE_DIR, "linkedin_draft.json")
 
+STATE_DB             = os.path.join(BASE_DIR, "astakos_state.db")
+
 GPS_STORAGE_FILE     = os.path.join(BASE_DIR, "last_location.json")
 
 # ==========================================

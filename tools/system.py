@@ -28,8 +28,9 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import docx
 import pandas as pd
+import sqlite3
 from config import (
-    REMINDERS_FILE, LISTS_FILE, WORKSPACE_DIR, PHOTOS_INDEX_FILE, PHOTOS_DIR,
+    STATE_DB, WORKSPACE_DIR, PHOTOS_INDEX_FILE, PHOTOS_DIR,
     EMAIL_ADDRESS, EMAIL_PASSWORD, GITHUB_TOKEN, VACUUM_IP, VACUUM_TOKEN, GPS_STORAGE_FILE
 )
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
@@ -607,40 +608,41 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
               ο Λάζαρος λέει 'όταν φτάσω σπίτι', 'μόλις πάω σπίτι' κλπ.
               Όταν δίνεται location, ΜΗΝ δίνεις minutes_from_now ή exact_time.
     """
+    conn = None
     try:
-        rems = []
-        if os.path.exists(REMINDERS_FILE):
-            with open(REMINDERS_FILE, "r", encoding="utf-8") as f:
-                try:
-                    rems = json.load(f)
-                except (json.JSONDecodeError, ValueError):
-                    pass
+        conn = sqlite3.connect(STATE_DB)
+        cursor = conn.cursor()
 
         # ── READ: Επιστρέφει ΜΟΝΟ pending ──────────────────────
         if action == "read":
-            pending = [r for r in rems if r.get("status") == "pending"]
+            cursor.execute("SELECT task, time FROM reminders WHERE status='pending'")
+            pending = cursor.fetchall()
             if not pending:
                 return "✅ Δεν υπάρχουν εκκρεμείς υπενθυμίσεις."
             lines = []
-            for r in pending:
-                if r.get("type") == "location":
-                    lines.append(f"• [📍 {r.get('location','home')}] {r['task']}")
+            for t, tm in pending:
+                if tm and tm.startswith("loc:"):
+                    loc = tm.split(":", 1)[1]
+                    lines.append(f"• [📍 {loc}] {t}")
                 else:
-                    lines.append(f"• [{r['time']}] {r['task']}")
+                    lines.append(f"• [{tm}] {t}")
             return "📋 Εκκρεμείς υπενθυμίσεις:\n" + "\n".join(lines)
 
         # ── DONE: Κλείνει υπενθύμιση με keyword ────────────────
         elif action == "done":
-            found = False
-            for r in rems:
-                if task.lower() in r.get("task", "").lower() and r.get("status") == "pending":
-                    r["status"] = "done"
-                    found = True
+            cursor.execute("SELECT id, task FROM reminders WHERE status='pending'")
+            pending = cursor.fetchall()
+            found_id = None
+            for rid, rtask in pending:
+                if task.lower() in rtask.lower():
+                    found_id = rid
                     break
-            if not found:
+            
+            if not found_id:
                 return f"⚠️ Δεν βρήκα pending υπενθύμιση με '{task}'."
-            with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
-                json.dump(rems, f, ensure_ascii=False, indent=4)
+                
+            cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (found_id,))
+            conn.commit()
             return f"✅ Η υπενθύμιση '{task}' ολοκληρώθηκε."
 
         # ── ADD: Νέα υπενθύμιση ─────────────────────────────────
@@ -661,20 +663,22 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
                     except ValueError:
                         return "Σφάλμα: Η ακριβής ώρα (exact_time) πρέπει να είναι ΜΟΝΟ ώρα (HH:MM) ή πλήρης ημερομηνία (YYYY-MM-DD HH:MM)."
             elif location:
-                rems.append({"task": task, "type": "location", "location": location, "status": "pending"})
-                with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(rems, f, ensure_ascii=False, indent=4)
-                return f"✅ Υπενθύμιση τοποθεσίας αποθηκεύτηκε! Θα χτυπήσει όταν φτάσεις {location}."
+                target_time = f"loc:{location}"
             else:
                 return "Σφάλμα: Πρέπει να δώσεις λεπτά, ακριβή ώρα, ή τοποθεσία (π.χ. location='home')."
 
-            rems.append({"task": task, "time": target_time, "status": "pending"})
-            with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
-                json.dump(rems, f, ensure_ascii=False, indent=4)
+            cursor.execute("INSERT INTO reminders (task, time, status) VALUES (?, ?, 'pending')", (task, target_time))
+            conn.commit()
+            
+            if location:
+                return f"✅ Υπενθύμιση τοποθεσίας αποθηκεύτηκε! Θα χτυπήσει όταν φτάσεις {location}."
             return f"✅ Υπενθύμιση ρυθμίστηκε για τις {target_time}!"
 
     except Exception as e:
         return f"Σφάλμα υπενθύμισης: {e}"
+    finally:
+        if conn:
+            conn.close()
 from langchain_core.tools import tool
 from memory.routine_db import upsert_routine
 
@@ -776,55 +780,51 @@ def set_reminder(task: str, time_str: str) -> str:
 def manage_list(action: str, list_name: str, item: str = "") -> str:
     """Διαχειρίζεται λίστες. Actions: 'add', 'remove', 'read', 'clear', 'delete'.
     Για πολλά αντικείμενα ταυτόχρονα, χώρισέ τα με κόμμα (item='γάλα, τυρί')."""
+    conn = None
     try:
-        lists_db = {}
-        if os.path.exists(LISTS_FILE):
-            with open(LISTS_FILE, "r", encoding="utf-8") as f:
-                try:
-                    loaded = json.load(f)
-                    if isinstance(loaded, dict):
-                        lists_db = loaded
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-        if list_name not in lists_db:
+        conn = sqlite3.connect(STATE_DB)
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT DISTINCT list_name FROM lists")
+        existing_lists = [row[0] for row in cursor.fetchall()]
+        
+        if list_name not in existing_lists:
             list_name_lower = list_name.lower()
-            for existing_key in lists_db.keys():
+            for existing_key in existing_lists:
                 if list_name_lower in existing_key.lower() or existing_key.lower().startswith(list_name_lower):
                     list_name = existing_key
                     break
 
         if action == "read":
-            current = lists_db.get(list_name, [])
-            if not current:
+            cursor.execute("SELECT item FROM lists WHERE list_name=?", (list_name,))
+            items = [row[0] for row in cursor.fetchall()]
+            if not items:
                 return f"Η λίστα '{list_name}' είναι άδεια."
-            return f"Περιεχόμενα '{list_name}':\n" + "\n".join([f"- {i}" for i in current])
+            return f"Περιεχόμενα '{list_name}':\n" + "\n".join([f"- {i}" for i in items])
 
         to_process = [i.strip() for i in item.split(",")] if item else []
 
         if action == "add":
-            if list_name not in lists_db:
-                lists_db[list_name] = []
             for obj in to_process:
-                if obj and obj not in lists_db[list_name]:
-                    lists_db[list_name].append(obj)
+                if obj:
+                    cursor.execute("SELECT id FROM lists WHERE list_name=? AND item=?", (list_name, obj))
+                    if not cursor.fetchone():
+                        cursor.execute("INSERT INTO lists (list_name, item) VALUES (?, ?)", (list_name, obj))
         elif action == "remove":
             for obj in to_process:
-                if obj in lists_db.get(list_name, []):
-                    lists_db[list_name].remove(obj)
-        elif action == "clear":
-            lists_db[list_name] = []
-        elif action == "delete":
-            if list_name in lists_db:
-                del lists_db[list_name]
+                cursor.execute("DELETE FROM lists WHERE list_name=? AND item=?", (list_name, obj))
+        elif action == "clear" or action == "delete":
+            cursor.execute("DELETE FROM lists WHERE list_name=?", (list_name,))
 
-        with open(LISTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(lists_db, f, ensure_ascii=False, indent=4)
+        conn.commit()
 
         added_str = ", ".join(to_process) if to_process else "κανένα"
         return f"System: Η ενέργεια '{action}' ολοκληρώθηκε (Αντικείμενα: {added_str})."
     except Exception as e:
         return f"Error: Σφάλμα λίστας: {str(e)}"
+    finally:
+        if conn:
+            conn.close()
 
 
 # ────────────────────────────────────────────────────────────────

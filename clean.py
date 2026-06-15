@@ -173,19 +173,33 @@ def strip_markdown_json(text: str) -> str:
 # ────────────────────────────────────────────────────────────────
 
 def consolidate_capabilities(dry_run: bool = False, backup: bool = True) -> bool:
-    header("Σύμπτυξη astakos_capabilities.json (can_do / cannot_do)")
-    data = safe_load_json(CAPABILITIES_FILE)
-    if not data or not isinstance(data, dict):
-        log("⚠️  Άκυρο schema — περίμενα {can_do:[], cannot_do:[]}", "warn")
+    import sqlite3
+    try:
+        from config import STATE_DB
+    except ImportError:
+        STATE_DB = os.path.join(PROJECT_ROOT, "astakos_state.db")
+        
+    header("Σύμπτυξη capabilities (can_do / cannot_do) σε STATE_DB")
+    
+    if not os.path.exists(STATE_DB):
+        log("⚠️ Δεν βρέθηκε το STATE_DB.", "warn")
         return False
-
-    can_do    = data.get("can_do", [])
-    cannot_do = data.get("cannot_do", [])
+        
+    conn = sqlite3.connect(STATE_DB, timeout=30)
+    c = conn.cursor()
+    c.execute("CREATE TABLE IF NOT EXISTS capabilities (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, description TEXT NOT NULL UNIQUE)")
+    c.execute("SELECT type, description FROM capabilities")
+    rows = c.fetchall()
+    
+    can_do = [r[1] for r in rows if r[0] == "can"]
+    cannot_do = [r[1] for r in rows if r[0] == "cannot"]
+    
     log(f"📊 Πριν: {len(can_do)} can_do  |  {len(cannot_do)} cannot_do", "info")
 
     llm = _load_llm()
     if llm is None:
         log("❌ Δεν φόρτωσε το LLM — παρακάμπτεται η σύμπτυξη.", "err")
+        conn.close()
         return False
 
     prompt = f"""Είσαι ο μηχανικός συντήρησης για τη μνήμη ενός AI agent.
@@ -213,38 +227,42 @@ def consolidate_capabilities(dry_run: bool = False, backup: bool = True) -> bool
     log("🤖 Κλήση LLM για consolidation...", "info")
     try:
         response = llm.invoke(prompt)
-        # Multimodal-safe extraction
         from core.utils import clean_message
         raw = clean_message(response.content)
         raw = strip_markdown_json(raw)
         new_data = json.loads(raw)
     except Exception as e:
         log(f"❌ Σφάλμα κατά τη σύμπτυξη: {e}", "err")
+        conn.close()
         return False
 
-    # Validation
     if not isinstance(new_data, dict) or "can_do" not in new_data or "cannot_do" not in new_data:
         log("❌ Το LLM γύρισε άκυρο schema. Δεν γράφω.", "err")
-        return False
-    if not isinstance(new_data["can_do"], list) or not isinstance(new_data["cannot_do"], list):
-        log("❌ can_do/cannot_do δεν είναι λίστες. Δεν γράφω.", "err")
+        conn.close()
         return False
 
     new_can    = len(new_data["can_do"])
     new_cannot = len(new_data["cannot_do"])
-    saved_can    = len(can_do) - new_can
-    saved_cannot = len(cannot_do) - new_cannot
-
-    log(f"📊 Μετά: {new_can} can_do (-{saved_can})  |  {new_cannot} cannot_do (-{saved_cannot})", "ok")
+    
+    log(f"📊 Μετά: {new_can} can_do | {new_cannot} cannot_do", "ok")
 
     if dry_run:
         log("🧪 DRY-RUN — δες παρακάτω τι θα γραφόταν:", "warn")
         print(json.dumps(new_data, ensure_ascii=False, indent=2))
+        conn.close()
         return True
 
-    backup_file(CAPABILITIES_FILE, enabled=backup)
-    return safe_save_json(CAPABILITIES_FILE, new_data, dry_run=False)
-
+    backup_file(STATE_DB, enabled=backup)
+    c.execute("DELETE FROM capabilities")
+    for item in new_data["can_do"]:
+        c.execute("INSERT OR IGNORE INTO capabilities (type, description) VALUES ('can', ?)", (str(item),))
+    for item in new_data["cannot_do"]:
+        c.execute("INSERT OR IGNORE INTO capabilities (type, description) VALUES ('cannot', ?)", (str(item),))
+    
+    conn.commit()
+    conn.close()
+    log("✅ Αποθηκεύτηκαν στο STATE_DB (capabilities)", "ok")
+    return True
 
 def maintain_conversation_db(dry_run: bool = False, backup: bool = True) -> bool:
     header("Shared conversation SQLite maintenance")
@@ -299,134 +317,49 @@ def maintain_conversation_db(dry_run: bool = False, backup: bool = True) -> bool
 # ────────────────────────────────────────────────────────────────
 
 def trim_sessions(keep: int = DEFAULT_SESSIONS_KEEP, dry_run: bool = False, backup: bool = True) -> bool:
-    header(f"Trim astakos_sessions.json (κρατά τις {keep} πιο πρόσφατες)")
-    data = safe_load_json(SESSIONS_FILE)
-    if data is None:
+    import sqlite3
+    try:
+        from config import STATE_DB
+    except ImportError:
+        STATE_DB = os.path.join(PROJECT_ROOT, "astakos_state.db")
+        
+    header(f"Trim sessions σε STATE_DB (κρατά τις {keep} πιο πρόσφατες)")
+    
+    if not os.path.exists(STATE_DB):
+        log("⚠️ Δεν βρέθηκε το STATE_DB.", "warn")
         return False
-    if not isinstance(data, list):
-        log("⚠️  Άκυρο schema — περίμενα list", "warn")
-        return False
+        
+    conn = sqlite3.connect(STATE_DB, timeout=30)
+    c = conn.cursor()
+    c.execute("CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, tag TEXT NOT NULL, details TEXT NOT NULL, sentiment TEXT, time_started TEXT NOT NULL, time_ended TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    c.execute("SELECT COUNT(*) FROM sessions")
+    total = c.fetchone()[0]
 
-    total = len(data)
     log(f"📊 Πριν: {total} sessions", "info")
 
     if total <= keep:
         log(f"ℹ️  Δεν χρειάζεται trim (≤ {keep}).", "dim")
+        conn.close()
         return True
 
-    # Sort by date descending, αν υπάρχει date field
-    def _date_key(item):
-        try:
-            return datetime.strptime(item.get("date", ""), "%Y-%m-%d %H:%M")
-        except Exception:
-            return datetime.min
+    if dry_run:
+        log(f"🧪 DRY-RUN: Θα διεγράφοντο {total - keep} παλιές sessions.", "warn")
+        conn.close()
+        return True
 
-    sorted_sessions = sorted(data, key=_date_key, reverse=True)
-    trimmed = sorted_sessions[:keep]
-    # Επαναφορά σε χρονολογική (αύξουσα) σειρά για το αρχείο
-    trimmed.sort(key=_date_key)
+    backup_file(STATE_DB, enabled=backup)
+    c.execute(f"""
+        DELETE FROM sessions 
+        WHERE id NOT IN (
+            SELECT id FROM sessions ORDER BY created_at DESC LIMIT {keep}
+        )
+    """)
+    conn.commit()
+    conn.close()
+    
     removed = total - keep
-    log(f"📊 Μετά: {len(trimmed)} sessions (−{removed})", "ok")
-
-    if dry_run:
-        return True
-
-    backup_file(SESSIONS_FILE, enabled=backup)
-    return safe_save_json(SESSIONS_FILE, trimmed, dry_run=False)
-
-
-# ────────────────────────────────────────────────────────────────
-# TASK 4: WORKING MEMORY — DEDUP + LLM CONSOLIDATION
-# ────────────────────────────────────────────────────────────────
-
-def consolidate_working_memory(dry_run: bool = False, backup: bool = True) -> bool:
-    header("Σύμπτυξη astakos_working_memory.json")
-    data = safe_load_json(WORKING_MEMORY_FILE)
-    if data is None:
-        return False
-    if not isinstance(data, list):
-        log("⚠️  Άκυρο schema — περίμενα list", "warn")
-        return False
-
-    total = len(data)
-    log(f"📊 Πριν: {total} entries", "info")
-
-    if total == 0:
-        log("ℹ️  Κενό αρχείο, παρακάμπτεται.", "dim")
-        return True
-
-    # Step 1: Πρώτο πέρασμα — απλό dedup με βάση το tag (case-insensitive trim)
-    seen = set()
-    deduped = []
-    for item in data:
-        tag = (item.get("tag", "") if isinstance(item, dict) else str(item)).strip()
-        key = tag.lower()
-        if key and key not in seen:
-            seen.add(key)
-            deduped.append(item)
-
-    after_dedup = len(deduped)
-    log(f"📊 Μετά από dedup: {after_dedup} entries (−{total - after_dedup})", "info")
-
-    # Step 2: Αν είναι ακόμα πολλά (>10), ζητάμε LLM σύμπτυξη
-    final = deduped
-    if after_dedup > 10:
-        llm = _load_llm()
-        if llm is None:
-            log("⚠️  Δεν φόρτωσε το LLM — μένω στο απλό dedup.", "warn")
-        else:
-            tags_only = [item.get("tag", "") if isinstance(item, dict) else str(item) for item in deduped]
-            prompt = f"""Έχεις μια λίστα από working memory tags ενός AI agent.
-Κάθε tag είναι μια σύντομη σύνοψη από προηγούμενη αλληλεπίδραση.
-
-Δουλειά σου:
-  1. Συγχώνευσε διπλότυπα και πολύ παρόμοια tags σε ένα.
-  2. Κράτα γενικευμένη, καθαρή διατύπωση.
-  3. Διατήρησε τη σειρά (από πιο παλιά σε πιο πρόσφατα).
-
-ΕΠΕΣΤΡΕΨΕ ΑΠΟΚΛΕΙΣΤΙΚΑ valid JSON array από strings, χωρίς markdown:
-["tag1", "tag2", ...]
-
-ΛΙΣΤΑ:
-{json.dumps(tags_only, ensure_ascii=False, indent=2)}
-"""
-            try:
-                log("🤖 Κλήση LLM για σύμπτυξη tags...", "info")
-                response = llm.invoke(prompt)
-                from core.utils import clean_message
-                raw = clean_message(response.content)
-                raw = strip_markdown_json(raw)
-                new_tags = json.loads(raw)
-                if isinstance(new_tags, list) and all(isinstance(t, str) for t in new_tags):
-                    # Επαναδημιουργία items με τρέχουσα ώρα για τα νέα
-                    now_str = datetime.now().strftime("%H:%M")
-                    final = [{"tag": t, "time": now_str} for t in new_tags]
-                else:
-                    log("⚠️  LLM γύρισε άκυρο format — μένω στο απλό dedup.", "warn")
-            except Exception as e:
-                log(f"⚠️  Σφάλμα LLM consolidation: {e} — μένω στο απλό dedup.", "warn")
-
-    log(f"📊 Τελικό: {len(final)} entries", "ok")
-
-    if dry_run:
-        log("🧪 DRY-RUN — δες παρακάτω τι θα γραφόταν:", "warn")
-        print(json.dumps(final, ensure_ascii=False, indent=2))
-        return True
-
-    backup_file(WORKING_MEMORY_FILE, enabled=backup)
-    return safe_save_json(WORKING_MEMORY_FILE, final, dry_run=False)
-
-
-# ────────────────────────────────────────────────────────────────
-# TASK 5: PROFILE — LLM CONSOLIDATION ΑΝΑ CATEGORY
-# ────────────────────────────────────────────────────────────────
-
-# Κατηγορίες που ΠΟΤΕ δεν τις αγγίζουμε (κρίσιμα δεδομένα)
-PROFILE_PROTECTED_CATEGORIES = {"contacts"}
-
-# Ελάχιστος αριθμός entries σε category για να αξίζει LLM σύμπτυξη
-PROFILE_MIN_ENTRIES_FOR_LLM = 5
-
+    log(f"📊 Μετά: {keep} sessions (−{removed})", "ok")
+    return True
 
 def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
     import sqlite3
@@ -667,8 +600,6 @@ def main():
                         help="Έλεγχος/maintenance της shared SQLite conversation history")
     parser.add_argument("--sessions", action="store_true",
                         help="Trim παλιών sessions (κρατά τις πιο πρόσφατες)")
-    parser.add_argument("--working-memory", action="store_true",
-                        help="Σύμπτυξη working memory (dedup + LLM)")
     parser.add_argument("--profile", action="store_true",
                         help="Σύμπτυξη astakos_profile.json (LLM ανά category)")
     parser.add_argument("--photos", action="store_true",
@@ -689,7 +620,7 @@ def main():
     # Αν δεν επιλέχθηκε κανένα συγκεκριμένο task, τα τρέχουμε όλα
     no_specific = not any([
         args.capabilities, args.conversation_db,
-        args.sessions, args.working_memory, args.profile, args.photos, args.memory_audit
+        args.sessions, args.profile, args.photos, args.memory_audit
     ])
     run_all = args.all or no_specific
 
@@ -718,10 +649,7 @@ def main():
             keep=args.sessions_keep, dry_run=args.dry_run, backup=backup_enabled
         )
 
-    if run_all or args.working_memory:
-        results["working_memory"] = consolidate_working_memory(
-            dry_run=args.dry_run, backup=backup_enabled
-        )
+
 
     if run_all or args.profile:
         results["profile"] = consolidate_profile(

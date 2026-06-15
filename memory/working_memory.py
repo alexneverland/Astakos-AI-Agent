@@ -9,8 +9,9 @@ import os
 import json
 import threading
 from datetime import datetime
+import sqlite3
 from langchain_core.messages import HumanMessage
-from config import WORKING_MEMORY_FILE, CAPABILITIES_FILE
+from config import WORKING_MEMORY_FILE, STATE_DB
 from memory.vector_store import memory, is_semantically_duplicate, memory_lock  # [MASTRO-FIX]: ΕΝΑ lock, όχι δύο
 from core.utils import clean_message
 
@@ -78,42 +79,67 @@ def update_working_memory(user_text, ai_text):
 
 def _load_capabilities() -> dict:
     default = {"can_do": [], "cannot_do": []}
-    if not os.path.exists(CAPABILITIES_FILE):
-        return default
+    conn = None
     try:
-        with open(CAPABILITIES_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        data["can_do"] = data.get("can_do", [])[-20:]
-        data["cannot_do"] = data.get("cannot_do", [])[-20:]
-        return data
-    except:
-        return default
+        conn = sqlite3.connect(STATE_DB)
+        cursor = conn.cursor()
+        cursor.execute("SELECT type, description FROM capabilities ORDER BY created_at ASC")
+        rows = cursor.fetchall()
+        for cap_type, desc in rows:
+            if cap_type in default:
+                default[cap_type].append(desc)
+        
+        default["can_do"] = default["can_do"][-20:]
+        default["cannot_do"] = default["cannot_do"][-20:]
+    except Exception as e:
+        print(f"Error loading capabilities: {e}")
+    finally:
+        if conn:
+            conn.close()
+    return default
 
 
 def _save_capability(capability_type: str, description: str):
     # [MASTRO-FIX]: Χρήση του memory_lock από vector_store — ένα lock για όλα
     with memory_lock:
         data = _load_capabilities()
+        conn = None
+        try:
+            conn = sqlite3.connect(STATE_DB)
+            cursor = conn.cursor()
 
-        if capability_type == "can":
-            new_cannot_do = []
-            for old_cap in data.get("cannot_do", []):
-                if not is_semantically_duplicate(description, [old_cap], threshold=0.80):
-                    new_cannot_do.append(old_cap)
-            data["cannot_do"] = new_cannot_do
-            key = "can_do"
-        else:
-            key = "cannot_do"
+            if capability_type == "can":
+                new_cannot_do = []
+                for old_cap in data.get("cannot_do", []):
+                    if not is_semantically_duplicate(description, [old_cap], threshold=0.80):
+                        new_cannot_do.append(old_cap)
+                    else:
+                        cursor.execute("DELETE FROM capabilities WHERE type='cannot_do' AND description=?", (old_cap,))
+                data["cannot_do"] = new_cannot_do
+                key = "can_do"
+                db_type = "can_do"
+            else:
+                key = "cannot_do"
+                db_type = "cannot_do"
 
-        # Threshold 0.88 ΟΚ για capabilities (γενικές ικανότητες)
-        if is_semantically_duplicate(description, data[key], threshold=0.88):
-            return
+            # Threshold 0.88 ΟΚ για capabilities (γενικές ικανότητες)
+            if is_semantically_duplicate(description, data[key], threshold=0.88):
+                conn.commit()
+                return
 
-        data[key].append(description)
-        data[key] = data[key][-20:]
+            cursor.execute("INSERT INTO capabilities (type, description) VALUES (?, ?)", (db_type, description))
+            
+            cursor.execute("SELECT id FROM capabilities WHERE type=? ORDER BY created_at DESC LIMIT -1 OFFSET 20", (db_type,))
+            old_ids = cursor.fetchall()
+            for (old_id,) in old_ids:
+                cursor.execute("DELETE FROM capabilities WHERE id=?", (old_id,))
 
-        with open(CAPABILITIES_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            conn.commit()
+        except Exception as e:
+            print(f"Error saving capability: {e}")
+        finally:
+            if conn:
+                conn.close()
 
 
 _USER_SUBJECT_MARKERS = (
