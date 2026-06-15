@@ -86,8 +86,10 @@ def _load_capabilities() -> dict:
         cursor.execute("SELECT type, description FROM capabilities ORDER BY created_at ASC")
         rows = cursor.fetchall()
         for cap_type, desc in rows:
-            if cap_type in default:
-                default[cap_type].append(desc)
+            if cap_type in ("can_do", "can"):
+                default["can_do"].append(desc)
+            elif cap_type in ("cannot_do", "cannot"):
+                default["cannot_do"].append(desc)
         
         default["can_do"] = default["can_do"][-20:]
         default["cannot_do"] = default["cannot_do"][-20:]
@@ -114,7 +116,10 @@ def _save_capability(capability_type: str, description: str):
                     if not is_semantically_duplicate(description, [old_cap], threshold=0.80):
                         new_cannot_do.append(old_cap)
                     else:
-                        cursor.execute("DELETE FROM capabilities WHERE type='cannot_do' AND description=?", (old_cap,))
+                        cursor.execute(
+                            "DELETE FROM capabilities WHERE type IN ('cannot_do', 'cannot') AND description=?",
+                            (old_cap,),
+                        )
                 data["cannot_do"] = new_cannot_do
                 key = "can_do"
                 db_type = "can_do"

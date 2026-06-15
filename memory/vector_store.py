@@ -609,7 +609,7 @@ class AstakosMemoryManager:
             pending = json.dumps(summary.get("pending", []), ensure_ascii=False)
             
             cursor.execute('''
-                INSERT INTO sessions (date, channel, summary, completed, pending, next_session_hint, mood)
+                INSERT INTO sessions (session_date, channel, summary, completed, pending, next_session_hint, mood)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
                 summary.get("date", ""),

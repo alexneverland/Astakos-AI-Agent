@@ -187,12 +187,19 @@ def consolidate_capabilities(dry_run: bool = False, backup: bool = True) -> bool
         
     conn = sqlite3.connect(STATE_DB, timeout=30)
     c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS capabilities (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, description TEXT NOT NULL UNIQUE)")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS capabilities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            description TEXT NOT NULL UNIQUE,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     c.execute("SELECT type, description FROM capabilities")
     rows = c.fetchall()
     
-    can_do = [r[1] for r in rows if r[0] == "can"]
-    cannot_do = [r[1] for r in rows if r[0] == "cannot"]
+    can_do = [r[1] for r in rows if r[0] in ("can_do", "can")]
+    cannot_do = [r[1] for r in rows if r[0] in ("cannot_do", "cannot")]
     
     log(f"📊 Πριν: {len(can_do)} can_do  |  {len(cannot_do)} cannot_do", "info")
 
@@ -255,9 +262,9 @@ def consolidate_capabilities(dry_run: bool = False, backup: bool = True) -> bool
     backup_file(STATE_DB, enabled=backup)
     c.execute("DELETE FROM capabilities")
     for item in new_data["can_do"]:
-        c.execute("INSERT OR IGNORE INTO capabilities (type, description) VALUES ('can', ?)", (str(item),))
+        c.execute("INSERT OR IGNORE INTO capabilities (type, description) VALUES ('can_do', ?)", (str(item),))
     for item in new_data["cannot_do"]:
-        c.execute("INSERT OR IGNORE INTO capabilities (type, description) VALUES ('cannot', ?)", (str(item),))
+        c.execute("INSERT OR IGNORE INTO capabilities (type, description) VALUES ('cannot_do', ?)", (str(item),))
     
     conn.commit()
     conn.close()
@@ -331,7 +338,18 @@ def trim_sessions(keep: int = DEFAULT_SESSIONS_KEEP, dry_run: bool = False, back
         
     conn = sqlite3.connect(STATE_DB, timeout=30)
     c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, tag TEXT NOT NULL, details TEXT NOT NULL, sentiment TEXT, time_started TEXT NOT NULL, time_ended TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_date TEXT,
+            channel TEXT,
+            summary TEXT,
+            completed TEXT,
+            pending TEXT,
+            next_session_hint TEXT,
+            mood TEXT
+        )
+    """)
     c.execute("SELECT COUNT(*) FROM sessions")
     total = c.fetchone()[0]
 
@@ -351,7 +369,7 @@ def trim_sessions(keep: int = DEFAULT_SESSIONS_KEEP, dry_run: bool = False, back
     c.execute(f"""
         DELETE FROM sessions 
         WHERE id NOT IN (
-            SELECT id FROM sessions ORDER BY created_at DESC LIMIT {keep}
+            SELECT id FROM sessions ORDER BY id DESC LIMIT {keep}
         )
     """)
     conn.commit()
