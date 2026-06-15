@@ -515,7 +515,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
             # 4b. [SEND TEXT]: Πληκτρολόγηση + Enter
             # Timeout αυξημένο σε 25s — Messenger SPA μερικές φορές αργεί
             chat_box = page.locator('div[role="textbox"]').last
-            chat_box.wait_for(state="visible", timeout=25000)
+            chat_box.wait_for(state="visible", timeout=10000)
             chat_box.click()
             if message:
                 chat_box.fill(message)
