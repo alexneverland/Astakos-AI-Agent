@@ -214,7 +214,9 @@ def temporal_history_for_query(
     has_temporal_marker = _has_temporal_marker(clean_query)
     if limit <= 0:
         return []
-    if not has_temporal_marker and len(tokens) < 2:
+    # [PERF]: Τρέχουμε SQL scan ΜΟΝΟ για temporal queries ("χθες", "πρωί", κλπ)
+    # Για απλά semantic queries, το ChromaDB similarity_search αρκεί.
+    if not has_temporal_marker:
         return []
 
     current = now or datetime.now()
@@ -229,7 +231,7 @@ def temporal_history_for_query(
         history_loader = load_messages_since
 
     try:
-        messages = history_loader(since_date=since_date, limit=1500)
+        messages = history_loader(since_date=since_date, limit=400)  # [PERF]: 400 most recent αρκεί
     except Exception:
         return []
 
