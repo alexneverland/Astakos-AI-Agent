@@ -77,6 +77,24 @@ _TEMPORAL_MARKERS = (
     "απόγευμα",
 )
 
+_RECALL_MARKERS = (
+    "θυμασαι",
+    "θυμάσαι",
+    "ειχαμε πει",
+    "είχαμε πει",
+    "σου ειχα",
+    "σου είχα",
+    "ειχα ανεβασει",
+    "είχα ανεβάσει",
+    "σημειωσει",
+    "σημειώσει",
+    "γενεθλι",
+    "δωρο",
+    "δώρο",
+    "ρολοι",
+    "ρολόι",
+)
+
 _TOKEN_STOPWORDS = {
     "και",
     "που",
@@ -132,6 +150,11 @@ def _clean_query_for_search(query: str) -> str:
 def _has_temporal_marker(query: str) -> bool:
     clean = _normalize_text(query)
     return any(marker in clean for marker in _TEMPORAL_MARKERS)
+
+
+def _has_recall_marker(query: str) -> bool:
+    clean = _normalize_text(query)
+    return any(marker in clean for marker in _RECALL_MARKERS)
 
 
 def _query_tokens(query: str) -> list[str]:
@@ -212,11 +235,13 @@ def temporal_history_for_query(
     clean_query = _normalize_text(query)
     tokens = _query_tokens(clean_query)
     has_temporal_marker = _has_temporal_marker(clean_query)
+    has_recall_marker = _has_recall_marker(clean_query)
     if limit <= 0:
         return []
-    # [PERF]: Τρέχουμε SQL scan ΜΟΝΟ για temporal queries ("χθες", "πρωί", κλπ)
-    # Για απλά semantic queries, το ChromaDB similarity_search αρκεί.
-    if not has_temporal_marker:
+    # [PERF]: SQL scan only for explicit time or recall/history intent.
+    # Plain semantic queries stay on Chroma; "θυμάσαι/δώρο/γενέθλια" still
+    # search SQLite because many details may exist only in conversation history.
+    if not has_temporal_marker and not has_recall_marker:
         return []
 
     current = now or datetime.now()
@@ -231,7 +256,7 @@ def temporal_history_for_query(
         history_loader = load_messages_since
 
     try:
-        messages = history_loader(since_date=since_date, limit=400)  # [PERF]: 400 most recent αρκεί
+        messages = history_loader(since_date=since_date, limit=1500)
     except Exception:
         return []
 
