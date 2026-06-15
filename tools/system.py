@@ -1790,6 +1790,10 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
 
         print(f"\033[94m[Mail API]: Εκτέλεση ενέργειας '{action}'...\033[0m")
         action = action.lower()
+        if action == "read" and email_id:
+            action = "read_full"
+        elif action == "read":
+            action = "search"
         service = get_gmail_service()
 
         # =========================
@@ -1844,7 +1848,7 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         # =========================
         # SEARCH
         # =========================
-        elif action in ["search", "check_emails", "check", "read"]:
+        elif action in ["search", "check_emails", "check"]:
             results = service.users().messages().list(userId="me", q=query, maxResults=limit).execute()
             messages = results.get("messages", [])
 

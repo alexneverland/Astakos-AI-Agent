@@ -15,9 +15,9 @@ def _clean(x):
 
 
 def _extract_known_ids(history):
-    """Αντιγράφει τη λογική v4 ID extraction (lines 546-552 agents.py)."""
+    """Αντιγράφει τη λογική v4 ID extraction: newest IDs first."""
     known_ids = []
-    for msg in history:
+    for msg in reversed(history):
         c = _clean(getattr(msg, "content", "") or "")
         for m in re.finditer(r"ID: ([a-f0-9]{16})", c):
             eid = m.group(1)
@@ -199,6 +199,21 @@ def test_v4_multiple_different_ids_collected():
     ids = _extract_known_ids(history)
     assert "aaaa000000000001" in ids
     assert "bbbb000000000002" in ids
+
+
+def test_v4_latest_turn_id_is_preferred():
+    """Αν υπάρχουν παλιά και νέα IDs, πρώτο πρέπει να βγαίνει το πιο πρόσφατο."""
+    history = [
+        ToolMessage(content="ID: aaaa000000000001 | Old Kaggle email",
+                    tool_call_id="old"),
+        AIMessage(content="Το παλιό email ήταν αυτό."),
+        HumanMessage(content="ήρθε άλλο mail, διάβασέ το"),
+        ToolMessage(content="ID: bbbb000000000002 | New Kaggle email",
+                    tool_call_id="new"),
+    ]
+    ids = _extract_known_ids(history)
+    assert ids[0] == "bbbb000000000002"
+    assert ids[1] == "aaaa000000000001"
 
 
 def test_v4_empty_history_no_ids():

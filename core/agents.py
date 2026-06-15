@@ -541,10 +541,12 @@ def mail_agent_node(state):
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
-    # [MASTRO-FIX v4]: Inject known email IDs into system_prompt
+    # [MASTRO-FIX v4]: Inject known email IDs into system_prompt.
+    # Prefer newest IDs from recent turns, so "διάβασέ το" keeps working on
+    # the mail the user just discussed instead of an older email in history.
     import re as _re_mail
     _known_ids = []
-    for _hmsg in history:
+    for _hmsg in reversed(history):
         _hc = clean_message(getattr(_hmsg, 'content', '') or '')
         for _hm in _re_mail.finditer(r'ID: ([a-f0-9]{16})', _hc):
             _heid = _hm.group(1)
@@ -614,7 +616,8 @@ def mail_agent_node(state):
             "ΑΠΟΤΕΛΕΣΜΑΤΑ ΑΝΑΖΗΤΗΣΗΣ EMAIL (από mail_manager):\\n"
             f"{joined_results}\n\n"
             "Με βάση τα παραπάνω, δώσε σύντομη καθαρή απάντηση στον Λάζαρο. "
-            "ΜΗΝ καλέσεις εργαλεία. Απλή περίληψη στα Ελληνικά."
+            "ΜΗΝ καλέσεις εργαλεία. Απλή περίληψη στα Ελληνικά, με 2-4 πρακτικά "
+            "next steps αν το email ζητά ενέργεια."
         )
         response = safe_llm_invoke(llm, [
             SystemMessage(content=synthesis_prompt),
@@ -627,9 +630,7 @@ def mail_agent_node(state):
             response = AIMessage(content=resp_text)
         return {"current_agent": "Mail_Agent", "messages": [response]}
 
-    mail_llm = llm.bind_tools([
-        mail_manager, search_memory
-    ])
+    mail_llm = llm.bind_tools([mail_manager])
     response = safe_llm_invoke(mail_llm, [SystemMessage(content=system_prompt)] + sanitize_history_for_gemini(history))
     response = _ensure_text_response(response, mail_llm, system_prompt, sanitize_history_for_gemini(history))
 
