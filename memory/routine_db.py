@@ -150,6 +150,10 @@ def setup_db():
         """)
         print("[routine_db]: Backfill → state column από is_active/confidence")
 
+    if "muted_until" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN muted_until TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'muted_until'")
+
     # Backfill fingerprints
     cursor.execute("SELECT id, day_of_week, time_str, event_name FROM routines WHERE fingerprint IS NULL")
     for r_id, day, time, event in cursor.fetchall():
@@ -531,6 +535,68 @@ def get_routine_notify_info(routine_id: int) -> dict:
         "cooldown_hours":   row[0] if row[0] is not None else COOLDOWN_DEFAULT_HOURS,
         "last_notified_ts": row[1],
     }
+
+
+# ────────────────────────────────────────────────────────────────
+# MUTED UNTIL: Ρουτίνα σε σίγαση μέχρι ημερομηνία
+# ────────────────────────────────────────────────────────────────
+
+def set_routine_muted_until(routine_id: int, until_date_str: str) -> None:
+    """
+    Βάζει τη ρουτίνα σε σίγαση μέχρι until_date_str (YYYY-MM-DD).
+    Κάθε μέρα η job_check_routines θα κάνει αυτόματο silent skip χωρίς LLM call.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET muted_until=? WHERE id=?",
+            (until_date_str, routine_id)
+        )
+        conn.commit()
+    conn.close()
+    print(f"[routine_db]: #{routine_id} muted until {until_date_str}")
+    from memory.event_log import log_event
+    log_event("routines", "muted", routine_id=routine_id, until=until_date_str)
+
+
+def clear_routine_muted_until(routine_id: int) -> None:
+    """
+    Αφαιρεί τη σίγαση από ρουτίνα (manual unmute ή ημερομηνία πέρασε).
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET muted_until=NULL WHERE id=?",
+            (routine_id,)
+        )
+        conn.commit()
+    conn.close()
+    print(f"[routine_db]: #{routine_id} unmuted")
+    from memory.event_log import log_event
+    log_event("routines", "unmuted", routine_id=routine_id)
+
+
+def get_routine_muted_until(routine_id: int) -> str | None:
+    """
+    Επιστρέφει muted_until (YYYY-MM-DD) ή None αν δεν είναι σε σίγαση.
+    Αν η ημερομηνία έχει περάσει, καθαρίζει αυτόματα και επιστρέφει None.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT muted_until FROM routines WHERE id=?", (routine_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row or not row[0]:
+        return None
+    muted_until = row[0]
+    today = datetime.now().strftime("%Y-%m-%d")
+    if muted_until < today:
+        # Ημερομηνία πέρασε — αυτόματο unmute
+        clear_routine_muted_until(routine_id)
+        return None
+    return muted_until
 
 
 # ────────────────────────────────────────────────────────────────

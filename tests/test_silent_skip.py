@@ -74,6 +74,10 @@ def _stub_modules():
     rdb.mark_routine_responded     = MagicMock()
     rdb.clear_pending_confirmations = MagicMock()
     rdb.mark_routine_ignored       = MagicMock()
+    # νέα stubs για muted_until
+    rdb.get_routine_muted_until    = MagicMock(return_value=None)   # δεν είναι muted by default
+    rdb.set_routine_muted_until    = MagicMock()
+    rdb.clear_routine_muted_until  = MagicMock()
 
     # ── core.* ────────────────────────────────────────────────
     for mod in [
@@ -139,16 +143,18 @@ def _make_routines_db(path, rows):
     conn.execute("""
         CREATE TABLE routines (
             id INTEGER PRIMARY KEY, event_name TEXT, confidence REAL,
-            time_str TEXT, day_of_week TEXT, state TEXT, last_triggered TEXT
+            time_str TEXT, day_of_week TEXT, state TEXT, last_triggered TEXT,
+            muted_until TEXT DEFAULT NULL
         )
     """)
     for r in rows:
         conn.execute(
-            "INSERT INTO routines VALUES (:id,:event_name,:confidence,"
-            ":time_str,:day_of_week,:state,:last_triggered)", r
+            "INSERT INTO routines (id,event_name,confidence,"
+            "time_str,day_of_week,state,last_triggered) VALUES "
+            "(:id,:event_name,:confidence,:time_str,:day_of_week,:state,:last_triggered)", r
         )
     conn.commit()
-    conn.close()
+    conn.close()  # αναγκαίο στο Windows για να μην κλειδωθεί το db στο TemporaryDirectory cleanup
 
 
 def _run_job(db_rows, craft_return="κανονικό μήνυμα",
