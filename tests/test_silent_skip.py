@@ -78,6 +78,14 @@ def _stub_modules():
     rdb.get_routine_muted_until    = MagicMock(return_value=None)   # δεν είναι muted by default
     rdb.set_routine_muted_until    = MagicMock()
     rdb.clear_routine_muted_until  = MagicMock()
+    # νέα stubs για sentimental
+    rdb.get_sentimental_info       = MagicMock(return_value={
+        "sentimental": 0, "muted_from": None, "muted_until": None,
+        "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False
+    })
+    rdb.set_routine_sentimental    = MagicMock()
+    rdb.update_sentimental_last_sent = MagicMock()
+    rdb.set_sentimental_silenced   = MagicMock()
 
     # ── core.* ────────────────────────────────────────────────
     for mod in [

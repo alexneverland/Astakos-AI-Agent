@@ -1724,6 +1724,71 @@ def _infer_muted_until(event_name: str, memory_context: str) -> str | None:
         return None
 
 
+
+def _infer_sentimental(event_name: str, memory_context: str) -> bool:
+    """
+    One-time LLM assessment: κρίνει αν η ρουτίνα έχει συναισθηματική αξία.
+    Sentimental = αφορά παιδί, οικογένεια, κοινές εμπειρίες, συνήθειες με φορτίο.
+    Καλείται μία φορά και αποθηκεύεται μόνιμα στο DB.
+    """
+    from langchain_core.messages import HumanMessage
+    from core.brain import llm
+
+    prompt = (
+        f"Η ρουτίνα: '{event_name}'.\n\n"
+        f"Context:\n{memory_context}\n\n"
+        "Αυτή η ρουτίνα αφορά οικογένεια, παιδί, κοινές εμπειρίες ή έχει "
+        "συναισθηματική αξία (π.χ. βόλτα με παιδί, παιχνίδι, ύπνος παιδιού); "
+        "Απάντησε ΜΟΝΟ: YES ή NO."
+    )
+    try:
+        response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(
+                p.get("text", "") if isinstance(p, dict) else str(p) for p in content
+            )
+        return content.strip().upper().startswith("YES")
+    except Exception as e:
+        print(f"[_infer_sentimental Error]: {e}")
+        return False
+
+
+def _craft_sentimental_absent_msg(
+    event_name: str, muted_from: str, muted_until: str, memory_context: str
+) -> str:
+    """
+    Φτιάχνει συναισθηματικό μήνυμα για ρουτίνα που δεν μπορεί να γίνει τώρα.
+    ΔΕΝ υπενθυμίζει την ρουτίνα — αναγνωρίζει με ζεστασιά/χιούμορ.
+    """
+    from langchain_core.messages import HumanMessage
+    from core.brain import llm
+    from datetime import date
+
+    today = date.today().isoformat()
+    prompt = (
+        f"Σήμερα: {today}. Η ρουτίνα '{event_name}' δεν μπορεί να γίνει "
+        f"από {muted_from} έως {muted_until}.\n\n"
+        f"Context:\n{memory_context}\n\n"
+        "Γράψε ΕΝΑ σύντομο μήνυμα (1-2 προτάσεις) που:\n"
+        "- ΔΕΝ λέει 'θυμήσου να...' ή 'ώρα για...' — δεν υπενθυμίζει\n"
+        "- Αναγνωρίζει συναισθηματικά (νοσταλγία, αντίστροφη μέτρηση, χιούμορ)\n"
+        "- Είναι σαν μήνυμα από φίλο που ξέρει την κατάσταση\n"
+        "Ελληνικά. Χωρίς tag. Χωρίς εισαγωγικά."
+    )
+    try:
+        response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(
+                p.get("text", "") if isinstance(p, dict) else str(p) for p in content
+            )
+        return content.strip()
+    except Exception as e:
+        print(f"[_craft_sentimental_absent_msg Error]: {e}")
+        return ""
+
+
 def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int) -> str:
 
     """
@@ -1956,14 +2021,57 @@ def job_check_routines():
             from memory.routine_db import (
                 get_routine_notify_info, mark_routine_notified,
                 save_pending_confirmation, get_routine_muted_until,
-                set_routine_muted_until
+                set_routine_muted_until, get_sentimental_info,
+                set_routine_sentimental, update_sentimental_last_sent
             )
             due_routines = []
             for r_id, event_name, confidence in cursor.fetchall():
-                # ── muted_until check: αθόρυβο skip χωρίς LLM call ────────
+                # ── muted_until check ────────────────────────────────────
                 muted_until = get_routine_muted_until(r_id)
                 if muted_until:
                     cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                    conn.commit()
+
+                    sent_info = get_sentimental_info(r_id)
+                    if sent_info["sentimental"] is None:
+                        try:
+                            from memory.context_builder import build_memory_context
+                            _ctx = build_memory_context(event_name, channel="telegram",
+                                                        recent_limit=8, semantic_k=4).render()
+                        except Exception:
+                            _ctx = ""
+                        is_sent = _infer_sentimental(event_name, _ctx)
+                        set_routine_sentimental(r_id, is_sent)
+                        sent_info["sentimental"] = is_sent
+
+                    if sent_info["sentimental"] and not sent_info["sentimental_silenced"]:
+                        _last  = sent_info["sentimental_last_sent"]
+                        _every = sent_info["sentimental_send_every"]
+                        if not _last:
+                            _should_send = True
+                        else:
+                            from datetime import datetime as _dt
+                            _days = (_dt.now().date() - _dt.strptime(_last, "%Y-%m-%d").date()).days
+                            _should_send = _days >= _every
+                        if _should_send:
+                            try:
+                                from memory.context_builder import build_memory_context
+                                _sctx = build_memory_context(event_name, channel="telegram",
+                                                             recent_limit=8, semantic_k=4).render()
+                            except Exception:
+                                _sctx = ""
+                            _emsg = _craft_sentimental_absent_msg(
+                                event_name,
+                                sent_info.get("muted_from") or today_str,
+                                muted_until, _sctx
+                            )
+                            if _emsg:
+                                send_telegram_msg(_emsg)
+                                update_sentimental_last_sent(r_id, today_str)
+                                log_event("routines", "sentimental_sent",
+                                          routine_id=r_id, event=event_name, muted_until=muted_until)
+                                print(f"\U0001f48c [job_check_routines]: #{r_id} '{event_name}' sentimental msg sent")
+
                     log_event("routines", "silent_skip", routine_id=r_id, event=event_name,
                               reason="muted_until", muted_until=muted_until)
                     print(f"\U0001f507 [job_check_routines]: #{r_id} '{event_name}' muted until {muted_until} — skipped")

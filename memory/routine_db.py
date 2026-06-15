@@ -154,6 +154,26 @@ def setup_db():
         cursor.execute("ALTER TABLE routines ADD COLUMN muted_until TEXT DEFAULT NULL")
         print("[routine_db]: Migration → 'muted_until'")
 
+    if "muted_from" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN muted_from TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'muted_from'")
+
+    if "sentimental" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN sentimental INTEGER DEFAULT NULL")
+        print("[routine_db]: Migration → 'sentimental'")
+
+    if "sentimental_send_every" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN sentimental_send_every INTEGER DEFAULT 2")
+        print("[routine_db]: Migration → 'sentimental_send_every'")
+
+    if "sentimental_last_sent" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN sentimental_last_sent TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'sentimental_last_sent'")
+
+    if "sentimental_silenced" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN sentimental_silenced INTEGER DEFAULT 0")
+        print("[routine_db]: Migration → 'sentimental_silenced'")
+
     # Backfill fingerprints
     cursor.execute("SELECT id, day_of_week, time_str, event_name FROM routines WHERE fingerprint IS NULL")
     for r_id, day, time, event in cursor.fetchall():
@@ -544,36 +564,44 @@ def get_routine_notify_info(routine_id: int) -> dict:
 def set_routine_muted_until(routine_id: int, until_date_str: str) -> None:
     """
     Βάζει τη ρουτίνα σε σίγαση μέχρι until_date_str (YYYY-MM-DD).
-    Κάθε μέρα η job_check_routines θα κάνει αυτόματο silent skip χωρίς LLM call.
+    Αποθηκεύει και muted_from (σήμερα) + reset sentimental state για την περίοδο.
     """
+    today = datetime.now().strftime("%Y-%m-%d")
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET muted_until=? WHERE id=?",
-            (until_date_str, routine_id)
+            """UPDATE routines
+               SET muted_until=?, muted_from=?,
+                   sentimental_last_sent=NULL, sentimental_silenced=0
+               WHERE id=?""",
+            (until_date_str, today, routine_id)
         )
         conn.commit()
     conn.close()
-    print(f"[routine_db]: #{routine_id} muted until {until_date_str}")
+    print(f"[routine_db]: #{routine_id} muted {today} → {until_date_str}")
     from memory.event_log import log_event
-    log_event("routines", "muted", routine_id=routine_id, until=until_date_str)
+    log_event("routines", "muted", routine_id=routine_id, muted_from=today, until=until_date_str)
 
 
 def clear_routine_muted_until(routine_id: int) -> None:
     """
-    Αφαιρεί τη σίγαση από ρουτίνα (manual unmute ή ημερομηνία πέρασε).
+    Αφαιρεί τη σίγαση — reset muted_from, sentimental_last_sent, sentimental_silenced.
+    Καλείται αυτόματα όταν λήξει η muted_until, ή manual unmute.
     """
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET muted_until=NULL WHERE id=?",
+            """UPDATE routines
+               SET muted_until=NULL, muted_from=NULL,
+                   sentimental_last_sent=NULL, sentimental_silenced=0
+               WHERE id=?""",
             (routine_id,)
         )
         conn.commit()
     conn.close()
-    print(f"[routine_db]: #{routine_id} unmuted")
+    print(f"[routine_db]: #{routine_id} unmuted — sentimental state reset")
     from memory.event_log import log_event
     log_event("routines", "unmuted", routine_id=routine_id)
 
@@ -597,6 +625,92 @@ def get_routine_muted_until(routine_id: int) -> str | None:
         clear_routine_muted_until(routine_id)
         return None
     return muted_until
+
+
+
+# ────────────────────────────────────────────────────────────────
+# SENTIMENTAL ROUTINES: Συναισθηματικά μηνύματα κατά τη σίγαση
+# ────────────────────────────────────────────────────────────────
+
+def set_routine_sentimental(routine_id: int, sentimental: bool, send_every: int = 2) -> None:
+    """
+    Ορίζει αν μια ρουτίνα έχει συναισθηματική αξία (μόνιμο flag).
+    send_every: στείλε emotional msg κάθε N μέρες κατά τη σίγαση.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET sentimental=?, sentimental_send_every=? WHERE id=?",
+            (1 if sentimental else 0, send_every, routine_id)
+        )
+        conn.commit()
+    conn.close()
+    print(f"[routine_db]: #{routine_id} sentimental={sentimental}, send_every={send_every}d")
+
+
+def get_sentimental_info(routine_id: int) -> dict:
+    """
+    Επιστρέφει όλες τις sentimental πληροφορίες για μια ρουτίνα:
+      sentimental, muted_from, muted_until, sentimental_send_every,
+      sentimental_last_sent, sentimental_silenced
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT sentimental, muted_from, muted_until,
+                  sentimental_send_every, sentimental_last_sent, sentimental_silenced
+           FROM routines WHERE id=?""",
+        (routine_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return {
+            "sentimental": None, "muted_from": None, "muted_until": None,
+            "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False
+        }
+    return {
+        "sentimental":           row[0],   # None=not assessed, 0=no, 1=yes
+        "muted_from":            row[1],
+        "muted_until":           row[2],
+        "sentimental_send_every": row[3] or 2,
+        "sentimental_last_sent": row[4],
+        "sentimental_silenced":  bool(row[5]),
+    }
+
+
+def update_sentimental_last_sent(routine_id: int, date_str: str) -> None:
+    """Καταγράφει πότε στάλθηκε το τελευταίο sentimental μήνυμα."""
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET sentimental_last_sent=? WHERE id=?",
+            (date_str, routine_id)
+        )
+        conn.commit()
+    conn.close()
+
+
+def set_sentimental_silenced(routine_id: int, silenced: bool) -> None:
+    """
+    User override: αν silenced=True, δεν στέλνεται κανένα sentimental μήνυμα
+    για την τρέχουσα muted περίοδο. Επαναφέρεται αυτόματα στο unmute.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET sentimental_silenced=? WHERE id=?",
+            (1 if silenced else 0, routine_id)
+        )
+        conn.commit()
+    conn.close()
+    state = "silenced" if silenced else "unsilenced"
+    print(f"[routine_db]: #{routine_id} sentimental {state}")
+    from memory.event_log import log_event
+    log_event("routines", f"sentimental_{state}", routine_id=routine_id)
 
 
 # ────────────────────────────────────────────────────────────────
