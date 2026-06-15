@@ -67,6 +67,9 @@ def validate_transition(from_state: RoutineState, to_state: RoutineState) -> Non
     Raises RoutineConflictError αν η μετάβαση δεν επιτρέπεται.
     Χρήση: validate_transition(current_state, RoutineState.TRIGGER_PENDING)
     """
+    if from_state == to_state:
+        return
+        
     allowed = VALID_TRANSITIONS.get(from_state, [])
     if to_state not in allowed:
         raise RoutineConflictError(

@@ -69,8 +69,9 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Feature | Description |
 |---|---|
 | Multi-Agent Orchestration | LangGraph Supervisor routes to Chat, Home, Web, Tech, Git, Mail, and Dev agents. |
-| Hybrid Memory | ChromaDB vector store + shared SQLite history + JSON profile/session state for semantic, temporal, and structured memory. |
+| Hybrid Memory | ChromaDB vector store + shared SQLite history + SQLite profile/session state for semantic, temporal, and structured memory. |
 | Routine State Machine | `LEARNED → ACTIVE → TRIGGER_PENDING → CONFIRMED / IGNORED / DISMISSED → DECAYED → ARCHIVED`. |
+| Context-Aware Proactive Routines | The Routine LLM Judge evaluates the user's recent contextual facts (e.g. "I work afternoon this week") before triggering a routine, silently issuing a `[SKIP]` signal to cancel irrelevant notifications without dropping confidence. |
 | Nightly Analytics Engine | LLM batch-analyzes the last 30 days of shared SQLite conversation history to detect recurring patterns automatically. |
 | LLM-Crafted Proactive Messages | Reminder text is generated naturally by the LLM instead of static templates, with recent Telegram/Web history and timestamps injected so messages feel contextual instead of random. |
 | Central Scheduler | `AstakosScheduler` runs a single background scheduler with watchdogs, rate limits, and quiet hours. |

@@ -334,6 +334,17 @@ def semantic_facts_for_query(
         if not fact or fact in seen:
             continue
         seen.add(fact)
+        
+        # Inject the date it was learned, so LLM understands temporal anchors ("this week")
+        metadata = getattr(result, "metadata", {})
+        ts = metadata.get("timestamp")
+        if ts:
+            try:
+                date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+                fact = f"[{date_str}] {fact}"
+            except Exception:
+                pass
+                
         facts.append(fact)
     return facts
 
