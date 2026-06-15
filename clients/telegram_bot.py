@@ -1651,9 +1651,15 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
         "Αν ο Λάζαρος είπε μόλις 'μαγειρεύω', 'παίζουμε', 'φεύγουμε' ή 'πάμε', "
         "μίλα σαν να είναι σε εξέλιξη, όχι σαν να έγινε ήδη.\n"
         "ΑΠΑΓΟΡΕΥΕΤΑΙ: 'δεν είναι η ώρα για', 'υπενθύμιση', 'θυμίζω', το event name κυριολεκτικά.\n"
-        "Παραδείγματα:\n"
-        "- 'Μάστορα, ο μικρός θα σε κυνηγάει αν δεν τον πας για ύπνο σε λίγο 😄'\n"
-        "- 'Ε, καλά, δουλειά δουλειά — αλλά ο Αλέξανδρος σε θέλει για ύπνο!'\n"
+        "ΣΗΜΑΝΤΙΚΟ: ΑΝ ΚΡΙΝΕΙΣ ότι λόγω του ιστορικού η ρουτίνα ΑΚΥΡΩΝΕΤΑΙ (π.χ. το παιδί λείπει κατασκήνωση, ή ο χρήστης είναι σε βάρδια), "
+        "γράψε κανονικά το παρηγορητικό/χιουμοριστικό μήνυμά σου ΑΛΛΑ ξεκίνα το μήνυμα με το tag [CONTEXT_SKIP].
+"
+        "Παραδείγματα:
+"
+        "- 'Μάστορα, ο μικρός θα σε κυνηγάει αν δεν τον πας για ύπνο σε λίγο 😄'
+"
+        "- '[CONTEXT_SKIP] Κανονικά τέτοια ώρα θα πάλευες να κοιμίσεις τον μικρό, αλλά απόψε σε βλέπω να ξεραίνεσαι εσύ!'
+"
         "Μέχρι 1-2 προτάσεις. Ελληνικά."
     )
 
@@ -1710,10 +1716,15 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
         "Σαν να ήρθες αργά και ρωτάς τι έγινε — χωρίς να εξηγείς γιατί έλειπες.\n"
         "Χρησιμοποίησε το πρόσφατο ιστορικό αν ταιριάζει φυσικά. "
         "ΑΠΑΓΟΡΕΥΕΤΑΙ: 'υπενθύμιση', 'reminder', 'έχασα', 'δεν ήμουν', το event name κυριολεκτικά.\n"
-        "Παραδείγματα:\n"
-        "- 'Ε, πήγατε τελικά πάρκο; 🌳'\n"
-        "- 'Κατάφερε ο μικρός να κοιμηθεί; 😴'\n"
-        "- 'Τι κάνατε σήμερα το απόγευμα;'\n"
+        "ΣΗΜΑΝΤΙΚΟ: ΑΝ ΚΡΙΝΕΙΣ ότι λόγω του ιστορικού η ρουτίνα ΑΚΥΡΩΝΕΤΑΙ (π.χ. το παιδί λείπει κατασκήνωση, ή ο χρήστης είναι σε βάρδια), "
+        "γράψε κανονικά το παρηγορητικό/χιουμοριστικό μήνυμά σου ΑΛΛΑ ξεκίνα το μήνυμα με το tag [CONTEXT_SKIP].
+"
+        "Παραδείγματα:
+"
+        "- 'Μάστορα, ο μικρός θα σε κυνηγάει αν δεν τον πας για ύπνο σε λίγο 😄'
+"
+        "- '[CONTEXT_SKIP] Κανονικά τέτοια ώρα θα πάλευες να κοιμίσεις τον μικρό, αλλά απόψε σε βλέπω να ξεραίνεσαι εσύ!'
+"
         "Μέχρι 1-2 προτάσεις. Ελληνικά."
     )
 
@@ -1919,33 +1930,56 @@ def job_check_routines():
             if len(due_routines) > 1:
                 names = ", ".join(f"'{e}'" for _, e, _ in due_routines)
                 msg = _craft_proactive_msg(names, 0.9, count=len(due_routines))
+                
+                is_context_skip = False
+                if "[CONTEXT_SKIP]" in msg:
+                    is_context_skip = True
+                    msg = msg.replace("[CONTEXT_SKIP]", "").strip()
+
                 send_telegram_msg(msg)
                 sent_at = datetime.now()
                 for r_id, event_name, confidence in due_routines:
                     cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
-                    mark_routine_notified(r_id)
-                    log_event("routines", "triggered", routine_id=r_id,
-                              event=event_name, confidence=confidence,
-                              batch=len(due_routines), preview=msg[:160])
-                    pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
-                    save_pending_confirmation(r_id, event_name, sent_at)
-                    bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel="telegram")
+                    if is_context_skip:
+                        log_event("routines", "context_skip", routine_id=r_id, event=event_name, batch=True, preview=msg[:160])
+                        bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
+                    else:
+                        mark_routine_notified(r_id)
+                        log_event("routines", "triggered", routine_id=r_id,
+                                  event=event_name, confidence=confidence,
+                                  batch=len(due_routines), preview=msg[:160])
+                        pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
+                        save_pending_confirmation(r_id, event_name, sent_at)
+                        bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel="telegram")
                 conn.commit()
             else:
                 # Μία ρουτίνα → εξατομικευμένο μήνυμα
                 r_id, event_name, confidence = due_routines[0]
                 msg = _craft_proactive_msg(event_name, confidence)
+                
+                is_context_skip = False
+                if "[CONTEXT_SKIP]" in msg:
+                    is_context_skip = True
+                    msg = msg.replace("[CONTEXT_SKIP]", "").strip()
+
                 cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                 conn.commit()
-                mark_routine_notified(r_id)
+                
                 send_telegram_msg(msg)
-                log_event("routines", "triggered", routine_id=r_id,
-                          event=event_name, confidence=confidence,
-                          preview=msg[:160])
-                sent_at = datetime.now()
-                pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
-                save_pending_confirmation(r_id, event_name, sent_at)
-                bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=False, channel="telegram")
+                
+                if is_context_skip:
+                    log_event("routines", "context_skip", routine_id=r_id, event=event_name, preview=msg[:160])
+                    # DO NOT mark as pending, just keep it active.
+                    bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
+                else:
+                    mark_routine_notified(r_id)
+                    log_event("routines", "triggered", routine_id=r_id,
+                              event=event_name, confidence=confidence,
+                              preview=msg[:160])
+                    sent_at = datetime.now()
+                    pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
+                    save_pending_confirmation(r_id, event_name, sent_at)
+                    bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=False, channel="telegram")
 
             conn.close()
     except Exception as e:
