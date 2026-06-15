@@ -88,7 +88,7 @@ def load_last_session_hint(channel: str = "web") -> str:
         conn = sqlite3.connect(STATE_DB)
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT date, pending, next_session_hint 
+            SELECT session_date, pending, next_session_hint 
             FROM sessions 
             ORDER BY id DESC LIMIT 1
         ''')
