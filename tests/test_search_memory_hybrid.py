@@ -78,6 +78,7 @@ def test_search_memory_can_return_sqlite_when_chroma_empty(monkeypatch):
     )
     monkeypatch.setattr(system, "vector_lock", _Lock())
     monkeypatch.setattr(system, "vector_store", _VectorStore([]))
+    system._lexical_cache.clear()
 
     result = system.search_memory.func("πάρκο Σοφία")
 

@@ -124,14 +124,24 @@ def memory_age_days(metadata: dict | None, *, now: datetime | None = None) -> in
 
 
 def memory_has_date(text: str) -> bool:
-    low = str(text).lower()
+    import re
+    text_str = str(text)
+    low = text_str.lower()
     if "στις" in low:
         return True
-    run = 0
-    for ch in str(text):
-        run = run + 1 if ch.isdigit() else 0
-        if run >= 4:
-            return True
+    
+    # Ψάχνουμε για έτη π.χ. 2024, 1998
+    if re.search(r"\b(19|20)\d{2}\b", text_str):
+        return True
+        
+    # Ψάχνουμε για ημερομηνίες π.χ. 12/05, 12/05/2024, 12-05
+    if re.search(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", text_str):
+        return True
+        
+    # Λέξεις κλειδιά
+    if any(word in low for word in ["σήμερα", "αυριο", "αύριο", "χθες", "χτες", "φετος", "φέτος", "περσι", "πέρυσι"]):
+        return True
+        
     return False
 
 
@@ -299,7 +309,7 @@ class AstakosMemoryManager:
         return True
 
     def _save_fact(self, fact: str, category: str, agent_name: str, photo_path: str = None, source: str = "unknown", reason: str = "agent_inferred", confidence: float = 0.7):
-        from config import PROFILE_FILE
+        from config import PROFILE_DB
 
         # ── Threshold ανά τύπο fact ──────────────────────────────
         if "[LESSON]" in fact:
@@ -479,55 +489,45 @@ class AstakosMemoryManager:
         _audit_log("add", category=category, fact=str(fact)[:100],
                    importance=_importance, confidence=confidence, source=source)
 
-# 4. Αποθήκευση JSON Profile — με έξυπνο OVERWRITE
+# 4. Αποθήκευση DB Profile — με έξυπνο OVERWRITE
         if category != "photos":
-            db = {"general": [], "family": [], "projects": [], "work": [], "home": [], "lesson": [], "photos": []}
-            if os.path.exists(PROFILE_FILE):
-                with open(PROFILE_FILE, "r", encoding="utf-8") as f:
-                    try:
-                        db = json.load(f)
-                    except:
-                        pass
-
-            if category not in db:
-                db[category] = []
-
-            new_entry = {"fact": fact, "photo_path": photo_path, "date": datetime.now().strftime("%Y-%m-%d")} if photo_path else fact
-
-            # [MASTRO-FIX]: ΕΝΟΠΟΙΗΜΕΝΟ overwrite — όχι δεύτερο, ανεξάρτητο
-            # cosine-similarity πέρασμα (που μπορούσε να καταλήξει σε ΑΝΤΙΘΕΤΗ
-            # απόφαση από τη Chroma — π.χ. Chroma "κράτα την πλούσια παλιά" ενώ
-            # JSON Profile "αντικατέστησε", οδηγώντας τα δύο stores σε διάσταση).
-            # Αν το βήμα 1 αποφάσισε overwrite, ξέρουμε ΑΚΡΙΒΩΣ ποια παλιά εγγραφή
-            # να αντικαταστήσουμε (exact text match — Chroma & JSON γράφονται πάντα
-            # με το ίδιο fact string). Αλλιώς, απλώς προσθέτουμε (ίδια συμπεριφορά
-            # με τη Chroma για γενικά facts).
-            target_idx = -1
-            if replace_old_fact_text is not None:
-                for i, existing in enumerate(db[category]):
-                    existing_text = existing if isinstance(existing, str) else existing.get("fact", "")
-                    if existing_text == replace_old_fact_text:
-                        target_idx = i
-                        break
-
-            if target_idx != -1:
-                print(f"\033[94m[JSON Profile]: Αντικατάσταση παλιάς εγγραφής (ίδια απόφαση με Chroma)\033[0m")
-                db[category][target_idx] = new_entry
-            else:
+            import sqlite3
+            conn = None
+            try:
+                conn = sqlite3.connect(PROFILE_DB)
+                c = conn.cursor()
+                c.execute('''
+                    CREATE TABLE IF NOT EXISTS profile_facts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        category TEXT NOT NULL,
+                        fact TEXT NOT NULL,
+                        photo_path TEXT,
+                        date TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                date_str = datetime.now().strftime("%Y-%m-%d")
+                
                 if replace_old_fact_text is not None:
-                    # Η Chroma αποφάσισε overwrite αλλά δεν βρέθηκε αντίστοιχη
-                    # εγγραφή στο JSON Profile (προϋπάρχουσα απόκλιση) — προσθήκη
-                    # αντί για σιωπηλή απώλεια του νέου fact.
-                    print(f"\033[93m[JSON Profile]: Δεν βρέθηκε αντίστοιχη παλιά εγγραφή για αντικατάσταση — προσθήκη νέας.\033[0m")
+                    c.execute("SELECT id FROM profile_facts WHERE category=? AND fact=?", (category, replace_old_fact_text))
+                    row = c.fetchone()
+                    if row:
+                        print(f"\033[94m[DB Profile]: Αντικατάσταση παλιάς εγγραφής (ίδια απόφαση με Chroma)\033[0m")
+                        c.execute("UPDATE profile_facts SET fact=?, photo_path=?, date=?, created_at=CURRENT_TIMESTAMP WHERE id=?", (fact, photo_path, date_str, row[0]))
+                    else:
+                        print(f"\033[93m[DB Profile]: Δεν βρέθηκε αντίστοιχη παλιά εγγραφή για αντικατάσταση — προσθήκη νέας.\033[0m")
+                        c.execute("INSERT INTO profile_facts (category, fact, photo_path, date) VALUES (?, ?, ?, ?)", (category, fact, photo_path, date_str))
                 else:
-                    print(f"\033[92m[JSON Profile]: Νέα εγγραφή προστέθηκε.\033[0m")
-                db[category].append(new_entry)
-
-            # Κρατάμε αυστηρά μέχρι 50 ανά category
-            db[category] = db[category][-50:]
-
-            with open(PROFILE_FILE, "w", encoding="utf-8") as f:
-                json.dump(db, f, ensure_ascii=False, indent=4)
+                    print(f"\033[92m[DB Profile]: Νέα εγγραφή προστέθηκε.\033[0m")
+                    c.execute("INSERT INTO profile_facts (category, fact, photo_path, date) VALUES (?, ?, ?, ?)", (category, fact, photo_path, date_str))
+                
+                conn.commit()
+            except Exception as db_err:
+                print(f"\033[91m[DB Profile Error]: {db_err}\033[0m")
+            finally:
+                if conn:
+                    conn.close()
 
         return True
 

@@ -101,14 +101,31 @@ def test_relay_local_payload_accepts_known_contact(monkeypatch, tmp_path):
     draft_file = tmp_path / "messenger_draft.json"
     monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
     monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
-    (tmp_path / "astakos_profile.json").write_text(
-        json.dumps({"contacts": {"sofia": "123"}}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    profile_db = tmp_path / "astakos_profile.db"
+    monkeypatch.setattr(config, "PROFILE_DB", str(profile_db))
+    import sqlite3
+    conn = sqlite3.connect(str(profile_db))
+    try:
+        c = conn.cursor()
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS profile_facts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                fact TEXT NOT NULL,
+                photo_path TEXT,
+                date TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute("INSERT INTO profile_facts (category, fact) VALUES ('contacts', 'sofia: 123')")
+        conn.commit()
+    finally:
+        conn.close()
 
     result = relay_local_payload.func("Sofia", "hello")
 
     assert "DRAFT" in result
+    import json
     data = json.loads(draft_file.read_text(encoding="utf-8"))
     assert data["target_name"] == "Sofia"
     assert data["message"] == "hello"

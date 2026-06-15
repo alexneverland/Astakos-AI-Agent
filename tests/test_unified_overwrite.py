@@ -42,7 +42,7 @@ def _patched_save_fact(profile_path, decision, same_cat_result):
     return patch.multiple(
         "memory.vector_store",
         decide_memory_overwrite=MagicMock(return_value=decision),
-    ), patch("config.PROFILE_FILE", new=profile_path)
+    ), patch("config.PROFILE_DB", new=profile_path)
 
 
 def _run_save_fact(tmp_path, fact, category, decision, same_cat_result,
@@ -52,10 +52,29 @@ def _run_save_fact(tmp_path, fact, category, decision, same_cat_result,
     search, ελεγχόμενη decide_memory_overwrite και πραγματικό (προσωρινό) JSON
     profile αρχείο. Επιστρέφει (result, mocks-dict, profile-db-μετά).
     """
-    profile_path = str(tmp_path / "astakos_profile.json")
+    profile_path = str(tmp_path / "astakos_profile.db")
     if profile_seed is not None:
-        with open(profile_path, "w", encoding="utf-8") as f:
-            json.dump(profile_seed, f, ensure_ascii=False, indent=4)
+        import sqlite3
+        conn = sqlite3.connect(profile_path)
+        try:
+            c = conn.cursor()
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS profile_facts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL,
+                    fact TEXT NOT NULL,
+                    photo_path TEXT,
+                    date TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            for cat, facts in profile_seed.items():
+                for f in facts:
+                    fact_str = f.get("fact", f) if isinstance(f, dict) else str(f)
+                    c.execute("INSERT INTO profile_facts (category, fact) VALUES (?, ?)", (cat, fact_str))
+            conn.commit()
+        finally:
+            conn.close()
 
     m = AstakosMemoryManager()
 
@@ -68,7 +87,7 @@ def _run_save_fact(tmp_path, fact, category, decision, same_cat_result,
          patch.object(type(__import__("memory.vector_store", fromlist=["vector_store"]).vector_store),
                       "_collection", new_callable=lambda: mock_collection), \
          patch("memory.vector_store.vector_store") as mock_vs, \
-         patch("config.PROFILE_FILE", profile_path):
+         patch("config.PROFILE_DB", profile_path):
 
         mock_embeddings.embed_query.return_value = [0.1, 0.2, 0.3]
         mock_vs._collection = mock_collection
@@ -78,12 +97,24 @@ def _run_save_fact(tmp_path, fact, category, decision, same_cat_result,
         result = m._save_fact(fact=fact, category=category, agent_name="Chat_Agent",
                               source="user_stated", reason="user_stated")
 
-    db_after = None
+    db_out = {}
     if os.path.exists(profile_path):
-        with open(profile_path, "r", encoding="utf-8") as f:
-            db_after = json.load(f)
-
-    return result, mock_collection, mock_vs, db_after
+        import sqlite3
+        conn = sqlite3.connect(profile_path)
+        try:
+            c = conn.cursor()
+            # Verify table exists before querying
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='profile_facts'")
+            if c.fetchone():
+                c.execute("SELECT category, fact FROM profile_facts")
+                for cat, fact_str in c.fetchall():
+                    if cat not in db_out:
+                        db_out[cat] = []
+                    db_out[cat].append(fact_str)
+        finally:
+            conn.close()
+        
+    return result, mock_collection, mock_vs, db_out
 
 
 # ──────────────────────────────────────────────────────────────────

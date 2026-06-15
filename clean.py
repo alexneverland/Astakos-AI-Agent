@@ -60,7 +60,7 @@ except ImportError:
     CAPABILITIES_FILE   = os.path.join(PROJECT_ROOT, "astakos_capabilities.json")
     SESSIONS_FILE       = os.path.join(PROJECT_ROOT, "astakos_sessions.json")
     WORKING_MEMORY_FILE = os.path.join(PROJECT_ROOT, "astakos_working_memory.json")
-    PROFILE_FILE        = os.path.join(PROJECT_ROOT, "astakos_profile.json")
+    from config import PROFILE_DB
     CONVERSATION_DB_FILE = os.path.join(PROJECT_ROOT, "astakos_conversation_history.db")
     MEMORY_AUDIT_DIR    = os.path.join(PROJECT_ROOT, "logs", "memory_audit")
 
@@ -429,41 +429,47 @@ PROFILE_MIN_ENTRIES_FOR_LLM = 5
 
 
 def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
-    header("Σύμπτυξη astakos_profile.json (LLM consolidation ανά category)")
-    data = safe_load_json(PROFILE_FILE)
-    if data is None:
+    import sqlite3
+    from config import PROFILE_DB
+    header("Σύμπτυξη astakos_profile.db (LLM consolidation ανά category)")
+    
+    if not os.path.exists(PROFILE_DB):
+        log("⚠️ Δεν βρέθηκε το PROFILE_DB.", "warn")
         return False
-    if not isinstance(data, dict):
-        log("⚠️  Άκυρο schema — περίμενα dict {category: [items]}", "warn")
-        return False
+        
+    conn = sqlite3.connect(PROFILE_DB)
+    c = conn.cursor()
+    c.execute("SELECT id, category, fact FROM profile_facts")
+    rows = c.fetchall()
+    
+    data = {}
+    row_mapping = {}
+    for r_id, category, fact in rows:
+        if category not in data:
+            data[category] = []
+        data[category].append(fact)
+        if category not in row_mapping:
+            row_mapping[category] = []
+        row_mapping[category].append(r_id)
 
-    total_before = sum(len(v) if isinstance(v, list) else 1 for v in data.values())
+    total_before = len(rows)
     log(f"📊 Πριν: {total_before} entries σε {len(data)} categories", "info")
 
     llm = _load_llm()
     if llm is None:
         log("❌ Δεν φόρτωσε το LLM — παρακάμπτεται.", "err")
+        conn.close()
         return False
 
     new_data = {}
     any_change = False
 
     for category, items in data.items():
-        # Protected categories — pass-through χωρίς αλλαγή
         if category in PROFILE_PROTECTED_CATEGORIES:
-            new_data[category] = items
-            log(f"🔒 {category}: protected ({len(items) if isinstance(items, list) else 1} entries) — αμετάβλητο", "dim")
+            log(f"🔒 {category}: protected ({len(items)}) — αμετάβλητο", "dim")
             continue
 
-        # Non-list categories — pass-through
-        if not isinstance(items, list):
-            new_data[category] = items
-            log(f"⏭️  {category}: δεν είναι λίστα — αμετάβλητο", "dim")
-            continue
-
-        # Πολύ λίγα entries — δεν αξίζει LLM
         if len(items) < PROFILE_MIN_ENTRIES_FOR_LLM:
-            new_data[category] = items
             log(f"⏭️  {category}: {len(items)} entries (< {PROFILE_MIN_ENTRIES_FOR_LLM}) — αμετάβλητο", "dim")
             continue
 
@@ -493,29 +499,23 @@ def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
             new_items = json.loads(raw)
         except Exception as e:
             log(f"   ⚠️  Σφάλμα LLM: {e} — κρατάω τα αρχικά", "warn")
-            new_data[category] = items
             continue
 
-        # Validation
         if not isinstance(new_items, list) or not all(isinstance(t, str) for t in new_items):
             log(f"   ⚠️  Άκυρο format από LLM — κρατάω τα αρχικά", "warn")
-            new_data[category] = items
             continue
 
         saved = len(items) - len(new_items)
         if saved > 0:
             any_change = True
             log(f"   📊 {len(items)} → {len(new_items)} (−{saved})", "ok")
+            new_data[category] = new_items
         else:
             log(f"   📊 {len(items)} → {len(new_items)} (καμία οικονομία)", "dim")
 
-        new_data[category] = new_items
-
-    total_after = sum(len(v) if isinstance(v, list) else 1 for v in new_data.values())
-    log(f"\n📊 Σύνολο: {total_before} → {total_after} (−{total_before - total_after})", "ok")
-
     if not any_change:
         log("ℹ️  Καμία ουσιαστική αλλαγή — δεν χρειάζεται γράψιμο.", "dim")
+        conn.close()
         return True
 
     if dry_run:
@@ -524,10 +524,29 @@ def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
         if len(preview) > 3000:
             preview = preview[:3000] + "\n... [truncated]"
         print(preview)
+        conn.close()
         return True
 
-    backup_file(PROFILE_FILE, enabled=backup)
-    return safe_save_json(PROFILE_FILE, new_data, dry_run=False)
+    if backup:
+        import shutil
+        backup_file = PROFILE_DB + ".backup"
+        shutil.copy2(PROFILE_DB, backup_file)
+        log(f"💾 Backup DB στο {backup_file}", "info")
+
+    try:
+        for category, new_items in new_data.items():
+            c.execute("DELETE FROM profile_facts WHERE category=?", (category,))
+            import datetime
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d")
+            for fact in new_items:
+                c.execute("INSERT INTO profile_facts (category, fact, date) VALUES (?, ?, ?)", (category, fact, now_str))
+
+        conn.commit()
+    finally:
+        conn.close()
+    
+    log(f"\n📊 Συμπτύχθηκαν κατηγορίες και γράφτηκαν στη βάση.", "ok")
+    return True
 
 
 # ────────────────────────────────────────────────────────────────

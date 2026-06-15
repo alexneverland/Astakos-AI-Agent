@@ -57,15 +57,25 @@ _AMBIGUOUS_MESSENGER_TARGETS = {
 
 def _load_messenger_contacts() -> dict[str, str]:
     try:
-        from config import BASE_DIR
-        profile_path = os.path.join(BASE_DIR, "astakos_profile.json")
-        if not os.path.exists(profile_path):
+        from config import PROFILE_DB
+        import sqlite3
+        if not os.path.exists(PROFILE_DB):
             return {}
-        with open(profile_path, "r", encoding="utf-8") as f:
-            profile = json.load(f)
-        contacts = profile.get("contacts", {})
-        if not isinstance(contacts, dict):
-            return {}
+        conn = sqlite3.connect(PROFILE_DB)
+        try:
+            c = conn.cursor()
+            c.execute("SELECT fact FROM profile_facts WHERE category='contacts'")
+            rows = c.fetchall()
+        finally:
+            conn.close()
+        
+        contacts = {}
+        for row in rows:
+            fact_str = row[0]
+            if ":" in fact_str:
+                k, v = fact_str.split(":", 1)
+                contacts[k.strip()] = v.strip()
+                
         return {remove_accents(str(k).strip()): str(v) for k, v in contacts.items()}
     except Exception:
         return {}
@@ -446,13 +456,21 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
         print(f"\033[93m[Messenger]: Βρέθηκε draft για {target_name}. Εκτέλεση...\033[0m")
 
     # 2. [MASTRO-ALIAS]: Μετατροπή Ονόματος σε ID
-    profile_path = os.path.join(base_dir, "..", "astakos_profile.json")
+    from config import PROFILE_DB
+    import sqlite3
     aliases = {}
-    if os.path.exists(profile_path):
+    if os.path.exists(PROFILE_DB):
         try:
-            with open(profile_path, 'r', encoding='utf-8') as f:
-                profile_data = json.load(f)
-                aliases = profile_data.get("contacts", {})
+            conn = sqlite3.connect(PROFILE_DB)
+            try:
+                c = conn.cursor()
+                c.execute("SELECT fact FROM profile_facts WHERE category='contacts'")
+                for row in c.fetchall():
+                    if ":" in row[0]:
+                        k, v = row[0].split(":", 1)
+                        aliases[k.strip()] = v.strip()
+            finally:
+                conn.close()
         except Exception as e:
             print(f"⚠️ [Messenger Error]: {e}")
 

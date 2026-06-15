@@ -106,7 +106,8 @@ def clean_orphan_tool_calls(history: list, k: int = 20) -> list:
             continue
 
         # Έλεγχος 1: tool_calls attribute (παραδοσιακός τρόπος)
-        has_tool_calls = bool(getattr(msg, "tool_calls", None))
+        tool_calls = getattr(msg, "tool_calls", [])
+        expected_ids = set(tc.get("id") for tc in tool_calls if isinstance(tc, dict) and tc.get("id"))
 
         # Έλεγχος 2: function_call/tool_use parts μέσα στο content list (Gemini 3.x)
         has_inline_fc = False
@@ -117,12 +118,23 @@ def clean_orphan_tool_calls(history: list, k: int = 20) -> list:
                     has_inline_fc = True
                     break
 
-        if has_tool_calls or has_inline_fc:
-            next_is_tool = (
-                i + 1 < len(history) and
-                getattr(history[i + 1], "type", "") == "tool"
-            )
-            if not next_is_tool:
+        if expected_ids or has_inline_fc:
+            found_ids = set()
+            next_idx = i + 1
+            while next_idx < len(history):
+                nxt_msg = history[next_idx]
+                if getattr(nxt_msg, "type", "") == "tool":
+                    tc_id = getattr(nxt_msg, "tool_call_id", None)
+                    if tc_id:
+                        found_ids.add(tc_id)
+                    next_idx += 1
+                else:
+                    break
+            
+            missing_ids = expected_ids - found_ids
+            next_is_tool = (i + 1 < len(history) and getattr(history[i + 1], "type", "") == "tool")
+            
+            if missing_ids or (has_inline_fc and not next_is_tool):
                 # Ορφανή κλήση εργαλείου — κρατάμε μόνο το text content αν υπάρχει
                 text_only = clean_message(raw_content) if raw_content else ""
                 if text_only:
@@ -591,7 +603,15 @@ def mail_agent_node(state):
             for msg in history[last_human_idx:]
             if getattr(msg, 'type', '') == 'ai'
         )
-        if _search_hits and not _read_hits and not _read_dispatched:
+        # Έλεγχος πρόθεσης χρήστη
+        user_q = next(
+            (clean_message(m.content) for m in reversed(history)
+             if getattr(m, "type", "") == "human"),
+            ""
+        )
+        user_wants_read = any(kw in user_q.lower() for kw in ["διάβασ", "διαβασ", "άνοιξ", "ανοιξ", "τι λέει", "τι λεει", "περισσότερα", "δες το", "λεπτομέρεια"])
+
+        if _search_hits and not _read_hits and not _read_dispatched and user_wants_read:
             _ar_match = _re_ar.search(r'ID: ([a-f0-9]{16})', _search_hits[0])
             if _ar_match:
                 _ar_eid = _ar_match.group(1)
