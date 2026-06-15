@@ -513,8 +513,29 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
                     print("\033[93m[Messenger]: Συνεχίζω με αποστολή μόνο κειμένου.\033[0m")
 
             # 4b. [SEND TEXT]: Πληκτρολόγηση + Enter
-            chat_box = page.locator('div[role="textbox"]').last
-            chat_box.wait_for(state="visible", timeout=10000)
+            # Περιμένουμε networkidle για να φορτώσει το SPA πριν ψάξουμε το textbox
+            try:
+                page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:
+                pass  # αν κολλήσει, προχωράμε
+            # Fallback selectors: Messenger αλλάζει DOM — δοκιμάζουμε σειρά
+            _tb_selectors = [
+                'div[role="textbox"]',
+                'div[contenteditable="true"]',
+                'p[data-lexical-editor="true"]',
+            ]
+            chat_box = None
+            for _sel in _tb_selectors:
+                try:
+                    _loc = page.locator(_sel).last
+                    _loc.wait_for(state="visible", timeout=8000)
+                    chat_box = _loc
+                    print(f"[Messenger]: textbox βρέθηκε με selector: {_sel}")
+                    break
+                except Exception:
+                    continue
+            if chat_box is None:
+                raise Exception("Δεν βρέθηκε textbox με κανένα selector")
             chat_box.click()
             if message:
                 chat_box.fill(message)
