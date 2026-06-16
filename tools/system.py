@@ -751,6 +751,84 @@ def get_routines(day_of_week: str) -> str:
     except Exception as e:
         return f"❌ Σφάλμα ανάκτησης ρουτινών: {e}"
 @tool
+def control_routine_notifications(event_name: str, action: str, until_date: str = "") -> str:
+    """
+    [OVERRIDE]: Χειροκίνητος έλεγχος των proactive υπενθυμίσεων μιας ρουτίνας, ΜΟΝΟ όταν
+    ο Λάζαρος το ζητήσει ρητά μέσα στην κουβέντα (όχι αυτόματα από εσένα ή από τον
+    προγραμματισμένο job — αυτό είναι ξεχωριστό κανάλι, ο χρήστης παίρνει τον έλεγχο).
+
+    ΠΟΤΕ ΝΑ ΤΟ ΚΑΛΕΣΕΙΣ (ενδεικτικά, ΓΕΝΙΚΕΥΣΕ σε κάθε ρουτίνα, όχι μόνο αυτά τα παραδείγματα):
+    - "Δεν χρειάζεται να μου στείλεις για το πάρκο μέχρι να γυρίσει ο Αλέξανδρος στις 26/6"
+      → action="mute", until_date="2026-06-26"
+    - "Άσε ήσυχο το ξυπνητήρι όλη την εβδομάδα, είμαι απόγευμα στη δουλειά"
+      → action="mute", until_date=<υπολόγισέ το ΕΣΥ από τα συμφραζόμενα, π.χ. επόμενη Κυριακή>
+    - "Ξανά ενεργοποίησε τις ειδοποιήσεις για το πάρκο" ή "γύρισε ο Αλέξανδρος"
+      → action="unmute"
+    - "Μην στείλεις ΤΙΠΟΤΑ, ούτε ζεστό μήνυμα, για το πάρκο μέχρι να γυρίσει"
+      → action="silence_emotional"
+    - "Μπορείς να στέλνεις πάλι κάποιο μήνυμα για το πάρκο όσο λείπει"
+      → action="allow_emotional"
+
+    ΟΡΙΣΜΑΤΑ:
+    - event_name: το όνομα της ρουτίνας όπως το είπε ο χρήστης (π.χ. "πάρκο", "ξυπνητήρι
+      δουλειάς") — ΔΕΝ χρειάζεται να είναι ακριβές, γίνεται fuzzy match στη μνήμη.
+    - action: ένα από "mute", "unmute", "silence_emotional", "allow_emotional".
+    - until_date: ΜΟΝΟ για action="mute". Μορφή YYYY-MM-DD. Υπολόγισέ την ΕΣΥ από τα
+      συμφραζόμενα (σήμερα + Χ μέρες, "αυτή την εβδομάδα" κλπ) — ΜΗΝ ζητήσεις από τον
+      χρήστη να την πει σε ISO format ρητά.
+    """
+    from datetime import datetime
+    from memory.routine_db import (
+        find_routine_by_name, set_routine_muted_until, clear_routine_muted_until,
+        set_sentimental_silenced, get_sentimental_info,
+    )
+
+    VALID_ACTIONS = {"mute", "unmute", "silence_emotional", "allow_emotional"}
+    if action not in VALID_ACTIONS:
+        return f"❌ Μη έγκυρο action: '{action}'. Επιτρεπτά: {', '.join(sorted(VALID_ACTIONS))}."
+
+    try:
+        routine = find_routine_by_name(event_name)
+    except Exception as e:
+        return f"❌ Σφάλμα αναζήτησης ρουτίνας: {e}"
+
+    if not routine:
+        return f"❌ Δεν βρήκα καταγεγραμμένη ρουτίνα που να ταιριάζει με '{event_name}'."
+
+    r_id  = routine["id"]
+    label = routine["event"]
+
+    try:
+        if action == "mute":
+            until_date = (until_date or "").strip()
+            if not until_date:
+                return "❌ Χρειάζομαι until_date (YYYY-MM-DD) — υπολόγισέ το από τα συμφραζόμενα της κουβέντας."
+            try:
+                datetime.strptime(until_date, "%Y-%m-%d")
+            except ValueError:
+                return f"❌ Λάθος format ημερομηνίας: '{until_date}'. Χρησιμοποίησε YYYY-MM-DD."
+            set_routine_muted_until(r_id, until_date)
+            return f"🔇 Η ρουτίνα '{label}' σιγάστηκε μέχρι {until_date}."
+
+        if action == "unmute":
+            clear_routine_muted_until(r_id)
+            return f"🔔 Η ρουτίνα '{label}' ξαναενεργοποιήθηκε κανονικά."
+
+        if action == "silence_emotional":
+            info = get_sentimental_info(r_id)
+            if not info["muted_until"]:
+                return f"⚠️ Η ρουτίνα '{label}' δεν είναι σε σίγαση αυτή τη στιγμή — δεν υπάρχει κάτι να σιγάσω."
+            set_sentimental_silenced(r_id, True)
+            return f"🤫 Εντάξει, δεν θα στείλω τίποτα (ούτε συναισθηματικό μήνυμα) για '{label}' μέχρι να λήξει η σίγαση."
+
+        if action == "allow_emotional":
+            set_sentimental_silenced(r_id, False)
+            return f"💬 Εντάξει, θα ξαναστέλνω περιστασιακά ένα ζεστό μήνυμα για '{label}' όσο διαρκεί η σίγαση."
+    except Exception as e:
+        return f"❌ Σφάλμα ενημέρωσης ρουτίνας: {e}"
+
+    return "❌ Άγνωστο σφάλμα."
+@tool
 def set_reminder(task: str, time_str: str) -> str:
     """Δημιουργεί τοπική υπενθύμιση (format time_str: 'YYYY-MM-DD HH:MM')."""
     from datetime import datetime
@@ -2761,7 +2839,7 @@ all_tools = [
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
-    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, browse_url,
+    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, control_routine_notifications, browse_url,
     duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, tool_stats, system_doctor, memory_review,
     repo_mapper,
     scan_receipt,

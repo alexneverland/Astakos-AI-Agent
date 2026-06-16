@@ -713,6 +713,65 @@ def set_sentimental_silenced(routine_id: int, silenced: bool) -> None:
     log_event("routines", f"sentimental_{state}", routine_id=routine_id)
 
 
+def find_routine_by_name(event_name: str, min_similarity: float = 0.55) -> dict | None:
+    """
+    Βρίσκει την πιο πιθανή ρουτίνα (state='active' ή 'learned') από ένα όνομα
+    που είπε ο χρήστης σε φυσική κουβέντα (όχι απαραίτητα το exact canonical event_name).
+
+    3-stage match, ίδια λογική με το upsert_routine αλλά ΧΩΡΙΣ φιλτράρισμα day/time
+    (ψάχνει σε ΟΛΕΣ τις ρουτίνες):
+      Stage 1 — exact normalized match
+      Stage 2 — difflib fuzzy ratio (>= min_similarity)
+      Stage 3 — embedding cosine similarity (>= 0.80) αν το difflib αποτύχει
+
+    Επιστρέφει dict με id/day/time/event/type/state/confidence ή None αν δεν βρεθεί.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state
+           FROM routines WHERE state IN ('active', 'learned')"""
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return None
+
+    def _row_to_dict(r) -> dict:
+        return {
+            "id": r[0], "day": r[1], "time": r[2], "event": r[3],
+            "type": r[4], "confidence": round(r[5], 2), "state": r[6],
+        }
+
+    target = normalize_event(event_name)
+
+    # ── Stage 1: exact normalized match ──────────────────────────
+    for r in rows:
+        if normalize_event(r[3]) == target:
+            return _row_to_dict(r)
+
+    # ── Stage 2: difflib fuzzy ────────────────────────────────────
+    best_row, best_score = None, 0.0
+    for r in rows:
+        score = event_similarity(event_name, r[3])
+        if score > best_score:
+            best_row, best_score = r, score
+    if best_row is not None and best_score >= min_similarity:
+        return _row_to_dict(best_row)
+
+    # ── Stage 3: embedding cosine similarity ──────────────────────
+    best_row, best_score = None, 0.0
+    for r in rows:
+        sim = _embedding_similarity(event_name, r[3])
+        if sim > best_score:
+            best_row, best_score = r, sim
+    if best_row is not None and best_score >= 0.80:
+        return _row_to_dict(best_row)
+
+    return None
+
+
 # ────────────────────────────────────────────────────────────────
 # PENDING CONFIRMATIONS PERSISTENCE (Recovery After Restart)
 # ────────────────────────────────────────────────────────────────

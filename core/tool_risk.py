@@ -34,6 +34,7 @@ TOOL_RISK: dict[str, str] = {
     "set_local_reminder":       "WARNING",
     "google_tasks_tool":        "WARNING",
     "learn_routine":            "WARNING",
+    "control_routine_notifications": "WARNING",
     "write_code":               "WARNING",
     "write_custom_tool":        "WARNING",
     "update_pending_linkedin_post": "WARNING",
