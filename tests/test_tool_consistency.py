@@ -36,7 +36,7 @@ CAPABILITY_ALIASES = {
     "photos": {"retrieve_photo"},
     "project_tools": {"list_project_files", "read_project_file", "edit_project_file", "grep_project_files"},
     "recipe": {"recipe_expert", "log_meal"},
-    "routines": {"learn_routine", "get_routines"},
+    "routines": {"learn_routine", "get_routines", "control_routine_notifications"},
     "shopping_list": {"manage_list"},
     "spotify": {"control_spotify"},
     "story_maker": set(),  # Telegram /story command flow.
