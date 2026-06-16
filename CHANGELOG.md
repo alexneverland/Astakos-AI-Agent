@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [v1.1.1] — 2026-06-16
+
+### 🆕 Features
+
+- **`list_recent_files`** (`tools/project_tools.py`) — bounded `os.walk` scan that returns the most recently modified files in a folder (default: whole `astakos_v2` repo, no `grant_project_access` needed for internal scans). Ignores `venv`, `.git`, `__pycache__`, `node_modules`, and other noisy directories. Risk: SAFE. Replaces ad-hoc PowerShell `Get-ChildItem -Recurse` / `dir /s` calls through `run_terminal_command`, which scanned noisy directories unbounded and routinely hit the 30s subprocess timeout. Wired into both Dev_Agent and Git_Agent prompts: use this for "τι άλλαξα" / untracked-file questions, and fall back to `git log`/`git show` only for committed history.
+
+### 🔧 Notable Fixes
+
+- Fixed an invalid escape sequence (`\m`) in `grep_project_files`'s docstring in `tools/project_tools.py` that triggered a `SyntaxWarning` on import.
+
+---
+
 ## [v1.1.0] — 2026-06-11
 
 This release marks Astakos's transformation from a smart assistant into a **proactive, self-improving AI agent** with long-term memory, nightly self-reflection, multi-step planning, and a robust safety framework.

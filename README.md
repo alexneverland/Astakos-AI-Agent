@@ -81,7 +81,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | File Generator Tools | `generate_excel`, `generate_word_doc`, `generate_pdf`, `generate_csv` — create formatted files from agent-supplied data and save to any path (defaults to Desktop). Risk: SAFE. |
 | File Delivery | When a file is created, the Web UI shows a file card with a **📂 Google Drive** button (upload-on-click + inline preview iframe). Telegram receives the actual file via `sendDocument`. |
 | Google Drive Upload | `tools/gdrive.py` — uploads any local file to Google Drive via ADC, sets public read permissions, and returns a shareable view URL. Used by the Web UI `/upload-to-drive` endpoint. |
-| Project Code Tools | `read_project_file`, `edit_project_file`, `write_project_file`, `grep_project_files`, `list_project_files` — permission-gated code navigation and editing with syntax check and rollback. |
+| Project Code Tools | `read_project_file`, `edit_project_file`, `write_project_file`, `grep_project_files`, `list_project_files`, `list_recent_files` — permission-gated code navigation and editing with syntax check and rollback. |
 | Long-Term Goals | ChromaDB goal tracking injected into prompts, with `/plan` for multi-step execution. |
 | Action Approval Levels | 4-level risk system: **SAFE** (silent), **WARNING** (console log only, no Telegram), **NOTIFY** (execute + Telegram info, no buttons), **CRITICAL** (block + Telegram ✅/❌ approval). Defined in `core/tool_risk.py`; dynamic override per tool in `core/approval.py`. |
 | Approval TTL Cleanup | Pending CRITICAL approvals auto-expire after 60 min via `expire_stale_pending()`; stale entries are marked `expired` and blocked from execution. |
@@ -496,6 +496,7 @@ Shutdown behavior:
 - [x] ChromaDB Graceful Shutdown — both Telegram bot and Web server wait for `vector_lock` before shutting down, preventing mid-write index corruption.
 - [x] ChromaDB HNSW Index Resilience — orphaned vector index IDs (HNSW/SQLite mismatch) are caught with a try/except in `vector_store.py`; the query returns empty results instead of crashing, and the affected category is auto-repaired on next write.
 - [x] Test Suite for Project Tools — `tests/test_project_tools.py` covers 48 cases: permission model (grant/deny/read-only), syntax check, read with line ranges, edit with rollback on syntax error, noop guard, grep, list, and tool risk levels (SAFE/WARNING/CRITICAL). pytest runs cleanly on the FUSE-mounted repo.
+- [x] `list_recent_files` — bounded `os.walk` scan for recently modified files, defaulting to the whole repo with no permission grant needed; ignores `venv`/`.git`/`__pycache__`/`node_modules`; replaces timeout-prone ad-hoc PowerShell recursive scans for "what did I just change" questions. Risk: SAFE.
 
 ### Planned
 
