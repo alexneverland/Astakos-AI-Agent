@@ -1694,7 +1694,7 @@ def _build_proactive_memory_context(event_name: str) -> str:
         recall_query = (
             f"θυμάσαι {event_name}; πρόσφατο context για το αν ισχύει ακόμα η ρουτίνα. "
             "Αλέξανδρος κατασκήνωση λείπει γύρισε πάρκο κοιμήθηκε βάρδια Σοφία "
-            "ήδη έγινε ακυρώθηκε σήμερα αύριο χθες"
+            "ήδη έγινε ακυρώθηκε"
         )
         context = build_memory_context(
             recall_query,
