@@ -72,6 +72,8 @@ last_interaction_time = time.time()
 # Pending routine confirmations: {routine_id: {"event": ..., "sent_at": ...}}
 pending_routine_confirmations = {}
 pending_exec_command = None
+# Pending reflection confirmations (ask-tier, 50-75% confidence): {reflection_id: {full reflection dict}}
+pending_reflection_confirmations = {}
 # Pending photo: αποθηκεύει ανάλυση φωτογραφίας που έφτασε χωρίς caption, για να συνδυαστεί με το επόμενο μήνυμα
 pending_photo_lock = threading.Lock()
 pending_photo      = None   # {analysis, filename, path, timestamp}
@@ -816,6 +818,44 @@ def handle_message(user_text: str, chat_id: str):
                 bus.emit("routine_dismissed", routine_id=rid, event=pending_routine_confirmations[rid].get("event","?"), channel="telegram")
             pending_routine_confirmations.clear()
             clear_pending_confirmations()
+
+    # ── REFLECTION CONFIRMATION LOOP (ask-tier, 50-75% confidence) ──
+    global pending_reflection_confirmations
+    if pending_reflection_confirmations:
+        text_check = _normalize_gr(clean_user_text)
+        text_words = text_check.replace(",", "").replace(".", "").replace("!", "").split()
+        yes_words = [_normalize_gr(w) for w in ["ναι", "yes", "ok", "οκ"]]
+        no_words  = [_normalize_gr(w) for w in ["όχι", "οχι", "no", "cancel", "άκυρο", "ακυρο"]]
+
+        if any(w in text_words for w in yes_words):
+            import sqlite3 as _sqlite3
+            from services.reflection_engine import _apply_action
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+            lines = []
+            for rid, rdata in list(pending_reflection_confirmations.items()):
+                success = _apply_action(rdata)
+                if success:
+                    try:
+                        conn = _sqlite3.connect(db_path)
+                        conn.execute(
+                            "UPDATE reflections SET applied=1, applied_at=? WHERE id=?",
+                            (datetime.now().isoformat(timespec="seconds"), rid)
+                        )
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        print(f"⚠️ [Reflection Confirm] DB update failed: {e}")
+                    lines.append(f"✅ Εφαρμόστηκε: {rdata.get('observation','')[:80]}")
+                else:
+                    lines.append(f"⚠️ Αποτυχία εφαρμογής: {rdata.get('observation','')[:80]}")
+            pending_reflection_confirmations.clear()
+            send_telegram_msg("\n".join(lines) if lines else "✅ Έγινε.")
+            return
+        elif any(w in text_words for w in no_words):
+            pending_reflection_confirmations.clear()
+            send_telegram_msg("❌ Ακυρώθηκε, δεν εφαρμόστηκε.")
+            return
+
     # ── SAFE EXECUTOR CONFIRMATION LOOP ──────────────────────────
     global pending_exec_command
     if pending_exec_command:
@@ -2288,7 +2328,10 @@ def job_analytics_engine():
     # Reflection engine — τρέχει αμέσως μετά τα analytics
     try:
         from services.reflection_engine import run_reflection
+        global pending_reflection_confirmations
         r_stats = run_reflection()
+        for item in r_stats.get("pending_items", []):
+            pending_reflection_confirmations[item["id"]] = item
         print(f"[Reflection Job]: applied={r_stats.get('applied',0)}, pending={r_stats.get('pending',0)}")
     except Exception as re:
         print(f"[Reflection Job Error]: {re}")

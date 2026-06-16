@@ -28,17 +28,31 @@ def _ensure_table():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS reflections (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at  TEXT NOT NULL,
-            source      TEXT,          -- 'routine', 'reminder', 'tool'
-            observation TEXT NOT NULL,
-            action      TEXT NOT NULL,
-            confidence  REAL NOT NULL,
-            lesson      TEXT,
-            applied     INTEGER DEFAULT 0,
-            applied_at  TEXT
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at   TEXT NOT NULL,
+            source       TEXT,          -- 'routine', 'reminder', 'tool'
+            observation  TEXT NOT NULL,
+            action       TEXT NOT NULL,
+            confidence   REAL NOT NULL,
+            lesson       TEXT,
+            applied      INTEGER DEFAULT 0,
+            applied_at   TEXT,
+            routine_id   INTEGER,
+            action_value TEXT
         )
     """)
+    # Migration για ήδη υπάρχουσες βάσεις (δημιουργήθηκαν πριν τα routine_id/action_value) —
+    # χωρίς αυτά, ένα "ναι" σε pending reflection με action="increase_cooldown"/"change_time"
+    # δεν είχε πού να εφαρμοστεί (ο _apply_action βλέπει routine_id=None και κάνει fallback
+    # σε save_to_memory αντί να αλλάξει τη ρουτίνα).
+    cursor = conn.execute("PRAGMA table_info(reflections)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    if "routine_id" not in existing_cols:
+        conn.execute("ALTER TABLE reflections ADD COLUMN routine_id INTEGER")
+        print("[reflection_engine]: Migration → 'routine_id'")
+    if "action_value" not in existing_cols:
+        conn.execute("ALTER TABLE reflections ADD COLUMN action_value TEXT")
+        print("[reflection_engine]: Migration → 'action_value'")
     conn.commit()
     conn.close()
 
@@ -57,13 +71,19 @@ def _already_reflected(observation: str, action: str) -> bool:
         return False
 
 
-def _save_reflection(source, observation, action, confidence, lesson, applied=False):
+def _save_reflection(source, observation, action, confidence, lesson, applied=False,
+                      routine_id=None, action_value=None) -> int:
+    """Επιστρέφει το id της εγγραφής (χρειάζεται για το Telegram ναι/όχι follow-up)."""
     conn = sqlite3.connect(DB_PATH)
     now  = datetime.now().isoformat(timespec="seconds")
-    conn.execute(
-        "INSERT INTO reflections (created_at, source, observation, action, confidence, lesson, applied, applied_at) VALUES (?,?,?,?,?,?,?,?)",
-        (now, source, observation, action, confidence, lesson, int(applied), now if applied else None)
+    cursor = conn.execute(
+        "INSERT INTO reflections (created_at, source, observation, action, confidence, lesson, applied, applied_at, routine_id, action_value) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (now, source, observation, action, confidence, lesson, int(applied),
+         now if applied else None, routine_id,
+         str(action_value) if action_value is not None else None)
     )
+    new_id = cursor.lastrowid
     conn.commit()
     conn.close()
     # Audit log
@@ -78,6 +98,7 @@ def _save_reflection(source, observation, action, confidence, lesson, applied=Fa
         )
     except Exception:
         pass
+    return new_id
 
 
 # ── Data Collection ──────────────────────────────────────────────
@@ -356,13 +377,16 @@ def run_reflection() -> dict:
 
     applied = pending = skipped = 0
     telegram_lines = []
+    pending_items = []   # [{"id":, "observation":, "action":, "routine_id":, "action_value":, "lesson":, "source":}, ...]
 
     for r in reflections:
-        obs        = r.get("observation", "")
-        action     = r.get("action", "")
-        confidence = float(r.get("confidence", 0))
-        lesson     = r.get("lesson", "")
-        source     = r.get("source", "general")
+        obs          = r.get("observation", "")
+        action       = r.get("action", "")
+        confidence   = float(r.get("confidence", 0))
+        lesson       = r.get("lesson", "")
+        source       = r.get("source", "general")
+        routine_id   = r.get("routine_id")
+        action_value = r.get("action_value")
 
         if not obs or not action:
             skipped += 1
@@ -377,7 +401,8 @@ def run_reflection() -> dict:
         if confidence >= AUTO_APPLY_THRESHOLD:
             # Αυτόματη εφαρμογή
             success = _apply_action(r)
-            _save_reflection(source, obs, action, confidence, lesson, applied=success)
+            _save_reflection(source, obs, action, confidence, lesson, applied=success,
+                              routine_id=routine_id, action_value=action_value)
             if success:
                 applied += 1
                 telegram_lines.append(f"✅ *{obs}*\n→ Εφαρμόστηκε: `{action}`\n💡 _{lesson}_")
@@ -385,9 +410,16 @@ def run_reflection() -> dict:
                 skipped += 1
 
         elif confidence >= ASK_THRESHOLD:
-            # Ρωτάει τον Λάζαρο
-            _save_reflection(source, obs, action, confidence, lesson, applied=False)
+            # Ρωτάει τον Λάζαρο — κρατάμε το id ώστε ένα "ναι" στο Telegram να μπορεί
+            # να εφαρμόσει ΑΥΤΟ ΤΟ reflection συγκεκριμένα (βλ. clients/telegram_bot.py)
+            new_id = _save_reflection(source, obs, action, confidence, lesson, applied=False,
+                                       routine_id=routine_id, action_value=action_value)
             pending += 1
+            pending_items.append({
+                "id": new_id, "observation": obs, "action": action,
+                "routine_id": routine_id, "action_value": action_value,
+                "lesson": lesson, "source": source,
+            })
             telegram_lines.append(
                 f"🤔 *Παρατήρηση:* {obs}\n"
                 f"→ Προτείνω: `{action}` (confidence: {confidence:.0%})\n"
@@ -395,7 +427,8 @@ def run_reflection() -> dict:
             )
         else:
             # Χαμηλή confidence — αποθηκεύω μόνο
-            _save_reflection(source, obs, action, confidence, lesson, applied=False)
+            _save_reflection(source, obs, action, confidence, lesson, applied=False,
+                              routine_id=routine_id, action_value=action_value)
             skipped += 1
 
     # Αποστολή Telegram
@@ -406,7 +439,10 @@ def run_reflection() -> dict:
             msg = msg[:3990] + "..."
         send_telegram_msg(msg)
 
-    stats = {"analyzed": len(reflections), "applied": applied, "pending": pending, "skipped": skipped}
+    stats = {
+        "analyzed": len(reflections), "applied": applied, "pending": pending,
+        "skipped": skipped, "pending_items": pending_items,
+    }
     print(f"[Reflection]: ✅ {stats}")
     return stats
 
