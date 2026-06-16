@@ -21,6 +21,9 @@ LOG_DIR  = os.path.join(_BASE, "..", "logs", "events")
 AUTO_APPLY_THRESHOLD = 0.75   # πάνω από αυτό → αυτόματη εφαρμογή
 ASK_THRESHOLD        = 0.50   # πάνω από αυτό → ρωτάει τον Λάζαρο
 COOLDOWN_MAX         = 168    # max cooldown ώρες (7 μέρες)
+REFLECTION_PENDING   = 0
+REFLECTION_APPLIED   = 1
+REFLECTION_REJECTED  = -1
 
 # ── DB Setup ─────────────────────────────────────────────────────
 
@@ -57,13 +60,37 @@ def _ensure_table():
     conn.close()
 
 
-def _already_reflected(observation: str, action: str) -> bool:
-    """Ελέγχει αν υπάρχει ήδη applied reflection με ίδιο observation+action (αποφυγή duplicates)."""
+def _already_reflected(observation: str, action: str, routine_id=None, action_value=None) -> bool:
+    """
+    Ελέγχει αν υπάρχει ήδη ίδιο reflection που είτε εφαρμόστηκε είτε περιμένει απάντηση.
+    Έτσι αποφεύγουμε να ξαναγράφουμε ask-tier duplicates κάθε νύχτα.
+    """
     try:
         conn = sqlite3.connect(DB_PATH)
         row = conn.execute(
-            "SELECT id FROM reflections WHERE observation=? AND action=? AND applied=1 LIMIT 1",
-            (observation, action)
+            """
+            SELECT id
+            FROM reflections
+            WHERE observation = ?
+              AND action = ?
+              AND applied IN (?, ?)
+              AND (
+                    routine_id = ?
+                 OR (routine_id IS NULL AND ? IS NULL)
+              )
+              AND (
+                    action_value = ?
+                 OR (action_value IS NULL AND ? IS NULL)
+              )
+            LIMIT 1
+            """,
+            (
+                observation, action,
+                REFLECTION_PENDING, REFLECTION_APPLIED,
+                routine_id, routine_id,
+                str(action_value) if action_value is not None else None,
+                str(action_value) if action_value is not None else None,
+            )
         ).fetchone()
         conn.close()
         return row is not None
@@ -99,6 +126,60 @@ def _save_reflection(source, observation, action, confidence, lesson, applied=Fa
     except Exception:
         pass
     return new_id
+
+
+def load_pending_reflections() -> dict[int, dict]:
+    """Φορτώνει unapplied ask-tier reflections ώστε να επιβιώνουν σε restart."""
+    _ensure_table()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            """
+            SELECT id, observation, action, lesson, source, confidence, routine_id, action_value
+            FROM reflections
+            WHERE applied = ?
+            ORDER BY created_at ASC, id ASC
+            """,
+            (REFLECTION_PENDING,)
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ [Reflection] Load pending failed: {e}")
+        return {}
+
+    return {
+        row[0]: {
+            "id": row[0],
+            "observation": row[1],
+            "action": row[2],
+            "lesson": row[3],
+            "source": row[4],
+            "confidence": row[5],
+            "routine_id": row[6],
+            "action_value": row[7],
+        }
+        for row in rows
+    }
+
+
+def mark_reflection_applied(reflection_id: int) -> None:
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "UPDATE reflections SET applied=?, applied_at=? WHERE id=?",
+        (REFLECTION_APPLIED, datetime.now().isoformat(timespec="seconds"), reflection_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def mark_reflection_rejected(reflection_id: int) -> None:
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "UPDATE reflections SET applied=?, applied_at=? WHERE id=?",
+        (REFLECTION_REJECTED, datetime.now().isoformat(timespec="seconds"), reflection_id)
+    )
+    conn.commit()
+    conn.close()
 
 
 # ── Data Collection ──────────────────────────────────────────────
@@ -393,7 +474,7 @@ def run_reflection() -> dict:
             continue
 
         # Skip αν έχει ήδη εφαρμοστεί το ίδιο observation+action
-        if _already_reflected(obs, action):
+        if _already_reflected(obs, action, routine_id=routine_id, action_value=action_value):
             print(f"[Reflection]: ⏭ Skip duplicate: '{obs[:40]}...'")
             skipped += 1
             continue

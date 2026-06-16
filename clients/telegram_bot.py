@@ -740,6 +740,29 @@ def _llm_routine_judge(user_msg: str, events: list) -> str:
 # MESSAGE HANDLER
 # ────────────────────────────────────────────────────────────────
 
+def _send_pending_reflections_summary() -> None:
+    """Στέλνει ένα ενιαίο αριθμημένο μήνυμα για όλα τα pending reflections."""
+    if not pending_reflection_confirmations:
+        return
+
+    blocks = []
+    for i, (rid, rdata) in enumerate(pending_reflection_confirmations.items(), start=1):
+        conf = rdata.get("confidence")
+        conf_txt = f" (confidence: {conf:.0%})" if isinstance(conf, (int, float)) else ""
+        blocks.append(
+            f"🤔 *#{i} Παρατήρηση:* {rdata.get('observation','')}\n"
+            f"→ Προτείνω: `{rdata.get('action','')}`{conf_txt}"
+        )
+    msg = (
+        "🧠 *Astakos — Εκκρεμή reflections*\n\n"
+        + "\n\n---\n\n".join(blocks)
+        + "\n\n_Απάντησε:_ `ναι Ν` / `όχι Ν` για συγκεκριμένο, ή απλά `ναι`/`όχι` για όλα μαζί."
+    )
+    if len(msg) > 4000:
+        msg = msg[:3990] + "..."
+    send_telegram_msg(msg)
+
+
 def handle_message(user_text: str, chat_id: str):
     """Στέλνει το μήνυμα στον Αστακό και απαντάει (Κείμενο ή Ήχο)."""
     global last_interaction_time
@@ -845,34 +868,35 @@ def handle_message(user_text: str, chat_id: str):
                 return
 
             if is_yes:
-                import sqlite3 as _sqlite3
-                from services.reflection_engine import _apply_action
-                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+                from services.reflection_engine import _apply_action, mark_reflection_applied
                 lines = []
                 for rid in targets:
                     rdata = pending_reflection_confirmations[rid]
                     success = _apply_action(rdata)
                     if success:
                         try:
-                            conn = _sqlite3.connect(db_path)
-                            conn.execute(
-                                "UPDATE reflections SET applied=1, applied_at=? WHERE id=?",
-                                (datetime.now().isoformat(timespec="seconds"), rid)
-                            )
-                            conn.commit()
-                            conn.close()
+                            mark_reflection_applied(rid)
                         except Exception as e:
                             print(f"⚠️ [Reflection Confirm] DB update failed: {e}")
                         lines.append(f"✅ Εφαρμόστηκε: {rdata.get('observation','')[:80]}")
+                        del pending_reflection_confirmations[rid]
                     else:
-                        lines.append(f"⚠️ Αποτυχία εφαρμογής: {rdata.get('observation','')[:80]}")
-                    del pending_reflection_confirmations[rid]
+                        lines.append(f"⚠️ Αποτυχία εφαρμογής, μένει εκκρεμές: {rdata.get('observation','')[:80]}")
                 send_telegram_msg("\n".join(lines) if lines else "✅ Έγινε.")
+                if pending_reflection_confirmations:
+                    _send_pending_reflections_summary()
                 return
             else:
+                from services.reflection_engine import mark_reflection_rejected
                 for rid in targets:
+                    try:
+                        mark_reflection_rejected(rid)
+                    except Exception as e:
+                        print(f"⚠️ [Reflection Reject] DB update failed: {e}")
                     del pending_reflection_confirmations[rid]
                 send_telegram_msg("❌ Ακυρώθηκε, δεν εφαρμόστηκε.")
+                if pending_reflection_confirmations:
+                    _send_pending_reflections_summary()
                 return
 
     # ── SAFE EXECUTOR CONFIRMATION LOOP ──────────────────────────
@@ -2352,25 +2376,8 @@ def job_analytics_engine():
         for item in r_stats.get("pending_items", []):
             pending_reflection_confirmations[item["id"]] = item
 
-        # Ένα αριθμημένο μήνυμα για ΟΛΑ τα τρέχοντα pending (παλιά ανεπίλυτα + νέα),
-        # ώστε οι αριθμοί #1, #2... να ταιριάζουν πάντα με τη σειρά του dict.
         if pending_reflection_confirmations:
-            blocks = []
-            for i, (rid, rdata) in enumerate(pending_reflection_confirmations.items(), start=1):
-                conf = rdata.get("confidence")
-                conf_txt = f" (confidence: {conf:.0%})" if isinstance(conf, (int, float)) else ""
-                blocks.append(
-                    f"🤔 *#{i} Παρατήρηση:* {rdata.get('observation','')}\n"
-                    f"→ Προτείνω: `{rdata.get('action','')}`{conf_txt}"
-                )
-            msg = (
-                "🧠 *Astakos — Εκκρεμή reflections*\n\n"
-                + "\n\n---\n\n".join(blocks)
-                + "\n\n_Απάντησε:_ `ναι Ν` / `όχι Ν` για συγκεκριμένο, ή απλά `ναι`/`όχι` για όλα μαζί."
-            )
-            if len(msg) > 4000:
-                msg = msg[:3990] + "..."
-            send_telegram_msg(msg)
+            _send_pending_reflections_summary()
 
         print(f"[Reflection Job]: applied={r_stats.get('applied',0)}, pending={r_stats.get('pending',0)}")
     except Exception as re:
@@ -2698,9 +2705,13 @@ if __name__ == "__main__":
 
     _load_override_state()
     from memory.routine_db import load_pending_confirmations
+    from services.reflection_engine import load_pending_reflections
     pending_routine_confirmations.update(load_pending_confirmations())
+    pending_reflection_confirmations.update(load_pending_reflections())
     if pending_routine_confirmations:
         print(f"\033[93m[Recovery]: \u03a6\u03bf\u03c1\u03c4\u03ce\u03b8\u03b7\u03ba\u03b1\u03bd {len(pending_routine_confirmations)} pending confirmations.\033[0m")
+    if pending_reflection_confirmations:
+        print(f"\033[93m[Recovery]: Loaded {len(pending_reflection_confirmations)} pending reflections.\033[0m")
 
     astakos_scheduler = AstakosScheduler()
     astakos_scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders",   verbose=False)
