@@ -44,6 +44,7 @@ from tools.web import (
 from tools.project_tools import (
     grant_project_access, list_project_files, read_project_file,
     edit_project_file, write_project_file, grep_project_files,
+    list_recent_files,
 )
 
 # ────────────────────────────────────────────────────────────────
@@ -228,6 +229,7 @@ def dev_agent_node(state):
         # Project tools — code navigation & editing
         grant_project_access, list_project_files, read_project_file,
         edit_project_file, write_project_file, grep_project_files, repo_mapper,
+        list_recent_files,
     ]
     
     safe_history = sanitize_history_for_gemini(history)
@@ -534,7 +536,7 @@ def git_agent_node(state):
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
     git_llm = llm.bind_tools([
-        github_manager, search_memory, run_terminal_command
+        github_manager, search_memory, run_terminal_command, list_recent_files
     ])
     response = safe_llm_invoke(git_llm, [SystemMessage(content=system_prompt)] + safe_history)
     response = _ensure_text_response(response, git_llm, system_prompt, safe_history)

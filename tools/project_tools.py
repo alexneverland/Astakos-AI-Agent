@@ -13,6 +13,7 @@
 #   read_project_file     — διαβάζει αρχείο με line numbers (SAFE)
 #   edit_project_file     — Python batch patch: old→new + syntax check (WARNING/CRITICAL)
 #   write_project_file    — full rewrite με syntax check (CRITICAL)
+#   list_recent_files     — bounded mtime scan, BASE_DIR χωρίς permission (SAFE)
 # ================================================================
 
 import os
@@ -351,7 +352,7 @@ def grep_project_files(folder_path: str, pattern: str, file_pattern: str = "*.py
     Ψάχνει για pattern μέσα στα αρχεία ενός εγκεκριμένου project folder.
     Επιστρέφει αρχείο + γραμμή + περιεχόμενο (σαν ripgrep).
 
-    folder_path:   Ο φάκελος του project (π.χ. C:\mastro_app)
+    folder_path:   Ο φάκελος του project (π.χ. C:\\mastro_app)
     pattern:       Regex pattern (π.χ. "CustomerSerializer", "def create", "temp_id=None")
     file_pattern:  Glob για τύπο αρχείων (default: *.py). Παραδείγματα: "*.js", "*.py", "*"
     context_lines: Γραμμές context πριν/μετά από κάθε match (default: 2, max: 5)
@@ -445,6 +446,108 @@ def grep_project_files(folder_path: str, pattern: str, file_pattern: str = "*.py
         lines_out.append("⚠️ Αποτελέσματα περικόπηκαν στα 200. Χρησιμοποίησε πιο συγκεκριμένο pattern.")
 
     return "\n".join(lines_out)
+
+
+# Ίδιοι θορυβώδεις φάκελοι με τα list_project_files/grep_project_files,
+# + credentials (ευαίσθητο) — reused από list_recent_files.
+_RECENT_SKIP_DIRS = {
+    "venv", ".venv", "__pycache__", ".git", "node_modules",
+    "dist", "build", ".tox", ".mypy_cache", "migrations",
+    "chroma_db", "telegram_photos", "telegram_uploads",
+    "outputs", "avatars", ".ruff_cache", "credentials",
+}
+_RECENT_SKIP_FILES = {".env", "secrets.py"}
+
+
+@tool
+def list_recent_files(folder_path: str = "", top_n: int = 15) -> str:
+    """
+    Βρίσκει τα πιο πρόσφατα τροποποιημένα αρχεία σε έναν φάκελο — γρήγορο,
+    bounded os.walk (ΟΧΙ subprocess/PowerShell), αγνοεί venv/.git/__pycache__/
+    node_modules και άλλους θορυβώδεις φακέλους.
+
+    ΧΡΗΣΙΜΟ ΓΙΑ: "τι άλλαξα πρόσφατα", "ποια αρχεία άγγιξα", "τι έχω αλλάξει
+    αλλά δεν έχω κάνει commit ακόμα" — ΕΙΔΙΚΑ για untracked/uncommitted αρχεία
+    που git log/git status δεν τα δείχνει εύκολα.
+    Για committed git ιστορικό προτίμησε git (run_terminal_command).
+    ΜΗΝ φτιάχνεις ad-hoc PowerShell (Get-ChildItem -Recurse) για αυτό το σκοπό
+    — είναι αργό σε μεγάλα δέντρα και κολλάει στο 30s subprocess timeout.
+
+    folder_path: Φάκελος για σκανάρισμα. Άδειο = ολόκληρο το Astakos repo
+                 (BASE_DIR) — δεν χρειάζεται grant_project_access, είναι ο
+                 ίδιος ο κώδικας του Αστακού.
+                 Για εξωτερικά projects (εκτός C:\\astakos_v2) χρειάζεται
+                 πρώτα grant_project_access.
+    top_n: Πόσα πιο πρόσφατα αρχεία να επιστρέψει (default 15, max 50).
+    """
+    folder_path = (folder_path or "").strip().strip("'\"")
+    top_n = max(1, min(int(top_n), 50))
+
+    target = folder_path or BASE_DIR
+    real_target = os.path.realpath(target)
+    real_base = os.path.realpath(BASE_DIR)
+    is_internal = real_target == real_base or real_target.startswith(real_base + os.sep)
+
+    if not is_internal:
+        ok, err = _check_permission(os.path.join(target, "_"))
+        if not ok:
+            ok, err = _check_permission(target + os.sep + "x")
+            if not ok:
+                return err
+
+    if not os.path.isdir(target):
+        return f"❌ Ο φάκελος '{target}' δεν υπάρχει."
+
+    entries: list[tuple[float, str]] = []
+    scanned = 0
+    SAFETY_CAP = 8000  # bounded — δεν χρειάζεται subprocess timeout
+    stopped_early = False
+
+    for root, dirs, files in os.walk(target):
+        dirs[:] = [d for d in dirs if d not in _RECENT_SKIP_DIRS and not d.startswith(".")]
+        for fname in files:
+            if fname in _RECENT_SKIP_FILES:
+                continue
+            scanned += 1
+            if scanned > SAFETY_CAP:
+                stopped_early = True
+                break
+            full = os.path.join(root, fname)
+            try:
+                mtime = os.path.getmtime(full)
+            except OSError:
+                continue
+            entries.append((mtime, os.path.relpath(full, target)))
+        if stopped_early:
+            break
+
+    if not entries:
+        return f"⚠️ Δεν βρέθηκαν αρχεία στο '{target}'."
+
+    entries.sort(key=lambda x: x[0], reverse=True)
+    top = entries[:top_n]
+
+    label = "Astakos repo (C:\\astakos_v2)" if is_internal else (os.path.basename(target.rstrip("/\\")) or target)
+    lines = [f"🕒 {label} — {len(top)}/{len(entries)} πιο πρόσφατα τροποποιημένα αρχεία:\n"]
+    now = datetime.now()
+    for mtime, rel in top:
+        dt = datetime.fromtimestamp(mtime)
+        delta = now - dt
+        if delta.days > 0:
+            age = f"{delta.days}d πριν"
+        elif delta.seconds >= 3600:
+            age = f"{delta.seconds // 3600}h πριν"
+        else:
+            age = f"{max(1, delta.seconds // 60)}m πριν"
+        lines.append(f"  {rel}  ({dt.strftime('%Y-%m-%d %H:%M')}, {age})")
+
+    if stopped_early:
+        lines.append(
+            f"\n⚠️ Σταμάτησα στα {SAFETY_CAP} αρχεία για ταχύτητα (partial scan) — "
+            f"δώσε πιο συγκεκριμένο subfolder αν θέλεις πληρότητα."
+        )
+
+    return "\n".join(lines)
 
 
 @tool
