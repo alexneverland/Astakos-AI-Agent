@@ -174,6 +174,18 @@ def _run_job(db_rows, craft_return="κανονικό μήνυμα",
     sent       = []
     logged     = []
     bus_events = []
+    rdb = sys.modules["memory.routine_db"]
+    for mock_name in (
+        "mark_routine_notified",
+        "save_pending_confirmation",
+        "remove_pending_confirmation",
+        "get_routine_muted_until",
+        "set_routine_muted_until",
+        "get_sentimental_info",
+        "set_routine_sentimental",
+        "update_sentimental_last_sent",
+    ):
+        getattr(rdb, mock_name).reset_mock()
 
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "astakos_routines.db")
@@ -201,6 +213,50 @@ def _run_job(db_rows, craft_return="κανονικό μήνυμα",
     return sent, logged, bus_events
 
 
+def _run_missed_job(db_rows, craft_return="Ε, πήγε καλά; 😊"):
+    """Τρέχει startup_check_missed_routines() με mocked εξωτερικά."""
+    sent       = []
+    logged     = []
+    bus_events = []
+    rdb = sys.modules["memory.routine_db"]
+    for mock_name in (
+        "mark_routine_notified",
+        "save_pending_confirmation",
+        "remove_pending_confirmation",
+        "get_routine_muted_until",
+        "set_routine_muted_until",
+        "get_sentimental_info",
+        "set_routine_sentimental",
+        "update_sentimental_last_sent",
+    ):
+        getattr(rdb, mock_name).reset_mock()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = os.path.join(tmp, "astakos_routines.db")
+        _make_routines_db(db_path, db_rows)
+        sys.modules["config"].BASE_DIR = tmp
+        sys.modules["config"].ROUTINE_MISS_GRACE_MINUTES = 60
+
+        mock_bus = MagicMock()
+        mock_bus.emit.side_effect = lambda ev, **kw: bus_events.append(ev)
+
+        with (
+            patch.object(bot, "is_quiet_hours",       return_value=False),
+            patch.object(bot, "is_proactive_muted",   return_value=False),
+            patch.object(bot, "is_duplicate_routine", return_value=False),
+            patch.object(bot, "_craft_deferred_msg",  return_value=craft_return),
+            patch.object(bot, "_build_proactive_memory_context", return_value="ctx"),
+            patch.object(bot, "_infer_muted_until",   return_value="2026-06-26"),
+            patch.object(bot, "_infer_sentimental",   return_value=True),
+            patch.object(bot, "send_telegram_msg",    side_effect=lambda msg: sent.append(msg)),
+            patch.object(bot, "log_event",            side_effect=lambda c, a, **kw: logged.append((c, a))),
+            patch.object(bot, "bus",                  mock_bus),
+        ):
+            bot.startup_check_missed_routines()
+
+    return sent, logged, bus_events
+
+
 def _today_minus(days):
     return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
@@ -210,6 +266,17 @@ def _due_routine():
     now      = datetime.now()
     # Η ρουτίνα είναι στο target_time = now+30min → time_str = (now+28min)
     time_str = (now + timedelta(minutes=30)).strftime("%H:%M")
+    return {
+        "id": 1, "event_name": "park_walk", "confidence": 0.9,
+        "time_str": time_str, "day_of_week": "Everyday", "state": "active",
+        "last_triggered": _today_minus(1),
+    }
+
+
+def _missed_routine():
+    """Ρουτίνα που έχασε το startup check μέσα στο grace window."""
+    now = datetime.now()
+    time_str = (now - timedelta(minutes=20)).strftime("%H:%M")
     return {
         "id": 1, "event_name": "park_walk", "confidence": 0.9,
         "time_str": time_str, "day_of_week": "Everyday", "state": "active",
@@ -300,6 +367,57 @@ def test_context_skip_logs_context_skip():
     )
     assert any(cat == "routines" and action == "context_skip"
                for cat, action in logged), f"Expected context_skip, got: {logged}"
+
+
+def test_context_skip_does_not_create_pending_confirmation():
+    """[CONTEXT_SKIP] → ούτε memory pending ούτε DB pending save."""
+    rdb = sys.modules["memory.routine_db"]
+    bot.pending_routine_confirmations.clear()
+    sent, _, _ = _run_job(
+        [_due_routine()],
+        craft_return="[CONTEXT_SKIP] Ο μικρός λείπει, σήμερα μόνο νοσταλγία.",
+    )
+    assert len(sent) == 1
+    assert bot.pending_routine_confirmations == {}
+    rdb.save_pending_confirmation.assert_not_called()
+    rdb.mark_routine_notified.assert_not_called()
+
+
+def test_context_skip_can_set_muted_window():
+    """[CONTEXT_SKIP] με long-running blocker → γράφει muted_until άμεσα."""
+    rdb = sys.modules["memory.routine_db"]
+    rdb.get_sentimental_info.return_value = {
+        "sentimental": None, "muted_from": None, "muted_until": None,
+        "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False,
+    }
+    with (
+        patch.object(bot, "_build_proactive_memory_context", return_value="camp context"),
+        patch.object(bot, "_infer_muted_until", return_value="2026-06-26"),
+        patch.object(bot, "_infer_sentimental", return_value=True),
+    ):
+        _run_job(
+            [_due_routine()],
+            craft_return="[CONTEXT_SKIP] Περίεργη η ώρα χωρίς τον μικρό σήμερα, ε;",
+        )
+    rdb.set_routine_muted_until.assert_called_once_with(1, "2026-06-26")
+    rdb.set_routine_sentimental.assert_called_once_with(1, True)
+
+
+def test_deferred_context_skip_does_not_create_pending_confirmation():
+    """Deferred [CONTEXT_SKIP] → μήνυμα χωρίς pending."""
+    rdb = sys.modules["memory.routine_db"]
+    bot.pending_routine_confirmations.clear()
+    sent, logged, bus_events = _run_missed_job(
+        [_missed_routine()],
+        craft_return="[CONTEXT_SKIP] Περίεργη η ώρα χωρίς τον μικρό σήμερα, ε;",
+    )
+    assert len(sent) == 1
+    assert bot.pending_routine_confirmations == {}
+    assert any(action == "context_skip" for _, action in logged)
+    assert "routine_skipped_context" in bus_events
+    rdb.save_pending_confirmation.assert_not_called()
+    rdb.mark_routine_notified.assert_not_called()
+    rdb.set_routine_muted_until.assert_called_once_with(1, "2026-06-26")
 
 
 # ─────────────────────────────────────────────────────────────

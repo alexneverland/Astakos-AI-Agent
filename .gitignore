@@ -58,6 +58,9 @@ venv/
 prompts.md
 docs/
 
+# Local-only private extensions
+local_only/
+
 # System artifacts
 .fuse_hidden*
 Thumbs.db

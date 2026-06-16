@@ -1686,6 +1686,71 @@ def _load_recent_proactive_context(limit: int = 10) -> str:
         return ""
 
 
+def _build_proactive_memory_context(event_name: str) -> str:
+    """Build richer context for routine nudges, including recent cancellation clues."""
+    try:
+        from memory.context_builder import build_memory_context
+
+        recall_query = (
+            f"θυμάσαι {event_name}; πρόσφατο context για το αν ισχύει ακόμα η ρουτίνα. "
+            "Αλέξανδρος κατασκήνωση λείπει γύρισε πάρκο κοιμήθηκε βάρδια Σοφία "
+            "ήδη έγινε ακυρώθηκε σήμερα αύριο χθες"
+        )
+        context = build_memory_context(
+            recall_query,
+            channel="telegram",
+            recent_limit=18,
+            temporal_limit=12,
+            semantic_k=6,
+        )
+        return context.render()
+    except Exception as exc:
+        print(f"\033[93m[ProactiveContext]: rich context builder failed: {exc}\033[0m")
+        return ""
+
+
+def _clear_routine_pending_confirmation(routine_id: int) -> None:
+    """Best-effort cleanup for stale pending confirmations on context-driven skips."""
+    pending_routine_confirmations.pop(routine_id, None)
+    try:
+        from memory.routine_db import remove_pending_confirmation
+
+        remove_pending_confirmation(routine_id)
+    except Exception as exc:
+        print(f"\033[93m[RoutinePendingCleanup]: #{routine_id} failed: {exc}\033[0m")
+
+
+def _apply_context_mute(routine_id: int, event_name: str, memory_context: str) -> str | None:
+    """Infer mute window from context and pre-classify sentimental family routines."""
+    if not memory_context:
+        return None
+    try:
+        until = _infer_muted_until(event_name, memory_context)
+    except Exception as exc:
+        print(f"\033[93m[RoutineMute]: #{routine_id} infer failed: {exc}\033[0m")
+        return None
+    if not until:
+        return None
+
+    try:
+        from memory.routine_db import (
+            get_sentimental_info,
+            set_routine_muted_until,
+            set_routine_sentimental,
+        )
+
+        info = get_sentimental_info(routine_id)
+        if info.get("sentimental") is None:
+            is_sentimental = _infer_sentimental(event_name, memory_context)
+            set_routine_sentimental(routine_id, is_sentimental)
+
+        set_routine_muted_until(routine_id, until)
+        return until
+    except Exception as exc:
+        print(f"\033[93m[RoutineMute]: #{routine_id} apply failed: {exc}\033[0m")
+        return None
+
+
 def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> str:
     """LLM φτιάχνει φυσικό proactive μήνυμα αντί για template."""
     from langchain_core.messages import HumanMessage
@@ -1700,18 +1765,7 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
     else:
         context = f"Παλιότερα ο Λάζαρος έκανε '{event_name}' αυτή την ώρα, δεν είμαστε σίγουροι πια."
 
-    try:
-        from memory.context_builder import build_memory_context
-
-        memory_context = build_memory_context(
-            event_name,
-            channel="telegram",
-            recent_limit=8,
-            semantic_k=4,
-        ).render()
-    except Exception as exc:
-        print(f"\033[93m[ProactiveContext]: context builder failed: {exc}\033[0m")
-        memory_context = ""
+    memory_context = _build_proactive_memory_context(event_name)
     memory_block = f"\n\n{memory_context}\n" if memory_context else ""
 
     prompt = (
@@ -1733,6 +1787,9 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
         "κάτι που ξεκίνησε πριν λίγα λεπτά ή δεν δηλώθηκε ότι ολοκληρώθηκε. "
         "Αν ο Λάζαρος είπε μόλις 'μαγειρεύω', 'παίζουμε', 'φεύγουμε' ή 'πάμε', "
         "μίλα σαν να είναι σε εξέλιξη, όχι σαν να έγινε ήδη.\n"
+        "Αν το context λέει ότι ο Αλέξανδρος λείπει/είναι κατασκήνωση, ΜΗΝ προτείνεις "
+        "δραστηριότητα μαζί του (πάρκο, παιχνίδι, ύπνο). Χρησιμοποίησε [CONTEXT_SKIP] "
+        "ή στείλε μόνο τρυφερό σχόλιο για την απουσία αν ταιριάζει.\n"
         "ΑΠΑΓΟΡΕΥΕΤΑΙ: 'δεν είναι η ώρα για', 'υπενθύμιση', 'θυμίζω', το event name κυριολεκτικά.\n"
         "ΣΗΜΑΝΤΙΚΟ — ΕΠΙΛΕΞΕ ΑΚΡΙΒΩΣ ΕΝΑ ΑΠΟ ΤΑ ΤΡΙΑ:\n"
         "1. ΚΑΝΟΝΙΚΟ ΜΗΝΥΜΑ: 1-2 προτάσεις χωρίς tag.\n"
@@ -1911,6 +1968,9 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
         "ρωτάς/σχολιάζεις αν το event έγινε, πώς πήγε, κάτι ανάλογο. "
         "Σαν να ήρθες αργά και ρωτάς τι έγινε — χωρίς να εξηγείς γιατί έλειπες.\n"
         "Χρησιμοποίησε το πρόσφατο ιστορικό αν ταιριάζει φυσικά. "
+        "Αν το context λέει ότι ο Αλέξανδρος λείπει/είναι κατασκήνωση, ΜΗΝ προτείνεις "
+        "δραστηριότητα μαζί του (πάρκο, παιχνίδι, ύπνο). Χρησιμοποίησε [CONTEXT_SKIP] "
+        "ή στείλε μόνο τρυφερό σχόλιο για την απουσία αν ταιριάζει. "
         "ΑΠΑΓΟΡΕΥΕΤΑΙ: 'υπενθύμιση', 'reminder', 'έχασα', 'δεν ήμουν', το event name κυριολεκτικά.\n"
         "ΣΗΜΑΝΤΙΚΟ — ΕΠΙΛΕΞΕ ΑΚΡΙΒΩΣ ΕΝΑ ΑΠΟ ΤΑ ΤΡΙΑ:\n"
         "1. ΚΑΝΟΝΙΚΟ ΜΗΝΥΜΑ: 1-2 προτάσεις χωρίς tag.\n"
@@ -2017,6 +2077,12 @@ def startup_check_missed_routines():
                 missed_min = ROUTINE_MISS_GRACE_MINUTES // 2
 
             msg = _craft_deferred_msg(event_name, confidence, missed_min)
+            ctx = ""
+            if msg.strip() == "[SILENT_SKIP]" or "[CONTEXT_SKIP]" in msg:
+                try:
+                    ctx = _build_proactive_memory_context(event_name)
+                except Exception:
+                    ctx = ""
 
             # Μάρκαρε ως triggered ώστε το κανονικό job να μην το ξαναστείλει σήμερα
             conn2   = sqlite3.connect(DB_PATH)
@@ -2025,8 +2091,34 @@ def startup_check_missed_routines():
             conn2.commit()
             conn2.close()
 
-            mark_routine_notified(r_id)
+            if msg.strip() == "[SILENT_SKIP]":
+                _clear_routine_pending_confirmation(r_id)
+                muted_until = _apply_context_mute(r_id, event_name, ctx)
+                log_event("routines", "silent_skip", routine_id=r_id, event=event_name,
+                          deferred=True, muted_until=muted_until)
+                bus.emit("routine_skipped_context", routine_id=r_id, event=event_name,
+                         deferred=True, channel="telegram")
+                print(f"\033[90m[MissedRoutines]: SILENT_SKIP '{event_name}' ({missed_min} λεπτά αργά)\033[0m")
+                continue
+
+            is_context_skip = "[CONTEXT_SKIP]" in msg
+            if is_context_skip:
+                msg = msg.replace("[CONTEXT_SKIP]", "").strip()
+
             send_telegram_msg(msg)
+
+            if is_context_skip:
+                _clear_routine_pending_confirmation(r_id)
+                muted_until = _apply_context_mute(r_id, event_name, ctx)
+                log_event("routines", "context_skip", routine_id=r_id, event=event_name,
+                          deferred=True, missed_minutes=missed_min,
+                          muted_until=muted_until, preview=msg[:160])
+                bus.emit("routine_skipped_context", routine_id=r_id, event=event_name,
+                         deferred=True, channel="telegram")
+                print(f"\033[90m[MissedRoutines]: CONTEXT_SKIP '{event_name}' ({missed_min} λεπτά αργά) → '{msg[:80]}'\033[0m")
+                continue
+
+            mark_routine_notified(r_id)
             sent_at = datetime.now()
             pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
             save_pending_confirmation(r_id, event_name, sent_at)
@@ -2063,6 +2155,20 @@ def job_check_routines():
         "Saturday":  ["Saturday", "Σάββατο"],
         "Sunday":    ["Sunday", "Κυριακή"],
     }
+
+    if pending_routine_confirmations:
+        from memory.routine_db import get_routine_muted_until, remove_pending_confirmation
+        for rid in list(pending_routine_confirmations.keys()):
+            try:
+                muted_until = get_routine_muted_until(rid)
+            except Exception:
+                muted_until = None
+            if muted_until:
+                ev = pending_routine_confirmations[rid]["event"]
+                del pending_routine_confirmations[rid]
+                remove_pending_confirmation(rid)
+                log_event("routines", "pending_cleared_muted", routine_id=rid, event=ev, muted_until=muted_until)
+                print(f"\033[90m[RoutinePendingCleanup]: #{rid} '{ev}' cleared because muted until {muted_until}\033[0m")
 
     # Quiet hours ή proactive muted
     if is_proactive_muted():
@@ -2104,7 +2210,7 @@ def job_check_routines():
             from memory.routine_db import (
                 get_routine_notify_info, mark_routine_notified,
                 save_pending_confirmation, get_routine_muted_until,
-                set_routine_muted_until, get_sentimental_info,
+                get_sentimental_info,
                 set_routine_sentimental, update_sentimental_last_sent
             )
             due_routines = []
@@ -2118,9 +2224,7 @@ def job_check_routines():
                     sent_info = get_sentimental_info(r_id)
                     if sent_info["sentimental"] is None:
                         try:
-                            from memory.context_builder import build_memory_context
-                            _ctx = build_memory_context(event_name, channel="telegram",
-                                                        recent_limit=8, semantic_k=4).render()
+                            _ctx = _build_proactive_memory_context(event_name)
                         except Exception:
                             _ctx = ""
                         is_sent = _infer_sentimental(event_name, _ctx)
@@ -2138,9 +2242,7 @@ def job_check_routines():
                             _should_send = _days >= _every
                         if _should_send:
                             try:
-                                from memory.context_builder import build_memory_context
-                                _sctx = build_memory_context(event_name, channel="telegram",
-                                                             recent_limit=8, semantic_k=4).render()
+                                _sctx = _build_proactive_memory_context(event_name)
                             except Exception:
                                 _sctx = ""
                             _emsg = _craft_sentimental_absent_msg(
@@ -2188,18 +2290,15 @@ def job_check_routines():
                 if msg.strip() == "[SILENT_SKIP]":
                     # Πρώτη φορά SILENT_SKIP — εκτίμα muted_until για κάθε ρουτίνα
                     try:
-                        from memory.context_builder import build_memory_context
-                        ctx = build_memory_context(names, channel="telegram",
-                                                   recent_limit=8, semantic_k=4).render()
+                        ctx = _build_proactive_memory_context(names)
                     except Exception:
                         ctx = ""
                     for r_id, event_name, confidence in due_routines:
                         cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                         log_event("routines", "silent_skip", routine_id=r_id, event=event_name, batch=True)
                         bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
-                        until = _infer_muted_until(event_name, ctx)
-                        if until:
-                            set_routine_muted_until(r_id, until)
+                        _clear_routine_pending_confirmation(r_id)
+                        _apply_context_mute(r_id, event_name, ctx)
                     conn.commit()
                 else:
                     is_context_skip = False
@@ -2209,10 +2308,19 @@ def job_check_routines():
 
                     send_telegram_msg(msg)
                     sent_at = datetime.now()
+                    context_skip_ctx = ""
+                    if is_context_skip:
+                        try:
+                            context_skip_ctx = _build_proactive_memory_context(names)
+                        except Exception:
+                            context_skip_ctx = ""
                     for r_id, event_name, confidence in due_routines:
                         cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                         if is_context_skip:
-                            log_event("routines", "context_skip", routine_id=r_id, event=event_name, batch=True, preview=msg[:160])
+                            _clear_routine_pending_confirmation(r_id)
+                            muted_until = _apply_context_mute(r_id, event_name, context_skip_ctx)
+                            log_event("routines", "context_skip", routine_id=r_id, event=event_name,
+                                      batch=True, muted_until=muted_until, preview=msg[:160])
                             bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
                         else:
                             mark_routine_notified(r_id)
@@ -2231,18 +2339,15 @@ def job_check_routines():
                 if msg.strip() == "[SILENT_SKIP]":
                     # Πρώτη φορά SILENT_SKIP — εκτίμα muted_until
                     try:
-                        from memory.context_builder import build_memory_context
-                        ctx = build_memory_context(event_name, channel="telegram",
-                                                   recent_limit=8, semantic_k=4).render()
+                        ctx = _build_proactive_memory_context(event_name)
                     except Exception:
                         ctx = ""
                     cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                     conn.commit()
                     log_event("routines", "silent_skip", routine_id=r_id, event=event_name)
                     bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
-                    until = _infer_muted_until(event_name, ctx)
-                    if until:
-                        set_routine_muted_until(r_id, until)
+                    _clear_routine_pending_confirmation(r_id)
+                    _apply_context_mute(r_id, event_name, ctx)
                 else:
                     is_context_skip = False
                     if "[CONTEXT_SKIP]" in msg:
@@ -2255,7 +2360,14 @@ def job_check_routines():
                     send_telegram_msg(msg)
 
                     if is_context_skip:
-                        log_event("routines", "context_skip", routine_id=r_id, event=event_name, preview=msg[:160])
+                        try:
+                            context_skip_ctx = _build_proactive_memory_context(event_name)
+                        except Exception:
+                            context_skip_ctx = ""
+                        _clear_routine_pending_confirmation(r_id)
+                        muted_until = _apply_context_mute(r_id, event_name, context_skip_ctx)
+                        log_event("routines", "context_skip", routine_id=r_id, event=event_name,
+                                  muted_until=muted_until, preview=msg[:160])
                         # DO NOT mark as pending, just keep it active.
                         bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
                     else:
