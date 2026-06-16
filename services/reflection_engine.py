@@ -418,13 +418,12 @@ def run_reflection() -> dict:
             pending_items.append({
                 "id": new_id, "observation": obs, "action": action,
                 "routine_id": routine_id, "action_value": action_value,
-                "lesson": lesson, "source": source,
+                "lesson": lesson, "source": source, "confidence": confidence,
             })
-            telegram_lines.append(
-                f"🤔 *Παρατήρηση:* {obs}\n"
-                f"→ Προτείνω: `{action}` (confidence: {confidence:.0%})\n"
-                f"Να το εφαρμόσω; (ναι/όχι)"
-            )
+            # Σημείωση: ΔΕΝ στέλνουμε εδώ το "Να το εφαρμόσω;" μήνυμα.
+            # Το telegram_bot.py χτίζει ΕΝΑ αριθμημένο μήνυμα για ΟΛΑ τα τρέχοντα
+            # pending (παλιά + νέα) ώστε οι αριθμοί #1, #2... να αντιστοιχούν σωστά
+            # σε ό,τι περιμένει απάντηση — βλ. pending_reflection_confirmations.
         else:
             # Χαμηλή confidence — αποθηκεύω μόνο
             _save_reflection(source, obs, action, confidence, lesson, applied=False,
