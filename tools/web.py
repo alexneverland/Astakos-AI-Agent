@@ -637,18 +637,39 @@ def browse_url(url: str) -> str:
 def duckduckgo_search(query: str) -> str:
     """Αναζήτηση στο διαδίκτυο.
     ΓΙΑ ΣΥΓΚΕΚΡΙΜΕΝΟ URL χρησιμοποίησε ΠΑΝΤΑ το browse_url."""
-    try:
-        from ddgs import DDGS
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=5))
-        if not results:
-            return "❌ Κενό αποτέλεσμα."
-        output = []
-        for r in results:
-            output.append(f"Τίτλος: {r['title']}\nURL: {r['href']}\nΠερίληψη: {r['body']}\n")
-        return "\n---\n".join(output)
-    except Exception as e:
-        return f"⚠️ Σφάλμα: {str(e)}"
+    from ddgs import DDGS
+    from ddgs.exceptions import RatelimitException, TimeoutException, DDGSException
+
+    # backend="auto" (το default) δοκιμάζει sequential/batched ΟΛΑ τα engines (έως 8),
+    # κάτι που σε fail-cascades έφτανε 20-30+ δευτ. ανά κλήση. Pin σε 2 γρήγορα,
+    # επαληθευμένα backends (verified live: duckduckgo ~1s, google ~0.5s) με 1 fallback.
+    backends_to_try = ["duckduckgo", "google"]
+    last_error = "άγνωστο σφάλμα"
+
+    for backend in backends_to_try:
+        try:
+            with DDGS(timeout=8) as ddgs:
+                results = list(ddgs.text(query, max_results=5, backend=backend))
+            if results:
+                output = []
+                for r in results:
+                    output.append(f"Τίτλος: {r['title']}\nURL: {r['href']}\nΠερίληψη: {r['body']}\n")
+                return "\n---\n".join(output)
+            last_error = "κενό αποτέλεσμα"
+        except RatelimitException:
+            last_error = "rate limit"
+        except TimeoutException:
+            last_error = "timeout"
+        except DDGSException as e:
+            last_error = str(e)
+        except Exception as e:
+            last_error = str(e)
+
+    return (
+        f"⚠️ Η αναζήτηση απέτυχε σε {len(backends_to_try)} backends ({last_error}). "
+        "ΜΗΝ ξαναδοκιμάσεις το ίδιο ή παρόμοιο ερώτημα αμέσως — ενημέρωσε τον χρήστη "
+        "ότι η web αναζήτηση είναι προσωρινά μη διαθέσιμη."
+    )
 @tool
 def search_supermarket_prices(query: str) -> str:
     """Αναζητά τιμές προϊόντος από όλα τα σούπερ μάρκετ (e-katanalotis.gov.gr).
