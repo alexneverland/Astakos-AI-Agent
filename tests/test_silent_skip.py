@@ -142,6 +142,10 @@ _stub_modules()
 import clients.telegram_bot as bot  # noqa: E402
 
 
+def _fixed_now():
+    return datetime(2026, 6, 17, 12, 0)
+
+
 # ─────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────
@@ -165,8 +169,15 @@ def _make_routines_db(path, rows):
     conn.close()  # αναγκαίο στο Windows για να μην κλειδωθεί το db στο TemporaryDirectory cleanup
 
 
-def _run_job(db_rows, craft_return="κανονικό μήνυμα",
-             quiet=False, muted=False, duplicate=False):
+def _run_job(
+    db_rows,
+    craft_return="κανονικό μήνυμα",
+    quiet=False,
+    muted=False,
+    duplicate=False,
+    muted_until=None,
+    sentimental_info=None,
+):
     """
     Τρέχει job_check_routines() με mocked εξωτερικά.
     Returns: (sent_messages, logged_events, bus_events)
@@ -186,6 +197,11 @@ def _run_job(db_rows, craft_return="κανονικό μήνυμα",
         "update_sentimental_last_sent",
     ):
         getattr(rdb, mock_name).reset_mock()
+    rdb.get_routine_muted_until.return_value = muted_until
+    rdb.get_sentimental_info.return_value = sentimental_info or {
+        "sentimental": 0, "muted_from": None, "muted_until": None,
+        "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False
+    }
 
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "astakos_routines.db")
@@ -198,6 +214,7 @@ def _run_job(db_rows, craft_return="κανονικό μήνυμα",
         mock_bus.emit.side_effect = lambda ev, **kw: bus_events.append(ev)
 
         with (
+            patch.object(bot, "datetime", type("FrozenDateTime", (), {"now": staticmethod(_fixed_now)})),
             patch.object(bot, "is_quiet_hours",        return_value=quiet),
             patch.object(bot, "is_proactive_muted",    return_value=muted),
             patch.object(bot, "is_duplicate_routine",  return_value=duplicate),
@@ -213,7 +230,7 @@ def _run_job(db_rows, craft_return="κανονικό μήνυμα",
     return sent, logged, bus_events
 
 
-def _run_missed_job(db_rows, craft_return="Ε, πήγε καλά; 😊"):
+def _run_missed_job(db_rows, craft_return="Ε, πήγε καλά; 😊", muted_until=None, sentimental_info=None):
     """Τρέχει startup_check_missed_routines() με mocked εξωτερικά."""
     sent       = []
     logged     = []
@@ -230,6 +247,11 @@ def _run_missed_job(db_rows, craft_return="Ε, πήγε καλά; 😊"):
         "update_sentimental_last_sent",
     ):
         getattr(rdb, mock_name).reset_mock()
+    rdb.get_routine_muted_until.return_value = muted_until
+    rdb.get_sentimental_info.return_value = sentimental_info or {
+        "sentimental": 0, "muted_from": None, "muted_until": None,
+        "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False
+    }
 
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "astakos_routines.db")
@@ -241,6 +263,7 @@ def _run_missed_job(db_rows, craft_return="Ε, πήγε καλά; 😊"):
         mock_bus.emit.side_effect = lambda ev, **kw: bus_events.append(ev)
 
         with (
+            patch.object(bot, "datetime", type("FrozenDateTime", (), {"now": staticmethod(_fixed_now)})),
             patch.object(bot, "is_quiet_hours",       return_value=False),
             patch.object(bot, "is_proactive_muted",   return_value=False),
             patch.object(bot, "is_duplicate_routine", return_value=False),
@@ -263,7 +286,7 @@ def _today_minus(days):
 
 def _due_routine():
     """Ρουτίνα που πρέπει να πυροδοτηθεί σε ~2 λεπτά (μέσα στο 30' window)."""
-    now      = datetime.now()
+    now      = _fixed_now()
     # Η ρουτίνα είναι στο target_time = now+30min → time_str = (now+28min)
     time_str = (now + timedelta(minutes=30)).strftime("%H:%M")
     return {
@@ -275,7 +298,7 @@ def _due_routine():
 
 def _missed_routine():
     """Ρουτίνα που έχασε το startup check μέσα στο grace window."""
-    now = datetime.now()
+    now = _fixed_now()
     time_str = (now - timedelta(minutes=20)).strftime("%H:%M")
     return {
         "id": 1, "event_name": "park_walk", "confidence": 0.9,
@@ -311,6 +334,7 @@ def test_silent_skip_updates_last_triggered():
 
         mock_bus = MagicMock()
         with (
+            patch.object(bot, "datetime", type("FrozenDateTime", (), {"now": staticmethod(_fixed_now)})),
             patch.object(bot, "is_quiet_hours",       return_value=False),
             patch.object(bot, "is_proactive_muted",   return_value=False),
             patch.object(bot, "is_duplicate_routine", return_value=False),
@@ -327,7 +351,7 @@ def test_silent_skip_updates_last_triggered():
         row_after = conn.execute("SELECT last_triggered FROM routines WHERE id=1").fetchone()
         conn.close()
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = _fixed_now().strftime("%Y-%m-%d")
     assert row_after[0] == today, f"last_triggered πρέπει {today}, είναι {row_after[0]}"
 
 
@@ -342,6 +366,28 @@ def test_silent_skip_with_whitespace():
     sent, logged, _ = _run_job([_due_routine()], craft_return="  [SILENT_SKIP]  ")
     assert sent == []
     assert any(action == "silent_skip" for _, action in logged)
+
+
+def test_already_muted_routine_does_not_send_sentimental_followup():
+    """muted_until ενεργό → silent_skip μόνο, χωρίς δεύτερο emotional/proactive send."""
+    rdb = sys.modules["memory.routine_db"]
+    sent, logged, _ = _run_job(
+        [_due_routine()],
+        craft_return="δεν πρέπει να χρησιμοποιηθεί",
+        muted_until="2026-06-25",
+        sentimental_info={
+            "sentimental": True,
+            "muted_from": "2026-06-16",
+            "muted_until": "2026-06-25",
+            "sentimental_send_every": 2,
+            "sentimental_last_sent": None,
+            "sentimental_silenced": False,
+        },
+    )
+
+    assert sent == []
+    assert any(action == "silent_skip" for _, action in logged)
+    rdb.update_sentimental_last_sent.assert_not_called()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -386,10 +432,6 @@ def test_context_skip_does_not_create_pending_confirmation():
 def test_context_skip_can_set_muted_window():
     """[CONTEXT_SKIP] με long-running blocker → γράφει muted_until άμεσα."""
     rdb = sys.modules["memory.routine_db"]
-    rdb.get_sentimental_info.return_value = {
-        "sentimental": None, "muted_from": None, "muted_until": None,
-        "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False,
-    }
     with (
         patch.object(bot, "_build_proactive_memory_context", return_value="camp context"),
         patch.object(bot, "_infer_muted_until", return_value="2026-06-26"),
@@ -398,6 +440,10 @@ def test_context_skip_can_set_muted_window():
         _run_job(
             [_due_routine()],
             craft_return="[CONTEXT_SKIP] Περίεργη η ώρα χωρίς τον μικρό σήμερα, ε;",
+            sentimental_info={
+                "sentimental": None, "muted_from": None, "muted_until": None,
+                "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False,
+            },
         )
     rdb.set_routine_muted_until.assert_called_once_with(1, "2026-06-26")
     rdb.set_routine_sentimental.assert_called_once_with(1, True)

@@ -754,10 +754,18 @@ def get_routines(day_of_week: str) -> str:
 def control_routine_notifications(event_name: str, action: str, until_date: str = "") -> str:
     """
     [OVERRIDE]: Χειροκίνητος έλεγχος των proactive υπενθυμίσεων μιας ρουτίνας, ΜΟΝΟ όταν
-    ο Λάζαρος το ζητήσει ρητά μέσα στην κουβέντα (όχι αυτόματα από εσένα ή από τον
+    ο Λάζαρος το ζητήσει ΡΗΤΑ μέσα στην κουβέντα (όχι αυτόματα από εσένα ή από τον
     προγραμματισμένο job — αυτό είναι ξεχωριστό κανάλι, ο χρήστης παίρνει τον έλεγχο).
 
-    ΠΟΤΕ ΝΑ ΤΟ ΚΑΛΕΣΕΙΣ (ενδεικτικά, ΓΕΝΙΚΕΥΣΕ σε κάθε ρουτίνα, όχι μόνο αυτά τα παραδείγματα):
+    ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ — ΜΗΝ το καλέσεις ποτέ μόνο επειδή ο χρήστης σου είπε μια ΠΛΗΡΟΦΟΡΙΑ
+    (π.χ. "ο Αλέξανδρος λείπει κατασκήνωση", "γυρνάει σε 9 μέρες"). Μια πληροφορία ΔΕΝ
+    είναι αίτημα. Κάλεσέ το ΜΟΝΟ όταν υπάρχει ρητό αίτημα ελέγχου ειδοποιήσεων — λέξεις/
+    νόημα τύπου "μη μου στείλεις", "σίγασε", "άσε ήσυχο", "σταμάτα τις ειδοποιήσεις",
+    "ξαναενεργοποίησε". Αν ο χρήστης απλά σε ενημερώνει για κάτι, απάντησε κανονικά στην
+    κουβέντα — ΜΗΝ μαντέψεις ότι θέλει mute και ΜΗΝ σκανάρεις άλλες ρουτίνες "για καλό".
+    Μία κλήση ανά ρουτίνα που ζητήθηκε ρητά — όχι επανάληψη της ίδιας κλήσης στον ίδιο γύρο.
+
+    ΠΑΡΑΔΕΙΓΜΑΤΑ ΡΗΤΟΥ ΑΙΤΗΜΑΤΟΣ (μόνο αυτά τα patterns, όχι γενίκευση σε κάθε ρουτίνα):
     - "Δεν χρειάζεται να μου στείλεις για το πάρκο μέχρι να γυρίσει ο Αλέξανδρος στις 26/6"
       → action="mute", until_date="2026-06-26"
     - "Άσε ήσυχο το ξυπνητήρι όλη την εβδομάδα, είμαι απόγευμα στη δουλειά"
@@ -779,8 +787,8 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
     """
     from datetime import datetime
     from memory.routine_db import (
-        find_routine_by_name, set_routine_muted_until, clear_routine_muted_until,
-        set_sentimental_silenced, get_sentimental_info,
+        find_routines_by_name, set_routine_muted_until, clear_routine_muted_until,
+        set_sentimental_silenced, get_sentimental_info, get_routine_muted_until,
     )
 
     VALID_ACTIONS = {"mute", "unmute", "silence_emotional", "allow_emotional"}
@@ -788,15 +796,14 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
         return f"❌ Μη έγκυρο action: '{action}'. Επιτρεπτά: {', '.join(sorted(VALID_ACTIONS))}."
 
     try:
-        routine = find_routine_by_name(event_name)
+        routines = find_routines_by_name(event_name)
     except Exception as e:
         return f"❌ Σφάλμα αναζήτησης ρουτίνας: {e}"
 
-    if not routine:
+    if not routines:
         return f"❌ Δεν βρήκα καταγεγραμμένη ρουτίνα που να ταιριάζει με '{event_name}'."
 
-    r_id  = routine["id"]
-    label = routine["event"]
+    results = []
 
     try:
         if action == "mute":
@@ -807,23 +814,48 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
                 datetime.strptime(until_date, "%Y-%m-%d")
             except ValueError:
                 return f"❌ Λάθος format ημερομηνίας: '{until_date}'. Χρησιμοποίησε YYYY-MM-DD."
-            set_routine_muted_until(r_id, until_date)
-            return f"🔇 Η ρουτίνα '{label}' σιγάστηκε μέχρι {until_date}."
+            for routine in routines:
+                r_id = routine["id"]
+                label = routine["event"]
+                day = routine.get("day") or "?"
+                existing_until = get_routine_muted_until(r_id)
+                if existing_until and existing_until >= until_date:
+                    results.append(f"ℹ️ [{day}] Η ρουτίνα '{label}' είναι ήδη σιγασμένη μέχρι {existing_until} — δεν έκανα τίποτα.")
+                    continue
+                set_routine_muted_until(r_id, until_date)
+                results.append(f"🔇 [{day}] Η ρουτίνα '{label}' σιγάστηκε μέχρι {until_date}.")
+            return "\n".join(results)
 
         if action == "unmute":
-            clear_routine_muted_until(r_id)
-            return f"🔔 Η ρουτίνα '{label}' ξαναενεργοποιήθηκε κανονικά."
+            for routine in routines:
+                r_id = routine["id"]
+                label = routine["event"]
+                day = routine.get("day") or "?"
+                clear_routine_muted_until(r_id)
+                results.append(f"🔔 [{day}] Η ρουτίνα '{label}' ξαναενεργοποιήθηκε κανονικά.")
+            return "\n".join(results)
 
         if action == "silence_emotional":
-            info = get_sentimental_info(r_id)
-            if not info["muted_until"]:
-                return f"⚠️ Η ρουτίνα '{label}' δεν είναι σε σίγαση αυτή τη στιγμή — δεν υπάρχει κάτι να σιγάσω."
-            set_sentimental_silenced(r_id, True)
-            return f"🤫 Εντάξει, δεν θα στείλω τίποτα (ούτε συναισθηματικό μήνυμα) για '{label}' μέχρι να λήξει η σίγαση."
+            for routine in routines:
+                r_id = routine["id"]
+                label = routine["event"]
+                day = routine.get("day") or "?"
+                info = get_sentimental_info(r_id)
+                if not info["muted_until"]:
+                    results.append(f"⚠️ [{day}] Η ρουτίνα '{label}' δεν είναι σε σίγαση αυτή τη στιγμή — δεν υπάρχει κάτι να σιγάσω.")
+                    continue
+                set_sentimental_silenced(r_id, True)
+                results.append(f"🤫 [{day}] Εντάξει, δεν θα στείλω τίποτα (ούτε συναισθηματικό μήνυμα) για '{label}' μέχρι να λήξει η σίγαση.")
+            return "\n".join(results)
 
         if action == "allow_emotional":
-            set_sentimental_silenced(r_id, False)
-            return f"💬 Εντάξει, θα ξαναστέλνω περιστασιακά ένα ζεστό μήνυμα για '{label}' όσο διαρκεί η σίγαση."
+            for routine in routines:
+                r_id = routine["id"]
+                label = routine["event"]
+                day = routine.get("day") or "?"
+                set_sentimental_silenced(r_id, False)
+                results.append(f"💬 [{day}] Εντάξει, θα ξαναστέλνω περιστασιακά ένα ζεστό μήνυμα για '{label}' όσο διαρκεί η σίγαση.")
+            return "\n".join(results)
     except Exception as e:
         return f"❌ Σφάλμα ενημέρωσης ρουτίνας: {e}"
 

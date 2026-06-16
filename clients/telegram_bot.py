@@ -2210,8 +2210,6 @@ def job_check_routines():
             from memory.routine_db import (
                 get_routine_notify_info, mark_routine_notified,
                 save_pending_confirmation, get_routine_muted_until,
-                get_sentimental_info,
-                set_routine_sentimental, update_sentimental_last_sent
             )
             due_routines = []
             for r_id, event_name, confidence in cursor.fetchall():
@@ -2221,42 +2219,10 @@ def job_check_routines():
                     cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                     conn.commit()
 
-                    sent_info = get_sentimental_info(r_id)
-                    if sent_info["sentimental"] is None:
-                        try:
-                            _ctx = _build_proactive_memory_context(event_name)
-                        except Exception:
-                            _ctx = ""
-                        is_sent = _infer_sentimental(event_name, _ctx)
-                        set_routine_sentimental(r_id, is_sent)
-                        sent_info["sentimental"] = is_sent
-
-                    if sent_info["sentimental"] and not sent_info["sentimental_silenced"]:
-                        _last  = sent_info["sentimental_last_sent"]
-                        _every = sent_info["sentimental_send_every"]
-                        if not _last:
-                            _should_send = True
-                        else:
-                            from datetime import datetime as _dt
-                            _days = (_dt.now().date() - _dt.strptime(_last, "%Y-%m-%d").date()).days
-                            _should_send = _days >= _every
-                        if _should_send:
-                            try:
-                                _sctx = _build_proactive_memory_context(event_name)
-                            except Exception:
-                                _sctx = ""
-                            _emsg = _craft_sentimental_absent_msg(
-                                event_name,
-                                sent_info.get("muted_from") or today_str,
-                                muted_until, _sctx
-                            )
-                            if _emsg:
-                                send_telegram_msg(_emsg)
-                                update_sentimental_last_sent(r_id, today_str)
-                                log_event("routines", "sentimental_sent",
-                                          routine_id=r_id, event=event_name, muted_until=muted_until)
-                                print(f"\U0001f48c [job_check_routines]: #{r_id} '{event_name}' sentimental msg sent")
-
+                    # Όταν η ρουτίνα είναι ήδη muted, το proactive για αυτό το slot τελειώνει εδώ.
+                    # ΔΕΝ στέλνουμε δεύτερο sentimental message από το polling loop· τα
+                    # συναισθηματικά/contextual messages παράγονται μόνο στη στιγμή που
+                    # ανιχνεύθηκε το context skip / mute, όχι ξανά σε κάθε επόμενο poll.
                     log_event("routines", "silent_skip", routine_id=r_id, event=event_name,
                               reason="muted_until", muted_until=muted_until)
                     print(f"\U0001f507 [job_check_routines]: #{r_id} '{event_name}' muted until {muted_until} — skipped")

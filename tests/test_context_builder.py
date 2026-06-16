@@ -258,6 +258,29 @@ def test_meal_log_tool_output_disables_memory_lookup():
     assert calls == {"recent": 0, "semantic": 0}
 
 
+def test_routine_control_output_disables_memory_lookup():
+    calls = {"recent": 0, "semantic": 0}
+
+    def fake_recent_loader(**kwargs):
+        calls["recent"] += 1
+        return [{"channel": "telegram", "time": "21:04", "role": "assistant", "content": "tool output"}]
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] noise")]
+
+    query = "🔇 [Δευτέρα] Η ρουτίνα 'ποδόσφαιρο Αλέξανδρου' σιγάστηκε μέχρι 2026-06-25."
+    context = build_memory_context(
+        query,
+        recent_loader=fake_recent_loader,
+        semantic_search=fake_search,
+    )
+
+    assert looks_like_tool_output(query)
+    assert context.render() == ""
+    assert calls == {"recent": 0, "semantic": 0}
+
+
 def test_empty_memory_context_renders_empty():
     assert MemoryContext([], [], []).render() == ""
 

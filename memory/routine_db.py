@@ -564,7 +564,11 @@ def get_routine_notify_info(routine_id: int) -> dict:
 def set_routine_muted_until(routine_id: int, until_date_str: str) -> None:
     """
     Βάζει τη ρουτίνα σε σίγαση μέχρι until_date_str (YYYY-MM-DD).
-    Αποθηκεύει και muted_from (σήμερα) + reset sentimental state για την περίοδο.
+    Αποθηκεύει και muted_from (σήμερα). ΔΕΝ αγγίζει sentimental_silenced — αν ο χρήστης
+    είχε ζητήσει ρητά silence_emotional παλιότερα, αυτό ΔΕΝ πρέπει να σβήνεται σιωπηλά σε
+    κάθε νέο/extended mute (πριν: reset σε 0 κάθε φορά — bug). sentimental_last_sent
+    γίνεται σήμερα (όχι NULL) ώστε το cooldown (sentimental_send_every) να ξεκινά ΤΩΡΑ,
+    όχι instant sentimental msg στο επόμενο poll (60s μετά το mute — bug).
     """
     today = datetime.now().strftime("%Y-%m-%d")
     conn   = get_connection()
@@ -572,10 +576,9 @@ def set_routine_muted_until(routine_id: int, until_date_str: str) -> None:
     with db_write_lock:
         cursor.execute(
             """UPDATE routines
-               SET muted_until=?, muted_from=?,
-                   sentimental_last_sent=NULL, sentimental_silenced=0
+               SET muted_until=?, muted_from=?, sentimental_last_sent=?
                WHERE id=?""",
-            (until_date_str, today, routine_id)
+            (until_date_str, today, today, routine_id)
         )
         conn.commit()
     conn.close()
@@ -713,18 +716,21 @@ def set_sentimental_silenced(routine_id: int, silenced: bool) -> None:
     log_event("routines", f"sentimental_{state}", routine_id=routine_id)
 
 
-def find_routine_by_name(event_name: str, min_similarity: float = 0.55) -> dict | None:
+def find_routines_by_name(event_name: str, min_similarity: float = 0.75) -> list[dict]:
     """
-    Βρίσκει την πιο πιθανή ρουτίνα (state='active' ή 'learned') από ένα όνομα
+    Βρίσκει τις πιο πιθανές ρουτίνες (state='active' ή 'learned') από ένα όνομα
     που είπε ο χρήστης σε φυσική κουβέντα (όχι απαραίτητα το exact canonical event_name).
 
     3-stage match, ίδια λογική με το upsert_routine αλλά ΧΩΡΙΣ φιλτράρισμα day/time
     (ψάχνει σε ΟΛΕΣ τις ρουτίνες):
-      Stage 1 — exact normalized match
-      Stage 2 — difflib fuzzy ratio (>= min_similarity)
+      Stage 1 — exact normalized match (επιστρέφει ΟΛΕΣ τις exact matches)
+      Stage 2 — difflib fuzzy ratio (>= min_similarity· πριν ήταν 0.55 — θόρυβος σε
+                κοντά strings προκαλούσε false matches όπως "μαγείρεμα" αντί άσχετου
+                event_name. 0.75 μειώνει τα false positives, χωρίς να σκοτώνει genuine
+                paraphrases.)
       Stage 3 — embedding cosine similarity (>= 0.80) αν το difflib αποτύχει
-
-    Επιστρέφει dict με id/day/time/event/type/state/confidence ή None αν δεν βρεθεί.
+ 
+    Επιστρέφει λίστα από dicts με id/day/time/event/type/state/confidence.
     """
     conn   = get_connection()
     cursor = conn.cursor()
@@ -736,7 +742,7 @@ def find_routine_by_name(event_name: str, min_similarity: float = 0.55) -> dict 
     conn.close()
 
     if not rows:
-        return None
+        return []
 
     def _row_to_dict(r) -> dict:
         return {
@@ -747,9 +753,9 @@ def find_routine_by_name(event_name: str, min_similarity: float = 0.55) -> dict 
     target = normalize_event(event_name)
 
     # ── Stage 1: exact normalized match ──────────────────────────
-    for r in rows:
-        if normalize_event(r[3]) == target:
-            return _row_to_dict(r)
+    exact_matches = [_row_to_dict(r) for r in rows if normalize_event(r[3]) == target]
+    if exact_matches:
+        return exact_matches
 
     # ── Stage 2: difflib fuzzy ────────────────────────────────────
     best_row, best_score = None, 0.0
@@ -758,7 +764,7 @@ def find_routine_by_name(event_name: str, min_similarity: float = 0.55) -> dict 
         if score > best_score:
             best_row, best_score = r, score
     if best_row is not None and best_score >= min_similarity:
-        return _row_to_dict(best_row)
+        return [_row_to_dict(best_row)]
 
     # ── Stage 3: embedding cosine similarity ──────────────────────
     best_row, best_score = None, 0.0
@@ -767,9 +773,15 @@ def find_routine_by_name(event_name: str, min_similarity: float = 0.55) -> dict 
         if sim > best_score:
             best_row, best_score = r, sim
     if best_row is not None and best_score >= 0.80:
-        return _row_to_dict(best_row)
+        return [_row_to_dict(best_row)]
 
-    return None
+    return []
+
+
+def find_routine_by_name(event_name: str, min_similarity: float = 0.75) -> dict | None:
+    """Backward-compatible wrapper που επιστρέφει μόνο την πρώτη match."""
+    matches = find_routines_by_name(event_name, min_similarity=min_similarity)
+    return matches[0] if matches else None
 
 
 # ────────────────────────────────────────────────────────────────
