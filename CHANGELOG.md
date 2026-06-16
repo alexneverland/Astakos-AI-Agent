@@ -5,15 +5,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [v1.1.1] — 2026-06-16
+## [v1.2.0] — 2026-06-16
+
+106 commits since v1.1.0. Headline: **Planner v2's full agentic loop is complete** (Goal → Plan → Validate → Execute → Reflect → Re-plan), alongside a full **Profile SQLite Migration**, Google Calendar integration, a Georgian-language helper, and a long tail of reliability fixes across Mail_Agent, memory search, and Telegram/Messenger.
 
 ### 🆕 Features
 
-- **`list_recent_files`** (`tools/project_tools.py`) — bounded `os.walk` scan that returns the most recently modified files in a folder (default: whole `astakos_v2` repo, no `grant_project_access` needed for internal scans). Ignores `venv`, `.git`, `__pycache__`, `node_modules`, and other noisy directories. Risk: SAFE. Replaces ad-hoc PowerShell `Get-ChildItem -Recurse` / `dir /s` calls through `run_terminal_command`, which scanned noisy directories unbounded and routinely hit the 30s subprocess timeout. Wired into both Dev_Agent and Git_Agent prompts: use this for "τι άλλαξα" / untracked-file questions, and fall back to `git log`/`git show` only for committed history.
+#### Planning & Execution — Planner v2 Agentic Loop (complete)
+- **Confirmation gate** — `/plan` no longer auto-executes; it decomposes the goal, then waits for explicit confirmation (PR1a).
+- **Auto-plan LLM judge** (`core/plan_judge.py`) — detects multi-step intent and routes into the planner without requiring the literal `/plan` command (PR1b).
+- **Progress UI** — `[X/N]` step progress messages during execution (PR2).
+- **`validate_step_node`** — detects step failure via AI response + tool-output heuristics (PR2).
+- **`replan_node`** — auto-skips failed steps and continues the plan instead of aborting (PR3).
+- **`end_check_node`** — final summary (`✅` full success / `⚠️ X/N steps`) + saves a post-plan reflection (PR3).
+- Step isolation directive + `ToolMessage` error-detection hardening; `capture_result` ignores progress messages when judging success.
+- Still open: parallel step execution and per-step Telegram approve/reject buttons (today's confirmation gate is chat-based, not inline-keyboard) — see Roadmap.
+
+#### Memory — Profile SQLite Migration
+- Profile memory (preferences, family facts, recurring details) moved from the legacy `astakos_profile.json` format to SQLite; `clean.py` migrated; legacy JSON files and `astakos_profile.json.example` removed as obsolete.
+- Schema fixes: corrected `date` → `session_date` column in `session_memory.py`; aligned SQLite state schema and cleaned tracked artifacts.
+- **Context-Aware Proactive Routines** — routine pings now check live context before firing.
+
+#### Memory — Routine Muting & Sentimental Handling
+- **`SILENT_SKIP`** — LLM judges whether a routine should fire silently instead of pinging.
+- **`muted_until`** — per-date auto-silence without a daily LLM call once muted.
+- **Sentimental flag + frequency** — emotional messages still get through at a reduced cadence during a muted period.
+- **Natural-language override** — mute/unmute, silence/allow emotional messages, parsed directly from chat, no command syntax.
+- Numbered ναι/όχι replies now resolve multiple pending reflections at once; reflection `routine_id`/`action_value` persistence and pending-recovery/dedupe bugs fixed.
+
+#### Memory — Performance
+- `search_memory` — lexical L1 cache, one `similarity_search` call instead of three, async bump, temporal guard; SQLite recall kept for memory-intent queries.
+- `save_to_memory` — fire-and-forget background thread, eliminates ~11s of blocking per call.
+
+#### Action Safety
+- **Capability Registry expanded to 37 capabilities** with a full 4-level risk model.
+- **`tool_stats`** — aggregates execution traces into per-tool call/error/duration stats.
+- **System Doctor** (`system_doctor`, `/doctor`) — runtime health summary: event logs, traces, pending approvals, Messenger draft state, SQLite session backlog, pending routine confirmations.
+- MASTRO-SHIELD v2 — added `CIVIC_INTEGRITY` + `JAILBREAK` + `IMAGE_*` BLOCK_NONE categories.
+
+#### Integrations
+- **Google Calendar** — full CRUD tool with per-action risk, OAuth2 `token.json` auth (same pattern as Mail/Drive/Tasks), proactive morning briefing.
+- **Georgian language helper** — `/georgian` and `/georgian_phrases` Telegram commands; pending-translation mode; TTS via `edge-tts` (`ka-GE-EkaNeural`) after Google Translate/gTTS turned out not to support `ka`; later renamed to `/gr` `/greek` for clarity; bot menu updated.
+- **Messenger image attachments** — Playwright-based upload + draft schema support.
+- **Reaction handler** — ❤️ exact-message-match via in-memory cache with SQLite fallback.
+- LinkedIn multi-image posting.
+
+#### Developer Tools
+- **`list_recent_files`** (`tools/project_tools.py`) — bounded `os.walk` scan for recently modified files, no `grant_project_access` needed for internal scans, ignores `venv`/`.git`/`__pycache__`/`node_modules`. Risk: SAFE. Replaces ad-hoc PowerShell `Get-ChildItem -Recurse`/`dir /s` through `run_terminal_command`, which routinely hit the 30s subprocess timeout. Wired into Dev_Agent and Git_Agent prompts.
 
 ### 🔧 Notable Fixes
 
-- Fixed an invalid escape sequence (`\m`) in `grep_project_files`'s docstring in `tools/project_tools.py` that triggered a `SyntaxWarning` on import.
+- **Mail_Agent loop guard** — hardened through four iterations: no-tools synthesis when mail results are already in context, clean 2-message synthesis bypassing `sanitize_history`, current-turn-only history, auto-read + ID-hint injection, `read_full` instead of `read`.
+- **Web/Telegram reply synthesis** — fixed empty-synthesis fallback and streaming filter so both channels reliably turn tool results into a spoken reply.
+- `duckduckgo_search` latency — pinned backend to `duckduckgo+google` fallback; removed the deprecated package pin from `requirements.txt`.
+- Trace/event log hardening — `WinError 5` fallback for cross-process write contention; guarded `None` data in `event.items()` loops and `process_event`.
+- Timeline dashboard — fixed legacy dict-string event parsing, confirmed/dismissed log format, `job=routines` filter, added `deferred_followup`/`timeout_decay` actions.
+- Startup stale-working-memory cleanup on hard restart; `Ctrl+C` shutdown now runs the full `handle_end_session` (messages + cleanup) instead of a partial one.
+- Photo indexer corrupted-filename bug + JSON state cleanup.
+- Messenger textbox timeout — root cause turned out to be a stuck PIN prompt, not slow page load; reverted an unneeded 10s→25s timeout bump once identified.
+- Google Fit — reverted to the Fit API (Health API v4 needs a Fitbit account) and handled a token scope mismatch.
+- Misc correctness: sifter no longer saves raw user text as a fact; removed a generic "έξοδα" trigger from `scan_receipt`; SQLite connections now close properly + UTF-8 console on Windows; `send_telegram_msg` chat_id keyword fix; Telegram HTML fallback formatting; reflection float-time sanitization (`14.5` → `14:30`); scheduler `verbose=False` cuts reminder/routine log noise; Messenger draft auto-clear + Sophia contact resolution; plan-mode payload sanitization + double-approval bypass fix.
+
+### 🗑 Removed
+
+- `astakos_profile.json.example` — superseded by the SQLite profile schema; the JSON template no longer reflects reality.
 
 ---
 

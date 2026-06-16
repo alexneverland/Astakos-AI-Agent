@@ -497,10 +497,20 @@ Shutdown behavior:
 - [x] ChromaDB HNSW Index Resilience — orphaned vector index IDs (HNSW/SQLite mismatch) are caught with a try/except in `vector_store.py`; the query returns empty results instead of crashing, and the affected category is auto-repaired on next write.
 - [x] Test Suite for Project Tools — `tests/test_project_tools.py` covers 48 cases: permission model (grant/deny/read-only), syntax check, read with line ranges, edit with rollback on syntax error, noop guard, grep, list, and tool risk levels (SAFE/WARNING/CRITICAL). pytest runs cleanly on the FUSE-mounted repo.
 - [x] `list_recent_files` — bounded `os.walk` scan for recently modified files, defaulting to the whole repo with no permission grant needed; ignores `venv`/`.git`/`__pycache__`/`node_modules`; replaces timeout-prone ad-hoc PowerShell recursive scans for "what did I just change" questions. Risk: SAFE.
+- [x] Planner v2 — full agentic loop: confirmation gate before execution, auto-plan LLM judge (no `/plan` needed), progress UI, `validate_step_node` (failure detection), `replan_node` (auto-skip + continue), `end_check_node` (final summary + reflection). Goal → Plan → Validate → Execute → Reflect → Re-plan.
+- [x] Profile SQLite Migration — profile memory (preferences, family facts) moved from JSON to SQLite; `clean.py` migrated; legacy `astakos_profile.json`/`.example` removed.
+- [x] Routine Muting & Sentimental Handling — `SILENT_SKIP` (LLM judges whether to skip silently), `muted_until` (per-date auto-silence without a daily LLM call), sentimental flag + reduced-frequency emotional messages during a muted period, natural-language mute/unmute override parsed directly from chat.
+- [x] Memory Audit Panel — debug-dashboard audit log for memory ops (add/overwrite/skip/reflection).
+- [x] Google Calendar — full CRUD tool with per-action risk, OAuth2 `token.json` auth, proactive morning briefing.
+- [x] Georgian Language Helper — `/gr`/`/greek` Telegram commands (renamed from `/georgian`), pending-translation mode, TTS via `edge-tts` (`ka-GE-EkaNeural`).
+- [x] Reaction Handler — ❤️ exact-message-match reactions via in-memory cache with SQLite fallback.
+- [x] Mail_Agent Loop Guard — hardened synthesis path so mail results already in context don't trigger redundant tool calls; auto-read + ID-hint injection.
+- [x] Memory Search Performance — `search_memory` lexical L1 cache + single `similarity_search` call; `save_to_memory` fire-and-forget background thread (~11s faster per call).
 
 ### Planned
 
-- [ ] Planner v2 — validate plan before execution, approve/reject from Telegram, parallel steps, error recovery, progress UI (`[2/5] Τρέχω tests...`), and full agentic loop: Goal → Plan → Validate → Execute → Reflect → Re-plan.
+- [ ] Planner v3 — parallel step execution and per-step Telegram inline approve/reject (today's confirmation gate is chat-based, not inline-keyboard).
+- [ ] Behavior Analytics Engine — auto-shift routine triggers based on ignore patterns.
 - [ ] Memory cleanup — prune low-score memories (`compute_score() < threshold`) after 6+ months of real data.
 - [ ] Personal Knowledge Graph — structured entity relations such as `Λάζαρος → project → Astakos` in SQLite, parallel to ChromaDB, after 6+ months of usage.
 - [ ] Tool Execution Journal — aggregate `tool_stats` data to SQLite for long-term trend analysis (currently read from daily trace files).
