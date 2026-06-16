@@ -160,6 +160,65 @@ def test_event_memory_candidate_captures_personal_day_event():
     assert "συνέντευξη" in candidate["fact"]
 
 
+def test_temporary_family_memory_candidate_captures_absence_window():
+    import datetime
+    import memory.session_memory as session_memory
+
+    candidate = session_memory._extract_temporary_family_memory_candidate(
+        "Ο Αλέξανδρος είναι κατασκήνωση και θα γυρίσει την άλλη εβδομάδα",
+        "Οκ, το κρατάω υπόψη μου.",
+        agent_name="Chat_Agent",
+        channel="telegram",
+        now=datetime.datetime(2026, 6, 16, 18, 30),
+    )
+
+    assert candidate["memory_type"] == "fact"
+    assert candidate["category"] == "family"
+    assert candidate["source"] == "telegram"
+    assert candidate["confidence"] == 0.9
+    assert "2026-06-16" in candidate["fact"]
+    assert "κατασκήνωση" in candidate["fact"]
+    assert "γυρίσει" in candidate["fact"]
+
+
+def test_temporary_family_memory_candidate_ignores_question():
+    import memory.session_memory as session_memory
+
+    candidate = session_memory._extract_temporary_family_memory_candidate(
+        "Ο Αλέξανδρος είναι ακόμα κατασκήνωση ή γύρισε;",
+        "Δεν ξέρω ακόμα.",
+        agent_name="Chat_Agent",
+        channel="web",
+    )
+
+    assert candidate is None
+
+
+def test_memory_sifter_saves_temporary_family_memory_even_if_llm_returns_empty(monkeypatch):
+    import memory.session_memory as session_memory
+
+    saved = []
+
+    class EmptyResponse:
+        text = "ΚΕΝΟ"
+
+    monkeypatch.setattr(session_memory.memory, "save", lambda **kwargs: saved.append(kwargs))
+    monkeypatch.setattr(session_memory, "safe_gemini_call", lambda prompt: EmptyResponse())
+    session_memory.SESSION_LOGS.clear()
+
+    session_memory._run_memory_sifter(
+        "Ο Αλέξανδρος είναι κατασκήνωση μέχρι την Κυριακή και μετά γυρνάει σπίτι",
+        "Το κρατάω στο νου μου.",
+        agent_name="Chat_Agent",
+        channel="telegram",
+    )
+
+    assert any(
+        entry.get("category") == "family" and "κατασκήνωση" in entry.get("fact", "")
+        for entry in saved
+    )
+
+
 def test_confirmed_memory_candidate_captures_family_watch():
     import datetime
     import memory.session_memory as session_memory

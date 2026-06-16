@@ -241,6 +241,127 @@ def _extract_event_memory_candidate(
     }
 
 
+def _extract_temporary_family_memory_candidate(
+    user_text: str,
+    ai_text: str,
+    *,
+    agent_name: str = "Unknown",
+    channel: str = "web",
+    now: datetime | None = None,
+) -> dict | None:
+    """Capture temporary family states with time windows (camp, away, return dates)."""
+    safe_user = clean_message(user_text)
+    safe_ai = clean_message(ai_text)
+    source_text = " ".join(safe_user.split())
+    if not source_text:
+        return None
+
+    normalized = _normalize_text(f"{safe_user} {safe_ai}")
+    lowered_source = _normalize_text(source_text)
+
+    if source_text.rstrip().endswith((";", "?")):
+        return None
+
+    question_starters = (
+        "τι ",
+        "πως ",
+        "πώς ",
+        "γιατι ",
+        "γιατί ",
+        "που ",
+        "πού ",
+        "ποιος ",
+        "ποια ",
+        "ποιο ",
+        "ποσο ",
+        "πόσο ",
+        "ποτε ",
+        "πότε ",
+    )
+    if lowered_source.startswith(question_starters):
+        return None
+
+    family_markers = (
+        "αλεξανδρ",
+        "σοφια",
+        "μικρο",
+        "μικρος",
+        "μικρη",
+        "γιος",
+        "κορη",
+        "παιδι",
+        "μαμα",
+        "μπαμπας",
+    )
+    absence_markers = (
+        "κατασκην",
+        "λειπ",
+        "δεν ειναι σπιτι",
+        "δεν ειναι μαζι",
+        "ταξιδ",
+        "εκδρομ",
+        "διακοπ",
+        "φιλοξεν",
+        "μενει στη",
+        "μενει στον",
+        "μενει στην",
+        "κοιμαται στη",
+        "κοιμαται στον",
+        "κοιμαται στην",
+    )
+    window_markers = (
+        "μεχρι",
+        "μέχρι",
+        "επιστρ",
+        "γυρν",
+        "γυρνα",
+        "επιστρο",
+        "αυριο",
+        "μεθαυριο",
+        "σε 2 μερες",
+        "σε 3 μερες",
+        "σε 4 μερες",
+        "σε 5 μερες",
+        "σε 6 μερες",
+        "σε 7 μερες",
+        "την αλλη εβδομαδα",
+        "την άλλη εβδομάδα",
+        "το σαββατο",
+        "το σάββατο",
+        "την κυριακη",
+        "την κυριακή",
+        "δευτερα",
+        "τριτη",
+        "τεταρτη",
+        "πεμπτη",
+        "παρασκευη",
+        "σαββατο",
+        "κυριακη",
+    )
+
+    if not any(marker in normalized for marker in family_markers):
+        return None
+    if not any(marker in normalized for marker in absence_markers):
+        return None
+    if not any(marker in normalized for marker in window_markers):
+        return None
+
+    if len(source_text) > 320:
+        source_text = source_text[:317].rstrip() + "..."
+
+    ts = now or datetime.now()
+    fact = f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, {source_text}"
+    return {
+        "memory_type": "fact",
+        "fact": fact,
+        "category": "family",
+        "agent_name": agent_name,
+        "source": channel,
+        "reason": "user_stated",
+        "confidence": 0.9,
+    }
+
+
 def _infer_memory_category(text: str) -> str:
     clean = _normalize_text(text)
     if any(marker in clean for marker in ("σοφια", "αλεξανδρ", "μαρια", "μικρο", "παιδι", "γενεθλια", "δωρο")):
@@ -460,6 +581,12 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
                 agent_name=agent_name,
                 channel=channel,
             ),
+            _extract_temporary_family_memory_candidate(
+                user_text,
+                ai_text,
+                agent_name=agent_name,
+                channel=channel,
+            ),
             _extract_confirmed_memory_candidate(
                 user_text,
                 ai_text,
@@ -514,6 +641,7 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
 5. Μην αποθηκεύεις απλά drafts/προσχέδια μηνυμάτων ως facts. Αποθήκευσε μόνο πραγματικά γεγονότα, προτιμήσεις, αποφάσεις ή μαθήματα.
 6. Αποθήκευσε χωρίς ρητή εντολή όταν ο διάλογος περιέχει:
    - προσωπικό ή οικογενειακό γεγονός/πλάνο/απόφαση (Σοφία, Αλέξανδρος, γενέθλια, δώρα, υγεία, σχολείο, δουλειά),
+   - προσωρινή οικογενειακή κατάσταση με χρονικό παράθυρο (π.χ. κατασκήνωση, ταξίδι, λείπει μέχρι να γυρίσει),
    - σταθερή προτίμηση, συνήθεια, περιορισμό ή κάτι που θα βοηθήσει μελλοντικά,
    - σημαντικό project/tool/bug/κανόνα που μάθαμε,
    - link ή προϊόν που συνδέεται με μελλοντική αγορά/δώρο/εκκρεμότητα.
@@ -526,6 +654,7 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
    - "photos": φωτογραφίες/αρχεία με περιγραφές.
 8. Μην αποθηκεύεις απλές απαντήσεις ευγένειας, προσωρινά drafts, αστεία χωρίς μελλοντική αξία,
    ή πληροφορίες που είναι ήδη γνωστές εκτός αν η νέα εκδοχή είναι πιο πλούσια/ακριβής.
+   Για προσωρινές οικογενειακές καταστάσεις, κράτα και τη χρονική ένδειξη/παράθυρο επιστροφής αν αναφέρεται.
 9. ΑΠΑΓΟΡΕΥΕΤΑΙ να αποθηκεύεις ερωτήσεις του χρήστη — αν το μήνυμα είναι ερώτηση (τελειώνει με ";" ή "?"
    ή ξεκινά με "τι", "πώς", "γιατί", "πού", "ποιος", "πόσο", "πότε") → ΚΕΝΟ.
    Ειδικά αν αφορά τη λειτουργία του Αστακού, debug, logs, ή τεχνικές ερωτήσεις για το σύστημα → ΚΕΝΟ.
