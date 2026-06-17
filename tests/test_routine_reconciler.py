@@ -22,7 +22,7 @@ def _make_routines_db(path, rows):
     conn = sqlite3.connect(path)
     conn.execute(
         """
-        CREATE TABLE routines ( priority INTEGER DEFAULT 0, condition_type TEXT, condition_payload TEXT, condition_mode TEXT,
+        CREATE TABLE routines ( priority INTEGER DEFAULT 0, condition_type TEXT, condition_payload TEXT, condition_mode TEXT, source_memory_ref TEXT,
             id INTEGER PRIMARY KEY,
             day_of_week TEXT,
             time_str TEXT,
@@ -43,16 +43,29 @@ def _make_routines_db(path, rows):
         """
     )
     for row in rows:
+        if "source_memory_ref" not in row:
+            row["source_memory_ref"] = None
+        if "priority" not in row:
+            row["priority"] = 0
+        if "condition_type" not in row:
+            row["condition_type"] = None
+        if "condition_payload" not in row:
+            row["condition_payload"] = None
+        if "condition_mode" not in row:
+            row["condition_mode"] = None
+
         conn.execute(
             """
             INSERT INTO routines (
                 id, day_of_week, time_str, event_name, event_type, confidence, state,
                 muted_until, muted_from, sentimental_last_sent, sentimental_silenced,
-                active_from, active_until, paused_until, resume_rule, pause_reason
+                active_from, active_until, paused_until, resume_rule, pause_reason,
+                priority, condition_type, condition_payload, condition_mode, source_memory_ref
             ) VALUES (
                 :id, :day_of_week, :time_str, :event_name, :event_type, :confidence, :state,
                 :muted_until, :muted_from, :sentimental_last_sent, :sentimental_silenced,
-                :active_from, :active_until, :paused_until, :resume_rule, :pause_reason
+                :active_from, :active_until, :paused_until, :resume_rule, :pause_reason,
+                :priority, :condition_type, :condition_payload, :condition_mode, :source_memory_ref
             )
             """,
             row,
@@ -421,3 +434,49 @@ def test_save_fact_does_not_trigger_reconciler_when_save_is_aborted(tmp_path):
 
     assert result is False
     mock_reconcile.assert_not_called()
+
+
+def test_apply_condition_add_hits_correct_routines_without_error(tmp_path):
+    import memory.routine_db as rdb
+
+    db_path = tmp_path / "routines.db"
+    _make_routines_db(
+        db_path,
+        [
+            _routine(1, "alexandros football", time_str="17:00"),
+            _routine(2, "alexandros english", time_str="16:00"),
+        ],
+    )
+
+    directives = [
+        {
+            "kind": "condition_add",
+            "subject_tokens": ["alexandros"],
+            "include_tokens": ["football"],
+            "exclude_tokens": [],
+            "condition_type": "context_flag",
+            "condition_payload": {"flag": "football_season", "equals": True},
+            "condition_mode": "allow_when_true",
+            "rule_name": "seasonal_football",
+            "decision": "auto_apply"
+        }
+    ]
+
+    with (
+        patch.object(rdb, "get_connection", side_effect=lambda write=False: sqlite3.connect(db_path)),
+        patch("memory.event_log.log_event"),
+    ):
+        from services.routine_reconciler import apply_routine_reconciliation_directives
+        
+        stats = apply_routine_reconciliation_directives(directives)
+
+    assert stats["conditions_added"] == 1
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT id, condition_type, condition_mode, source_memory_ref FROM routines ORDER BY id").fetchall()
+    conn.close()
+
+    assert rows == [
+        (1, "context_flag", "allow_when_true", "reconciler"),
+        (2, None, None, None),
+    ]

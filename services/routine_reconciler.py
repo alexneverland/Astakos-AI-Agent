@@ -865,7 +865,7 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
                     condition_type=cond_type, 
                     condition_payload=cond_payload, 
                     condition_mode=cond_mode, 
-                    source_ref="reconciler"
+                    source_memory_ref="reconciler"
                 )
                 stats["conditions_added"] += 1
                 log_event(

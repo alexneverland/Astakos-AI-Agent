@@ -11,8 +11,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ── Helpers ──────────────────────────────────────────────────────
 
-def _stub_deps():
+_original_modules = {}
+
+def setup_module(module):
     for mod_name in ["services", "services.gemini", "services.reflection_engine", "config"]:
+        _original_modules[mod_name] = sys.modules.get(mod_name)
         if mod_name not in sys.modules:
             sys.modules[mod_name] = types.ModuleType(mod_name)
     cfg = sys.modules["config"]
@@ -20,9 +23,15 @@ def _stub_deps():
         cfg.WORKING_MEMORY_FILE = "/tmp/wm.json"
         cfg.BASE_DIR = "/tmp"
 
+def teardown_module(module):
+    for mod_name, orig in _original_modules.items():
+        if orig is None:
+            sys.modules.pop(mod_name, None)
+        else:
+            sys.modules[mod_name] = orig
+
 
 def _import_validate():
-    _stub_deps()
     if "core.planner" in sys.modules:
         del sys.modules["core.planner"]
     from core.planner import validate_step_node
