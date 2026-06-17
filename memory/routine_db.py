@@ -183,6 +183,27 @@ def setup_db():
         cursor.execute("ALTER TABLE routines ADD COLUMN sentimental_silenced INTEGER DEFAULT 0")
         print("[routine_db]: Migration → 'sentimental_silenced'")
 
+    # Phase 3C: Conditions
+    if "condition_type" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN condition_type TEXT")
+        print("[routine_db]: Migration → 'condition_type'")
+
+    if "condition_payload" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN condition_payload TEXT")
+        print("[routine_db]: Migration → 'condition_payload'")
+
+    if "condition_mode" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN condition_mode TEXT")
+        print("[routine_db]: Migration → 'condition_mode'")
+
+    if "priority" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN priority INTEGER DEFAULT 0")
+        print("[routine_db]: Migration → 'priority'")
+
+    if "source_memory_ref" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN source_memory_ref TEXT")
+        print("[routine_db]: Migration → 'source_memory_ref'")
+
     # Backfill fingerprints
     cursor.execute("SELECT id, day_of_week, time_str, event_name FROM routines WHERE fingerprint IS NULL")
     for r_id, day, time, event in cursor.fetchall():
@@ -1102,3 +1123,83 @@ def load_pending_confirmations() -> dict:
 
 _setup_pending_table()
 ensure_routine_schedule_columns()
+
+
+# ────────────────────────────────────────────────────────────────
+# PHASE 3C: ROUTINE CONDITIONS
+# ────────────────────────────────────────────────────────────────
+
+def set_routine_condition(
+    routine_id: int,
+    *,
+    condition_type: str | None = None,
+    condition_payload: str | None = None,
+    condition_mode: str | None = None,
+    priority: int | None = None,
+    source_memory_ref: str | None = None,
+) -> None:
+    conn = get_connection(write=True)
+    cursor = conn.cursor()
+
+    fields = []
+    values = []
+
+    if condition_type is not None:
+        fields.append("condition_type = ?")
+        values.append(condition_type)
+
+    if condition_payload is not None:
+        fields.append("condition_payload = ?")
+        values.append(condition_payload)
+
+    if condition_mode is not None:
+        fields.append("condition_mode = ?")
+        values.append(condition_mode)
+
+    if priority is not None:
+        fields.append("priority = ?")
+        values.append(priority)
+
+    if source_memory_ref is not None:
+        fields.append("source_memory_ref = ?")
+        values.append(source_memory_ref)
+
+    if not fields:
+        conn.close()
+        return
+
+    values.append(routine_id)
+    with db_write_lock:
+        cursor.execute(
+            f"UPDATE routines SET {', '.join(fields)} WHERE id = ?",
+            values,
+        )
+        conn.commit()
+    conn.close()
+
+
+def get_routine_condition(routine_id: int) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    row = cursor.execute(
+        """
+        SELECT condition_type, condition_payload, condition_mode, priority, source_memory_ref
+        FROM routines
+        WHERE id = ?
+        """,
+        (routine_id,),
+    ).fetchone()
+
+    conn.close()
+
+    if not row:
+        return {}
+
+    return {
+        "condition_type": row[0],
+        "condition_payload": row[1],
+        "condition_mode": row[2],
+        "priority": row[3] or 0,
+        "source_memory_ref": row[4],
+    }
