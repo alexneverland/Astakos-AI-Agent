@@ -41,7 +41,13 @@ from core.graph import graph
 from core.agents import clean_message, filter_messages
 from memory.vector_store import memory
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
-from memory.session_memory import trigger_memory_sifter, log_exchange, _run_session_summary, startup_stale_cleanup
+from memory.session_memory import (
+    run_memory_sifter_fast,
+    run_memory_sifter_slow,
+    log_exchange,
+    _run_session_summary,
+    startup_stale_cleanup,
+)
 from tools.telegram import send_telegram_msg, send_telegram_voice, send_telegram_msg_full
 from services.gemini import safe_gemini_call
 from services.embeddings import embeddings
@@ -50,7 +56,8 @@ from core.event_bus import bus
 # GLOBALS
 # ────────────────────────────────────────────────────────────────
 shutdown_event        = threading.Event()
-astakos_queue         = queue.Queue()
+fast_queue            = queue.Queue()
+slow_queue            = queue.Queue()
 memory_lock           = threading.Lock()
 
 # Cache: telegram message_id → full text (τελευταία 50 bot μηνύματα)
@@ -136,8 +143,22 @@ def should_skip_proactive_for_recent_activity(
         return True
     return False
 
-def enqueue_task(func, *args):
-    astakos_queue.put((func, args))
+def enqueue_fast_task(func, *args):
+    fast_queue.put((func, args))
+
+def enqueue_slow_task(func, *args):
+    slow_queue.put((func, args))
+
+def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
+    seed_facts = run_memory_sifter_fast(user_text, ai_text, handling_agent, channel)
+    enqueue_slow_task(
+        run_memory_sifter_slow,
+        user_text,
+        ai_text,
+        handling_agent,
+        channel,
+        deterministic_seed_facts=seed_facts,
+    )
 
 
 # ── Human Override State ──────────────────────────────────────
@@ -163,6 +184,38 @@ def _save_override_state():
     except Exception:
         pass
 
+def fast_queue_worker():
+    """Εκτελεί fast background tasks (π.χ. UI updates, deterministic memory)."""
+    print("\033[90m[System]: Telegram Fast Queue Worker Ξεκίνησε!\033[0m")
+    while not shutdown_event.is_set():
+        try:
+            task_func, args = fast_queue.get(timeout=2)
+            try:
+                print(f"\033[90m[FastQueue]: {task_func.__name__}\033[0m")
+                task_func(*args)
+            except Exception as e:
+                print(f"\033[91m[Fast Queue Error στο {task_func.__name__}]: {e}\033[0m")
+            finally:
+                fast_queue.task_done()
+        except queue.Empty:
+            continue
+
+def slow_queue_worker():
+    """Εκτελεί slow background tasks (π.χ. LLM memory sifting)."""
+    print("\033[90m[System]: Telegram Slow Queue Worker Ξεκίνησε!\033[0m")
+    while not shutdown_event.is_set():
+        try:
+            task_func, args = slow_queue.get(timeout=2)
+            try:
+                print(f"\033[90m[SlowQueue]: {task_func.__name__}\033[0m")
+                task_func(*args)
+            except Exception as e:
+                print(f"\033[91m[Slow Queue Error στο {task_func.__name__}]: {e}\033[0m")
+            finally:
+                slow_queue.task_done()
+        except queue.Empty:
+            continue
+
 def is_reminders_paused() -> bool:
     with _override_lock:
         if _override_state.get("sleep_until") and _time.time() < _override_state["sleep_until"]:
@@ -176,23 +229,6 @@ def is_proactive_muted() -> bool:
         return bool(_override_state.get("mute_proactive"))
 
 
-# ────────────────────────────────────────────────────────────────
-# QUEUE WORKER
-# ────────────────────────────────────────────────────────────────
-
-def queue_worker():
-    print("\033[90m[TelegramBot]: Queue Worker Ξεκίνησε!\033[0m")
-    while not shutdown_event.is_set():
-        try:
-            task_func, args = astakos_queue.get(timeout=2)
-            try:
-                task_func(*args)
-            except Exception as e:
-                print(f"\033[91m[Queue Task Error στο {task_func.__name__}]: {e}\033[0m")
-            finally:
-                astakos_queue.task_done()
-        except queue.Empty:
-            continue
 # ────────────────────────────────────────────────────────────────
 # DOCUMENT HANDLER (ΝΕΟ)
 # ────────────────────────────────────────────────────────────────
@@ -1048,10 +1084,10 @@ def handle_message(user_text: str, chat_id: str):
                         pass
 
             # Background Tasks
-            enqueue_task(update_working_memory,             user_text, final_ai_response)
-            enqueue_task(trigger_memory_sifter,             user_text, final_ai_response, handling_agent, "telegram")
-            enqueue_task(log_exchange,                       user_text, final_ai_response, handling_agent, "telegram")
-            enqueue_task(update_capabilities_from_exchange, user_text, final_ai_response, handling_agent)
+            enqueue_fast_task(log_exchange,                       user_text, final_ai_response, handling_agent, "telegram")
+            enqueue_fast_task(update_working_memory,              user_text, final_ai_response)
+            enqueue_fast_task(_enqueue_slow_memory_sifter,        user_text, final_ai_response, handling_agent, "telegram")
+            enqueue_slow_task(update_capabilities_from_exchange,  user_text, final_ai_response, handling_agent)
 
     except Exception as e:
         _typing_active["on"] = False  # Σταματάμε το typing και σε error
@@ -2728,7 +2764,8 @@ class AstakosScheduler:
                     for j in self._jobs
                 ],
                 "pending_confirmations": len(pending_routine_confirmations),
-                "queue_size":            astakos_queue.qsize(),
+                "fast_queue_size":       fast_queue.qsize(),
+                "slow_queue_size":       slow_queue.qsize(),
                 "quiet_hours":           is_quiet_hours(),
                 "proactive_muted":       is_proactive_muted(),
                 "reminders_paused":      is_reminders_paused(),
@@ -2810,7 +2847,7 @@ class AstakosScheduler:
 
         lines.append("")
         lines.append(f"\u23f3 Pending confirmations: {len(pending_routine_confirmations)}")
-        lines.append(f"\U0001f4ec Queue size: {astakos_queue.qsize()}")
+        lines.append(f"\U0001f4ec Fast Queue: {fast_queue.qsize()} | Slow Queue: {slow_queue.qsize()}")
         quiet = is_quiet_hours()
         quiet_label = "\u039d\u0391\u0399" if quiet else "\u039f\u03a7\u0399"
         lines.append(f"\U0001f319 Quiet hours: {quiet_label} ({QUIET_HOURS[0]:02d}:00\u2013{QUIET_HOURS[1]:02d}:00)")
@@ -2844,7 +2881,8 @@ if __name__ == "__main__":
     _signal.signal(_signal.SIGTERM, _handle_exit)
     _signal.signal(_signal.SIGINT,  _handle_exit)
 
-    threading.Thread(target=queue_worker, daemon=True).start()
+    threading.Thread(target=fast_queue_worker, daemon=True).start()
+    threading.Thread(target=slow_queue_worker, daemon=True).start()
 
     _load_override_state()
     from memory.routine_db import load_pending_confirmations
@@ -2892,7 +2930,10 @@ if __name__ == "__main__":
         try:
             import threading as _th
             _done = _th.Event()
-            def _drain(): astakos_queue.join(); _done.set()
+            def _drain(): 
+                fast_queue.join()
+                slow_queue.join()
+                _done.set()
             _th.Thread(target=_drain, daemon=True).start()
             _done.wait(timeout=5)
         except Exception:

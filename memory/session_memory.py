@@ -583,11 +583,98 @@ def _same_candidate_fact(a: dict | None, b: dict | None) -> bool:
 # MEMORY SIFTER — "Αρχειοθέτης"
 # ════════════════════════════════════════════════════════════════
 
-def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
-    """
-    Αναλύει τον διάλογο, εξάγει μνήμες για τη ChromaDB 
-    και ενημερώνει το JSON index φωτογραφιών με πλήρη ανάλυση.
-    """
+def _fact_matches_any(fact: str, existing_facts: list[str]) -> bool:
+    def _normalize_text_local(t):
+        if not t: return ""
+        import unicodedata
+        normalized = unicodedata.normalize("NFD", str(t))
+        return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower().strip()
+
+    normalized_fact = _normalize_text_local(fact)
+    if not normalized_fact:
+        return False
+
+    for existing in existing_facts:
+        normalized_existing = _normalize_text_local(existing)
+        if not normalized_existing:
+            continue
+        if normalized_fact == normalized_existing:
+            return True
+        if normalized_fact in normalized_existing or normalized_existing in normalized_fact:
+            return True
+
+    return False
+
+def _collect_deterministic_candidates(
+    user_text: str,
+    ai_text: str,
+    *,
+    agent_name: str = "Unknown",
+    channel: str = "web",
+) -> list[dict]:
+    event_candidate = _extract_event_memory_candidate(
+        user_text,
+        ai_text,
+        agent_name=agent_name,
+        channel=channel,
+    )
+    temporary_candidate = _extract_temporary_family_memory_candidate(
+        user_text,
+        ai_text,
+        agent_name=agent_name,
+        channel=channel,
+    )
+    confirmed_candidate = _extract_confirmed_memory_candidate(
+        user_text,
+        ai_text,
+        agent_name=agent_name,
+        channel=channel,
+    )
+
+    selected_candidates = []
+
+    # πιο ειδικό family/temporary fact κερδίζει το generic event
+    if temporary_candidate:
+        selected_candidates.append(temporary_candidate)
+    elif event_candidate:
+        selected_candidates.append(event_candidate)
+
+    # confirmed μπαίνει μόνο αν δεν είναι ουσιαστικά ίδιο με ήδη επιλεγμένο
+    if confirmed_candidate and not any(
+        _same_candidate_fact(confirmed_candidate, existing)
+        for existing in selected_candidates
+    ):
+        selected_candidates.append(confirmed_candidate)
+
+    return selected_candidates
+
+def run_memory_sifter_fast(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
+    try:
+        selected_candidates = _collect_deterministic_candidates(
+            user_text,
+            ai_text,
+            agent_name=agent_name,
+            channel=channel,
+        )
+
+        for candidate in selected_candidates:
+            memory.save(**candidate)
+
+        return [c.get("fact", "") for c in selected_candidates if c.get("fact")]
+    except Exception as e:
+        print(f"⚠️ [MemorySifterFast Error]: {e}")
+        return []
+
+def run_memory_sifter_slow(
+    user_text: str,
+    ai_text: str,
+    agent_name: str = "Unknown",
+    channel: str = "web",
+    deterministic_seed_facts: list[str] | None = None,
+):
+    deterministic_seed_facts = deterministic_seed_facts or []
+    print("\033[90m[MemorySifterSlow]: start\033[0m")
+    
     MEMORY_CATS = {
         "lazaros":  "Προτιμήσεις, συνήθειες, τρόπος σκέψης, δουλειά του Λάζαρου",
         "family":   "Πληροφορίες για Σοφία, Αλέξανδρο, Μαρία, κατοικίδια",
@@ -598,43 +685,6 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
     }
 
     try:
-        event_candidate = _extract_event_memory_candidate(
-            user_text,
-            ai_text,
-            agent_name=agent_name,
-            channel=channel,
-        )
-        temporary_candidate = _extract_temporary_family_memory_candidate(
-            user_text,
-            ai_text,
-            agent_name=agent_name,
-            channel=channel,
-        )
-        confirmed_candidate = _extract_confirmed_memory_candidate(
-            user_text,
-            ai_text,
-            agent_name=agent_name,
-            channel=channel,
-        )
-
-        selected_candidates = []
-
-        # πιο ειδικό family/temporary fact κερδίζει το generic event
-        if temporary_candidate:
-            selected_candidates.append(temporary_candidate)
-        elif event_candidate:
-            selected_candidates.append(event_candidate)
-
-        # confirmed μπαίνει μόνο αν δεν είναι ουσιαστικά ίδιο με ήδη επιλεγμένο
-        if confirmed_candidate and not any(
-            _same_candidate_fact(confirmed_candidate, existing)
-            for existing in selected_candidates
-        ):
-            selected_candidates.append(confirmed_candidate)
-
-        for candidate in selected_candidates:
-            memory.save(**candidate)
-
         # 1. Προετοιμασία Prompt για το Gemini
         cats_desc = "\n".join([f'  - "{k}": {v}' for k, v in MEMORY_CATS.items()])
         
@@ -750,6 +800,10 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
                 print(f"\033[93m[Sifter]: Question guard — skipping fact: {_fact_body[:60]}\033[0m")
                 continue
 
+            if _fact_matches_any(fact, deterministic_seed_facts):
+                print(f"\033[90m[MemorySifterSlow]: seed-duplicate skip -> {fact[:80]}\033[0m")
+                continue
+
             # 2. --- ΤΟ ΣΩΣΤΟ JSON INDEXING (Mastro-Restore) ---
             if "[PHOTO]" in fact or category == "photos":
                 # Regex για να βρούμε το filename από το user_text
@@ -813,13 +867,16 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
                 agent_name=agent_name
             )
 
+        print("\033[90m[MemorySifterSlow]: done\033[0m")
+
     except Exception as e:
         print(f"⚠️ [Sifter Error]: {e}")
 
 
 def trigger_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
     """Wrapper — εκτελείται μέσω Queue Worker."""
-    _run_memory_sifter(user_text, ai_text, agent_name, channel)
+    seed_facts = run_memory_sifter_fast(user_text, ai_text, agent_name, channel)
+    run_memory_sifter_slow(user_text, ai_text, agent_name, channel, deterministic_seed_facts=seed_facts)
 
 
 # ════════════════════════════════════════════════════════════════

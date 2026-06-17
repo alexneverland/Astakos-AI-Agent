@@ -32,7 +32,7 @@ from core.brain import llm, safe_llm_invoke
 from core.graph import graph, AgentState
 from core.agents import clean_message
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
-from memory.session_memory import trigger_memory_sifter, log_exchange, _run_session_summary
+from memory.session_memory import log_exchange, _run_session_summary
 from tools.telegram import send_telegram_msg
 import uuid
 from PIL import Image
@@ -47,7 +47,8 @@ from core.brain import FAST_MODEL
 # GLOBALS
 # ────────────────────────────────────────────────────────────────
 shutdown_event  = threading.Event()
-astakos_queue   = queue.Queue()
+fast_queue      = queue.Queue()
+slow_queue      = queue.Queue()
 memory_lock     = threading.Lock()
 last_interaction_time = time.time()
 
@@ -253,23 +254,55 @@ def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -
 # QUEUE SYSTEM
 # ────────────────────────────────────────────────────────────────
 
-def queue_worker():
-    """Εκτελεί background tasks (memory sifter, working memory, κλπ) ένα-ένα."""
-    print("\033[90m[System]: Queue Worker Ξεκίνησε!\033[0m")
+def fast_queue_worker():
+    """Εκτελεί fast background tasks (π.χ. UI updates, deterministic memory)."""
+    print("\033[90m[System]: Fast Queue Worker Ξεκίνησε!\033[0m")
     while not shutdown_event.is_set():
         try:
-            task_func, args = astakos_queue.get(timeout=2)
+            task_func, args = fast_queue.get(timeout=2)
             try:
+                print(f"\033[90m[FastQueue]: {task_func.__name__}\033[0m")
                 task_func(*args)
             except Exception as e:
-                print(f"\033[91m[Queue Task Error στο {task_func.__name__}]: {e}\033[0m")
+                print(f"\033[91m[Fast Queue Error στο {task_func.__name__}]: {e}\033[0m")
             finally:
-                astakos_queue.task_done()
+                fast_queue.task_done()
         except queue.Empty:
             continue
 
-def enqueue_task(func, *args):
-    astakos_queue.put((func, args))
+def slow_queue_worker():
+    """Εκτελεί slow background tasks (π.χ. LLM memory sifting)."""
+    print("\033[90m[System]: Slow Queue Worker Ξεκίνησε!\033[0m")
+    while not shutdown_event.is_set():
+        try:
+            task_func, args = slow_queue.get(timeout=2)
+            try:
+                print(f"\033[90m[SlowQueue]: {task_func.__name__}\033[0m")
+                task_func(*args)
+            except Exception as e:
+                print(f"\033[91m[Slow Queue Error στο {task_func.__name__}]: {e}\033[0m")
+            finally:
+                slow_queue.task_done()
+        except queue.Empty:
+            continue
+
+def enqueue_fast_task(func, *args):
+    fast_queue.put((func, args))
+
+def enqueue_slow_task(func, *args):
+    slow_queue.put((func, args))
+
+def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
+    from memory.session_memory import run_memory_sifter_fast, run_memory_sifter_slow
+    seed_facts = run_memory_sifter_fast(user_text, ai_text, handling_agent, channel)
+    enqueue_slow_task(
+        run_memory_sifter_slow,
+        user_text,
+        ai_text,
+        handling_agent,
+        channel,
+        seed_facts,
+    )
 
 # ────────────────────────────────────────────────────────────────
 # REMINDER WORKER
@@ -346,7 +379,8 @@ def proactive_worker():
                     send_telegram_msg(f"🤖 {ai_msg}")
 
                     with memory_lock:
-                        enqueue_task(log_exchange, "POKE_EVENT", ai_msg, "Proactive_Worker", "web")
+                        from memory.session_memory import log_exchange
+                        enqueue_fast_task(log_exchange, "POKE_EVENT", ai_msg, "Proactive_Worker", "web")
 
                 except Exception as e:
                     print(f"\n[Proactive Worker Error]: {e}")
@@ -363,8 +397,9 @@ async def lifespan(app: FastAPI):
     sys.stdout = WsLogger(sys.stdout)
     threads = [
         # reminder_worker και proactive_worker τρέχουν ΜΟΝΟ στο telegram_bot.py
-        # Εδώ κρατάμε μόνο τον queue_worker για τα background memory tasks
-        threading.Thread(target=queue_worker, daemon=True),
+        # Εδώ κρατάμε μόνο τους fast/slow workers για τα background memory tasks
+        threading.Thread(target=fast_queue_worker, daemon=True),
+        threading.Thread(target=slow_queue_worker, daemon=True),
     ]
     for t in threads:
         t.start()
@@ -378,7 +413,10 @@ async def lifespan(app: FastAPI):
     try:
         import threading as _th
         _done = _th.Event()
-        def _drain(): astakos_queue.join(); _done.set()
+        def _drain(): 
+            fast_queue.join()
+            slow_queue.join()
+            _done.set()
         _th.Thread(target=_drain, daemon=True).start()
         _done.wait(timeout=5)
     except Exception:
@@ -679,10 +717,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             _trace.finalize(response=clean_ai)
             _trace.save()
             append_to_chat_history("assistant", clean_ai, agent=handling_agent)
-            enqueue_task(update_working_memory,             clean_user, clean_ai)
-            enqueue_task(trigger_memory_sifter,             clean_user, clean_ai, handling_agent, "web")
-            enqueue_task(log_exchange,                      clean_user, clean_ai, handling_agent, "web")
-            enqueue_task(update_capabilities_from_exchange, clean_user, clean_ai, handling_agent)
+            enqueue_fast_task(log_exchange,                      clean_user, clean_ai, handling_agent, "web")
+            enqueue_fast_task(update_working_memory,             clean_user, clean_ai)
+            enqueue_fast_task(_enqueue_slow_memory_sifter,       clean_user, clean_ai, handling_agent, "web")
+            enqueue_slow_task(update_capabilities_from_exchange, clean_user, clean_ai, handling_agent)
 
         return JSONResponse({
             "agent":    handling_agent,
