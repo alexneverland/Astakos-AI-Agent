@@ -18,8 +18,8 @@ def _make_routines_db(path, rows):
     """)
     for r in rows:
         conn.execute(
-            "INSERT INTO routines (id, event_name, confidence, time_str, day_of_week, state, last_triggered, priority) VALUES (:id,:event_name,:confidence,"
-            ":time_str,:day_of_week,:state,:last_triggered,:priority)", r
+            "INSERT INTO routines (id, event_name, confidence, time_str, day_of_week, state, last_triggered, priority, condition_type) VALUES (:id,:event_name,:confidence,"
+            ":time_str,:day_of_week,:state,:last_triggered,:priority,:condition_type)", r
         )
     conn.commit()
     conn.close()
@@ -27,11 +27,11 @@ def _make_routines_db(path, rows):
 
 _FIXED_NOW = datetime(2026, 6, 17, 12, 0, 0)
 
-def _due_row(rid=14, name="ρουτίνα", priority=0):
+def _due_row(rid=14, name="ρουτίνα", priority=0, ctype=None):
     return {
         "id": rid, "event_name": name, "confidence": 0.85,
         "time_str": "12:30", "day_of_week": "Everyday", "state": "active",
-        "last_triggered": None, "priority": priority
+        "last_triggered": None, "priority": priority, "condition_type": ctype
     }
 
 
@@ -196,3 +196,86 @@ def test_conflict_resolution_with_conditions_skips_lower_priority_only_if_higher
     assert len(sent2) == 1
     skips2 = [kw for cat, action, kw in logged2 if action == "routine_condition_blocked"]
     assert len(skips2) == 0 # Δεν υπάρχει condition block. Η #1 κόπηκε αθόρυβα λόγω priority.
+
+def test_conflict_resolution_specificity_breaks_ties():
+    # Δύο ρουτίνες με ίδιο keyword ('Σχολείο'), οπότε πέφτουν στο ίδιο conflict group
+    # Και οι δύο έχουν priority 0.
+    # Η πρώτη (id=1) μπήκε πρώτη (id=1 < id=2).
+    # Όμως η δεύτερη έχει condition. Η δεύτερη πρέπει να αξιολογηθεί ΠΡΩΤΗ λόγω specificity.
+    rows = [
+        _due_row(rid=1, name="Σχολείο Αλέξανδρου", priority=0),
+        _due_row(rid=2, name="Σχολείο Διακοπές", priority=0, ctype="context_flag"),
+    ]
+    
+    conditions = {
+        # Η #2 έχει condition (πχ. απαιτεί school_open=False)
+        2: {"condition_type": "context_flag", "condition_payload": '{"flag": "school_open", "equals": false}', "condition_mode": "allow_when_true"}
+    }
+    
+    # Αν η βάση σέβεται το specificity, θα αξιολογήσει την #2 πρώτη.
+    # Ας δώσουμε context που ΕΠΙΤΡΕΠΕΙ την #2 (school_open=False).
+    context = {"school_open": False}
+    sent, logged = _run_job(rows, routine_conditions=conditions, context_state=context)
+    
+    # Η #2 επετράπη, οπότε έκανε trigger και έβαλε το group στο conflict set.
+    # Η #1 θα πρέπει να έχει κοπεί (και να μην εστάλη).
+    assert len(sent) == 1
+    
+    # Ελέγχουμε ποια ρουτίνα έκανε trigger
+    triggered_rids = [kw["routine_id"] for cat, action, kw in logged if action == "triggered"]
+    assert len(triggered_rids) == 1
+    assert triggered_rids[0] == 2 # Η #2 "νίκησε" λόγω specificity!
+
+def test_conflict_resolution_deep_integration():
+    # 3 routines in the SAME conflict group ("Αθλητισμός"), scheduled for the EXACT SAME time.
+    # #1: Priority 10, no condition (Fallback)
+    # #2: Priority 20, condition: football_season == true (allow_when_true)
+    # #3: Priority 30, condition: alexandros_at_camp == true (suppress_when_true)
+    
+    rows = [
+        _due_row(rid=1, name="Αθλητισμός Τρέξιμο", priority=10),
+        _due_row(rid=2, name="Αθλητισμός Ποδόσφαιρο", priority=20, ctype="context_flag"),
+        _due_row(rid=3, name="Αθλητισμός Κατασκήνωση", priority=30, ctype="context_flag"),
+    ]
+    
+    # We update the db rows to explicitly set conflict_group
+    for r in rows:
+        r["conflict_group"] = "sports"
+        
+    conditions = {
+        2: {"condition_type": "context_flag", "condition_payload": '{"flag": "football_season", "equals": true}', "condition_mode": "allow_when_true"},
+        3: {"condition_type": "context_flag", "condition_payload": '{"flag": "alexandros_at_camp", "equals": true}', "condition_mode": "suppress_when_true"}
+    }
+    
+    # Scenario A: Football season is OFF (false), Camp is ON (true).
+    # #3 (Priority 30) evaluates first: suppress_when_true and camp is TRUE -> BLOCKED.
+    # #2 (Priority 20) evaluates next: allow_when_true and football is FALSE -> BLOCKED.
+    # #1 (Priority 10) evaluates last: no condition -> ALLOWED (Wins!)
+    context_A = {"football_season": False, "alexandros_at_camp": True}
+    sent_A, logged_A = _run_job(rows, routine_conditions=conditions, context_state=context_A)
+    assert len(sent_A) == 1
+    trig_A = [kw["routine_id"] for cat, action, kw in logged_A if action == "triggered"]
+    assert len(trig_A) == 1
+    assert trig_A[0] == 1 # Fallback wins
+
+    # Scenario B: Football season is ON (true), Camp is ON (true).
+    # #3 (Priority 30): suppress_when_true and camp is TRUE -> BLOCKED.
+    # #2 (Priority 20): allow_when_true and football is TRUE -> ALLOWED (Wins!)
+    # #1 (Priority 10): Skipped due to conflict.
+    context_B = {"football_season": True, "alexandros_at_camp": True}
+    sent_B, logged_B = _run_job(rows, routine_conditions=conditions, context_state=context_B)
+    assert len(sent_B) == 1
+    trig_B = [kw["routine_id"] for cat, action, kw in logged_B if action == "triggered"]
+    assert len(trig_B) == 1
+    assert trig_B[0] == 2 # Football wins
+    
+    # Scenario C: Football season is ON (true), Camp is OFF (false).
+    # #3 (Priority 30): suppress_when_true and camp is FALSE -> ALLOWED (Wins!)
+    # #2 (Priority 20): Skipped due to conflict.
+    # #1 (Priority 10): Skipped due to conflict.
+    context_C = {"football_season": True, "alexandros_at_camp": False}
+    sent_C, logged_C = _run_job(rows, routine_conditions=conditions, context_state=context_C)
+    assert len(sent_C) == 1
+    trig_C = [kw["routine_id"] for cat, action, kw in logged_C if action == "triggered"]
+    assert len(trig_C) == 1
+    assert trig_C[0] == 3 # Camp routine wins

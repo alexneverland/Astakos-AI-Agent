@@ -555,6 +555,30 @@ def _run_session_summary(channel: str = "web"):
         is_summarizing = False
 
 
+def _same_candidate_fact(a: dict | None, b: dict | None) -> bool:
+    if not a or not b:
+        return False
+
+    def _normalize_text_local(t):
+        if not t: return ""
+        import unicodedata
+        normalized = unicodedata.normalize("NFD", str(t))
+        return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower().strip()
+
+    fa = _normalize_text_local(a.get("fact", ""))
+    fb = _normalize_text_local(b.get("fact", ""))
+
+    if not fa or not fb:
+        return False
+
+    if fa == fb:
+        return True
+
+    if fa in fb or fb in fa:
+        return True
+
+    return False
+
 # ════════════════════════════════════════════════════════════════
 # MEMORY SIFTER — "Αρχειοθέτης"
 # ════════════════════════════════════════════════════════════════
@@ -574,29 +598,42 @@ def _run_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown"
     }
 
     try:
-        deterministic_candidates = (
-            _extract_event_memory_candidate(
-                user_text,
-                ai_text,
-                agent_name=agent_name,
-                channel=channel,
-            ),
-            _extract_temporary_family_memory_candidate(
-                user_text,
-                ai_text,
-                agent_name=agent_name,
-                channel=channel,
-            ),
-            _extract_confirmed_memory_candidate(
-                user_text,
-                ai_text,
-                agent_name=agent_name,
-                channel=channel,
-            ),
+        event_candidate = _extract_event_memory_candidate(
+            user_text,
+            ai_text,
+            agent_name=agent_name,
+            channel=channel,
         )
-        for candidate in deterministic_candidates:
-            if candidate:
-                memory.save(**candidate)
+        temporary_candidate = _extract_temporary_family_memory_candidate(
+            user_text,
+            ai_text,
+            agent_name=agent_name,
+            channel=channel,
+        )
+        confirmed_candidate = _extract_confirmed_memory_candidate(
+            user_text,
+            ai_text,
+            agent_name=agent_name,
+            channel=channel,
+        )
+
+        selected_candidates = []
+
+        # πιο ειδικό family/temporary fact κερδίζει το generic event
+        if temporary_candidate:
+            selected_candidates.append(temporary_candidate)
+        elif event_candidate:
+            selected_candidates.append(event_candidate)
+
+        # confirmed μπαίνει μόνο αν δεν είναι ουσιαστικά ίδιο με ήδη επιλεγμένο
+        if confirmed_candidate and not any(
+            _same_candidate_fact(confirmed_candidate, existing)
+            for existing in selected_candidates
+        ):
+            selected_candidates.append(confirmed_candidate)
+
+        for candidate in selected_candidates:
+            memory.save(**candidate)
 
         # 1. Προετοιμασία Prompt για το Gemini
         cats_desc = "\n".join([f'  - "{k}": {v}' for k, v in MEMORY_CATS.items()])

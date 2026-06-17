@@ -138,7 +138,7 @@ def test_infer_return_home_unmute_directive():
         now=datetime(2026, 6, 25, 18, 0, 0),
     )
 
-    assert any(d["kind"] == "notifications_unmute" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_at_camp" and d["value"] == "false" for d in directives)
 
 
 def test_infer_school_break_requires_child_subject():

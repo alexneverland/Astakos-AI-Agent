@@ -5,12 +5,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _set_temp_db(monkeypatch, tmp_path):
-    import services.reflection_engine as re
+    import services.reflection_engine as ref_eng
 
     db_path = tmp_path / "reflections_test.db"
-    monkeypatch.setattr(re, "DB_PATH", str(db_path))
-    re._ensure_table()
-    return re
+    monkeypatch.setattr(ref_eng, "DB_PATH", str(db_path))
+    ref_eng._ensure_table()
+    return ref_eng
 
 
 def test_pending_reflection_blocks_duplicate_creation(monkeypatch, tmp_path):

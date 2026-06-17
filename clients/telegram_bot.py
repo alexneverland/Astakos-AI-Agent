@@ -95,10 +95,9 @@ _proactive_count = {"hour": -1, "count": 0}
 _proactive_lock  = threading.Lock()
 
 def is_quiet_hours() -> bool:
-    """True αν είμαστε εντός quiet window (π.χ. 23:00–08:00)."""
-    h = datetime.now().hour
-    start, end = QUIET_HOURS
-    return h >= start or h < end  # wraps midnight
+    """True αν είμαστε εντός quiet window ή αν έχει γίνει override από context state."""
+    from services.routine_context import resolve_quiet_hours
+    return resolve_quiet_hours()
 
 def can_send_proactive() -> bool:
     """Rate-limit: max MAX_PROACTIVE_PER_HOUR proactive μηνύματα/ώρα."""
@@ -2219,7 +2218,7 @@ def job_check_routines():
                 WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
                 AND time_str=? AND state='active'
                 AND (last_triggered IS NULL OR last_triggered != ?)
-                ORDER BY priority DESC, id ASC
+                ORDER BY priority DESC, CASE WHEN condition_type IS NOT NULL THEN 1 ELSE 0 END DESC, id ASC
             """, (*possible_days, target_time_str, today_str))
 
             # ── Anti-Spam: φιλτράρισμα με per-routine cooldown ──────────

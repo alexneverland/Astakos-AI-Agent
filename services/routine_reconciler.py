@@ -248,21 +248,25 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
 
 
 def _rule_return_home(normalized: str) -> list[dict]:
-    """Αλέξανδρος γύρισε → notifications_unmute."""
+    """Αλέξανδρος γύρισε → context_state_set (alexandros_at_camp = false)."""
     if not (
         _contains_any(normalized, _ALEXANDROS_TOKENS)
         and _contains_any(normalized, _RETURN_TOKENS)
         and (_contains_any(normalized, _CAMP_TOKENS) or "σπιτι" in normalized)
     ):
         return []
-    d = _build_directive(
-        "notifications_unmute",
-        subject_tokens=_ALEXANDROS_TOKENS,
-        include_tokens=[],
-        exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
-        reason="returned_home",
-    )
-    return [d] if d else []
+    
+    d_state = {
+        "kind": "context_state_set",
+        "key": "alexandros_at_camp",
+        "value": "false",
+        "until_date": None,
+        "reason": "returned_home",
+        "subject_tokens": _ALEXANDROS_TOKENS,
+        "include_tokens": [],
+        "exclude_tokens": [],
+    }
+    return [d_state]
 
 
 def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list[dict]:
@@ -439,9 +443,7 @@ def _rule_temporary_absence_other_person(normalized: str, dates: list[str], now:
     Phase 3A — temporary_absence_other_person:
     Facts: "η Σοφία δουλεύει πρωί όλη την εβδομάδα", "η Σοφία λείπει"
     Target: Messenger/Sofia proactive ρουτίνες
-    Action: soft notifications_mute — όχι βαριές αλλαγές.
-
-    Guard: Σοφία + absence/work + scope.
+    Action: State + Condition (sofia_absent = true)
     """
     has_sofia   = _contains_any(normalized, _SOFIA_TOKENS)
     has_absence = _contains_any(normalized, _ABSENCE_TOKENS) or _contains_any(normalized, _WORK_TOKENS)
@@ -456,15 +458,29 @@ def _rule_temporary_absence_other_person(normalized: str, dates: list[str], now:
         until = _infer_relative_until(normalized, now=now)
     if not until:
         return []
-    d = _build_directive(
-        "notifications_mute",
+        
+    d_state = {
+        "kind": "context_state_set",
+        "key": "sofia_absent",
+        "value": "true",
+        "until_date": until,
+        "reason": "sofia_absent_or_shifted",
+        "subject_tokens": _SOFIA_TOKENS,
+        "include_tokens": ["σοφια", "messenger", "μηνυμα"],
+        "exclude_tokens": _MESSENGER_EXCLUDE,
+    }
+    
+    cond = _build_condition_directive(
         subject_tokens=_SOFIA_TOKENS,
         include_tokens=["σοφια", "messenger", "μηνυμα"],
         exclude_tokens=_MESSENGER_EXCLUDE,
-        until_date=until,
-        reason="sofia_absent_or_shifted",
+        condition_type="context_flag",
+        condition_payload={"flag": "sofia_absent", "equals": True},
+        condition_mode="suppress_when_true",
+        reason="sofia_absent_condition",
     )
-    return [d] if d else []
+    
+    return [d_state] + ([cond] if cond else [])
 
 
 def _rule_child_activity_pause(normalized: str, dates: list[str], now: datetime) -> list[dict]:

@@ -2812,6 +2812,15 @@ def system_doctor(days: int = 1) -> str:
         lines.append("• Conditioned routines:")
         lines.append(cond_routines)
 
+    try:
+        ctx_panel = _doctor_runtime_context()
+        if ctx_panel and ctx_panel != "None":
+            lines.append("• Runtime Context:")
+            for c_line in ctx_panel.splitlines():
+                lines.append(f"  {c_line}")
+    except Exception:
+        pass
+
     if logs["last_issues"]:
         lines.append("• Recent things to inspect:")
         for item in logs["last_issues"][-3:]:
@@ -2825,6 +2834,17 @@ def system_doctor(days: int = 1) -> str:
     return "\n".join(lines)
 
 
+def _doctor_runtime_context() -> str:
+    try:
+        from services.routine_context import build_runtime_routine_context
+        ctx = build_runtime_routine_context()
+        if not ctx:
+            return "None"
+        import json
+        return json.dumps(ctx, indent=2, ensure_ascii=False)
+    except Exception as e:
+        return f"Error: {e}"
+
 def _doctor_conditioned_routines() -> str:
     try:
         from memory.routine_db import get_connection
@@ -2835,9 +2855,9 @@ def _doctor_conditioned_routines() -> str:
         cursor = conn.cursor()
         rows = cursor.execute(
             """
-            SELECT id, event_name, condition_type, condition_mode, condition_payload
+            SELECT id, event_name, condition_type, condition_mode, condition_payload, priority, conflict_group
             FROM routines
-            WHERE state = 'active' AND condition_type IS NOT NULL
+            WHERE state = 'active' AND (condition_type IS NOT NULL OR priority > 0 OR conflict_group IS NOT NULL)
             """
         ).fetchall()
         conn.close()
@@ -2847,34 +2867,42 @@ def _doctor_conditioned_routines() -> str:
 
         context = build_runtime_routine_context()
         lines = []
-        for r_id, event_name, c_type, c_mode, c_payload in rows:
-            eval_result = evaluate_routine_condition(
-                {
-                    "condition_type": c_type,
-                    "condition_payload": c_payload,
-                    "condition_mode": c_mode,
-                },
-                context,
-            )
+        for r_id, event_name, c_type, c_mode, c_payload, priority, conflict_group in rows:
+            eval_result = {}
+            if c_type:
+                eval_result = evaluate_routine_condition(
+                    {
+                        "condition_type": c_type,
+                        "condition_payload": c_payload,
+                        "condition_mode": c_mode,
+                    },
+                    context,
+                )
             
             status = "allowed" if eval_result.get("allowed", True) else "blocked"
-            mode_desc = f"{c_mode}"
+            eval_reason = eval_result.get("reason", "")
+            
+            mode_desc = f"{c_mode}" if c_mode else "no_condition"
             
             import json
             try:
-                payload_dict = json.loads(c_payload)
+                payload_dict = json.loads(c_payload) if c_payload else {}
                 if "flag" in payload_dict:
-                    reason = f"{payload_dict['flag']}={payload_dict.get('equals', True)}"
+                    target = f"{payload_dict['flag']}={payload_dict.get('equals', True)}"
                 elif "shift" in payload_dict:
-                    reason = f"shift={payload_dict['shift']}"
-                elif "equals" in payload_dict:
-                    reason = f"equals={payload_dict['equals']}"
+                    target = f"shift={payload_dict['shift']}"
                 else:
-                    reason = str(c_payload)
+                    target = str(c_payload)
             except Exception:
-                reason = str(c_payload)
+                target = str(c_payload)
 
-            lines.append(f"  #{r_id} {event_name} -> {status} by {mode_desc} ({reason})")
+            details = []
+            if c_type:
+                details.append(f"cond: {mode_desc} ({target}) -> {status} [{eval_reason}]")
+            if priority or conflict_group:
+                details.append(f"conflict: grp='{conflict_group or event_name.split()[0]}' prio={priority or 0}")
+                
+            lines.append(f"  #{r_id} {event_name} | " + " | ".join(details))
 
         if not lines:
             return "None"

@@ -71,7 +71,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Multi-Agent Orchestration | LangGraph Supervisor routes to Chat, Home, Web, Tech, Git, Mail, and Dev agents. |
 | Hybrid Memory | ChromaDB vector store + shared SQLite history + SQLite profile/session state for semantic, temporal, and structured memory. |
 | Routine State Machine | `LEARNED → ACTIVE → TRIGGER_PENDING → CONFIRMED / IGNORED / DISMISSED → DECAYED → ARCHIVED`. |
-| Context-Aware Proactive Routines | The Routine LLM Judge evaluates the user's recent contextual facts (e.g. "I work afternoon this week") before triggering a routine, silently issuing a `[SKIP]` signal to cancel irrelevant notifications without dropping confidence. |
+| Context-Aware Proactive Routines | Runtime context flags (`alexandros_at_camp`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, `quiet_hours`) are resolved before trigger time, and routines can be condition-gated instead of hard-paused. |
 | Nightly Analytics Engine | LLM batch-analyzes the last 30 days of shared SQLite conversation history to detect recurring patterns automatically. |
 | LLM-Crafted Proactive Messages | Reminder text is generated naturally by the LLM instead of static templates, with recent Telegram/Web history and timestamps injected so messages feel contextual instead of random. |
 | Central Scheduler | `AstakosScheduler` runs a single background scheduler with watchdogs, rate limits, and quiet hours. |
@@ -100,7 +100,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Unified Session Memory | One shared session log across Telegram, Web, and Terminal for cross-channel context awareness. |
 | Shared Conversation History | Telegram and Web write to one SQLite conversation store, with SQLite-first context reads and analytics using the shared history. |
 | Broad SQL Context Recall | Substantive questions search recent SQLite history even without explicit date words; temporal queries like "yesterday morning" narrow to the right day/time window. |
-| Personal Event Capture | Personal and family events are saved as dated ChromaDB `[USER_FACT]` memories when the conversation clearly states them. |
+| Personal Event Capture | Personal and family events are saved as dated ChromaDB `[USER_FACT]` memories when the conversation clearly states them. Deterministic memory extractors now prioritize specific temporary-family facts over generic day-event facts to reduce duplicate saves. |
 | Google Fit Integration | Daily steps, sleep phases (deep / REM / light), and heart rate from Samsung Health via Google Fit. Morning briefing at 08:00 uses yesterday's steps, last night's sleep, and heart-rate fallback logic. |
 | Memory Overwrite Helpers | `memory.vector_store` exposes tested helper functions for correction detection, memory age, richness scoring, and overwrite decisions. |
 | Memory Scoring | Every memory has `importance`, `confidence`, `last_accessed`, and `retrieval_count`. `compute_score()` = importance × 0.4 + retrieval × 0.3 + confidence × 0.2 + freshness × 0.1. |
@@ -113,7 +113,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 |---|---|
 | Telegram Bot | Polling bot with text, voice, photo, document, location, routine confirmation, and inline approval handlers. |
 | Web UI | FastAPI server with chat endpoint, upload handling, voice processing, local static assets, and chat history. |
-| Runtime Dashboard | `/debug/runtime` and `/debug` expose scheduler health, jobs, event throughput, routines, goals, pending confirmations, pending actions, memory-context previews, shared SQLite stats, and session backlog. |
+| Runtime Dashboard | `/debug/runtime` and `/debug` expose scheduler health, jobs, event throughput, routines, goals, pending confirmations, pending actions, memory-context previews, shared SQLite stats, session backlog, and a memory-audit panel. Routine tables summarize condition payloads and metadata instead of dumping raw JSON. |
 | Voice I/O | STT via Vertex AI Gemini + TTS via `edge-tts` using `el-GR-NestorasNeural`; mirror mode supports voice in → voice out. |
 | Product Analyzer | `/nutrition` scans food, cosmetics, and household product labels with a score from 1-10 and a kids note. |
 | Receipt Scanner | `/receipt` scans the last Telegram photo as a shopping receipt and returns structured JSON with store, date, total, currency, and items. |
@@ -127,7 +127,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 
 | Feature | Description |
 |---|---|
-| Observability Dashboard | `/debug/runtime` includes heartbeat, job health, fail counts, pending confirmations, active goals, pending CRITICAL actions (with age + warn >15 min), Messenger Draft state (exists/active/reason/target/age/expires_in), shared conversation/session health, and analytics charts. |
+| Observability Dashboard | `/debug/runtime` includes heartbeat, job health, fail counts, pending confirmations, active goals, pending CRITICAL actions (with age + warn >15 min), Messenger Draft state (exists/active/reason/target/age/expires_in), shared conversation/session health, analytics charts, and compact condition/meta views for routines. |
 | Local Security | Bearer token auth, localhost-only CORS, upload size limits, and extension whitelist. |
 | Auto-Restart | `run_telegram.py` and the Web launcher watch core source files only; runtime JSON/DB/photos/uploads and generated skills do not trigger restarts. |
 | Safe Executor | `core/safe_executor.py` classifies terminal commands as SAFE, WARNING, REQUIRE_CONFIRMATION, or BLOCKED. |
@@ -137,7 +137,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Planner v2 | `/plan` decomposes a goal into tasks with a **confirmation gate** before execution. Auto-plan LLM judge detects multi-step intent without needing `/plan`. Progress UI shows `⏳ Βήμα X/N` per step. `validate_step_node` detects failures via AI response + tool output heuristics. `replan_node` auto-skips failed steps and continues. `end_check_node` generates a final summary (`✅` / `⚠️ X/N βήματα επιτυχή`) and saves a post-plan reflection. |
 | Execution Trace System | Every agent turn records agent name, tools called, duration, errors, and loop events to `logs/traces/YYYY-MM-DD.json`. Viewable at `/debug/traces` and the runtime dashboard with colored tool names, response preview, issue-only/clean filters, and optional hiding of old resolved issues. |
 | Tool Performance Stats | `tool_stats(days=N)` reads execution traces and returns per-tool call count, error count, error rate, and average duration — sorted by errors descending. Ask Astakos "tool stats last 7 days" for an instant health report. |
-| System Doctor | `system_doctor(days=N)` gives a read-only runtime health summary from logs, traces, pending approvals, Messenger drafts, session backlog, memory audit ops, and routine confirmations. Default is today (`days=1`). Ask `/doctor` or "δες αν όλα πάνε καλά" without opening the debug dashboard. |
+| System Doctor | `system_doctor(days=N)` gives a read-only runtime health summary from logs, traces, pending approvals, Messenger drafts, session backlog, memory audit ops, routine confirmations, conditioned routines, and the resolved runtime context. Default is today (`days=1`). Ask `/doctor` or "δες αν όλα πάνε καλά" without opening the debug dashboard. |
 | Self-Diagnosis via Source Read | `read_local_file` now allows reading from `tools/`, `core/`, `memory/`, `services/`, `clients/`, `astakos_skills/`, and `api/`. Sensitive files (`config.py`, `.env`, `*.db`) remain blocked. Astakos can inspect its own code when debugging a failed tool call. |
 
 ---
@@ -481,6 +481,9 @@ Shutdown behavior:
 - [x] Personal/Family Event Capture — clear personal and family day-events are saved as dated ChromaDB facts while the full conversation remains in SQLite.
 - [x] Memory Context Debugging — `/debug` shows recent, SQLite, and Chroma context counts/previews for the last prompt build.
 - [x] Category-Safe Memory Overwrite — same-category Chroma matches use helper-tested correction, staleness, richness, and length tie-break rules before replacing old facts.
+- [x] Deterministic Memory Priority Guard — temporary family-state memories (camp, absence, return-home windows) now win over generic day-event capture, and near-identical confirmed saves are skipped before they can double-write in the same turn.
+- [x] Runtime Context Flags — routines now read resolved context such as `alexandros_at_camp`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, and `quiet_hours` instead of relying only on blunt mute/pause windows.
+- [x] Context-State Reconciliation — facts like “Αλέξανδρος γύρισε σπίτι” now flip context state (`alexandros_at_camp=false`) through the reconciler instead of only unmuting routines by name.
 
 - [x] Web UI Agent Name in History — `agent_name` is stored in SQLite alongside each message and returned by `/history`; the Web UI now shows the correct agent label (e.g. `Web / Dev_Agent`) for both live and historical messages.
 - [x] File Generator Tools — `generate_excel` (styled headers, zebra rows, freeze pane), `generate_word_doc` (Markdown-style headings and bullets), `generate_pdf` (reportlab with custom styles), and `generate_csv` (UTF-8 BOM for Excel compatibility). All route via Capability Registry to Dev_Agent. Risk: SAFE.
@@ -501,6 +504,7 @@ Shutdown behavior:
 - [x] Profile SQLite Migration — profile memory (preferences, family facts) moved from JSON to SQLite; `clean.py` migrated; legacy `astakos_profile.json`/`.example` removed.
 - [x] Routine Muting & Sentimental Handling — `SILENT_SKIP` (LLM judges whether to skip silently), `muted_until` (per-date auto-silence without a daily LLM call), sentimental flag + reduced-frequency emotional messages during a muted period, natural-language mute/unmute override parsed directly from chat.
 - [x] Memory Audit Panel — debug-dashboard audit log for memory ops (add/overwrite/skip/reflection).
+- [x] Routine Table UX Refresh — `/debug` routine tables now show compact condition summaries, meta badges, safer wrapping, and clearer “No condition / No meta” states instead of raw payload dumps.
 - [x] Google Calendar — full CRUD tool with per-action risk, OAuth2 `token.json` auth, proactive morning briefing.
 - [x] Georgian Language Helper — `/gr`/`/greek` Telegram commands (renamed from `/georgian`), pending-translation mode, TTS via `edge-tts` (`ka-GE-EkaNeural`).
 - [x] Reaction Handler — ❤️ exact-message-match reactions via in-memory cache with SQLite fallback.

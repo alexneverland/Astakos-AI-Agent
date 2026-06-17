@@ -7,6 +7,9 @@ def test_build_runtime_routine_context_returns_expected_keys(monkeypatch):
     monkeypatch.setattr(rc, "resolve_football_season", lambda now=None: False)
     monkeypatch.setattr(rc, "resolve_school_open", lambda now=None: False)
     monkeypatch.setattr(rc, "resolve_current_shift", lambda now=None: "afternoon")
+    monkeypatch.setattr(rc, "resolve_sofia_work_mode", lambda now=None: "home")
+    monkeypatch.setattr(rc, "resolve_user_at_work", lambda now=None: True)
+    monkeypatch.setattr(rc, "resolve_quiet_hours", lambda now=None: False)
 
     result = rc.build_runtime_routine_context(datetime(2026, 6, 17))
 
@@ -14,6 +17,9 @@ def test_build_runtime_routine_context_returns_expected_keys(monkeypatch):
     assert result["football_season"] is False
     assert result["school_open"] is False
     assert result["current_shift"] == "afternoon"
+    assert result["sofia_work_mode"] == "home"
+    assert result["user_at_work"] is True
+    assert result["quiet_hours"] is False
 
 def test_resolve_current_shift_reads_runtime_state(monkeypatch):
     monkeypatch.setattr("memory.runtime_state.get_current_shift", lambda: "afternoon")
