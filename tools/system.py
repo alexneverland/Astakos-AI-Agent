@@ -751,8 +751,64 @@ def get_routines(day_of_week: str) -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"❌ Σφάλμα ανάκτησης ρουτινών: {e}"
+
+def _looks_like_manual_routine_command(text: str) -> bool:
+    if not text:
+        return False
+
+    normalized = text.strip().lower()
+
+    manual_markers = [
+        "πάγωσε", "παγωσε",
+        "σβήσε", "σβησε",
+        "βάλε", "βαλε",
+        "άλλαξε", "αλλαξε",
+        "μετάφερε", "μεταφερε",
+        "κάνε mute", "κανε mute",
+        "mute", "pause", "resume",
+    ]
+
+    routine_markers = [
+        "ποδόσφαιρο", "ποδοσφαιρο",
+        "λαϊκή", "λαικη",
+        "μήνυμα", "μηνυμα",
+        "ύπνος", "υπνος",
+        "πάρκο", "παρκο",
+        "δουλειά", "δουλεια",
+        "ρουτίνα", "ρουτινα",
+    ]
+
+    return any(m in normalized for m in manual_markers) and any(r in normalized for r in routine_markers)
+
+def _looks_like_context_fact(text: str) -> bool:
+    if not text:
+        return False
+
+    normalized = text.strip().lower()
+    fact_markers = [
+        "είναι", "ειναι", "γύρισε", "γυρισε", "δεν έχει", "δεν εχει",
+        "ξανά", "ξανα", "μέχρι", "μεχρι", "καλοκαίρι", "καλοκαιρι",
+        "σπίτι", "σπιτι", "δουλεύει", "δουλευει", "απόγευμα", "απογευμα",
+        "γυρνάει", "γυρναει",
+    ]
+
+    command_markers = [
+        "πάγωσε", "παγωσε", "σβήσε", "σβησε", "βάλε", "βαλε",
+        "άλλαξε", "αλλαξε", "μετάφερε", "μεταφερε", "κάνε mute", "κανε mute",
+        "κλείσε", "κλεισε", "άνοιξε", "ανοιξε", "resume", "pause", "mute",
+    ]
+
+    if any(cmd in normalized for cmd in command_markers):
+        return False
+
+    word_count = len(normalized.split())
+    if word_count >= 6 and any(marker in normalized for marker in fact_markers):
+        return True
+
+    return False
+
 @tool
-def control_routine_notifications(event_name: str, action: str, until_date: str = "") -> str:
+def control_routine_notifications(event_name: str, action: str, until_date: str = "", source_text: str = "") -> str:
     """
     [OVERRIDE]: Χειροκίνητος έλεγχος των proactive υπενθυμίσεων μιας ρουτίνας, ΜΟΝΟ όταν
     ο Λάζαρος το ζητήσει ΡΗΤΑ μέσα στην κουβέντα (όχι αυτόματα από εσένα ή από τον
@@ -788,21 +844,33 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
     """
     from datetime import datetime
     from memory.routine_db import (
-        find_routines_by_name, set_routine_muted_until, clear_routine_muted_until,
+        find_routines_for_schedule_control, set_routine_muted_until, clear_routine_muted_until,
         set_sentimental_silenced, get_sentimental_info, get_routine_muted_until,
     )
+
+    decision_text = source_text or event_name
+    if _looks_like_manual_routine_command(decision_text):
+        pass
+    elif _looks_like_context_fact(decision_text):
+        return (
+            "ℹ️ Αυτό μοιάζει με context/fact update και όχι με ρητή χειροκίνητη "
+            "εντολή σίγασης ειδοποιήσεων. Δεν έγινε notification change."
+        )
 
     VALID_ACTIONS = {"mute", "unmute", "silence_emotional", "allow_emotional"}
     if action not in VALID_ACTIONS:
         return f"❌ Μη έγκυρο action: '{action}'. Επιτρεπτά: {', '.join(sorted(VALID_ACTIONS))}."
 
+    changed = 0
+    already_ok = 0
+
     try:
-        routines = find_routines_by_name(event_name)
+        routines = find_routines_for_schedule_control(event_name)
     except Exception as e:
         return f"❌ Σφάλμα αναζήτησης ρουτίνας: {e}"
 
     if not routines:
-        return f"❌ Δεν βρήκα καταγεγραμμένη ρουτίνα που να ταιριάζει με '{event_name}'."
+        return f"ℹ️ Δεν βρέθηκε σαφής ρουτίνα για: {event_name}"
 
     results = []
 
@@ -822,9 +890,16 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
                 existing_until = get_routine_muted_until(r_id)
                 if existing_until and existing_until >= until_date:
                     results.append(f"ℹ️ [{day}] Η ρουτίνα '{label}' είναι ήδη σιγασμένη μέχρι {existing_until} — δεν έκανα τίποτα.")
+                    already_ok += 1
                     continue
                 set_routine_muted_until(r_id, until_date)
                 results.append(f"🔇 [{day}] Η ρουτίνα '{label}' σιγάστηκε μέχρι {until_date}.")
+                changed += 1
+            
+            if changed == 0 and already_ok > 0:
+                return f"ℹ️ Οι ρουτίνες ήταν ήδη στην επιθυμητή κατάσταση για: {event_name}"
+            if changed == 0:
+                return f"ℹ️ Δεν έγινε καμία αλλαγή ρουτίνας για: {event_name}"
             return "\n".join(results)
 
         if action == "unmute":
@@ -834,6 +909,9 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
                 day = routine.get("day") or "?"
                 clear_routine_muted_until(r_id)
                 results.append(f"🔔 [{day}] Η ρουτίνα '{label}' ξαναενεργοποιήθηκε κανονικά.")
+                changed += 1
+            if changed == 0:
+                return f"ℹ️ Δεν έγινε καμία αλλαγή ρουτίνας για: {event_name}"
             return "\n".join(results)
 
         if action == "silence_emotional":
@@ -844,9 +922,15 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
                 info = get_sentimental_info(r_id)
                 if not info["muted_until"]:
                     results.append(f"⚠️ [{day}] Η ρουτίνα '{label}' δεν είναι σε σίγαση αυτή τη στιγμή — δεν υπάρχει κάτι να σιγάσω.")
+                    already_ok += 1
                     continue
                 set_sentimental_silenced(r_id, True)
                 results.append(f"🤫 [{day}] Εντάξει, δεν θα στείλω τίποτα (ούτε συναισθηματικό μήνυμα) για '{label}' μέχρι να λήξει η σίγαση.")
+                changed += 1
+            if changed == 0 and already_ok > 0:
+                return f"ℹ️ Οι ρουτίνες ήταν ήδη στην επιθυμητή κατάσταση για: {event_name}"
+            if changed == 0:
+                return f"ℹ️ Δεν έγινε καμία αλλαγή ρουτίνας για: {event_name}"
             return "\n".join(results)
 
         if action == "allow_emotional":
@@ -856,6 +940,9 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
                 day = routine.get("day") or "?"
                 set_sentimental_silenced(r_id, False)
                 results.append(f"💬 [{day}] Εντάξει, θα ξαναστέλνω περιστασιακά ένα ζεστό μήνυμα για '{label}' όσο διαρκεί η σίγαση.")
+                changed += 1
+            if changed == 0:
+                return f"ℹ️ Δεν έγινε καμία αλλαγή ρουτίνας για: {event_name}"
             return "\n".join(results)
     except Exception as e:
         return f"❌ Σφάλμα ενημέρωσης ρουτίνας: {e}"
@@ -864,7 +951,7 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
 @tool
 def control_routine_schedule(event_name: str, action: str, until_date: str = "",
                               active_from: str = "", active_until: str = "",
-                              resume_rule: str = "", reason: str = "") -> str:
+                              resume_rule: str = "", reason: str = "", source_text: str = "") -> str:
     """
     [OVERRIDE]: Χειροκίνητος έλεγχος της ΕΠΟΧΙΚΗΣ/ΠΡΟΣΩΡΙΝΗΣ ανενεργότητας μιας ρουτίνας
     (όχι ειδοποιήσεων — γι' αυτό υπάρχει το control_routine_notifications). Χρησιμοποίησέ
@@ -907,8 +994,9 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
     """
     from datetime import datetime
     from memory.routine_db import (
-        find_routines_by_name, set_routine_paused_until, clear_routine_paused_until,
+        find_routines_for_schedule_control, set_routine_paused_until, clear_routine_paused_until,
         set_routine_active_window, set_routine_resume_rule, get_routine_schedule_meta,
+        normalize_event
     )
 
     VALID_ACTIONS = {"pause", "resume", "set_window", "clear_window"}
@@ -922,13 +1010,25 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
         except ValueError:
             return False
 
+    decision_text = source_text or event_name
+    if _looks_like_manual_routine_command(decision_text):
+        pass
+    elif _looks_like_context_fact(decision_text):
+        return (
+            "ℹ️ Αυτό μοιάζει με context/fact update και όχι με ρητή χειροκίνητη "
+            "εντολή αλλαγής ρουτίνας. Δεν έγινε schedule change."
+        )
+
+    changed = 0
+    already_ok = 0
+
     try:
-        routines = find_routines_by_name(event_name)
+        routines = find_routines_for_schedule_control(event_name)
     except Exception as e:
         return f"❌ Σφάλμα αναζήτησης ρουτίνας: {e}"
 
     if not routines:
-        return f"❌ Δεν βρήκα καταγεγραμμένη ρουτίνα που να ταιριάζει με '{event_name}'."
+        return f"ℹ️ Δεν βρέθηκε σαφής ρουτίνα για: {event_name}"
 
     results = []
 
@@ -948,11 +1048,17 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
                 existing_until = meta.get("paused_until")
                 if existing_until and existing_until >= until_date:
                     results.append(f"ℹ️ [{day}] Η ρουτίνα '{label}' είναι ήδη παγωμένη μέχρι {existing_until} — δεν έκανα τίποτα.")
+                    already_ok += 1
                     continue
                 set_routine_paused_until(r_id, until_date, reason=reason_clean)
                 if resume_rule.strip():
                     set_routine_resume_rule(r_id, resume_rule.strip())
                 results.append(f"❄️ [{day}] Η ρουτίνα '{label}' πάγωσε μέχρι {until_date}" + (f" (λόγος: {reason_clean})" if reason_clean else "") + ".")
+                changed += 1
+            if changed == 0 and already_ok > 0:
+                return f"ℹ️ Οι ρουτίνες ήταν ήδη στην επιθυμητή κατάσταση για: {event_name}"
+            if changed == 0:
+                return f"ℹ️ Δεν έγινε καμία αλλαγή ρουτίνας για: {event_name}"
             return "\n".join(results)
 
         if action == "resume":
@@ -962,6 +1068,9 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
                 day = routine.get("day") or "?"
                 clear_routine_paused_until(r_id)
                 results.append(f"▶️ [{day}] Η ρουτίνα '{label}' ξαναενεργοποιήθηκε κανονικά.")
+                changed += 1
+            if changed == 0:
+                return f"ℹ️ Δεν έγινε καμία αλλαγή ρουτίνας για: {event_name}"
             return "\n".join(results)
 
         if action == "set_window":
