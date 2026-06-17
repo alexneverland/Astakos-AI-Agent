@@ -530,6 +530,31 @@ class AstakosMemoryManager:
                 if conn:
                     conn.close()
 
+        # 5. Automatic fact -> routine reconciliation (conservative)
+        # Τρέχει ΜΕΤΑ την επιτυχή αποθήκευση ώστε να στηρίζεται μόνο σε facts που
+        # όντως "κάθισαν" στη μνήμη. Σκοπίμως fail-open: αν κάτι πάει στραβά εδώ,
+        # η μνήμη παραμένει αποθηκευμένη και απλώς παραλείπεται το auto-adjust.
+        try:
+            from services.routine_reconciler import reconcile_fact_to_routines
+
+            reconcile_stats = reconcile_fact_to_routines(
+                fact,
+                category=category,
+                reason=reason,
+            )
+            if reconcile_stats.get("applied"):
+                print(
+                    "\033[95m[RoutineReconciler]: "
+                    f"{reconcile_stats['directives']} directive(s), "
+                    f"matched={reconcile_stats['matched_routines']}, "
+                    f"paused={reconcile_stats.get('schedule_paused', 0)}, "
+                    f"muted={reconcile_stats.get('notifications_muted', 0)}, "
+                    f"unmuted={reconcile_stats.get('notifications_unmuted', 0)}"
+                    "\033[0m"
+                )
+        except Exception as reconcile_err:
+            print(f"\033[90m[RoutineReconciler]: skip ({reconcile_err})\033[0m")
+
         return True
 
     def _save_photo(self, file_path: str, analysis: str, caption: str):

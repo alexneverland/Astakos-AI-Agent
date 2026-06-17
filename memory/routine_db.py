@@ -39,6 +39,15 @@ def normalize_time(time_str: str) -> str:
 def normalize_event(event: str) -> str:
     return event.lower().strip()
 
+
+def normalize_search_text(text: str) -> str:
+    """Accent-insensitive normalizer για lightweight routine matching."""
+    import unicodedata
+
+    raw = str(text or "").strip().lower()
+    normalized = unicodedata.normalize("NFD", raw)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
 def make_fingerprint(day: str, time: str, event: str) -> str:
     key = f"{normalize_day(day)}|{normalize_time(time)}|{normalize_event(event)}"
     return hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
@@ -782,6 +791,64 @@ def find_routine_by_name(event_name: str, min_similarity: float = 0.75) -> dict 
     """Backward-compatible wrapper που επιστρέφει μόνο την πρώτη match."""
     matches = find_routines_by_name(event_name, min_similarity=min_similarity)
     return matches[0] if matches else None
+
+
+def find_routines_for_reconciliation(
+    *,
+    subject_tokens: list[str],
+    include_tokens: list[str] | None = None,
+    exclude_tokens: list[str] | None = None,
+) -> list[dict]:
+    """
+    Conservative matcher για automatic fact→routine reconciliation.
+
+    Σε αντίθεση με το find_routines_by_name(), εδώ ΔΕΝ θέλουμε fuzzy/embedding guesswork.
+    Θέλουμε deterministic, token-based matching πάνω στο stored event_name ώστε facts όπως:
+      - "ο Αλέξανδρος είναι κατασκήνωση"
+      - "το ποδόσφαιρο του Αλέξανδρου σταμάτησε για το καλοκαίρι"
+    να μπορούν να βρουν ΟΛΕΣ τις σχετικές ρουτίνες χωρίς να πειράξουν άσχετες.
+
+    Κανόνες:
+      - Όλα τα subject_tokens πρέπει να υπάρχουν
+      - Αν include_tokens δοθούν, πρέπει να υπάρχει τουλάχιστον ένα
+      - Αν exclude_tokens δοθούν, κανένα δεν πρέπει να υπάρχει
+      - Ψάχνουμε μόνο σε state='active' ή 'learned'
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state
+           FROM routines WHERE state IN ('active', 'learned')"""
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    required = [normalize_search_text(tok) for tok in (subject_tokens or []) if str(tok).strip()]
+    include = [normalize_search_text(tok) for tok in (include_tokens or []) if str(tok).strip()]
+    exclude = [normalize_search_text(tok) for tok in (exclude_tokens or []) if str(tok).strip()]
+
+    if not required:
+        return []
+
+    results = []
+    for row in rows:
+        event_text = normalize_search_text(row[3])
+        if not all(tok in event_text for tok in required):
+            continue
+        if include and not any(tok in event_text for tok in include):
+            continue
+        if exclude and any(tok in event_text for tok in exclude):
+            continue
+        results.append({
+            "id": row[0],
+            "day": row[1],
+            "time": row[2],
+            "event": row[3],
+            "type": row[4],
+            "confidence": round(row[5], 2),
+            "state": row[6],
+        })
+    return results
 
 
 # ────────────────────────────────────────────────────────────────
