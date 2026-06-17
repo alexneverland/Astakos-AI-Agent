@@ -118,6 +118,7 @@ def _stub_modules():
     rdb.clear_routine_paused_until = MagicMock()
     rdb.set_routine_active_window  = MagicMock()
     rdb.set_routine_resume_rule    = MagicMock()
+    rdb.get_routine_condition      = MagicMock(return_value={})
     # νέα stubs για sentimental
     rdb.get_sentimental_info       = MagicMock(return_value={
         "sentimental": 0, "muted_from": None, "muted_until": None,

@@ -2226,8 +2226,12 @@ def job_check_routines():
                 get_routine_notify_info, mark_routine_notified,
                 save_pending_confirmation, get_routine_muted_until,
                 get_routine_schedule_meta, is_routine_temporarily_inactive_meta,
+                get_routine_condition,
             )
+            from services.routine_context import build_runtime_routine_context
+            from services.routine_conditions import evaluate_routine_condition
             due_routines = []
+            rt_context = build_runtime_routine_context(now=now)
             for r_id, event_name, confidence in cursor.fetchall():
                 # ── Seasonal/temporary inactivity check (paused_until / active window) ──
                 # Πρέπει να τρέξει ΠΡΙΝ από muted_until/cooldown/proactive scoring — μια
@@ -2241,6 +2245,26 @@ def job_check_routines():
                               active_from=schedule_meta.get("active_from"), active_until=schedule_meta.get("active_until"))
                     print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' inactive ({inactive_reason}) — skipped")
                     continue
+                # ── Phase 3C: Conditions Evaluator ───────────────────────
+                cond_data = get_routine_condition(r_id)
+                if cond_data and cond_data.get("condition_type"):
+                    cond_result = evaluate_routine_condition(cond_data, rt_context, now=now)
+                    if not cond_result.get("allowed", True):
+                        log_event("routines", "routine_condition_blocked",
+                                  routine_id=r_id, event=event_name,
+                                  condition_type=cond_data.get("condition_type"),
+                                  condition_mode=cond_data.get("condition_mode"),
+                                  reason=cond_result.get("reason"),
+                                  context_snapshot=rt_context)
+                        print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('reason')}) — skipped")
+                        continue
+                    else:
+                        log_event("routines", "routine_condition_allowed",
+                                  routine_id=r_id, event=event_name,
+                                  condition_type=cond_data.get("condition_type"),
+                                  condition_mode=cond_data.get("condition_mode"),
+                                  reason=cond_result.get("reason"))
+
                 # ── muted_until check ────────────────────────────────────
                 muted_until = get_routine_muted_until(r_id)
                 if muted_until:

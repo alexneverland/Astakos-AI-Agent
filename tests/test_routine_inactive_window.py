@@ -244,6 +244,7 @@ def _run_job(db_rows, schedule_meta, cooldown=False):
                   side_effect=lambda *a, **kw: save_pending_calls.append(a)),
             patch("memory.routine_db.get_routine_schedule_meta",
                   return_value=schedule_meta),
+            patch("memory.routine_db.get_routine_condition", return_value={}),
         ):
             bot.job_check_routines()
 
