@@ -200,6 +200,10 @@ def setup_db():
         cursor.execute("ALTER TABLE routines ADD COLUMN priority INTEGER DEFAULT 0")
         print("[routine_db]: Migration → 'priority'")
 
+    if "conflict_group" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN conflict_group TEXT")
+        print("[routine_db]: Migration → 'conflict_group'")
+
     if "source_memory_ref" not in existing_cols:
         cursor.execute("ALTER TABLE routines ADD COLUMN source_memory_ref TEXT")
         print("[routine_db]: Migration → 'source_memory_ref'")
@@ -1193,7 +1197,7 @@ def get_routine_condition(routine_id: int) -> dict:
 
     row = cursor.execute(
         """
-        SELECT condition_type, condition_payload, condition_mode, priority, source_memory_ref
+        SELECT condition_type, condition_payload, condition_mode, priority, source_memory_ref, conflict_group
         FROM routines
         WHERE id = ?
         """,
@@ -1211,6 +1215,7 @@ def get_routine_condition(routine_id: int) -> dict:
         "condition_mode": row[2],
         "priority": row[3] or 0,
         "source_memory_ref": row[4],
+        "conflict_group": row[5],
     }
 # ----------------------------------------------------------------
 # 3C.1: CONTEXT STATE STORE

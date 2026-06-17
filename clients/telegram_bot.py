@@ -2215,7 +2215,7 @@ def job_check_routines():
 
             placeholders = ",".join("?" * len(possible_days))
             cursor.execute(f"""
-                SELECT id, event_name, confidence, priority FROM routines
+                SELECT id, event_name, confidence, priority, conflict_group FROM routines
                 WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
                 AND time_str=? AND state='active'
                 AND (last_triggered IS NULL OR last_triggered != ?)
@@ -2239,8 +2239,8 @@ def job_check_routines():
                 parts = name.lower().split()
                 return parts[0] if parts else name.lower()
 
-            for r_id, event_name, confidence, priority in cursor.fetchall():
-                conflict_group = _get_conflict_group(event_name)
+            for r_id, event_name, confidence, priority, db_conflict_group in cursor.fetchall():
+                conflict_group = db_conflict_group if db_conflict_group else _get_conflict_group(event_name)
                 
                 if conflict_group in triggered_conflict_groups:
                     print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' skipped due to conflict with higher priority routine in group '{conflict_group}'")

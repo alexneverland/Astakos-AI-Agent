@@ -207,13 +207,21 @@ function render(d) {
 
   function renderCondition(r) {
     if (!r.condition_type) return '<span class="off">—</span>';
-    const badge = r.condition_eval ? '<span class="ok">🟢 Allowed</span>' : '<span class="err" style="font-weight:bold">🔴 Blocked</span>';
+    const badge = r.condition_eval ? '<span class="ok">✅ Allowed</span>' : '<span class="err" style="font-weight:bold">🚫 Blocked</span>';
     return `<div style="font-size:11px;line-height:1.2;min-width:130px;max-width:180px;white-space:normal;word-break:break-word">
       <b>${esc(r.condition_type)}</b><br>
       <span class="off" style="font-size:10px">${esc(r.condition_payload)}</span><br>
       <span class="off" style="font-size:10px">${esc(r.condition_mode)}</span><br>
       <div style="margin-top:4px">${badge}</div>
     </div>`;
+  }
+
+  function renderMeta(r) {
+    let parts = [];
+    if (r.priority) parts.push(`<span class="off" style="font-size:10px">Prio: ${r.priority}</span>`);
+    if (r.source_memory_ref) parts.push(`<span class="off" style="font-size:10px">Ref: ${r.source_memory_ref}</span>`);
+    if (parts.length === 0) return '<span class="off">—</span>';
+    return `<div style="line-height:1.2;min-width:70px">${parts.join('<br>')}</div>`;
   }
 
   const evts = d.events_1h||{}, pend = d.pending_confirmations||[];
@@ -326,11 +334,12 @@ function render(d) {
 
   if ((rout.active||[]).length > 0) {
     html += `<div class="card" style="grid-column:span 2"><h2>🗓️ Active Routines (${rout.active.length})</h2>
-      <table><tr><th>ID</th><th>Day</th><th>Time</th><th>Event</th><th>Condition</th><th>Confidence</th><th>Cooldown left</th><th>State</th><th>Ενέργειες</th></tr>
+      <table><tr><th>ID</th><th>Day</th><th>Time</th><th>Event</th><th>Condition</th><th>Meta</th><th>Confidence</th><th>Cooldown left</th><th>State</th><th>Ενέργειες</th></tr>
       ${rout.active.map(r=>`<tr>
         <td class="off">#${r.id}</td><td>${r.day}</td><td><b>${r.time}</b></td>
         <td>${r.event}</td>
         <td>${renderCondition(r)}</td>
+        <td>${renderMeta(r)}</td>
         <td style="min-width:80px">${confBar(r.confidence)}</td>
         <td class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null?r.cooldown_remaining_h+'h':'—'}</td>
         <td>${stateBadge(r.state)}</td>
@@ -341,7 +350,7 @@ function render(d) {
         </td>
       </tr>
       <tr id="edit-row-${r.id}" style="display:none;background:#1a1f2a">
-        <td colspan="9" style="padding:8px 12px">
+        <td colspan="10" style="padding:8px 12px">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <label style="color:var(--muted);font-size:11px">Day:
               <select id="edit-day-${r.id}" style="background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 7px;width:110px;margin-left:4px">
@@ -370,13 +379,14 @@ function render(d) {
 
   if ((rout.non_active||[]).length > 0) {
     html += `<div class="card" style="grid-column:span 2"><h2>🔄 Non-Active Routines (${rout.non_active.length})</h2>
-      <table><tr><th>ID</th><th>Day</th><th>Time</th><th>Event</th><th>Condition</th><th>State</th><th>Conf</th><th>Ενέργειες</th></tr>
+      <table><tr><th>ID</th><th>Day</th><th>Time</th><th>Event</th><th>Condition</th><th>Meta</th><th>State</th><th>Conf</th><th>Ενέργειες</th></tr>
       ${rout.non_active.map(r=>`<tr>
         <td class="off">#${r.id}</td>
         <td>${r.day||'—'}</td>
         <td><b>${r.time||'—'}</b></td>
         <td>${r.event}</td>
         <td>${renderCondition(r)}</td>
+        <td>${renderMeta(r)}</td>
         <td>${stateBadge(r.state)}</td>
         <td class="${r.confidence<0.1?'err':r.confidence<0.5?'warn':'ok'}">${r.confidence}</td>
         <td style="white-space:nowrap">
@@ -389,7 +399,7 @@ function render(d) {
         </td>
       </tr>
       <tr id="edit-row-${r.id}" style="display:none;background:#1a1f2a">
-        <td colspan="8" style="padding:8px 12px">
+        <td colspan="9" style="padding:8px 12px">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <label style="color:var(--muted);font-size:11px">Day:
               <select id="edit-day-${r.id}" style="background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:3px 7px;width:110px;margin-left:4px">

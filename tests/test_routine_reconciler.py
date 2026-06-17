@@ -22,7 +22,7 @@ def _make_routines_db(path, rows):
     conn = sqlite3.connect(path)
     conn.execute(
         """
-        CREATE TABLE routines ( priority INTEGER DEFAULT 0, condition_type TEXT, condition_payload TEXT, condition_mode TEXT, source_memory_ref TEXT,
+        CREATE TABLE routines ( priority INTEGER DEFAULT 0, conflict_group TEXT, condition_type TEXT, condition_payload TEXT, condition_mode TEXT, source_memory_ref TEXT,
             id INTEGER PRIMARY KEY,
             day_of_week TEXT,
             time_str TEXT,
@@ -110,7 +110,7 @@ def test_infer_summer_break_pause_directive():
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
 
-    assert len(directives) == 2
+    assert len([d for d in directives if d.get("rule_name") == "seasonal_football"]) == 2
     assert directives[0]["kind"] == "context_state_set"
     assert directives[0]["key"] == "football_season"
     assert directives[0]["value"] == "false"
@@ -127,7 +127,7 @@ def test_infer_camp_absence_mute_directive():
     )
 
     assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_at_camp" and d["until_date"] == "2026-06-25" for d in directives)
-    assert any(d["kind"] == "condition_add" and d["until_date"] == "2026-06-25" for d in directives)
+    assert any(d["kind"] == "condition_add" for d in directives)
 
 def test_infer_return_home_unmute_directive():
     fact = "[USER_FACT]: Ο Αλέξανδρος γύρισε από την κατασκήνωση και είναι πάλι σπίτι."
@@ -169,7 +169,7 @@ def test_infer_school_break_with_child_subject_creates_pause():
         and d["until_date"] == "2026-09-01"
         for d in directives
     )
-    assert any(d["kind"] == "condition_add" and d["until_date"] == "2026-09-01" for d in directives)
+    assert any(d["kind"] == "condition_add" for d in directives)
 
 
 def test_apply_schedule_pause_hits_all_football_routines(tmp_path):
@@ -480,3 +480,48 @@ def test_apply_condition_add_hits_correct_routines_without_error(tmp_path):
         (1, "context_flag", "allow_when_true", "reconciler"),
         (2, None, None, None),
     ]
+
+def test_apply_condition_add_skips_identical_existing_condition(tmp_path):
+    import memory.routine_db as rdb
+    import json
+
+    db_path = tmp_path / "routines.db"
+    _make_routines_db(
+        db_path,
+        [
+            _routine(1, "alexandros football", time_str="17:00"),
+        ],
+    )
+
+    with patch.object(rdb, "get_connection", side_effect=lambda write=False: sqlite3.connect(db_path)):
+        rdb.set_routine_condition(
+            1, 
+            condition_type="context_flag", 
+            condition_payload=json.dumps({"flag": "football_season", "equals": True}), 
+            condition_mode="allow_when_true", 
+            source_memory_ref="reconciler"
+        )
+
+    directives = [
+        {
+            "kind": "condition_add",
+            "subject_tokens": ["alexandros"],
+            "include_tokens": ["football"],
+            "exclude_tokens": [],
+            "condition_type": "context_flag",
+            "condition_payload": {"flag": "football_season", "equals": True},
+            "condition_mode": "allow_when_true",
+            "rule_name": "seasonal_football",
+            "decision": "auto_apply"
+        }
+    ]
+
+    with (
+        patch.object(rdb, "get_connection", side_effect=lambda write=False: sqlite3.connect(db_path)),
+        patch("memory.event_log.log_event"),
+    ):
+        from services.routine_reconciler import apply_routine_reconciliation_directives
+        stats = apply_routine_reconciliation_directives(directives)
+
+    assert stats["conditions_added"] == 0
+    assert stats["skipped"] == 1

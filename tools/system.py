@@ -2793,6 +2793,11 @@ def system_doctor(days: int = 1) -> str:
         memory_ops = {"total": 0}
         warnings.append("memory audit unreadable")
 
+    try:
+        cond_routines = _doctor_conditioned_routines()
+    except Exception:
+        cond_routines = "error reading conditions"
+
     status = _doctor_status_label(warnings=warnings, pending_actions=pending_actions, logs=logs)
     lines.append(f"🩺 Astakos Doctor: {status}")
     lines.append(f"• Logs ({logs['days']}d): events {logs['events']} / errors {logs['event_errors']}, traces {logs['traces']} / issues {logs['trace_issues']}")
@@ -2802,6 +2807,10 @@ def system_doctor(days: int = 1) -> str:
     lines.append(f"• Session backlog: {unsummarized}/{threshold} unsummarized ({_doctor_compact_map(conv.get('unsummarized_by_channel'))})")
     lines.append(f"• Memory ops: {_format_memory_ops_summary(memory_ops)}")
     lines.append(f"• Pending routine confirmations: {_format_pending_routines(pending_routines)}")
+
+    if cond_routines and cond_routines != "None":
+        lines.append("• Conditioned routines:")
+        lines.append(cond_routines)
 
     if logs["last_issues"]:
         lines.append("• Recent things to inspect:")
@@ -2815,6 +2824,63 @@ def system_doctor(days: int = 1) -> str:
 
     return "\n".join(lines)
 
+
+def _doctor_conditioned_routines() -> str:
+    try:
+        from memory.routine_db import get_connection
+        from services.routine_conditions import evaluate_routine_condition
+        from services.routine_context import build_runtime_routine_context
+
+        conn = get_connection()
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            """
+            SELECT id, event_name, condition_type, condition_mode, condition_payload
+            FROM routines
+            WHERE state = 'active' AND condition_type IS NOT NULL
+            """
+        ).fetchall()
+        conn.close()
+
+        if not rows:
+            return "None"
+
+        context = build_runtime_routine_context()
+        lines = []
+        for r_id, event_name, c_type, c_mode, c_payload in rows:
+            eval_result = evaluate_routine_condition(
+                {
+                    "condition_type": c_type,
+                    "condition_payload": c_payload,
+                    "condition_mode": c_mode,
+                },
+                context,
+            )
+            
+            status = "allowed" if eval_result.get("allowed", True) else "blocked"
+            mode_desc = f"{c_mode}"
+            
+            import json
+            try:
+                payload_dict = json.loads(c_payload)
+                if "flag" in payload_dict:
+                    reason = f"{payload_dict['flag']}={payload_dict.get('equals', True)}"
+                elif "shift" in payload_dict:
+                    reason = f"shift={payload_dict['shift']}"
+                elif "equals" in payload_dict:
+                    reason = f"equals={payload_dict['equals']}"
+                else:
+                    reason = str(c_payload)
+            except Exception:
+                reason = str(c_payload)
+
+            lines.append(f"  #{r_id} {event_name} -> {status} by {mode_desc} ({reason})")
+
+        if not lines:
+            return "None"
+        return "\n".join(lines)
+    except Exception as e:
+        return f"error: {str(e)}"
 
 # ────────────────────────────────────────────────────────────────
 # MEMORY REVIEW

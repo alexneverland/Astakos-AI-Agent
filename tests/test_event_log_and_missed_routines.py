@@ -15,7 +15,7 @@ import pytest
 def _make_routines_db(path, rows):
     conn = sqlite3.connect(path)
     conn.execute("""
-        CREATE TABLE routines ( priority INTEGER DEFAULT 0, condition_type TEXT, condition_payload TEXT, condition_mode TEXT,
+        CREATE TABLE routines ( priority INTEGER DEFAULT 0, conflict_group TEXT, condition_type TEXT, condition_payload TEXT, condition_mode TEXT,
             id INTEGER PRIMARY KEY, event_name TEXT, confidence REAL,
             time_str TEXT, day_of_week TEXT, state TEXT, last_triggered TEXT
         )

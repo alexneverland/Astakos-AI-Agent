@@ -968,13 +968,14 @@ async def debug_runtime(_=Depends(require_token)):
         cursor.execute("""
             SELECT id, day_of_week, time_str, event_name, confidence,
                    mention_count, notify_cooldown_hours, last_notified_ts, state,
-                   condition_type, condition_payload, condition_mode
+                   condition_type, condition_payload, condition_mode,
+                   priority, source_memory_ref, conflict_group
             FROM routines
             WHERE state='active'
             ORDER BY day_of_week, time_str
         """)
         for row in cursor.fetchall():
-            r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state, c_type, c_payload, c_mode = row
+            r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state, c_type, c_payload, c_mode, priority, memory_ref, conflict_group = row
             now_dt = datetime.now()
             cooldown_remaining = None
             if last_ts:
@@ -1015,6 +1016,9 @@ async def debug_runtime(_=Depends(require_token)):
                 "condition_payload": c_payload,
                 "condition_mode":    c_mode,
                 "condition_eval":    cond_res,
+                "priority":          priority,
+                "conflict_group":    conflict_group,
+                "source_memory_ref": memory_ref,
             })
 
         # Pending confirmations
@@ -1037,13 +1041,14 @@ async def debug_runtime(_=Depends(require_token)):
         # Routines in non-active states (LEARNED, TRIGGER_PENDING, DISMISSED, DECAYED, etc.)
         cursor.execute("""
             SELECT id, day_of_week, time_str, event_name, state, confidence,
-                   condition_type, condition_payload, condition_mode
+                   condition_type, condition_payload, condition_mode,
+                   priority, source_memory_ref, conflict_group
             FROM routines
             WHERE state != 'active' AND state != 'archived'
             ORDER BY state, day_of_week, time_str
         """)
         for row in cursor.fetchall():
-            r_id, day, tstr, ev, state, conf, c_type, c_payload, c_mode = row
+            r_id, day, tstr, ev, state, conf, c_type, c_payload, c_mode, priority, memory_ref, conflict_group = row
             
             cond_res = None
             if c_type:
@@ -1066,6 +1071,9 @@ async def debug_runtime(_=Depends(require_token)):
                 "condition_payload": c_payload,
                 "condition_mode":    c_mode,
                 "condition_eval":    cond_res,
+                "priority":          priority,
+                "conflict_group":    conflict_group,
+                "source_memory_ref": memory_ref,
             })
 
         # Stats
@@ -1379,6 +1387,10 @@ async def edit_routine(routine_id: int, request: Request, _=Depends(require_toke
             conn.execute("UPDATE routines SET time_str=? WHERE id=?", (time, routine_id))
         if event:
             conn.execute("UPDATE routines SET event_name=? WHERE id=?", (event, routine_id))
+        if "conflict_group" in body:
+            conn.execute("UPDATE routines SET conflict_group=? WHERE id=?", (body["conflict_group"], routine_id))
+        if "priority" in body:
+            conn.execute("UPDATE routines SET priority=? WHERE id=?", (int(body["priority"]), routine_id))
         conn.commit()
         conn.close()
         return {"ok": True, "updated": routine_id}
