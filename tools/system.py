@@ -48,6 +48,7 @@ from astakos_skills.repo_mapper import repo_mapper
 from tools.project_tools import (
     grant_project_access, list_project_files, read_project_file,
     edit_project_file, write_project_file, grep_project_files,
+    list_recent_files,
 )
 from astakos_skills.file_generator import (
     generate_excel, generate_word_doc, generate_pdf, generate_csv,
@@ -858,6 +859,139 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
             return "\n".join(results)
     except Exception as e:
         return f"❌ Σφάλμα ενημέρωσης ρουτίνας: {e}"
+
+    return "❌ Άγνωστο σφάλμα."
+@tool
+def control_routine_schedule(event_name: str, action: str, until_date: str = "",
+                              active_from: str = "", active_until: str = "",
+                              resume_rule: str = "", reason: str = "") -> str:
+    """
+    [OVERRIDE]: Χειροκίνητος έλεγχος της ΕΠΟΧΙΚΗΣ/ΠΡΟΣΩΡΙΝΗΣ ανενεργότητας μιας ρουτίνας
+    (όχι ειδοποιήσεων — γι' αυτό υπάρχει το control_routine_notifications). Χρησιμοποίησέ
+    το ΜΟΝΟ όταν ο Λάζαρος ζητήσει ΡΗΤΑ να "παγώσει" / "σταματήσει" / "ξαναρχίσει" μια
+    ρουτίνα λόγω καλοκαιρινού διαλείμματος, κατασκήνωσης, αλλαγής σεζόν κλπ.
+
+    ΔΙΑΦΟΡΑ ΑΠΟ ΤΟ control_routine_notifications:
+    - control_routine_notifications = "μη μου ΣΤΕΙΛΕΙΣ" (notification layer, η ρουτίνα
+      παραμένει ενεργή από πλευράς confidence/missed-tracking).
+    - control_routine_schedule = "αυτή η ρουτίνα ΔΕΝ ΙΣΧΥΕΙ τώρα" (business-logic layer —
+      δεν μπαίνει σε missed/failed λογική, δεν πέφτει confidence, απλά "παγώνει").
+    Για καλοκαιρινό διάλειμμα σχολικής/εποχικής δραστηριότητας (π.χ. ποδόσφαιρο, σχολή)
+    χρησιμοποίησε ΠΑΝΤΑ αυτό το tool, ΟΧΙ mute, εκτός αν ο Λάζαρος ζητήσει ρητά "mute"/
+    "σίγαση ειδοποιήσεων".
+
+    ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ — ΜΗΝ το καλέσεις μόνο επειδή ο χρήστης σου είπε μια ΠΛΗΡΟΦΟΡΙΑ (π.χ.
+    "ο Αλέξανδρος λείπει κατασκήνωση 2 βδομάδες"). Μια πληροφορία ΔΕΝ είναι αίτημα. Κάλεσέ
+    το ΜΟΝΟ όταν υπάρχει ρητό αίτημα παύσης/επαναφοράς ρουτίνας.
+
+    ΟΡΙΣΜΑΤΑ:
+    - event_name: το όνομα της ρουτίνας όπως το είπε ο χρήστης — fuzzy match στη μνήμη.
+    - action: ένα από "pause", "resume", "set_window", "clear_window".
+      • pause → παγώνει τη ρουτίνα μέχρι until_date (YYYY-MM-DD), προαιρετικό reason
+        (π.χ. "summer_break", "camp", "shift_change") και προαιρετικό resume_rule
+        (π.χ. "every_september", "next_school_year", "manual_only").
+      • resume → αφαιρεί την παύση, η ρουτίνα ξαναμπαίνει αμέσως σε κανονική λειτουργία.
+      • set_window → ορίζει active_from και/ή active_until (YYYY-MM-DD) — η ρουτίνα
+        ισχύει ΜΟΝΟ μέσα σε αυτό το παράθυρο ημερομηνιών.
+      • clear_window → αφαιρεί το active_from/active_until παράθυρο.
+    - until_date: ΜΟΝΟ για action="pause". Υπολόγισέ το ΕΣΥ από τα συμφραζόμενα.
+    - active_from / active_until: ΜΟΝΟ για action="set_window" (YYYY-MM-DD, μπορεί να
+      δοθεί μόνο το ένα από τα δύο).
+    - resume_rule: προαιρετικό, μαζί με action="pause" — πώς/πότε θα ξαναρχίσει.
+    - reason: προαιρετικό, ανθρώπινη περιγραφή του λόγου (π.χ. "summer_break").
+
+    ΠΑΡΑΔΕΙΓΜΑ:
+    "Το ποδόσφαιρο του Αλέξανδρου σταματά μέχρι το Σεπτέμβριο για το καλοκαίρι"
+      → action="pause", until_date="2026-09-01", reason="summer_break",
+        resume_rule="every_september"
+    """
+    from datetime import datetime
+    from memory.routine_db import (
+        find_routines_by_name, set_routine_paused_until, clear_routine_paused_until,
+        set_routine_active_window, set_routine_resume_rule, get_routine_schedule_meta,
+    )
+
+    VALID_ACTIONS = {"pause", "resume", "set_window", "clear_window"}
+    if action not in VALID_ACTIONS:
+        return f"❌ Μη έγκυρο action: '{action}'. Επιτρεπτά: {', '.join(sorted(VALID_ACTIONS))}."
+
+    def _valid_date(d: str) -> bool:
+        try:
+            datetime.strptime(d, "%Y-%m-%d")
+            return True
+        except ValueError:
+            return False
+
+    try:
+        routines = find_routines_by_name(event_name)
+    except Exception as e:
+        return f"❌ Σφάλμα αναζήτησης ρουτίνας: {e}"
+
+    if not routines:
+        return f"❌ Δεν βρήκα καταγεγραμμένη ρουτίνα που να ταιριάζει με '{event_name}'."
+
+    results = []
+
+    try:
+        if action == "pause":
+            until_date = (until_date or "").strip()
+            if not until_date:
+                return "❌ Χρειάζομαι until_date (YYYY-MM-DD) — υπολόγισέ το από τα συμφραζόμενα της κουβέντας."
+            if not _valid_date(until_date):
+                return f"❌ Λάθος format ημερομηνίας: '{until_date}'. Χρησιμοποίησε YYYY-MM-DD."
+            reason_clean = reason.strip() or None
+            for routine in routines:
+                r_id = routine["id"]
+                label = routine["event"]
+                day = routine.get("day") or "?"
+                meta = get_routine_schedule_meta(r_id)
+                existing_until = meta.get("paused_until")
+                if existing_until and existing_until >= until_date:
+                    results.append(f"ℹ️ [{day}] Η ρουτίνα '{label}' είναι ήδη παγωμένη μέχρι {existing_until} — δεν έκανα τίποτα.")
+                    continue
+                set_routine_paused_until(r_id, until_date, reason=reason_clean)
+                if resume_rule.strip():
+                    set_routine_resume_rule(r_id, resume_rule.strip())
+                results.append(f"❄️ [{day}] Η ρουτίνα '{label}' πάγωσε μέχρι {until_date}" + (f" (λόγος: {reason_clean})" if reason_clean else "") + ".")
+            return "\n".join(results)
+
+        if action == "resume":
+            for routine in routines:
+                r_id = routine["id"]
+                label = routine["event"]
+                day = routine.get("day") or "?"
+                clear_routine_paused_until(r_id)
+                results.append(f"▶️ [{day}] Η ρουτίνα '{label}' ξαναενεργοποιήθηκε κανονικά.")
+            return "\n".join(results)
+
+        if action == "set_window":
+            active_from_clean = active_from.strip() or None
+            active_until_clean = active_until.strip() or None
+            if not active_from_clean and not active_until_clean:
+                return "❌ Χρειάζομαι active_from και/ή active_until (YYYY-MM-DD)."
+            if active_from_clean and not _valid_date(active_from_clean):
+                return f"❌ Λάθος format active_from: '{active_from_clean}'. Χρησιμοποίησε YYYY-MM-DD."
+            if active_until_clean and not _valid_date(active_until_clean):
+                return f"❌ Λάθος format active_until: '{active_until_clean}'. Χρησιμοποίησε YYYY-MM-DD."
+            reason_clean = reason.strip() or None
+            for routine in routines:
+                r_id = routine["id"]
+                label = routine["event"]
+                day = routine.get("day") or "?"
+                set_routine_active_window(r_id, active_from=active_from_clean, active_until=active_until_clean, reason=reason_clean)
+                results.append(f"📅 [{day}] Η ρουτίνα '{label}' έχει πλέον παράθυρο ισχύος: από={active_from_clean or '—'}, μέχρι={active_until_clean or '—'}.")
+            return "\n".join(results)
+
+        if action == "clear_window":
+            for routine in routines:
+                r_id = routine["id"]
+                label = routine["event"]
+                day = routine.get("day") or "?"
+                set_routine_active_window(r_id, active_from=None, active_until=None)
+                results.append(f"📅 [{day}] Το παράθυρο ισχύος της ρουτίνας '{label}' αφαιρέθηκε — ισχύει πάντα πλέον.")
+            return "\n".join(results)
+    except Exception as e:
+        return f"❌ Σφάλμα ενημέρωσης χρονοδιαγράμματος ρουτίνας: {e}"
 
     return "❌ Άγνωστο σφάλμα."
 @tool
@@ -2871,7 +3005,7 @@ all_tools = [
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
-    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, control_routine_notifications, browse_url,
+    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, browse_url,
     duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, tool_stats, system_doctor, memory_review,
     repo_mapper,
     scan_receipt,
@@ -2880,6 +3014,7 @@ all_tools = [
     # Project tools
     grant_project_access, list_project_files, read_project_file,
     edit_project_file, write_project_file, grep_project_files,
+    list_recent_files,
     # File generator
     generate_excel, generate_word_doc, generate_pdf, generate_csv,
 ]

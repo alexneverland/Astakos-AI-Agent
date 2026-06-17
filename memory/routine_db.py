@@ -785,6 +785,193 @@ def find_routine_by_name(event_name: str, min_similarity: float = 0.75) -> dict 
 
 
 # ────────────────────────────────────────────────────────────────
+# SEASONAL / TEMPORARY INACTIVITY: active_from / active_until / paused_until
+#
+# Ορθογώνιο στο muted_until (notification layer — "μη μου στείλεις") και στο
+# RoutineState (lifecycle layer — learned/active/decayed/...). Το paused_until
+# / active_from / active_until είναι business-logic layer: "αυτή η ρουτίνα
+# δεν ισχύει τώρα" (π.χ. ποδόσφαιρο που σταματά καλοκαίρι, κατασκήνωση,
+# βάρδια). ΔΕΝ αγγίζει confidence, ΔΕΝ αγγίζει state, ΔΕΝ διαγράφει τίποτα.
+# ────────────────────────────────────────────────────────────────
+
+def ensure_routine_schedule_columns() -> None:
+    """
+    Migration-safe προσθήκη πεδίων seasonal/temporary inactivity στο routines:
+      active_from, active_until, paused_until, resume_rule, pause_reason.
+    Idempotent (PRAGMA table_info guard, ίδιο pattern με setup_db()) — ασφαλές
+    να κληθεί πολλές φορές / σε ήδη existing DB.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    existing_cols = [r[1] for r in cursor.execute("PRAGMA table_info(routines)").fetchall()]
+
+    if "active_from" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN active_from TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'active_from'")
+    if "active_until" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN active_until TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'active_until'")
+    if "paused_until" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN paused_until TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'paused_until'")
+    if "resume_rule" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN resume_rule TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'resume_rule'")
+    if "pause_reason" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN pause_reason TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'pause_reason'")
+
+    conn.commit()
+    conn.close()
+
+
+def get_routine_schedule_meta(routine_id: int) -> dict:
+    """
+    Επιστρέφει active_from / active_until / paused_until / resume_rule / pause_reason
+    για μία ρουτίνα. Άγνωστο id → dict με όλα None (ίδιο defensive pattern με
+    get_sentimental_info).
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT active_from, active_until, paused_until, resume_rule, pause_reason
+           FROM routines WHERE id=?""",
+        (routine_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return {
+            "active_from": None, "active_until": None, "paused_until": None,
+            "resume_rule": None, "pause_reason": None,
+        }
+    return {
+        "active_from":  row[0],
+        "active_until": row[1],
+        "paused_until": row[2],
+        "resume_rule":  row[3],
+        "pause_reason": row[4],
+    }
+
+
+def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | None = None) -> None:
+    """
+    Παύει προσωρινά τη ρουτίνα μέχρι paused_until (YYYY-MM-DD) — π.χ. καλοκαιρινό
+    διάλειμμα, κατασκήνωση. ΔΕΝ αγγίζει confidence/state· η ρουτίνα παραμένει
+    ως έχει, απλά δεν "μετράει" στον scheduler μέχρι να περάσει η ημερομηνία
+    (βλ. is_routine_temporarily_inactive_meta).
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET paused_until=?, pause_reason=? WHERE id=?",
+            (paused_until, reason, routine_id)
+        )
+        conn.commit()
+    conn.close()
+    print(f"[routine_db]: #{routine_id} paused → {paused_until} (reason={reason})")
+    from memory.event_log import log_event
+    log_event("routines", "paused", routine_id=routine_id, paused_until=paused_until, reason=reason)
+
+
+def clear_routine_paused_until(routine_id: int) -> None:
+    """Αφαιρεί την προσωρινή παύση (manual resume) — καθαρίζει και pause_reason."""
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET paused_until=NULL, pause_reason=NULL WHERE id=?",
+            (routine_id,)
+        )
+        conn.commit()
+    conn.close()
+    print(f"[routine_db]: #{routine_id} resumed (paused_until cleared)")
+    from memory.event_log import log_event
+    log_event("routines", "resumed", routine_id=routine_id)
+
+
+def set_routine_active_window(routine_id: int, active_from: str | None = None,
+                               active_until: str | None = None, reason: str | None = None) -> None:
+    """
+    Ορίζει (set_window) ή καθαρίζει (clear_window, καλώντας με active_from=None,
+    active_until=None) το παράθυρο active_from/active_until μιας ρουτίνας.
+    reason είναι προαιρετικό — αν δεν δοθεί, το υπάρχον pause_reason ΔΕΝ αγγίζεται
+    (ώστε ένα clear_window χωρίς reason να μη σβήνει σιωπηλά τον λόγο ενός
+    προηγούμενου pause).
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        if reason is not None:
+            cursor.execute(
+                "UPDATE routines SET active_from=?, active_until=?, pause_reason=? WHERE id=?",
+                (active_from, active_until, reason, routine_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE routines SET active_from=?, active_until=? WHERE id=?",
+                (active_from, active_until, routine_id)
+            )
+        conn.commit()
+    conn.close()
+    print(f"[routine_db]: #{routine_id} active window → from={active_from}, until={active_until}")
+    from memory.event_log import log_event
+    log_event("routines", "active_window_set", routine_id=routine_id,
+               active_from=active_from, active_until=active_until, reason=reason)
+
+
+def set_routine_resume_rule(routine_id: int, resume_rule: str | None = None) -> None:
+    """Ορίζει το resume_rule (π.χ. 'every_september', 'next_school_year', 'manual_only')."""
+    conn   = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET resume_rule=? WHERE id=?",
+            (resume_rule, routine_id)
+        )
+        conn.commit()
+    conn.close()
+    print(f"[routine_db]: #{routine_id} resume_rule → {resume_rule}")
+    from memory.event_log import log_event
+    log_event("routines", "resume_rule_set", routine_id=routine_id, resume_rule=resume_rule)
+
+
+def is_routine_temporarily_inactive_meta(routine: dict, now: datetime | None = None) -> tuple[bool, str | None]:
+    """
+    Κεντρικό gate: αποφασίζει αν μια ρουτίνα είναι ΠΡΟΣΩΡΙΝΑ ανενεργή, ΧΩΡΙΣ να
+    είναι disabled/deleted/decayed. `routine` = dict με (τουλάχιστον) τα κλειδιά
+    paused_until / active_from / active_until — π.χ. ό,τι επιστρέφει
+    get_routine_schedule_meta().
+
+    ΚΡΙΣΙΜΟ: inactive ≠ disabled, inactive ≠ deleted. Ο caller (scheduler) πρέπει
+    να skip-άρει trigger/confirm/send/proactive scoring ΧΩΡΙΣ να το μετρήσει ως
+    missed/failure και ΧΩΡΙΣ να αγγίξει confidence/state.
+
+    Επιστρέφει:
+      (True,  "paused_until")        — ενεργό paused_until, today <= paused_until
+      (True,  "before_active_from")  — today < active_from
+      (True,  "after_active_until")  — today > active_until
+      (False, None)                  — κανονικά ενεργή
+    """
+    today = (now or datetime.now()).strftime("%Y-%m-%d")
+
+    paused_until = routine.get("paused_until")
+    if paused_until and today <= paused_until:
+        return True, "paused_until"
+
+    active_from = routine.get("active_from")
+    if active_from and today < active_from:
+        return True, "before_active_from"
+
+    active_until = routine.get("active_until")
+    if active_until and today > active_until:
+        return True, "after_active_until"
+
+    return False, None
+
+
+# ────────────────────────────────────────────────────────────────
 # PENDING CONFIRMATIONS PERSISTENCE (Recovery After Restart)
 # ────────────────────────────────────────────────────────────────
 
@@ -847,3 +1034,4 @@ def load_pending_confirmations() -> dict:
 
 
 _setup_pending_table()
+ensure_routine_schedule_columns()

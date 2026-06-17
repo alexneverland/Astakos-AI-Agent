@@ -19,6 +19,36 @@ import pytest
 
 _TMP_BASE = tempfile.mkdtemp()   # persistent temp dir για το config.BASE_DIR
 
+# Όλα τα module names που το _stub_modules() αντικαθιστά στο sys.modules.
+# ΣΗΜΑΝΤΙΚΟ (διορθώθηκε): το snapshot + stubbing + "import clients.telegram_bot"
+# ΔΕΝ γίνονται στο module level (collection time) — γίνονται μέσα στο
+# setup_module() (βλ. παρακάτω). Λόγος: το pytest κάνει collection (import)
+# ΟΛΩΝ των test αρχείων ΠΡΙΝ ξεκινήσει η εκτέλεση ΟΠΟΙΟΥΔΗΠΟΤΕ test — άρα αν
+# το stubbing γινόταν στο module level, "δηλητηρίαζε" το sys.modules για ΟΛΑ
+# τα άλλα test αρχεία (πριν ΚΑΙ μετά αλφαβητικά), ακόμα και με ένα
+# teardown_module() στο τέλος, αφού η ζημιά είχε ήδη γίνει στη φάση collection —
+# πολύ πριν τρέξει το teardown_module() αυτού εδώ του αρχείου (π.χ.
+# tests/test_routine_schedule_control.py έπαιρνε AttributeError
+# "module 'memory.routine_db' has no attribute 'find_routines_by_name'" επειδή
+# ακριβώς αυτό συνέβαινε — έβλεπε το stub module, όχι το πραγματικό).
+# Με setup_module()/teardown_module(), η αντικατάσταση περιορίζεται ΑΚΡΙΒΩΣ
+# στο παράθυρο εκτέλεσης (όχι collection) αυτού του αρχείου.
+_STUB_MODULE_NAMES = [
+    "config",
+    "langchain_core", "langchain_core.messages",
+    "memory", "memory.event_log", "memory.vector_store",
+    "memory.working_memory", "memory.session_memory",
+    "memory.context_builder", "memory.routine_db",
+    "core", "core.brain", "core.graph", "core.agents",
+    "core.exceptions", "core.event_bus",
+    "core.routine_state", "core.prompts",
+    "services", "services.gemini", "services.embeddings",
+    "tools", "tools.telegram",
+    "telegram", "telegram.ext",
+]
+_ORIGINAL_MODULES = {}  # γεμίζει μέσα στο setup_module(), ΟΧΙ στο collection time
+bot = None  # γεμίζει μέσα στο setup_module() με το clients.telegram_bot (stubbed deps)
+
 
 def _stub_modules():
     # ── config (force-replace) ────────────────────────────────
@@ -78,6 +108,16 @@ def _stub_modules():
     rdb.get_routine_muted_until    = MagicMock(return_value=None)   # δεν είναι muted by default
     rdb.set_routine_muted_until    = MagicMock()
     rdb.clear_routine_muted_until  = MagicMock()
+    # νέα stubs για seasonal/temporary inactivity (active_from/active_until/paused_until)
+    rdb.get_routine_schedule_meta  = MagicMock(return_value={
+        "active_from": None, "active_until": None, "paused_until": None,
+        "resume_rule": None, "pause_reason": None,
+    })  # by default: καμία ρουτίνα δεν είναι inactive
+    rdb.is_routine_temporarily_inactive_meta = MagicMock(return_value=(False, None))
+    rdb.set_routine_paused_until   = MagicMock()
+    rdb.clear_routine_paused_until = MagicMock()
+    rdb.set_routine_active_window  = MagicMock()
+    rdb.set_routine_resume_rule    = MagicMock()
     # νέα stubs για sentimental
     rdb.get_sentimental_info       = MagicMock(return_value={
         "sentimental": 0, "muted_from": None, "muted_until": None,
@@ -138,8 +178,43 @@ def _stub_modules():
         sys.modules[mod] = types.ModuleType(mod)
 
 
-_stub_modules()
-import clients.telegram_bot as bot  # noqa: E402
+def setup_module(module):
+    """
+    pytest xunit-style hook: τρέχει ΜΙΑ φορά, ΑΚΡΙΒΩΣ πριν το ΠΡΩΤΟ test αυτού
+    του αρχείου εκτελεστεί (φάση EXECUTION) — ΟΧΙ στη φάση collection.
+    Εδώ (και όχι στο module level) κάνουμε snapshot + stubbing + import, ώστε
+    το "δηλητηριασμένο" sys.modules να υπάρχει ΜΟΝΟ όσο διάστημα τρέχουν τα
+    tests αυτού του αρχείου — όχι κατά τη collection όλων των test αρχείων.
+    """
+    global bot
+    _ORIGINAL_MODULES.update({name: sys.modules.get(name) for name in _STUB_MODULE_NAMES})
+    _stub_modules()
+    import clients.telegram_bot as _bot_module
+    bot = _bot_module
+
+
+def teardown_module(module):
+    """
+    pytest xunit-style hook: τρέχει ΜΙΑ φορά, μετά το ΤΕΛΕΥΤΑΙΟ test αυτού του
+    αρχείου. Επαναφέρει το sys.modules στην κατάσταση που ήταν πριν το
+    setup_module(), ώστε τα fake stub modules να μην διαρρεύσουν σε άλλα test
+    αρχεία που τρέχουν στο ίδιο pytest process πριν ή μετά από αυτό εδώ.
+    Δεν επηρεάζει τα tests ΑΥΤΟΥ του αρχείου (όλα τρέχουν με τα stubs, όπως πριν,
+    απλά τώρα μέσα στο setup_module()/teardown_module() παράθυρο).
+    """
+    global bot
+    for name in _STUB_MODULE_NAMES:
+        original = _ORIGINAL_MODULES.get(name)
+        if original is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
+    # Το clients.telegram_bot φορτώθηκε στο setup_module() χρησιμοποιώντας τα
+    # FAKE dependencies. Το αφαιρούμε ώστε το επόμενο test αρχείο που το κάνει
+    # import να ξανατρέξει το πραγματικό module πάνω στα ΠΡΑΓΜΑΤΙΚΑ (μόλις
+    # αποκατεστημένα) dependencies.
+    sys.modules.pop("clients.telegram_bot", None)
+    bot = None
 
 
 def _fixed_now():
@@ -488,15 +563,22 @@ def test_normal_msg_no_skip_logs():
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import traceback
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    passed = failed = 0
-    for fn in tests:
-        try:
-            fn()
-            print(f"  PASS  {fn.__name__}")
-            passed += 1
-        except Exception as e:
-            print(f"  FAIL  {fn.__name__}: {e}")
-            traceback.print_exc()
-            failed += 1
-    print(f"\n{passed} passed, {failed} failed")
+    # Όταν τρέχει standalone (όχι μέσω pytest) κανείς δεν καλεί τα xunit hooks
+    # setup_module()/teardown_module() αυτόματα — τα καλούμε εδώ χειροκίνητα
+    # ώστε το bot/stubs να υπάρχουν πριν τρέξουν τα tests.
+    setup_module(None)
+    try:
+        tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+        passed = failed = 0
+        for fn in tests:
+            try:
+                fn()
+                print(f"  PASS  {fn.__name__}")
+                passed += 1
+            except Exception as e:
+                print(f"  FAIL  {fn.__name__}: {e}")
+                traceback.print_exc()
+                failed += 1
+        print(f"\n{passed} passed, {failed} failed")
+    finally:
+        teardown_module(None)

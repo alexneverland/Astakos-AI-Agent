@@ -2060,9 +2060,24 @@ def startup_check_missed_routines():
 
         print(f"\033[93m[MissedRoutines]: {len(missed)} χαμένη/ες ρουτίνα/ες — deferred follow-up.\033[0m")
 
-        from memory.routine_db import get_routine_notify_info, mark_routine_notified, save_pending_confirmation
+        from memory.routine_db import (
+            get_routine_notify_info, mark_routine_notified, save_pending_confirmation,
+            get_routine_schedule_meta, is_routine_temporarily_inactive_meta,
+        )
 
         for r_id, event_name, confidence, time_str in missed:
+            # ── Seasonal/temporary inactivity check (paused_until / active window) ──
+            # Πρέπει να τρέξει ΠΡΙΝ από κάθε missed/trigger λογική — μια ρουτίνα σε
+            # παύση ή εκτός active window δεν είναι "χαμένη", απλά δεν ισχύει τώρα.
+            schedule_meta = get_routine_schedule_meta(r_id)
+            inactive, inactive_reason = is_routine_temporarily_inactive_meta(schedule_meta, now=now)
+            if inactive:
+                log_event("routines", "inactive_skip", routine_id=r_id, event=event_name,
+                          reason=inactive_reason, paused_until=schedule_meta.get("paused_until"),
+                          active_from=schedule_meta.get("active_from"), active_until=schedule_meta.get("active_until"))
+                print(f"\033[90m[MissedRoutines]: #{r_id} '{event_name}' — inactive ({inactive_reason}), skip.\033[0m")
+                continue
+
             # Cooldown check — αποφεύγουμε spam αν ειδοποιήθηκε πρόσφατα
             info = get_routine_notify_info(r_id)
             if is_duplicate_routine(r_id, info["cooldown_hours"]):
@@ -2210,9 +2225,22 @@ def job_check_routines():
             from memory.routine_db import (
                 get_routine_notify_info, mark_routine_notified,
                 save_pending_confirmation, get_routine_muted_until,
+                get_routine_schedule_meta, is_routine_temporarily_inactive_meta,
             )
             due_routines = []
             for r_id, event_name, confidence in cursor.fetchall():
+                # ── Seasonal/temporary inactivity check (paused_until / active window) ──
+                # Πρέπει να τρέξει ΠΡΙΝ από muted_until/cooldown/proactive scoring — μια
+                # ρουτίνα σε παύση (π.χ. καλοκαιρινό διάλειμμα) δεν θεωρείται ποτέ "missed",
+                # δεν πειράζει το confidence, και δεν περνά από το sentimental/mute branch.
+                schedule_meta = get_routine_schedule_meta(r_id)
+                inactive, inactive_reason = is_routine_temporarily_inactive_meta(schedule_meta, now=now)
+                if inactive:
+                    log_event("routines", "inactive_skip", routine_id=r_id, event=event_name,
+                              reason=inactive_reason, paused_until=schedule_meta.get("paused_until"),
+                              active_from=schedule_meta.get("active_from"), active_until=schedule_meta.get("active_until"))
+                    print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' inactive ({inactive_reason}) — skipped")
+                    continue
                 # ── muted_until check ────────────────────────────────────
                 muted_until = get_routine_muted_until(r_id)
                 if muted_until:

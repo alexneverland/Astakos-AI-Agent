@@ -67,6 +67,9 @@ def _run_missed(db_rows, fixed_now, grace=90, quiet=False, muted=False, cooldown
                   return_value={"cooldown_hours": 4}),
             patch("memory.routine_db.mark_routine_notified"),
             patch("memory.routine_db.save_pending_confirmation"),
+            patch("memory.routine_db.get_routine_schedule_meta",
+                  return_value={"active_from": None, "active_until": None,
+                                "paused_until": None, "resume_rule": None, "pause_reason": None}),
         ):
             bot.startup_check_missed_routines()
 

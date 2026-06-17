@@ -35,6 +35,7 @@ TOOL_RISK: dict[str, str] = {
     "google_tasks_tool":        "WARNING",
     "learn_routine":            "WARNING",
     "control_routine_notifications": "WARNING",
+    "control_routine_schedule":  "WARNING",
     "write_code":               "WARNING",
     "write_custom_tool":        "WARNING",
     "update_pending_linkedin_post": "WARNING",
