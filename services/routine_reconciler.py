@@ -470,8 +470,9 @@ def score_candidate_directive(
         score += _P_NO_SCOPE
         _append_flag(ambiguity_flags, "missing_scope")
     else:
-        # unmute: scope not required, grant partial scope credit
-        score += _W_SCOPE * 0.5
+        # notifications_unmute: η απουσία until_date είναι αναμενόμενη,
+        # όχι αδυναμία του fact. Δίνουμε full scope-equivalent credit.
+        score += _W_SCOPE
         _append_signal(signals, "scope:not_required")
 
     # ── Rule-level bonuses and penalties ─────────────────────────────────────

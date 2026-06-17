@@ -9,7 +9,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from memory.vector_store import AstakosMemoryManager
 from services.routine_reconciler import (
     infer_routine_reconciliation_directives,
+    infer_routine_reconciliation_candidates,
+    score_candidate_directive,
     apply_routine_reconciliation_directives,
+    _normalize,
+    _AUTO_APPLY_THRESHOLD,
+    _DEBUG_ONLY_THRESHOLD,
 )
 
 
@@ -276,21 +281,55 @@ def test_apply_shift_week_mute_matches_include_only_routines(tmp_path):
     ]
 
 
-def test_infer_shift_week_creates_mute_directive_until_sunday():
+def test_shift_week_candidate_scores_debug_only_until_sunday():
+    """shift_week produces a candidate directive but stays debug_only by design (score < 0.80)."""
     fact = "[USER_FACT]: Αυτή την εβδομάδα δουλεύω απόγευμα στη βάρδια."
-    directives = infer_routine_reconciliation_directives(
+
+    candidates = infer_routine_reconciliation_candidates(
         fact,
         category="lazaros",
         reason="user_stated",
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
 
+    # Candidate must exist with correct metadata
     assert any(
-        d["kind"] == "notifications_mute"
-        and d["reason"] == "shift_afternoon_week"
-        and d["until_date"] == "2026-06-21"
-        for d in directives
+        c["kind"] == "notifications_mute"
+        and c["reason"] == "shift_afternoon_week"
+        and c["until_date"] == "2026-06-21"
+        and c["rule_name"] == "shift_week"
+        for c in candidates
+    ), "Expected shift_week candidate with shift_afternoon_week reason and Sunday until_date"
+
+    # Score it and verify it stays debug_only (not auto_apply)
+    normalized_fact = _normalize(fact)
+    scored = [
+        score_candidate_directive(
+            c,
+            normalized_fact=normalized_fact,
+            matched_rule_name=c["rule_name"],
+        )
+        for c in candidates
+    ]
+
+    assert any(
+        d["rule_name"] == "shift_week"
+        and d["decision"] == "debug_only"
+        and d["score"] >= _DEBUG_ONLY_THRESHOLD
+        and d["score"] < _AUTO_APPLY_THRESHOLD
+        for d in scored
+    ), "shift_week should be debug_only: score in [0.55, 0.80)"
+
+    # The backward-compat wrapper must NOT include shift_week in its output
+    directives = infer_routine_reconciliation_directives(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 6, 17, 12, 0, 0),
     )
+    assert not any(
+        d.get("reason") == "shift_afternoon_week" for d in directives
+    ), "infer_routine_reconciliation_directives must not return debug_only directives"
 
 
 def _make_same_cat_result(old_id, old_content, distance, old_meta=None):
