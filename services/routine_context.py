@@ -117,17 +117,5 @@ def resolve_school_open(now: datetime | None = None) -> bool | None:
 
 
 def resolve_current_shift(now: datetime | None = None) -> str | None:
-    current = now or datetime.now()
-    today = current.strftime("%Y-%m-%d")
-    
-    from memory.routine_db import get_context_state
-    state_data = get_context_state("current_shift")
-    
-    if not state_data:
-        return None
-        
-    expires_at = state_data.get("expires_at")
-    if expires_at and expires_at < today:
-        return None
-        
-    return state_data.get("value")
+    from memory.runtime_state import get_current_shift
+    return get_current_shift()

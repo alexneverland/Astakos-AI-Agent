@@ -15,16 +15,6 @@ def test_build_runtime_routine_context_returns_expected_keys(monkeypatch):
     assert result["school_open"] is False
     assert result["current_shift"] == "afternoon"
 
-def test_resolve_current_shift_not_found(monkeypatch):
-    monkeypatch.setattr("memory.routine_db.get_context_state", lambda k: None)
-    assert rc.resolve_current_shift() is None
-
-def test_resolve_current_shift_expired(monkeypatch):
-    monkeypatch.setattr("memory.routine_db.get_context_state", lambda k: {"value": "afternoon", "expires_at": "2026-06-16"})
-    now = datetime(2026, 6, 17)
-    assert rc.resolve_current_shift(now) is None
-
-def test_resolve_current_shift_valid(monkeypatch):
-    monkeypatch.setattr("memory.routine_db.get_context_state", lambda k: {"value": "afternoon", "expires_at": "2026-06-20"})
-    now = datetime(2026, 6, 17)
-    assert rc.resolve_current_shift(now) == "afternoon"
+def test_resolve_current_shift_reads_runtime_state(monkeypatch):
+    monkeypatch.setattr("memory.runtime_state.get_current_shift", lambda: "afternoon")
+    assert rc.resolve_current_shift() == "afternoon"
