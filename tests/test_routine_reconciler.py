@@ -22,7 +22,7 @@ def _make_routines_db(path, rows):
     conn = sqlite3.connect(path)
     conn.execute(
         """
-        CREATE TABLE routines (
+        CREATE TABLE routines ( priority INTEGER DEFAULT 0, condition_type TEXT, condition_payload TEXT, condition_mode TEXT,
             id INTEGER PRIMARY KEY,
             day_of_week TEXT,
             time_str TEXT,
@@ -97,12 +97,11 @@ def test_infer_summer_break_pause_directive():
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
 
-    assert len(directives) == 1
-    directive = directives[0]
-    assert directive["kind"] == "schedule_pause"
-    assert directive["until_date"] == "2026-09-01"
-    assert directive["reason"] == "summer_break"
-    assert directive["resume_rule"] == "every_september"
+    assert len(directives) == 2
+    assert directives[0]["kind"] == "context_state_set"
+    assert directives[0]["key"] == "football_season"
+    assert directives[0]["value"] == "false"
+    assert directives[1]["kind"] == "condition_add"
 
 
 def test_infer_camp_absence_mute_directive():
@@ -114,8 +113,8 @@ def test_infer_camp_absence_mute_directive():
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
 
-    assert any(d["kind"] == "notifications_mute" and d["until_date"] == "2026-06-25" for d in directives)
-
+    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_at_camp" and d["until_date"] == "2026-06-25" for d in directives)
+    assert any(d["kind"] == "condition_add" and d["until_date"] == "2026-06-25" for d in directives)
 
 def test_infer_return_home_unmute_directive():
     fact = "[USER_FACT]: Ο Αλέξανδρος γύρισε από την κατασκήνωση και είναι πάλι σπίτι."
@@ -151,11 +150,13 @@ def test_infer_school_break_with_child_subject_creates_pause():
     )
 
     assert any(
-        d["kind"] == "schedule_pause"
-        and d["reason"] == "school_break"
+        d["kind"] == "context_state_set"
+        and d["key"] == "school_open"
+        and d["value"] == "false"
         and d["until_date"] == "2026-09-01"
         for d in directives
     )
+    assert any(d["kind"] == "condition_add" and d["until_date"] == "2026-09-01" for d in directives)
 
 
 def test_apply_schedule_pause_hits_all_football_routines(tmp_path):
@@ -294,13 +295,12 @@ def test_shift_week_candidate_scores_debug_only_until_sunday():
 
     # Candidate must exist with correct metadata
     assert any(
-        c["kind"] == "notifications_mute"
+        c["kind"] == "context_state_set"
         and c["reason"] == "shift_afternoon_week"
         and c["until_date"] == "2026-06-21"
         and c["rule_name"] == "shift_week"
         for c in candidates
     ), "Expected shift_week candidate with shift_afternoon_week reason and Sunday until_date"
-
     # Score it and verify it stays debug_only (not auto_apply)
     normalized_fact = _normalize(fact)
     scored = [

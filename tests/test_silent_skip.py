@@ -42,7 +42,7 @@ _STUB_MODULE_NAMES = [
     "core", "core.brain", "core.graph", "core.agents",
     "core.exceptions", "core.event_bus",
     "core.routine_state", "core.prompts",
-    "services", "services.gemini", "services.embeddings",
+    "services", "services.gemini", "services.embeddings", "services.routine_context",
     "tools", "tools.telegram",
     "telegram", "telegram.ext",
 ]
@@ -119,6 +119,7 @@ def _stub_modules():
     rdb.set_routine_active_window  = MagicMock()
     rdb.set_routine_resume_rule    = MagicMock()
     rdb.get_routine_condition      = MagicMock(return_value={})
+    rdb.get_context_state          = MagicMock(return_value=None)
     # νέα stubs για sentimental
     rdb.get_sentimental_info       = MagicMock(return_value={
         "sentimental": 0, "muted_from": None, "muted_until": None,
@@ -160,9 +161,17 @@ def _stub_modules():
     rs.RoutineState  = _RS
     rs.is_notifiable = lambda s: s == "active"
 
-    # ── services.* ────────────────────────────────────────────
-    for mod in ["services", "services.gemini", "services.embeddings"]:
+    for mod in ["services", "services.gemini", "services.embeddings", "services.routine_context"]:
         sys.modules[mod] = types.ModuleType(mod)
+        
+    sys.modules["services.routine_context"].build_runtime_routine_context = MagicMock(return_value={
+        "today": "2026-06-17",
+        "alexandros_at_camp": False,
+        "football_season": True,
+        "school_open": True,
+        "current_shift": None,
+        "sofia_work_mode": "office"
+    })
     sys.modules["services.gemini"].safe_gemini_call = MagicMock(return_value="ok")
     sys.modules["services.embeddings"].embeddings   = MagicMock()
 
@@ -229,7 +238,7 @@ def _fixed_now():
 def _make_routines_db(path, rows):
     conn = sqlite3.connect(path)
     conn.execute("""
-        CREATE TABLE routines (
+        CREATE TABLE routines ( priority INTEGER DEFAULT 0, condition_type TEXT, condition_payload TEXT, condition_mode TEXT,
             id INTEGER PRIMARY KEY, event_name TEXT, confidence REAL,
             time_str TEXT, day_of_week TEXT, state TEXT, last_triggered TEXT,
             muted_until TEXT DEFAULT NULL

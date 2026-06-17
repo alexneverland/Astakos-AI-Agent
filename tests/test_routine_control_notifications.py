@@ -65,7 +65,7 @@ def test_find_routines_by_name_returns_all_exact_duplicates(tmp_path):
     conn = sqlite3.connect(db_path)
     conn.execute(
         """
-        CREATE TABLE routines (
+        CREATE TABLE routines ( priority INTEGER DEFAULT 0, condition_type TEXT, condition_payload TEXT, condition_mode TEXT,
             id INTEGER PRIMARY KEY,
             day_of_week TEXT,
             time_str TEXT,

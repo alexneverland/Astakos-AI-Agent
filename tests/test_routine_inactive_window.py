@@ -20,14 +20,14 @@ import pytest
 def _make_routines_db(path, rows):
     conn = sqlite3.connect(path)
     conn.execute("""
-        CREATE TABLE routines (
+        CREATE TABLE routines ( priority INTEGER DEFAULT 0, condition_type TEXT, condition_payload TEXT, condition_mode TEXT,
             id INTEGER PRIMARY KEY, event_name TEXT, confidence REAL,
             time_str TEXT, day_of_week TEXT, state TEXT, last_triggered TEXT
         )
     """)
     for r in rows:
         conn.execute(
-            "INSERT INTO routines VALUES (:id,:event_name,:confidence,"
+            "INSERT INTO routines (id, event_name, confidence, time_str, day_of_week, state, last_triggered) VALUES (:id,:event_name,:confidence,"
             ":time_str,:day_of_week,:state,:last_triggered)", r
         )
     conn.commit()

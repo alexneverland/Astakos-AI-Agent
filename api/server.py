@@ -953,19 +953,28 @@ async def debug_runtime(_=Depends(require_token)):
     cooldown_info     = []
 
     try:
+        from services.routine_context import build_runtime_routine_context
+        from services.routine_conditions import evaluate_routine_condition
+        ctx = build_runtime_routine_context(datetime.now())
+    except ImportError:
+        ctx = {}
+        evaluate_routine_condition = lambda rid, c: True
+
+    try:
         conn   = _sqlite3.connect(db_path, check_same_thread=False)
         cursor = conn.cursor()
 
         # Active routines
         cursor.execute("""
             SELECT id, day_of_week, time_str, event_name, confidence,
-                   mention_count, notify_cooldown_hours, last_notified_ts, state
+                   mention_count, notify_cooldown_hours, last_notified_ts, state,
+                   condition_type, condition_payload, condition_mode
             FROM routines
             WHERE state='active'
             ORDER BY day_of_week, time_str
         """)
         for row in cursor.fetchall():
-            r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state = row
+            r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state, c_type, c_payload, c_mode = row
             now_dt = datetime.now()
             cooldown_remaining = None
             if last_ts:
@@ -977,6 +986,20 @@ async def debug_runtime(_=Depends(require_token)):
                     cooldown_remaining = max(0, round(remaining_secs / 3600, 1))
                 except Exception:
                     pass
+            
+            cond_res = None
+            if c_type:
+                try:
+                    c_dict = {
+                        "condition_type": c_type,
+                        "condition_payload": c_payload,
+                        "condition_mode": c_mode
+                    }
+                    eval_result = evaluate_routine_condition(c_dict, ctx)
+                    cond_res = eval_result.get("allowed", True)
+                except Exception:
+                    pass
+
             active_routines.append({
                 "id":                r_id,
                 "day":               day,
@@ -988,6 +1011,10 @@ async def debug_runtime(_=Depends(require_token)):
                 "last_notified":     last_ts,
                 "cooldown_remaining_h": cooldown_remaining,
                 "state":             state,
+                "condition_type":    c_type,
+                "condition_payload": c_payload,
+                "condition_mode":    c_mode,
+                "condition_eval":    cond_res,
             })
 
         # Pending confirmations
@@ -1009,17 +1036,36 @@ async def debug_runtime(_=Depends(require_token)):
 
         # Routines in non-active states (LEARNED, TRIGGER_PENDING, DISMISSED, DECAYED, etc.)
         cursor.execute("""
-            SELECT id, day_of_week, time_str, event_name, state, confidence
+            SELECT id, day_of_week, time_str, event_name, state, confidence,
+                   condition_type, condition_payload, condition_mode
             FROM routines
             WHERE state != 'active' AND state != 'archived'
             ORDER BY state, day_of_week, time_str
         """)
         for row in cursor.fetchall():
-            r_id, day, tstr, ev, state, conf = row
+            r_id, day, tstr, ev, state, conf, c_type, c_payload, c_mode = row
+            
+            cond_res = None
+            if c_type:
+                try:
+                    c_dict = {
+                        "condition_type": c_type,
+                        "condition_payload": c_payload,
+                        "condition_mode": c_mode
+                    }
+                    eval_result = evaluate_routine_condition(c_dict, ctx)
+                    cond_res = eval_result.get("allowed", True)
+                except Exception:
+                    pass
+
             cooldown_info.append({
                 "id": r_id, "day": day, "time": tstr,
                 "event": ev, "state": state,
                 "confidence": round(conf or 0, 2),
+                "condition_type":    c_type,
+                "condition_payload": c_payload,
+                "condition_mode":    c_mode,
+                "condition_eval":    cond_res,
             })
 
         # Stats

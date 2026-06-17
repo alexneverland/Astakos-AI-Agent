@@ -204,6 +204,15 @@ def setup_db():
         cursor.execute("ALTER TABLE routines ADD COLUMN source_memory_ref TEXT")
         print("[routine_db]: Migration → 'source_memory_ref'")
 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS context_state (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            expires_at TEXT,
+            updated_at TEXT
+        )
+    ''')
+
     # Backfill fingerprints
     cursor.execute("SELECT id, day_of_week, time_str, event_name FROM routines WHERE fingerprint IS NULL")
     for r_id, day, time, event in cursor.fetchall():
@@ -1203,3 +1212,43 @@ def get_routine_condition(routine_id: int) -> dict:
         "priority": row[3] or 0,
         "source_memory_ref": row[4],
     }
+# ----------------------------------------------------------------
+# 3C.1: CONTEXT STATE STORE
+# ----------------------------------------------------------------
+
+def get_context_state(key: str) -> dict | None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT value, expires_at, updated_at FROM context_state WHERE key=?", (key,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        return None
+    return {
+        "value": row[0],
+        "expires_at": row[1],
+        "updated_at": row[2]
+    }
+
+def set_context_state(key: str, value: str, expires_at: str | None = None) -> None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    from datetime import datetime
+    now_str = datetime.now().isoformat()
+    try:
+        with db_write_lock:
+            cursor.execute(
+                """
+                INSERT INTO context_state (key, value, expires_at, updated_at) 
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET 
+                    value=excluded.value, 
+                    expires_at=excluded.expires_at, 
+                    updated_at=excluded.updated_at
+                """,
+                (key, value, expires_at, now_str)
+            )
+            conn.commit()
+    finally:
+        conn.close()

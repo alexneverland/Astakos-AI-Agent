@@ -2215,10 +2215,11 @@ def job_check_routines():
 
             placeholders = ",".join("?" * len(possible_days))
             cursor.execute(f"""
-                SELECT id, event_name, confidence FROM routines
+                SELECT id, event_name, confidence, priority FROM routines
                 WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
                 AND time_str=? AND state='active'
                 AND (last_triggered IS NULL OR last_triggered != ?)
+                ORDER BY priority DESC, id ASC
             """, (*possible_days, target_time_str, today_str))
 
             # ── Anti-Spam: φιλτράρισμα με per-routine cooldown ──────────
@@ -2231,8 +2232,20 @@ def job_check_routines():
             from services.routine_context import build_runtime_routine_context
             from services.routine_conditions import evaluate_routine_condition
             due_routines = []
+            triggered_conflict_groups = set()
             rt_context = build_runtime_routine_context(now=now)
-            for r_id, event_name, confidence in cursor.fetchall():
+
+            def _get_conflict_group(name: str) -> str:
+                parts = name.lower().split()
+                return parts[0] if parts else name.lower()
+
+            for r_id, event_name, confidence, priority in cursor.fetchall():
+                conflict_group = _get_conflict_group(event_name)
+                
+                if conflict_group in triggered_conflict_groups:
+                    print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' skipped due to conflict with higher priority routine in group '{conflict_group}'")
+                    continue
+
                 # ── Seasonal/temporary inactivity check (paused_until / active window) ──
                 # Πρέπει να τρέξει ΠΡΙΝ από muted_until/cooldown/proactive scoring — μια
                 # ρουτίνα σε παύση (π.χ. καλοκαιρινό διάλειμμα) δεν θεωρείται ποτέ "missed",
@@ -2287,6 +2300,7 @@ def job_check_routines():
                               cooldown_hours=cd_hours)
                     continue
                 due_routines.append((r_id, event_name, confidence))
+                triggered_conflict_groups.add(conflict_group)
 
 
             if not due_routines:

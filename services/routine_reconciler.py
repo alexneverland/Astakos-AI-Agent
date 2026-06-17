@@ -163,16 +163,32 @@ def _rule_seasonal_football(normalized: str, dates: list[str], now: datetime) ->
     until = _infer_september_resume(normalized, now=now, explicit_dates=dates)
     if not until:
         return []
-    d = _build_directive(
-        "schedule_pause",
+    
+    d_state = {
+        "kind": "context_state_set",
+        "key": "football_season",
+        "value": "false",
+        "until_date": until,
+        "reason": "summer_break",
+        "subject_tokens": _ALEXANDROS_TOKENS,
+        "include_tokens": _FOOTBALL_TOKENS,
+        "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
+    }
+    
+    d_cond = _build_directive(
+        "condition_add",
         subject_tokens=_ALEXANDROS_TOKENS,
         include_tokens=_FOOTBALL_TOKENS,
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         until_date=until,
         reason="summer_break",
-        resume_rule="every_september",
     )
-    return [d] if d else []
+    if d_cond:
+        d_cond["condition_type"] = "context_flag"
+        d_cond["condition_payload"] = {"flag": "football_season", "equals": True}
+        d_cond["condition_mode"] = "allow_when_true"
+
+    return [d_state] + ([d_cond] if d_cond else [])
 
 
 def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list[dict]:
@@ -185,15 +201,32 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
     if not until:
         return []
     reason = "camp_absence" if _contains_any(normalized, _CAMP_TOKENS) else "temporary_absence"
-    d = _build_directive(
-        "notifications_mute",
+    
+    # 3C.2: Global state AND routine condition
+    d_state = {
+        "kind": "context_state_set",
+        "key": "alexandros_at_camp",
+        "value": "true",
+        "until_date": until,
+        "reason": reason,
+        "subject_tokens": _ALEXANDROS_TOKENS,
+        "include_tokens": [],
+        "exclude_tokens": [],
+    }
+    d_cond = _build_directive(
+        "condition_add",
         subject_tokens=_ALEXANDROS_TOKENS,
         include_tokens=[],
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         until_date=until,
         reason=reason,
     )
-    return [d] if d else []
+    if d_cond:
+        d_cond["condition_type"] = "context_flag"
+        d_cond["condition_payload"] = {"flag": "alexandros_at_camp", "equals": True}
+        d_cond["condition_mode"] = "suppress_when_true"
+
+    return [d_state] + ([d_cond] if d_cond else [])
 
 
 def _rule_return_home(normalized: str) -> list[dict]:
@@ -239,16 +272,98 @@ def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list
             until = _infer_relative_until(normalized, now=now)
     if not until:
         return []
-    d = _build_directive(
-        "schedule_pause",
+    
+    d_state = {
+        "kind": "context_state_set",
+        "key": "school_open",
+        "value": "false",
+        "until_date": until,
+        "reason": "school_break",
+        "subject_tokens": _ALEXANDROS_TOKENS,
+        "include_tokens": _SCHOOL_TOKENS + _MORNING_TOKENS,
+        "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
+    }
+    
+    d_cond = _build_directive(
+        "condition_add",
         subject_tokens=_ALEXANDROS_TOKENS,
         include_tokens=_SCHOOL_TOKENS + _MORNING_TOKENS,
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         until_date=until,
         reason="school_break",
-        resume_rule="every_september",
     )
-    return [d] if d else []
+    if d_cond:
+        d_cond["condition_type"] = "context_flag"
+        d_cond["condition_payload"] = {"flag": "school_open", "equals": True}
+        d_cond["condition_mode"] = "allow_when_true"
+
+    return [d_state] + ([d_cond] if d_cond else [])
+
+
+def _rule_sofia_work_mode(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+    """
+    Phase 3C.5 — sofia_work_mode:
+    Facts: "Η Σοφία δουλεύει από το σπίτι αύριο", "Η Σοφία είναι τηλεργασία"
+    """
+    has_sofia = "σοφια" in normalized
+    has_work = _contains_any(normalized, _WORK_TOKENS)
+    has_remote = "σπιτι" in normalized or "τηλεργασια" in normalized or "remote" in normalized
+    
+    if not (has_sofia and has_work and has_remote):
+        return []
+        
+    until = None
+    if dates:
+        until = max(dates)
+    else:
+        until = _infer_relative_until(normalized, now=now)
+        if not until:
+            until = now.strftime("%Y-%m-%d") # default today
+            
+    d_state = {
+        "kind": "context_state_set",
+        "key": "sofia_work_mode",
+        "value": "remote",
+        "until_date": until,
+        "reason": "sofia_remote_work",
+        "subject_tokens": ["σοφια"],
+        "include_tokens": _WORK_TOKENS,
+        "exclude_tokens": [],
+    }
+    return [d_state]
+
+
+def _rule_football_season(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+    """
+    Phase 3C.5 — football_season:
+    Facts: "ξεκίνησε το ποδόσφαιρο", "άρχισαν οι προπονήσεις"
+    """
+    has_football = "ποδοσφαιρ" in normalized or "μπαλα" in normalized or "προπονηση" in normalized
+    has_start = "ξεκινησ" in normalized or "αρχισ" in normalized
+    has_end = "τελειωσ" in normalized or "σταματησ" in normalized or "εκλεισ" in normalized
+    
+    if not has_football:
+        return []
+        
+    until = None
+    if dates:
+        until = max(dates)
+    
+    val = "true" if has_start else ("false" if has_end else None)
+    if not val:
+        return []
+        
+    d_state = {
+        "kind": "context_state_set",
+        "key": "football_season",
+        "value": val,
+        "until_date": until,
+        "reason": "football_season_update",
+        "subject_tokens": _ALEXANDROS_TOKENS,
+        "include_tokens": ["ποδοσφαιρ", "μπαλα", "προπονηση"],
+        "exclude_tokens": [],
+    }
+    return [d_state]
 
 
 def _rule_shift_week(normalized: str, now: datetime) -> list[dict]:
@@ -272,16 +387,36 @@ def _rule_shift_week(normalized: str, now: datetime) -> list[dict]:
     else:
         include = _SLEEP_TOKENS
         reason  = "shift_morning_week"
-    # subject_tokens=[] → match μόνο by include_tokens (ο χρήστης ο ίδιος)
-    d = _build_directive(
-        "notifications_mute",
+    # 3C.2: Set global shift context AND teach relevant routines
+    shift_val = "afternoon" if _contains_any(normalized, _SHIFT_PM_TOKENS) else "morning"
+    
+    d_state = {
+        "kind": "context_state_set",
+        "key": "current_shift",
+        "value": shift_val,
+        "until_date": until,
+        "reason": reason,
+        "subject_tokens": [],
+        "include_tokens": include,
+        "exclude_tokens": [],
+    }
+    
+    d_cond = _build_directive(
+        "condition_add",
         subject_tokens=[],
         include_tokens=include,
         exclude_tokens=_ALEXANDROS_TOKENS + _SOFIA_TOKENS,
         until_date=until,
         reason=reason,
     )
-    return [d] if d else []
+    if d_cond:
+        d_cond["condition_type"] = "shift_mode"
+        # If I have afternoon shift, suppress routines matching "morning" shift logic?
+        # Actually, suppress if current_shift EQUALS my shift!
+        d_cond["condition_payload"] = {"flag": "current_shift", "equals": shift_val}
+        d_cond["condition_mode"] = "suppress_when_true"
+
+    return [d_state] + ([d_cond] if d_cond else [])
 
 
 def _rule_temporary_absence_other_person(normalized: str, dates: list[str], now: datetime) -> list[dict]:
@@ -573,12 +708,14 @@ def infer_routine_reconciliation_candidates(
 
     rules = [
         ("seasonal_football",              _rule_seasonal_football,              (normalized_fact, dates, current)),
+        ("football_season",                _rule_football_season,                (normalized_fact, dates, current)),
         ("camp_absence",                   _rule_camp_absence,                   (normalized_fact, dates, current)),
         ("school_break",                   _rule_school_break,                   (normalized_fact, dates, current)),
         ("child_activity_pause",           _rule_child_activity_pause,           (normalized_fact, dates, current)),
         ("temporary_absence_other_person", _rule_temporary_absence_other_person, (normalized_fact, dates, current)),
         ("shift_week",                     _rule_shift_week,                     (normalized_fact, current)),
         ("return_home",                    _rule_return_home,                    (normalized_fact,)),
+        ("sofia_work_mode",                _rule_sofia_work_mode,                (normalized_fact, dates, current)),
     ]
     for rule_name, rule_fn, args in rules:
         for directive in rule_fn(*args):
@@ -624,8 +761,11 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
         clear_routine_muted_until,
         set_routine_paused_until,
         set_routine_resume_rule,
+        set_routine_condition,
+        set_context_state
     )
     from memory.event_log import log_event
+    import json
 
     stats = {
         "directives": len(directives),
@@ -633,10 +773,27 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
         "schedule_paused": 0,
         "notifications_muted": 0,
         "notifications_unmuted": 0,
+        "conditions_added": 0,
+        "context_states_set": 0,
         "skipped": 0,
     }
 
     for directive in directives:
+        kind = directive["kind"]
+
+        if kind == "context_state_set":
+            key = directive["key"]
+            value = directive["value"]
+            until_date = directive.get("until_date")
+            set_context_state(key, value, until_date)
+            stats["context_states_set"] += 1
+            log_event(
+                "routines", "auto_context_state_set",
+                key=key, value=value, until_date=until_date,
+                reason=directive.get("reason"),
+            )
+            continue
+
         routines = find_routines_for_reconciliation(
             subject_tokens=directive.get("subject_tokens") or [],
             include_tokens=directive.get("include_tokens") or [],
@@ -696,6 +853,28 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
                     routine_id=r_id, event=label,
                     reason=directive.get("reason"),
                 )
+                continue
+                
+            if kind == "condition_add":
+                cond_type = directive["condition_type"]
+                cond_payload = json.dumps(directive["condition_payload"])
+                cond_mode = directive["condition_mode"]
+                reason = directive.get("reason")
+                set_routine_condition(
+                    r_id, 
+                    condition_type=cond_type, 
+                    condition_payload=cond_payload, 
+                    condition_mode=cond_mode, 
+                    source_ref="reconciler"
+                )
+                stats["conditions_added"] += 1
+                log_event(
+                    "routines", "auto_condition_add",
+                    routine_id=r_id, event=label,
+                    condition_type=cond_type,
+                    reason=reason,
+                )
+                continue
 
     return stats
 
