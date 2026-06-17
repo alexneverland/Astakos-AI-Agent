@@ -827,13 +827,13 @@ def find_routines_for_reconciliation(
     include = [normalize_search_text(tok) for tok in (include_tokens or []) if str(tok).strip()]
     exclude = [normalize_search_text(tok) for tok in (exclude_tokens or []) if str(tok).strip()]
 
-    if not required:
+    if not required and not include:
         return []
 
     results = []
     for row in rows:
         event_text = normalize_search_text(row[3])
-        if not all(tok in event_text for tok in required):
+        if required and not all(tok in event_text for tok in required):
             continue
         if include and not any(tok in event_text for tok in include):
             continue

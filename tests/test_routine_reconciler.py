@@ -124,6 +124,35 @@ def test_infer_return_home_unmute_directive():
     assert any(d["kind"] == "notifications_unmute" for d in directives)
 
 
+def test_infer_school_break_requires_child_subject():
+    fact = "[USER_FACT]: Τελείωσε το σχολείο και από αύριο διακοπές μέχρι τον Σεπτέμβριο."
+    directives = infer_routine_reconciliation_directives(
+        fact,
+        category="family",
+        reason="user_stated",
+        now=datetime(2026, 6, 17, 12, 0, 0),
+    )
+
+    assert not any(d.get("reason") == "school_break" for d in directives)
+
+
+def test_infer_school_break_with_child_subject_creates_pause():
+    fact = "[USER_FACT]: Ο Αλέξανδρος τελείωσε το σχολείο και από αύριο έχει διακοπές μέχρι τον Σεπτέμβριο."
+    directives = infer_routine_reconciliation_directives(
+        fact,
+        category="family",
+        reason="user_stated",
+        now=datetime(2026, 6, 17, 12, 0, 0),
+    )
+
+    assert any(
+        d["kind"] == "schedule_pause"
+        and d["reason"] == "school_break"
+        and d["until_date"] == "2026-09-01"
+        for d in directives
+    )
+
+
 def test_apply_schedule_pause_hits_all_football_routines(tmp_path):
     import memory.routine_db as rdb
 
@@ -203,6 +232,65 @@ def test_apply_notifications_mute_hits_alexandros_routines_only(tmp_path):
         (3, "2026-06-25"),
         (4, None),
     ]
+
+
+def test_apply_shift_week_mute_matches_include_only_routines(tmp_path):
+    import memory.routine_db as rdb
+
+    db_path = tmp_path / "routines.db"
+    _make_routines_db(
+        db_path,
+        [
+            _routine(20, "Αναχώρηση για δουλειά", time_str="10:00"),
+            _routine(21, "Μεσημεριανό φαγητό", time_str="15:00"),
+            _routine(22, "Ύπνος Αλέξανδρου", time_str="22:20"),
+            _routine(23, "Μήνυμα στη Σοφία στο Messenger", time_str="11:00"),
+        ],
+    )
+
+    directives = [{
+        "kind": "notifications_mute",
+        "subject_tokens": [],
+        "include_tokens": ["αναχωρησ", "φευγ", "δουλεια", "δουλειαν", "μεσημερ", "φαγητ", "γευμ"],
+        "exclude_tokens": ["αλεξανδρ", "σοφια"],
+        "until_date": "2026-06-21",
+        "reason": "shift_afternoon_week",
+    }]
+
+    with (
+        patch.object(rdb, "get_connection", side_effect=lambda write=False: sqlite3.connect(db_path)),
+        patch("memory.event_log.log_event"),
+    ):
+        stats = apply_routine_reconciliation_directives(directives)
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT id, muted_until FROM routines ORDER BY id").fetchall()
+    conn.close()
+
+    assert stats["notifications_muted"] == 2
+    assert rows == [
+        (20, "2026-06-21"),
+        (21, "2026-06-21"),
+        (22, None),
+        (23, None),
+    ]
+
+
+def test_infer_shift_week_creates_mute_directive_until_sunday():
+    fact = "[USER_FACT]: Αυτή την εβδομάδα δουλεύω απόγευμα στη βάρδια."
+    directives = infer_routine_reconciliation_directives(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 6, 17, 12, 0, 0),
+    )
+
+    assert any(
+        d["kind"] == "notifications_mute"
+        and d["reason"] == "shift_afternoon_week"
+        and d["until_date"] == "2026-06-21"
+        for d in directives
+    )
 
 
 def _make_same_cat_result(old_id, old_content, distance, old_meta=None):

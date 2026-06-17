@@ -205,7 +205,12 @@ def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list
     """
     has_school_break = _contains_any(normalized, _SCHOOL_BREAK_TOKENS)
     has_school_ref   = _contains_any(normalized, _SCHOOL_TOKENS)
-    if not (has_school_break or has_school_ref):
+    has_child_ref    = (
+        _contains_any(normalized, _ALEXANDROS_TOKENS)
+        or "παιδι" in normalized
+        or "μικρ" in normalized
+    )
+    if not (has_school_ref and has_child_ref and has_school_break):
         return []
     until = None
     if dates:
@@ -311,6 +316,10 @@ def _rule_child_activity_pause(normalized: str, dates: list[str], now: datetime)
     has_activity = _contains_any(normalized, _CHILD_ACTIVITY_TOKENS)
     has_stop     = _contains_any(normalized, _STOP_TOKENS)
     if not (has_child and has_activity and has_stop):
+        return []
+    # Αν πρόκειται ήδη για καθαρό seasonal/summer break case, το αφήνουμε
+    # στο ειδικότερο rule για να μη βγάζουμε duplicate directives.
+    if _contains_any(normalized, _SUMMER_BREAK_TOKENS):
         return []
     until = None
     if dates:
