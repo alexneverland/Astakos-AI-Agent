@@ -1009,13 +1009,13 @@ async def debug_runtime(_=Depends(require_token)):
             SELECT id, day_of_week, time_str, event_name, confidence,
                    mention_count, notify_cooldown_hours, last_notified_ts, state,
                    condition_type, condition_payload, condition_mode,
-                   priority, source_memory_ref, conflict_group, paused_until, pause_reason
+                   priority, source_memory_ref, conflict_group, paused_until, pause_reason, muted_until
             FROM routines
             WHERE state='active'
             ORDER BY day_of_week, time_str
         """)
         for row in cursor.fetchall():
-            r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state, c_type, c_payload, c_mode, priority, memory_ref, conflict_group, paused_until, pause_reason = row
+            r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state, c_type, c_payload, c_mode, priority, memory_ref, conflict_group, paused_until, pause_reason, muted_until = row
             now_dt = datetime.now()
             cooldown_remaining = None
             if last_ts:
@@ -1076,6 +1076,8 @@ async def debug_runtime(_=Depends(require_token)):
                 "source_memory_ref": memory_ref,
                 "paused_until":      paused_until,
                 "pause_reason":      pause_reason,
+                "condition_reason": cond_reason,
+                "muted_until": muted_until
             })
 
         # Pending confirmations

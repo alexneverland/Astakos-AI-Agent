@@ -229,7 +229,10 @@ function stateBadge(r) {
   if (r.paused_until) {
     return `<span class="badge b-orange">PAUSED</span>`;
   }
-  const s = r.state || r; // support passing string directly if no paused_until
+  if (r.muted_until) {
+    return `<span class="badge b-purple">MUTED</span>`;
+  }
+  const s = r.state || r; // support passing string directly if no paused_until/muted_until
   const m = {
     active:['b-green','ACTIVE'], trigger_pending:['b-yellow','TRIGGER_PENDING'],
     confirmed:['b-blue','CONFIRMED'], ignored:['b-orange','IGNORED'],
@@ -322,10 +325,12 @@ function render(d) {
   function renderCondition(r) {
     if (r.conditions && r.conditions.length > 0) {
       const mainBadge = r.paused_until
-        ? '<span class="badge b-orange">PAUSED</span>'
-        : r.condition_eval
-          ? '<span class="badge b-green">Active now</span>'
-          : '<span class="badge b-red">Suppressed now</span>';
+        ? `<span class="badge b-orange" title="Paused until ${r.paused_until}">PAUSED</span>`
+        : r.muted_until
+          ? `<span class="badge b-purple" title="Muted until ${r.muted_until}">MUTED</span>`
+          : r.condition_eval
+            ? '<span class="badge b-green">Active now</span>'
+            : '<span class="badge b-red">Suppressed now</span>';
         
       let html = `<div class="cond-box">
         <div style="margin-bottom:6px">${mainBadge}</div>`;
@@ -356,10 +361,12 @@ function render(d) {
       return `<div class="cond-box"><span class="badge b-muted">No condition</span></div>`;
     }
     const badge = r.paused_until
-      ? '<span class="badge b-orange">PAUSED</span>'
-      : r.condition_eval
-        ? '<span class="badge b-green">Active now</span>'
-        : '<span class="badge b-red">Suppressed now</span>';
+        ? `<span class="badge b-orange" title="Paused until ${r.paused_until}">PAUSED</span>`
+        : r.muted_until
+          ? `<span class="badge b-purple" title="Muted until ${r.muted_until}">MUTED</span>`
+          : r.condition_eval
+            ? '<span class="badge b-green">Active now</span>'
+            : '<span class="badge b-red">Suppressed now</span>';
     const summary = summarizeConditionPayload(r.condition_payload, r.condition_mode);
     
     let html = `<div class="cond-box" title="${esc(r.condition_payload || '')}">
@@ -521,6 +528,7 @@ function render(d) {
         <td class="cell-tight" style="vertical-align:middle">
           <div style="margin-bottom:6px">${stateBadge(r)}</div>
           ${r.paused_until ? `<div style="font-size:10px;color:var(--orange);margin-bottom:4px;font-weight:bold" title="Reason: ${r.pause_reason||'N/A'}">⏸️ Paused until: <br/>${r.paused_until}</div>` : ''}
+          ${r.muted_until ? `<div style="font-size:10px;color:var(--purple);margin-bottom:4px;font-weight:bold">🔇 Muted until: <br/>${r.muted_until}</div>` : ''}
           <div style="width:80px;margin-bottom:4px">${confBar(r.confidence)}</div>
           <div style="font-size:10px;color:var(--text-muted)">CD: <span class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null?r.cooldown_remaining_h+'h':'—'}</span></div>
         </td>
