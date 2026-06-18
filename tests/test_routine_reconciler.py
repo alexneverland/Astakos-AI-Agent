@@ -297,8 +297,8 @@ def test_apply_shift_week_mute_matches_include_only_routines(tmp_path):
     ]
 
 
-def test_shift_week_candidate_scores_debug_only_until_sunday():
-    """shift_week produces a candidate directive but stays debug_only by design (score < 0.80)."""
+def test_shift_logic_candidate_scores_auto_apply():
+    """shift_logic produces a candidate directive and auto applies it."""
     fact = "[USER_FACT]: Αυτή την εβδομάδα δουλεύω απόγευμα στη βάρδια."
 
     candidates = infer_routine_reconciliation_candidates(
@@ -316,7 +316,7 @@ def test_shift_week_candidate_scores_debug_only_until_sunday():
         and c["rule_name"] == "shift_logic"
         for c in candidates
     ), "Expected shift_logic candidate with shift_afternoon_week reason and Sunday until_date"
-    # Score it and verify it stays debug_only (not auto_apply)
+    # Score it and verify it becomes auto_apply
     normalized_fact = _normalize(fact)
     scored = [
         score_candidate_directive(
@@ -329,22 +329,21 @@ def test_shift_week_candidate_scores_debug_only_until_sunday():
 
     assert any(
         d["rule_name"] == "shift_logic"
-        and d["decision"] == "debug_only"
-        and d["score"] >= _DEBUG_ONLY_THRESHOLD
-        and d["score"] < _AUTO_APPLY_THRESHOLD
+        and d["decision"] == "auto_apply"
+        and d["score"] >= _AUTO_APPLY_THRESHOLD
         for d in scored
-    ), "shift_logic should be debug_only: score in [0.55, 0.80)"
+    ), "shift_logic should be auto_apply: score >= 0.80"
 
-    # The backward-compat wrapper must NOT include shift_week in its output
+    # The backward-compat wrapper MUST include shift_logic in its output
     directives = infer_routine_reconciliation_directives(
         fact,
         category="lazaros",
         reason="user_stated",
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
-    assert not any(
+    assert any(
         d.get("reason") == "shift_afternoon_week" for d in directives
-    ), "infer_routine_reconciliation_directives must not return debug_only directives"
+    ), "infer_routine_reconciliation_directives must return auto_apply directives"
 
 
 def _make_same_cat_result(old_id, old_content, distance, old_meta=None):

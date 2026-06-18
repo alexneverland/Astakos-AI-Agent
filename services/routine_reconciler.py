@@ -660,7 +660,7 @@ _P_CONSERVATIVE = -0.25   # rules that are by-design conservative (shift_week)
 # Rules that earn the +0.10 special bonus
 _SPECIAL_RULES = {"seasonal_football", "camp_absence", "return_home"}
 # Rules that get the conservative penalty
-_CONSERVATIVE_RULES = {"shift_logic"}
+_CONSERVATIVE_RULES = set()
 # Rules where generic-token penalty applies if activity not found in fact
 _ACTIVITY_REQUIRED_RULES = {"school_break"}
 
