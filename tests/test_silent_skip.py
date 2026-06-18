@@ -43,6 +43,7 @@ _STUB_MODULE_NAMES = [
     "core.exceptions", "core.event_bus",
     "core.routine_state", "core.prompts",
     "services", "services.gemini", "services.embeddings", "services.routine_context",
+    "services.routine_conditions",
     "tools", "tools.telegram",
     "telegram", "telegram.ext",
 ]
@@ -89,7 +90,8 @@ def _stub_modules():
     wm.update_capabilities_from_exchange = MagicMock()
 
     sm = sys.modules["memory.session_memory"]
-    sm.trigger_memory_sifter  = MagicMock()
+    sm.run_memory_sifter_fast = MagicMock(return_value=[])
+    sm.run_memory_sifter_slow = MagicMock()
     sm.log_exchange           = MagicMock()
     sm._run_session_summary   = MagicMock()
     sm.startup_stale_cleanup  = MagicMock()
@@ -161,12 +163,15 @@ def _stub_modules():
     rs.RoutineState  = _RS
     rs.is_notifiable = lambda s: s == "active"
 
-    for mod in ["services", "services.gemini", "services.embeddings", "services.routine_context"]:
+    for mod in [
+        "services", "services.gemini", "services.embeddings",
+        "services.routine_context", "services.routine_conditions",
+    ]:
         sys.modules[mod] = types.ModuleType(mod)
-        
+
     sys.modules["services.routine_context"].build_runtime_routine_context = MagicMock(return_value={
         "today": "2026-06-17",
-        "alexandros_at_camp": False,
+        "alexandros_away_from_home": False,
         "football_season": True,
         "school_open": True,
         "current_shift": None,
@@ -174,6 +179,9 @@ def _stub_modules():
     })
     sys.modules["services.gemini"].safe_gemini_call = MagicMock(return_value="ok")
     sys.modules["services.embeddings"].embeddings   = MagicMock()
+    sys.modules["services.routine_conditions"].evaluate_routine_condition = MagicMock(
+        return_value={"allowed": True, "reason": None}
+    )
 
     # ── tools.* ───────────────────────────────────────────────
     for mod in ["tools", "tools.telegram"]:
@@ -366,7 +374,17 @@ def _run_missed_job(db_rows, craft_return="Ε, πήγε καλά; 😊", muted_u
 
 
 def _today_minus(days):
-    return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    # ΠΡΟΣΟΧΗ: πρέπει να υπολογίζεται σχετικά με το FROZEN _fixed_now(), όχι με
+    # το πραγματικό datetime.now(). Το job_check_routines() τρέχει με
+    # bot.datetime patched στο _fixed_now() (2026-06-17 12:00), άρα το
+    # last_triggered πρέπει να είναι "χθες" ΣΕ ΣΧΕΣΗ ΜΕ ΑΥΤΗ την ημερομηνία.
+    # Bug που διορθώθηκε: όταν χρησιμοποιούταν το πραγματικό "σήμερα", μόλις
+    # η πραγματική ημερομηνία προσπέρασε το 2026-06-17, το last_triggered
+    # (πραγματικό "χθες") συνέπιπτε ΤΥΧΑΙΑ με το frozen today_str
+    # ("2026-06-17"), κάνοντας τη ρουτίνα να φαίνεται "already triggered today"
+    # στο SQL WHERE (last_triggered != today_str) — όλα τα due routines
+    # φιλτράρονταν σιωπηλά, χωρίς exception/print, άδειο sent/logged/bus_events.
+    return (_fixed_now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
 
 def _due_routine():

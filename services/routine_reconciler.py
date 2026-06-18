@@ -11,7 +11,7 @@ _FOOTBALL_TOKENS        = ["ποδοσφαιρο", "προπονηση", "μπα
 _BASKETBALL_TOKENS      = ["μπασκετ", "μπασκεμπολ"]
 _CHILD_ACTIVITY_TOKENS  = _FOOTBALL_TOKENS + _BASKETBALL_TOKENS + ["δραστηριοτητ", "τμημα", "μαθημα"]
 _SUMMER_BREAK_TOKENS    = ["καλοκαιρ", "σταματ", "ξαναρχ", "σεπτεμβρ"]
-_CAMP_TOKENS            = ["κατασκηνωση", "camp"]
+_CAMP_TOKENS            = ["κατασκην", "camp"]
 _SCHOOL_TOKENS          = ["σχολει", "σχολικ"]
 _SCHOOL_BREAK_TOKENS    = ["δεν εχει σχολει", "τελειωσε το σχολει", "διακοπ", "καλοκαιρ"]
 _MORNING_TOKENS         = ["πρωι", "πρωιν", "ξυπνημ", "ετοιμασι"]
@@ -664,7 +664,7 @@ _P_CONSERVATIVE = -0.25   # rules that are by-design conservative (shift_week)
 # Rules that earn the +0.10 special bonus
 _SPECIAL_RULES = {"seasonal_football", "camp_absence", "return_home"}
 # Rules that get the conservative penalty
-_CONSERVATIVE_RULES = set()
+_CONSERVATIVE_RULES = {"shift_logic"}
 # Rules where generic-token penalty applies if activity not found in fact
 _ACTIVITY_REQUIRED_RULES = {"school_break"}
 
@@ -748,10 +748,6 @@ def score_candidate_directive(
         _append_signal(signals, "scope:not_required")
 
     # ── Rule-level bonuses and penalties ─────────────────────────────────────
-    if matched_rule_name == "shift_logic":
-        # Shift logic relies heavily on activities ("δουλει", "ξυπνημα", generic actions), so we boost them.
-        score += 0.50  # base shift logic boost so that even 1 action word gets 0.50 + 0.50 - 0.35 + 0.20 = 0.85 (Auto Apply)
-
     if matched_rule_name in _SPECIAL_RULES:
         score += _W_SPECIAL
         _append_signal(signals, f"special_rule:{matched_rule_name}")

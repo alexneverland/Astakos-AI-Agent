@@ -206,7 +206,7 @@ def test_memory_sifter_saves_temporary_family_memory_even_if_llm_returns_empty(m
     monkeypatch.setattr(session_memory, "safe_gemini_call", lambda prompt: EmptyResponse())
     session_memory.SESSION_LOGS.clear()
 
-    session_memory._run_memory_sifter(
+    session_memory.run_memory_sifter_fast(
         "Ο Αλέξανδρος είναι κατασκήνωση μέχρι την Κυριακή και μετά γυρνάει σπίτι",
         "Το κρατάω στο νου μου.",
         agent_name="Chat_Agent",
@@ -292,7 +292,7 @@ def test_memory_sifter_includes_recent_session_context_in_prompt(monkeypatch):
 
     monkeypatch.setattr(session_memory, "safe_gemini_call", fake_gemini)
 
-    session_memory._run_memory_sifter(
+    session_memory.run_memory_sifter_slow(
         "Ωραία τα φτιάξαμε", "Ναι, τέλειο αποτέλεσμα!",
         agent_name="Chat_Agent", channel="web",
     )
@@ -331,7 +331,7 @@ def test_memory_sifter_omits_context_block_when_session_logs_empty(monkeypatch):
 
     monkeypatch.setattr(session_memory, "safe_gemini_call", fake_gemini)
 
-    session_memory._run_memory_sifter(
+    session_memory.run_memory_sifter_slow(
         "Γεια σου", "Γεια!", agent_name="Chat_Agent", channel="web",
     )
 

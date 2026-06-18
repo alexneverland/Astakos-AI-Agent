@@ -5,6 +5,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [v1.3.0] — 2026-06-18
+
+28 commits since v1.2.0. Headline: **Routine Reconciler Phase 3** — automatic fact-to-routine reconciliation grows a full deterministic scoring engine with auto-apply guardrails, paired with a new **Routine Conditions** system for context-aware constraints (shift schedules, seasonal pauses), plus a round of test-suite hardening that found and fixed several stale assertions and a `sys.modules` pollution bug.
+
+### 🆕 Features
+
+#### Routine Reconciler — Phase 3A/3B (deterministic scoring + auto-apply guardrails)
+- **Automatic fact-to-routine reconciliation** — stated facts ("Αλέξανδρος γύρισε σπίτι", "αυτή την εβδομάδα δουλεύω απόγευμα") are matched against deterministic rules and turned into routine directives instead of requiring a manual mute/unmute.
+- **Phase 3A — 4 new rule groups**: `school_break`, `shift_week`, `temporary_absence_other_person`, `child_activity_pause`, built on a shared `_build_directive()` helper that enforces subject + time-scope guards on every directive. Smoke tests cover false-positive cases (11/11).
+- **Phase 3B — deterministic scoring layer** (`services/routine_reconciler.py`): weighted score (subject 0.30 / activity 0.20 / state 0.20 / scope 0.20 / special 0.10) against two thresholds — `_AUTO_APPLY_THRESHOLD = 0.80`, `_DEBUG_ONLY_THRESHOLD = 0.55`. `score_candidate_directive()` returns `auto_apply` / `debug_only` / `rejected`; `filter_directives_for_auto_apply()` buckets candidates; `reconcile_fact_to_routines()` runs the full pipeline with stats and per-candidate event logs (`reconcile_candidate_applied` / `_debug_only` / `_rejected`). `infer_routine_reconciliation_directives()` stays as a backward-compatible wrapper that only returns the `auto_apply` bucket.
+- **Deliberately conservative by design** — `shift_logic` carries a `-0.25` penalty so a stated shift change can never silently auto-apply (it lands in `debug_only`, logged but not acted on, by design — confirmed behavior, not a bug). `return_home` was tuned the other way: a complete fact like "γύρισε σπίτι τώρα" needs no `until_date`, so it now scores into `auto_apply`.
+
+#### Routine Conditions — context-aware constraints
+- **Condition evaluation engine** — routines can now carry conditions resolved against live `context_state` (e.g. `shift_mode`) instead of only blunt mute/pause windows.
+- **`control_routine_condition` tool** — LLM-driven, natural-language routine constraints ("δούλεψε μόνο όταν είμαι σε απογευματινή βάρδια") instead of editing condition JSON by hand.
+- **Runtime current-shift state** — a dedicated runtime store feeds shift-based conditions, with the memory sifter split into fast/deterministic and slow/LLM queues so shift facts resolve without waiting on an LLM call.
+- **Smart weekend filter** — `shift_mode` conditions are skipped on weekend-only routines unless explicitly requested, so a work-shift rule can't accidentally mute a Saturday habit.
+- **Routine intent gating hardened** — distinguishes a stated fact ("δουλεύω απόγευμα αυτή την εβδομάδα") from a manual command, so the reconciler doesn't misfire on ordinary chat.
+- **Debug dashboard fixes** — routines with conditions no longer show a false "No meta"; `shift_mode` conditions now show their resolved `Now:` value.
+
+#### Memory & Proactive Routines
+- **Deterministic family-absence extractor** — temporary absence statements ("ο Αλέξανδρος είναι σε κατασκήνωση") are parsed without an LLM sifter call.
+- **Seasonal Routine Inactivity Controls** — pause/resume a routine for a date range (e.g. football paused over summer) without deleting or permanently muting it.
+- Fixed proactive mute loops and duplicate routine control; fixed a `recall_query`/temporal date-marker collision that leaked unrelated 30-day SQL history lookback into proactive routine context; hardened the muted + sentimental proactive routine flow.
+
+### 🔧 Notable Fixes
+
+- **Test-suite hardening** — found and fixed a stemming bug in `_CAMP_TOKENS` (`routine_reconciler.py`); fixed several stale test assertions (`test_routine_reconciler.py`, `test_routine_reconciler_scoring.py`, `test_session_memory.py`, `test_silent_skip.py`) that had drifted from the confirmed-correct conservative-by-design `shift_logic` behavior; fixed a `sys.modules` pollution bug in `test_pr3.py` where a never-torn-down stub of `services.reflection_engine` leaked into later-run test files — converted to the `setup_module()`/`teardown_module()` pattern already used elsewhere in the suite.
+- Full suite: **581 passed, 0 failed**.
+
+---
+
 ## [v1.2.0] — 2026-06-16
 
 106 commits since v1.1.0. Headline: **Planner v2's full agentic loop is complete** (Goal → Plan → Validate → Execute → Reflect → Re-plan), alongside a full **Profile SQLite Migration**, Google Calendar integration, a Georgian-language helper, and a long tail of reliability fixes across Mail_Agent, memory search, and Telegram/Messenger.

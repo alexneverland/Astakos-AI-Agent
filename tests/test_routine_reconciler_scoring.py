@@ -146,32 +146,32 @@ class TestSchoolBreak:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. shift_week — should be debug_only by design
+# 5. shift_logic (formerly shift_week) — should be debug_only by design
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestShiftWeek:
     FACT = "[USER_FACT] αυτη εβδομαδ δουλευω απογευμα"
 
     def test_stays_debug_only(self):
-        d = _first(self.FACT, "shift_week")
+        d = _first(self.FACT, "shift_logic")
         assert d["decision"] == "debug_only"
         assert d["auto_apply"] is False
 
     def test_score_below_auto_threshold(self):
-        d = _first(self.FACT, "shift_week")
+        d = _first(self.FACT, "shift_logic")
         assert d["score"] < _AUTO_APPLY_THRESHOLD
 
     def test_score_above_debug_threshold(self):
-        d = _first(self.FACT, "shift_week")
+        d = _first(self.FACT, "shift_logic")
         assert d["score"] >= _DEBUG_ONLY_THRESHOLD
 
     def test_conservative_flag_present(self):
-        d = _first(self.FACT, "shift_week")
-        assert "shift_week_conservative" in d["ambiguity_flags"]
+        d = _first(self.FACT, "shift_logic")
+        assert "shift_logic_conservative" in d["ambiguity_flags"]
 
     def test_has_include_proxy_signal(self):
-        """shift_week has no explicit subject — scoring uses include_tokens as subject proxy."""
-        d = _first(self.FACT, "shift_week")
+        """shift_logic has no explicit subject — scoring uses include_tokens as subject proxy."""
+        d = _first(self.FACT, "shift_logic")
         assert any("include_proxy" in s or "subject" in s for s in d["signals"])
 
 
@@ -245,7 +245,7 @@ class TestScoreClamping:
             "until_date": None,
             "reason": "test",
         }
-        d = score_candidate_directive(directive, normalized_fact="κατι εγινε", matched_rule_name="shift_week")
+        d = score_candidate_directive(directive, normalized_fact="κατι εγινε", matched_rule_name="shift_logic")
         assert d["score"] >= 0.0
 
 
@@ -282,7 +282,7 @@ class TestReconcileStats:
                     "rejected_candidates", "scored_directives"):
             assert key in stats
 
-    def test_shift_week_never_auto_applies(self, monkeypatch):
+    def test_shift_logic_never_auto_applies(self, monkeypatch):
         import services.routine_reconciler as rr
         applied_directives: list = []
         def _mock_apply(d: list) -> dict:
@@ -294,8 +294,8 @@ class TestReconcileStats:
 
         fact = "[USER_FACT] αυτη εβδομαδ δουλευω απογευμα"
         reconcile_fact_to_routines(fact, category="work", reason="user_stated", now=_NOW)
-        shift_applied = [d for d in applied_directives if d.get("rule_name") == "shift_week"]
-        assert shift_applied == [], "shift_week should never be in auto_apply list"
+        shift_applied = [d for d in applied_directives if d.get("rule_name") == "shift_logic"]
+        assert shift_applied == [], "shift_logic should never be in auto_apply list"
 
     def test_no_candidates_returns_false_applied(self):
         stats = reconcile_fact_to_routines(

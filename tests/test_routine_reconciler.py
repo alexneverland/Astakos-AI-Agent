@@ -297,8 +297,14 @@ def test_apply_shift_week_mute_matches_include_only_routines(tmp_path):
     ]
 
 
-def test_shift_logic_candidate_scores_auto_apply():
-    """shift_logic produces a candidate directive and auto applies it."""
+def test_shift_logic_candidate_scores_debug_only():
+    """shift_logic produces a candidate directive but stays debug_only by design.
+
+    shift_logic is in _CONSERVATIVE_RULES, which applies a -0.25 penalty so it
+    never crosses the auto-apply threshold on its own (see
+    test_routine_reconciler_scoring.py::TestShiftWeek, which is the
+    authoritative spec for this rule's scoring behavior).
+    """
     fact = "[USER_FACT]: Αυτή την εβδομάδα δουλεύω απόγευμα στη βάρδια."
 
     candidates = infer_routine_reconciliation_candidates(
@@ -316,7 +322,7 @@ def test_shift_logic_candidate_scores_auto_apply():
         and c["rule_name"] == "shift_logic"
         for c in candidates
     ), "Expected shift_logic candidate with shift_afternoon_week reason and Sunday until_date"
-    # Score it and verify it becomes auto_apply
+    # Score it and verify it stays debug_only (never auto_apply — conservative rule)
     normalized_fact = _normalize(fact)
     scored = [
         score_candidate_directive(
@@ -329,21 +335,22 @@ def test_shift_logic_candidate_scores_auto_apply():
 
     assert any(
         d["rule_name"] == "shift_logic"
-        and d["decision"] == "auto_apply"
-        and d["score"] >= _AUTO_APPLY_THRESHOLD
+        and d["decision"] == "debug_only"
+        and _DEBUG_ONLY_THRESHOLD <= d["score"] < _AUTO_APPLY_THRESHOLD
         for d in scored
-    ), "shift_logic should be auto_apply: score >= 0.80"
+    ), "shift_logic should stay debug_only: DEBUG_ONLY_THRESHOLD <= score < AUTO_APPLY_THRESHOLD"
 
-    # The backward-compat wrapper MUST include shift_logic in its output
+    # The backward-compat wrapper only returns the auto_apply bucket, so a
+    # debug_only-only rule like shift_logic must NOT show up in its output.
     directives = infer_routine_reconciliation_directives(
         fact,
         category="lazaros",
         reason="user_stated",
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
-    assert any(
+    assert not any(
         d.get("reason") == "shift_afternoon_week" for d in directives
-    ), "infer_routine_reconciliation_directives must return auto_apply directives"
+    ), "infer_routine_reconciliation_directives only returns auto_apply directives — shift_logic is debug_only"
 
 
 def _make_same_cat_result(old_id, old_content, distance, old_meta=None):

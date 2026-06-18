@@ -10,9 +10,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # ── Helpers ──────────────────────────────────────────────────────
+#
+# NOTE: sys.modules stubs MUST be set up/torn down at module scope
+# (setup_module/teardown_module), never stubbed-in-place with no restore.
+# A bare `sys.modules["services.reflection_engine"] = types.ModuleType(...)`
+# that's never undone leaks into every other test file that runs afterward
+# (alphabetically, this file runs before test_reflection_engine_pending.py)
+# and shadows the real module, causing AttributeError there.
 
-def _stub_deps():
+_original_modules = {}
+
+def setup_module(module):
     for mod_name in ["services", "services.gemini", "services.reflection_engine", "config"]:
+        _original_modules[mod_name] = sys.modules.get(mod_name)
         if mod_name not in sys.modules:
             sys.modules[mod_name] = types.ModuleType(mod_name)
     cfg = sys.modules["config"]
@@ -20,9 +30,15 @@ def _stub_deps():
         cfg.WORKING_MEMORY_FILE = "/tmp/wm.json"
         cfg.BASE_DIR = "/tmp"
 
+def teardown_module(module):
+    for mod_name, orig in _original_modules.items():
+        if orig is None:
+            sys.modules.pop(mod_name, None)
+        else:
+            sys.modules[mod_name] = orig
+
 
 def _import_nodes():
-    _stub_deps()
     if "core.planner" in sys.modules:
         del sys.modules["core.planner"]
     from core.planner import replan_node, end_check_node

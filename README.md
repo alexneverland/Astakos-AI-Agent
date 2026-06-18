@@ -512,6 +512,10 @@ Shutdown behavior:
 - [x] Reaction Handler — ❤️ exact-message-match reactions via in-memory cache with SQLite fallback.
 - [x] Mail_Agent Loop Guard — hardened synthesis path so mail results already in context don't trigger redundant tool calls; auto-read + ID-hint injection.
 - [x] Memory Search Performance — `search_memory` lexical L1 cache + single `similarity_search` call; `save_to_memory` fire-and-forget background thread (~11s faster per call).
+- [x] Routine Reconciler Phase 3 — deterministic scoring engine for automatic fact-to-routine reconciliation (`services/routine_reconciler.py`): weighted subject/activity/state/scope/special score against `_AUTO_APPLY_THRESHOLD = 0.80` and `_DEBUG_ONLY_THRESHOLD = 0.55`, with a deliberate conservative penalty so ambiguous rules like `shift_logic` log to `debug_only` instead of silently auto-applying. Covers seasonal football, camp absence, school break, child-activity pause, temporary absence of another person, return-home, and shift-week detection.
+- [x] Routine Conditions — routines evaluate conditions against live `context_state` (e.g. `shift_mode`), with a `control_routine_condition` tool for natural-language constraint changes, a smart weekend filter so shift conditions don't leak into weekend-only routines, and dashboard fixes for condition display.
+- [x] Deterministic Family-Absence Extractor — temporary absence statements parsed without an LLM sifter call.
+- [x] Seasonal Routine Inactivity Controls — pause/resume a routine for a date range (e.g. a sports routine paused over summer) without deleting or permanently muting it.
 
 ### Planned
 
