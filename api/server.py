@@ -1050,6 +1050,9 @@ async def debug_runtime(_=Depends(require_token)):
                 except Exception:
                     pass
 
+            if not memory_ref and conditions_list:
+                memory_ref = conditions_list[0].get("source_memory_ref")
+
             active_routines.append({
                 "id":                r_id,
                 "day":               day,
@@ -1123,6 +1126,9 @@ async def debug_runtime(_=Depends(require_token)):
                         cond_actual_value = ctx.get(flag_name)
                 except Exception:
                     pass
+
+            if not memory_ref and conditions_list:
+                memory_ref = conditions_list[0].get("source_memory_ref")
 
             cooldown_info.append({
                 "id": r_id, "day": day, "time": tstr,
