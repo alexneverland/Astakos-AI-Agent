@@ -196,6 +196,10 @@ def setup_db():
         cursor.execute("ALTER TABLE routines ADD COLUMN condition_mode TEXT")
         print("[routine_db]: Migration → 'condition_mode'")
 
+    if "conditions_json" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN conditions_json TEXT")
+        print("[routine_db]: Migration → 'conditions_json'")
+
     if "priority" not in existing_cols:
         cursor.execute("ALTER TABLE routines ADD COLUMN priority INTEGER DEFAULT 0")
         print("[routine_db]: Migration → 'priority'")
@@ -827,6 +831,85 @@ def find_routine_by_name(event_name: str, min_similarity: float = 0.75) -> dict 
     return matches[0] if matches else None
 
 
+def _token_overlap(a: str, b: str) -> set[str]:
+    a_tokens = set(normalize_event(a).split())
+    b_tokens = set(normalize_event(b).split())
+    return a_tokens & b_tokens
+
+
+def find_routines_for_schedule_control(
+    event_name: str, 
+    *, 
+    min_similarity: float = 0.82,
+    day_of_week: str | None = None,
+    time_str: str | None = None
+) -> list[dict]:
+    """
+    Very strict matching for the schedule control tool.
+    Does not use embeddings. Requires either exact match or high string similarity
+    WITH lexical overlap to prevent tool hallucination on irrelevant routines.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state
+           FROM routines WHERE state IN ('active', 'learned')"""
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return []
+        
+    filtered_rows = []
+    for r in rows:
+        if day_of_week and day_of_week.lower() != str(r[1]).lower():
+            continue
+        if time_str and time_str != r[2]:
+            continue
+        filtered_rows.append(r)
+    rows = filtered_rows
+
+    def _row_to_dict(r) -> dict:
+        return {
+            "id": r[0], "day": r[1], "time": r[2], "event": r[3],
+            "type": r[4], "confidence": round(r[5], 2), "state": r[6],
+        }
+
+    target = normalize_event(event_name)
+
+    # Stage 1: Exact
+    exact_matches = [_row_to_dict(r) for r in rows if normalize_event(r[3]) == target]
+    if exact_matches:
+        return exact_matches
+
+    # Stage 1.5: Substring match (for short queries matching long db names)
+    substring_matches = []
+    for r in rows:
+        norm_r = normalize_event(r[3])
+        if target in norm_r.split() or target in norm_r:
+            substring_matches.append(r)
+            
+    if substring_matches:
+        # Return ALL substring matches so a generic rule applies to all related routines
+        return [_row_to_dict(r) for r in substring_matches]
+
+    # Stage 2: Strict Fuzzy with Overlap
+    best_row, best_score = None, 0.0
+    for r in rows:
+        score = event_similarity(event_name, r[3])
+        if score > best_score:
+            best_row, best_score = r, score
+            
+    if best_row is not None and best_score >= min_similarity:
+        # Enforce lexical overlap
+        if _token_overlap(event_name, best_row[3]):
+            return [_row_to_dict(best_row)]
+
+    return []
+
+
+
 def find_routines_for_reconciliation(
     *,
     subject_tokens: list[str],
@@ -1190,6 +1273,94 @@ def set_routine_condition(
         conn.commit()
     conn.close()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 3C: MULTI-CONDITIONS HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+import json
+
+def get_routine_conditions(routine_id: int) -> list[dict]:
+    with db_write_lock:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT conditions_json, condition_type, condition_payload, condition_mode FROM routines WHERE id = ?",
+            (routine_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return []
+            
+        c_json, c_type, c_payload, c_mode = row
+        
+        # 1. New multi-condition JSON
+        if c_json:
+            try:
+                parsed = json.loads(c_json)
+                if isinstance(parsed, list):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+                
+        # 2. Fallback to legacy single condition
+        if c_type:
+            return [{
+                "condition_type": c_type,
+                "condition_payload": json.loads(c_payload) if c_payload else None,
+                "condition_mode": c_mode
+            }]
+            
+        return []
+
+def append_routine_condition(
+    routine_id: int,
+    *,
+    condition_type: str,
+    condition_payload: str | dict,
+    condition_mode: str,
+    source_memory_ref: str | None = None,
+) -> bool:
+    """Appends a new condition to conditions_json if it doesn't already exist. Returns True if added."""
+    
+    # Normalize payload
+    if isinstance(condition_payload, str):
+        try:
+            parsed_payload = json.loads(condition_payload)
+        except json.JSONDecodeError:
+            parsed_payload = condition_payload
+    else:
+        parsed_payload = condition_payload
+
+    existing_conditions = get_routine_conditions(routine_id)
+    
+    # Check for duplicates
+    for cond in existing_conditions:
+        if (cond.get("condition_type") == condition_type and 
+            cond.get("condition_payload") == parsed_payload and 
+            cond.get("condition_mode") == condition_mode):
+            return False # Duplicate
+            
+    new_cond = {
+        "condition_type": condition_type,
+        "condition_payload": parsed_payload,
+        "condition_mode": condition_mode,
+    }
+    if source_memory_ref:
+        new_cond["source_memory_ref"] = source_memory_ref
+        
+    existing_conditions.append(new_cond)
+    
+    with db_write_lock:
+        conn = get_connection(write=True)
+        conn.execute(
+            "UPDATE routines SET conditions_json = ? WHERE id = ?",
+            (json.dumps(existing_conditions), routine_id)
+        )
+        conn.commit()
+    return True
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LEGACY CONDITION HELPER (Still used for single overwrites?)
+# ─────────────────────────────────────────────────────────────────────────────
 
 def get_routine_condition(routine_id: int) -> dict:
     conn = get_connection()

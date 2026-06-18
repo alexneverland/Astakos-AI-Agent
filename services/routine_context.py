@@ -5,7 +5,8 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
 
     return {
         "today": current.strftime("%Y-%m-%d"),
-        "alexandros_at_camp": resolve_alexandros_camp_state(current),
+        "alexandros_away_from_home": resolve_alexandros_away_state(current),
+        "alexandros_away_reason": resolve_alexandros_away_reason(current),
         "football_season": resolve_football_season(current),
         "school_open": resolve_school_open(current),
         "current_shift": resolve_current_shift(current),
@@ -25,6 +26,30 @@ def resolve_alexandros_camp_state(now: datetime | None = None) -> bool | None:
     if expires_at and expires_at < today:
         return None
     return str(state_data.get("value")).lower() == "true"
+
+def resolve_alexandros_away_state(now: datetime | None = None) -> bool | None:
+    current = now or datetime.now()
+    today = current.strftime("%Y-%m-%d")
+    from memory.routine_db import get_context_state
+    state_data = get_context_state("alexandros_away_from_home")
+    if not state_data:
+        return False
+    expires_at = state_data.get("expires_at")
+    if expires_at and expires_at < today:
+        return False
+    return str(state_data.get("value")).lower() == "true"
+
+def resolve_alexandros_away_reason(now: datetime | None = None) -> str | None:
+    current = now or datetime.now()
+    today = current.strftime("%Y-%m-%d")
+    from memory.routine_db import get_context_state
+    state_data = get_context_state("alexandros_away_reason")
+    if not state_data:
+        return None
+    expires_at = state_data.get("expires_at")
+    if expires_at and expires_at < today:
+        return None
+    return str(state_data.get("value"))
 
 def resolve_sofia_work_mode(now: datetime | None = None) -> str | None:
     current = now or datetime.now()

@@ -157,7 +157,7 @@ def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
         ai_text,
         handling_agent,
         channel,
-        deterministic_seed_facts=seed_facts,
+        seed_facts,
     )
 
 

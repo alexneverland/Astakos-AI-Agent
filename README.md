@@ -484,6 +484,8 @@ Shutdown behavior:
 - [x] Deterministic Memory Priority Guard — temporary family-state memories (camp, absence, return-home windows) now win over generic day-event capture, and near-identical confirmed saves are skipped before they can double-write in the same turn.
 - [x] Routine Context Flags — routines now read resolved context_state such as `alexandros_at_camp`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, and `quiet_hours` instead of relying only on blunt mute/pause windows.
 - [x] Context-State Reconciliation — facts like “Αλέξανδρος γύρισε σπίτι” now flip context state (`alexandros_at_camp=false`) through the reconciler instead of only unmuting routines by name.
+- [x] Smart Weekend Filter — automatically skip applying `shift_mode` conditions to weekend-only routines unless explicitly requested, preventing work-shift rules from breaking weekend habits.
+- [x] Debug Dashboard Condition UX — evaluate and display actual state (`actual_value`) for each condition individually, and prominently show a PAUSED badge instead of ACTIVE for routines paused until a specific date.
 
 - [x] Web UI Agent Name in History — `agent_name` is stored in SQLite alongside each message and returned by `/history`; the Web UI now shows the correct agent label (e.g. `Web / Dev_Agent`) for both live and historical messages.
 - [x] File Generator Tools — `generate_excel` (styled headers, zebra rows, freeze pane), `generate_word_doc` (Markdown-style headings and bullets), `generate_pdf` (reportlab with custom styles), and `generate_csv` (UTF-8 BOM for Excel compatibility). All route via Capability Registry to Dev_Agent. Risk: SAFE.

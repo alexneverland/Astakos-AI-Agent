@@ -51,9 +51,8 @@ def test_control_routine_notifications_mute_is_idempotent_per_match(monkeypatch)
     )
 
     assert called == []
-    assert "δεν έκανα τίποτα" in result
-    assert "[Monday]" in result
-    assert "[Thursday]" in result
+    assert "ήδη στην επιθυμητή κατάσταση" in result
+    assert "ποδόσφαιρο Αλέξανδρου" in result
 
 
 def test_find_routines_by_name_returns_all_exact_duplicates(tmp_path):

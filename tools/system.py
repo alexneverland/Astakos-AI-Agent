@@ -889,7 +889,7 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
 
 
 @tool
-def control_routine_condition(event_name: str, action: str, condition_type: str = "", payload_json: str = "", condition_mode: str = "", source_text: str = "") -> str:
+def control_routine_condition(event_name: str, action: str, condition_type: str = "", payload_json: str = "", condition_mode: str = "", source_text: str = "", day_of_week: str = "", time_str: str = "") -> str:
     """
     [OVERRIDE]: Προσθέτει ή Αφαιρεί "συνθήκες" (conditions) από μια ρουτίνα.
     Χρησιμοποίησέ το ΟΤΑΝ ο χρήστης ζητάει μια ρουτίνα να εξαρτάται από έναν εξωτερικό παράγοντα
@@ -902,6 +902,9 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
     - payload_json: JSON string με τις παραμέτρους (π.χ. '{"flag": "current_shift", "equals": "afternoon"}').
     - condition_mode: "allow_when_true" (επιτρέπεται ΜΟΝΟ αν ισχύει) ή "suppress_when_true" (ΑΚΥΡΩΝΕΤΑΙ όταν ισχύει).
     - source_text: Το ακριβές αρχικό μήνυμα/πρόταση του χρήστη (ΠΑΝΤΑ ΥΠΟΧΡΕΩΤΙΚΟ).
+    - day_of_week: (Προαιρετικό) Αν ο χρήστης προσδιόρισε μέρα (π.χ. "Sunday", "Monday").
+    - time_str: (Προαιρετικό) Αν ο χρήστης προσδιόρισε ώρα (π.χ. "13:00").
+
 
     ΠΑΡΑΔΕΙΓΜΑΤΑ:
     "Όταν έχω απόγευμα το πάρκο το πάει η Σοφία" (δηλαδή το πάρκο για μένα ΔΕΝ ισχύει το απόγευμα)
@@ -912,14 +915,14 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
     """
     import json
     from memory.routine_db import (
-        find_routines_for_schedule_control, set_routine_condition
+        find_routines_for_schedule_control, append_routine_condition, set_routine_condition
     )
 
     VALID_ACTIONS = {"add", "remove"}
     if action not in VALID_ACTIONS:
         return f"❌ Μη έγκυρο action: '{action}'. Επιτρεπτά: add, remove."
 
-    routines = find_routines_for_schedule_control(event_name)
+    routines = find_routines_for_schedule_control(event_name, day_of_week=day_of_week if day_of_week else None, time_str=time_str if time_str else None)
     if not routines:
         return f"❌ Δεν βρέθηκε καμία ρουτίνα που να ταιριάζει στο '{event_name}'."
 
@@ -937,15 +940,35 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
         for routine in routines:
             r_id = routine["id"]
             label = routine["event"]
-            set_routine_condition(r_id, condition_type=condition_type, condition_payload=payload_json, condition_mode=condition_mode, source_memory_ref="llm_agent")
-            results.append(f"⚙️ Η ρουτίνα '{label}' απέκτησε condition: {condition_type} ({condition_mode}).")
-            changed += 1
+            r_day = str(routine["day"]).lower()
+            
+            # Έξυπνος έλεγχος: Αν η συνθήκη αφορά βάρδια (shift) και η ρουτίνα είναι ΑΠΟΚΛΕΙΣΤΙΚΑ Σαββατοκύριακο, 
+            # την αγνοούμε αυτόματα, καθώς οι βάρδιες του χρήστη είναι Δευτέρα-Παρασκευή.
+            # Αν ο χρήστης έδωσε ρητά day_of_week, τότε το επιτρέπουμε.
+            if condition_type == "shift_mode" and r_day in ("saturday", "sunday") and not day_of_week:
+                results.append(f"⏩ Η ρουτίνα '{label}' αγνοήθηκε αυτόματα γιατί τρέχει '{routine['day']}' (ΣΚ) και δεν έχεις βάρδιες.")
+                continue
+
+            added = append_routine_condition(r_id, condition_type=condition_type, condition_payload=payload_json, condition_mode=condition_mode, source_memory_ref="llm_agent")
+            if added:
+                results.append(f"⚙️ Η ρουτίνα '{label}' απέκτησε condition: {condition_type} ({condition_mode}).")
+                changed += 1
+            else:
+                results.append(f"⚠️ Η ρουτίνα '{label}' είχε ήδη αυτό το condition.")
 
     elif action == "remove":
         for routine in routines:
             r_id = routine["id"]
             label = routine["event"]
+            # Clear legacy conditions
             set_routine_condition(r_id, condition_type="", condition_payload="", condition_mode="", source_memory_ref="")
+            # Clear conditions_json
+            import sqlite3
+            from memory.routine_db import get_connection, db_write_lock
+            with db_write_lock:
+                conn = get_connection(write=True)
+                conn.execute("UPDATE routines SET conditions_json = NULL WHERE id = ?", (r_id,))
+                conn.commit()
             results.append(f"🧹 Η ρουτίνα '{label}' καθαρίστηκε από conditions.")
             changed += 1
 

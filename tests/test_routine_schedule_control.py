@@ -78,7 +78,7 @@ def test_pause_is_idempotent_when_already_paused_later(monkeypatch):
     )
 
     assert called == []
-    assert "δεν έκανα τίποτα" in result
+    assert "ήδη στην επιθυμητή κατάσταση" in result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -268,5 +268,5 @@ def test_no_matching_routine_returns_error(monkeypatch):
         until_date="2026-09-01",
     )
 
-    assert "❌" in result
-    assert "Δεν βρήκα" in result
+    assert "ℹ️" in result
+    assert "Δεν βρέθηκε" in result
