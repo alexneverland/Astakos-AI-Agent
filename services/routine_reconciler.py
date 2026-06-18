@@ -497,45 +497,49 @@ def _rule_shift_logic(normalized: str, now: datetime) -> list[dict]:
             "exclude_tokens": [],
         }
         directives.append(d_state)
+    # 2. Dynamic Generic Condition for specific activities mentioned (e.g. "τρέξιμο", "γυμναστήριο")
+    # Instead of hardcoding morning/afternoon targets, we extract the action.
+    stop_words = {
+        "το", "η", "ο", "τα", "τις", "τους", "εχω", "ειμαι", "οταν", "μονο", "δεν", 
+        "ισχυει", "απογευμα", "πρωι", "βαρδια", "αυτη", "την", "εβδομαδα", "και", 
+        "αλλα", "οτι", "για", "να", "ξερεις", "μου", "ειναι", "θα", "παω", "οτι", "πως", "σου"
+    }
+    action_tokens = [w for w in normalized.split() if w not in stop_words and len(w) > 2]
 
-    # 2. Permanent Condition for Morning Shift routines (e.g. sleep/wakeup)
+    # Old logic for "morning/wakeup" routines if they are explicitly mentioned
     if _contains_any(normalized, _MORNING_TOKENS) or "ξυπνημα" in normalized or "πρωινο" in normalized:
-        d_cond_morning = _build_directive(
-            "condition_add",
-            subject_tokens=[],
-            include_tokens=["ξυπνημα", "πρωινο", "υπνος"] + _SLEEP_TOKENS,
-            exclude_tokens=_ALEXANDROS_TOKENS + _SOFIA_TOKENS,
-            reason="shift_morning_rule",
-        )
-        if d_cond_morning:
-            d_cond_morning["condition_type"] = "shift_mode"
-            d_cond_morning["condition_payload"] = {"flag": "current_shift", "equals": "afternoon"}
-            # Αν λέει "δεν ισχύει", τότε suppress_when_true όταν είναι afternoon.
-            # Αν λέει "ισχύει", τότε allow_when_true. Κάνουμε fallback σε suppress.
-            if "δεν " in normalized or "οχι" in normalized:
-                d_cond_morning["condition_mode"] = "suppress_when_true"
-            else:
-                d_cond_morning["condition_mode"] = "allow_when_true"
-            directives.append(d_cond_morning)
-
-    # 3. Permanent Condition for Afternoon Shift routines (e.g. departure)
+        action_tokens.extend(["ξυπνημα", "πρωινο", "υπνος"] + _SLEEP_TOKENS)
+        
+    # Old logic for "departure" routines if they are explicitly mentioned
     if "αναχωρηση" in normalized or "δουλει" in normalized or _contains_any(normalized, _WORK_DEPARTURE_TOKENS):
-        d_cond_afternoon = _build_directive(
+        action_tokens.extend(["αναχωρηση", "δουλει", "φευγω"] + _WORK_DEPARTURE_TOKENS)
+        
+    action_tokens = list(set(action_tokens))
+
+    # If they said "ισχύει/δεν ισχύει" and mentioned a shift, and we have an action token
+    if "ισχυει" in normalized and has_shift and action_tokens:
+        d_cond_generic = _build_directive(
             "condition_add",
             subject_tokens=[],
-            include_tokens=["αναχωρηση", "δουλει", "φευγω"] + _WORK_DEPARTURE_TOKENS,
+            include_tokens=action_tokens,
             exclude_tokens=_ALEXANDROS_TOKENS + _SOFIA_TOKENS,
-            reason="shift_afternoon_rule",
+            reason="shift_generic_rule",
         )
-        if d_cond_afternoon:
-            d_cond_afternoon["condition_type"] = "shift_mode"
-            # Αν λέει "ισχύει μόνο όταν είναι απόγευμα" -> allow_when_true (equals afternoon)
-            d_cond_afternoon["condition_payload"] = {"flag": "current_shift", "equals": "afternoon"}
-            if "μονο " in normalized or "ισχυει" in normalized and not ("δεν ισχυει" in normalized):
-                d_cond_afternoon["condition_mode"] = "allow_when_true"
+        if d_cond_generic:
+            d_cond_generic["condition_type"] = "shift_mode"
+            # If PM shift -> target afternoon. Otherwise -> morning
+            if _contains_any(normalized, _SHIFT_PM_TOKENS):
+                d_cond_generic["condition_payload"] = {"flag": "current_shift", "equals": "afternoon"}
             else:
-                d_cond_afternoon["condition_mode"] = "allow_when_true" # Default safe for departure
-            directives.append(d_cond_afternoon)
+                d_cond_generic["condition_payload"] = {"flag": "current_shift", "equals": "morning"}
+                
+            # If it says "δεν ισχύει", suppress. Otherwise allow.
+            if "δεν " in normalized or "οχι" in normalized:
+                d_cond_generic["condition_mode"] = "suppress_when_true"
+            else:
+                d_cond_generic["condition_mode"] = "allow_when_true"
+                
+            directives.append(d_cond_generic)
 
     return directives
 
@@ -744,6 +748,10 @@ def score_candidate_directive(
         _append_signal(signals, "scope:not_required")
 
     # ── Rule-level bonuses and penalties ─────────────────────────────────────
+    if matched_rule_name == "shift_logic":
+        # Shift logic relies heavily on activities ("δουλει", "ξυπνημα", generic actions), so we boost them.
+        score += 0.50  # base shift logic boost so that even 1 action word gets 0.50 + 0.50 - 0.35 + 0.20 = 0.85 (Auto Apply)
+
     if matched_rule_name in _SPECIAL_RULES:
         score += _W_SPECIAL
         _append_signal(signals, f"special_rule:{matched_rule_name}")

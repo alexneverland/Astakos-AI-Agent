@@ -534,3 +534,21 @@ def test_apply_condition_add_skips_identical_existing_condition(tmp_path):
 
     assert stats["conditions_added"] == 0
     assert stats["skipped"] == 1
+
+
+def test_dynamic_shift_routine():
+    from services.routine_reconciler import reconcile_fact_to_routines
+
+    fact = "[USER_FACT]: Το τρέξιμο δεν ισχύει όταν έχω απόγευμα."
+    now = datetime(2026, 6, 18, 10, 0)
+    res = reconcile_fact_to_routines(fact, category="user", reason="agent_inferred", now=now)
+    
+    # It should have extracted "τρεξιμο" and matched it
+    assert res["candidates"] > 0
+    
+    # Look for the shift_generic_rule candidate
+    gen_cond = next((c for c in res["scored_directives"] if c.get("reason") == "shift_generic_rule"), None)
+    assert gen_cond is not None
+    assert "τρεξιμο" in gen_cond["include_tokens"]
+    assert gen_cond["condition_mode"] == "suppress_when_true"
+    assert gen_cond["condition_payload"]["equals"] == "afternoon"
