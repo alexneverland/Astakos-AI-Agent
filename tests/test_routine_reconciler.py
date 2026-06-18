@@ -22,7 +22,7 @@ def _make_routines_db(path, rows):
     conn = sqlite3.connect(path)
     conn.execute(
         """
-        CREATE TABLE routines ( priority INTEGER DEFAULT 0, conflict_group TEXT, condition_type TEXT, condition_payload TEXT, condition_mode TEXT, source_memory_ref TEXT,
+        CREATE TABLE routines ( priority INTEGER DEFAULT 0, conflict_group TEXT, condition_type TEXT, condition_payload TEXT, condition_mode TEXT, conditions_json TEXT, source_memory_ref TEXT,
             id INTEGER PRIMARY KEY,
             day_of_week TEXT,
             time_str TEXT,
@@ -60,12 +60,12 @@ def _make_routines_db(path, rows):
                 id, day_of_week, time_str, event_name, event_type, confidence, state,
                 muted_until, muted_from, sentimental_last_sent, sentimental_silenced,
                 active_from, active_until, paused_until, resume_rule, pause_reason,
-                priority, condition_type, condition_payload, condition_mode, source_memory_ref
+                condition_type, condition_payload, condition_mode, conditions_json, priority, source_memory_ref
             ) VALUES (
                 :id, :day_of_week, :time_str, :event_name, :event_type, :confidence, :state,
                 :muted_until, :muted_from, :sentimental_last_sent, :sentimental_silenced,
                 :active_from, :active_until, :paused_until, :resume_rule, :pause_reason,
-                :priority, :condition_type, :condition_payload, :condition_mode, :source_memory_ref
+                :condition_type, :condition_payload, :condition_mode, null, :priority, :source_memory_ref
             )
             """,
             row,
@@ -126,7 +126,8 @@ def test_infer_camp_absence_mute_directive():
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
 
-    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_at_camp" and d["until_date"] == "2026-06-25" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_away_from_home" and d["value"] == "true" and d["until_date"] == "2026-06-25" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_away_reason" and d["value"] == "camp" and d["until_date"] == "2026-06-25" for d in directives)
     assert any(d["kind"] == "condition_add" for d in directives)
 
 def test_infer_return_home_unmute_directive():
@@ -138,7 +139,8 @@ def test_infer_return_home_unmute_directive():
         now=datetime(2026, 6, 25, 18, 0, 0),
     )
 
-    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_at_camp" and d["value"] == "false" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_away_from_home" and d["value"] == "false" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_away_reason" and d["value"] == "" for d in directives)
 
 
 def test_infer_school_break_requires_child_subject():
@@ -311,9 +313,9 @@ def test_shift_week_candidate_scores_debug_only_until_sunday():
         c["kind"] == "context_state_set"
         and c["reason"] == "shift_afternoon_week"
         and c["until_date"] == "2026-06-21"
-        and c["rule_name"] == "shift_week"
+        and c["rule_name"] == "shift_logic"
         for c in candidates
-    ), "Expected shift_week candidate with shift_afternoon_week reason and Sunday until_date"
+    ), "Expected shift_logic candidate with shift_afternoon_week reason and Sunday until_date"
     # Score it and verify it stays debug_only (not auto_apply)
     normalized_fact = _normalize(fact)
     scored = [
@@ -326,12 +328,12 @@ def test_shift_week_candidate_scores_debug_only_until_sunday():
     ]
 
     assert any(
-        d["rule_name"] == "shift_week"
+        d["rule_name"] == "shift_logic"
         and d["decision"] == "debug_only"
         and d["score"] >= _DEBUG_ONLY_THRESHOLD
         and d["score"] < _AUTO_APPLY_THRESHOLD
         for d in scored
-    ), "shift_week should be debug_only: score in [0.55, 0.80)"
+    ), "shift_logic should be debug_only: score in [0.55, 0.80)"
 
     # The backward-compat wrapper must NOT include shift_week in its output
     directives = infer_routine_reconciliation_directives(
@@ -473,13 +475,21 @@ def test_apply_condition_add_hits_correct_routines_without_error(tmp_path):
     assert stats["conditions_added"] == 1
 
     conn = sqlite3.connect(db_path)
-    rows = conn.execute("SELECT id, condition_type, condition_mode, source_memory_ref FROM routines ORDER BY id").fetchall()
+    rows = conn.execute("SELECT id, conditions_json FROM routines ORDER BY id").fetchall()
     conn.close()
 
-    assert rows == [
-        (1, "context_flag", "allow_when_true", "reconciler"),
-        (2, None, None, None),
-    ]
+    import json
+    row1_id, row1_json = rows[0]
+    assert row1_id == 1
+    assert row1_json is not None
+    conds = json.loads(row1_json)
+    assert len(conds) == 1
+    assert conds[0]["condition_type"] == "context_flag"
+    assert conds[0]["condition_mode"] == "allow_when_true"
+    
+    row2_id, row2_json = rows[1]
+    assert row2_id == 2
+    assert row2_json is None
 
 def test_apply_condition_add_skips_identical_existing_condition(tmp_path):
     import memory.routine_db as rdb
