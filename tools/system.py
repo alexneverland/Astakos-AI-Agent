@@ -752,60 +752,6 @@ def get_routines(day_of_week: str) -> str:
     except Exception as e:
         return f"❌ Σφάλμα ανάκτησης ρουτινών: {e}"
 
-def _looks_like_manual_routine_command(text: str) -> bool:
-    if not text:
-        return False
-
-    normalized = text.strip().lower()
-
-    manual_markers = [
-        "πάγωσε", "παγωσε",
-        "σβήσε", "σβησε",
-        "βάλε", "βαλε",
-        "άλλαξε", "αλλαξε",
-        "μετάφερε", "μεταφερε",
-        "κάνε mute", "κανε mute",
-        "mute", "pause", "resume",
-    ]
-
-    routine_markers = [
-        "ποδόσφαιρο", "ποδοσφαιρο",
-        "λαϊκή", "λαικη",
-        "μήνυμα", "μηνυμα",
-        "ύπνος", "υπνος",
-        "πάρκο", "παρκο",
-        "δουλειά", "δουλεια",
-        "ρουτίνα", "ρουτινα",
-    ]
-
-    return any(m in normalized for m in manual_markers) and any(r in normalized for r in routine_markers)
-
-def _looks_like_context_fact(text: str) -> bool:
-    if not text:
-        return False
-
-    normalized = text.strip().lower()
-    fact_markers = [
-        "είναι", "ειναι", "γύρισε", "γυρισε", "δεν έχει", "δεν εχει",
-        "ξανά", "ξανα", "μέχρι", "μεχρι", "καλοκαίρι", "καλοκαιρι",
-        "σπίτι", "σπιτι", "δουλεύει", "δουλευει", "απόγευμα", "απογευμα",
-        "γυρνάει", "γυρναει",
-    ]
-
-    command_markers = [
-        "πάγωσε", "παγωσε", "σβήσε", "σβησε", "βάλε", "βαλε",
-        "άλλαξε", "αλλαξε", "μετάφερε", "μεταφερε", "κάνε mute", "κανε mute",
-        "κλείσε", "κλεισε", "άνοιξε", "ανοιξε", "resume", "pause", "mute",
-    ]
-
-    if any(cmd in normalized for cmd in command_markers):
-        return False
-
-    word_count = len(normalized.split())
-    if word_count >= 6 and any(marker in normalized for marker in fact_markers):
-        return True
-
-    return False
 
 @tool
 def control_routine_notifications(event_name: str, action: str, until_date: str = "", source_text: str = "") -> str:
@@ -841,22 +787,14 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
     - until_date: ΜΟΝΟ για action="mute". Μορφή YYYY-MM-DD. Υπολόγισέ την ΕΣΥ από τα
       συμφραζόμενα (σήμερα + Χ μέρες, "αυτή την εβδομάδα" κλπ) — ΜΗΝ ζητήσεις από τον
       χρήστη να την πει σε ISO format ρητά.
+    - source_text: Το ακριβές αρχικό μήνυμα/πρόταση του χρήστη που οδήγησε σε
+      αυτή την κλήση (ΠΑΝΤΑ ΥΠΟΧΡΕΩΤΙΚΟ).
     """
     from datetime import datetime
     from memory.routine_db import (
         find_routines_for_schedule_control, set_routine_muted_until, clear_routine_muted_until,
         set_sentimental_silenced, get_sentimental_info, get_routine_muted_until,
     )
-
-    decision_text = source_text or event_name
-    if _looks_like_manual_routine_command(decision_text):
-        pass
-    elif _looks_like_context_fact(decision_text):
-        return (
-            "ℹ️ Αυτό μοιάζει με context/fact update και όχι με ρητή χειροκίνητη "
-            "εντολή σίγασης ειδοποιήσεων. Δεν έγινε notification change."
-        )
-
     VALID_ACTIONS = {"mute", "unmute", "silence_emotional", "allow_emotional"}
     if action not in VALID_ACTIONS:
         return f"❌ Μη έγκυρο action: '{action}'. Επιτρεπτά: {', '.join(sorted(VALID_ACTIONS))}."
@@ -948,6 +886,73 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
         return f"❌ Σφάλμα ενημέρωσης ρουτίνας: {e}"
 
     return "❌ Άγνωστο σφάλμα."
+
+
+@tool
+def control_routine_condition(event_name: str, action: str, condition_type: str = "", payload_json: str = "", condition_mode: str = "", source_text: str = "") -> str:
+    """
+    [OVERRIDE]: Προσθέτει ή Αφαιρεί "συνθήκες" (conditions) από μια ρουτίνα.
+    Χρησιμοποίησέ το ΟΤΑΝ ο χρήστης ζητάει μια ρουτίνα να εξαρτάται από έναν εξωτερικό παράγοντα
+    (π.χ. βάρδια, καιρός, τοποθεσία) ή όταν λέει ότι κάτι "δεν ισχύει όταν..."
+
+    ΟΡΙΣΜΑΤΑ:
+    - event_name: Το όνομα της ρουτίνας-στόχου όπως το είπε ο χρήστης — γίνεται fuzzy match.
+    - action: "add" (για να βάλεις συνθήκη) ή "remove" (για να καθαρίσεις τη συνθήκη).
+    - condition_type: π.χ. "shift_mode" (εξάρτηση από βάρδια), "context_flag" (εξάρτηση από γενικό flag όπως school_open).
+    - payload_json: JSON string με τις παραμέτρους (π.χ. '{"flag": "current_shift", "equals": "afternoon"}').
+    - condition_mode: "allow_when_true" (επιτρέπεται ΜΟΝΟ αν ισχύει) ή "suppress_when_true" (ΑΚΥΡΩΝΕΤΑΙ όταν ισχύει).
+    - source_text: Το ακριβές αρχικό μήνυμα/πρόταση του χρήστη (ΠΑΝΤΑ ΥΠΟΧΡΕΩΤΙΚΟ).
+
+    ΠΑΡΑΔΕΙΓΜΑΤΑ:
+    "Όταν έχω απόγευμα το πάρκο το πάει η Σοφία" (δηλαδή το πάρκο για μένα ΔΕΝ ισχύει το απόγευμα)
+    -> action="add", condition_type="shift_mode", payload_json='{"flag": "current_shift", "equals": "afternoon"}', condition_mode="suppress_when_true"
+
+    "Η προπόνηση ισχύει μόνο όταν έχω πρωί"
+    -> action="add", condition_type="shift_mode", payload_json='{"flag": "current_shift", "equals": "morning"}', condition_mode="allow_when_true"
+    """
+    import json
+    from memory.routine_db import (
+        find_routines_for_schedule_control, set_routine_condition
+    )
+
+    VALID_ACTIONS = {"add", "remove"}
+    if action not in VALID_ACTIONS:
+        return f"❌ Μη έγκυρο action: '{action}'. Επιτρεπτά: add, remove."
+
+    routines = find_routines_for_schedule_control(event_name)
+    if not routines:
+        return f"❌ Δεν βρέθηκε καμία ρουτίνα που να ταιριάζει στο '{event_name}'."
+
+    results = []
+    changed = 0
+
+    if action == "add":
+        if not condition_type or not payload_json or not condition_mode:
+            return "❌ Για action='add' απαιτούνται condition_type, payload_json, condition_mode."
+        try:
+            json.loads(payload_json) # Validate JSON
+        except json.JSONDecodeError:
+            return "❌ Το payload_json δεν είναι έγκυρο JSON."
+
+        for routine in routines:
+            r_id = routine["id"]
+            label = routine["event"]
+            set_routine_condition(r_id, condition_type=condition_type, condition_payload=payload_json, condition_mode=condition_mode, source_memory_ref="llm_agent")
+            results.append(f"⚙️ Η ρουτίνα '{label}' απέκτησε condition: {condition_type} ({condition_mode}).")
+            changed += 1
+
+    elif action == "remove":
+        for routine in routines:
+            r_id = routine["id"]
+            label = routine["event"]
+            set_routine_condition(r_id, condition_type="", condition_payload="", condition_mode="", source_memory_ref="")
+            results.append(f"🧹 Η ρουτίνα '{label}' καθαρίστηκε από conditions.")
+            changed += 1
+
+    if changed == 0:
+        return f"ℹ️ Δεν έγινε καμία αλλαγή ρουτίνας για: {event_name}"
+    return "\n".join(results)
+
 @tool
 def control_routine_schedule(event_name: str, action: str, until_date: str = "",
                               active_from: str = "", active_until: str = "",
@@ -986,6 +991,8 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
       δοθεί μόνο το ένα από τα δύο).
     - resume_rule: προαιρετικό, μαζί με action="pause" — πώς/πότε θα ξαναρχίσει.
     - reason: προαιρετικό, ανθρώπινη περιγραφή του λόγου (π.χ. "summer_break").
+    - source_text: Το ακριβές αρχικό μήνυμα/πρόταση του χρήστη που οδήγησε σε
+      αυτή την κλήση (ΠΑΝΤΑ ΥΠΟΧΡΕΩΤΙΚΟ).
 
     ΠΑΡΑΔΕΙΓΜΑ:
     "Το ποδόσφαιρο του Αλέξανδρου σταματά μέχρι το Σεπτέμβριο για το καλοκαίρι"
@@ -1011,14 +1018,6 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
             return False
 
     decision_text = source_text or event_name
-    if _looks_like_manual_routine_command(decision_text):
-        pass
-    elif _looks_like_context_fact(decision_text):
-        return (
-            "ℹ️ Αυτό μοιάζει με context/fact update και όχι με ρητή χειροκίνητη "
-            "εντολή αλλαγής ρουτίνας. Δεν έγινε schedule change."
-        )
-
     changed = 0
     already_ok = 0
 
@@ -3208,7 +3207,7 @@ all_tools = [
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
-    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, browse_url,
+    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, browse_url,
     duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, tool_stats, system_doctor, memory_review,
     repo_mapper,
     scan_receipt,

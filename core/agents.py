@@ -34,7 +34,7 @@ from tools.system import (
     set_local_reminder, set_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool, register_tool,
-    mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
+    mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
     save_goal_tool, update_goal_status_tool, tool_stats, system_doctor, memory_review,
 )
 from tools.web import (
@@ -223,7 +223,7 @@ def dev_agent_node(state):
         delete_from_memory, search_memory, save_to_memory,
         execute_local_pipeline, control_spotify, control_vacuum, 
         get_navigation_info, recipe_expert, log_meal, 
-        generate_image_tool, search_flights, run_terminal_command, learn_routine, get_routines, control_routine_notifications, control_routine_schedule,
+        generate_image_tool, search_flights, run_terminal_command, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition,
         save_goal_tool, update_goal_status_tool,
         duckduckgo_search,
         # Project tools — code navigation & editing
@@ -312,7 +312,7 @@ def chat_agent_node(state: AgentState):
     chat_tools = [
         get_current_location, control_spotify,
         search_memory, save_to_memory, delete_from_memory, retrieve_photo, duckduckgo_search,
-        recipe_expert, log_meal, relay_local_payload, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, search_supermarket_prices,
+        recipe_expert, log_meal, relay_local_payload, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, search_supermarket_prices,
         read_local_file, generate_image_tool, get_fit_summary,
         *([archive_file] if not _is_farewell else []),
     ]
@@ -342,7 +342,7 @@ def home_agent_node(state):
         manage_list, set_reminder, set_local_reminder, delete_from_memory, search_memory,
         control_spotify, control_vacuum,
         search_goldmall_offers, get_navigation_info,
-        google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, search_supermarket_prices,
+        google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, search_supermarket_prices,
         get_fit_summary
     ]
 
@@ -694,6 +694,6 @@ all_tools = [
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info,
     control_spotify, search_goldmall_offers, execute_local_pipeline, get_current_location,
-    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, browse_url,
+    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, browse_url,
     duckduckgo_search, search_supermarket_prices, tool_stats, system_doctor
 ]
