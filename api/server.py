@@ -992,11 +992,13 @@ async def debug_runtime(_=Depends(require_token)):
 
     try:
         from services.routine_context import build_runtime_routine_context
-        from services.routine_conditions import evaluate_routine_condition
+        from services.routine_conditions import evaluate_routine_conditions
+        from memory.routine_db import get_routine_conditions
         ctx = build_runtime_routine_context(datetime.now())
     except ImportError:
         ctx = {}
-        evaluate_routine_condition = lambda rid, c: True
+        evaluate_routine_conditions = lambda c_list, cx: {"allowed": True, "results": []}
+        get_routine_conditions = lambda rid: []
 
     try:
         conn   = _sqlite3.connect(db_path, check_same_thread=False)
@@ -1027,15 +1029,24 @@ async def debug_runtime(_=Depends(require_token)):
                     pass
             
             cond_res = None
-            if c_type:
+            cond_matched = None
+            cond_reason = None
+            cond_actual_value = None
+            conditions_list = get_routine_conditions(r_id)
+            eval_result = evaluate_routine_conditions(conditions_list, ctx)
+            cond_res = eval_result.get("allowed", True)
+            cond_results = eval_result.get("results", [])
+
+            # Extract an actual value for UI if the first condition has a 'flag' (context_flag, shift_mode)
+            if conditions_list and conditions_list[0].get("condition_type") in ("context_flag", "shift_mode"):
+                import json
                 try:
-                    c_dict = {
-                        "condition_type": c_type,
-                        "condition_payload": c_payload,
-                        "condition_mode": c_mode
-                    }
-                    eval_result = evaluate_routine_condition(c_dict, ctx)
-                    cond_res = eval_result.get("allowed", True)
+                    payload = conditions_list[0].get("condition_payload")
+                    if isinstance(payload, str):
+                        payload = json.loads(payload)
+                    flag_name = payload.get("flag")
+                    if flag_name:
+                        cond_actual_value = ctx.get(flag_name)
                 except Exception:
                     pass
 
@@ -1050,10 +1061,13 @@ async def debug_runtime(_=Depends(require_token)):
                 "last_notified":     last_ts,
                 "cooldown_remaining_h": cooldown_remaining,
                 "state":             state,
+                "conditions":        conditions_list,
                 "condition_type":    c_type,
                 "condition_payload": c_payload,
                 "condition_mode":    c_mode,
                 "condition_eval":    cond_res,
+                "condition_results": cond_results,
+                "condition_actual_value": cond_actual_value,
                 "priority":          priority,
                 "conflict_group":    conflict_group,
                 "source_memory_ref": memory_ref,
@@ -1089,15 +1103,24 @@ async def debug_runtime(_=Depends(require_token)):
             r_id, day, tstr, ev, state, conf, c_type, c_payload, c_mode, priority, memory_ref, conflict_group = row
             
             cond_res = None
-            if c_type:
+            cond_matched = None
+            cond_reason = None
+            cond_actual_value = None
+            conditions_list = get_routine_conditions(r_id)
+            eval_result = evaluate_routine_conditions(conditions_list, ctx)
+            cond_res = eval_result.get("allowed", True)
+            cond_results = eval_result.get("results", [])
+
+            # Extract an actual value for UI if the first condition has a 'flag' (context_flag, shift_mode)
+            if conditions_list and conditions_list[0].get("condition_type") in ("context_flag", "shift_mode"):
+                import json
                 try:
-                    c_dict = {
-                        "condition_type": c_type,
-                        "condition_payload": c_payload,
-                        "condition_mode": c_mode
-                    }
-                    eval_result = evaluate_routine_condition(c_dict, ctx)
-                    cond_res = eval_result.get("allowed", True)
+                    payload = conditions_list[0].get("condition_payload")
+                    if isinstance(payload, str):
+                        payload = json.loads(payload)
+                    flag_name = payload.get("flag")
+                    if flag_name:
+                        cond_actual_value = ctx.get(flag_name)
                 except Exception:
                     pass
 
@@ -1105,10 +1128,13 @@ async def debug_runtime(_=Depends(require_token)):
                 "id": r_id, "day": day, "time": tstr,
                 "event": ev, "state": state,
                 "confidence": round(conf or 0, 2),
+                "conditions":        conditions_list,
                 "condition_type":    c_type,
                 "condition_payload": c_payload,
                 "condition_mode":    c_mode,
                 "condition_eval":    cond_res,
+                "condition_results": cond_results,
+                "condition_actual_value": cond_actual_value,
                 "priority":          priority,
                 "conflict_group":    conflict_group,
                 "source_memory_ref": memory_ref,
