@@ -71,7 +71,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Multi-Agent Orchestration | LangGraph Supervisor routes to Chat, Home, Web, Tech, Git, Mail, and Dev agents. |
 | Hybrid Memory | ChromaDB vector store + shared SQLite history + SQLite profile/session state for semantic, temporal, and structured memory. |
 | Routine State Machine | `LEARNED → ACTIVE → TRIGGER_PENDING → CONFIRMED / IGNORED / DISMISSED → DECAYED → ARCHIVED`. |
-| Context-Aware Proactive Routines | Routine context flags (`alexandros_at_camp`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, `quiet_hours`) are resolved from context_state before trigger time, and routines can be condition-gated instead of hard-paused. |
+| Context-Aware Proactive Routines | Routine context flags (`alexandros_away_from_home`, `alexandros_away_reason`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, `quiet_hours`) are resolved from context_state before trigger time, and routines can be condition-gated instead of hard-paused. |
 | Nightly Analytics Engine | LLM batch-analyzes the last 30 days of shared SQLite conversation history to detect recurring patterns automatically. |
 | LLM-Crafted Proactive Messages | Reminder text is generated naturally by the LLM instead of static templates, with recent Telegram/Web history and timestamps injected so messages feel contextual instead of random. |
 | Central Scheduler | `AstakosScheduler` runs a single background scheduler with watchdogs, rate limits, and quiet hours. |
@@ -482,8 +482,8 @@ Shutdown behavior:
 - [x] Memory Context Debugging — `/debug` shows recent, SQLite, and Chroma context counts/previews for the last prompt build.
 - [x] Category-Safe Memory Overwrite — same-category Chroma matches use helper-tested correction, staleness, richness, and length tie-break rules before replacing old facts.
 - [x] Deterministic Memory Priority Guard — temporary family-state memories (camp, absence, return-home windows) now win over generic day-event capture, and near-identical confirmed saves are skipped before they can double-write in the same turn.
-- [x] Routine Context Flags — routines now read resolved context_state such as `alexandros_at_camp`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, and `quiet_hours` instead of relying only on blunt mute/pause windows.
-- [x] Context-State Reconciliation — facts like “Αλέξανδρος γύρισε σπίτι” now flip context state (`alexandros_at_camp=false`) through the reconciler instead of only unmuting routines by name.
+- [x] Routine Context Flags — routines now read resolved context_state such as `alexandros_away_from_home`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, and `quiet_hours` instead of relying only on blunt mute/pause windows.
+- [x] Context-State Reconciliation — facts like “Αλέξανδρος γύρισε σπίτι” now flip context state (`alexandros_away_from_home=false`) through the reconciler instead of only unmuting routines by name.
 - [x] Smart Weekend Filter — automatically skip applying `shift_mode` conditions to weekend-only routines unless explicitly requested, preventing work-shift rules from breaking weekend habits.
 - [x] Debug Dashboard Condition UX — evaluate and display actual state (`actual_value`) for each condition individually, and prominently show a PAUSED badge instead of ACTIVE for routines paused until a specific date.
 

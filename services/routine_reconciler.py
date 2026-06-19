@@ -260,7 +260,7 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
 
 
 def _rule_return_home(normalized: str) -> list[dict]:
-    """Αλέξανδρος γύρισε → context_state_set (alexandros_at_camp = false)."""
+    """Αλέξανδρος γύρισε → context_state_set (alexandros_away_from_home = false)."""
     if not (
         _contains_any(normalized, _ALEXANDROS_TOKENS)
         and _contains_any(normalized, _RETURN_TOKENS)

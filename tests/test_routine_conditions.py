@@ -5,10 +5,10 @@ from services.routine_conditions import evaluate_routine_condition
 def test_context_flag_allow_when_true():
     routine = {
         "condition_type": "context_flag",
-        "condition_payload": '{"flag":"alexandros_at_camp","equals":true}',
+        "condition_payload": '{"flag":"alexandros_away_from_home","equals":true}',
         "condition_mode": "allow_when_true",
     }
-    context = {"alexandros_at_camp": True}
+    context = {"alexandros_away_from_home": True}
 
     result = evaluate_routine_condition(routine, context, now=datetime(2026, 6, 17))
     assert result["allowed"] is True
@@ -17,10 +17,10 @@ def test_context_flag_allow_when_true():
 def test_context_flag_suppress_when_true():
     routine = {
         "condition_type": "context_flag",
-        "condition_payload": '{"flag":"alexandros_at_camp","equals":true}',
+        "condition_payload": '{"flag":"alexandros_away_from_home","equals":true}',
         "condition_mode": "suppress_when_true",
     }
-    context = {"alexandros_at_camp": True}
+    context = {"alexandros_away_from_home": True}
 
     result = evaluate_routine_condition(routine, context, now=datetime(2026, 6, 17))
     assert result["allowed"] is False

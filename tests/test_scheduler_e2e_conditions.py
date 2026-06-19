@@ -53,6 +53,14 @@ def _run_job(db_rows, routine_conditions=None, context_state=None, craft_return=
     if context_state is None:
         context_state = {}
 
+    def _condition_list_for(rid):
+        cond = routine_conditions.get(rid)
+        if not cond:
+            return []
+        if isinstance(cond, list):
+            return cond
+        return [cond]
+
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "astakos_routines.db")
         _make_routines_db(db_path, db_rows)
@@ -78,8 +86,10 @@ def _run_job(db_rows, routine_conditions=None, context_state=None, craft_return=
             stack.enter_context(patch("memory.routine_db.get_routine_muted_until", return_value=None))
             stack.enter_context(patch("memory.routine_db.get_sentimental_info", return_value={"sentimental": 0, "muted_from": None, "muted_until": None, "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False}))
             stack.enter_context(patch("memory.routine_db.get_routine_condition", side_effect=lambda rid: routine_conditions.get(rid, {})))
+            stack.enter_context(patch("memory.routine_db.get_routine_conditions", side_effect=_condition_list_for))
             stack.enter_context(patch("services.routine_context.build_runtime_routine_context", return_value=context_state))
             stack.enter_context(patch("core.brain.safe_llm_invoke", return_value=MagicMock(content=craft_return)))
+            stack.enter_context(patch("random.random", return_value=0.99))
             
             bot.job_check_routines()
             
@@ -112,9 +122,9 @@ def test_require_true_skips_when_context_false():
 
 def test_suppress_when_true_skips_when_context_true():
     conditions = {
-        1: {"condition_type": "context_flag", "condition_payload": '{"flag": "alexandros_at_camp", "equals": true}', "condition_mode": "suppress_when_true"}
+        1: {"condition_type": "context_flag", "condition_payload": '{"flag": "alexandros_away_from_home", "equals": true}', "condition_mode": "suppress_when_true"}
     }
-    context = {"alexandros_at_camp": True}
+    context = {"alexandros_away_from_home": True}
     
     sent, logged = _run_job([_due_row(rid=1)], routine_conditions=conditions, context_state=context)
     
@@ -124,9 +134,9 @@ def test_suppress_when_true_skips_when_context_true():
 
 def test_suppress_when_true_allows_when_context_false():
     conditions = {
-        1: {"condition_type": "context_flag", "condition_payload": '{"flag": "alexandros_at_camp", "equals": true}', "condition_mode": "suppress_when_true"}
+        1: {"condition_type": "context_flag", "condition_payload": '{"flag": "alexandros_away_from_home", "equals": true}', "condition_mode": "suppress_when_true"}
     }
-    context = {"alexandros_at_camp": False}
+    context = {"alexandros_away_from_home": False}
     
     sent, logged = _run_job([_due_row(rid=1)], routine_conditions=conditions, context_state=context)
     
@@ -174,12 +184,12 @@ def test_conflict_resolution_with_conditions_skips_lower_priority_only_if_higher
     
     conditions = {
         # Η #2 απαιτεί camp=True
-        2: {"condition_type": "context_flag", "condition_payload": '{"flag": "alexandros_at_camp", "equals": true}', "condition_mode": "allow_when_true"}
+        2: {"condition_type": "context_flag", "condition_payload": '{"flag": "alexandros_away_from_home", "equals": true}', "condition_mode": "allow_when_true"}
     }
     
     # Περίπτωση 1: Δεν είμαστε camp
     # Η #2 κόβεται λόγω condition. Η #1 πρέπει να περάσει κανονικά (αφού δεν προστέθηκε στο triggered_conflict_groups η #2).
-    context1 = {"alexandros_at_camp": False}
+    context1 = {"alexandros_away_from_home": False}
     sent1, logged1 = _run_job(rows, routine_conditions=conditions, context_state=context1)
     
     assert len(sent1) == 1
@@ -190,7 +200,7 @@ def test_conflict_resolution_with_conditions_skips_lower_priority_only_if_higher
     
     # Περίπτωση 2: Είμαστε camp
     # Η #2 επιτρέπεται λόγω condition. Η #1 κόβεται επειδή έχει μικρότερο priority.
-    context2 = {"alexandros_at_camp": True}
+    context2 = {"alexandros_away_from_home": True}
     sent2, logged2 = _run_job(rows, routine_conditions=conditions, context_state=context2)
     
     assert len(sent2) == 1
@@ -230,7 +240,7 @@ def test_conflict_resolution_deep_integration():
     # 3 routines in the SAME conflict group ("Αθλητισμός"), scheduled for the EXACT SAME time.
     # #1: Priority 10, no condition (Fallback)
     # #2: Priority 20, condition: football_season == true (allow_when_true)
-    # #3: Priority 30, condition: alexandros_at_camp == true (suppress_when_true)
+    # #3: Priority 30, condition: alexandros_away_from_home == true (suppress_when_true)
     
     rows = [
         _due_row(rid=1, name="Αθλητισμός Τρέξιμο", priority=10),
@@ -244,14 +254,14 @@ def test_conflict_resolution_deep_integration():
         
     conditions = {
         2: {"condition_type": "context_flag", "condition_payload": '{"flag": "football_season", "equals": true}', "condition_mode": "allow_when_true"},
-        3: {"condition_type": "context_flag", "condition_payload": '{"flag": "alexandros_at_camp", "equals": true}', "condition_mode": "suppress_when_true"}
+        3: {"condition_type": "context_flag", "condition_payload": '{"flag": "alexandros_away_from_home", "equals": true}', "condition_mode": "suppress_when_true"}
     }
     
     # Scenario A: Football season is OFF (false), Camp is ON (true).
     # #3 (Priority 30) evaluates first: suppress_when_true and camp is TRUE -> BLOCKED.
     # #2 (Priority 20) evaluates next: allow_when_true and football is FALSE -> BLOCKED.
     # #1 (Priority 10) evaluates last: no condition -> ALLOWED (Wins!)
-    context_A = {"football_season": False, "alexandros_at_camp": True}
+    context_A = {"football_season": False, "alexandros_away_from_home": True}
     sent_A, logged_A = _run_job(rows, routine_conditions=conditions, context_state=context_A)
     assert len(sent_A) == 1
     trig_A = [kw["routine_id"] for cat, action, kw in logged_A if action == "triggered"]
@@ -262,7 +272,7 @@ def test_conflict_resolution_deep_integration():
     # #3 (Priority 30): suppress_when_true and camp is TRUE -> BLOCKED.
     # #2 (Priority 20): allow_when_true and football is TRUE -> ALLOWED (Wins!)
     # #1 (Priority 10): Skipped due to conflict.
-    context_B = {"football_season": True, "alexandros_at_camp": True}
+    context_B = {"football_season": True, "alexandros_away_from_home": True}
     sent_B, logged_B = _run_job(rows, routine_conditions=conditions, context_state=context_B)
     assert len(sent_B) == 1
     trig_B = [kw["routine_id"] for cat, action, kw in logged_B if action == "triggered"]
@@ -273,7 +283,7 @@ def test_conflict_resolution_deep_integration():
     # #3 (Priority 30): suppress_when_true and camp is FALSE -> ALLOWED (Wins!)
     # #2 (Priority 20): Skipped due to conflict.
     # #1 (Priority 10): Skipped due to conflict.
-    context_C = {"football_season": True, "alexandros_at_camp": False}
+    context_C = {"football_season": True, "alexandros_away_from_home": False}
     sent_C, logged_C = _run_job(rows, routine_conditions=conditions, context_state=context_C)
     assert len(sent_C) == 1
     trig_C = [kw["routine_id"] for cat, action, kw in logged_C if action == "triggered"]
