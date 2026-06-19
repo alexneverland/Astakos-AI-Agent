@@ -121,6 +121,7 @@ def _stub_modules():
     rdb.set_routine_active_window  = MagicMock()
     rdb.set_routine_resume_rule    = MagicMock()
     rdb.get_routine_condition      = MagicMock(return_value={})
+    rdb.get_routine_conditions     = MagicMock(return_value=[])
     rdb.get_context_state          = MagicMock(return_value=None)
     # νέα stubs για sentimental
     rdb.get_sentimental_info       = MagicMock(return_value={
@@ -181,6 +182,9 @@ def _stub_modules():
     sys.modules["services.embeddings"].embeddings   = MagicMock()
     sys.modules["services.routine_conditions"].evaluate_routine_condition = MagicMock(
         return_value={"allowed": True, "reason": None}
+    )
+    sys.modules["services.routine_conditions"].evaluate_routine_conditions = MagicMock(
+        return_value={"allowed": True, "results": [], "matched_count": 0, "failed_count": 0}
     )
 
     # ── tools.* ───────────────────────────────────────────────

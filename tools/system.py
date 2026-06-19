@@ -1125,30 +1125,6 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
         return f"❌ Σφάλμα ενημέρωσης χρονοδιαγράμματος ρουτίνας: {e}"
 
     return "❌ Άγνωστο σφάλμα."
-@tool
-def set_reminder(task: str, time_str: str) -> str:
-    """Δημιουργεί τοπική υπενθύμιση (format time_str: 'YYYY-MM-DD HH:MM')."""
-    from datetime import datetime
-
-    try:
-        datetime.strptime(time_str, "%Y-%m-%d %H:%M")
-    except ValueError:
-        return f"❌ Λάθος format: '{time_str}'. Χρησιμοποίησε 'YYYY-MM-DD HH:MM'."
-
-    rems = []
-    if os.path.exists(REMINDERS_FILE):
-        with open(REMINDERS_FILE, "r", encoding="utf-8") as f:
-            try:
-                rems = json.load(f)
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-    rems.append({"task": task, "time": time_str, "status": "pending"})
-
-    with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(rems, f, ensure_ascii=False, indent=4)
-
-    return f"✅ Υπενθύμιση '{task}' στις {time_str} καταχωρήθηκε."
 
 
 @tool
@@ -3224,7 +3200,7 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
 
 all_tools = [
     search_memory, save_to_memory, delete_from_memory, retrieve_photo, update_pending_linkedin_post, process_and_clear_linkedin_post,
-    set_local_reminder, set_reminder, manage_list,
+    set_local_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,

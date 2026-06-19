@@ -18,7 +18,7 @@ main.py — CLI Entry Point του Αστακού
 
 import os
 import sys
-import json
+import sqlite3
 import time
 import queue
 import signal
@@ -30,7 +30,7 @@ from zoneinfo import ZoneInfo
 from langchain_core.messages import HumanMessage, AIMessage
 from rich.console import Console
 
-from config import REMINDERS_FILE
+from config import STATE_DB
 from core.brain import llm, safe_llm_invoke
 from core.graph import graph
 from core.agents import clean_message
@@ -75,21 +75,27 @@ def queue_worker():
 
 def reminder_worker():
     while not shutdown_event.is_set():
-        if os.path.exists(REMINDERS_FILE):
-            with open(REMINDERS_FILE, "r", encoding="utf-8") as f:
-                try:
-                    rems = json.load(f)
-                except:
-                    rems = []
-            now, changed = datetime.now().strftime("%Y-%m-%d %H:%M"), False
-            for r in rems:
-                if r["status"] == "pending" and now >= r["time"]:
-                    print(f"\n\033[93m[🔔 ΥΠΕΝΘΥΜΙΣΗ]: {r['task']}\033[0m\nΛάζαρος: ", end="", flush=True)
-                    send_telegram_msg(f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {r['task']}")
-                    r["status"], changed = "done", True
-            if changed:
-                with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(rems, f, ensure_ascii=False, indent=4)
+        if os.path.exists(STATE_DB):
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            conn = None
+            try:
+                conn = sqlite3.connect(STATE_DB)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, task FROM reminders WHERE status='pending' AND time NOT LIKE 'loc:%' AND time <= ?",
+                    (now,),
+                )
+                due = cursor.fetchall()
+                for rid, task in due:
+                    print(f"\n\033[93m[🔔 ΥΠΕΝΘΥΜΙΣΗ]: {task}\033[0m\nΛάζαρος: ", end="", flush=True)
+                    send_telegram_msg(f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {task}")
+                    cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
+                conn.commit()
+            except Exception as e:
+                print(f"\033[91m[ReminderWorker Error]: {e}\033[0m")
+            finally:
+                if conn:
+                    conn.close()
         shutdown_event.wait(timeout=20)
 
 

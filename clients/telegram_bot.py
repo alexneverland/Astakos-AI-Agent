@@ -1133,9 +1133,10 @@ def handle_location(msg, live_update=False):
         pass
     #print(f"\033[94m[Location]: {lat}, {lon}\033[0m")
 
-    # ── Location Reminders ──────────────────────────────────────
+    # ── Location Reminders (SQL: time = 'loc:<name>' convention) ──
     try:
-        from config import HOME_COORDS, HOME_RADIUS_M, REMINDERS_FILE
+        import sqlite3
+        from config import HOME_COORDS, HOME_RADIUS_M, STATE_DB
 
         def haversine(lat1, lon1, lat2, lon2):
             R = 6371000
@@ -1145,26 +1146,25 @@ def handle_location(msg, live_update=False):
                  math.sin((lon2-lon1)*p/2)**2)
             return 2 * R * math.asin(math.sqrt(a))
 
-        if os.path.exists(REMINDERS_FILE):
-            with open(REMINDERS_FILE, "r", encoding="utf-8") as f:
-                rems = json.load(f)
-
-            changed = False
-            for r in rems:
-                if r.get("status") != "pending" or r.get("type") != "location":
-                    continue
-                target = r.get("location", "home")
-                if target == "home":
-                    dist = haversine(lat, lon, HOME_COORDS[0], HOME_COORDS[1])
-                    if dist <= HOME_RADIUS_M:
-                        send_telegram_msg(f"📍 ΥΠΕΝΘΥΜΙΣΗ (Έφτασες σπίτι!): {r['task']}")
-                        print(f"\033[93m[Location Reminder]: {r['task']} fired ({dist:.0f}m)\033[0m")
-                        r["status"] = "done"
-                        changed = True
-
-            if changed:
-                with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(rems, f, ensure_ascii=False, indent=4)
+        if os.path.exists(STATE_DB):
+            conn = sqlite3.connect(STATE_DB)
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, task, time FROM reminders WHERE status='pending' AND time LIKE 'loc:%'"
+                )
+                pending = cursor.fetchall()
+                for rid, task, tm in pending:
+                    target = tm.split(":", 1)[1] if tm and ":" in tm else "home"
+                    if target == "home":
+                        dist = haversine(lat, lon, HOME_COORDS[0], HOME_COORDS[1])
+                        if dist <= HOME_RADIUS_M:
+                            send_telegram_msg(f"📍 ΥΠΕΝΘΥΜΙΣΗ (Έφτασες σπίτι!): {task}")
+                            print(f"\033[93m[Location Reminder]: {task} fired ({dist:.0f}m)\033[0m")
+                            cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
+                conn.commit()
+            finally:
+                conn.close()
     except Exception as e:
         print(f"\033[91m[Location Reminder Error]: {e}\033[0m")
 
@@ -1680,29 +1680,36 @@ def run_polling():
 # ────────────────────────────────────────────────────────────────
 
 def job_check_reminders():
-    """Ελέγχει για υπενθυμίσεις και τις στέλνει στο Telegram."""
+    """Ελέγχει για υπενθυμίσεις (SQL) και τις στέλνει στο Telegram."""
     if is_reminders_paused():
         return
-    from config import REMINDERS_FILE
-    if not os.path.exists(REMINDERS_FILE):
+    import sqlite3
+    from config import STATE_DB
+    if not os.path.exists(STATE_DB):
         return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    conn = None
     try:
-        with open(REMINDERS_FILE, "r", encoding="utf-8") as f:
-            rems = json.load(f)
-    except Exception:
-        return
-    now, changed = datetime.now().strftime("%Y-%m-%d %H:%M"), False
-    for r in rems:
-        if r.get("status") == "pending" and r.get("type") != "location" and now >= r.get("time", ""):
-            msg = f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {r['task']}"
+        conn = sqlite3.connect(STATE_DB)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, task FROM reminders WHERE status='pending' AND time NOT LIKE 'loc:%' AND time <= ?",
+            (now,),
+        )
+        due = cursor.fetchall()
+        for rid, task in due:
+            msg = f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {task}"
             if is_duplicate_notification(msg, cooldown_seconds=60):
                 continue
             send_telegram_msg(msg)
-            log_event("reminders", "sent", task=r["task"])
-            r["status"], changed = "done", True
-    if changed:
-        with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(rems, f, ensure_ascii=False, indent=4)
+            log_event("reminders", "sent", task=task)
+            cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
+            conn.commit()
+    except Exception as e:
+        print(f"\033[91m[ReminderCheck Error]: {e}\033[0m")
+    finally:
+        if conn:
+            conn.close()
 
 def _load_recent_proactive_context(limit: int = 10) -> str:
     """Return a compact mixed-channel conversation snippet for proactive messages."""
@@ -2241,240 +2248,243 @@ def job_check_routines():
         if os.path.exists(DB_PATH):
             conn   = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            now          = datetime.now()
-            target_time  = now + timedelta(minutes=30)
-            day_en       = target_time.strftime("%A")
-            possible_days = DAYS_MAP.get(day_en, [day_en])
-            target_time_str = target_time.strftime("%H:%M")
-            today_str       = now.strftime("%Y-%m-%d")
+            try:
+                now          = datetime.now()
+                target_time  = now + timedelta(minutes=30)
+                day_en       = target_time.strftime("%A")
+                possible_days = DAYS_MAP.get(day_en, [day_en])
+                target_time_str = target_time.strftime("%H:%M")
+                today_str       = now.strftime("%Y-%m-%d")
 
-            placeholders = ",".join("?" * len(possible_days))
-            cursor.execute(f"""
-                SELECT id, event_name, confidence, priority, conflict_group, time_str FROM routines
-                WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
-                AND state='active'
-                AND (last_triggered IS NULL OR last_triggered != ?)
-                ORDER BY priority DESC, CASE WHEN condition_type IS NOT NULL THEN 1 ELSE 0 END DESC, id ASC
-            """, (*possible_days, today_str))
+                placeholders = ",".join("?" * len(possible_days))
+                cursor.execute(f"""
+                    SELECT id, event_name, confidence, priority, conflict_group, time_str FROM routines
+                    WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
+                    AND state='active'
+                    AND (last_triggered IS NULL OR last_triggered != ?)
+                    ORDER BY priority DESC, CASE WHEN condition_type IS NOT NULL THEN 1 ELSE 0 END DESC, id ASC
+                """, (*possible_days, today_str))
 
-            # ── Anti-Spam: φιλτράρισμα με per-routine cooldown ──────────
-            from memory.routine_db import (
-                get_routine_notify_info, mark_routine_notified,
-                save_pending_confirmation, get_routine_muted_until,
-                get_routine_schedule_meta, is_routine_temporarily_inactive_meta,
-                get_routine_conditions,
-            )
-            from services.routine_context import build_runtime_routine_context
-            from services.routine_conditions import evaluate_routine_conditions
-            due_routines = []
-            triggered_conflict_groups = set()
-            rt_context = build_runtime_routine_context(now=now)
+                # ── Anti-Spam: φιλτράρισμα με per-routine cooldown ──────────
+                from memory.routine_db import (
+                    get_routine_notify_info, mark_routine_notified,
+                    save_pending_confirmation, get_routine_muted_until,
+                    get_routine_schedule_meta, is_routine_temporarily_inactive_meta,
+                    get_routine_conditions,
+                )
+                from services.routine_context import build_runtime_routine_context
+                from services.routine_conditions import evaluate_routine_conditions
+                due_routines = []
+                triggered_conflict_groups = set()
+                rt_context = build_runtime_routine_context(now=now)
 
-            def _get_conflict_group(name: str) -> str:
-                parts = name.lower().split()
-                return parts[0] if parts else name.lower()
+                def _get_conflict_group(name: str) -> str:
+                    parts = name.lower().split()
+                    return parts[0] if parts else name.lower()
 
-            for r_id, event_name, confidence, priority, db_conflict_group, time_str in cursor.fetchall():
-                # --- NEW WINDOW LOGIC TO PREVENT TIME LIMBO ---
-                try:
-                    h, m = map(int, time_str.split(':'))
-                    routine_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
-                except ValueError:
-                    continue
-                
-                time_diff_mins = (routine_dt - now).total_seconds() / 60.0
-                
-                # Handle midnight wrap-around (if routine is past midnight but matches day of week)
-                if time_diff_mins < -1000:
-                    time_diff_mins += 24 * 60
-                    
-                # We trigger if the routine is anywhere between 0 and 30 minutes in the future.
-                # Because we update the state to 'trigger_pending', it won't spam.
-                # If bot was offline and we missed the exact 30-min mark, it catches it now!
-                if not (0 <= time_diff_mins <= 30):
-                    continue
-
-                conflict_group = db_conflict_group if db_conflict_group else _get_conflict_group(event_name)
-                
-                if conflict_group in triggered_conflict_groups:
-                    print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' skipped due to conflict with higher priority routine in group '{conflict_group}'")
-                    continue
-
-                # ── Seasonal/temporary inactivity check (paused_until / active window) ──
-                # Πρέπει να τρέξει ΠΡΙΝ από muted_until/cooldown/proactive scoring — μια
-                # ρουτίνα σε παύση (π.χ. καλοκαιρινό διάλειμμα) δεν θεωρείται ποτέ "missed",
-                # δεν πειράζει το confidence, και δεν περνά από το sentimental/mute branch.
-                schedule_meta = get_routine_schedule_meta(r_id)
-                inactive, inactive_reason = is_routine_temporarily_inactive_meta(schedule_meta, now=now)
-                if inactive:
-                    log_event("routines", "inactive_skip", routine_id=r_id, event=event_name,
-                              reason=inactive_reason, paused_until=schedule_meta.get("paused_until"),
-                              active_from=schedule_meta.get("active_from"), active_until=schedule_meta.get("active_until"))
-                    print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' inactive ({inactive_reason}) — skipped")
-                    continue
-                # ── Phase 3C: Conditions Evaluator ───────────────────────
-                cond_list = get_routine_conditions(r_id)
-                if cond_list:
-                    cond_result = evaluate_routine_conditions(cond_list, rt_context, now=now)
-                    if not cond_result.get("allowed", True):
-                        log_event("routines", "routine_condition_blocked",
-                                  routine_id=r_id, event=event_name,
-                                  failed_count=cond_result.get("failed_count", 1),
-                                  reason=str(cond_result.get("results")),
-                                  context_snapshot=rt_context)
-                        
-                        import random
-                        # 30% chance for a Sentimental Override (approx 2 times a week for a daily routine)
-                        if random.random() < 0.30:
-                            blocked_reason = ", ".join(str(r.get("reason", "blocked")) for r in cond_result.get("results", []) if not r.get("allowed"))
-                            override_name = f"{event_name} [ΑΚΥΡΩΝΕΤΑΙ ΣΗΜΕΡΑ ΛΟΓΩ: {blocked_reason}]"
-                            print(f"\U0001f496 [job_check_routines]: #{r_id} '{event_name}' blocked but triggering sentimental override!")
-                            # Fall through to due_routines to let the LLM generate a [CONTEXT_SKIP]
-                            event_name = override_name
-                        else:
-                            print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('failed_count')} failed) — skipped")
-                            continue
-                    else:
-                        log_event("routines", "routine_condition_allowed",
-                                  routine_id=r_id, event=event_name,
-                                  reason="All conditions passed")
-
-                # ── muted_until check ────────────────────────────────────
-                muted_until = get_routine_muted_until(r_id)
-                if muted_until:
-                    cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
-                    conn.commit()
-
-                    # Όταν η ρουτίνα είναι ήδη muted, το proactive για αυτό το slot τελειώνει εδώ.
-                    # ΔΕΝ στέλνουμε δεύτερο sentimental message από το polling loop· τα
-                    # συναισθηματικά/contextual messages παράγονται μόνο στη στιγμή που
-                    # ανιχνεύθηκε το context skip / mute, όχι ξανά σε κάθε επόμενο poll.
-                    log_event("routines", "silent_skip", routine_id=r_id, event=event_name,
-                              reason="muted_until", muted_until=muted_until)
-                    print(f"\U0001f507 [job_check_routines]: #{r_id} '{event_name}' muted until {muted_until} — skipped")
-                    continue
-                info = get_routine_notify_info(r_id)
-                cd_hours = info["cooldown_hours"]
-                if is_duplicate_routine(r_id, cd_hours):
-                    log_event("routines", "skipped", reason="cooldown",
-                              routine_id=r_id, event=event_name,
-                              cooldown_hours=cd_hours)
-                    continue
-                due_routines.append((r_id, event_name, confidence))
-                triggered_conflict_groups.add(conflict_group)
-
-
-            if not due_routines:
-                conn.close()
-                return
-
-            if not can_send_proactive():
-                log_event("routines", "skipped", reason="rate_limit",
-                          count=len(due_routines))
-                print(f"⏸️ [job_check_routines]: Rate limit, {len(due_routines)} routine(s) skipped")
-                conn.close()
-                return
-
-            # ── Batching: πολλές ρουτίνες → ένα μήνυμα ──────────────────
-            if len(due_routines) > 1:
-                names = ", ".join(f"'{e}'" for _, e, _ in due_routines)
-                msg = _craft_proactive_msg(names, 0.9, count=len(due_routines))
-
-                if msg.strip() == "[SILENT_SKIP]":
-                    # Πρώτη φορά SILENT_SKIP — εκτίμα muted_until για κάθε ρουτίνα
+                for r_id, event_name, confidence, priority, db_conflict_group, time_str in cursor.fetchall():
+                    # --- NEW WINDOW LOGIC TO PREVENT TIME LIMBO ---
                     try:
-                        ctx = _build_proactive_memory_context(names)
-                    except Exception:
-                        ctx = ""
-                    for r_id, event_name, confidence in due_routines:
+                        h, m = map(int, time_str.split(':'))
+                        routine_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                    except ValueError:
+                        continue
+                
+                    time_diff_mins = (routine_dt - now).total_seconds() / 60.0
+                
+                    # Handle midnight wrap-around (if routine is past midnight but matches day of week)
+                    if time_diff_mins < -1000:
+                        time_diff_mins += 24 * 60
+                    
+                    # We trigger if the routine is anywhere between 0 and 30 minutes in the future.
+                    # Because we update the state to 'trigger_pending', it won't spam.
+                    # If bot was offline and we missed the exact 30-min mark, it catches it now!
+                    if not (0 <= time_diff_mins <= 30):
+                        continue
+
+                    conflict_group = db_conflict_group if db_conflict_group else _get_conflict_group(event_name)
+                
+                    if conflict_group in triggered_conflict_groups:
+                        print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' skipped due to conflict with higher priority routine in group '{conflict_group}'")
+                        continue
+
+                    # ── Seasonal/temporary inactivity check (paused_until / active window) ──
+                    # Πρέπει να τρέξει ΠΡΙΝ από muted_until/cooldown/proactive scoring — μια
+                    # ρουτίνα σε παύση (π.χ. καλοκαιρινό διάλειμμα) δεν θεωρείται ποτέ "missed",
+                    # δεν πειράζει το confidence, και δεν περνά από το sentimental/mute branch.
+                    schedule_meta = get_routine_schedule_meta(r_id)
+                    inactive, inactive_reason = is_routine_temporarily_inactive_meta(schedule_meta, now=now)
+                    if inactive:
+                        log_event("routines", "inactive_skip", routine_id=r_id, event=event_name,
+                                  reason=inactive_reason, paused_until=schedule_meta.get("paused_until"),
+                                  active_from=schedule_meta.get("active_from"), active_until=schedule_meta.get("active_until"))
+                        print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' inactive ({inactive_reason}) — skipped")
+                        continue
+                    # ── Phase 3C: Conditions Evaluator ───────────────────────
+                    cond_list = get_routine_conditions(r_id)
+                    if cond_list:
+                        cond_result = evaluate_routine_conditions(cond_list, rt_context, now=now)
+                        if not cond_result.get("allowed", True):
+                            log_event("routines", "routine_condition_blocked",
+                                      routine_id=r_id, event=event_name,
+                                      failed_count=cond_result.get("failed_count", 1),
+                                      reason=str(cond_result.get("results")),
+                                      context_snapshot=rt_context)
+                        
+                            import random
+                            # 30% chance for a Sentimental Override (approx 2 times a week for a daily routine)
+                            if random.random() < 0.30:
+                                blocked_reason = ", ".join(str(r.get("reason", "blocked")) for r in cond_result.get("results", []) if not r.get("allowed"))
+                                override_name = f"{event_name} [ΑΚΥΡΩΝΕΤΑΙ ΣΗΜΕΡΑ ΛΟΓΩ: {blocked_reason}]"
+                                print(f"\U0001f496 [job_check_routines]: #{r_id} '{event_name}' blocked but triggering sentimental override!")
+                                # Fall through to due_routines to let the LLM generate a [CONTEXT_SKIP]
+                                event_name = override_name
+                            else:
+                                print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('failed_count')} failed) — skipped")
+                                continue
+                        else:
+                            log_event("routines", "routine_condition_allowed",
+                                      routine_id=r_id, event=event_name,
+                                      reason="All conditions passed")
+
+                    # ── muted_until check ────────────────────────────────────
+                    muted_until = get_routine_muted_until(r_id)
+                    if muted_until:
                         cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
-                        log_event("routines", "silent_skip", routine_id=r_id, event=event_name, batch=True)
-                        bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
+                        conn.commit()
+
+                        # Όταν η ρουτίνα είναι ήδη muted, το proactive για αυτό το slot τελειώνει εδώ.
+                        # ΔΕΝ στέλνουμε δεύτερο sentimental message από το polling loop· τα
+                        # συναισθηματικά/contextual messages παράγονται μόνο στη στιγμή που
+                        # ανιχνεύθηκε το context skip / mute, όχι ξανά σε κάθε επόμενο poll.
+                        log_event("routines", "silent_skip", routine_id=r_id, event=event_name,
+                                  reason="muted_until", muted_until=muted_until)
+                        print(f"\U0001f507 [job_check_routines]: #{r_id} '{event_name}' muted until {muted_until} — skipped")
+                        continue
+                    info = get_routine_notify_info(r_id)
+                    cd_hours = info["cooldown_hours"]
+                    if is_duplicate_routine(r_id, cd_hours):
+                        log_event("routines", "skipped", reason="cooldown",
+                                  routine_id=r_id, event=event_name,
+                                  cooldown_hours=cd_hours)
+                        continue
+                    due_routines.append((r_id, event_name, confidence))
+                    triggered_conflict_groups.add(conflict_group)
+
+
+                if not due_routines:
+                    conn.close()
+                    return
+
+                if not can_send_proactive():
+                    log_event("routines", "skipped", reason="rate_limit",
+                              count=len(due_routines))
+                    print(f"⏸️ [job_check_routines]: Rate limit, {len(due_routines)} routine(s) skipped")
+                    conn.close()
+                    return
+
+                # ── Batching: πολλές ρουτίνες → ένα μήνυμα ──────────────────
+                if len(due_routines) > 1:
+                    names = ", ".join(f"'{e}'" for _, e, _ in due_routines)
+                    msg = _craft_proactive_msg(names, 0.9, count=len(due_routines))
+
+                    if msg.strip() == "[SILENT_SKIP]":
+                        # Πρώτη φορά SILENT_SKIP — εκτίμα muted_until για κάθε ρουτίνα
+                        try:
+                            ctx = _build_proactive_memory_context(names)
+                        except Exception:
+                            ctx = ""
+                        for r_id, event_name, confidence in due_routines:
+                            cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                            log_event("routines", "silent_skip", routine_id=r_id, event=event_name, batch=True)
+                            bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
+                            _clear_routine_pending_confirmation(r_id)
+                            _apply_context_mute(r_id, event_name, ctx)
+                        conn.commit()
+                    else:
+                        is_context_skip = False
+                        if "[CONTEXT_SKIP]" in msg:
+                            is_context_skip = True
+                            msg = msg.replace("[CONTEXT_SKIP]", "").strip()
+
+                        send_telegram_msg(msg)
+                        sent_at = datetime.now()
+                        context_skip_ctx = ""
+                        if is_context_skip:
+                            try:
+                                context_skip_ctx = _build_proactive_memory_context(names)
+                            except Exception:
+                                context_skip_ctx = ""
+                        for r_id, event_name, confidence in due_routines:
+                            cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                            if is_context_skip:
+                                _clear_routine_pending_confirmation(r_id)
+                                muted_until = _apply_context_mute(r_id, event_name, context_skip_ctx)
+                                log_event("routines", "context_skip", routine_id=r_id, event=event_name,
+                                          batch=True, muted_until=muted_until, preview=msg[:160])
+                                bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
+                            else:
+                                mark_routine_notified(r_id)
+                                log_event("routines", "triggered", routine_id=r_id,
+                                          event=event_name, confidence=confidence,
+                                          batch=len(due_routines), preview=msg[:160])
+                                pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
+                                save_pending_confirmation(r_id, event_name, sent_at)
+                                bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel="telegram")
+                        conn.commit()
+                else:
+                    # Μία ρουτίνα → εξατομικευμένο μήνυμα
+                    r_id, event_name, confidence = due_routines[0]
+                    msg = _craft_proactive_msg(event_name, confidence)
+
+                    if msg.strip() == "[SILENT_SKIP]":
+                        # Πρώτη φορά SILENT_SKIP — εκτίμα muted_until
+                        try:
+                            ctx = _build_proactive_memory_context(event_name)
+                        except Exception:
+                            ctx = ""
+                        cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                        conn.commit()
+                        log_event("routines", "silent_skip", routine_id=r_id, event=event_name)
+                        bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
                         _clear_routine_pending_confirmation(r_id)
                         _apply_context_mute(r_id, event_name, ctx)
-                    conn.commit()
-                else:
-                    is_context_skip = False
-                    if "[CONTEXT_SKIP]" in msg:
-                        is_context_skip = True
-                        msg = msg.replace("[CONTEXT_SKIP]", "").strip()
+                    else:
+                        is_context_skip = False
+                        if "[CONTEXT_SKIP]" in msg:
+                            is_context_skip = True
+                            msg = msg.replace("[CONTEXT_SKIP]", "").strip()
 
-                    send_telegram_msg(msg)
-                    sent_at = datetime.now()
-                    context_skip_ctx = ""
-                    if is_context_skip:
-                        try:
-                            context_skip_ctx = _build_proactive_memory_context(names)
-                        except Exception:
-                            context_skip_ctx = ""
-                    for r_id, event_name, confidence in due_routines:
                         cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                        conn.commit()
+
+                        send_telegram_msg(msg)
+
                         if is_context_skip:
+                            try:
+                                context_skip_ctx = _build_proactive_memory_context(event_name)
+                            except Exception:
+                                context_skip_ctx = ""
                             _clear_routine_pending_confirmation(r_id)
                             muted_until = _apply_context_mute(r_id, event_name, context_skip_ctx)
                             log_event("routines", "context_skip", routine_id=r_id, event=event_name,
-                                      batch=True, muted_until=muted_until, preview=msg[:160])
-                            bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
+                                      muted_until=muted_until, preview=msg[:160])
+                            # DO NOT mark as pending, just keep it active.
+                            bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
                         else:
                             mark_routine_notified(r_id)
                             log_event("routines", "triggered", routine_id=r_id,
                                       event=event_name, confidence=confidence,
-                                      batch=len(due_routines), preview=msg[:160])
+                                      preview=msg[:160])
+                            sent_at = datetime.now()
                             pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
                             save_pending_confirmation(r_id, event_name, sent_at)
-                            bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel="telegram")
-                    conn.commit()
-            else:
-                # Μία ρουτίνα → εξατομικευμένο μήνυμα
-                r_id, event_name, confidence = due_routines[0]
-                msg = _craft_proactive_msg(event_name, confidence)
-
-                if msg.strip() == "[SILENT_SKIP]":
-                    # Πρώτη φορά SILENT_SKIP — εκτίμα muted_until
-                    try:
-                        ctx = _build_proactive_memory_context(event_name)
-                    except Exception:
-                        ctx = ""
-                    cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
-                    conn.commit()
-                    log_event("routines", "silent_skip", routine_id=r_id, event=event_name)
-                    bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
-                    _clear_routine_pending_confirmation(r_id)
-                    _apply_context_mute(r_id, event_name, ctx)
-                else:
-                    is_context_skip = False
-                    if "[CONTEXT_SKIP]" in msg:
-                        is_context_skip = True
-                        msg = msg.replace("[CONTEXT_SKIP]", "").strip()
-
-                    cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
-                    conn.commit()
-
-                    send_telegram_msg(msg)
-
-                    if is_context_skip:
-                        try:
-                            context_skip_ctx = _build_proactive_memory_context(event_name)
-                        except Exception:
-                            context_skip_ctx = ""
-                        _clear_routine_pending_confirmation(r_id)
-                        muted_until = _apply_context_mute(r_id, event_name, context_skip_ctx)
-                        log_event("routines", "context_skip", routine_id=r_id, event=event_name,
-                                  muted_until=muted_until, preview=msg[:160])
-                        # DO NOT mark as pending, just keep it active.
-                        bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
-                    else:
-                        mark_routine_notified(r_id)
-                        log_event("routines", "triggered", routine_id=r_id,
-                                  event=event_name, confidence=confidence,
-                                  preview=msg[:160])
-                        sent_at = datetime.now()
-                        pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
-                        save_pending_confirmation(r_id, event_name, sent_at)
-                        bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=False, channel="telegram")
+                            bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=False, channel="telegram")
 
 
-            conn.close()
+                conn.close()
+            finally:
+                conn.close()
     except Exception as e:
         print(f"❌ [job_check_routines]: {e}")
 

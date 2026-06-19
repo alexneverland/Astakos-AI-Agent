@@ -31,7 +31,7 @@ from astakos_skills.repo_mapper import repo_mapper
 # TOOLS
 from tools.system import (
     search_memory, save_to_memory, delete_from_memory, retrieve_photo,
-    set_local_reminder, set_reminder, manage_list,
+    set_local_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool, register_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
@@ -328,7 +328,7 @@ def home_agent_node(state):
     from langchain_core.messages import SystemMessage
     
     from tools.system import (
-        manage_list, set_reminder, set_local_reminder, delete_from_memory, 
+        manage_list, set_local_reminder, delete_from_memory,
         search_memory, control_spotify, control_vacuum, get_current_location
     )
     from tools.web import get_navigation_info, search_goldmall_offers
@@ -339,7 +339,7 @@ def home_agent_node(state):
 
     tools_to_bind = [
         get_current_location,
-        manage_list, set_reminder, set_local_reminder, delete_from_memory, search_memory,
+        manage_list, set_local_reminder, delete_from_memory, search_memory,
         control_spotify, control_vacuum,
         search_goldmall_offers, get_navigation_info,
         google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, search_supermarket_prices,
@@ -688,7 +688,7 @@ def tool_router(state):
 # ────────────────────────────────────────────────────────────────
 
 all_tools = [
-    manage_list, set_reminder, set_local_reminder, read_local_file, github_manager,
+    manage_list, set_local_reminder, read_local_file, github_manager,
     mail_manager, get_news, drive_manager, get_weather_forecast,
     google_calendar_tool, save_to_memory, google_tasks_tool, delete_from_memory,
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,

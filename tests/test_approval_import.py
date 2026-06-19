@@ -6,7 +6,7 @@ from core.approval import approval_check_node, _effective_risk, _notify_telegram
 
 # tool_risk checks
 assert get_risk("read_local_file") == "SAFE", "read_local_file should be SAFE"
-assert get_risk("set_reminder") == "WARNING", "set_reminder should be WARNING"
+assert get_risk("set_local_reminder") == "WARNING", "set_local_reminder should be WARNING"
 assert get_risk("google_calendar_tool") == "SAFE", "google_calendar_tool should be SAFE (per-action handled by _effective_risk)"
 assert get_risk("drive_manager") == "NOTIFY", "drive_manager should be NOTIFY"
 assert get_risk("execute_local_pipeline") == "CRITICAL", "execute_local_pipeline should be CRITICAL"

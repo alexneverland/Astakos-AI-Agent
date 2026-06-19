@@ -27,7 +27,6 @@ from langchain_core.messages import HumanMessage, AIMessage
 from rich.console import Console
 from zoneinfo import ZoneInfo
 
-from config import REMINDERS_FILE
 from core.brain import llm, safe_llm_invoke
 from core.graph import graph, AgentState
 from core.agents import clean_message
@@ -303,30 +302,6 @@ def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
         channel,
         seed_facts,
     )
-
-# ────────────────────────────────────────────────────────────────
-# REMINDER WORKER
-# ────────────────────────────────────────────────────────────────
-
-def reminder_worker():
-    """Ελέγχει για τοπικές υπενθυμίσεις κάθε 20 δευτερόλεπτα."""
-    while not shutdown_event.is_set():
-        if os.path.exists(REMINDERS_FILE):
-            with open(REMINDERS_FILE, "r", encoding="utf-8") as f:
-                try:
-                    rems = json.load(f)
-                except:
-                    rems = []
-            now, changed = datetime.now().strftime("%Y-%m-%d %H:%M"), False
-            for r in rems:
-                if r["status"] == "pending" and now >= r["time"]:
-                    print(f"\n\033[93m[🔔 ΥΠΕΝΘΥΜΙΣΗ]: {r['task']}\033[0m")
-                    send_telegram_msg(f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {r['task']}")
-                    r["status"], changed = "done", True
-            if changed:
-                with open(REMINDERS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(rems, f, ensure_ascii=False, indent=4)
-        shutdown_event.wait(timeout=20)
 
 # ────────────────────────────────────────────────────────────────
 # PROACTIVE WORKER
