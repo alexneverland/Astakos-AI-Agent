@@ -131,6 +131,231 @@ def _normalize_text(value: str) -> str:
     return " ".join(text.split())
 
 
+_TOPIC_CHOICES = {
+    "family", "activity", "school", "health", "emotion", "pet",
+    "home", "work", "gift", "food", "trip", "project", "routine", "other",
+}
+_RELATION_TYPE_CHOICES = {
+    "new_fact", "follow_up", "state_update", "correction",
+    "temporary_state", "preference", "routine_hint",
+}
+_STATE_MARKER_CHOICES = {
+    "started", "stopped", "paused", "resumed", "away", "returned",
+    "scheduled", "cancelled", "confirmed", "tired", "better", "sick",
+    "emotional", "completed", "ongoing", "seasonal_break",
+}
+
+
+def _empty_memory_candidate() -> dict:
+    return {
+        "memory_type": "fact",
+        "fact": "",
+        "category": "other",
+        "tags": [],
+        "entities": [],
+        "topic": "other",
+        "topic_detail": "",
+        "state_markers": [],
+        "time_scope": "",
+        "relation_type": "new_fact",
+        "confidence": 0.7,
+        "source": "unknown",
+        "agent_name": "Unknown",
+        "reason": "agent_inferred",
+    }
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def _extract_entities_from_text(text: str) -> list[str]:
+    compact = " ".join(clean_message(text).split())
+    if not compact:
+        return []
+
+    found = []
+    for match in re.finditer(r"\b[Α-ΩA-Z][Α-ΩA-Za-zΆ-Ώά-ώϊϋΐΰ]+(?:\s+[Α-ΩA-Z][Α-ΩA-Za-zΆ-Ώά-ώϊϋΐΰ]+)?", compact):
+        entity = match.group(0).strip(" .,;:!?")
+        if len(entity) >= 3:
+            found.append(entity)
+    return _dedupe_preserve_order(found)
+
+
+def _infer_topic_from_text(text: str, category: str) -> str:
+    normalized = _normalize_text(text)
+    if any(marker in normalized for marker in ("ποδοσφ", "μπασκετ", "κολυμβ", "σκακι", "χορο", "δραστηριοτ", "προπονησ")):
+        return "activity"
+    if any(marker in normalized for marker in ("σχολει", "δημοτικ", "φροντιστ", "κατασκην")):
+        return "school" if "σχολει" in normalized or "δημοτικ" in normalized or "φροντιστ" in normalized else "trip"
+    if any(marker in normalized for marker in ("υπν", "πυρετ", "γιατρ", "αρρωστ", "πονα", "κουρασ", "ηρεμησ", "τσιμπουρ")):
+        return "health"
+    if any(marker in normalized for marker in ("στεναχωρ", "χαρ", "αγχω", "φοβ", "ηρεμησ", "πιεστηκ")):
+        return "emotion"
+    if any(marker in normalized for marker in ("κουνελ", "σκυλ", "γατ", "ζωακ", "κατοικιδ")):
+        return "pet"
+    if any(marker in normalized for marker in ("σπιτι", "κουζιν", "καθαρισ", "αφυγραντηρ", "σκουπ", "λαικ", "ψων")):
+        return "home"
+    if any(marker in normalized for marker in ("δουλει", "βαρδια", "εργοστασ", "πασσια", "συναδελφ")):
+        return "work"
+    if any(marker in normalized for marker in ("δωρο", "γενεθλ", "ρολοι", "γλαστρ")):
+        return "gift"
+    if any(marker in normalized for marker in ("φαγητ", "φακες", "ψαρ", "μπριζολ", "φαγα", "εφαγε")):
+        return "food"
+    if any(marker in normalized for marker in ("ταξιδ", "εκδρομ", "διακοπ", "πηγαμε", "γυρισ", "επιστρ")):
+        return "trip"
+    if category == "projects":
+        return "project"
+    if category == "home":
+        return "home"
+    if category == "family":
+        return "family"
+    return "other"
+
+
+def _infer_topic_detail_from_text(text: str) -> str:
+    normalized = _normalize_text(text)
+    detail_markers = {
+        "football": ("ποδοσφ",),
+        "camp": ("κατασκην",),
+        "park": ("παρκο", "βολτ"),
+        "school": ("σχολει", "δημοτικ"),
+        "tutoring": ("φροντιστ",),
+        "sleep": ("υπν",),
+        "gift_watch": ("ρολοι",),
+        "gift_plant": ("γλαστρ", "φυτο"),
+        "fish_market": ("λαϊκ", "λαικ", "ψαρ"),
+        "rabbit": ("κουνελ",),
+        "dog": ("σκυλ",),
+    }
+    for detail, markers in detail_markers.items():
+        if any(marker in normalized for marker in markers):
+            return detail
+    return ""
+
+
+def _infer_state_markers_from_text(text: str) -> list[str]:
+    normalized = _normalize_text(text)
+    states: list[str] = []
+    rules = {
+        "started": ("ξεκινα", "ξεκινησ", "αρχισ"),
+        "stopped": ("σταματ", "τελος", "δεν εχει πια"),
+        "paused": ("παγωσ", "παυση", "σταματαει για"),
+        "resumed": ("ξαναρχ", "συνεχιζ", "επανηλθ"),
+        "away": ("λειπ", "εκτος σπιτιου", "δεν ειναι σπιτι", "κατασκην", "ταξιδ", "διακοπ"),
+        "returned": ("γυρισ", "επιστρ", "ηρθε σπιτι", "γυρναει σπιτι"),
+        "scheduled": ("θα παει", "θα παμε", "ειναι για", "προγραμματισ"),
+        "cancelled": ("ακυρω", "δεν θα γινει"),
+        "confirmed": ("επιβεβαι", "οκ", "κλειστ"),
+        "tired": ("κουρασ",),
+        "better": ("καλυτερ", "συνηλθ", "ηρεμησ"),
+        "sick": ("αρρωστ", "πυρετ", "πονα"),
+        "emotional": ("στεναχωρ", "αγχω", "φοβ", "πιεστηκ"),
+        "completed": ("ολοκληρ", "τελειωσ", "εγινε"),
+        "ongoing": ("συνεχιζ", "ακομα", "παραμεν"),
+        "seasonal_break": ("καλοκαιρ", "σεπτεμβρ", "το χειμωνα", "για το καλοκαιρι"),
+    }
+    for state, markers in rules.items():
+        if any(marker in normalized for marker in markers):
+            states.append(state)
+    return _dedupe_preserve_order([state for state in states if state in _STATE_MARKER_CHOICES])
+
+
+def _infer_time_scope_from_text(text: str, *, now: datetime | None = None) -> str:
+    normalized = _normalize_text(text)
+    ts = now or datetime.now()
+
+    range_match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\s*(?:to|-|εως|έως|μεχρι|μέχρι)\s*(20\d{2}-\d{2}-\d{2})\b", text)
+    if range_match:
+        return f"{range_match.group(1)}_to_{range_match.group(2)}"
+
+    exact_match = re.search(r"\b20\d{2}-\d{2}-\d{2}\b", text)
+    if exact_match:
+        return exact_match.group(0)
+
+    if "σεπτεμβρ" in normalized and ("καλοκαιρ" in normalized or "μεχρι" in normalized or "μέχρι" in normalized):
+        return f"{ts.strftime('%Y-%m-%d')}_to_{ts.year}-09-01"
+
+    if any(marker in normalized for marker in ("μεχρι", "μέχρι", "εως", "έως", "αυριο", "αύριο", "μεθαυριο", "μεθαύριο")):
+        return "ongoing"
+
+    return ts.strftime('%Y-%m-%d')
+
+
+def _infer_relation_type_from_text(text: str, state_markers: list[str]) -> str:
+    normalized = _normalize_text(text)
+    if any(marker in normalized for marker in ("διορθ", "οχι αυτο", "τελικα", "update", "correction")):
+        return "correction"
+    if any(state in state_markers for state in ("away", "returned", "tired", "better", "sick", "seasonal_break")):
+        return "state_update"
+    if any(state in state_markers for state in ("started", "stopped", "paused", "resumed", "completed")):
+        return "follow_up"
+    if any(marker in normalized for marker in ("ρουτιν", "καθε", "κάθε", "θυμιζ", "υπενθυμ")):
+        return "routine_hint"
+    return "new_fact"
+
+
+def _build_tags(candidate: dict) -> list[str]:
+    tags = [str(x).strip().lower() for x in candidate.get("tags", []) if str(x).strip()]
+    tags.extend(str(x).strip().lower() for x in candidate.get("entities", []) if str(x).strip())
+    if candidate.get("topic"):
+        tags.append(candidate["topic"])
+    if candidate.get("topic_detail"):
+        tags.append(candidate["topic_detail"])
+    tags.extend(candidate.get("state_markers", []))
+    return _dedupe_preserve_order(tags)
+
+
+def _normalize_memory_candidate(raw: dict | None, *, now: datetime | None = None) -> dict:
+    base = _empty_memory_candidate()
+    if not isinstance(raw, dict):
+        return base
+
+    base["memory_type"] = str(raw.get("memory_type", base["memory_type"])).strip() or base["memory_type"]
+    base["fact"] = str(raw.get("fact", base["fact"])).strip()
+    base["category"] = str(raw.get("category", base["category"])).strip().lower() or base["category"]
+    if not base["fact"]:
+        return base
+
+    try:
+        base["confidence"] = float(raw.get("confidence", base["confidence"]) or base["confidence"])
+    except Exception:
+        pass
+
+    base["source"] = str(raw.get("source", base["source"])).strip() or base["source"]
+    base["agent_name"] = str(raw.get("agent_name", base["agent_name"])).strip() or base["agent_name"]
+    base["reason"] = str(raw.get("reason", base["reason"])).strip() or base["reason"]
+
+    raw_tags = [str(x).strip().lower() for x in raw.get("tags", []) if str(x).strip()]
+    raw_entities = [str(x).strip() for x in raw.get("entities", []) if str(x).strip()]
+    raw_topic = str(raw.get("topic", "")).strip().lower()
+    raw_topic_detail = str(raw.get("topic_detail", "")).strip().lower()
+    raw_states = [str(x).strip().lower() for x in raw.get("state_markers", []) if str(x).strip()]
+    raw_time_scope = str(raw.get("time_scope", "")).strip()
+    raw_relation_type = str(raw.get("relation_type", "")).strip().lower()
+
+    base["entities"] = _dedupe_preserve_order(raw_entities or _extract_entities_from_text(base["fact"]))
+    base["topic"] = raw_topic if raw_topic in _TOPIC_CHOICES else _infer_topic_from_text(base["fact"], base["category"])
+    base["topic_detail"] = raw_topic_detail or _infer_topic_detail_from_text(base["fact"])
+    base["state_markers"] = _dedupe_preserve_order(
+        [state for state in raw_states if state in _STATE_MARKER_CHOICES] or _infer_state_markers_from_text(base["fact"])
+    )
+    base["time_scope"] = raw_time_scope or _infer_time_scope_from_text(base["fact"], now=now)
+    base["relation_type"] = (
+        raw_relation_type
+        if raw_relation_type in _RELATION_TYPE_CHOICES
+        else _infer_relation_type_from_text(base["fact"], base["state_markers"])
+    )
+    base["tags"] = _build_tags({**base, "tags": raw_tags})
+    return base
+
+
 def _extract_event_memory_candidate(
     user_text: str,
     ai_text: str,
@@ -230,7 +455,7 @@ def _extract_event_memory_candidate(
 
     ts = now or datetime.now()
     fact = f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, {source_text}"
-    return {
+    return _normalize_memory_candidate({
         "memory_type": "fact",
         "fact": fact,
         "category": "family" if has_family_marker else "lazaros",
@@ -238,7 +463,7 @@ def _extract_event_memory_candidate(
         "source": channel,
         "reason": "user_stated",
         "confidence": 0.85,
-    }
+    }, now=ts)
 
 
 def _extract_temporary_family_memory_candidate(
@@ -351,7 +576,7 @@ def _extract_temporary_family_memory_candidate(
 
     ts = now or datetime.now()
     fact = f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, {source_text}"
-    return {
+    return _normalize_memory_candidate({
         "memory_type": "fact",
         "fact": fact,
         "category": "family",
@@ -359,7 +584,8 @@ def _extract_temporary_family_memory_candidate(
         "source": channel,
         "reason": "user_stated",
         "confidence": 0.9,
-    }
+        "relation_type": "temporary_state",
+    }, now=ts)
 
 
 def _infer_memory_category(text: str) -> str:
@@ -459,7 +685,7 @@ def _extract_confirmed_memory_candidate(
 
     ts = now or datetime.now()
     fact = f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, {detail}"
-    return {
+    return _normalize_memory_candidate({
         "memory_type": "fact",
         "fact": fact,
         "category": category,
@@ -467,7 +693,8 @@ def _extract_confirmed_memory_candidate(
         "source": channel,
         "reason": "user_stated",
         "confidence": 0.9,
-    }
+        "relation_type": "confirmed",
+    }, now=ts)
 
 
 def _run_session_summary(channel: str = "web"):
@@ -555,29 +782,62 @@ def _run_session_summary(channel: str = "web"):
         is_summarizing = False
 
 
+def _candidate_identity_key(candidate: dict | None) -> tuple:
+    if not candidate:
+        return tuple()
+    entities = tuple(sorted(x.lower() for x in candidate.get("entities", []) if str(x).strip()))
+    topic = candidate.get("topic", "") or "other"
+    topic_detail = candidate.get("topic_detail", "") or ""
+    time_scope = candidate.get("time_scope", "") or ""
+    category = candidate.get("category", "") or "other"
+    return (category, entities, topic, topic_detail, time_scope)
+
+
+def _candidate_overlap_ratio(a: dict | None, b: dict | None) -> float:
+    if not a or not b:
+        return 0.0
+    ta = set(_normalize_text(a.get("fact", "")).split())
+    tb = set(_normalize_text(b.get("fact", "")).split())
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / min(len(ta), len(tb))
+
+
 def _same_candidate_fact(a: dict | None, b: dict | None) -> bool:
     if not a or not b:
         return False
 
-    def _normalize_text_local(t):
-        if not t: return ""
-        import unicodedata
-        normalized = unicodedata.normalize("NFD", str(t))
-        return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower().strip()
-
-    fa = _normalize_text_local(a.get("fact", ""))
-    fb = _normalize_text_local(b.get("fact", ""))
-
+    fa = _normalize_text(a.get("fact", ""))
+    fb = _normalize_text(b.get("fact", ""))
     if not fa or not fb:
         return False
-
-    if fa == fb:
+    if fa == fb or fa in fb or fb in fa:
         return True
 
-    if fa in fb or fb in fa:
-        return True
+    same_identity = _candidate_identity_key(a) == _candidate_identity_key(b)
+    same_states = set(a.get("state_markers", [])) == set(b.get("state_markers", []))
+    return same_identity and same_states and _candidate_overlap_ratio(a, b) >= 0.72
 
+
+def _candidate_has_new_information(new_candidate: dict, existing_candidate: dict) -> bool:
+    if set(new_candidate.get("state_markers", [])) - set(existing_candidate.get("state_markers", [])):
+        return True
+    if set(new_candidate.get("tags", [])) - set(existing_candidate.get("tags", [])):
+        return True
+    if new_candidate.get("relation_type") in {"follow_up", "state_update", "correction", "temporary_state"}:
+        return new_candidate.get("fact") != existing_candidate.get("fact")
     return False
+
+
+def _append_candidate_safely(selected: list[dict], candidate: dict) -> None:
+    for existing in selected:
+        if _same_candidate_fact(candidate, existing):
+            return
+        if _candidate_identity_key(candidate) == _candidate_identity_key(existing):
+            if _candidate_has_new_information(candidate, existing):
+                selected.append(candidate)
+            return
+    selected.append(candidate)
 
 # ════════════════════════════════════════════════════════════════
 # MEMORY SIFTER — "Αρχειοθέτης"
@@ -631,21 +891,10 @@ def _collect_deterministic_candidates(
         channel=channel,
     )
 
-    selected_candidates = []
-
-    # πιο ειδικό family/temporary fact κερδίζει το generic event
-    if temporary_candidate:
-        selected_candidates.append(temporary_candidate)
-    elif event_candidate:
-        selected_candidates.append(event_candidate)
-
-    # confirmed μπαίνει μόνο αν δεν είναι ουσιαστικά ίδιο με ήδη επιλεγμένο
-    if confirmed_candidate and not any(
-        _same_candidate_fact(confirmed_candidate, existing)
-        for existing in selected_candidates
-    ):
-        selected_candidates.append(confirmed_candidate)
-
+    selected_candidates: list[dict] = []
+    for candidate in (temporary_candidate, event_candidate, confirmed_candidate):
+        if candidate:
+            _append_candidate_safely(selected_candidates, _normalize_memory_candidate(candidate))
     return selected_candidates
 
 def run_memory_sifter_fast(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
@@ -742,6 +991,8 @@ def run_memory_sifter_slow(
 8. Μην αποθηκεύεις απλές απαντήσεις ευγένειας, προσωρινά drafts, αστεία χωρίς μελλοντική αξία,
    ή πληροφορίες που είναι ήδη γνωστές εκτός αν η νέα εκδοχή είναι πιο πλούσια/ακριβής.
    Για προσωρινές οικογενειακές καταστάσεις, κράτα και τη χρονική ένδειξη/παράθυρο επιστροφής αν αναφέρεται.
+   Αν το νέο fact είναι εξέλιξη ήδη υπάρχουσας κατάστασης, χρησιμοποίησε relation_type="follow_up" ή "state_update" και βάλε state_markers,
+   όχι απλό generic duplicate.
 9. ΑΠΑΓΟΡΕΥΕΤΑΙ να αποθηκεύεις ερωτήσεις του χρήστη — αν το μήνυμα είναι ερώτηση (τελειώνει με ";" ή "?"
    ή ξεκινά με "τι", "πώς", "γιατί", "πού", "ποιος", "πόσο", "πότε") → ΚΕΝΟ.
    Ειδικά αν αφορά τη λειτουργία του Αστακού, debug, logs, ή τεχνικές ερωτήσεις για το σύστημα → ΚΕΝΟ.
@@ -784,8 +1035,14 @@ def run_memory_sifter_slow(
                 return
 
         for mem in memories:
-            fact = mem.get("fact", "").strip()
-            category = mem.get("category", "lazaros")
+            candidate = _normalize_memory_candidate({
+                **mem,
+                "source": channel,
+                "agent_name": agent_name,
+                "reason": mem.get("reason", "agent_inferred"),
+            })
+            fact = candidate.get("fact", "").strip()
+            category = candidate.get("category", "lazaros")
 
             # [QUESTION GUARD]: Αν το fact είναι ερώτηση, παράκαμψε το
             _fact_body = re.sub(r"^\[USER_FACT\]:\s*", "", fact).strip()
@@ -826,7 +1083,7 @@ def run_memory_sifter_slow(
 
                 if not filename:
                     # Συνέχισε στο ChromaDB save, αλλά μην γράψεις στο photos index
-                    memory.save(memory_type="fact", fact=fact, category=category, agent_name=agent_name)
+                    memory.save(**candidate)
                     continue
 
                 file_path = os.path.join(PHOTOS_DIR, filename)
@@ -860,12 +1117,7 @@ def run_memory_sifter_slow(
                     print(f"\033[92m📸 [Index]: Η φωτογραφία {filename} αρχειοθετήθηκε επιτυχώς.\033[0m")
 
             # 3. Αποθήκευση στη ChromaDB
-            memory.save(
-                memory_type="fact",
-                fact=fact,
-                category=category,
-                agent_name=agent_name
-            )
+            memory.save(**candidate)
 
         print("\033[90m[MemorySifterSlow]: done\033[0m")
 

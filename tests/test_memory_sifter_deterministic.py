@@ -2,9 +2,29 @@ from unittest.mock import patch
 import memory.session_memory as sm
 
 
-def test_temporary_candidate_wins_over_event_candidate():
-    event_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, πήγαμε κάπου", "category": "family"}
-    temporary_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος είναι στην κατασκήνωση", "category": "family"}
+def test_temporary_and_event_both_saved_when_event_progresses_state():
+    event_candidate = {
+        "memory_type": "fact",
+        "fact": "[USER_FACT]: Στις 2026-06-17, πήγαμε να πάρουμε τον Αλέξανδρο από την κατασκήνωση",
+        "category": "family",
+        "entities": ["Αλέξανδρος"],
+        "topic": "trip",
+        "topic_detail": "camp",
+        "state_markers": ["returned"],
+        "time_scope": "2026-06-17",
+        "relation_type": "follow_up",
+    }
+    temporary_candidate = {
+        "memory_type": "fact",
+        "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος είναι στην κατασκήνωση",
+        "category": "family",
+        "entities": ["Αλέξανδρος"],
+        "topic": "trip",
+        "topic_detail": "camp",
+        "state_markers": ["away"],
+        "time_scope": "2026-06-17",
+        "relation_type": "temporary_state",
+    }
 
     with patch.object(sm, "_extract_event_memory_candidate", return_value=event_candidate), \
          patch.object(sm, "_extract_temporary_family_memory_candidate", return_value=temporary_candidate), \
@@ -15,9 +35,8 @@ def test_temporary_candidate_wins_over_event_candidate():
         mock_llm.return_value.text = "ΚΕΝΟ"
         sm.run_memory_sifter_fast("user", "ai", "TestAgent", "telegram")
 
-    assert mock_save.call_count == 1
-    saved_kwargs = mock_save.call_args.kwargs
-    assert saved_kwargs["fact"] == temporary_candidate["fact"]
+    assert mock_save.call_count == 2
+
 
 def test_confirmed_candidate_not_saved_twice_when_same_as_temporary():
     temporary_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος γυρνάει από την κατασκήνωση", "category": "family"}
@@ -36,6 +55,7 @@ def test_confirmed_candidate_not_saved_twice_when_same_as_temporary():
     saved_kwargs = mock_save.call_args.kwargs
     assert saved_kwargs["fact"] == temporary_candidate["fact"]
 
+
 def test_confirmed_candidate_not_saved_twice_with_slight_overlap():
     temporary_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος γυρνάει από την κατασκήνωση", "category": "family"}
     confirmed_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος επιστρέφει σπίτι από την κατασκήνωση", "category": "family"}
@@ -51,6 +71,7 @@ def test_confirmed_candidate_not_saved_twice_with_slight_overlap():
 
     assert mock_save.call_count == 2
     
+
 def test_confirmed_candidate_not_saved_twice_when_contained():
     temporary_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, πάμε κατασκήνωση", "category": "family"}
     confirmed_candidate = {"memory_type": "fact", "fact": "κατασκήνωση", "category": "family"}
@@ -66,22 +87,60 @@ def test_confirmed_candidate_not_saved_twice_when_contained():
 
     assert mock_save.call_count == 1
 
-def test_collect_deterministic_candidates_prefers_temporary_over_event():
-    event_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: event", "category": "family"}
-    temporary_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: temporary", "category": "family"}
+
+def test_collect_deterministic_candidates_keeps_both_when_temporary_and_event_differ():
+    event_candidate = {
+        "memory_type": "fact",
+        "fact": "[USER_FACT]: Στις 2026-06-17, πήγαμε να πάρουμε τον Αλέξανδρο από την κατασκήνωση",
+        "category": "family",
+        "entities": ["Αλέξανδρος"],
+        "topic": "trip",
+        "topic_detail": "camp",
+        "time_scope": "2026-06-17",
+        "state_markers": ["returned"],
+        "relation_type": "follow_up",
+    }
+    temporary_candidate = {
+        "memory_type": "fact",
+        "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος είναι στην κατασκήνωση",
+        "category": "family",
+        "entities": ["Αλέξανδρος"],
+        "topic": "trip",
+        "topic_detail": "camp",
+        "time_scope": "2026-06-17",
+        "state_markers": ["away"],
+        "relation_type": "temporary_state",
+    }
 
     with patch.object(sm, "_extract_event_memory_candidate", return_value=event_candidate), \
          patch.object(sm, "_extract_temporary_family_memory_candidate", return_value=temporary_candidate), \
          patch.object(sm, "_extract_confirmed_memory_candidate", return_value=None):
         selected = sm._collect_deterministic_candidates("u", "a", agent_name="x", channel="telegram")
 
-    assert len(selected) == 1
-    assert selected[0]["fact"] == "[USER_FACT]: temporary"
+    assert len(selected) == 2
+
+
+def test_normalize_memory_candidate_builds_structured_fields():
+    candidate = sm._normalize_memory_candidate({
+        "memory_type": "fact",
+        "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος γύρισε σπίτι πολύ κουρασμένος από την κατασκήνωση",
+        "category": "family",
+        "source": "telegram",
+        "agent_name": "Chat_Agent",
+    })
+
+    assert candidate["topic"] in {"trip", "health", "family"}
+    assert "returned" in candidate["state_markers"]
+    assert "tired" in candidate["state_markers"]
+    assert candidate["time_scope"]
+    assert candidate["tags"]
+
 
 def test_fact_matches_any_detects_contained_fact():
     fact = "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος γυρνάει σπίτι από την κατασκήνωση"
     seeds = ["[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος γυρνάει σπίτι"]
     assert sm._fact_matches_any(fact, seeds) is True
+
 
 def test_slow_sifter_skips_seed_duplicates():
     class MockResponse:
