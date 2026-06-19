@@ -2250,22 +2250,22 @@ def job_check_routines():
 
             placeholders = ",".join("?" * len(possible_days))
             cursor.execute(f"""
-                SELECT id, event_name, confidence, priority, conflict_group FROM routines
+                SELECT id, event_name, confidence, priority, conflict_group, time_str FROM routines
                 WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
-                AND time_str=? AND state='active'
+                AND state='active'
                 AND (last_triggered IS NULL OR last_triggered != ?)
                 ORDER BY priority DESC, CASE WHEN condition_type IS NOT NULL THEN 1 ELSE 0 END DESC, id ASC
-            """, (*possible_days, target_time_str, today_str))
+            """, (*possible_days, today_str))
 
             # ── Anti-Spam: φιλτράρισμα με per-routine cooldown ──────────
             from memory.routine_db import (
                 get_routine_notify_info, mark_routine_notified,
                 save_pending_confirmation, get_routine_muted_until,
                 get_routine_schedule_meta, is_routine_temporarily_inactive_meta,
-                get_routine_condition,
+                get_routine_conditions,
             )
             from services.routine_context import build_runtime_routine_context
-            from services.routine_conditions import evaluate_routine_condition
+            from services.routine_conditions import evaluate_routine_conditions
             due_routines = []
             triggered_conflict_groups = set()
             rt_context = build_runtime_routine_context(now=now)
@@ -2274,7 +2274,26 @@ def job_check_routines():
                 parts = name.lower().split()
                 return parts[0] if parts else name.lower()
 
-            for r_id, event_name, confidence, priority, db_conflict_group in cursor.fetchall():
+            for r_id, event_name, confidence, priority, db_conflict_group, time_str in cursor.fetchall():
+                # --- NEW WINDOW LOGIC TO PREVENT TIME LIMBO ---
+                try:
+                    h, m = map(int, time_str.split(':'))
+                    routine_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                except ValueError:
+                    continue
+                
+                time_diff_mins = (routine_dt - now).total_seconds() / 60.0
+                
+                # Handle midnight wrap-around (if routine is past midnight but matches day of week)
+                if time_diff_mins < -1000:
+                    time_diff_mins += 24 * 60
+                    
+                # We trigger if the routine is anywhere between 0 and 30 minutes in the future.
+                # Because we update the state to 'trigger_pending', it won't spam.
+                # If bot was offline and we missed the exact 30-min mark, it catches it now!
+                if not (0 <= time_diff_mins <= 30):
+                    continue
+
                 conflict_group = db_conflict_group if db_conflict_group else _get_conflict_group(event_name)
                 
                 if conflict_group in triggered_conflict_groups:
@@ -2294,24 +2313,31 @@ def job_check_routines():
                     print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' inactive ({inactive_reason}) — skipped")
                     continue
                 # ── Phase 3C: Conditions Evaluator ───────────────────────
-                cond_data = get_routine_condition(r_id)
-                if cond_data and cond_data.get("condition_type"):
-                    cond_result = evaluate_routine_condition(cond_data, rt_context, now=now)
+                cond_list = get_routine_conditions(r_id)
+                if cond_list:
+                    cond_result = evaluate_routine_conditions(cond_list, rt_context, now=now)
                     if not cond_result.get("allowed", True):
                         log_event("routines", "routine_condition_blocked",
                                   routine_id=r_id, event=event_name,
-                                  condition_type=cond_data.get("condition_type"),
-                                  condition_mode=cond_data.get("condition_mode"),
-                                  reason=cond_result.get("reason"),
+                                  failed_count=cond_result.get("failed_count", 1),
+                                  reason=str(cond_result.get("results")),
                                   context_snapshot=rt_context)
-                        print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('reason')}) — skipped")
-                        continue
+                        
+                        import random
+                        # 30% chance for a Sentimental Override (approx 2 times a week for a daily routine)
+                        if random.random() < 0.30:
+                            blocked_reason = ", ".join(str(r.get("reason", "blocked")) for r in cond_result.get("results", []) if not r.get("allowed"))
+                            override_name = f"{event_name} [ΑΚΥΡΩΝΕΤΑΙ ΣΗΜΕΡΑ ΛΟΓΩ: {blocked_reason}]"
+                            print(f"\U0001f496 [job_check_routines]: #{r_id} '{event_name}' blocked but triggering sentimental override!")
+                            # Fall through to due_routines to let the LLM generate a [CONTEXT_SKIP]
+                            event_name = override_name
+                        else:
+                            print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('failed_count')} failed) — skipped")
+                            continue
                     else:
                         log_event("routines", "routine_condition_allowed",
                                   routine_id=r_id, event=event_name,
-                                  condition_type=cond_data.get("condition_type"),
-                                  condition_mode=cond_data.get("condition_mode"),
-                                  reason=cond_result.get("reason"))
+                                  reason="All conditions passed")
 
                 # ── muted_until check ────────────────────────────────────
                 muted_until = get_routine_muted_until(r_id)
