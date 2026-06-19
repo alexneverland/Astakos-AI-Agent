@@ -5,8 +5,35 @@ import os
 import signal
 from watchfiles import watch
 
+# Σιγουρεύουμε UTF-8 στο stdout/stderr — αν αυτό τρέξει μέσα από κονσόλα
+# χωρίς chcp 65001 (π.χ. απευθείας, όχι μέσω start_astakos.bat), τα ελληνικά
+# στα prints πιο κάτω θα έσκαγαν με UnicodeEncodeError πάνω στο cp1252.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 WATCH_DIRS = ["clients", "core", "tools", "memory", "services"]
 SHUTDOWN_TIMEOUT_SECONDS = 20
+LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_telegram.lock")
+
+# ────────────────────────────────────────────────────────────────
+# SINGLE-INSTANCE LOCK
+# Εμποδίζει να τρέξουν 2 watchdogs ταυτόχρονα (διπλό polling στο
+# ίδιο Telegram token → conflict / διπλά reminders). Το OS κρατάει
+# το lock όσο ζει η διαδικασία και το ελευθερώνει αυτόματα ακόμα
+# και σε crash/kill — δεν χρειάζεται manual cleanup ενός pidfile.
+# ────────────────────────────────────────────────────────────────
+_lock_file = None
+if os.name == "nt":
+    import msvcrt
+    _lock_file = open(LOCK_PATH, "w")
+    try:
+        msvcrt.locking(_lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        print("\033[91m[Watchdog]: Τρέχει ήδη ένα instance του run_telegram.py — έξοδος.\033[0m")
+        sys.exit(1)
 
 
 def stop_process(process):
