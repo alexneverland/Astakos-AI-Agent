@@ -9,6 +9,7 @@ import json
 import uuid
 import hashlib
 import threading
+import time
 from datetime import datetime
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), "..", "logs", "events")
@@ -16,6 +17,52 @@ LOGS_DIR = os.path.join(os.path.dirname(__file__), "..", "logs", "events")
 # Lock για thread-safety: ο scheduler τρέχει πολλά jobs παράλληλα
 # και το log_event καλείται από πολλά threads ταυτόχρονα.
 _log_lock = threading.Lock()
+
+# ────────────────────────────────────────────────────────────────
+# CROSS-PROCESS LOCK
+# Το _log_lock πιο πάνω προστατεύει μόνο threads ΜΕΣΑ στο ίδιο process.
+# Όμως ο web server (api/server.py, uvicorn) ΚΑΙ το telegram bot τρέχουν
+# ταυτόχρονα ως 2 ξεχωριστά OS processes και γράφουν στο ΙΔΙΟ daily JSON
+# αρχείο — χωρίς cross-process lock, το os.replace των δύο μπορεί να
+# τρακάρει (WinError 5) γιατί κανείς δεν βλέπει το lock του άλλου.
+# Λύση: msvcrt file lock σε ξεχωριστό sentinel αρχείο (ίδια τεχνική με
+# το run_telegram.lock) — σειριοποιεί τα log_event() calls μεταξύ
+# processes, χωρίς να μπλέκεται με το ίδιο το atomic-write αρχείο.
+# ────────────────────────────────────────────────────────────────
+
+def _acquire_cross_process_lock():
+    if os.name != "nt":
+        return None
+    try:
+        import msvcrt
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        lock_path = os.path.join(LOGS_DIR, ".event_log.lock")
+        f = open(lock_path, "w")
+        for _attempt in range(40):  # έως ~2s αναμονή σε βαριά αντιπαλότητα
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                return f
+            except OSError:
+                time.sleep(0.05)
+        f.close()
+        return None  # δεν καταφέραμε lock — προχωράμε χωρίς (το retry+fallback πιο κάτω παραμένει safety net)
+    except Exception:
+        return None
+
+
+def _release_cross_process_lock(f):
+    if f is None:
+        return
+    try:
+        import msvcrt
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+    except Exception:
+        pass
+    try:
+        f.close()
+    except Exception:
+        pass
 
 # ────────────────────────────────────────────────────────────────
 # EVENT LOGGING
@@ -48,61 +95,62 @@ def log_event(job: str, action: str, **kwargs):
         }
 
         with _log_lock:
-            entries = []
-            if os.path.exists(log_file):
-                try:
-                    with open(log_file, "r", encoding="utf-8") as f:
-                        entries = json.load(f)
-                except Exception:
-                    entries = []   # corrupted → ξεκινάμε φρέσκο για σήμερα
+            _cross_lock = _acquire_cross_process_lock()
+            try:
+                entries = []
+                if os.path.exists(log_file):
+                    try:
+                        with open(log_file, "r", encoding="utf-8") as f:
+                            entries = json.load(f)
+                    except Exception:
+                        entries = []   # corrupted → ξεκινάμε φρέσκο για σήμερα
 
-            entries.append(entry)
+                entries.append(entry)
 
-            # Atomic write: .tmp → fsync → os.replace
-            # Αν κοπεί το ρεύμα/crash πριν το replace: παλιό αρχείο ανέπαφο.
-            # Αν κοπεί μετά το replace: νέο αρχείο πλήρες.
-            tmp_file = log_file + ".tmp"
-            with open(tmp_file, "w", encoding="utf-8") as f:
-                json.dump(entries, f, ensure_ascii=False, indent=2)
-                f.flush()
-                try:
-                    os.fsync(f.fileno())
-                except OSError:
-                    pass  # fsync δεν υποστηρίζεται παντού — flush αρκεί
-            # Windows Defender / antivirus μπορεί να κλειδώσει το αρχείο
-            # για λίγα ms κατά τη σάρωση → retry με backoff.
-            # WinError 5 (PermissionError) μπορεί να εμφανιστεί κατά τα
-            # watchdog restarts όταν τρέχουν 2 processes ταυτόχρονα.
-            for _attempt in range(5):
-                try:
-                    os.replace(tmp_file, log_file)
-                    break
-                except OSError:
-                    if _attempt < 4:
-                        import time as _time
-                        _time.sleep(0.05 * (_attempt + 1))
-                    else:
-                        # WinError 5: cross-process contention (watchdog restart).
-                        # Fallback: αναμένουμε 500ms και γράφουμε απευθείας.
-                        # Non-atomic αλλά το event δεν χάνεται σιωπηλά.
-                        import time as _time
-                        _time.sleep(0.5)
-                        _written = False
-                        try:
-                            with open(log_file, "w", encoding="utf-8") as _f:
-                                json.dump(entries, _f, ensure_ascii=False, indent=2)
-                            _written = True
-                            print("⚠️ [event_log]: os.replace WinError 5 → direct write fallback OK")
-                        except Exception as _fe:
-                            print(f"⚠️ [event_log]: direct write also failed: {_fe}")
-                        finally:
-                            try:
-                                os.unlink(tmp_file)
-                            except OSError:
-                                pass
-                        if not _written:
-                            raise
+                # Atomic write: .tmp → fsync → os.replace
+                # Αν κοπεί το ρεύμα/crash πριν το replace: παλιό αρχείο ανέπαφο.
+                # Αν κοπεί μετά το replace: νέο αρχείο πλήρες.
+                tmp_file = log_file + ".tmp"
+                with open(tmp_file, "w", encoding="utf-8") as f:
+                    json.dump(entries, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    try:
+                        os.fsync(f.fileno())
+                    except OSError:
+                        pass  # fsync δεν υποστηρίζεται παντού — flush αρκεί
+                # Με το cross-process lock πιο πάνω, ο web server και το
+                # telegram bot δεν τρακάρουν πλέον στο ίδιο αρχείο — αυτό
+                # το retry+fallback παραμένει μόνο σαν safety net για
+                # antivirus locks ή lock acquisition που απέτυχε.
+                for _attempt in range(5):
+                    try:
+                        os.replace(tmp_file, log_file)
                         break
+                    except OSError:
+                        if _attempt < 4:
+                            time.sleep(0.05 * (_attempt + 1))
+                        else:
+                            # Fallback: αναμένουμε 500ms και γράφουμε απευθείας.
+                            # Non-atomic αλλά το event δεν χάνεται σιωπηλά.
+                            time.sleep(0.5)
+                            _written = False
+                            try:
+                                with open(log_file, "w", encoding="utf-8") as _f:
+                                    json.dump(entries, _f, ensure_ascii=False, indent=2)
+                                _written = True
+                                print("⚠️ [event_log]: os.replace WinError 5 → direct write fallback OK")
+                            except Exception as _fe:
+                                print(f"⚠️ [event_log]: direct write also failed: {_fe}")
+                            finally:
+                                try:
+                                    os.unlink(tmp_file)
+                                except OSError:
+                                    pass
+                            if not _written:
+                                raise
+                            break
+            finally:
+                _release_cross_process_lock(_cross_lock)
 
     except Exception as e:
         print(f"⚠️ [event_log]: {e}")
