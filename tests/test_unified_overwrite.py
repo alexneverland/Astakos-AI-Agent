@@ -260,3 +260,68 @@ def test_close_unrelated_family_fact_adds_alongside_instead_of_overwrite(tmp_pat
     mock_collection.delete.assert_not_called()
     mock_vs.add_texts.assert_called_once()
     assert db_after["family"] == [old_content, new_fact]
+
+
+# ──────────────────────────────────────────────────────────────────
+# (d) [MASTRO-FIX] High overlap (>=0.55) ΑΛΛΑ "επεισοδιακό" — διαφορετική
+#     ρητή ημερομηνία μέσα στο ίδιο το κείμενο -> add_alongside, ΟΧΙ
+#     σιωπηλή απώλεια. Πριν το fix, το overlap>=0.55 οδηγούσε ΠΑΝΤΑ σε
+#     keep_old, ανεξαρτήτως episodic-ness — αυτό ήταν το bug.
+# ──────────────────────────────────────────────────────────────────
+
+def test_high_overlap_with_differing_literal_dates_adds_alongside(tmp_path):
+    old_content = "[USER_FACT]: Στις 2026-05-20 ο Αλέξανδρος πήγε βόλτα στο πάρκο."
+    new_fact = "[USER_FACT]: Στις 2026-06-17 ο Αλέξανδρος πήγε βόλτα στο πάρκο."
+
+    decision = {
+        "keep_old": True, "looks_like_correction": False, "stale": False,
+        "old_age_days": 28, "new_richness": 2.0, "old_richness": 2.0, "much_longer": False,
+    }
+    same_cat = _make_same_cat_result("old-id-park", old_content, 0.05)
+    profile_seed = {"family": [old_content]}
+
+    dup_doc = MagicMock()
+    dup_doc.metadata = {"category": "family"}
+    dup_doc.page_content = old_content
+
+    result, mock_collection, mock_vs, db_after = _run_save_fact(
+        tmp_path, new_fact, "family", decision, same_cat, profile_seed=profile_seed,
+        dup_results=[(dup_doc, 0.05)],
+    )
+
+    # Ίδιο λεξιλόγιο (overlap=1.0), ΑΛΛΑ διαφορετική ρητή ημερομηνία μέσα στο
+    # κείμενο -> διαφορετική μέρα/περιστατικό, όχι απλή επανάληψη ενός πάγιου
+    # fact. Πρέπει να κρατηθούν ΚΑΙ ΤΑ ΔΥΟ.
+    assert result is True
+    mock_collection.delete.assert_not_called()
+    mock_vs.add_texts.assert_called_once()
+    assert db_after["family"] == [old_content, new_fact]
+
+
+# ──────────────────────────────────────────────────────────────────
+# (e) High overlap, ΧΩΡΙΣ καμία ένδειξη επεισοδιακού (καμία ημερομηνία,
+#     καμία state_marker/relation_type διαφορά) -> keep_old παραμένει —
+#     η ομαδοποίηση πάγιων/timeless facts (π.χ. προτιμήσεις) ΔΕΝ σπάει.
+# ──────────────────────────────────────────────────────────────────
+
+def test_high_overlap_static_preference_still_keeps_old(tmp_path):
+    old_content = "[USER_FACT]: Ο Αλέξανδρος αγαπάει τις φακές για φαγητό."
+    new_fact = "[USER_FACT]: Ο Αλέξανδρος αγαπάει πολύ τις φακές."
+
+    decision = {
+        "keep_old": True, "looks_like_correction": False, "stale": False,
+        "old_age_days": 5, "new_richness": 1.0, "old_richness": 1.0, "much_longer": False,
+    }
+    same_cat = _make_same_cat_result("old-id-fakes", old_content, 0.05)
+    profile_seed = {"family": [old_content]}
+
+    result, mock_collection, mock_vs, db_after = _run_save_fact(
+        tmp_path, new_fact, "family", decision, same_cat, profile_seed=profile_seed,
+    )
+
+    # Ίδιο πάγιο γούστο ξαναδιατυπωμένο, καμία ένδειξη νέου περιστατικού -> η
+    # νέα ΔΕΝ αποθηκεύεται πουθενά, ομαδοποιείται με την υπάρχουσα (όπως πριν).
+    assert result is False
+    mock_collection.delete.assert_not_called()
+    mock_vs.add_texts.assert_not_called()
+    assert db_after == profile_seed

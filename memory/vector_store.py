@@ -8,7 +8,9 @@
 import os
 import json
 import threading
+import time
 import uuid
+import contextlib
 from datetime import datetime
 import sqlite3
 from langchain_chroma import Chroma
@@ -47,11 +49,92 @@ def _audit_log(op: str, **kwargs):
 vector_lock = threading.Lock()
 memory_lock = threading.Lock()
 
+# ================================================================
+# CROSS-PROCESS LOCK
+# Same pattern as memory/event_log.py: vector_lock/memory_lock only
+# serialize threads inside ONE process. api/server.py (web) and
+# clients/telegram_bot.py run as 2 separate OS processes and both
+# write to the same ChromaDB persist_directory - without a
+# cross-process lock, concurrent writes from the two processes could
+# race against the same SQLite-backed Chroma store.
+# ================================================================
+
+def _acquire_cross_process_lock():
+    if os.name != "nt":
+        return None
+    try:
+        import msvcrt
+        os.makedirs(CHROMA_DB_DIR, exist_ok=True)
+        lock_path = os.path.join(CHROMA_DB_DIR, ".vector_store.lock")
+        f = open(lock_path, "w")
+        for _attempt in range(40):  # ~2s max before giving up
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                return f
+            except OSError:
+                time.sleep(0.05)
+        f.close()
+        return None  # could not get the lock - proceed anyway (in-process lock is still a safety net)
+    except Exception:
+        return None
+
+
+def _release_cross_process_lock(f):
+    if f is None:
+        return
+    try:
+        import msvcrt
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+    except Exception:
+        pass
+    try:
+        f.close()
+    except Exception:
+        pass
+
+
+@contextlib.contextmanager
+def _cross_process_lock():
+    f = _acquire_cross_process_lock()
+    try:
+        yield
+    finally:
+        _release_cross_process_lock(f)
+
+
 vector_store = Chroma(
     collection_name="astakos_long_term",
     embedding_function=embeddings,
     persist_directory=CHROMA_DB_DIR
 )
+
+
+def _json_meta_list(values) -> str:
+    if not values:
+        return "[]"
+    try:
+        return json.dumps(list(values), ensure_ascii=False)
+    except Exception:
+        return "[]"
+
+
+def _ensure_profile_fact_schema(cursor) -> None:
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS profile_facts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            fact TEXT NOT NULL,
+            photo_path TEXT,
+            date TEXT,
+            metadata_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("PRAGMA table_info(profile_facts)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if "metadata_json" not in cols:
+        cursor.execute("ALTER TABLE profile_facts ADD COLUMN metadata_json TEXT")
 
 
 def is_semantically_duplicate(new_text: str, existing_list: list, threshold: float = 0.88) -> bool:
@@ -201,6 +284,55 @@ def memory_overlap_ratio(new_fact: str, old_content: str) -> float:
     return len(new_tokens & old_tokens) / min(len(new_tokens), len(old_tokens))
 
 
+def _first_literal_date(text: str) -> str | None:
+    """Επιστρέφει την πρώτη ρητή ημερομηνία YYYY-MM-DD μέσα στο ίδιο το κείμενο
+    (π.χ. "Στις 2026-06-17, ..."). Σκόπιμα ΔΕΝ διαβάζει metadata — οι deterministic
+    extractors στο session_memory.py προτάσσουν πάντα αυτή τη μορφή στο κείμενο,
+    άρα είναι πιο αξιόπιστο σήμα από το metadata time_scope (που έχει default σε
+    "σήμερα" ακόμα και για timeless facts χωρίς καμία ρητή ημερομηνία)."""
+    import re
+    match = re.search(r"\b(19|20)\d{2}-\d{2}-\d{2}\b", str(text))
+    return match.group(0) if match else None
+
+
+def memory_looks_episodic(
+    new_fact: str,
+    old_content: str,
+    *,
+    new_relation_type: str = "",
+    old_relation_type: str = "",
+    new_state_markers: list | None = None,
+    old_state_markers: list | None = None,
+) -> bool:
+    """True αν το νέο fact πιθανότατα περιγράφει ΔΙΑΦΟΡΕΤΙΚΟ περιστατικό/μέρα ή
+    εξέλιξη κατάστασης σε σχέση με το παλιό — όχι απλή επανάληψη ενός
+    timeless/static fact (π.χ. πάγια προτίμηση). Σε αυτή την περίπτωση το
+    overlap-based dedup δεν πρέπει να σβήσει σιωπηλά το νέο fact μόνο επειδή
+    μοιράζεται λεξιλόγιο με ένα παλιότερο, άσχετο-ως-προς-τη-μέρα fact.
+
+    Σήματα, με σειρά προτεραιότητας:
+      1. relation_type δηλώνει ρητά εξέλιξη κατάστασης (follow_up/state_update/
+         temporary_state) — σχεδιαστικά ΠΟΤΕ απλή επανάληψη.
+      2. state_markers στο νέο fact (started/stopped/away/returned/...) —
+         συγκεκριμένο περιστατικό/αλλαγή κατάστασης, όχι πάγια δήλωση.
+      3. Ρητή, διαφορετική ημερομηνία μέσα στο ίδιο το κείμενο και των δύο
+         facts (π.χ. "Στις 2026-06-13" vs "Στις 2026-05-20") — δύο ξεχωριστές
+         μέρες/περιστατικά, όχι το ίδιο γεγονός ξαναδιατυπωμένο.
+    """
+    if str(new_relation_type or "").strip() in ("follow_up", "state_update", "temporary_state"):
+        return True
+
+    if new_state_markers:
+        return True
+
+    new_date = _first_literal_date(new_fact)
+    old_date = _first_literal_date(old_content)
+    if new_date and old_date and new_date != old_date:
+        return True
+
+    return False
+
+
 def decide_memory_storage_action(
     decision: dict,
     new_fact: str,
@@ -208,18 +340,40 @@ def decide_memory_storage_action(
     *,
     distance: float | None,
     duplicate_overlap: float = 0.55,
+    new_relation_type: str = "",
+    old_relation_type: str = "",
+    new_state_markers: list | None = None,
+    old_state_markers: list | None = None,
 ) -> dict:
     """Choose keep/overwrite/add-alongside after a close same-category match.
 
     Embedding distance alone is too broad for personal/family memories: two
     different family events can be close enough to look related. Only explicit
     corrections are allowed to delete old memories automatically.
+
+    [MASTRO-FIX]: Το παλιό overlap>=duplicate_overlap -> "keep_old" έσβηνε
+    σιωπηλά ΚΑΘΕ νέο fact που μοιραζόταν λεξιλόγιο με ένα παλιότερο, ΠΡΙΝ καν
+    συγκριθεί η λεπτομέρεια (richness) — πρόβλημα ειδικά για κοντά, επαναλαμβανόμενα
+    οικογενειακά γεγονότα (π.χ. βόλτες στο πάρκο), που χάνονταν χωρίς ίχνος.
+    Τώρα ελέγχουμε πρώτα αν το ζευγάρι "μοιάζει επεισοδιακό" (memory_looks_episodic,
+    βασισμένο στα ήδη υπάρχοντα relation_type/state_markers metadata + ρητή
+    ημερομηνία στο κείμενο) — αν ναι, κρατάμε ΚΑΙ ΤΑ ΔΥΟ (add_alongside) ακόμα
+    και με υψηλό overlap. Το keep_old/ομαδοποίηση εξακολουθεί να ισχύει κανονικά
+    για πάγια/timeless facts που απλά ξαναδιατυπώθηκαν.
     """
     overlap = memory_overlap_ratio(new_fact, old_content)
+    episodic = memory_looks_episodic(
+        new_fact,
+        old_content,
+        new_relation_type=new_relation_type,
+        old_relation_type=old_relation_type,
+        new_state_markers=new_state_markers,
+        old_state_markers=old_state_markers,
+    )
     if decision.get("looks_like_correction"):
         action = "overwrite"
     elif overlap >= duplicate_overlap:
-        action = "keep_old"
+        action = "add_alongside" if episodic else "keep_old"
     elif decision.get("keep_old") and float(decision.get("new_richness") or 0) < 1.5:
         action = "keep_old"
     else:
@@ -229,6 +383,7 @@ def decide_memory_storage_action(
         "action": action,
         "overlap": overlap,
         "distance": distance,
+        "episodic": episodic,
     }
 
 
@@ -268,7 +423,7 @@ class AstakosMemoryManager:
     """Κεντρικός Memory Manager — το ΕΝΑ και ΜΟΝΑΔΙΚΟ σημείο εγγραφής."""
 
     def save(self, memory_type: str, **kwargs):
-        with vector_lock, memory_lock:
+        with vector_lock, memory_lock, _cross_process_lock():
             try:
                 if memory_type == "fact":
                     return self._save_fact(**kwargs)
@@ -305,11 +460,35 @@ class AstakosMemoryManager:
         data.append({"tag": new_tags, "time": datetime.now().strftime("%H:%M")})
         data = data[-15:]
 
-        with open(WORKING_MEMORY_FILE, "w", encoding="utf-8") as f:
+        # Atomic write: .tmp -> fsync -> os.replace (no partial/corrupted JSON on crash mid-write)
+        tmp_file = WORKING_MEMORY_FILE + ".tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        os.replace(tmp_file, WORKING_MEMORY_FILE)
         return True
 
-    def _save_fact(self, fact: str, category: str, agent_name: str, photo_path: str = None, source: str = "unknown", reason: str = "agent_inferred", confidence: float = 0.7):
+    def _save_fact(
+        self,
+        fact: str,
+        category: str,
+        agent_name: str,
+        photo_path: str = None,
+        source: str = "unknown",
+        reason: str = "agent_inferred",
+        confidence: float = 0.7,
+        tags: list[str] | None = None,
+        entities: list[str] | None = None,
+        topic: str = "",
+        topic_detail: str = "",
+        state_markers: list[str] | None = None,
+        time_scope: str = "",
+        relation_type: str = "",
+    ):
         from config import PROFILE_DB
 
         # ── Threshold ανά τύπο fact ──────────────────────────────
@@ -384,11 +563,19 @@ class AstakosMemoryManager:
                     old_meta,
                     new_confidence=confidence,
                 )
+                try:
+                    old_state_markers = json.loads((old_meta or {}).get("state_markers") or "[]")
+                except Exception:
+                    old_state_markers = []
                 storage = decide_memory_storage_action(
                     decision,
                     fact,
                     old_content,
                     distance=dist,
+                    new_relation_type=relation_type,
+                    old_relation_type=(old_meta or {}).get("relation_type") or "",
+                    new_state_markers=state_markers,
+                    old_state_markers=old_state_markers,
                 )
 
                 if storage["action"] == "keep_old":
@@ -413,12 +600,14 @@ class AstakosMemoryManager:
                     add_alongside_old_text = old_content
                     print(
                         f"\033[90m[MemoryManager]: Add alongside close memory "
-                        f"(dist={dist:.3f}, overlap={storage['overlap']:.2f}) - keeping both.\033[0m"
+                        f"(dist={dist:.3f}, overlap={storage['overlap']:.2f}, "
+                        f"episodic={storage.get('episodic', False)}) - keeping both.\033[0m"
                     )
                     _audit_log("add_alongside", category=category,
                                fact=str(fact)[:100], old=str(old_content)[:100],
                                distance=round(float(dist), 3) if dist is not None else None,
-                               overlap=round(float(storage["overlap"]), 3))
+                               overlap=round(float(storage["overlap"]), 3),
+                               episodic=bool(storage.get("episodic", False)))
                 else:
                     try:
                         vector_store._collection.delete(ids=[old_id])
@@ -470,6 +659,9 @@ class AstakosMemoryManager:
         else:
             _importance = 6
 
+        tags = tags or []
+        entities = entities or []
+        state_markers = state_markers or []
         now_ts = datetime.now().timestamp()
         metadata = {
             "category": category, "agent": agent_name,
@@ -480,6 +672,13 @@ class AstakosMemoryManager:
             "confidence": confidence,
             "source": source,
             "reason": reason,
+            "tags": _json_meta_list(tags),
+            "entities": _json_meta_list(entities),
+            "topic": topic or "",
+            "topic_detail": topic_detail or "",
+            "state_markers": _json_meta_list(state_markers),
+            "time_scope": time_scope or "",
+            "relation_type": relation_type or "",
         }
         if photo_path:
             if not os.path.isabs(photo_path):
@@ -487,8 +686,21 @@ class AstakosMemoryManager:
             metadata["photo_path"] = photo_path
 
         vector_store.add_texts([fact], metadatas=[metadata])
-        _audit_log("add", category=category, fact=str(fact)[:100],
-                   importance=_importance, confidence=confidence, source=source)
+        _audit_log(
+            "add",
+            category=category,
+            fact=str(fact)[:100],
+            importance=_importance,
+            confidence=confidence,
+            source=source,
+            tags=tags,
+            entities=entities,
+            topic=topic or "",
+            topic_detail=topic_detail or "",
+            state_markers=state_markers,
+            time_scope=time_scope or "",
+            relation_type=relation_type or "",
+        )
 
 # 4. Αποθήκευση DB Profile — με έξυπνο OVERWRITE
         if category != "photos":
@@ -497,31 +709,35 @@ class AstakosMemoryManager:
             try:
                 conn = sqlite3.connect(PROFILE_DB)
                 c = conn.cursor()
-                c.execute('''
-                    CREATE TABLE IF NOT EXISTS profile_facts (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        category TEXT NOT NULL,
-                        fact TEXT NOT NULL,
-                        photo_path TEXT,
-                        date TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                ''')
-                
+                _ensure_profile_fact_schema(c)
+
                 date_str = datetime.now().strftime("%Y-%m-%d")
+                profile_metadata_json = json.dumps({
+                    "tags": tags,
+                    "entities": entities,
+                    "topic": topic or "",
+                    "topic_detail": topic_detail or "",
+                    "state_markers": state_markers,
+                    "time_scope": time_scope or "",
+                    "relation_type": relation_type or "",
+                    "confidence": confidence,
+                    "source": source,
+                    "reason": reason,
+                    "agent_name": agent_name,
+                }, ensure_ascii=False)
                 
                 if replace_old_fact_text is not None:
                     c.execute("SELECT id FROM profile_facts WHERE category=? AND fact=?", (category, replace_old_fact_text))
                     row = c.fetchone()
                     if row:
                         print(f"\033[94m[DB Profile]: Αντικατάσταση παλιάς εγγραφής (ίδια απόφαση με Chroma)\033[0m")
-                        c.execute("UPDATE profile_facts SET fact=?, photo_path=?, date=?, created_at=CURRENT_TIMESTAMP WHERE id=?", (fact, photo_path, date_str, row[0]))
+                        c.execute("UPDATE profile_facts SET fact=?, photo_path=?, date=?, metadata_json=?, created_at=CURRENT_TIMESTAMP WHERE id=?", (fact, photo_path, date_str, profile_metadata_json, row[0]))
                     else:
                         print(f"\033[93m[DB Profile]: Δεν βρέθηκε αντίστοιχη παλιά εγγραφή για αντικατάσταση — προσθήκη νέας.\033[0m")
-                        c.execute("INSERT INTO profile_facts (category, fact, photo_path, date) VALUES (?, ?, ?, ?)", (category, fact, photo_path, date_str))
+                        c.execute("INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) VALUES (?, ?, ?, ?, ?)", (category, fact, photo_path, date_str, profile_metadata_json))
                 else:
                     print(f"\033[92m[DB Profile]: Νέα εγγραφή προστέθηκε.\033[0m")
-                    c.execute("INSERT INTO profile_facts (category, fact, photo_path, date) VALUES (?, ?, ?, ?)", (category, fact, photo_path, date_str))
+                    c.execute("INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) VALUES (?, ?, ?, ?, ?)", (category, fact, photo_path, date_str, profile_metadata_json))
                 
                 conn.commit()
             except Exception as db_err:
@@ -684,7 +900,7 @@ def bump_retrieval_count(doc_ids: list[str]):
     if not doc_ids:
         return
     try:
-        with vector_lock:
+        with vector_lock, _cross_process_lock():
             existing = vector_store._collection.get(ids=doc_ids, include=["metadatas", "documents"])
             if not existing["ids"]:
                 return
@@ -739,7 +955,7 @@ def save_photo_to_index(file_path: str, analysis: str, caption: str = ""):
 def save_goal(project: str, description: str, status: str = "active") -> bool:
     """Αποθηκεύει ή ενημερώνει goal. Κάνει overwrite αν υπάρχει ήδη."""
     try:
-        with vector_lock:
+        with vector_lock, _cross_process_lock():
             existing = vector_store._collection.get(where={"category": "goal", "project": project})
             if existing["ids"]:
                 vector_store._collection.delete(ids=existing["ids"])
@@ -762,7 +978,7 @@ def save_goal(project: str, description: str, status: str = "active") -> bool:
 def update_goal_status(project: str, status: str) -> bool:
     """Αλλάζει το status ενός goal."""
     try:
-        with vector_lock:
+        with vector_lock, _cross_process_lock():
             existing = vector_store._collection.get(where={"category": "goal", "project": project})
             if not existing["ids"]:
                 return False
@@ -780,7 +996,7 @@ def update_goal_status(project: str, status: str) -> bool:
 def get_active_goals() -> list[dict]:
     """Επιστρέφει active/paused goals."""
     try:
-        with vector_lock:
+        with vector_lock, _cross_process_lock():
             results = vector_store._collection.get(where={"category": "goal"})
         goals = []
         for doc, meta in zip(results.get("documents", []), results.get("metadatas", [])):
