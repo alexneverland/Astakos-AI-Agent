@@ -12,6 +12,11 @@ from datetime import datetime
 import unicodedata
 from memory.vector_store import memory
 from services.gemini import safe_gemini_call
+from memory.family_arc_resolution import (
+    _same_family_arc,
+    _decide_family_arc_resolution,
+    _pick_richer_candidate,
+)
 import re
 from core.utils import clean_message
 from core.event_bus import bus
@@ -793,6 +798,19 @@ def _candidate_identity_key(candidate: dict | None) -> tuple:
     return (category, entities, topic, topic_detail, time_scope)
 
 
+def _resolve_family_candidate_conflict(existing_candidate: dict, new_candidate: dict):
+    decision = _decide_family_arc_resolution(existing_candidate, new_candidate)
+
+    if decision == "skip_exact_duplicate":
+        return existing_candidate, "skip"
+
+    if decision == "merge_enrich_existing":
+        richer = _pick_richer_candidate(existing_candidate, new_candidate)
+        return richer, "merge"
+
+    return [existing_candidate, new_candidate], "add_both"
+
+
 _RELATION_TYPE_RANK = {
     "new_fact": 1,
     "confirmed": 2,
@@ -977,10 +995,64 @@ def _collect_deterministic_candidates(
         channel=channel,
     )
 
-    selected_candidates: list[dict] = []
+    resolved_candidates = []
+
     for candidate in (temporary_candidate, event_candidate, confirmed_candidate):
-        if candidate:
-            _append_candidate_safely(selected_candidates, _normalize_memory_candidate(candidate))
+        if not candidate:
+            continue
+            
+        cand_norm = _normalize_memory_candidate(candidate)
+
+        if not resolved_candidates:
+            resolved_candidates.append(cand_norm)
+            continue
+
+        handled = False
+        next_resolved = []
+
+        for existing in resolved_candidates:
+            if (
+                str(existing.get("category") or "").lower() == "family"
+                and str(cand_norm.get("category") or "").lower() == "family"
+            ):
+                result, mode = _resolve_family_candidate_conflict(existing, cand_norm)
+
+                if mode == "skip":
+                    next_resolved.append(existing)
+                    handled = True
+                elif mode == "merge":
+                    next_resolved.append(result)
+                    handled = True
+                elif mode == "add_both":
+                    next_resolved.append(existing)
+                    next_resolved.append(cand_norm)
+                    handled = True
+                else:
+                    next_resolved.append(existing)
+            else:
+                next_resolved.append(existing)
+
+        if not handled:
+            next_resolved.append(cand_norm)
+
+        # dedupe by object identity / fact text if needed
+        resolved_candidates = []
+        seen = set()
+        for item in next_resolved:
+            key = (
+                str(item.get("category") or ""),
+                str(item.get("relation_type") or ""),
+                str(item.get("fact") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            resolved_candidates.append(item)
+
+    selected_candidates = []
+    for c in resolved_candidates:
+        _append_candidate_safely(selected_candidates, c)
+        
     return selected_candidates
 
 def run_memory_sifter_fast(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
