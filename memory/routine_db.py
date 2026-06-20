@@ -466,7 +466,7 @@ def decay_routine(routine_id: int):
     if row:
         new_conf    = max(0.0, row[0] - 0.2)
         new_decay   = row[1] + 1
-        is_everyday = row[2] in ("Everyday", "Καθημερινά")
+        is_everyday = row[2] == "Everyday"
 
         if new_conf < 0.1:
             new_state   = RoutineState.DECAYED
@@ -505,8 +505,8 @@ def get_routines_for_day(day: str) -> list:
         WHERE (
             day_of_week=?
             OR day_of_week='Everyday'
-            OR (day_of_week='Weekdays' AND ? IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Weekdays'))
-            OR (day_of_week='Weekends' AND ? IN ('Saturday', 'Sunday', 'Weekends'))
+            OR (day_of_week IN ('Weekdays','Εργάσιμες','καθημερινές') AND ? IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Weekdays','Εργάσιμες','καθημερινές'))
+            OR (day_of_week IN ('Weekends','Σαββατοκύριακο','σκ') AND ? IN ('Saturday', 'Sunday', 'Weekends','Σαββατοκύριακο','σκ'))
         )
         AND state='active'
         ORDER BY time_str ASC

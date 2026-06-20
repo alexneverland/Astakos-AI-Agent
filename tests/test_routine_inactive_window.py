@@ -245,6 +245,7 @@ def _run_job(db_rows, schedule_meta, cooldown=False):
             patch("memory.routine_db.get_routine_schedule_meta",
                   return_value=schedule_meta),
             patch("memory.routine_db.get_routine_condition", return_value={}),
+            patch("memory.routine_db.get_routine_conditions", return_value=[]),
         ):
             bot.job_check_routines()
 

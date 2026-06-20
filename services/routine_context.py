@@ -77,21 +77,20 @@ def resolve_current_shift(now: datetime | None = None) -> str | None:
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
     from memory.routine_db import get_context_state
+    state_data = get_context_state("current_shift")
+
+    if state_data:
+        expires_at = state_data.get("expires_at")
+        if not (expires_at and expires_at < today):
+            val = str(state_data.get("value")).lower()
+            if val in ("morning", "afternoon", "night"):
+                return val
+
+    # Default: Σαββατοκύριακο = off, εκτός αν υπάρχει ρητό override παραπάνω
+    # (π.χ. ο χρήστης είπε στον Αστακό ότι δουλεύει Σ/Κ αυτή τη βδομάδα).
     if current.weekday() >= 5:
         return "off"
-    state_data = get_context_state("current_shift")
-    
-    if not state_data:
-        return None
-        
-    expires_at = state_data.get("expires_at")
-    if expires_at and expires_at < today:
-        return None
-        
-    val = str(state_data.get("value")).lower()
-    if val in ("morning", "afternoon", "night"):
-        return val
-        
+
     return None
 
 def resolve_user_at_work(now: datetime | None = None) -> bool:
