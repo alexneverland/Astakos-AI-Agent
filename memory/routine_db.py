@@ -502,10 +502,15 @@ def get_routines_for_day(day: str) -> list:
     cursor.execute("""
         SELECT id, time_str, event_name, event_type, confidence, mention_count, state
         FROM routines
-        WHERE (day_of_week=? OR day_of_week='Everyday')
+        WHERE (
+            day_of_week=?
+            OR day_of_week='Everyday'
+            OR (day_of_week='Weekdays' AND ? IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Weekdays'))
+            OR (day_of_week='Weekends' AND ? IN ('Saturday', 'Sunday', 'Weekends'))
+        )
         AND state='active'
         ORDER BY time_str ASC
-    """, (c_day,))
+    """, (c_day, c_day, c_day))
     rows = cursor.fetchall()
     conn.close()
     return [

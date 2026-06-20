@@ -77,6 +77,8 @@ def resolve_current_shift(now: datetime | None = None) -> str | None:
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
     from memory.routine_db import get_context_state
+    if current.weekday() >= 5:
+        return "off"
     state_data = get_context_state("current_shift")
     
     if not state_data:

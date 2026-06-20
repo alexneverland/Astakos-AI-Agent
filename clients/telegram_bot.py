@@ -2081,13 +2081,20 @@ def startup_check_missed_routines():
         grace_start   = (now - timedelta(minutes=ROUTINE_MISS_GRACE_MINUTES)).strftime("%H:%M")
         day_en        = now.strftime("%A")
         possible_days = DAYS_MAP.get(day_en, [day_en])
+
+        group_cond = ""
+        if day_en in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday"):
+            group_cond = " OR day_of_week='Weekdays' OR day_of_week='Εργάσιμες' OR day_of_week='καθημερινές'"
+        elif day_en in ("Saturday", "Sunday"):
+            group_cond = " OR day_of_week='Weekends' OR day_of_week='Σαββατοκύριακο' OR day_of_week='σκ'"
+
         placeholders  = ",".join("?" * len(possible_days))
 
         conn   = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute(f"""
             SELECT id, event_name, confidence, time_str FROM routines
-            WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
+            WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday'{group_cond})
               AND state='active'
               AND (last_triggered IS NULL OR last_triggered != ?)
               AND time_str <  ?
@@ -2256,10 +2263,16 @@ def job_check_routines():
                 target_time_str = target_time.strftime("%H:%M")
                 today_str       = now.strftime("%Y-%m-%d")
 
+                group_cond = ""
+                if day_en in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday"):
+                    group_cond = " OR day_of_week='Weekdays' OR day_of_week='Εργάσιμες' OR day_of_week='καθημερινές'"
+                elif day_en in ("Saturday", "Sunday"):
+                    group_cond = " OR day_of_week='Weekends' OR day_of_week='Σαββατοκύριακο' OR day_of_week='σκ'"
+
                 placeholders = ",".join("?" * len(possible_days))
                 cursor.execute(f"""
                     SELECT id, event_name, confidence, priority, conflict_group, time_str FROM routines
-                    WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday' OR day_of_week='Καθημερινά')
+                    WHERE (day_of_week IN ({placeholders}) OR day_of_week='Everyday'{group_cond})
                     AND state='active'
                     AND (last_triggered IS NULL OR last_triggered != ?)
                     ORDER BY priority DESC, CASE WHEN condition_type IS NOT NULL THEN 1 ELSE 0 END DESC, id ASC

@@ -22,7 +22,7 @@ def test_pause_applies_to_all_exact_name_matches(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: _two_routines())
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: _two_routines())
     monkeypatch.setattr(rdb, "get_routine_schedule_meta", lambda routine_id: {
         "active_from": None, "active_until": None, "paused_until": None,
         "resume_rule": None, "pause_reason": None,
@@ -63,7 +63,7 @@ def test_pause_is_idempotent_when_already_paused_later(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: _two_routines())
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: _two_routines())
     monkeypatch.setattr(rdb, "get_routine_schedule_meta", lambda routine_id: {
         "active_from": None, "active_until": None, "paused_until": "2026-12-01",
         "resume_rule": None, "pause_reason": "already_set",
@@ -89,7 +89,7 @@ def test_resume_clears_paused_state_for_all_matches(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: _two_routines())
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: _two_routines())
     cleared = []
     monkeypatch.setattr(rdb, "clear_routine_paused_until", lambda routine_id: cleared.append(routine_id))
 
@@ -111,7 +111,7 @@ def test_set_window_applies_to_all_matches(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: _two_routines())
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: _two_routines())
     windows = []
     monkeypatch.setattr(
         rdb, "set_routine_active_window",
@@ -139,7 +139,7 @@ def test_set_window_accepts_only_active_from(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: _two_routines())
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: _two_routines())
     windows = []
     monkeypatch.setattr(
         rdb, "set_routine_active_window",
@@ -160,7 +160,7 @@ def test_set_window_without_any_date_is_rejected(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: _two_routines())
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: _two_routines())
 
     result = system.control_routine_schedule.func(
         event_name="ποδόσφαιρο Αλέξανδρου",
@@ -174,7 +174,7 @@ def test_clear_window_applies_to_all_matches(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: _two_routines())
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: _two_routines())
     windows = []
     monkeypatch.setattr(
         rdb, "set_routine_active_window",
@@ -200,7 +200,7 @@ def test_invalid_action_is_rejected(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: _two_routines())
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: _two_routines())
 
     result = system.control_routine_schedule.func(
         event_name="ποδόσφαιρο Αλέξανδρου",
@@ -215,7 +215,7 @@ def test_pause_without_until_date_is_rejected(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: _two_routines())
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: _two_routines())
 
     result = system.control_routine_schedule.func(
         event_name="ποδόσφαιρο Αλέξανδρου",
@@ -229,7 +229,7 @@ def test_pause_with_bad_date_format_is_rejected(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: _two_routines())
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: _two_routines())
 
     result = system.control_routine_schedule.func(
         event_name="ποδόσφαιρο Αλέξανδρου",
@@ -245,7 +245,7 @@ def test_set_window_with_bad_date_format_is_rejected(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: _two_routines())
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: _two_routines())
 
     result = system.control_routine_schedule.func(
         event_name="ποδόσφαιρο Αλέξανδρου",
@@ -260,7 +260,7 @@ def test_no_matching_routine_returns_error(monkeypatch):
     import tools.system as system
     import memory.routine_db as rdb
 
-    monkeypatch.setattr(rdb, "find_routines_by_name", lambda event_name: [])
+    monkeypatch.setattr(rdb, "find_routines_for_schedule_control", lambda event_name: [])
 
     result = system.control_routine_schedule.func(
         event_name="ανύπαρκτη ρουτίνα",

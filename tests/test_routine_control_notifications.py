@@ -7,7 +7,7 @@ def test_control_routine_notifications_mutes_all_exact_name_matches(monkeypatch)
 
     monkeypatch.setattr(
         rdb,
-        "find_routines_by_name",
+        "find_routines_for_schedule_control",
         lambda event_name: [
             {"id": 13, "event": "ποδόσφαιρο Αλέξανδρου", "day": "Monday"},
             {"id": 14, "event": "ποδόσφαιρο Αλέξανδρου", "day": "Thursday"},
@@ -34,7 +34,7 @@ def test_control_routine_notifications_mute_is_idempotent_per_match(monkeypatch)
 
     monkeypatch.setattr(
         rdb,
-        "find_routines_by_name",
+        "find_routines_for_schedule_control",
         lambda event_name: [
             {"id": 13, "event": "ποδόσφαιρο Αλέξανδρου", "day": "Monday"},
             {"id": 14, "event": "ποδόσφαιρο Αλέξανδρου", "day": "Thursday"},
@@ -55,7 +55,7 @@ def test_control_routine_notifications_mute_is_idempotent_per_match(monkeypatch)
     assert "ποδόσφαιρο Αλέξανδρου" in result
 
 
-def test_find_routines_by_name_returns_all_exact_duplicates(tmp_path):
+def test_find_routines_for_schedule_control_returns_all_exact_duplicates(tmp_path):
     import importlib
     import sqlite3
     import memory.routine_db as rdb
@@ -87,7 +87,7 @@ def test_find_routines_by_name_returns_all_exact_duplicates(tmp_path):
     conn.close()
 
     with patch.object(rdb, "get_connection", side_effect=lambda: sqlite3.connect(db_path)):
-        matches = rdb.find_routines_by_name("ποδόσφαιρο Αλέξανδρου")
+        matches = rdb.find_routines_for_schedule_control("ποδόσφαιρο Αλέξανδρου")
 
     assert [m["id"] for m in matches] == [13, 14]
 
