@@ -466,12 +466,19 @@ def decay_routine(routine_id: int):
     if row:
         new_conf    = max(0.0, row[0] - 0.2)
         new_decay   = row[1] + 1
-        is_everyday = row[2] == "Everyday"
+        everyday_like_days = {
+            "everyday",
+            "weekdays",
+            "εργάσιμες",
+            "καθημερινές",
+        }
+        day_value = (row[2] or "").strip().lower()
+        is_everyday_like = day_value in everyday_like_days
 
         if new_conf < 0.1:
             new_state   = RoutineState.DECAYED
             active_flag = 0
-        elif is_everyday:
+        elif is_everyday_like:
             new_state   = RoutineState.ACTIVE
             active_flag = 1
         else:
