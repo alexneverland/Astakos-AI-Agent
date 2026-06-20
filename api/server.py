@@ -1076,13 +1076,14 @@ async def debug_runtime(_=Depends(require_token)):
         cursor.execute("""
             SELECT id, day_of_week, time_str, event_name, state, confidence,
                    condition_type, condition_payload, condition_mode,
-                   priority, source_memory_ref, conflict_group
+                   priority, source_memory_ref, conflict_group,
+                   paused_until, pause_reason, muted_until
             FROM routines
             WHERE state != 'active' AND state != 'archived'
             ORDER BY state, day_of_week, time_str
         """)
         for row in cursor.fetchall():
-            r_id, day, tstr, ev, state, conf, c_type, c_payload, c_mode, priority, memory_ref, conflict_group = row
+            r_id, day, tstr, ev, state, conf, c_type, c_payload, c_mode, priority, memory_ref, conflict_group, paused_until, pause_reason, muted_until = row
             
             cond_res = None
             cond_matched = None
@@ -1123,6 +1124,9 @@ async def debug_runtime(_=Depends(require_token)):
                 "priority":          priority,
                 "conflict_group":    conflict_group,
                 "source_memory_ref": memory_ref,
+                "paused_until":      paused_until,
+                "pause_reason":      pause_reason,
+                "muted_until":       muted_until
             })
 
         # Stats
