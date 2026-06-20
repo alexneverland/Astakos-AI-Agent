@@ -1011,3 +1011,329 @@ def get_active_goals() -> list[dict]:
     except Exception as e:
         print(f"\033[91m[Goals Error]: {e}\033[0m")
         return []
+
+
+def _safe_load_metadata_json(raw: str | None) -> dict:
+    import json
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _profile_row_to_memory_doc(row) -> dict:
+    metadata = _safe_load_metadata_json(row["metadata_json"])
+
+    return {
+        "id": row["id"],
+        "category": row["category"],
+        "fact": row["fact"],
+        "photo_path": row["photo_path"],
+        "date": row["date"],
+        "created_at": row["created_at"],
+        "tags": metadata.get("tags", []) or [],
+        "entities": metadata.get("entities", []) or [],
+        "topic": metadata.get("topic", "") or "",
+        "topic_detail": metadata.get("topic_detail", "") or "",
+        "state_markers": metadata.get("state_markers", []) or [],
+        "time_scope": metadata.get("time_scope", "") or "",
+        "relation_type": metadata.get("relation_type", "") or "",
+        "confidence": metadata.get("confidence"),
+        "source": metadata.get("source", "") or "",
+        "reason": metadata.get("reason", "") or "",
+        "agent_name": metadata.get("agent_name", "") or "",
+        "metadata": metadata,
+    }
+
+
+def get_profile_facts(
+    category: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    from config import PROFILE_DB
+    import sqlite3
+
+    conn = None
+    try:
+        conn = sqlite3.connect(PROFILE_DB)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+
+        if category:
+            c.execute(
+                """
+                SELECT id, category, fact, photo_path, date, metadata_json, created_at
+                FROM profile_facts
+                WHERE category = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (category, limit),
+            )
+        else:
+            c.execute(
+                """
+                SELECT id, category, fact, photo_path, date, metadata_json, created_at
+                FROM profile_facts
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+
+        rows = c.fetchall()
+        return [_profile_row_to_memory_doc(row) for row in rows]
+
+    except Exception as e:
+        print(f"[ProfileFacts Error]: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def filter_profile_docs_by_entity(docs: list[dict], entity: str) -> list[dict]:
+    needle = entity.strip().lower()
+    if not needle:
+        return docs
+    out = []
+    for doc in docs:
+        entities = doc.get("entities", []) or []
+        if any(str(x).strip().lower() == needle for x in entities):
+            out.append(doc)
+    return out
+
+
+def filter_profile_docs_by_topic(docs: list[dict], topic: str) -> list[dict]:
+    needle = topic.strip().lower()
+    if not needle:
+        return docs
+    return [
+        doc for doc in docs
+        if str(doc.get("topic", "")).strip().lower() == needle
+    ]
+
+
+def filter_profile_docs_by_topic_detail(docs: list[dict], topic_detail: str) -> list[dict]:
+    needle = topic_detail.strip().lower()
+    if not needle:
+        return docs
+    return [
+        doc for doc in docs
+        if str(doc.get("topic_detail", "")).strip().lower() == needle
+    ]
+
+
+def filter_profile_docs_by_relation_type(docs: list[dict], relation_type: str) -> list[dict]:
+    needle = relation_type.strip().lower()
+    if not needle:
+        return docs
+    return [
+        doc for doc in docs
+        if str(doc.get("relation_type", "")).strip().lower() == needle
+    ]
+
+
+def filter_profile_docs_by_state_marker(docs: list[dict], marker: str) -> list[dict]:
+    needle = marker.strip().lower()
+    if not needle:
+        return docs
+    out = []
+    for doc in docs:
+        markers = doc.get("state_markers", []) or []
+        if any(str(x).strip().lower() == needle for x in markers):
+            out.append(doc)
+    return out
+
+
+def get_recent_entity_topic_facts(
+    entity: str,
+    topic: str,
+    limit: int = 10,
+    category: str | None = None,
+) -> list[dict]:
+    docs = get_profile_facts(category=category, limit=300)
+
+    docs = filter_profile_docs_by_entity(docs, entity)
+    docs = filter_profile_docs_by_topic(docs, topic)
+
+    docs.sort(
+        key=lambda d: (
+            str(d.get("date", "") or ""),
+            str(d.get("created_at", "") or ""),
+            int(d.get("id", 0) or 0),
+        ),
+        reverse=True,
+    )
+    return docs[:limit]
+
+
+def get_latest_entity_state(
+    entity: str,
+    topic: str,
+    category: str | None = None,
+) -> dict | None:
+    docs = get_recent_entity_topic_facts(
+        entity=entity,
+        topic=topic,
+        limit=20,
+        category=category,
+    )
+
+    if not docs:
+        return None
+
+    stateful_docs = [
+        d for d in docs
+        if d.get("state_markers") or d.get("relation_type") in {
+            "temporary_state",
+            "state_update",
+            "follow_up",
+            "confirmed",
+        }
+    ]
+
+    return stateful_docs[0] if stateful_docs else docs[0]
+
+
+def get_profile_docs_with_photos(
+    category: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    docs = get_profile_facts(category=category, limit=limit)
+    return [d for d in docs if d.get("photo_path")]
+
+
+def _profile_doc_match_score(doc: dict, query: str) -> int:
+    q = (query or "").strip().lower()
+    if not q:
+        return 0
+
+    tokens = [tok for tok in q.split() if len(tok) >= 2]
+    if not tokens:
+        tokens = [q]
+
+    score = 0
+    fact = str(doc.get("fact", "")).lower()
+    topic = str(doc.get("topic", "")).lower()
+    topic_detail = str(doc.get("topic_detail", "")).lower()
+    relation_type = str(doc.get("relation_type", "")).lower()
+    entities = [str(x).strip().lower() for x in (doc.get("entities", []) or []) if str(x).strip()]
+    tags = [str(x).strip().lower() for x in (doc.get("tags", []) or []) if str(x).strip()]
+    state_markers = [str(x).strip().lower() for x in (doc.get("state_markers", []) or []) if str(x).strip()]
+
+    for token in tokens:
+        if token in fact:
+            score += 3
+        if topic and (token == topic or token in topic):
+            score += 4
+        if topic_detail and (token == topic_detail or token in topic_detail):
+            score += 4
+        if relation_type and (token == relation_type or token in relation_type):
+            score += 1
+        if any(token == entity or token in entity for entity in entities):
+            score += 5
+        if any(token == tag or token in tag for tag in tags):
+            score += 3
+        if any(token == state or token in state for state in state_markers):
+            score += 1
+
+    return score
+
+
+def search_profile_facts(query: str, category: str | None = None, limit: int = 10) -> list[dict]:
+    docs = get_profile_facts(category=category, limit=300)
+    scored = []
+    for doc in docs:
+        score = _profile_doc_match_score(doc, query)
+        if score > 0:
+            scored.append((score, doc))
+
+    scored.sort(
+        key=lambda item: (
+            item[0],
+            str(item[1].get("date", "") or ""),
+            str(item[1].get("created_at", "") or ""),
+            int(item[1].get("id", 0) or 0),
+        ),
+        reverse=True,
+    )
+    return [doc for _, doc in scored[:limit]]
+
+
+def get_latest_state_for_query(query: str, category: str | None = None) -> dict | None:
+    docs = search_profile_facts(query, category=category, limit=20)
+    if not docs:
+        return None
+
+    stateful_docs = [
+        d for d in docs
+        if d.get("state_markers") or d.get("relation_type") in {
+            "temporary_state",
+            "state_update",
+            "follow_up",
+            "confirmed",
+        }
+    ]
+    return stateful_docs[0] if stateful_docs else docs[0]
+
+
+def get_recent_profile_facts_for_query(
+    query: str,
+    category: str | None = None,
+    limit: int = 8,
+) -> list[dict]:
+    return search_profile_facts(query, category=category, limit=limit)
+
+
+def format_profile_fact(doc: dict) -> str:
+    fact = doc.get("fact", "").strip()
+    states = ", ".join(doc.get("state_markers", []) or [])
+    topic = doc.get("topic", "")
+    relation_type = doc.get("relation_type", "")
+
+    bits = []
+    if topic:
+        bits.append(f"topic={topic}")
+    if relation_type:
+        bits.append(f"rel={relation_type}")
+    if states:
+        bits.append(f"states={states}")
+
+    suffix = f" [{' | '.join(bits)}]" if bits else ""
+    return f"{fact}{suffix}"
+
+
+def build_profile_memory_summary(query: str, category: str | None = None, limit: int = 5) -> list[str]:
+    docs = search_profile_facts(query, category=category, limit=limit)
+    if not docs:
+        return []
+
+    lines = []
+    for doc in docs:
+        fact = doc.get("fact", "").strip()
+        topic = doc.get("topic", "")
+        topic_detail = doc.get("topic_detail", "")
+        relation_type = doc.get("relation_type", "")
+        states = ", ".join(doc.get("state_markers", []) or [])
+        entities = ", ".join(doc.get("entities", []) or [])
+
+        meta_bits = []
+        if entities:
+            meta_bits.append(f"entities={entities}")
+        if topic:
+            meta_bits.append(f"topic={topic}")
+        if topic_detail:
+            meta_bits.append(f"detail={topic_detail}")
+        if relation_type:
+            meta_bits.append(f"rel={relation_type}")
+        if states:
+            meta_bits.append(f"states={states}")
+
+        meta_suffix = f" [{' | '.join(meta_bits)}]" if meta_bits else ""
+        lines.append(f"  • {fact}{meta_suffix}")
+
+    return lines

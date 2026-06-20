@@ -114,6 +114,7 @@ def test_relay_local_payload_accepts_known_contact(monkeypatch, tmp_path):
                 fact TEXT NOT NULL,
                 photo_path TEXT,
                 date TEXT,
+                metadata_json TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')

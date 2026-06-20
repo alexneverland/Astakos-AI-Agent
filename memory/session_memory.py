@@ -137,7 +137,7 @@ _TOPIC_CHOICES = {
 }
 _RELATION_TYPE_CHOICES = {
     "new_fact", "follow_up", "state_update", "correction",
-    "temporary_state", "preference", "routine_hint",
+    "temporary_state", "preference", "routine_hint", "confirmed",
 }
 _STATE_MARKER_CHOICES = {
     "started", "stopped", "paused", "resumed", "away", "returned",
@@ -793,14 +793,57 @@ def _candidate_identity_key(candidate: dict | None) -> tuple:
     return (category, entities, topic, topic_detail, time_scope)
 
 
-def _candidate_overlap_ratio(a: dict | None, b: dict | None) -> float:
-    if not a or not b:
-        return 0.0
-    ta = set(_normalize_text(a.get("fact", "")).split())
-    tb = set(_normalize_text(b.get("fact", "")).split())
+_RELATION_TYPE_RANK = {
+    "new_fact": 1,
+    "confirmed": 2,
+    "follow_up": 3,
+    "temporary_state": 4,
+    "state_update": 5,
+    "correction": 6,
+    "preference": 2,
+    "routine_hint": 2,
+}
+
+def _relation_type_rank(value: str) -> int:
+    key = str(value or "").strip().lower()
+    return _RELATION_TYPE_RANK.get(key, 0)
+
+
+def _fact_token_set(text: str) -> set[str]:
+    clean = _normalize_text(text)
+    clean = re.sub(r"^\[user_fact\]:\s*", "", clean, flags=re.IGNORECASE)
+
+    stopwords = {
+        "ο", "η", "το", "οι", "τα", "του", "της", "των",
+        "και", "να", "που", "στο", "στη", "στην", "στον",
+        "με", "σε", "απο", "από", "για", "πια", "πιο",
+        "μια", "μία", "ενα", "ένα", "ειναι", "ήταν",
+        "τον", "την", "τις", "τους", "μας", "σας",
+        "χτες", "χθες", "σημερα", "σήμερα", "αυριο", "αύριο",
+        "στις", "στη", "στο", "ως", "μεχρι", "μέχρι",
+    }
+
+    tokens = set()
+    for token in clean.split():
+        token = token.strip(".,;:!?()[]{}\"'")
+        if len(token) < 2:
+            continue
+        if token in stopwords:
+            continue
+        tokens.add(token)
+
+    return tokens
+
+
+def _facts_are_near_duplicates(a: str, b: str, threshold: float = 0.75) -> bool:
+    ta = _fact_token_set(a)
+    tb = _fact_token_set(b)
+
     if not ta or not tb:
-        return 0.0
-    return len(ta & tb) / min(len(ta), len(tb))
+        return False
+
+    overlap = len(ta & tb) / min(len(ta), len(tb))
+    return overlap >= threshold
 
 
 def _same_candidate_fact(a: dict | None, b: dict | None) -> bool:
@@ -809,23 +852,51 @@ def _same_candidate_fact(a: dict | None, b: dict | None) -> bool:
 
     fa = _normalize_text(a.get("fact", ""))
     fb = _normalize_text(b.get("fact", ""))
+
     if not fa or not fb:
         return False
+
     if fa == fb or fa in fb or fb in fa:
         return True
 
     same_identity = _candidate_identity_key(a) == _candidate_identity_key(b)
     same_states = set(a.get("state_markers", [])) == set(b.get("state_markers", []))
-    return same_identity and same_states and _candidate_overlap_ratio(a, b) >= 0.72
+
+    if same_identity and same_states and _facts_are_near_duplicates(
+        a.get("fact", ""),
+        b.get("fact", ""),
+    ):
+        return True
+
+    return False
 
 
 def _candidate_has_new_information(new_candidate: dict, existing_candidate: dict) -> bool:
-    if set(new_candidate.get("state_markers", [])) - set(existing_candidate.get("state_markers", [])):
+    new_states = set(new_candidate.get("state_markers", []))
+    old_states = set(existing_candidate.get("state_markers", []))
+
+    new_tags = set(new_candidate.get("tags", []))
+    old_tags = set(existing_candidate.get("tags", []))
+
+    new_relation = str(new_candidate.get("relation_type", "")).strip().lower()
+    old_relation = str(existing_candidate.get("relation_type", "")).strip().lower()
+
+    if new_states - old_states:
         return True
-    if set(new_candidate.get("tags", [])) - set(existing_candidate.get("tags", [])):
+
+    if new_tags - old_tags:
         return True
-    if new_candidate.get("relation_type") in {"follow_up", "state_update", "correction", "temporary_state"}:
-        return new_candidate.get("fact") != existing_candidate.get("fact")
+
+    if _relation_type_rank(new_relation) > _relation_type_rank(old_relation):
+        return True
+
+    if new_relation in {"follow_up", "state_update", "correction", "temporary_state"}:
+        if not _facts_are_near_duplicates(
+            new_candidate.get("fact", ""),
+            existing_candidate.get("fact", ""),
+        ):
+            return True
+
     return False
 
 
@@ -833,11 +904,26 @@ def _append_candidate_safely(selected: list[dict], candidate: dict) -> None:
     for existing in selected:
         if _same_candidate_fact(candidate, existing):
             return
-        if _candidate_identity_key(candidate) == _candidate_identity_key(existing):
+
+        same_identity = _candidate_identity_key(candidate) == _candidate_identity_key(existing)
+        if same_identity:
             if _candidate_has_new_information(candidate, existing):
                 selected.append(candidate)
             return
+
     selected.append(candidate)
+
+
+def _candidate_debug_summary(candidate: dict) -> str:
+    return (
+        f"cat={candidate.get('category')} "
+        f"entities={candidate.get('entities', [])} "
+        f"topic={candidate.get('topic')} "
+        f"detail={candidate.get('topic_detail')} "
+        f"states={candidate.get('state_markers', [])} "
+        f"rel={candidate.get('relation_type')} "
+        f"time={candidate.get('time_scope')}"
+    )
 
 # ════════════════════════════════════════════════════════════════
 # MEMORY SIFTER — "Αρχειοθέτης"

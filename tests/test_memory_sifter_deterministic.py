@@ -156,3 +156,129 @@ def test_slow_sifter_skips_seed_duplicates():
         sm.run_memory_sifter_slow("user", "ai", deterministic_seed_facts=seeds)
         
         mock_save.assert_not_called()
+
+
+def test_same_identity_same_state_near_duplicate_skips_second():
+    a = {
+        "memory_type": "fact",
+        "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση",
+        "category": "family",
+        "entities": ["Αλέξανδρος"],
+        "topic": "trip",
+        "topic_detail": "camp",
+        "state_markers": ["away"],
+        "time_scope": "2026-06-17",
+        "relation_type": "temporary_state",
+        "tags": ["alexandros", "camp", "away"],
+    }
+    b = {
+        "memory_type": "fact",
+        "fact": "[USER_FACT]: Ο Αλέξανδρος βρίσκεται στην κατασκήνωση",
+        "category": "family",
+        "entities": ["Αλέξανδρος"],
+        "topic": "trip",
+        "topic_detail": "camp",
+        "state_markers": ["away"],
+        "time_scope": "2026-06-17",
+        "relation_type": "temporary_state",
+        "tags": ["alexandros", "camp", "away"],
+    }
+
+    selected = []
+    sm._append_candidate_safely(selected, a)
+    sm._append_candidate_safely(selected, b)
+
+    assert len(selected) == 1
+
+
+def test_same_identity_new_state_keeps_both():
+    a = {
+        "memory_type": "fact",
+        "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση",
+        "category": "family",
+        "entities": ["Αλέξανδρος"],
+        "topic": "trip",
+        "topic_detail": "camp",
+        "state_markers": ["away"],
+        "time_scope": "2026-06-17",
+        "relation_type": "temporary_state",
+        "tags": ["alexandros", "camp", "away"],
+    }
+    b = {
+        "memory_type": "fact",
+        "fact": "[USER_FACT]: Ο Αλέξανδρος γύρισε σπίτι από την κατασκήνωση",
+        "category": "family",
+        "entities": ["Αλέξανδρος"],
+        "topic": "trip",
+        "topic_detail": "camp",
+        "state_markers": ["returned"],
+        "time_scope": "2026-06-17",
+        "relation_type": "state_update",
+        "tags": ["alexandros", "camp", "returned"],
+    }
+
+    selected = []
+    sm._append_candidate_safely(selected, a)
+    sm._append_candidate_safely(selected, b)
+
+    assert len(selected) == 2
+
+
+def test_same_day_same_topic_same_state_reword_skips_duplicate():
+    a = {
+        "memory_type": "fact",
+        "fact": "[USER_FACT]: Η Σοφία έχει ρεπό σήμερα",
+        "category": "family",
+        "entities": ["Σοφία"],
+        "topic": "work",
+        "topic_detail": "",
+        "state_markers": ["confirmed"],
+        "time_scope": "2026-06-18",
+        "relation_type": "confirmed",
+        "tags": ["sofia", "work", "confirmed"],
+    }
+    b = {
+        "memory_type": "fact",
+        "fact": "[USER_FACT]: Η Σοφία σήμερα έχει ρεπό",
+        "category": "family",
+        "entities": ["Σοφία"],
+        "topic": "work",
+        "topic_detail": "",
+        "state_markers": ["confirmed"],
+        "time_scope": "2026-06-18",
+        "relation_type": "confirmed",
+        "tags": ["sofia", "work", "confirmed"],
+    }
+
+    selected = []
+    sm._append_candidate_safely(selected, a)
+    sm._append_candidate_safely(selected, b)
+
+    assert len(selected) == 1
+
+
+def test_more_informative_relation_type_counts_as_new_information():
+    old = {
+        "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση",
+        "category": "family",
+        "entities": ["Αλέξανδρος"],
+        "topic": "trip",
+        "topic_detail": "camp",
+        "state_markers": ["away"],
+        "time_scope": "2026-06-17",
+        "relation_type": "new_fact",
+        "tags": ["alexandros", "camp"],
+    }
+    new = {
+        "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση",
+        "category": "family",
+        "entities": ["Αλέξανδρος"],
+        "topic": "trip",
+        "topic_detail": "camp",
+        "state_markers": ["away"],
+        "time_scope": "2026-06-17",
+        "relation_type": "temporary_state",
+        "tags": ["alexandros", "camp", "away"],
+    }
+
+    assert sm._candidate_has_new_information(new, old) is True

@@ -292,7 +292,18 @@ def search_memory(query: str, category: str = "") -> str:
                     merged_results.append(doc)
             results = merged_results[:8 if effective_category else 6]
 
-        if not results and not sql_lines:
+        from memory.vector_store import (
+            get_latest_state_for_query,
+            build_profile_memory_summary,
+        )
+        latest = get_latest_state_for_query(primary_query, category=effective_category or None)
+        profile_lines = build_profile_memory_summary(
+            primary_query,
+            category=effective_category or None,
+            limit=5,
+        )
+
+        if not results and not sql_lines and not latest and not profile_lines:
             return "System: Δεν βρέθηκε σχετικό ιστορικό SQLite ή μνήμη Chroma. Απάντα με τις γενικές σου γνώσεις."
 
         # bump retrieval_count async — δεν μπλοκάρει την απάντηση
@@ -324,6 +335,17 @@ def search_memory(query: str, category: str = "") -> str:
             by_cat.setdefault(cat, []).append(content)
 
         output_parts = ["ΜΝΗΜΕΣ ΠΟΥ ΒΡΕΘΗΚΑΝ:"]
+        
+        # 1. Profile: Latest matching state (generic, query-driven)
+        if latest and latest.get("fact"):
+            output_parts.append("\n[LATEST MATCHING STATE]")
+            output_parts.append(f"  • {latest['fact']}")
+
+        # 2. Structured profile memory summary
+        if profile_lines:
+            output_parts.append("\n[STRUCTURED PROFILE MEMORY]")
+            output_parts.extend(profile_lines)
+
         if sql_lines:
             output_parts.append("\n[ΣΧΕΤΙΚΟ ΙΣΤΟΡΙΚΟ SQLITE]")
             output_parts.extend(f"  • {line}" for line in sql_lines)

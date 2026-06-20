@@ -65,6 +65,7 @@ def _run_save_fact(tmp_path, fact, category, decision, same_cat_result,
                     fact TEXT NOT NULL,
                     photo_path TEXT,
                     date TEXT,
+                    metadata_json TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
