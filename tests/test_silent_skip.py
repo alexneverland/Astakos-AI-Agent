@@ -97,6 +97,15 @@ def _stub_modules():
     sm.startup_stale_cleanup  = MagicMock()
 
     rdb = sys.modules["memory.routine_db"]
+    import enum
+    class MockRoutineState(enum.Enum):
+        ACTIVE = "active"
+        INACTIVE = "inactive"
+        IGNORED = "ignored"
+        TRIGGER_PENDING = "trigger_pending"
+        CONFIRMED = "confirmed"
+    rdb.RoutineState = MockRoutineState
+    rdb.get_routine_state = MagicMock(return_value=MockRoutineState.TRIGGER_PENDING)
     rdb.get_routine_notify_info    = MagicMock(return_value={"cooldown_hours": 4})
     rdb.mark_routine_notified      = MagicMock()
     rdb.save_pending_confirmation  = MagicMock()
@@ -577,6 +586,41 @@ def test_deferred_context_skip_does_not_create_pending_confirmation():
 # Tests: Normal message (regression)
 # ─────────────────────────────────────────────────────────────
 
+def test_force_silent_skip_from_state_when_park_already_in_progress():
+    snap = {
+        "state:alexandros:outing": {"value": "in_progress", "expires_at": None}
+    }
+    assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) == "[SILENT_SKIP]"
+
+def test_force_silent_skip_from_state_when_football_off_season():
+    snap = {
+        "football_season": {"value": "false", "expires_at": "2026-09-01"},
+        "state:alexandros:sports_training": {"value": "off_season", "expires_at": "2026-09-01"},
+    }
+    assert bot._force_proactive_skip_from_state("ποδόσφαιρο Αλέξανδρου", snap) == "[SILENT_SKIP]"
+
+def test_force_context_skip_from_state_when_child_away_from_home():
+    snap = {
+        "alexandros_away_from_home": {"value": "true", "expires_at": "2026-06-25"},
+        "alexandros_away_reason": {"value": "camp", "expires_at": "2026-06-25"},
+    }
+    assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) == "[CONTEXT_SKIP]"
+
+def test_force_proactive_skip_from_state_returns_silent_skip_for_done_park():
+    snap = {
+        "state:alexandros:outing": {"value": "done", "expires_at": None}
+    }
+    assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) == "[SILENT_SKIP]"
+
+def test_force_proactive_skip_from_context_uses_generic_overlap_and_progress_markers():
+    ctx = "Μόλις φτάσαμε στο πάρκο και είμαστε ήδη εκεί με τον μικρό."
+    assert bot._force_proactive_skip_from_context("Πάρκο με Αλέξανδρο", ctx) == "[SILENT_SKIP]"
+
+
+def test_force_proactive_skip_from_context_does_not_skip_without_progress_signal():
+    ctx = "Σκεφτόμαστε αργότερα για πάρκο με τον μικρό αν προλάβουμε."
+    assert bot._force_proactive_skip_from_context("Πάρκο με Αλέξανδρο", ctx) is None
+
 def test_normal_msg_is_sent():
     """Κανονικό μήνυμα → στέλνεται αυτούσιο."""
     sent, _, _ = _run_job([_due_routine()], craft_return="Μάστορα, πάμε πάρκο;")
@@ -589,7 +633,34 @@ def test_normal_msg_no_skip_logs():
     assert not any(action == "silent_skip"  for _, action in logged)
     assert not any(action == "context_skip" for _, action in logged)
 
+def test_timeout_decay_ignores_stale_pending():
+    """
+    Όταν ένα routine έχει γίνει confirmed (δηλ. όχι TRIGGER_PENDING),
+    το timeout decay δεν πρέπει να γράψει timeout_decay,
+    αλλά pending_stale_cleared.
+    """
+    past_time = _fixed_now() - timedelta(minutes=40)
+    bot.pending_routine_confirmations[888] = {"event": "Stale Routine", "sent_at": past_time}
 
+    rdb = sys.modules["memory.routine_db"]
+    # Mock state to return ACTIVE
+    rdb.get_routine_state.return_value = rdb.RoutineState.ACTIVE
+
+    sent, logged, _ = _run_job([])
+
+    action_types = [a for _, a in logged]
+
+    assert "pending_stale_cleared" in action_types
+    assert "timeout_decay" not in action_types
+
+    assert 888 not in bot.pending_routine_confirmations
+    assert sent == []
+
+    rdb.mark_routine_ignored.assert_not_called()
+    rdb.remove_pending_confirmation.assert_called_once_with(888)
+
+    # Reset mock
+    rdb.get_routine_state.return_value = rdb.RoutineState.TRIGGER_PENDING
 # ─────────────────────────────────────────────────────────────
 # Standalone runner
 # ─────────────────────────────────────────────────────────────

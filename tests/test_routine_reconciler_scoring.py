@@ -18,6 +18,29 @@ from services.routine_reconciler import (
 )
 from services.routine_reconciler import _normalize
 
+def test_llm_extracted_candidate_with_subject_activity_state_scope_scores_high():
+    from services.routine_reconciler import score_candidate_directive
+
+    directive = {
+        "kind": "context_state_set",
+        "key": "state:alexandros:sports_training",
+        "value": "off_season",
+        "until_date": "2026-09-01",
+        "reason": "summer_break",
+        "subject_tokens": ["αλεξανδρ"],
+        "include_tokens": ["ποδοσφαιρο", "προπονηση"],
+        "exclude_tokens": [],
+    }
+
+    scored = score_candidate_directive(
+        directive,
+        normalized_fact="ειναι καλοκαιρι ο αλεξανδρος δεν εχει ποδοσφαιρο ξανα τον σεπτεμβριο",
+        matched_rule_name="llm_extracted",
+    )
+
+    assert scored["score"] >= 0.80
+    assert scored["decision"] == "auto_apply"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures / helpers
 # ─────────────────────────────────────────────────────────────────────────────

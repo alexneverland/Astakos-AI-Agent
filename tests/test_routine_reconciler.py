@@ -318,10 +318,10 @@ def test_shift_logic_candidate_scores_debug_only():
     assert any(
         c["kind"] == "context_state_set"
         and c["reason"] == "shift_afternoon_week"
-        and c["until_date"] == "2026-06-21"
+        and c["until_date"] == "2026-06-19"
         and c["rule_name"] == "shift_logic"
         for c in candidates
-    ), "Expected shift_logic candidate with shift_afternoon_week reason and Sunday until_date"
+    ), "Expected shift_logic candidate with shift_afternoon_week reason and Friday until_date"
     # Score it and verify it stays debug_only (never auto_apply — conservative rule)
     normalized_fact = _normalize(fact)
     scored = [
@@ -542,6 +542,16 @@ def test_apply_condition_add_skips_identical_existing_condition(tmp_path):
     assert stats["conditions_added"] == 0
     assert stats["skipped"] == 1
 
+def test_infer_workweek_until_from_wednesday():
+    from services.routine_reconciler import _infer_workweek_until
+    now = datetime(2026, 6, 17)  # Wednesday
+    assert _infer_workweek_until(now) == "2026-06-19"
+
+def test_infer_workweek_until_from_friday():
+    from services.routine_reconciler import _infer_workweek_until
+    now = datetime(2026, 6, 19)  # Friday
+    assert _infer_workweek_until(now) == "2026-06-19"
+
 
 def test_dynamic_shift_routine():
     from services.routine_reconciler import reconcile_fact_to_routines
@@ -559,3 +569,29 @@ def test_dynamic_shift_routine():
     assert "τρεξιμο" in gen_cond["include_tokens"]
     assert gen_cond["condition_mode"] == "suppress_when_true"
     assert gen_cond["condition_payload"]["equals"] == "afternoon"
+
+def test_llm_candidates_merge_with_rule_candidates_without_duplicates(monkeypatch):
+    import services.routine_reconciler as rr
+
+    fake_llm = [{
+        "kind": "context_state_set",
+        "key": "football_season",
+        "value": "false",
+        "until_date": "2026-09-01",
+        "reason": "summer_break",
+        "subject_tokens": ["αλεξανδρ"],
+        "include_tokens": ["ποδοσφαιρο"],
+        "exclude_tokens": ["messenger", "μηνυμα"],
+    }]
+
+    monkeypatch.setattr(rr, "_infer_llm_reconciliation_candidates", lambda *a, **k: fake_llm)
+
+    directives = rr.infer_routine_reconciliation_candidates(
+        "[USER_FACT] Είναι καλοκαίρι ο Αλέξανδρος δεν έχει ποδόσφαιρο μέχρι Σεπτέμβριο",
+        category="family",
+        reason="user_stated",
+        now=datetime(2026, 6, 20, 12, 0, 0),
+    )
+
+    fps = [rr._candidate_fingerprint(d) for d in directives]
+    assert len(fps) == len(set(fps))

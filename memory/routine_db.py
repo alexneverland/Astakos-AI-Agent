@@ -592,7 +592,14 @@ def mark_routine_responded(routine_id: int):
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET ignore_count=0, notify_cooldown_hours=?, state='active', is_active=1 WHERE id=?",
+            """
+            UPDATE routines
+            SET ignore_count=0,
+                notify_cooldown_hours=?,
+                state='active',
+                is_active=1
+            WHERE id=?
+            """,
             (COOLDOWN_DEFAULT_HOURS, routine_id)
         )
         conn.commit()
@@ -1214,11 +1221,31 @@ def clear_pending_confirmations():
 
 
 def load_pending_confirmations() -> dict:
-    conn   = get_connection()
+    conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT routine_id, event_name, sent_at FROM pending_confirmations")
-    rows   = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT pc.routine_id, pc.event_name, pc.sent_at
+        FROM pending_confirmations pc
+        JOIN routines r ON r.id = pc.routine_id
+        WHERE r.state = 'trigger_pending'
+    """)
+    rows = cursor.fetchall()
+
+    # βρες stale rows για cleanup
+    cursor.execute("""
+        SELECT pc.routine_id
+        FROM pending_confirmations pc
+        JOIN routines r ON r.id = pc.routine_id
+        WHERE r.state != 'trigger_pending'
+    """)
+    stale_rows = [r[0] for r in cursor.fetchall()]
+
     conn.close()
+
+    for rid in stale_rows:
+        remove_pending_confirmation(rid)
+
     result = {}
     for r_id, event_name, sent_at_str in rows:
         try:
@@ -1226,6 +1253,7 @@ def load_pending_confirmations() -> dict:
         except Exception:
             sent_at = datetime.now()
         result[r_id] = {"event": event_name, "sent_at": sent_at}
+
     return result
 
 

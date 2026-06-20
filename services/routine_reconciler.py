@@ -1,4 +1,5 @@
 import re
+import json
 from datetime import datetime, timedelta
 
 
@@ -90,6 +91,12 @@ def _infer_week_until(now: datetime) -> str:
     """Επιστρέφει την Κυριακή της τρέχουσας εβδομάδας (end-of-week scope)."""
     days_to_sunday = 6 - now.weekday()  # Mon=0, Sun=6
     return (now + timedelta(days=days_to_sunday)).strftime("%Y-%m-%d")
+
+def _infer_workweek_until(now: datetime) -> str:
+    days_to_friday = 4 - now.weekday()  # Mon=0 ... Fri=4
+    if days_to_friday < 0:
+        days_to_friday = 0
+    return (now + timedelta(days=days_to_friday)).strftime("%Y-%m-%d")
 
 
 def _infer_september_resume(normalized_fact: str, *, now: datetime, explicit_dates: list[str]) -> str | None:
@@ -485,7 +492,7 @@ def _rule_shift_logic(normalized: str, now: datetime) -> list[dict]:
 
     # 1. State Update (μόνο αν αναφέρει συγκεκριμένη εβδομάδα)
     if has_week and has_work:
-        until = _infer_week_until(now)
+        until = _infer_workweek_until(now)
         d_state = {
             "kind": "context_state_set",
             "key": "current_shift",
@@ -876,6 +883,230 @@ def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
     return [d_state]
 
 
+def _safe_json_list(raw: str) -> list[dict]:
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
+        return []
+    except Exception:
+        return []
+
+def _llm_impact_to_directives(impact: dict) -> list[dict]:
+    """
+    Converts one structured LLM impact object into the same directive schema
+    already used by the reconciler.
+    """
+    entity = _normalize(impact.get("entity", ""))
+    activity = _normalize(impact.get("activity", ""))
+    aliases = [_normalize(x) for x in (impact.get("aliases") or []) if str(x).strip()]
+    state_change = _normalize(impact.get("state_change", ""))
+    impact_type = _normalize(impact.get("impact", ""))
+    until_date = impact.get("until_date")
+    reason = impact.get("reason") or "llm_inferred"
+
+    if not entity or not activity or not impact_type:
+        return []
+
+    subject_tokens = []
+    if "αλεξανδρ" in entity or "alexand" in entity:
+        subject_tokens = _ALEXANDROS_TOKENS
+    elif "σοφ" in entity or "sofia" in entity:
+        subject_tokens = _SOFIA_TOKENS
+    else:
+        subject_tokens = [entity]
+
+    include_tokens = aliases[:] if aliases else [activity]
+    exclude_tokens = _ROUTINE_EXCLUDE_TOKENS[:]
+
+    directives = []
+
+    state_key = f"state:{entity}:{activity}"
+
+    if state_change:
+        directives.append({
+            "kind": "context_state_set",
+            "key": state_key,
+            "value": state_change,
+            "until_date": until_date,
+            "reason": reason,
+            "subject_tokens": subject_tokens,
+            "include_tokens": include_tokens,
+            "exclude_tokens": exclude_tokens,
+        })
+
+    if impact_type == "pause_matching_routines" and until_date:
+        d = _build_directive(
+            "schedule_pause",
+            subject_tokens=subject_tokens,
+            include_tokens=include_tokens,
+            exclude_tokens=exclude_tokens,
+            until_date=until_date,
+            reason=reason,
+        )
+        if d:
+            directives.append(d)
+
+    elif impact_type == "mute_matching_notifications" and until_date:
+        d = _build_directive(
+            "notifications_mute",
+            subject_tokens=subject_tokens,
+            include_tokens=include_tokens,
+            exclude_tokens=exclude_tokens,
+            until_date=until_date,
+            reason=reason,
+        )
+        if d:
+            directives.append(d)
+
+    elif impact_type == "resume_matching_routines":
+        d = _build_directive(
+            "notifications_unmute",
+            subject_tokens=subject_tokens,
+            include_tokens=include_tokens,
+            exclude_tokens=exclude_tokens,
+            reason=reason,
+        )
+        if d:
+            directives.append(d)
+
+    elif impact_type == "already_happening":
+        cond = _build_condition_directive(
+            subject_tokens=subject_tokens,
+            include_tokens=include_tokens,
+            exclude_tokens=exclude_tokens,
+            condition_type="context_flag",
+            condition_payload={"flag": state_key, "equals": "in_progress"},
+            condition_mode="suppress_when_true",
+            reason=reason,
+        )
+        if cond:
+            directives.append(cond)
+
+    elif impact_type == "already_done":
+        cond = _build_condition_directive(
+            subject_tokens=subject_tokens,
+            include_tokens=include_tokens,
+            exclude_tokens=exclude_tokens,
+            condition_type="context_flag",
+            condition_payload={"flag": state_key, "equals": "done"},
+            condition_mode="suppress_when_true",
+            reason=reason,
+        )
+        if cond:
+            directives.append(cond)
+
+    elif impact_type == "allow_only_when_active":
+        cond = _build_condition_directive(
+            subject_tokens=subject_tokens,
+            include_tokens=include_tokens,
+            exclude_tokens=exclude_tokens,
+            condition_type="context_flag",
+            condition_payload={"flag": state_key, "equals": "active"},
+            condition_mode="allow_when_true",
+            reason=reason,
+        )
+        if cond:
+            directives.append(cond)
+
+    return directives
+
+def _infer_llm_reconciliation_candidates(
+    fact: str,
+    *,
+    category: str,
+    reason: str,
+    now: datetime,
+) -> list[dict]:
+    """
+    LLM-first extraction layer.
+    Returns candidate directives in the same schema as rule-based candidates.
+    """
+    if reason not in {"user_stated", "agent_inferred"}:
+        return []
+
+    try:
+        from core.brain import llm
+        from langchain_core.messages import HumanMessage
+    except Exception:
+        return []
+
+    today = now.strftime("%Y-%m-%d")
+
+    prompt = f"""
+Είσαι extractor για routine reconciliation.
+
+Σήμερα είναι {today}.
+
+Θα σου δώσω ένα fact/μήνυμα χρήστη.
+Θέλω να βγάλεις ΜΟΝΟ JSON LIST.
+Καμία εξήγηση.
+
+Στόχος:
+να καταλάβεις αν το fact επηρεάζει υπάρχουσες ρουτίνες ή προσωρινό context ζωής.
+
+Επέστρεψε λίστα από objects με fields:
+- entity: ποιο πρόσωπο/οντότητα αφορά
+- activity: γενική δραστηριότητα/τομέας, π.χ. sports_training, outing, sleep, school, work_shift
+- aliases: λίστα λέξεων-κλειδιών που θα βοηθήσουν να ταιριάξουν routines
+- state_change: π.χ. active, inactive, in_progress, done, off_season, away
+- impact:
+    - pause_matching_routines
+    - mute_matching_notifications
+    - resume_matching_routines
+    - already_happening
+    - already_done
+    - allow_only_when_active
+- until_date: YYYY-MM-DD ή null
+- reason: σύντομο machine-friendly reason, π.χ. summer_break, camp, returned_home, live_context
+
+Βγάλε αποτέλεσμα ΜΟΝΟ όταν υπάρχει καθαρό routine/context impact.
+Αν δεν υπάρχει, γύρνα [].
+
+Fact:
+{fact}
+""".strip()
+
+    try:
+        resp = llm.invoke([HumanMessage(content=prompt)])
+        raw = getattr(resp, "content", "") or ""
+    except Exception:
+        return []
+
+    impacts = _safe_json_list(raw)
+    out: list[dict] = []
+    for impact in impacts:
+        out.extend(_llm_impact_to_directives(impact))
+    return out
+
+def _candidate_fingerprint(d: dict) -> tuple:
+    return (
+        d.get("kind"),
+        d.get("key"),
+        d.get("value"),
+        d.get("until_date"),
+        d.get("reason"),
+        tuple(sorted(d.get("subject_tokens") or [])),
+        tuple(sorted(d.get("include_tokens") or [])),
+        tuple(sorted(d.get("exclude_tokens") or [])),
+        d.get("condition_type"),
+        d.get("condition_mode"),
+        _normalize_condition_payload(d.get("condition_payload")),
+    )
+
+def _merge_candidate_lists(primary: list[dict], secondary: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[tuple] = set()
+
+    for item in primary + secondary:
+        fp = _candidate_fingerprint(item)
+        if fp in seen:
+            continue
+        seen.add(fp)
+        merged.append(item)
+
+    return merged
+
 def infer_routine_reconciliation_candidates(
     fact: str,
     *,
@@ -899,10 +1130,17 @@ def infer_routine_reconciliation_candidates(
     current         = now or datetime.now()
     normalized_fact = _normalize(fact)
     dates           = _extract_iso_dates(str(fact))
-    candidates: list[dict] = []
+    rule_candidates: list[dict] = []
 
     if "[user_fact]" not in normalized_fact and reason not in {"user_stated", "agent_inferred"}:
-        return candidates
+        return rule_candidates
+
+    llm_candidates = _infer_llm_reconciliation_candidates(
+        fact,
+        category=category,
+        reason=reason,
+        now=current,
+    )
 
     rules = [
         ("seasonal_football",              _rule_seasonal_football,              (normalized_fact, dates, current)),
@@ -922,9 +1160,12 @@ def infer_routine_reconciliation_candidates(
         for directive in rule_fn(*args):
             tagged = dict(directive)
             tagged["rule_name"] = rule_name
-            candidates.append(tagged)
+            rule_candidates.append(tagged)
 
-    return candidates
+    for d in llm_candidates:
+        d.setdefault("rule_name", "llm_extracted")
+
+    return _merge_candidate_lists(llm_candidates, rule_candidates)
 
 
 def infer_routine_reconciliation_directives(

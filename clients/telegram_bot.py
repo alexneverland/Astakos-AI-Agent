@@ -856,26 +856,42 @@ def handle_message(user_text: str, chat_id: str):
                 llm_dismissed = True
 
         if explicit_yes or implicit_confirmed:
-            from memory.routine_db import confirm_routine, mark_routine_responded, clear_pending_confirmations
+            from memory.routine_db import (
+                confirm_routine,
+                mark_routine_responded,
+                remove_pending_confirmation,
+            )
+            from memory.event_log import log_event
+
             for rid in list(pending_routine_confirmations.keys()):
+                pdata = pending_routine_confirmations.get(rid, {})
+                ev = pdata.get("event", "?")
+
                 confirm_routine(rid)
                 mark_routine_responded(rid)
-                from memory.event_log import log_event
-                log_event("routines", "confirmed", routine_id=rid, event=pending_routine_confirmations[rid].get("event","?"))
-                print(f"✅ [Routine Confirmed]: {pending_routine_confirmations[rid]}")
-                bus.emit("routine_confirmed", routine_id=rid, event=pending_routine_confirmations[rid].get("event","?"), channel="telegram")
-            pending_routine_confirmations.clear()
-            clear_pending_confirmations()
+                remove_pending_confirmation(rid)
+
+                log_event("routines", "confirmed", routine_id=rid, event=ev)
+                print(f"✅ [Routine Confirmed]: {pdata}")
+                bus.emit("routine_confirmed", routine_id=rid, event=ev, channel="telegram")
+
+                pending_routine_confirmations.pop(rid, None)
         elif any(w in text_check for w in no_words) or llm_dismissed:
-            from memory.routine_db import decay_routine, clear_pending_confirmations
+            from memory.routine_db import decay_routine, remove_pending_confirmation
+            from memory.event_log import log_event
+
             for rid in list(pending_routine_confirmations.keys()):
+                pdata = pending_routine_confirmations.get(rid, {})
+                ev = pdata.get("event", "?")
+
                 decay_routine(rid)
-                from memory.event_log import log_event
-                log_event("routines", "dismissed", routine_id=rid, event=pending_routine_confirmations[rid].get("event","?"))
-                print(f"📉 [Routine Dismissed]: {pending_routine_confirmations[rid]}")
-                bus.emit("routine_dismissed", routine_id=rid, event=pending_routine_confirmations[rid].get("event","?"), channel="telegram")
-            pending_routine_confirmations.clear()
-            clear_pending_confirmations()
+                remove_pending_confirmation(rid)
+
+                log_event("routines", "dismissed", routine_id=rid, event=ev)
+                print(f"📉 [Routine Dismissed]: {pdata}")
+                bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
+
+                pending_routine_confirmations.pop(rid, None)
 
     # ── REFLECTION CONFIRMATION LOOP (ask-tier, 50-75% confidence) ──
     global pending_reflection_confirmations
@@ -1734,9 +1750,10 @@ def _build_proactive_memory_context(event_name: str) -> str:
         from memory.context_builder import build_memory_context
 
         recall_query = (
-            f"θυμάσαι {event_name}; πρόσφατο context για το αν ισχύει ακόμα η ρουτίνα. "
-            "Αλέξανδρος κατασκήνωση λείπει γύρισε πάρκο κοιμήθηκε βάρδια Σοφία "
-            "ήδη έγινε ακυρώθηκε"
+            f"θυμάσαι {event_name}; πρόσφατο context για το αν ισχύει ακόμα η ρουτίνα, "
+            f"αν ήδη έγινε, αν είναι σε εξέλιξη, αν ακυρώθηκε, "
+            f"αν το σχετικό πρόσωπο λείπει, αν έχει γυρίσει σπίτι, "
+            f"ή αν υπάρχει προσωρινή αλλαγή προγράμματος"
         )
         context = build_memory_context(
             recall_query,
@@ -1750,6 +1767,170 @@ def _build_proactive_memory_context(event_name: str) -> str:
         print(f"\033[93m[ProactiveContext]: rich context builder failed: {exc}\033[0m")
         return ""
 
+
+def _proactive_state_keys_for_event(event_name: str) -> list[str]:
+    event_l = (event_name or "").lower()
+
+    keys = []
+
+    # Generic away/home flags
+    keys.extend([
+        "alexandros_away_from_home",
+        "alexandros_away_reason",
+        "football_season",
+        "school_open",
+        "user_at_work",
+        "quiet_hours",
+    ])
+
+    # Generic namespaced states from reconciler Phase 1
+    if "αλέξανδρ" in event_l or "alexand" in event_l or "αλεξανδρ" in event_l:
+        keys.extend([
+            "state:alexandros:outing",
+            "state:alexandros:sleep",
+            "state:alexandros:sports_training",
+            "state:alexandros:school",
+        ])
+
+    if "σοφ" in event_l or "messenger" in event_l:
+        keys.extend([
+            "sofia_absent",
+            "sofia_work_mode",
+        ])
+
+    # de-dup preserve order
+    seen = set()
+    out = []
+    for k in keys:
+        if k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+def _build_proactive_state_snapshot(event_name: str) -> dict:
+    try:
+        from memory.routine_db import get_context_states
+    except Exception:
+        return {}
+
+    keys = _proactive_state_keys_for_event(event_name)
+    if not keys:
+        return {}
+
+    try:
+        return get_context_states(keys)
+    except Exception as exc:
+        print(f"\033[93m[ProactiveState]: snapshot failed: {exc}\033[0m")
+        return {}
+
+def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> str | None:
+    """
+    Structured state guard before phrase-based fallback.
+    Returns:
+      - "[SILENT_SKIP]"
+      - "[CONTEXT_SKIP]"
+      - None
+    """
+    if not event_name or not state_snapshot:
+        return None
+
+    event_l = event_name.lower()
+
+    def state_value(key: str):
+        item = state_snapshot.get(key) or {}
+        return str(item.get("value", "")).strip().lower()
+
+    # Shared state
+    away = state_value("alexandros_away_from_home") == "true"
+    away_reason = state_value("alexandros_away_reason")
+    football_season = state_value("football_season")
+    school_open = state_value("school_open")
+    user_at_work = state_value("user_at_work") == "true"
+    quiet_hours = state_value("quiet_hours") == "true"
+
+    # Namespaced generic states
+    outing_state = state_value("state:alexandros:outing")
+    sleep_state = state_value("state:alexandros:sleep")
+    sports_state = state_value("state:alexandros:sports_training")
+
+    # PARK / OUTING
+    if "πάρκο" in event_l or "park" in event_l:
+        if outing_state in {"in_progress", "done"}:
+            return "[SILENT_SKIP]"
+        if away:
+            return "[CONTEXT_SKIP]"
+        if user_at_work:
+            return "[CONTEXT_SKIP]"
+
+    # SLEEP
+    if "ύπν" in event_l or "υπν" in event_l or "sleep" in event_l:
+        if sleep_state in {"in_progress", "done"}:
+            return "[SILENT_SKIP]"
+        if away:
+            return "[CONTEXT_SKIP]"
+        if quiet_hours:
+            return "[CONTEXT_SKIP]"
+
+    # FOOTBALL / TRAINING
+    if "ποδόσφ" in event_l or "ποδοσφ" in event_l or "training" in event_l or "προπόνη" in event_l:
+        if away:
+            return "[CONTEXT_SKIP]"
+        if sports_state in {"off_season", "paused", "done"}:
+            return "[SILENT_SKIP]"
+        if football_season == "false":
+            return "[SILENT_SKIP]"
+
+    # SCHOOL
+    if "σχολ" in event_l:
+        if school_open == "false":
+            return "[SILENT_SKIP]"
+
+    return None
+
+# Temporary generic fallback until proactive skip is driven primarily by structured state.
+def _force_proactive_skip_from_context(event_name: str, memory_context: str) -> str | None:
+    """
+    Generic guard for obvious "already happening / already happened" cases.
+    Uses light token overlap with the event name plus neutral progress/completion
+    markers, instead of hardcoded routine-specific phrases.
+    """
+    if not event_name or not memory_context:
+        return None
+
+    import re
+
+    def _tokens(value: str) -> list[str]:
+        parts = re.findall(r"[^\W\d_]+", (value or "").lower(), flags=re.UNICODE)
+        stop = {
+            "everyday", "monday", "tuesday", "wednesday", "thursday", "friday",
+            "saturday", "sunday",
+        }
+        return [p for p in parts if len(p) >= 4 and p not in stop]
+
+    event_l = event_name.lower()
+    ctx_l = memory_context.lower()
+    event_tokens = _tokens(event_l)
+    if not event_tokens:
+        return None
+
+    overlap = sum(1 for token in set(event_tokens) if token in ctx_l)
+    if overlap == 0:
+        return None
+
+    progress_markers = (
+        "ήδη", "ηδη", "τώρα", "τωρα",
+        "μόλις", "μολις", "είμαστε", "ειμαστε",
+        "πήγαμε", "πηγαμε", "φτάσαμε", "φτασαμε",
+        "φεύγουμε", "φευγουμε", "ξεκίνησε", "ξεκινησε",
+        "ξεκινήσαμε", "ξεκινησαμε", "κοιμήθηκε", "κοιμηθηκε",
+        "γύρισε", "γυρισε", "τελείωσε", "τελειωσε",
+        "ολοκληρώθηκε", "ολοκληρωθηκε", "έγινε", "εγινε",
+        "σε εξέλιξη", "σε εξελιξη", "επιστρέψαμε", "επιστρεψαμε",
+    )
+    if any(marker in ctx_l for marker in progress_markers):
+        return "[SILENT_SKIP]"
+
+    return None
 
 def _clear_routine_pending_confirmation(routine_id: int) -> None:
     """Best-effort cleanup for stale pending confirmations on context-driven skips."""
@@ -1809,6 +1990,23 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
 
     memory_context = _build_proactive_memory_context(event_name)
     memory_block = f"\n\n{memory_context}\n" if memory_context else ""
+
+    state_snapshot = _build_proactive_state_snapshot(event_name)
+
+    if state_snapshot:
+        try:
+            compact = {k: v.get("value") for k, v in state_snapshot.items()}
+            print(f"\033[90m[ProactiveState]: {event_name} -> {compact}\033[0m")
+        except Exception:
+            pass
+
+    forced_skip = _force_proactive_skip_from_state(event_name, state_snapshot)
+    if forced_skip:
+        return forced_skip
+
+    forced_skip = _force_proactive_skip_from_context(event_name, memory_context)
+    if forced_skip:
+        return forced_skip
 
     prompt = (
         f"{context}\n\n"
@@ -2239,17 +2437,87 @@ def job_check_routines():
         return
     if is_quiet_hours():
         if pending_routine_confirmations:
-            from memory.routine_db import decay_routine, remove_pending_confirmation
+            from memory.routine_db import decay_routine, remove_pending_confirmation, get_routine_state, RoutineState
             now_check = datetime.now()
             for rid in list(pending_routine_confirmations.keys()):
                 if (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds() > 1800:
+                    try:
+                        current_state = get_routine_state(rid)
+                    except Exception:
+                        current_state = None
+
+                    if current_state != RoutineState.TRIGGER_PENDING:
+                        log_event(
+                            "routines",
+                            "pending_stale_cleared",
+                            routine_id=rid,
+                            event=pending_routine_confirmations[rid]["event"],
+                            state=(current_state.value if current_state else "unknown"),
+                            elapsed_s=1800,
+                        )
+                        pending_routine_confirmations.pop(rid, None)
+                        remove_pending_confirmation(rid)
+                        continue
+
                     decay_routine(rid)
                     log_event("routines", "timeout_decay", routine_id=rid,
                               event=pending_routine_confirmations[rid]["event"],
                               elapsed_s=1800)
-                    del pending_routine_confirmations[rid]
+                    pending_routine_confirmations.pop(rid, None)
                     remove_pending_confirmation(rid)
         return
+    # 2. Timeout decay για εκκρεμείς επιβεβαιώσεις (>30')
+    # TRIGGER_PENDING → IGNORED → ACTIVE (cooldown doubled, confidence ανέπαφο)
+    if pending_routine_confirmations:
+        from memory.routine_db import (
+            mark_routine_ignored,
+            remove_pending_confirmation,
+            get_routine_state,
+            RoutineState,
+        )
+
+        now_check = datetime.now()
+        for rid in list(pending_routine_confirmations.keys()):
+            elapsed = (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds()
+            if elapsed > 1800:
+                ev = pending_routine_confirmations[rid]["event"]
+
+                try:
+                    current_state = get_routine_state(rid)
+                except Exception:
+                    current_state = None
+
+                if current_state != RoutineState.TRIGGER_PENDING:
+                    log_event(
+                        "routines",
+                        "pending_stale_cleared",
+                        routine_id=rid,
+                        event=ev,
+                        state=(current_state.value if current_state else "unknown"),
+                        elapsed_s=int(elapsed),
+                    )
+                    del pending_routine_confirmations[rid]
+                    remove_pending_confirmation(rid)
+                    continue
+
+                try:
+                    mark_routine_ignored(rid)  # TRIGGER_PENDING → IGNORED → ACTIVE + doubled cooldown
+                except DBWriteError as e:
+                    print(f"\033[91m[Timeout Decay DBWriteError]: {e}\033[0m")
+
+                timeout_err = PendingTimeoutError(rid, ev, elapsed)
+                log_event(
+                    "routines",
+                    "timeout_decay",
+                    routine_id=rid,
+                    event=ev,
+                    elapsed_s=int(elapsed),
+                    error=str(timeout_err),
+                )
+
+                del pending_routine_confirmations[rid]
+                remove_pending_confirmation(rid)
+
     # 1. Upcoming routine notifications
     try:
         if os.path.exists(DB_PATH):
@@ -2500,28 +2768,6 @@ def job_check_routines():
                 conn.close()
     except Exception as e:
         print(f"❌ [job_check_routines]: {e}")
-
-    # 2. Timeout decay για εκκρεμείς επιβεβαιώσεις (>30')
-    # TRIGGER_PENDING → IGNORED → ACTIVE (cooldown doubled, confidence ανέπαφο)
-    if pending_routine_confirmations:
-        from memory.routine_db import mark_routine_ignored, remove_pending_confirmation
-        now_check = datetime.now()
-        for rid in list(pending_routine_confirmations.keys()):
-            elapsed = (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds()
-            if elapsed > 1800:
-                ev = pending_routine_confirmations[rid]["event"]
-                try:
-                    mark_routine_ignored(rid)  # TRIGGER_PENDING → IGNORED → ACTIVE + doubled cooldown
-                except DBWriteError as e:
-                    print(f"\033[91m[Timeout Decay DBWriteError]: {e}\033[0m")
-                timeout_err = PendingTimeoutError(rid, ev, elapsed)
-                log_event("routines", "timeout_decay",
-                          routine_id=rid, event=ev,
-                          elapsed_s=int(elapsed))
-                print(f"⏰ {timeout_err}")
-                bus.emit("routine_timeout", routine_id=rid, event=ev, elapsed_s=int(elapsed), channel="telegram")
-                del pending_routine_confirmations[rid]
-                remove_pending_confirmation(rid)
 
 
 def job_proactive_scan():

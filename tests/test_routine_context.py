@@ -69,3 +69,28 @@ def test_current_shift_e2e_pipeline(tmp_path, monkeypatch):
     monkeypatch.setattr(rc, "resolve_quiet_hours", lambda now=None: False)
     ctx = rc.build_runtime_routine_context(now)
     assert ctx["current_shift"] == "afternoon"
+
+def test_current_shift_returns_weekday_override(monkeypatch):
+    monkeypatch.setattr(
+        "memory.routine_db.get_context_state",
+        lambda k: {"value": "afternoon", "expires_at": "2026-12-31"} if k == "current_shift" else None
+    )
+    assert rc.resolve_current_shift(datetime(2026, 6, 17)) == "afternoon"  # Wednesday
+
+def test_current_shift_returns_off_on_weekend_even_if_weekday_shift_exists(monkeypatch):
+    monkeypatch.setattr(
+        "memory.routine_db.get_context_state",
+        lambda k: {"value": "afternoon", "expires_at": "2026-12-31"} if k == "current_shift" else None
+    )
+    assert rc.resolve_current_shift(datetime(2026, 6, 20)) == "off"  # Saturday
+
+def test_current_shift_weekend_override_wins(monkeypatch):
+    def fake_get_context_state(key):
+        if key == "weekend_work_override":
+            return {"value": "morning", "expires_at": "2026-12-31"}
+        if key == "current_shift":
+            return {"value": "afternoon", "expires_at": "2026-12-31"}
+        return None
+
+    monkeypatch.setattr("memory.routine_db.get_context_state", fake_get_context_state)
+    assert rc.resolve_current_shift(datetime(2026, 6, 20)) == "morning"

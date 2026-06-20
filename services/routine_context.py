@@ -77,19 +77,26 @@ def resolve_current_shift(now: datetime | None = None) -> str | None:
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
     from memory.routine_db import get_context_state
-    state_data = get_context_state("current_shift")
 
+    # 1. explicit weekend override (optional future-safe hook)
+    weekend_override = get_context_state("weekend_work_override")
+    if current.weekday() >= 5:
+        if weekend_override:
+            expires_at = weekend_override.get("expires_at")
+            if not (expires_at and expires_at < today):
+                val = str(weekend_override.get("value")).lower()
+                if val in ("morning", "afternoon", "night"):
+                    return val
+        return "off"
+
+    # 2. weekday shift override
+    state_data = get_context_state("current_shift")
     if state_data:
         expires_at = state_data.get("expires_at")
         if not (expires_at and expires_at < today):
             val = str(state_data.get("value")).lower()
             if val in ("morning", "afternoon", "night"):
                 return val
-
-    # Default: Σαββατοκύριακο = off, εκτός αν υπάρχει ρητό override παραπάνω
-    # (π.χ. ο χρήστης είπε στον Αστακό ότι δουλεύει Σ/Κ αυτή τη βδομάδα).
-    if current.weekday() >= 5:
-        return "off"
 
     return None
 
