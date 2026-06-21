@@ -71,7 +71,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Multi-Agent Orchestration | LangGraph Supervisor routes to Chat, Home, Web, Tech, Git, Mail, and Dev agents. |
 | Hybrid Memory | ChromaDB vector store + shared SQLite history + SQLite profile/session state for semantic, temporal, and structured memory. |
 | Routine State Machine | `LEARNED → ACTIVE → TRIGGER_PENDING → CONFIRMED / IGNORED / DISMISSED → DECAYED → ARCHIVED`. |
-| Context-Aware Proactive Routines | Routine context flags (`alexandros_away_from_home`, `alexandros_away_reason`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, `quiet_hours`) are resolved from context_state before trigger time, and routines can be condition-gated instead of hard-paused. |
+| Context-Aware Proactive Routines | Routine context flags (`alexandros_away_from_home`, `alexandros_away_reason`, `state:alexandros:outing`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, `user_out_of_home`, `quiet_hours`) are resolved from `context_state` before trigger time, and routines can be condition-gated instead of hard-paused. |
 | Nightly Analytics Engine | LLM batch-analyzes the last 30 days of shared SQLite conversation history to detect recurring patterns automatically. |
 | LLM-Crafted Proactive Messages | Reminder text is generated naturally by the LLM instead of static templates, with recent Telegram/Web history and timestamps injected so messages feel contextual instead of random. |
 | Central Scheduler | `AstakosScheduler` runs a single background scheduler with watchdogs, rate limits, and quiet hours. |
@@ -137,7 +137,7 @@ Important note: Astakos uses configured external APIs for model calls and integr
 | Planner v2 | `/plan` decomposes a goal into tasks with a **confirmation gate** before execution. Auto-plan LLM judge detects multi-step intent without needing `/plan`. Progress UI shows `⏳ Βήμα X/N` per step. `validate_step_node` detects failures via AI response + tool output heuristics. `replan_node` auto-skips failed steps and continues. `end_check_node` generates a final summary (`✅` / `⚠️ X/N βήματα επιτυχή`) and saves a post-plan reflection. |
 | Execution Trace System | Every agent turn records agent name, tools called, duration, errors, and loop events to `logs/traces/YYYY-MM-DD.json`. Viewable at `/debug/traces` and the runtime dashboard with colored tool names, response preview, issue-only/clean filters, and optional hiding of old resolved issues. |
 | Tool Performance Stats | `tool_stats(days=N)` reads execution traces and returns per-tool call count, error count, error rate, and average duration — sorted by errors descending. Ask Astakos "tool stats last 7 days" for an instant health report. |
-| System Doctor | `system_doctor(days=N)` gives a read-only runtime health summary from logs, traces, pending approvals, Messenger drafts, session backlog, memory audit ops, routine confirmations, conditioned routines, and the resolved runtime context. Default is today (`days=1`). Ask `/doctor` or "δες αν όλα πάνε καλά" without opening the debug dashboard. |
+| System Doctor | `system_doctor(days=N)` gives a read-only runtime health summary from logs, traces, pending approvals, Messenger drafts, session backlog, memory audit ops, routine confirmations, conditioned routines, proactive skip reasons, and the resolved runtime context. Default is today (`days=1`). Ask `/doctor` or "check system health" without opening the debug dashboard. |
 | Self-Diagnosis via Source Read | `read_local_file` now allows reading from `tools/`, `core/`, `memory/`, `services/`, `clients/`, `astakos_skills/`, and `api/`. Sensitive files (`config.py`, `.env`, `*.db`) remain blocked. Astakos can inspect its own code when debugging a failed tool call. |
 
 ---
@@ -227,7 +227,9 @@ How it works:
 2. **Incremental Nightly Analytics** — after bootstrap, every 03:00 run reads only new shared SQLite messages after the last processed `rowid`, instead of re-reading the full 30-day window.
 3. **Pattern Detection** — candidate activities are grouped by day/time bucket (±15 min), merged if similar, and promoted only after they meet the routine threshold.
 4. **Threshold** — a routine is saved only if it appears 3+ times across 2+ different weeks. Final writes always go through `upsert_routine`, preserving fingerprint/fuzzy/embedding dedupe.
-5. **Proactive Message** — when a routine is due in about 30 minutes, the LLM writes a natural message using the routine context plus recent shared Telegram/Web history with timestamps.
+5. **Runtime Context Resolution** - before a routine fires, Astakos resolves live flags such as `current_shift`, `alexandros_away_from_home`, `state:alexandros:outing`, and `user_out_of_home` from `context_state`.
+6. **Condition Evaluation** - outing-like routines, child routines, and home-only routines can be condition-blocked instead of deleted or blindly muted; for example, a park reminder can be skipped if the family is already out, and cooking can be skipped if everyone is away from home.
+7. **Proactive Message** - when a routine is due in about 30 minutes, the LLM writes a natural message using the routine context plus recent shared Telegram/Web history with timestamps.
 
 Bootstrap command:
 
@@ -514,6 +516,9 @@ Shutdown behavior:
 - [x] Memory Search Performance — `search_memory` lexical L1 cache + single `similarity_search` call; `save_to_memory` fire-and-forget background thread (~11s faster per call).
 - [x] Routine Reconciler Phase 3 — deterministic scoring engine for automatic fact-to-routine reconciliation (`services/routine_reconciler.py`): weighted subject/activity/state/scope/special score against `_AUTO_APPLY_THRESHOLD = 0.80` and `_DEBUG_ONLY_THRESHOLD = 0.55`, with a deliberate conservative penalty so ambiguous rules like `shift_logic` log to `debug_only` instead of silently auto-applying. Covers seasonal football, camp absence, school break, child-activity pause, temporary absence of another person, return-home, and shift-week detection.
 - [x] Routine Conditions — routines evaluate conditions against live `context_state` (e.g. `shift_mode`), with a `control_routine_condition` tool for natural-language constraint changes, a smart weekend filter so shift conditions don't leak into weekend-only routines, and dashboard fixes for condition display.
+- [x] Generalized Outing Context - family outing facts can now set `state:alexandros:outing=in_progress` plus `user_out_of_home=true`, so outing-like routines (e.g. park) and home-only routines (e.g. cooking) can self-suppress from runtime context instead of relying on hardcoded one-off patches.
+- [x] Stricter Return-Home Reconciliation - a "returned home" fact only closes outing context when an active outing / out-of-home state already exists, preventing unrelated home-return phrases from mutating routine state.
+- [x] Proactive Debug Labels - runtime event logs and `/debug` traces now distinguish `manual_control`, `pending_cleanup`, `condition_eval`, `proactive_decision`, and `reconciler_applied`, making diagnosis much easier when a routine is skipped, muted, resumed, or silently suppressed.
 - [x] Deterministic Family-Absence Extractor — temporary absence statements parsed without an LLM sifter call.
 - [x] Seasonal Routine Inactivity Controls — pause/resume a routine for a date range (e.g. a sports routine paused over summer) without deleting or permanently muting it.
 
