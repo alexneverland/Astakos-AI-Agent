@@ -8,7 +8,8 @@
 import os
 import json
 import threading
-from datetime import datetime
+import hashlib
+from datetime import datetime, timedelta
 import unicodedata
 from memory.vector_store import memory
 from services.gemini import safe_gemini_call
@@ -135,6 +136,92 @@ def _normalize_text(value: str) -> str:
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
     return " ".join(text.split())
 
+
+
+
+_MEMORY_SIFTER_RUN_TTL_HOURS = 48
+
+
+def _ensure_memory_sifter_runs_table() -> None:
+    conn = sqlite3.connect(STATE_DB)
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS memory_sifter_runs (
+                fingerprint TEXT PRIMARY KEY,
+                processed_at TEXT NOT NULL,
+                channel TEXT,
+                agent_name TEXT,
+                user_preview TEXT,
+                ai_preview TEXT
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _memory_sifter_fingerprint(
+    user_text: str,
+    ai_text: str,
+    agent_name: str = "Unknown",
+    channel: str = "web",
+) -> str:
+    payload = "||".join([
+        _normalize_text(channel),
+        _normalize_text(agent_name),
+        _normalize_text(user_text),
+        _normalize_text(ai_text),
+    ])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _memory_sifter_already_processed(fingerprint: str) -> bool:
+    _ensure_memory_sifter_runs_table()
+    cutoff = (datetime.now() - timedelta(hours=_MEMORY_SIFTER_RUN_TTL_HOURS)).isoformat()
+
+    conn = sqlite3.connect(STATE_DB)
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT 1
+            FROM memory_sifter_runs
+            WHERE fingerprint = ?
+              AND processed_at >= ?
+            LIMIT 1
+        """, (fingerprint, cutoff))
+        return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def _mark_memory_sifter_processed(
+    fingerprint: str,
+    user_text: str,
+    ai_text: str,
+    agent_name: str = "Unknown",
+    channel: str = "web",
+) -> None:
+    _ensure_memory_sifter_runs_table()
+
+    conn = sqlite3.connect(STATE_DB)
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT OR REPLACE INTO memory_sifter_runs
+            (fingerprint, processed_at, channel, agent_name, user_preview, ai_preview)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            fingerprint,
+            datetime.now().isoformat(),
+            channel,
+            agent_name,
+            clean_message(user_text)[:160],
+            clean_message(ai_text)[:160],
+        ))
+        conn.commit()
+    finally:
+        conn.close()
 
 _TOPIC_CHOICES = {
     "family", "activity", "school", "health", "emotion", "pet",
@@ -969,6 +1056,63 @@ def _fact_matches_any(fact: str, existing_facts: list[str]) -> bool:
 
     return False
 
+def _family_fact_same_day_near_duplicate(candidate: dict, accepted_candidates: list[dict]) -> bool:
+    if str(candidate.get("category") or "").lower() != "family":
+        return False
+
+    cand_fact = str(candidate.get("fact") or "").strip()
+    cand_topic = str(candidate.get("topic") or "").lower().strip()
+    cand_detail = str(candidate.get("topic_detail") or "").lower().strip()
+    cand_scope = str(candidate.get("time_scope") or "").strip()
+
+    if not cand_fact:
+        return False
+
+    for existing in accepted_candidates:
+        if str(existing.get("category") or "").lower() != "family":
+            continue
+
+        existing_fact = str(existing.get("fact") or "").strip()
+        existing_topic = str(existing.get("topic") or "").lower().strip()
+        existing_detail = str(existing.get("topic_detail") or "").lower().strip()
+        existing_scope = str(existing.get("time_scope") or "").strip()
+
+        if cand_scope and existing_scope and cand_scope != existing_scope:
+            continue
+
+        same_topic = cand_topic and cand_topic == existing_topic
+        same_detail = cand_detail and cand_detail == existing_detail
+        same_arc = _same_family_arc(existing_fact, cand_fact)
+
+        if not (same_topic or same_detail or same_arc):
+            continue
+
+        overlap = memory.memory_overlap_ratio(existing_fact, cand_fact)
+        if overlap >= 0.82:
+            return True
+
+    return False
+
+def _looks_low_signal_family_fact(fact: str) -> bool:
+    body = re.sub(r"^\[[A-Z_]+\]:\s*", "", str(fact or "")).strip()
+    norm = _normalize_text(body)
+
+    if len(norm) < 28:
+        return True
+
+    low_signal_starts = (
+        "ναι ",
+        "ε ναι ",
+        "κατω ",
+        "οκ ",
+        "ενταξει ",
+        "ωραια ",
+    )
+    if norm.startswith(low_signal_starts):
+        return True
+
+    return False
+
 def _collect_deterministic_candidates(
     user_text: str,
     ai_text: str,
@@ -1082,6 +1226,16 @@ def run_memory_sifter_slow(
     deterministic_seed_facts = deterministic_seed_facts or []
     print("\033[90m[MemorySifterSlow]: start\033[0m")
     
+    fingerprint = _memory_sifter_fingerprint(
+        user_text=user_text,
+        ai_text=ai_text,
+        agent_name=agent_name,
+        channel=channel,
+    )
+
+    if _memory_sifter_already_processed(fingerprint):
+        print("\033[90m[MemorySifterSlow]: replay-skip (already processed)\033[0m")
+        return
     MEMORY_CATS = {
         "lazaros":  "Προτιμήσεις, συνήθειες, τρόπος σκέψης, δουλειά του Λάζαρου",
         "family":   "Πληροφορίες για Σοφία, Αλέξανδρο, Μαρία, κατοικίδια",
@@ -1172,6 +1326,13 @@ def run_memory_sifter_slow(
         raw_text = response.text.strip()
         
         if "ΚΕΝΟ" in raw_text or not raw_text:
+            _mark_memory_sifter_processed(
+                fingerprint=fingerprint,
+                user_text=user_text,
+                ai_text=ai_text,
+                agent_name=agent_name,
+                channel=channel,
+            )
             return
 
         raw_clean = re.sub(r"```json|```", "", raw_text).strip()
@@ -1191,6 +1352,9 @@ def run_memory_sifter_slow(
             except:
                 print("\033[91m⚠️ [Sifter Error]: Το LLM έβγαλε εντελώς κακογραμμένο JSON. Παράκαμψη εγγραφής.\033[0m")
                 return
+
+        accepted_candidates: list[dict] = []
+        accepted_facts: list[str] = list(deterministic_seed_facts)
 
         for mem in memories:
             candidate = _normalize_memory_candidate({
@@ -1219,6 +1383,18 @@ def run_memory_sifter_slow(
                 print(f"\033[90m[MemorySifterSlow]: seed-duplicate skip -> {fact[:80]}\033[0m")
                 continue
 
+            if _fact_matches_any(fact, accepted_facts):
+                print(f"\033[90m[MemorySifterSlow]: accepted-duplicate skip -> {fact[:80]}\033[0m")
+                continue
+
+            if _family_fact_same_day_near_duplicate(candidate, accepted_candidates):
+                print(f"\033[90m[MemorySifterSlow]: family-near-duplicate skip -> {fact[:80]}\033[0m")
+                continue
+
+            if category == "family" and _looks_low_signal_family_fact(fact):
+                print(f"\033[90m[MemorySifterSlow]: low-signal family skip -> {fact[:80]}\033[0m")
+                continue
+
             # 2. --- ΤΟ ΣΩΣΤΟ JSON INDEXING (Mastro-Restore) ---
             if "[PHOTO]" in fact or category == "photos":
                 # Regex για να βρούμε το filename από το user_text
@@ -1242,6 +1418,8 @@ def run_memory_sifter_slow(
                 if not filename:
                     # Συνέχισε στο ChromaDB save, αλλά μην γράψεις στο photos index
                     memory.save(**candidate)
+                    accepted_candidates.append(candidate)
+                    accepted_facts.append(fact)
                     continue
 
                 file_path = os.path.join(PHOTOS_DIR, filename)
@@ -1276,7 +1454,16 @@ def run_memory_sifter_slow(
 
             # 3. Αποθήκευση στη ChromaDB
             memory.save(**candidate)
+            accepted_candidates.append(candidate)
+            accepted_facts.append(fact)
 
+        _mark_memory_sifter_processed(
+            fingerprint=fingerprint,
+            user_text=user_text,
+            ai_text=ai_text,
+            agent_name=agent_name,
+            channel=channel,
+        )
         print("\033[90m[MemorySifterSlow]: done\033[0m")
 
     except Exception as e:
