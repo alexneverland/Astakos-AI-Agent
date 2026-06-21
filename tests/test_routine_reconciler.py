@@ -595,3 +595,82 @@ def test_llm_candidates_merge_with_rule_candidates_without_duplicates(monkeypatc
 
     fps = [rr._candidate_fingerprint(d) for d in directives]
     assert len(fps) == len(set(fps))
+
+
+def test_return_home_from_outing_requires_active_out_of_home_context():
+    from services.routine_reconciler import _rule_return_home_from_outing
+
+    now = datetime(2026, 6, 21, 14, 0)
+
+    with patch("memory.routine_db.get_context_state", return_value=None):
+        directives = _rule_return_home_from_outing(
+            normalized="γυρισαμε σπιτι",
+            dates=[],
+            now=now,
+        )
+
+    assert directives == []
+
+
+def test_return_home_from_outing_clears_out_of_home_and_marks_outing_done():
+    from services.routine_reconciler import _rule_return_home_from_outing
+
+    now = datetime(2026, 6, 21, 14, 0)
+
+    def fake_get_context_state(key):
+        if key == "user_out_of_home":
+            return {"value": "true", "expires_at": "2026-06-21"}
+        if key == "state:alexandros:outing":
+            return {"value": "in_progress", "expires_at": "2026-06-21"}
+        return None
+
+    with patch("memory.routine_db.get_context_state", side_effect=fake_get_context_state):
+        directives = _rule_return_home_from_outing(
+            normalized="γυρισαμε σπιτι",
+            dates=[],
+            now=now,
+        )
+
+    assert len(directives) == 2
+
+    user_out = next(d for d in directives if d["key"] == "user_out_of_home")
+    alex_outing = next(d for d in directives if d["key"] == "state:alexandros:outing")
+
+    assert user_out["value"] == "false"
+    assert user_out["until_date"] is None
+    assert user_out["reason"] == "returned_home_from_outing"
+
+    assert alex_outing["value"] == "done"
+    assert alex_outing["until_date"] == "2026-06-21"
+    assert alex_outing["reason"] == "returned_home_from_outing"
+
+
+def test_family_outing_in_progress_adds_outing_and_home_conditions():
+    from services.routine_reconciler import _rule_family_outing_in_progress
+
+    now = datetime(2026, 6, 21, 12, 0)
+
+    directives = _rule_family_outing_in_progress(
+        normalized="ειμαστε ολοι μαζι στην πισινα με τον αλεξανδρο",
+        dates=[],
+        now=now,
+    )
+
+    condition_directives = [d for d in directives if d.get("kind") == "condition_add"]
+
+    assert any(
+        d.get("condition_payload") == {"flag": "state:alexandros:outing", "equals": "in_progress"}
+        for d in condition_directives
+    )
+
+    assert any(
+        d.get("condition_payload") == {"flag": "user_out_of_home", "equals": True}
+        and any(tok in d.get("include_tokens", []) for tok in ["παρκο", "βολτα", "παιχνιδ"])
+        for d in condition_directives
+    )
+
+    assert any(
+        d.get("condition_payload") == {"flag": "user_out_of_home", "equals": True}
+        and any(tok in d.get("include_tokens", []) for tok in ["μαγειρ", "φαγητ", "γευμα"])
+        for d in condition_directives
+    )

@@ -37,6 +37,30 @@ _WORK_DEPARTURE_TOKENS  = ["αναχωρησ", "φευγ", "δουλεια", "δ
 _SLEEP_TOKENS           = ["υπνο", "κοιμ", "νυχτ"]
 _LUNCH_TOKENS           = ["μεσημερ", "φαγητ", "γευμ"]
 
+_OUTING_TOKENS = [
+    "πισιν", "μπανι", "θαλασσ", "παραλι", "εκδρομ",
+    "πικνικ", "βολτα", "παιδικ", "κουνι", "παιχνιδ",
+    "εξω", "club",
+]
+
+_OUTING_PROGRESS_TOKENS = [
+    "ειμαστε", "πηγαμε", "παμε", "φτασαμε", "αραζ",
+    "κατσαμε", "ειμαι με", "ολοι μαζι",
+]
+
+_HOME_RETURN_TOKENS = [
+    "γυρισαμε σπιτι", "γυρισαμε σπιτι", "ειμαστε σπιτι",
+    "ηρθαμε σπιτι", "επιστρεψαμε σπιτι", "πισω σπιτι",
+]
+
+_OUTING_ROUTINE_TOKENS = [
+    "παρκο", "βολτα", "παιχνιδ", "κουνι", "παιδικ",
+]
+
+_HOME_ONLY_ROUTINE_TOKENS = [
+    "μαγειρ", "φαγητ", "γευμα", "μεσημεριαν", "κουζιν",
+]
+
 # ── Scoring thresholds [Phase 3B] ────────────────────────────────────────────
 _AUTO_APPLY_THRESHOLD = 0.80   # score >= this → auto-apply
 _DEBUG_ONLY_THRESHOLD = 0.55   # score in [this, AUTO_APPLY) → log, no apply
@@ -296,6 +320,155 @@ def _rule_return_home(normalized: str) -> list[dict]:
         "exclude_tokens": [],
     }
     return [d_state_home, d_state_reason]
+
+def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+    """
+    Family outing / already outside:
+    Facts: "πάμε πισίνα", "είμαστε θάλασσα", "φτάσαμε πάρκο", "όλοι μαζί για μπάνιο"
+    Effect:
+      - state:alexandros:outing = in_progress
+      - user_out_of_home = true
+      - suppress park-like child routines while outing is in progress
+      - suppress home-only routines (e.g. cooking) while user is out of home
+    """
+    has_child = (
+        _contains_any(normalized, _ALEXANDROS_TOKENS)
+        or "μικρ" in normalized
+        or "παιδι" in normalized
+        or "ολοι μαζι" in normalized
+    )
+    has_outing = _contains_any(normalized, _OUTING_TOKENS)
+    has_progress = _contains_any(normalized, _OUTING_PROGRESS_TOKENS)
+
+    if not (has_child and has_outing and has_progress):
+        return []
+
+    until = max(dates) if dates else now.strftime("%Y-%m-%d")
+
+    d_child_outing = {
+        "kind": "context_state_set",
+        "key": "state:alexandros:outing",
+        "value": "in_progress",
+        "until_date": until,
+        "reason": "family_outing_in_progress",
+        "subject_tokens": _ALEXANDROS_TOKENS,
+        "include_tokens": _OUTING_TOKENS,
+        "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
+    }
+
+    d_user_out = {
+        "kind": "context_state_set",
+        "key": "user_out_of_home",
+        "value": "true",
+        "until_date": until,
+        "reason": "family_outing_in_progress",
+        "subject_tokens": [],
+        "include_tokens": _OUTING_TOKENS,
+        "exclude_tokens": [],
+    }
+
+    cond_outing_progress = _build_condition_directive(
+        subject_tokens=[],
+        include_tokens=_OUTING_ROUTINE_TOKENS,
+        exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
+        condition_type="context_flag",
+        condition_payload={"flag": "state:alexandros:outing", "equals": "in_progress"},
+        condition_mode="suppress_when_true",
+        reason="outing_in_progress_condition",
+    )
+
+    cond_outing_out_of_home = _build_condition_directive(
+        subject_tokens=[],
+        include_tokens=_OUTING_ROUTINE_TOKENS,
+        exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
+        condition_type="context_flag",
+        condition_payload={"flag": "user_out_of_home", "equals": True},
+        condition_mode="suppress_when_true",
+        reason="out_of_home_outing_conflict_condition",
+    )
+
+    cond_home = _build_condition_directive(
+        subject_tokens=[],
+        include_tokens=_HOME_ONLY_ROUTINE_TOKENS,
+        exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
+        condition_type="context_flag",
+        condition_payload={"flag": "user_out_of_home", "equals": True},
+        condition_mode="suppress_when_true",
+        reason="out_of_home_home_routine_condition",
+    )
+
+    out = [d_child_outing, d_user_out]
+
+    if cond_outing_progress:
+        out.append(cond_outing_progress)
+
+    if cond_outing_out_of_home:
+        out.append(cond_outing_out_of_home)
+
+    if cond_home:
+        out.append(cond_home)
+
+    return out
+
+def _rule_return_home_from_outing(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+    """
+    Return home after outing:
+    Facts: "γυρίσαμε σπίτι", "ήρθαμε σπίτι", "είμαστε σπίτι τώρα"
+    Effect:
+      - user_out_of_home = false
+      - state:alexandros:outing = done (for the rest of today)
+    Only applies if there is already an active outing/out-of-home context.
+    """
+    if not _contains_any(normalized, _HOME_RETURN_TOKENS):
+        return []
+
+    from memory.routine_db import get_context_state
+
+    user_out_state = get_context_state("user_out_of_home")
+    alex_outing_state = get_context_state("state:alexandros:outing")
+
+    user_out_active = False
+    if user_out_state:
+        user_out_active = str(user_out_state.get("value", "")).lower() == "true"
+
+    alex_outing_active = False
+    if alex_outing_state:
+        alex_outing_active = str(alex_outing_state.get("value", "")).lower() == "in_progress"
+
+    # Do nothing unless we already know the family/child is out.
+    if not (user_out_active or alex_outing_active):
+        return []
+
+    until = now.strftime("%Y-%m-%d")
+
+    directives = [
+        {
+            "kind": "context_state_set",
+            "key": "user_out_of_home",
+            "value": "false",
+            "until_date": None,
+            "reason": "returned_home_from_outing",
+            "subject_tokens": [],
+            "include_tokens": [],
+            "exclude_tokens": [],
+        }
+    ]
+
+    if alex_outing_active:
+        directives.append(
+            {
+                "kind": "context_state_set",
+                "key": "state:alexandros:outing",
+                "value": "done",
+                "until_date": until,
+                "reason": "returned_home_from_outing",
+                "subject_tokens": _ALEXANDROS_TOKENS,
+                "include_tokens": _OUTING_TOKENS,
+                "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
+            }
+        )
+
+    return directives
 
 def _rule_alexandros_away_general(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """Γενικός κανόνας απουσίας Αλέξανδρου (π.χ. διακοπές, με τη γιαγιά)."""
@@ -669,7 +842,7 @@ _P_GENERIC_TOK  = -0.15
 _P_CONSERVATIVE = -0.25   # rules that are by-design conservative (shift_week)
 
 # Rules that earn the +0.10 special bonus
-_SPECIAL_RULES = {"seasonal_football", "camp_absence", "return_home"}
+_SPECIAL_RULES = {"seasonal_football", "camp_absence", "return_home", "family_outing_in_progress", "return_home_from_outing"}
 # Rules that get the conservative penalty
 _CONSERVATIVE_RULES = {"shift_logic"}
 # Rules where generic-token penalty applies if activity not found in fact
@@ -1146,12 +1319,14 @@ def infer_routine_reconciliation_candidates(
         ("seasonal_football",              _rule_seasonal_football,              (normalized_fact, dates, current)),
         ("football_season",                _rule_football_season,                (normalized_fact, dates, current)),
         ("camp_absence",                   _rule_camp_absence,                   (normalized_fact, dates, current)),
+        ("family_outing_in_progress",      _rule_family_outing_in_progress,      (normalized_fact, dates, current)),
+        ("return_home",                    _rule_return_home,                    (normalized_fact,)),
+        ("return_home_from_outing",        _rule_return_home_from_outing,        (normalized_fact, dates, current)),
         ("alexandros_away_general",        _rule_alexandros_away_general,        (normalized_fact, dates, current)),
         ("school_break",                   _rule_school_break,                   (normalized_fact, dates, current)),
         ("child_activity_pause",           _rule_child_activity_pause,           (normalized_fact, dates, current)),
         ("temporary_absence_other_person", _rule_temporary_absence_other_person, (normalized_fact, dates, current)),
         ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, current)),
-        ("return_home",                    _rule_return_home,                    (normalized_fact,)),
         ("sofia_work_mode",                _rule_sofia_work_mode,                (normalized_fact, dates, current)),
         ("user_at_work",                   _rule_user_at_work,                   (normalized_fact, dates, current)),
         ("quiet_hours",                    _rule_quiet_hours,                    (normalized_fact, dates, current)),
@@ -1242,6 +1417,9 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
                 "routines", "auto_context_state_set",
                 key=key, value=value, until_date=until_date,
                 reason=directive.get("reason"),
+                debug_type="reconciler_applied",
+                debug_source="reconciler",
+                debug_effect="state_only",
             )
             continue
 
@@ -1273,6 +1451,9 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
                     until_date=new_until,
                     reason=directive.get("reason"),
                     resume_rule=directive.get("resume_rule"),
+                    debug_type="reconciler_applied",
+                    debug_source="reconciler",
+                    debug_effect="routine_changed",
                 )
                 continue
 
@@ -1289,6 +1470,9 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
                     routine_id=r_id, event=label,
                     until_date=new_until,
                     reason=directive.get("reason"),
+                    debug_type="reconciler_applied",
+                    debug_source="reconciler",
+                    debug_effect="routine_changed",
                 )
                 continue
 
@@ -1303,6 +1487,9 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
                     "routines", "auto_notifications_unmute",
                     routine_id=r_id, event=label,
                     reason=directive.get("reason"),
+                    debug_type="reconciler_applied",
+                    debug_source="reconciler",
+                    debug_effect="routine_changed",
                 )
                 continue
                 
@@ -1334,6 +1521,9 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
                     condition_payload=cond_payload,
                     condition_mode=cond_mode,
                     reason=directive.get("reason"),
+                    debug_type="reconciler_applied",
+                    debug_source="reconciler",
+                    debug_effect="routine_changed",
                 )
                 continue
 

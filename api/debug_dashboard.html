@@ -194,6 +194,45 @@ function cleanEventName(raw){
   if(m) return m[1];
   return raw;
 }
+function debugTypeBadge(v){
+  const map = {
+    manual_control: ['b-yellow', 'manual'],
+    context_update: ['b-blue', 'context'],
+    reconciler_applied: ['b-purple', 'reconciler'],
+    proactive_decision: ['b-green', 'proactive'],
+    pending_cleanup: ['b-orange', 'cleanup'],
+    condition_eval: ['b-muted', 'condition'],
+  };
+  const item = map[v] || ['b-muted', v || '—'];
+  return `<span class="badge ${item[0]}">${item[1]}</span>`;
+}
+
+function debugSourceBadge(v){
+  const map = {
+    user_message: ['b-yellow', 'user'],
+    scheduler: ['b-green', 'scheduler'],
+    reconciler: ['b-purple', 'reconciler'],
+    timeout_guard: ['b-orange', 'timeout'],
+    system: ['b-muted', 'system'],
+  };
+  const item = map[v] || ['b-muted', v || '—'];
+  return `<span class="badge ${item[0]}">${item[1]}</span>`;
+}
+
+function debugEffectBadge(v){
+  const map = {
+    state_only: ['b-blue', 'state'],
+    routine_changed: ['b-purple', 'routine'],
+    notification_sent: ['b-green', 'sent'],
+    notification_skipped: ['b-orange', 'skipped'],
+    pending_cleared: ['b-yellow', 'cleared'],
+    cooldown_changed: ['b-red', 'cooldown'],
+    no_change: ['b-muted', 'no-change'],
+  };
+  const item = map[v] || ['b-muted', v || '—'];
+  return `<span class="badge ${item[0]}">${item[1]}</span>`;
+}
+
 function renderTimelineCard(){
   const container = document.getElementById('timeline-section');
   if(!container) return;
@@ -207,6 +246,9 @@ function renderTimelineCard(){
     return `<tr>
       <td class="off" style="white-space:nowrap;font-size:11px">${date} ${ts}</td>
       <td>${actionIcon(e.action)} <span class="${actionColor(e.action)}">${e.action}</span></td>
+      <td>${debugTypeBadge(e.debug_type)}</td>
+      <td>${debugSourceBadge(e.debug_source)}</td>
+      <td>${debugEffectBadge(e.debug_effect)}</td>
       <td class="off">#${e.routine_id??'?'}</td>
       <td style="max-width:420px;white-space:normal;word-break:break-word">${cleanEventName(e.event)}</td>
       <td class="off" style="font-size:11px">${extraInfo(e)}</td>
@@ -214,7 +256,7 @@ function renderTimelineCard(){
   }).join('');
   container.innerHTML = `<div class="card" style="grid-column:1/-1">
     <h2>📜 Routine Timeline (last 2 days)</h2>
-    <table><tr><th>Time</th><th>Action</th><th>ID</th><th>Event</th><th>Info</th></tr>
+    <table><tr><th>Time</th><th>Action</th><th>Type</th><th>Source</th><th>Effect</th><th>ID</th><th>Event</th><th>Info</th></tr>
     ${rows}</table></div>`;
 }
 async function fetchTimeline(){

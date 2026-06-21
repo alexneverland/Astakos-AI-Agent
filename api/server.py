@@ -1326,12 +1326,58 @@ async def reject_action(tool_call_id: str, _=Depends(require_token)):
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+def _decorate_debug_event(ev: dict) -> dict:
+    ev = dict(ev)
+
+    ev.setdefault("debug_type", "")
+    ev.setdefault("debug_source", "")
+    ev.setdefault("debug_effect", "")
+
+    action = (ev.get("action") or "").lower()
+
+    if not ev["debug_type"]:
+        if action in {"confirmed", "dismissed"}:
+            ev["debug_type"] = "manual_control"
+        elif action in {"pending_stale_cleared", "timeout_decay"}:
+            ev["debug_type"] = "pending_cleanup"
+        elif action in {"triggered", "silent_skip", "context_skip"}:
+            ev["debug_type"] = "proactive_decision"
+        elif "condition" in action:
+            ev["debug_type"] = "condition_eval"
+
+    if not ev["debug_source"]:
+        if ev["debug_type"] == "manual_control":
+            ev["debug_source"] = "user_message"
+        elif ev["debug_type"] in {"proactive_decision", "condition_eval"}:
+            ev["debug_source"] = "scheduler"
+        elif ev["debug_type"] == "pending_cleanup":
+            ev["debug_source"] = "timeout_guard"
+        elif ev["debug_type"] == "reconciler_applied":
+            ev["debug_source"] = "reconciler"
+
+    if not ev["debug_effect"]:
+        if action == "triggered":
+            ev["debug_effect"] = "notification_sent"
+        elif action in {"silent_skip", "context_skip"}:
+            ev["debug_effect"] = "notification_skipped"
+        elif action == "pending_stale_cleared":
+            ev["debug_effect"] = "pending_cleared"
+        elif action == "timeout_decay":
+            ev["debug_effect"] = "cooldown_changed"
+        elif action in {"confirmed", "dismissed"}:
+            ev["debug_effect"] = "routine_changed"
+        else:
+            ev["debug_effect"] = "no_change"
+
+    return ev
+
 
 @server.get("/debug/replay")
 async def debug_replay(days: int = 2, _=Depends(require_token)):
     from memory.event_log import get_routine_timeline
     try:
         events = get_routine_timeline(routine_id=None, days=days)
+        events = [_decorate_debug_event(e) for e in events]
         return {"events": events, "count": len(events), "days": days}
     except Exception as e:
         return {"events": [], "error": str(e)}

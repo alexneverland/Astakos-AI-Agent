@@ -94,3 +94,23 @@ def test_current_shift_weekend_override_wins(monkeypatch):
 
     monkeypatch.setattr("memory.routine_db.get_context_state", fake_get_context_state)
     assert rc.resolve_current_shift(datetime(2026, 6, 20)) == "morning"
+
+
+def test_build_runtime_routine_context_includes_user_out_of_home(monkeypatch):
+    import services.routine_context as rc
+    from datetime import datetime
+
+    monkeypatch.setattr(rc, "resolve_alexandros_away_state", lambda now=None: False)
+    monkeypatch.setattr(rc, "resolve_alexandros_away_reason", lambda now=None: None)
+    monkeypatch.setattr(rc, "resolve_football_season", lambda now=None: True)
+    monkeypatch.setattr(rc, "resolve_school_open", lambda now=None: True)
+    monkeypatch.setattr(rc, "resolve_current_shift", lambda now=None: None)
+    monkeypatch.setattr(rc, "resolve_sofia_work_mode", lambda now=None: None)
+    monkeypatch.setattr(rc, "resolve_user_at_work", lambda now=None: False)
+    monkeypatch.setattr(rc, "resolve_user_out_of_home", lambda now=None: True)
+    monkeypatch.setattr(rc, "resolve_quiet_hours", lambda now=None: False)
+
+    result = rc.build_runtime_routine_context(datetime(2026, 6, 21, 14, 0))
+
+    assert "user_out_of_home" in result
+    assert result["user_out_of_home"] is True

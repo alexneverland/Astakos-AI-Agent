@@ -12,6 +12,7 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
         "current_shift": resolve_current_shift(current),
         "sofia_work_mode": resolve_sofia_work_mode(current),
         "user_at_work": resolve_user_at_work(current),
+        "user_out_of_home": resolve_user_out_of_home(current),
         "quiet_hours": resolve_quiet_hours(current),
     }
 
@@ -105,6 +106,17 @@ def resolve_user_at_work(now: datetime | None = None) -> bool:
     today = current.strftime("%Y-%m-%d")
     from memory.routine_db import get_context_state
     state_data = get_context_state("user_at_work")
+    if state_data:
+        expires_at = state_data.get("expires_at")
+        if not expires_at or expires_at >= today:
+            return str(state_data.get("value")).lower() == "true"
+    return False
+
+def resolve_user_out_of_home(now: datetime | None = None) -> bool:
+    current = now or datetime.now()
+    today = current.strftime("%Y-%m-%d")
+    from memory.routine_db import get_context_state
+    state_data = get_context_state("user_out_of_home")
     if state_data:
         expires_at = state_data.get("expires_at")
         if not expires_at or expires_at >= today:
