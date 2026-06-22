@@ -29,12 +29,6 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE
 
-def _normalize_gr(text: str) -> str:
-    """Αφαιρεί τόνους από ελληνικό κείμενο για accent-insensitive σύγκριση."""
-    import unicodedata
-    normalized = unicodedata.normalize("NFD", str(text))
-    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
-
 from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
 from core.exceptions import SchedulerCrashError, PendingTimeoutError, DBWriteError
 from core.brain import llm, safe_llm_invoke
@@ -477,6 +471,39 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     if not final_response:
         send_telegram_msg("⚠️ Δεν πήρα σαφή απάντηση για τη φωτογραφία.")
         return
+
+    from memory.pending_assets import looks_like_archive_confirmation_prompt
+    if not looks_like_archive_confirmation_prompt(final_response):
+        final_response += "\n\nΝα την αποθηκεύσω μόνιμα στη μνήμη μου;\nΑπάντησέ μου μόνο με: ναι ή όχι."
+
+    # ── Photo persistence / Pending asset ──
+    try:
+        from memory.conversation_history import append_message
+        now = datetime.now()
+        append_message("user", user_log_msg, "telegram", agent=None, timestamp=now)
+        append_message("assistant", final_response, "telegram", agent="Chat_Agent", timestamp=now)
+    except Exception as e:
+        print(f"[Photo/History]: {e}")
+
+    handling_agent = "Chat_Agent"
+    enqueue_fast_task(log_exchange, user_log_msg, final_response, handling_agent, "telegram")
+    enqueue_fast_task(update_working_memory, user_log_msg, final_response)
+    enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, final_response, handling_agent, "telegram")
+    enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, final_response, handling_agent)
+
+    try:
+        from memory.pending_assets import create_pending_asset_archive, looks_like_archive_confirmation_prompt
+        if looks_like_archive_confirmation_prompt(final_response):
+            create_pending_asset_archive(
+                channel="telegram",
+                asset_type="photo",
+                file_path=local_path,
+                filename=filename,
+                analysis=analysis,
+                caption=question or "",
+            )
+    except Exception as e:
+        print(f"[PendingAssets]: {e}")
 
     # Interceptor για CREATED_FILE
     file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_response)
@@ -1106,6 +1133,46 @@ def handle_message(user_text: str, chat_id: str):
 
     final_ai_response = ""
     handling_agent = "Chat_Agent"
+
+    # ── PENDING ASSET CONFIRMATION ──────────────────────────────
+    from memory.pending_assets import (
+        clear_expired_pending_assets,
+        get_latest_pending_asset,
+        mark_pending_asset_confirmed,
+        mark_pending_asset_cancelled,
+        create_pending_asset_archive,
+        classify_pending_asset_reply,
+        looks_like_archive_confirmation_prompt,
+    )
+    clear_expired_pending_assets()
+    pending_photo_asset = get_latest_pending_asset("telegram", "photo")
+    reply_kind = classify_pending_asset_reply(clean_user_text) if pending_photo_asset else None
+
+    if pending_photo_asset and reply_kind == "yes":
+        memory.save(
+            memory_type="photo",
+            file_path=pending_photo_asset["file_path"],
+            analysis=pending_photo_asset.get("analysis", ""),
+            caption=pending_photo_asset.get("caption", "") or pending_photo_asset["filename"],
+        )
+        mark_pending_asset_confirmed(pending_photo_asset["id"])
+        confirm_reply = "Έγινε, μάστορα. Την αποθήκευσα στη μνήμη μου."
+        _send_and_record_assistant(confirm_reply, chat_id)
+        enqueue_fast_task(log_exchange, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
+        enqueue_fast_task(update_working_memory, clean_user_text, confirm_reply)
+        enqueue_fast_task(_enqueue_slow_memory_sifter, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
+        enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, confirm_reply, "Chat_Agent")
+        return
+
+    if pending_photo_asset and reply_kind == "no":
+        mark_pending_asset_cancelled(pending_photo_asset["id"])
+        cancel_reply = "Έγινε, δεν την αρχειοθετώ μόνιμα."
+        _send_and_record_assistant(cancel_reply, chat_id)
+        enqueue_fast_task(log_exchange, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
+        enqueue_fast_task(update_working_memory, clean_user_text, cancel_reply)
+        enqueue_fast_task(_enqueue_slow_memory_sifter, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
+        enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, cancel_reply, "Chat_Agent")
+        return
 
     # ── Typing indicator — δείχνει "ο Αστακός πληκτρολογεί..." ──
     _typing_active = {"on": True}
@@ -3481,6 +3548,11 @@ if __name__ == "__main__":
     threading.Thread(target=slow_queue_worker, daemon=True).start()
 
     _load_override_state()
+    try:
+        from memory.pending_assets import init_pending_assets_table
+        init_pending_assets_table()
+    except Exception as e:
+        print(f"[PendingAssets]: Init failed: {e}")
     from memory.routine_db import load_pending_confirmations
     from services.reflection_engine import load_pending_reflections
     pending_routine_confirmations.update(load_pending_confirmations())

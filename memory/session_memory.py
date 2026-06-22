@@ -136,9 +136,25 @@ def _normalize_text(value: str) -> str:
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
     return " ".join(text.split())
 
+def _looks_like_operational_asset_confirmation(text: str) -> bool:
+    txt = (text or "").strip().lower()
 
+    markers = (
+        "την αποθηκευσα στη μνημη μου",
+        "την αποθήκευσα στη μνήμη μου",
+        "δεν την αποθηκευω μονιμα",
+        "δεν την αποθηκεύω μόνιμα",
+        "δεν την αρχειοθετω μονιμα",
+        "δεν την αρχειοθετώ μόνιμα",
+        "την αρχειοθετησα",
+        "την αρχειοθέτησα",
+        "αρχειοθετηθηκε",
+        "αρχειοθετήθηκε",
+        "δεν την κραταω",
+        "δεν την κρατάω",
+    )
 
-
+    return any(m in txt for m in markers)
 _MEMORY_SIFTER_RUN_TTL_HOURS = 48
 
 
@@ -1415,62 +1431,16 @@ def run_memory_sifter_slow(
                     print(f"\033[93m[MemorySifterSlow]: assistant-style paraphrase skip -> {fact[:80]}\033[0m")
                     continue
 
-            # 2. --- ΤΟ ΣΩΣΤΟ JSON INDEXING (Mastro-Restore) ---
+            if _looks_like_operational_asset_confirmation(fact) or _looks_like_operational_asset_confirmation(ai_text):
+                print("\033[90m[MemorySifterSlow]: operational asset confirmation skip\033[0m")
+                continue
+
+            # 2. --- PENDING ASSET ARCHITECTURE ---
             if "[PHOTO]" in fact or category == "photos":
-                # Regex για να βρούμε το filename από το user_text
-                match = re.search(r"(?:USER_UPLOADED_PHOTO|PHOTO PATH)\]:\s*([^\s\n\]]+)", user_text)
-                if match:
-                    filename = os.path.basename(match.group(1).strip().replace("]", ""))
-                else:
-                    # Fallback: ψάξε για πραγματικό filename (.jpg/.png/κλπ) στα texts
-                    file_match = re.search(
-                        r"\b([a-zA-Z0-9_\-]+\.(?:jpg|jpeg|png|gif|webp|pdf|txt|md))\b",
-                        user_text + " " + ai_text,
-                        re.IGNORECASE,
-                    )
-                    if file_match:
-                        filename = file_match.group(1)
-                    else:
-                        # Δεν βρέθηκε έγκυρο filename — αποφυγή corrupted entry
-                        print(f"\033[93m[Sifter]: [PHOTO] χωρίς έγκυρο filename — παράκαμψη photo index.\033[0m")
-                        filename = None
-
-                if not filename:
-                    # Συνέχισε στο ChromaDB save, αλλά μην γράψεις στο photos index
-                    memory.save(**candidate)
-                    accepted_candidates.append(candidate)
-                    accepted_facts.append(fact)
-                    continue
-
-                file_path = os.path.join(PHOTOS_DIR, filename)
-
-                # Αν το Gemini δεν έβγαλε analysis, παίρνουμε την απάντηση του AI ως analysis
-                analysis_val = mem.get("analysis")
-                if not analysis_val or analysis_val == "No analysis provided.":
-                    analysis_val = ai_text # Backup από τον διάλογο
-
-                photo_entry = {
-                    "file_path": file_path,
-                    "analysis": analysis_val,
-                    "caption": mem.get("caption", "Φωτογραφία από τον Λάζαρο"),
-                    "date": datetime.now().strftime("%Y-%m-%d"),
-                    "timestamp": datetime.now().isoformat()
-                }
-
-                # Φόρτωση και ενημέρωση του κεντρικού JSON
-                photo_index = []
-                if os.path.exists(PHOTOS_INDEX_FILE):
-                    with open(PHOTOS_INDEX_FILE, "r", encoding="utf-8") as f:
-                        try: photo_index = json.load(f)
-                        except: photo_index = []
-                
-                save_confirmed = any(w in ai_text.lower() for w in ["αρχειοθετ", "αποθηκεύ", "καταγράφ", "σώθηκε", "index"])
-
-                if not any(p.get("file_path") == file_path for p in photo_index) and save_confirmed:
-                    photo_index.append(photo_entry)
-                    with open(PHOTOS_INDEX_FILE, "w", encoding="utf-8") as f:
-                        json.dump(photo_index, f, indent=4, ensure_ascii=False)
-                    print(f"\033[92m📸 [Index]: Η φωτογραφία {filename} αρχειοθετήθηκε επιτυχώς.\033[0m")
+                # Ο session sifter ΔΕΝ είναι canonical writer για photo archive.
+                # Το μόνιμο save (Chroma + PHOTOS_INDEX_FILE) γίνεται μόνο
+                # μέσω memory.save(memory_type="photo", ...) μετά από explicit confirm.
+                print("\033[90m[MemorySifterSlow]: photo fact detected — skip direct photo index write\033[0m")
 
             # 3. Αποθήκευση στη ChromaDB
             memory.save(**candidate)

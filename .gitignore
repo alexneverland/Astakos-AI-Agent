@@ -68,3 +68,5 @@ Thumbs.db
 Desktop.ini
 
 .calendar_briefing_sent
+tmp/
+.pytest_tmp*/

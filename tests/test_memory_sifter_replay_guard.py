@@ -342,3 +342,43 @@ def test_sifter_assistant_paraphrase_guard(monkeypatch):
         channel="telegram",
     )
     assert len(saved) == 1
+
+def test_slow_sifter_skips_operational_asset_confirmation(isolated_state_db, monkeypatch):
+    saved = []
+
+    monkeypatch.setattr(
+        session_memory.memory,
+        "save",
+        lambda **kwargs: saved.append(kwargs),
+    )
+
+    class DummyResponse:
+        text = """
+        [
+          {
+            "fact": "[PHOTO]: Έγινε, την αποθήκευσα στη μνήμη μου.",
+            "category": "photos",
+            "topic": "misc",
+            "topic_detail": "archive",
+            "relation_type": "None",
+            "state_markers": [],
+            "time_scope": "None",
+            "confidence": 0.90
+          }
+        ]
+        """
+
+    monkeypatch.setattr(session_memory, "safe_gemini_call", lambda prompt: DummyResponse())
+
+    user_text = "Ναι, αποθήκευσέ το"
+    ai_text = "Έγινε, μάστορα. Την αποθήκευσα στη μνήμη μου."
+
+    session_memory.run_memory_sifter_slow(
+        user_text=user_text,
+        ai_text=ai_text,
+        agent_name="Chat_Agent",
+        channel="telegram",
+        deterministic_seed_facts=[],
+    )
+
+    assert len(saved) == 0

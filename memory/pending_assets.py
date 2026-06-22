@@ -1,0 +1,220 @@
+import sqlite3
+import json
+import unicodedata
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+
+from config import STATE_DB
+
+
+def _normalize_gr(text: str) -> str:
+    normalized = unicodedata.normalize("NFD", str(text or ""))
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower().strip()
+
+
+def classify_pending_asset_reply(text: str) -> str | None:
+    txt = _normalize_gr(text)
+
+    yes_exact = {
+        "ναι", "nai", "yes", "ok", "οκ",
+    }
+    no_exact = {
+        "οχι", "oxi", "no",
+    }
+
+    yes_phrases = (
+        "αποθηκευσε",
+        "αποθηκευσε τη",
+        "αποθηκευσε την",
+        "αρχειοθετησε",
+        "κρατα τη",
+        "κρατα την",
+        "save it",
+    )
+    no_phrases = (
+        "μην την αποθηκευσεις",
+        "μην τη σωσεις",
+        "μην την κρατησεις",
+        "αστο",
+        "αφησε το",
+    )
+
+    if txt in yes_exact:
+        return "yes"
+    if txt in no_exact:
+        return "no"
+
+    if any(p in txt for p in yes_phrases):
+        return "yes"
+    if any(p in txt for p in no_phrases):
+        return "no"
+
+    return None
+
+
+def looks_like_archive_confirmation_prompt(text: str) -> bool:
+    txt = _normalize_gr(text)
+    markers = (
+        "να την αποθηκευσω",
+        "να το αποθηκευσω",
+        "να τη σωσω",
+        "να το σωσω",
+        "ναι η οχι",
+        "ναι ή οχι",
+        "απαντησε μου μονο με",
+        "να την αρχειοθετησω",
+    )
+    return any(m in txt for m in markers)
+
+
+def _get_conn():
+    return sqlite3.connect(STATE_DB)
+
+
+def init_pending_assets_table():
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pending_asset_archives (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel TEXT NOT NULL,
+                asset_type TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                analysis TEXT,
+                caption TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def clear_expired_pending_assets():
+    now_iso = datetime.now().isoformat()
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE pending_asset_archives
+            SET status = 'cancelled'
+            WHERE status = 'pending'
+              AND expires_at <= ?
+            """,
+            (now_iso,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def create_pending_asset_archive(
+    channel: str,
+    asset_type: str,
+    file_path: str,
+    filename: str,
+    analysis: str,
+    caption: str = "",
+    ttl_minutes: int = 30,
+):
+    now = datetime.now()
+    expires_at = now + timedelta(minutes=ttl_minutes)
+
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE pending_asset_archives
+            SET status = 'cancelled'
+            WHERE channel = ?
+              AND asset_type = ?
+              AND status = 'pending'
+            """,
+            (channel, asset_type),
+        )
+
+        cursor = conn.execute(
+            """
+            INSERT INTO pending_asset_archives (
+                channel, asset_type, file_path, filename,
+                analysis, caption, status, created_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+            """,
+            (
+                channel,
+                asset_type,
+                file_path,
+                filename,
+                analysis,
+                caption,
+                now.isoformat(),
+                expires_at.isoformat(),
+            ),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def get_latest_pending_asset(channel: str, asset_type: str = "photo"):
+    clear_expired_pending_assets()
+
+    now_iso = datetime.now().isoformat()
+    conn = _get_conn()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT *
+            FROM pending_asset_archives
+            WHERE channel = ?
+              AND asset_type = ?
+              AND status = 'pending'
+              AND expires_at > ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (channel, asset_type, now_iso),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def mark_pending_asset_confirmed(asset_id: int):
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE pending_asset_archives
+            SET status = 'confirmed'
+            WHERE id = ?
+            """,
+            (asset_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def mark_pending_asset_cancelled(asset_id: int):
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE pending_asset_archives
+            SET status = 'cancelled'
+            WHERE id = ?
+            """,
+            (asset_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()

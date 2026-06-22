@@ -774,7 +774,7 @@ class AstakosMemoryManager:
         return True
 
     def _save_photo(self, file_path: str, analysis: str, caption: str):
-        fact = f"[PHOTO]: {caption or 'Φωτογραφία'} | {analysis[:200]}..."
+        fact = f"[PHOTO]: {caption or 'Φωτογραφία'} | {analysis[:350]}..."
         metadata = {
             "category": "photos", "agent": "Direct_Index", "photo_path": file_path,
             "timestamp": datetime.now().timestamp(), "date": datetime.now().strftime("%Y-%m-%d"),

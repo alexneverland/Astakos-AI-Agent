@@ -380,6 +380,12 @@ async def lifespan(app: FastAPI):
         t.start()
 
     print("\n--- Αστακός API Server: Ξεκίνησε ---")
+    try:
+        from memory.pending_assets import init_pending_assets_table
+        init_pending_assets_table()
+    except Exception as e:
+        print(f"[PendingAssets]: Init failed: {e}")
+        
     yield  # Server τρέχει εδώ
 
     print("\n[Server]: Τερματισμός...")
@@ -540,6 +546,47 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 clear_pending_confirmations()
     except Exception as _rce:
         print(f"[Web Routine Confirm]: {_rce}")
+
+    # ── Pending Photo Confirmation από Web UI ────────────────────
+    try:
+        from memory.pending_assets import (
+            clear_expired_pending_assets,
+            get_latest_pending_asset,
+            mark_pending_asset_confirmed,
+            mark_pending_asset_cancelled,
+            classify_pending_asset_reply,
+            looks_like_archive_confirmation_prompt,
+        )
+        clear_expired_pending_assets()
+        pending_photo_asset = get_latest_pending_asset("web", "photo")
+        reply_kind = classify_pending_asset_reply(user_input) if pending_photo_asset else None
+
+        if pending_photo_asset and reply_kind == "yes":
+            from memory.vector_store import memory
+            memory.save(
+                memory_type="photo",
+                file_path=pending_photo_asset["file_path"],
+                analysis=pending_photo_asset.get("analysis", ""),
+                caption=pending_photo_asset.get("caption", "") or pending_photo_asset["filename"],
+            )
+            mark_pending_asset_confirmed(pending_photo_asset["id"])
+
+            reply = "Έγινε, Λάζαρε. Την αποθήκευσα στη μνήμη μου."
+            append_to_chat_history("user", user_input)
+            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            log_exchange(user_input, reply, "Chat_Agent", channel="web")
+            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+
+        if pending_photo_asset and reply_kind == "no":
+            mark_pending_asset_cancelled(pending_photo_asset["id"])
+
+            reply = "Έγινε, δεν την αποθηκεύω μόνιμα."
+            append_to_chat_history("user", user_input)
+            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            log_exchange(user_input, reply, "Chat_Agent", channel="web")
+            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+    except Exception as e:
+        print(f"[PendingAssets]: Web text handler error: {e}")
 
     with memory_lock:
         last_interaction_time = time.time()
@@ -817,7 +864,8 @@ async def upload_file(request: Request, file: UploadFile = File(...), _=Depends(
             chat_ai_msg = (
                 f"📸 **Φωτογραφία ελήφθη:** `{filename}`\n\n"
                 f"{detailed_analysis}\n\n"
-                "**Λάζαρε, να την αρχειοθετήσω μόνιμα στη μνήμη μου;**"
+                "**Λάζαρε, να την αποθηκεύσω μόνιμα στη μνήμη μου;**\n"
+                "Απάντησέ μου μόνο με: ναι ή όχι."
             )
             user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
         elif file_ext in doc_exts:
@@ -866,6 +914,20 @@ async def upload_file(request: Request, file: UploadFile = File(...), _=Depends(
         append_to_chat_history("user", f"📎 *Ανέβασα αρχείο:* `{filename}`")
         append_to_chat_history("assistant", chat_ai_msg)
         log_exchange(user_log_msg, chat_ai_msg, "Chat_Agent", channel="web")
+
+        if is_image and looks_like_archive_confirmation_prompt(chat_ai_msg):
+            try:
+                from memory.pending_assets import create_pending_asset_archive
+                create_pending_asset_archive(
+                    channel="web",
+                    asset_type="photo",
+                    file_path=file_path,
+                    filename=filename,
+                    analysis=memory_analysis,
+                    caption="",
+                )
+            except Exception as e:
+                print(f"[PendingAssets]: Web upload error: {e}")
         return JSONResponse({
             "status":    "success",
             "filename":  filename,
