@@ -123,6 +123,33 @@ def _infer_workweek_until(now: datetime) -> str:
     return (now + timedelta(days=days_to_friday)).strftime("%Y-%m-%d")
 
 
+def _end_of_workweek(base_dt: datetime) -> str:
+    days_until_sunday = 6 - base_dt.weekday()
+    end_dt = base_dt + timedelta(days=days_until_sunday)
+    return end_dt.date().isoformat()
+
+
+def _next_monday(dt: datetime) -> datetime:
+    days_ahead = (7 - dt.weekday()) % 7
+    if days_ahead == 0:
+        days_ahead = 7
+    return dt + timedelta(days=days_ahead)
+
+
+def _has_next_workweek_scope(normalized: str) -> bool:
+    if "απο δευτερα" in normalized or "απο εβδομαδα" in normalized:
+        return True
+    if "ερχομεν" in normalized or "επομεν" in normalized:
+        return True
+    if "δευτερα" in normalized and ("αυριο" in normalized or "απο " in normalized):
+        return True
+    return False
+
+
+def _has_this_workweek_scope(normalized: str) -> bool:
+    return _contains_any(normalized, _WEEK_TOKENS)
+
+
 def _infer_september_resume(normalized_fact: str, *, now: datetime, explicit_dates: list[str]) -> str | None:
     for date_str in explicit_dates:
         if date_str[5:7] == "09":
@@ -646,7 +673,7 @@ def _rule_football_season(normalized: str, dates: list[str], now: datetime) -> l
     return [d_state]
 
 
-def _rule_shift_logic(normalized: str, now: datetime) -> list[dict]:
+def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3A — shift_logic:
     Facts: "αυτή την εβδομάδα έχω απόγευμα", "δεν ισχύει το ξύπνημα 5:30 όταν είμαι απόγευμα"
@@ -655,7 +682,9 @@ def _rule_shift_logic(normalized: str, now: datetime) -> list[dict]:
     """
     has_work  = _contains_any(normalized, _WORK_TOKENS) or "αναχωρηση" in normalized or "δουλει" in normalized
     has_shift = _contains_any(normalized, _SHIFT_PM_TOKENS) or _contains_any(normalized, _SHIFT_AM_TOKENS)
-    has_week  = _contains_any(normalized, _WEEK_TOKENS)
+    has_next_week = _has_next_workweek_scope(normalized)
+    has_this_week = _has_this_workweek_scope(normalized)
+    has_week_scope = has_next_week or has_this_week
 
     if not has_shift:
         return []
@@ -664,8 +693,19 @@ def _rule_shift_logic(normalized: str, now: datetime) -> list[dict]:
     shift_val = "afternoon" if _contains_any(normalized, _SHIFT_PM_TOKENS) else "morning"
 
     # 1. State Update (μόνο αν αναφέρει συγκεκριμένη εβδομάδα)
-    if has_week and has_work:
-        until = _infer_workweek_until(now)
+    if has_week_scope and has_work:
+        if dates:
+            try:
+                parsed_dt = datetime.strptime(dates[0], "%Y-%m-%d")
+                effective_dt = parsed_dt
+            except Exception:
+                effective_dt = now
+        elif has_next_week:
+            effective_dt = _next_monday(now)
+        else:
+            effective_dt = now
+
+        until = _end_of_workweek(effective_dt)
         d_state = {
             "kind": "context_state_set",
             "key": "current_shift",
@@ -1000,11 +1040,21 @@ def _rule_user_at_work(normalized: str, dates: list[str], now) -> list[dict]:
     """
     User at work:
     Facts: "Έχω πάει γραφείο", "Δουλεύω στο γραφείο σήμερα", "Είμαι δουλειά"
+    Guard: δεν πιάνει δηλώσεις βάρδιας/προγράμματος για επόμενες μέρες.
     """
     has_work = _contains_any(normalized, _WORK_TOKENS) or "γραφειο" in normalized
     has_user = "ειμαι" in normalized or "εχω" in normalized or "δουλευω" in normalized
-    
+    has_presence_phrase = (
+        "ειμαι στη δουλεια" in normalized
+        or "ειμαι δουλεια" in normalized
+        or "δουλευω στο γραφειο" in normalized
+        or "εχω παει γραφειο" in normalized
+    )
+    has_schedule_phrase = _has_next_workweek_scope(normalized) or _contains_any(normalized, _SHIFT_PM_TOKENS + _SHIFT_AM_TOKENS)
+
     if not (has_work and has_user):
+        return []
+    if has_schedule_phrase and not has_presence_phrase:
         return []
         
     until = None
@@ -1326,7 +1376,7 @@ def infer_routine_reconciliation_candidates(
         ("school_break",                   _rule_school_break,                   (normalized_fact, dates, current)),
         ("child_activity_pause",           _rule_child_activity_pause,           (normalized_fact, dates, current)),
         ("temporary_absence_other_person", _rule_temporary_absence_other_person, (normalized_fact, dates, current)),
-        ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, current)),
+        ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, dates, current)),
         ("sofia_work_mode",                _rule_sofia_work_mode,                (normalized_fact, dates, current)),
         ("user_at_work",                   _rule_user_at_work,                   (normalized_fact, dates, current)),
         ("quiet_hours",                    _rule_quiet_hours,                    (normalized_fact, dates, current)),

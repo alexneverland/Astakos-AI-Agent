@@ -302,3 +302,43 @@ def test_slow_sifter_no_mark_on_parse_error(isolated_state_db, monkeypatch):
 
     assert len(saved) == 1
     assert "valid fact" in saved[0]["fact"]
+
+def test_sifter_assistant_paraphrase_guard(monkeypatch):
+    from memory import session_memory
+    
+    # Clean up replay DB to prevent test pollution
+    import sqlite3
+    try:
+        conn = sqlite3.connect(session_memory.STATE_DB)
+        conn.execute("DELETE FROM memory_sifter_runs")
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+    saved = []
+    def mock_save(**kwargs):
+        saved.append(kwargs)
+    monkeypatch.setattr(session_memory.memory, "save", mock_save)
+    
+    # 1. Reject assistant paraphrase
+    monkeypatch.setattr(session_memory, "safe_gemini_call", lambda _: type("Resp", (), {"text": "[\n{\"fact\": \"[USER_FACT]: Σημειώθηκε η πρωινή βάρδια. Καλή αρχή από αύριο, μάστορα\", \"category\": \"lazaros\", \"analysis\": \"None\"}\n]"})())
+    
+    session_memory.run_memory_sifter_slow(
+        user_text="Από αύριο είμαι πρωινός UNIQUE_TEST_1",
+        ai_text="Σημειώθηκε η πρωινή βάρδια. Καλή αρχή από αύριο, μάστορα UNIQUE_TEST_1",
+        agent_name="Chat_Agent",
+        channel="telegram",
+    )
+    assert len(saved) == 0
+
+    # 2. Accept pure user fact
+    monkeypatch.setattr(session_memory, "safe_gemini_call", lambda _: type("Resp", (), {"text": "[\n{\"fact\": \"[USER_FACT]: Ο Λάζαρος ενημέρωσε ότι από τη Δευτέρα 2026-06-22 είναι πρωινή βάρδια\", \"category\": \"lazaros\", \"analysis\": \"None\"}\n]"})())
+    
+    session_memory.run_memory_sifter_slow(
+        user_text="Από Δευτέρα είμαι πρωινός, θα πάω δουλειά νωρίς UNIQUE_TEST_2",
+        ai_text="Το κατέγραψα, καλή αρχή UNIQUE_TEST_2",
+        agent_name="Chat_Agent",
+        channel="telegram",
+    )
+    assert len(saved) == 1

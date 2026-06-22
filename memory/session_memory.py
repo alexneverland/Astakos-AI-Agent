@@ -1216,6 +1216,21 @@ def run_memory_sifter_fast(user_text: str, ai_text: str, agent_name: str = "Unkn
         print(f"⚠️ [MemorySifterFast Error]: {e}")
         return []
 
+_ASSISTANT_STYLE_FACT_PATTERNS = (
+    "σημειώθηκε ότι",
+    "καταγράφηκε ότι",
+    "όπως είπες",
+    "καλή αρχή από",
+    "το κατέγραψα",
+    "σημείωσα ότι",
+)
+
+def _looks_like_assistant_paraphrase_fact(text: str) -> bool:
+    if not text:
+        return False
+    normalized = text.lower()
+    return any(token in normalized for token in _ASSISTANT_STYLE_FACT_PATTERNS)
+
 def run_memory_sifter_slow(
     user_text: str,
     ai_text: str,
@@ -1394,6 +1409,11 @@ def run_memory_sifter_slow(
             if category == "family" and _looks_low_signal_family_fact(fact):
                 print(f"\033[90m[MemorySifterSlow]: low-signal family skip -> {fact[:80]}\033[0m")
                 continue
+
+            if category in {"family", "work", "lazaros"} and _looks_like_assistant_paraphrase_fact(fact):
+                if fact.lower().startswith("[user_fact]:"):
+                    print(f"\033[93m[MemorySifterSlow]: assistant-style paraphrase skip -> {fact[:80]}\033[0m")
+                    continue
 
             # 2. --- ΤΟ ΣΩΣΤΟ JSON INDEXING (Mastro-Restore) ---
             if "[PHOTO]" in fact or category == "photos":

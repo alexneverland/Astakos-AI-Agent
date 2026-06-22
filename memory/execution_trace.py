@@ -57,6 +57,7 @@ class ExecutionTrace:
         self.response       = None          # final response preview
         self.error          = None
         self.loop_guard     = False
+        self.phase_timings  = {}            # extra per-turn timing breakdown
         self._pending: dict = {}            # tool_call_id → {name, args, t0}
 
     # ── Stream event processor ───────────────────────────────────
@@ -76,6 +77,14 @@ class ExecutionTrace:
                 self.agent = node
 
     def _process_message(self, node: str, msg):
+        phase_timings = getattr(msg, "_astakos_phase_timings", None)
+        if phase_timings:
+            for key, value in phase_timings.items():
+                try:
+                    self.phase_timings[key] = int(value)
+                except Exception:
+                    continue
+
         # AIMessage με tool_calls → pending calls
         tool_calls = getattr(msg, "tool_calls", None)
         if tool_calls:
@@ -116,6 +125,13 @@ class ExecutionTrace:
 
     # ── Finalize & Save ──────────────────────────────────────────
 
+    def mark_phase(self, name: str, duration_ms: int):
+        """Αποθηκεύει timing για ένα συγκεκριμένο phase του turn."""
+        try:
+            self.phase_timings[name] = int(duration_ms)
+        except Exception:
+            self.phase_timings[name] = duration_ms
+
     def finalize(self, response: str | None = None, error: str | None = None):
         """Κλείνει το trace με final response και error."""
         if response:
@@ -145,6 +161,7 @@ class ExecutionTrace:
                 "loop_guard":  self.loop_guard,
                 "error":       self.error,
                 "duration_ms": getattr(self, "duration_ms", None),
+                "phase_timings": self.phase_timings,
             }
 
             with _write_lock:

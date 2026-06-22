@@ -368,6 +368,7 @@ def build_memory_context(
     temporal_limit: int = 8,
     semantic_k: int = 5,
 ) -> MemoryContext:
+    from time import perf_counter
     # Χρησιμοποιούμε clean_query για semantic search & debug — αφαιρούμε
     # system prefixes ([USER_UPLOADED_FILE], [CURRENT_PHOTO_PATH] κ.λπ.)
     # ώστε το embedding να γίνει με το πραγματικό κείμενο του χρήστη.
@@ -384,6 +385,7 @@ def build_memory_context(
 
         recent_loader = load_recent_context
 
+    t_recent_0 = perf_counter()
     if recent_limit > 0:
         try:
             recent_messages = recent_loader(
@@ -396,16 +398,25 @@ def build_memory_context(
             recent_messages = []
     else:
         recent_messages = []
+    recent_ms = int((perf_counter() - t_recent_0) * 1000)
+
+    t_hist_0 = perf_counter()
+    historical_lines = temporal_history_for_query(
+        clean_query,
+        channel=channel,
+        limit=temporal_limit,
+        history_loader=temporal_loader,
+    )
+    historical_ms = int((perf_counter() - t_hist_0) * 1000)
+
+    t_sem_0 = perf_counter()
+    semantic_facts = semantic_facts_for_query(clean_query, k=semantic_k, search_fn=semantic_search)
+    semantic_ms = int((perf_counter() - t_sem_0) * 1000)
 
     context = MemoryContext(
         recent_lines=format_recent_messages(recent_messages, limit=recent_limit),
-        historical_lines=temporal_history_for_query(
-            clean_query,
-            channel=channel,
-            limit=temporal_limit,
-            history_loader=temporal_loader,
-        ),
-        semantic_facts=semantic_facts_for_query(clean_query, k=semantic_k, search_fn=semantic_search),
+        historical_lines=historical_lines,
+        semantic_facts=semantic_facts,
     )
     _record_memory_context_debug(
         channel=channel,
@@ -417,6 +428,9 @@ def build_memory_context(
         recent_preview=context.recent_lines[:3],
         historical_preview=context.historical_lines[:3],
         semantic_preview=context.semantic_facts[:3],
+        recent_ms=recent_ms,
+        historical_ms=historical_ms,
+        semantic_ms=semantic_ms,
     )
     return context
 
@@ -432,6 +446,9 @@ def _record_memory_context_debug(
     recent_preview: list[str],
     historical_preview: list[str],
     semantic_preview: list[str],
+    recent_ms: int = 0,
+    historical_ms: int = 0,
+    semantic_ms: int = 0,
 ) -> None:
     payload = {
         "written_at": datetime.now().isoformat(timespec="seconds"),
@@ -444,6 +461,9 @@ def _record_memory_context_debug(
         "recent_preview": recent_preview,
         "historical_preview": historical_preview,
         "semantic_preview": semantic_preview,
+        "recent_ms": recent_ms,
+        "historical_ms": historical_ms,
+        "semantic_ms": semantic_ms,
     }
     if is_tool_output:
         # [MASTRO-FIX]: Το query εδώ είναι εσωτερικό tool-output (όχι πραγματικό
@@ -458,7 +478,9 @@ def _record_memory_context_debug(
     else:
         print(
             f"\033[90m[MemoryContext]: channel={channel} "
-            f"recent={recent_count} sqlite={historical_count} semantic={semantic_count} "
+            f"recent={recent_count} ({recent_ms}ms) "
+            f"sqlite={historical_count} ({historical_ms}ms) "
+            f"semantic={semantic_count} ({semantic_ms}ms) "
             f"query='{payload['query_preview']}'\033[0m"
         )
     try:

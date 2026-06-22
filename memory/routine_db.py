@@ -418,6 +418,50 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
     return "created"
 
 
+def delete_routine_db(routine_id: int) -> bool:
+    """Διαγράφει οριστικά μια ρουτίνα από τη βάση."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        with db_write_lock:
+            cursor.execute("DELETE FROM routines WHERE id=?", (routine_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        raise DBWriteError("delete_routine_db", e) from e
+    finally:
+        conn.close()
+
+
+def update_routine_db(routine_id: int, new_time: str = None, new_day: str = None) -> bool:
+    """Ενημερώνει ώρα/ημέρα υπάρχουσας ρουτίνας και κάνει re-fingerprint."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT day_of_week, time_str, event_name FROM routines WHERE id=?", (routine_id,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+        
+        day = normalize_day(new_day) if new_day else row[0]
+        time_s = normalize_time(new_time) if new_time else row[1]
+        ev_name = row[2]
+        
+        fp = make_fingerprint(day, time_s, ev_name)
+        
+        with db_write_lock:
+            cursor.execute(
+                "UPDATE routines SET day_of_week=?, time_str=?, fingerprint=? WHERE id=?",
+                (day, time_s, fp, routine_id)
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        raise DBWriteError("update_routine_db", e) from e
+    finally:
+        conn.close()
+
+
 def confirm_routine(routine_id: int):
     """
     TRIGGER_PENDING → CONFIRMED → ACTIVE (double transition, auto-immediate).

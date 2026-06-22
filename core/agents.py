@@ -34,7 +34,7 @@ from tools.system import (
     set_local_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool, register_tool,
-    mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
+    mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
     save_goal_tool, update_goal_status_tool, tool_stats, system_doctor, memory_review,
 )
 from tools.web import (
@@ -47,6 +47,30 @@ from tools.project_tools import (
     list_recent_files,
 )
 
+from time import perf_counter
+
+def _attach_phase_timing(message, key: str, duration_ms: int):
+    try:
+        existing = dict(getattr(message, "_astakos_phase_timings", {}) or {})
+        existing[key] = int(duration_ms)
+        setattr(message, "_astakos_phase_timings", existing)
+    except Exception:
+        pass
+    return message
+
+
+def _merge_phase_timings(target, source):
+    try:
+        source_timings = dict(getattr(source, "_astakos_phase_timings", {}) or {})
+        if not source_timings:
+            return target
+        target_timings = dict(getattr(target, "_astakos_phase_timings", {}) or {})
+        target_timings.update(source_timings)
+        setattr(target, "_astakos_phase_timings", target_timings)
+    except Exception:
+        pass
+    return target
+
 # ────────────────────────────────────────────────────────────────
 # [GEMINI-FIX]: Force text response after tool execution
 # ────────────────────────────────────────────────────────────────
@@ -55,7 +79,12 @@ def _ensure_text_response(response, llm_instance, system_prompt: str, safe_histo
     Gemini quirk: μετά από tool execution επιστρέφει μερικές φορές κενό content.
     Retry μέχρι 3 φορές με escalating instruction.
     """
+    ensure_started = perf_counter()
+    retry_count = 0
+
     if clean_message(response.content).strip() or getattr(response, "tool_calls", []):
+        _attach_phase_timing(response, "ensure_text_ms", int((perf_counter() - ensure_started) * 1000))
+        _attach_phase_timing(response, "ensure_text_retries", retry_count)
         return response  # Όλα ΟΚ
 
     suffixes = [
@@ -65,12 +94,21 @@ def _ensure_text_response(response, llm_instance, system_prompt: str, safe_histo
     ]
     for attempt, suffix in enumerate(suffixes, 1):
         print(f"\033[93m[Gemini-Fix]: Κενό response — retry {attempt}/3...\033[0m")
-        retry = llm_instance.invoke([
+        retry_started = perf_counter()
+        retry_count += 1
+        retry_response = llm_instance.invoke([
             SystemMessage(content=system_prompt + suffix),
             *safe_history
         ])
-        if clean_message(retry.content).strip():
-            return retry
+        _attach_phase_timing(retry_response, f"ensure_text_retry_{retry_count}_ms", int((perf_counter() - retry_started) * 1000))
+        if clean_message(retry_response.content).strip():
+            _merge_phase_timings(retry_response, response)
+            _attach_phase_timing(retry_response, "ensure_text_ms", int((perf_counter() - ensure_started) * 1000))
+            _attach_phase_timing(retry_response, "ensure_text_retries", retry_count)
+            return retry_response
+    
+    _attach_phase_timing(response, "ensure_text_ms", int((perf_counter() - ensure_started) * 1000))
+    _attach_phase_timing(response, "ensure_text_retries", retry_count)
     return response  # Επιστρέφουμε το original αν όλα αποτύχουν
 
 # ────────────────────────────────────────────────────────────────
@@ -223,7 +261,7 @@ def dev_agent_node(state):
         delete_from_memory, search_memory, save_to_memory,
         execute_local_pipeline, control_spotify, control_vacuum, 
         get_navigation_info, recipe_expert, log_meal, 
-        generate_image_tool, search_flights, run_terminal_command, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition,
+        generate_image_tool, search_flights, run_terminal_command, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition,
         save_goal_tool, update_goal_status_tool,
         duckduckgo_search,
         # Project tools — code navigation & editing
@@ -312,13 +350,27 @@ def chat_agent_node(state: AgentState):
     chat_tools = [
         get_current_location, control_spotify,
         search_memory, save_to_memory, delete_from_memory, retrieve_photo, duckduckgo_search,
-        recipe_expert, log_meal, relay_local_payload, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, search_supermarket_prices,
+        recipe_expert, log_meal, relay_local_payload, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, search_supermarket_prices,
         read_local_file, generate_image_tool, get_fit_summary,
         *([archive_file] if not _is_farewell else []),
     ]
 
-    response = llm.bind_tools(chat_tools).invoke(final_messages)
+    bind_started = perf_counter()
+    bound_llm = llm.bind_tools(chat_tools)
+    bind_ms = int((perf_counter() - bind_started) * 1000)
+
+    invoke_started = perf_counter()
+    response = bound_llm.invoke(final_messages)
+    invoke_ms = int((perf_counter() - invoke_started) * 1000)
+
+    _attach_phase_timing(response, "chat_bind_ms", bind_ms)
+    _attach_phase_timing(response, "chat_invoke_ms", invoke_ms)
+
+    ensure_started = perf_counter()
     response = _ensure_text_response(response, llm, system_prompt, safe_history)
+    ensure_wrapper_ms = int((perf_counter() - ensure_started) * 1000)
+
+    _attach_phase_timing(response, "chat_ensure_wrapper_ms", ensure_wrapper_ms)
     return {"current_agent": "Chat_Agent", "messages": [response]}
 
 
@@ -342,7 +394,7 @@ def home_agent_node(state):
         manage_list, set_local_reminder, delete_from_memory, search_memory,
         control_spotify, control_vacuum,
         search_goldmall_offers, get_navigation_info,
-        google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, search_supermarket_prices,
+        google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, search_supermarket_prices,
         get_fit_summary
     ]
 
@@ -351,10 +403,24 @@ def home_agent_node(state):
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
     safe_history = sanitize_history_for_gemini(history)
-    response = llm.bind_tools(tools_to_bind).invoke(
+    bind_started = perf_counter()
+    bound_llm = llm.bind_tools(tools_to_bind)
+    bind_ms = int((perf_counter() - bind_started) * 1000)
+
+    invoke_started = perf_counter()
+    response = bound_llm.invoke(
         [SystemMessage(content=system_prompt)] + safe_history
     )
+    invoke_ms = int((perf_counter() - invoke_started) * 1000)
+
+    _attach_phase_timing(response, "home_bind_ms", bind_ms)
+    _attach_phase_timing(response, "home_invoke_ms", invoke_ms)
+
+    ensure_started = perf_counter()
     response = _ensure_text_response(response, llm, system_prompt, safe_history)
+    ensure_wrapper_ms = int((perf_counter() - ensure_started) * 1000)
+
+    _attach_phase_timing(response, "home_ensure_wrapper_ms", ensure_wrapper_ms)
 
     return {"current_agent": "Home_Agent", "messages": [response]}
 
@@ -694,6 +760,6 @@ all_tools = [
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info,
     control_spotify, search_goldmall_offers, execute_local_pipeline, get_current_location,
-    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, browse_url,
+    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, browse_url,
     duckduckgo_search, search_supermarket_prices, tool_stats, system_doctor
 ]

@@ -69,6 +69,7 @@ print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI via GenAI SDK)\033[0m")
 
 
 def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
+    from time import perf_counter
     """
     Mastro-Shield για κύριες LLM κλήσεις: exponential backoff σε
     network/transport errors (OAuth token refresh timeout, connection reset κ.λπ.).
@@ -91,7 +92,19 @@ def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
 
     for attempt in range(retries):
         try:
-            return llm_obj.invoke(input_)
+            attempt_started = perf_counter()
+            response = llm_obj.invoke(input_)
+            attempt_ms = int((perf_counter() - attempt_started) * 1000)
+
+            try:
+                existing = dict(getattr(response, "_astakos_phase_timings", {}) or {})
+                existing["safe_llm_invoke_ms"] = attempt_ms
+                existing["safe_llm_attempt"] = attempt + 1
+                setattr(response, "_astakos_phase_timings", existing)
+            except Exception:
+                pass
+
+            return response
         except Exception as e:
             err = str(e).lower()
             is_transient = any(t in err for t in _TRANSIENT)

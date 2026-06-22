@@ -318,10 +318,10 @@ def test_shift_logic_candidate_scores_debug_only():
     assert any(
         c["kind"] == "context_state_set"
         and c["reason"] == "shift_afternoon_week"
-        and c["until_date"] == "2026-06-19"
+        and c["until_date"] == "2026-06-21"
         and c["rule_name"] == "shift_logic"
         for c in candidates
-    ), "Expected shift_logic candidate with shift_afternoon_week reason and Friday until_date"
+    ), "Expected shift_logic candidate with shift_afternoon_week reason and Sunday until_date"
     # Score it and verify it stays debug_only (never auto_apply — conservative rule)
     normalized_fact = _normalize(fact)
     scored = [

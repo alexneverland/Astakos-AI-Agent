@@ -20,6 +20,7 @@ import time
 import queue
 import threading
 import requests
+from time import perf_counter
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import sys
@@ -1027,16 +1028,54 @@ def handle_message(user_text: str, chat_id: str):
 
     try:
         # ── Context: shared mixed history από τη SQLite ────────────
+        t_context_0 = perf_counter()
         now_ts = datetime.now().strftime("%H:%M")
         context_msgs = _load_shared_context_messages("telegram")
         current_msg  = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
+        context_load_ms = int((perf_counter() - t_context_0) * 1000)
         # ── Ροή μέσω LangGraph ───────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"
         from memory.execution_trace import ExecutionTrace
         _trace = ExecutionTrace(channel="telegram", user_message=clean_user_text)
-        tool_result_fallbacks = []
-        for event in graph.stream({"messages": context_msgs + [current_msg], "channel": "telegram"}, {"recursion_limit": 50}):
+        _trace.mark_phase("context_load_ms", context_load_ms)
+        
+        t_graph_0 = perf_counter()
+        
+        # 1. graph_call_ms
+        graph_call_started = perf_counter()
+        events = list(graph.stream({"messages": context_msgs + [current_msg], "channel": "telegram"}, {"recursion_limit": 50}))
+        graph_call_ms = int((perf_counter() - graph_call_started) * 1000)
+        _trace.mark_phase("graph_call_ms", graph_call_ms)
+
+        for event in events:
             _trace.process_event(event)
+
+        # 2. graph_result_extract_ms
+        extract_started = perf_counter()
+        for event in events:
+            for node, data in event.items():
+                if data is None:
+                    continue
+                if node not in ["supervisor", "tools"]:
+                    handling_agent = node
+                    msgs = data.get("messages", [])
+                    if msgs and hasattr(msgs[-1], "content"):
+                        last_msg = msgs[-1]
+                        # [MASTRO-FIX]: Skip intermediate tool-call steps
+                        if getattr(last_msg, "tool_calls", None):
+                            continue
+                        from core.utils import clean_message
+                        candidate_raw = clean_message(last_msg.content)
+                        # Skip tool-call announcement strings (internal debug output)
+                        if candidate_raw and not candidate_raw.startswith("[Κλήση Εργαλείου:"):
+                            final_ai_response = candidate_raw
+        graph_result_extract_ms = int((perf_counter() - extract_started) * 1000)
+        _trace.mark_phase("graph_result_extract_ms", graph_result_extract_ms)
+
+        # 3. tool_message_collect_ms
+        tool_collect_started = perf_counter()
+        tool_result_fallbacks = []
+        for event in events:
             for node, data in event.items():
                 if data is None:
                     continue
@@ -1046,60 +1085,80 @@ def handle_message(user_text: str, chat_id: str):
                             tool_content = clean_message(getattr(msg, "content", "")).strip()
                             if tool_content:
                                 tool_result_fallbacks.append(tool_content)
-                if node not in ["supervisor", "tools"]:
-                    handling_agent = node
-                    msgs = data.get("messages", [])
-                    if msgs and hasattr(msgs[-1], "content"):
-                        last_msg = msgs[-1]
-                        # [MASTRO-FIX]: Skip intermediate tool-call steps
-                        if getattr(last_msg, "tool_calls", None):
-                            continue
-                        candidate = clean_message(last_msg.content).strip()
-                        # Skip tool-call announcement strings (internal debug output)
-                        if candidate and not candidate.startswith("[Κλήση Εργαλείου:"):
-                            final_ai_response = candidate
+        tool_message_collect_ms = int((perf_counter() - tool_collect_started) * 1000)
+        _trace.mark_phase("tool_message_collect_ms", tool_message_collect_ms)
+
+        graph_stream_ms = int((perf_counter() - t_graph_0) * 1000)
+        _trace.mark_phase("graph_stream_ms", graph_stream_ms)
+
+        # 4. final_response_build_ms
+        response_build_started = perf_counter()
+
+        if final_ai_response:
+            final_ai_response = clean_message(final_ai_response).strip()
 
         if not final_ai_response:
+            t_fallback_0 = perf_counter()
             final_ai_response = _tool_results_fallback_response(clean_user_text, tool_result_fallbacks)
+            fallback_ms = int((perf_counter() - t_fallback_0) * 1000)
+            _trace.mark_phase("fallback_llm_ms", fallback_ms)
 
         if not final_ai_response:
             # [MASTRO-FIX]: Fallback όταν ο agent δεν παρήγαγε κείμενο (π.χ. loop/recursion)
             send_telegram_msg("⚠️ Κάτι μπλόκαρε — δεν πήρα σαφή απάντηση. Ξαναστείλε μου.")
             return
 
-        _trace.finalize(response=final_ai_response or None)
-        _trace.save()
+        file_path_to_send = None
         if final_ai_response:
             # --- MASTRO INTERCEPTOR ΓΙΑ ΕΓΓΡΑΦΑ ---
             file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_ai_response)
             if file_match:
-                file_path = file_match.group(1).strip()
+                file_path_to_send = file_match.group(1).strip()
                 final_ai_response = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", "", final_ai_response).strip()
 
+        final_response_build_ms = int((perf_counter() - response_build_started) * 1000)
+        _trace.mark_phase("final_response_build_ms", final_response_build_ms)
+
+        _trace.finalize(response=final_ai_response or None)
+
+        if final_ai_response:
+            if file_path_to_send:
                 if final_ai_response:
                     if is_voice_mode:
                         import asyncio
+                        t_voice_0 = perf_counter()
                         asyncio.run(send_telegram_voice(final_ai_response))
+                        voice_send_ms = int((perf_counter() - t_voice_0) * 1000)
+                        _trace.mark_phase("telegram_voice_send_ms", voice_send_ms)
                     else:
+                        t_send_0 = perf_counter()
                         _mid = send_telegram_msg(final_ai_response)
+                        send_ms = int((perf_counter() - t_send_0) * 1000)
+                        _trace.mark_phase("telegram_send_ms", send_ms)
                         _cache_bot_message(_mid, final_ai_response)
 
                 # Στείλε το αρχείο στο Telegram ως document
                 try:
                     from tools.telegram import send_telegram_document
                     import os as _os
-                    _fname = _os.path.basename(file_path)
-                    send_telegram_document(file_path, caption=f"📎 <b>{_fname}</b>")
+                    _fname = _os.path.basename(file_path_to_send)
+                    send_telegram_document(file_path_to_send, caption=f"📎 <b>{_fname}</b>")
                 except Exception as _de:
                     print(f"❌ [Doc send error]: {_de}")
-                    send_telegram_msg(f"📎 Αρχείο: <code>{file_path}</code>")
+                    send_telegram_msg(f"📎 Αρχείο: <code>{file_path_to_send}</code>")
             else:
                 # Κανονική Ροή (Χωρίς Έγγραφα)
                 if is_voice_mode:
                     import asyncio
+                    t_voice_0 = perf_counter()
                     asyncio.run(send_telegram_voice(final_ai_response))
+                    voice_send_ms = int((perf_counter() - t_voice_0) * 1000)
+                    _trace.mark_phase("telegram_voice_send_ms", voice_send_ms)
                 else:
+                    t_send_0 = perf_counter()
                     _mid = send_telegram_msg(final_ai_response)
+                    send_ms = int((perf_counter() - t_send_0) * 1000)
+                    _trace.mark_phase("telegram_send_ms", send_ms)
                     _cache_bot_message(_mid, final_ai_response)
             # Κρατάμε context για επόμενο μήνυμα
             _typing_active["on"] = False  # Σταματάμε το typing
@@ -1116,10 +1175,15 @@ def handle_message(user_text: str, chat_id: str):
                         pass
 
             # Background Tasks
+            t_bg_0 = perf_counter()
             enqueue_fast_task(log_exchange,                       user_text, final_ai_response, handling_agent, "telegram")
             enqueue_fast_task(update_working_memory,              user_text, final_ai_response)
             enqueue_fast_task(_enqueue_slow_memory_sifter,        user_text, final_ai_response, handling_agent, "telegram")
             enqueue_slow_task(update_capabilities_from_exchange,  user_text, final_ai_response, handling_agent)
+            
+            background_enqueue_ms = int((perf_counter() - t_bg_0) * 1000)
+            _trace.mark_phase("background_enqueue_ms", background_enqueue_ms)
+            _trace.save()
 
     except Exception as e:
         _typing_active["on"] = False  # Σταματάμε το typing και σε error
@@ -2060,6 +2124,8 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
         "Αν το context λέει ότι ο Αλέξανδρος λείπει/είναι κατασκήνωση, ΜΗΝ προτείνεις "
         "δραστηριότητα μαζί του (πάρκο, παιχνίδι, ύπνο). Χρησιμοποίησε [CONTEXT_SKIP] "
         "ή στείλε μόνο τρυφερό σχόλιο για την απουσία αν ταιριάζει.\n"
+        "Αν το event ακυρώνεται λόγω 'shift_mode_blocked', σημαίνει ότι ο χρήστης ΔΟΥΛΕΥΕΙ σε άλλη βάρδια, "
+        "ΕΠΟΜΕΝΩΣ ΜΗΝ πεις ότι έχει ρεπό ή ότι 'γλίτωσε τη δουλειά'. Σχολίασε την τρέχουσα βάρδια του!\n"
         "ΑΠΑΓΟΡΕΥΕΤΑΙ: 'δεν είναι η ώρα για', 'υπενθύμιση', 'θυμίζω', το event name κυριολεκτικά.\n"
         "ΣΗΜΑΝΤΙΚΟ — ΕΠΙΛΕΞΕ ΑΚΡΙΒΩΣ ΕΝΑ ΑΠΟ ΤΑ ΤΡΙΑ:\n"
         "1. ΚΑΝΟΝΙΚΟ ΜΗΝΥΜΑ: 1-2 προτάσεις χωρίς tag.\n"

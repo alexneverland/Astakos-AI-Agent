@@ -752,6 +752,94 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
             return f"✅ Ρουτίνα '{event_name}' ενισχύθηκε! (Confidence Boosted)."
     except Exception as e:
         return f"❌ Σφάλμα αποθήκευσης ρουτίνας: {e}"
+
+
+@tool
+def delete_routine(event_name: str, day_of_week: str = "", time_str: str = "") -> str:
+    """
+    [ACTION]: Διαγράφει οριστικά μια ρουτίνα από τον scheduler (βάση ρουτινών).
+    Χρησιμοποίησέ το ΟΤΑΝ ο Λάζαρος ζητά ρητά να διαγραφεί / ακυρωθεί / καταργηθεί 
+    μια επαναλαμβανόμενη ρουτίνα (όχι event του ημερολογίου, όχι απλή μνήμη, αλλά ρουτίνα!).
+    - event_name: Το όνομα ή μέρος του ονόματος της ρουτίνας.
+    - day_of_week: (Προαιρετικό) Ημέρα για πιο ακριβή αναζήτηση.
+    - time_str: (Προαιρετικό) Ώρα (HH:MM) για πιο ακριβή αναζήτηση.
+    """
+    try:
+        from memory.routine_db import find_routines_for_schedule_control, delete_routine_db
+
+        routines = find_routines_for_schedule_control(
+            event_name, 
+            day_of_week=day_of_week if day_of_week else None, 
+            time_str=time_str if time_str else None
+        )
+
+        if not routines:
+            return f"⚠️ Δεν βρέθηκε ρουτίνα που να ταιριάζει στο '{event_name}' για διαγραφή."
+
+        if len(routines) > 1:
+            opts = "\n".join(f"- {r['event']} ({r.get('day','')}, {r.get('time','')})" for r in routines)
+            return f"⚠️ Βρέθηκαν πολλές ρουτίνες. Διευκρίνισε ποια εννοείς:\n{opts}"
+
+        r_id = routines[0]["id"]
+        success = delete_routine_db(r_id)
+        if success:
+            return f"✅ Η ρουτίνα '{routines[0]['event']}' διαγράφηκε οριστικά."
+        return "❌ Η διαγραφή απέτυχε."
+    except Exception as e:
+        return f"❌ Σφάλμα κατά τη διαγραφή ρουτίνας: {e}"
+
+
+@tool
+def edit_routine(
+    event_name: str,
+    new_time_str: str = "",
+    new_day_of_week: str = "",
+    day_of_week: str = "",
+    time_str: str = "",
+) -> str:
+    """
+    [ACTION]: Αλλάζει την ώρα ή/και την ημέρα μιας υφιστάμενης ρουτίνας στον scheduler.
+    Χρησιμοποίησέ το αντί του learn_routine όταν ο Λάζαρος ζητά να ΑΛΛΑΞΕΙ ώρα 
+    ή μέρα σε κάτι που ήδη υπάρχει!
+    - event_name: Το όνομα (ή μέρος) της υπάρχουσας ρουτίνας.
+    - new_time_str: Η νέα ώρα (π.χ. "23:00"). Άφησέ το κενό αν δεν αλλάζει.
+    - new_day_of_week: Η νέα μέρα (π.χ. "Everyday", "Monday"). Άφησέ το κενό αν δεν αλλάζει.
+    - day_of_week: (Προαιρετικό) Ημέρα της υπάρχουσας ρουτίνας για αποσαφήνιση.
+    - time_str: (Προαιρετικό) Ώρα της υπάρχουσας ρουτίνας για αποσαφήνιση.
+    """
+    if not new_time_str and not new_day_of_week:
+        return "⚠️ Πρέπει να δώσεις νέα ώρα ή νέα ημέρα για να γίνει η αλλαγή."
+
+    try:
+        from memory.routine_db import find_routines_for_schedule_control, update_routine_db
+        import re
+
+        routines = find_routines_for_schedule_control(
+            event_name,
+            day_of_week=day_of_week if day_of_week else None,
+            time_str=time_str if time_str else None,
+        )
+
+        if not routines:
+            return f"⚠️ Δεν βρέθηκε ρουτίνα που να ταιριάζει στο '{event_name}' για επεξεργασία."
+
+        if len(routines) > 1:
+            opts = "\n".join(f"- {r['event']} ({r.get('day','')}, {r.get('time','')})" for r in routines)
+            return f"⚠️ Βρέθηκαν πολλές ρουτίνες. Διευκρίνισε ποια εννοείς:\n{opts}"
+
+        r_id = routines[0]["id"]
+        
+        # Αν δόθηκε new_time_str, σιγουρέψου ότι είναι HH:MM
+        if new_time_str:
+            if not re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", new_time_str):
+                return f"❌ Λάθος format νέας ώρας: '{new_time_str}'. Χρησιμοποίησε 'HH:MM'."
+
+        success = update_routine_db(r_id, new_time=new_time_str, new_day=new_day_of_week)
+        if success:
+            return f"✅ Η ρουτίνα '{routines[0]['event']}' ενημερώθηκε επιτυχώς (νέα ώρα: {new_time_str or 'ίδια'}, νέα μέρα: {new_day_of_week or 'ίδια'})."
+        return "❌ Η ενημέρωση απέτυχε."
+    except Exception as e:
+        return f"❌ Σφάλμα κατά την επεξεργασία ρουτίνας: {e}"
 @tool
 def get_routines(day_of_week: str) -> str:
     """
@@ -3228,7 +3316,7 @@ all_tools = [
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
-    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, browse_url,
+    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, browse_url,
     duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, tool_stats, system_doctor, memory_review,
     repo_mapper,
     scan_receipt,
