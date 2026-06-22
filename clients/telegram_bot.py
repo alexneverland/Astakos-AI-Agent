@@ -259,15 +259,70 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         # Στέλνουμε μήνυμα στον χρήστη ότι το λάβαμε
         send_telegram_msg(f"📄 Έγγραφο ελήφθη: `{file_name}`\nΠερίμενε, το κοιτάζω...")
 
-        # Συνθέτουμε το "αόρατο" μήνυμα για να το πιάσει το Graph (Tech_Agent)
-        user_text = f"[USER_UPLOADED_FILE]: {file_name}\n[FILE PATH]: {local_path}"
-        if caption:
-            user_text += f"\nΟδηγία: {caption}"
-        else:
-            user_text += "\nΤι θέλεις να κάνω με αυτό; Να το διαβάσω ή να το αρχειοθετήσω;"
+        file_ext = os.path.splitext(file_name)[1].lower()
+        doc_text = ""
+        try:
+            if file_ext in (".txt", ".csv", ".json", ".md"):
+                with open(local_path, "r", encoding="utf-8", errors="ignore") as df:
+                    doc_text = df.read()[:8000]
+            elif file_ext == ".pdf":
+                import pypdf
+                reader = pypdf.PdfReader(local_path)
+                doc_text = "\n".join(p.extract_text() or "" for p in reader.pages)[:8000]
+            elif file_ext in (".docx",):
+                from docx import Document as DocxDoc
+                doc_text = "\n".join(p.text for p in DocxDoc(local_path).paragraphs)[:8000]
+            elif file_ext in (".xlsx", ".xls"):
+                import pandas as pd
+                df_data = pd.read_excel(local_path)
+                doc_text = df_data.to_string(index=False)[:8000]
+            else:
+                doc_text = f"Μη υποστηριζόμενος τύπος εγγράφου: {file_ext}"
+        except Exception as read_err:
+            doc_text = f"[Δεν μπόρεσα να διαβάσω το περιεχόμενο: {read_err}]"
 
-        # Το περνάμε στον κανονικό handler μηνυμάτων για να αναλάβει ο Αστακός
-        handle_message(user_text, chat_id)
+        sum_prompt = f"Διάβασε το παρακάτω έγγραφο '{file_name}' και κάνε μια σύντομη ανάλυση/περίληψη στα Ελληνικά (5-8 προτάσεις). Αν υπήρχε οδηγία '{caption}', δώσε έμφαση εκεί:\n\n{doc_text}"
+        from langchain_core.messages import HumanMessage as _HM
+        sum_resp = safe_llm_invoke(llm, [_HM(content=sum_prompt)])
+        detailed_analysis = clean_message(sum_resp.content).strip() if sum_resp and sum_resp.content else "Δεν μπόρεσα να αναλύσω το έγγραφο."
+        memory_analysis = detailed_analysis[:500]
+
+        chat_ai_msg = (
+            f"📄 **Έγγραφο:** `{file_name}`\n\n"
+            f"{detailed_analysis}\n\n"
+            "**Να το αποθηκεύσω μόνιμα στη μνήμη μου;**\n"
+            "Απάντησέ μου μόνο με: ναι ή όχι."
+        )
+        
+        send_telegram_msg(chat_ai_msg)
+
+        user_log_msg = f"[USER_UPLOADED_FILE]: {file_name}\n[FILE PATH]: {local_path}\n[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]: {memory_analysis}"
+        
+        # Καταγραφή στο ιστορικό
+        try:
+            from memory.conversation_history import append_message
+            now = datetime.now()
+            append_message("user", user_log_msg, "telegram", agent=None, timestamp=now)
+            append_message("assistant", chat_ai_msg, "telegram", agent="Chat_Agent", timestamp=now)
+            enqueue_fast_task(log_exchange, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
+            enqueue_fast_task(update_working_memory, user_log_msg, chat_ai_msg)
+            enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
+            enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
+        except Exception as e:
+            print(f"[Document/History]: {e}")
+
+        try:
+            from memory.pending_assets import create_pending_asset_archive
+            create_pending_asset_archive(
+                channel="telegram",
+                asset_type="document",
+                file_path=local_path,
+                filename=file_name,
+                analysis=memory_analysis,
+                caption=caption or "",
+            )
+        except Exception as e:
+            print(f"[PendingAssets]: Telegram document upload error: {e}")
 
     except Exception as e:
         print(f"\033[91m[Document Error]: {e}\033[0m")
@@ -472,8 +527,8 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         send_telegram_msg("⚠️ Δεν πήρα σαφή απάντηση για τη φωτογραφία.")
         return
 
-    from memory.pending_assets import looks_like_archive_confirmation_prompt
-    if not looks_like_archive_confirmation_prompt(final_response):
+    from memory.pending_assets import looks_like_asset_confirmation_prompt
+    if not looks_like_asset_confirmation_prompt(final_response):
         final_response += "\n\nΝα την αποθηκεύσω μόνιμα στη μνήμη μου;\nΑπάντησέ μου μόνο με: ναι ή όχι."
 
     # ── Photo persistence / Pending asset ──
@@ -492,8 +547,8 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, final_response, handling_agent)
 
     try:
-        from memory.pending_assets import create_pending_asset_archive, looks_like_archive_confirmation_prompt
-        if looks_like_archive_confirmation_prompt(final_response):
+        from memory.pending_assets import create_pending_asset_archive, looks_like_asset_confirmation_prompt
+        if looks_like_asset_confirmation_prompt(final_response):
             create_pending_asset_archive(
                 channel="telegram",
                 asset_type="photo",
@@ -1142,21 +1197,32 @@ def handle_message(user_text: str, chat_id: str):
         mark_pending_asset_cancelled,
         create_pending_asset_archive,
         classify_pending_asset_reply,
-        looks_like_archive_confirmation_prompt,
+        looks_like_asset_confirmation_prompt,
     )
     clear_expired_pending_assets()
     pending_photo_asset = get_latest_pending_asset("telegram", "photo")
-    reply_kind = classify_pending_asset_reply(clean_user_text) if pending_photo_asset else None
+    pending_doc_asset = get_latest_pending_asset("telegram", "document")
+    pending_asset = pending_photo_asset or pending_doc_asset
+    reply_kind = classify_pending_asset_reply(clean_user_text) if pending_asset else None
 
-    if pending_photo_asset and reply_kind == "yes":
-        memory.save(
-            memory_type="photo",
-            file_path=pending_photo_asset["file_path"],
-            analysis=pending_photo_asset.get("analysis", ""),
-            caption=pending_photo_asset.get("caption", "") or pending_photo_asset["filename"],
-        )
-        mark_pending_asset_confirmed(pending_photo_asset["id"])
-        confirm_reply = "Έγινε, μάστορα. Την αποθήκευσα στη μνήμη μου."
+    if pending_asset and reply_kind == "yes":
+        if pending_asset["asset_type"] == "photo":
+            memory.save(
+                memory_type="photo",
+                file_path=pending_asset["file_path"],
+                analysis=pending_asset.get("analysis", ""),
+                caption=pending_asset.get("caption", "") or pending_asset["filename"],
+            )
+        else:
+            memory.save(
+                memory_type="document",
+                file_path=pending_asset["file_path"],
+                analysis=pending_asset.get("analysis", ""),
+                caption=pending_asset.get("caption", "") or pending_asset["filename"],
+            )
+            
+        mark_pending_asset_confirmed(pending_asset["id"])
+        confirm_reply = "Έγινε, μάστορα. Το αποθήκευσα στη μνήμη μου."
         _send_and_record_assistant(confirm_reply, chat_id)
         enqueue_fast_task(log_exchange, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
         enqueue_fast_task(update_working_memory, clean_user_text, confirm_reply)
@@ -1164,9 +1230,9 @@ def handle_message(user_text: str, chat_id: str):
         enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, confirm_reply, "Chat_Agent")
         return
 
-    if pending_photo_asset and reply_kind == "no":
-        mark_pending_asset_cancelled(pending_photo_asset["id"])
-        cancel_reply = "Έγινε, δεν την αρχειοθετώ μόνιμα."
+    if pending_asset and reply_kind == "no":
+        mark_pending_asset_cancelled(pending_asset["id"])
+        cancel_reply = "Έγινε, δεν το αρχειοθετώ μόνιμα."
         _send_and_record_assistant(cancel_reply, chat_id)
         enqueue_fast_task(log_exchange, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
         enqueue_fast_task(update_working_memory, clean_user_text, cancel_reply)

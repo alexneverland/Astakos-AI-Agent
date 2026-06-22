@@ -547,7 +547,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     except Exception as _rce:
         print(f"[Web Routine Confirm]: {_rce}")
 
-    # ── Pending Photo Confirmation από Web UI ────────────────────
+    # ── Pending Asset Confirmation από Web UI ────────────────────
     try:
         from memory.pending_assets import (
             clear_expired_pending_assets,
@@ -555,32 +555,43 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             mark_pending_asset_confirmed,
             mark_pending_asset_cancelled,
             classify_pending_asset_reply,
-            looks_like_archive_confirmation_prompt,
+            looks_like_asset_confirmation_prompt,
         )
         clear_expired_pending_assets()
         pending_photo_asset = get_latest_pending_asset("web", "photo")
-        reply_kind = classify_pending_asset_reply(user_input) if pending_photo_asset else None
+        pending_doc_asset = get_latest_pending_asset("web", "document")
+        pending_asset = pending_photo_asset or pending_doc_asset
+        reply_kind = classify_pending_asset_reply(user_input) if pending_asset else None
 
-        if pending_photo_asset and reply_kind == "yes":
+        if pending_asset and reply_kind == "yes":
             from memory.vector_store import memory
-            memory.save(
-                memory_type="photo",
-                file_path=pending_photo_asset["file_path"],
-                analysis=pending_photo_asset.get("analysis", ""),
-                caption=pending_photo_asset.get("caption", "") or pending_photo_asset["filename"],
-            )
-            mark_pending_asset_confirmed(pending_photo_asset["id"])
+            if pending_asset["asset_type"] == "photo":
+                memory.save(
+                    memory_type="photo",
+                    file_path=pending_asset["file_path"],
+                    analysis=pending_asset.get("analysis", ""),
+                    caption=pending_asset.get("caption", "") or pending_asset["filename"],
+                )
+            else:
+                memory.save(
+                    memory_type="document",
+                    file_path=pending_asset["file_path"],
+                    analysis=pending_asset.get("analysis", ""),
+                    caption=pending_asset.get("caption", "") or pending_asset["filename"],
+                )
+                
+            mark_pending_asset_confirmed(pending_asset["id"])
 
-            reply = "Έγινε, Λάζαρε. Την αποθήκευσα στη μνήμη μου."
+            reply = "Έγινε, Λάζαρε. Το αποθήκευσα στη μνήμη μου."
             append_to_chat_history("user", user_input)
             append_to_chat_history("assistant", reply, agent="Chat_Agent")
             log_exchange(user_input, reply, "Chat_Agent", channel="web")
             return JSONResponse({"agent": "Chat_Agent", "response": reply})
 
-        if pending_photo_asset and reply_kind == "no":
-            mark_pending_asset_cancelled(pending_photo_asset["id"])
+        if pending_asset and reply_kind == "no":
+            mark_pending_asset_cancelled(pending_asset["id"])
 
-            reply = "Έγινε, δεν την αποθηκεύω μόνιμα."
+            reply = "Έγινε, δεν το αποθηκεύω μόνιμα."
             append_to_chat_history("user", user_input)
             append_to_chat_history("assistant", reply, agent="Chat_Agent")
             log_exchange(user_input, reply, "Chat_Agent", channel="web")
@@ -899,7 +910,8 @@ async def upload_file(request: Request, file: UploadFile = File(...), _=Depends(
             chat_ai_msg = (
                 f"📄 **Έγγραφο:** `{file.filename}`\n\n"
                 f"{detailed_analysis}\n\n"
-                "**Θέλεις να αποθηκεύσω το περιεχόμενο στη μνήμη μου ώστε να το γνωρίζω μελλοντικά;**"
+                "**Να το αποθηκεύσω μόνιμα στη μνήμη μου;**\n"
+                "Απάντησέ μου μόνο με: ναι ή όχι."
             )
             user_log_msg = f"[USER_UPLOADED_FILE]: {filename}\n[FILE PATH]: {file_path}\n[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]: {memory_analysis}"
         else:
@@ -915,12 +927,14 @@ async def upload_file(request: Request, file: UploadFile = File(...), _=Depends(
         append_to_chat_history("assistant", chat_ai_msg)
         log_exchange(user_log_msg, chat_ai_msg, "Chat_Agent", channel="web")
 
-        if is_image and looks_like_archive_confirmation_prompt(chat_ai_msg):
+        from memory.pending_assets import looks_like_asset_confirmation_prompt
+        if looks_like_asset_confirmation_prompt(chat_ai_msg):
             try:
                 from memory.pending_assets import create_pending_asset_archive
+                asset_type = "photo" if is_image else "document"
                 create_pending_asset_archive(
                     channel="web",
-                    asset_type="photo",
+                    asset_type=asset_type,
                     file_path=file_path,
                     filename=filename,
                     analysis=memory_analysis,

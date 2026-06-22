@@ -52,16 +52,20 @@ def classify_pending_asset_reply(text: str) -> str | None:
     return None
 
 
-def looks_like_archive_confirmation_prompt(text: str) -> bool:
+def looks_like_asset_confirmation_prompt(text: str) -> bool:
     txt = _normalize_gr(text)
     markers = (
+        "να την αποθηκευσω μονιμα στη μνημη μου",
+        "να το αποθηκευσω μονιμα στη μνημη μου",
+        "να την αρχειοθετησω μονιμα",
+        "να το αρχειοθετησω μονιμα",
+        "απαντησε μου μονο με",
+        "ναι η οχι",
+        "ναι ή οχι",
         "να την αποθηκευσω",
         "να το αποθηκευσω",
         "να τη σωσω",
         "να το σωσω",
-        "ναι η οχι",
-        "ναι ή οχι",
-        "απαντησε μου μονο με",
         "να την αρχειοθετησω",
     )
     return any(m in txt for m in markers)
