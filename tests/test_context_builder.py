@@ -316,3 +316,93 @@ def test_temporal_history_matches_inflected_query_against_stored_form():
 
     assert any("LEGO διαστημόπλοιο" in line for line in lines)
     assert all("φακές" not in line for line in lines)
+
+def test_semantic_skip_simple_ack_skipped():
+    calls = {"recent": 0, "semantic": 0}
+
+    def fake_recent_loader(**kwargs):
+        calls["recent"] += 1
+        return []
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] stale")]
+
+    # "ναι" is a simple ack, should skip semantic search
+    query = "[10:24] ναι"
+    context = build_memory_context(
+        query,
+        recent_loader=fake_recent_loader,
+        semantic_search=fake_search,
+        semantic_k=5,
+    )
+
+    # _record_memory_context_debug checks the effective_semantic_k
+    assert calls["semantic"] == 0  # The function is called, but with k=0
+    assert len(context.semantic_facts) == 0
+
+def test_semantic_skip_short_important_kept():
+    calls = {"recent": 0, "semantic": 0}
+
+    def fake_recent_loader(**kwargs):
+        return []
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] αλέξανδρος info")] if k > 0 else []
+
+    # Short message, but mentions "Αλέξανδρος" -> kept
+    query = "[10:24] ο Αλέξανδρος γύρισε"
+    context = build_memory_context(
+        query,
+        recent_loader=fake_recent_loader,
+        semantic_search=fake_search,
+        semantic_k=5,
+    )
+
+    assert calls["semantic"] == 1
+    assert len(context.semantic_facts) == 1
+
+def test_semantic_skip_question_kept():
+    calls = {"recent": 0, "semantic": 0}
+
+    def fake_recent_loader(**kwargs):
+        return []
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] info")] if k > 0 else []
+
+    # Short message, but has question mark -> kept
+    query = "[10:24] τι έκανε;"
+    context = build_memory_context(
+        query,
+        recent_loader=fake_recent_loader,
+        semantic_search=fake_search,
+        semantic_k=5,
+    )
+
+    assert calls["semantic"] == 1
+    assert len(context.semantic_facts) == 1
+
+def test_semantic_skip_work_message_kept():
+    calls = {"recent": 0, "semantic": 0}
+
+    def fake_recent_loader(**kwargs):
+        return []
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] work info")] if k > 0 else []
+
+    # Short message, but mentions "δουλειά" -> kept
+    query = "[10:24] είμαι στη δουλειά"
+    context = build_memory_context(
+        query,
+        recent_loader=fake_recent_loader,
+        semantic_search=fake_search,
+        semantic_k=5,
+    )
+
+    assert calls["semantic"] == 1
+    assert len(context.semantic_facts) == 1

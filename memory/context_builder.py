@@ -155,6 +155,93 @@ def _clean_query_for_search(query: str) -> str:
     return cleaned if cleaned else query
 
 
+_SIMPLE_ACKS = {
+    "ναι", "nai", "yes",
+    "οκ", "ok", "okay",
+    "έγινε", "εγινε",
+    "καλά", "καλα",
+    "ευχαριστώ", "ευχαριστω",
+    "τέλεια", "τελεια",
+    "ωραία", "ωραια",
+    "σωστά", "σωστα",
+}
+
+def _looks_low_complexity_query(query: str) -> bool:
+    if not query:
+        return True
+
+    q = query.strip().lower()
+    if not q:
+        return True
+
+    # Αφαίρεσε timestamp prefix τύπου [10:24]
+    q = re.sub(r"^\[\d{1,2}:\d{2}\]\s*", "", q).strip()
+
+    # Πολύ μικρά acknowledgements
+    if q in _SIMPLE_ACKS:
+        return True
+
+    # Πολύ σύντομο μήνυμα χωρίς ερώτηση
+    word_count = len(q.split())
+    has_question = "?" in q or ";" in q
+
+    if word_count <= 3 and not has_question:
+        return True
+
+    # Σύντομα status / follow-up χωρίς ξεκάθαρο info request
+    low_signal_starts = (
+        "ναι ",
+        "οκ ",
+        "έγινε ",
+        "σε λίγο ",
+        "αργότερα ",
+        "μετά ",
+        "καλά είμαστε",
+        "ολα καλα",
+        "όλα καλά",
+        "ευχαριστώ ",
+    )
+    if q.startswith(low_signal_starts) and word_count <= 8 and not has_question:
+        return True
+
+    return False
+
+def _must_keep_semantic(query: str) -> bool:
+    if not query:
+        return False
+
+    q = query.strip().lower()
+
+    strong_tokens = (
+        "σοφία", "σοφια",
+        "αλέξανδρ", "αλεξανδρ",
+        "μαρία", "μαρια",
+        "δουλει", "βάρδια", "βαρδια",
+        "πάρκο", "παρκο",
+        "ποδόσφαιρ", "ποδοσφαιρ",
+        "κατασκήν", "κατασκην",
+        "σπίτι", "σπιτι",
+        "μήνυμα", "μηνυμα",
+        "υπνος", "ύπνος",
+        "μαγείρε", "μαγειρε",
+        "ψών", "ψων",
+        "λίστα", "λιστα",
+        "θυμά", "θυμα",
+        "remember",
+        "γιατί", "γιατι",
+        "πώς", "πως",
+        "τι ",
+        "ποιος", "ποια", "ποιο",
+        "πότε", "ποτε",
+        "πού", "που",
+        "στείλε", "στειλε",
+        "πάγωσε", "παγωσε",
+        "άλλαξε", "αλλαξε",
+    )
+
+    return any(token in q for token in strong_tokens)
+
+
 def _has_temporal_marker(query: str) -> bool:
     clean = _normalize_text(query)
     return any(marker in clean for marker in _TEMPORAL_MARKERS)
@@ -409,8 +496,16 @@ def build_memory_context(
     )
     historical_ms = int((perf_counter() - t_hist_0) * 1000)
 
+    effective_semantic_k = semantic_k
+    semantic_skip_reason = None
+
+    if semantic_k > 0:
+        if _looks_low_complexity_query(clean_query) and not _must_keep_semantic(clean_query):
+            effective_semantic_k = 0
+            semantic_skip_reason = "low_complexity_query"
+
     t_sem_0 = perf_counter()
-    semantic_facts = semantic_facts_for_query(clean_query, k=semantic_k, search_fn=semantic_search)
+    semantic_facts = semantic_facts_for_query(clean_query, k=effective_semantic_k, search_fn=semantic_search)
     semantic_ms = int((perf_counter() - t_sem_0) * 1000)
 
     context = MemoryContext(
@@ -431,6 +526,8 @@ def build_memory_context(
         recent_ms=recent_ms,
         historical_ms=historical_ms,
         semantic_ms=semantic_ms,
+        semantic_k_used=effective_semantic_k,
+        semantic_skip_reason=semantic_skip_reason,
     )
     return context
 
@@ -449,6 +546,8 @@ def _record_memory_context_debug(
     recent_ms: int = 0,
     historical_ms: int = 0,
     semantic_ms: int = 0,
+    semantic_k_used: int = 0,
+    semantic_skip_reason: str | None = None,
 ) -> None:
     payload = {
         "written_at": datetime.now().isoformat(timespec="seconds"),
@@ -464,6 +563,8 @@ def _record_memory_context_debug(
         "recent_ms": recent_ms,
         "historical_ms": historical_ms,
         "semantic_ms": semantic_ms,
+        "semantic_k_used": semantic_k_used,
+        "semantic_skip_reason": semantic_skip_reason,
     }
     if is_tool_output:
         # [MASTRO-FIX]: Το query εδώ είναι εσωτερικό tool-output (όχι πραγματικό
@@ -480,9 +581,10 @@ def _record_memory_context_debug(
             f"\033[90m[MemoryContext]: channel={channel} "
             f"recent={recent_count} ({recent_ms}ms) "
             f"sqlite={historical_count} ({historical_ms}ms) "
-            f"semantic={semantic_count} ({semantic_ms}ms) "
+            f"semantic={semantic_count} ({semantic_ms}ms, k={semantic_k_used}, skip={semantic_skip_reason}) "
             f"query='{payload['query_preview']}'\033[0m"
         )
+
     try:
         with open(MEMORY_CONTEXT_DEBUG_FILE, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
