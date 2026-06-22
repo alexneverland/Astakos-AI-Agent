@@ -127,6 +127,29 @@ def is_simple_chat_fast_path_candidate(user_text: str) -> bool:
 
     return False
 
+_ULTRA_LIGHT_ACKS = {
+    "ναι", "οκ", "ok", "έγινε", "εγινε", "καλά", "καλα",
+    "τέλεια", "τελεια", "σωστά", "σωστα", "εντάξει", "ενταξει",
+    "ναι οκ", "οκ ναι", "εγινε οκ", "οκ εγινε"
+}
+
+def is_ultra_light_ack(text: str) -> bool:
+    """Detect whether the message is a tiny ACK that can bypass the LLM entirely."""
+    import string
+    clean_text = text.lower().translate(str.maketrans('', '', string.punctuation)).strip()
+    return clean_text in _ULTRA_LIGHT_ACKS
+
+def get_ultra_light_ack_response() -> str:
+    """Return a short neutral confirmation for ultra-light ACK replies."""
+    import random
+    return random.choice([
+        "Έγινε.",
+        "ΟΚ.",
+        "Λήφθη.",
+        "Τέλεια.",
+        "✅"
+    ])
+
 def sanitize_history_for_gemini(messages: list) -> list:
     """
     [MASTRO-FIX]: Σιδερώνει το ιστορικό για να μην κρασάρει το Gemini με Error 400.

@@ -1189,20 +1189,33 @@ def handle_message(user_text: str, chat_id: str):
         
         t_graph_0 = perf_counter()
         
-        fast_path_used = is_simple_chat_fast_path_candidate(clean_user_text)
-        _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
+        from core.utils import is_simple_chat_fast_path_candidate, is_ultra_light_ack, get_ultra_light_ack_response
+        
+        is_ultra_ack = is_ultra_light_ack(clean_user_text)
+        fast_path_used = False
 
         # 1. graph_call_ms
         graph_call_started = perf_counter()
-        if fast_path_used:
-            events = _run_fast_chat_path(context_msgs, current_msg)
+        
+        if is_ultra_ack:
+            _trace.mark_phase("ultra_light_ack_used", 1)
+            handling_agent = "UltraLightACK"
+            final_ai_response = get_ultra_light_ack_response()
+            print(f"\033[92m[Telegram->UltraLightACK]: Ακαριαία απάντηση στο '{clean_user_text}'\033[0m")
+            events = []
         else:
-            events = list(
-                graph.stream(
-                    {"messages": context_msgs + [current_msg], "channel": "telegram"},
-                    {"recursion_limit": 50},
+            fast_path_used = is_simple_chat_fast_path_candidate(clean_user_text)
+            _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
+
+            if fast_path_used:
+                events = _run_fast_chat_path(context_msgs, current_msg)
+            else:
+                events = list(
+                    graph.stream(
+                        {"messages": context_msgs + [current_msg], "channel": "telegram"},
+                        {"recursion_limit": 50},
+                    )
                 )
-            )
         graph_call_ms = int((perf_counter() - graph_call_started) * 1000)
         _trace.mark_phase("graph_call_ms", graph_call_ms)
         _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
@@ -1279,6 +1292,7 @@ def handle_message(user_text: str, chat_id: str):
         final_response_build_ms = int((perf_counter() - response_build_started) * 1000)
         _trace.mark_phase("final_response_build_ms", final_response_build_ms)
 
+        _trace.agent = handling_agent
         _trace.finalize(response=final_ai_response or None)
 
         if final_ai_response:

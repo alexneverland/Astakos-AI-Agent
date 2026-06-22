@@ -681,58 +681,67 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         context_msgs = _load_shared_context_messages("web", exclude_message_id=current_history_id)
         _trace.mark_phase("context_load_ms", int((perf_counter() - t_context_0) * 1000))
 
-        from core.utils import is_simple_chat_fast_path_candidate
-        fast_path_used = is_simple_chat_fast_path_candidate(isolated_user_input)
-        _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
-        _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
-
-        limit = 12 if fast_path_used else 50
+        from core.utils import is_simple_chat_fast_path_candidate, is_ultra_light_ack, get_ultra_light_ack_response
+        
+        is_ultra_ack = is_ultra_light_ack(isolated_user_input)
         tool_result_fallbacks = []
 
-        t_graph_0 = perf_counter()
-        for event in graph.stream({"messages": context_msgs + [human_msg], "channel": "web"}, {"recursion_limit": limit}):
-            _trace.process_event(event)
-            for node, data in event.items():
-                if data is None:
-                    continue
+        if is_ultra_ack:
+            _trace.mark_phase("ultra_light_ack_used", 1)
+            final_ai_response = get_ultra_light_ack_response()
+            handling_agent = "UltraLightACK"
+            print(f"\033[92m[Web->UltraLightACK]: Ακαριαία απάντηση στο '{isolated_user_input}'\033[0m")
+        else:
+            fast_path_used = is_simple_chat_fast_path_candidate(isolated_user_input)
+            _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
+            _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
 
-                if node == "tools":
-                    t_tools_0 = perf_counter()
-                    for msg in data.get("messages", []):
-                        if getattr(msg, "type", "") == "tool":
-                            tool_content = clean_message(getattr(msg, "content", "")).strip()
-                            if tool_content:
-                                tool_result_fallbacks.append(tool_content)
-                    _trace.mark_phase(
-                        "tool_message_collect_ms",
-                        _trace.phase_timings.get("tool_message_collect_ms", 0)
-                        + int((perf_counter() - t_tools_0) * 1000)
-                    )
+            limit = 12 if fast_path_used else 50
 
-                if node not in ["supervisor", "tools"]:
-                    t_extract_0 = perf_counter()
+            t_graph_0 = perf_counter()
+            for event in graph.stream({"messages": context_msgs + [human_msg], "channel": "web"}, {"recursion_limit": limit}):
+                _trace.process_event(event)
+                for node, data in event.items():
+                    if data is None:
+                        continue
 
-                    handling_agent = node
-                    msgs = data.get("messages", [])
-                    if msgs and hasattr(msgs[-1], "content"):
-                        last_msg = msgs[-1]
-                        if getattr(last_msg, "tool_calls", None):
-                            pass
-                        else:
-                            candidate = clean_message(msgs[-1].content).strip()
-                            if candidate and not candidate.startswith("[Κλήση Εργαλείου:"):
-                                final_ai_response = candidate
-                                print(f"\033[90m[Web->Graph]: Agent '{handling_agent}' απάντησε ({len(candidate)} χαρ.)\033[0m")
+                    if node == "tools":
+                        t_tools_0 = perf_counter()
+                        for msg in data.get("messages", []):
+                            if getattr(msg, "type", "") == "tool":
+                                tool_content = clean_message(getattr(msg, "content", "")).strip()
+                                if tool_content:
+                                    tool_result_fallbacks.append(tool_content)
+                        _trace.mark_phase(
+                            "tool_message_collect_ms",
+                            _trace.phase_timings.get("tool_message_collect_ms", 0)
+                            + int((perf_counter() - t_tools_0) * 1000)
+                        )
 
-                    _trace.mark_phase(
-                        "graph_result_extract_ms",
-                        _trace.phase_timings.get("graph_result_extract_ms", 0)
-                        + int((perf_counter() - t_extract_0) * 1000)
-                    )
+                    if node not in ["supervisor", "tools"]:
+                        t_extract_0 = perf_counter()
 
-        graph_elapsed_ms = int((perf_counter() - t_graph_0) * 1000)
-        _trace.mark_phase("graph_call_ms", graph_elapsed_ms)
-        _trace.mark_phase("graph_stream_ms", graph_elapsed_ms)
+                        handling_agent = node
+                        msgs = data.get("messages", [])
+                        if msgs and hasattr(msgs[-1], "content"):
+                            last_msg = msgs[-1]
+                            if getattr(last_msg, "tool_calls", None):
+                                pass
+                            else:
+                                candidate = clean_message(msgs[-1].content).strip()
+                                if candidate and not candidate.startswith("[Κλήση Εργαλείου:"):
+                                    final_ai_response = candidate
+                                    print(f"\033[90m[Web->Graph]: Agent '{handling_agent}' απάντησε ({len(candidate)} χαρ.)\033[0m")
+
+                        _trace.mark_phase(
+                            "graph_result_extract_ms",
+                            _trace.phase_timings.get("graph_result_extract_ms", 0)
+                            + int((perf_counter() - t_extract_0) * 1000)
+                        )
+
+            graph_elapsed_ms = int((perf_counter() - t_graph_0) * 1000)
+            _trace.mark_phase("graph_call_ms", graph_elapsed_ms)
+            _trace.mark_phase("graph_stream_ms", graph_elapsed_ms)
 
         t_build_0 = perf_counter()
 
@@ -789,6 +798,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         if final_ai_response:
             # Αποθηκεύουμε παντού τα ΚΑΘΑΡΑ strings (με το Link/Img αν υπάρχει)
             _trace.mark_phase("final_response_build_ms", int((perf_counter() - t_build_0) * 1000))
+            _trace.agent = handling_agent
             _trace.finalize(response=clean_ai)
             
             append_to_chat_history("assistant", clean_ai, agent=handling_agent)
