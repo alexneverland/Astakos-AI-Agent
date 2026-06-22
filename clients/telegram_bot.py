@@ -799,6 +799,100 @@ def _send_pending_reflections_summary() -> None:
     send_telegram_msg(msg)
 
 
+def _is_simple_chat_fast_path_candidate(user_text: str) -> bool:
+    if not user_text:
+        return True
+
+    q = clean_message(user_text).strip().lower()
+    if not q:
+        return True
+
+    # Commands never go fast path
+    if q.startswith("/"):
+        return False
+
+    # Questions usually deserve normal path
+    if "?" in q or ";" in q:
+        return False
+
+    # Tool / action / control intent -> normal path
+    blocked_tokens = (
+        "στείλε", "στειλε",
+        "θυμά", "θυμα",
+        "δες", "κοιτα",
+        "πάγωσε", "παγωσε",
+        "άλλαξε", "αλλαξε",
+        "σβήσε", "σβησε",
+        "γράψε", "γραψε",
+        "φτιάξε", "φτιαξε",
+        "ρύθμισε", "ρυθμισε",
+        "λίστα", "λιστα",
+        "routine", "ρουτίν", "ρουτιν",
+        "υπενθύμι", "υπενθυμι",
+        "μήνυμα", "μηνυμα",
+        "δουλειά", "δουλεια",
+        "βάρδια", "βαρδια",
+        "πρωιν", "απογευματιν", "βραδιν",
+        "σοφία", "σοφια",
+        "αλέξανδρ", "αλεξανδρ",
+        "μαρία", "μαρια",
+        "κατασκήν", "κατασκην",
+        "πάρκο", "παρκο",
+        "ποδόσφαιρ", "ποδοσφαιρ",
+        "μαγείρ", "μαγειρ",
+        "ψών", "ψων",
+        "φωτο", "photo",
+        "receipt", "nutrition",
+    )
+    if any(token in q for token in blocked_tokens):
+        return False
+
+    # Simple short conversational turns
+    word_count = len(q.split())
+    if word_count <= 8:
+        return True
+
+    low_signal_starts = (
+        "ναι ",
+        "οκ ",
+        "ok ",
+        "έγινε ",
+        "εγινε ",
+        "καλά ",
+        "καλα ",
+        "σε λίγο ",
+        "σε λιγο ",
+        "αργότερα ",
+        "αργοτερα ",
+        "μετά ",
+        "μετα ",
+        "ευχαριστώ ",
+        "ευχαριστω ",
+        "όχι εντάξει",
+        "οχι ενταξει",
+        "βαριέμαι ",
+        "βαριεμαι ",
+    )
+    if q.startswith(low_signal_starts) and word_count <= 12:
+        return True
+
+    return False
+
+def _build_fast_chat_context(clean_user_text: str):
+    now_ts = datetime.now().strftime("%H:%M")
+    context_msgs = _load_shared_context_messages("telegram")
+    current_msg = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
+    return context_msgs, current_msg
+
+def _run_fast_chat_path(context_msgs, current_msg):
+    return list(
+        graph.stream(
+            {"messages": context_msgs + [current_msg], "channel": "telegram"},
+            {"recursion_limit": 12},
+        )
+    )
+
+
 def handle_message(user_text: str, chat_id: str):
     """Στέλνει το μήνυμα στον Αστακό και απαντάει (Κείμενο ή Ήχο)."""
     global last_interaction_time
@@ -1029,9 +1123,7 @@ def handle_message(user_text: str, chat_id: str):
     try:
         # ── Context: shared mixed history από τη SQLite ────────────
         t_context_0 = perf_counter()
-        now_ts = datetime.now().strftime("%H:%M")
-        context_msgs = _load_shared_context_messages("telegram")
-        current_msg  = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
+        context_msgs, current_msg = _build_fast_chat_context(clean_user_text)
         context_load_ms = int((perf_counter() - t_context_0) * 1000)
         # ── Ροή μέσω LangGraph ───────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"
@@ -1041,11 +1133,23 @@ def handle_message(user_text: str, chat_id: str):
         
         t_graph_0 = perf_counter()
         
+        fast_path_used = _is_simple_chat_fast_path_candidate(clean_user_text)
+        _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
+
         # 1. graph_call_ms
         graph_call_started = perf_counter()
-        events = list(graph.stream({"messages": context_msgs + [current_msg], "channel": "telegram"}, {"recursion_limit": 50}))
+        if fast_path_used:
+            events = _run_fast_chat_path(context_msgs, current_msg)
+        else:
+            events = list(
+                graph.stream(
+                    {"messages": context_msgs + [current_msg], "channel": "telegram"},
+                    {"recursion_limit": 50},
+                )
+            )
         graph_call_ms = int((perf_counter() - graph_call_started) * 1000)
         _trace.mark_phase("graph_call_ms", graph_call_ms)
+        _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
 
         for event in events:
             _trace.process_event(event)
