@@ -585,7 +585,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             reply = "Έγινε, Λάζαρε. Το αποθήκευσα στη μνήμη μου."
             append_to_chat_history("user", user_input)
             append_to_chat_history("assistant", reply, agent="Chat_Agent")
-            log_exchange(user_input, reply, "Chat_Agent", channel="web")
+            enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
+            enqueue_fast_task(update_working_memory, user_input, reply)
+            enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
+            enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             return JSONResponse({"agent": "Chat_Agent", "response": reply})
 
         if pending_asset and reply_kind == "no":
@@ -594,7 +597,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             reply = "Έγινε, δεν το αποθηκεύω μόνιμα."
             append_to_chat_history("user", user_input)
             append_to_chat_history("assistant", reply, agent="Chat_Agent")
-            log_exchange(user_input, reply, "Chat_Agent", channel="web")
+            enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
+            enqueue_fast_task(update_working_memory, user_input, reply)
+            enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
+            enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             return JSONResponse({"agent": "Chat_Agent", "response": reply})
     except Exception as e:
         print(f"[PendingAssets]: Web text handler error: {e}")
@@ -670,8 +676,14 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             print(f"\033[95m[Web->Graph]: Προώθηση μηνύματος στο γράφημα — '{isolated_user_input[:120]}'\033[0m")
         from memory.execution_trace import ExecutionTrace
         _trace = ExecutionTrace(channel="web", user_message=user_input)
+        from core.utils import is_simple_chat_fast_path_candidate
+        fast_path_used = is_simple_chat_fast_path_candidate(isolated_user_input)
+        _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
+        _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
+
+        limit = 12 if fast_path_used else 50
         tool_result_fallbacks = []
-        for event in graph.stream({"messages": context_msgs + [human_msg], "channel": "web"}, {"recursion_limit": 50}):
+        for event in graph.stream({"messages": context_msgs + [human_msg], "channel": "web"}, {"recursion_limit": limit}):
             _trace.process_event(event)
             for node, data in event.items():
                 if data is None:
@@ -925,7 +937,10 @@ async def upload_file(request: Request, file: UploadFile = File(...), _=Depends(
             user_log_msg = f"[USER_UPLOADED_FILE]: {filename}\n[FILE PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
         append_to_chat_history("user", f"📎 *Ανέβασα αρχείο:* `{filename}`")
         append_to_chat_history("assistant", chat_ai_msg)
-        log_exchange(user_log_msg, chat_ai_msg, "Chat_Agent", channel="web")
+        enqueue_fast_task(log_exchange, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
+        enqueue_fast_task(update_working_memory, user_log_msg, chat_ai_msg)
+        enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
+        enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
 
         from memory.pending_assets import looks_like_asset_confirmation_prompt
         if looks_like_asset_confirmation_prompt(chat_ai_msg):

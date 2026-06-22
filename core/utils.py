@@ -62,6 +62,71 @@ def clean_message(msg_content) -> str:
         return " ".join(parts).strip()
     
     return str(msg_content).strip()
+
+def is_simple_chat_fast_path_candidate(user_text: str) -> bool:
+    if not user_text:
+        return True
+
+    q = clean_message(user_text).strip().lower()
+    if not q:
+        return True
+
+    # Commands never go fast path
+    if q.startswith("/"):
+        return False
+
+    # Questions usually deserve normal path
+    if "?" in q or ";" in q:
+        return False
+
+    # Tool / action / control intent -> normal path
+    blocked_tokens = (
+        "στείλε", "στειλε",
+        "θυμά", "θυμα",
+        "δες", "κοιτα",
+        "πάγωσε", "παγωσε",
+        "άλλαξε", "αλλαξε",
+        "σβήσε", "σβησε",
+        "γράψε", "γραψε",
+        "φτιάξε", "φτιαξε",
+        "ρύθμισε", "ρυθμισε",
+        "λίστα", "λιστα",
+        "routine", "ρουτίν", "ρουτιν",
+        "υπενθύμι", "υπενθυμι",
+        "μήνυμα", "μηνυμα",
+        "δουλειά", "δουλεια",
+        "βάρδια", "βαρδια",
+        "πρωιν", "απογευματιν", "βραδιν",
+        "σοφία", "σοφια",
+        "αλέξανδρ", "αλεξανδρ",
+        "μαρία", "μαρια",
+        "κατασκήν", "κατασκην",
+        "πάρκο", "παρκο",
+        "ποδόσφαιρ", "ποδοσφαιρ",
+        "μαγείρ", "μαγειρ",
+        "ψών", "ψων",
+        "φωτο", "photo",
+        "receipt", "nutrition",
+    )
+    if any(token in q for token in blocked_tokens):
+        return False
+
+    # Simple short conversational turns
+    word_count = len(q.split())
+    if word_count <= 8:
+        return True
+
+    low_signal_starts = (
+        "ναι ", "οκ ", "ok ", "έγινε ", "εγινε ", "καλά ", "καλα ",
+        "σε λίγο ", "σε λιγο ", "αργότερα ", "αργοτερα ", "μετά ", "μετα ",
+        "ευχαριστώ ", "ευχαριστω ", "όχι εντάξει", "οχι ενταξει",
+        "βαριέμαι ", "βαριεμαι ",
+    )
+    if q.startswith(low_signal_starts) and word_count <= 12:
+        return True
+
+    return False
+
 def sanitize_history_for_gemini(messages: list) -> list:
     """
     [MASTRO-FIX]: Σιδερώνει το ιστορικό για να μην κρασάρει το Gemini με Error 400.

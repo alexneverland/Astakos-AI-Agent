@@ -881,84 +881,7 @@ def _send_pending_reflections_summary() -> None:
     send_telegram_msg(msg)
 
 
-def _is_simple_chat_fast_path_candidate(user_text: str) -> bool:
-    if not user_text:
-        return True
-
-    q = clean_message(user_text).strip().lower()
-    if not q:
-        return True
-
-    # Commands never go fast path
-    if q.startswith("/"):
-        return False
-
-    # Questions usually deserve normal path
-    if "?" in q or ";" in q:
-        return False
-
-    # Tool / action / control intent -> normal path
-    blocked_tokens = (
-        "στείλε", "στειλε",
-        "θυμά", "θυμα",
-        "δες", "κοιτα",
-        "πάγωσε", "παγωσε",
-        "άλλαξε", "αλλαξε",
-        "σβήσε", "σβησε",
-        "γράψε", "γραψε",
-        "φτιάξε", "φτιαξε",
-        "ρύθμισε", "ρυθμισε",
-        "λίστα", "λιστα",
-        "routine", "ρουτίν", "ρουτιν",
-        "υπενθύμι", "υπενθυμι",
-        "μήνυμα", "μηνυμα",
-        "δουλειά", "δουλεια",
-        "βάρδια", "βαρδια",
-        "πρωιν", "απογευματιν", "βραδιν",
-        "σοφία", "σοφια",
-        "αλέξανδρ", "αλεξανδρ",
-        "μαρία", "μαρια",
-        "κατασκήν", "κατασκην",
-        "πάρκο", "παρκο",
-        "ποδόσφαιρ", "ποδοσφαιρ",
-        "μαγείρ", "μαγειρ",
-        "ψών", "ψων",
-        "φωτο", "photo",
-        "receipt", "nutrition",
-    )
-    if any(token in q for token in blocked_tokens):
-        return False
-
-    # Simple short conversational turns
-    word_count = len(q.split())
-    if word_count <= 8:
-        return True
-
-    low_signal_starts = (
-        "ναι ",
-        "οκ ",
-        "ok ",
-        "έγινε ",
-        "εγινε ",
-        "καλά ",
-        "καλα ",
-        "σε λίγο ",
-        "σε λιγο ",
-        "αργότερα ",
-        "αργοτερα ",
-        "μετά ",
-        "μετα ",
-        "ευχαριστώ ",
-        "ευχαριστω ",
-        "όχι εντάξει",
-        "οχι ενταξει",
-        "βαριέμαι ",
-        "βαριεμαι ",
-    )
-    if q.startswith(low_signal_starts) and word_count <= 12:
-        return True
-
-    return False
+from core.utils import is_simple_chat_fast_path_candidate
 
 def _build_fast_chat_context(clean_user_text: str):
     now_ts = datetime.now().strftime("%H:%M")
@@ -1266,7 +1189,7 @@ def handle_message(user_text: str, chat_id: str):
         
         t_graph_0 = perf_counter()
         
-        fast_path_used = _is_simple_chat_fast_path_candidate(clean_user_text)
+        fast_path_used = is_simple_chat_fast_path_candidate(clean_user_text)
         _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
 
         # 1. graph_call_ms
