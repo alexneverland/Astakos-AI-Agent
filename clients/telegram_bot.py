@@ -29,6 +29,11 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE
 
+def _normalize_gr(text: str) -> str:
+    """Αφαιρεί τόνους από ελληνικό κείμενο για accent-insensitive σύγκριση."""
+    import unicodedata
+    return unicodedata.normalize("NFD", text).encode("ascii", "ignore").decode("ascii").lower()
+
 from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
 from core.exceptions import SchedulerCrashError, PendingTimeoutError, DBWriteError
 from core.brain import llm, safe_llm_invoke
@@ -89,7 +94,7 @@ voice_mode_enabled = False
 # Scheduler reference (set in __main__, used by /status command)
 astakos_scheduler = None
 # ── Rate Limiting ─────────────────────────────────────────────
-QUIET_HOURS          = (23, 8)   # 23:00 → 08:00 χωρίς proactive
+QUIET_HOURS          = (0, 8)    # 00:00 → 08:00 χωρίς proactive
 MAX_PROACTIVE_PER_HOUR = 3       # max proactive μηνύματα/ώρα
 PROACTIVE_RECENT_ACTIVITY_GRACE_SECONDS = 15 * 60
 
@@ -893,7 +898,7 @@ def _run_fast_chat_path(context_msgs, current_msg):
     return list(
         graph.stream(
             {"messages": context_msgs + [current_msg], "channel": "telegram"},
-            {"recursion_limit": 12},
+            {"recursion_limit": 100},
         )
     )
 
@@ -1213,7 +1218,7 @@ def handle_message(user_text: str, chat_id: str):
                 events = list(
                     graph.stream(
                         {"messages": context_msgs + [current_msg], "channel": "telegram"},
-                        {"recursion_limit": 50},
+                        {"recursion_limit": 100},
                     )
                 )
         graph_call_ms = int((perf_counter() - graph_call_started) * 1000)

@@ -696,7 +696,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
             _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
 
-            limit = 12 if fast_path_used else 50
+            limit = 100
 
             t_graph_0 = perf_counter()
             for event in graph.stream({"messages": context_msgs + [human_msg], "channel": "web"}, {"recursion_limit": limit}):

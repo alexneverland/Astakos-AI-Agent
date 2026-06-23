@@ -688,7 +688,6 @@
                 formData.append('message', apiText);
                 response = await fetch('http://127.0.0.1:8000/upload', { method: 'POST', body: formData });
                 const data = await response.json();
-                currentPhotoPath = data.file_path;
                 chatBox.removeChild(loadingDiv);
                 appendMessage(data.ai_message, 'ai', 'Chat_Agent');
                 if (isDrawerOpen) speakText(data.ai_message);
@@ -703,6 +702,9 @@
                 appendMessage(data.response, 'ai', data.agent);
                 if (isDrawerOpen) speakText(data.response);
             }
+            
+            // Clear the photo path so we don't keep sending it on every subsequent message
+            currentPhotoPath = null;
             setAvatar('speaking');
             setTimeout(() => setAvatar('idle'), 4000);
         } catch (error) {

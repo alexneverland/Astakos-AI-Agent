@@ -26,8 +26,7 @@ def update_pending_linkedin_post(draft_text: str, photo_path: str = "") -> str:
     
     with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
-    
-    return "Το draft είναι έτοιμο και παρκαρισμένο, δώσε μου το ΟΚ να το ανεβάσω."
+    return "SUCCESS: Το draft είναι έτοιμο και παρκαρισμένο. STOP calling tools and report to the user that the draft is ready for their approval."
 
 @tool
 def process_and_clear_linkedin_post() -> str:
