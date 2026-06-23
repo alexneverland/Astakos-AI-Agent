@@ -48,3 +48,51 @@ def test_date_range_allows_inside_window():
 
     result = evaluate_routine_condition(routine, context, now=datetime(2026, 6, 17))
     assert result["allowed"] is True
+
+def test_context_flag_multi_key_allow_when_all_match():
+    routine = {
+        "condition_type": "context_flag",
+        "condition_payload": '{"alexandros_present": true, "family_at_home": true}',
+        "condition_mode": "allow_when_true",
+    }
+    context = {
+        "alexandros_present": True,
+        "family_at_home": True,
+    }
+
+    result = evaluate_routine_condition(routine, context, now=datetime(2026, 6, 17))
+    assert result["allowed"] is True
+    assert result["matched"] is True
+    assert result["reason"] == "context_flag_allow"
+
+
+def test_context_flag_multi_key_allow_blocks_on_first_mismatch():
+    routine = {
+        "condition_type": "context_flag",
+        "condition_payload": '{"alexandros_present": true, "family_at_home": true}',
+        "condition_mode": "allow_when_true",
+    }
+    context = {
+        "alexandros_present": True,
+        "family_at_home": False,
+    }
+
+    result = evaluate_routine_condition(routine, context, now=datetime(2026, 6, 17))
+    assert result["allowed"] is False
+    assert result["matched"] is False
+    assert result["reason"] == "context_flag_mismatch_family_at_home"
+
+
+def test_context_flag_empty_payload_is_not_treated_as_match():
+    routine = {
+        "condition_type": "context_flag",
+        "condition_payload": '{}',
+        "condition_mode": "allow_when_true",
+    }
+    context = {}
+
+    result = evaluate_routine_condition(routine, context, now=datetime(2026, 6, 17))
+    assert result["allowed"] is False
+    assert result["matched"] is False
+    assert result["reason"] == "missing_flag"
+

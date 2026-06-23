@@ -106,15 +106,48 @@ def _evaluate_context_flag(payload: dict, mode: str, context: dict) -> dict:
     flag = payload.get("flag")
     expected = payload.get("equals")
 
+    # Handle direct key-value payload if "flag" is missing
+    # Example: {"alexandros_present": True, "family_at_home": True}
     if not flag:
+        direct_pairs = {k: v for k, v in payload.items() if k not in ("flag", "equals")}
+        if not direct_pairs:
+            return {
+                "allowed": False,
+                "matched": False,
+                "reason": "missing_flag",
+            }
+
+        # Check all keys in the payload
+        for k, v in direct_pairs.items():
+            actual = context.get(k)
+            # Normalize for comparison
+            actual_str = str(actual).lower() if actual is not None else "null"
+            expected_str = str(v).lower() if v is not None else "null"
+
+            if actual_str != expected_str:
+                return {
+                    "allowed": False if mode == "allow_when_true" else True,
+                    "matched": False,
+                    "reason": f"context_flag_mismatch_{k}",
+                    "actual_value": actual,
+                }
+
+        # If all keys matched
         return {
-            "allowed": False,
-            "matched": False,
-            "reason": "missing_flag",
+            "allowed": True if mode == "allow_when_true" else False,
+            "matched": True,
+            "reason": "context_flag_allow" if mode == "allow_when_true" else "context_flag_suppressed",
+            "actual_value": "multiple_match",
         }
 
+    # Standard format: {"flag": "something", "equals": "true"}
     actual = context.get(flag)
-    matched = (actual == expected)
+    
+    # Normalize comparison to strings
+    actual_str = str(actual).lower() if actual is not None else "null"
+    expected_str = str(expected).lower() if expected is not None else "true" # Default to true if only flag is provided
+    
+    matched = (actual_str == expected_str)
 
     if mode == "allow_when_true":
         return {

@@ -2,9 +2,30 @@ from datetime import datetime
 
 def build_runtime_routine_context(now: datetime | None = None) -> dict:
     current = now or datetime.now()
+    today = current.strftime("%Y-%m-%d")
 
-    return {
-        "today": current.strftime("%Y-%m-%d"),
+    ctx = {}
+    try:
+        from memory.routine_db import get_connection
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT key, value, expires_at FROM context_state")
+        for row in c.fetchall():
+            k, v, exp = row[0], row[1], row[2]
+            if exp and exp < today:
+                continue
+            if str(v).lower() == "true":
+                ctx[k] = True
+            elif str(v).lower() == "false":
+                ctx[k] = False
+            else:
+                ctx[k] = v
+        conn.close()
+    except Exception as e:
+        print(f"Error loading dynamic context flags: {e}")
+
+    ctx.update({
+        "today": today,
         "alexandros_away_from_home": resolve_alexandros_away_state(current),
         "alexandros_away_reason": resolve_alexandros_away_reason(current),
         "football_season": resolve_football_season(current),
@@ -14,7 +35,8 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
         "user_at_work": resolve_user_at_work(current),
         "user_out_of_home": resolve_user_out_of_home(current),
         "quiet_hours": resolve_quiet_hours(current),
-    }
+    })
+    return ctx
 
 def resolve_alexandros_away_state(now: datetime | None = None) -> bool | None:
     current = now or datetime.now()
