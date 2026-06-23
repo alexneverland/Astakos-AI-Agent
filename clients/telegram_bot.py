@@ -2247,6 +2247,124 @@ def _apply_context_mute(routine_id: int, event_name: str, memory_context: str) -
         return None
 
 
+_ENV_CONTEXT_CACHE = {
+    "ts": 0.0,
+    "value": "",
+    "gps_key": None,
+}
+
+def _get_env_context() -> str:
+    """Returns GPS location and current weather context if recent location exists."""
+    global _ENV_CONTEXT_CACHE
+    import os
+    import json
+    import time
+    import math
+    import requests
+    from config import GPS_STORAGE_FILE, HOME_COORDS, HOME_RADIUS_M
+
+    if not os.path.exists(GPS_STORAGE_FILE):
+        return ""
+
+    try:
+        with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        lat = data.get("lat")
+        lon = data.get("lon")
+        timestamp = data.get("timestamp", 0)
+
+        # Ensure location is recent (within 4 hours)
+        if lat is None or lon is None or (time.time() - timestamp > 14400):
+            _ENV_CONTEXT_CACHE["value"] = ""
+            _ENV_CONTEXT_CACHE["gps_key"] = None
+            return ""
+
+        now_ts = time.time()
+        gps_key = (round(float(lat), 4), round(float(lon), 4), int(timestamp))
+
+        if (
+            _ENV_CONTEXT_CACHE.get("gps_key") == gps_key
+            and (now_ts - _ENV_CONTEXT_CACHE.get("ts", 0.0)) < 300
+        ):
+            return _ENV_CONTEXT_CACHE.get("value", "")
+
+        # Check distance to home and work
+        def haversine(lat1, lon1, lat2, lon2):
+            R = 6371000
+            p = math.pi / 180
+            a = (math.sin((lat2-lat1)*p/2)**2 +
+                 math.cos(lat1*p) * math.cos(lat2*p) *
+                 math.sin((lon2-lon1)*p/2)**2)
+            return 2 * R * math.asin(math.sqrt(a))
+            
+        try:
+            from config import WORK_COORDS, WORK_RADIUS_M
+        except ImportError:
+            WORK_COORDS = None
+            WORK_RADIUS_M = 300
+            
+        dist_home = haversine(lat, lon, HOME_COORDS[0], HOME_COORDS[1])
+        
+        if WORK_COORDS:
+            dist_work = haversine(lat, lon, WORK_COORDS[0], WORK_COORDS[1])
+        else:
+            dist_work = float('inf')
+            
+        if dist_home <= HOME_RADIUS_M:
+            location_status = "🏠 ΣΤΟ ΣΠΙΤΙ"
+        elif dist_work <= WORK_RADIUS_M:
+            location_status = "🏢 ΣΤΗ ΔΟΥΛΕΙΑ"
+        else:
+            location_status = "🚗 ΕΚΤΟΣ ΣΠΙΤΙΟΥ (σε άλλη τοποθεσία)"
+
+        weather_url = (
+            f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+            "&current=temperature_2m,precipitation,weather_code"
+        )
+        try:
+            resp = requests.get(weather_url, timeout=5).json()
+            curr = resp.get("current", {})
+            temp = curr.get("temperature_2m", "")
+            precip = curr.get("precipitation", "")
+            wcode = curr.get("weather_code", 0)
+
+            WMO_CODES = {
+                0: "☀️ Αίθριος", 1: "🌤 Σχεδόν αίθριος", 2: "⛅ Μερικώς συννεφιά",
+                3: "☁️ Συννεφιά", 45: "🌫 Ομίχλη", 48: "🌫 Παγετός",
+                51: "🌦 Ψιλόβροχο", 53: "🌦 Βροχή", 55: "🌧 Έντονο ψιλόβροχο",
+                61: "🌧 Ελαφριά βροχή", 63: "🌧 Μέτρια βροχή", 65: "🌧 Έντονη βροχή",
+                71: "🌨 Ελαφριά χιονόπτωση", 73: "🌨 Χιονόπτωση", 75: "❄️ Έντονη χιονόπτωση",
+                80: "🌦 Μπόρες", 81: "🌧 Μέτριες μπόρες", 82: "⛈ Έντονες μπόρες",
+                95: "⛈ Καταιγίδα", 96: "⛈ Καταιγίδα με χαλάζι", 99: "⛈ Έντονη καταιγίδα",
+            }
+            w_desc = WMO_CODES.get(wcode, "Άγνωστος")
+
+            env_str = (
+                f"[ΠΕΡΙΒΑΛΛΟΝΤΙΚΑ ΔΕΔΟΜΕΝΑ ΧΡΗΣΤΗ]\n"
+                f"- Τοποθεσία: {location_status} (GPS: lat={lat:.4f}, lon={lon:.4f})\n"
+                f"- Καιρός εκεί: {w_desc}, {temp}°C, υετός {precip}mm\n"
+            )
+            _ENV_CONTEXT_CACHE["ts"] = now_ts
+            _ENV_CONTEXT_CACHE["gps_key"] = gps_key
+            _ENV_CONTEXT_CACHE["value"] = env_str
+            return env_str
+        except Exception as e:
+            print(f"\033[93m[EnvContext]: Weather fetch failed: {e}\033[0m")
+            env_str = (
+                f"[ΠΕΡΙΒΑΛΛΟΝΤΙΚΑ ΔΕΔΟΜΕΝΑ ΧΡΗΣΤΗ]\n"
+                f"- Τοποθεσία: {location_status} (GPS: lat={lat:.4f}, lon={lon:.4f})\n"
+            )
+            _ENV_CONTEXT_CACHE["ts"] = now_ts
+            _ENV_CONTEXT_CACHE["gps_key"] = gps_key
+            _ENV_CONTEXT_CACHE["value"] = env_str
+            return env_str
+
+    except Exception as e:
+        print(f"\033[93m[EnvContext]: GPS read failed: {e}\033[0m")
+        return ""
+
+
 def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> str:
     """LLM φτιάχνει φυσικό proactive μήνυμα αντί για template."""
     from langchain_core.messages import HumanMessage
@@ -2281,15 +2399,21 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
     if forced_skip:
         return forced_skip
 
+    env_context = _get_env_context()
+    env_block = f"\n{env_context}\n" if env_context else ""
+
     prompt = (
         f"{context}\n\n"
         f"{memory_block}"
+        f"{env_block}"
         "Είσαι ο Αστακός, ο προσωπικός AI του Λάζαρου (42 χρονών, μάστορας, "
         "γιος Αλέξανδρος 6 ετών, κόρη Μαρία 15 ετών, γυναίκα Σοφία). "
         "Στείλε ΕΝΑ φυσικό μήνυμα κολλημένο στην καθημερινότητα — με χιούμορ, σαν παλιός φίλος.\n"
         "Πριν γράψεις, διάβασε το πρόσφατο ιστορικό. Αν υπάρχει ζωντανό context "
         "(π.χ. παίζουν επιτραπέζιο, είναι σε ποδόσφαιρο, δουλεύει, είναι έξω), "
         "δέσε την ατάκα φυσικά με αυτό. Αν το ιστορικό δεν σχετίζεται, αγνόησέ το.\n"
+        "Επίσης, αν βλέπεις ΠΕΡΙΒΑΛΛΟΝΤΙΚΑ ΔΕΔΟΜΕΝΑ (καιρός, τοποθεσία) και σχετίζονται "
+        "άμεσα με τη ρουτίνα (π.χ. βροχή και εξωτερική δραστηριότητα), προσάρμοσε την ατάκα σου!\n"
         "ΚΡΙΣΙΜΟ: Το μήνυμα ΠΡΕΠΕΙ να υπηρετεί τη συγκεκριμένη ρουτίνα/event. "
         "Μπορείς και πρέπει να το δένεις με το πρόσφατο ιστορικό όταν ταιριάζει "
         "(π.χ. ποδόσφαιρο, επιτραπέζιο, δουλειά, χαλάρωση με τον Αλέξανδρο), "
@@ -2472,11 +2596,15 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
         memory_context = ""
     memory_block = f"\n\n{memory_context}\n" if memory_context else ""
 
+    env_context = _get_env_context()
+    env_block = f"\n{env_context}\n" if env_context else ""
+
     prompt = (
         f"{certainty}\n\n"
         f"Ο Αστακός ήταν offline/εκτός λειτουργίας και η ώρα της ρουτίνας πέρασε "
         f"πριν από {missed_minutes} λεπτά.\n"
         f"{memory_block}"
+        f"{env_block}"
         "Είσαι ο Αστακός, ο προσωπικός AI του Λάζαρου (42 χρονών, μάστορας, "
         "γιος Αλέξανδρος 6 ετών, κόρη Μαρία 15 ετών, γυναίκα Σοφία). "
         "Δεν στέλνεις υπενθύμιση — η ώρα πέρασε. Στέλνεις φυσικό follow-up: "
@@ -2486,6 +2614,8 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
         "Αν το context λέει ότι ο Αλέξανδρος λείπει/είναι κατασκήνωση, ΜΗΝ προτείνεις "
         "δραστηριότητα μαζί του (πάρκο, παιχνίδι, ύπνο). Χρησιμοποίησε [CONTEXT_SKIP] "
         "ή στείλε μόνο τρυφερό σχόλιο για την απουσία αν ταιριάζει. "
+        "Επίσης, αν βλέπεις ΠΕΡΙΒΑΛΛΟΝΤΙΚΑ ΔΕΔΟΜΕΝΑ (καιρός, τοποθεσία) και σχετίζονται "
+        "άμεσα με τη ρουτίνα (π.χ. βροχή και εξωτερική δραστηριότητα), προσάρμοσε το μήνυμά σου!\n"
         "ΑΠΑΓΟΡΕΥΕΤΑΙ: 'υπενθύμιση', 'reminder', 'έχασα', 'δεν ήμουν', το event name κυριολεκτικά.\n"
         "ΣΗΜΑΝΤΙΚΟ — ΕΠΙΛΕΞΕ ΑΚΡΙΒΩΣ ΕΝΑ ΑΠΟ ΤΑ ΤΡΙΑ:\n"
         "1. ΚΑΝΟΝΙΚΟ ΜΗΝΥΜΑ: 1-2 προτάσεις χωρίς tag.\n"

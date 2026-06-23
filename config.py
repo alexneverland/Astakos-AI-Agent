@@ -55,6 +55,8 @@ CONVERSATION_DB_FILE = os.path.join(BASE_DIR, "astakos_conversation_history.db")
 # GPS: Συντεταγμένες σπιτιού για location reminders (reminders ζουν πλέον στο STATE_DB)
 HOME_COORDS   = (40.646558, 22.939036)   # Piston 7 — διόρθωσε αν χρειαστεί
 HOME_RADIUS_M = 150                   # trigger εντός 150 μέτρων
+WORK_COORDS   = (40.690914, 22.929607)   # ΒΙ.ΠΕ. Ευκαρπίας
+WORK_RADIUS_M = 300                   # Λίγο μεγαλύτερη ακτίνα για βιομηχανική περιοχή
 CAPABILITIES_FILE    = os.path.join(BASE_DIR, "astakos_capabilities.json")
 MESSENGER_DRAFT_FILE = os.path.join(BASE_DIR, "messenger_draft.json")
 MESSENGER_DRAFT_TTL_SECONDS = int(os.getenv("MESSENGER_DRAFT_TTL_SECONDS", "1800"))
