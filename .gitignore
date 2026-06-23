@@ -49,6 +49,7 @@ __pycache__/
 .pytest_cache/
 .pytest_tmp/
 .pytest_tmp*/
+interview_copilot/
 .pytest_temp*/
 .pytest_temp_dir*/
 *.backup
