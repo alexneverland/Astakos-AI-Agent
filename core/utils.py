@@ -473,14 +473,30 @@ def looks_like_operational_assistant_text(text: str) -> bool:
         "είναι έτοιμο σε draft",
         "γράψε απλά «στείλε»",
         "γράψε απλά \"στείλε\"",
-        "αν θες να το φύγουμε τώρα",
         "action approval required",
         "αναμονή έγκρισης",
         "εκτελώ `execute_local_pipeline`",
         "το μήνυμα στάλθηκε στον/στη",
         "σου έστειλα telegram για επιβεβαίωση",
+        "μήνυμα στη σοφία",
+        "messenger draft",
     ]
     return any(m in t for m in markers)
+
+def strip_operational_assistant_paragraphs(text: str) -> str:
+    raw = clean_message(text).strip()
+    if not raw:
+        return raw
+
+    paragraphs = [p.strip() for p in raw.split("\n\n") if p.strip()]
+    kept: list[str] = []
+
+    for p in paragraphs:
+        if looks_like_operational_assistant_text(p):
+            continue
+        kept.append(p)
+
+    return "\n\n".join(kept).strip()
 
 
 def sanitize_messenger_draft_claims(text: str) -> str:

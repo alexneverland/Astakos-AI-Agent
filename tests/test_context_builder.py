@@ -406,3 +406,23 @@ def test_semantic_skip_work_message_kept():
 
     assert calls["semantic"] == 1
     assert len(context.semantic_facts) == 1
+
+def test_format_recent_messages_keeps_informative_part_and_drops_operational_tail():
+    from memory.context_builder import format_recent_messages
+    messages = [
+        {
+            "role": "assistant",
+            "channel": "web",
+            "time": "13:03",
+            "date": "2026-06-24",
+            "content": (
+                "Το Kaggle page έχει Cloudflare protection, αλλά ξέρω το task.\n\n"
+                "Γράψε απλά «Στείλε» και το εκτελώ αμέσως!"
+            ),
+        }
+    ]
+
+    lines = format_recent_messages(messages, limit=5)
+    assert len(lines) == 1
+    assert "Cloudflare protection" in lines[0]
+    assert "Στείλε" not in lines[0]

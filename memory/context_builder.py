@@ -312,9 +312,13 @@ def format_recent_messages(
         if not content:
             continue
         
-        from core.utils import looks_like_operational_assistant_text
-        if role == "assistant" and looks_like_operational_assistant_text(content):
-            continue
+        from core.utils import strip_operational_assistant_paragraphs
+
+        if role == "assistant":
+            cleaned_content = strip_operational_assistant_paragraphs(content)
+            if not cleaned_content:
+                continue
+            content = cleaned_content
 
         content = " ".join(content.split())
         if len(content) > 260:
