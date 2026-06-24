@@ -15,39 +15,42 @@ def _normalize_gr(text: str) -> str:
 def classify_pending_asset_reply(text: str) -> str | None:
     txt = _normalize_gr(text)
 
-    yes_exact = {
-        "ναι", "nai", "yes", "ok", "οκ",
-    }
-    no_exact = {
-        "οχι", "oxi", "no",
-    }
+    yes_exact = {"ναι", "nai", "yes", "ok", "οκ"}
+    no_exact = {"όχι", "οχι", "oxi", "no"}
 
+    no_phrases = (
+        "μην το αποθηκευσεις",
+        "μην την αποθηκευσεις",
+        "μην αποθηκευσεις",
+        "μην το αρχειοθετησεις",
+        "μην την αρχειοθετησεις",
+        "δεν θελω να το αποθηκευσεις",
+        "δεν θελω να την αποθηκευσεις",
+        "αστο",
+        "αφησε το",
+        "μην το κρατησεις",
+        "μην την κρατησεις",
+    )
     yes_phrases = (
-        "αποθηκευσε",
-        "αποθηκευσε τη",
+        "αποθηκευσε το",
         "αποθηκευσε την",
-        "αρχειοθετησε",
-        "κρατα τη",
+        "αρχειοθετησε το",
+        "αρχειοθετησε την",
+        "κρατα το",
         "κρατα την",
         "save it",
     )
-    no_phrases = (
-        "μην την αποθηκευσεις",
-        "μην τη σωσεις",
-        "μην την κρατησεις",
-        "αστο",
-        "αφησε το",
-    )
 
-    if txt in yes_exact:
-        return "yes"
     if txt in no_exact:
         return "no"
-
-    if any(p in txt for p in yes_phrases):
+    if txt in yes_exact:
         return "yes"
-    if any(p in txt for p in no_phrases):
+
+    # Η άρνηση πρέπει πάντα να κερδίζει.
+    if any(phrase in txt for phrase in no_phrases):
         return "no"
+    if any(phrase in txt for phrase in yes_phrases):
+        return "yes"
 
     return None
 

@@ -802,3 +802,24 @@ def _row_to_exchange(row: sqlite3.Row) -> dict[str, Any]:
         "ai": row["ai_text"],
         "summarized_at": row["summarized_at"],
     }
+
+def build_asset_context_text(channel: str, limit: int = 8) -> str:
+    entries = load_recent_context(
+        channel=channel,
+        global_limit=limit,
+        channel_limit=limit,
+        total_limit=limit,
+    )
+
+    lines = []
+    for entry in entries:
+        content = str(entry.get("content") or "").strip()
+        if not content:
+            continue
+        if content.startswith(("[USER_UPLOADED_FILE]", "[USER_UPLOADED_PHOTO]")):
+            continue
+
+        speaker = "Λάζαρος" if entry.get("role") == "user" else "Αστακός"
+        lines.append(f"{speaker}: {content[:700]}")
+
+    return "\n".join(lines[-limit:])

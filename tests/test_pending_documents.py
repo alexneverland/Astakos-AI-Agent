@@ -62,7 +62,7 @@ def test_document_pending_flow():
         assert pending["status"] == "pending"
 
         # 3. Classify reply
-        assert classify_pending_asset_reply("Ναι, αποθήκευσε") == "yes"
+        assert classify_pending_asset_reply("Ναι, αποθήκευσέ το") == "yes"
         assert classify_pending_asset_reply("Όχι, άστο") == "no"
 
         # 4. Confirm

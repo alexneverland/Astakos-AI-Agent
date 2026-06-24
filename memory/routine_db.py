@@ -508,8 +508,8 @@ def decay_routine(routine_id: int):
     cursor.execute("SELECT confidence, decay_counter, day_of_week FROM routines WHERE id=?", (routine_id,))
     row = cursor.fetchone()
     if row:
-        new_conf    = max(0.0, row[0] - 0.2)
-        new_decay   = row[1] + 1
+        new_conf    = max(0.0, (row[0] or 0.0) - 0.2)
+        new_decay   = (row[1] or 0) + 1
         everyday_like_days = {
             "everyday",
             "weekdays",
@@ -1490,6 +1490,20 @@ def get_context_state(key: str) -> dict | None:
         "expires_at": row[1],
         "updated_at": row[2]
     }
+
+def get_context_states(keys: list[str]) -> dict[str, dict]:
+    from datetime import datetime
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    out: dict[str, dict] = {}
+    for key in keys:
+        item = get_context_state(key)
+        if item is not None:
+            expires_at = item.get("expires_at")
+            if expires_at and expires_at < today:
+                continue
+            out[key] = item
+    return out
 
 def set_context_state(key: str, value: str, expires_at: str | None = None) -> None:
     conn = get_connection()

@@ -154,9 +154,13 @@ def resolve_quiet_hours(now: datetime | None = None) -> bool:
         expires_at = state_data.get("expires_at")
         if not expires_at or expires_at >= today:
             return str(state_data.get("value")).lower() == "true"
-            
-    # Fallback to defaults
+
     from clients.telegram_bot import QUIET_HOURS
     h = current.hour
     start, end = QUIET_HOURS
+
+    if start == end:
+        return False
+    if start < end:
+        return start <= h < end
     return h >= start or h < end

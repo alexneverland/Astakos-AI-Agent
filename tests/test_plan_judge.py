@@ -175,3 +175,12 @@ def test_judge_explicit_plan_command_not_needed():
         # Δεν πρέπει να ρίξει exception
         result = judge("/plan κάνε κάτι κάτι κάτι κάτι κάτι κάτι κάτι κάτι κάτι κάτι κάτι κάτι")
         assert isinstance(result, bool)
+
+def test_reference_document_does_not_trigger_plan():
+    from unittest.mock import patch
+    judge, _ = _import_judge()
+    mock_fn = _make_gemini_mock("REFERENCE")
+    document = "Getting Started. Initialize an attack template and run a smoke test. " * 5
+
+    with patch("services.gemini.safe_gemini_call", mock_fn, create=True):
+        assert judge(document) is False

@@ -442,35 +442,25 @@ def save_to_memory(fact: str, entities: str = "", category: str = "general", rea
 
     def _do_save():
         try:
-            from memory.vector_store import vector_store
-            semantic_payload = f"{fact} [Tags: {entities}]"
+            from memory.vector_store import memory
 
-            # [MASTRO-DEDUP]: Έλεγχος για duplicate
-            with vector_lock:
-                existing = vector_store._collection.query(
-                    query_embeddings=[embeddings.embed_query(semantic_payload)],
-                    n_results=1
-                )
-            if (existing['ids'] and existing['ids'][0] and
-                    existing['distances'] and existing['distances'][0] and
-                    existing['distances'][0][0] < 0.10):
-                print(f"\033[93m⚠️ [Semantic Graph bg]: Duplicate skip → {fact[:50]}\033[0m")
-                return
+            canonical_fact = fact.strip()
+            if not canonical_fact.startswith(("[USER_FACT]", "[LESSON]", "[CAPABILITY]")):
+                canonical_fact = f"[USER_FACT]: {canonical_fact}"
 
-            vector_store.add_texts(
-                texts=[semantic_payload],
-                metadatas=[{
-                    "category": category,
-                    "entities": entities,
-                    "timestamp": datetime.datetime.now().timestamp(),
-                    "type": "semantic_node",
-                    "source": _source,
-                    "reason": reason,
-                    "retrieval_count": 0,
-                }]
+            saved = memory.save(
+                memory_type="fact",
+                fact=canonical_fact,
+                category=category,
+                agent_name="Tool_save_to_memory",
+                source=_source,
+                reason=reason,
+                confidence=0.85 if reason == "user_stated" else 0.7,
+                entities=[x.strip() for x in entities.split(",") if x.strip()],
             )
-            _lexical_cache.clear()  # invalidate lexical cache on write
-            print(f"\033[95m🧠 [Semantic Graph bg]: Καρφώθηκε -> {entities}\033[0m")
+
+            if saved:
+                _lexical_cache.clear()
         except Exception as e:
             print(f"⚠️ [save_to_memory bg]: {e}")
 

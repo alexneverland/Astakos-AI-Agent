@@ -41,7 +41,7 @@ echo.
 echo  Starting both services...
 cd /d C:\astakos_v2
 call venv\Scripts\activate
-start "Astakos Web Server" cmd /k "cd /d C:\astakos_v2 && call venv\Scripts\activate && uvicorn api.server:server %SERVER_ARGS% %RELOAD_ARGS%"
+start "Astakos Web Server" cmd /k "cd /d C:\astakos_v2 && call venv\Scripts\activate && uvicorn api.server:server --host 0.0.0.0 %SERVER_ARGS% %RELOAD_ARGS%"
 timeout /t 3 /nobreak >nul
 python run_telegram.py
 goto end

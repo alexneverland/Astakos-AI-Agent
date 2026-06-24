@@ -41,7 +41,7 @@ _STUB_MODULE_NAMES = [
     "memory.context_builder", "memory.routine_db",
     "core", "core.brain", "core.graph", "core.agents",
     "core.exceptions", "core.event_bus",
-    "core.routine_state", "core.prompts",
+    "core.routine_state", "core.prompts", "core.utils",
     "services", "services.gemini", "services.embeddings", "services.routine_context",
     "services.routine_conditions",
     "tools", "tools.telegram",
@@ -145,9 +145,11 @@ def _stub_modules():
     for mod in [
         "core", "core.brain", "core.graph", "core.agents",
         "core.exceptions", "core.event_bus",
-        "core.routine_state", "core.prompts",
+        "core.routine_state", "core.prompts", "core.utils",
     ]:
         sys.modules[mod] = types.ModuleType(mod)
+
+    sys.modules["core.utils"].is_simple_chat_fast_path_candidate = MagicMock(return_value=False)
 
     brain = sys.modules["core.brain"]
     brain.llm             = MagicMock()
@@ -605,6 +607,15 @@ def test_force_context_skip_from_state_when_child_away_from_home():
         "alexandros_away_reason": {"value": "camp", "expires_at": "2026-06-25"},
     }
     assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) == "[CONTEXT_SKIP]"
+
+def test_force_proactive_skip_from_state_does_not_skip_park_when_only_out_of_home():
+    snap = {
+        "user_out_of_home": {"value": "true", "expires_at": None},
+        "state:alexandros:outing": {"value": "", "expires_at": None},
+        "alexandros_away_from_home": {"value": "false", "expires_at": None},
+        "user_at_work": {"value": "false", "expires_at": None},
+    }
+    assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) is None
 
 def test_force_proactive_skip_from_state_returns_silent_skip_for_done_park():
     snap = {

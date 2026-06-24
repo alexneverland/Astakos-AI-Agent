@@ -151,3 +151,12 @@ def test_get_latest_pending_asset_ignores_expired():
     db_row = conn.execute("SELECT status FROM pending_asset_archives WHERE id = ?", (expired_id,)).fetchone()
     conn.close()
     assert db_row[0] == "cancelled"
+
+def test_negative_archive_reply_wins_over_save_word():
+    from memory.pending_assets import classify_pending_asset_reply
+    text = "ΟΧΙ ΜΗΝ ΤΟ ΑΠΟΘΗΚΕΥΣΕΙΣ αφορά αυτό που λέγαμε"
+    assert classify_pending_asset_reply(text) == "no"
+
+def test_positive_archive_reply():
+    from memory.pending_assets import classify_pending_asset_reply
+    assert classify_pending_asset_reply("ναι αποθήκευσέ το") == "yes"
