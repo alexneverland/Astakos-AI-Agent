@@ -311,6 +311,11 @@ def format_recent_messages(
         content = str(message.get("content", "")).strip()
         if not content:
             continue
+        
+        from core.utils import looks_like_operational_assistant_text
+        if role == "assistant" and looks_like_operational_assistant_text(content):
+            continue
+
         content = " ".join(content.split())
         if len(content) > 260:
             content = content[:257].rstrip() + "..."

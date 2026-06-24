@@ -460,3 +460,61 @@ Answer:"""
             print(f"\033[90m[Firewall]: LLM check failed, allowing: {e}\033[0m")
 
     return False
+
+
+def looks_like_operational_assistant_text(text: str) -> bool:
+    t = clean_message(text).strip().lower()
+    if not t:
+        return False
+
+    markers = [
+        "το ετοίμασα, να το στείλω",
+        "το αποθήκευσα. θέλεις αλλαγές ή να το στείλω",
+        "είναι έτοιμο σε draft",
+        "γράψε απλά «στείλε»",
+        "γράψε απλά \"στείλε\"",
+        "αν θες να το φύγουμε τώρα",
+        "action approval required",
+        "αναμονή έγκρισης",
+        "εκτελώ `execute_local_pipeline`",
+        "το μήνυμα στάλθηκε στον/στη",
+        "σου έστειλα telegram για επιβεβαίωση",
+    ]
+    return any(m in t for m in markers)
+
+
+def sanitize_messenger_draft_claims(text: str) -> str:
+    from core.messenger_draft import active_draft_status
+
+    raw = clean_message(text).strip()
+    if not raw:
+        return raw
+
+    active, _, _ = active_draft_status()
+    if active:
+        return raw
+
+    paragraphs = [p.strip() for p in raw.split("\n\n") if p.strip()]
+
+    def is_draft_paragraph(p: str) -> bool:
+        pl = p.lower()
+        has_messenger_topic = (
+            "draft" in pl
+            or "messenger" in pl
+            or "σοφ" in pl
+            or "μήνυμα στη σοφία" in pl
+            or "μηνυμα στη σοφια" in pl
+        )
+        has_false_current_state = (
+            "να το στείλω" in pl
+            or "στείλε" in pl
+            or "στειλε" in pl
+            or "είναι έτοιμο" in pl
+            or "ετοιμο σε draft" in pl
+            or "γράψε απλά" in pl
+            or "αν θες να το φύγουμε" in pl
+        )
+        return has_messenger_topic and has_false_current_state
+
+    cleaned = [p for p in paragraphs if not is_draft_paragraph(p)]
+    return "\n\n".join(cleaned).strip() or raw

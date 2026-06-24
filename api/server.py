@@ -583,6 +583,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             mark_pending_asset_confirmed(pending_asset["id"])
 
             reply = "Έγινε, Λάζαρε. Το αποθήκευσα στη μνήμη μου."
+            from core.utils import sanitize_messenger_draft_claims
+            reply = sanitize_messenger_draft_claims(reply)
             append_to_chat_history("user", user_input)
             append_to_chat_history("assistant", reply, agent="Chat_Agent")
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
@@ -595,6 +597,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             mark_pending_asset_cancelled(pending_asset["id"])
 
             reply = "Έγινε, δεν το αποθηκεύω μόνιμα."
+            from core.utils import sanitize_messenger_draft_claims
+            reply = sanitize_messenger_draft_claims(reply)
             append_to_chat_history("user", user_input)
             append_to_chat_history("assistant", reply, agent="Chat_Agent")
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
@@ -799,6 +803,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             # Αποθηκεύουμε παντού τα ΚΑΘΑΡΑ strings (με το Link/Img αν υπάρχει)
             _trace.mark_phase("final_response_build_ms", int((perf_counter() - t_build_0) * 1000))
             _trace.agent = handling_agent
+            from core.utils import sanitize_messenger_draft_claims
+            clean_ai = sanitize_messenger_draft_claims(clean_ai)
             _trace.finalize(response=clean_ai)
             
             append_to_chat_history("assistant", clean_ai, agent=handling_agent)
