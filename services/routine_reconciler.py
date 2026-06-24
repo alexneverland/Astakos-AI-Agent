@@ -27,6 +27,21 @@ _SHIFT_PM_TOKENS        = ["απογευμα", "βραδυ", "βραδιν"]
 _SHIFT_AM_TOKENS        = ["πρωι", "πρωιν"]
 _WORK_TOKENS            = ["δουλει", "δουλευ", "βαρδι", "σεφτ"]
 _WEEK_TOKENS            = ["εβδομαδ", "αυτη την εβδομαδ", "αυτη εβδομαδ"]
+_TOGETHER_TOKENS        = [
+    "μαζι",
+    "ειμαι με",
+    "ειμαστε με",
+    "ειμαστε μαζι",
+    "ολοι μαζι",
+    "παρεα με",
+]
+_NOT_TOGETHER_TOKENS    = [
+    "δεν ειμαι με",
+    "δεν ειμαστε μαζι",
+    "δεν ειμαστε πια μαζι",
+    "δεν ειμαι πια με",
+    "χωρισ",
+]
 
 # ── Exclude tokens ───────────────────────────────────────────────────────────
 _ROUTINE_EXCLUDE_TOKENS = ["messenger", "μηνυμα"]
@@ -764,16 +779,16 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     return directives
 
 
-def _rule_temporary_absence_other_person(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
-    Phase 3A — temporary_absence_other_person:
-    Facts: "η Σοφία δουλεύει πρωί όλη την εβδομάδα", "η Σοφία λείπει"
+    Phase 3A — sofia_with_user:
+    Facts: "είμαι με τη Σοφία", "είμαστε μαζί με τη Σοφία", "η Σοφία είναι μαζί μου"
     Target: Messenger/Sofia proactive ρουτίνες
-    Action: State + Condition (sofia_absent = true)
+    Action: State + Condition (sofia_with_user = true)
     """
-    has_sofia   = _contains_any(normalized, _SOFIA_TOKENS)
-    has_absence = _contains_any(normalized, _ABSENCE_TOKENS) or _contains_any(normalized, _WORK_TOKENS)
-    if not (has_sofia and has_absence):
+    has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
+    has_together = _contains_any(normalized, _TOGETHER_TOKENS)
+    if not (has_sofia and has_together):
         return []
     until = None
     if dates:
@@ -781,16 +796,16 @@ def _rule_temporary_absence_other_person(normalized: str, dates: list[str], now:
     elif _contains_any(normalized, _WEEK_TOKENS):
         until = _infer_week_until(now)
     else:
-        until = _infer_relative_until(normalized, now=now)
+        until = now.strftime("%Y-%m-%d")
     if not until:
         return []
         
     d_state = {
         "kind": "context_state_set",
-        "key": "sofia_absent",
+        "key": "sofia_with_user",
         "value": "true",
         "until_date": until,
-        "reason": "sofia_absent_or_shifted",
+        "reason": "sofia_with_user",
         "subject_tokens": _SOFIA_TOKENS,
         "include_tokens": ["σοφια", "messenger", "μηνυμα"],
         "exclude_tokens": _MESSENGER_EXCLUDE,
@@ -801,12 +816,51 @@ def _rule_temporary_absence_other_person(normalized: str, dates: list[str], now:
         include_tokens=["σοφια", "messenger", "μηνυμα"],
         exclude_tokens=_MESSENGER_EXCLUDE,
         condition_type="context_flag",
-        condition_payload={"flag": "sofia_absent", "equals": True},
+        condition_payload={"flag": "sofia_with_user", "equals": True},
         condition_mode="suppress_when_true",
-        reason="sofia_absent_condition",
+        reason="sofia_with_user_condition",
     )
     
     return [d_state] + ([cond] if cond else [])
+
+
+def _rule_sofia_not_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+    """
+    Phase 3A — sofia_not_with_user:
+    Facts: "η Σοφία έφυγε", "η Σοφία δεν είναι εδώ", "δεν είμαστε μαζί τώρα"
+    Target: clear Messenger/Sofia suppress context immediately
+    Action: State only (sofia_with_user = false)
+    """
+    has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
+    has_absence = has_sofia and _contains_any(normalized, _ABSENCE_TOKENS)
+    has_not_together = _contains_any(normalized, _NOT_TOGETHER_TOKENS)
+
+    if not (has_absence or has_not_together):
+        return []
+
+    if has_not_together and not has_sofia:
+        from memory.routine_db import get_context_state
+        state_data = get_context_state("sofia_with_user")
+        is_active = False
+        if state_data:
+            expires_at = state_data.get("expires_at")
+            today = now.strftime("%Y-%m-%d")
+            if not expires_at or expires_at >= today:
+                is_active = str(state_data.get("value")).lower() == "true"
+        if not is_active:
+            return []
+
+    d_state = {
+        "kind": "context_state_set",
+        "key": "sofia_with_user",
+        "value": "false",
+        "until_date": None,
+        "reason": "sofia_not_with_user",
+        "subject_tokens": _SOFIA_TOKENS,
+        "include_tokens": ["σοφια", "messenger", "μηνυμα"],
+        "exclude_tokens": _MESSENGER_EXCLUDE,
+    }
+    return [d_state]
 
 
 def _rule_child_activity_pause(normalized: str, dates: list[str], now: datetime) -> list[dict]:
@@ -1347,8 +1401,9 @@ def infer_routine_reconciliation_candidates(
     3. return_home                    — επιστροφή Αλέξανδρου
     4. school_break                   — σχολικές διακοπές
     5. child_activity_pause           — παιδική δραστηριότητα pause
-    6. temporary_absence_other_person — Σοφία λείπει/δουλεύει
-    7. shift_week                     — εβδομαδιαία αλλαγή βάρδιας
+    6. sofia_with_user               — είμαστε μαζί με τη Σοφία
+    7. sofia_not_with_user           — δεν είμαστε πια μαζί με τη Σοφία
+    8. shift_week                     — εβδομαδιαία αλλαγή βάρδιας
     """
     current         = now or datetime.now()
     normalized_fact = _normalize(fact)
@@ -1375,7 +1430,8 @@ def infer_routine_reconciliation_candidates(
         ("alexandros_away_general",        _rule_alexandros_away_general,        (normalized_fact, dates, current)),
         ("school_break",                   _rule_school_break,                   (normalized_fact, dates, current)),
         ("child_activity_pause",           _rule_child_activity_pause,           (normalized_fact, dates, current)),
-        ("temporary_absence_other_person", _rule_temporary_absence_other_person, (normalized_fact, dates, current)),
+        ("sofia_with_user",                _rule_sofia_with_user,                (normalized_fact, dates, current)),
+        ("sofia_not_with_user",            _rule_sofia_not_with_user,            (normalized_fact, dates, current)),
         ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, dates, current)),
         ("sofia_work_mode",                _rule_sofia_work_mode,                (normalized_fact, dates, current)),
         ("user_at_work",                   _rule_user_at_work,                   (normalized_fact, dates, current)),

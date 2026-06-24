@@ -297,6 +297,97 @@ def test_apply_shift_week_mute_matches_include_only_routines(tmp_path):
     ]
 
 
+def test_sofia_work_does_not_suppress_messenger_routine():
+    fact = "[USER_FACT]: Η Σοφία δουλεύει σήμερα από το σπίτι."
+
+    directives = infer_routine_reconciliation_directives(
+        fact,
+        category="family",
+        reason="user_stated",
+        now=datetime(2026, 6, 24, 10, 0, 0),
+    )
+
+    assert not any(
+        d.get("condition_payload", {}).get("flag") == "sofia_with_user"
+        for d in directives
+    )
+
+
+def test_sofia_together_suppresses_messenger_routine():
+    fact = "[USER_FACT]: Είμαι μαζί με τη Σοφία τώρα."
+
+    directives = infer_routine_reconciliation_candidates(
+        fact,
+        category="family",
+        reason="user_stated",
+        now=datetime(2026, 6, 24, 10, 0, 0),
+    )
+
+    assert any(
+        d["kind"] == "context_state_set"
+        and d["key"] == "sofia_with_user"
+        and d["value"] == "true"
+        for d in directives
+    )
+    assert any(
+        d["kind"] == "condition_add"
+        and d["condition_payload"]["flag"] == "sofia_with_user"
+        and d["condition_mode"] == "suppress_when_true"
+        for d in directives
+    )
+
+
+def test_sofia_left_clears_together_flag():
+    fact = "[USER_FACT]: Η Σοφία έφυγε και δεν είναι εδώ τώρα."
+
+    directives = infer_routine_reconciliation_candidates(
+        fact,
+        category="family",
+        reason="user_stated",
+        now=datetime(2026, 6, 24, 12, 0, 0),
+    )
+
+    assert any(
+        d["kind"] == "context_state_set"
+        and d["key"] == "sofia_with_user"
+        and d["value"] == "false"
+        for d in directives
+    )
+
+
+def test_not_together_phrase_clears_only_when_sofia_context_is_active():
+    fact = "[USER_FACT]: Δεν είμαστε μαζί τώρα."
+
+    with patch("memory.routine_db.get_context_state", return_value={"value": "true", "expires_at": "2026-06-24"}):
+        directives = infer_routine_reconciliation_candidates(
+            fact,
+            category="family",
+            reason="user_stated",
+            now=datetime(2026, 6, 24, 12, 0, 0),
+        )
+
+    assert any(
+        d["kind"] == "context_state_set"
+        and d["key"] == "sofia_with_user"
+        and d["value"] == "false"
+        for d in directives
+    )
+
+
+def test_not_together_phrase_without_active_sofia_context_does_nothing():
+    fact = "[USER_FACT]: Δεν είμαστε μαζί τώρα."
+
+    with patch("memory.routine_db.get_context_state", return_value=None):
+        directives = infer_routine_reconciliation_candidates(
+            fact,
+            category="family",
+            reason="user_stated",
+            now=datetime(2026, 6, 24, 12, 0, 0),
+        )
+
+    assert not any(d.get("key") == "sofia_with_user" for d in directives)
+
+
 def test_shift_logic_candidate_scores_debug_only():
     """shift_logic produces a candidate directive but stays debug_only by design.
 

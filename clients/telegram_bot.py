@@ -2077,7 +2077,7 @@ def _proactive_state_keys_for_event(event_name: str) -> list[str]:
 
     if "σοφ" in event_l or "messenger" in event_l:
         keys.extend([
-            "sofia_absent",
+            "sofia_with_user",
             "sofia_work_mode",
         ])
 
