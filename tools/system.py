@@ -16,6 +16,7 @@ import unicodedata
 from types import SimpleNamespace
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from services.routine_intent import classify_routine_intent
 from langchain_core.tools import tool
 from pypdf import PdfReader
 from github import Github
@@ -858,6 +859,19 @@ def get_routines(day_of_week: str) -> str:
         return f"❌ Σφάλμα ανάκτησης ρουτινών: {e}"
 
 
+def _get_routine_names_for_intent_classification() -> list[str]:
+    try:
+        from memory.routine_db import get_connection
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT event_name FROM routines WHERE event_name IS NOT NULL AND event_name != ''")
+        rows = cur.fetchall()
+        conn.close()
+        return [r[0] for r in rows if r and r[0]]
+    except Exception:
+        return []
+
+
 @tool
 def control_routine_notifications(event_name: str, action: str, until_date: str = "", source_text: str = "") -> str:
     """
@@ -900,6 +914,15 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
         find_routines_for_schedule_control, set_routine_muted_until, clear_routine_muted_until,
         set_sentimental_silenced, get_sentimental_info, get_routine_muted_until,
     )
+    
+    routine_names = _get_routine_names_for_intent_classification()
+    intent_result = classify_routine_intent(source_text, routine_names=routine_names)
+    if intent_result.intent == "context_update":
+        return (
+            "ℹ️ Αυτό μοιάζει με context/fact update και όχι με ρητή χειροκίνητη εντολή αλλαγής ειδοποιήσεων ρουτίνας. "
+            "Δεν έγινε notification change."
+        )
+
     VALID_ACTIONS = {"mute", "unmute", "silence_emotional", "allow_emotional"}
     if action not in VALID_ACTIONS:
         return f"❌ Μη έγκυρο action: '{action}'. Επιτρεπτά: {', '.join(sorted(VALID_ACTIONS))}."
@@ -1023,6 +1046,14 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
         find_routines_for_schedule_control, append_routine_condition, set_routine_condition
     )
 
+    routine_names = _get_routine_names_for_intent_classification()
+    intent_result = classify_routine_intent(source_text, routine_names=routine_names)
+    if intent_result.intent == "context_update":
+        return (
+            "ℹ️ Αυτό μοιάζει με context/fact update και όχι με ρητή χειροκίνητη εντολή αλλαγής ρουτίνας. "
+            "Δεν έγινε προσθήκη ή αφαίρεση condition."
+        )
+
     VALID_ACTIONS = {"add", "remove"}
     if action not in VALID_ACTIONS:
         return f"❌ Μη έγκυρο action: '{action}'. Επιτρεπτά: add, remove."
@@ -1133,6 +1164,14 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
         set_routine_active_window, set_routine_resume_rule, get_routine_schedule_meta,
         normalize_event
     )
+
+    routine_names = _get_routine_names_for_intent_classification()
+    intent_result = classify_routine_intent(source_text, routine_names=routine_names)
+    if intent_result.intent == "context_update":
+        return (
+            "ℹ️ Αυτό μοιάζει με context/fact update και όχι με ρητή χειροκίνητη εντολή αλλαγής ρουτίνας. "
+            "Δεν έγινε schedule change."
+        )
 
     VALID_ACTIONS = {"pause", "resume", "set_window", "clear_window"}
     if action not in VALID_ACTIONS:
