@@ -1153,12 +1153,17 @@ def handle_message(user_text: str, chat_id: str):
         looks_like_asset_confirmation_prompt,
     )
     clear_expired_pending_assets()
+    from memory.pending_assets import is_reply_to_recent_asset_prompt
     pending_photo_asset = get_latest_pending_asset("telegram", "photo")
     pending_doc_asset = get_latest_pending_asset("telegram", "document")
     pending_asset = pending_photo_asset or pending_doc_asset
     reply_kind = classify_pending_asset_reply(clean_user_text) if pending_asset else None
+    asset_prompt_active = is_reply_to_recent_asset_prompt("telegram") if pending_asset else False
 
-    if pending_asset and reply_kind == "yes":
+    if pending_asset and reply_kind in {"yes", "no"} and not asset_prompt_active:
+        print("[PendingAssetGuard]: ignored generic yes/no because no recent archive prompt was active")
+
+    if pending_asset and reply_kind == "yes" and asset_prompt_active:
         if pending_asset["asset_type"] == "photo":
             memory.save(
                 memory_type="photo",
@@ -1183,7 +1188,7 @@ def handle_message(user_text: str, chat_id: str):
         enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, confirm_reply, "Chat_Agent")
         return
 
-    if pending_asset and reply_kind == "no":
+    if pending_asset and reply_kind == "no" and asset_prompt_active:
         mark_pending_asset_cancelled(pending_asset["id"])
         cancel_reply = "Έγινε, δεν το αρχειοθετώ μόνιμα."
         _send_and_record_assistant(cancel_reply, chat_id)

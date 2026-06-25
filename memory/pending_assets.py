@@ -14,6 +14,7 @@ def _normalize_gr(text: str) -> str:
 
 def classify_pending_asset_reply(text: str) -> str | None:
     txt = _normalize_gr(text)
+    words = txt.replace(",", " ").replace(".", " ").replace("!", " ").replace(";", " ").split()
 
     yes_exact = {"ναι", "nai", "yes", "ok", "οκ"}
     no_exact = {"όχι", "οχι", "oxi", "no"}
@@ -41,9 +42,9 @@ def classify_pending_asset_reply(text: str) -> str | None:
         "save it",
     )
 
-    if txt in no_exact:
+    if txt in no_exact or (words and words[0] in no_exact):
         return "no"
-    if txt in yes_exact:
+    if txt in yes_exact or (words and words[0] in yes_exact):
         return "yes"
 
     # Η άρνηση πρέπει πάντα να κερδίζει.
@@ -225,3 +226,26 @@ def mark_pending_asset_cancelled(asset_id: int):
         conn.commit()
     finally:
         conn.close()
+
+
+def is_reply_to_recent_asset_prompt(channel: str, limit: int = 3) -> bool:
+    from memory.conversation_history import load_recent_context
+
+    entries = load_recent_context(
+        channel=channel,
+        global_limit=limit,
+        channel_limit=limit,
+        total_limit=limit,
+    )
+
+    for entry in reversed(entries):
+        if entry.get("role") != "assistant":
+            continue
+
+        content = str(entry.get("content") or "").strip()
+        if not content:
+            continue
+
+        return looks_like_asset_confirmation_prompt(content)
+
+    return False

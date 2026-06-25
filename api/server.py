@@ -558,12 +558,17 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             looks_like_asset_confirmation_prompt,
         )
         clear_expired_pending_assets()
+        from memory.pending_assets import is_reply_to_recent_asset_prompt
         pending_photo_asset = get_latest_pending_asset("web", "photo")
         pending_doc_asset = get_latest_pending_asset("web", "document")
         pending_asset = pending_photo_asset or pending_doc_asset
         reply_kind = classify_pending_asset_reply(user_input) if pending_asset else None
+        asset_prompt_active = is_reply_to_recent_asset_prompt("web") if pending_asset else False
 
-        if pending_asset and reply_kind == "yes":
+        if pending_asset and reply_kind in {"yes", "no"} and not asset_prompt_active:
+            print("[PendingAssetGuard]: ignored generic yes/no because no recent archive prompt was active")
+
+        if pending_asset and reply_kind == "yes" and asset_prompt_active:
             from memory.vector_store import memory
             if pending_asset["asset_type"] == "photo":
                 memory.save(
@@ -593,7 +598,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             return JSONResponse({"agent": "Chat_Agent", "response": reply})
 
-        if pending_asset and reply_kind == "no":
+        if pending_asset and reply_kind == "no" and asset_prompt_active:
             mark_pending_asset_cancelled(pending_asset["id"])
 
             reply = "Έγινε, δεν το αποθηκεύω μόνιμα."

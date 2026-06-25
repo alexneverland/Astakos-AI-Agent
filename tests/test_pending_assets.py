@@ -160,3 +160,50 @@ def test_negative_archive_reply_wins_over_save_word():
 def test_positive_archive_reply():
     from memory.pending_assets import classify_pending_asset_reply
     assert classify_pending_asset_reply("ναι αποθήκευσέ το") == "yes"
+
+
+from memory.pending_assets import is_reply_to_recent_asset_prompt
+def test_pending_asset_still_confirms_immediately_after_prompt(monkeypatch):
+    def mock_load_recent_context(channel, global_limit, channel_limit, total_limit):
+        return [
+            {"role": "user", "content": "Ορίστε μια φωτογραφία"},
+            {"role": "assistant", "content": "Να την αποθηκεύσω μόνιμα στη μνήμη μου; Απάντησέ μου μόνο με: ναι ή όχι."}
+        ]
+    monkeypatch.setattr("memory.conversation_history.load_recent_context", mock_load_recent_context)
+    
+    assert is_reply_to_recent_asset_prompt("telegram") is True
+
+def test_generic_yes_is_ignored_when_prompt_is_not_latest(monkeypatch):
+    def mock_load_recent_context(channel, global_limit, channel_limit, total_limit):
+        return [
+            {"role": "user", "content": "Ορίστε μια φωτογραφία"},
+            {"role": "assistant", "content": "Να την αποθηκεύσω μόνιμα στη μνήμη μου; Απάντησέ μου μόνο με: ναι ή όχι."},
+            {"role": "user", "content": "Τι καιρό κάνει;"},
+            {"role": "assistant", "content": "Έχει ήλιο σήμερα."}
+        ]
+    monkeypatch.setattr("memory.conversation_history.load_recent_context", mock_load_recent_context)
+    
+    assert is_reply_to_recent_asset_prompt("telegram") is False
+
+def test_old_archive_prompt_in_history_must_not_count(monkeypatch):
+    def mock_load_recent_context(channel, global_limit, channel_limit, total_limit):
+        return [
+            {"role": "assistant", "content": "Να την αποθηκεύσω μόνιμα στη μνήμη μου; Απάντησέ μου μόνο με: ναι ή όχι."},
+            {"role": "user", "content": "Άστο για τώρα"},
+            {"role": "assistant", "content": "Οκ"},
+            {"role": "user", "content": "Και κάτι άλλο..."},
+            {"role": "assistant", "content": "Πες μου"}
+        ]
+    monkeypatch.setattr("memory.conversation_history.load_recent_context", mock_load_recent_context)
+    
+    assert is_reply_to_recent_asset_prompt("telegram") is False
+
+def test_web_reply_to_recent_asset_prompt_detected(monkeypatch):
+    def mock_load_recent_context(channel, global_limit, channel_limit, total_limit):
+        assert channel == "web"
+        return [
+            {"role": "assistant", "content": "Να την αποθηκεύσω μόνιμα;"}
+        ]
+    monkeypatch.setattr("memory.conversation_history.load_recent_context", mock_load_recent_context)
+    
+    assert is_reply_to_recent_asset_prompt("web") is True
