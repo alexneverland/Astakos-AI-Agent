@@ -152,8 +152,16 @@ let rafId;
 let timelineData = [];
 
 function actionIcon(a){
-  return {triggered:'🧠',confirmed:'✅',dismissed:'📉',timeout_decay:'⏰',
-          decay:'💀',cooldown_extended:'🔄',state_change:'🔀',skipped:'⏭️'}[a]||'•';
+  return {
+    triggered:'🧠',
+    confirmed:'✅',
+    dismissed:'📉',
+    timeout_decay:'⏰',
+    decay:'💀',
+    cooldown_extended:'🔁',
+    state_change:'🔄',
+    skipped:'⏭️'
+  }[a] || '•';
 }
 function actionColor(a){
   return {confirmed:'ok',dismissed:'warn',decay:'err',timeout_decay:'warn',
