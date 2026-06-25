@@ -16,6 +16,8 @@ import xml.etree.ElementTree as ET
 from langchain_core.tools import tool
 from typing import Annotated
 from playwright.sync_api import sync_playwright
+from services.messenger_intent import classify_messenger_intent
+from core.messenger_draft import active_draft_status
 try:
     from playwright_stealth import stealth_sync
 except ImportError:
@@ -197,8 +199,15 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
             f"Λόγος: {reason}.\n"
             "Δώσε ρητό παραλήπτη από τις επαφές, π.χ. `Σοφία`, ή Messenger URL/ID."
         )
+    
+    active, _, _ = active_draft_status()
+    intent = classify_messenger_intent(payload_data or "", has_active_draft=active)
+
+    if intent.intent in {"clarify_draft", "clear_draft"}:
+        return "❌ Δεν αποθήκευσα Messenger draft. Αυτό το μήνυμα μοιάζει με διευκρίνιση ή κλείσιμο draft, όχι με νέο draft."
+
     if not (payload_data or "").strip():
-        return "❌ Δεν αποθήκευσα Messenger draft. Λείπει το κείμενο του μηνύματος."
+        return "❌ Δεν αποθήκευσα Messenger draft. Δεν δόθηκε νέο κείμενο μηνύματος."
 
     # Validate image path if provided
     if image_path and not os.path.exists(image_path):

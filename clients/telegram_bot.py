@@ -15,13 +15,15 @@ clients/telegram_bot.py
 """
 
 import os
-import json
 import time
-import queue
-import threading
+import json
 import requests
-from time import perf_counter
+import threading
+import queue
 from datetime import datetime
+from services.messenger_intent import classify_messenger_intent
+from core.messenger_draft import active_draft_status, clear_draft
+from time import perf_counter
 from zoneinfo import ZoneInfo
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -1189,6 +1191,73 @@ def handle_message(user_text: str, chat_id: str):
         enqueue_fast_task(update_working_memory, clean_user_text, cancel_reply)
         enqueue_fast_task(_enqueue_slow_memory_sifter, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
         enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, cancel_reply, "Chat_Agent")
+        return
+
+    # ── Messenger Draft Intent Guard ─────────────────────────────
+    draft_active, draft_reason, draft_data = active_draft_status()
+    draft_intent = classify_messenger_intent(
+        clean_user_text,
+        has_active_draft=draft_active,
+    )
+
+    if draft_intent.intent == "clear_draft":
+        cleared = clear_draft()
+        now_ts = datetime.now().strftime("%H:%M")
+        final_ai_response = (
+            f"[{now_ts}] Έγινε, μάστορα. Το draft καθαρίστηκε και το κλείνουμε εδώ."
+            if cleared
+            else f"[{now_ts}] Δεν υπάρχει ενεργό draft αυτή τη στιγμή για να καθαρίσω."
+        )
+
+        try:
+            send_telegram_msg(chat_id, final_ai_response)
+        except Exception:
+            pass
+
+        try:
+            _append_to_analytics_log("user", clean_user_text)
+            _append_to_analytics_log("ai", final_ai_response)
+            from memory.execution_trace import ExecutionTrace
+            _trace = ExecutionTrace(channel="telegram", user_message=clean_user_text)
+            _trace.mark_phase("messenger_intent_clear_intercept", 1)
+            _trace.finalize(response=final_ai_response)
+            _trace.save()
+        except Exception:
+            pass
+
+        return
+
+    if draft_intent.intent == "clarify_draft":
+        now_ts = datetime.now().strftime("%H:%M")
+        if draft_active and draft_data and draft_data.get("message"):
+            draft_message = str(draft_data.get("message") or "").strip()
+            final_ai_response = (
+                f"[{now_ts}] Εννοούσα αυτό το draft:\n\n"
+                f"{draft_message}\n\n"
+                f"Θέλεις αλλαγές, να το σβήσω ή να το στείλω;"
+            )
+        else:
+            final_ai_response = (
+                f"[{now_ts}] Δεν υπάρχει ενεργό draft αυτή τη στιγμή. "
+                f"Εννοούσα απλώς σαν ιδέα να ετοιμάσουμε μήνυμα, όχι ότι υπάρχει ήδη έτοιμο."
+            )
+
+        try:
+            send_telegram_msg(chat_id, final_ai_response)
+        except Exception:
+            pass
+
+        try:
+            _append_to_analytics_log("user", clean_user_text)
+            _append_to_analytics_log("ai", final_ai_response)
+            from memory.execution_trace import ExecutionTrace
+            _trace = ExecutionTrace(channel="telegram", user_message=clean_user_text)
+            _trace.mark_phase("messenger_intent_clarify_intercept", 1)
+            _trace.finalize(response=final_ai_response)
+            _trace.save()
+        except Exception:
+            pass
+
         return
 
     # ── Typing indicator — δείχνει "ο Αστακός πληκτρολογεί..." ──

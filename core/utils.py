@@ -528,6 +528,8 @@ def sanitize_messenger_draft_claims(text: str) -> str:
             or "είναι έτοιμο" in pl
             or "ετοιμο σε draft" in pl
             or "γράψε απλά" in pl
+            or "το μήνυμα στη σοφία να το στείλω τώρα" in pl
+            or "να το στείλω τώρα που σχόλασες" in pl
             or "αν θες να το φύγουμε" in pl
         )
         return has_messenger_topic and has_false_current_state

@@ -134,3 +134,15 @@ def debug_draft_state(*, now: datetime | None = None) -> dict:
         "expires_in_seconds": expires_in,
         "message_chars": len(draft.get("message") or ""),
     }
+
+
+def clear_draft() -> bool:
+    draft_file, _ = _settings()
+    if not os.path.exists(draft_file):
+        return False
+    try:
+        with open(draft_file, "w", encoding="utf-8") as f:
+            json.dump({}, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception:
+        return False
