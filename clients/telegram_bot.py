@@ -15,18 +15,23 @@ clients/telegram_bot.py
 """
 
 import os
+import sys
 import time
 import json
 import requests
 import threading
 import queue
 from datetime import datetime
-from services.messenger_intent import classify_messenger_intent
-from core.messenger_draft import active_draft_status, clear_draft
 from time import perf_counter
 from zoneinfo import ZoneInfo
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Bootstrap repo root before any project-local imports when this file runs as a script.
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from services.messenger_intent import classify_messenger_intent
+from core.messenger_draft import active_draft_status, clear_draft
 from langchain_core.messages import HumanMessage, AIMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE

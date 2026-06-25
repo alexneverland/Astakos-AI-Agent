@@ -10,10 +10,14 @@ import os
 import re
 import sys
 import time
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from collections import defaultdict
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
+
+# Bootstrap repo root before any project-local imports when this file runs as a script.
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 # ── Config ───────────────────────────────────────────────────────
 LOOKBACK_DAYS     = 30    # Μέρες ιστορικού
