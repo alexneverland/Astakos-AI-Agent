@@ -185,8 +185,8 @@ def test_search_profile_facts_scores_generic_query(monkeypatch):
         {
             "id": 1,
             "category": "family",
-            "fact": "[USER_FACT]: ? ?????????? ????? ???? ???????????",
-            "entities": ["??????????"],
+            "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση.",
+            "entities": ["Αλέξανδρος"],
             "tags": ["alexandros", "camp", "away"],
             "topic": "trip",
             "topic_detail": "camp",
@@ -198,8 +198,8 @@ def test_search_profile_facts_scores_generic_query(monkeypatch):
         {
             "id": 2,
             "category": "family",
-            "fact": "[USER_FACT]: ? ????? ???? ????",
-            "entities": ["?????"],
+            "fact": "[USER_FACT]: Η Σοφία πήγε δουλειά",
+            "entities": ["Σοφία"],
             "tags": ["sofia", "work"],
             "topic": "work",
             "topic_detail": "",
@@ -212,9 +212,9 @@ def test_search_profile_facts_scores_generic_query(monkeypatch):
 
     monkeypatch.setattr(vs, "get_profile_facts", lambda category=None, limit=300: docs)
 
-    results = search_profile_facts("?????????? ???????????", category="family", limit=5)
+    results = search_profile_facts("Αλέξανδρος κατασκήνωση", category="family", limit=5)
     assert len(results) == 1
-    assert "??????????" in results[0]["fact"]
+    assert "Αλέξανδρος" in results[0]["fact"]
 
 
 
@@ -225,8 +225,8 @@ def test_get_latest_state_for_query_uses_query_not_hardcoded(monkeypatch):
         {
             "id": 1,
             "category": "family",
-            "fact": "[USER_FACT]: ? ?????????? ????? ???? ???????????",
-            "entities": ["??????????"],
+            "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση.",
+            "entities": ["Αλέξανδρος"],
             "tags": ["alexandros", "camp", "away"],
             "topic": "trip",
             "topic_detail": "camp",
@@ -238,8 +238,8 @@ def test_get_latest_state_for_query_uses_query_not_hardcoded(monkeypatch):
         {
             "id": 2,
             "category": "family",
-            "fact": "[USER_FACT]: ? ????? ???? ????",
-            "entities": ["?????"],
+            "fact": "[USER_FACT]: Η Σοφία πήγε δουλειά",
+            "entities": ["Σοφία"],
             "tags": ["sofia", "work"],
             "topic": "work",
             "topic_detail": "",
@@ -252,6 +252,6 @@ def test_get_latest_state_for_query_uses_query_not_hardcoded(monkeypatch):
 
     monkeypatch.setattr(vs, "get_profile_facts", lambda category=None, limit=300: docs)
 
-    latest = get_latest_state_for_query("????? ????", category="family")
+    latest = get_latest_state_for_query("Σοφία δουλειά", category="family")
     assert latest is not None
-    assert "?????" in latest["fact"]
+    assert "Σοφία" in latest["fact"]

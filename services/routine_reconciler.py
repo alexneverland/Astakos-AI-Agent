@@ -1180,7 +1180,6 @@ _CANONICAL_CONTEXT_KEYS = {
     "alexandros_away_from_home",
     "family_at_home",
     "family_outside_activity",
-    "alexandros_away_from_home",
     "sofia_with_user",
     "current_shift",
     "football_season",
@@ -1255,8 +1254,6 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
 
     if context_key:
         if context_key == "alexandros_away_from_home":
-            subject_tokens = _ALEXANDROS_TOKENS
-        elif context_key == "alexandros_away_from_home":
             subject_tokens = _ALEXANDROS_TOKENS
         elif context_key == "sofia_with_user":
             subject_tokens = _SOFIA_TOKENS
@@ -1427,7 +1424,6 @@ def _infer_llm_reconciliation_candidates(
 - alexandros_away_from_home
 - family_at_home
 - family_outside_activity
-- alexandros_away_from_home
 - sofia_with_user
 - current_shift
 - football_season

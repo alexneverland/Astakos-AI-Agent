@@ -118,8 +118,8 @@ def _candidate_adds_new_stage(existing_candidate: dict, new_candidate: dict) -> 
 
     new_fact = str(new_candidate.get("fact") or "").lower()
     stage_keywords = (
-        "??????", "?????????", "????????", "?????", "??????",
-        "?????", "?????", "?????", "???????", "????????",
+        "γυρισε", "γυρισαμε", "επιστροφη", "επεστρεψε", "ηρθε",
+        "σπιτι", "κουρασμ", "εφυγε", "μεχρι", "κατασκηνωση",
         "returned", "return", "home", "tired", "left", "until", "camp"
     )
     if any(k in new_fact for k in stage_keywords):
@@ -153,7 +153,7 @@ def _fact_information_score(candidate: dict) -> int:
     if re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", fact):
         score += 20
 
-    if any(token in fact.lower() for token in ("?????", "??? ", "????", "?????", "?????", "??????", "for ", "days", "home", "tired", "until")):
+    if any(token in fact.lower() for token in ("γυρισε", "για ", "μερα", "μερες", "ωρες", "μεχρι", "for ", "days", "home", "tired", "until")):
         score += 20
 
     return score
@@ -179,8 +179,8 @@ def _facts_are_near_exact(a: dict, b: dict) -> bool:
 
     enrich_indicators = (
         " for ", " days", " day", " hours", " until", " because ",
-        " ??? ", " ?????", " ????", " ????", " ?????", " ?????? ",
-        "returned", "home", "tired", " ??????", " ?????", " ??????"
+        " για ", " μερες", " μερα", " ωρα", " ωρες", " μεχρι ",
+        "returned", "home", "tired", " επειδη", " γυρισε", " κουρασμ"
     )
     if shorter and shorter in longer:
         extra = longer.replace(shorter, "", 1)
