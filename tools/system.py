@@ -422,7 +422,7 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
     return result.get("output", "")
 
 @tool
-def save_to_memory(fact: str, entities: str = "", category: str = "general", reason: str = "agent_inferred") -> str:
+def save_to_memory(fact: str, entities: str = "", category: str = "other", reason: str = "agent_inferred") -> str:
     """
     Αποθηκεύει πληροφορίες ΣΗΜΑΣΙΟΛΟΓΙΚΑ.
     fact: Το γεγονός (π.χ. "Ο Αλέξανδρος τρώει μόνο φακές").
@@ -443,21 +443,26 @@ def save_to_memory(fact: str, entities: str = "", category: str = "general", rea
     def _do_save():
         try:
             from memory.vector_store import memory
+            from memory.session_memory import build_canonical_memory_candidate
 
             canonical_fact = fact.strip()
             if not canonical_fact.startswith(("[USER_FACT]", "[LESSON]", "[CAPABILITY]")):
                 canonical_fact = f"[USER_FACT]: {canonical_fact}"
 
-            saved = memory.save(
+            raw_entities = [x.strip() for x in entities.split(",") if x.strip()]
+
+            candidate = build_canonical_memory_candidate(
                 memory_type="fact",
                 fact=canonical_fact,
                 category=category,
+                entities=raw_entities,
                 agent_name="Tool_save_to_memory",
                 source=_source,
                 reason=reason,
                 confidence=0.85 if reason == "user_stated" else 0.7,
-                entities=[x.strip() for x in entities.split(",") if x.strip()],
             )
+
+            saved = memory.save(**candidate)
 
             if saved:
                 _lexical_cache.clear()

@@ -69,7 +69,7 @@ def test_slow_sifter_replay_guard_skips_same_exchange(isolated_state_db, monkeyp
     finally:
         conn.close()
 
-    assert len(rows) == 1
+    assert len(rows) == 2
     assert rows[0][1] == "telegram"
     assert rows[0][2] == "Home_Agent"
 
@@ -198,6 +198,7 @@ def test_slow_sifter_skips_same_day_family_near_duplicate(isolated_state_db, mon
           {
             "fact": "[USER_FACT]: Στις 2026-06-21, ο Αλέξανδρος σταματάει το ποδόσφαιρο για το καλοκαίρι.",
             "category": "family",
+            "entities": ["Αλέξανδρος", "ποδόσφαιρο"],
             "topic": "activity",
             "topic_detail": "football season",
             "relation_type": "state_update",
@@ -208,6 +209,7 @@ def test_slow_sifter_skips_same_day_family_near_duplicate(isolated_state_db, mon
           {
             "fact": "[USER_FACT]: Στις 2026-06-21, οι ποδοσφαιρικές δραστηριότητες του Αλέξανδρου παγώνουν για το καλοκαίρι.",
             "category": "family",
+            "entities": ["Αλέξανδρος", "ποδόσφαιρο"],
             "topic": "activity",
             "topic_detail": "football season",
             "relation_type": "state_update",
@@ -382,3 +384,40 @@ def test_slow_sifter_skips_operational_asset_confirmation(isolated_state_db, mon
     )
 
     assert len(saved) == 0
+
+
+def test_family_duplicate_tool_and_sifter_variants_are_collapsed(isolated_state_db, monkeypatch):
+    saved = []
+
+    def fake_save(**kwargs):
+        saved.append(kwargs)
+        return True
+
+    from memory import session_memory
+    monkeypatch.setattr(session_memory.memory, 'save', fake_save)
+
+    tool_candidate = session_memory.build_canonical_memory_candidate(
+        fact='[USER_FACT]: Στις 2026-06-25, ο Λάζαρος έκλεισε εισιτήρια για τη Γεωργία τον Αύγουστο.',
+        category='family',
+        entities=['Γεωργία', 'Εισιτήρια', 'Ταξίδι', 'Διακοπές'],
+        source='telegram',
+        agent_name='Tool_save_to_memory',
+        reason='user_stated',
+        confidence=0.85,
+    )
+
+    saved.append(tool_candidate)
+
+    sifter_candidate = session_memory.build_canonical_memory_candidate(
+        fact='[USER_FACT]: Στις 2026-06-25, ο Λάζαρος έκλεισε εισιτήρια για τη Γεωργία για τον Αύγουστο.',
+        category='family',
+        source='telegram',
+        agent_name='Dev_Agent',
+        reason='agent_inferred',
+        confidence=0.9,
+    )
+
+    assert session_memory._family_fact_same_day_near_duplicate(
+        sifter_candidate,
+        [tool_candidate],
+    ) is True

@@ -637,14 +637,54 @@ class AstakosMemoryManager:
         # 2. Duplicate check με dynamic threshold
         results = vector_store.similarity_search_with_score(fact, k=1)
         for doc, score in results:
-            if score < SIM_THRESHOLD_DISTANCE and doc.metadata.get("category") == category:
-                if add_alongside_old_text is not None and doc.page_content == add_alongside_old_text:
+            if score >= SIM_THRESHOLD_DISTANCE:
+                continue
+
+            if doc.metadata.get("category") != category:
+                continue
+
+            if add_alongside_old_text is not None and doc.page_content == add_alongside_old_text:
+                continue
+
+            if category == "family":
+                existing_topic = str(doc.metadata.get("topic") or "").strip().lower()
+                existing_detail = str(doc.metadata.get("topic_detail") or "").strip().lower()
+                existing_relation = str(doc.metadata.get("relation_type") or "").strip().lower()
+
+                try:
+                    import json
+                    existing_state_markers = json.loads(doc.metadata.get("state_markers") or "[]")
+                except Exception:
+                    existing_state_markers = []
+
+                same_topic = bool(topic and str(topic).strip().lower() == existing_topic)
+                same_detail = bool(topic_detail and str(topic_detail).strip().lower() == existing_detail)
+                overlap = memory_overlap_ratio(fact, doc.page_content)
+                episodic = memory_looks_episodic(
+                    fact,
+                    doc.page_content,
+                    new_relation_type=relation_type,
+                    old_relation_type=existing_relation,
+                    new_state_markers=state_markers,
+                    old_state_markers=existing_state_markers,
+                )
+
+                if overlap < 0.82:
                     continue
-                print(f"\033[90m[MemoryManager]: Duplicate skip (distance={score:.3f}): {doc.page_content}\033[0m")
-                _audit_log("skip_duplicate", category=category,
-                           fact=str(fact)[:100], existing=doc.page_content[:100],
-                           distance=round(float(score), 3))
-                return False
+                if not (same_topic or same_detail):
+                    continue
+                if episodic:
+                    continue
+
+            print(f"\033[90m[MemoryManager]: Duplicate skip (distance={score:.3f}): {doc.page_content}\033[0m")
+            _audit_log(
+                "skip_duplicate",
+                category=category,
+                fact=str(fact)[:100],
+                existing=doc.page_content[:100],
+                distance=round(float(score), 3),
+            )
+            return False
 
         # 3. Αποθήκευση Chroma
         # Auto-compute importance

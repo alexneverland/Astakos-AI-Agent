@@ -11,7 +11,7 @@ import threading
 import hashlib
 from datetime import datetime, timedelta
 import unicodedata
-from memory.vector_store import memory
+from memory.vector_store import memory, get_profile_facts, memory_overlap_ratio
 from services.gemini import safe_gemini_call
 from memory.family_arc_resolution import (
     _same_family_arc,
@@ -191,6 +191,19 @@ def _memory_sifter_fingerprint(
     ])
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+
+def _memory_sifter_user_fingerprint(
+    user_text: str,
+    agent_name: str = "Unknown",
+    channel: str = "web",
+) -> str:
+    payload = "||".join([
+        "user_only",
+        _normalize_text(channel),
+        _normalize_text(agent_name),
+        _normalize_text(user_text),
+    ])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 def _memory_sifter_already_processed(fingerprint: str) -> bool:
     _ensure_memory_sifter_runs_table()
@@ -462,6 +475,45 @@ def _normalize_memory_candidate(raw: dict | None, *, now: datetime | None = None
     )
     base["tags"] = _build_tags({**base, "tags": raw_tags})
     return base
+
+
+def build_canonical_memory_candidate(
+    *,
+    fact: str,
+    category: str = "other",
+    memory_type: str = "fact",
+    tags: list[str] | None = None,
+    entities: list[str] | None = None,
+    topic: str = "",
+    topic_detail: str = "",
+    state_markers: list[str] | None = None,
+    time_scope: str = "",
+    relation_type: str = "",
+    confidence: float = 0.7,
+    source: str = "unknown",
+    agent_name: str = "Unknown",
+    reason: str = "agent_inferred",
+    now: datetime | None = None,
+) -> dict:
+    return _normalize_memory_candidate(
+        {
+            "memory_type": memory_type,
+            "fact": fact,
+            "category": category,
+            "tags": tags or [],
+            "entities": entities or [],
+            "topic": topic,
+            "topic_detail": topic_detail,
+            "state_markers": state_markers or [],
+            "time_scope": time_scope,
+            "relation_type": relation_type,
+            "confidence": confidence,
+            "source": source,
+            "agent_name": agent_name,
+            "reason": reason,
+        },
+        now=now,
+    )
 
 
 def _extract_event_memory_candidate(
@@ -1072,6 +1124,10 @@ def _fact_matches_any(fact: str, existing_facts: list[str]) -> bool:
 
     return False
 
+def _extract_fact_date(text: str) -> str:
+    match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", str(text or ""))
+    return match.group(0) if match else ""
+
 def _family_fact_same_day_near_duplicate(candidate: dict, accepted_candidates: list[dict]) -> bool:
     if str(candidate.get("category") or "").lower() != "family":
         return False
@@ -1093,17 +1149,77 @@ def _family_fact_same_day_near_duplicate(candidate: dict, accepted_candidates: l
         existing_detail = str(existing.get("topic_detail") or "").lower().strip()
         existing_scope = str(existing.get("time_scope") or "").strip()
 
+        cand_date = _extract_fact_date(cand_fact)
+        existing_date = _extract_fact_date(existing_fact)
+
         if cand_scope and existing_scope and cand_scope != existing_scope:
-            continue
+            if not (cand_date and existing_date and cand_date == existing_date):
+                continue
 
         same_topic = cand_topic and cand_topic == existing_topic
         same_detail = cand_detail and cand_detail == existing_detail
-        same_arc = _same_family_arc(existing_fact, cand_fact)
+        same_arc = _same_family_arc(existing, candidate)
 
-        if not (same_topic or same_detail or same_arc):
+        if same_arc:
+            return True
+
+        overlap = memory_overlap_ratio(existing_fact, cand_fact)
+
+        if not (same_topic or same_detail):
+            if overlap < 0.88:
+                continue
+
+        if overlap >= 0.82:
+            return True
+
+    return False
+
+def _existing_family_fact_same_day_near_duplicate(candidate: dict) -> bool:
+    if str(candidate.get("category") or "").lower() != "family":
+        return False
+
+    cand_fact = str(candidate.get("fact") or "").strip()
+    cand_topic = str(candidate.get("topic") or "").lower().strip()
+    cand_detail = str(candidate.get("topic_detail") or "").lower().strip()
+    cand_scope = str(candidate.get("time_scope") or "").strip()
+
+    if not cand_fact:
+        return False
+
+    try:
+        docs = get_profile_facts(category="family", limit=200)
+    except Exception:
+        return False
+
+    for existing in docs:
+        existing_fact = str(existing.get("fact") or "").strip()
+        existing_topic = str(existing.get("topic") or "").lower().strip()
+        existing_detail = str(existing.get("topic_detail") or "").lower().strip()
+        existing_scope = str(existing.get("time_scope") or "").strip()
+
+        if not existing_fact:
             continue
 
-        overlap = memory.memory_overlap_ratio(existing_fact, cand_fact)
+        cand_date = _extract_fact_date(cand_fact)
+        existing_date = _extract_fact_date(existing_fact)
+
+        if cand_scope and existing_scope and cand_scope != existing_scope:
+            if not (cand_date and existing_date and cand_date == existing_date):
+                continue
+
+        same_topic = cand_topic and cand_topic == existing_topic
+        same_detail = cand_detail and cand_detail == existing_detail
+        same_arc = _same_family_arc(existing, candidate)
+
+        if same_arc:
+            return True
+
+        overlap = memory_overlap_ratio(cand_fact, existing_fact)
+
+        if not (same_topic or same_detail):
+            if overlap < 0.88:
+                continue
+
         if overlap >= 0.82:
             return True
 
@@ -1263,8 +1379,16 @@ def run_memory_sifter_slow(
         agent_name=agent_name,
         channel=channel,
     )
+    user_fingerprint = _memory_sifter_user_fingerprint(
+        user_text=user_text,
+        agent_name=agent_name,
+        channel=channel,
+    )
 
-    if _memory_sifter_already_processed(fingerprint):
+    if (
+        _memory_sifter_already_processed(fingerprint)
+        or _memory_sifter_already_processed(user_fingerprint)
+    ):
         print("\033[90m[MemorySifterSlow]: replay-skip (already processed)\033[0m")
         return
     MEMORY_CATS = {
@@ -1369,6 +1493,13 @@ def run_memory_sifter_slow(
                 agent_name=agent_name,
                 channel=channel,
             )
+            _mark_memory_sifter_processed(
+                fingerprint=user_fingerprint,
+                user_text=user_text,
+                ai_text=ai_text,
+                agent_name=agent_name,
+                channel=channel,
+            )
             return
 
         raw_clean = re.sub(r"```json|```", "", raw_text).strip()
@@ -1454,6 +1585,13 @@ def run_memory_sifter_slow(
 
         _mark_memory_sifter_processed(
             fingerprint=fingerprint,
+            user_text=user_text,
+            ai_text=ai_text,
+            agent_name=agent_name,
+            channel=channel,
+        )
+        _mark_memory_sifter_processed(
+            fingerprint=user_fingerprint,
             user_text=user_text,
             ai_text=ai_text,
             agent_name=agent_name,
