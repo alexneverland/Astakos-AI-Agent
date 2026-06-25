@@ -809,8 +809,8 @@ def test_llm_context_key_does_not_require_entity_and_activity():
 
     directives = _llm_impact_to_directives(impact)
     assert len(directives) == 1
-    assert directives[0]["key"] == "alexandros_present"
-    assert directives[0]["value"] is False
+    assert directives[0]["key"] == "alexandros_away_from_home"
+    assert directives[0]["value"] is True
 
 def test_llm_context_key_rejects_non_canonical_keys():
     from services.routine_reconciler import _llm_impact_to_directives

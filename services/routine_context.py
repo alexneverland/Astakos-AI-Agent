@@ -3,6 +3,7 @@ from datetime import datetime
 def build_runtime_routine_context(now: datetime | None = None) -> dict:
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
+    away_state = resolve_alexandros_away_state(current)
 
     ctx = {}
     try:
@@ -26,7 +27,7 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
 
     ctx.update({
         "today": today,
-        "alexandros_away_from_home": resolve_alexandros_away_state(current),
+        "alexandros_away_from_home": away_state,
         "alexandros_away_reason": resolve_alexandros_away_reason(current),
         "football_season": resolve_football_season(current),
         "school_open": resolve_school_open(current),
@@ -36,6 +37,7 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
         "user_out_of_home": resolve_user_out_of_home(current),
         "quiet_hours": resolve_quiet_hours(current),
     })
+    ctx["alexandros_present"] = not bool(away_state)
     return ctx
 
 def resolve_alexandros_away_state(now: datetime | None = None) -> bool | None:

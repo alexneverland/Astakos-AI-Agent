@@ -114,9 +114,14 @@ def test_build_runtime_routine_context_includes_user_out_of_home(monkeypatch):
 
     assert "user_out_of_home" in result
     assert result["user_out_of_home"] is True
-def test_apply_canonical_context_directives_updates_runtime_context():
+def test_apply_canonical_context_directives_updates_runtime_context(tmp_path, monkeypatch):
+    import memory.routine_db as routine_db
     from services.routine_reconciler import apply_routine_reconciliation_directives
     from services.routine_context import build_runtime_routine_context
+
+    temp_db = tmp_path / "test_routines.db"
+    monkeypatch.setattr(routine_db, "DB_PATH", str(temp_db))
+    routine_db.setup_db()
 
     directives = [
         {
@@ -131,8 +136,8 @@ def test_apply_canonical_context_directives_updates_runtime_context():
         },
         {
             "kind": "context_state_set",
-            "key": "alexandros_present",
-            "value": False,
+            "key": "alexandros_away_from_home",
+            "value": True,
             "until_date": "2030-01-01",
             "reason": "child_with_caregiver",
             "subject_tokens": ["αλεξανδρ"],
@@ -146,4 +151,5 @@ def test_apply_canonical_context_directives_updates_runtime_context():
 
     assert stats["context_states_set"] >= 2
     assert ctx.get("user_out_of_home") is True
+    assert ctx.get("alexandros_away_from_home") is True
     assert ctx.get("alexandros_present") is False

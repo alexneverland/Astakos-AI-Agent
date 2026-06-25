@@ -1177,7 +1177,7 @@ def _safe_json_list(raw: str) -> list[dict]:
 
 _CANONICAL_CONTEXT_KEYS = {
     "user_out_of_home",
-    "alexandros_present",
+    "alexandros_away_from_home",
     "family_at_home",
     "family_outside_activity",
     "alexandros_away_from_home",
@@ -1192,17 +1192,17 @@ def _normalize_context_key(raw: str) -> str:
         "user_out_of_home": "user_out_of_home",
         "out_of_home": "user_out_of_home",
 
-        "alexandros_present": "alexandros_present",
-        "child_present": "alexandros_present",
+        "alexandros_present": "alexandros_away_from_home",
+        "child_present": "alexandros_away_from_home",
+        
+        "alexandros_away_from_home": "alexandros_away_from_home",
+        "child_away": "alexandros_away_from_home",
 
         "family_at_home": "family_at_home",
         "at_home": "family_at_home",
 
         "family_outside_activity": "family_outside_activity",
         "outside_activity": "family_outside_activity",
-
-        "alexandros_away_from_home": "alexandros_away_from_home",
-        "child_away": "alexandros_away_from_home",
 
         "sofia_with_user": "sofia_with_user",
         "current_shift": "current_shift",
@@ -1223,7 +1223,8 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
     until_date = impact.get("until_date")
     reason = impact.get("reason") or "llm_inferred"
 
-    context_key = _normalize_context_key(impact.get("context_key", ""))
+    raw_context_key = _normalize(impact.get("context_key", ""))
+    context_key = _normalize_context_key(raw_context_key)
     context_value = impact.get("context_value", None)
 
     if isinstance(context_value, str):
@@ -1234,6 +1235,9 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
             context_value = False
         elif cv == "null":
             context_value = None
+
+    if raw_context_key in {"alexandros_present", "child_present"} and isinstance(context_value, bool):
+        context_value = not context_value
 
     if not context_key and (not entity or not activity or not impact_type):
         return []
@@ -1250,7 +1254,7 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
     exclude_tokens = _ROUTINE_EXCLUDE_TOKENS[:]
 
     if context_key:
-        if context_key == "alexandros_present":
+        if context_key == "alexandros_away_from_home":
             subject_tokens = _ALEXANDROS_TOKENS
         elif context_key == "alexandros_away_from_home":
             subject_tokens = _ALEXANDROS_TOKENS
@@ -1420,7 +1424,7 @@ def _infer_llm_reconciliation_candidates(
 Για γενικές τρέχουσες καταστάσεις ζωής, προτίμησε canonical context flags.
 Χρησιμοποίησε ΜΟΝΟ αυτά τα context_key όταν ταιριάζουν:
 - user_out_of_home
-- alexandros_present
+- alexandros_away_from_home
 - family_at_home
 - family_outside_activity
 - alexandros_away_from_home
@@ -1440,7 +1444,7 @@ Fact: "Το βράδυ θα πάω με τη Σοφία έξω και ο Αλέ�
 Output:
 [
   {{"entity":"Λάζαρος","activity":"outing","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"user_out_of_home","context_value":true,"until_date":"{today}","reason":"user_out_evening"}},
-  {{"entity":"Αλέξανδρος","activity":"home_presence","aliases":["με τη μαρια"],"state_change":null,"impact":"live_context","context_key":"alexandros_present","context_value":false,"until_date":"{today}","reason":"child_with_caregiver"}},
+  {{"entity":"Αλέξανδρος","activity":"home_presence","aliases":["με τη μαρια"],"state_change":null,"impact":"live_context","context_key":"alexandros_away_from_home","context_value":true,"until_date":"{today}","reason":"child_with_caregiver"}},
   {{"entity":"family","activity":"home_presence","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"family_at_home","context_value":false,"until_date":"{today}","reason":"family_out_evening"}},
   {{"entity":"family","activity":"outing","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"family_outside_activity","context_value":true,"until_date":"{today}","reason":"family_out_evening"}}
 ]
@@ -1455,7 +1459,7 @@ Output:
 Fact: "Ο Αλέξανδρος είναι μαζί μας"
 Output:
 [
-  {{"entity":"Αλέξανδρος","activity":"home_presence","aliases":["μαζι μας"],"state_change":null,"impact":"live_context","context_key":"alexandros_present","context_value":true,"until_date":null,"reason":"child_present_again"}},
+  {{"entity":"Αλέξανδρος","activity":"home_presence","aliases":["μαζι μας"],"state_change":null,"impact":"live_context","context_key":"alexandros_away_from_home","context_value":false,"until_date":null,"reason":"child_present_again"}},
   {{"entity":"family","activity":"home_presence","aliases":["μαζι μας"],"state_change":null,"impact":"live_context","context_key":"family_at_home","context_value":true,"until_date":null,"reason":"family_home_again"}}
 ]
 
