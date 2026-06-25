@@ -606,7 +606,7 @@ def browse_url(url: str) -> str:
                 page.wait_for_timeout(3000)
             except PlaywrightTimeoutError:
                 browser.close()
-                return f"⚠️ Σφάλμα Timeout: Η σελίδα '{url}' άργησε υπερβολικά."
+                return f"[WEB_TOOL_ERROR][browse_url][reason=timeout] Η σελίδα '{url}' άργησε υπερβολικά."
 
             # Αφαιρούμε scripts/styles/banners
             text = page.evaluate("""() => {
@@ -623,12 +623,12 @@ def browse_url(url: str) -> str:
             # Cloudflare / Captcha Detector
             bot_keywords = ["just a moment", "checking if the site connection is secure", "cloudflare", "attention required"]
             if any(kw in clean_text.lower() for kw in bot_keywords) or len(clean_text) < 30:
-                return f"🛑 Προστασία Bot: Εντοπίστηκε Cloudflare ή Captcha στο {url}."
+                return f"[WEB_TOOL_ERROR][browse_url][reason=cloudflare] Το site έχει προστασία και δεν με άφησε να το διαβάσω."
 
             return f"📄 Περιεχόμενο από {url}:\n\n{clean_text}"
 
     except Exception as e:
-        return f"❌ Γενικό Σφάλμα στο browse_url: Το εργαλείο απέτυχε ({str(e)})" 
+        return f"[WEB_TOOL_ERROR][browse_url][reason=generic] Γενικό σφάλμα στο browse_url: Το εργαλείο απέτυχε ({str(e)})" 
 @tool
 def duckduckgo_search(query: str) -> str:
     """Αναζήτηση στο διαδίκτυο.
@@ -662,9 +662,11 @@ def duckduckgo_search(query: str) -> str:
             last_error = str(e)
 
     return (
-        f"⚠️ Η αναζήτηση απέτυχε σε {len(backends_to_try)} backends ({last_error}). "
-        "ΜΗΝ ξαναδοκιμάσεις το ίδιο ή παρόμοιο ερώτημα αμέσως — ενημέρωσε τον χρήστη "
-        "ότι η web αναζήτηση είναι προσωρινά μη διαθέσιμη."
+        f"[WEB_TOOL_ERROR][duckduckgo_search]"
+        f"[reason={last_error}] "
+        f"Η αναζήτηση απέτυχε σε {len(backends_to_try)} backends. "
+        "ΜΗΝ ξαναδοκιμάσεις το ίδιο ή παρόμοιο ερώτημα αμέσως — "
+        "ενημέρωσε τον χρήστη ότι η web αναζήτηση είναι προσωρινά μη διαθέσιμη."
     )
 @tool
 def search_supermarket_prices(query: str) -> str:

@@ -536,3 +536,40 @@ def sanitize_messenger_draft_claims(text: str) -> str:
 
     cleaned = [p for p in paragraphs if not is_draft_paragraph(p)]
     return "\n\n".join(cleaned).strip() or raw
+
+def looks_like_web_tool_error(text: str) -> bool:
+    if '[WEB_TOOL_ERROR]' in text:
+        return True
+    legacy_prefixes = ['⚠️ Η αναζήτηση απέτυχε', '❌ Γενικό Σφάλμα στο browse_url', 'Cloudflare', 'Bot Protection', 'temporarily unavailable', '🛑 Προστασία Bot', '⚠️ Σφάλμα Timeout']
+    for p in legacy_prefixes:
+        if p.lower() in text.lower():
+            return True
+    return False
+
+def collect_recent_tool_messages_since_last_user(messages: list) -> list:
+    recent_tools = []
+    for msg in reversed(messages):
+        if getattr(msg, 'type', '') == 'human':
+            break
+        if getattr(msg, 'type', '') == 'tool':
+            recent_tools.append(msg)
+    return list(reversed(recent_tools))
+
+def filter_recent_web_tool_results(messages: list) -> list:
+    recent_tools = collect_recent_tool_messages_since_last_user(messages)
+    web_tools = {'duckduckgo_search', 'browse_url', 'search_google_places', 'get_news', 'get_weather_forecast', 'get_navigation_info', 'search_supermarket_prices'}
+    
+    results = []
+    for msg in recent_tools:
+        name = getattr(msg, 'name', '')
+        if name in web_tools:
+            content = clean_message(getattr(msg, 'content', '')).strip()
+            results.append((name, content))
+            
+    return results
+
+def build_web_failure_reply(user_text: str, tool_results: list) -> str:
+    qty_intents = ['πόσο', 'τιμή', 'χωράει', 'απόσταση', 'ώρα']
+    is_qty = any(w in user_text.lower() for w in qty_intents)
+    kind = 'νούμερο/στοιχείο' if is_qty else 'πληροφορία'
+    return f'Μάστορα, προσπάθησα να το επιβεβαιώσω από web sources, αλλά αυτή τη στιγμή δεν πήρα αξιόπιστο αποτέλεσμα από τα εργαλεία μου, οπότε δεν θέλω να σου πω {kind} στον αέρα. Αν θέλεις, δώσε μου συγκεκριμένο link ή το ξαναπιάνουμε αργότερα.'

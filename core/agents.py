@@ -489,6 +489,16 @@ def web_agent_node(state: AgentState):
     content = clean_message(result.content).strip() if result.content else ""
     has_tool_calls = bool(getattr(result, "tool_calls", None))
 
+    from core.utils import filter_recent_web_tool_results, looks_like_web_tool_error, build_web_failure_reply
+    recent_web_tool_results = filter_recent_web_tool_results(history)
+    web_errors = [(name, text) for name, text in recent_web_tool_results if looks_like_web_tool_error(text)]
+    web_successes = [(name, text) for name, text in recent_web_tool_results if not looks_like_web_tool_error(text)]
+
+    if web_errors and not web_successes:
+        guarded_reply = build_web_failure_reply(last_msg_text, recent_web_tool_results)
+        from langchain_core.messages import AIMessage as _AIMsg
+        return {"messages": [_AIMsg(content=guarded_reply)], "current_agent": "Web_Agent"}
+
     # [MASTRO-FIX]: Αν η σύνθεση είναι κενή (blocked server-side) και υπάρχουν
     # tool results στο history, επιστρέφουμε τα raw αποτελέσματα ως fallback.
     if not content and not has_tool_calls:
