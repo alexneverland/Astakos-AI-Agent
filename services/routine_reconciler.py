@@ -966,6 +966,7 @@ def score_candidate_directive(
     until_date     = directive.get("until_date")
     kind           = directive.get("kind", "")
     reason         = directive.get("reason") or ""
+    directive_key  = directive.get("key") or ""
 
     # notifications_unmute does not need a scope — don't penalise for missing until_date
     scope_required = kind in {"schedule_pause", "notifications_mute"}
@@ -1002,6 +1003,11 @@ def score_candidate_directive(
     if has_activity:
         score += _W_ACTIVITY
         _append_signal(signals, f"activity:{include_tokens[0]}" if include_tokens else "activity")
+
+    if matched_rule_name == "llm_extracted" and kind == "context_state_set":
+        if directive_key in _CANONICAL_CONTEXT_KEYS:
+            score += 0.15
+            _append_signal(signals, "llm:canonical_context")
 
     if has_state:
         score += _W_STATE
@@ -1169,6 +1175,41 @@ def _safe_json_list(raw: str) -> list[dict]:
     except Exception:
         return []
 
+_CANONICAL_CONTEXT_KEYS = {
+    "user_out_of_home",
+    "alexandros_present",
+    "family_at_home",
+    "family_outside_activity",
+    "alexandros_away_from_home",
+    "sofia_with_user",
+    "current_shift",
+    "football_season",
+}
+
+def _normalize_context_key(raw: str) -> str:
+    key = _normalize(raw or "")
+    aliases = {
+        "user_out_of_home": "user_out_of_home",
+        "out_of_home": "user_out_of_home",
+
+        "alexandros_present": "alexandros_present",
+        "child_present": "alexandros_present",
+
+        "family_at_home": "family_at_home",
+        "at_home": "family_at_home",
+
+        "family_outside_activity": "family_outside_activity",
+        "outside_activity": "family_outside_activity",
+
+        "alexandros_away_from_home": "alexandros_away_from_home",
+        "child_away": "alexandros_away_from_home",
+
+        "sofia_with_user": "sofia_with_user",
+        "current_shift": "current_shift",
+        "football_season": "football_season",
+    }
+    return aliases.get(key, key)
+
 def _llm_impact_to_directives(impact: dict) -> list[dict]:
     """
     Converts one structured LLM impact object into the same directive schema
@@ -1182,7 +1223,19 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
     until_date = impact.get("until_date")
     reason = impact.get("reason") or "llm_inferred"
 
-    if not entity or not activity or not impact_type:
+    context_key = _normalize_context_key(impact.get("context_key", ""))
+    context_value = impact.get("context_value", None)
+
+    if isinstance(context_value, str):
+        cv = _normalize(context_value)
+        if cv == "true":
+            context_value = True
+        elif cv == "false":
+            context_value = False
+        elif cv == "null":
+            context_value = None
+
+    if not context_key and (not entity or not activity or not impact_type):
         return []
 
     subject_tokens = []
@@ -1193,8 +1246,32 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
     else:
         subject_tokens = [entity]
 
-    include_tokens = aliases[:] if aliases else [activity]
+    include_tokens = aliases[:] if aliases else ([activity] if activity else [])
     exclude_tokens = _ROUTINE_EXCLUDE_TOKENS[:]
+
+    if context_key:
+        if context_key == "alexandros_present":
+            subject_tokens = _ALEXANDROS_TOKENS
+        elif context_key == "alexandros_away_from_home":
+            subject_tokens = _ALEXANDROS_TOKENS
+        elif context_key == "sofia_with_user":
+            subject_tokens = _SOFIA_TOKENS
+        elif context_key in {"user_out_of_home", "family_at_home", "family_outside_activity"}:
+            subject_tokens = []
+
+        if context_key not in _CANONICAL_CONTEXT_KEYS:
+            return []
+
+        return [{
+            "kind": "context_state_set",
+            "key": context_key,
+            "value": context_value,
+            "until_date": until_date,
+            "reason": reason,
+            "subject_tokens": subject_tokens,
+            "include_tokens": include_tokens,
+            "exclude_tokens": exclude_tokens,
+        }]
 
     directives = []
 
@@ -1323,10 +1400,10 @@ def _infer_llm_reconciliation_candidates(
 να καταλάβεις αν το fact επηρεάζει υπάρχουσες ρουτίνες ή προσωρινό context ζωής.
 
 Επέστρεψε λίστα από objects με fields:
-- entity: ποιο πρόσωπο/οντότητα αφορά
-- activity: γενική δραστηριότητα/τομέας, π.χ. sports_training, outing, sleep, school, work_shift
+- entity: ποιο πρόσωπο/οντότητα αφορά ή null
+- activity: γενική δραστηριότητα/τομέας, π.χ. sports_training, outing, sleep, school, work_shift, home_presence ή null
 - aliases: λίστα λέξεων-κλειδιών που θα βοηθήσουν να ταιριάξουν routines
-- state_change: π.χ. active, inactive, in_progress, done, off_season, away
+- state_change: π.χ. active, inactive, in_progress, done, off_season, away ή null
 - impact:
     - pause_matching_routines
     - mute_matching_notifications
@@ -1334,15 +1411,57 @@ def _infer_llm_reconciliation_candidates(
     - already_happening
     - already_done
     - allow_only_when_active
+    - live_context
+- context_key: canonical context flag ή null
+- context_value: true | false | string | null
 - until_date: YYYY-MM-DD ή null
 - reason: σύντομο machine-friendly reason, π.χ. summer_break, camp, returned_home, live_context
 
-Βγάλε αποτέλεσμα ΜΟΝΟ όταν υπάρχει καθαρό routine/context impact.
-Αν δεν υπάρχει, γύρνα [].
+Για γενικές τρέχουσες καταστάσεις ζωής, προτίμησε canonical context flags.
+Χρησιμοποίησε ΜΟΝΟ αυτά τα context_key όταν ταιριάζουν:
+- user_out_of_home
+- alexandros_present
+- family_at_home
+- family_outside_activity
+- alexandros_away_from_home
+- sofia_with_user
+- current_shift
+- football_season
+
+Κανόνες:
+- Μην εφευρίσκεις νέα context keys αν υπάρχει canonical key που καλύπτει το νόημα.
+- Μπορείς να επιστρέψεις περισσότερα από ένα objects αν ένα fact αλλάζει πολλά context flags.
+- Αν το fact αφορά live/temporary κατάσταση ζωής, προτίμησε context_key/context_value αντί για dynamic state:{{entity}}:{{activity}}.
+- Αν δεν υπάρχει καθαρό routine/context impact, γύρνα [].
+
+Παραδείγματα:
+
+Fact: "Το βράδυ θα πάω με τη Σοφία έξω και ο Αλέξανδρος θα είναι με τη Μαρία"
+Output:
+[
+  {{"entity":"Λάζαρος","activity":"outing","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"user_out_of_home","context_value":true,"until_date":"{today}","reason":"user_out_evening"}},
+  {{"entity":"Αλέξανδρος","activity":"home_presence","aliases":["με τη μαρια"],"state_change":null,"impact":"live_context","context_key":"alexandros_present","context_value":false,"until_date":"{today}","reason":"child_with_caregiver"}},
+  {{"entity":"family","activity":"home_presence","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"family_at_home","context_value":false,"until_date":"{today}","reason":"family_out_evening"}},
+  {{"entity":"family","activity":"outing","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"family_outside_activity","context_value":true,"until_date":"{today}","reason":"family_out_evening"}}
+]
+
+Fact: "Γυρίσαμε σπίτι"
+Output:
+[
+  {{"entity":"family","activity":"outing","aliases":["γυρισαμε σπιτι"],"state_change":null,"impact":"live_context","context_key":"user_out_of_home","context_value":false,"until_date":null,"reason":"returned_home"}},
+  {{"entity":"family","activity":"outing","aliases":["γυρισαμε σπιτι"],"state_change":null,"impact":"live_context","context_key":"family_outside_activity","context_value":false,"until_date":null,"reason":"returned_home"}}
+]
+
+Fact: "Ο Αλέξανδρος είναι μαζί μας"
+Output:
+[
+  {{"entity":"Αλέξανδρος","activity":"home_presence","aliases":["μαζι μας"],"state_change":null,"impact":"live_context","context_key":"alexandros_present","context_value":true,"until_date":null,"reason":"child_present_again"}},
+  {{"entity":"family","activity":"home_presence","aliases":["μαζι μας"],"state_change":null,"impact":"live_context","context_key":"family_at_home","context_value":true,"until_date":null,"reason":"family_home_again"}}
+]
 
 Fact:
 {fact}
-""".strip()
+"""
 
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])
@@ -1420,6 +1539,8 @@ def infer_routine_reconciliation_candidates(
         now=current,
     )
 
+    # llm_candidates είναι το primary semantic path
+    # τα rule candidates είναι conservative fallback heuristics
     rules = [
         ("seasonal_football",              _rule_seasonal_football,              (normalized_fact, dates, current)),
         ("football_season",                _rule_football_season,                (normalized_fact, dates, current)),
@@ -1516,6 +1637,10 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
         if kind == "context_state_set":
             key = directive["key"]
             value = directive["value"]
+            if isinstance(value, bool):
+                value = "true" if value else "false"
+            else:
+                value = str(value) if value is not None else ""
             until_date = directive.get("until_date")
             set_context_state(key, value, until_date)
             stats["context_states_set"] += 1

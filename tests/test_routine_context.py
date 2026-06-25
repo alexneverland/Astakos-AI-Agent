@@ -114,3 +114,36 @@ def test_build_runtime_routine_context_includes_user_out_of_home(monkeypatch):
 
     assert "user_out_of_home" in result
     assert result["user_out_of_home"] is True
+def test_apply_canonical_context_directives_updates_runtime_context():
+    from services.routine_reconciler import apply_routine_reconciliation_directives
+    from services.routine_context import build_runtime_routine_context
+
+    directives = [
+        {
+            "kind": "context_state_set",
+            "key": "user_out_of_home",
+            "value": True,
+            "until_date": "2030-01-01",
+            "reason": "user_out_evening",
+            "subject_tokens": [],
+            "include_tokens": ["εξω"],
+            "exclude_tokens": [],
+        },
+        {
+            "kind": "context_state_set",
+            "key": "alexandros_present",
+            "value": False,
+            "until_date": "2030-01-01",
+            "reason": "child_with_caregiver",
+            "subject_tokens": ["αλεξανδρ"],
+            "include_tokens": ["μαρια"],
+            "exclude_tokens": [],
+        },
+    ]
+
+    stats = apply_routine_reconciliation_directives(directives)
+    ctx = build_runtime_routine_context()
+
+    assert stats["context_states_set"] >= 2
+    assert ctx.get("user_out_of_home") is True
+    assert ctx.get("alexandros_present") is False

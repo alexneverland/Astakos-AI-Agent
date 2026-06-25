@@ -765,3 +765,62 @@ def test_family_outing_in_progress_adds_outing_and_home_conditions():
         and any(tok in d.get("include_tokens", []) for tok in ["μαγειρ", "φαγητ", "γευμα"])
         for d in condition_directives
     )
+def test_llm_impact_to_directives_supports_canonical_context_key():
+    from services.routine_reconciler import _llm_impact_to_directives
+
+    impact = {
+        "context_key": "user_out_of_home",
+        "context_value": True,
+        "impact": "live_context",
+        "until_date": "2026-06-24",
+        "reason": "user_out_evening",
+    }
+
+    directives = _llm_impact_to_directives(impact)
+    assert len(directives) == 1
+    assert directives[0]["kind"] == "context_state_set"
+    assert directives[0]["key"] == "user_out_of_home"
+    assert directives[0]["value"] is True
+
+def test_llm_impact_to_directives_normalizes_string_boolean_context_value():
+    from services.routine_reconciler import _llm_impact_to_directives
+
+    impact = {
+        "context_key": "family_outside_activity",
+        "context_value": "true",
+        "impact": "live_context",
+        "until_date": "2026-06-24",
+        "reason": "family_out_evening",
+    }
+
+    directives = _llm_impact_to_directives(impact)
+    assert len(directives) == 1
+    assert directives[0]["value"] is True
+
+def test_llm_context_key_does_not_require_entity_and_activity():
+    from services.routine_reconciler import _llm_impact_to_directives
+
+    impact = {
+        "context_key": "alexandros_present",
+        "context_value": False,
+        "impact": "live_context",
+        "reason": "child_with_caregiver",
+    }
+
+    directives = _llm_impact_to_directives(impact)
+    assert len(directives) == 1
+    assert directives[0]["key"] == "alexandros_present"
+    assert directives[0]["value"] is False
+
+def test_llm_context_key_rejects_non_canonical_keys():
+    from services.routine_reconciler import _llm_impact_to_directives
+
+    impact = {
+        "context_key": "concert_mode",
+        "context_value": True,
+        "impact": "live_context",
+        "reason": "bad_key",
+    }
+
+    directives = _llm_impact_to_directives(impact)
+    assert directives == []
