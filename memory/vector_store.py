@@ -652,7 +652,6 @@ class AstakosMemoryManager:
                 existing_relation = str(doc.metadata.get("relation_type") or "").strip().lower()
 
                 try:
-                    import json
                     existing_state_markers = json.loads(doc.metadata.get("state_markers") or "[]")
                 except Exception:
                     existing_state_markers = []
