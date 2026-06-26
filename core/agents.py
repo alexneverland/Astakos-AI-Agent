@@ -647,7 +647,7 @@ def mail_agent_node(state):
         _id_str = ', '.join("'" + e + "'" for e in _known_ids[:5])
         system_prompt = system_prompt + ('\n\n[EMAIL IDs APO ANAZHTHSH]: '
             + _id_str + '. An thelei na diavazeis email, kalese AMESA '
-            'mail_manager(action=read_full, email_id=' + _top_id + '). '
+            'mail_manager(action="read_full" ή "read_thread" για όλη τη συνομιλία, email_id=' + _top_id + '). '
             'MHN kaneis search xana.')
 
     # [MASTRO-FIX v3]: Elegxos MONO tool results apo to trexon turn
@@ -662,7 +662,7 @@ def mail_agent_node(state):
     for msg in history[last_human_idx:]:
         if getattr(msg, "type", "") == "tool":
             content = clean_message(getattr(msg, "content", "")).strip()
-            if content.startswith("ID: ") or content.startswith("📩 Περιεχόμενο:"):
+            if content.startswith("ID: ") or content.startswith("📩 Περιεχόμενο:") or content.startswith("📩 Ολόκληρη η"):
                 mail_tool_results.append(content)
 
     if mail_tool_results:
@@ -673,10 +673,10 @@ def mail_agent_node(state):
         import re as _re_ar
         _search_hits = [r for r in mail_tool_results if r.startswith('ID: ')]
         _read_hits = [r for r in mail_tool_results
-                      if 'Περιεχόμενο:' in r]
+                      if 'Περιεχόμενο:' in r or 'Ολόκληρη η συνομιλία' in r]
         # Guard: if read_full already dispatched this turn, skip auto-read
         _read_dispatched = any(
-            any(tc.get('args', {}).get('action') == 'read_full'
+            any(tc.get('args', {}).get('action') in ['read_full', 'read_thread']
                 for tc in (getattr(msg, 'tool_calls', None) or []))
             for msg in history[last_human_idx:]
             if getattr(msg, 'type', '') == 'ai'
@@ -690,6 +690,9 @@ def mail_agent_node(state):
         user_wants_read = any(kw in user_q.lower() for kw in ["διάβασ", "διαβασ", "άνοιξ", "ανοιξ", "τι λέει", "τι λεει", "περισσότερα", "δες το", "λεπτομέρεια"])
 
         if _search_hits and not _read_hits and not _read_dispatched and user_wants_read:
+            user_wants_thread = any(kw in user_q.lower() for kw in ["όλη τη", "ολη τη", "συνομιλία", "συζήτηση", "thread", "όλα τα", "ολα τα"])
+            action_to_use = "read_thread" if user_wants_thread else "read_full"
+
             _ar_match = _re_ar.search(r'ID: ([a-f0-9]{16})', _search_hits[0])
             if _ar_match:
                 _ar_eid = _ar_match.group(1)
@@ -698,10 +701,23 @@ def mail_agent_node(state):
                     tool_calls=[{
                         'name': 'mail_manager',
                         'id': 'auto-read-' + _ar_eid[:8],
-                        'args': {'action': 'read_full', 'email_id': _ar_eid}
+                        'args': {'action': action_to_use, 'email_id': _ar_eid}
                     }]
                 )
                 return {'current_agent': 'Mail_Agent', 'messages': [_auto_msg]}
+        elif not _read_hits and not _read_dispatched and user_wants_read and _known_ids:
+            user_wants_thread = any(kw in user_q.lower() for kw in ["όλη τη", "ολη τη", "συνομιλία", "συζήτηση", "thread", "όλα τα", "ολα τα"])
+            action_to_use = "read_thread" if user_wants_thread else "read_full"
+            _ar_eid = _known_ids[0]
+            _auto_msg = AIMessage(
+                content='',
+                tool_calls=[{
+                    'name': 'mail_manager',
+                    'id': 'auto-read-' + _ar_eid[:8],
+                    'args': {'action': action_to_use, 'email_id': _ar_eid}
+                }]
+            )
+            return {'current_agent': 'Mail_Agent', 'messages': [_auto_msg]}
         # Has read results or no valid ID -> synthesize below
         joined_results = "\n\n".join(mail_tool_results[:5])[:4000]
         user_q = next(

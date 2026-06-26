@@ -150,6 +150,49 @@ def get_ultra_light_ack_response() -> str:
         "✅"
     ])
 
+def is_reply_to_recent_mail_prompt(messages: list, limit: int = 4) -> bool:
+    mail_markers = (
+        "θέλεις να προχωρήσω",
+        "θέλεις να διαβάσω",
+        "να διαβάσω το πλήρες",
+        "να διαβάσω όλη τη συνομιλία",
+        "να ανοίξω το email",
+        "να ανοίξω όλη τη συνομιλία",
+        "να σου πω τι ζητάει",
+        "να σου πω τι λέει",
+        "τι να απαντήσω",
+        "τελευταίο email",
+        "πλήρες περιεχόμενο",
+        "ολόκληρη η συνομιλία",
+        "ολόκληρο το thread",
+    )
+
+    mail_tool_markers = (
+        "📩 περιεχόμενο:",
+        "📩 ολόκληρη η συνομιλία",
+        "id: ",
+        "θέμα:",
+        "από:",
+    )
+
+    checked = 0
+    for msg in reversed(messages):
+        if getattr(msg, "type", "") != "ai":
+            continue
+        content = clean_message(getattr(msg, "content", "")).lower().strip()
+        if not content:
+            continue
+        checked += 1
+        if any(marker in content for marker in mail_markers):
+            return True
+
+        if any(marker in content for marker in mail_tool_markers):
+            return True
+
+        if checked >= limit:
+            break
+    return False
+
 def sanitize_history_for_gemini(messages: list) -> list:
     """
     [MASTRO-FIX]: Σιδερώνει το ιστορικό για να μην κρασάρει το Gemini με Error 400.

@@ -1296,15 +1296,22 @@ def handle_message(user_text: str, chat_id: str):
         
         t_graph_0 = perf_counter()
         
-        from core.utils import is_simple_chat_fast_path_candidate, is_ultra_light_ack, get_ultra_light_ack_response
+        from core.utils import (
+            is_simple_chat_fast_path_candidate,
+            is_ultra_light_ack,
+            get_ultra_light_ack_response,
+            is_reply_to_recent_mail_prompt,
+        )
         
         is_ultra_ack = is_ultra_light_ack(clean_user_text)
         fast_path_used = False
 
         # 1. graph_call_ms
         graph_call_started = perf_counter()
+
+        mail_prompt_active = is_reply_to_recent_mail_prompt(context_msgs)
         
-        if is_ultra_ack:
+        if is_ultra_ack and not mail_prompt_active:
             _trace.mark_phase("ultra_light_ack_used", 1)
             handling_agent = "UltraLightACK"
             final_ai_response = get_ultra_light_ack_response()

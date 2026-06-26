@@ -692,12 +692,19 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         context_msgs = _load_shared_context_messages("web", exclude_message_id=current_history_id)
         _trace.mark_phase("context_load_ms", int((perf_counter() - t_context_0) * 1000))
 
-        from core.utils import is_simple_chat_fast_path_candidate, is_ultra_light_ack, get_ultra_light_ack_response
+        from core.utils import (
+            is_simple_chat_fast_path_candidate,
+            is_ultra_light_ack,
+            get_ultra_light_ack_response,
+            is_reply_to_recent_mail_prompt,
+        )
         
         is_ultra_ack = is_ultra_light_ack(isolated_user_input)
         tool_result_fallbacks = []
 
-        if is_ultra_ack:
+        mail_prompt_active = is_reply_to_recent_mail_prompt(context_msgs)
+
+        if is_ultra_ack and not mail_prompt_active:
             _trace.mark_phase("ultra_light_ack_used", 1)
             final_ai_response = get_ultra_light_ack_response()
             handling_agent = "UltraLightACK"

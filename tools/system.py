@@ -2289,13 +2289,14 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
     """
     Διαχείριση Gmail μέσω Google API. 
     Actions: 'search' (θέλει query), 'read_full' (θέλει email_id), 
+             'read_thread' (θέλει email_id, διαβάζει όλη τη συνομιλία),
              'send' (θέλει to_email, subject, body),
              'reply' (θέλει email_id, body),
              'delete' (θέλει email_id).
     """
     try:
         if not action:
-            return "❌ Δώσε action: search, read_full, send, reply ή delete."
+            return "❌ Δώσε action: search, read_full, read_thread, send, reply ή delete."
 
         print(f"\033[94m[Mail API]: Εκτέλεση ενέργειας '{action}'...\033[0m")
         action = action.lower()
@@ -2380,7 +2381,7 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
             return "\n".join(output)
 
         # =========================
-        # READ FULL
+        # READ FULL (Single Message)
         # =========================
         elif action == "read_full":
             if not email_id:
@@ -2388,6 +2389,31 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
             data = service.users().messages().get(userId="me", id=email_id, format="full").execute()
             body_text = extract_body(data['payload'])
             return f"📩 Περιεχόμενο:\n{clean_text(body_text)[:5000]}"
+
+        # =========================
+        # READ THREAD (Full Conversation)
+        # =========================
+        elif action == "read_thread":
+            if not email_id:
+                return "❌ Για read_thread χρειάζεται email_id (ενός μηνύματος της συνομιλίας)."
+            # Get the message to find its threadId
+            msg_meta = service.users().messages().get(userId="me", id=email_id, format="minimal").execute()
+            thread_id = msg_meta.get("threadId", email_id)
+            
+            thread_data = service.users().threads().get(userId="me", id=thread_id).execute()
+            messages_in_thread = thread_data.get("messages", [])
+            
+            output = []
+            for i, m in enumerate(messages_in_thread):
+                headers = m['payload']['headers']
+                from_val = next((h['value'] for h in headers if h['name'] == 'From'), "Unknown")
+                date_val = next((h['value'] for h in headers if h['name'] == 'Date'), "")
+                
+                body_text = extract_body(m['payload'])
+                output.append(f"--- Μήνυμα {i+1} | Από: {from_val} ({date_val}) ---\n{clean_text(body_text)[:2000]}")
+            
+            full_text = "\n\n".join(output)
+            return f"📩 Ολόκληρη η συνομιλία ({len(messages_in_thread)} μηνύματα):\n{full_text[:8000]}"
 
         # =========================
         # DELETE
@@ -2641,7 +2667,7 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
 import math
 
 def _is_home(lat: float, lon: float, home_lat: float = 40.646537, home_lon: float = 22.939025, radius_m: float = 150) -> bool:
-    """Ελέγχει αν οι συντεταγμένες είναι εντός 150m από το Piston 7."""
+    """Ελέγχει αν οι συντεταγμένες είναι εντός 150 μέτρα από το Piston 7."""
     R = 6371000
     dlat = math.radians(lat - home_lat)
     dlon = math.radians(lon - home_lon)

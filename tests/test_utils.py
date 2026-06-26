@@ -1,6 +1,8 @@
 """
 Tests για core/utils.py — clean_message και detect_prompt_injection (regex only).
 """
+from langchain_core.messages import AIMessage, HumanMessage
+from core.utils import is_reply_to_recent_mail_prompt
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -66,3 +68,25 @@ def test_no_injection_empty():
 
 def test_no_injection_greek_chat():
     assert detect_prompt_injection("πάμε για ύπνο Αλέξανδρε") is False
+
+
+def test_mail_prompt_detects_explicit_mail_followup():
+    messages = [
+        AIMessage(content="Θέλεις να διαβάσω όλη τη συνομιλία;"),
+        HumanMessage(content="ναι"),
+    ]
+    assert is_reply_to_recent_mail_prompt(messages) is True
+
+def test_mail_prompt_not_triggered_by_generic_mail_word():
+    messages = [
+        AIMessage(content="Σήμερα είδα ένα mail από την τράπεζα γενικά."),
+        HumanMessage(content="ναι"),
+    ]
+    assert is_reply_to_recent_mail_prompt(messages) is False
+
+def test_mail_prompt_detects_structured_mail_result():
+    messages = [
+        AIMessage(content="📩 Περιεχόμενο:\nΑπό: Kaggle\nΘέμα: Welcome"),
+        HumanMessage(content="ναι"),
+    ]
+    assert is_reply_to_recent_mail_prompt(messages) is True

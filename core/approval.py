@@ -48,7 +48,7 @@ def _effective_risk(tc: dict) -> str:
         action = str(tc.get("args", {}).get("action", "")).lower()
         if action in {"send", "reply", "delete"}:
             return "CRITICAL"
-        if action in {"search", "check_emails", "check", "read", "read_full"}:
+        if action in {"search", "check_emails", "check", "read", "read_full", "read_thread"}:
             return "SAFE"
         return "CRITICAL"
     if name == "google_tasks_tool":
