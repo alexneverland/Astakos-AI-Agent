@@ -480,6 +480,10 @@ def looks_like_operational_assistant_text(text: str) -> bool:
         "σου έστειλα telegram για επιβεβαίωση",
         "μήνυμα στη σοφία",
         "messenger draft",
+        "δεν βρέθηκε προσχέδιο",
+        "δεν υπάρχει ενεργό προσχέδιο",
+        "το προσχέδιο έχει λήξει",
+        "το προσχέδιο είναι ελλιπές",
     ]
     return any(m in t for m in markers)
 

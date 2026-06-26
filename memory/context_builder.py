@@ -60,6 +60,10 @@ _TOOL_OUTPUT_MARKERS = (
     "draft αποθηκεύτηκε",
     "ολοκληρωθηκε",
     "ολοκληρώθηκε",
+    "σφαλμα:",
+    "σφάλμα:",
+    "δεν βρεθηκε προσχεδιο",
+    "δεν βρέθηκε προσχέδιο",
     "η ρουτινα",
     "η ρουτίνα",
     "σιγαστηκε μεχρι",
@@ -167,14 +171,32 @@ _SIMPLE_ACKS = {
 }
 
 def looks_like_news_or_web_fact_query(text: str) -> bool:
-    low = str(text).lower()
-    markers = (
-        "ειδηση", "είδηση", "διάβασα", "διαβασα",
-        "ειδα", "είδα", "λένε", "λεγαν", "άρθρο", "αρθρο",
-        "στο ιντερνετ", "στο internet", "site", "web",
-        "δεδδηε", "deddie", "μετρητ", "μηχανημα", "μηχάνημα",
+    low = str(text).lower().strip()
+
+    opening_markers = (
+        "διάβασα μια είδηση",
+        "διαβασα μια ειδηση",
+        "διάβασα ότι",
+        "διαβασα οτι",
+        "είδα μια είδηση",
+        "ειδα μια ειδηση",
+        "είδα ότι",
+        "ειδα οτι",
+        "λένε ότι",
+        "λενε οτι",
+        "είδα στο ίντερνετ",
+        "ειδα στο ιντερνετ",
+        "διάβασα σε άρθρο",
+        "διαβασα σε αρθρο",
+        "είδα σε site",
+        "ειδα σε site",
+        "το είδα στο web",
+        "το ειδα στο web",
+        "μου έβγαλε είδηση",
+        "μου εβγαλε ειδηση",
     )
-    return any(m in low for m in markers)
+
+    return any(marker in low for marker in opening_markers)
 
 
 def looks_like_tool_result_query(text: str) -> bool:
@@ -186,6 +208,68 @@ def looks_like_tool_result_query(text: str) -> bool:
         or " url: " in low
     )
 
+def looks_like_recent_web_result_text(text: str) -> bool:
+    low = str(text or "").lower().strip()
+    if not low:
+        return False
+
+    return (
+        low.startswith("τίτλος:")
+        or low.startswith("title:")
+        or low.startswith("📄 περιεχόμενο από ")
+        or low.startswith("[web_tool_error]")
+        or (" url: " in low and " περίληψη: " in low)
+    )
+
+def has_fresh_web_results_in_recent_context(messages: Iterable[dict[str, Any]]) -> bool:
+    items = list(messages)[-8:]
+    for message in reversed(items):
+        role = str(message.get("role", "")).strip().lower()
+        content = str(message.get("content", "")).strip()
+        if role != "assistant":
+            continue
+        if looks_like_recent_web_result_text(content):
+            return True
+    return False
+
+def looks_like_web_followup_query(text: str) -> bool:
+    low = str(text or "").lower().strip()
+    if not low:
+        return False
+
+    if looks_like_news_or_web_fact_query(low):
+        return False
+
+    followup_markers = (
+        "άρα",
+        "αρα",
+        "δηλαδή",
+        "δηλαδη",
+        "οπότε",
+        "οποτε",
+        "πώς",
+        "πως",
+        "γιατί",
+        "γιατι",
+        "σοβαρό",
+        "σοβαρο",
+        "δηλαδή τι σημαίνει",
+        "τι σημαίνει",
+        "τι σημαινει",
+        "πώς γίνεται",
+        "πως γινεται",
+        "πώς μπορούσαν",
+        "πως μπορουσαν",
+        "εξωτερικά",
+        "εξωτερικα",
+        "το software",
+        "το λογισμικό",
+        "το λογισμικο",
+        "πρακτικά",
+        "πρακτικα",
+    )
+
+    return any(marker in low for marker in followup_markers)
 
 def _looks_low_complexity_query(query: str) -> bool:
     if not query:
@@ -515,6 +599,13 @@ def build_memory_context(
             recent_messages = []
     else:
         recent_messages = []
+
+    has_recent_web_results = (
+        channel == "web"
+        and has_fresh_web_results_in_recent_context(recent_messages)
+    )
+
+    recent_formatted = format_recent_messages(recent_messages, limit=recent_limit)
     recent_ms = int((perf_counter() - t_recent_0) * 1000)
 
     t_hist_0 = perf_counter()
@@ -538,8 +629,11 @@ def build_memory_context(
             effective_semantic_k = 0
             semantic_adjust_reason = "low_complexity_query"
         elif looks_like_news_or_web_fact_query(clean_query):
-            effective_semantic_k = min(effective_semantic_k, 3)
-            semantic_adjust_reason = "news_or_web_fact_downshift"
+            effective_semantic_k = 0
+            semantic_adjust_reason = "news_or_web_fact_skip"
+        elif has_recent_web_results and looks_like_web_followup_query(clean_query):
+            effective_semantic_k = min(semantic_k, 2)
+            semantic_adjust_reason = "recent_web_context_downshift"
 
     t_sem_0 = perf_counter()
     semantic_facts = semantic_facts_for_query(clean_query, k=effective_semantic_k, search_fn=semantic_search)
