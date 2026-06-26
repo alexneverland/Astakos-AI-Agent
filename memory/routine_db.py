@@ -505,18 +505,30 @@ def decay_routine(routine_id: int):
     """
     conn   = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT confidence, decay_counter, day_of_week FROM routines WHERE id=?", (routine_id,))
+    cursor.execute(
+        "SELECT confidence, decay_counter, day_of_week, state FROM routines WHERE id=?",
+        (routine_id,),
+    )
     row = cursor.fetchone()
     if row:
-        new_conf    = max(0.0, (row[0] or 0.0) - 0.2)
-        new_decay   = (row[1] or 0) + 1
+        current_conf = row[0] or 0.0
+        current_decay = row[1] or 0
+        day_value = (row[2] or "").strip().lower()
+        current_state = state_from_str(row[3])
+
+        if current_state == RoutineState.DECAYED:
+            conn.close()
+            return
+
+        new_conf = round(max(0.0, current_conf - 0.2), 4)
+        new_decay = current_decay + 1
+
         everyday_like_days = {
             "everyday",
             "weekdays",
             "εργάσιμες",
             "καθημερινές",
         }
-        day_value = (row[2] or "").strip().lower()
         is_everyday_like = day_value in everyday_like_days
 
         if new_conf < 0.1:
@@ -529,7 +541,7 @@ def decay_routine(routine_id: int):
             new_state   = RoutineState.DISMISSED
             active_flag = 0
 
-        validate_transition(get_routine_state(routine_id), new_state)
+        validate_transition(current_state, new_state)
         try:
             with db_write_lock:
                 cursor.execute(
@@ -541,7 +553,11 @@ def decay_routine(routine_id: int):
             raise DBWriteError("decay_routine", e) from e
         finally:
             conn.close()
-        print(f"[routine_db]: #{routine_id} decayed → {new_state.value} (conf={new_conf:.2f})")
+        print(
+            f"[routine_db]: #{routine_id} decayed "
+            f"{current_state.value} → {new_state.value} "
+            f"(conf={current_conf:.4f} -> {new_conf:.4f})"
+        )
         from memory.event_log import log_event
         log_event("routines", "decay", routine_id=routine_id, new_confidence=new_conf, new_state=new_state.value)
 
@@ -1526,3 +1542,22 @@ def set_context_state(key: str, value: str, expires_at: str | None = None) -> No
             conn.commit()
     finally:
         conn.close()
+
+def reset_routine_state_for_debug(routine_id: int):
+    """
+    Helper to reset a routine to full ACTIVE state manually.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        with db_write_lock:
+            cursor.execute(
+                "UPDATE routines SET confidence=?, decay_counter=?, is_active=?, state=?, ignore_count=? WHERE id=?",
+                (1.0, 0, 1, RoutineState.ACTIVE.value, 0, routine_id)
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise DBWriteError("reset_routine_state_for_debug", e) from e
+    finally:
+        conn.close()
+    print(f"[routine_db]: #{routine_id} debug-reset to ACTIVE (conf=1.00)")

@@ -46,3 +46,79 @@ def test_decay_everyday_like():
     conn.commit()
     conn.close()
 
+
+def test_decay_routine_is_noop_when_already_decayed():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM routines WHERE event_name = 'TEST_DECAYED_NOOP'")
+    conn.commit()
+
+    upsert_routine("Everyday", "10:00", "TEST_DECAYED_NOOP", "general", 0.5)
+    c.execute("SELECT id FROM routines WHERE event_name='TEST_DECAYED_NOOP'")
+    r_id = c.fetchone()[0]
+
+    c.execute("UPDATE routines SET state='decayed', confidence=0.05, decay_counter=5 WHERE id=?", (r_id,))
+    conn.commit()
+
+    decay_routine(r_id)
+
+    c.execute("SELECT state, confidence, decay_counter FROM routines WHERE id=?", (r_id,))
+    state, conf, decay_c = c.fetchone()
+
+    assert state == RoutineState.DECAYED.value
+    assert conf == 0.05
+    assert decay_c == 5
+
+    c.execute("DELETE FROM routines WHERE event_name = 'TEST_DECAYED_NOOP'")
+    conn.commit()
+    conn.close()
+
+def test_decay_routine_rounds_confidence_before_threshold():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM routines WHERE event_name = 'TEST_DECAY_ROUNDING'")
+    conn.commit()
+
+    upsert_routine("Everyday", "10:00", "TEST_DECAY_ROUNDING", "general", 0.3)
+    c.execute("SELECT id FROM routines WHERE event_name='TEST_DECAY_ROUNDING'")
+    r_id = c.fetchone()[0]
+
+    c.execute("UPDATE routines SET state='trigger_pending', confidence=0.2999999 WHERE id=?", (r_id,))
+    conn.commit()
+
+    decay_routine(r_id)
+
+    c.execute("SELECT state, confidence FROM routines WHERE id=?", (r_id,))
+    state, conf = c.fetchone()
+
+    assert state == RoutineState.ACTIVE.value
+    assert conf == 0.1
+
+    c.execute("DELETE FROM routines WHERE event_name = 'TEST_DECAY_ROUNDING'")
+    conn.commit()
+    conn.close()
+
+def test_decay_everyday_like_routine_stays_active_at_point_one():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM routines WHERE event_name = 'TEST_DECAY_POINT_ONE'")
+    conn.commit()
+
+    upsert_routine("Everyday", "10:00", "TEST_DECAY_POINT_ONE", "general", 0.3)
+    c.execute("SELECT id FROM routines WHERE event_name='TEST_DECAY_POINT_ONE'")
+    r_id = c.fetchone()[0]
+
+    c.execute("UPDATE routines SET state='trigger_pending', confidence=0.3 WHERE id=?", (r_id,))
+    conn.commit()
+
+    decay_routine(r_id)
+
+    c.execute("SELECT state, confidence FROM routines WHERE id=?", (r_id,))
+    state, conf = c.fetchone()
+
+    assert state == RoutineState.ACTIVE.value
+    assert conf == 0.1
+
+    c.execute("DELETE FROM routines WHERE event_name = 'TEST_DECAY_POINT_ONE'")
+    conn.commit()
+    conn.close()
