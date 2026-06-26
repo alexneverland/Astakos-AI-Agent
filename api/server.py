@@ -588,8 +588,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             mark_pending_asset_confirmed(pending_asset["id"])
 
             reply = "Έγινε, Λάζαρε. Το αποθήκευσα στη μνήμη μου."
-            from core.utils import sanitize_messenger_draft_claims
+            from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
+            reply = strip_operational_assistant_paragraphs(reply).strip() or reply
             append_to_chat_history("user", user_input)
             append_to_chat_history("assistant", reply, agent="Chat_Agent")
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
@@ -602,8 +603,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             mark_pending_asset_cancelled(pending_asset["id"])
 
             reply = "Έγινε, δεν το αποθηκεύω μόνιμα."
-            from core.utils import sanitize_messenger_draft_claims
+            from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
+            reply = strip_operational_assistant_paragraphs(reply).strip() or reply
             append_to_chat_history("user", user_input)
             append_to_chat_history("assistant", reply, agent="Chat_Agent")
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
@@ -808,8 +810,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             # Αποθηκεύουμε παντού τα ΚΑΘΑΡΑ strings (με το Link/Img αν υπάρχει)
             _trace.mark_phase("final_response_build_ms", int((perf_counter() - t_build_0) * 1000))
             _trace.agent = handling_agent
-            from core.utils import sanitize_messenger_draft_claims
+            from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             clean_ai = sanitize_messenger_draft_claims(clean_ai)
+            clean_ai = strip_operational_assistant_paragraphs(clean_ai).strip() or clean_ai
             _trace.finalize(response=clean_ai)
             
             append_to_chat_history("assistant", clean_ai, agent=handling_agent)
@@ -1149,6 +1152,25 @@ async def debug_runtime(_=Depends(require_token)):
         conn   = _sqlite3.connect(db_path, check_same_thread=False)
         cursor = conn.cursor()
 
+        from memory.event_log import get_events
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_events = get_events(today_str, job="routines")
+
+        def _routine_outcome_label(action: str, debug_effect: str | None = None) -> str:
+            mapping = {
+                "routine_triggered": "Sent",
+                "routine_condition_blocked": "Blocked by condition",
+                "routine_condition_allowed": "Condition passed",
+                "routine_cooldown_skip": "Skipped: cooldown",
+                "routine_silent_skip": "Skipped: silent",
+                "routine_context_skip": "Skipped: context",
+                "routine_rate_limit_skip": "Skipped: rate limit",
+                "routine_inactive_skip": "Skipped: inactive",
+                "routine_timeout_decay": "Timed out",
+                "routine_pending_stale_cleared": "Stale pending cleared",
+            }
+            return mapping.get(action, action)
+
         # Active routines
         cursor.execute("""
             SELECT id, day_of_week, time_str, event_name, confidence,
@@ -1195,6 +1217,20 @@ async def debug_runtime(_=Depends(require_token)):
                 except Exception:
                     pass
 
+            last_outcome_action = None
+            last_outcome_label = "Not evaluated"
+            last_outcome_ts = None
+            last_outcome_reason = None
+            
+            # Find the latest event for this r_id among canonical routine outcome actions
+            r_events = [e for e in today_events if e.get("routine_id") == r_id and e.get("action", "").startswith("routine_")]
+            if r_events:
+                latest = r_events[-1]
+                last_outcome_action = latest.get("action")
+                last_outcome_label = _routine_outcome_label(last_outcome_action, latest.get("debug_effect"))
+                last_outcome_ts = latest.get("timestamp")
+                last_outcome_reason = latest.get("reason") or latest.get("debug_effect")
+
             if not memory_ref and conditions_list:
                 memory_ref = conditions_list[0].get("source_memory_ref")
 
@@ -1222,7 +1258,11 @@ async def debug_runtime(_=Depends(require_token)):
                 "paused_until":      paused_until,
                 "pause_reason":      pause_reason,
                 "condition_reason": cond_reason,
-                "muted_until": muted_until
+                "muted_until": muted_until,
+                "last_outcome_action": last_outcome_action,
+                "last_outcome_label": last_outcome_label,
+                "last_outcome_ts": last_outcome_ts,
+                "last_outcome_reason": last_outcome_reason
             })
 
         # Pending confirmations

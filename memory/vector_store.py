@@ -109,6 +109,57 @@ vector_store = Chroma(
     persist_directory=CHROMA_DB_DIR
 )
 
+_EMPTY_QUERY_RESULT = {
+    "ids": [[]],
+    "documents": [[]],
+    "metadatas": [[]],
+    "distances": [[]],
+}
+
+def _safe_chroma_query(*, query_embeddings, n_results, where=None, include=None):
+    try:
+        kwargs = {
+            "query_embeddings": query_embeddings,
+            "n_results": n_results,
+            "include": include or ["documents", "metadatas", "distances"],
+        }
+        if where is not None:
+            kwargs["where"] = where
+        return vector_store._collection.query(**kwargs)
+    except Exception as e:
+        print(f"\033[93m[MemoryManager]: Chroma query error (graceful skip): {e}\033[0m")
+        return {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+            "_error": str(e),
+        }
+
+def _safe_chroma_delete(ids: list[str]) -> bool:
+    if not ids:
+        return False
+    try:
+        vector_store._collection.delete(ids=ids)
+        return True
+    except Exception as e:
+        print(f"\033[90m[MemoryManager]: Chroma delete skip: {e}\033[0m")
+        return False
+
+def _safe_chroma_get(*, ids=None, where=None, include=None):
+    try:
+        kwargs = {
+            "include": include or ["documents", "metadatas"],
+        }
+        if ids is not None:
+            kwargs["ids"] = ids
+        if where is not None:
+            kwargs["where"] = where
+        return vector_store._collection.get(**kwargs)
+    except Exception as e:
+        print(f"\033[93m[MemoryManager]: Chroma get error (graceful skip): {e}\033[0m")
+        return {"ids": [], "documents": [], "metadatas": [], "_error": str(e)}
+
 
 def _json_meta_list(values) -> str:
     if not values:
@@ -282,6 +333,18 @@ def memory_overlap_ratio(new_fact: str, old_content: str) -> float:
     if not new_tokens or not old_tokens:
         return 0.0
     return len(new_tokens & old_tokens) / min(len(new_tokens), len(old_tokens))
+
+
+def memory_token_overlap_count(new_fact: str, old_content: str) -> int:
+    new_tokens = memory_content_tokens(new_fact)
+    old_tokens = memory_content_tokens(old_content)
+    if not new_tokens or not old_tokens:
+        return 0
+    return len(new_tokens & old_tokens)
+
+
+def memory_has_meaningful_overlap(new_fact: str, old_content: str, *, min_shared_tokens: int = 2) -> bool:
+    return memory_token_overlap_count(new_fact, old_content) >= min_shared_tokens
 
 
 def _first_literal_date(text: str) -> str | None:
@@ -520,15 +583,12 @@ class AstakosMemoryManager:
             # Ψάξε ΠΡΩΤΑ μέσα στην ΙΔΙΑ category — αποφεύγουμε να συγκρίνουμε
             # (και ενδεχομένως να σβήσουμε) άσχετη μνήμη άλλης κατηγορίας απλά
             # επειδή το embedding της έτυχε να μοιάζει.
-            try:
-                same_cat = vector_store._collection.query(
-                    query_embeddings=[query_emb], n_results=1,
-                    where={"category": category},
-                    include=["documents", "metadatas", "distances"],
-                )
-            except Exception as _chroma_err:
-                print(f"[93m[MemoryManager]: ChromaDB index error (graceful skip): {_chroma_err}[0m")
-                same_cat = {"ids": [[]], "distances": [[]], "documents": [[]], "metadatas": [[]]}
+            same_cat = _safe_chroma_query(
+                query_embeddings=[query_emb],
+                n_results=1,
+                where={"category": category},
+                include=["documents", "metadatas", "distances"],
+            )
 
             old_id = old_content = old_meta = None
             dist = None
@@ -540,21 +600,32 @@ class AstakosMemoryManager:
                     old_meta = _meta_of(same_cat)
                     dist = d
 
-            if old_id is None:
+            if old_id is None and not same_cat.get("_error"):
                 # Τίποτα κοντινό μέσα στην category — δες αν υπάρχει κάτι ύποπτα
                 # κοντινό cross-category. Μόνο ενημέρωση, ΔΕΝ σβήνουμε ποτέ cross-category.
-                cross = vector_store._collection.query(
-                    query_embeddings=[query_emb], n_results=1,
+                cross = _safe_chroma_query(
+                    query_embeddings=[query_emb],
+                    n_results=1,
                     include=["documents", "metadatas", "distances"],
                 )
-                if cross['ids'] and cross['ids'][0] and cross['distances'][0][0] < 0.20:
+                cross_ids = cross.get("ids") or [[]]
+                cross_distances = cross.get("distances") or [[]]
+                cross_documents = cross.get("documents") or [[]]
+
+                if (
+                    cross_ids and cross_ids[0] 
+                    and cross_distances and cross_distances[0] 
+                    and cross_distances[0][0] < 0.20
+                ):
                     c_meta = _meta_of(cross)
-                    c_doc = cross['documents'][0][0]
-                    print(
-                        f"\033[93m[MemoryManager]: ⚠️ Κοντινή μνήμη σε άλλη category "
-                        f"({c_meta.get('category', '?')}, dist={cross['distances'][0][0]:.3f}): "
-                        f"{c_doc[:80]} — δεν την πειράζω (άλλη κατηγορία).\033[0m"
-                    )
+                    c_doc = cross_documents[0][0]
+                    
+                    if memory_has_meaningful_overlap(fact, c_doc):
+                        print(
+                            f"\033[93m[MemoryManager]: ⚠️ Κοντινή μνήμη σε άλλη category "
+                            f"({c_meta.get('category', '?')}, dist={cross_distances[0][0]:.3f}): "
+                            f"{c_doc[:80]} — δεν την πειράζω (άλλη κατηγορία).\033[0m"
+                        )
 
             if old_id is not None:
                 decision = decide_memory_overwrite(
@@ -609,13 +680,15 @@ class AstakosMemoryManager:
                                overlap=round(float(storage["overlap"]), 3),
                                episodic=bool(storage.get("episodic", False)))
                 else:
-                    try:
-                        vector_store._collection.delete(ids=[old_id])
-                    except Exception as _del_err:
-                        # Ορισμένες εκδόσεις ChromaDB ρίχνουν "Error finding id"
-                        # αν το ID δεν υπάρχει (π.χ. διαγράφηκε από concurrent thread).
-                        # Graceful skip — η νέα εγγραφή θα προστεθεί κανονικά.
-                        print(f"\033[90m[MemoryManager]: delete skip (ID not found): {_del_err}\033[0m")
+                    deleted = _safe_chroma_delete([old_id])
+                    if not deleted:
+                        _audit_log(
+                            "delete_skip",
+                            category=category,
+                            fact=str(fact)[:100],
+                            old=str(old_content)[:100],
+                            old_id=old_id,
+                        )
                     reason_tag = []
                     if decision["looks_like_correction"]:
                         reason_tag.append("ρητή διόρθωση")
@@ -673,6 +746,11 @@ class AstakosMemoryManager:
                 if not (same_topic or same_detail):
                     continue
                 if episodic:
+                    continue
+
+            if "[USER_FACT]" in fact:
+                shared_tokens = memory_token_overlap_count(fact, doc.page_content)
+                if shared_tokens < 2:
                     continue
 
             print(f"\033[90m[MemoryManager]: Duplicate skip (distance={score:.3f}): {doc.page_content}\033[0m")
@@ -940,7 +1018,7 @@ def bump_retrieval_count(doc_ids: list[str]):
         return
     try:
         with vector_lock, _cross_process_lock():
-            existing = vector_store._collection.get(ids=doc_ids, include=["metadatas", "documents"])
+            existing = _safe_chroma_get(ids=doc_ids, include=["metadatas", "documents"])
             if not existing["ids"]:
                 return
             new_metas = []
@@ -995,7 +1073,7 @@ def save_goal(project: str, description: str, status: str = "active") -> bool:
     """Αποθηκεύει ή ενημερώνει goal. Κάνει overwrite αν υπάρχει ήδη."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = vector_store._collection.get(where={"category": "goal", "project": project})
+            existing = _safe_chroma_get(where={"category": "goal", "project": project})
             if existing["ids"]:
                 vector_store._collection.delete(ids=existing["ids"])
                 print(f"\033[94m[Goals]: Overwrite '{project}'\033[0m")
@@ -1018,7 +1096,7 @@ def update_goal_status(project: str, status: str) -> bool:
     """Αλλάζει το status ενός goal."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = vector_store._collection.get(where={"category": "goal", "project": project})
+            existing = _safe_chroma_get(where={"category": "goal", "project": project})
             if not existing["ids"]:
                 return False
             old_meta = dict(existing["metadatas"][0])

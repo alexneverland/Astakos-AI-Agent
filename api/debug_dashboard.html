@@ -444,6 +444,24 @@ function render(d) {
     return `<div class="meta-box">${parts.join('<div style="height:4px"></div>')}</div>`;
   }
 
+  function renderOutcome(r) {
+    let lbl = r.last_outcome_label || "Not evaluated";
+    let ts = r.last_outcome_ts ? " at " + r.last_outcome_ts.split('T')[1].substring(0, 5) : "";
+    let reason = r.last_outcome_reason ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${esc(r.last_outcome_reason)}</div>` : "";
+    
+    let colorVar = "var(--text-muted)";
+    if (lbl === "Sent") colorVar = "var(--green)";
+    else if (lbl.includes("Blocked") || lbl.includes("inactive") || lbl.includes("stale") || lbl.includes("Timed out")) colorVar = "var(--orange)";
+    else if (lbl.includes("Skipped")) colorVar = "var(--yellow)";
+
+    return `
+      <div class="cond-box" style="border-left: 2px solid ${colorVar}; background: rgba(0,0,0,0.02);">
+        <div style="font-size:11px;font-weight:600;color:${colorVar}">Last outcome: ${esc(lbl)}${ts}</div>
+        ${reason}
+      </div>
+    `;
+  }
+
   const evts = d.events_1h||{}, pend = d.pending_confirmations||[];
   const stale = d.snapshot_age_s != null && d.snapshot_age_s > 30;
   const age = d.snapshot_age_s != null
@@ -574,7 +592,7 @@ function render(d) {
         <td class="off cell-tight" style="font-size:11px; vertical-align:middle">#${r.id}</td>
         <td class="cell-tight" style="vertical-align:middle"><div style="font-size:11px;color:var(--text-muted)">${r.day}</div><div style="font-weight:600;font-size:13px">${r.time}</div></td>
         <td class="cell-event" style="vertical-align:middle; font-weight: 500">${r.event}</td>
-        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}</div></td>
+        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}</div></td>
         <td class="cell-tight" style="vertical-align:middle">
           <div style="margin-bottom:6px">${stateBadge(r)}</div>
           ${r.paused_until ? `<div style="font-size:10px;color:var(--orange);margin-bottom:4px;font-weight:bold" title="Reason: ${r.pause_reason||'N/A'}">⏸️ Paused until: <br/>${r.paused_until}</div>` : ''}
@@ -623,7 +641,7 @@ function render(d) {
         <td class="off cell-tight" style="font-size:11px;vertical-align:middle">#${r.id}</td>
         <td class="cell-tight" style="vertical-align:middle"><div style="font-size:11px;color:var(--text-muted)">${r.day||'—'}</div><div style="font-weight:600;font-size:13px">${r.time||'—'}</div></td>
         <td class="cell-event" style="vertical-align:middle; font-weight: 500">${r.event}</td>
-        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}</div></td>
+        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}</div></td>
         <td class="cell-tight" style="vertical-align:middle">
           <div style="margin-bottom:6px">${stateBadge(r)}</div>
           <div style="width:80px">${confBar(r.confidence)}</div>

@@ -166,6 +166,27 @@ _SIMPLE_ACKS = {
     "σωστά", "σωστα",
 }
 
+def looks_like_news_or_web_fact_query(text: str) -> bool:
+    low = str(text).lower()
+    markers = (
+        "ειδηση", "είδηση", "διάβασα", "διαβασα",
+        "ειδα", "είδα", "λένε", "λεγαν", "άρθρο", "αρθρο",
+        "στο ιντερνετ", "στο internet", "site", "web",
+        "δεδδηε", "deddie", "μετρητ", "μηχανημα", "μηχάνημα",
+    )
+    return any(m in low for m in markers)
+
+
+def looks_like_tool_result_query(text: str) -> bool:
+    low = str(text).lower().strip()
+    return (
+        low.startswith("τίτλος:")
+        or low.startswith("title:")
+        or low.startswith("[web_tool_error]")
+        or " url: " in low
+    )
+
+
 def _looks_low_complexity_query(query: str) -> bool:
     if not query:
         return True
@@ -506,12 +527,19 @@ def build_memory_context(
     historical_ms = int((perf_counter() - t_hist_0) * 1000)
 
     effective_semantic_k = semantic_k
-    semantic_skip_reason = None
+    semantic_adjust_reason = None
 
     if semantic_k > 0:
-        if _looks_low_complexity_query(clean_query) and not _must_keep_semantic(clean_query):
+        low_complexity_skip = _looks_low_complexity_query(clean_query) and not _must_keep_semantic(clean_query)
+        if looks_like_tool_result_query(clean_query):
             effective_semantic_k = 0
-            semantic_skip_reason = "low_complexity_query"
+            semantic_adjust_reason = "tool_result_query"
+        elif low_complexity_skip:
+            effective_semantic_k = 0
+            semantic_adjust_reason = "low_complexity_query"
+        elif looks_like_news_or_web_fact_query(clean_query):
+            effective_semantic_k = min(effective_semantic_k, 3)
+            semantic_adjust_reason = "news_or_web_fact_downshift"
 
     t_sem_0 = perf_counter()
     semantic_facts = semantic_facts_for_query(clean_query, k=effective_semantic_k, search_fn=semantic_search)
@@ -536,7 +564,7 @@ def build_memory_context(
         historical_ms=historical_ms,
         semantic_ms=semantic_ms,
         semantic_k_used=effective_semantic_k,
-        semantic_skip_reason=semantic_skip_reason,
+        semantic_adjust_reason=semantic_adjust_reason,
     )
     return context
 
@@ -556,7 +584,7 @@ def _record_memory_context_debug(
     historical_ms: int = 0,
     semantic_ms: int = 0,
     semantic_k_used: int = 0,
-    semantic_skip_reason: str | None = None,
+    semantic_adjust_reason: str | None = None,
 ) -> None:
     payload = {
         "written_at": datetime.now().isoformat(timespec="seconds"),
@@ -573,7 +601,7 @@ def _record_memory_context_debug(
         "historical_ms": historical_ms,
         "semantic_ms": semantic_ms,
         "semantic_k_used": semantic_k_used,
-        "semantic_skip_reason": semantic_skip_reason,
+        "semantic_adjust_reason": semantic_adjust_reason,
     }
     if is_tool_output:
         # [MASTRO-FIX]: Το query εδώ είναι εσωτερικό tool-output (όχι πραγματικό
@@ -590,7 +618,7 @@ def _record_memory_context_debug(
             f"\033[90m[MemoryContext]: channel={channel} "
             f"recent={recent_count} ({recent_ms}ms) "
             f"sqlite={historical_count} ({historical_ms}ms) "
-            f"semantic={semantic_count} ({semantic_ms}ms, k={semantic_k_used}, skip={semantic_skip_reason}) "
+            f"semantic={semantic_count} ({semantic_ms}ms, k={semantic_k_used}, skip={semantic_adjust_reason}) "
             f"query='{payload['query_preview']}'\033[0m"
         )
 

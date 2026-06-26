@@ -483,6 +483,20 @@ def looks_like_operational_assistant_text(text: str) -> bool:
     ]
     return any(m in t for m in markers)
 
+def looks_like_self_capability_text(text: str) -> bool:
+    low = clean_message(text).strip().lower()
+    markers = (
+        "[αυτογνωσία]",
+        "can_do:",
+        "cannot_do:",
+        "✅ can_do:",
+        "❌ cannot_do:",
+        "ο αστακός μπορεί να",
+        "ο αστακός ενδέχεται να",
+        "ο αστακός δεν μπορεί να",
+    )
+    return any(marker in low for marker in markers)
+
 def strip_operational_assistant_paragraphs(text: str) -> str:
     raw = clean_message(text).strip()
     if not raw:
@@ -492,7 +506,7 @@ def strip_operational_assistant_paragraphs(text: str) -> str:
     kept: list[str] = []
 
     for p in paragraphs:
-        if looks_like_operational_assistant_text(p):
+        if looks_like_operational_assistant_text(p) or looks_like_self_capability_text(p):
             continue
         kept.append(p)
 

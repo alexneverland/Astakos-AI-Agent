@@ -1376,6 +1376,11 @@ def handle_message(user_text: str, chat_id: str):
 
         if final_ai_response:
             final_ai_response = clean_message(final_ai_response).strip()
+            
+            from core.utils import strip_operational_assistant_paragraphs
+            cleaned_response = strip_operational_assistant_paragraphs(final_ai_response).strip()
+            if cleaned_response:
+                final_ai_response = cleaned_response
 
         if not final_ai_response:
             t_fallback_0 = perf_counter()
@@ -2826,8 +2831,8 @@ def startup_check_missed_routines():
             schedule_meta = get_routine_schedule_meta(r_id)
             inactive, inactive_reason = is_routine_temporarily_inactive_meta(schedule_meta, now=now)
             if inactive:
-                log_event("routines", "inactive_skip", routine_id=r_id, event=event_name,
-                          reason=inactive_reason, paused_until=schedule_meta.get("paused_until"),
+                log_event("routines", "routine_inactive_skip", routine_id=r_id, event=event_name,
+                          reason=inactive_reason, paused_until=schedule_meta.get("paused_until", debug_type="scheduler_decision", debug_source="scheduler", debug_effect="inactive_skip"),
                           active_from=schedule_meta.get("active_from"), active_until=schedule_meta.get("active_until"))
                 print(f"\033[90m[MissedRoutines]: #{r_id} '{event_name}' — inactive ({inactive_reason}), skip.\033[0m")
                 continue
@@ -2863,8 +2868,8 @@ def startup_check_missed_routines():
             if msg.strip() == "[SILENT_SKIP]":
                 _clear_routine_pending_confirmation(r_id)
                 muted_until = _apply_context_mute(r_id, event_name, ctx)
-                log_event("routines", "silent_skip", routine_id=r_id, event=event_name,
-                          deferred=True, muted_until=muted_until)
+                log_event("routines", "routine_silent_skip", routine_id=r_id, event=event_name,
+                          deferred=True, muted_until=muted_until, debug_type="proactive_policy", debug_source="scheduler", debug_effect="silent_skip")
                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name,
                          deferred=True, channel="telegram")
                 print(f"\033[90m[MissedRoutines]: SILENT_SKIP '{event_name}' ({missed_min} λεπτά αργά)\033[0m")
@@ -2879,9 +2884,9 @@ def startup_check_missed_routines():
             if is_context_skip:
                 _clear_routine_pending_confirmation(r_id)
                 muted_until = _apply_context_mute(r_id, event_name, ctx)
-                log_event("routines", "context_skip", routine_id=r_id, event=event_name,
+                log_event("routines", "routine_context_skip", routine_id=r_id, event=event_name,
                           deferred=True, missed_minutes=missed_min,
-                          muted_until=muted_until, preview=msg[:160])
+                          muted_until=muted_until, preview=msg[:160], debug_type="proactive_policy", debug_source="scheduler", debug_effect="context_skip")
                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name,
                          deferred=True, channel="telegram")
                 print(f"\033[90m[MissedRoutines]: CONTEXT_SKIP '{event_name}' ({missed_min} λεπτά αργά) → '{msg[:80]}'\033[0m")
@@ -2963,9 +2968,7 @@ def job_check_routines():
                         current_state = None
 
                     if current_state != RoutineState.TRIGGER_PENDING:
-                        log_event(
-                            "routines",
-                            "pending_stale_cleared",
+                        log_event("routines", "routine_pending_stale_cleared",
                             routine_id=rid,
                             event=pending_routine_confirmations[rid]["event"],
                             state=(current_state.value if current_state else "unknown"),
@@ -2981,7 +2984,7 @@ def job_check_routines():
                     decay_routine(rid)
                     log_event(
                         "routines", 
-                        "timeout_decay", 
+                        "routine_timeout_decay", 
                         routine_id=rid,
                         event=pending_routine_confirmations[rid]["event"],
                         elapsed_s=1800,
@@ -3013,9 +3016,7 @@ def job_check_routines():
                     current_state = None
 
                 if current_state != RoutineState.TRIGGER_PENDING:
-                    log_event(
-                        "routines",
-                        "pending_stale_cleared",
+                    log_event("routines", "routine_pending_stale_cleared",
                         routine_id=rid,
                         event=ev,
                         state=(current_state.value if current_state else "unknown"),
@@ -3034,9 +3035,7 @@ def job_check_routines():
                     print(f"\033[91m[Timeout Decay DBWriteError]: {e}\033[0m")
 
                 timeout_err = PendingTimeoutError(rid, ev, elapsed)
-                log_event(
-                    "routines",
-                    "timeout_decay",
+                log_event("routines", "routine_timeout_decay",
                     routine_id=rid,
                     event=ev,
                     elapsed_s=int(elapsed),
@@ -3127,8 +3126,8 @@ def job_check_routines():
                     schedule_meta = get_routine_schedule_meta(r_id)
                     inactive, inactive_reason = is_routine_temporarily_inactive_meta(schedule_meta, now=now)
                     if inactive:
-                        log_event("routines", "inactive_skip", routine_id=r_id, event=event_name,
-                                  reason=inactive_reason, paused_until=schedule_meta.get("paused_until"),
+                        log_event("routines", "routine_inactive_skip", routine_id=r_id, event=event_name,
+                                  reason=inactive_reason, paused_until=schedule_meta.get("paused_until", debug_type="scheduler_decision", debug_source="scheduler", debug_effect="inactive_skip"),
                                   active_from=schedule_meta.get("active_from"), active_until=schedule_meta.get("active_until"))
                         print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' inactive ({inactive_reason}) — skipped")
                         continue
@@ -3137,12 +3136,10 @@ def job_check_routines():
                     if cond_list:
                         cond_result = evaluate_routine_conditions(cond_list, rt_context, now=now)
                         if not cond_result.get("allowed", True):
-                            log_event(
-                                "routines", 
-                                "routine_condition_blocked",
+                            log_event("routines", "routine_condition_blocked",
                                 routine_id=r_id, 
                                 event=event_name,
-                                failed_count=cond_result.get("failed_count", 1),
+                                failed_count=cond_result.get("failed_count", 1, debug_type="condition_eval", debug_source="scheduler", debug_effect="blocked"),
                                 reason=str(cond_result.get("results")),
                                 context_snapshot=rt_context,
                                 debug_type="condition_eval",
@@ -3185,7 +3182,7 @@ def job_check_routines():
                         # ανιχνεύθηκε το context skip / mute, όχι ξανά σε κάθε επόμενο poll.
                         log_event(
                             "routines", 
-                            "silent_skip", 
+                            "routine_silent_skip", 
                             routine_id=r_id, 
                             event=event_name,
                             reason="muted_until", 
@@ -3199,9 +3196,7 @@ def job_check_routines():
                     info = get_routine_notify_info(r_id)
                     cd_hours = info["cooldown_hours"]
                     if is_duplicate_routine(r_id, cd_hours):
-                        log_event("routines", "skipped", reason="cooldown",
-                                  routine_id=r_id, event=event_name,
-                                  cooldown_hours=cd_hours)
+                        log_event("routines", "routine_cooldown_skip", routine_id=r_id, event=event_name, cooldown_hours=cd_hours, debug_type="scheduler_decision", debug_source="scheduler", debug_effect="cooldown_skip")
                         continue
                     due_routines.append((r_id, event_name, confidence))
                     triggered_conflict_groups.add(conflict_group)
@@ -3212,8 +3207,10 @@ def job_check_routines():
                     return
 
                 if not can_send_proactive():
-                    log_event("routines", "skipped", reason="rate_limit",
-                              count=len(due_routines))
+                    for r_id, event_name, _ in due_routines:
+                        log_event("routines", "routine_rate_limit_skip",
+                                  routine_id=r_id, event=event_name,
+                                  debug_type="scheduler_decision", debug_source="scheduler", debug_effect="rate_limit_skip")
                     print(f"⏸️ [job_check_routines]: Rate limit, {len(due_routines)} routine(s) skipped")
                     conn.close()
                     return
@@ -3233,7 +3230,7 @@ def job_check_routines():
                             cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                             log_event(
                                 "routines", 
-                                "silent_skip", 
+                                "routine_silent_skip", 
                                 routine_id=r_id, 
                                 event=event_name, 
                                 batch=True,
@@ -3266,7 +3263,7 @@ def job_check_routines():
                                 muted_until = _apply_context_mute(r_id, event_name, context_skip_ctx)
                                 log_event(
                                     "routines", 
-                                    "context_skip", 
+                                    "routine_context_skip", 
                                     routine_id=r_id, 
                                     event=event_name,
                                     batch=True, 
@@ -3279,13 +3276,11 @@ def job_check_routines():
                                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
                             else:
                                 mark_routine_notified(r_id)
-                                log_event(
-                                    "routines", 
-                                    "triggered", 
+                                log_event("routines", "routine_triggered", 
                                     routine_id=r_id,
                                     event=event_name, 
                                     confidence=confidence,
-                                    batch=len(due_routines), 
+                                    batch=len(due_routines, debug_type="scheduler_decision", debug_source="scheduler", debug_effect="triggered"), 
                                     preview=msg[:160],
                                     debug_type="proactive_decision",
                                     debug_source="scheduler",
@@ -3310,7 +3305,7 @@ def job_check_routines():
                         conn.commit()
                         log_event(
                             "routines", 
-                            "silent_skip", 
+                            "routine_silent_skip", 
                             routine_id=r_id, 
                             event=event_name,
                             debug_type="proactive_decision",
@@ -3340,7 +3335,7 @@ def job_check_routines():
                             muted_until = _apply_context_mute(r_id, event_name, context_skip_ctx)
                             log_event(
                                 "routines", 
-                                "context_skip", 
+                                "routine_context_skip", 
                                 routine_id=r_id, 
                                 event=event_name,
                                 muted_until=muted_until, 
@@ -3355,7 +3350,7 @@ def job_check_routines():
                             mark_routine_notified(r_id)
                             log_event(
                                 "routines", 
-                                "triggered", 
+                                "routine_triggered", 
                                 routine_id=r_id,
                                 event=event_name, 
                                 confidence=confidence,
