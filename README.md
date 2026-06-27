@@ -62,6 +62,22 @@ Astakos is local-first:
 
 Important note: Astakos uses configured external APIs for model calls and integrations, including Gemini / Vertex AI, Telegram, Google APIs, GitHub, Spotify, LinkedIn, and others when those features are enabled. Local-first means the memory and runtime state live on your machine; prompts, uploaded media, or tool payloads may be sent to the external service required by the feature you use.
 
+### Active Local Storage
+
+Astakos currently uses these runtime storage locations:
+
+- `astakos_conversation_history.db` — shared Telegram/Web conversation history and session exchanges
+- `astakos_profile.db` — long-term structured profile facts
+- `astakos_state.db` — reminders, sessions, lists, pending asset confirmations, memory sifter replay state
+- `astakos_routines.db` — routines, context flags, runtime state, reflections, pending confirmations
+- `analytics_state.db` — incremental analytics candidates, occurrences, and progress
+- `astakos_embeddings_cache.db` — embeddings request cache
+- `chroma_db/` — semantic memory vector store
+- `logs/events/YYYY-MM-DD.json` — scheduler/runtime event timeline and debug throughput logs
+- JSON sidecars such as `messenger_draft.json`, `astakos_working_memory.json`, `astakos_photos_index.json`, and `astakos_docs_index.json` — lightweight local state and media indexes
+
+Legacy empty `.db` leftovers are not part of the active runtime layout.
+
 ---
 
 ## Core Features
