@@ -621,7 +621,7 @@ def git_agent_node(state):
 
 
 def mail_agent_node(state):
-    from core.utils import load_agent_prompt
+    from core.utils import load_agent_prompt, extract_list_selection_index
     from config import BASE_DIR  
     
     # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
@@ -688,12 +688,14 @@ def mail_agent_node(state):
             ""
         )
         user_wants_read = any(kw in user_q.lower() for kw in ["διάβασ", "διαβασ", "άνοιξ", "ανοιξ", "τι λέει", "τι λεει", "περισσότερα", "δες το", "λεπτομέρεια"])
+        selected_idx = extract_list_selection_index(user_q)
 
         if _search_hits and not _read_hits and not _read_dispatched and user_wants_read:
             user_wants_thread = any(kw in user_q.lower() for kw in ["όλη τη", "ολη τη", "συνομιλία", "συζήτηση", "thread", "όλα τα", "ολα τα"])
             action_to_use = "read_thread" if user_wants_thread else "read_full"
+            chosen_hit = _search_hits[selected_idx] if selected_idx is not None and 0 <= selected_idx < len(_search_hits) else _search_hits[0]
 
-            _ar_match = _re_ar.search(r'ID: ([a-f0-9]{16})', _search_hits[0])
+            _ar_match = _re_ar.search(r'ID: ([a-f0-9]{16})', chosen_hit)
             if _ar_match:
                 _ar_eid = _ar_match.group(1)
                 _auto_msg = AIMessage(
@@ -708,7 +710,7 @@ def mail_agent_node(state):
         elif not _read_hits and not _read_dispatched and user_wants_read and _known_ids:
             user_wants_thread = any(kw in user_q.lower() for kw in ["όλη τη", "ολη τη", "συνομιλία", "συζήτηση", "thread", "όλα τα", "ολα τα"])
             action_to_use = "read_thread" if user_wants_thread else "read_full"
-            _ar_eid = _known_ids[0]
+            _ar_eid = _known_ids[selected_idx] if selected_idx is not None and 0 <= selected_idx < len(_known_ids) else _known_ids[0]
             _auto_msg = AIMessage(
                 content='',
                 tool_calls=[{

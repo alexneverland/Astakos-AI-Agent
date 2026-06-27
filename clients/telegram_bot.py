@@ -30,8 +30,6 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from services.messenger_intent import classify_messenger_intent
-from core.messenger_draft import active_draft_status, clear_draft
 from langchain_core.messages import HumanMessage, AIMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE
@@ -40,6 +38,39 @@ def _normalize_gr(text: str) -> str:
     """Αφαιρεί τόνους από ελληνικό κείμενο για accent-insensitive σύγκριση."""
     import unicodedata
     return unicodedata.normalize("NFD", text).encode("ascii", "ignore").decode("ascii").lower()
+
+def _safe_classify_messenger_intent(text: str, *, has_active_draft: bool):
+    """Lazy/fail-soft import so tests that stub `services` don't crash telegram_bot import."""
+    try:
+        from services.messenger_intent import classify_messenger_intent
+    except Exception:
+        return None
+    try:
+        return classify_messenger_intent(text, has_active_draft=has_active_draft)
+    except Exception:
+        return None
+
+
+def _safe_active_draft_status():
+    try:
+        from core.messenger_draft import active_draft_status
+    except Exception:
+        return False, "unavailable", None
+    try:
+        return active_draft_status()
+    except Exception:
+        return False, "error", None
+
+
+def _safe_clear_draft() -> bool:
+    try:
+        from core.messenger_draft import clear_draft
+    except Exception:
+        return False
+    try:
+        return bool(clear_draft())
+    except Exception:
+        return False
 
 from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
 from core.exceptions import SchedulerCrashError, PendingTimeoutError, DBWriteError
@@ -1204,14 +1235,14 @@ def handle_message(user_text: str, chat_id: str):
         return
 
     # ── Messenger Draft Intent Guard ─────────────────────────────
-    draft_active, draft_reason, draft_data = active_draft_status()
-    draft_intent = classify_messenger_intent(
+    draft_active, draft_reason, draft_data = _safe_active_draft_status()
+    draft_intent = _safe_classify_messenger_intent(
         clean_user_text,
         has_active_draft=draft_active,
     )
 
-    if draft_intent.intent == "clear_draft":
-        cleared = clear_draft()
+    if draft_intent and draft_intent.intent == "clear_draft":
+        cleared = _safe_clear_draft()
         now_ts = datetime.now().strftime("%H:%M")
         final_ai_response = (
             f"[{now_ts}] Έγινε, μάστορα. Το draft καθαρίστηκε και το κλείνουμε εδώ."
@@ -1237,7 +1268,7 @@ def handle_message(user_text: str, chat_id: str):
 
         return
 
-    if draft_intent.intent == "clarify_draft":
+    if draft_intent and draft_intent.intent == "clarify_draft":
         now_ts = datetime.now().strftime("%H:%M")
         if draft_active and draft_data and draft_data.get("message"):
             draft_message = str(draft_data.get("message") or "").strip()
@@ -3134,7 +3165,7 @@ def job_check_routines():
                     inactive, inactive_reason = is_routine_temporarily_inactive_meta(schedule_meta, now=now)
                     if inactive:
                         log_event("routines", "routine_inactive_skip", routine_id=r_id, event=event_name,
-                                  reason=inactive_reason, paused_until=schedule_meta.get("paused_until", debug_type="scheduler_decision", debug_source="scheduler", debug_effect="inactive_skip"),
+                                  reason=inactive_reason, paused_until=schedule_meta.get("paused_until"), debug_type="scheduler_decision", debug_source="scheduler", debug_effect="inactive_skip",
                                   active_from=schedule_meta.get("active_from"), active_until=schedule_meta.get("active_until"))
                         print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' inactive ({inactive_reason}) — skipped")
                         continue
@@ -3146,12 +3177,12 @@ def job_check_routines():
                             log_event("routines", "routine_condition_blocked",
                                 routine_id=r_id, 
                                 event=event_name,
-                                failed_count=cond_result.get("failed_count", 1, debug_type="condition_eval", debug_source="scheduler", debug_effect="blocked"),
+                                failed_count=cond_result.get("failed_count", 1),
                                 reason=str(cond_result.get("results")),
                                 context_snapshot=rt_context,
                                 debug_type="condition_eval",
                                 debug_source="scheduler",
-                                debug_effect="notification_skipped",
+                                debug_effect="blocked",
                             )
                         
                             import random

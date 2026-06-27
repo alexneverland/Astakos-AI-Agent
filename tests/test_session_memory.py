@@ -194,6 +194,40 @@ def test_temporary_family_memory_candidate_ignores_question():
     assert candidate is None
 
 
+def test_question_guard_strips_date_prefix_and_ack():
+    import memory.session_memory as session_memory
+
+    assert session_memory._looks_like_question_fact(
+        "[USER_FACT]: Στις 2026-06-26, ΝΑΙ πληροφοριακα πωσ μπορεισ να παρεβεις εξωτερικα σε ενα τετοιο συστημα?"
+    ) is True
+
+
+def test_operational_user_request_detects_mail_image_pipeline():
+    import memory.session_memory as session_memory
+
+    assert session_memory._looks_like_operational_user_request(
+        "ID: 19efdc77291a37e2 mail από tripcom flight booking confirm να το διαβάσεις και να μου φτιάξεις μία φωτογραφία",
+        "📋 **Plan για:** _read mail and create image_",
+    ) is True
+
+
+def test_memory_sifter_fast_skips_operational_mail_image_request(monkeypatch):
+    import memory.session_memory as session_memory
+
+    saved = []
+    monkeypatch.setattr(session_memory.memory, "save", lambda **kwargs: saved.append(kwargs))
+
+    result = session_memory.run_memory_sifter_fast(
+        "ID: 19efdc77291a37e2 mail από tripcom flight booking confirm να το διαβάσεις και να μου φτιάξεις μία φωτογραφία",
+        "📋 **Plan για:** _read mail and create image_",
+        agent_name="Chat_Agent",
+        channel="telegram",
+    )
+
+    assert result == []
+    assert saved == []
+
+
 def test_memory_sifter_saves_temporary_family_memory_even_if_llm_returns_empty(monkeypatch):
     import memory.session_memory as session_memory
 
@@ -283,6 +317,8 @@ def test_memory_sifter_includes_recent_session_context_in_prompt(monkeypatch):
         {"time": "10:05", "agent": "Chat_Agent", "channel": "web",
          "user": "Τι θα φτιάξουμε;", "ai": "Ένα διαστημόπλοιο."},
     ]
+    monkeypatch.setattr(session_memory, "_memory_sifter_already_processed", lambda *_: False)
+    monkeypatch.setattr(session_memory, "_mark_memory_sifter_processed", lambda **_: None)
     monkeypatch.setattr(session_memory, "_extract_event_memory_candidate", lambda *a, **k: None)
     monkeypatch.setattr(session_memory, "_extract_confirmed_memory_candidate", lambda *a, **k: None)
 
@@ -322,6 +358,8 @@ def test_memory_sifter_omits_context_block_when_session_logs_empty(monkeypatch):
         text = "ΚΕΝΟ"
 
     session_memory.SESSION_LOGS.clear()
+    monkeypatch.setattr(session_memory, "_memory_sifter_already_processed", lambda *_: False)
+    monkeypatch.setattr(session_memory, "_mark_memory_sifter_processed", lambda **_: None)
     monkeypatch.setattr(session_memory, "_extract_event_memory_candidate", lambda *a, **k: None)
     monkeypatch.setattr(session_memory, "_extract_confirmed_memory_candidate", lambda *a, **k: None)
 
@@ -338,3 +376,32 @@ def test_memory_sifter_omits_context_block_when_session_logs_empty(monkeypatch):
     prompt = captured["prompt"]
     assert "ΠΡΟΗΓΟΥΜΕΝΟ ΠΛΑΙΣΙΟ" not in prompt
     assert "ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ" in prompt
+
+
+def test_memory_sifter_skips_operational_mail_image_request(monkeypatch):
+    import memory.session_memory as session_memory
+
+    saved = []
+    gemini_called = {"value": False}
+
+    class FakeResponse:
+        text = '[{"fact":"[USER_FACT]: Στις 2026-06-26, ID: 19efdc77291a37e2 mail από tripcom...","category":"family"}]'
+
+    def fake_gemini(prompt):
+        gemini_called["value"] = True
+        return FakeResponse()
+
+    monkeypatch.setattr(session_memory.memory, "save", lambda **kwargs: saved.append(kwargs))
+    monkeypatch.setattr(session_memory, "_memory_sifter_already_processed", lambda *_: False)
+    monkeypatch.setattr(session_memory, "_mark_memory_sifter_processed", lambda **_: None)
+    monkeypatch.setattr(session_memory, "safe_gemini_call", fake_gemini)
+
+    session_memory.run_memory_sifter_slow(
+        "ID: 19efdc77291a37e2 mail από tripcom flight booking confirm να το διαβάσεις και να μου φτιάξεις μία φωτογραφία",
+        "📋 **Plan για:** _read mail and create image_",
+        agent_name="Chat_Agent",
+        channel="telegram",
+    )
+
+    assert gemini_called["value"] is True
+    assert saved == []

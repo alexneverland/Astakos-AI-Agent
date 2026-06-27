@@ -193,6 +193,47 @@ def is_reply_to_recent_mail_prompt(messages: list, limit: int = 4) -> bool:
             break
     return False
 
+
+def extract_list_selection_index(text: str) -> int | None:
+    """
+    Detects an explicit 1-based choice from natural language follow-ups like:
+    - "το 2"
+    - "το 2ο"
+    - "το δεύτερο"
+    Returns a zero-based index, or None if no explicit selection is found.
+    """
+    if not text:
+        return None
+
+    normalized = clean_message(text).strip().lower()
+    normalized = normalized.replace("δεύτερο", "δευτερο")
+    normalized = normalized.replace("τρίτο", "τριτο")
+    normalized = normalized.replace("τέταρτο", "τεταρτο")
+    normalized = normalized.replace("πέμπτο", "πεμπτο")
+
+    for pattern in (
+        r"\bτο\s+([1-9])\b",
+        r"\bτο\s+([1-9])ο\b",
+        r"\bνούμερο\s+([1-9])\b",
+        r"\b#\s*([1-9])\b",
+    ):
+        match = re.search(pattern, normalized)
+        if match:
+            return int(match.group(1)) - 1
+
+    ordinal_words = {
+        "πρωτο": 0,
+        "δευτερο": 1,
+        "τριτο": 2,
+        "τεταρτο": 3,
+        "πεμπτο": 4,
+    }
+    for word, idx in ordinal_words.items():
+        if re.search(rf"\bτο\s+{word}\b", normalized):
+            return idx
+
+    return None
+
 def sanitize_history_for_gemini(messages: list) -> list:
     """
     [MASTRO-FIX]: Σιδερώνει το ιστορικό για να μην κρασάρει το Gemini με Error 400.

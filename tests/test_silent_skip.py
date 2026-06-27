@@ -436,10 +436,10 @@ def test_silent_skip_sends_no_message():
 
 
 def test_silent_skip_logs_silent_skip():
-    """[SILENT_SKIP] → log_event('routines', 'silent_skip')."""
+    """[SILENT_SKIP] → log_event('routines', 'routine_silent_skip')."""
     _, logged, _ = _run_job([_due_routine()], craft_return="[SILENT_SKIP]")
-    assert any(cat == "routines" and action == "silent_skip"
-               for cat, action in logged), f"Expected silent_skip, got: {logged}"
+    assert any(cat == "routines" and action == "routine_silent_skip"
+               for cat, action in logged), f"Expected routine_silent_skip, got: {logged}"
 
 
 def test_silent_skip_updates_last_triggered():
@@ -483,11 +483,11 @@ def test_silent_skip_with_whitespace():
     """'  [SILENT_SKIP]  ' → μετά trim → ίδια συμπεριφορά."""
     sent, logged, _ = _run_job([_due_routine()], craft_return="  [SILENT_SKIP]  ")
     assert sent == []
-    assert any(action == "silent_skip" for _, action in logged)
+    assert any(action == "routine_silent_skip" for _, action in logged)
 
 
 def test_already_muted_routine_does_not_send_sentimental_followup():
-    """muted_until ενεργό → silent_skip μόνο, χωρίς δεύτερο emotional/proactive send."""
+    """muted_until ενεργό → routine_silent_skip μόνο, χωρίς δεύτερο emotional/proactive send."""
     rdb = sys.modules["memory.routine_db"]
     sent, logged, _ = _run_job(
         [_due_routine()],
@@ -504,7 +504,7 @@ def test_already_muted_routine_does_not_send_sentimental_followup():
     )
 
     assert sent == []
-    assert any(action == "silent_skip" for _, action in logged)
+    assert any(action == "routine_silent_skip" for _, action in logged)
     rdb.update_sentimental_last_sent.assert_not_called()
 
 
@@ -524,13 +524,13 @@ def test_context_skip_sends_message_without_tag():
 
 
 def test_context_skip_logs_context_skip():
-    """[CONTEXT_SKIP] → log_event('routines', 'context_skip')."""
+    """[CONTEXT_SKIP] → log_event('routines', 'routine_context_skip')."""
     _, logged, _ = _run_job(
         [_due_routine()],
         craft_return="[CONTEXT_SKIP] Βρέχει, δεν πάτε πάρκο!",
     )
-    assert any(cat == "routines" and action == "context_skip"
-               for cat, action in logged), f"Expected context_skip, got: {logged}"
+    assert any(cat == "routines" and action == "routine_context_skip"
+               for cat, action in logged), f"Expected routine_context_skip, got: {logged}"
 
 
 def test_context_skip_does_not_create_pending_confirmation():
@@ -577,7 +577,7 @@ def test_deferred_context_skip_does_not_create_pending_confirmation():
     )
     assert len(sent) == 1
     assert bot.pending_routine_confirmations == {}
-    assert any(action == "context_skip" for _, action in logged)
+    assert any(action == "routine_context_skip" for _, action in logged)
     assert "routine_skipped_context" in bus_events
     rdb.save_pending_confirmation.assert_not_called()
     rdb.mark_routine_notified.assert_not_called()
@@ -639,10 +639,10 @@ def test_normal_msg_is_sent():
 
 
 def test_normal_msg_no_skip_logs():
-    """Κανονικό μήνυμα → ΟΧΙ silent_skip ή context_skip στο log."""
+    """Κανονικό μήνυμα → ΟΧΙ routine_silent_skip ή routine_context_skip στο log."""
     _, logged, _ = _run_job([_due_routine()], craft_return="Μάστορα, πάμε βόλτα!")
-    assert not any(action == "silent_skip"  for _, action in logged)
-    assert not any(action == "context_skip" for _, action in logged)
+    assert not any(action == "routine_silent_skip"  for _, action in logged)
+    assert not any(action == "routine_context_skip" for _, action in logged)
 
 def test_timeout_decay_ignores_stale_pending():
     """
@@ -661,8 +661,8 @@ def test_timeout_decay_ignores_stale_pending():
 
     action_types = [a for _, a in logged]
 
-    assert "pending_stale_cleared" in action_types
-    assert "timeout_decay" not in action_types
+    assert "routine_pending_stale_cleared" in action_types
+    assert "routine_timeout_decay" not in action_types
 
     assert 888 not in bot.pending_routine_confirmations
     assert sent == []

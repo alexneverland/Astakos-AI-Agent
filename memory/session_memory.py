@@ -136,6 +136,119 @@ def _normalize_text(value: str) -> str:
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
     return " ".join(text.split())
 
+
+def _strip_leading_ack_prefix(text: str) -> str:
+    normalized = _normalize_text(text)
+    prefixes = (
+        "ναι ",
+        "ναι, ",
+        "οκ ",
+        "ok ",
+        "ωραια ",
+        "ωραία ",
+        "λοιπον ",
+        "λοιπόν ",
+        "ε ",
+        "ε και ",
+    )
+    changed = True
+    while changed:
+        changed = False
+        for prefix in prefixes:
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):].strip()
+                changed = True
+                break
+    return normalized
+
+
+def _strip_user_fact_scaffold(text: str) -> str:
+    body = re.sub(r"^\[[A-Z_]+\]:\s*", "", str(text or ""), flags=re.IGNORECASE).strip()
+    body = re.sub(r"^στις\s+20\d{2}-\d{2}-\d{2},?\s*", "", body, flags=re.IGNORECASE).strip()
+    return body
+
+
+def _looks_like_question_fact(text: str) -> bool:
+    body = _strip_user_fact_scaffold(text)
+    normalized = _strip_leading_ack_prefix(body)
+    question_starters = (
+        "τι ",
+        "πώς ",
+        "πως ",
+        "γιατί ",
+        "γιατι ",
+        "πού ",
+        "που ",
+        "ποιος ",
+        "ποια ",
+        "ποιο ",
+        "πόσο ",
+        "ποσο ",
+        "πότε ",
+        "ποτε ",
+    )
+    return (
+        body.endswith("?")
+        or body.endswith(";")
+        or normalized.endswith("?")
+        or normalized.endswith(";")
+        or any(normalized.startswith(s) for s in question_starters)
+    )
+
+
+def _looks_like_operational_user_request(user_text: str, ai_text: str = "") -> bool:
+    source_text = " ".join(clean_message(user_text).split())
+    if not source_text:
+        return False
+
+    normalized = _strip_leading_ack_prefix(source_text)
+    ai_normalized = _normalize_text(ai_text)
+
+    if normalized.startswith("id: "):
+        return True
+
+    imperative_starts = (
+        "διαβασε",
+        "βρες",
+        "ψαξε",
+        "φτιαξε",
+        "γραψε",
+        "στειλε",
+        "μπες",
+        "ανοιξε",
+        "δες",
+        "τσεκαρε",
+        "κοιτα",
+        "θελω να βρεις",
+        "θελω να διαβασεις",
+        "θελω να φτιαξεις",
+        "θελω να μπεις",
+    )
+    tool_targets = (
+        "mail",
+        "email",
+        "thread",
+        "συνομιλι",
+        "εικονα",
+        "φωτο",
+        "photo",
+        "site",
+        "link",
+        "url",
+        "αρχει",
+        "file",
+        "pdf",
+        "trip.com",
+    )
+
+    if any(normalized.startswith(prefix) for prefix in imperative_starts) and any(token in normalized for token in tool_targets):
+        return True
+
+    if "📋 **plan για:" in ai_normalized and any(token in normalized for token in tool_targets):
+        return True
+
+    return False
+
 def _looks_like_operational_asset_confirmation(text: str) -> bool:
     txt = (text or "").strip().lower()
 
@@ -1333,6 +1446,9 @@ def _collect_deterministic_candidates(
 
 def run_memory_sifter_fast(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
     try:
+        if _looks_like_operational_user_request(user_text, ai_text):
+            return []
+
         selected_candidates = _collect_deterministic_candidates(
             user_text,
             ai_text,
@@ -1534,16 +1650,13 @@ def run_memory_sifter_slow(
             category = candidate.get("category", "lazaros")
 
             # [QUESTION GUARD]: Αν το fact είναι ερώτηση, παράκαμψε το
-            _fact_body = re.sub(r"^\[USER_FACT\]:\s*", "", fact).strip()
-            _question_starters = ("τι ", "πώς ", "πως ", "γιατί ", "γιατι ", "πού ",
-                                  "που ", "ποιος ", "ποια ", "ποιο ", "πόσο ", "ποσο ",
-                                  "πότε ", "ποτε ", "εδω ", "αυτο ")
-            _is_question = (
-                _fact_body.endswith("?") or _fact_body.endswith(";") or
-                any(_fact_body.lower().startswith(s) for s in _question_starters)
-            )
-            if _is_question:
+            _fact_body = _strip_user_fact_scaffold(fact)
+            if _looks_like_question_fact(fact):
                 print(f"\033[93m[Sifter]: Question guard — skipping fact: {_fact_body[:60]}\033[0m")
+                continue
+
+            if _looks_like_operational_user_request(user_text, ai_text):
+                print(f"\033[90m[MemorySifterSlow]: operational user request skip -> {_fact_body[:80]}\033[0m")
                 continue
 
             if _fact_matches_any(fact, deterministic_seed_facts):

@@ -2,7 +2,7 @@
 Tests για core/utils.py — clean_message και detect_prompt_injection (regex only).
 """
 from langchain_core.messages import AIMessage, HumanMessage
-from core.utils import is_reply_to_recent_mail_prompt
+from core.utils import is_reply_to_recent_mail_prompt, extract_list_selection_index
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -90,3 +90,11 @@ def test_mail_prompt_detects_structured_mail_result():
         HumanMessage(content="ναι"),
     ]
     assert is_reply_to_recent_mail_prompt(messages) is True
+
+
+def test_extract_list_selection_index_numeric():
+    assert extract_list_selection_index("Το 2 την επιβεβαίωσης διάβασε") == 1
+
+
+def test_extract_list_selection_index_ordinal_word():
+    assert extract_list_selection_index("διάβασε το δεύτερο") == 1

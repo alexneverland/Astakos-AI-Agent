@@ -232,7 +232,7 @@ def test_conflict_resolution_specificity_breaks_ties():
     assert len(sent) == 1
     
     # Ελέγχουμε ποια ρουτίνα έκανε trigger
-    triggered_rids = [kw["routine_id"] for cat, action, kw in logged if action == "triggered"]
+    triggered_rids = [kw["routine_id"] for cat, action, kw in logged if action == "routine_triggered"]
     assert len(triggered_rids) == 1
     assert triggered_rids[0] == 2 # Η #2 "νίκησε" λόγω specificity!
 
@@ -264,7 +264,7 @@ def test_conflict_resolution_deep_integration():
     context_A = {"football_season": False, "alexandros_away_from_home": True}
     sent_A, logged_A = _run_job(rows, routine_conditions=conditions, context_state=context_A)
     assert len(sent_A) == 1
-    trig_A = [kw["routine_id"] for cat, action, kw in logged_A if action == "triggered"]
+    trig_A = [kw["routine_id"] for cat, action, kw in logged_A if action == "routine_triggered"]
     assert len(trig_A) == 1
     assert trig_A[0] == 1 # Fallback wins
 
@@ -275,7 +275,7 @@ def test_conflict_resolution_deep_integration():
     context_B = {"football_season": True, "alexandros_away_from_home": True}
     sent_B, logged_B = _run_job(rows, routine_conditions=conditions, context_state=context_B)
     assert len(sent_B) == 1
-    trig_B = [kw["routine_id"] for cat, action, kw in logged_B if action == "triggered"]
+    trig_B = [kw["routine_id"] for cat, action, kw in logged_B if action == "routine_triggered"]
     assert len(trig_B) == 1
     assert trig_B[0] == 2 # Football wins
     
@@ -286,6 +286,6 @@ def test_conflict_resolution_deep_integration():
     context_C = {"football_season": True, "alexandros_away_from_home": False}
     sent_C, logged_C = _run_job(rows, routine_conditions=conditions, context_state=context_C)
     assert len(sent_C) == 1
-    trig_C = [kw["routine_id"] for cat, action, kw in logged_C if action == "triggered"]
+    trig_C = [kw["routine_id"] for cat, action, kw in logged_C if action == "routine_triggered"]
     assert len(trig_C) == 1
     assert trig_C[0] == 3 # Camp routine wins
