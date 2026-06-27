@@ -334,6 +334,40 @@ function secondsLabel(v) {
   return `${Math.round(v/86400)}d`;
 }
 
+function prettyMemoryIntent(intent) {
+  const map = {
+    generic: "Generic",
+    tool_result: "Tool result",
+    news_opening: "News opening",
+    web_followup: "Web follow-up",
+    food_memory_recall: "Food memory recall",
+    low_complexity: "Low complexity",
+  };
+  return map[intent] || intent || "Generic";
+}
+
+function memoryIntentBadge(intent) {
+  const key = intent || "generic";
+  const label = prettyMemoryIntent(key);
+
+  let bg = "#334155";
+  if (key === "food_memory_recall") bg = "#14532d";
+  else if (key === "web_followup") bg = "#1d4ed8";
+  else if (key === "news_opening") bg = "#7c2d12";
+  else if (key === "tool_result") bg = "#5b21b6";
+  else if (key === "low_complexity") bg = "#6b7280";
+
+  return `<span style="
+    display:inline-block;
+    padding:2px 8px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:600;
+    background:${bg};
+    color:white;
+  ">${label}</span>`;
+}
+
 function safeJsonParse(raw) {
   if (!raw || typeof raw !== 'string') return null;
   try { return JSON.parse(raw); } catch { return null; }
@@ -536,6 +570,8 @@ function render(d) {
     <div class="kv"><span class="k">Last build</span><span class="v">${mem.written_at ? esc(mem.written_at.slice(11,19)) : 'none'}</span></div>
     <div class="kv"><span class="k">Channel</span><span class="v">${esc(mem.channel || '-')}</span></div>
     <div class="kv"><span class="k">Recent / SQL / Chroma</span><span class="v">${mem.recent_count ?? 0} / ${mem.historical_count ?? 0} / ${mem.semantic_count ?? 0}</span></div>
+    <div class="kv"><span class="k">Intent</span><span class="v">${memoryIntentBadge(mem.query_intent)}</span></div>
+    <div class="kv"><span class="k">Semantic rule</span><span class="v">${esc(mem.semantic_adjust_reason || 'none')}</span></div>
     <div class="kv"><span class="k">Query</span><span class="v" style="text-align:right">${esc(mem.query_preview || '-')}</span></div>
     ${memPreview.length ? `<div style="margin-top:6px;color:var(--muted);font-size:10px;line-height:1.35">${memPreview.map(esc).join('<br>')}</div>` : ''}
   </div>`;

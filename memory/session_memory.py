@@ -409,8 +409,39 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
     return out
 
 
+_LOW_SIGNAL_ENTITY_TOKENS = {
+    "στις", "στο", "στη", "στην", "στον", "στα", "στους", "στις",
+    "και", "για", "απο", "από", "με", "θα", "να", "την", "τον", "του",
+    "της", "τους", "μας", "σας", "τους", "ολοι", "όλοι", "ολη", "όλη",
+    "οικογενεια", "οικογένεια", "γυρω", "γύρω", "περιπου", "περίπου",
+    "κιλο", "κιλό", "κιλα", "κιλά", "γραμμαρια", "γραμμάρια", "φουρνο",
+    "φούρνο", "τηγανιες", "τηγανιές", "παρει", "πήρε", "πηρα", "πήρα",
+    "πηραμε", "πήραμε", "αγορασα", "αγόρασα", "αγορασε", "αγόρασε",
+}
+
+
+def _extract_food_subject_tokens(text: str) -> list[str]:
+    cleaned_text = _strip_user_fact_scaffold(text)
+    if not _looks_like_food_context(cleaned_text):
+        return []
+
+    compact = " ".join(clean_message(cleaned_text).lower().split())
+    tokens = re.findall(r"[a-zA-Zα-ωάέήίόύώϊϋΐΰ]{4,}", compact)
+    out: list[str] = []
+    for token in tokens:
+        if token in _LOW_SIGNAL_ENTITY_TOKENS:
+            continue
+        if token.endswith(("ουμε", "ουνε", "ουν", "εις", "ωσει", "ώσει", "ει", "οντας")):
+            continue
+        if token.endswith(("μενος", "μένη", "μενη", "μενο", "ητες", "ητές", "ητος", "ητή", "ητό")):
+            continue
+        out.append(token)
+    return _dedupe_preserve_order(out[:6])
+
+
 def _extract_entities_from_text(text: str) -> list[str]:
-    compact = " ".join(clean_message(text).split())
+    cleaned_text = _strip_user_fact_scaffold(text)
+    compact = " ".join(clean_message(cleaned_text).split())
     if not compact:
         return []
 
@@ -419,7 +450,52 @@ def _extract_entities_from_text(text: str) -> list[str]:
         entity = match.group(0).strip(" .,;:!?")
         if len(entity) >= 3:
             found.append(entity)
-    return _dedupe_preserve_order(found)
+    found.extend(_extract_food_subject_tokens(compact))
+    out: list[str] = []
+    seen_casefold: set[str] = set()
+    for item in found:
+        key = str(item).strip().casefold()
+        if not key or key in seen_casefold:
+            continue
+        seen_casefold.add(key)
+        out.append(item)
+    return out
+
+
+def _looks_like_food_context(text: str) -> bool:
+    normalized = _normalize_text(text)
+    compact = " ".join(clean_message(text).lower().split())
+
+    direct_food_markers = (
+        "φαγητ", "φακες", "ψαρ", "μπριζολ", "φαγα", "εφαγε",
+        "κρεας", "κοτοπ", "μακαρον", "ρυζ", "φασολ", "σουπα",
+        "σαλατ", "τυρι", "πιτα", "πιτσ", "μπιφτεκ", "ψην",
+    )
+    prep_markers = (
+        "φουρν", "τηγαν", "ψησ", "μαγειρ", "συνταγ", "αντιστασ",
+        "αερα", "βρασ", "κατσαρολ", "σχαρ", "ριγαν", "λεμον",
+    )
+    meal_context_markers = (
+        "πατατ", "οικογεν", "τραπεζ", "μεσημερ", "βραδιν", "γευμα",
+        "φαμε", "φαω", "πιατο",
+    )
+    purchase_markers = (
+        "αγορασ", "πηρα", "πηραμε", "κιλο", "κιλα", "γραμμαρ",
+        "τεμαχ", "κομματ",
+    )
+
+    if any(marker in normalized for marker in direct_food_markers):
+        return True
+
+    has_weight_or_count = bool(
+        re.search(r"\b\d+(?:[.,]\d+)?\s*(?:κιλ(?:ο|ά)?|κιλα|γρ|γραμμ?)\b", compact)
+        or re.search(r"\b\d+\s*(?:τεμαχ|κομματ)\b", compact)
+    )
+    has_prep = any(marker in normalized for marker in prep_markers)
+    has_meal_context = any(marker in normalized for marker in meal_context_markers)
+    has_purchase_context = any(marker in normalized for marker in purchase_markers)
+
+    return has_prep and (has_meal_context or has_purchase_context or has_weight_or_count)
 
 
 def _infer_topic_from_text(text: str, category: str) -> str:
@@ -434,14 +510,14 @@ def _infer_topic_from_text(text: str, category: str) -> str:
         return "emotion"
     if any(marker in normalized for marker in ("κουνελ", "σκυλ", "γατ", "ζωακ", "κατοικιδ")):
         return "pet"
+    if _looks_like_food_context(text):
+        return "food"
     if any(marker in normalized for marker in ("σπιτι", "κουζιν", "καθαρισ", "αφυγραντηρ", "σκουπ", "λαικ", "ψων")):
         return "home"
     if any(marker in normalized for marker in ("δουλει", "βαρδια", "εργοστασ", "πασσια", "συναδελφ")):
         return "work"
     if any(marker in normalized for marker in ("δωρο", "γενεθλ", "ρολοι", "γλαστρ")):
         return "gift"
-    if any(marker in normalized for marker in ("φαγητ", "φακες", "ψαρ", "μπριζολ", "φαγα", "εφαγε")):
-        return "food"
     if any(marker in normalized for marker in ("ταξιδ", "εκδρομ", "διακοπ", "πηγαμε", "γυρισ", "επιστρ")):
         return "trip"
     if category == "projects":
@@ -471,6 +547,8 @@ def _infer_topic_detail_from_text(text: str) -> str:
     for detail, markers in detail_markers.items():
         if any(marker in normalized for marker in markers):
             return detail
+    if _looks_like_food_context(text):
+        return "meal_prep"
     return ""
 
 

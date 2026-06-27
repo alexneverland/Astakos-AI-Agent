@@ -303,6 +303,43 @@ def test_confirmed_memory_candidate_ignores_message_drafts():
     assert candidate is None
 
 
+def test_build_canonical_memory_candidate_infers_food_from_cooking_context():
+    import datetime
+    import memory.session_memory as session_memory
+
+    candidate = session_memory.build_canonical_memory_candidate(
+        fact="[USER_FACT]: Στις 2026-06-27, ο Λάζαρος πήρε 3 φαγκριά γύρω στο 1,5 κιλό και θα τα βάλει φούρνο με τηγανητές πατάτες για την οικογένεια.",
+        category="family",
+        source="telegram",
+        agent_name="Home_Agent",
+        reason="agent_inferred",
+        now=datetime.datetime(2026, 6, 27, 12, 15),
+    )
+
+    assert candidate["topic"] == "food"
+    assert candidate["topic_detail"] == "meal_prep"
+    assert candidate["time_scope"] == "2026-06-27"
+    assert "food" in candidate["tags"]
+    assert "meal_prep" in candidate["tags"]
+    assert "φαγκριά" in candidate["entities"]
+    assert "πατάτες" in candidate["entities"]
+
+
+def test_build_canonical_memory_candidate_keeps_home_when_not_food():
+    import memory.session_memory as session_memory
+
+    candidate = session_memory.build_canonical_memory_candidate(
+        fact="[USER_FACT]: Σήμερα έβαλα τον αφυγραντήρα στο σπίτι και καθάρισα την κουζίνα.",
+        category="family",
+        source="telegram",
+        agent_name="Home_Agent",
+        reason="agent_inferred",
+    )
+
+    assert candidate["topic"] == "home"
+    assert "κουζίνα" not in candidate["entities"]
+
+
 def test_memory_sifter_includes_recent_session_context_in_prompt(monkeypatch):
     import memory.session_memory as session_memory
 
