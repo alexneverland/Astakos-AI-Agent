@@ -2141,6 +2141,7 @@ def _load_recent_proactive_context(limit: int = 10) -> str:
             channel="telegram",
             recent_limit=limit,
             semantic_k=0,
+            write_debug=False,
         )
         return "\n".join(context.recent_lines)
     except Exception as exc:
@@ -2165,6 +2166,7 @@ def _build_proactive_memory_context(event_name: str) -> str:
             recent_limit=18,
             temporal_limit=12,
             semantic_k=6,
+            write_debug=False,
         )
         return context.render()
     except Exception as exc:
@@ -2734,6 +2736,7 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
             channel="telegram",
             recent_limit=8,
             semantic_k=4,
+            write_debug=False,
         ).render()
     except Exception as exc:
         print(f"\033[93m[DeferredMsg]: context builder failed: {exc}\033[0m")

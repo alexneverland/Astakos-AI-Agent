@@ -271,6 +271,46 @@ def looks_like_web_followup_query(text: str) -> bool:
 
     return any(marker in low for marker in followup_markers)
 
+
+def looks_like_food_memory_query(text: str) -> bool:
+    clean = _normalize_text(text)
+    if not clean:
+        return False
+
+    if re.search(r"\bτι\b.*\bφαγ[α-ω]*", clean):
+        return True
+
+    strong_phrases = (
+        "τι πηρα για φαγητο",
+        "τι πηρα σημερα για φαγητο",
+        "τι φαγαμε",
+        "τι εφαγαμε",
+        "τι εφτιαξα",
+        "τι μαγειρεψα",
+        "τι ψαρια πηρα",
+        "τι ψαρι πηρα",
+        "τι κρεας πηρα",
+        "τι ειπα οτι θα βαλω στο φουρνο",
+        "τι ειχα πει για το φουρνο",
+    )
+
+    if any(phrase in clean for phrase in strong_phrases):
+        return True
+
+    food_tokens = (
+        "φαγητ", "φαγ", "γευμα", "μαγειρ", "συνταγ", "φουρν", "τηγαν",
+        "ψαρ", "κρεας", "κοτοπ", "μπριζολ", "πατατ",
+    )
+    recall_tokens = (
+        "τι πηρα", "τι εφτιαξ", "τι ειπα", "τι ειχα πει", "θυμασαι", "θυμασαι τι",
+    )
+
+    has_food = any(token in clean for token in food_tokens)
+    has_recall = any(token in clean for token in recall_tokens)
+
+    return has_food and has_recall
+
+
 def _looks_low_complexity_query(query: str) -> bool:
     if not query:
         return True
@@ -310,6 +350,34 @@ def _looks_low_complexity_query(query: str) -> bool:
         return True
 
     return False
+
+
+def classify_memory_query_intent(
+    query: str,
+    *,
+    has_recent_web_results: bool = False,
+) -> str:
+    clean = _clean_query_for_search(query).strip()
+    if not clean:
+        return "low_complexity"
+
+    if looks_like_tool_result_query(clean):
+        return "tool_result"
+
+    if looks_like_food_memory_query(clean):
+        return "food_memory_recall"
+
+    if looks_like_news_or_web_fact_query(clean):
+        return "news_opening"
+
+    if has_recent_web_results and looks_like_web_followup_query(clean):
+        return "web_followup"
+
+    if _looks_low_complexity_query(clean) and not _must_keep_semantic(clean):
+        return "low_complexity"
+
+    return "generic"
+
 
 def _must_keep_semantic(query: str) -> bool:
     if not query:
@@ -568,6 +636,7 @@ def build_memory_context(
     recent_limit: int = 10,
     temporal_limit: int = 8,
     semantic_k: int = 5,
+    write_debug: bool = True,
 ) -> MemoryContext:
     from time import perf_counter
     # Χρησιμοποιούμε clean_query για semantic search & debug — αφαιρούμε
@@ -620,20 +689,27 @@ def build_memory_context(
     effective_semantic_k = semantic_k
     semantic_adjust_reason = None
 
+    query_intent = classify_memory_query_intent(
+        clean_query,
+        has_recent_web_results=has_recent_web_results,
+    )
+
     if semantic_k > 0:
-        low_complexity_skip = _looks_low_complexity_query(clean_query) and not _must_keep_semantic(clean_query)
-        if looks_like_tool_result_query(clean_query):
+        if query_intent == "tool_result":
             effective_semantic_k = 0
             semantic_adjust_reason = "tool_result_query"
-        elif low_complexity_skip:
-            effective_semantic_k = 0
-            semantic_adjust_reason = "low_complexity_query"
-        elif looks_like_news_or_web_fact_query(clean_query):
+        elif query_intent == "food_memory_recall":
+            effective_semantic_k = max(semantic_k, 6)
+            semantic_adjust_reason = "food_memory_query"
+        elif query_intent == "news_opening":
             effective_semantic_k = 0
             semantic_adjust_reason = "news_or_web_fact_skip"
-        elif has_recent_web_results and looks_like_web_followup_query(clean_query):
+        elif query_intent == "web_followup":
             effective_semantic_k = min(semantic_k, 2)
             semantic_adjust_reason = "recent_web_context_downshift"
+        elif query_intent == "low_complexity":
+            effective_semantic_k = 0
+            semantic_adjust_reason = "low_complexity_query"
 
     t_sem_0 = perf_counter()
     semantic_facts = semantic_facts_for_query(clean_query, k=effective_semantic_k, search_fn=semantic_search)
@@ -644,22 +720,24 @@ def build_memory_context(
         historical_lines=historical_lines,
         semantic_facts=semantic_facts,
     )
-    _record_memory_context_debug(
-        channel=channel,
-        query=clean_query,  # debug panel shows clean query, not raw with filename
-        is_tool_output=is_tool_output,
-        recent_count=len(context.recent_lines),
-        historical_count=len(context.historical_lines),
-        semantic_count=len(context.semantic_facts),
-        recent_preview=context.recent_lines[:3],
-        historical_preview=context.historical_lines[:3],
-        semantic_preview=context.semantic_facts[:3],
-        recent_ms=recent_ms,
-        historical_ms=historical_ms,
-        semantic_ms=semantic_ms,
-        semantic_k_used=effective_semantic_k,
-        semantic_adjust_reason=semantic_adjust_reason,
-    )
+    if write_debug:
+        _record_memory_context_debug(
+            channel=channel,
+            query=clean_query,  # debug panel shows clean query, not raw with filename
+            is_tool_output=is_tool_output,
+            recent_count=len(context.recent_lines),
+            historical_count=len(context.historical_lines),
+            semantic_count=len(context.semantic_facts),
+            recent_preview=context.recent_lines[:3],
+            historical_preview=context.historical_lines[:3],
+            semantic_preview=context.semantic_facts[:3],
+            recent_ms=recent_ms,
+            historical_ms=historical_ms,
+            semantic_ms=semantic_ms,
+            semantic_k_used=effective_semantic_k,
+            semantic_adjust_reason=semantic_adjust_reason,
+            query_intent=query_intent,
+        )
     return context
 
 
@@ -679,6 +757,7 @@ def _record_memory_context_debug(
     semantic_ms: int = 0,
     semantic_k_used: int = 0,
     semantic_adjust_reason: str | None = None,
+    query_intent: str | None = None,
 ) -> None:
     payload = {
         "written_at": datetime.now().isoformat(timespec="seconds"),
@@ -696,6 +775,7 @@ def _record_memory_context_debug(
         "semantic_ms": semantic_ms,
         "semantic_k_used": semantic_k_used,
         "semantic_adjust_reason": semantic_adjust_reason,
+        "query_intent": query_intent,
     }
     if is_tool_output:
         # [MASTRO-FIX]: Το query εδώ είναι εσωτερικό tool-output (όχι πραγματικό

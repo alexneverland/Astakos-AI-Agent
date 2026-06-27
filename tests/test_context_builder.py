@@ -426,3 +426,138 @@ def test_format_recent_messages_keeps_informative_part_and_drops_operational_tai
     assert len(lines) == 1
     assert "Cloudflare protection" in lines[0]
     assert "Στείλε" not in lines[0]
+
+
+def test_food_memory_query_detector_matches_recall_phrases():
+    import memory.context_builder as cb
+
+    assert cb.looks_like_food_memory_query("Τι πήρα σήμερα για φαγητό;") is True
+    assert cb.looks_like_food_memory_query("Τι φαι φάγαμε σήμερα;") is True
+    assert cb.looks_like_food_memory_query("Θυμάσαι τι ψάρια πήρα;") is True
+    assert cb.looks_like_food_memory_query("Τι είχα πει ότι θα βάλω στο φούρνο;") is True
+
+
+def test_food_memory_query_detector_does_not_match_generic_chat():
+    import memory.context_builder as cb
+
+    assert cb.looks_like_food_memory_query("Πάμε μετά μια βόλτα;") is False
+    assert cb.looks_like_food_memory_query("Ναι ωραία") is False
+    assert cb.looks_like_food_memory_query("Τι έγινε με τη δουλειά;") is False
+
+
+def test_food_memory_query_boosts_semantic_k(monkeypatch):
+    import memory.context_builder as cb
+
+    captured = {}
+
+    def fake_semantic_search(query, k=8):
+        captured["query"] = query
+        captured["k"] = k
+        return []
+
+    ctx = cb.build_memory_context(
+        query="Τι πήρα σήμερα για φαγητό;",
+        channel="telegram",
+        recent_loader=lambda **kwargs: [],
+        temporal_loader=lambda **kwargs: [],
+        semantic_search=fake_semantic_search,
+        semantic_k=8,
+    )
+
+    assert ctx is not None
+    assert captured["k"] >= 6
+
+
+def test_classify_memory_query_intent_food_recall():
+    import memory.context_builder as cb
+
+    result = cb.classify_memory_query_intent("Τι πήρα σήμερα για φαγητό;")
+    assert result == "food_memory_recall"
+    typo_result = cb.classify_memory_query_intent("Τι φαι φάγαμε σήμερα;")
+    assert typo_result == "food_memory_recall"
+
+
+def test_classify_memory_query_intent_tool_result():
+    import memory.context_builder as cb
+
+    result = cb.classify_memory_query_intent("Τίτλος: ΔΕΔΔΗΕ ... URL: https://example.com")
+    assert result == "tool_result"
+
+
+def test_classify_memory_query_intent_news_opening():
+    import memory.context_builder as cb
+
+    result = cb.classify_memory_query_intent("Διάβασα μια είδηση ότι πειράζουν τους μετρητές")
+    assert result == "news_opening"
+
+
+def test_classify_memory_query_intent_web_followup():
+    import memory.context_builder as cb
+
+    result = cb.classify_memory_query_intent(
+        "Πώς μπορούσαν εξωτερικά να πειράζουν το software;",
+        has_recent_web_results=True,
+    )
+    assert result == "web_followup"
+
+
+def test_classify_memory_query_intent_low_complexity():
+    import memory.context_builder as cb
+
+    result = cb.classify_memory_query_intent("Ναι")
+    assert result == "low_complexity"
+
+
+def test_classify_memory_query_intent_generic():
+    import memory.context_builder as cb
+
+    result = cb.classify_memory_query_intent("Θυμάσαι τι είχαμε πει για τη βάρδια αύριο;")
+    assert result == "generic"
+
+
+def test_build_memory_context_records_query_intent_for_food_recall(monkeypatch):
+    import memory.context_builder as cb
+
+    captured = {}
+
+    def fake_semantic_search(query, k=8):
+        return []
+
+    def fake_debug(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(cb, "_record_memory_context_debug", fake_debug)
+
+    cb.build_memory_context(
+        query="Τι πήρα σήμερα για φαγητό;",
+        channel="telegram",
+        recent_loader=lambda **kwargs: [],
+        temporal_loader=lambda **kwargs: [],
+        semantic_search=fake_semantic_search,
+        semantic_k=8,
+    )
+
+    assert captured["query_intent"] == "food_memory_recall"
+
+
+def test_build_memory_context_skips_debug_write_when_disabled(monkeypatch):
+    import memory.context_builder as cb
+
+    called = {"count": 0}
+
+    def fake_debug(**kwargs):
+        called["count"] += 1
+
+    monkeypatch.setattr(cb, "_record_memory_context_debug", fake_debug)
+
+    cb.build_memory_context(
+        query="θυμάσαι τι φάγαμε;",
+        channel="telegram",
+        recent_loader=lambda **kwargs: [],
+        temporal_loader=lambda **kwargs: [],
+        semantic_search=lambda *args, **kwargs: [],
+        semantic_k=4,
+        write_debug=False,
+    )
+
+    assert called["count"] == 0

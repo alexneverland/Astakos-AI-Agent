@@ -412,6 +412,7 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
                 channel=channel or "telegram",
                 recent_limit=recent_limit,
                 semantic_k=semantic_k,
+                write_debug=False,
             )
             rendered_context = context.render()
             if rendered_context:
