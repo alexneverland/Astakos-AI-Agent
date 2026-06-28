@@ -37,7 +37,9 @@ from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FI
 def _normalize_gr(text: str) -> str:
     """Αφαιρεί τόνους από ελληνικό κείμενο για accent-insensitive σύγκριση."""
     import unicodedata
-    return unicodedata.normalize("NFD", text).encode("ascii", "ignore").decode("ascii").lower()
+    raw = str(text or "").strip().lower()
+    normalized = unicodedata.normalize("NFD", raw)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
 def _safe_classify_messenger_intent(text: str, *, has_active_draft: bool):
     """Lazy/fail-soft import so tests that stub `services` don't crash telegram_bot import."""
@@ -183,21 +185,28 @@ def should_skip_proactive_for_recent_activity(
 
 
 def _looks_like_contextual_not_needed_reply(text: str) -> bool:
-    import re
+    normalized = _normalize_gr(text or "")
 
-    normalized = (text or "").lower()
-    words = set(re.findall(r"[a-zA-Zα-ωΑ-Ωάέήίόύώϊϋΐΰ]+", normalized))
+    phrase_markers = (
+        "ειμαστε μαζι",
+        "ημαστε μαζι",
+        "ολοι μαζι",
+        "διπλα μου",
+        "εδω διπλα μου",
+        "ειναι η σοφια διπλα μου",
+        "ειναι διπλα μου η σοφια",
+        "μαζι με τη σοφια",
+        "μαζι με την σοφια",
+        "ηρθαμε θαλασσα",
+        "ηρθαμε εξω",
+        "ειμαστε θαλασσα",
+        "ειμαστε εξω",
+    )
 
-    tokens = {
-        "ειμαστε", "ήμαστε", "είμαστε",
-        "ηδη", "ήδη",
-        "μαζι", "μαζί",
-        "ηρθαμε", "ήρθαμε",
-        "εχουμε", "έχουμε",
-        "εδω", "εδώ",
-        "διπλα", "δίπλα",
-    }
-    return bool(words.intersection(tokens))
+    signal_count = sum(1 for marker in phrase_markers if marker in normalized)
+    has_sofia_ref = ("σοφ" in normalized) or ("sofia" in normalized)
+
+    return signal_count >= 2 or (has_sofia_ref and signal_count >= 1)
 
 def enqueue_fast_task(func, *args):
     fast_queue.put((func, args))
@@ -1005,6 +1014,51 @@ def handle_message(user_text: str, chat_id: str):
     if pending_routine_confirmations:
         text_check = _normalize_gr(clean_user_text)
         text_words = text_check.replace(",", "").replace(".", "").replace("!", "").split()
+
+        pending_items = [
+            (rid, pending_routine_confirmations.get(rid, {}))
+            for rid in list(pending_routine_confirmations.keys())
+        ]
+        has_pending_sofia_messenger = any(
+            (
+                "σοφ" in _normalize_gr(str((pdata or {}).get("event", "")))
+                or "sofia" in _normalize_gr(str((pdata or {}).get("event", "")))
+                or "messenger" in _normalize_gr(str((pdata or {}).get("event", "")))
+                or "μηνυμ" in _normalize_gr(str((pdata or {}).get("event", "")))
+            )
+            for _, pdata in pending_items
+        )
+
+        if has_pending_sofia_messenger and _looks_like_contextual_not_needed_reply(clean_user_text):
+            from memory.routine_db import remove_pending_confirmation
+            from memory.event_log import log_event
+
+            for rid, pdata in pending_items:
+                ev = (pdata or {}).get("event", "?")
+                event_l = _normalize_gr(str(ev))
+                is_sofia_messenger = (
+                    "σοφ" in event_l
+                    or "sofia" in event_l
+                    or "messenger" in event_l
+                    or "μηνυμ" in event_l
+                )
+                if not is_sofia_messenger:
+                    continue
+
+                print(f"📉 [Routine Dismissed - Contextual, No Decay]: {pdata}")
+                log_event(
+                    "routines",
+                    "routine_context_skip",
+                    routine_id=rid,
+                    event=ev,
+                    reason="user_already_with_sofia",
+                    debug_type="manual_control",
+                    debug_source="user_message",
+                    debug_effect="no_decay"
+                )
+                remove_pending_confirmation(rid)
+                bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
+                pending_routine_confirmations.pop(rid, None)
 
         yes_words = [_normalize_gr(w) for w in ["ναι", "yes", "οκ", "ok", "ισχύει", "σωστά", "σωστα"]]
         no_words  = [_normalize_gr(w) for w in ["όχι", "οχι", "no", "σταμάτα", "σταματα", "διέγραψε", "βγάλτο", "βγαλτο"]]

@@ -389,13 +389,7 @@ def test_not_together_phrase_without_active_sofia_context_does_nothing():
 
 
 def test_shift_logic_candidate_scores_debug_only():
-    """shift_logic produces a candidate directive but stays debug_only by design.
-
-    shift_logic is in _CONSERVATIVE_RULES, which applies a -0.25 penalty so it
-    never crosses the auto-apply threshold on its own (see
-    test_routine_reconciler_scoring.py::TestShiftWeek, which is the
-    authoritative spec for this rule's scoring behavior).
-    """
+    """Generic weekly shift statements stay debug_only by design."""
     fact = "[USER_FACT]: Αυτή την εβδομάδα δουλεύω απόγευμα στη βάρδια."
 
     candidates = infer_routine_reconciliation_candidates(
@@ -442,6 +436,44 @@ def test_shift_logic_candidate_scores_debug_only():
     assert not any(
         d.get("reason") == "shift_afternoon_week" for d in directives
     ), "infer_routine_reconciliation_directives only returns auto_apply directives — shift_logic is debug_only"
+
+
+def test_shift_logic_explicit_weekday_auto_applies():
+    fact = "[USER_FACT]: Δευτέρα είμαι απογευματινός βάρδια στην δουλειά."
+
+    candidates = infer_routine_reconciliation_candidates(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 6, 28, 15, 0, 0),
+    )
+
+    assert any(
+        c["kind"] == "context_state_set"
+        and c["reason"] == "shift_afternoon_week"
+        and c["key"] == "current_shift"
+        and c["until_date"] == "2026-07-05"
+        and c["rule_name"] == "shift_logic"
+        for c in candidates
+    )
+
+    normalized_fact = _normalize(fact)
+    scored = [
+        score_candidate_directive(
+            c,
+            normalized_fact=normalized_fact,
+            matched_rule_name=c["rule_name"],
+        )
+        for c in candidates
+    ]
+
+    assert any(
+        d["rule_name"] == "shift_logic"
+        and d["decision"] == "auto_apply"
+        and d["auto_apply"] is True
+        and d["key"] == "current_shift"
+        for d in scored
+    )
 
 
 def _make_same_cat_result(old_id, old_content, distance, old_meta=None):

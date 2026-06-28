@@ -165,6 +165,39 @@ def _has_this_workweek_scope(normalized: str) -> bool:
     return _contains_any(normalized, _WEEK_TOKENS)
 
 
+def _has_explicit_weekday_reference(normalized: str) -> bool:
+    return any(
+        token in normalized
+        for token in (
+            "δευτερα", "τριτη", "τεταρτη", "πεμπτη", "παρασκευη",
+            "monday", "tuesday", "wednesday", "thursday", "friday",
+        )
+    )
+
+
+def _extract_explicit_weekday_scope_dt(normalized: str, now: datetime) -> datetime | None:
+    weekday_aliases = {
+        "δευτερα": 0,
+        "τριτη": 1,
+        "τεταρτη": 2,
+        "πεμπτη": 3,
+        "παρασκευη": 4,
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+    }
+    for token, weekday_idx in weekday_aliases.items():
+        if token not in normalized:
+            continue
+        days_ahead = (weekday_idx - now.weekday()) % 7
+        if days_ahead == 0:
+            return now
+        return now + timedelta(days=days_ahead)
+    return None
+
+
 def _infer_september_resume(normalized_fact: str, *, now: datetime, explicit_dates: list[str]) -> str | None:
     for date_str in explicit_dates:
         if date_str[5:7] == "09":
@@ -705,7 +738,8 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     has_shift = _contains_any(normalized, _SHIFT_PM_TOKENS) or _contains_any(normalized, _SHIFT_AM_TOKENS)
     has_next_week = _has_next_workweek_scope(normalized)
     has_this_week = _has_this_workweek_scope(normalized)
-    has_week_scope = has_next_week or has_this_week
+    explicit_weekday_dt = _extract_explicit_weekday_scope_dt(normalized, now)
+    has_week_scope = has_next_week or has_this_week or explicit_weekday_dt is not None
 
     if not has_shift:
         return []
@@ -721,6 +755,8 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
                 effective_dt = parsed_dt
             except Exception:
                 effective_dt = now
+        elif explicit_weekday_dt is not None:
+            effective_dt = explicit_weekday_dt
         elif has_next_week:
             effective_dt = _next_monday(now)
         else:
@@ -1068,9 +1104,22 @@ def score_candidate_directive(
         score += _W_SPECIAL
         _append_signal(signals, f"special_rule:{matched_rule_name}")
 
-    if matched_rule_name in _CONSERVATIVE_RULES:
+    explicit_shift_schedule = (
+        matched_rule_name == "shift_logic"
+        and kind == "context_state_set"
+        and directive_key == "current_shift"
+        and has_activity
+        and has_state
+        and has_scope
+        and _has_explicit_weekday_reference(normalized_fact)
+    )
+
+    if matched_rule_name in _CONSERVATIVE_RULES and not explicit_shift_schedule:
         score += _P_CONSERVATIVE
         _append_flag(ambiguity_flags, f"{matched_rule_name}_conservative")
+    elif explicit_shift_schedule:
+        score += 0.10
+        _append_signal(signals, "shift_logic:explicit_schedule")
 
     # Penalty: activity required by this rule but not found in fact
     if matched_rule_name in _ACTIVITY_REQUIRED_RULES and not has_activity:

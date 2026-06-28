@@ -717,6 +717,12 @@ def test_telegram_bot_contextual_dismiss_skips_decay_for_sofia():
         debug_effect="no_decay"
     )
 
+
+def test_contextual_not_needed_reply_detects_sofia_presence_phrase():
+    assert bot._looks_like_contextual_not_needed_reply(
+        "Καλά βρε όλοι μαζι δεν ήρθαμε θάλασσα δίπλα μου είναι η Σοφία"
+    ) is True
+
 # ─────────────────────────────────────────────────────────────
 # Standalone runner
 # ─────────────────────────────────────────────────────────────
