@@ -786,7 +786,7 @@ def test_llm_impact_to_directives_normalizes_string_boolean_context_value():
     from services.routine_reconciler import _llm_impact_to_directives
 
     impact = {
-        "context_key": "family_outside_activity",
+        "context_key": "user_out_of_home",
         "context_value": "true",
         "impact": "live_context",
         "until_date": "2026-06-24",
@@ -834,3 +834,28 @@ def test_sofia_with_user_group_outing_reinforces_existing_state(monkeypatch):
 
     assert out
     assert any(d.get("kind") == "context_state_set" and d.get("key") == "sofia_with_user" for d in out)
+
+
+def test_family_outing_without_child_still_sets_user_out_of_home():
+    from services.routine_reconciler import _rule_family_outing_in_progress
+
+    now = datetime(2026, 6, 28, 14, 0)
+
+    directives = _rule_family_outing_in_progress(
+        normalized="πηγαμε θαλασσα και ειμαστε εξω",
+        dates=[],
+        now=now,
+    )
+
+    assert any(
+        d.get("kind") == "context_state_set"
+        and d.get("key") == "user_out_of_home"
+        and d.get("value") == "true"
+        for d in directives
+    )
+
+    assert not any(
+        d.get("kind") == "context_state_set"
+        and d.get("key") == "state:alexandros:outing"
+        for d in directives
+    )

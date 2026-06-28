@@ -375,29 +375,22 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
     """
     has_child = (
         _contains_any(normalized, _ALEXANDROS_TOKENS)
-        or "μικρ" in normalized
         or "παιδι" in normalized
-        or "ολοι μαζι" in normalized
+        or "μικρ" in normalized
     )
+
     has_outing = _contains_any(normalized, _OUTING_TOKENS)
     has_progress = _contains_any(normalized, _OUTING_PROGRESS_TOKENS)
 
-    if not (has_child and has_outing and has_progress):
+    # Generic outing signal for user/family being out of home
+    if not (has_outing and has_progress):
         return []
 
     until = max(dates) if dates else now.strftime("%Y-%m-%d")
 
-    d_child_outing = {
-        "kind": "context_state_set",
-        "key": "state:alexandros:outing",
-        "value": "in_progress",
-        "until_date": until,
-        "reason": "family_outing_in_progress",
-        "subject_tokens": _ALEXANDROS_TOKENS,
-        "include_tokens": _OUTING_TOKENS,
-        "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
-    }
+    out = []
 
+    # Always set generic out-of-home state
     d_user_out = {
         "kind": "context_state_set",
         "key": "user_out_of_home",
@@ -408,6 +401,21 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
         "include_tokens": _OUTING_TOKENS,
         "exclude_tokens": [],
     }
+    out.append(d_user_out)
+
+    # Only set child-specific outing state if child is actually mentioned
+    if has_child:
+        d_child_outing = {
+            "kind": "context_state_set",
+            "key": "state:alexandros:outing",
+            "value": "in_progress",
+            "until_date": until,
+            "reason": "family_outing_in_progress",
+            "subject_tokens": _ALEXANDROS_TOKENS,
+            "include_tokens": _OUTING_TOKENS,
+            "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
+        }
+        out.append(d_child_outing)
 
     cond_outing_progress = _build_condition_directive(
         subject_tokens=[],
@@ -439,9 +447,7 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
         reason="out_of_home_home_routine_condition",
     )
 
-    out = [d_child_outing, d_user_out]
-
-    if cond_outing_progress:
+    if has_child and cond_outing_progress:
         out.append(cond_outing_progress)
 
     if cond_outing_out_of_home:
@@ -1209,7 +1215,7 @@ _CANONICAL_CONTEXT_KEYS = {
     "user_out_of_home",
     "alexandros_away_from_home",
     "family_at_home",
-    "family_outside_activity",
+
     "sofia_with_user",
     "current_shift",
     "football_season",
@@ -1230,8 +1236,8 @@ def _normalize_context_key(raw: str) -> str:
         "family_at_home": "family_at_home",
         "at_home": "family_at_home",
 
-        "family_outside_activity": "family_outside_activity",
-        "outside_activity": "family_outside_activity",
+        "family_outside_activity": "user_out_of_home",
+        "outside_activity": "user_out_of_home",
 
         "sofia_with_user": "sofia_with_user",
         "current_shift": "current_shift",
@@ -1287,7 +1293,7 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
             subject_tokens = _ALEXANDROS_TOKENS
         elif context_key == "sofia_with_user":
             subject_tokens = _SOFIA_TOKENS
-        elif context_key in {"user_out_of_home", "family_at_home", "family_outside_activity"}:
+        elif context_key in {"user_out_of_home", "family_at_home"}:
             subject_tokens = []
 
         if context_key not in _CANONICAL_CONTEXT_KEYS:
@@ -1453,7 +1459,7 @@ def _infer_llm_reconciliation_candidates(
 - user_out_of_home
 - alexandros_away_from_home
 - family_at_home
-- family_outside_activity
+
 - sofia_with_user
 - current_shift
 - football_season
@@ -1472,14 +1478,13 @@ Output:
   {{"entity":"Λάζαρος","activity":"outing","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"user_out_of_home","context_value":true,"until_date":"{today}","reason":"user_out_evening"}},
   {{"entity":"Αλέξανδρος","activity":"home_presence","aliases":["με τη μαρια"],"state_change":null,"impact":"live_context","context_key":"alexandros_away_from_home","context_value":true,"until_date":"{today}","reason":"child_with_caregiver"}},
   {{"entity":"family","activity":"home_presence","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"family_at_home","context_value":false,"until_date":"{today}","reason":"family_out_evening"}},
-  {{"entity":"family","activity":"outing","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"family_outside_activity","context_value":true,"until_date":"{today}","reason":"family_out_evening"}}
+  {{"entity":"family","activity":"outing","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"user_out_of_home","context_value":true,"until_date":"{today}","reason":"family_out_evening"}}
 ]
 
 Fact: "Γυρίσαμε σπίτι"
 Output:
 [
-  {{"entity":"family","activity":"outing","aliases":["γυρισαμε σπιτι"],"state_change":null,"impact":"live_context","context_key":"user_out_of_home","context_value":false,"until_date":null,"reason":"returned_home"}},
-  {{"entity":"family","activity":"outing","aliases":["γυρισαμε σπιτι"],"state_change":null,"impact":"live_context","context_key":"family_outside_activity","context_value":false,"until_date":null,"reason":"returned_home"}}
+  {{"entity":"family","activity":"outing","aliases":["γυρισαμε σπιτι"],"state_change":null,"impact":"live_context","context_key":"user_out_of_home","context_value":false,"until_date":null,"reason":"returned_home"}}
 ]
 
 Fact: "Ο Αλέξανδρος είναι μαζί μας"
