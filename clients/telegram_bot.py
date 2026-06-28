@@ -181,6 +181,24 @@ def should_skip_proactive_for_recent_activity(
         return True
     return False
 
+
+def _looks_like_contextual_not_needed_reply(text: str) -> bool:
+    import re
+
+    normalized = (text or "").lower()
+    words = set(re.findall(r"[a-zA-Zα-ωΑ-Ωάέήίόύώϊϋΐΰ]+", normalized))
+
+    tokens = {
+        "ειμαστε", "ήμαστε", "είμαστε",
+        "ηδη", "ήδη",
+        "μαζι", "μαζί",
+        "ηρθαμε", "ήρθαμε",
+        "εχουμε", "έχουμε",
+        "εδω", "εδώ",
+        "διπλα", "δίπλα",
+    }
+    return bool(words.intersection(tokens))
+
 def enqueue_fast_task(func, *args):
     fast_queue.put((func, args))
 
@@ -1058,19 +1076,47 @@ def handle_message(user_text: str, chat_id: str):
                 pdata = pending_routine_confirmations.get(rid, {})
                 ev = pdata.get("event", "?")
 
-                decay_routine(rid)
-                remove_pending_confirmation(rid)
+                _reason = "explicit_dismissal"
+                _decay = True
 
-                log_event(
-                    "routines", 
-                    "dismissed", 
-                    routine_id=rid, 
-                    event=ev,
-                    debug_type="manual_control",
-                    debug_source="user_message",
-                    debug_effect="routine_changed",
+                event_l = (ev or "").lower()
+                is_sofia_messenger = (
+                    "σοφ" in event_l or
+                    "sofia" in event_l or
+                    "messenger" in event_l or
+                    "μηνυμ" in event_l
                 )
-                print(f"📉 [Routine Dismissed]: {pdata}")
+
+                if is_sofia_messenger and _looks_like_contextual_not_needed_reply(clean_user_text):
+                    _reason = "user_already_with_sofia"
+                    _decay = False
+
+                if _decay:
+                    decay_routine(rid)
+                    print(f"📉 [Routine Dismissed - Decayed]: {pdata}")
+                    log_event(
+                        "routines", 
+                        "dismissed", 
+                        routine_id=rid, 
+                        event=ev,
+                        debug_type="manual_control",
+                        debug_source="user_message",
+                        debug_effect="routine_changed",
+                    )
+                else:
+                    print(f"📉 [Routine Dismissed - Contextual, No Decay]: {pdata}")
+                    log_event(
+                        "routines",
+                        "routine_context_skip",
+                        routine_id=rid,
+                        event=ev,
+                        reason=_reason,
+                        debug_type="manual_control",
+                        debug_source="user_message",
+                        debug_effect="no_decay"
+                    )
+
+                remove_pending_confirmation(rid)
                 bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
 
                 pending_routine_confirmations.pop(rid, None)

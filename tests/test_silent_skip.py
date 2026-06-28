@@ -75,6 +75,7 @@ def _stub_modules():
         "memory", "memory.event_log", "memory.vector_store",
         "memory.working_memory", "memory.session_memory",
         "memory.context_builder", "memory.routine_db",
+        "memory.pending_assets",
     ]:
         sys.modules[mod] = types.ModuleType(mod)
 
@@ -95,6 +96,19 @@ def _stub_modules():
     sm.log_exchange           = MagicMock()
     sm._run_session_summary   = MagicMock()
     sm.startup_stale_cleanup  = MagicMock()
+
+    pa = sys.modules["memory.pending_assets"]
+    pa.clear_expired_pending_assets = MagicMock()
+    pa.process_pending_assets_from_message = MagicMock()
+    pa.get_pending_asset = MagicMock(return_value=None)
+    pa.get_latest_pending_asset = MagicMock(return_value=None)
+    pa.mark_pending_asset_confirmed = MagicMock()
+    pa.mark_pending_asset_rejected = MagicMock()
+    pa.mark_pending_asset_cancelled = MagicMock()
+    pa.create_pending_asset_archive = MagicMock()
+    pa.classify_pending_asset_reply = MagicMock(return_value=None)
+    pa.looks_like_asset_confirmation_prompt = MagicMock(return_value=False)
+    pa.is_reply_to_recent_asset_prompt = MagicMock(return_value=False)
 
     rdb = sys.modules["memory.routine_db"]
     import enum
@@ -661,6 +675,8 @@ def test_timeout_decay_ignores_stale_pending():
 
     action_types = [a for _, a in logged]
 
+
+
     assert "routine_pending_stale_cleared" in action_types
     assert "routine_timeout_decay" not in action_types
 
@@ -672,14 +688,40 @@ def test_timeout_decay_ignores_stale_pending():
 
     # Reset mock
     rdb.get_routine_state.return_value = rdb.RoutineState.TRIGGER_PENDING
+
+def test_telegram_bot_contextual_dismiss_skips_decay_for_sofia():
+    bot.pending_routine_confirmations = {
+        999: {"event": "Στείλε μήνυμα στη Σοφία (messenger)", "sent_at": _fixed_now()}
+    }
+    
+    rdb = sys.modules["memory.routine_db"]
+    rdb.decay_routine.reset_mock()
+    rdb.remove_pending_confirmation.reset_mock()
+    
+    el = sys.modules["memory.event_log"]
+    el.log_event.reset_mock()
+
+    bot.handle_message("ήρθαμε θάλασσα, είμαστε μαζί", "123456")
+
+    rdb.decay_routine.assert_not_called()
+    rdb.remove_pending_confirmation.assert_called_once_with(999)
+
+    el.log_event.assert_any_call(
+        "routines",
+        "routine_context_skip",
+        routine_id=999,
+        event="Στείλε μήνυμα στη Σοφία (messenger)",
+        reason="user_already_with_sofia",
+        debug_type="manual_control",
+        debug_source="user_message",
+        debug_effect="no_decay"
+    )
+
 # ─────────────────────────────────────────────────────────────
 # Standalone runner
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import traceback
-    # Όταν τρέχει standalone (όχι μέσω pytest) κανείς δεν καλεί τα xunit hooks
-    # setup_module()/teardown_module() αυτόματα — τα καλούμε εδώ χειροκίνητα
-    # ώστε το bot/stubs να υπάρχουν πριν τρέξουν τα tests.
     setup_module(None)
     try:
         tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

@@ -779,6 +779,21 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     return directives
 
 
+def _sofia_state_is_active(now: datetime) -> bool:
+    from memory.routine_db import get_context_state
+
+    state_data = get_context_state("sofia_with_user")
+    if not state_data:
+        return False
+
+    expires_at = state_data.get("expires_at")
+    today = now.strftime("%Y-%m-%d")
+    if expires_at and expires_at < today:
+        return False
+
+    return str(state_data.get("value", "")).lower() == "true"
+
+
 def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3A — sofia_with_user:
@@ -788,7 +803,22 @@ def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> l
     """
     has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
     has_together = _contains_any(normalized, _TOGETHER_TOKENS)
-    if not (has_sofia and has_together):
+
+    group_outing_tokens = [
+        "ηρθαμε", "ήρθαμε", "πηγαμε", "πήγαμε", "ειμαστε", "είμαστε",
+        "ολοι", "όλοι", "οικογενειακ", "μαζι", "μαζί",
+        "θαλασσα", "θάλασσα", "παραλια", "παραλία", "μπανιο", "μπάνιο",
+        "βγηκαμε", "βγήκαμε", "βολτα", "βόλτα", "εκδρομ"
+    ]
+    has_group_outing = _contains_any(normalized, group_outing_tokens)
+
+    # Strong path: explicit Sofia + together
+    if has_sofia and has_together:
+        pass
+    # Softer path: group outing wording can reinforce an already-active Sofia context
+    elif has_group_outing and _sofia_state_is_active(now):
+        pass
+    else:
         return []
     until = None
     if dates:

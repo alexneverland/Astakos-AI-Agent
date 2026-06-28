@@ -824,3 +824,13 @@ def test_llm_context_key_rejects_non_canonical_keys():
 
     directives = _llm_impact_to_directives(impact)
     assert directives == []
+
+def test_sofia_with_user_group_outing_reinforces_existing_state(monkeypatch):
+    from services import routine_reconciler as rr
+
+    monkeypatch.setattr(rr, "_sofia_state_is_active", lambda now: True)
+
+    out = rr._rule_sofia_with_user("ηρθαμε θαλασσα ολοι μαζι", [], datetime(2026, 6, 28))
+
+    assert out
+    assert any(d.get("kind") == "context_state_set" and d.get("key") == "sofia_with_user" for d in out)
