@@ -1,4 +1,4 @@
-﻿from unittest.mock import MagicMock
+from unittest.mock import MagicMock
 
 import memory.context_builder as cb
 from memory.context_builder import build_memory_context

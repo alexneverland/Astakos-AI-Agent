@@ -1322,6 +1322,55 @@ def _extract_fact_date(text: str) -> str:
     match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", str(text or ""))
     return match.group(0) if match else ""
 
+
+def _same_day_personal_or_work_near_duplicate(candidate: dict, accepted_candidates: list[dict]) -> bool:
+    allowed = {"family", "work", "lazaros"}
+    cand_category = str(candidate.get("category") or "").lower()
+    if cand_category not in allowed:
+        return False
+
+    cand_fact = str(candidate.get("fact") or "").strip()
+    cand_scope = str(candidate.get("time_scope") or "").strip()
+    cand_topic = str(candidate.get("topic") or "").lower().strip()
+    cand_detail = str(candidate.get("topic_detail") or "").lower().strip()
+
+    if not cand_fact:
+        return False
+
+    cand_date = _extract_fact_date(cand_fact)
+
+    for existing in accepted_candidates:
+        existing_category = str(existing.get("category") or "").lower()
+        if existing_category not in allowed:
+            continue
+
+        existing_fact = str(existing.get("fact") or "").strip()
+        existing_scope = str(existing.get("time_scope") or "").strip()
+        existing_topic = str(existing.get("topic") or "").lower().strip()
+        existing_detail = str(existing.get("topic_detail") or "").lower().strip()
+
+        if not existing_fact:
+            continue
+
+        existing_date = _extract_fact_date(existing_fact)
+
+        if cand_scope and existing_scope and cand_scope != existing_scope:
+            if not (cand_date and existing_date and cand_date == existing_date):
+                continue
+
+        same_topic = cand_topic and cand_topic == existing_topic
+        same_detail = cand_detail and cand_detail == existing_detail
+
+        overlap = memory_overlap_ratio(existing_fact, cand_fact)
+
+        if same_topic or same_detail:
+            if overlap >= 0.78:
+                return True
+        elif cand_date and existing_date and cand_date == existing_date and overlap >= 0.86:
+            return True
+
+    return False
+
 def _family_fact_same_day_near_duplicate(candidate: dict, accepted_candidates: list[dict]) -> bool:
     if str(candidate.get("category") or "").lower() != "family":
         return False
@@ -1847,6 +1896,10 @@ def run_memory_sifter_slow(
 
             if _fact_matches_any(fact, accepted_facts):
                 print(f"\033[90m[MemorySifterSlow]: accepted-duplicate skip -> {fact[:80]}\033[0m")
+                continue
+
+            if _same_day_personal_or_work_near_duplicate(candidate, accepted_candidates):
+                print(f"\033[90m[MemorySifterSlow]: personal/work near-duplicate skip -> {fact[:80]}\033[0m")
                 continue
 
             if _family_fact_same_day_near_duplicate(candidate, accepted_candidates):
