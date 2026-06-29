@@ -2,6 +2,7 @@ import pytest
 from core.utils import (
     get_ultra_light_ack_response,
     is_simple_chat_fast_path_candidate,
+    is_medium_web_chat_path_candidate,
     is_ultra_light_ack,
 )
 
@@ -57,7 +58,7 @@ def test_ultra_light_ack_response_is_neutral_confirmation():
 from unittest.mock import patch
 
 
-@patch("clients.telegram_bot.active_draft_status", return_value=(False, "missing", None))
+@patch("core.messenger_draft.active_draft_status", return_value=(False, "missing", None))
 @patch("tools.telegram.send_telegram_msg")
 @patch("clients.telegram_bot._append_to_analytics_log")
 @patch("clients.telegram_bot.graph.stream")
@@ -75,8 +76,8 @@ def test_messenger_intent_clarify_does_not_create_draft(mock_stream, mock_append
     assert "Δεν υπάρχει ενεργό draft αυτή τη στιγμή" in sent_text
 
 
-@patch("clients.telegram_bot.active_draft_status", return_value=(True, "active", {"message": "hello"}))
-@patch("clients.telegram_bot.clear_draft", return_value=True)
+@patch("core.messenger_draft.active_draft_status", return_value=(True, "active", {"message": "hello"}))
+@patch("core.messenger_draft.clear_draft", return_value=True)
 @patch("tools.telegram.send_telegram_msg")
 @patch("clients.telegram_bot._append_to_analytics_log")
 @patch("clients.telegram_bot.graph.stream")
@@ -95,3 +96,7 @@ def test_messenger_intent_clear_closes_draft(mock_stream, mock_append, mock_send
     args, _ = mock_send.call_args
     sent_text = args[1]
     assert "Το draft καθαρίστηκε" in sent_text
+
+
+def test_medium_path_candidate_for_telegram_reflective_turn():
+    assert is_medium_web_chat_path_candidate('σχολασα φιλε και παω σπιτι') is True
