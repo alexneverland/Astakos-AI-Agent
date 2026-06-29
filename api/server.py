@@ -694,6 +694,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         from core.utils import (
             is_simple_chat_fast_path_candidate,
+            is_medium_web_chat_path_candidate,
             is_ultra_light_ack,
             get_ultra_light_ack_response,
             is_reply_to_recent_mail_prompt,
@@ -710,14 +711,30 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             handling_agent = "UltraLightACK"
             print(f"\033[92m[Web->UltraLightACK]: Ακαριαία απάντηση στο '{isolated_user_input}'\033[0m")
         else:
-            fast_path_used = is_simple_chat_fast_path_candidate(isolated_user_input)
+            medium_path_used = is_medium_web_chat_path_candidate(isolated_user_input)
+            fast_path_used = (not medium_path_used) and is_simple_chat_fast_path_candidate(isolated_user_input)
             _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
             _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
+            _trace.mark_phase("medium_path_candidate", 1 if medium_path_used else 0)
+            _trace.mark_phase("medium_path_used", 1 if medium_path_used else 0)
 
-            limit = 100
+            if fast_path_used:
+                limit = 12
+                messages_for_graph = context_msgs[-6:] + [human_msg]
+            elif medium_path_used:
+                limit = 24
+                messages_for_graph = context_msgs[-8:] + [human_msg]
+            else:
+                limit = 100
+                messages_for_graph = context_msgs + [human_msg]
+
+            _trace.mark_phase("web_graph_budget", limit)
 
             t_graph_0 = perf_counter()
-            for event in graph.stream({"messages": context_msgs + [human_msg], "channel": "web"}, {"recursion_limit": limit}):
+            for event in graph.stream(
+                {"messages": messages_for_graph, "channel": "web"},
+                {"recursion_limit": limit},
+            ):
                 _trace.process_event(event)
                 for node, data in event.items():
                     if data is None:

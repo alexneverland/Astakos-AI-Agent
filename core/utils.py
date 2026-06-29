@@ -194,6 +194,76 @@ def is_reply_to_recent_mail_prompt(messages: list, limit: int = 4) -> bool:
     return False
 
 
+def is_medium_web_chat_path_candidate(user_text: str) -> bool:
+    """
+    Detect medium-weight conversational web turns that do not need the full
+    graph budget, but are richer than the tiny fast-path chat.
+    """
+    if not user_text:
+        return False
+
+    q = clean_message(user_text).strip().lower()
+    if not q:
+        return False
+
+    # Keep explicit commands and tool/control phrasing on the full path.
+    if q.startswith("/"):
+        return False
+
+    strong_control_tokens = (
+        "στειλε", "στείλε",
+        "θυμα", "θυμά",
+        "δες", "κοιτα",
+        "πάγωσε", "παγωσε",
+        "άλλαξε", "αλλαξε",
+        "σβησε", "σβήσε",
+        "γράψε", "γραψε",
+        "φτιάξε", "φτιαξε",
+        "ρύθμισε", "ρυθμισε",
+        "λίστα", "λιστα",
+        "ρουτίν", "ρουτιν", "routine",
+        "υπενθύμι", "υπενθυμι",
+        "φωτο", "photo", "audio", "voice",
+        "pdf", "docx", "επισυναπ", "attachment",
+    )
+    if any(token in q for token in strong_control_tokens):
+        return False
+
+    word_count = len(q.split())
+    if word_count < 4 or word_count > 28:
+        return False
+
+    low_signal_starts = (
+        "ναι ", "οκ ", "ok ", "έγινε ", "εγινε ", "καλά ", "καλα ",
+        "σε λίγο ", "σε λιγο ", "αργότερα ", "αργοτερα ", "μετά ", "μετα ",
+        "ευχαριστώ ", "ευχαριστω ", "όχι εντάξει", "οχι ενταξει",
+        "βαριέμαι ", "βαριεμαι ",
+    )
+    if q in {"ναι", "οκ", "ok", "έγινε", "εγινε", "καλά", "καλα"}:
+        return False
+    if q.startswith(low_signal_starts) and word_count <= 12:
+        return False
+
+    reflective_starts = (
+        "εκλεισα ", "έκλεισα ",
+        "δυσκολα ", "δύσκολα ",
+        "νομιζω ", "νομίζω ",
+        "αγχωνομαι ", "αγχώνομαι ",
+        "φοβαμαι ", "φοβάμαι ",
+        "σκεφτομαι ", "σκέφτομαι ",
+        "μαλλον ", "μάλλον ",
+    )
+    if q.startswith(reflective_starts):
+        return True
+
+    # Short-to-medium conversational questions can also use the middle budget
+    # as long as they are not action/control/tool requests.
+    if "?" in q or ";" in q:
+        return word_count <= 14
+
+    return True
+
+
 def extract_list_selection_index(text: str) -> int | None:
     """
     Detects an explicit 1-based choice from natural language follow-ups like:
@@ -412,7 +482,7 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
                 channel=channel or "telegram",
                 recent_limit=recent_limit,
                 semantic_k=semantic_k,
-                write_debug=False,
+                write_debug=True,
             )
             rendered_context = context.render()
             if rendered_context:
