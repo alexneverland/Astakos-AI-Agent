@@ -1429,6 +1429,7 @@ def handle_message(user_text: str, chat_id: str):
         
         from core.utils import (
             is_simple_chat_fast_path_candidate,
+            is_medium_web_chat_path_candidate,
             is_ultra_light_ack,
             get_ultra_light_ack_response,
             is_reply_to_recent_mail_prompt,
@@ -1436,6 +1437,7 @@ def handle_message(user_text: str, chat_id: str):
         
         is_ultra_ack = is_ultra_light_ack(clean_user_text)
         fast_path_used = False
+        medium_path_used = False
 
         # 1. graph_call_ms
         graph_call_started = perf_counter()
@@ -1449,11 +1451,21 @@ def handle_message(user_text: str, chat_id: str):
             print(f"\033[92m[Telegram->UltraLightACK]: Ακαριαία απάντηση στο '{clean_user_text}'\033[0m")
             events = []
         else:
-            fast_path_used = is_simple_chat_fast_path_candidate(clean_user_text)
+            medium_path_used = is_medium_web_chat_path_candidate(clean_user_text)
+            fast_path_used = (not medium_path_used) and is_simple_chat_fast_path_candidate(clean_user_text)
+
             _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
+            _trace.mark_phase("medium_path_candidate", 1 if medium_path_used else 0)
 
             if fast_path_used:
                 events = _run_fast_chat_path(context_msgs, current_msg)
+            elif medium_path_used:
+                events = list(
+                    graph.stream(
+                        {"messages": context_msgs[-8:] + [current_msg], "channel": "telegram"},
+                        {"recursion_limit": 24},
+                    )
+                )
             else:
                 events = list(
                     graph.stream(
@@ -1464,6 +1476,14 @@ def handle_message(user_text: str, chat_id: str):
         graph_call_ms = int((perf_counter() - graph_call_started) * 1000)
         _trace.mark_phase("graph_call_ms", graph_call_ms)
         _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
+        _trace.mark_phase("medium_path_used", 1 if medium_path_used else 0)
+
+        if fast_path_used:
+            _trace.mark_phase("telegram_graph_budget", 12)
+        elif medium_path_used:
+            _trace.mark_phase("telegram_graph_budget", 24)
+        else:
+            _trace.mark_phase("telegram_graph_budget", 100)
 
         for event in events:
             _trace.process_event(event)
