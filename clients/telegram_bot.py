@@ -3020,8 +3020,6 @@ def startup_check_missed_routines():
             if is_context_skip:
                 msg = msg.replace("[CONTEXT_SKIP]", "").strip()
 
-            send_telegram_msg(msg)
-
             if is_context_skip:
                 _clear_routine_pending_confirmation(r_id)
                 muted_until = _apply_context_mute(r_id, event_name, ctx)
@@ -3032,6 +3030,8 @@ def startup_check_missed_routines():
                          deferred=True, channel="telegram")
                 print(f"\033[90m[MissedRoutines]: CONTEXT_SKIP '{event_name}' ({missed_min} λεπτά αργά) → '{msg[:80]}'\033[0m")
                 continue
+
+            send_telegram_msg(msg)
 
             mark_routine_notified(r_id)
             sent_at = datetime.now()
@@ -3389,8 +3389,6 @@ def job_check_routines():
                             is_context_skip = True
                             msg = msg.replace("[CONTEXT_SKIP]", "").strip()
 
-                        send_telegram_msg(msg)
-                        sent_at = datetime.now()
                         context_skip_ctx = ""
                         if is_context_skip:
                             try:
@@ -3416,6 +3414,8 @@ def job_check_routines():
                                 )
                                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
                             else:
+                                send_telegram_msg(msg)
+                                sent_at = datetime.now()
                                 mark_routine_notified(r_id)
                                 log_event("routines", "routine_triggered", 
                                     routine_id=r_id,
@@ -3465,8 +3465,6 @@ def job_check_routines():
                         cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                         conn.commit()
 
-                        send_telegram_msg(msg)
-
                         if is_context_skip:
                             try:
                                 context_skip_ctx = _build_proactive_memory_context(event_name)
@@ -3488,6 +3486,7 @@ def job_check_routines():
                             # DO NOT mark as pending, just keep it active.
                             bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
                         else:
+                            send_telegram_msg(msg)
                             mark_routine_notified(r_id)
                             log_event(
                                 "routines", 

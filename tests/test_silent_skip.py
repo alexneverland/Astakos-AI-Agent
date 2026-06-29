@@ -526,15 +526,13 @@ def test_already_muted_routine_does_not_send_sentimental_followup():
 # Tests: CONTEXT_SKIP (regression)
 # ─────────────────────────────────────────────────────────────
 
-def test_context_skip_sends_message_without_tag():
-    """[CONTEXT_SKIP] → στέλνεται μήνυμα, χωρίς το tag."""
+def test_context_skip_does_not_send_message():
+    """[CONTEXT_SKIP] → δεν στέλνεται μήνυμα στον χρήστη."""
     sent, _, _ = _run_job(
         [_due_routine()],
         craft_return="[CONTEXT_SKIP] Κανονικά θα πήγαινες στο πάρκο αλλά βρέχει!",
     )
-    assert len(sent) == 1, f"Έπρεπε 1 μήνυμα, στάλθηκαν: {sent}"
-    assert "[CONTEXT_SKIP]" not in sent[0]
-    assert "πάρκο" in sent[0]
+    assert sent == [], f"Δεν έπρεπε να σταλεί μήνυμα, στάλθηκαν: {sent}"
 
 
 def test_context_skip_logs_context_skip():
@@ -548,14 +546,14 @@ def test_context_skip_logs_context_skip():
 
 
 def test_context_skip_does_not_create_pending_confirmation():
-    """[CONTEXT_SKIP] → ούτε memory pending ούτε DB pending save."""
+    """[CONTEXT_SKIP] → ούτε μήνυμα, ούτε memory pending, ούτε DB pending save."""
     rdb = sys.modules["memory.routine_db"]
     bot.pending_routine_confirmations.clear()
     sent, _, _ = _run_job(
         [_due_routine()],
         craft_return="[CONTEXT_SKIP] Ο μικρός λείπει, σήμερα μόνο νοσταλγία.",
     )
-    assert len(sent) == 1
+    assert sent == []
     assert bot.pending_routine_confirmations == {}
     rdb.save_pending_confirmation.assert_not_called()
     rdb.mark_routine_notified.assert_not_called()
@@ -582,14 +580,14 @@ def test_context_skip_can_set_muted_window():
 
 
 def test_deferred_context_skip_does_not_create_pending_confirmation():
-    """Deferred [CONTEXT_SKIP] → μήνυμα χωρίς pending."""
+    """Deferred [CONTEXT_SKIP] → ούτε μήνυμα ούτε pending."""
     rdb = sys.modules["memory.routine_db"]
     bot.pending_routine_confirmations.clear()
     sent, logged, bus_events = _run_missed_job(
         [_missed_routine()],
         craft_return="[CONTEXT_SKIP] Περίεργη η ώρα χωρίς τον μικρό σήμερα, ε;",
     )
-    assert len(sent) == 1
+    assert sent == []
     assert bot.pending_routine_confirmations == {}
     assert any(action == "routine_context_skip" for _, action in logged)
     assert "routine_skipped_context" in bus_events
