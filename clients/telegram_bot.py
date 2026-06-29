@@ -1433,6 +1433,8 @@ def handle_message(user_text: str, chat_id: str):
             is_ultra_light_ack,
             get_ultra_light_ack_response,
             is_reply_to_recent_mail_prompt,
+            looks_like_terminal_linkedin_draft_result,
+            build_linkedin_draft_ready_reply,
         )
         
         is_ultra_ack = is_ultra_light_ack(clean_user_text)
@@ -1539,6 +1541,9 @@ def handle_message(user_text: str, chat_id: str):
             cleaned_response = strip_operational_assistant_paragraphs(final_ai_response).strip()
             if cleaned_response:
                 final_ai_response = cleaned_response
+
+        if any(looks_like_terminal_linkedin_draft_result(r) for r in tool_result_fallbacks):
+            final_ai_response = build_linkedin_draft_ready_reply(tool_result_fallbacks)
 
         if not final_ai_response:
             t_fallback_0 = perf_counter()

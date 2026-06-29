@@ -698,6 +698,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             is_ultra_light_ack,
             get_ultra_light_ack_response,
             is_reply_to_recent_mail_prompt,
+            looks_like_terminal_linkedin_draft_result,
+            build_linkedin_draft_ready_reply,
         )
         
         is_ultra_ack = is_ultra_light_ack(isolated_user_input)
@@ -779,6 +781,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             _trace.mark_phase("graph_stream_ms", graph_elapsed_ms)
 
         t_build_0 = perf_counter()
+
+        if any(looks_like_terminal_linkedin_draft_result(r) for r in tool_result_fallbacks):
+            final_ai_response = build_linkedin_draft_ready_reply(tool_result_fallbacks)
 
         if not final_ai_response:
             final_ai_response = _tool_results_fallback_response(isolated_user_input, tool_result_fallbacks)

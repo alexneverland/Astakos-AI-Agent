@@ -426,7 +426,15 @@ def home_agent_node(state):
 
 
 def web_agent_node(state: AgentState):
-    from core.utils import load_agent_prompt, clean_message
+    from core.utils import (
+        load_agent_prompt,
+        clean_message,
+        filter_recent_web_tool_results,
+        looks_like_web_tool_error,
+        build_web_failure_reply,
+        looks_like_terminal_linkedin_draft_result,
+        build_linkedin_draft_ready_reply,
+    )
     from config import BASE_DIR, PHOTOS_DIR 
     import re
     import os
@@ -453,6 +461,21 @@ def web_agent_node(state: AgentState):
                 print(f"\033[92m[Web-Vision]: Pixels loaded for analysis: {filename}\033[0m")
         except Exception as e:
             print(f"⚠️ Web Vision Error: {e}")
+
+    recent_web_tool_results = filter_recent_web_tool_results(history)
+    web_errors = [(name, text) for name, text in recent_web_tool_results if looks_like_web_tool_error(text)]
+    web_successes = [(name, text) for name, text in recent_web_tool_results if not looks_like_web_tool_error(text)]
+    linkedin_terminal_results = [
+        text for _, text in recent_web_tool_results
+        if looks_like_terminal_linkedin_draft_result(text)
+    ]
+
+    if linkedin_terminal_results:
+        from langchain_core.messages import AIMessage as _AIMsg
+        return {
+            "messages": [_AIMsg(content=build_linkedin_draft_ready_reply(linkedin_terminal_results))],
+            "current_agent": "Web_Agent",
+        }
 
     system_base = load_agent_prompt("Web_Agent", "Είσαι ο Web_Agent.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
@@ -488,11 +511,6 @@ def web_agent_node(state: AgentState):
     result = llm.bind_tools(web_tools).invoke(final_messages)
     content = clean_message(result.content).strip() if result.content else ""
     has_tool_calls = bool(getattr(result, "tool_calls", None))
-
-    from core.utils import filter_recent_web_tool_results, looks_like_web_tool_error, build_web_failure_reply
-    recent_web_tool_results = filter_recent_web_tool_results(history)
-    web_errors = [(name, text) for name, text in recent_web_tool_results if looks_like_web_tool_error(text)]
-    web_successes = [(name, text) for name, text in recent_web_tool_results if not looks_like_web_tool_error(text)]
 
     if web_errors and not web_successes:
         guarded_reply = build_web_failure_reply(last_msg_text, recent_web_tool_results)

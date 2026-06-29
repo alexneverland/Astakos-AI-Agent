@@ -1,7 +1,9 @@
 from core.utils import (
     looks_like_web_tool_error,
     filter_recent_web_tool_results,
-    build_web_failure_reply
+    build_web_failure_reply,
+    looks_like_terminal_linkedin_draft_result,
+    build_linkedin_draft_ready_reply,
 )
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 
@@ -144,3 +146,47 @@ def test_web_agent_node_does_not_override_when_one_web_tool_succeeds(monkeypatch
 
     assert "4.300" in reply
     assert "δεν θέλω να σου πω" not in reply
+
+def test_linkedin_terminal_result_detection():
+    text = "SUCCESS: Το draft είναι έτοιμο και παρκαρισμένο. STOP calling tools and report to the user that the draft is ready for their approval."
+    assert looks_like_terminal_linkedin_draft_result(text) is True
+
+
+def test_linkedin_terminal_reply_builder():
+    reply = build_linkedin_draft_ready_reply([
+        "SUCCESS: Το draft είναι έτοιμο και παρκαρισμένο. STOP calling tools and report to the user that the draft is ready for their approval."
+    ])
+    assert "LinkedIn" in reply
+    assert "έτοιμο" in reply
+    assert "έγκριση" in reply
+
+
+def test_web_agent_node_short_circuits_after_linkedin_draft_success(monkeypatch):
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            raise AssertionError("LLM should not run after terminal LinkedIn draft tool result")
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+
+    state = {
+        "messages": [
+            HumanMessage(content="Γράψε post για το LinkedIn"),
+            AIMessage(content="", tool_calls=[{"name": "update_pending_linkedin_post", "args": {}, "id": "t1"}]),
+            ToolMessage(
+                tool_call_id="t1",
+                name="update_pending_linkedin_post",
+                content="SUCCESS: Το draft είναι έτοιμο και παρκαρισμένο. STOP calling tools and report to the user that the draft is ready for their approval."
+            ),
+        ],
+        "channel": "web",
+    }
+
+    result = web_agent_node(state)
+    reply = result["messages"][-1].content
+
+    assert "LinkedIn" in reply
+    assert "έγκριση" in reply

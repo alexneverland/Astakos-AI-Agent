@@ -730,7 +730,17 @@ def collect_recent_tool_messages_since_last_user(messages: list) -> list:
 
 def filter_recent_web_tool_results(messages: list) -> list:
     recent_tools = collect_recent_tool_messages_since_last_user(messages)
-    web_tools = {'duckduckgo_search', 'browse_url', 'search_google_places', 'get_news', 'get_weather_forecast', 'get_navigation_info', 'search_supermarket_prices'}
+    web_tools = {
+        'duckduckgo_search',
+        'browse_url',
+        'search_google_places',
+        'get_news',
+        'get_weather_forecast',
+        'get_navigation_info',
+        'search_supermarket_prices',
+        'update_pending_linkedin_post',
+        'process_and_clear_linkedin_post',
+    }
     
     results = []
     for msg in recent_tools:
@@ -746,3 +756,31 @@ def build_web_failure_reply(user_text: str, tool_results: list) -> str:
     is_qty = any(w in user_text.lower() for w in qty_intents)
     kind = 'νούμερο/στοιχείο' if is_qty else 'πληροφορία'
     return f'Μάστορα, προσπάθησα να το επιβεβαιώσω από web sources, αλλά αυτή τη στιγμή δεν πήρα αξιόπιστο αποτέλεσμα από τα εργαλεία μου, οπότε δεν θέλω να σου πω {kind} στον αέρα. Αν θέλεις, δώσε μου συγκεκριμένο link ή το ξαναπιάνουμε αργότερα.'
+
+def looks_like_terminal_linkedin_draft_result(text: str) -> bool:
+    """Return True when a LinkedIn draft tool already finished successfully and the turn should stop."""
+    content = clean_message(text).strip().lower()
+    if not content or not content.startswith("success:"):
+        return False
+    return "draft" in content and "approval" in content
+
+def build_linkedin_draft_ready_reply(tool_results: list[str]) -> str:
+    """Build a clean user-facing confirmation after the LinkedIn draft is already parked."""
+    photo_attached = False
+    for raw in tool_results:
+        text = clean_message(raw).strip().lower()
+        if not text or looks_like_terminal_linkedin_draft_result(text):
+            continue
+        if "[send_photo:" in text or "image_path" in text or "photo_path" in text:
+            photo_attached = True
+
+    if photo_attached:
+        return (
+            "Έγινε, μάστορα. Το draft του LinkedIn είναι έτοιμο και το έχω παρκαρισμένο "
+            "μαζί με την εικόνα για έγκριση. Αν θες, στο δείχνω ή το δημοσιεύω μόλις μου πεις."
+        )
+
+    return (
+        "Έγινε, μάστορα. Το draft του LinkedIn είναι έτοιμο και παρκαρισμένο για έγκριση. "
+        "Αν θες, στο δείχνω ή το δημοσιεύω μόλις μου πεις."
+    )
