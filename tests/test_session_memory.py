@@ -442,3 +442,87 @@ def test_memory_sifter_skips_operational_mail_image_request(monkeypatch):
 
     assert gemini_called["value"] is True
     assert saved == []
+
+
+# ─── Ephemeral conversational source tests ────────────────────────────────────
+
+def test_ephemeral_conversational_message_is_not_saved(monkeypatch):
+    """Conversational trash like 'Ναι φίλε μόλις φάγαμε και σε 10 λεπτά πάμε για ύπνο'
+    must NOT be saved — it has zero future value."""
+    from memory import session_memory as sm
+
+    saved = []
+
+    monkeypatch.setattr(sm, "safe_gemini_call", lambda prompt: type("R", (), {
+        "text": """[
+            {
+                "fact": "[USER_FACT]: Στις 2026-06-28, Ναι φίλε μόλις φάγαμε τις γίγαντες και σε 10 λεπτά πάμε για ύπνο",
+                "category": "lazaros",
+                "topic": "health",
+                "topic_detail": "sleep",
+                "state_markers": [],
+                "relation_type": "new_fact"
+            }
+        ]"""
+    })())
+
+    monkeypatch.setattr(sm.memory, "save", lambda **kwargs: saved.append(kwargs))
+
+    sm.run_memory_sifter_slow(
+        "Ναι φίλε μόλις φάγαμε τις γίγαντες και σε 10 λεπτά πάμε για ύπνο",
+        "[22:32] Στην υγειά σας και καλό ύπνο, μάστορα! Τα λέμε αύριο.",
+        agent_name="Chat_Agent",
+        channel="telegram",
+    )
+
+    assert saved == []
+
+
+def test_food_family_outcome_still_saves(monkeypatch):
+    """Meaningful food/family outcomes ('Ο Αλέξανδρος ενθουσιάστηκε') MUST be saved."""
+    from memory import session_memory as sm
+
+    saved = []
+
+    # Bypass replay deduplication guard (cross-test fingerprint pollution)
+    monkeypatch.setattr(sm, "_mark_memory_sifter_processed", lambda **kwargs: None)
+    monkeypatch.setattr(sm, "_memory_sifter_already_processed", lambda *_args, **_kwargs: False)
+
+    monkeypatch.setattr(sm, "safe_gemini_call", lambda prompt: type("R", (), {
+        "text": """[
+            {
+                "fact": "[USER_FACT]: Στις 2026-06-28, Ο Αλέξανδρος ενθουσιάστηκε ξανά με τους γίγαντες",
+                "category": "family",
+                "topic": "food",
+                "topic_detail": "meal_prep",
+                "state_markers": ["confirmed"],
+                "relation_type": "confirmed"
+            }
+        ]"""
+    })())
+
+    monkeypatch.setattr(sm.memory, "save", lambda **kwargs: saved.append(kwargs))
+
+    sm.run_memory_sifter_slow(
+        "Τρελάθηκε ο Αλέξανδρος με τους γίγαντες",
+        "[22:21] Μεγάλη νίκη αυτή, μάστορα!",
+        agent_name="Home_Agent",
+        channel="telegram",
+    )
+
+    assert len(saved) == 1
+    assert saved[0]["category"] == "family"
+
+
+def test_event_candidate_skips_ephemeral_immediate_plan():
+    """Deterministic extractor must return None for immediate conversational plan."""
+    from memory import session_memory as sm
+
+    candidate = sm._extract_event_memory_candidate(
+        "Ναι φίλε μόλις φάγαμε τις γίγαντες και σε 10 λεπτά πάμε για ύπνο",
+        "[22:32] Στην υγειά σας και καλό ύπνο",
+        agent_name="Chat_Agent",
+        channel="telegram",
+    )
+
+    assert candidate is None

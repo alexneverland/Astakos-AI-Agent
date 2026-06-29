@@ -346,6 +346,52 @@ function prettyMemoryIntent(intent) {
   return map[intent] || intent || "Generic";
 }
 
+function memoryFreshnessInfo(mem) {
+  const writtenAt = mem && mem.written_at;
+  if (!writtenAt) {
+    return {
+      label: "No snapshot",
+      badge: "b-muted",
+      ageLabel: "unknown",
+      hint: "No memory-context snapshot has been written yet.",
+    };
+  }
+
+  const ts = Date.parse(writtenAt);
+  if (Number.isNaN(ts)) {
+    return {
+      label: "Unknown age",
+      badge: "b-muted",
+      ageLabel: "unknown",
+      hint: "Snapshot exists, but its timestamp could not be parsed.",
+    };
+  }
+
+  const ageSeconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (ageSeconds <= 300) {
+    return {
+      label: "Fresh",
+      badge: "b-green",
+      ageLabel: secondsLabel(ageSeconds),
+      hint: "This panel shows the last successful memory-context build.",
+    };
+  }
+  if (ageSeconds <= 1800) {
+    return {
+      label: "Warm",
+      badge: "b-yellow",
+      ageLabel: secondsLabel(ageSeconds),
+      hint: "Still recent, but not necessarily from the very last user flow.",
+    };
+  }
+  return {
+    label: "Stale",
+    badge: "b-red",
+    ageLabel: secondsLabel(ageSeconds),
+    hint: "This is an older snapshot. Recent replies may have used a fast path or another flow without rebuilding memory context.",
+  };
+}
+
 function memoryIntentBadge(intent) {
   const key = intent || "generic";
   const label = prettyMemoryIntent(key);
@@ -562,17 +608,21 @@ function render(d) {
   </div>`;
 
   const mem = d.memory_context || {};
+  const memFresh = memoryFreshnessInfo(mem);
   const memPreview = []
     .concat((mem.recent_preview || []).slice(0, 2))
     .concat((mem.historical_preview || []).slice(0, 2).map(x => 'SQL ' + x))
-    .concat((mem.semantic_preview || []).slice(0, 2).map(x => '• ' + x));
-  html += `<div class="card"><h2>Memory Context</h2>
+    .concat((mem.semantic_preview || []).slice(0, 2).map(x => '- ' + x));
+  html += `<div class="card"><h2>Last Memory Context Build</h2>
+    <div class="kv"><span class="k">Snapshot status</span><span class="v"><span class="badge ${memFresh.badge}">${memFresh.label}</span></span></div>
+    <div class="kv"><span class="k">Snapshot age</span><span class="v ${memFresh.label==='Stale'?'warn':''}">${esc(memFresh.ageLabel)}</span></div>
     <div class="kv"><span class="k">Last build</span><span class="v">${mem.written_at ? esc(mem.written_at.slice(11,19)) : 'none'}</span></div>
     <div class="kv"><span class="k">Channel</span><span class="v">${esc(mem.channel || '-')}</span></div>
     <div class="kv"><span class="k">Recent / SQL / Chroma</span><span class="v">${mem.recent_count ?? 0} / ${mem.historical_count ?? 0} / ${mem.semantic_count ?? 0}</span></div>
     <div class="kv"><span class="k">Intent</span><span class="v">${memoryIntentBadge(mem.query_intent)}</span></div>
     <div class="kv"><span class="k">Semantic rule</span><span class="v">${esc(mem.semantic_adjust_reason || 'none')}</span></div>
     <div class="kv"><span class="k">Query</span><span class="v" style="text-align:right">${esc(mem.query_preview || '-')}</span></div>
+    <div style="margin-top:6px;color:var(--text-muted);font-size:11px;line-height:1.35">${esc(memFresh.hint)}</div>
     ${memPreview.length ? `<div style="margin-top:6px;color:var(--muted);font-size:10px;line-height:1.35">${memPreview.map(esc).join('<br>')}</div>` : ''}
   </div>`;
 

@@ -804,6 +804,9 @@ def _extract_event_memory_candidate(
     if len(source_text) > 280:
         source_text = source_text[:277].rstrip() + "..."
 
+    if _looks_like_ephemeral_conversational_source(source_text):
+        return None
+
     ts = now or datetime.now()
     fact = f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, {source_text}"
     return _normalize_memory_candidate({
@@ -1436,6 +1439,107 @@ def _looks_low_signal_family_fact(fact: str) -> bool:
 
     return False
 
+
+def _looks_like_ephemeral_conversational_source(text: str) -> bool:
+    norm = _normalize_text(_strip_user_fact_scaffold(text))
+
+    if not norm:
+        return False
+
+    ack_prefixes = (
+        "ναι ",
+        "ε ναι ",
+        "οκ ",
+        "ok ",
+        "ωραια ",
+        "ωραία ",
+        "καλα ",
+        "καλά ",
+    )
+
+    immediate_markers = (
+        "σε λιγο",
+        "σε λίγο",
+        "σε 5 λεπτ",
+        "σε 10 λεπτ",
+        "σε 15 λεπτ",
+        "σε 20 λεπτ",
+        "τωρα",
+        "τώρα",
+        "μολις",
+        "μόλις",
+        "μετα",
+        "μετά",
+        "παμε για",
+        "πάμε για",
+        "παω για",
+        "πάω για",
+        "γυρναμε",
+        "γυρνάμε",
+        "φευγουμε",
+        "φεύγουμε",
+    )
+
+    durable_markers = (
+        "του αρεσε",
+        "του άρεσε",
+        "ενθουσιαστ",
+        "προτιμα",
+        "προτιμά",
+        "σταματησ",
+        "σταμάτησ",
+        "ξεκινα",
+        "ξεκινά",
+        "γυρισε",
+        "γύρισε",
+        "επεστρε",
+        "επέστρε",
+        "αγορασ",
+        "αγόρασ",
+        "εκλεισ",
+        "έκλεισ",
+        "βελτιωθ",
+        "καλυτερ",
+        "κουρασ",
+        "αρρωστ",
+        "βαρδια",
+        "δουλευ",
+        "κατασκην",
+        "διακοπ",
+    )
+
+    has_ack_prefix = norm.startswith(ack_prefixes)
+    has_immediate = any(marker in norm for marker in immediate_markers)
+    has_durable = any(marker in norm for marker in durable_markers)
+
+    return has_ack_prefix and has_immediate and not has_durable
+
+
+def _should_skip_ephemeral_candidate(candidate: dict, source_text: str) -> bool:
+    category = str(candidate.get("category") or "").lower()
+    relation_type = str(candidate.get("relation_type") or "").lower()
+    state_markers = candidate.get("state_markers") or []
+    entities = candidate.get("entities") or []
+    topic = str(candidate.get("topic") or "").lower()
+
+    if category not in {"lazaros", "family", "work", "home"}:
+        return False
+
+    if relation_type not in {"new_fact", "confirmed"}:
+        return False
+
+    if state_markers:
+        return False
+
+    # Food/family outcomes τύπου "του άρεσε", "ενθουσιάστηκε" κτλ. να μη χαθούν.
+    if topic == "food":
+        norm = _normalize_text(source_text)
+        if any(marker in norm for marker in ("του αρεσε", "του άρεσε", "ενθουσιαστ", "ξανατρω", "τρωει", "τρώει")):
+            return False
+
+    return _looks_like_ephemeral_conversational_source(source_text)
+
+
 def _collect_deterministic_candidates(
     user_text: str,
     ai_text: str,
@@ -1749,6 +1853,10 @@ def run_memory_sifter_slow(
                 print(f"\033[90m[MemorySifterSlow]: family-near-duplicate skip -> {fact[:80]}\033[0m")
                 continue
 
+            if _looks_like_operational_asset_confirmation(fact) or _looks_like_operational_asset_confirmation(ai_text):
+                print("\033[90m[MemorySifterSlow]: operational asset confirmation skip\033[0m")
+                continue
+
             if category == "family" and _looks_low_signal_family_fact(fact):
                 print(f"\033[90m[MemorySifterSlow]: low-signal family skip -> {fact[:80]}\033[0m")
                 continue
@@ -1758,8 +1866,8 @@ def run_memory_sifter_slow(
                     print(f"\033[93m[MemorySifterSlow]: assistant-style paraphrase skip -> {fact[:80]}\033[0m")
                     continue
 
-            if _looks_like_operational_asset_confirmation(fact) or _looks_like_operational_asset_confirmation(ai_text):
-                print("\033[90m[MemorySifterSlow]: operational asset confirmation skip\033[0m")
+            if _should_skip_ephemeral_candidate(candidate, user_text):
+                print(f"\033[90m[MemorySifterSlow]: ephemeral conversational skip -> {fact[:80]}\033[0m")
                 continue
 
             # 2. --- PENDING ASSET ARCHITECTURE ---
