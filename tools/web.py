@@ -182,6 +182,111 @@ def _format_rss_pub_date(pub_date: str) -> str:
         return pub_date
 
 
+def _places_tokenize(text: str) -> set[str]:
+    normalized = remove_accents(text or "")
+    return {tok for tok in re.findall(r"[a-zA-Zα-ωΑ-Ω0-9]+", normalized) if len(tok) >= 2}
+
+
+_PLACES_INTENT_SYNONYMS = {
+    "seafood": {
+        "ψαροταβερνα", "ψαροταβερνες", "ψαρι", "ψαρια", "θαλασσινα", "seafood", "fish", "taverna",
+    },
+    "meat": {
+        "μπριζολαδικο", "μπριζολα", "κρεας", "σουβλακια", "ψησταρια", "grill", "steak", "burger",
+    },
+    "coffee": {
+        "καφε", "καφεδες", "cafe", "coffee", "brunch", "espresso", "barista",
+    },
+    "dessert": {
+        "γλυκο", "παγωτο", "waffle", "crepe", "dessert", "ζαχαροπλαστειο",
+    },
+    "family": {
+        "παιδια", "παιδι", "οικογενεια", "family", "kid", "kids",
+    },
+    "romantic": {
+        "ρομαντικο", "ησυχο", "quiet", "romantic", "sunset", "view",
+    },
+    "delivery": {
+        "delivery", "takeout", "πακετο", "ντελιβερι", "take away",
+    },
+}
+
+
+def _build_places_query_profile(query: str) -> dict:
+    tokens = _places_tokenize(query)
+    wanted = {
+        label for label, synonyms in _PLACES_INTENT_SYNONYMS.items()
+        if tokens & synonyms
+    }
+    return {
+        "tokens": tokens,
+        "wanted": wanted,
+    }
+
+
+def _places_text_blob(place: dict) -> str:
+    parts = [
+        place.get("displayName", {}).get("text", ""),
+        place.get("primaryTypeDisplayName", {}).get("text", ""),
+        place.get("formattedAddress", ""),
+    ]
+    for review in place.get("reviews", [])[:3]:
+        parts.append(review.get("text", {}).get("text", ""))
+    return " ".join(p for p in parts if p)
+
+
+def _score_place_match(place: dict, profile: dict) -> float:
+    tokens = profile.get("tokens", set())
+    wanted = profile.get("wanted", set())
+    blob = _places_text_blob(place)
+    blob_tokens = _places_tokenize(blob)
+    primary_type = remove_accents(place.get("primaryTypeDisplayName", {}).get("text", ""))
+    name = remove_accents(place.get("displayName", {}).get("text", ""))
+    rating = float(place.get("rating", 0) or 0)
+    votes = int(place.get("userRatingCount", 0) or 0)
+
+    score = rating * 12.0
+    score += min(votes, 2500) / 120.0
+
+    lexical_overlap = len(tokens & blob_tokens)
+    score += lexical_overlap * 5.0
+
+    if wanted:
+        for label in wanted:
+            synonyms = _PLACES_INTENT_SYNONYMS.get(label, set())
+            synonym_hits = len(blob_tokens & synonyms)
+            if synonym_hits:
+                score += 10.0 + synonym_hits * 3.0
+            else:
+                score -= 6.0
+
+    if "seafood" in wanted:
+        if any(tok in blob_tokens for tok in {"ψαρι", "ψαρια", "θαλασσινα", "fish", "seafood"}):
+            score += 8.0
+        if any(tok in name for tok in ["grill", "burger", "pizza"]):
+            score -= 10.0
+
+    if "coffee" in wanted and any(tok in blob_tokens for tok in {"cafe", "coffee", "brunch", "bar"}):
+        score += 8.0
+
+    if "delivery" in wanted:
+        if place.get("delivery") or place.get("takeout"):
+            score += 7.0
+        else:
+            score -= 5.0
+
+    if "family" in wanted and any(tok in blob_tokens for tok in {"family", "kids", "παιδια", "παιδι"}):
+        score += 6.0
+
+    if "romantic" in wanted and any(tok in blob_tokens for tok in {"view", "sunset", "ρομαντικο", "ησυχο"}):
+        score += 6.0
+
+    if "restaurant" in primary_type or "εστιατορ" in primary_type:
+        score += 2.0
+
+    return round(score, 3)
+
+
 @tool
 def relay_local_payload(target_entity: str, payload_data: str, image_path: str = "") -> str:
     """
@@ -725,6 +830,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
     import time
     import json
     from config import GPS_STORAGE_FILE
+    profile = _build_places_query_profile(query)
     
     # [MASTRO-GPS-INTERCEPTOR]
     if "κοντά" in query.lower() or location == "current":
@@ -805,6 +911,12 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
         if not places:
             return f"❌ Δεν βρέθηκαν αποτελέσματα για '{query}' στην {location}."
 
+        ranked_places = sorted(
+            places,
+            key=lambda place: _score_place_match(place, profile),
+            reverse=True,
+        )[:3]
+
         # ── Μορφοποίηση αποτελεσμάτων ─────────────────────────
         price_map = {
             "PRICE_LEVEL_FREE": "Δωρεάν",
@@ -816,7 +928,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
 
         lines = [f"📍 Αποτελέσματα για '{query}' — {location}:\n"]
 
-        for i, place in enumerate(places, 1):
+        for i, place in enumerate(ranked_places, 1):
             name = place.get("displayName", {}).get("text", "Άγνωστο")
             rating = place.get("rating", "—")
             votes = place.get("userRatingCount", 0)
@@ -832,6 +944,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             if place.get("takeout"): services.append("Takeout")
             if place.get("delivery"): services.append("Delivery")
             if place.get("dineIn"): services.append("Dine-in")
+            match_score = _score_place_match(place, profile)
             
             review_text = ""
             reviews = place.get("reviews", [])
@@ -866,6 +979,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
                 f"{services_str}"
                 f"{review_str}"
                 f"   🗺️ <a href='{maps_url}'>Άνοιγμα στο Google Maps</a>\n"
+                f"   🧭 Match: {match_score}\n"
             )
 
         return "\n".join(lines)
