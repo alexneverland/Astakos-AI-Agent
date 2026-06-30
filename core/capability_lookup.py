@@ -34,6 +34,28 @@ _LINKEDIN_CREATION = [
     "δημιούργησε", "σκέψου", "βάλε", "φτιαξε",
 ]
 
+_PLACE_SEARCH_ACTIONS = {
+    "βρες", "βρεισ", "ψαξε", "ψάξε", "προτεινε", "πρότεινε", "δωσε", "δώσε",
+}
+
+_PLACE_SEARCH_NOUNS = {
+    "μερος", "μέρος", "μαγαζι", "μαγαζί", "εστιατοριο", "εστιατόριο", "ταβερνα", "ταβέρνα",
+    "ψαροταβερνα", "ψαροταβέρνα", "καφε", "καφέ", "μπαρ", "bar", "cafe", "restaurant",
+}
+
+_PLACE_SEARCH_QUALIFIERS = {
+    "κοντα", "κοντά", "χαρτη", "χάρτη", "maps", "rating", "review", "reviews",
+    "ησυχο", "ήσυχο", "παιδια", "παιδιά", "οικογενεια", "οικογένεια", "ρομαντικο", "ρομαντικό",
+}
+
+
+def _looks_like_place_search(msg: str) -> bool:
+    tokens = set(re.findall(r"[^\W_]+", msg.lower(), flags=re.UNICODE))
+    has_action = bool(tokens & _PLACE_SEARCH_ACTIONS)
+    has_place_noun = bool(tokens & _PLACE_SEARCH_NOUNS)
+    has_qualifier = bool(tokens & _PLACE_SEARCH_QUALIFIERS)
+    return has_action and (has_place_noun or has_qualifier)
+
 def _load_registry():
     global _registry
     if _registry:
@@ -73,6 +95,11 @@ def lookup_agent(user_message: str) -> str | None:
             if _matches_trigger(msg, ct):
                 print(f"🎯 [CapabilityRegistry]: 'linkedin+{ct}' → Web_Agent (linkedin_post)")
                 return "Web_Agent"
+
+    # Place-finding queries should prefer Web_Agent over generic food/home routing.
+    if _looks_like_place_search(msg):
+        print("🎯 [CapabilityRegistry]: place-search heuristic → Web_Agent (maps_places)")
+        return "Web_Agent"
 
     for trigger in _GIT_TRIGGERS:
         if _matches_trigger(msg, trigger):
