@@ -49,14 +49,11 @@ _DRAFT_CLEAR_PATTERNS = (
     "αυτο σταλθηκε",
     "το εχουμε στειλει",
     "το στειλαμε",
-    "κλειστο",
-    "κλεισε το",
-    "αστο",
-    "αδειασε το",
-    "σβηστο",
+    "αδειασε το draft",
     "σβησε το draft",
-    "μην το κρατας",
-    "δεν το θελω",
+    "σβηστο draft",
+    "μην το κρατας σαν draft",
+    "κλεισε το draft",
 )
 
 _GENERAL_SHORT = {
@@ -83,7 +80,8 @@ def classify_messenger_intent(text: str, has_active_draft: bool = False) -> Mess
     if not normalized:
         return MessengerIntentResult("general_chat", 0.50, ["empty"])
 
-    if _has_any(normalized, _DRAFT_CLEAR_PATTERNS):
+    has_draft_word = any(word in normalized for word in ("draft", "προσχεδιο", "μηνυμα"))
+    if has_active_draft and has_draft_word and _has_any(normalized, _DRAFT_CLEAR_PATTERNS):
         return MessengerIntentResult("clear_draft", 0.98, ["clear_phrase"])
 
     if _has_any(normalized, _DRAFT_CLARIFY_PATTERNS):

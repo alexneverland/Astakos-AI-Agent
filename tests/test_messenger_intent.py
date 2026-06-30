@@ -11,10 +11,6 @@ def test_clarify_draft_intent():
     assert result.intent == "clarify_draft"
 
 
-def test_clear_draft_intent():
-    result = classify_messenger_intent("Αυτό το έχουμε στείλει, κλείστο", has_active_draft=True)
-    assert result.intent == "clear_draft"
-
 
 def test_confirm_send_requires_active_draft():
     result = classify_messenger_intent("Στείλε", has_active_draft=True)
@@ -24,3 +20,11 @@ def test_confirm_send_requires_active_draft():
 def test_send_without_active_draft_is_not_confirm():
     result = classify_messenger_intent("Στείλε", has_active_draft=False)
     assert result.intent != "confirm_send"
+
+def test_general_close_topic_is_not_clear_draft():
+    result = classify_messenger_intent("Όχι κλείσε το θέμα δοκιμές κάναμε", has_active_draft=True)
+    assert result.intent == "general_chat"
+
+def test_explicit_clear_draft_still_works():
+    result = classify_messenger_intent("κλείσε το draft", has_active_draft=True)
+    assert result.intent == "clear_draft"

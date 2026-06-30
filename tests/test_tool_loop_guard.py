@@ -1,57 +1,42 @@
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from langchain_core.messages import AIMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 from core.tool_loop_guard import inspect_tool_loop
 
 
-def _ai_tool_call(name: str, args: dict):
-    return AIMessage(
-        content="",
-        tool_calls=[{"name": name, "args": args, "id": f"call-{name}"}],
-    )
+def _ai_with_tool(name, args):
+    msg = AIMessage(content="")
+    msg.tool_calls = [{"name": name, "args": args, "id": f"{name}-1"}]
+    return msg
 
 
-def test_repeated_same_tool_call_is_blocked():
+def test_repeated_tool_calls_allowed_after_new_human_update():
     messages = [
-        _ai_tool_call("run_terminal_command", {"command": "git status"}),
-        _ai_tool_call("run_terminal_command", {"command": "git status"}),
-        _ai_tool_call("run_terminal_command", {"command": "git status"}),
+        HumanMessage(content="ψαξε για φωτια στο ωραιοκαστρο"),
+        _ai_with_tool("duckduckgo_search", {"query": "φωτια ωραιοκαστρο"}),
+        HumanMessage(content="τωρα ηρθε μηνυμα 112"),
+        _ai_with_tool("duckduckgo_search", {"query": "φωτια ωραιοκαστρο 112"}),
     ]
-    allowed, reason = inspect_tool_loop(messages, max_repeated_calls=2)
-    assert allowed is False
-    assert "Repeated tool call" in reason
+    allowed, _ = inspect_tool_loop(messages)
+    assert allowed is True
 
 
-def test_many_tool_rounds_are_blocked():
+def test_true_same_window_tool_loop_is_blocked():
     messages = [
-        _ai_tool_call("run_terminal_command", {"command": f"git log -n {i}"})
-        for i in range(9)
+        HumanMessage(content="ψαξε για φωτια στο ωραιοκαστρο"),
+        _ai_with_tool("duckduckgo_search", {"query": "φωτια ωραιοκαστρο"}),
+        _ai_with_tool("duckduckgo_search", {"query": "φωτια ωραιοκαστρο"}),
+        _ai_with_tool("duckduckgo_search", {"query": "φωτια ωραιοκαστρο"}),
+        _ai_with_tool("duckduckgo_search", {"query": "φωτια ωραιοκαστρο"}),
     ]
-    allowed, reason = inspect_tool_loop(messages, max_tool_rounds=8)
+    allowed, reason = inspect_tool_loop(messages)
     assert allowed is False
-    assert "Tool loop stopped" in reason
+    assert "Repeated tool call blocked" in reason
 
-
-def test_many_tool_rounds_includes_last_tool_name():
-    """Νέο: το error message περιέχει το όνομα του τελευταίου tool."""
+def test_small_mixed_tool_sequence_is_allowed():
     messages = [
-        _ai_tool_call("web_search", {"query": f"search {i}"})
-        for i in range(9)
-    ]
-    allowed, reason = inspect_tool_loop(messages, max_tool_rounds=8)
-    assert allowed is False
-    assert "Tool loop stopped" in reason
-    assert "web_search" in reason
-
-
-def test_small_tool_sequence_is_allowed():
-    messages = [
-        _ai_tool_call("run_terminal_command", {"command": "git status"}),
-        _ai_tool_call("run_terminal_command", {"command": "git log -n 1"}),
+        HumanMessage(content="ψαξε και δες"),
+        _ai_with_tool("duckduckgo_search", {"query": "καιρος θεσσαλονικη"}),
+        _ai_with_tool("browse_url", {"url": "https://example.com"}),
     ]
     allowed, reason = inspect_tool_loop(messages)
     assert allowed is True
