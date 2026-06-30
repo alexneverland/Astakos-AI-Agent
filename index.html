@@ -557,6 +557,8 @@
     const terminalPanel = document.getElementById('terminal-panel');
 
     let currentPhotoPath = null;
+    let pastedVirtualFile = null;
+    const PASTE_AS_FILE_THRESHOLD = 700;
 
     toggleBtn.addEventListener('click', () => { terminalPanel.classList.toggle('hidden-panel'); });
 
@@ -572,6 +574,7 @@
 
     attachBtn.addEventListener('click', () => { fileInput.click(); });
     fileInput.addEventListener('change', (e) => {
+        pastedVirtualFile = null;
         fileLabel.innerText = e.target.files.length > 0 ? "📎 Επιλέχθηκε: " + e.target.files[0].name : "";
     });
 
@@ -611,13 +614,62 @@
 
     /* ── Telegram live refresh ── */
     let lastKnownMsgId = 0;
+    const renderedHistoryRowIds = new Set();
+    const pendingLocalEchoes = [];
+
+    function normalizeEchoText(text) {
+        return String(text || "")
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    function pushLocalEcho(role, text) {
+        pendingLocalEchoes.push({
+            role,
+            text: normalizeEchoText(text),
+            expiresAt: Date.now() + 12000,
+        });
+    }
+
+    function consumeMatchingLocalEcho(role, text) {
+        const normalized = normalizeEchoText(text);
+        const now = Date.now();
+
+        for (let i = 0; i < pendingLocalEchoes.length; i++) {
+            const item = pendingLocalEchoes[i];
+            if (item.expiresAt < now) {
+                pendingLocalEchoes.splice(i, 1);
+                i--;
+                continue;
+            }
+            if (item.role === role && item.text === normalized) {
+                pendingLocalEchoes.splice(i, 1);
+                return true;
+            }
+        }
+        return false;
+    }
 
     function renderHistoryMsg(msg) {
+        if (msg.rowid && renderedHistoryRowIds.has(msg.rowid)) {
+            return;
+        }
+
         const sender = (msg.role === 'user' || msg.role === 'Human') ? 'user' : 'ai';
         const defaultName = sender === 'user' ? 'Λάζαρος' : 'Αστακός';
         const channelName = msg.channel ? `${msg.channel.charAt(0).toUpperCase()}${msg.channel.slice(1)}` : '';
         const label = channelName ? `${channelName} / ${msg.agent || defaultName}` : (msg.agent || defaultName);
+
+        if (consumeMatchingLocalEcho(sender, msg.content)) {
+            if (msg.rowid) renderedHistoryRowIds.add(msg.rowid);
+            if (msg.rowid && msg.rowid > lastKnownMsgId) lastKnownMsgId = msg.rowid;
+            return;
+        }
+
         appendMessage(msg.content, sender, label);
+
+        if (msg.rowid) renderedHistoryRowIds.add(msg.rowid);
         if (msg.rowid && msg.rowid > lastKnownMsgId) lastKnownMsgId = msg.rowid;
     }
 
@@ -651,9 +703,70 @@
         } catch (error) { console.error("History error:", error); }
     });
 
+    function looksLikeCodePaste(text) {
+        const t = String(text || "");
+        if (!t.trim()) return false;
+
+        const codeSignals = [
+            "def ", "class ", "import ", "from ", "function ", "const ", "let ", "var ",
+            "if __name__", "```", "{", "}", "SELECT ", "INSERT ", "UPDATE ", "DELETE ",
+            "<html", "</", "attack_code"
+        ];
+
+        let hits = 0;
+        const low = t.toLowerCase();
+        for (const sig of codeSignals) {
+            if (low.includes(sig.toLowerCase())) hits++;
+        }
+
+        const lineCount = t.split(/\r?\n/).length;
+        return hits >= 2 || lineCount >= 12;
+    }
+
+    function buildVirtualPasteFile(text) {
+        const now = new Date();
+        const stamp = now.toISOString().replace(/[:.]/g, "-");
+        const extension = looksLikeCodePaste(text) ? "py" : "txt";
+        const mime = "text/plain;charset=utf-8";
+        const filename = `paste_${stamp}.${extension}`;
+        return new File([text], filename, { type: mime });
+    }
+
+    function setVirtualPasteFile(file, originalLength) {
+        pastedVirtualFile = file;
+        fileLabel.innerText = `📎 Paste έγινε αρχείο: ${file.name} (${originalLength} chars, auto-attachment)`;
+    }
+
+    function clearPendingAttachmentUI() {
+        pastedVirtualFile = null;
+        fileInput.value = "";
+        fileLabel.innerText = "";
+    }
+
+    userInput.addEventListener('paste', (e) => {
+        const pastedText = e.clipboardData?.getData('text/plain') || "";
+        if (!pastedText.trim()) return;
+
+        const shouldConvertToFile =
+            pastedText.length >= PASTE_AS_FILE_THRESHOLD || looksLikeCodePaste(pastedText);
+
+        if (!shouldConvertToFile) return;
+
+        e.preventDefault();
+
+        const virtualFile = buildVirtualPasteFile(pastedText);
+        setVirtualPasteFile(virtualFile, pastedText.length);
+
+        if (!userInput.value.trim()) {
+            userInput.value = "Δες το συνημμένο κείμενο και κάνε ανάλυση.";
+            userInput.style.height = 'auto';
+            userInput.style.height = Math.min(userInput.scrollHeight, 200) + 'px';
+        }
+    });
+
     async function sendMessage() {
         const text = userInput.value.trim();
-        const file = fileInput.files[0];
+        const file = fileInput.files[0] || pastedVirtualFile;
         if (!text && !file) return;
 
         let displayUserMsg = text;
@@ -661,9 +774,9 @@
         if (file && text)  displayUserMsg = `[Αρχείο: ${file.name}]<br>${text}`;
 
         appendMessage(displayUserMsg, 'user');
+        pushLocalEcho('user', displayUserMsg);
         userInput.value = '';
-        fileInput.value = '';
-        fileLabel.innerText = '';
+        clearPendingAttachmentUI();
         if (!isRecording) userInput.focus();
 
         const loadingDiv = document.createElement('div');
@@ -690,6 +803,7 @@
                 const data = await response.json();
                 chatBox.removeChild(loadingDiv);
                 appendMessage(data.ai_message, 'ai', 'Chat_Agent');
+                pushLocalEcho('ai', data.ai_message);
                 if (isDrawerOpen) speakText(data.ai_message);
             } else {
                 response = await fetch('http://127.0.0.1:8000/chat', {
@@ -700,6 +814,7 @@
                 const data = await response.json();
                 chatBox.removeChild(loadingDiv);
                 appendMessage(data.response, 'ai', data.agent);
+                pushLocalEcho('ai', data.response);
                 if (isDrawerOpen) speakText(data.response);
             }
             

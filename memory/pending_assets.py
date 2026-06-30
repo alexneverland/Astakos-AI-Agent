@@ -102,6 +102,26 @@ def init_pending_assets_table():
     finally:
         conn.close()
 
+def get_latest_recent_asset(channel: str, max_age_minutes: int = 20):
+    cutoff_iso = (datetime.now() - timedelta(minutes=max_age_minutes)).isoformat()
+    conn = _get_conn()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT *
+            FROM pending_asset_archives
+            WHERE channel = ?
+              AND created_at >= ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (channel, cutoff_iso),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
 
 def clear_expired_pending_assets():
     now_iso = datetime.now().isoformat()
