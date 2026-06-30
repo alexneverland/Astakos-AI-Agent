@@ -783,7 +783,11 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         t_build_0 = perf_counter()
 
         if any(looks_like_terminal_linkedin_draft_result(r) for r in tool_result_fallbacks):
-            final_ai_response = build_linkedin_draft_ready_reply(tool_result_fallbacks)
+            draft_msg = build_linkedin_draft_ready_reply(tool_result_fallbacks)
+            if final_ai_response and draft_msg not in final_ai_response:
+                final_ai_response = final_ai_response + "\n\n" + draft_msg
+            else:
+                final_ai_response = draft_msg
 
         if not final_ai_response:
             final_ai_response = _tool_results_fallback_response(isolated_user_input, tool_result_fallbacks)

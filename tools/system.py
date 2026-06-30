@@ -1795,6 +1795,7 @@ def read_local_file(file_path: str) -> str:
     ]
     _allowed_files = [
         os.path.realpath(os.path.join(BASE_DIR, "messenger_draft.json")),
+        os.path.realpath(os.path.join(BASE_DIR, "linkedin_draft.json")),
     ]
     # [SECURITY]: Sensitive αρχεία που δεν επιτρέπονται ακόμα και αν είναι σε allowed dir
     _blocked_filenames = {

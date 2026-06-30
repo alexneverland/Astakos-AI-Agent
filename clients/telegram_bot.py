@@ -1543,7 +1543,11 @@ def handle_message(user_text: str, chat_id: str):
                 final_ai_response = cleaned_response
 
         if any(looks_like_terminal_linkedin_draft_result(r) for r in tool_result_fallbacks):
-            final_ai_response = build_linkedin_draft_ready_reply(tool_result_fallbacks)
+            draft_msg = build_linkedin_draft_ready_reply(tool_result_fallbacks)
+            if final_ai_response and draft_msg not in final_ai_response:
+                final_ai_response = final_ai_response + "\n\n" + draft_msg
+            else:
+                final_ai_response = draft_msg
 
         if not final_ai_response:
             t_fallback_0 = perf_counter()
