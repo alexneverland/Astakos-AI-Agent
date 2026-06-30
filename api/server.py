@@ -317,41 +317,6 @@ def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
 # PROACTIVE WORKER
 # ────────────────────────────────────────────────────────────────
 
-def proactive_worker():
-    """Κάνει poke στον Λάζαρο αν υπάρχει σιωπή 2.5 ωρών (09:00–23:00)."""
-    global last_interaction_time
-    CHECK_INTERVAL = 9000
-    greece_tz = ZoneInfo("Europe/Athens")
-
-    while not shutdown_event.is_set():
-        if shutdown_event.wait(timeout=5):
-            break
-
-        now_gr = datetime.now(greece_tz)
-        current_hour = now_gr.hour
-
-        if 9 <= current_hour <= 23:
-            with memory_lock:
-                elapsed = time.time() - last_interaction_time
-
-            if elapsed >= CHECK_INTERVAL:
-                with memory_lock:
-                    last_interaction_time = time.time()
-
-                if current_hour < 12:
-                    ai_msg = "Καλημέρα μάστορα ☕ Μήπως ήρθε η ώρα να πάρεις μια ανάσα ή να οργανώσεις το επόμενο βήμα σου;"
-                elif current_hour < 18:
-                    ai_msg = "Μάστορα, μικρό τσεκ: όλα ρολάρουν ή θέλεις να βάλουμε μια τάξη στο χάος;"
-                else:
-                    ai_msg = "Βραδινό τσεκ, μάστορα 🌙 Αν θες, λέμε τι έμεινε ανοιχτό και το κλείνουμε."
-
-                print(f"\\n🤖 [Proactive]: {ai_msg}")
-                send_telegram_msg(f"🤖 {ai_msg}")
-
-                with memory_lock:
-                    from memory.session_memory import log_exchange
-                    enqueue_fast_task(log_exchange, "POKE_EVENT", ai_msg, "Proactive_Worker", "web")
-
 # ────────────────────────────────────────────────────────────────
 # FASTAPI LIFESPAN
 # ────────────────────────────────────────────────────────────────
