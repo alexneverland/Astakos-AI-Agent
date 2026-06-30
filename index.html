@@ -616,6 +616,7 @@
     let lastKnownMsgId = 0;
     const renderedHistoryRowIds = new Set();
     const pendingLocalEchoes = [];
+    let isFetchingMessages = false;
 
     function getMessageStableId(msg) {
         return msg?.rowid || msg?.id || null;
@@ -679,6 +680,8 @@
     }
 
     async function fetchNewMessages() {
+        if (isFetchingMessages) return;
+        isFetchingMessages = true;
         try {
             const res = await fetch(`http://127.0.0.1:8000/messages/poll?after_id=${lastKnownMsgId}`);
             if (!res.ok) return;
@@ -688,6 +691,7 @@
             }
             if (data.max_id && data.max_id > lastKnownMsgId) lastKnownMsgId = data.max_id;
         } catch (e) { /* server offline, skip */ }
+        finally { isFetchingMessages = false; }
     }
 
     window.addEventListener('DOMContentLoaded', async () => {
@@ -811,8 +815,8 @@
                 response = await fetch('http://127.0.0.1:8000/upload', { method: 'POST', body: formData });
                 const data = await response.json();
                 chatBox.removeChild(loadingDiv);
-                appendMessage(data.ai_message, 'ai', 'Chat_Agent');
                 pushLocalEcho('ai', data.ai_message);
+                appendMessage(data.ai_message, 'ai', 'Chat_Agent');
                 if (isDrawerOpen) speakText(data.ai_message);
             } else {
                 response = await fetch('http://127.0.0.1:8000/chat', {
@@ -822,8 +826,8 @@
                 });
                 const data = await response.json();
                 chatBox.removeChild(loadingDiv);
-                appendMessage(data.response, 'ai', data.agent);
                 pushLocalEcho('ai', data.response);
+                appendMessage(data.response, 'ai', data.agent);
                 if (isDrawerOpen) speakText(data.response);
             }
             
