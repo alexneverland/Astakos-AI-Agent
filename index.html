@@ -623,7 +623,7 @@
 
     async function fetchNewMessages() {
         try {
-            const res = await fetch(`http://127.0.0.1:8000/messages/poll?after_id=${lastKnownMsgId}&channel=telegram`);
+            const res = await fetch(`http://127.0.0.1:8000/messages/poll?after_id=${lastKnownMsgId}`);
             if (!res.ok) return;
             const data = await res.json();
             if (data.messages && data.messages.length > 0) {
@@ -843,7 +843,7 @@
         // Δοκιμή: αν είναι JSON event από _broadcast_ws, χειρίσου ανάλογα
         try {
             const evt = JSON.parse(event.data);
-            if (evt.type === 'new_message' && evt.channel === 'telegram') {
+            if (evt.type === 'new_message' && (evt.channel === 'telegram' || evt.channel === 'web')) {
                 // Νέο Telegram μήνυμα — κάνε fetch μόνο τα νέα
                 fetchNewMessages();
                 return;

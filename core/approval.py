@@ -97,7 +97,7 @@ PENDING_TTL_SECONDS: int = 3600  # 60 λεπτά
 # Pending approval store
 # ────────────────────────────────────────────────────────────────
 
-def save_pending(tool_name: str, tool_args: dict, tool_call_id: str):
+def save_pending(tool_name: str, tool_args: dict, tool_call_id: str, channel: str = "telegram"):
     """Αποθηκεύει CRITICAL tool call για αργότερα."""
     pending = _load_pending()
     pending[tool_call_id] = {
@@ -106,6 +106,7 @@ def save_pending(tool_name: str, tool_args: dict, tool_call_id: str):
         "tool_call_id": tool_call_id,
         "created_at":  datetime.now().isoformat(timespec="seconds"),
         "status":      "pending",
+        "channel":     channel,
     }
     _save_pending(pending)
 
@@ -310,8 +311,9 @@ def approval_check_node(state):
 
     # Υπάρχουν CRITICAL calls — τα αποθηκεύουμε και ζητάμε approval
     tool_messages = []
+    current_channel = state.get("channel", "telegram")
     for tc in critical_calls:
-        save_pending(tc["name"], tc.get("args", {}), tc["id"])
+        save_pending(tc["name"], tc.get("args", {}), tc["id"], channel=current_channel)
         print(f"\033[91m[Approval]: 🚨 CRITICAL — {tc['name']} blocked, awaiting approval\033[0m")
 
         # Στέλνουμε Telegram notification

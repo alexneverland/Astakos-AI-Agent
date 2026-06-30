@@ -1789,6 +1789,7 @@ def _handle_approval_callback(cq: dict):
                 return
 
             tool_name = item["tool_name"]
+            origin_channel = item.get("channel", "telegram")
 
             # Ενημέρωση keyboard → "✅ Εγκρίθηκε"
             requests.post(
@@ -1800,14 +1801,69 @@ def _handle_approval_callback(cq: dict):
             send_telegram_msg(f"⚙️ Εκτελώ `{tool_name}`...")
 
             execution = execute_approved_pending(tool_call_id, all_tools)
-            if execution["ok"]:
-                send_telegram_msg_full(str(execution["result"]), prefix="✅ `" + tool_name + "` ολοκληρώθηκε:\n\n")
-            elif execution["status"] == "tool_not_found":
-                send_telegram_msg(f"❌ Tool `{tool_name}` δεν βρέθηκε.")
-            else:
-                send_telegram_msg(f"❌ `{tool_name}` απέτυχε: {execution['error']}")
+            
+            if origin_channel == "web":
+                if execution["ok"]:
+                    send_telegram_msg(f"✅ Το `{tool_name}` εκτελέστηκε.\nΗ απάντηση θα σταλεί στο Web UI.")
+                    
+                    def _resume_web():
+                        try:
+                            from api.server import append_to_chat_history
+                            from core.brain import llm, safe_llm_invoke
+                            from langchain_core.messages import HumanMessage
+                            from core.utils import clean_message
+                            import datetime
 
+                            prompt = (
+                                f"Το εργαλείο `{tool_name}` εγκρίθηκε από τον χρήστη μέσω Telegram "
+                                f"και εκτελέστηκε επιτυχώς.\n\n"
+                                f"Αποτέλεσμα εργαλείου:\n{execution['result']}\n\n"
+                                f"Γράψε τη φυσική τελική απάντηση που πρέπει να δει ο χρήστης στο Web UI, "
+                                f"στα Ελληνικά, χωρίς να λες εσωτερικά τεχνικά πράγματα."
+                            )
+
+                            response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
+                            final_resp = clean_message(getattr(response, "content", "")).strip()
+
+                            if not final_resp:
+                                final_resp = clean_message(str(execution["result"])).strip()
+
+                            append_to_chat_history("assistant", final_resp, agent="Web_Agent")
+                        except Exception as e:
+                            print(f"[ApprovalCallback Web Resume Error]: {e}")
+
+                    import threading
+                    threading.Thread(target=_resume_web, daemon=True).start()
+
+                elif execution["status"] == "tool_not_found":
+                    send_telegram_msg(f"❌ Tool `{tool_name}` δεν βρέθηκε (Web flow).")
+                    try:
+                        from api.server import append_to_chat_history
+                        append_to_chat_history("assistant", f"❌ Δεν βρέθηκε το tool `{tool_name}` για να εκτελεστεί η ενέργεια.", agent="Web_Agent")
+                    except Exception as e:
+                        print(f"[ApprovalCallback Web Error Notify]: {e}")
+                else:
+                    send_telegram_msg(f"❌ `{tool_name}` απέτυχε (Web flow): {execution['error']}")
+                    try:
+                        from api.server import append_to_chat_history
+                        append_to_chat_history(
+                            "assistant",
+                            f"❌ Η ενέργεια `{tool_name}` απέτυχε να εκτελεστεί.\n\nΛεπτομέρεια: {execution['error']}",
+                            agent="Web_Agent",
+                        )
+                    except Exception as e:
+                        print(f"[ApprovalCallback Web Error Notify]: {e}")
+            else:
+                if execution["ok"]:
+                    send_telegram_msg_full(str(execution["result"]), prefix="✅ `" + tool_name + "` ολοκληρώθηκε:\n\n")
+                elif execution["status"] == "tool_not_found":
+                    send_telegram_msg(f"❌ Tool `{tool_name}` δεν βρέθηκε.")
+                else:
+                    send_telegram_msg(f"❌ `{tool_name}` απέτυχε: {execution['error']}")
         elif action == "reject":
+            item = get_pending(tool_call_id)
+            origin_channel = (item or {}).get("channel", "telegram")
+            tool_name = (item or {}).get("tool_name", "ενέργεια")
             pop_pending(tool_call_id)
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageReplyMarkup",
@@ -1815,6 +1871,16 @@ def _handle_approval_callback(cq: dict):
                 timeout=5,
             )
             send_telegram_msg("❌ Action ακυρώθηκε.")
+            if origin_channel == "web":
+                try:
+                    from api.server import append_to_chat_history
+                    append_to_chat_history(
+                        "assistant",
+                        f"❌ Η ενέργεια `{tool_name}` ακυρώθηκε και δεν εκτελέστηκε.",
+                        agent="Web_Agent",
+                    )
+                except Exception as e:
+                    print(f"[ApprovalCallback Web Reject Notify]: {e}")
 
     except Exception as e:
         print(f"\033[91m[ApprovalCallback]: {e}\033[0m")

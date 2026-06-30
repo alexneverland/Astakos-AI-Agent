@@ -119,7 +119,7 @@ from core.graph import build_graph as _build_graph
 app_graph = _build_graph()
 
 def append_to_chat_history(role: str, content: str, agent: str | None = None):
-    """Προσθήκη μηνύματος στο shared SQLite conversation history (web channel)."""
+    """Προσθήκη μηνύματος στο shared SQLite conversation history (web channel) και websocket push."""
     now = datetime.now()
     shared_message_id = None
     try:
@@ -132,6 +132,16 @@ def append_to_chat_history(role: str, content: str, agent: str | None = None):
             timestamp=now,
         )
         shared_message_id = saved.get("id")
+        
+        _broadcast_ws({
+            "type": "new_message",
+            "channel": "web",
+            "id": shared_message_id,
+            "role": role,
+            "agent": agent,
+            "time": now.strftime("%H:%M"),
+            "content": content,
+        })
     except Exception as e:
         print(f"[ConversationHistory/web]: Σφάλμα shared write: {e}")
     return shared_message_id
