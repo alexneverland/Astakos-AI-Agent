@@ -255,6 +255,7 @@ def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -
             "date": entry.get("date", ""),
             "channel": entry.get("channel", channel or ""),
             "id": entry.get("id", ""),
+            "rowid": entry.get("rowid"),
             "agent": entry.get("agent") or "",
         })
     return history

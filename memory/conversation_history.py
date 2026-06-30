@@ -447,7 +447,7 @@ def load_messages(
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     query = f"""
-        SELECT *
+        SELECT rowid, *
         FROM conversation_messages
         {where}
         ORDER BY timestamp DESC, id DESC
@@ -459,6 +459,8 @@ def load_messages(
         rows = conn.execute(query, params).fetchall()
 
     messages = [_row_to_message(row) for row in rows]
+    for msg, row in zip(messages, rows):
+        msg["rowid"] = row["rowid"] if hasattr(row, "keys") else row[0]
     messages.reverse()
     return messages
 

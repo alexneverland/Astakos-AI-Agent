@@ -617,6 +617,10 @@
     const renderedHistoryRowIds = new Set();
     const pendingLocalEchoes = [];
 
+    function getMessageStableId(msg) {
+        return msg?.rowid || msg?.id || null;
+    }
+
     function normalizeEchoText(text) {
         return String(text || "")
             .replace(/<br\s*\/?>/gi, "\n")
@@ -652,7 +656,8 @@
     }
 
     function renderHistoryMsg(msg) {
-        if (msg.rowid && renderedHistoryRowIds.has(msg.rowid)) {
+        const stableId = getMessageStableId(msg);
+        if (stableId && renderedHistoryRowIds.has(stableId)) {
             return;
         }
 
@@ -662,14 +667,14 @@
         const label = channelName ? `${channelName} / ${msg.agent || defaultName}` : (msg.agent || defaultName);
 
         if (consumeMatchingLocalEcho(sender, msg.content)) {
-            if (msg.rowid) renderedHistoryRowIds.add(msg.rowid);
+            if (stableId) renderedHistoryRowIds.add(stableId);
             if (msg.rowid && msg.rowid > lastKnownMsgId) lastKnownMsgId = msg.rowid;
             return;
         }
 
         appendMessage(msg.content, sender, label);
 
-        if (msg.rowid) renderedHistoryRowIds.add(msg.rowid);
+        if (stableId) renderedHistoryRowIds.add(stableId);
         if (msg.rowid && msg.rowid > lastKnownMsgId) lastKnownMsgId = msg.rowid;
     }
 
@@ -691,15 +696,19 @@
             const data = await response.json();
             if (data.history && data.history.length > 0) {
                 data.history.forEach(msg => renderHistoryMsg(msg));
+                const historyMaxRowId = Math.max(0, ...data.history.map(msg => Number(msg.rowid) || 0));
+                if (historyMaxRowId > lastKnownMsgId) lastKnownMsgId = historyMaxRowId;
             } else {
                 appendMessage("Καλημέρα Μάστορα! Έτοιμος για μερεμέτια;", "ai", "System");
             }
             // Φόρτωσε max_id ώστε το polling να ξεκινά από εδώ
-            try {
-                const pr = await fetch(`http://127.0.0.1:8000/messages/poll?after_id=0`);
-                const pd = await pr.json();
-                if (pd.max_id) lastKnownMsgId = pd.max_id;
-            } catch(e) {}
+            if (!lastKnownMsgId) {
+                try {
+                    const pr = await fetch(`http://127.0.0.1:8000/messages/poll?after_id=0`);
+                    const pd = await pr.json();
+                    if (pd.max_id) lastKnownMsgId = pd.max_id;
+                } catch(e) {}
+            }
         } catch (error) { console.error("History error:", error); }
     });
 
