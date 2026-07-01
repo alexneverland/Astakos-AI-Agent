@@ -20,3 +20,19 @@ def test_multiple_capability_paragraphs():
     input_text = "Γεια σου!\n\nο αστακός δεν μπορεί να κάνει καφέ.\n\nΤα λέμε."
     expected = "Γεια σου!\n\nΤα λέμε."
     assert strip_operational_assistant_paragraphs(input_text) == expected
+
+def test_operational_memory_noise_is_skipped():
+    from memory.session_memory import _looks_like_operational_memory_noise
+
+    fact = "[USER_FACT]: Στις 2026-07-01, ✅ Στάλθηκε, μάστορα."
+    ai = "✅ Στάλθηκε, μάστορα."
+
+    assert _looks_like_operational_memory_noise(fact, ai) is True
+
+def test_normal_family_fact_is_not_operational_noise():
+    from memory.session_memory import _looks_like_operational_memory_noise
+
+    fact = "[USER_FACT]: Στις 2026-07-01, η Σοφία σήμερα είναι σπίτι με τα παιδιά."
+    ai = "Ωραία, το κρατάω."
+
+    assert _looks_like_operational_memory_noise(fact, ai) is False
