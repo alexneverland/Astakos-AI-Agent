@@ -599,6 +599,75 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     except Exception as e:
         print(f"[PendingAssets]: Web text handler error: {e}")
 
+    # ── Messenger Draft Intent Guard (Web UI parity with Telegram) ─────────────
+    try:
+        from core.messenger_draft import active_draft_status, clear_draft
+        from services.messenger_intent import classify_messenger_intent
+        from memory.execution_trace import ExecutionTrace
+
+        draft_active, _, draft_data = active_draft_status()
+        draft_intent = classify_messenger_intent(
+            user_input,
+            has_active_draft=draft_active,
+        )
+
+        if draft_intent and draft_intent.intent == "clear_draft":
+            cleared = bool(clear_draft())
+            reply = (
+                "Έγινε, μάστορα. Το draft καθαρίστηκε και το κλείνουμε εδώ."
+                if cleared
+                else "Δεν υπάρχει ενεργό draft αυτή τη στιγμή για να καθαρίσω."
+            )
+            from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
+            reply = sanitize_messenger_draft_claims(reply)
+            reply = strip_operational_assistant_paragraphs(reply).strip() or reply
+
+            append_to_chat_history("user", user_input)
+            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
+            enqueue_fast_task(update_working_memory, user_input, reply)
+            enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
+            enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
+
+            _trace = ExecutionTrace(channel="web", user_message=user_input)
+            _trace.mark_phase("messenger_intent_clear_intercept", 1)
+            _trace.finalize(response=reply)
+            _trace.save()
+            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+
+        if draft_intent and draft_intent.intent == "clarify_draft":
+            if draft_active and draft_data and draft_data.get("message"):
+                draft_message = str(draft_data.get("message") or "").strip()
+                reply = (
+                    "Εννοούσα αυτό το draft:\n\n"
+                    f"{draft_message}\n\n"
+                    "Θέλεις αλλαγές, να το σβήσω ή να το στείλω;"
+                )
+            else:
+                reply = (
+                    "Δεν υπάρχει ενεργό draft αυτή τη στιγμή. "
+                    "Εννοούσα απλώς σαν ιδέα να ετοιμάσουμε μήνυμα, όχι ότι υπάρχει ήδη έτοιμο."
+                )
+
+            from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
+            reply = sanitize_messenger_draft_claims(reply)
+            reply = strip_operational_assistant_paragraphs(reply).strip() or reply
+
+            append_to_chat_history("user", user_input)
+            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
+            enqueue_fast_task(update_working_memory, user_input, reply)
+            enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
+            enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
+
+            _trace = ExecutionTrace(channel="web", user_message=user_input)
+            _trace.mark_phase("messenger_intent_clarify_intercept", 1)
+            _trace.finalize(response=reply)
+            _trace.save()
+            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+    except Exception as e:
+        print(f"[MessengerIntent Web]: {e}")
+
     with memory_lock:
         last_interaction_time = time.time()
 
