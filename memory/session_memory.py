@@ -19,7 +19,7 @@ from memory.family_arc_resolution import (
     _pick_richer_candidate,
 )
 import re
-from core.utils import clean_message
+from core.utils import clean_message, looks_like_operational_assistant_text
 from core.event_bus import bus
 import sqlite3
 from config import PHOTOS_INDEX_FILE, PHOTOS_DIR, STATE_DB
@@ -268,6 +268,36 @@ def _looks_like_operational_asset_confirmation(text: str) -> bool:
     )
 
     return any(m in txt for m in markers)
+
+
+def _looks_like_operational_memory_noise(fact: str, ai_text: str = "") -> bool:
+    fact_body = _strip_user_fact_scaffold(fact)
+    fact_norm = clean_message(fact_body).strip()
+    ai_norm = clean_message(ai_text).strip()
+
+    if looks_like_operational_assistant_text(fact_norm):
+        return True
+
+    if ai_norm and looks_like_operational_assistant_text(ai_norm):
+        return True
+
+    low_fact = fact_norm.lower()
+    low_ai = ai_norm.lower()
+
+    direct_markers = (
+        "αναμονή έγκρισης",
+        "action approval required",
+        "εκτελώ `execute_local_pipeline`",
+        "εκτελώ `",
+        "στάλθηκε, μάστορα",
+        "το draft καθαρίστηκε",
+        "δεν υπάρχει ενεργό draft",
+        "εννοούσα αυτό το draft",
+        "θέλεις αλλαγές, να το σβήσω ή να το στείλω",
+    )
+
+    return any(marker in low_fact or marker in low_ai for marker in direct_markers)
+
 _MEMORY_SIFTER_RUN_TTL_HOURS = 48
 
 
@@ -1908,6 +1938,10 @@ def run_memory_sifter_slow(
 
             if _looks_like_operational_asset_confirmation(fact) or _looks_like_operational_asset_confirmation(ai_text):
                 print("\033[90m[MemorySifterSlow]: operational asset confirmation skip\033[0m")
+                continue
+
+            if _looks_like_operational_memory_noise(fact, ai_text):
+                print(f"\033[90m[MemorySifterSlow]: operational memory noise skip -> {fact[:80]}\033[0m")
                 continue
 
             if category == "family" and _looks_low_signal_family_fact(fact):

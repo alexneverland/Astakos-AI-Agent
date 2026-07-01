@@ -1798,7 +1798,8 @@ def _handle_approval_callback(cq: dict):
                 timeout=5,
             )
 
-            send_telegram_msg(f"⚙️ Εκτελώ `{tool_name}`...")
+            if tool_name != "execute_local_pipeline":
+                send_telegram_msg(f"⚙️ Εκτελώ `{tool_name}`...")
 
             execution = execute_approved_pending(tool_call_id, all_tools)
             
@@ -1855,7 +1856,13 @@ def _handle_approval_callback(cq: dict):
                         print(f"[ApprovalCallback Web Error Notify]: {e}")
             else:
                 if execution["ok"]:
-                    send_telegram_msg_full(str(execution["result"]), prefix="✅ `" + tool_name + "` ολοκληρώθηκε:\n\n")
+                    if tool_name == "execute_local_pipeline":
+                        send_telegram_msg("✅ Στάλθηκε, μάστορα.")
+                    else:
+                        send_telegram_msg_full(
+                            str(execution["result"]),
+                            prefix="✅ `" + tool_name + "` ολοκληρώθηκε:\n\n",
+                        )
                 elif execution["status"] == "tool_not_found":
                     send_telegram_msg(f"❌ Tool `{tool_name}` δεν βρέθηκε.")
                 else:
@@ -1926,6 +1933,13 @@ def _handle_message_reaction(reaction: dict) -> None:
             send_telegram_msg("❤️ Έπιασα το react αλλά δεν βρήκα το μήνυμα στη μνήμη μου.")
             return
 
+        from core.utils import looks_like_operational_assistant_text
+
+        if looks_like_operational_assistant_text(bot_text):
+            print("\033[90m[Reaction ❤️]: operational assistant text skip\033[0m")
+            send_telegram_msg("❤️ Αυτό ήταν operational μήνυμα και δεν το κράτησα στη μνήμη.")
+            return
+
         # Αποθήκευσε στη long-term memory
         preview = bot_text[:80].replace("\n", " ")
         print(f"\033[92m[Reaction ❤️]: Αποθήκευση: {preview}...\033[0m")
@@ -1942,6 +1956,12 @@ def _handle_message_reaction(reaction: dict) -> None:
 def _save_reaction_to_memory(text: str) -> None:
     """Background: αποθηκεύει το κείμενο στη ChromaDB και ειδοποιεί."""
     try:
+        from core.utils import looks_like_operational_assistant_text
+
+        if looks_like_operational_assistant_text(text):
+            print("\033[90m[Reaction Save]: skipped operational assistant text\033[0m")
+            return
+
         from tools.system import save_to_memory
         preview = text[:60].replace("\n", " ")
         result = save_to_memory.invoke({
