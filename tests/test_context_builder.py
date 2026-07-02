@@ -408,6 +408,26 @@ def test_tool_result_routine_list_outputs_skip_semantic():
     assert context.semantic_facts == []
 
 
+def test_tool_result_background_save_confirmation_skips_semantic():
+    calls = {"semantic": 0}
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] background save")] if k > 0 else []
+
+    query = "✅ Αποθηκεύεται σε background: [Ξηροκρήνη, Σοφία, Αλέξανδρος]"
+    context = build_memory_context(
+        query,
+        recent_loader=lambda **kwargs: [],
+        semantic_search=fake_search,
+        semantic_k=8,
+    )
+
+    assert looks_like_tool_result_query(query)
+    assert calls["semantic"] == 0
+    assert context.semantic_facts == []
+
+
 def test_normal_location_user_message_keeps_semantic():
     calls = {"semantic": 0}
 
