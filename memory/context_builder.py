@@ -200,12 +200,44 @@ def looks_like_news_or_web_fact_query(text: str) -> bool:
 
 
 def looks_like_tool_result_query(text: str) -> bool:
-    low = str(text).lower().strip()
+    raw = str(text or "").strip()
+    low = raw.lower()
+    normalized = _normalize_text(raw)
+
+    tool_prefixes = (
+        "✅",
+        "ℹ️",
+        "📍",
+        "📅",
+        "📄",
+        "🗺️",
+        "⏳",
+        "⚙️",
+        "❌",
+    )
+    tool_result_markers = (
+        "δεν υπαρχουν εκκρεμεις υπενθυμισεις",
+        "δεν υπαρχουν ανοιχτα google tasks",
+        "δεν υπαρχουν tasks",
+        "συντεταγμενες:",
+        "τοποθεσια:",
+        "ρουτινες για ",
+        "αποτελεσματα για ",
+        "περιεχομενο απο ",
+        "προβολη στον χαρτη",
+        "δες στον χαρτη",
+        "η λιστα ",
+        "ειναι αδεια",
+    )
     return (
         low.startswith("τίτλος:")
         or low.startswith("title:")
         or low.startswith("[web_tool_error]")
         or " url: " in low
+        or (
+            raw.startswith(tool_prefixes)
+            and any(marker in normalized for marker in tool_result_markers)
+        )
     )
 
 def looks_like_recent_web_result_text(text: str) -> bool:

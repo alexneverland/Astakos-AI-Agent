@@ -3,6 +3,7 @@ from memory.context_builder import (
     build_memory_context,
     format_recent_messages,
     looks_like_tool_output,
+    looks_like_tool_result_query,
     semantic_facts_for_query,
     temporal_history_for_query,
 )
@@ -340,6 +341,92 @@ def test_semantic_skip_simple_ack_skipped():
     # _record_memory_context_debug checks the effective_semantic_k
     assert calls["semantic"] == 0  # The function is called, but with k=0
     assert len(context.semantic_facts) == 0
+
+
+def test_tool_result_status_outputs_skip_semantic_but_keep_recent_context():
+    calls = {"recent": 0, "semantic": 0}
+
+    def fake_recent_loader(**kwargs):
+        calls["recent"] += 1
+        return [{"channel": "web", "time": "20:17", "role": "user", "content": "θα πάω σε καμιά ώρα"}]
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] stale")] if k > 0 else []
+
+    query = "✅ Δεν υπάρχουν ανοιχτά Google Tasks."
+    context = build_memory_context(
+        query,
+        recent_loader=fake_recent_loader,
+        semantic_search=fake_search,
+        semantic_k=8,
+    )
+
+    assert looks_like_tool_result_query(query)
+    assert calls == {"recent": 1, "semantic": 0}
+    assert context.recent_lines
+    assert context.semantic_facts == []
+
+
+def test_tool_result_location_outputs_skip_semantic():
+    calls = {"semantic": 0}
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] location")] if k > 0 else []
+
+    query = "📍 Συντεταγμένες: 40.648339, 22.935704 🚶 Είναι ΕΚΤΟΣ σπιτιού"
+    context = build_memory_context(
+        query,
+        recent_loader=lambda **kwargs: [],
+        semantic_search=fake_search,
+        semantic_k=8,
+    )
+
+    assert looks_like_tool_result_query(query)
+    assert calls["semantic"] == 0
+    assert context.semantic_facts == []
+
+
+def test_tool_result_routine_list_outputs_skip_semantic():
+    calls = {"semantic": 0}
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] routines")] if k > 0 else []
+
+    query = "📅 Ρουτίνες για Thursday: • 05:30 — ξύπνημα Λάζαρου"
+    context = build_memory_context(
+        query,
+        recent_loader=lambda **kwargs: [],
+        semantic_search=fake_search,
+        semantic_k=8,
+    )
+
+    assert looks_like_tool_result_query(query)
+    assert calls["semantic"] == 0
+    assert context.semantic_facts == []
+
+
+def test_normal_location_user_message_keeps_semantic():
+    calls = {"semantic": 0}
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] family park")] if k > 0 else []
+
+    query = "σχόλασα ήρθα σπίτι και θα πάω σε καμιά ώρα στην Ξηροκρήνη"
+    context = build_memory_context(
+        query,
+        recent_loader=lambda **kwargs: [],
+        semantic_search=fake_search,
+        semantic_k=8,
+    )
+
+    assert not looks_like_tool_result_query(query)
+    assert calls["semantic"] == 1
+    assert context.semantic_facts
+
 
 def test_semantic_skip_short_important_kept():
     calls = {"recent": 0, "semantic": 0}
