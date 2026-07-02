@@ -272,6 +272,46 @@ def looks_like_web_followup_query(text: str) -> bool:
     return any(marker in low for marker in followup_markers)
 
 
+def has_recent_context_overlap(
+    query: str,
+    messages: Iterable[dict[str, Any]],
+    *,
+    min_shared_tokens: int = 2,
+) -> bool:
+    query_tokens = {_stem_token(token) for token in _query_tokens(query)}
+    effective_min_shared = 1 if len(query_tokens) <= 4 else min_shared_tokens
+    if len(query_tokens) < effective_min_shared:
+        return False
+
+    recent_items = list(messages)[-6:]
+    for message in reversed(recent_items):
+        content = str(message.get("content", "")).strip()
+        if not content:
+            continue
+        content_tokens = {_stem_token(token) for token in _query_tokens(content)}
+        if len(query_tokens & content_tokens) >= effective_min_shared:
+            return True
+    return False
+
+
+def looks_like_recent_context_followup_query(text: str) -> bool:
+    low = str(text or "").lower().strip()
+    if not low:
+        return False
+
+    if looks_like_news_or_web_fact_query(low) or looks_like_tool_result_query(low):
+        return False
+
+    if _has_recall_marker(low) or _has_temporal_marker(low):
+        return False
+
+    word_count = len(low.split())
+    if word_count > 14:
+        return False
+
+    return True
+
+
 def looks_like_food_memory_query(text: str) -> bool:
     clean = _normalize_text(text)
     if not clean:
@@ -356,6 +396,7 @@ def classify_memory_query_intent(
     query: str,
     *,
     has_recent_web_results: bool = False,
+    has_recent_context_overlap: bool = False,
 ) -> str:
     clean = _clean_query_for_search(query).strip()
     if not clean:
@@ -372,6 +413,9 @@ def classify_memory_query_intent(
 
     if has_recent_web_results and looks_like_web_followup_query(clean):
         return "web_followup"
+
+    if has_recent_context_overlap and looks_like_recent_context_followup_query(clean):
+        return "recent_context_followup"
 
     if _looks_low_complexity_query(clean) and not _must_keep_semantic(clean):
         return "low_complexity"
@@ -673,6 +717,7 @@ def build_memory_context(
         channel == "web"
         and has_fresh_web_results_in_recent_context(recent_messages)
     )
+    recent_context_overlap = has_recent_context_overlap(clean_query, recent_messages)
 
     recent_formatted = format_recent_messages(recent_messages, limit=recent_limit)
     recent_ms = int((perf_counter() - t_recent_0) * 1000)
@@ -692,6 +737,7 @@ def build_memory_context(
     query_intent = classify_memory_query_intent(
         clean_query,
         has_recent_web_results=has_recent_web_results,
+        has_recent_context_overlap=recent_context_overlap,
     )
 
     if semantic_k > 0:
@@ -707,6 +753,9 @@ def build_memory_context(
         elif query_intent == "web_followup":
             effective_semantic_k = min(semantic_k, 2)
             semantic_adjust_reason = "recent_web_context_downshift"
+        elif query_intent == "recent_context_followup":
+            effective_semantic_k = min(semantic_k, 3)
+            semantic_adjust_reason = "recent_context_overlap_downshift"
         elif query_intent == "low_complexity":
             effective_semantic_k = 0
             semantic_adjust_reason = "low_complexity_query"

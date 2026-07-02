@@ -695,6 +695,15 @@
         markRecentlyRendered('ai', text);
     }
 
+    function appendUserMessageOnce(text) {
+        if (wasRecentlyRendered('user', text)) {
+            return;
+        }
+        pushLocalEcho('user', text);
+        appendMessage(text, 'user');
+        markRecentlyRendered('user', text);
+    }
+
     function renderHistoryMsg(msg) {
         const stableId = getMessageStableId(msg);
         if (stableId && renderedHistoryRowIds.has(stableId)) {
@@ -826,8 +835,7 @@
         if (file && !text) displayUserMsg = `[Απεστάλη αρχείο: ${file.name}]`;
         if (file && text)  displayUserMsg = `[Αρχείο: ${file.name}]<br>${text}`;
 
-        appendMessage(displayUserMsg, 'user');
-        pushLocalEcho('user', displayUserMsg);
+        appendUserMessageOnce(displayUserMsg);
         userInput.value = '';
         clearPendingAttachmentUI();
         if (!isRecording) userInput.focus();

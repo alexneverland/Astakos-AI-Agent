@@ -152,3 +152,75 @@ def test_followup_without_recent_web_results_keeps_semantic(monkeypatch):
     assert len(debug_calls) == 1
     assert debug_calls[0]["semantic_k_used"] == 8
     assert debug_calls[0]["semantic_adjust_reason"] is None
+
+
+def test_recent_context_followup_downshifts_semantic(monkeypatch):
+    debug_calls = []
+
+    def fake_recent_loader(**kwargs):
+        return [
+            {
+                "channel": "web",
+                "time": "14:43",
+                "role": "user",
+                "content": "το κουνελι το φωναζουμε Κουθαθα ετσι το ονομασε ο Αλεξανδρος",
+            },
+            {
+                "channel": "web",
+                "time": "14:43",
+                "role": "assistant",
+                "content": "Κουθάθα λοιπόν ο μάγκας! Το κράτησα, ωραίο όνομα διάλεξε ο μικρός.",
+            },
+        ]
+
+    monkeypatch.setattr(cb, "temporal_history_for_query", MagicMock(return_value=[]))
+    monkeypatch.setattr(cb, "semantic_facts_for_query", MagicMock(return_value=[]))
+    monkeypatch.setattr(
+        cb,
+        "_record_memory_context_debug",
+        lambda **kwargs: debug_calls.append(kwargs),
+    )
+
+    build_memory_context(
+        "ο αλεξανδρος το αγαπαει πολυ",
+        channel="web",
+        semantic_k=8,
+        recent_loader=fake_recent_loader,
+    )
+
+    assert len(debug_calls) == 1
+    assert debug_calls[0]["semantic_k_used"] == 3
+    assert debug_calls[0]["semantic_adjust_reason"] == "recent_context_overlap_downshift"
+
+
+def test_recall_query_with_overlap_keeps_full_semantic(monkeypatch):
+    debug_calls = []
+
+    def fake_recent_loader(**kwargs):
+        return [
+            {
+                "channel": "telegram",
+                "time": "14:43",
+                "role": "user",
+                "content": "το κουνελι το φωναζουμε Κουθαθα ετσι το ονομασε ο Αλεξανδρος",
+            }
+        ]
+
+    monkeypatch.setattr(cb, "temporal_history_for_query", MagicMock(return_value=[]))
+    monkeypatch.setattr(cb, "semantic_facts_for_query", MagicMock(return_value=[]))
+    monkeypatch.setattr(
+        cb,
+        "_record_memory_context_debug",
+        lambda **kwargs: debug_calls.append(kwargs),
+    )
+
+    build_memory_context(
+        "θυμάσαι πώς το ονόμασε ο Αλέξανδρος τελικά;",
+        channel="telegram",
+        semantic_k=8,
+        recent_loader=fake_recent_loader,
+    )
+
+    assert len(debug_calls) == 1
+    assert debug_calls[0]["semantic_k_used"] == 8
+    assert debug_calls[0]["semantic_adjust_reason"] is None
