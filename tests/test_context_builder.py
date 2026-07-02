@@ -428,6 +428,26 @@ def test_tool_result_background_save_confirmation_skips_semantic():
     assert context.semantic_facts == []
 
 
+def test_tool_result_supermarket_price_list_skips_semantic():
+    calls = {"semantic": 0}
+
+    def fake_search(query, k):
+        calls["semantic"] += 1
+        return [_Doc("[USER_FACT] price list")] if k > 0 else []
+
+    query = "📦 ΛΟΥΜΙΔΗΣ ΕΛΛΗΝΙΚΟΣ ΚΑΦΕΣ 30/96G ΑΒ Βασιλόπουλος: 2.54€ Μασούτης: 2.54€ My Market: 2.54€"
+    context = build_memory_context(
+        query,
+        recent_loader=lambda **kwargs: [],
+        semantic_search=fake_search,
+        semantic_k=8,
+    )
+
+    assert looks_like_tool_result_query(query)
+    assert calls["semantic"] == 0
+    assert context.semantic_facts == []
+
+
 def test_normal_location_user_message_keeps_semantic():
     calls = {"semantic": 0}
 

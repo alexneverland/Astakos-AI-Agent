@@ -210,6 +210,7 @@ def looks_like_tool_result_query(text: str) -> bool:
         "📍",
         "📅",
         "📄",
+        "📦",
         "🗺️",
         "⏳",
         "⚙️",
@@ -229,6 +230,12 @@ def looks_like_tool_result_query(text: str) -> bool:
         "δες στον χαρτη",
         "η λιστα ",
         "ειναι αδεια",
+        "αβ βασιλοπουλου:",
+        "μασουτης:",
+        "my market:",
+        "market in:",
+        "bazaar:",
+        "efresh:",
     )
     return (
         low.startswith("τίτλος:")
