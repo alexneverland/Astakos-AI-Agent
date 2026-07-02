@@ -1087,7 +1087,7 @@ function render(d) {
   }
 
   if ((rout.active||[]).length > 0) {
-    html += `<div class="card" style="grid-column:span 2"><h2>🗓️ Active Routines (${rout.active.length})</h2>
+    html += `<div class="card" style="grid-column:1/-1"><h2>🗓️ Active Routines (${rout.active.length})</h2>
       <div class="table-wrap"><table class="routines-table"><tr><th class="cell-tight">ID</th><th class="cell-tight">Schedule</th><th>Event</th><th>Rules</th><th class="cell-tight">Status</th><th class="cell-tight" style="text-align:right">Ενέργειες</th></tr>
       ${rout.active.map(r=>`<tr>
         <td class="off cell-tight" style="font-size:11px; vertical-align:middle">#${r.id}</td>
@@ -1136,7 +1136,7 @@ function render(d) {
   }
 
   if ((rout.non_active||[]).length > 0) {
-    html += `<div class="card" style="grid-column:span 2"><h2>🔄 Non-Active Routines (${rout.non_active.length})</h2>
+    html += `<div class="card" style="grid-column:1/-1"><h2>🔄 Non-Active Routines (${rout.non_active.length})</h2>
       <div class="table-wrap"><table class="routines-table"><tr><th class="cell-tight">ID</th><th class="cell-tight">Schedule</th><th>Event</th><th>Rules</th><th class="cell-tight">Status</th><th class="cell-tight" style="text-align:right">Ενέργειες</th></tr>
       ${rout.non_active.map(r=>`<tr>
         <td class="off cell-tight" style="font-size:11px;vertical-align:middle">#${r.id}</td>
