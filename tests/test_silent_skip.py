@@ -299,6 +299,7 @@ def _run_job(
     duplicate=False,
     muted_until=None,
     sentimental_info=None,
+    random_value=0.99,
 ):
     """
     Τρέχει job_check_routines() με mocked εξωτερικά.
@@ -346,6 +347,7 @@ def _run_job(
             patch.object(bot, "send_telegram_msg",     side_effect=lambda m: sent.append(m)),
             patch.object(bot, "log_event",             side_effect=lambda *a, **kw: logged.append((a[0], a[1]))),
             patch.object(bot, "bus",                   mock_bus),
+            patch("random.random", return_value=random_value),
         ):
             bot.job_check_routines()
 
@@ -577,6 +579,42 @@ def test_context_skip_can_set_muted_window():
         )
     rdb.set_routine_muted_until.assert_called_once_with(1, "2026-06-26")
     rdb.set_routine_sentimental.assert_called_once_with(1, True)
+
+
+def test_shift_mode_block_does_not_trigger_sentimental_override():
+    """Work/shift blocks should stay blocked, even if the random sentimental gate fires."""
+    rdb = sys.modules["memory.routine_db"]
+    rdb.get_routine_conditions.return_value = [
+        {
+            "condition_type": "shift_mode",
+            "condition_payload": '{"flag": "current_shift", "equals": "afternoon"}',
+            "condition_mode": "suppress_when_true",
+        }
+    ]
+    sys.modules["services.routine_conditions"].evaluate_routine_conditions.return_value = {
+        "allowed": False,
+        "results": [{"allowed": False, "reason": "shift_mode_suppressed"}],
+        "matched_count": 0,
+        "failed_count": 1,
+    }
+
+    try:
+        sent, logged, _ = _run_job(
+            [dict(_due_routine(), event_name="Πάρκο με τον Αλέξανδρο")],
+            random_value=0.0,
+        )
+    finally:
+        rdb.get_routine_conditions.return_value = []
+        sys.modules["services.routine_conditions"].evaluate_routine_conditions.return_value = {
+            "allowed": True,
+            "results": [],
+            "matched_count": 0,
+            "failed_count": 0,
+        }
+
+    assert sent == []
+    assert any(action == "routine_condition_blocked" for _, action in logged)
+    assert not any(action == "routine_triggered" for _, action in logged)
 
 
 def test_deferred_context_skip_does_not_create_pending_confirmation():

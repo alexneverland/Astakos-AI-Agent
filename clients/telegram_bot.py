@@ -2900,6 +2900,40 @@ def _infer_sentimental(event_name: str, memory_context: str) -> bool:
         return False
 
 
+def _should_allow_sentimental_override(event_name: str, cond_result: dict) -> bool:
+    """
+    Keep sentimental overrides for family/home-like routines, but block them
+    for work/shift-driven suppressions.
+    """
+    try:
+        results = cond_result.get("results") or []
+        reason_blob = " ".join(
+            str(item.get("reason", "")) for item in results if isinstance(item, dict)
+        ).lower()
+
+        if any(token in reason_blob for token in ("shift_mode", "user_at_work", "sofia_work_mode")):
+            return False
+
+        event_norm = _normalize_gr(event_name)
+        sentimental_hints = (
+            "αλεξανδρ",
+            "σοφια",
+            "σοφία",
+            "παιδ",
+            "κουνελ",
+            "παρκο",
+            "σπιτι",
+            "θαλασσ",
+            "βολτ",
+            "οικογεν",
+            "family",
+            "home",
+        )
+        return any(token in event_norm for token in sentimental_hints)
+    except Exception:
+        return False
+
+
 def _craft_sentimental_absent_msg(
     event_name: str, muted_from: str, muted_until: str, memory_context: str
 ) -> str:
@@ -3417,7 +3451,7 @@ def job_check_routines():
                         
                             import random
                             # 30% chance for a Sentimental Override (approx 2 times a week for a daily routine)
-                            if random.random() < 0.30:
+                            if random.random() < 0.30 and _should_allow_sentimental_override(event_name, cond_result):
                                 blocked_reason = ", ".join(str(r.get("reason", "blocked")) for r in cond_result.get("results", []) if not r.get("allowed"))
                                 override_name = f"{event_name} [ΑΚΥΡΩΝΕΤΑΙ ΣΗΜΕΡΑ ΛΟΓΩ: {blocked_reason}]"
                                 print(f"\U0001f496 [job_check_routines]: #{r_id} '{event_name}' blocked but triggering sentimental override!")
