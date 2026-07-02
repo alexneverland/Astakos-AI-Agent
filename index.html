@@ -969,6 +969,8 @@
     function normalizeEchoText(text) {
         return String(text || "")
             .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<[^>]+>/g, "")
+            .replace(/[\u200B-\u200D\uFEFF]/g, "")
             .replace(/\s+/g, " ")
             .trim();
     }
@@ -1058,7 +1060,7 @@
         const channelName = msg.channel ? `${msg.channel.charAt(0).toUpperCase()}${msg.channel.slice(1)}` : '';
         const label = channelName ? `${channelName} / ${msg.agent || defaultName}` : (msg.agent || defaultName);
 
-        if (consumeMatchingLocalEcho(sender, msg.content)) {
+        if (wasRecentlyRendered(sender, msg.content) || consumeMatchingLocalEcho(sender, msg.content)) {
             if (stableId) renderedHistoryRowIds.add(stableId);
             if (msg.rowid && msg.rowid > lastKnownMsgId) lastKnownMsgId = msg.rowid;
             return;
@@ -1341,7 +1343,13 @@
     function _startPolling() {
         if (!_pollInterval) _pollInterval = setInterval(fetchNewMessages, 5000);
     }
-    ws.onopen  = () => { wsDot.style.background = '#4EC9B0'; wsLabel.textContent = 'Online'; _startPolling(); };
+    function _stopPolling() {
+        if (_pollInterval) {
+            clearInterval(_pollInterval);
+            _pollInterval = null;
+        }
+    }
+    ws.onopen  = () => { wsDot.style.background = '#4EC9B0'; wsLabel.textContent = 'Online'; _stopPolling(); };
     ws.onclose = () => { wsDot.style.background = '#F44747'; wsLabel.textContent = 'Offline'; _startPolling(); };
 
     function parseANSI(text) {
