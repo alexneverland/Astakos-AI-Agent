@@ -616,6 +616,7 @@
     let lastKnownMsgId = 0;
     const renderedHistoryRowIds = new Set();
     const pendingLocalEchoes = [];
+    const recentRenderedMessages = [];
     let isFetchingMessages = false;
 
     function getMessageStableId(msg) {
@@ -656,6 +657,44 @@
         return false;
     }
 
+    function markRecentlyRendered(role, text) {
+        const normalized = normalizeEchoText(text);
+        const now = Date.now();
+        for (let i = recentRenderedMessages.length - 1; i >= 0; i--) {
+            if (recentRenderedMessages[i].expiresAt < now) recentRenderedMessages.splice(i, 1);
+        }
+        recentRenderedMessages.push({
+            role,
+            text: normalized,
+            expiresAt: now + 12000,
+        });
+    }
+
+    function wasRecentlyRendered(role, text) {
+        const normalized = normalizeEchoText(text);
+        const now = Date.now();
+        for (let i = recentRenderedMessages.length - 1; i >= 0; i--) {
+            const item = recentRenderedMessages[i];
+            if (item.expiresAt < now) {
+                recentRenderedMessages.splice(i, 1);
+                continue;
+            }
+            if (item.role === role && item.text === normalized) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function appendAssistantResponseOnce(text, agentName = "") {
+        if (wasRecentlyRendered('ai', text)) {
+            return;
+        }
+        pushLocalEcho('ai', text);
+        appendMessage(text, 'ai', agentName);
+        markRecentlyRendered('ai', text);
+    }
+
     function renderHistoryMsg(msg) {
         const stableId = getMessageStableId(msg);
         if (stableId && renderedHistoryRowIds.has(stableId)) {
@@ -674,6 +713,7 @@
         }
 
         appendMessage(msg.content, sender, label);
+        markRecentlyRendered(sender, msg.content);
 
         if (stableId) renderedHistoryRowIds.add(stableId);
         if (msg.rowid && msg.rowid > lastKnownMsgId) lastKnownMsgId = msg.rowid;
@@ -815,8 +855,7 @@
                 response = await fetch('http://127.0.0.1:8000/upload', { method: 'POST', body: formData });
                 const data = await response.json();
                 chatBox.removeChild(loadingDiv);
-                pushLocalEcho('ai', data.ai_message);
-                appendMessage(data.ai_message, 'ai', 'Chat_Agent');
+                appendAssistantResponseOnce(data.ai_message, 'Chat_Agent');
                 if (isDrawerOpen) speakText(data.ai_message);
             } else {
                 response = await fetch('http://127.0.0.1:8000/chat', {
@@ -826,8 +865,7 @@
                 });
                 const data = await response.json();
                 chatBox.removeChild(loadingDiv);
-                pushLocalEcho('ai', data.response);
-                appendMessage(data.response, 'ai', data.agent);
+                appendAssistantResponseOnce(data.response, data.agent);
                 if (isDrawerOpen) speakText(data.response);
             }
             
