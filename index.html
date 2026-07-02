@@ -972,8 +972,11 @@
         try {
             const evt = JSON.parse(event.data);
             if (evt.type === 'new_message' && (evt.channel === 'telegram' || evt.channel === 'web')) {
-                // Νέο Telegram μήνυμα — κάνε fetch μόνο τα νέα
-                fetchNewMessages();
+                if (evt.rowid && evt.content) {
+                    renderHistoryMsg(evt);
+                } else {
+                    fetchNewMessages();
+                }
                 return;
             }
         } catch(e) { /* plain text log line, συνέχισε κανονικά */ }

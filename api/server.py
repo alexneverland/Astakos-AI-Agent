@@ -122,6 +122,7 @@ def append_to_chat_history(role: str, content: str, agent: str | None = None):
     """Προσθήκη μηνύματος στο shared SQLite conversation history (web channel) και websocket push."""
     now = datetime.now()
     shared_message_id = None
+    shared_message_rowid = None
     try:
         from memory.conversation_history import append_message
         saved = append_message(
@@ -132,11 +133,13 @@ def append_to_chat_history(role: str, content: str, agent: str | None = None):
             timestamp=now,
         )
         shared_message_id = saved.get("id")
+        shared_message_rowid = saved.get("rowid")
         
         _broadcast_ws({
             "type": "new_message",
             "channel": "web",
             "id": shared_message_id,
+            "rowid": shared_message_rowid,
             "role": role,
             "agent": agent,
             "time": now.strftime("%H:%M"),
@@ -164,14 +167,16 @@ def notify_telegram_message(role: str, content: str, agent: str | None = None) -
             timestamp=now,
             agent=agent,
         )
-        msg_id = get_max_rowid()
+        msg_id = saved.get("rowid") or get_max_rowid()
         _broadcast_ws({
             "type": "new_message",
             "channel": "telegram",
             "id": msg_id,
+            "rowid": msg_id,
             "role": role,
             "agent": agent,
             "time": now.strftime("%H:%M"),
+            "content": content,
         })
         return msg_id
     except Exception as e:

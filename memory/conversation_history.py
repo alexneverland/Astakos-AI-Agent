@@ -214,7 +214,7 @@ def append_message(
 
     init_db(db_path)
     with _conn(db_path) as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT OR IGNORE INTO conversation_messages (
                 id, session_id, channel, role, content,
@@ -235,6 +235,8 @@ def append_message(
                 json.dumps(message["metadata"], ensure_ascii=False),
             ),
         )
+        if cursor.rowcount == 1:
+            message["rowid"] = cursor.lastrowid
     return message
 
 
