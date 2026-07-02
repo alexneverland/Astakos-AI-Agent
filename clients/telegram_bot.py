@@ -985,8 +985,8 @@ def _build_fast_chat_context(clean_user_text: str):
 def _run_fast_chat_path(context_msgs, current_msg):
     return list(
         graph.stream(
-            {"messages": context_msgs + [current_msg], "channel": "telegram"},
-            {"recursion_limit": 100},
+            {"messages": context_msgs[-6:] + [current_msg], "channel": "telegram"},
+            {"recursion_limit": 12},
         )
     )
 
