@@ -265,6 +265,70 @@ def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -
         })
     return history
 
+
+def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
+    """
+    Runs the synchronous LangGraph stream off the main event loop.
+    Returns extracted response, handling agent, fallback tool outputs and elapsed ms.
+    """
+    from time import perf_counter
+
+    final_ai_response = ""
+    handling_agent = "Chat_Agent"
+    tool_result_fallbacks: list[str] = []
+
+    t_graph_0 = perf_counter()
+    for event in graph.stream(
+        {"messages": messages_for_graph, "channel": "web"},
+        {"recursion_limit": limit},
+    ):
+        trace.process_event(event)
+        for node, data in event.items():
+            if data is None:
+                continue
+
+            if node == "tools":
+                t_tools_0 = perf_counter()
+                for msg in data.get("messages", []):
+                    if getattr(msg, "type", "") == "tool":
+                        tool_content = clean_message(getattr(msg, "content", "")).strip()
+                        if tool_content:
+                            tool_result_fallbacks.append(tool_content)
+                trace.mark_phase(
+                    "tool_message_collect_ms",
+                    trace.phase_timings.get("tool_message_collect_ms", 0)
+                    + int((perf_counter() - t_tools_0) * 1000),
+                )
+
+            if node not in ["supervisor", "tools"]:
+                t_extract_0 = perf_counter()
+
+                handling_agent = node
+                msgs = data.get("messages", [])
+                if msgs and hasattr(msgs[-1], "content"):
+                    last_msg = msgs[-1]
+                    if getattr(last_msg, "tool_calls", None):
+                        pass
+                    else:
+                        candidate = clean_message(msgs[-1].content).strip()
+                        if candidate and not candidate.startswith("[Κλήση Εργαλείου:"):
+                            final_ai_response = candidate
+                            print(f"\033[90m[Web->Graph]: Agent '{handling_agent}' απάντησε ({len(candidate)} χαρ.)\033[0m")
+
+                trace.mark_phase(
+                    "graph_result_extract_ms",
+                    trace.phase_timings.get("graph_result_extract_ms", 0)
+                    + int((perf_counter() - t_extract_0) * 1000),
+                )
+
+    graph_elapsed_ms = int((perf_counter() - t_graph_0) * 1000)
+    return {
+        "final_ai_response": final_ai_response,
+        "handling_agent": handling_agent,
+        "tool_result_fallbacks": tool_result_fallbacks,
+        "graph_elapsed_ms": graph_elapsed_ms,
+    }
+
 # ────────────────────────────────────────────────────────────────
 # QUEUE SYSTEM
 # ────────────────────────────────────────────────────────────────
@@ -789,51 +853,16 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
             _trace.mark_phase("web_graph_budget", limit)
 
-            t_graph_0 = perf_counter()
-            for event in graph.stream(
-                {"messages": messages_for_graph, "channel": "web"},
-                {"recursion_limit": limit},
-            ):
-                _trace.process_event(event)
-                for node, data in event.items():
-                    if data is None:
-                        continue
-
-                    if node == "tools":
-                        t_tools_0 = perf_counter()
-                        for msg in data.get("messages", []):
-                            if getattr(msg, "type", "") == "tool":
-                                tool_content = clean_message(getattr(msg, "content", "")).strip()
-                                if tool_content:
-                                    tool_result_fallbacks.append(tool_content)
-                        _trace.mark_phase(
-                            "tool_message_collect_ms",
-                            _trace.phase_timings.get("tool_message_collect_ms", 0)
-                            + int((perf_counter() - t_tools_0) * 1000)
-                        )
-
-                    if node not in ["supervisor", "tools"]:
-                        t_extract_0 = perf_counter()
-
-                        handling_agent = node
-                        msgs = data.get("messages", [])
-                        if msgs and hasattr(msgs[-1], "content"):
-                            last_msg = msgs[-1]
-                            if getattr(last_msg, "tool_calls", None):
-                                pass
-                            else:
-                                candidate = clean_message(msgs[-1].content).strip()
-                                if candidate and not candidate.startswith("[Κλήση Εργαλείου:"):
-                                    final_ai_response = candidate
-                                    print(f"\033[90m[Web->Graph]: Agent '{handling_agent}' απάντησε ({len(candidate)} χαρ.)\033[0m")
-
-                        _trace.mark_phase(
-                            "graph_result_extract_ms",
-                            _trace.phase_timings.get("graph_result_extract_ms", 0)
-                            + int((perf_counter() - t_extract_0) * 1000)
-                        )
-
-            graph_elapsed_ms = int((perf_counter() - t_graph_0) * 1000)
+            graph_result = await asyncio.to_thread(
+                _run_web_graph_stream_sync,
+                messages_for_graph,
+                limit,
+                _trace,
+            )
+            final_ai_response = graph_result["final_ai_response"]
+            handling_agent = graph_result["handling_agent"]
+            tool_result_fallbacks = graph_result["tool_result_fallbacks"]
+            graph_elapsed_ms = graph_result["graph_elapsed_ms"]
             _trace.mark_phase("graph_call_ms", graph_elapsed_ms)
             _trace.mark_phase("graph_stream_ms", graph_elapsed_ms)
 
