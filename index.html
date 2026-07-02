@@ -2,6 +2,7 @@
 <html lang="el">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Αστακός — Κέντρο Ελέγχου</title>
     <style>
         /* ══════════════════════════════════════════════════════
@@ -289,6 +290,330 @@
             0%   { box-shadow: 0 0 0 0 rgba(244,71,71,0.7); }
             70%  { box-shadow: 0 0 0 18px rgba(244,71,71,0); }
             100% { box-shadow: 0 0 0 0 rgba(244,71,71,0); }
+        }
+
+        /* ── 2026 conversational workspace refresh ── */
+        :root {
+            --bg: #090d14;
+            --surface: #101620;
+            --surface2: #151d2a;
+            --surface3: #1b2636;
+            --border: #263245;
+            --accent: #38bdf8;
+            --accent2: #0f8fc0;
+            --lobster: #f0522a;
+            --lobster-hi: #ff8a5f;
+            --green: #34d399;
+            --yellow: #fbbf24;
+            --red: #fb7185;
+            --text: #e5edf7;
+            --text-dim: #8b99ad;
+            --bubble-ai: #141c29;
+            --bubble-user: #0e8fc0;
+            --shadow-soft: 0 14px 36px rgba(0,0,0,.24);
+        }
+
+        html, body {
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        #header {
+            height: 58px;
+            padding: 0 18px;
+            background: rgba(16,22,32,.96);
+            border-bottom: 1px solid var(--border);
+            box-shadow: 0 8px 26px rgba(0,0,0,.24);
+            z-index: 20;
+        }
+        #header-left {
+            min-width: 0;
+        }
+        #header-logo {
+            display: grid;
+            place-items: center;
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            background: rgba(240,82,42,.1);
+            border: 1px solid rgba(240,82,42,.22);
+            font-size: 20px;
+        }
+        #header-title {
+            color: var(--text);
+            letter-spacing: .03em;
+            line-height: 1.1;
+        }
+        #header-subtitle {
+            margin-top: 3px;
+            color: var(--text-dim);
+            letter-spacing: .04em;
+        }
+        #ws-status {
+            background: #0b1220;
+            border-color: var(--border);
+            color: var(--text-dim);
+        }
+        #header-buttons {
+            gap: 8px;
+        }
+        .hbtn {
+            height: 34px;
+            padding: 0 12px;
+            border-radius: 8px;
+            background: #111a28;
+            box-shadow: none;
+        }
+
+        #main-row {
+            background:
+                linear-gradient(180deg, rgba(56,189,248,.04), transparent 180px),
+                var(--bg);
+        }
+
+        #chat-panel {
+            min-width: 0;
+            background:
+                radial-gradient(circle at 18% 0%, rgba(240,82,42,.07), transparent 28%),
+                radial-gradient(circle at 80% 0%, rgba(56,189,248,.08), transparent 32%);
+        }
+
+        #chat-box {
+            gap: 16px;
+            padding: 22px clamp(16px, 4vw, 58px);
+            scroll-behavior: smooth;
+        }
+        #chat-box::before {
+            content: "";
+            margin-top: auto;
+        }
+
+        .msg {
+            width: fit-content;
+            max-width: min(76ch, 78%);
+            padding: 12px 14px;
+            border-radius: 10px;
+            line-height: 1.58;
+            font-size: 14px;
+            box-shadow: var(--shadow-soft);
+        }
+        .msg-user {
+            background: linear-gradient(145deg, var(--bubble-user), #0aa7d4);
+            border: 1px solid rgba(255,255,255,.16);
+            border-bottom-right-radius: 4px;
+        }
+        .msg-ai {
+            background: var(--bubble-ai);
+            border: 1px solid var(--border);
+            border-bottom-left-radius: 4px;
+        }
+        .msg strong {
+            color: #ffffff;
+            font-weight: 750;
+        }
+        .msg a {
+            color: #7dd3fc;
+            text-decoration: none;
+            border-bottom: 1px solid rgba(125,211,252,.45);
+        }
+        .msg a:hover {
+            border-bottom-color: #7dd3fc;
+        }
+        .agent-label {
+            display: inline-flex;
+            width: auto;
+            margin: 0 0 7px;
+            padding: 2px 7px;
+            border-radius: 999px;
+            background: rgba(56,189,248,.09);
+            color: var(--accent);
+            font-size: 10px;
+            letter-spacing: .06em;
+        }
+        .msg-user .agent-label {
+            color: rgba(255,255,255,.78);
+            background: rgba(255,255,255,.13);
+        }
+        .copy-btn {
+            top: 7px;
+            right: 7px;
+            border-radius: 6px;
+            background: rgba(2,6,23,.62);
+        }
+
+        .loading {
+            margin-left: clamp(4px, 2vw, 20px);
+            padding: 9px 12px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: rgba(16,22,32,.8);
+            font-style: normal;
+        }
+
+        #input-container {
+            padding: 12px clamp(14px, 4vw, 58px) 16px;
+            background: linear-gradient(180deg, rgba(9,13,20,0), rgba(9,13,20,.88) 18%, var(--surface) 100%);
+            border-top: 1px solid rgba(38,50,69,.75);
+        }
+        #input-area {
+            max-width: 1180px;
+            margin: 0 auto;
+            align-items: flex-end;
+            gap: 9px;
+        }
+        .input-btn,
+        #send-btn {
+            height: 46px;
+            border-radius: 8px;
+            box-shadow: none;
+        }
+        .input-btn {
+            min-width: 46px;
+            background: #101827;
+        }
+        #user-input {
+            min-height: 46px;
+            max-height: 190px;
+            padding: 12px 14px;
+            border-radius: 8px;
+            background: #0d1420;
+            border-color: #2b3850;
+            color: var(--text);
+        }
+        #user-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(56,189,248,.12);
+        }
+        #send-btn {
+            min-width: 124px;
+            background: linear-gradient(145deg, #0e8fc0, #0ba8d5);
+        }
+        #send-btn:hover {
+            transform: none;
+            filter: brightness(1.06);
+        }
+        #file-label {
+            max-width: 1180px;
+            margin: 7px auto 0;
+            color: var(--green);
+        }
+
+        #astakos-drawer {
+            max-width: 1180px;
+            margin: 0 auto 12px;
+            border-radius: 8px;
+            height: 260px;
+            background: #0f1724;
+        }
+        #lobster-svg {
+            height: 248px;
+        }
+
+        #terminal-panel {
+            width: 430px;
+            background: #070b12;
+            border-left-color: var(--border);
+        }
+        #terminal-header {
+            height: 44px;
+            background: #101620;
+        }
+        #log-box {
+            font-size: 11px;
+            line-height: 1.45;
+        }
+
+        @media (max-width: 980px) {
+            #header {
+                height: auto;
+                min-height: 58px;
+                padding: 9px 10px;
+                flex-wrap: wrap;
+            }
+            #ws-status {
+                order: 3;
+                width: 100%;
+                justify-content: center;
+            }
+            #header-buttons {
+                margin-left: auto;
+            }
+            .hbtn {
+                padding: 0 10px;
+                font-size: 11px;
+            }
+            #terminal-panel {
+                position: fixed;
+                right: 0;
+                top: 58px;
+                bottom: 0;
+                width: min(92vw, 420px);
+                z-index: 30;
+                box-shadow: -18px 0 40px rgba(0,0,0,.35);
+            }
+            #terminal-panel.hidden-panel {
+                width: 0 !important;
+            }
+            .msg {
+                max-width: 88%;
+            }
+        }
+
+        @media (max-width: 640px) {
+            #header-title {
+                font-size: 13px;
+            }
+            #header-subtitle {
+                display: none;
+            }
+            #header-buttons {
+                width: 100%;
+                justify-content: stretch;
+            }
+            .hbtn {
+                flex: 1;
+                justify-content: center;
+            }
+            #chat-box {
+                padding: 14px 10px;
+                gap: 11px;
+            }
+            .msg {
+                max-width: 94%;
+                font-size: 13px;
+                padding: 10px 11px;
+            }
+            #input-container {
+                padding: 9px 9px 11px;
+            }
+            #input-area {
+                gap: 6px;
+            }
+            .input-btn {
+                min-width: 42px;
+                width: 42px;
+                padding: 0;
+            }
+            #send-btn {
+                min-width: 48px;
+                width: 48px;
+                padding: 0;
+                font-size: 0;
+            }
+            #send-btn::before {
+                content: "▶";
+                font-size: 15px;
+            }
+            #user-input {
+                font-size: 13px;
+                padding: 11px 12px;
+            }
+            #astakos-drawer {
+                height: 210px;
+            }
+            #lobster-svg {
+                height: 205px;
+            }
         }
     </style>
 </head>
@@ -578,6 +903,33 @@
         fileLabel.innerText = e.target.files.length > 0 ? "📎 Επιλέχθηκε: " + e.target.files[0].name : "";
     });
 
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    function renderMessageText(text) {
+        let processedText = escapeHtml(text);
+
+        const photoRegex = /\[SEND_PHOTO:\s*(.*?)\]/g;
+        processedText = processedText.replace(photoRegex, (match, filepath) => {
+            const cleanPath = filepath.replace(/&amp;/g, "&");
+            const filename = cleanPath.split('\\').pop().split('/').pop();
+            return `<br><img src="http://127.0.0.1:8000/photos/${encodeURIComponent(filename)}" class="chat-img" />`;
+        });
+
+        const linkRegex = /\[(.*?)\]\((https?:\/\/.*?)\)/g;
+        processedText = processedText.replace(linkRegex, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        processedText = processedText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        processedText = processedText.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;color:#dbeafe">$1</code>');
+        processedText = processedText.replace(/\n/g, '<br>');
+        return processedText;
+    }
+
     function appendMessage(text, sender, agentName = "") {
         const div = document.createElement('div');
         div.className = `msg ${sender === 'user' ? 'msg-user' : 'msg-ai'}`;
@@ -585,16 +937,7 @@
         let innerHTML = '';
         if (agentName) innerHTML += `<span class="agent-label">${agentName}</span>`;
 
-        let processedText = text.replace(/\n/g, '<br>');
-        const linkRegex = /\[(.*?)\]\((https?:\/\/.*?)\)/g;
-        processedText = processedText.replace(linkRegex, '<a href="$2" target="_blank" style="color:#4fc1ff;text-decoration:underline;">$1</a>');
-        const photoRegex = /\[SEND_PHOTO:\s*(.*?)\]/g;
-        processedText = processedText.replace(photoRegex, (match, filepath) => {
-            const filename = filepath.split('\\').pop().split('/').pop();
-            return `<br><img src="http://127.0.0.1:8000/photos/${filename}" class="chat-img" />`;
-        });
-
-        innerHTML += processedText;
+        innerHTML += renderMessageText(text);
         div.innerHTML = innerHTML;
 
         const copyBtn = document.createElement('button');
