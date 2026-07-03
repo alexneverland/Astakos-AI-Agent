@@ -999,67 +999,26 @@ function render(d) {
     </div>
   </div>`;
   
-  const conv = d.conversation || {};
-  const last = conv.last_user_activity || {};
+  const convStore = d.conversation || {};
+  const lastUser = convStore.last_user_activity || {};
   html += `<div class="card"><h2>Conversation Store</h2>
-    <div class="kv"><span class="k">SQLite status</span><span class="v ${conv.ok===false?'err':'ok'}">${conv.ok===false?'ERROR':'OK'}</span></div>
-    <div class="kv"><span class="k">Messages total</span><span class="v">${conv.messages_total??0}</span></div>
-    <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(conv.messages_by_channel)}</span></div>
-    <div class="kv"><span class="k">By role</span><span class="v" style="text-align:right">${mapRows(conv.messages_by_role)}</span></div>
-    <div class="kv"><span class="k">Last user</span><span class="v">${last.timestamp ? `${esc(last.channel)} ${esc(last.time||'')}` : 'none'}</span></div>
-    <div class="kv"><span class="k">Last user age</span><span class="v ${conv.seconds_since_last_user_activity>1800?'warn':''}">${secondsLabel(conv.seconds_since_last_user_activity)}</span></div>
-    ${last.content ? `<div style="margin-top:6px;color:var(--text-muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(last.content)}</div>` : ''}
+    <div class="kv"><span class="k">SQLite status</span><span class="v ${convStore.ok===false?'err':'ok'}">${convStore.ok===false?'ERROR':'OK'}</span></div>
+    <div class="kv"><span class="k">Messages total</span><span class="v">${convStore.messages_total??0}</span></div>
+    <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(convStore.messages_by_channel)}</span></div>
+    <div class="kv"><span class="k">By role</span><span class="v" style="text-align:right">${mapRows(convStore.messages_by_role)}</span></div>
+    <div class="kv"><span class="k">Last user</span><span class="v">${lastUser.timestamp ? `${esc(lastUser.channel)} ${esc(lastUser.time||'')}` : 'none'}</span></div>
+    <div class="kv"><span class="k">Last user age</span><span class="v ${convStore.seconds_since_last_user_activity>1800?'warn':''}">${secondsLabel(convStore.seconds_since_last_user_activity)}</span></div>
+    ${lastUser.content ? `<div style="margin-top:6px;color:var(--text-muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(lastUser.content)}</div>` : ''}
   </div>`;
 
-  const sess = d.session || {};
+  const sessInfo = d.session || {};
   html += `<div class="card"><h2>Session Backlog</h2>
-    <div class="kv"><span class="k">SQLite status</span><span class="v ${sess.ok===false?'err':'ok'}">${sess.ok===false?'ERROR':'OK'}</span></div>
-    <div class="kv"><span class="k">RAM exchanges</span><span class="v">${sess.memory_log_count??0}</span></div>
-    <div class="kv"><span class="k">Persistent exchanges</span><span class="v">${sess.persistent_exchanges_total??0}</span></div>
-    <div class="kv"><span class="k">Unsummarized</span><span class="v ${sess.auto_summary_due?'warn':''}">${sess.persistent_unsummarized??0} / ${sess.auto_summary_threshold??'?'}</span></div>
-    <div class="kv"><span class="k">Auto summary due</span><span class="v ${sess.auto_summary_due?'warn':'ok'}">${sess.auto_summary_due?'YES':'NO'}</span></div>
-    <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(sess.unsummarized_by_channel)}</span></div>
-    <div style="text-align:center">
-      <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px">Queue Size</div>
-      <div style="font-size:24px; font-weight:700" class="${s.queue_size>5?'warn':''}">${s.queue_size??'?'}</div>
-    </div>
-    <div style="width: 1px; height: 40px; background: rgba(255,255,255,0.05)"></div>
-    <div style="text-align:center">
-      <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px">Proactive (1h)</div>
-      <div style="font-size:24px; font-weight:700">${s.proactive_this_hour??0} <span style="font-size:14px; color:var(--text-muted)">/ 3</span></div>
-    </div>
-    <div style="width: 1px; height: 40px; background: rgba(255,255,255,0.05)"></div>
-    <div style="text-align:center">
-      <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px">Pending Conf.</div>
-      <div style="font-size:24px; font-weight:700" class="${s.pending_count>0?'warn':''}">${s.pending_count??0}</div>
-    </div>
-    <div style="width: 1px; height: 40px; background: rgba(255,255,255,0.05)"></div>
-    <div style="text-align:center">
-      <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px">Events Today</div>
-      <div style="font-size:24px; font-weight:700">${evts.total_today??0}</div>
-    </div>
-  </div>`;
-  
-  const conv = d.conversation || {};
-  const last = conv.last_user_activity || {};
-  html += `<div class="card"><h2>Conversation Store</h2>
-    <div class="kv"><span class="k">SQLite status</span><span class="v ${conv.ok===false?'err':'ok'}">${conv.ok===false?'ERROR':'OK'}</span></div>
-    <div class="kv"><span class="k">Messages total</span><span class="v">${conv.messages_total??0}</span></div>
-    <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(conv.messages_by_channel)}</span></div>
-    <div class="kv"><span class="k">By role</span><span class="v" style="text-align:right">${mapRows(conv.messages_by_role)}</span></div>
-    <div class="kv"><span class="k">Last user</span><span class="v">${last.timestamp ? `${esc(last.channel)} ${esc(last.time||'')}` : 'none'}</span></div>
-    <div class="kv"><span class="k">Last user age</span><span class="v ${conv.seconds_since_last_user_activity>1800?'warn':''}">${secondsLabel(conv.seconds_since_last_user_activity)}</span></div>
-    ${last.content ? `<div style="margin-top:6px;color:var(--text-muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(last.content)}</div>` : ''}
-  </div>`;
-
-  const sess = d.session || {};
-  html += `<div class="card"><h2>Session Backlog</h2>
-    <div class="kv"><span class="k">SQLite status</span><span class="v ${sess.ok===false?'err':'ok'}">${sess.ok===false?'ERROR':'OK'}</span></div>
-    <div class="kv"><span class="k">RAM exchanges</span><span class="v">${sess.memory_log_count??0}</span></div>
-    <div class="kv"><span class="k">Persistent exchanges</span><span class="v">${sess.persistent_exchanges_total??0}</span></div>
-    <div class="kv"><span class="k">Unsummarized</span><span class="v ${sess.auto_summary_due?'warn':''}">${sess.persistent_unsummarized??0} / ${sess.auto_summary_threshold??'?'}</span></div>
-    <div class="kv"><span class="k">Auto summary due</span><span class="v ${sess.auto_summary_due?'warn':'ok'}">${sess.auto_summary_due?'YES':'NO'}</span></div>
-    <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(sess.unsummarized_by_channel)}</span></div>
+    <div class="kv"><span class="k">SQLite status</span><span class="v ${sessInfo.ok===false?'err':'ok'}">${sessInfo.ok===false?'ERROR':'OK'}</span></div>
+    <div class="kv"><span class="k">RAM exchanges</span><span class="v">${sessInfo.memory_log_count??0}</span></div>
+    <div class="kv"><span class="k">Persistent exchanges</span><span class="v">${sessInfo.persistent_exchanges_total??0}</span></div>
+    <div class="kv"><span class="k">Unsummarized</span><span class="v ${sessInfo.auto_summary_due?'warn':''}">${sessInfo.persistent_unsummarized??0} / ${sessInfo.auto_summary_threshold??'?'}</span></div>
+    <div class="kv"><span class="k">Auto summary due</span><span class="v ${sessInfo.auto_summary_due?'warn':'ok'}">${sessInfo.auto_summary_due?'YES':'NO'}</span></div>
+    <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(sessInfo.unsummarized_by_channel)}</span></div>
   </div>`;
 
   const mem = d.memory_context || {};
