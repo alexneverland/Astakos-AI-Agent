@@ -1019,6 +1019,47 @@ function render(d) {
     <div class="kv"><span class="k">Unsummarized</span><span class="v ${sess.auto_summary_due?'warn':''}">${sess.persistent_unsummarized??0} / ${sess.auto_summary_threshold??'?'}</span></div>
     <div class="kv"><span class="k">Auto summary due</span><span class="v ${sess.auto_summary_due?'warn':'ok'}">${sess.auto_summary_due?'YES':'NO'}</span></div>
     <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(sess.unsummarized_by_channel)}</span></div>
+    <div style="text-align:center">
+      <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px">Queue Size</div>
+      <div style="font-size:24px; font-weight:700" class="${s.queue_size>5?'warn':''}">${s.queue_size??'?'}</div>
+    </div>
+    <div style="width: 1px; height: 40px; background: rgba(255,255,255,0.05)"></div>
+    <div style="text-align:center">
+      <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px">Proactive (1h)</div>
+      <div style="font-size:24px; font-weight:700">${s.proactive_this_hour??0} <span style="font-size:14px; color:var(--text-muted)">/ 3</span></div>
+    </div>
+    <div style="width: 1px; height: 40px; background: rgba(255,255,255,0.05)"></div>
+    <div style="text-align:center">
+      <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px">Pending Conf.</div>
+      <div style="font-size:24px; font-weight:700" class="${s.pending_count>0?'warn':''}">${s.pending_count??0}</div>
+    </div>
+    <div style="width: 1px; height: 40px; background: rgba(255,255,255,0.05)"></div>
+    <div style="text-align:center">
+      <div style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px">Events Today</div>
+      <div style="font-size:24px; font-weight:700">${evts.total_today??0}</div>
+    </div>
+  </div>`;
+  
+  const conv = d.conversation || {};
+  const last = conv.last_user_activity || {};
+  html += `<div class="card"><h2>Conversation Store</h2>
+    <div class="kv"><span class="k">SQLite status</span><span class="v ${conv.ok===false?'err':'ok'}">${conv.ok===false?'ERROR':'OK'}</span></div>
+    <div class="kv"><span class="k">Messages total</span><span class="v">${conv.messages_total??0}</span></div>
+    <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(conv.messages_by_channel)}</span></div>
+    <div class="kv"><span class="k">By role</span><span class="v" style="text-align:right">${mapRows(conv.messages_by_role)}</span></div>
+    <div class="kv"><span class="k">Last user</span><span class="v">${last.timestamp ? `${esc(last.channel)} ${esc(last.time||'')}` : 'none'}</span></div>
+    <div class="kv"><span class="k">Last user age</span><span class="v ${conv.seconds_since_last_user_activity>1800?'warn':''}">${secondsLabel(conv.seconds_since_last_user_activity)}</span></div>
+    ${last.content ? `<div style="margin-top:6px;color:var(--text-muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(last.content)}</div>` : ''}
+  </div>`;
+
+  const sess = d.session || {};
+  html += `<div class="card"><h2>Session Backlog</h2>
+    <div class="kv"><span class="k">SQLite status</span><span class="v ${sess.ok===false?'err':'ok'}">${sess.ok===false?'ERROR':'OK'}</span></div>
+    <div class="kv"><span class="k">RAM exchanges</span><span class="v">${sess.memory_log_count??0}</span></div>
+    <div class="kv"><span class="k">Persistent exchanges</span><span class="v">${sess.persistent_exchanges_total??0}</span></div>
+    <div class="kv"><span class="k">Unsummarized</span><span class="v ${sess.auto_summary_due?'warn':''}">${sess.persistent_unsummarized??0} / ${sess.auto_summary_threshold??'?'}</span></div>
+    <div class="kv"><span class="k">Auto summary due</span><span class="v ${sess.auto_summary_due?'warn':'ok'}">${sess.auto_summary_due?'YES':'NO'}</span></div>
+    <div class="kv"><span class="k">By channel</span><span class="v" style="text-align:right">${mapRows(sess.unsummarized_by_channel)}</span></div>
   </div>`;
 
   const mem = d.memory_context || {};
@@ -1039,6 +1080,43 @@ function render(d) {
     <div class="kv"><span class="k">Query</span><span class="v" style="text-align:right">${esc(mem.query_preview || '-')}</span></div>
     <div style="margin-top:6px;color:var(--text-muted);font-size:11px;line-height:1.35">${esc(memFresh.hint)}</div>
     ${memPreview.length ? `<div style="margin-top:6px;color:var(--muted);font-size:10px;line-height:1.35">${memPreview.map(esc).join('<br>')}</div>` : ''}
+  </div>`;
+
+  const followups = d.pending_followups || [];
+  const followupHtml = followups.length
+    ? followups.map(f => `
+      <div class="card" style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+          <div>
+            <div style="font-weight:700;">#${f.id} · ${esc(f.subject || "-")}</div>
+            <div class="mono-small">${esc(f.topic || "-")} · ${esc(f.status || "-")}</div>
+          </div>
+          <div class="badge ${
+            f.status === 'pending' ? 'b-yellow' :
+            f.status === 'sent' ? 'b-green' :
+            f.status === 'resolved' ? 'b-blue' :
+            'b-muted'
+          }">
+            ${esc(f.status || "-")}
+          </div>
+        </div>
+
+        <div class="mono-small" style="margin-top:8px;">Due in: ${f.due_in_minutes ?? "-"} min</div>
+        <div class="mono-small">Last decision: ${esc(f.last_decision || "-")}</div>
+        <div class="mono-small">Reason: ${esc(f.decision_reason || "-")}</div>
+        <div class="mono-small">Times sent: ${f.times_sent ?? 0}</div>
+        <div class="mono-small">Score: ${f.outcome_score ?? 0}</div>
+        <div class="mono-small">Arc: ${esc(f.arc_key || "-")}</div>
+        <div class="mono-small">Agent: ${esc(f.source_agent || "-")} · Channel: ${esc(f.source_channel || "-")}</div>
+        <div class="mono-small" style="margin-top:6px;white-space:pre-wrap;">${esc(f.source_user_text || "")}</div>
+      </div>
+    `).join("")
+    : `<div class="card"><span class="badge b-muted">No pending followups</span></div>`;
+
+  html += `<div class="card" style="grid-column:1/-1"><h2>👋 Pending Followups</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(300px, 1fr));gap:10px;">
+      ${followupHtml}
+    </div>
   </div>`;
 
   if (pend.length > 0) {

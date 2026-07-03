@@ -38,9 +38,60 @@ def ensure_pending_followups_table():
             )
             """
         )
+        existing_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(pending_followups)").fetchall()
+        }
+
+        if "arc_key" not in existing_cols:
+            conn.execute("ALTER TABLE pending_followups ADD COLUMN arc_key TEXT DEFAULT ''")
+        if "last_decision" not in existing_cols:
+            conn.execute("ALTER TABLE pending_followups ADD COLUMN last_decision TEXT DEFAULT ''")
+        if "decision_reason" not in existing_cols:
+            conn.execute("ALTER TABLE pending_followups ADD COLUMN decision_reason TEXT DEFAULT ''")
+        if "outcome_score" not in existing_cols:
+            conn.execute("ALTER TABLE pending_followups ADD COLUMN outcome_score REAL DEFAULT 0.0")
+        if "times_sent" not in existing_cols:
+            conn.execute("ALTER TABLE pending_followups ADD COLUMN times_sent INTEGER DEFAULT 0")
+
         conn.commit()
     finally:
         conn.close()
+
+
+def build_followup_arc_key(topic: str, subject: str) -> str:
+    tokens = [tok for tok in (subject or "").lower().split() if len(tok) >= 4]
+    tokens = sorted(set(tokens))[:4]
+    return f"{(topic or '').strip().lower()}::{' '.join(tokens)}".strip()
+
+
+def normalize_followup_delay(topic: str, suggested_minutes: int, source_user_text: str = "") -> int:
+    text = (source_user_text or "").lower()
+    topic = (topic or "").strip().lower()
+    value = int(suggested_minutes or 0)
+
+    if value < 30:
+        value = 30
+    if value > 720:
+        value = 720
+
+    if topic == "outing":
+        return max(45, min(value, 180))
+
+    if topic == "food_purchase":
+        if "βράδυ" in text or "βραδυ" in text or "απόψε" in text or "αποψε" in text:
+            return max(60, min(value, 240))
+        return max(90, min(value, 300))
+
+    if topic == "appointment":
+        return max(180, min(value, 720))
+
+    if topic == "task_progress":
+        return max(120, min(value, 480))
+
+    if topic == "family_plan":
+        return max(60, min(value, 360))
+
+    return value
 
 
 def create_pending_followup(
@@ -63,16 +114,20 @@ def create_pending_followup(
         ).isoformat(timespec="seconds")
 
         metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+        arc_key = build_followup_arc_key(topic, subject)
 
         existing = conn.execute(
             """
             SELECT id
             FROM pending_followups
-            WHERE status='pending' AND topic=? AND subject=?
+            WHERE status='pending' AND (
+                (topic=? AND subject=?)
+                OR arc_key=?
+            )
             ORDER BY id DESC
             LIMIT 1
             """,
-            (topic, subject),
+            (topic, subject, arc_key),
         ).fetchone()
 
         if existing:
@@ -85,6 +140,7 @@ def create_pending_followup(
                 source_agent,
                 topic,
                 subject,
+                arc_key,
                 source_user_text,
                 source_ai_text,
                 followup_after_ts,
@@ -92,13 +148,14 @@ def create_pending_followup(
                 confidence,
                 metadata_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source_channel,
                 source_agent,
                 topic,
                 subject,
+                arc_key,
                 source_user_text,
                 source_ai_text,
                 followup_after_ts,
@@ -170,7 +227,11 @@ def mark_followup_sent(followup_id: int):
         conn.execute(
             """
             UPDATE pending_followups
-            SET status='sent', sent_at=CURRENT_TIMESTAMP, resolved_at=CURRENT_TIMESTAMP
+            SET status='sent',
+                sent_at=CURRENT_TIMESTAMP,
+                resolved_at=CURRENT_TIMESTAMP,
+                times_sent=COALESCE(times_sent, 0) + 1,
+                last_decision='sent'
             WHERE id=?
             """,
             (followup_id,),
@@ -188,10 +249,29 @@ def resolve_followup(followup_id: int, reason: str):
             UPDATE pending_followups
             SET status='resolved',
                 resolution_reason=?,
-                resolved_at=CURRENT_TIMESTAMP
+                resolved_at=CURRENT_TIMESTAMP,
+                last_decision='resolved',
+                decision_reason=?
             WHERE id=?
             """,
-            (reason, followup_id),
+            (reason, reason, followup_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _set_followup_decision(followup_id: int, decision: str, reason: str = ""):
+    conn = _conn()
+    try:
+        conn.execute(
+            """
+            UPDATE pending_followups
+            SET last_decision=?,
+                decision_reason=?
+            WHERE id=?
+            """,
+            (decision, reason, followup_id),
         )
         conn.commit()
     finally:
@@ -206,7 +286,10 @@ def expire_old_followups(now_iso: str):
             UPDATE pending_followups
             SET status='expired',
                 resolution_reason='ttl_expired',
-                resolved_at=CURRENT_TIMESTAMP
+                resolved_at=CURRENT_TIMESTAMP,
+                last_decision='expired',
+                decision_reason='ttl_expired',
+                outcome_score=COALESCE(outcome_score, 0.0) - 0.5
             WHERE status='pending' AND expires_at <= ?
             """,
             (now_iso,),
@@ -222,13 +305,30 @@ def find_pending_followups(limit: int = 20) -> list[dict]:
     try:
         rows = conn.execute(
             """
-            SELECT id, topic, subject, status, followup_after_ts, expires_at, created_at
+            SELECT
+                id,
+                topic,
+                subject,
+                status,
+                followup_after_ts,
+                expires_at,
+                created_at,
+                source_channel,
+                source_agent,
+                source_user_text,
+                last_decision,
+                decision_reason,
+                outcome_score,
+                times_sent,
+                metadata_json,
+                arc_key
             FROM pending_followups
             ORDER BY id DESC
             LIMIT ?
             """,
             (limit,),
         ).fetchall()
+        from datetime import datetime
         return [
             {
                 "id": r[0],
@@ -238,9 +338,84 @@ def find_pending_followups(limit: int = 20) -> list[dict]:
                 "followup_after_ts": r[4],
                 "expires_at": r[5],
                 "created_at": r[6],
+                "source_channel": r[7],
+                "source_agent": r[8],
+                "source_user_text": r[9],
+                "last_decision": r[10],
+                "decision_reason": r[11],
+                "outcome_score": float(r[12] or 0.0),
+                "times_sent": int(r[13] or 0),
+                "metadata": json.loads(r[14] or "{}"),
+                "arc_key": r[15] or "",
+                "due_in_minutes": max(
+                    0,
+                    int((datetime.fromisoformat(r[4]) - datetime.now()).total_seconds() / 60)
+                ) if r[3] == "pending" else None,
             }
             for r in rows
         ]
+    finally:
+        conn.close()
+
+
+def has_recent_sent_followup(within_minutes: int = 90) -> bool:
+    conn = _conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT sent_at
+            FROM pending_followups
+            WHERE status='sent' AND sent_at IS NOT NULL
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+        if not row or not row[0]:
+            return False
+
+        last_sent = datetime.fromisoformat(str(row[0]).replace(" ", "T"))
+        return (datetime.now() - last_sent) <= timedelta(minutes=within_minutes)
+    finally:
+        conn.close()
+
+
+def has_recent_sent_followup_for_arc(arc_key: str, within_minutes: int = 240) -> bool:
+    conn = _conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT sent_at
+            FROM pending_followups
+            WHERE arc_key=? AND status='sent' AND sent_at IS NOT NULL
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (arc_key,),
+        ).fetchone()
+
+        if not row or not row[0]:
+            return False
+
+        last_sent = datetime.fromisoformat(str(row[0]).replace(" ", "T"))
+        return (datetime.now() - last_sent) <= timedelta(minutes=within_minutes)
+    finally:
+        conn.close()
+
+
+def record_followup_outcome(followup_id: int, delta: float, reason: str):
+    conn = _conn()
+    try:
+        conn.execute(
+            """
+            UPDATE pending_followups
+            SET outcome_score = COALESCE(outcome_score, 0.0) + ?,
+                decision_reason = ?
+            WHERE id=?
+            """,
+            (float(delta), reason, followup_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -351,15 +526,19 @@ def maybe_create_followup_from_exchange(
 
     topic = str(candidate.get("topic") or "").strip().lower()
     subject = str(candidate.get("subject") or "").strip()
-    delay_minutes = int(candidate.get("delay_minutes") or 0)
+    delay_minutes_raw = int(candidate.get("delay_minutes") or 0)
     confidence = float(candidate.get("confidence") or 0.0)
 
     if not topic or not subject:
         return None
-    if delay_minutes < 30 or delay_minutes > 720:
-        return None
     if confidence < 0.45:
         return None
+
+    delay_minutes = normalize_followup_delay(
+        topic=topic,
+        suggested_minutes=delay_minutes_raw,
+        source_user_text=clean_user,
+    )
 
     followup_after_ts = (
         datetime.now() + timedelta(minutes=delay_minutes)
@@ -374,12 +553,71 @@ def maybe_create_followup_from_exchange(
         source_ai_text=clean_ai,
         followup_after_ts=followup_after_ts,
         confidence=confidence,
-        metadata={"reason": candidate.get("reason", "")},
+        metadata={
+            "reason": candidate.get("reason", ""),
+            "delay_minutes_raw": delay_minutes_raw,
+            "delay_minutes_final": delay_minutes,
+        },
     )
 
     if followup_id:
-        print(f"[FollowUp]: created #{followup_id} ({topic}) -> {subject}")
+        print(f"[FollowUp]: created #{followup_id} ({topic}) -> {subject} [{delay_minutes_raw}m -> {delay_minutes}m]")
     return followup_id
+
+
+def classify_followup_resolution_with_llm(
+    *,
+    user_text: str,
+    topic: str,
+    subject: str,
+    source_user_text: str,
+) -> dict | None:
+    import json
+    import re
+    from services.gemini import safe_gemini_call
+
+    prompt = f"""
+Αποφάσισε αν το νέο μήνυμα του χρήστη λύνει/κλείνει ένα pending conversational follow-up.
+
+Pending follow-up:
+- topic: {topic}
+- subject: {subject}
+- original source message: {source_user_text}
+
+New user message:
+{user_text}
+
+Απάντησε ΑΥΣΤΗΡΑ σε JSON:
+{{
+  "resolves": true,
+  "resolution_type": "completed | canceled | postponed | superseded | irrelevant",
+  "confidence": 0.0,
+  "reason": "short reason"
+}}
+
+ή
+
+{{
+  "resolves": false,
+  "confidence": 0.0,
+  "reason": "short reason"
+}}
+
+Κανόνες:
+- resolves=true αν ο χρήστης λέει ότι το έκανε, δεν το έκανε, πήγε για αύριο, βρήκε το πρόσωπο, γύρισε, ακυρώθηκε, μετατέθηκε
+- resolves=false αν είναι άσχετο ή δεν αρκεί
+- confidence 0.0 έως 1.0
+- μόνο JSON
+"""
+    try:
+        response = safe_gemini_call(prompt)
+        raw = response.text if hasattr(response, "text") else str(response)
+        raw = re.sub(r"```json|```", "", raw.strip()).strip()
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else None
+    except Exception as exc:
+        print(f"[FollowUpResolve Error]: {exc}")
+        return None
 
 
 def maybe_resolve_followups_from_user_message(user_text: str):
@@ -430,12 +668,50 @@ def maybe_resolve_followups_from_user_message(user_text: str):
 
         for row in rows:
             followup_id, topic, subject, source_user_text = row
+
             shared_tokens = [
                 tok for tok in subject.lower().split()
                 if len(tok) >= 4 and tok in text
             ]
-            if shared_tokens or (topic == "outing" and any(x in text for x in ("βρήκα", "τους βρήκα", "πήγα", "γύρισα"))):
-                resolve_followup(followup_id, "resolved_by_recent_user_message")
-                print(f"[FollowUp]: resolved #{followup_id} from user message")
+
+            lexical_hint = bool(shared_tokens) or (
+                topic == "outing" and any(x in text for x in ("βρήκα", "τους βρήκα", "πήγα", "γύρισα"))
+            )
+
+            if not lexical_hint and len(text.split()) < 4:
+                continue
+
+            result = classify_followup_resolution_with_llm(
+                user_text=text,
+                topic=topic,
+                subject=subject,
+                source_user_text=source_user_text or "",
+            )
+
+            if not result or not result.get("resolves"):
+                continue
+
+            confidence = float(result.get("confidence") or 0.0)
+            if confidence < 0.55:
+                continue
+
+            resolution_type = str(result.get("resolution_type") or "resolved").strip()
+            reason = str(result.get("reason") or "").strip()
+
+            resolve_followup(
+                followup_id,
+                f"resolved_by_user:{resolution_type}"
+            )
+            _set_followup_decision(
+                followup_id,
+                decision="resolved",
+                reason=reason or resolution_type,
+            )
+            record_followup_outcome(
+                followup_id,
+                +1.0,
+                "resolved_by_user_message"
+            )
+            print(f"[FollowUp]: resolved #{followup_id} ({resolution_type})")
     finally:
         conn.close()

@@ -98,6 +98,10 @@ from memory.pending_followups import (
     get_due_pending_followups,
     mark_followup_sent,
     expire_old_followups,
+    has_recent_sent_followup,
+    has_recent_sent_followup_for_arc,
+    build_followup_arc_key,
+    record_followup_outcome,
 )
 from core.event_bus import bus
 # ────────────────────────────────────────────────────────────────
@@ -308,6 +312,18 @@ def job_check_pending_followups():
         recent_context = _load_recent_proactive_context(limit=10)
 
         for item in due[:3]:
+            if has_recent_sent_followup(within_minutes=90):
+                print(f"[FollowUp]: skip #{item['id']} recent global followup")
+                continue
+
+            arc_key = item.get("arc_key") or build_followup_arc_key(
+                item.get("topic", ""),
+                item.get("subject", ""),
+            )
+            if has_recent_sent_followup_for_arc(arc_key, within_minutes=240):
+                print(f"[FollowUp]: skip #{item['id']} recent arc followup")
+                continue
+
             if recent_context and item["subject"].lower() in recent_context.lower():
                 print(f"[FollowUp]: skip #{item['id']} recent overlap")
                 continue
@@ -318,6 +334,7 @@ def job_check_pending_followups():
 
             send_telegram_msg(msg)
             mark_followup_sent(item["id"])
+            record_followup_outcome(item["id"], +0.2, "followup_sent")
             print(f"[FollowUp]: sent #{item['id']} -> {item['subject']}")
     except Exception as exc:
         print(f"[FollowUpJob Error]: {exc}")
