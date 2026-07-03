@@ -678,6 +678,61 @@ def mark_routine_responded(routine_id: int):
     conn.close()
 
 
+def reset_routine_cooldown(routine_id: int, clear_last_notified: bool = True) -> None:
+    """
+    Χειροκίνητο reset του cooldown μιας ρουτίνας.
+    - γυρίζει notify_cooldown_hours στο default
+    - μηδενίζει ignore_count
+    - προαιρετικά καθαρίζει το last_notified_ts ώστε να μπορεί να ξανασταλεί
+      στο επόμενο valid slot χωρίς να μπλοκάρει από duplicate check
+    - επαναφέρει state='active'
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    reset_cd = clamp_cooldown_hours(COOLDOWN_DEFAULT_HOURS)
+
+    with db_write_lock:
+        if clear_last_notified:
+            cursor.execute(
+                """
+                UPDATE routines
+                SET ignore_count=0,
+                    notify_cooldown_hours=?,
+                    last_notified_ts=NULL,
+                    state='active',
+                    is_active=1
+                WHERE id=?
+                """,
+                (reset_cd, routine_id)
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE routines
+                SET ignore_count=0,
+                    notify_cooldown_hours=?,
+                    state='active',
+                    is_active=1
+                WHERE id=?
+                """,
+                (reset_cd, routine_id)
+            )
+        conn.commit()
+
+    conn.close()
+
+    print(f"[routine_db]: #{routine_id} cooldown reset -> {reset_cd:.1f}h")
+    from memory.event_log import log_event
+    log_event(
+        "routines",
+        "cooldown_reset",
+        routine_id=routine_id,
+        new_cooldown_hours=reset_cd,
+        clear_last_notified=clear_last_notified,
+    )
+
+
 def get_routine_notify_info(routine_id: int) -> dict:
     conn   = get_connection()
     cursor = conn.cursor()

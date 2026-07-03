@@ -29,6 +29,8 @@ _MANUAL_VERB_PATTERNS = (
     "κανε",
     "στειλ",
     "στελν",
+    "μηδενισ",
+    "reset",
 )
 
 _MANUAL_CONTROL_HINTS = (
@@ -45,6 +47,11 @@ _MANUAL_CONTROL_HINTS = (
     "οταν ",
     "μονο οταν",
     "καθε ",
+    "cooldown",
+    "να ξανασταλει",
+    "να ξαναστειλει",
+    "βγαλτο απο cooldown",
+    "βγαλτο από cooldown",
 )
 
 _CONTEXT_PATTERNS = (

@@ -56,3 +56,53 @@ def test_control_routine_schedule_allows_explicit_manual_command(mock_set, mock_
     )
     normalized = result.lower()
     assert "2026-09-01" in result or "πάγω" in normalized or "paused" in normalized
+
+
+def test_control_routine_cooldown_resets_matching_routine(monkeypatch):
+    from tools import system
+    
+    monkeypatch.setattr(
+        system,
+        "classify_routine_intent",
+        lambda source_text, routine_names=None: type(
+            "X", (), {"intent": "manual_routine_control"}
+        )()
+    )
+
+    monkeypatch.setattr(
+        system,
+        "_get_routine_names_for_intent_classification",
+        lambda: ["καθάρισμα κλουβιού κουνελιού"]
+    )
+
+    with patch("memory.routine_db.find_routines_for_schedule_control") as mock_find, \
+         patch("memory.routine_db.reset_routine_cooldown") as mock_reset, \
+         patch("memory.routine_db.get_routine_notify_info") as mock_info:
+
+        mock_find.return_value = [
+            {"id": 96, "event": "καθάρισμα κλουβιού κουνελιού", "day": "Everyday", "time": "09:00"}
+        ]
+        mock_info.side_effect = [
+            {"cooldown_hours": 40.0, "last_notified_ts": "2026-07-03T08:00:30"},
+            {"cooldown_hours": 20.0, "last_notified_ts": None},
+        ]
+
+        # The tool function is bound to the `.func` property in some tool frameworks like LangChain,
+        # but if we're invoking it directly in tests, we can just call it (or use .invoke as in the other tests).
+        # Let's use invoke like the other tests or `.func` if explicitly requested by the user.
+        # The user requested system.control_routine_cooldown.func, so we'll use that if it exists, otherwise invoke.
+        if hasattr(system.control_routine_cooldown, "func"):
+            result = system.control_routine_cooldown.func(
+                event_name="καθάρισμα κλουβιού κουνελιού",
+                action="reset",
+                source_text="Μηδένισε το cooldown της ρουτίνας καθάρισμα κλουβιού κουνελιού",
+            )
+        else:
+            result = system.control_routine_cooldown(
+                event_name="καθάρισμα κλουβιού κουνελιού",
+                action="reset",
+                source_text="Μηδένισε το cooldown της ρουτίνας καθάρισμα κλουβιού κουνελιού",
+            )
+
+        mock_reset.assert_called_once_with(96, clear_last_notified=True)
+        assert "βγήκε από cooldown" in result

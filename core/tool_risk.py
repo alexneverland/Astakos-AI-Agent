@@ -36,6 +36,7 @@ TOOL_RISK: dict[str, str] = {
     "control_routine_notifications": "WARNING",
     "control_routine_schedule":  "WARNING",
     "control_routine_condition": "WARNING",
+    "control_routine_cooldown":  "WARNING",
     "write_code":               "WARNING",
     "write_custom_tool":        "WARNING",
     "update_pending_linkedin_post": "WARNING",

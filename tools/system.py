@@ -1272,6 +1272,85 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
 
 
 @tool
+def control_routine_cooldown(
+    event_name: str,
+    action: str,
+    source_text: str = "",
+    day_of_week: str = "",
+    time_str: str = "",
+) -> str:
+    """
+    [OVERRIDE]: Χειροκίνητος έλεγχος cooldown ρουτίνας.
+
+    Χρησιμοποίησέ το ΜΟΝΟ όταν ο χρήστης ζητά ρητά κάτι όπως:
+    - "μηδένισε το cooldown"
+    - "reset το cooldown"
+    - "βγάλτο από cooldown"
+    - "θέλω να μπορεί να σταλεί αύριο κανονικά"
+    - "να ξανασταλεί κανονικά"
+
+    ΜΗΝ το καλείς για απλό context update.
+    ΜΗΝ το καλείς επειδή ο χρήστης απλώς άργησε να απαντήσει.
+    ΜΗΝ το μπερδεύεις με mute/schedule/conditions.
+
+    ΟΡΙΣΜΑΤΑ:
+    - event_name: όνομα ρουτίνας όπως το είπε ο χρήστης
+    - action: μόνο "reset"
+    - source_text: το ακριβές μήνυμα του χρήστη
+    - day_of_week/time_str: προαιρετική αποσαφήνιση αν υπάρχουν πολλές παρόμοιες ρουτίνες
+    """
+    from memory.routine_db import (
+        find_routines_for_schedule_control,
+        reset_routine_cooldown,
+        get_routine_notify_info,
+    )
+
+    routine_names = _get_routine_names_for_intent_classification()
+    intent_result = classify_routine_intent(source_text, routine_names=routine_names)
+    if intent_result.intent == "context_update":
+        return (
+            "ℹ️ Αυτό μοιάζει με context/fact update και όχι με ρητή χειροκίνητη εντολή αλλαγής cooldown ρουτίνας. "
+            "Δεν έγινε cooldown reset."
+        )
+
+    VALID_ACTIONS = {"reset"}
+    if action not in VALID_ACTIONS:
+        return f"❌ Μη έγκυρο action: '{action}'. Επιτρεπτά: reset."
+
+    routines = find_routines_for_schedule_control(
+        event_name,
+        day_of_week=day_of_week if day_of_week else None,
+        time_str=time_str if time_str else None,
+    )
+    if not routines:
+        return f"❌ Δεν βρέθηκε καμία ρουτίνα που να ταιριάζει στο '{event_name}'."
+
+    results = []
+    changed = 0
+
+    for routine in routines:
+        r_id = routine["id"]
+        label = routine["event"]
+        r_day = routine.get("day") or "?"
+        r_time = routine.get("time") or "?"
+        before = get_routine_notify_info(r_id)
+
+        reset_routine_cooldown(r_id, clear_last_notified=True)
+
+        after = get_routine_notify_info(r_id)
+        results.append(
+            f"🔄 [{r_day} {r_time}] Η ρουτίνα '{label}' βγήκε από cooldown "
+            f"({before['cooldown_hours']}h -> {after['cooldown_hours']}h)."
+        )
+        changed += 1
+
+    if changed == 0:
+        return f"ℹ️ Δεν έγινε καμία αλλαγή cooldown για: {event_name}"
+
+    return "\n".join(results)
+
+
+@tool
 def manage_list(action: str, list_name: str, item: str = "") -> str:
     """Διαχειρίζεται λίστες. Actions: 'add', 'remove', 'read', 'clear', 'delete'.
     Για πολλά αντικείμενα ταυτόχρονα, χώρισέ τα με κόμμα (item='γάλα, τυρί')."""
@@ -3377,7 +3456,7 @@ all_tools = [
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
-    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, browse_url,
+    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, browse_url,
     duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, tool_stats, system_doctor, memory_review,
     repo_mapper,
     scan_receipt,

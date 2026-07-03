@@ -55,3 +55,11 @@ def test_manual_notification_control():
         routine_names=["πάρκο με Αλέξανδρο"],
     )
     assert result.intent == "manual_routine_control"
+
+
+def test_manual_cooldown_reset_control():
+    result = classify_routine_intent(
+        "Μηδένισε το cooldown της ρουτίνας καθάρισμα κλουβιού κουνελιού",
+        routine_names=["καθάρισμα κλουβιού κουνελιού"],
+    )
+    assert result.intent == "manual_routine_control"
