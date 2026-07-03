@@ -1041,39 +1041,106 @@ function render(d) {
     ${memPreview.length ? `<div style="margin-top:6px;color:var(--muted);font-size:10px;line-height:1.35">${memPreview.map(esc).join('<br>')}</div>` : ''}
   </div>`;
 
+  function prettyFollowupWindow(key) {
+    const map = {
+      explicit_timer: "Explicit timer",
+      same_day_short_checkin: "Same day · short check-in",
+      same_day_evening: "Same day · evening",
+      next_day_morning: "Next day · morning",
+      next_day_late_morning: "Next day · late morning",
+      next_day_afternoon: "Next day · afternoon",
+      next_day_evening: "Next day · evening",
+      after_likely_completion: "After likely completion",
+    };
+    return map[key] || key || "-";
+  }
+
+  function fmtFollowupTs(value) {
+    if (!value) return "-";
+    try {
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return esc(value);
+      return d.toLocaleString('el-GR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return esc(value);
+    }
+  }
+
   const followups = d.pending_followups || [];
   const followupHtml = followups.length
-    ? followups.map(f => `
-      <div class="card" style="margin-bottom:10px;">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-          <div>
-            <div style="font-weight:700;">#${f.id} · ${esc(f.subject || "-")}</div>
-            <div class="mono-small">${esc(f.topic || "-")} · ${esc(f.status || "-")}</div>
-          </div>
-          <div class="badge ${
-            f.status === 'pending' ? 'b-yellow' :
-            f.status === 'sent' ? 'b-green' :
-            f.status === 'resolved' ? 'b-blue' :
-            'b-muted'
-          }">
-            ${esc(f.status || "-")}
-          </div>
-        </div>
+    ? followups.map(f => {
+        const meta = f.metadata || {};
+        const createdReason = meta.reason || "-";
+        const targetWindow = prettyFollowupWindow(meta.target_window || "");
+        const rawDelay = meta.delay_minutes_raw ?? "-";
+        const finalDelay = meta.delay_minutes_final ?? "-";
+        const ttlHours = meta.ttl_hours ?? "-";
 
-        <div class="mono-small" style="margin-top:8px;">Due in: ${f.due_in_minutes ?? "-"} min</div>
-        <div class="mono-small">Last decision: ${esc(f.last_decision || "-")}</div>
-        <div class="mono-small">Reason: ${esc(f.decision_reason || "-")}</div>
-        <div class="mono-small">Times sent: ${f.times_sent ?? 0}</div>
-        <div class="mono-small">Score: ${f.outcome_score ?? 0}</div>
-        <div class="mono-small">Arc: ${esc(f.arc_key || "-")}</div>
-        <div class="mono-small">Agent: ${esc(f.source_agent || "-")} · Channel: ${esc(f.source_channel || "-")}</div>
-        <div class="mono-small" style="margin-top:6px;white-space:pre-wrap;">${esc(f.source_user_text || "")}</div>
-      </div>
-    `).join("")
+        const statusBadge =
+          f.status === 'pending' ? 'b-yellow' :
+          f.status === 'sent' ? 'b-green' :
+          f.status === 'resolved' ? 'b-blue' :
+          'b-muted';
+
+        return `
+          <div class="card" style="margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+              <div style="min-width:0;">
+                <div style="font-weight:700;word-break:break-word;">#${f.id} · ${esc(f.subject || "-")}</div>
+                <div class="mono-small">${esc(f.topic || "-")} · ${esc(f.status || "-")}</div>
+              </div>
+              <div class="badge ${statusBadge}">
+                ${esc(f.status || "-")}
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+              <div class="cond-box">
+                <div class="mono-small"><b>Due in</b>: ${f.due_in_minutes ?? "-"} min</div>
+                <div class="mono-small"><b>Due at</b>: ${fmtFollowupTs(f.followup_after_ts)}</div>
+                <div class="mono-small"><b>Expires</b>: ${fmtFollowupTs(f.expires_at)}</div>
+              </div>
+
+              <div class="cond-box">
+                <div class="mono-small"><b>Last decision</b>: ${esc(f.last_decision || "-")}</div>
+                <div class="mono-small"><b>Decision reason</b>: ${esc(f.decision_reason || "-")}</div>
+                <div class="mono-small"><b>Times sent</b>: ${f.times_sent ?? 0}</div>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
+              <div class="meta-box">
+                <div class="mono-small"><b>Created reason</b>: ${esc(createdReason)}</div>
+                <div class="mono-small"><b>Target window</b>: ${esc(targetWindow)}</div>
+                <div class="mono-small"><b>TTL</b>: ${esc(String(ttlHours))}h</div>
+              </div>
+
+              <div class="meta-box">
+                <div class="mono-small"><b>Delay</b>: ${esc(String(rawDelay))}m → ${esc(String(finalDelay))}m</div>
+                <div class="mono-small"><b>Score</b>: ${f.outcome_score ?? 0}</div>
+                <div class="mono-small"><b>Arc</b>: ${esc(f.arc_key || "-")}</div>
+              </div>
+            </div>
+
+            <div class="mono-small" style="margin-top:8px;">
+              <b>Agent</b>: ${esc(f.source_agent || "-")} · <b>Channel</b>: ${esc(f.source_channel || "-")}
+            </div>
+
+            <div class="mono-small" style="margin-top:8px;white-space:pre-wrap;line-height:1.4;">
+              ${esc(f.source_user_text || "")}
+            </div>
+          </div>
+        `;
+      }).join("")
     : `<div class="card"><span class="badge b-muted">No pending followups</span></div>`;
 
   html += `<div class="card" style="grid-column:1/-1"><h2>👋 Pending Followups</h2>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(300px, 1fr));gap:10px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(340px, 1fr));gap:12px;align-items:start;">
       ${followupHtml}
     </div>
   </div>`;

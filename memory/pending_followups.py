@@ -3,11 +3,24 @@ import sqlite3
 import unicodedata
 from datetime import datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from config import STATE_DB
 
 
 FOLLOWUP_TTL_HOURS = 12
+FOLLOWUP_LOCAL_TZ = ZoneInfo("Europe/Athens")
+
+
+def _local_now() -> datetime:
+    return datetime.now(FOLLOWUP_LOCAL_TZ)
+
+
+def _coerce_local_dt(dt: Optional[datetime] = None) -> datetime:
+    dt = dt or _local_now()
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=FOLLOWUP_LOCAL_TZ)
+    return dt.astimezone(FOLLOWUP_LOCAL_TZ)
 
 
 def _conn():
@@ -73,11 +86,144 @@ def build_followup_arc_key(topic: str, subject: str) -> str:
     return f"{(topic or '').strip().lower()}::{' '.join(tokens)}".strip()
 
 
+def _tokenize_followup_text(text: str) -> list[str]:
+    normalized = _normalize_match_text(text or "")
+    return [tok for tok in normalized.split() if len(tok) >= 4]
+
+
 def _delay_until_next_window(now: datetime, hour: int, minute: int = 0) -> int:
     target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if target <= now:
         target = target + timedelta(days=1)
     return max(1, int((target - now).total_seconds() / 60))
+
+
+def _apply_weekend_window_adjustment(target: datetime) -> datetime:
+    if target.weekday() >= 5 and (target.hour, target.minute) < (11, 0):
+        return target.replace(hour=11, minute=0, second=0, microsecond=0)
+    return target
+
+
+def _delay_until_target(now: datetime, target: datetime) -> int:
+    target = _coerce_local_dt(target)
+    if target <= now:
+        target = target + timedelta(days=1)
+    return max(1, int((target - now).total_seconds() / 60))
+
+
+def _delay_until_next_day_window(now: datetime, hour: int, minute: int = 0) -> int:
+    target = (now + timedelta(days=1)).replace(
+        hour=hour,
+        minute=minute,
+        second=0,
+        microsecond=0,
+    )
+    target = _apply_weekend_window_adjustment(target)
+    return _delay_until_target(now, target)
+
+
+def _compute_followup_ttl_hours(
+    delay_minutes: int,
+    target_window: str = "",
+    topic: str = "",
+) -> int:
+    target_window = (target_window or "").strip().lower()
+    topic = (topic or "").strip().lower()
+
+    if target_window in {
+        "next_day_morning",
+        "next_day_late_morning",
+        "next_day_afternoon",
+        "next_day_evening",
+    }:
+        return 18
+
+    if target_window == "explicit_timer":
+        if delay_minutes >= 12 * 60:
+            return 18
+        if delay_minutes >= 6 * 60:
+            return 12
+        return 8
+
+    if target_window == "after_likely_completion":
+        if topic in {"food_purchase", "appointment", "family_plan"}:
+            return 12
+        return 8
+
+    if delay_minutes >= 12 * 60:
+        return 18
+    if delay_minutes >= 6 * 60:
+        return 12
+    return 6
+
+
+def _infer_legacy_target_window(
+    *,
+    topic: str,
+    source_user_text: str = "",
+    reason: str = "",
+    delay_minutes_raw: int = 0,
+) -> str:
+    text = _normalize_match_text(f"{source_user_text} {reason}")
+    topic = (topic or "").strip().lower()
+
+    if "σε " in text and "ωρ" in text:
+        return "explicit_timer"
+
+    if any(marker in text for marker in ("αυριο", "tomorrow")):
+        if topic == "food_purchase":
+            return "next_day_late_morning"
+        if topic == "outing":
+            return "next_day_afternoon"
+        if topic == "appointment":
+            return "next_day_afternoon"
+        return "next_day_morning"
+
+    if any(marker in text for marker in ("αποψε", "βραδ", "tonight", "evening")):
+        return "same_day_evening"
+
+    if topic == "outing":
+        return "same_day_short_checkin"
+    if topic == "food_purchase":
+        return "after_likely_completion"
+
+    if delay_minutes_raw >= 12 * 60:
+        return "next_day_morning"
+    if delay_minutes_raw <= 90:
+        return "same_day_short_checkin"
+    return "after_likely_completion"
+
+
+def _next_occurrence_for_window(now: datetime, target_window: str, fallback_delay_minutes: int) -> datetime:
+    target_window = (target_window or "").strip().lower()
+    fallback_delay_minutes = max(15, int(fallback_delay_minutes or 60))
+
+    def _today_or_tomorrow(hour: int, minute: int = 0) -> datetime:
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        target = _apply_weekend_window_adjustment(target)
+        if target <= now:
+            target = target + timedelta(days=1)
+            target = _apply_weekend_window_adjustment(target)
+        return target
+
+    if target_window == "same_day_short_checkin":
+        return now + timedelta(minutes=min(fallback_delay_minutes, 90))
+    if target_window == "same_day_evening":
+        return _today_or_tomorrow(19, 30)
+    if target_window == "next_day_morning":
+        return _today_or_tomorrow(9, 30)
+    if target_window == "next_day_late_morning":
+        return _today_or_tomorrow(11, 30)
+    if target_window == "next_day_afternoon":
+        return _today_or_tomorrow(14, 30)
+    if target_window == "next_day_evening":
+        return _today_or_tomorrow(19, 30)
+    if target_window == "after_likely_completion":
+        return now + timedelta(minutes=min(max(fallback_delay_minutes, 60), 300))
+    if target_window == "explicit_timer":
+        return now + timedelta(minutes=fallback_delay_minutes)
+
+    return now + timedelta(minutes=min(max(fallback_delay_minutes, 60), 300))
 
 
 def normalize_followup_delay(
@@ -92,13 +238,16 @@ def normalize_followup_delay(
     target_window = (target_window or "").strip().lower()
     raw_value = int(suggested_minutes or 0)
     value = raw_value
-    now = now or datetime.now()
+    now = _coerce_local_dt(now)
     hour = int(now.hour)
 
     if value < 30:
         value = 30
     if value > 720:
         value = 720
+
+    if target_window == "explicit_timer":
+        return value
 
     if target_window == "same_day_short_checkin":
         return max(20, min(value, 90))
@@ -110,19 +259,19 @@ def normalize_followup_delay(
         return max(45, min(value, 240))
 
     if target_window == "next_day_morning":
-        delay = _delay_until_next_window(now + timedelta(days=1), 9, 30)
+        delay = _delay_until_next_day_window(now, 9, 30)
         return max(8 * 60, min(delay, 24 * 60))
 
     if target_window == "next_day_late_morning":
-        delay = _delay_until_next_window(now + timedelta(days=1), 11, 30)
+        delay = _delay_until_next_day_window(now, 11, 30)
         return max(8 * 60, min(delay, 24 * 60))
 
     if target_window == "next_day_afternoon":
-        delay = _delay_until_next_window(now + timedelta(days=1), 14, 30)
+        delay = _delay_until_next_day_window(now, 14, 30)
         return max(10 * 60, min(delay, 30 * 60))
 
     if target_window == "next_day_evening":
-        delay = _delay_until_next_window(now + timedelta(days=1), 19, 30)
+        delay = _delay_until_next_day_window(now, 19, 30)
         return max(12 * 60, min(delay, 30 * 60))
 
     if target_window == "after_likely_completion":
@@ -138,7 +287,7 @@ def normalize_followup_delay(
 
     if topic == "food_purchase":
         if "αυριο" in text or "αύριο" in text:
-            delay = _delay_until_next_window(now + timedelta(days=1), 11, 30)
+            delay = _delay_until_next_day_window(now, 11, 30)
             return max(8 * 60, min(delay, 24 * 60))
         if "αποψε" in text or "απόψε" in text or "βραδ" in text:
             return max(45, min(value, 240))
@@ -158,13 +307,19 @@ def create_pending_followup(
     followup_after_ts: str,
     confidence: float = 0.0,
     metadata: Optional[dict] = None,
+    ttl_hours: Optional[int] = None,
 ):
     ensure_pending_followups_table()
     conn = _conn()
     try:
-        expires_at = (
-            datetime.fromisoformat(followup_after_ts) + timedelta(hours=FOLLOWUP_TTL_HOURS)
-        ).isoformat(timespec="seconds")
+        ttl_hours = int(ttl_hours or FOLLOWUP_TTL_HOURS)
+        due_dt = datetime.fromisoformat(followup_after_ts)
+        if due_dt.tzinfo is None:
+            due_dt = due_dt.replace(tzinfo=FOLLOWUP_LOCAL_TZ)
+        else:
+            due_dt = due_dt.astimezone(FOLLOWUP_LOCAL_TZ)
+
+        expires_at = (due_dt + timedelta(hours=ttl_hours)).isoformat(timespec="seconds")
 
         metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
         arc_key = build_followup_arc_key(topic, subject)
@@ -241,13 +396,19 @@ def create_pending_followup_from_candidate(
     if confidence < 0.45:
         return None
 
-    now = datetime.now()
+    now = _local_now()
     delay_minutes = normalize_followup_delay(
         topic=topic,
         suggested_minutes=delay_minutes_raw,
         source_user_text=source_user_text,
         target_window=str(candidate.get("target_window") or ""),
         now=now,
+    )
+
+    ttl_hours = _compute_followup_ttl_hours(
+        delay_minutes=delay_minutes,
+        target_window=str(candidate.get("target_window") or ""),
+        topic=topic,
     )
 
     followup_after_ts = (
@@ -263,9 +424,11 @@ def create_pending_followup_from_candidate(
         source_ai_text=source_ai_text,
         followup_after_ts=followup_after_ts,
         confidence=confidence,
+        ttl_hours=ttl_hours,
         metadata={
             "reason": candidate.get("reason", ""),
             "target_window": str(candidate.get("target_window") or ""),
+            "ttl_hours": ttl_hours,
             "delay_minutes_raw": delay_minutes_raw,
             "delay_minutes_final": delay_minutes,
         },
@@ -334,7 +497,7 @@ def get_recently_resolved_followups(limit: int = 5, within_seconds: int = 180) -
     ensure_pending_followups_table()
     conn = _conn()
     try:
-        cutoff = datetime.now() - timedelta(seconds=within_seconds)
+        cutoff = _local_now() - timedelta(seconds=within_seconds)
         rows = conn.execute(
             """
             SELECT id, topic, subject, arc_key, resolution_reason, decision_reason, resolved_at
@@ -390,7 +553,7 @@ def mark_followup_sent(followup_id: int, decision_reason: str = "followup_sent")
     conn = _conn()
     try:
         from datetime import datetime
-        now_iso = datetime.now().isoformat(timespec="seconds")
+        now_iso = _local_now().isoformat(timespec="seconds")
         conn.execute(
             """
             UPDATE pending_followups
@@ -412,19 +575,286 @@ def mark_followup_sent(followup_id: int, decision_reason: str = "followup_sent")
 def resolve_followup(followup_id: int, reason: str):
     conn = _conn()
     try:
+        now_iso = _local_now().isoformat(timespec="seconds")
         conn.execute(
             """
             UPDATE pending_followups
             SET status='resolved',
                 resolution_reason=?,
-                resolved_at=CURRENT_TIMESTAMP,
+                resolved_at=?,
                 last_decision='resolved',
                 decision_reason=?
             WHERE id=?
             """,
-            (reason, reason, followup_id),
+            (reason, now_iso, reason, followup_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def defer_followup(
+    followup_id: int,
+    *,
+    delay_minutes: int,
+    reason: str = "deferred_by_user_reply",
+    target_window: str = "",
+    topic: str = "",
+) -> None:
+    ensure_pending_followups_table()
+    conn = _conn()
+    try:
+        now = _local_now()
+        safe_delay = max(15, int(delay_minutes))
+        next_due = now + timedelta(minutes=safe_delay)
+        ttl_hours = _compute_followup_ttl_hours(
+            delay_minutes=safe_delay,
+            target_window=target_window,
+            topic=topic,
+        )
+        next_expires = next_due + timedelta(hours=ttl_hours)
+
+        row = conn.execute(
+            "SELECT metadata_json FROM pending_followups WHERE id=?",
+            (followup_id,),
+        ).fetchone()
+
+        metadata = {}
+        if row and row[0]:
+            try:
+                metadata = json.loads(row[0])
+            except Exception:
+                metadata = {}
+
+        metadata["ttl_hours"] = ttl_hours
+        metadata["delay_minutes_final"] = safe_delay
+        if target_window:
+            metadata["target_window"] = target_window
+
+        conn.execute(
+            """
+            UPDATE pending_followups
+            SET
+                status='pending',
+                followup_after_ts=?,
+                expires_at=?,
+                metadata_json=?,
+                last_decision='deferred',
+                decision_reason=?,
+                resolution_reason='',
+                sent_at=NULL
+            WHERE id=?
+            """,
+            (
+                next_due.isoformat(timespec="seconds"),
+                next_expires.isoformat(timespec="seconds"),
+                json.dumps(metadata, ensure_ascii=False),
+                reason,
+                followup_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_followup(followup_id: int, reason: str = "manual_delete") -> bool:
+    ensure_pending_followups_table()
+    conn = _conn()
+    try:
+        cur = conn.execute(
+            "DELETE FROM pending_followups WHERE id=?",
+            (followup_id,),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def backfill_legacy_followups(limit: Optional[int] = None, force_retime: bool = False) -> int:
+    ensure_pending_followups_table()
+    conn = _conn()
+    try:
+        sql = """
+            SELECT
+                id, topic, subject, status, followup_after_ts, expires_at,
+                created_at, source_user_text, metadata_json
+            FROM pending_followups
+            ORDER BY id ASC
+        """
+        params: tuple = ()
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (int(limit),)
+
+        rows = conn.execute(sql, params).fetchall()
+        updated = 0
+        now = _local_now()
+
+        for row in rows:
+            followup_id = int(row[0])
+            topic = str(row[1] or "").strip().lower()
+            status = str(row[3] or "").strip().lower()
+            created_raw = str(row[6] or "").strip()
+            source_user_text = str(row[7] or "").strip()
+
+            try:
+                metadata = json.loads(row[8] or "{}")
+            except Exception:
+                metadata = {}
+
+            missing_target = not str(metadata.get("target_window") or "").strip()
+            missing_ttl = not metadata.get("ttl_hours")
+            missing_delay = not metadata.get("delay_minutes_final")
+            needs_full_retiming = force_retime or missing_target or missing_ttl
+
+            if not (missing_target or missing_ttl or missing_delay or force_retime):
+                continue
+
+            created_dt = _coerce_local_dt(datetime.fromisoformat(created_raw.replace(" ", "T")))
+            existing_due_raw = str(row[4] or "").strip()
+            try:
+                existing_due_dt = _coerce_local_dt(datetime.fromisoformat(existing_due_raw.replace(" ", "T")))
+            except Exception:
+                existing_due_dt = created_dt + timedelta(hours=6)
+
+            raw_delay = int(
+                metadata.get("delay_minutes_raw")
+                or max(30, int((existing_due_dt - created_dt).total_seconds() / 60))
+            )
+            inferred_window = str(
+                metadata.get("target_window")
+                or _infer_legacy_target_window(
+                    topic=topic,
+                    source_user_text=source_user_text,
+                    reason=str(metadata.get("reason") or ""),
+                    delay_minutes_raw=raw_delay,
+                )
+            ).strip()
+
+            if needs_full_retiming:
+                final_delay = int(
+                    normalize_followup_delay(
+                        topic=topic,
+                        suggested_minutes=raw_delay,
+                        source_user_text=source_user_text or str(metadata.get("reason") or ""),
+                        target_window=inferred_window,
+                        now=created_dt,
+                    )
+                )
+            else:
+                final_delay = int(metadata.get("delay_minutes_final") or raw_delay)
+            ttl_hours = int(
+                metadata.get("ttl_hours")
+                or _compute_followup_ttl_hours(
+                    delay_minutes=final_delay,
+                    target_window=inferred_window,
+                    topic=topic,
+                )
+            )
+
+            due_dt = created_dt + timedelta(minutes=final_delay)
+            if status == "pending" and due_dt <= now:
+                due_dt = _next_occurrence_for_window(now, inferred_window, final_delay)
+
+            expires_dt = due_dt + timedelta(hours=ttl_hours)
+
+            metadata["target_window"] = inferred_window
+            metadata["ttl_hours"] = ttl_hours
+            metadata["delay_minutes_raw"] = raw_delay
+            metadata["delay_minutes_final"] = final_delay
+
+            conn.execute(
+                """
+                UPDATE pending_followups
+                SET followup_after_ts=?,
+                    expires_at=?,
+                    metadata_json=?
+                WHERE id=?
+                """,
+                (
+                    due_dt.isoformat(timespec="seconds"),
+                    expires_dt.isoformat(timespec="seconds"),
+                    json.dumps(metadata, ensure_ascii=False),
+                    followup_id,
+                ),
+            )
+            updated += 1
+
+        conn.commit()
+        return updated
+    finally:
+        conn.close()
+
+
+def find_followups_for_control(
+    subject_query: str,
+    *,
+    topic: str = "",
+    statuses: tuple[str, ...] = ("pending", "sent"),
+) -> list[dict]:
+    ensure_pending_followups_table()
+    query_tokens = set(_tokenize_followup_text(subject_query))
+    topic = (topic or "").strip().lower()
+    conn = _conn()
+    try:
+        placeholders = ",".join("?" for _ in statuses)
+        rows = conn.execute(
+            f"""
+            SELECT id, topic, subject, status, followup_after_ts, expires_at,
+                   source_channel, source_agent, metadata_json, arc_key
+            FROM pending_followups
+            WHERE status IN ({placeholders})
+            ORDER BY id DESC
+            """,
+            tuple(statuses),
+        ).fetchall()
+
+        matches: list[tuple[int, dict]] = []
+        for row in rows:
+            row_topic = str(row[1] or "").strip().lower()
+            row_subject = str(row[2] or "")
+            if topic and row_topic != topic:
+                continue
+
+            subject_tokens = set(_tokenize_followup_text(row_subject))
+            overlap = len(query_tokens & subject_tokens)
+
+            score = overlap
+            if subject_query and subject_query.strip().lower() in row_subject.lower():
+                score += 3
+            if topic and row_topic == topic:
+                score += 1
+
+            if score <= 0:
+                continue
+
+            try:
+                metadata = json.loads(row[8] or "{}")
+            except Exception:
+                metadata = {}
+
+            matches.append(
+                (
+                    score,
+                    {
+                        "id": int(row[0]),
+                        "topic": row_topic,
+                        "subject": row_subject,
+                        "status": str(row[3] or ""),
+                        "followup_after_ts": str(row[4] or ""),
+                        "expires_at": str(row[5] or ""),
+                        "source_channel": str(row[6] or ""),
+                        "source_agent": str(row[7] or ""),
+                        "metadata": metadata,
+                        "arc_key": str(row[9] or ""),
+                    },
+                )
+            )
+
+        matches.sort(key=lambda item: (item[0], item[1]["id"]), reverse=True)
+        return [item[1] for item in matches]
     finally:
         conn.close()
 
@@ -517,7 +947,7 @@ def find_pending_followups(limit: int = 20) -> list[dict]:
                 "arc_key": r[15] or "",
                 "due_in_minutes": max(
                     0,
-                    int((datetime.fromisoformat(r[4]) - datetime.now()).total_seconds() / 60)
+                    int((datetime.fromisoformat(r[4]).replace(tzinfo=FOLLOWUP_LOCAL_TZ) - _local_now()).total_seconds() / 60)
                 ) if r[3] == "pending" else None,
             }
             for r in rows
@@ -543,7 +973,8 @@ def has_recent_sent_followup(within_minutes: int = 90) -> bool:
             return False
 
         last_sent = datetime.fromisoformat(str(row[0]).replace(" ", "T"))
-        return (datetime.now() - last_sent) <= timedelta(minutes=within_minutes)
+        last_sent = last_sent.replace(tzinfo=FOLLOWUP_LOCAL_TZ) if last_sent.tzinfo is None else last_sent.astimezone(FOLLOWUP_LOCAL_TZ)
+        return (_local_now() - last_sent) <= timedelta(minutes=within_minutes)
     finally:
         conn.close()
 
@@ -566,7 +997,8 @@ def has_recent_sent_followup_for_arc(arc_key: str, within_minutes: int = 240) ->
             return False
 
         last_sent = datetime.fromisoformat(str(row[0]).replace(" ", "T"))
-        return (datetime.now() - last_sent) <= timedelta(minutes=within_minutes)
+        last_sent = last_sent.replace(tzinfo=FOLLOWUP_LOCAL_TZ) if last_sent.tzinfo is None else last_sent.astimezone(FOLLOWUP_LOCAL_TZ)
+        return (_local_now() - last_sent) <= timedelta(minutes=within_minutes)
     finally:
         conn.close()
 
@@ -652,7 +1084,7 @@ def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name
   "topic": "food_purchase | outing | task_progress | family_plan | appointment | general_progress",
   "subject": "σύντομο subject",
   "delay_minutes": 180,
-  "target_window": "same_day_short_checkin | same_day_evening | next_day_morning | next_day_late_morning | next_day_afternoon | next_day_evening | after_likely_completion",
+  "target_window": "explicit_timer | same_day_short_checkin | same_day_evening | next_day_morning | next_day_late_morning | next_day_afternoon | next_day_evening | after_likely_completion",
   "confidence": 0.0,
   "reason": "short reason"
 }}
@@ -675,6 +1107,7 @@ def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name
 - Μην επιλέγεις target_window με βάση γενικά "αργότερα", αλλά με βάση το πραγματικό πιθανό outcome
 
 Χρησιμοποίησε:
+- "explicit_timer" όταν ο χρήστης έχει δώσει ο ίδιος συγκεκριμένο χρόνο/διάστημα και πρέπει να σεβαστούμε το delay_minutes χωρίς semantic override
 - "same_day_short_checkin" όταν ο χρήστης μόλις ξεκίνησε κάτι και σύντομα θα υπάρχει εξέλιξη
 - "same_day_evening" όταν το θέμα λογικά θα κλείσει αργότερα μέσα στην ίδια μέρα
 - "next_day_morning" όταν το θέμα μεταφέρεται στην επόμενη μέρα και έχει νόημα νωρίς αλλά όχι χαράματα
@@ -684,6 +1117,8 @@ def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name
 - "after_likely_completion" όταν το follow-up πρέπει να γίνει μετά το πιθανό τέλος του γεγονότος
 
 Παραδείγματα:
+- "σε 2 ώρες ρώτα με αν το έκανα" -> target_window: "explicit_timer"
+- "θυμήσου να με ρωτήσεις αύριο στις 3" -> target_window: "explicit_timer"
 - "οι μπριζόλες αύριο" -> target_window: "next_day_late_morning"
 - "πάω τώρα να τους βρω στο πάρκο" -> target_window: "same_day_short_checkin"
 - "αύριο θα δούμε για το interview" -> target_window: "next_day_afternoon"
@@ -810,6 +1245,68 @@ New user message:
         return None
 
 
+def classify_followup_deferral_with_llm(
+    *,
+    topic: str,
+    subject: str,
+    source_user_text: str,
+    current_user_text: str,
+) -> dict:
+    from services.brain import llm_flash
+
+    prompt = f"""
+Είσαι classifier για conversational follow-ups.
+
+PENDING FOLLOWUP
+topic: {topic}
+subject: {subject}
+source_user_text: {source_user_text}
+
+NEW USER MESSAGE
+{current_user_text}
+
+Απάντησε ΜΟΝΟ με JSON:
+{{
+  "should_defer": true/false,
+  "delay_minutes": integer,
+  "target_window": "explicit_timer | same_day_short_checkin | same_day_evening | next_day_morning | next_day_late_morning | next_day_afternoon | next_day_evening | after_likely_completion",
+  "reason": "short reason",
+  "confidence": 0.0
+}}
+
+Κανόνες:
+- should_defer=true μόνο αν ο χρήστης ΔΕΝ λέει ότι το έκανε, αλλά το μεταθέτει για μετά
+- παραδείγματα defer:
+  - "αύριο θα τις κάνω"
+  - "όχι σήμερα, αύριο"
+  - "μετά θα πάω"
+  - "αργότερα"
+  - "σε 2 ώρες"
+- αν ο χρήστης λέει ότι το έκανε ήδη ή έκλεισε το θέμα, τότε should_defer=false
+- αν δεν είσαι αρκετά σίγουρος, should_defer=false
+"""
+    raw = llm_flash.invoke(prompt).content.strip()
+
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {
+            "should_defer": False,
+            "delay_minutes": 0,
+            "target_window": "",
+            "reason": "invalid_json",
+            "confidence": 0.0,
+        }
+
+    return {
+        "should_defer": bool(data.get("should_defer")),
+        "delay_minutes": int(data.get("delay_minutes") or 0),
+        "target_window": str(data.get("target_window") or "").strip(),
+        "reason": str(data.get("reason") or "").strip(),
+        "confidence": float(data.get("confidence") or 0.0),
+    }
+
+
 def maybe_resolve_followups_from_user_message(user_text: str) -> int:
     ensure_pending_followups_table()
     text = _normalize_match_text(user_text)
@@ -855,6 +1352,10 @@ def maybe_resolve_followups_from_user_message(user_text: str) -> int:
             "δεν πηρα",
             "δεν έγινε",
             "δεν εγινε",
+            "μετά",
+            "μετα",
+            "αργότερα",
+            "αργοτερα",
         )
 
         if not any(m in text for m in resolution_markers):
@@ -877,8 +1378,34 @@ def maybe_resolve_followups_from_user_message(user_text: str) -> int:
             if not lexical_hint and len(text.split()) < 4:
                 continue
 
+            deferral = classify_followup_deferral_with_llm(
+                topic=topic,
+                subject=subject,
+                source_user_text=source_user_text or "",
+                current_user_text=user_text,
+            )
+
+            if deferral.get("should_defer") and float(deferral.get("confidence") or 0.0) >= 0.60:
+                delay_minutes = normalize_followup_delay(
+                    topic=topic,
+                    suggested_minutes=int(deferral.get("delay_minutes") or 0),
+                    source_user_text=user_text,
+                    target_window=str(deferral.get("target_window") or ""),
+                    now=_local_now(),
+                )
+                defer_reason = deferral.get('reason') or 'user_postponed'
+                defer_followup(
+                    followup_id,
+                    delay_minutes=delay_minutes,
+                    reason=f"deferred:{defer_reason}",
+                    target_window=str(deferral.get("target_window") or ""),
+                    topic=topic,
+                )
+                print(f"[FollowUp]: deferred #{followup_id} -> {defer_reason}")
+                continue
+
             result = classify_followup_resolution_with_llm(
-                user_text=text,
+                user_text=user_text,
                 topic=topic,
                 subject=subject,
                 source_user_text=source_user_text or "",

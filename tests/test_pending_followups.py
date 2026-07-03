@@ -257,6 +257,12 @@ def test_maybe_resolve_followups_from_user_message_uses_llm_resolution(temp_stat
         },
     )
 
+    monkeypatch.setattr(
+        pf,
+        "classify_followup_deferral_with_llm",
+        lambda **kwargs: {"should_defer": False},
+    )
+
     pf.maybe_resolve_followups_from_user_message("Τους βρήκα τελικά στο πάρκο")
 
     rows = _fetch_all(temp_state_db)
@@ -319,6 +325,12 @@ def test_maybe_resolve_followups_from_user_message_resolves_sent_followup(temp_s
             "confidence": 0.92,
             "reason": "user said they bought them",
         },
+    )
+
+    monkeypatch.setattr(
+        pf,
+        "classify_followup_deferral_with_llm",
+        lambda **kwargs: {"should_defer": False},
     )
 
     resolved = pf.maybe_resolve_followups_from_user_message(
@@ -993,3 +1005,275 @@ def test_create_pending_followup_preserves_target_window(monkeypatch, temp_state
     rows = pf.find_pending_followups(limit=10)
     row = next(item for item in rows if item["id"] == followup_id)
     assert row["metadata"]["target_window"] == "next_day_late_morning"
+    assert row["metadata"]["ttl_hours"] == 18
+
+
+def test_normalize_followup_delay_explicit_timer_returns_clamped_delay():
+    from datetime import datetime
+    from memory.pending_followups import normalize_followup_delay
+
+    now = datetime(2026, 7, 3, 20, 0, 0)
+    delay = normalize_followup_delay(
+        "general_progress",
+        125,
+        "σε 2 ώρες ρώτα με",
+        target_window="explicit_timer",
+        now=now,
+    )
+
+    assert delay == 125
+
+
+def test_compute_followup_ttl_hours_next_day_window():
+    from memory.pending_followups import _compute_followup_ttl_hours
+
+    ttl = _compute_followup_ttl_hours(
+        delay_minutes=810,
+        target_window="next_day_late_morning",
+        topic="food_purchase",
+    )
+    assert ttl == 18
+
+
+def test_compute_followup_ttl_hours_explicit_timer_medium():
+    from memory.pending_followups import _compute_followup_ttl_hours
+
+    ttl = _compute_followup_ttl_hours(
+        delay_minutes=8 * 60,
+        target_window="explicit_timer",
+        topic="general_progress",
+    )
+    assert ttl == 12
+
+
+def test_next_day_morning_on_friday_night_targets_weekend_later_morning():
+    from datetime import datetime
+    from memory.pending_followups import FOLLOWUP_LOCAL_TZ, normalize_followup_delay
+
+    now = datetime(2030, 1, 4, 22, 0, tzinfo=FOLLOWUP_LOCAL_TZ)
+
+    delay = normalize_followup_delay(
+        topic="outing",
+        suggested_minutes=600,
+        source_user_text="αύριο να με ρωτήσεις",
+        target_window="next_day_morning",
+        now=now,
+    )
+
+    assert delay == 13 * 60
+
+
+def test_next_day_late_morning_on_weekend_stays_as_requested():
+    from datetime import datetime
+    from memory.pending_followups import FOLLOWUP_LOCAL_TZ, normalize_followup_delay
+
+    now = datetime(2030, 1, 4, 22, 0, tzinfo=FOLLOWUP_LOCAL_TZ)
+
+    delay = normalize_followup_delay(
+        topic="food_purchase",
+        suggested_minutes=700,
+        source_user_text="οι μπριζόλες αύριο",
+        target_window="next_day_late_morning",
+        now=now,
+    )
+
+    assert delay == 13 * 60 + 30
+
+
+def test_defer_followup_moves_due_time_and_keeps_pending(temp_state_db):
+    followup_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="food_purchase",
+        subject="μπριζόλες λαιμού",
+        source_user_text="θυμισέ μου για τις μπριζόλες",
+        source_ai_text="έγινε",
+        followup_after_ts="2030-01-01T19:00:00+02:00",
+        confidence=0.8,
+        metadata={},
+    )
+
+    pf.defer_followup(
+        followup_id,
+        delay_minutes=180,
+        reason="deferred:user_said_tomorrow",
+    )
+
+    rows = pf.find_pending_followups(limit=10)
+    row = rows[0]
+    assert row["status"] == "pending"
+    assert row["last_decision"] == "deferred"
+    assert row["decision_reason"] == "deferred:user_said_tomorrow"
+
+
+def test_maybe_resolve_followups_from_user_message_defers_when_user_postpones(temp_state_db, monkeypatch):
+    pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="food_purchase",
+        subject="μπριζόλες λαιμού",
+        source_user_text="θυμισέ μου για τις μπριζόλες",
+        source_ai_text="έγινε",
+        followup_after_ts="2030-01-01T19:00:00+02:00",
+        confidence=0.8,
+        metadata={},
+    )
+
+    monkeypatch.setattr(
+        pf,
+        "classify_followup_resolution_with_llm",
+        lambda **kwargs: {
+            "resolves": False,
+            "resolution_type": "",
+            "confidence": 0.2,
+            "reason": "not resolved",
+        },
+    )
+
+    monkeypatch.setattr(
+        pf,
+        "classify_followup_deferral_with_llm",
+        lambda **kwargs: {
+            "should_defer": True,
+            "delay_minutes": 720,
+            "target_window": "next_day_late_morning",
+            "reason": "user postponed to tomorrow",
+            "confidence": 0.88,
+        },
+    )
+
+    pf.maybe_resolve_followups_from_user_message("όχι σήμερα, αύριο οι μπριζόλες")
+
+    row = pf.find_pending_followups(limit=10)[0]
+    assert row["status"] == "pending"
+    assert row["last_decision"] == "deferred"
+    assert "postponed" in row["decision_reason"]
+
+
+def test_resolve_followup_sets_iso_resolved_at(temp_state_db):
+    followup_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="συνάντηση με Σοφία",
+        source_user_text="σε λίγο φεύγω να τη βρω",
+        source_ai_text="οκ",
+        followup_after_ts="2030-01-01T19:00:00+02:00",
+        confidence=0.80,
+        metadata={},
+    )
+
+    pf.resolve_followup(followup_id, "resolved_by_user:completed")
+
+    conn = sqlite3.connect(str(temp_state_db))
+    try:
+        row = conn.execute(
+            "SELECT resolved_at FROM pending_followups WHERE id=?",
+            (followup_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+    assert "T" in row[0]
+
+
+def test_defer_followup_refreshes_expiry_and_metadata(temp_state_db):
+    followup_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="food_purchase",
+        subject="μπριζόλες λαιμού",
+        source_user_text="θυμισέ μου για τις μπριζόλες",
+        source_ai_text="έγινε",
+        followup_after_ts="2030-01-01T19:00:00+02:00",
+        confidence=0.80,
+        metadata={"target_window": "same_day_evening"},
+    )
+
+    pf.defer_followup(
+        followup_id,
+        delay_minutes=720,
+        reason="deferred:user_said_tomorrow",
+        target_window="next_day_late_morning",
+        topic="food_purchase",
+    )
+
+    row = pf.find_pending_followups(limit=10)[0]
+
+    assert row["status"] == "pending"
+    assert row["last_decision"] == "deferred"
+    assert row["decision_reason"] == "deferred:user_said_tomorrow"
+    assert row["metadata"]["target_window"] == "next_day_late_morning"
+    assert row["metadata"]["ttl_hours"] == 18
+
+
+def test_defer_followup_sets_expires_after_followup_after_ts(temp_state_db):
+    followup_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="συνάντηση με Σοφία",
+        source_user_text="μετά θα πάω",
+        source_ai_text="οκ",
+        followup_after_ts="2030-01-01T19:00:00+02:00",
+        confidence=0.80,
+        metadata={},
+    )
+
+    pf.defer_followup(
+        followup_id,
+        delay_minutes=180,
+        reason="deferred:user_postponed",
+        target_window="after_likely_completion",
+        topic="outing",
+    )
+
+    row = pf.find_pending_followups(limit=10)[0]
+    due_dt = datetime.fromisoformat(row["followup_after_ts"])
+    exp_dt = datetime.fromisoformat(row["expires_at"])
+
+    assert exp_dt > due_dt
+
+
+def test_backfill_legacy_followups_populates_missing_metadata_and_reanchors_pending(temp_state_db):
+    conn = sqlite3.connect(str(temp_state_db))
+    try:
+        conn.execute(
+            """
+            INSERT INTO pending_followups (
+                source_channel, source_agent, topic, subject, source_user_text, source_ai_text,
+                followup_after_ts, expires_at, confidence, status, resolution_reason, metadata_json,
+                created_at, arc_key
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "telegram",
+                "Home_Agent",
+                "food_purchase",
+                "ψήσιμο μπριζόλας",
+                "Οι μπριζόλες αύριο",
+                "Οκ",
+                "2030-01-02T03:30:00+02:00",
+                "2030-01-02T15:30:00+02:00",
+                0.8,
+                "pending",
+                "",
+                json.dumps({"reason": "legacy row", "delay_minutes_raw": 720}, ensure_ascii=False),
+                "2030-01-01 19:30:00",
+                pf.build_followup_arc_key("food_purchase", "ψήσιμο μπριζόλας"),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    updated = pf.backfill_legacy_followups()
+    assert updated == 1
+
+    row = pf.find_pending_followups(limit=10)[0]
+    assert row["metadata"]["target_window"] == "next_day_late_morning"
+    assert row["metadata"]["ttl_hours"] == 18
+    assert row["metadata"]["delay_minutes_final"] >= 8 * 60
+    assert "T11:30:" in row["followup_after_ts"]

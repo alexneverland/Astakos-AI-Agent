@@ -931,6 +931,35 @@ def _get_routine_names_for_intent_classification() -> list[str]:
         return []
 
 
+def _looks_like_manual_followup_control(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKD", str(text or "").lower())
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    control_markers = (
+        "pending followup",
+        "followup",
+        "follow-up",
+        "ακολουθ",
+        "εκκρεμ",
+        "σβησ",
+        "διαγραφ",
+        "ακυρωσ",
+        "μεταθεσ",
+        "αλλαξ",
+        "ξαναβαλ",
+    )
+    action_markers = (
+        "σβησ",
+        "διαγραφ",
+        "ακυρωσ",
+        "μεταθεσ",
+        "αλλαξ",
+        "μετακινησ",
+        "ριξ",
+        "βαλ",
+    )
+    return any(m in normalized for m in control_markers) and any(m in normalized for m in action_markers)
+
+
 @tool
 def control_routine_notifications(event_name: str, action: str, until_date: str = "", source_text: str = "") -> str:
     """
@@ -1407,6 +1436,102 @@ def control_routine_cooldown(
         return f"ℹ️ Δεν έγινε καμία αλλαγή cooldown για: {event_name}"
 
     return "\n".join(results)
+
+
+@tool
+def control_pending_followup(
+    subject_query: str,
+    action: str,
+    source_text: str = "",
+    topic: str = "",
+    delay_minutes: int = 0,
+    target_window: str = "",
+) -> str:
+    """
+    [OVERRIDE]: Χειροκίνητος έλεγχος pending conversational follow-ups.
+
+    Χρησιμοποίησέ το ΜΟΝΟ όταν ο χρήστης ζητά ρητά να αλλάξει/σβήσει/μεταθέσει ένα pending follow-up.
+
+    Παραδείγματα:
+    - "σβήσε το pending followup για τις μπριζόλες"
+    - "άλλαξε το pending για το πάρκο πιο αργά"
+    - "μετάθεσε το followup για τη Σοφία για αύριο το απόγευμα"
+    - "στρώσε τα παλιά pending followups"
+
+    actions:
+    - "delete": διαγράφει το matching follow-up
+    - "defer": μεταθέτει το matching follow-up με νέα λεπτά/window
+    - "repair_legacy": κάνει backfill σε παλιά followups που λείπουν metadata πεδία
+    """
+    from memory.pending_followups import (
+        backfill_legacy_followups,
+        delete_followup,
+        defer_followup,
+        find_followups_for_control,
+        find_pending_followups,
+    )
+
+    action = (action or "").strip().lower()
+    if action not in {"delete", "defer", "repair_legacy"}:
+        return "❌ Μη έγκυρο action. Επιτρεπτά: delete, defer, repair_legacy."
+
+    if action != "repair_legacy":
+        if not _looks_like_manual_followup_control(source_text):
+            return (
+                "ℹ️ Αυτό μοιάζει περισσότερο με απλό context update και όχι με ρητή χειροκίνητη εντολή "
+                "αλλαγής pending follow-up. Δεν έγινε καμία αλλαγή."
+            )
+
+    if action == "repair_legacy":
+        repaired = backfill_legacy_followups(force_retime=True)
+        rows = find_pending_followups(limit=10)
+        if not repaired:
+            return "ℹ️ Δεν βρήκα legacy pending followups που να χρειάζονται repair."
+        preview = []
+        for row in rows[:5]:
+            preview.append(
+                f"- #{row['id']} {row['subject']} -> {row['followup_after_ts']}"
+            )
+        body = "\n".join(preview)
+        return f"🛠️ Έγινε repair σε {repaired} legacy pending followups.\n{body}"
+
+    matches = find_followups_for_control(subject_query, topic=topic)
+    if not matches:
+        return f"ℹ️ Δεν βρήκα pending/sent follow-up που να ταιριάζει στο '{subject_query}'."
+
+    if len(matches) > 1:
+        opts = "\n".join(
+            f"- #{m['id']} {m['subject']} ({m['topic']}, {m['status']})"
+            for m in matches[:5]
+        )
+        return f"⚠️ Βρήκα πολλά pending followups. Διευκρίνισε ποιο εννοείς:\n{opts}"
+
+    item = matches[0]
+    if action == "delete":
+        ok = delete_followup(item["id"], reason="manual_delete")
+        if not ok:
+            return f"❌ Δεν κατάφερα να διαγράψω το pending follow-up #{item['id']}."
+        return f"✅ Διαγράφηκε το pending follow-up #{item['id']} για '{item['subject']}'."
+
+    if delay_minutes <= 0 and not target_window.strip():
+        return "❌ Για defer χρειάζομαι delay_minutes ή/και target_window."
+
+    defer_followup(
+        item["id"],
+        delay_minutes=delay_minutes or int(item.get("metadata", {}).get("delay_minutes_final") or 60),
+        reason="manual_defer",
+        target_window=(target_window or str(item.get("metadata", {}).get("target_window") or "")).strip(),
+        topic=item["topic"],
+    )
+    updated = find_pending_followups(limit=20)
+    refreshed = next((row for row in updated if row["id"] == item["id"]), None)
+    if not refreshed:
+        return f"✅ Το pending follow-up #{item['id']} μετατέθηκε."
+    return (
+        f"✅ Το pending follow-up #{item['id']} για '{refreshed['subject']}' μετατέθηκε.\n"
+        f"Νέο due: {refreshed['followup_after_ts']}\n"
+        f"Νέο expiry: {refreshed['expires_at']}"
+    )
 
 
 @tool
@@ -3515,7 +3640,7 @@ all_tools = [
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
-    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, browse_url,
+    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url,
     duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, tool_stats, system_doctor, memory_review,
     repo_mapper,
     scan_receipt,

@@ -121,3 +121,45 @@ def test_control_routine_cooldown_ignores_context_fact():
 
     normalized = result.lower()
     assert "context/fact update" in normalized or "δεν έγινε cooldown reset" in normalized
+
+
+def test_control_pending_followup_deletes_matching_row(monkeypatch):
+    from tools import system
+
+    monkeypatch.setattr(system, "_looks_like_manual_followup_control", lambda text: True)
+
+    with patch("memory.pending_followups.find_followups_for_control") as mock_find, \
+         patch("memory.pending_followups.delete_followup") as mock_delete:
+        mock_find.return_value = [
+            {"id": 4, "subject": "ψήσιμο μπριζόλας", "topic": "food_purchase", "status": "pending"}
+        ]
+        mock_delete.return_value = True
+
+        result = system.control_pending_followup.func(
+            subject_query="μπριζόλες",
+            action="delete",
+            source_text="σβήσε το pending followup για τις μπριζόλες",
+        )
+
+        mock_delete.assert_called_once_with(4, reason="manual_delete")
+        assert "Διαγράφηκε" in result
+
+
+def test_control_pending_followup_repairs_legacy_rows(monkeypatch):
+    from tools import system
+
+    with patch("memory.pending_followups.backfill_legacy_followups") as mock_backfill, \
+         patch("memory.pending_followups.find_pending_followups") as mock_find_pending:
+        mock_backfill.return_value = 1
+        mock_find_pending.return_value = [
+            {"id": 4, "subject": "ψήσιμο μπριζόλας", "followup_after_ts": "2030-01-02T11:30:00+02:00"}
+        ]
+
+        result = system.control_pending_followup.func(
+            subject_query="legacy",
+            action="repair_legacy",
+            source_text="στρώσε τα παλιά pending followups",
+        )
+
+        assert "repair" in result.lower()
+        assert "#4" in result
