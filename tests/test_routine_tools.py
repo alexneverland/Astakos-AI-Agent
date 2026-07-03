@@ -106,3 +106,18 @@ def test_control_routine_cooldown_resets_matching_routine(monkeypatch):
 
         mock_reset.assert_called_once_with(96, clear_last_notified=True)
         assert "βγήκε από cooldown" in result
+
+
+def test_control_routine_cooldown_ignores_context_fact():
+    from tools import system
+
+    result = system.control_routine_cooldown.invoke(
+        {
+            "event_name": "καθάρισμα κλουβιού κουνελιού",
+            "action": "reset",
+            "source_text": "Αύριο θα είμαστε σπίτι πιο νωρίς και θα το κάνω εγώ",
+        }
+    )
+
+    normalized = result.lower()
+    assert "context/fact update" in normalized or "δεν έγινε cooldown reset" in normalized
