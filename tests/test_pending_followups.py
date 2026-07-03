@@ -295,6 +295,42 @@ def test_maybe_resolve_followups_from_user_message_skips_low_confidence_llm(temp
     assert rows[0][3] == "pending"
 
 
+def test_maybe_resolve_followups_from_user_message_resolves_sent_followup(temp_state_db, monkeypatch):
+    followup_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="food_purchase",
+        subject="\u03bc\u03c0\u03c1\u03b9\u03b6\u03cc\u03bb\u03b5\u03c2 \u03bb\u03b1\u03b9\u03bc\u03bf\u03cd",
+        source_user_text="\u0398\u03cd\u03bc\u03b9\u03c3\u03ad \u03bc\u03bf\u03c5 \u03bd\u03b1 \u03c0\u03ac\u03c1\u03c9 \u03c4\u03b9\u03c2 \u03bc\u03c0\u03c1\u03b9\u03b6\u03cc\u03bb\u03b5\u03c2",
+        source_ai_text="\u0388\u03b3\u03b9\u03bd\u03b5.",
+        followup_after_ts="2030-01-01T19:00:00",
+        confidence=0.80,
+        metadata={},
+    )
+    pf.mark_followup_sent(followup_id)
+
+    monkeypatch.setattr(
+        pf,
+        "classify_followup_resolution_with_llm",
+        lambda **kwargs: {
+            "resolves": True,
+            "resolution_type": "completed",
+            "confidence": 0.92,
+            "reason": "user said they bought them",
+        },
+    )
+
+    resolved = pf.maybe_resolve_followups_from_user_message(
+        "\u03a4\u03b9\u03c2 \u03c0\u03ae\u03c1\u03b1 \u03c4\u03ce\u03c1\u03b1 \u03ba\u03b1\u03b9 \u03c6\u03b5\u03cd\u03b3\u03c9 \u03b1\u03c0\u03cc \u03c4\u03b7 \u03b4\u03bf\u03c5\u03bb\u03b5\u03b9\u03ac"
+    )
+
+    rows = _fetch_all(temp_state_db)
+    assert resolved == 1
+    assert len(rows) == 1
+    assert rows[0][3] == "resolved"
+    assert rows[0][6] == "resolved_by_user:completed"
+
+
 def test_build_followup_arc_key_collapses_similar_subjects():
     key1 = pf.build_followup_arc_key("food_purchase", "μπριζόλες λαιμού")
     key2 = pf.build_followup_arc_key("food_purchase", "λαιμού μπριζόλες")
@@ -446,6 +482,27 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
     assert sent == []
     assert marked == []
     assert outcomes == []
+
+
+def test_enqueue_followup_pipeline_skips_create_after_resolution_update(monkeypatch):
+    created = []
+
+    monkeypatch.setattr(bot, "maybe_resolve_followups_from_user_message", lambda text: 1)
+    monkeypatch.setattr(bot, "looks_like_followup_resolution_update", lambda text: True)
+    monkeypatch.setattr(
+        bot,
+        "maybe_create_followup_from_exchange",
+        lambda **kwargs: created.append(kwargs),
+    )
+
+    bot._enqueue_followup_pipeline(
+        "Ï„Î¹Ï‚ Ï€Î®ÏÎ± Ï„ÏŽÏÎ± ÎºÎ±Î¹ Ï†ÎµÏÎ³Ï‰",
+        "Ï‰ÏÎ±Î¯Î± Î¼Î¬ÏƒÏ„Î¿ÏÎ±",
+        "Chat_Agent",
+        "telegram",
+    )
+
+    assert created == []
 
 
 def test_job_check_pending_followups_persists_sent_message(monkeypatch):

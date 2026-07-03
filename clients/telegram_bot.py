@@ -95,6 +95,7 @@ from memory.pending_followups import (
     ensure_pending_followups_table,
     maybe_create_followup_from_exchange,
     maybe_resolve_followups_from_user_message,
+    looks_like_followup_resolution_update,
     get_due_pending_followups,
     mark_followup_sent,
     expire_old_followups,
@@ -258,7 +259,10 @@ def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
     )
 
 def _enqueue_followup_pipeline(user_text, ai_text, agent_name, channel):
-    maybe_resolve_followups_from_user_message(user_text)
+    resolved_count = maybe_resolve_followups_from_user_message(user_text)
+    if resolved_count > 0 and looks_like_followup_resolution_update(user_text):
+        print(f"[FollowUp]: create-skip after resolution update ({resolved_count} resolved)")
+        return
     maybe_create_followup_from_exchange(
         user_text=user_text,
         ai_text=ai_text,

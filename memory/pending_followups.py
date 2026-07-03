@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import unicodedata
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -11,6 +12,14 @@ FOLLOWUP_TTL_HOURS = 12
 
 def _conn():
     return sqlite3.connect(STATE_DB)
+
+
+def _normalize_match_text(text: str) -> str:
+    raw = str(text or "").strip().lower()
+    if not raw:
+        return ""
+    normalized = unicodedata.normalize("NFKD", raw)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
 
 def ensure_pending_followups_table():
@@ -406,6 +415,45 @@ def has_recent_sent_followup_for_arc(arc_key: str, within_minutes: int = 240) ->
         conn.close()
 
 
+def looks_like_followup_resolution_update(user_text: str) -> bool:
+    text = _normalize_match_text(user_text)
+    if not text:
+        return False
+
+    if len(text.split()) > 18:
+        return False
+
+    resolution_markers = (
+        "τελικά",
+        "ήδη",
+        "το έκανα",
+        "το εκανα",
+        "το πήρα",
+        "το πηρα",
+        "τις πήρα",
+        "τις πηρα",
+        "γύρισα",
+        "γυρισα",
+        "βρήκα",
+        "βρηκα",
+        "πήγα",
+        "πηγα",
+        "έφυγα",
+        "εφυγα",
+        "φεύγω",
+        "φευγω",
+        "πάω",
+        "παω",
+        "δεν πήρα",
+        "δεν πηρα",
+        "δεν έγινε",
+        "δεν εγινε",
+        "αύριο",
+        "αυριο",
+    )
+    return any(marker in text for marker in resolution_markers)
+
+
 def record_followup_outcome(followup_id: int, delta: float, reason: str):
     conn = _conn()
     try:
@@ -623,11 +671,11 @@ New user message:
         return None
 
 
-def maybe_resolve_followups_from_user_message(user_text: str):
+def maybe_resolve_followups_from_user_message(user_text: str) -> int:
     ensure_pending_followups_table()
-    text = str(user_text or "").strip().lower()
+    text = _normalize_match_text(user_text)
     if not text:
-        return
+        return 0
 
     conn = _conn()
     try:
@@ -635,8 +683,8 @@ def maybe_resolve_followups_from_user_message(user_text: str):
             """
             SELECT id, topic, subject, source_user_text
             FROM pending_followups
-            WHERE status='pending'
-            ORDER BY id DESC
+            WHERE status IN ('pending', 'sent')
+            ORDER BY CASE WHEN status='sent' THEN 0 ELSE 1 END, id DESC
             LIMIT 20
             """
         ).fetchall()
@@ -656,6 +704,10 @@ def maybe_resolve_followups_from_user_message(user_text: str):
             "βρηκα",
             "πήγα",
             "πηγα",
+            "φεύγω",
+            "φευγω",
+            "πάω",
+            "παω",
             "έγινε",
             "εγινε",
             "αύριο",
@@ -667,18 +719,20 @@ def maybe_resolve_followups_from_user_message(user_text: str):
         )
 
         if not any(m in text for m in resolution_markers):
-            return
+            return 0
+
+        resolved_count = 0
 
         for row in rows:
             followup_id, topic, subject, source_user_text = row
 
             shared_tokens = [
-                tok for tok in subject.lower().split()
+                tok for tok in _normalize_match_text(subject).split()
                 if len(tok) >= 4 and tok in text
             ]
 
             lexical_hint = bool(shared_tokens) or (
-                topic == "outing" and any(x in text for x in ("βρήκα", "τους βρήκα", "πήγα", "γύρισα"))
+                topic == "outing" and any(x in text for x in ("βρηκα", "τους βρηκα", "πηγα", "γυρισα"))
             )
 
             if not lexical_hint and len(text.split()) < 4:
@@ -716,5 +770,7 @@ def maybe_resolve_followups_from_user_message(user_text: str):
                 "resolved_by_user_message"
             )
             print(f"[FollowUp]: resolved #{followup_id} ({resolution_type})")
+            resolved_count += 1
+        return resolved_count
     finally:
         conn.close()
