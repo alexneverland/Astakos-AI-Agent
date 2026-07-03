@@ -979,7 +979,7 @@
         pendingLocalEchoes.push({
             role,
             text: normalizeEchoText(text),
-            expiresAt: Date.now() + 12000,
+            expiresAt: Date.now() + 60000,
         });
     }
 
@@ -1011,7 +1011,7 @@
         recentRenderedMessages.push({
             role,
             text: normalized,
-            expiresAt: now + 12000,
+            expiresAt: now + 60000,
         });
     }
 
