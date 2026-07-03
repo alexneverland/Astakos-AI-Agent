@@ -5,6 +5,65 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [v1.4.0] — 2026-07-03
+
+Headline: **Follow-up intelligence, cleaner memory hygiene, and a much more inspectable runtime.** This release focuses on making Astakos feel more continuous and less robotic: conversation-triggered follow-ups, deterministic media/document archival, cleaner Web UI behavior, lower-latency context selection, and better visibility into why the system did what it did.
+
+### Added
+
+#### Conversational Follow-up Pipeline
+- **Pending follow-ups subsystem** (`memory/pending_followups.py`) — Astakos can now create delayed follow-up threads from ordinary conversation, persist them in SQLite, expire them safely, and resolve them later when the user naturally closes the loop.
+- **Topic-aware follow-up extraction** — LLM extraction now proposes `topic`, `subject`, `delay_minutes`, `confidence`, and `reason`, with deterministic guards and TTL-backed persistence.
+- **Arc dedupe** — similar subjects like "μπριζόλες λαιμού" and "λαιμού μπριζόλες" collapse into a shared `arc_key`, preventing duplicate follow-up threads for the same real-world arc.
+- **Timing policy normalization** — follow-up delays are clamped by follow-up type (for example outings vs. food purchases) so timing stays plausible without hardcoding a single fixed delay for every case.
+- **LLM-based follow-up resolution** — later user messages can resolve a pending follow-up through a structured classifier instead of relying only on lexical overlap.
+- **Scheduler job for follow-ups** — `job_check_pending_followups` sends natural Telegram follow-ups only when a pending item is still due, unresolved, and not blocked by anti-spam guards.
+- **Debug dashboard visibility** — `/debug/runtime` now surfaces pending follow-ups with due time, arc key, last decision, score, and send count.
+
+#### Deterministic File / Media Handling
+- **Pending asset archive confirmations** — photos and uploaded documents are now archived only after an explicit yes/no confirmation, instead of depending on a later heuristic memory pass.
+- **Recent-file follow-up handling in Web UI** — after a document or large paste is analyzed, the user can immediately ask follow-up questions about it and Astakos will re-inject the recent file context into the chat flow.
+- **Paste-to-file behavior** — large Web UI pastes can be promoted into virtual document attachments (`.txt` / `.py`) so long code or text blocks are analyzed as files rather than getting truncated as plain chat.
+- **Head+tail document excerpting** — large text/code uploads now preserve both the beginning and the end of a file during analysis, which prevents losing the critical tail of stack traces, returns, or final blocks.
+
+### Changed
+
+#### Memory Context and Latency
+- **Fast/medium path tuning across Web and Telegram** — lightweight turns, reminder requests, tool outputs, recent-context follow-ups, and initial "I read a news item" openings can now bypass or downshift expensive semantic recall.
+- **Reminder/task requests skip semantic recall** — operational turns like "θύμισέ μου στις 19:00…" no longer pay the full semantic retrieval cost before setting the reminder.
+- **Recent web-result follow-ups downshift memory** — follow-up discussion on just-fetched web results can use a smaller retrieval budget instead of the full memory depth.
+- **Recent local-echo dedupe window in Web UI increased** — the frontend now tolerates slower backend turns without rendering duplicate user messages after polling catches up.
+
+#### Memory Hygiene and Dedupe
+- **Replay-safe reminder handling** — operational reminder confirmations are filtered before they become duplicate long-term memories.
+- **Same-day duplicate collapse improved** — personal/work/family facts from tools and the slow memory sifter now align better through shared canonical candidate building and same-day near-duplicate checks.
+- **Operational/meta assistant text filtering** — draft-management boilerplate, capability blurbs, and similar meta assistant paragraphs are less likely to leak back into memory context or be mistaken for real user facts.
+- **Capability logging quieted** — duplicate capability detections are now logged as duplicate skips instead of being surfaced like brand-new learned capabilities.
+
+#### Runtime / UI / Observability
+- **Pending follow-up outcome tracking** — follow-ups now track `last_decision`, `decision_reason`, `outcome_score`, and `times_sent`.
+- **Routine outcome observability** — the dashboard shows clearer last-outcome data for routines, including blocked, skipped, stale, and sent outcomes.
+- **Web tool failure guard** — hallucinated answers are overridden when recent web tool calls all fail, favoring safe fallback text over invented facts.
+- **Web/Telegram history and debug refresh** — runtime memory-context debug snapshots are refreshed more consistently across both channels.
+
+### Fixed
+
+- Fixed duplicate rendering races in the Web UI where a local echo and a delayed persisted message could both appear.
+- Fixed follow-up scheduler startup/runtime issues, including the zero-argument scheduler call path and missing helper blocks after partial patch application.
+- Fixed stale or misleading dashboard behavior around pending follow-ups and memory-context observability.
+- Fixed several false-positive semantic retrieval cases caused by tool outputs, short status updates, or operational exchange text.
+- Hardened the vector-store path against Chroma query/delete/get failures with graceful fallbacks and targeted tests.
+
+### Tests
+
+- Added focused test coverage for:
+  - follow-up creation, timing normalization, arc dedupe, LLM resolution, debug-field exposure, and scheduler anti-spam skips
+  - Web tool failure guards
+  - output sanitizers
+  - reminder semantic-skip behavior
+  - vector-store safety wrappers and lexical duplicate guards
+  - recent-web-context semantic downshift logic
+
 ## [v1.3.0] — 2026-06-18
 
 28 commits since v1.2.0. Headline: **Routine Reconciler Phase 3** — automatic fact-to-routine reconciliation grows a full deterministic scoring engine with auto-apply guardrails, paired with a new **Routine Conditions** system for context-aware constraints (shift schedules, seasonal pauses), plus a round of test-suite hardening that found and fixed several stale assertions and a `sys.modules` pollution bug.

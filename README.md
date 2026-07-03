@@ -88,6 +88,7 @@ Legacy empty `.db` leftovers are not part of the active runtime layout.
 | Hybrid Memory | ChromaDB vector store + shared SQLite history + SQLite profile/session state for semantic, temporal, and structured memory. |
 | Routine State Machine | `LEARNED → ACTIVE → TRIGGER_PENDING → CONFIRMED / IGNORED / DISMISSED → DECAYED → ARCHIVED`. |
 | Context-Aware Proactive Routines | Routine context flags (`alexandros_away_from_home`, `alexandros_away_reason`, `state:alexandros:outing`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, `user_out_of_home`, `quiet_hours`) are resolved from `context_state` before trigger time, and routines can be condition-gated instead of hard-paused. |
+| Conversational Follow-up Engine | Astakos can create delayed follow-up threads from natural conversation (for example food purchases, outings, or task progress), dedupe them by topic/arc, resolve them later from user replies, and send a natural Telegram follow-up only when it still makes sense. |
 | Nightly Analytics Engine | LLM batch-analyzes the last 30 days of shared SQLite conversation history to detect recurring patterns automatically. |
 | LLM-Crafted Proactive Messages | Reminder text is generated naturally by the LLM instead of static templates, with recent Telegram/Web history and timestamps injected so messages feel contextual instead of random. |
 | Central Scheduler | `AstakosScheduler` runs a single background scheduler with watchdogs, rate limits, and quiet hours. |
@@ -117,6 +118,8 @@ Legacy empty `.db` leftovers are not part of the active runtime layout.
 | Shared Conversation History | Telegram and Web write to one SQLite conversation store, with SQLite-first context reads and analytics using the shared history. |
 | Broad SQL Context Recall | Substantive questions search recent SQLite history even without explicit date words; temporal queries like "yesterday morning" narrow to the right day/time window. |
 | Personal Event Capture | Personal and family events are saved as dated ChromaDB `[USER_FACT]` memories when the conversation clearly states them. Deterministic memory extractors now prioritize specific temporary-family facts over generic day-event facts to reduce duplicate saves. |
+| Deterministic Asset Archive Flow | Photos and uploaded documents are analyzed first, then saved permanently only after an explicit yes/no confirmation; file paths and summaries are indexed locally, and pending confirmations expire cleanly instead of being inferred later by the memory sifter. |
+| Follow-up Aware Memory Hygiene | Operational reminder exchanges, duplicate same-day personal/work facts, and assistant-style confirmations are filtered before they pollute long-term memory. |
 | Google Fit Integration | Daily steps, sleep phases (deep / REM / light), and heart rate from Samsung Health via Google Fit. Morning briefing at 08:00 uses yesterday's steps, last night's sleep, and heart-rate fallback logic. |
 | Memory Overwrite Helpers | `memory.vector_store` exposes tested helper functions for correction detection, memory age, richness scoring, and overwrite decisions. |
 | Memory Scoring | Every memory has `importance`, `confidence`, `last_accessed`, and `retrieval_count`. `compute_score()` = importance × 0.4 + retrieval × 0.3 + confidence × 0.2 + freshness × 0.1. |
@@ -129,12 +132,13 @@ Legacy empty `.db` leftovers are not part of the active runtime layout.
 |---|---|
 | Telegram Bot | Polling bot with text, voice, photo, document, location, routine confirmation, and inline approval handlers. |
 | Web UI | FastAPI server with chat endpoint, upload handling, voice processing, local static assets, and chat history. |
-| Runtime Dashboard | `/debug/runtime` and `/debug` expose scheduler health, jobs, event throughput, routines, goals, pending confirmations, pending actions, memory-context previews, shared SQLite stats, session backlog, and a memory-audit panel. Routine tables summarize condition payloads and metadata instead of dumping raw JSON. |
+| Runtime Dashboard | `/debug/runtime` and `/debug` expose scheduler health, jobs, event throughput, routines, goals, pending confirmations, pending follow-ups, pending actions, memory-context previews, shared SQLite stats, session backlog, and a memory-audit panel. Routine tables summarize condition payloads and metadata instead of dumping raw JSON. |
 | Voice I/O | STT via Vertex AI Gemini + TTS via `edge-tts` using `el-GR-NestorasNeural`; mirror mode supports voice in → voice out. |
 | Product Analyzer | `/nutrition` scans food, cosmetics, and household product labels with a score from 1-10 and a kids note. |
 | Receipt Scanner | `/receipt` scans the last Telegram photo as a shopping receipt and returns structured JSON with store, date, total, currency, and items. |
 | Smart Photo Pending | Send a photo and Astakos waits 30 seconds for a caption, `/nutrition`, or `/receipt`, avoiding duplicate responses. |
-| Document Reading | Uploaded documents are summarized and can be saved into memory. |
+| Document Reading | Uploaded documents are summarized, can be saved into memory after explicit confirmation, and support recent-file follow-up questions from the Web UI so you can keep discussing the same pasted/uploaded file naturally. |
+| Paste-to-File Workflow | Large Web UI paste blocks can be auto-attached as virtual `.txt` or `.py` files so Astakos can analyze them as documents instead of losing critical tail content in plain chat. |
 | Story Maker | `/story [theme] \| [characters]` generates a children's story plus 3 Vertex AI Imagen illustrations. |
 | Typing Indicator | Telegram shows typing while Astakos is processing. |
 | Human Override Commands | `/pause`, `/mute`, `/sleep N`, `/resume`, and `/status` persist across restarts. |
@@ -144,11 +148,13 @@ Legacy empty `.db` leftovers are not part of the active runtime layout.
 | Feature | Description |
 |---|---|
 | Observability Dashboard | `/debug/runtime` includes heartbeat, job health, fail counts, pending confirmations, active goals, pending CRITICAL actions (with age + warn >15 min), Messenger Draft state (exists/active/reason/target/age/expires_in), shared conversation/session health, analytics charts, and compact condition/meta views for routines. |
+| Pending Follow-up Observability | The debug dashboard includes a dedicated pending-followups panel showing topic, subject, due time, arc key, last decision, outcome score, and send count for conversational follow-ups. |
 | Local Security | Bearer token auth, localhost-only CORS, upload size limits, and extension whitelist. |
 | Auto-Restart | `run_telegram.py` and the Web launcher watch core source files only; runtime JSON/DB/photos/uploads and generated skills do not trigger restarts. |
 | Safe Executor | `core/safe_executor.py` classifies terminal commands as SAFE, WARNING, REQUIRE_CONFIRMATION, or BLOCKED. |
 | Action Approval Dashboard | Pending CRITICAL tool approvals can be approved or rejected from Telegram and the debug dashboard. |
 | Tool Risk Registry | `core/tool_risk.py` defines SAFE / WARNING / CRITICAL behavior per tool. |
+| Latency Controls | Web and Telegram use context-aware fast paths, medium paths, semantic downshifts, and tool-output detection to avoid paying full retrieval cost on simple acknowledgements, reminder requests, recent web follow-ups, and other lightweight turns. |
 | Skill Creation Flow | New skills are created with `write_custom_tool`, validated for `@tool`, previewed with `register_tool(dry_run=True)`, and applied only after approval. Skills that need Gemini/vision use shared `core.brain` clients instead of raw API keys. |
 | Planner v2 | `/plan` decomposes a goal into tasks with a **confirmation gate** before execution. Auto-plan LLM judge detects multi-step intent without needing `/plan`. Progress UI shows `⏳ Βήμα X/N` per step. `validate_step_node` detects failures via AI response + tool output heuristics. `replan_node` auto-skips failed steps and continues. `end_check_node` generates a final summary (`✅` / `⚠️ X/N βήματα επιτυχή`) and saves a post-plan reflection. |
 | Execution Trace System | Every agent turn records agent name, tools called, duration, errors, and loop events to `logs/traces/YYYY-MM-DD.json`. Viewable at `/debug/traces` and the runtime dashboard with colored tool names, response preview, issue-only/clean filters, and optional hiding of old resolved issues. |
@@ -217,6 +223,7 @@ Background jobs run through `AstakosScheduler`:
 |---|---:|---|
 | `job_check_reminders` | 20s | Local reminders. |
 | `job_check_routines` | 60s | Adaptive routine reminders and anti-spam cooldowns. |
+| `job_check_pending_followups` | 10m | Sends delayed conversational follow-ups only when they are still due, unsolved, and not blocked by anti-spam guards. |
 | `job_proactive_scan` | 12h | Watch-folder analysis and proactive scan. |
 | `job_morning_fit_briefing` | 1h | Fires at 08:00 for the Google Fit morning summary: yesterday's steps, last night's sleep, and heart rate. |
 | `job_goal_followup` | 1h | Fires at 10:00 for stale-goal semantic checks. |
