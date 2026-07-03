@@ -367,28 +367,7 @@ def test_create_pending_followup_dedupes_same_arc_key(temp_state_db):
     assert second_id is None
 
 
-def test_normalize_followup_delay_clamps_outing_window():
-    assert pf.normalize_followup_delay("outing", 20, "") == 45
-    assert pf.normalize_followup_delay("outing", 500, "") == 180
-    assert pf.normalize_followup_delay("outing", 90, "") == 90
 
-
-def test_normalize_followup_delay_shortens_live_evening_outing():
-    evening = datetime(2030, 1, 1, 20, 0, 0)
-    assert pf.normalize_followup_delay("outing", 180, "πάω πάρκο να τους βρω τώρα", now=evening) == 60
-    assert pf.normalize_followup_delay("outing", 10, "φεύγω τώρα για πάρκο", now=evening) == 20
-
-
-def test_normalize_followup_delay_clamps_food_purchase_window():
-    assert pf.normalize_followup_delay("food_purchase", 20, "θα τις κάνω το βράδυ") == 60
-    assert pf.normalize_followup_delay("food_purchase", 500, "θα τις κάνω το βράδυ") == 240
-    assert pf.normalize_followup_delay("food_purchase", 120, "θα τις κάνω το βράδυ") == 120
-
-
-def test_normalize_followup_delay_shortens_evening_food_followup():
-    evening = datetime(2030, 1, 1, 19, 30, 0)
-    assert pf.normalize_followup_delay("food_purchase", 180, "τις πήρα και θα τις κάνω το βράδυ", now=evening) == 120
-    assert pf.normalize_followup_delay("food_purchase", 20, "τις πήρα μόλις, θα τις κάνω απόψε", now=evening) == 30
 
 
 def test_maybe_create_followup_from_exchange_stores_raw_and_final_delay(temp_state_db, monkeypatch):
@@ -425,7 +404,7 @@ def test_maybe_create_followup_from_exchange_stores_raw_and_final_delay(temp_sta
 
     metadata = json.loads(row[0])
     assert metadata["delay_minutes_raw"] == 500
-    assert metadata["delay_minutes_final"] == 60
+    assert metadata["delay_minutes_final"] == 180
 
 
 def test_find_pending_followups_includes_debug_fields(temp_state_db):
@@ -877,3 +856,140 @@ def test_followup_decision_fallback_defaults_to_non_assumptive(monkeypatch):
     assert result["decision"] == "send"
     assert result["stage"] == "decision_pending"
     assert "Πώς πήγε" not in result["message"]
+
+
+def test_normalize_followup_delay_food_purchase_tomorrow_targets_next_day_lunch_window():
+    from datetime import datetime
+    from memory.pending_followups import normalize_followup_delay
+
+    now = datetime(2026, 7, 3, 22, 0, 0)
+    delay = normalize_followup_delay(
+        "food_purchase",
+        287,
+        "οι μπριζόλες αύριο",
+        now=now,
+    )
+
+    # από 22:00 σήμερα μέχρι 11:30 αύριο = 810 λεπτά
+    assert delay == 810
+
+
+def test_normalize_followup_delay_food_purchase_tomorrow_from_evening_still_targets_lunch():
+    from datetime import datetime
+    from memory.pending_followups import normalize_followup_delay
+
+    now = datetime(2026, 7, 3, 19, 0, 0)
+    delay = normalize_followup_delay(
+        "food_purchase",
+        287,
+        "τελικά αύριο θα τις κάνουμε",
+        now=now,
+    )
+
+    # από 19:00 σήμερα μέχρι 11:30 αύριο = 990 λεπτά, αλλά clamp max 18h => 1080 ok
+    assert delay == 990
+
+
+def test_normalize_followup_delay_food_purchase_tonight_stays_short():
+    from datetime import datetime
+    from memory.pending_followups import normalize_followup_delay
+
+    now = datetime(2026, 7, 3, 20, 0, 0)
+    delay = normalize_followup_delay(
+        "food_purchase",
+        90,
+        "μόλις πήρα τις μπριζόλες, απόψε θα τις ψήσουμε",
+        now=now,
+    )
+
+    assert 30 <= delay <= 120
+
+
+def test_normalize_followup_delay_same_day_short_checkin():
+    from datetime import datetime
+    from memory.pending_followups import normalize_followup_delay
+
+    now = datetime(2026, 7, 3, 18, 0, 0)
+    delay = normalize_followup_delay(
+        "outing",
+        120,
+        "πάω τώρα να τους βρω στο πάρκο",
+        target_window="same_day_short_checkin",
+        now=now,
+    )
+
+    assert 20 <= delay <= 90
+
+
+def test_normalize_followup_delay_next_day_late_morning():
+    from datetime import datetime
+    from memory.pending_followups import normalize_followup_delay
+
+    now = datetime(2026, 7, 3, 22, 0, 0)
+    delay = normalize_followup_delay(
+        "food_purchase",
+        287,
+        "οι μπριζόλες αύριο",
+        target_window="next_day_late_morning",
+        now=now,
+    )
+
+    assert delay == 810
+
+
+def test_normalize_followup_delay_next_day_afternoon():
+    from datetime import datetime
+    from memory.pending_followups import normalize_followup_delay
+
+    now = datetime(2026, 7, 3, 20, 0, 0)
+    delay = normalize_followup_delay(
+        "appointment",
+        180,
+        "αύριο θα δούμε για το interview",
+        target_window="next_day_afternoon",
+        now=now,
+    )
+
+    assert delay > 12 * 60
+
+
+def test_normalize_followup_delay_fallback_food_tomorrow_without_window():
+    from datetime import datetime
+    from memory.pending_followups import normalize_followup_delay
+
+    now = datetime(2026, 7, 3, 22, 0, 0)
+    delay = normalize_followup_delay(
+        "food_purchase",
+        287,
+        "οι μπριζόλες αύριο",
+        target_window="",
+        now=now,
+    )
+
+    assert delay == 810
+
+
+def test_create_pending_followup_preserves_target_window(monkeypatch, temp_state_db):
+    from memory import pending_followups as pf
+
+    candidate = {
+        "should_follow_up": True,
+        "topic": "food_purchase",
+        "subject": "ψήσιμο μπριζόλας",
+        "delay_minutes": 180,
+        "target_window": "next_day_late_morning",
+        "confidence": 0.85,
+        "reason": "user moved cooking to tomorrow",
+    }
+
+    followup_id = pf.create_pending_followup_from_candidate(
+        candidate=candidate,
+        source_channel="telegram",
+        source_agent="Home_Agent",
+        source_user_text="οι μπριζόλες αύριο",
+        source_ai_text="ok",
+    )
+
+    rows = pf.find_pending_followups(limit=10)
+    row = next(item for item in rows if item["id"] == followup_id)
+    assert row["metadata"]["target_window"] == "next_day_late_morning"

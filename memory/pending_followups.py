@@ -73,34 +73,78 @@ def build_followup_arc_key(topic: str, subject: str) -> str:
     return f"{(topic or '').strip().lower()}::{' '.join(tokens)}".strip()
 
 
-def normalize_followup_delay(topic: str, suggested_minutes: int, source_user_text: str = "") -> int:
-    text = (source_user_text or "").lower()
+def _delay_until_next_window(now: datetime, hour: int, minute: int = 0) -> int:
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target = target + timedelta(days=1)
+    return max(1, int((target - now).total_seconds() / 60))
+
+
+def normalize_followup_delay(
+    topic: str,
+    suggested_minutes: int,
+    source_user_text: str = "",
+    target_window: str = "",
+    now: Optional[datetime] = None,
+) -> int:
+    text = _normalize_match_text(source_user_text or "")
     topic = (topic or "").strip().lower()
-    value = int(suggested_minutes or 0)
+    target_window = (target_window or "").strip().lower()
+    raw_value = int(suggested_minutes or 0)
+    value = raw_value
+    now = now or datetime.now()
+    hour = int(now.hour)
 
     if value < 30:
         value = 30
     if value > 720:
         value = 720
 
+    if target_window == "same_day_short_checkin":
+        return max(20, min(value, 90))
+
+    if target_window == "same_day_evening":
+        if hour < 18:
+            delay = _delay_until_next_window(now, 19, 30)
+            return max(120, min(delay, 12 * 60))
+        return max(45, min(value, 240))
+
+    if target_window == "next_day_morning":
+        delay = _delay_until_next_window(now + timedelta(days=1), 9, 30)
+        return max(8 * 60, min(delay, 24 * 60))
+
+    if target_window == "next_day_late_morning":
+        delay = _delay_until_next_window(now + timedelta(days=1), 11, 30)
+        return max(8 * 60, min(delay, 24 * 60))
+
+    if target_window == "next_day_afternoon":
+        delay = _delay_until_next_window(now + timedelta(days=1), 14, 30)
+        return max(10 * 60, min(delay, 30 * 60))
+
+    if target_window == "next_day_evening":
+        delay = _delay_until_next_window(now + timedelta(days=1), 19, 30)
+        return max(12 * 60, min(delay, 30 * 60))
+
+    if target_window == "after_likely_completion":
+        if topic == "outing":
+            return max(45, min(value, 180))
+        if topic == "food_purchase":
+            return max(90, min(value, 360))
+        return max(60, min(value, 300))
+
+    # fallback heuristic αν το LLM δεν έδωσε usable window
     if topic == "outing":
-        return max(45, min(value, 180))
+        return max(30, min(value, 180))
 
     if topic == "food_purchase":
-        if "βράδυ" in text or "βραδυ" in text or "απόψε" in text or "αποψε" in text:
-            return max(60, min(value, 240))
-        return max(90, min(value, 300))
+        if "αυριο" in text or "αύριο" in text:
+            delay = _delay_until_next_window(now + timedelta(days=1), 11, 30)
+            return max(8 * 60, min(delay, 24 * 60))
+        if "αποψε" in text or "απόψε" in text or "βραδ" in text:
+            return max(45, min(value, 240))
+        return max(90, min(value, 360))
 
-    if topic == "appointment":
-        return max(180, min(value, 720))
-
-    if topic == "task_progress":
-        return max(120, min(value, 480))
-
-    if topic == "family_plan":
-        return max(60, min(value, 360))
-
-    return value
+    return max(60, min(value, 480))
 
 
 def create_pending_followup(
@@ -179,6 +223,62 @@ def create_pending_followup(
         conn.close()
 
 
+def create_pending_followup_from_candidate(
+    *,
+    candidate: dict,
+    source_channel: str,
+    source_agent: str,
+    source_user_text: str,
+    source_ai_text: str,
+):
+    topic = str(candidate.get("topic") or "").strip().lower()
+    subject = str(candidate.get("subject") or "").strip()
+    delay_minutes_raw = int(candidate.get("delay_minutes") or 0)
+    confidence = float(candidate.get("confidence") or 0.0)
+
+    if not topic or not subject:
+        return None
+    if confidence < 0.45:
+        return None
+
+    now = datetime.now()
+    delay_minutes = normalize_followup_delay(
+        topic=topic,
+        suggested_minutes=delay_minutes_raw,
+        source_user_text=source_user_text,
+        target_window=str(candidate.get("target_window") or ""),
+        now=now,
+    )
+
+    followup_after_ts = (
+        now + timedelta(minutes=delay_minutes)
+    ).isoformat(timespec="seconds")
+
+    followup_id = create_pending_followup(
+        source_channel=source_channel,
+        source_agent=source_agent,
+        topic=topic,
+        subject=subject,
+        source_user_text=source_user_text,
+        source_ai_text=source_ai_text,
+        followup_after_ts=followup_after_ts,
+        confidence=confidence,
+        metadata={
+            "reason": candidate.get("reason", ""),
+            "target_window": str(candidate.get("target_window") or ""),
+            "delay_minutes_raw": delay_minutes_raw,
+            "delay_minutes_final": delay_minutes,
+        },
+    )
+
+    if followup_id:
+        print(
+            f"[FollowUp]: created #{followup_id} ({topic}) -> {subject} "
+            f"[{delay_minutes_raw}m -> {delay_minutes}m]"
+        )
+    return followup_id
+
+
 def get_due_pending_followups(now_iso: str) -> list[dict]:
     ensure_pending_followups_table()
     conn = _conn()
@@ -228,6 +328,62 @@ def get_due_pending_followups(now_iso: str) -> list[dict]:
         return out
     finally:
         conn.close()
+
+
+def get_recently_resolved_followups(limit: int = 5, within_seconds: int = 180) -> list[dict]:
+    ensure_pending_followups_table()
+    conn = _conn()
+    try:
+        cutoff = datetime.now() - timedelta(seconds=within_seconds)
+        rows = conn.execute(
+            """
+            SELECT id, topic, subject, arc_key, resolution_reason, decision_reason, resolved_at
+            FROM pending_followups
+            WHERE status='resolved'
+              AND resolved_at IS NOT NULL
+            ORDER BY resolved_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+        out = []
+        for row in rows:
+            try:
+                resolved_at = datetime.fromisoformat(str(row[6]).replace(" ", "T"))
+            except Exception:
+                continue
+            if resolved_at < cutoff:
+                continue
+            out.append(
+                {
+                    "id": row[0],
+                    "topic": row[1] or "",
+                    "subject": row[2] or "",
+                    "arc_key": row[3] or "",
+                    "resolution_reason": row[4] or "",
+                    "decision_reason": row[5] or "",
+                    "resolved_at": str(row[6]),
+                }
+            )
+        return out
+    finally:
+        conn.close()
+
+
+def candidate_is_distinct_from_recently_resolved(candidate: dict, recent_resolved: list[dict]) -> bool:
+    topic = str(candidate.get("topic") or "").strip().lower()
+    subject = str(candidate.get("subject") or "").strip()
+    arc_key = build_followup_arc_key(topic, subject)
+
+    for item in recent_resolved or []:
+        existing_topic = str(item.get("topic") or "").strip().lower()
+        existing_arc = str(item.get("arc_key") or "").strip()
+        if topic == existing_topic:
+            return False
+        if arc_key and existing_arc and arc_key == existing_arc:
+            return False
+    return True
 
 
 def mark_followup_sent(followup_id: int, decision_reason: str = "followup_sent"):
@@ -496,6 +652,7 @@ def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name
   "topic": "food_purchase | outing | task_progress | family_plan | appointment | general_progress",
   "subject": "σύντομο subject",
   "delay_minutes": 180,
+  "target_window": "same_day_short_checkin | same_day_evening | next_day_morning | next_day_late_morning | next_day_afternoon | next_day_evening | after_likely_completion",
   "confidence": 0.0,
   "reason": "short reason"
 }}
@@ -514,6 +671,23 @@ def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name
 - delay_minutes integer από 30 έως 720
 - confidence 0.0 έως 1.0
 - μην επιστρέψεις τίποτα εκτός JSON
+- target_window πρέπει να περιγράφει ΠΟΤΕ έχει φυσικό νόημα να ξαναμιλήσουμε
+- Μην επιλέγεις target_window με βάση γενικά "αργότερα", αλλά με βάση το πραγματικό πιθανό outcome
+
+Χρησιμοποίησε:
+- "same_day_short_checkin" όταν ο χρήστης μόλις ξεκίνησε κάτι και σύντομα θα υπάρχει εξέλιξη
+- "same_day_evening" όταν το θέμα λογικά θα κλείσει αργότερα μέσα στην ίδια μέρα
+- "next_day_morning" όταν το θέμα μεταφέρεται στην επόμενη μέρα και έχει νόημα νωρίς αλλά όχι χαράματα
+- "next_day_late_morning" όταν το θέμα σχετίζεται με φαγητό / έξοδο / οικογενειακή κίνηση που λογικά θα ξεκαθαρίσει πιο κοντά στο μεσημέρι
+- "next_day_afternoon" όταν το θέμα αναμένεται να ξεκαθαρίσει μετά το μεσημέρι
+- "next_day_evening" όταν είναι βραδινό σχέδιο / μεταγενέστερη εξέλιξη
+- "after_likely_completion" όταν το follow-up πρέπει να γίνει μετά το πιθανό τέλος του γεγονότος
+
+Παραδείγματα:
+- "οι μπριζόλες αύριο" -> target_window: "next_day_late_morning"
+- "πάω τώρα να τους βρω στο πάρκο" -> target_window: "same_day_short_checkin"
+- "αύριο θα δούμε για το interview" -> target_window: "next_day_afternoon"
+- "το βράδυ θα βγούμε" -> target_window: "same_day_evening"
 
 Παραδείγματα καλού subject:
 - "μπριζόλες λαιμού"
@@ -548,8 +722,6 @@ def maybe_create_followup_from_exchange(
     agent_name: str,
     channel: str,
 ):
-    from datetime import datetime, timedelta
-
     clean_user = str(user_text or "").strip()
     clean_ai = str(ai_text or "").strip()
 
@@ -574,46 +746,13 @@ def maybe_create_followup_from_exchange(
     candidate = extract_followup_candidate_with_llm(clean_user, clean_ai, agent_name)
     if not candidate or not candidate.get("should_follow_up"):
         return None
-
-    topic = str(candidate.get("topic") or "").strip().lower()
-    subject = str(candidate.get("subject") or "").strip()
-    delay_minutes_raw = int(candidate.get("delay_minutes") or 0)
-    confidence = float(candidate.get("confidence") or 0.0)
-
-    if not topic or not subject:
-        return None
-    if confidence < 0.45:
-        return None
-
-    delay_minutes = normalize_followup_delay(
-        topic=topic,
-        suggested_minutes=delay_minutes_raw,
-        source_user_text=clean_user,
-    )
-
-    followup_after_ts = (
-        datetime.now() + timedelta(minutes=delay_minutes)
-    ).isoformat(timespec="seconds")
-
-    followup_id = create_pending_followup(
+    return create_pending_followup_from_candidate(
+        candidate=candidate,
         source_channel=channel,
         source_agent=agent_name,
-        topic=topic,
-        subject=subject,
         source_user_text=clean_user,
         source_ai_text=clean_ai,
-        followup_after_ts=followup_after_ts,
-        confidence=confidence,
-        metadata={
-            "reason": candidate.get("reason", ""),
-            "delay_minutes_raw": delay_minutes_raw,
-            "delay_minutes_final": delay_minutes,
-        },
     )
-
-    if followup_id:
-        print(f"[FollowUp]: created #{followup_id} ({topic}) -> {subject} [{delay_minutes_raw}m -> {delay_minutes}m]")
-    return followup_id
 
 
 def classify_followup_resolution_with_llm(
