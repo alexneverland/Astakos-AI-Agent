@@ -77,3 +77,40 @@ def test_load_pending_reflections_ignores_applied_and_rejected(monkeypatch, tmp_
     assert rejected_id not in loaded
     assert loaded[pending_id]["routine_id"] == 12
     assert loaded[pending_id]["action_value"] == "48"
+
+
+def test_run_reflection_dedupes_same_run_duplicates(monkeypatch, tmp_path):
+    re = _set_temp_db(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(re, "_load_today_events", lambda days_back=1: [{"event": "x"}])
+    monkeypatch.setattr(re, "_get_routine_stats", lambda: [])
+    monkeypatch.setattr(re, "_load_conversation_traces", lambda days_back=1: [])
+    monkeypatch.setattr(re, "_apply_action", lambda reflection: True)
+
+    reflections = [
+        {
+            "source": "general",
+            "routine_id": None,
+            "observation": "Το bot επαναλαμβάνει το ίδιο lesson.",
+            "action": "save_to_memory",
+            "action_value": None,
+            "confidence": 0.95,
+            "lesson": "Να αποφεύγεται το διπλό save ίδιου lesson.",
+        },
+        {
+            "source": "general",
+            "routine_id": None,
+            "observation": "Το bot επαναλαμβάνει το ίδιο lesson.",
+            "action": "save_to_memory",
+            "action_value": None,
+            "confidence": 0.95,
+            "lesson": "Να αποφεύγεται το διπλό save ίδιου lesson.",
+        },
+    ]
+    monkeypatch.setattr(re, "_analyze_with_llm", lambda events, routine_stats, traces: reflections)
+
+    stats = re.run_reflection()
+
+    assert stats["analyzed"] == 2
+    assert stats["applied"] == 1
+    assert stats["skipped"] == 1

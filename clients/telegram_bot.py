@@ -95,6 +95,26 @@ from core.event_bus import bus
 # ────────────────────────────────────────────────────────────────
 # GLOBALS
 # ────────────────────────────────────────────────────────────────
+_recent_routine_skip_events = {}
+
+def _should_log_routine_skip(routine_id: int, action: str, reason: str, ttl_seconds: int = 600) -> bool:
+    now_ts = time.time()
+    key = (routine_id, action, str(reason or "").strip())
+
+    expired = [
+        k for k, ts in _recent_routine_skip_events.items()
+        if now_ts - ts > ttl_seconds
+    ]
+    for k in expired:
+        _recent_routine_skip_events.pop(k, None)
+
+    last_ts = _recent_routine_skip_events.get(key)
+    if last_ts is not None:
+        return False
+
+    _recent_routine_skip_events[key] = now_ts
+    return True
+
 shutdown_event        = threading.Event()
 fast_queue            = queue.Queue()
 slow_queue            = queue.Queue()
@@ -3428,37 +3448,44 @@ def job_check_routines():
                     schedule_meta = get_routine_schedule_meta(r_id)
                     inactive, inactive_reason = is_routine_temporarily_inactive_meta(schedule_meta, now=now)
                     if inactive:
-                        log_event("routines", "routine_inactive_skip", routine_id=r_id, event=event_name,
-                                  reason=inactive_reason, paused_until=schedule_meta.get("paused_until"), debug_type="scheduler_decision", debug_source="scheduler", debug_effect="inactive_skip",
-                                  active_from=schedule_meta.get("active_from"), active_until=schedule_meta.get("active_until"))
-                        print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' inactive ({inactive_reason}) — skipped")
+                        skip_reason = f"inactive:{inactive_reason}"
+                        if _should_log_routine_skip(r_id, "routine_inactive_skip", skip_reason):
+                            log_event("routines", "routine_inactive_skip", routine_id=r_id, event=event_name,
+                                      reason=inactive_reason, paused_until=schedule_meta.get("paused_until"), debug_type="scheduler_decision", debug_source="scheduler", debug_effect="inactive_skip",
+                                      active_from=schedule_meta.get("active_from"), active_until=schedule_meta.get("active_until"))
+                            print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' inactive ({inactive_reason}) — skipped")
                         continue
                     # ── Phase 3C: Conditions Evaluator ───────────────────────
                     cond_list = get_routine_conditions(r_id)
                     if cond_list:
                         cond_result = evaluate_routine_conditions(cond_list, rt_context, now=now)
                         if not cond_result.get("allowed", True):
-                            log_event("routines", "routine_condition_blocked",
-                                routine_id=r_id, 
-                                event=event_name,
-                                failed_count=cond_result.get("failed_count", 1),
-                                reason=str(cond_result.get("results")),
-                                context_snapshot=rt_context,
-                                debug_type="condition_eval",
-                                debug_source="scheduler",
-                                debug_effect="blocked",
-                            )
+                            blocked_reason = str(cond_result.get("results"))
+                            should_log = _should_log_routine_skip(r_id, "routine_condition_blocked", blocked_reason)
+                            if should_log:
+                                log_event("routines", "routine_condition_blocked",
+                                    routine_id=r_id, 
+                                    event=event_name,
+                                    failed_count=cond_result.get("failed_count", 1),
+                                    reason=blocked_reason,
+                                    context_snapshot=rt_context,
+                                    debug_type="condition_eval",
+                                    debug_source="scheduler",
+                                    debug_effect="blocked",
+                                )
                         
                             import random
                             # 30% chance for a Sentimental Override (approx 2 times a week for a daily routine)
                             if random.random() < 0.30 and _should_allow_sentimental_override(event_name, cond_result):
-                                blocked_reason = ", ".join(str(r.get("reason", "blocked")) for r in cond_result.get("results", []) if not r.get("allowed"))
-                                override_name = f"{event_name} [ΑΚΥΡΩΝΕΤΑΙ ΣΗΜΕΡΑ ΛΟΓΩ: {blocked_reason}]"
-                                print(f"\U0001f496 [job_check_routines]: #{r_id} '{event_name}' blocked but triggering sentimental override!")
+                                blocked_reason_text = ", ".join(str(r.get("reason", "blocked")) for r in cond_result.get("results", []) if not r.get("allowed"))
+                                override_name = f"{event_name} [ΑΚΥΡΩΝΕΤΑΙ ΣΗΜΕΡΑ ΛΟΓΩ: {blocked_reason_text}]"
+                                if should_log:
+                                    print(f"\U0001f496 [job_check_routines]: #{r_id} '{event_name}' blocked but triggering sentimental override!")
                                 # Fall through to due_routines to let the LLM generate a [CONTEXT_SKIP]
                                 event_name = override_name
                             else:
-                                print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('failed_count')} failed) — skipped")
+                                if should_log:
+                                    print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('failed_count')} failed) — skipped")
                                 continue
                         else:
                             log_event(
@@ -3482,23 +3509,27 @@ def job_check_routines():
                         # ΔΕΝ στέλνουμε δεύτερο sentimental message από το polling loop· τα
                         # συναισθηματικά/contextual messages παράγονται μόνο στη στιγμή που
                         # ανιχνεύθηκε το context skip / mute, όχι ξανά σε κάθε επόμενο poll.
-                        log_event(
-                            "routines", 
-                            "routine_silent_skip", 
-                            routine_id=r_id, 
-                            event=event_name,
-                            reason="muted_until", 
-                            muted_until=muted_until,
-                            debug_type="proactive_decision",
-                            debug_source="scheduler",
-                            debug_effect="notification_skipped",
-                        )
-                        print(f"\U0001f507 [job_check_routines]: #{r_id} '{event_name}' muted until {muted_until} — skipped")
+                        skip_reason = f"muted_until:{muted_until}"
+                        if _should_log_routine_skip(r_id, "routine_silent_skip", skip_reason):
+                            log_event(
+                                "routines", 
+                                "routine_silent_skip", 
+                                routine_id=r_id, 
+                                event=event_name,
+                                reason="muted_until", 
+                                muted_until=muted_until,
+                                debug_type="proactive_decision",
+                                debug_source="scheduler",
+                                debug_effect="notification_skipped",
+                            )
+                            print(f"\U0001f507 [job_check_routines]: #{r_id} '{event_name}' muted until {muted_until} — skipped")
                         continue
                     info = get_routine_notify_info(r_id)
                     cd_hours = info["cooldown_hours"]
                     if is_duplicate_routine(r_id, cd_hours):
-                        log_event("routines", "routine_cooldown_skip", routine_id=r_id, event=event_name, cooldown_hours=cd_hours, debug_type="scheduler_decision", debug_source="scheduler", debug_effect="cooldown_skip")
+                        skip_reason = f"cooldown:{cd_hours}"
+                        if _should_log_routine_skip(r_id, "routine_cooldown_skip", skip_reason):
+                            log_event("routines", "routine_cooldown_skip", routine_id=r_id, event=event_name, cooldown_hours=cd_hours, debug_type="scheduler_decision", debug_source="scheduler", debug_effect="cooldown_skip")
                         continue
                     due_routines.append((r_id, event_name, confidence))
                     triggered_conflict_groups.add(conflict_group)

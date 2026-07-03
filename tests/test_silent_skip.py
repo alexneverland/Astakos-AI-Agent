@@ -617,6 +617,19 @@ def test_shift_mode_block_does_not_trigger_sentimental_override():
     assert not any(action == "routine_triggered" for _, action in logged)
 
 
+def test_should_log_routine_skip_respects_ttl(monkeypatch):
+    bot._recent_routine_skip_events.clear()
+
+    fake_now = {"value": 1000.0}
+    monkeypatch.setattr(bot.time, "time", lambda: fake_now["value"])
+
+    assert bot._should_log_routine_skip(11, "routine_condition_blocked", "x", ttl_seconds=10) is True
+    assert bot._should_log_routine_skip(11, "routine_condition_blocked", "x", ttl_seconds=10) is False
+
+    fake_now["value"] = 1011.0
+    assert bot._should_log_routine_skip(11, "routine_condition_blocked", "x", ttl_seconds=10) is True
+
+
 def test_deferred_context_skip_does_not_create_pending_confirmation():
     """Deferred [CONTEXT_SKIP] → ούτε μήνυμα ούτε pending."""
     rdb = sys.modules["memory.routine_db"]

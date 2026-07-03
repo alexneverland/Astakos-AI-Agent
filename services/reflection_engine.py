@@ -10,6 +10,7 @@ import os
 import json
 import sqlite3
 import sys
+import re
 from datetime import datetime, timedelta
 
 # Bootstrap repo root before any project-local imports when this file runs as a script.
@@ -100,6 +101,22 @@ def _already_reflected(observation: str, action: str, routine_id=None, action_va
     except Exception:
         return False
 
+
+def _normalize_reflection_text(text: str) -> str:
+    text = str(text or "").lower().strip()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^\w\s]", "", text)
+    return text
+
+def _build_reflection_key(observation: str, action: str, routine_id=None, action_value=None) -> str:
+    obs = _normalize_reflection_text(observation)
+    act = _normalize_reflection_text(action)
+    rid = str(routine_id or "")
+    val = _normalize_reflection_text(action_value) if action_value is not None else ""
+    return f"{obs}|{act}|{rid}|{val}"
+
+def _build_lesson_key(lesson: str) -> str:
+    return _normalize_reflection_text(lesson)
 
 def _save_reflection(source, observation, action, confidence, lesson, applied=False,
                       routine_id=None, action_value=None) -> int:
@@ -298,15 +315,21 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
 Γράψε ένα JSON array με observations. Κάθε observation:
 {{
   "source": "conversation" | "routine" | "general",
-  "routine_id": <int ή null — μόνο για routine observations>,
-  "observation": "<τι παρατήρησες σε 1 πρόταση>",
+  "routine_id": <int or null>,
+  "observation": "<1 sentence>",
   "action": "increase_cooldown" | "reduce_frequency" | "change_time" | "save_to_memory",
-  "action_value": <αριθμός ή null>,
+  "action_value": <number or null>,
   "confidence": <0.0-1.0>,
-  "lesson": "<τι έμαθες για τον Λάζαρο ή την κατάσταση σε 1 πρόταση>"
+  "severity": "low" | "medium" | "high",
+  "confidence_reason": "<short reason>",
+  "source_events": ["<short event 1>", "<short event 2>"],
+  "lesson": "<1 sentence>"
 }}
 
 ΚΑΝΟΝΕΣ:
+- Μην επιστρέφεις 2 observations που λένε ουσιαστικά το ίδιο πράγμα με άλλο wording.
+- Για action="save_to_memory", πρότεινέ το μόνο αν το lesson είναι σταθερό και γενικεύσιμο, όχι στιγμιαίο noise.
+- Αν 2 observations είναι κοντινά, κράτα μόνο το πιο δυνατό.
 - Για ρουτίνες: αν ignore_count >= 2 → πρότεινε αλλαγή
 - Για συνομιλίες: αν βλέπεις επαναλαμβανόμενα errors, loops, ή patterns → καταγράψτο ως lesson με action="save_to_memory"
 - confidence > 0.75 μόνο αν είσαι σίγουρος
@@ -463,6 +486,9 @@ def run_reflection() -> dict:
     telegram_lines = []
     pending_items = []   # [{"id":, "observation":, "action":, "routine_id":, "action_value":, "lesson":, "source":}, ...]
 
+    seen_reflection_keys = set()
+    seen_lesson_keys = set()
+
     for r in reflections:
         obs          = r.get("observation", "")
         action       = r.get("action", "")
@@ -476,11 +502,26 @@ def run_reflection() -> dict:
             skipped += 1
             continue
 
+        reflection_key = _build_reflection_key(obs, action, routine_id=routine_id, action_value=action_value)
+        lesson_key = _build_lesson_key(lesson)
+
+        if reflection_key in seen_reflection_keys:
+            skipped += 1
+            continue
+
+        seen_reflection_keys.add(reflection_key)
+
         # Skip αν έχει ήδη εφαρμοστεί το ίδιο observation+action
         if _already_reflected(obs, action, routine_id=routine_id, action_value=action_value):
             print(f"[Reflection]: ⏭ Skip duplicate: '{obs[:40]}...'")
             skipped += 1
             continue
+
+        if action == "save_to_memory" and lesson_key:
+            if lesson_key in seen_lesson_keys:
+                skipped += 1
+                continue
+            seen_lesson_keys.add(lesson_key)
 
         if confidence >= AUTO_APPLY_THRESHOLD:
             # Αυτόματη εφαρμογή
