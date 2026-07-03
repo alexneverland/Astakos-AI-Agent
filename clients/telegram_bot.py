@@ -91,6 +91,14 @@ from memory.session_memory import (
 from tools.telegram import send_telegram_msg, send_telegram_voice, send_telegram_msg_full
 from services.gemini import safe_gemini_call
 from services.embeddings import embeddings
+from memory.pending_followups import (
+    ensure_pending_followups_table,
+    maybe_create_followup_from_exchange,
+    maybe_resolve_followups_from_user_message,
+    get_due_pending_followups,
+    mark_followup_sent,
+    expire_old_followups,
+)
 from core.event_bus import bus
 # ────────────────────────────────────────────────────────────────
 # GLOBALS
@@ -245,6 +253,74 @@ def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
         seed_facts,
     )
 
+def _enqueue_followup_pipeline(user_text, ai_text, agent_name, channel):
+    maybe_resolve_followups_from_user_message(user_text)
+    maybe_create_followup_from_exchange(
+        user_text=user_text,
+        ai_text=ai_text,
+        agent_name=agent_name,
+        channel=channel,
+    )
+
+def _build_followup_message_with_llm(item: dict, recent_context: str) -> str:
+    from services.gemini import safe_gemini_call
+    from core.utils import clean_message
+    prompt = f"""
+Γράψε ένα σύντομο, φυσικό, ζεστό follow-up μήνυμα στα Ελληνικά.
+
+Στόχος:
+- να συνεχίσεις ανθρώπινα μια παλιότερη κουβέντα
+- να ρωτήσεις διακριτικά για την εξέλιξη
+- όχι να ακουστείς σαν reminder robot
+- όχι να υποθέτεις facts που δεν ξέρεις
+
+Κανόνες:
+- μέχρι 2 προτάσεις
+- όχι markdown
+- όχι bullets
+- όχι "αποθήκευσα", "σύμφωνα με τη μνήμη", "βλέπω ότι"
+- να μοιάζει με φυσικό chat
+
+Topic: {item.get('topic')}
+Subject: {item.get('subject')}
+Original user text: {item.get('source_user_text')}
+Recent context:
+{recent_context[:2000]}
+"""
+    try:
+        response = safe_gemini_call(prompt)
+        text = response.text if hasattr(response, "text") else str(response)
+        return clean_message(text).strip()
+    except Exception as exc:
+        print(f"[FollowUpMsg Error]: {exc}")
+        return ""
+
+def job_check_pending_followups():
+    from datetime import datetime
+    try:
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        expire_old_followups(now_iso)
+
+        due = get_due_pending_followups(now_iso)
+        if not due:
+            return
+
+        recent_context = _load_recent_proactive_context(limit=10)
+
+        for item in due[:3]:
+            if recent_context and item["subject"].lower() in recent_context.lower():
+                print(f"[FollowUp]: skip #{item['id']} recent overlap")
+                continue
+
+            msg = _build_followup_message_with_llm(item, recent_context)
+            if not msg:
+                continue
+
+            send_telegram_msg(msg)
+            mark_followup_sent(item["id"])
+            print(f"[FollowUp]: sent #{item['id']} -> {item['subject']}")
+    except Exception as exc:
+        print(f"[FollowUpJob Error]: {exc}")
 
 # ── Human Override State ──────────────────────────────────────
 import time as _time
@@ -421,6 +497,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
             enqueue_fast_task(update_working_memory, user_log_msg, chat_ai_msg)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
             enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
+            enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
         except Exception as e:
             print(f"[Document/History]: {e}")
 
@@ -658,6 +735,7 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     enqueue_fast_task(update_working_memory, user_log_msg, final_response)
     enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, final_response, handling_agent, "telegram")
     enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, final_response, handling_agent)
+    enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, final_response, handling_agent, "telegram")
 
     try:
         from memory.pending_assets import create_pending_asset_archive, looks_like_asset_confirmation_prompt
@@ -1342,6 +1420,7 @@ def handle_message(user_text: str, chat_id: str):
         enqueue_fast_task(update_working_memory, clean_user_text, confirm_reply)
         enqueue_fast_task(_enqueue_slow_memory_sifter, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
         enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, confirm_reply, "Chat_Agent")
+        enqueue_slow_task(_enqueue_followup_pipeline, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
         return
 
     if pending_asset and reply_kind == "no" and asset_prompt_active:
@@ -1352,6 +1431,7 @@ def handle_message(user_text: str, chat_id: str):
         enqueue_fast_task(update_working_memory, clean_user_text, cancel_reply)
         enqueue_fast_task(_enqueue_slow_memory_sifter, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
         enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, cancel_reply, "Chat_Agent")
+        enqueue_slow_task(_enqueue_followup_pipeline, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
         return
 
     # ── Messenger Draft Intent Guard ─────────────────────────────
@@ -1653,6 +1733,7 @@ def handle_message(user_text: str, chat_id: str):
             enqueue_fast_task(update_working_memory,              user_text, final_ai_response)
             enqueue_fast_task(_enqueue_slow_memory_sifter,        user_text, final_ai_response, handling_agent, "telegram")
             enqueue_slow_task(update_capabilities_from_exchange,  user_text, final_ai_response, handling_agent)
+            enqueue_slow_task(_enqueue_followup_pipeline, user_text, final_ai_response, handling_agent, "telegram")
             
             background_enqueue_ms = int((perf_counter() - t_bg_0) * 1000)
             _trace.mark_phase("background_enqueue_ms", background_enqueue_ms)
@@ -4117,6 +4198,7 @@ if __name__ == "__main__":
     try:
         from memory.pending_assets import init_pending_assets_table
         init_pending_assets_table()
+        ensure_pending_followups_table()
     except Exception as e:
         print(f"[PendingAssets]: Init failed: {e}")
     from memory.routine_db import load_pending_confirmations
@@ -4133,6 +4215,7 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_check_routines,  interval_seconds=60,    name="routines",    verbose=False)
     astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive",   verbose=True)
     astakos_scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics",   verbose=True)
+    astakos_scheduler.register(job_check_pending_followups, interval_seconds=600, name="pending_followups", verbose=False)
     astakos_scheduler.register(job_morning_fit_briefing,       interval_seconds=3600, name="fit_briefing",      verbose=True)
     astakos_scheduler.register(job_morning_calendar_briefing,  interval_seconds=3600, name="cal_briefing",      verbose=True)
     astakos_scheduler.register(job_goal_followup,              interval_seconds=3600, name="goal_followup",     verbose=True)

@@ -31,6 +31,20 @@ from core.brain import llm, safe_llm_invoke
 from core.graph import graph, AgentState
 from core.agents import clean_message
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
+from memory.pending_followups import (
+    maybe_create_followup_from_exchange,
+    maybe_resolve_followups_from_user_message,
+    find_pending_followups,
+)
+def _enqueue_followup_pipeline(user_text, ai_text, agent_name, channel):
+    maybe_resolve_followups_from_user_message(user_text)
+    maybe_create_followup_from_exchange(
+        user_text=user_text,
+        ai_text=ai_text,
+        agent_name=agent_name,
+        channel=channel,
+    )
+
 from memory.session_memory import log_exchange, _run_session_summary
 from tools.telegram import send_telegram_msg
 import uuid
@@ -649,6 +663,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
+            enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
             return JSONResponse({"agent": "Chat_Agent", "response": reply})
 
         if pending_asset and reply_kind == "no" and asset_prompt_active:
@@ -664,6 +679,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
+            enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
             return JSONResponse({"agent": "Chat_Agent", "response": reply})
     except Exception as e:
         print(f"[PendingAssets]: Web text handler error: {e}")
@@ -697,6 +713,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
+            enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
 
             _trace = ExecutionTrace(channel="web", user_message=user_input)
             _trace.mark_phase("messenger_intent_clear_intercept", 1)
@@ -728,6 +745,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
+            enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
 
             _trace = ExecutionTrace(channel="web", user_message=user_input)
             _trace.mark_phase("messenger_intent_clarify_intercept", 1)
@@ -941,6 +959,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(update_working_memory,             clean_user, clean_ai)
             enqueue_fast_task(_enqueue_slow_memory_sifter,       clean_user, clean_ai, handling_agent, "web")
             enqueue_slow_task(update_capabilities_from_exchange, clean_user, clean_ai, handling_agent)
+            enqueue_slow_task(_enqueue_followup_pipeline, clean_user, clean_ai, handling_agent, "web")
             _trace.mark_phase("background_enqueue_ms", int((perf_counter() - t_bg_0) * 1000))
 
             _trace.save()
@@ -1216,6 +1235,7 @@ async def upload_file(
         enqueue_fast_task(update_working_memory, user_log_msg, chat_ai_msg)
         enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
         enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
+        enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
 
         from memory.pending_assets import looks_like_asset_confirmation_prompt
         if looks_like_asset_confirmation_prompt(chat_ai_msg):
@@ -1654,6 +1674,7 @@ async def debug_runtime(_=Depends(require_token)):
             "non_active":      cooldown_info,
         },
         "pending_confirmations": pending_from_db,
+        "pending_followups": find_pending_followups(limit=20),
         "pending_actions":       pending_actions,
         "events_1h": {
             "throughput":  throughput,
