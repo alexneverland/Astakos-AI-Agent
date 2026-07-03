@@ -101,7 +101,7 @@ def _load_capabilities() -> dict:
     return default
 
 
-def _save_capability(capability_type: str, description: str):
+def _save_capability(capability_type: str, description: str) -> str:
     # [MASTRO-FIX]: Χρήση του memory_lock από vector_store — ένα lock για όλα
     with memory_lock:
         data = _load_capabilities()
@@ -130,7 +130,7 @@ def _save_capability(capability_type: str, description: str):
             # Threshold 0.88 ΟΚ για capabilities (γενικές ικανότητες)
             if is_semantically_duplicate(description, data[key], threshold=0.88):
                 conn.commit()
-                return
+                return "duplicate"
 
             cursor.execute("INSERT INTO capabilities (type, description) VALUES (?, ?)", (db_type, description))
             
@@ -140,11 +140,14 @@ def _save_capability(capability_type: str, description: str):
                 cursor.execute("DELETE FROM capabilities WHERE id=?", (old_id,))
 
             conn.commit()
+            return "inserted"
         except Exception as e:
             print(f"Error saving capability: {e}")
+            return "error"
         finally:
             if conn:
                 conn.close()
+    return "error"
 
 
 _USER_SUBJECT_MARKERS = (
@@ -225,15 +228,21 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
             if _looks_like_user_fact_not_capability(data["can_do"]):
                 print(f"\033[90m[Αυτογνωσία]: skip user fact, not can_do: {data['can_do']}\033[0m")
             else:
-                _save_capability("can", data["can_do"])
-                print(f"\033[96m[Αυτογνωσία]: ✅ can_do: {data['can_do']}\033[0m")
+                result = _save_capability("can", data["can_do"])
+                if result == "inserted":
+                    print(f"\033[96m[Αυτογνωσία]: ✅ can_do: {data['can_do']}\033[0m")
+                elif result == "duplicate":
+                    print(f"\033[90m[Αυτογνωσία]: skip duplicate can_do: {data['can_do']}\033[0m")
             
         if data.get("cannot_do") and str(data["cannot_do"]).lower() != "null":
             if _looks_like_user_fact_not_capability(data["cannot_do"]):
                 print(f"\033[90m[Αυτογνωσία]: skip user fact, not cannot_do: {data['cannot_do']}\033[0m")
             else:
-                _save_capability("cannot", data["cannot_do"])
-                print(f"\033[91m[Αυτογνωσία]: ❌ cannot_do: {data['cannot_do']}\033[0m")
+                result = _save_capability("cannot", data["cannot_do"])
+                if result == "inserted":
+                    print(f"\033[91m[Αυτογνωσία]: ❌ cannot_do: {data['cannot_do']}\033[0m")
+                elif result == "duplicate":
+                    print(f"\033[90m[Αυτογνωσία]: skip duplicate cannot_do: {data['cannot_do']}\033[0m")
             
     except Exception as e:
         print(f"\033[90m[Αυτογνωσία Error]: {e}\033[0m")
