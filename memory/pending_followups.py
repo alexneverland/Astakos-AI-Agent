@@ -282,10 +282,21 @@ def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name
 }}
 
 Κανόνες:
-- subject μέχρι 8 λέξεις
+- subject μέχρι 4 λέξεις
+- προτίμησε compact noun phrase, όχι πλήρη περιγραφή
+- απόφυγε "και", "για", "ώστε", "να"
 - delay_minutes integer από 30 έως 720
 - confidence 0.0 έως 1.0
 - μην επιστρέψεις τίποτα εκτός JSON
+
+Παραδείγματα καλού subject:
+- "μπριζόλες λαιμού"
+- "συνάντηση με Σοφία"
+- "καθάρισμα κλουβιού"
+
+Παραδείγματα κακού subject:
+- "αγορά και ψήσιμο για τις μπριζόλες λαιμού"
+- "να δω πώς πήγε το πράγμα αργότερα"
 
 [Agent]: {agent_name}
 [User]: {user_text[:800]}

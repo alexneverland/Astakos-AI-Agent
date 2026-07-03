@@ -617,6 +617,55 @@ def retrieve_photo(query: str) -> str:
 # REMINDERS & LISTS
 # ────────────────────────────────────────────────────────────────
 
+def _normalize_reminder_text(text: str) -> str:
+    import re
+
+    value = str(text or "").lower().strip()
+
+    replacements = {
+        "θύμισε μου": "",
+        "θυμησε μου": "",
+        "να πάρεις": "",
+        "να παρεις": "",
+        "πριν φύγεις από τη δουλειά": "",
+        "πριν φυγεις απο τη δουλεια": "",
+        "από τη δουλειά": "",
+        "απο τη δουλεια": "",
+        "όταν φύγω από τη δουλειά": "",
+        "οταν φυγω απο τη δουλεια": "",
+    }
+
+    for old, new in replacements.items():
+        value = value.replace(old, new)
+
+    value = re.sub(r"[^\w\sάέήίόύώα-ω]", " ", value, flags=re.UNICODE)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+def _same_pending_reminder(existing_task: str, new_task: str, existing_time: str, new_time: str) -> bool:
+    if str(existing_time or "").strip() != str(new_time or "").strip():
+        return False
+
+    a = _normalize_reminder_text(existing_task)
+    b = _normalize_reminder_text(new_task)
+
+    if not a or not b:
+        return False
+
+    if a == b:
+        return True
+
+    a_tokens = {tok for tok in a.split() if len(tok) >= 4}
+    b_tokens = {tok for tok in b.split() if len(tok) >= 4}
+
+    if not a_tokens or not b_tokens:
+        return False
+
+    overlap = len(a_tokens & b_tokens)
+    min_len = min(len(a_tokens), len(b_tokens))
+
+    return overlap >= max(2, min_len)
+
 @tool
 def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = None, action: str = "add", location: str = None) -> str:
     """
@@ -686,7 +735,17 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             else:
                 return "Σφάλμα: Πρέπει να δώσεις λεπτά, ακριβή ώρα, ή τοποθεσία (π.χ. location='home')."
 
-            cursor.execute("INSERT INTO reminders (task, time, status) VALUES (?, ?, 'pending')", (task, target_time))
+            cursor.execute("SELECT id, task, time FROM reminders WHERE status='pending'")
+            pending_rows = cursor.fetchall()
+
+            for rid, existing_task, existing_time in pending_rows:
+                if _same_pending_reminder(existing_task, task, existing_time, target_time):
+                    return f"ℹ️ Υπάρχει ήδη παρόμοια εκκρεμής υπενθύμιση για τις {target_time}: {existing_task}"
+
+            cursor.execute(
+                "INSERT INTO reminders (task, time, status) VALUES (?, ?, 'pending')",
+                (task, target_time),
+            )
             conn.commit()
             
             if location:
