@@ -422,6 +422,49 @@ def looks_like_food_memory_query(text: str) -> bool:
     return has_food and has_recall
 
 
+def looks_like_reminder_or_task_request(text: str) -> bool:
+    clean = _normalize_text(text)
+    if not clean:
+        return False
+
+    reminder_markers = (
+        "θυμισε μου",
+        "θυμισε με",
+        "υπενθυμισε μου",
+        "υπενθυμιση",
+        "βαλε υπενθυμιση",
+        "βαλε μου υπενθυμιση",
+        "να μου θυμησεις",
+        "να μου θυμισεις",
+        "μην ξεχασω",
+        "στις ",
+    )
+
+    action_markers = (
+        "να παρω",
+        "να φυγω",
+        "να κανω",
+        "να στειλω",
+        "να περασω",
+        "πριν φυγω",
+        "πριν παω",
+        "οταν φυγω",
+    )
+
+    has_reminder_language = any(marker in clean for marker in reminder_markers)
+    has_action_language = any(marker in clean for marker in action_markers)
+
+    if has_reminder_language and has_action_language:
+        return True
+
+    # fallback για πολύ τυπικό "θύμισέ μου στις 19:00 ..."
+    if ("θυμ" in clean or "υπενθυμ" in clean) and re.search(r"\b\d{1,2}:\d{2}\b", clean):
+        return True
+
+    return False
+
+
+
 def _looks_low_complexity_query(query: str) -> bool:
     if not query:
         return True
@@ -475,6 +518,9 @@ def classify_memory_query_intent(
 
     if looks_like_tool_result_query(clean):
         return "tool_result"
+
+    if looks_like_reminder_or_task_request(clean):
+        return "reminder_request"
 
     if looks_like_food_memory_query(clean):
         return "food_memory_recall"
@@ -815,6 +861,9 @@ def build_memory_context(
         if query_intent == "tool_result":
             effective_semantic_k = 0
             semantic_adjust_reason = "tool_result_query"
+        elif query_intent == "reminder_request":
+            effective_semantic_k = 0
+            semantic_adjust_reason = "reminder_request_skip"
         elif query_intent == "food_memory_recall":
             effective_semantic_k = max(semantic_k, 6)
             semantic_adjust_reason = "food_memory_query"

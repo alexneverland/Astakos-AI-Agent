@@ -1619,6 +1619,27 @@ def _should_skip_ephemeral_candidate(candidate: dict, source_text: str) -> bool:
     return _looks_like_ephemeral_conversational_source(source_text)
 
 
+def _looks_like_operational_reminder_exchange(user_text: str, ai_text: str) -> bool:
+    user_norm = _normalize_text(user_text)
+    ai_norm = _normalize_text(ai_text)
+
+    if not user_norm or not ai_norm:
+        return False
+
+    user_has_reminder_request = (
+        ("θυμ" in user_norm or "υπενθυμ" in user_norm)
+        and bool(re.search(r"\b\d{1,2}:\d{2}\b", user_norm))
+    )
+
+    ai_has_reminder_confirmation = (
+        "υπενθυμιση ρυθμιστηκε" in ai_norm
+        or "υπενθυμιση ρυθμιστηκε για τις" in ai_norm
+    )
+
+    return user_has_reminder_request and ai_has_reminder_confirmation
+
+
+
 def _collect_deterministic_candidates(
     user_text: str,
     ai_text: str,
@@ -1749,6 +1770,10 @@ def run_memory_sifter_slow(
 ):
     deterministic_seed_facts = deterministic_seed_facts or []
     print("\033[90m[MemorySifterSlow]: start\033[0m")
+
+    if _looks_like_operational_reminder_exchange(user_text, ai_text):
+        print("\033[90m[MemorySifterSlow]: skip operational reminder exchange\033[0m")
+        return
     
     fingerprint = _memory_sifter_fingerprint(
         user_text=user_text,

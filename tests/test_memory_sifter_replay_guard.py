@@ -421,3 +421,20 @@ def test_family_duplicate_tool_and_sifter_variants_are_collapsed(isolated_state_
         sifter_candidate,
         [tool_candidate],
     ) is True
+
+
+def test_slow_sifter_skips_operational_reminder_exchange(monkeypatch):
+    from memory import session_memory as sm
+
+    saved = []
+
+    monkeypatch.setattr(sm.memory, 'save', lambda *args, **kwargs: saved.append((args, kwargs)))
+
+    sm.run_memory_sifter_slow(
+        'θυμησε μου στις 19:00 πριν φυγω απο την δουλεια να παρω τις μπριζολες',
+        '✅ Υπενθύμιση ρυθμίστηκε για τις 2026-07-03 19:00!',
+        'Home_Agent',
+        'web',
+    )
+
+    assert saved == []

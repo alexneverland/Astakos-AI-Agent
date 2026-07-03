@@ -688,3 +688,13 @@ def test_build_memory_context_skips_debug_write_when_disabled(monkeypatch):
     )
 
     assert called["count"] == 0
+
+
+def test_reminder_request_skips_semantic():
+    from memory.context_builder import classify_memory_query_intent
+
+    result = classify_memory_query_intent(
+        "[12:50] θυμησε μου στις 19:00 πριν φυγω απο την δουλεια να παρω τις μπριζολες λαιμου που πηρα"
+    )
+
+    assert result == "reminder_request"
