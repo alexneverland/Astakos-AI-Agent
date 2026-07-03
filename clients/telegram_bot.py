@@ -266,38 +266,177 @@ def _enqueue_followup_pipeline(user_text, ai_text, agent_name, channel):
         channel=channel,
     )
 
-def _build_followup_message_with_llm(item: dict, recent_context: str) -> str:
+def _build_followup_state_snapshot() -> dict:
+    try:
+        from memory.routine_db import get_context_states
+    except Exception:
+        return {}
+
+    keys = [
+        "user_at_work",
+        "user_out_of_home",
+        "family_at_home",
+        "alexandros_away_from_home",
+        "alexandros_away_reason",
+        "quiet_hours",
+        "current_shift",
+        "state:alexandros:outing",
+        "state:alexandros:sleep",
+    ]
+    try:
+        return get_context_states(keys)
+    except Exception as exc:
+        print(f"[FollowUpState]: snapshot failed: {exc}")
+        return {}
+
+
+def _render_followup_state_snapshot(state_snapshot: dict) -> str:
+    if not state_snapshot:
+        return "No live state available."
+
+    lines = []
+    for key, item in state_snapshot.items():
+        if not isinstance(item, dict):
+            continue
+        value = str(item.get("value", "")).strip()
+        until_date = str(item.get("until_date", "")).strip()
+        if until_date:
+            lines.append(f"- {key} = {value} (until {until_date})")
+        else:
+            lines.append(f"- {key} = {value}")
+    return "\n".join(lines) if lines else "No live state available."
+
+
+def _build_safe_followup_fallback(item: dict, stage: str = "") -> str:
+    subject = str(item.get("subject") or "").strip()
+    topic = str(item.get("topic") or "").strip().lower()
+
+    if stage == "before_prerequisite":
+        if subject:
+            return f"Τι έγινε τελικά με {subject};"
+        return "Τι έγινε τελικά με αυτό;"
+
+    if stage == "decision_pending":
+        if subject:
+            return f"Τελικά τι θα γίνει με {subject};"
+        return "Τελικά τι θα γίνει με αυτό;"
+
+    if stage == "after_likely_completion":
+        if subject:
+            return f"Πώς πήγε τελικά με {subject};"
+        return "Πώς πήγε τελικά;"
+
+    if topic == "outing":
+        return f"Τελικά τι έγινε με {subject};" if subject else "Τελικά τι έγινε;"
+    if topic == "food_purchase":
+        return f"Τελικά τι έγινε με {subject};" if subject else "Τελικά το προχωρήσατε;"
+    if topic == "task_progress":
+        return f"Τελικά προχώρησε το {subject};" if subject else "Τελικά προχώρησε;"
+    return f"Τι έγινε τελικά με {subject};" if subject else "Τι έγινε τελικά;"
+
+
+def _build_followup_decision_with_llm(item: dict, recent_context: str, state_snapshot: dict) -> dict:
     from services.gemini import safe_gemini_call
     from core.utils import clean_message
+    import json
+    from datetime import datetime
+
+    now_dt = datetime.now()
+    state_block = _render_followup_state_snapshot(state_snapshot)
+
     prompt = f"""
-Γράψε ένα σύντομο, φυσικό, ζεστό follow-up μήνυμα στα Ελληνικά.
+Είσαι ο Αστακός και αποφασίζεις αν πρέπει να σταλεί conversational follow-up τώρα.
 
 Στόχος:
-- να συνεχίσεις ανθρώπινα μια παλιότερη κουβέντα
-- να ρωτήσεις διακριτικά για την εξέλιξη
-- όχι να ακουστείς σαν reminder robot
-- όχι να υποθέτεις facts που δεν ξέρεις
+- να ΜΗΝ υποθέτεις ότι κάτι ολοκληρώθηκε αν δεν υπάρχει σαφής ένδειξη
+- να χρησιμοποιείς live state, ώρα και recent context
+- να στείλεις μόνο φυσικό, σύντομο follow-up
+- να αποφεύγεις premature assumptions τύπου "πώς πήγε" όταν ο χρήστης μπορεί να είναι ακόμα στη δουλειά ή να μην έχει κάνει ακόμη το βήμα
+
+ΤΩΡΙΝΗ ΩΡΑ:
+- local_time: {now_dt.strftime("%Y-%m-%d %H:%M")}
+- hour: {now_dt.hour}
+
+LIVE STATE:
+{state_block}
+
+FOLLOW-UP ITEM:
+- topic: {item.get('topic')}
+- subject: {item.get('subject')}
+- source_channel: {item.get('source_channel')}
+- source_agent: {item.get('source_agent')}
+- original_user_text: {item.get('source_user_text')}
+- original_ai_text: {item.get('source_ai_text')}
+- due_at: {item.get('followup_after_ts')}
+
+RECENT CONTEXT:
+{recent_context[:2500]}
 
 Κανόνες:
-- μέχρι 2 προτάσεις
-- όχι markdown
-- όχι bullets
-- όχι "αποθήκευσα", "σύμφωνα με τη μνήμη", "βλέπω ότι"
-- να μοιάζει με φυσικό chat
+1. Αν ΔΕΝ υπάρχει σαφής ένδειξη ότι έχει ολοκληρωθεί το βασικό prerequisite, ΜΗΝ γράψεις post-completion follow-up.
+2. Αν ο χρήστης φαίνεται ακόμα στη δουλειά / εκτός σπιτιού / πριν από το πιθανό main event, προτίμησε:
+   - είτε "before_prerequisite"
+   - είτε "decision_pending"
+3. "after_likely_completion" επιτρέπεται μόνο αν υπάρχει ρητό ή ισχυρό context ότι το γεγονός λογικά έχει ήδη συμβεί.
+4. Αν το follow-up δεν βγάζει νόημα τώρα, βάλε decision="skip".
+5. Το μήνυμα πρέπει να είναι μέχρι 2 προτάσεις.
+6. Οχι markdown, όχι bullets, όχι meta κείμενο.
+7. Οχι φράσεις όπως "βλέπω ότι", "σύμφωνα με τη μνήμη", "αποθήκευσα", "έχω κρατήσει".
+8. Αν δεν είσαι βέβαιος, να είσαι ουδέτερος και να μην υποθέτεις completion.
 
-Topic: {item.get('topic')}
-Subject: {item.get('subject')}
-Original user text: {item.get('source_user_text')}
-Recent context:
-{recent_context[:2000]}
+Επέστρεψε ΑΥΣΤΗΡΑ JSON:
+{{
+  "decision": "send" | "skip",
+  "stage": "before_prerequisite" | "decision_pending" | "after_likely_completion" | "skip",
+  "message": "το follow-up μήνυμα ή κενό",
+  "reason": "σύντομος λόγος"
+}}
 """
     try:
         response = safe_gemini_call(prompt)
         text = response.text if hasattr(response, "text") else str(response)
-        return clean_message(text).strip()
+        cleaned = clean_message(text).strip()
+
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError("No JSON object found in follow-up decision response.")
+
+        payload = json.loads(cleaned[start:end + 1])
+        decision = str(payload.get("decision", "")).strip().lower()
+        stage = str(payload.get("stage", "")).strip().lower()
+        message = clean_message(payload.get("message", "")).strip()
+        reason = str(payload.get("reason", "")).strip()
+
+        if decision not in {"send", "skip"}:
+            decision = "skip"
+
+        if stage not in {
+            "before_prerequisite",
+            "decision_pending",
+            "after_likely_completion",
+            "skip",
+        }:
+            stage = "skip" if decision == "skip" else "decision_pending"
+
+        if decision == "send" and not message:
+            message = _build_safe_followup_fallback(item, stage)
+
+        return {
+            "decision": decision,
+            "stage": stage,
+            "message": message,
+            "reason": reason,
+        }
+
     except Exception as exc:
-        print(f"[FollowUpMsg Error]: {exc}")
-        return ""
+        print(f"[FollowUpDecision Error]: {exc}")
+        return {
+            "decision": "send",
+            "stage": "decision_pending",
+            "message": _build_safe_followup_fallback(item, "decision_pending"),
+            "reason": "fallback_non_assumptive",
+        }
 
 def job_check_pending_followups():
     from datetime import datetime
@@ -328,14 +467,48 @@ def job_check_pending_followups():
                 print(f"[FollowUp]: skip #{item['id']} recent overlap")
                 continue
 
-            msg = _build_followup_message_with_llm(item, recent_context)
+            lower_ctx = (recent_context or "").lower()
+
+            if item.get("topic") == "food_purchase":
+                premature_markers = (
+                    "στη δουλει",
+                    "δουλεια",
+                    "σχολασ",
+                    "πριν φυγω",
+                )
+                if any(marker in lower_ctx for marker in premature_markers):
+                    print(f"[FollowUp]: keep pre-completion stage for #{item['id']} due to work-context")
+
+            state_snapshot = _build_followup_state_snapshot()
+            decision = _build_followup_decision_with_llm(
+                item,
+                recent_context,
+                state_snapshot,
+            )
+
+            if decision.get("decision") != "send":
+                print(
+                    f"[FollowUp]: skip #{item['id']} "
+                    f"stage={decision.get('stage')} "
+                    f"reason={decision.get('reason')}"
+                )
+                continue
+
+            msg = str(decision.get("message") or "").strip()
             if not msg:
                 continue
 
             send_telegram_msg(msg)
-            mark_followup_sent(item["id"])
-            record_followup_outcome(item["id"], +0.2, "followup_sent")
-            print(f"[FollowUp]: sent #{item['id']} -> {item['subject']}")
+            mark_followup_sent(
+                item["id"],
+                f"followup_sent:{decision.get('stage')}",
+            )
+            record_followup_outcome(item["id"], +0.2, f"followup_sent:{decision.get('stage')}")
+            print(
+                f"[FollowUp]: sent #{item['id']} "
+                f"stage={decision.get('stage')} "
+                f"-> {item['subject']}"
+            )
     except Exception as exc:
         print(f"[FollowUpJob Error]: {exc}")
 

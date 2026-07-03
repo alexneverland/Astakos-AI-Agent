@@ -221,20 +221,23 @@ def get_due_pending_followups(now_iso: str) -> list[dict]:
         conn.close()
 
 
-def mark_followup_sent(followup_id: int):
+def mark_followup_sent(followup_id: int, decision_reason: str = "followup_sent"):
     conn = _conn()
     try:
+        from datetime import datetime
+        now_iso = datetime.now().isoformat(timespec="seconds")
         conn.execute(
             """
             UPDATE pending_followups
             SET status='sent',
-                sent_at=CURRENT_TIMESTAMP,
-                resolved_at=CURRENT_TIMESTAMP,
-                times_sent=COALESCE(times_sent, 0) + 1,
-                last_decision='sent'
+                sent_at=?,
+                resolved_at=NULL,
+                last_decision='sent',
+                decision_reason=?,
+                times_sent=COALESCE(times_sent, 0) + 1
             WHERE id=?
             """,
-            (followup_id,),
+            (now_iso, decision_reason, followup_id),
         )
         conn.commit()
     finally:

@@ -432,7 +432,7 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
         "has_recent_sent_followup_for_arc",
         lambda arc_key, within_minutes=240: False,
     )
-    monkeypatch.setattr(bot, "_build_followup_message_with_llm", lambda item, recent_context: "ping")
+    monkeypatch.setattr(bot, "_build_followup_decision_with_llm", lambda item, recent_context, state_snapshot: {}, raising=False)
     monkeypatch.setattr(bot, "send_telegram_msg", lambda msg: sent.append(msg))
     monkeypatch.setattr(bot, "mark_followup_sent", lambda followup_id: marked.append(followup_id))
     monkeypatch.setattr(
@@ -446,3 +446,51 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
     assert sent == []
     assert marked == []
     assert outcomes == []
+
+
+def test_followup_safe_fallback_is_non_assumptive():
+    import clients.telegram_bot as bot
+
+    item = {
+        "topic": "food_purchase",
+        "subject": "μπριζόλες λαιμού",
+    }
+
+    msg = bot._build_safe_followup_fallback(item, "decision_pending")
+    assert "Πώς πήγε" not in msg
+    assert "μπριζόλες λαιμού" in msg
+
+
+def test_followup_decision_fallback_defaults_to_non_assumptive(monkeypatch):
+    import clients.telegram_bot as bot
+
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_state_snapshot",
+        lambda: {},
+    )
+
+    class DummyResponse:
+        text = "not json"
+
+    import services.gemini as gemini
+    monkeypatch.setattr(
+        gemini,
+        "safe_gemini_call",
+        lambda prompt: DummyResponse(),
+    )
+
+    item = {
+        "topic": "food_purchase",
+        "subject": "μπριζόλες λαιμού",
+        "source_user_text": "θύμισέ μου να τις πάρω",
+        "source_ai_text": "έγινε",
+        "source_channel": "web",
+        "source_agent": "Home_Agent",
+        "followup_after_ts": "2030-01-01T18:00:00",
+    }
+
+    result = bot._build_followup_decision_with_llm(item, "", {})
+    assert result["decision"] == "send"
+    assert result["stage"] == "decision_pending"
+    assert "Πώς πήγε" not in result["message"]
