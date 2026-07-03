@@ -498,7 +498,7 @@ def job_check_pending_followups():
             if not msg:
                 continue
 
-            send_telegram_msg(msg)
+            _send_and_record_assistant(msg, agent="FollowUp_Agent")
             mark_followup_sent(
                 item["id"],
                 f"followup_sent:{decision.get('stage')}",
@@ -1052,7 +1052,7 @@ def send_voice_reply(text, chat_id):
     except Exception as e:
         print(f"❌ TTS Error: {e}")
         send_telegram_msg(f"Μάστορα, μου κόπηκε η φωνή... (Error: {e})")
-def _append_to_analytics_log(role: str, content: str):
+def _append_to_analytics_log(role: str, content: str, agent: str | None = None):
     """Καταγραφή μηνύματος στο shared SQLite conversation history (telegram channel)."""
     try:
         now = datetime.now()
@@ -1060,7 +1060,7 @@ def _append_to_analytics_log(role: str, content: str):
         try:
             # notify_telegram_message: αποθηκεύει στη shared SQLite + WebSocket broadcast στο Web UI
             from api.server import notify_telegram_message
-            notify_telegram_message(role=shared_role, content=content)
+            notify_telegram_message(role=shared_role, content=content, agent=agent)
         except Exception:
             # Fallback: άμεσο append χωρίς broadcast (αν ο server δεν τρέχει)
             from memory.conversation_history import append_message
@@ -1069,15 +1069,20 @@ def _append_to_analytics_log(role: str, content: str):
                 content=content,
                 channel="telegram",
                 timestamp=now,
+                agent=agent,
             )
     except Exception as e:
         print(f"[ConversationHistory/telegram]: Σφάλμα shared write: {e}")
 
 
-def _send_and_record_assistant(content: str, chat_id: str | None = None):
+def _send_and_record_assistant(
+    content: str,
+    chat_id: str | None = None,
+    agent: str | None = "Chat_Agent",
+):
     """Στέλνει assistant reply στο Telegram και το γράφει στο shared history."""
     message_id = send_telegram_msg(content)
-    _append_to_analytics_log("ai", content)
+    _append_to_analytics_log("ai", content, agent=agent)
     return message_id
 
 
@@ -1259,7 +1264,7 @@ def _send_pending_reflections_summary() -> None:
     )
     if len(msg) > 4000:
         msg = msg[:3990] + "..."
-    send_telegram_msg(msg)
+    _send_and_record_assistant(msg, agent="Reflection_Agent")
 
 
 from core.utils import is_simple_chat_fast_path_candidate
@@ -1999,7 +2004,10 @@ def handle_location(msg, live_update=False):
                     if target == "home":
                         dist = haversine(lat, lon, HOME_COORDS[0], HOME_COORDS[1])
                         if dist <= HOME_RADIUS_M:
-                            send_telegram_msg(f"📍 ΥΠΕΝΘΥΜΙΣΗ (Έφτασες σπίτι!): {task}")
+                            _send_and_record_assistant(
+                                f"📍 ΥΠΕΝΘΥΜΙΣΗ (Έφτασες σπίτι!): {task}",
+                                agent="Reminder_Agent",
+                            )
                             print(f"\033[93m[Location Reminder]: {task} fired ({dist:.0f}m)\033[0m")
                             cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
                 conn.commit()
@@ -2627,7 +2635,7 @@ def job_check_reminders():
             msg = f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {task}"
             if is_duplicate_notification(msg, cooldown_seconds=60):
                 continue
-            send_telegram_msg(msg)
+            _send_and_record_assistant(msg, agent="Routine_Agent")
             log_event("reminders", "sent", task=task)
             cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
             conn.commit()
@@ -3483,7 +3491,7 @@ def startup_check_missed_routines():
                 print(f"\033[90m[MissedRoutines]: CONTEXT_SKIP '{event_name}' ({missed_min} λεπτά αργά) → '{msg[:80]}'\033[0m")
                 continue
 
-            send_telegram_msg(msg)
+            _send_and_record_assistant(msg, agent="Routine_Agent")
 
             mark_routine_notified(r_id)
             sent_at = datetime.now()
@@ -3877,7 +3885,7 @@ def job_check_routines():
                                 )
                                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
                             else:
-                                send_telegram_msg(msg)
+                                _send_and_record_assistant(msg, agent="Routine_Agent")
                                 sent_at = datetime.now()
                                 mark_routine_notified(r_id)
                                 log_event("routines", "routine_triggered", 
@@ -3949,7 +3957,7 @@ def job_check_routines():
                             # DO NOT mark as pending, just keep it active.
                             bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
                         else:
-                            send_telegram_msg(msg)
+                            _send_and_record_assistant(msg, agent="Routine_Agent")
                             mark_routine_notified(r_id)
                             log_event(
                                 "routines", 
@@ -4021,7 +4029,7 @@ def job_proactive_scan():
 
         if reply and "ΟΛΑ ΚΑΛΑ" not in reply:
             if not is_duplicate_notification(reply, cooldown_seconds=3600):
-                send_telegram_msg(reply)
+                _send_and_record_assistant(reply, agent="Proactive_Agent")
                 log_event("proactive", "alert_sent", preview=reply[:80])
                 print(f"⚠️ [Proactive Alert Sent]: {reply[:50]}...")
         else:
@@ -4077,7 +4085,10 @@ def job_morning_fit_briefing():
     try:
         from astakos_skills.google_fit import get_morning_summary
         summary = get_morning_summary()
-        send_telegram_msg(f"🌅 *Καλημέρα Μάστορα!*\n\n{summary}")
+        _send_and_record_assistant(
+            f"🌅 *Καλημέρα Μάστορα!*\n\n{summary}",
+            agent="Fit_Briefing",
+        )
         with open(flag_file, "w") as f:
             f.write(today_str)
         print(f"✅ [FitBriefing]: Πρωινό briefing στάλθηκε.")
@@ -4116,7 +4127,7 @@ def job_morning_calendar_briefing():
                 f"*Σημερινό πρόγραμμα:*\n{today_events}"
             )
 
-        send_telegram_msg(msg)
+        _send_and_record_assistant(msg, agent="Calendar_Briefing")
         with open(flag_file, "w") as f:
             f.write(today_str)
         print("✅ [CalendarBriefing]: Πρωινό briefing στάλθηκε.")
@@ -4191,7 +4202,7 @@ def job_goal_followup():
         msg = response.text.strip() if hasattr(response, "text") else str(response).strip()
 
         if msg:
-            send_telegram_msg(f"🎯 {msg}")
+            _send_and_record_assistant(f"🎯 {msg}", agent="Goal_Followup")
             with open(flag_file, "w") as f:
                 f.write(today_str)
             print(f"✅ [GoalFollowup]: Στάλθηκε για {len(stale_goals)} goals.")

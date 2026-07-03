@@ -448,6 +448,65 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
     assert outcomes == []
 
 
+def test_job_check_pending_followups_persists_sent_message(monkeypatch):
+    sent = []
+    marked = []
+    outcomes = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 9,
+                "topic": "food_purchase",
+                "subject": "brizoles laimou",
+                "source_user_text": "thymise mou na paro tis brizoles",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(bot, "has_recent_sent_followup", lambda within_minutes=90: False)
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup_for_arc",
+        lambda arc_key, within_minutes=240: False,
+    )
+    monkeypatch.setattr(bot, "_build_followup_state_snapshot", lambda: {})
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda item, recent_context, state_snapshot: {
+            "decision": "send",
+            "stage": "decision_pending",
+            "message": "κανε τις μπριζολες οπως τις σκεφτεσαι;",
+            "reason": "test",
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "_send_and_record_assistant",
+        lambda msg, chat_id=None, agent=None: sent.append((msg, agent)),
+    )
+    monkeypatch.setattr(
+        bot,
+        "mark_followup_sent",
+        lambda followup_id, reason=None: marked.append((followup_id, reason)),
+    )
+    monkeypatch.setattr(
+        bot,
+        "record_followup_outcome",
+        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert sent == [("κανε τις μπριζολες οπως τις σκεφτεσαι;", "FollowUp_Agent")]
+    assert marked == [(9, "followup_sent:decision_pending")]
+    assert outcomes == [(9, 0.2, "followup_sent:decision_pending")]
+
+
 def test_followup_safe_fallback_is_non_assumptive():
     import clients.telegram_bot as bot
 
