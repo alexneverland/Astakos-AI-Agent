@@ -96,6 +96,10 @@ from memory.pending_followups import (
     maybe_create_followup_from_exchange,
     maybe_resolve_followups_from_user_message,
     looks_like_followup_resolution_update,
+    extract_followup_candidate_with_llm,
+    create_pending_followup_from_candidate,
+    get_recently_resolved_followups,
+    candidate_is_distinct_from_recently_resolved,
     get_due_pending_followups,
     mark_followup_sent,
     expire_old_followups,
@@ -261,7 +265,23 @@ def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
 def _enqueue_followup_pipeline(user_text, ai_text, agent_name, channel):
     resolved_count = maybe_resolve_followups_from_user_message(user_text)
     if resolved_count > 0 and looks_like_followup_resolution_update(user_text):
-        print(f"[FollowUp]: create-skip after resolution update ({resolved_count} resolved)")
+        candidate = extract_followup_candidate_with_llm(user_text, ai_text, agent_name)
+        if not candidate or not candidate.get("should_follow_up"):
+            print(f"[FollowUp]: create-skip after resolution update ({resolved_count} resolved)")
+            return
+
+        recent_resolved = get_recently_resolved_followups(limit=5, within_seconds=180)
+        if not candidate_is_distinct_from_recently_resolved(candidate, recent_resolved):
+            print(f"[FollowUp]: create-skip redundant arc after resolution update ({resolved_count} resolved)")
+            return
+
+        create_pending_followup_from_candidate(
+            candidate=candidate,
+            source_channel=channel,
+            source_agent=agent_name,
+            source_user_text=user_text,
+            source_ai_text=ai_text,
+        )
         return
     maybe_create_followup_from_exchange(
         user_text=user_text,
@@ -330,6 +350,11 @@ def _build_safe_followup_fallback(item: dict, stage: str = "") -> str:
             return f"Πώς πήγε τελικά με {subject};"
         return "Πώς πήγε τελικά;"
 
+    if stage == "light_outing_checkin":
+        if subject:
+            return f"Τους βρήκες τελικά για {subject};"
+        return "Τους βρήκες τελικά;"
+
     if topic == "outing":
         return f"Τελικά τι έγινε με {subject};" if subject else "Τελικά τι έγινε;"
     if topic == "food_purchase":
@@ -337,6 +362,51 @@ def _build_safe_followup_fallback(item: dict, stage: str = "") -> str:
     if topic == "task_progress":
         return f"Τελικά προχώρησε το {subject};" if subject else "Τελικά προχώρησε;"
     return f"Τι έγινε τελικά με {subject};" if subject else "Τι έγινε τελικά;"
+
+
+def _normalize_followup_signal_text(text: str) -> str:
+    import unicodedata
+
+    raw = str(text or "").strip().lower()
+    if not raw:
+        return ""
+    normalized = unicodedata.normalize("NFKD", raw)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _should_force_light_outing_followup(item: dict) -> bool:
+    from datetime import datetime
+
+    if str(item.get("topic") or "").strip().lower() != "outing":
+        return False
+
+    text = _normalize_followup_signal_text(item.get("source_user_text") or "")
+    if not text:
+        return False
+
+    markers = (
+        "παω",
+        "πηγα",
+        "φευγω",
+        "εφυγα",
+        "τους βρω",
+        "να τους βρω",
+        "παρκο",
+    )
+    if not any(marker in text for marker in markers):
+        return False
+
+    due_at_raw = str(item.get("followup_after_ts") or "").strip()
+    if not due_at_raw:
+        return False
+
+    try:
+        due_at = datetime.fromisoformat(due_at_raw.replace(" ", "T"))
+    except Exception:
+        return False
+
+    elapsed_since_due = (datetime.now() - due_at).total_seconds() / 60.0
+    return 0 <= elapsed_since_due <= 60
 
 
 def _build_followup_decision_with_llm(item: dict, recent_context: str, state_snapshot: dict) -> dict:
@@ -467,10 +537,6 @@ def job_check_pending_followups():
                 print(f"[FollowUp]: skip #{item['id']} recent arc followup")
                 continue
 
-            if recent_context and item["subject"].lower() in recent_context.lower():
-                print(f"[FollowUp]: skip #{item['id']} recent overlap")
-                continue
-
             lower_ctx = (recent_context or "").lower()
 
             if item.get("topic") == "food_purchase":
@@ -491,6 +557,27 @@ def job_check_pending_followups():
             )
 
             if decision.get("decision") != "send":
+                if _should_force_light_outing_followup(item):
+                    msg = _build_safe_followup_fallback(item, "light_outing_checkin")
+                    message_id = _send_and_record_assistant(msg, agent="FollowUp_Agent")
+                    if not message_id:
+                        print(f"[FollowUp]: send-failed #{item['id']} forced light outing")
+                        continue
+                    mark_followup_sent(
+                        item["id"],
+                        "followup_sent:light_outing_checkin",
+                    )
+                    record_followup_outcome(
+                        item["id"],
+                        +0.1,
+                        "followup_sent:light_outing_checkin",
+                    )
+                    print(
+                        f"[FollowUp]: forced-light-send #{item['id']} "
+                        f"-> {item['subject']}"
+                    )
+                    continue
+
                 print(
                     f"[FollowUp]: skip #{item['id']} "
                     f"stage={decision.get('stage')} "
@@ -502,7 +589,10 @@ def job_check_pending_followups():
             if not msg:
                 continue
 
-            _send_and_record_assistant(msg, agent="FollowUp_Agent")
+            message_id = _send_and_record_assistant(msg, agent="FollowUp_Agent")
+            if not message_id:
+                print(f"[FollowUp]: send-failed #{item['id']} stage={decision.get('stage')}")
+                continue
             mark_followup_sent(
                 item["id"],
                 f"followup_sent:{decision.get('stage')}",
@@ -1086,7 +1176,10 @@ def _send_and_record_assistant(
 ):
     """Στέλνει assistant reply στο Telegram και το γράφει στο shared history."""
     message_id = send_telegram_msg(content)
-    _append_to_analytics_log("ai", content, agent=agent)
+    if message_id:
+        _append_to_analytics_log("ai", content, agent=agent)
+    else:
+        print(f"[TelegramSend]: outbound send failed for agent={agent}")
     return message_id
 
 

@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -372,10 +373,22 @@ def test_normalize_followup_delay_clamps_outing_window():
     assert pf.normalize_followup_delay("outing", 90, "") == 90
 
 
+def test_normalize_followup_delay_shortens_live_evening_outing():
+    evening = datetime(2030, 1, 1, 20, 0, 0)
+    assert pf.normalize_followup_delay("outing", 180, "πάω πάρκο να τους βρω τώρα", now=evening) == 60
+    assert pf.normalize_followup_delay("outing", 10, "φεύγω τώρα για πάρκο", now=evening) == 20
+
+
 def test_normalize_followup_delay_clamps_food_purchase_window():
     assert pf.normalize_followup_delay("food_purchase", 20, "θα τις κάνω το βράδυ") == 60
     assert pf.normalize_followup_delay("food_purchase", 500, "θα τις κάνω το βράδυ") == 240
     assert pf.normalize_followup_delay("food_purchase", 120, "θα τις κάνω το βράδυ") == 120
+
+
+def test_normalize_followup_delay_shortens_evening_food_followup():
+    evening = datetime(2030, 1, 1, 19, 30, 0)
+    assert pf.normalize_followup_delay("food_purchase", 180, "τις πήρα και θα τις κάνω το βράδυ", now=evening) == 120
+    assert pf.normalize_followup_delay("food_purchase", 20, "τις πήρα μόλις, θα τις κάνω απόψε", now=evening) == 30
 
 
 def test_maybe_create_followup_from_exchange_stores_raw_and_final_delay(temp_state_db, monkeypatch):
@@ -412,7 +425,7 @@ def test_maybe_create_followup_from_exchange_stores_raw_and_final_delay(temp_sta
 
     metadata = json.loads(row[0])
     assert metadata["delay_minutes_raw"] == 500
-    assert metadata["delay_minutes_final"] == 180
+    assert metadata["delay_minutes_final"] == 60
 
 
 def test_find_pending_followups_includes_debug_fields(temp_state_db):
@@ -491,18 +504,88 @@ def test_enqueue_followup_pipeline_skips_create_after_resolution_update(monkeypa
     monkeypatch.setattr(bot, "looks_like_followup_resolution_update", lambda text: True)
     monkeypatch.setattr(
         bot,
-        "maybe_create_followup_from_exchange",
+        "extract_followup_candidate_with_llm",
+        lambda user_text, ai_text, agent_name: {
+            "should_follow_up": True,
+            "topic": "food_purchase",
+            "subject": "brizoles laimou",
+            "delay_minutes": 90,
+            "confidence": 0.8,
+            "reason": "same arc",
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "get_recently_resolved_followups",
+        lambda limit=5, within_seconds=180: [
+            {
+                "topic": "food_purchase",
+                "subject": "brizoles laimou",
+                "arc_key": pf.build_followup_arc_key("food_purchase", "brizoles laimou"),
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "candidate_is_distinct_from_recently_resolved", lambda candidate, recent: False)
+    monkeypatch.setattr(
+        bot,
+        "create_pending_followup_from_candidate",
         lambda **kwargs: created.append(kwargs),
     )
 
     bot._enqueue_followup_pipeline(
-        "Ï„Î¹Ï‚ Ï€Î®ÏÎ± Ï„ÏŽÏÎ± ÎºÎ±Î¹ Ï†ÎµÏÎ³Ï‰",
-        "Ï‰ÏÎ±Î¯Î± Î¼Î¬ÏƒÏ„Î¿ÏÎ±",
+        "τις πήρα τώρα και φεύγω",
+        "ωραία μάστορα",
         "Chat_Agent",
         "telegram",
     )
 
     assert created == []
+
+
+def test_enqueue_followup_pipeline_allows_distinct_new_arc_after_resolution(monkeypatch):
+    created = []
+
+    monkeypatch.setattr(bot, "maybe_resolve_followups_from_user_message", lambda text: 1)
+    monkeypatch.setattr(bot, "looks_like_followup_resolution_update", lambda text: True)
+    monkeypatch.setattr(
+        bot,
+        "extract_followup_candidate_with_llm",
+        lambda user_text, ai_text, agent_name: {
+            "should_follow_up": True,
+            "topic": "outing",
+            "subject": "παρκο με οικογενεια",
+            "delay_minutes": 60,
+            "confidence": 0.82,
+            "reason": "new arc",
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "get_recently_resolved_followups",
+        lambda limit=5, within_seconds=180: [
+            {
+                "topic": "food_purchase",
+                "subject": "brizoles laimou",
+                "arc_key": pf.build_followup_arc_key("food_purchase", "brizoles laimou"),
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "candidate_is_distinct_from_recently_resolved", lambda candidate, recent: True)
+    monkeypatch.setattr(
+        bot,
+        "create_pending_followup_from_candidate",
+        lambda **kwargs: created.append(kwargs) or 77,
+    )
+
+    bot._enqueue_followup_pipeline(
+        "τις πήρα τώρα και πάω να τους βρω στο πάρκο",
+        "ωραία μάστορα",
+        "Chat_Agent",
+        "telegram",
+    )
+
+    assert len(created) == 1
+    assert created[0]["candidate"]["topic"] == "outing"
 
 
 def test_job_check_pending_followups_persists_sent_message(monkeypatch):
@@ -544,7 +627,7 @@ def test_job_check_pending_followups_persists_sent_message(monkeypatch):
     monkeypatch.setattr(
         bot,
         "_send_and_record_assistant",
-        lambda msg, chat_id=None, agent=None: sent.append((msg, agent)),
+        lambda msg, chat_id=None, agent=None: sent.append((msg, agent)) or 123,
     )
     monkeypatch.setattr(
         bot,
@@ -562,6 +645,190 @@ def test_job_check_pending_followups_persists_sent_message(monkeypatch):
     assert sent == [("κανε τις μπριζολες οπως τις σκεφτεσαι;", "FollowUp_Agent")]
     assert marked == [(9, "followup_sent:decision_pending")]
     assert outcomes == [(9, 0.2, "followup_sent:decision_pending")]
+
+
+def test_job_check_pending_followups_does_not_mark_sent_when_telegram_send_fails(monkeypatch):
+    marked = []
+    outcomes = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 10,
+                "topic": "food_purchase",
+                "subject": "brizoles laimou",
+                "source_user_text": "thymise mou na paro tis brizoles",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(bot, "has_recent_sent_followup", lambda within_minutes=90: False)
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup_for_arc",
+        lambda arc_key, within_minutes=240: False,
+    )
+    monkeypatch.setattr(bot, "_build_followup_state_snapshot", lambda: {})
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda item, recent_context, state_snapshot: {
+            "decision": "send",
+            "stage": "decision_pending",
+            "message": "κανε τις μπριζολες οπως τις σκεφτεσαι;",
+            "reason": "test",
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "_send_and_record_assistant",
+        lambda msg, chat_id=None, agent=None: None,
+    )
+    monkeypatch.setattr(
+        bot,
+        "mark_followup_sent",
+        lambda followup_id, reason=None: marked.append((followup_id, reason)),
+    )
+    monkeypatch.setattr(
+        bot,
+        "record_followup_outcome",
+        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert marked == []
+    assert outcomes == []
+
+
+def test_job_check_pending_followups_forces_light_outing_send_when_due(monkeypatch):
+    sent = []
+    marked = []
+    outcomes = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 11,
+                "topic": "outing",
+                "subject": "βόλτα στο πάρκο",
+                "source_user_text": "πάω πάρκο να τους βρω τώρα",
+                "source_ai_text": "ωραία",
+                "source_channel": "telegram",
+                "source_agent": "Chat_Agent",
+                "followup_after_ts": "2030-01-01T20:20:00",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(bot, "has_recent_sent_followup", lambda within_minutes=90: False)
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup_for_arc",
+        lambda arc_key, within_minutes=240: False,
+    )
+    monkeypatch.setattr(bot, "_build_followup_state_snapshot", lambda: {})
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda item, recent_context, state_snapshot: {
+            "decision": "skip",
+            "stage": "skip",
+            "message": "",
+            "reason": "too early",
+        },
+    )
+    monkeypatch.setattr(bot, "_should_force_light_outing_followup", lambda item: True)
+    monkeypatch.setattr(
+        bot,
+        "_send_and_record_assistant",
+        lambda msg, chat_id=None, agent=None: sent.append((msg, agent)) or 456,
+    )
+    monkeypatch.setattr(
+        bot,
+        "mark_followup_sent",
+        lambda followup_id, reason=None: marked.append((followup_id, reason)),
+    )
+    monkeypatch.setattr(
+        bot,
+        "record_followup_outcome",
+        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert sent == [("Τους βρήκες τελικά για βόλτα στο πάρκο;", "FollowUp_Agent")]
+    assert marked == [(11, "followup_sent:light_outing_checkin")]
+    assert outcomes == [(11, 0.1, "followup_sent:light_outing_checkin")]
+
+
+def test_job_check_pending_followups_does_not_skip_just_because_subject_is_in_recent_context(monkeypatch):
+    sent = []
+    marked = []
+    outcomes = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 12,
+                "topic": "outing",
+                "subject": "volta sto parko",
+                "source_user_text": "pao parko na tous vro",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        bot,
+        "_load_recent_proactive_context",
+        lambda limit=10: "Lazaros: pao parko na tous vro\nAssistant: egine, kali volta",
+    )
+    monkeypatch.setattr(bot, "has_recent_sent_followup", lambda within_minutes=90: False)
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup_for_arc",
+        lambda arc_key, within_minutes=240: False,
+    )
+    monkeypatch.setattr(bot, "_build_followup_state_snapshot", lambda: {})
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda item, recent_context, state_snapshot: {
+            "decision": "send",
+            "stage": "decision_pending",
+            "message": "Tous vrikes telika gia volta sto parko?",
+            "reason": "test",
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "_send_and_record_assistant",
+        lambda msg, chat_id=None, agent=None: sent.append((msg, agent)) or 789,
+    )
+    monkeypatch.setattr(
+        bot,
+        "mark_followup_sent",
+        lambda followup_id, reason=None: marked.append((followup_id, reason)),
+    )
+    monkeypatch.setattr(
+        bot,
+        "record_followup_outcome",
+        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert sent == [("Tous vrikes telika gia volta sto parko?", "FollowUp_Agent")]
+    assert marked == [(12, "followup_sent:decision_pending")]
+    assert outcomes == [(12, 0.2, "followup_sent:decision_pending")]
 
 
 def test_followup_safe_fallback_is_non_assumptive():
