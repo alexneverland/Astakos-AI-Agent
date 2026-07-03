@@ -526,3 +526,83 @@ def test_event_candidate_skips_ephemeral_immediate_plan():
     )
 
     assert candidate is None
+
+
+def test_slow_sifter_skips_recent_followup_resolution_reply(monkeypatch, tmp_path):
+    import sqlite3
+    from memory import session_memory as sm
+
+    state_db = tmp_path / "state.db"
+    monkeypatch.setattr(sm, "STATE_DB", str(state_db))
+
+    conn = sqlite3.connect(str(state_db))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pending_followups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_channel TEXT NOT NULL,
+                source_agent TEXT,
+                topic TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                source_user_text TEXT,
+                source_ai_text TEXT,
+                followup_after_ts TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                confidence REAL DEFAULT 0.0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                resolution_reason TEXT DEFAULT '',
+                metadata_json TEXT DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                sent_at TEXT,
+                resolved_at TEXT,
+                arc_key TEXT DEFAULT '',
+                last_decision TEXT DEFAULT '',
+                decision_reason TEXT DEFAULT '',
+                outcome_score REAL DEFAULT 0.0,
+                times_sent INTEGER DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO pending_followups (
+                source_channel, source_agent, topic, subject,
+                source_user_text, source_ai_text,
+                followup_after_ts, expires_at,
+                status, resolution_reason, resolved_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "telegram",
+                "FollowUp_Agent",
+                "outing",
+                "βόλτα στο πάρκο",
+                "Άφησα σπίτι τις μπριζόλες και πάω πάρκο να τους βρω",
+                "Τους βρήκες τελικά για βόλτα στο πάρκο;",
+                "2030-01-01T20:00:00",
+                "2030-01-02T20:00:00",
+                "resolved",
+                "resolved_by_user_message",
+                "2030-01-01T20:10:00",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    saved = []
+
+    monkeypatch.setattr(sm.memory, "save", lambda **kwargs: saved.append(kwargs))
+    monkeypatch.setattr(sm, "_memory_sifter_already_processed", lambda *_: False)
+    monkeypatch.setattr(sm, "_mark_memory_sifter_processed", lambda **_: None)
+
+    sm.run_memory_sifter_slow(
+        user_text="Ναι φίλε εδώ είμαστε στο πάρκο",
+        ai_text="Ωραία πράγματα, μάστορα!",
+        agent_name="Chat_Agent",
+        channel="telegram",
+        deterministic_seed_facts=[],
+    )
+
+    assert saved == []

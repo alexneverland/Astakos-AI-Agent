@@ -1639,6 +1639,91 @@ def _looks_like_operational_reminder_exchange(user_text: str, ai_text: str) -> b
     return user_has_reminder_request and ai_has_reminder_confirmation
 
 
+def _looks_like_recent_followup_resolution_reply(user_text: str, within_seconds: int = 300) -> bool:
+    text = _normalize_text(_strip_user_fact_scaffold(user_text))
+
+    if not text:
+        return False
+
+    if len(text.split()) > 18:
+        return False
+
+    resolution_markers = (
+        "τελικα",
+        "ήδη",
+        "ηδη",
+        "εδω ειμαστε",
+        "εδώ είμαστε",
+        "γυρισαμε",
+        "γυρίσαμε",
+        "βρηκα",
+        "βρήκα",
+        "τους βρηκα",
+        "τους βρήκα",
+        "πηγα",
+        "πήγα",
+        "παω",
+        "πάω",
+        "εφυγα",
+        "έφυγα",
+        "δεν εγινε",
+        "δεν έγινε",
+        "αυριο",
+        "αύριο",
+    )
+
+    if not any(marker in text for marker in resolution_markers):
+        return False
+
+    import sqlite3
+    from datetime import datetime, timedelta
+    conn = sqlite3.connect(STATE_DB)
+    try:
+        rows = conn.execute(
+            """
+            SELECT topic, subject, resolved_at, resolution_reason
+            FROM pending_followups
+            WHERE status='resolved'
+              AND resolved_at IS NOT NULL
+            ORDER BY resolved_at DESC, id DESC
+            LIMIT 5
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    cutoff = datetime.now() - timedelta(seconds=within_seconds)
+
+    for topic, subject, resolved_at, resolution_reason in rows:
+        try:
+            resolved_dt = datetime.fromisoformat(str(resolved_at).replace(" ", "T"))
+        except Exception:
+            continue
+
+        if resolved_dt < cutoff:
+            continue
+
+        subject_norm = _normalize_text(subject or "")
+        subject_tokens = [tok for tok in subject_norm.split() if len(tok) >= 4]
+
+        if any(tok in text for tok in subject_tokens):
+            return True
+
+        topic = str(topic or "").strip().lower()
+        reason = _normalize_text(resolution_reason or "")
+
+        if topic == "outing" and any(marker in text for marker in ("εδω ειμαστε", "εδώ είμαστε", "γυρισαμε", "γυρίσαμε", "βρηκα", "βρήκα", "παω", "πάω")):
+            return True
+
+        if topic == "food_purchase" and any(marker in text for marker in ("τις πηρα", "τις πήρα", "το πηρα", "το πήρα", "δεν πηρα", "δεν πήρα")):
+            return True
+
+        if "resolved_by_user_message" in reason:
+            return True
+
+    return False
+
+
 
 def _collect_deterministic_candidates(
     user_text: str,
@@ -1773,6 +1858,10 @@ def run_memory_sifter_slow(
 
     if _looks_like_operational_reminder_exchange(user_text, ai_text):
         print("\033[90m[MemorySifterSlow]: skip operational reminder exchange\033[0m")
+        return
+
+    if _looks_like_recent_followup_resolution_reply(user_text):
+        print("\033[90m[MemorySifterSlow]: skip recent followup-resolution reply\033[0m")
         return
     
     fingerprint = _memory_sifter_fingerprint(
