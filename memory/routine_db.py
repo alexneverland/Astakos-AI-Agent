@@ -600,6 +600,17 @@ COOLDOWN_DEFAULT_HOURS = 20.0
 COOLDOWN_MIN_HOURS     = 4.0
 COOLDOWN_MAX_HOURS     = 72.0
 
+def clamp_cooldown_hours(value) -> float:
+    """
+    Κανονικοποιεί οποιαδήποτε cooldown τιμή στα canonical όρια του συστήματος.
+    """
+    try:
+        cd = float(value)
+    except (TypeError, ValueError):
+        cd = COOLDOWN_DEFAULT_HOURS
+
+    return max(COOLDOWN_MIN_HOURS, min(COOLDOWN_MAX_HOURS, cd))
+
 
 def mark_routine_notified(routine_id: int):
     """TRIGGER_PENDING: routine ειδοποιήθηκε — αναμένει επιβεβαίωση."""
@@ -633,7 +644,8 @@ def mark_routine_ignored(routine_id: int):
     row = cursor.fetchone()
     if row:
         ignore_count = (row[0] or 0) + 1
-        new_cd       = min(COOLDOWN_MAX_HOURS, (row[1] or COOLDOWN_DEFAULT_HOURS) * 2)
+        current_cd = clamp_cooldown_hours(row[1] or COOLDOWN_DEFAULT_HOURS)
+        new_cd = clamp_cooldown_hours(current_cd * 2)
         with db_write_lock:
             cursor.execute(
                 "UPDATE routines SET ignore_count=?, notify_cooldown_hours=?, state='active', is_active=1 WHERE id=?",
@@ -660,7 +672,7 @@ def mark_routine_responded(routine_id: int):
                 is_active=1
             WHERE id=?
             """,
-            (COOLDOWN_DEFAULT_HOURS, routine_id)
+            (clamp_cooldown_hours(COOLDOWN_DEFAULT_HOURS), routine_id)
         )
         conn.commit()
     conn.close()
@@ -678,7 +690,9 @@ def get_routine_notify_info(routine_id: int) -> dict:
     if not row:
         return {"cooldown_hours": COOLDOWN_DEFAULT_HOURS, "last_notified_ts": None}
     return {
-        "cooldown_hours":   row[0] if row[0] is not None else COOLDOWN_DEFAULT_HOURS,
+        "cooldown_hours": clamp_cooldown_hours(
+            row[0] if row[0] is not None else COOLDOWN_DEFAULT_HOURS
+        ),
         "last_notified_ts": row[1],
     }
 

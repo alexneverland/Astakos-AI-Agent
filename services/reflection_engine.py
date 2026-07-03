@@ -18,13 +18,19 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
+from memory.routine_db import (
+    COOLDOWN_DEFAULT_HOURS,
+    COOLDOWN_MIN_HOURS,
+    COOLDOWN_MAX_HOURS,
+    clamp_cooldown_hours,
+)
+
 _BASE    = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(_BASE, "..", "astakos_routines.db")
 LOG_DIR  = os.path.join(_BASE, "..", "logs", "events")
 
 AUTO_APPLY_THRESHOLD = 0.75   # πάνω από αυτό → αυτόματη εφαρμογή
 ASK_THRESHOLD        = 0.50   # πάνω από αυτό → ρωτάει τον Λάζαρο
-COOLDOWN_MAX         = 168    # max cooldown ώρες (7 μέρες)
 REFLECTION_PENDING   = 0
 REFLECTION_APPLIED   = 1
 REFLECTION_REJECTED  = -1
@@ -404,7 +410,7 @@ def _apply_action(reflection: dict) -> bool:
         conn = sqlite3.connect(DB_PATH)
 
         if action == "increase_cooldown" and value:
-            new_cd = min(COOLDOWN_MAX, int(value))
+            new_cd = clamp_cooldown_hours(value)
             conn.execute(
                 "UPDATE routines SET notify_cooldown_hours=? WHERE id=?",
                 (new_cd, routine_id)
@@ -412,11 +418,19 @@ def _apply_action(reflection: dict) -> bool:
             print(f"🔧 [Reflection]: #{routine_id} cooldown → {new_cd}h")
 
         elif action == "reduce_frequency":
-            conn.execute(
-                "UPDATE routines SET notify_cooldown_hours=MIN(notify_cooldown_hours*2, ?) WHERE id=?",
-                (COOLDOWN_MAX, routine_id)
+            row = conn.execute(
+                "SELECT notify_cooldown_hours FROM routines WHERE id=?",
+                (routine_id,)
+            ).fetchone()
+            current_cd = clamp_cooldown_hours(
+                row[0] if row and row[0] is not None else COOLDOWN_DEFAULT_HOURS
             )
-            print(f"🔧 [Reflection]: #{routine_id} frequency reduced")
+            new_cd = clamp_cooldown_hours(current_cd * 2)
+            conn.execute(
+                "UPDATE routines SET notify_cooldown_hours=? WHERE id=?",
+                (new_cd, routine_id)
+            )
+            print(f"🔧 [Reflection]: #{routine_id} frequency reduced → cooldown {new_cd}h")
 
         elif action == "change_time" and value:
             # Sanitize: float 14.5 → "14:30", int/str "14" → "14:00"
