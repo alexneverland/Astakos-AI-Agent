@@ -288,6 +288,11 @@ def chat_agent_node(state: AgentState):
     # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=20)
     last_msg_text = clean_message(history[-1].content) if history else ""
+    latest_user_text = ""
+    for msg in reversed(history):
+        if getattr(msg, "type", "") == "human":
+            latest_user_text = clean_message(getattr(msg, "content", ""))
+            break
 
     analysis_match = re.search(r"\[ANALYSIS\]:\s*(.*)", last_msg_text)
     path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
@@ -434,6 +439,8 @@ def web_agent_node(state: AgentState):
         build_web_failure_reply,
         looks_like_terminal_linkedin_draft_result,
         build_linkedin_draft_ready_reply,
+        is_reply_to_recent_linkedin_prompt,
+        should_attach_linkedin_draft_reply,
     )
     from config import BASE_DIR, PHOTOS_DIR 
     import re
@@ -443,6 +450,11 @@ def web_agent_node(state: AgentState):
     # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=20)
     last_msg_text = clean_message(history[-1].content) if history else ""
+    latest_user_text = ""
+    for msg in reversed(history):
+        if getattr(msg, "type", "") == "human":
+            latest_user_text = clean_message(getattr(msg, "content", ""))
+            break
 
     path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
     image_part = None
@@ -470,7 +482,13 @@ def web_agent_node(state: AgentState):
         if looks_like_terminal_linkedin_draft_result(text)
     ]
 
-    if linkedin_terminal_results:
+    linkedin_prompt_active = is_reply_to_recent_linkedin_prompt(history)
+
+    if should_attach_linkedin_draft_reply(
+        latest_user_text or last_msg_text,
+        linkedin_terminal_results,
+        recent_linkedin_prompt_active=linkedin_prompt_active,
+    ):
         from langchain_core.messages import AIMessage as _AIMsg
         return {
             "messages": [_AIMsg(content=build_linkedin_draft_ready_reply(linkedin_terminal_results))],

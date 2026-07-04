@@ -1,4 +1,43 @@
+import json
+import math
 from datetime import datetime
+
+from config import GPS_STORAGE_FILE, HOME_COORDS, HOME_RADIUS_M
+
+
+def _recent_gps_status(now: datetime | None = None) -> str | None:
+    current = now or datetime.now()
+    try:
+        with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+
+    lat = data.get("lat")
+    lon = data.get("lon")
+    timestamp = data.get("timestamp")
+    if lat is None or lon is None or timestamp is None:
+        return None
+
+    try:
+        age_seconds = current.timestamp() - float(timestamp)
+    except Exception:
+        return None
+
+    if age_seconds < 0 or age_seconds > 4 * 60 * 60:
+        return None
+
+    def haversine(lat1, lon1, lat2, lon2):
+        radius_m = 6371000
+        p = math.pi / 180
+        a = (
+            math.sin((lat2 - lat1) * p / 2) ** 2
+            + math.cos(lat1 * p) * math.cos(lat2 * p) * math.sin((lon2 - lon1) * p / 2) ** 2
+        )
+        return 2 * radius_m * math.asin(math.sqrt(a))
+
+    dist_home = haversine(float(lat), float(lon), HOME_COORDS[0], HOME_COORDS[1])
+    return "home" if dist_home <= HOME_RADIUS_M else "away"
 
 def build_runtime_routine_context(now: datetime | None = None) -> dict:
     current = now or datetime.now()
@@ -144,7 +183,11 @@ def resolve_user_out_of_home(now: datetime | None = None) -> bool:
     if state_data:
         expires_at = state_data.get("expires_at")
         if not expires_at or expires_at >= today:
-            return str(state_data.get("value")).lower() == "true"
+            stored_value = str(state_data.get("value")).lower() == "true"
+            gps_status = _recent_gps_status(current)
+            if stored_value and gps_status == "home":
+                return False
+            return stored_value
     return False
 
 def resolve_quiet_hours(now: datetime | None = None) -> bool:

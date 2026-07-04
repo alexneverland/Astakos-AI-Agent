@@ -1743,7 +1743,7 @@ def handle_message(user_text: str, chat_id: str):
         )
 
         try:
-            send_telegram_msg(chat_id, final_ai_response)
+            send_telegram_msg(final_ai_response)
         except Exception:
             pass
 
@@ -1776,7 +1776,7 @@ def handle_message(user_text: str, chat_id: str):
             )
 
         try:
-            send_telegram_msg(chat_id, final_ai_response)
+            send_telegram_msg(final_ai_response)
         except Exception:
             pass
 
@@ -1825,8 +1825,12 @@ def handle_message(user_text: str, chat_id: str):
             is_ultra_light_ack,
             get_ultra_light_ack_response,
             is_reply_to_recent_mail_prompt,
+            is_reply_to_recent_linkedin_prompt,
             looks_like_terminal_linkedin_draft_result,
             build_linkedin_draft_ready_reply,
+            should_attach_linkedin_draft_reply,
+            looks_like_terminal_messenger_draft_result,
+            build_messenger_draft_ready_reply,
         )
         
         is_ultra_ack = is_ultra_light_ack(clean_user_text)
@@ -1934,12 +1938,20 @@ def handle_message(user_text: str, chat_id: str):
             if cleaned_response:
                 final_ai_response = cleaned_response
 
-        if any(looks_like_terminal_linkedin_draft_result(r) for r in tool_result_fallbacks):
+        linkedin_prompt_active = is_reply_to_recent_linkedin_prompt(context_msgs)
+        if should_attach_linkedin_draft_reply(
+            clean_user_text,
+            tool_result_fallbacks,
+            recent_linkedin_prompt_active=linkedin_prompt_active,
+        ):
             draft_msg = build_linkedin_draft_ready_reply(tool_result_fallbacks)
             if final_ai_response and draft_msg not in final_ai_response:
                 final_ai_response = final_ai_response + "\n\n" + draft_msg
             else:
                 final_ai_response = draft_msg
+
+        if any(looks_like_terminal_messenger_draft_result(r) for r in tool_result_fallbacks):
+            final_ai_response = build_messenger_draft_ready_reply(tool_result_fallbacks)
 
         if not final_ai_response:
             t_fallback_0 = perf_counter()

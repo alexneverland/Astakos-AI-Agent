@@ -1399,3 +1399,14 @@ def test_create_pending_followup_allows_same_topic_when_overlap_is_only_generic(
 
     rows = _fetch_all(temp_state_db)
     assert len(rows) == 2
+
+
+def test_maybe_create_followup_skips_mixed_messenger_send_exchange(temp_state_db):
+    result = pf.maybe_create_followup_from_exchange(
+        user_text="Στείλε το μήνυμα. Τώρα βγήκαμε βόλτα με τον Αλέξανδρο.",
+        ai_text="Έγινε, μάστορα.",
+        agent_name="Home_Agent",
+        channel="telegram",
+    )
+
+    assert result is None

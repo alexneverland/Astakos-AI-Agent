@@ -114,6 +114,28 @@ def test_build_runtime_routine_context_includes_user_out_of_home(monkeypatch):
 
     assert "user_out_of_home" in result
     assert result["user_out_of_home"] is True
+
+
+def test_resolve_user_out_of_home_prefers_recent_home_gps_over_stale_true_state(monkeypatch, tmp_path):
+    gps_file = tmp_path / "last_location.json"
+    gps_file.write_text(
+        '{"lat": 40.646558, "lon": 22.939036, "timestamp": 1783152000}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "memory.routine_db.get_context_state",
+        lambda key: {"value": "true", "expires_at": "2030-01-01", "updated_at": "2030-01-01T10:00:00"}
+        if key == "user_out_of_home"
+        else None,
+    )
+    monkeypatch.setattr(rc, "GPS_STORAGE_FILE", str(gps_file))
+
+    result = rc.resolve_user_out_of_home(datetime.fromtimestamp(1783152600))
+
+    assert result is False
+
+
 def test_apply_canonical_context_directives_updates_runtime_context(tmp_path, monkeypatch):
     import memory.routine_db as routine_db
     from services.routine_reconciler import apply_routine_reconciliation_directives
@@ -121,6 +143,7 @@ def test_apply_canonical_context_directives_updates_runtime_context(tmp_path, mo
 
     temp_db = tmp_path / "test_routines.db"
     monkeypatch.setattr(routine_db, "DB_PATH", str(temp_db))
+    monkeypatch.setattr(rc, "_recent_gps_status", lambda now=None: None)
     routine_db.setup_db()
 
     directives = [

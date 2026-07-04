@@ -837,14 +837,19 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             is_ultra_light_ack,
             get_ultra_light_ack_response,
             is_reply_to_recent_mail_prompt,
+            is_reply_to_recent_linkedin_prompt,
             looks_like_terminal_linkedin_draft_result,
             build_linkedin_draft_ready_reply,
+            should_attach_linkedin_draft_reply,
+            looks_like_terminal_messenger_draft_result,
+            build_messenger_draft_ready_reply,
         )
         
         is_ultra_ack = is_ultra_light_ack(isolated_user_input)
         tool_result_fallbacks = []
 
         mail_prompt_active = is_reply_to_recent_mail_prompt(context_msgs)
+        linkedin_prompt_active = is_reply_to_recent_linkedin_prompt(context_msgs)
 
         if is_ultra_ack and not mail_prompt_active:
             _trace.mark_phase("ultra_light_ack_used", 1)
@@ -886,12 +891,19 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         t_build_0 = perf_counter()
 
-        if any(looks_like_terminal_linkedin_draft_result(r) for r in tool_result_fallbacks):
+        if should_attach_linkedin_draft_reply(
+            isolated_user_input,
+            tool_result_fallbacks,
+            recent_linkedin_prompt_active=linkedin_prompt_active,
+        ):
             draft_msg = build_linkedin_draft_ready_reply(tool_result_fallbacks)
             if final_ai_response and draft_msg not in final_ai_response:
                 final_ai_response = final_ai_response + "\n\n" + draft_msg
             else:
                 final_ai_response = draft_msg
+
+        if any(looks_like_terminal_messenger_draft_result(r) for r in tool_result_fallbacks):
+            final_ai_response = build_messenger_draft_ready_reply(tool_result_fallbacks)
 
         if not final_ai_response:
             final_ai_response = _tool_results_fallback_response(isolated_user_input, tool_result_fallbacks)

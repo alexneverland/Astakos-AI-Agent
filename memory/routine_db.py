@@ -1058,6 +1058,40 @@ def find_routines_for_schedule_control(
 
 
 
+def get_routines_by_ids(routine_ids: list[int]) -> list[dict]:
+    if not routine_ids:
+        return []
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    placeholders = ",".join("?" for _ in routine_ids)
+    cursor.execute(
+        f"""
+        SELECT id, day_of_week, time_str, event_name, event_type, confidence, state
+        FROM routines
+        WHERE id IN ({placeholders})
+          AND state IN ('active', 'learned')
+        """,
+        tuple(int(x) for x in routine_ids),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "day": row[1],
+            "time": row[2],
+            "event": row[3],
+            "type": row[4],
+            "confidence": round(row[5], 2),
+            "state": row[6],
+        }
+        for row in rows
+    ]
+
+
 def find_routines_for_reconciliation(
     *,
     subject_tokens: list[str],

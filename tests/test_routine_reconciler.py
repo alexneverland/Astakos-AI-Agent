@@ -891,3 +891,17 @@ def test_family_outing_without_child_still_sets_user_out_of_home():
         and d.get("key") == "state:alexandros:outing"
         for d in directives
     )
+
+
+def test_family_outing_future_plan_does_not_set_user_out_of_home():
+    from services.routine_reconciler import _rule_family_outing_in_progress
+
+    now = datetime(2026, 7, 4, 9, 37)
+
+    directives = _rule_family_outing_in_progress(
+        normalized="θα παμε καμια βολτα θα δω τωρα θα τον ρωτησω παρκο βολτα κατω κεντρο",
+        dates=[],
+        now=now,
+    )
+
+    assert directives == []

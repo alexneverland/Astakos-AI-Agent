@@ -4,6 +4,9 @@ from core.utils import (
     build_web_failure_reply,
     looks_like_terminal_linkedin_draft_result,
     build_linkedin_draft_ready_reply,
+    should_attach_linkedin_draft_reply,
+    looks_like_terminal_messenger_draft_result,
+    build_messenger_draft_ready_reply,
 )
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 
@@ -190,3 +193,73 @@ def test_web_agent_node_short_circuits_after_linkedin_draft_success(monkeypatch)
 
     assert "LinkedIn" in reply
     assert "έγκριση" in reply
+
+
+def test_web_agent_node_does_not_short_circuit_linkedin_reply_for_messenger_request(monkeypatch):
+    from core.agents import web_agent_node
+
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="Έτοιμο το προσχέδιο για Messenger.")
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *a, **k: "test prompt", raising=False)
+
+    state = {
+        "messages": [
+            HumanMessage(content="Φτιάξε νέο Messenger draft για τη Σοφία. Μόνο Messenger μήνυμα, όχι LinkedIn post."),
+            AIMessage(content="", tool_calls=[{"name": "update_pending_linkedin_post", "args": {}, "id": "t1"}]),
+            ToolMessage(
+                tool_call_id="t1",
+                name="update_pending_linkedin_post",
+                content="SUCCESS: Το draft είναι έτοιμο και παρκαρισμένο. STOP calling tools and report to the user that the draft is ready for their approval."
+            ),
+        ],
+        "channel": "telegram",
+    }
+
+    result = web_agent_node(state)
+    reply = result["messages"][-1].content
+
+    assert "Messenger" in reply
+    assert "LinkedIn" not in reply
+
+
+def test_should_attach_linkedin_reply_skips_messenger_turn():
+    tool_results = [
+        "SUCCESS: draft ready and parked. STOP calling tools and report to the user that the draft is ready for approval."
+    ]
+    assert should_attach_linkedin_draft_reply(
+        "Messenger μηνύματα για τη Σοφία ετοίμασε όχι linkedin",
+        tool_results,
+        recent_linkedin_prompt_active=False,
+    ) is False
+
+
+def test_should_attach_linkedin_reply_allows_short_confirm_with_recent_context():
+    tool_results = [
+        "SUCCESS: draft ready and parked. STOP calling tools and report to the user that the draft is ready for approval."
+    ]
+    assert should_attach_linkedin_draft_reply(
+        "Στείλε",
+        tool_results,
+        recent_linkedin_prompt_active=True,
+    ) is True
+
+
+def test_messenger_terminal_result_detection():
+    text = "✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: Καλημέρα αγάπη μου"
+    assert looks_like_terminal_messenger_draft_result(text) is True
+
+
+def test_messenger_terminal_reply_builder():
+    reply = build_messenger_draft_ready_reply([
+        "✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: Καλημέρα αγάπη μου"
+    ])
+    assert "Το αποθήκευσα." in reply
+    assert "να το στείλω" in reply
+    assert "Καλημέρα αγάπη μου" in reply

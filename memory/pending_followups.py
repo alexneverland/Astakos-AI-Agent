@@ -1036,6 +1036,101 @@ def expire_old_followups(now_iso: str):
         record_followup_outcome(fid, -0.5, "ttl_expired")
 
 
+def reanchor_pending_followups_to_target_windows(limit: int = 50) -> int:
+    ensure_pending_followups_table()
+    now = _local_now()
+    now_iso = now.isoformat(timespec="seconds")
+
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, topic, source_user_text, followup_after_ts, metadata_json
+            FROM pending_followups
+            WHERE status='pending'
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+        updated = 0
+
+        for row in rows:
+            followup_id = int(row[0])
+            topic = str(row[1] or "")
+            source_user_text = str(row[2] or "")
+            current_followup_after_ts = str(row[3] or "")
+
+            try:
+                metadata = json.loads(row[4] or "{}")
+            except Exception:
+                metadata = {}
+
+            target_window = str(metadata.get("target_window") or "").strip()
+            if not target_window:
+                continue
+
+            raw_delay = int(metadata.get("delay_minutes_raw") or 0)
+            expected_delay = normalize_followup_delay(
+                topic=topic,
+                suggested_minutes=raw_delay,
+                source_user_text=source_user_text,
+                target_window=target_window,
+                now=now,
+            )
+
+            expected_followup_dt = now + timedelta(minutes=expected_delay)
+            expected_followup_iso = expected_followup_dt.isoformat(timespec="seconds")
+
+            try:
+                current_dt = _coerce_local_dt(datetime.fromisoformat(current_followup_after_ts))
+            except Exception:
+                current_dt = None
+
+            if current_dt is not None:
+                diff_minutes = abs(int((expected_followup_dt - current_dt).total_seconds() / 60))
+                if diff_minutes <= 20:
+                    continue
+
+            ttl_hours = _compute_followup_ttl_hours(
+                expected_delay,
+                target_window=target_window,
+                topic=topic,
+            )
+            expires_dt = expected_followup_dt + timedelta(hours=ttl_hours)
+
+            metadata["delay_minutes_final"] = expected_delay
+            metadata["ttl_hours"] = ttl_hours
+            metadata["target_window"] = target_window
+
+            conn.execute(
+                """
+                UPDATE pending_followups
+                SET followup_after_ts=?,
+                    expires_at=?,
+                    metadata_json=?,
+                    last_decision=?,
+                    decision_reason=?
+                WHERE id=?
+                """,
+                (
+                    expected_followup_iso,
+                    expires_dt.isoformat(timespec="seconds"),
+                    json.dumps(metadata, ensure_ascii=False),
+                    "reanchored",
+                    f"reanchored_to:{target_window}",
+                    followup_id,
+                ),
+            )
+            updated += 1
+
+        conn.commit()
+        return updated
+    finally:
+        conn.close()
+
+
 def find_pending_followups(limit: int = 20) -> list[dict]:
     ensure_pending_followups_table()
     conn = _conn()
@@ -1289,6 +1384,83 @@ def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name
         return None
 
 
+def looks_like_messenger_draft_exchange(user_text: str, ai_text: str = "") -> bool:
+    text = _normalize_match_text(f"{user_text} {ai_text}")
+    if not text:
+        return False
+
+    try:
+        from services.messenger_intent import classify_messenger_intent
+        from core.messenger_draft import has_active_draft
+
+        intent = classify_messenger_intent(
+            user_text,
+            has_active_draft=has_active_draft(),
+        )
+        if intent.intent in {"create_draft", "confirm_send", "clarify_draft", "clear_draft"}:
+            return True
+    except Exception:
+        pass
+
+    operational_markers = (
+        "draft",
+        "προσχεδιο",
+        "μηνυμα",
+        "messenger",
+        "στειλε το μηνυμα",
+        "στειλε.",
+        "στειλε ",
+        "στειλτο",
+        "να το στειλω",
+        "θελεις αλλαγες",
+        "δεν βρεθηκε προσχεδιο",
+        "το draft καθαριστηκε",
+        "σταλθηκε μαστορα",
+    )
+    return any(marker in text for marker in operational_markers)
+
+
+def looks_like_negative_plan_update(user_text: str) -> bool:
+    text = _normalize_match_text(user_text)
+    if not text:
+        return False
+
+    negative_markers = (
+        "δεν θα",
+        "δε θα",
+        "οχι σημερα",
+        "δεν εγινε",
+        "ακυρω",
+        "μετατιθε",
+        "αργοτερα",
+        "αυριο",
+    )
+    future_context_markers = (
+        "θα ",
+        "σημερα",
+        "αυριο",
+        "μετα",
+        "αργοτερα",
+        "παμε",
+        "γινει",
+        "κανουμε",
+    )
+    completion_markers = (
+        "το εκανα",
+        "πηγα",
+        "πηρα",
+        "γυρισα",
+        "βρηκα",
+        "σταλθηκε",
+    )
+
+    has_negative = any(marker in text for marker in negative_markers)
+    has_future_context = any(marker in text for marker in future_context_markers)
+    has_completion = any(marker in text for marker in completion_markers)
+
+    return has_negative and has_future_context and not has_completion
+
+
 def maybe_create_followup_from_exchange(
     *,
     user_text: str,
@@ -1298,6 +1470,12 @@ def maybe_create_followup_from_exchange(
 ):
     clean_user = str(user_text or "").strip()
     clean_ai = str(ai_text or "").strip()
+
+    if looks_like_messenger_draft_exchange(clean_user, clean_ai):
+        return None
+
+    if looks_like_negative_plan_update(clean_user):
+        return None
 
     if not clean_user:
         return None

@@ -87,14 +87,15 @@ def classify_messenger_intent(text: str, has_active_draft: bool = False) -> Mess
     if _has_any(normalized, _DRAFT_CLARIFY_PATTERNS):
         return MessengerIntentResult("clarify_draft", 0.96, ["clarify_phrase"])
 
-    if has_active_draft and _has_any(normalized, _DRAFT_CONFIRM_PATTERNS):
-        return MessengerIntentResult("confirm_send", 0.95, ["confirm_phrase", "active_draft"])
-
     has_create = _has_any(normalized, _DRAFT_CREATE_PATTERNS)
     has_message_shape = ("μηνυμα" in normalized or "draft" in normalized or "προσχεδιο" in normalized)
 
     if has_create and has_message_shape:
         return MessengerIntentResult("create_draft", 0.90, ["draft_create_phrase"])
+
+    word_count = len(normalized.split())
+    if has_active_draft and word_count <= 4 and _has_any(normalized, _DRAFT_CONFIRM_PATTERNS):
+        return MessengerIntentResult("confirm_send", 0.95, ["confirm_phrase", "active_draft", "short_confirm"])
 
     if normalized in _GENERAL_SHORT:
         return MessengerIntentResult("general_chat", 0.85, ["short_chat"])

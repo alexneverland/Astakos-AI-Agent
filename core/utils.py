@@ -9,6 +9,7 @@ import re
 import json
 import os
 import threading
+import unicodedata
 from datetime import datetime
 from typing import Annotated
 from typing_extensions import TypedDict, NotRequired
@@ -195,6 +196,137 @@ def is_reply_to_recent_mail_prompt(messages: list, limit: int = 4) -> bool:
         if checked >= limit:
             break
     return False
+
+
+def _normalize_intent_text(text: str) -> str:
+    raw = clean_message(text).strip().lower()
+    raw = unicodedata.normalize("NFD", raw)
+    return "".join(ch for ch in raw if not unicodedata.combining(ch))
+
+
+def looks_like_linkedin_request(text: str) -> bool:
+    normalized = _normalize_intent_text(text)
+    if not normalized:
+        return False
+    positive_markers = (
+        "linkedin",
+        "post",
+        "αναρτηση",
+        "δημοσιευ",
+        "publish",
+        "postαρισ",
+        "draft του linkedin",
+    )
+    return any(marker in normalized for marker in positive_markers)
+
+
+def looks_like_messenger_request(text: str) -> bool:
+    normalized = _normalize_intent_text(text)
+    if not normalized:
+        return False
+    positive_markers = (
+        "messenger",
+        "σοφια",
+        "sofia",
+        "μηνυμα",
+        "draft",
+        "προσχεδιο",
+        "στειλε το μηνυμα",
+    )
+    return any(marker in normalized for marker in positive_markers)
+
+
+def is_reply_to_recent_linkedin_prompt(messages: list, limit: int = 4) -> bool:
+    linkedin_markers = (
+        "draft του linkedin",
+        "draft του linkedin",
+        "το draft του linkedin ειναι ετοιμο",
+        "να το δειχνω η το δημοσιευω",
+        "να το δειξω η το δημοσιευω",
+        "publish",
+        "linkedin",
+    )
+
+    checked = 0
+    for msg in reversed(messages):
+        if getattr(msg, "type", "") != "ai":
+            continue
+        content = _normalize_intent_text(getattr(msg, "content", ""))
+        if not content:
+            continue
+        checked += 1
+        if any(marker in content for marker in linkedin_markers):
+            return True
+        if checked >= limit:
+            break
+    return False
+
+
+def should_attach_linkedin_draft_reply(
+    user_text: str,
+    tool_results: list[str],
+    *,
+    recent_linkedin_prompt_active: bool = False,
+) -> bool:
+    if not any(looks_like_terminal_linkedin_draft_result(r) for r in tool_results):
+        return False
+
+    normalized_user = _normalize_intent_text(user_text)
+    linkedin_explicitly_rejected = any(
+        marker in normalized_user
+        for marker in ("οχι linkedin", "oxi linkedin", "not linkedin")
+    )
+
+    if linkedin_explicitly_rejected:
+        return False
+
+    if looks_like_messenger_request(user_text) and not looks_like_linkedin_request(user_text):
+        return False
+
+    return recent_linkedin_prompt_active or looks_like_linkedin_request(user_text)
+
+
+def _normalize_tool_text(text: str) -> str:
+    raw = clean_message(text).strip().lower()
+    raw = unicodedata.normalize("NFD", raw)
+    return "".join(ch for ch in raw if not unicodedata.combining(ch))
+
+
+def looks_like_terminal_messenger_draft_result(text: str) -> bool:
+    content = _normalize_tool_text(text)
+    return content.startswith("✅ draft αποθηκευτηκε.") or content.startswith("draft αποθηκευτηκε.")
+
+
+def build_messenger_draft_ready_reply(tool_results: list[str]) -> str:
+    draft_message = ""
+    for raw in tool_results:
+        text = clean_message(raw).strip()
+        if not looks_like_terminal_messenger_draft_result(text):
+            continue
+        draft_message_lines = []
+        in_message = False
+        for line in text.splitlines():
+            if not in_message and line.lower().startswith("message:"):
+                in_message = True
+                first_line = line.split(":", 1)[1].strip()
+                if first_line:
+                    draft_message_lines.append(first_line)
+            elif in_message:
+                if line.lower().startswith("image:"):
+                    break
+                draft_message_lines.append(line)
+        if draft_message_lines:
+            draft_message = "\n".join(draft_message_lines)
+            break
+
+    if draft_message:
+        return (
+            f"Έτοιμο το προσχέδιο, μάστορα:\n\n"
+            f"«{draft_message}»\n\n"
+            f"Το αποθήκευσα. Θέλεις αλλαγές ή να το στείλω;"
+        )
+
+    return "Το αποθήκευσα. Θέλεις αλλαγές ή να το στείλω;"
 
 
 def is_medium_web_chat_path_candidate(user_text: str) -> bool:
