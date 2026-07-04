@@ -899,7 +899,21 @@ def test_family_outing_future_plan_does_not_set_user_out_of_home():
     now = datetime(2026, 7, 4, 9, 37)
 
     directives = _rule_family_outing_in_progress(
-        normalized="θα παμε καμια βολτα θα δω τωρα θα τον ρωτησω παρκο βολτα κατω κεντρο",
+        normalized="θα παμε καμια βολτα θα δω θα τον ρωτησω παρκο βολτα κατω κεντρο",
+        dates=[],
+        now=now,
+    )
+
+    assert directives == []
+
+
+def test_family_outing_future_plan_with_unrelated_live_clause_does_not_set_outing():
+    from services.routine_reconciler import _rule_family_outing_in_progress
+
+    now = datetime(2026, 7, 4, 9, 37)
+
+    directives = _rule_family_outing_in_progress(
+        normalized="ο αλεξανδρος ειναι σπιτι ακομα αλλα θα παμε μετα παρκο",
         dates=[],
         now=now,
     )

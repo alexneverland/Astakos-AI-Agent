@@ -447,6 +447,53 @@ def test_find_pending_followups_includes_debug_fields(temp_state_db):
     assert "due_in_minutes" in row
 
 
+def test_find_pending_followups_active_only_hides_resolved(temp_state_db):
+    pending_id = pf.create_pending_followup(
+        source_channel="web",
+        source_agent="Home_Agent",
+        topic="food_purchase",
+        subject="brizoles laimou",
+        source_user_text="thymise mou na paro tis brizoles",
+        source_ai_text="egine",
+        followup_after_ts="2030-01-01T19:00:00",
+        confidence=0.82,
+        metadata={"delay_minutes_raw": 180, "delay_minutes_final": 180},
+    )
+    resolved_id = pf.create_pending_followup(
+        source_channel="web",
+        source_agent="Home_Agent",
+        topic="outing",
+        subject="volta sto parko",
+        source_user_text="pao parko",
+        source_ai_text="ok",
+        followup_after_ts="2030-01-01T20:00:00",
+        confidence=0.70,
+        metadata={"delay_minutes_raw": 60, "delay_minutes_final": 60},
+    )
+    pf.resolve_followup(resolved_id, "resolved_by_recent_user_message")
+
+    active_rows = pf.find_pending_followups(limit=10, active_only=True)
+    all_rows = pf.find_pending_followups(limit=10, active_only=False)
+
+    active_ids = {row["id"] for row in active_rows}
+    all_ids = {row["id"] for row in all_rows}
+
+    assert pending_id in active_ids
+    assert resolved_id not in active_ids
+    assert resolved_id in all_ids
+
+
+def test_maybe_create_followup_from_exchange_skips_linkedin_post_flow(temp_state_db):
+    followup_id = pf.maybe_create_followup_from_exchange(
+        user_text="φτιάξε ένα linkedin post για αυτο",
+        ai_text="Ορίστε το LinkedIn post που ετοίμασα.",
+        agent_name="Web_Agent",
+        channel="web",
+    )
+
+    assert followup_id is None
+
+
 def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypatch):
     sent = []
     marked = []

@@ -1131,11 +1131,12 @@ def reanchor_pending_followups_to_target_windows(limit: int = 50) -> int:
         conn.close()
 
 
-def find_pending_followups(limit: int = 20) -> list[dict]:
+def find_pending_followups(limit: int = 20, *, active_only: bool = True) -> list[dict]:
     ensure_pending_followups_table()
     conn = _conn()
     try:
-        rows = conn.execute(
+        where_sql = "WHERE status IN ('pending', 'sent')" if active_only else ""
+        query = (
             """
             SELECT
                 id,
@@ -1155,9 +1156,15 @@ def find_pending_followups(limit: int = 20) -> list[dict]:
                 metadata_json,
                 arc_key
             FROM pending_followups
+            """
+            + where_sql
+            + """
             ORDER BY id DESC
             LIMIT ?
-            """,
+            """
+        )
+        rows = conn.execute(
+            query,
             (limit,),
         ).fetchall()
         from datetime import datetime
@@ -1420,6 +1427,38 @@ def looks_like_messenger_draft_exchange(user_text: str, ai_text: str = "") -> bo
     return any(marker in text for marker in operational_markers)
 
 
+def looks_like_linkedin_post_exchange(user_text: str, ai_text: str = "") -> bool:
+    text = _normalize_match_text(f"{user_text} {ai_text}")
+    if not text:
+        return False
+
+    try:
+        from core.utils import (
+            looks_like_linkedin_request,
+            looks_like_terminal_linkedin_draft_result,
+        )
+
+        if looks_like_linkedin_request(user_text):
+            return True
+        if looks_like_terminal_linkedin_draft_result(ai_text):
+            return True
+    except Exception:
+        pass
+
+    operational_markers = (
+        "linkedin",
+        "αναρτηση",
+        "post",
+        "publish",
+        "draft του linkedin",
+        "linkedin post",
+        "post για το linkedin",
+        "το linkedin post που ετοιμασα",
+        "οριστε το linkedin post",
+    )
+    return any(marker in text for marker in operational_markers)
+
+
 def looks_like_negative_plan_update(user_text: str) -> bool:
     text = _normalize_match_text(user_text)
     if not text:
@@ -1472,6 +1511,9 @@ def maybe_create_followup_from_exchange(
     clean_ai = str(ai_text or "").strip()
 
     if looks_like_messenger_draft_exchange(clean_user, clean_ai):
+        return None
+
+    if looks_like_linkedin_post_exchange(clean_user, clean_ai):
         return None
 
     if looks_like_negative_plan_update(clean_user):

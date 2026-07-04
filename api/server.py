@@ -1700,7 +1700,7 @@ async def debug_runtime(_=Depends(require_token)):
             "non_active":      cooldown_info,
         },
         "pending_confirmations": pending_from_db,
-        "pending_followups": find_pending_followups(limit=20),
+        "pending_followups": find_pending_followups(limit=20, active_only=True),
         "pending_actions":       pending_actions,
         "events_1h": {
             "throughput":  throughput,

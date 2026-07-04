@@ -43,6 +43,52 @@ _NOT_TOGETHER_TOKENS    = [
     "χωρισ",
 ]
 
+
+_FUTURE_INTENT_TOKENS = [
+    "θα ",
+    "να ",
+    "αν ",
+    "ισως",
+    "μπορει",
+    "λέω να",
+    "λεω να",
+    "σκεφτομαι να",
+]
+
+_PRESENT_LIVE_TOKENS = [
+    "ειμαι",
+    "ειμαστε",
+    "βρισκομαι",
+    "βρισκομαστε",
+    "φτασαμε",
+    "ηρθαμε",
+    "πηγαμε",
+    "βγηκαμε",
+    "ηδη",
+]
+
+_PAST_REFERENCE_TOKENS = [
+    "χθες",
+    "χτεσ",
+    "πριν",
+    "το βραδυ",
+    "περασα",
+    "περασαμε",
+    "ηταν",
+    "θυμηθηκα",
+]
+
+_DRAFT_CONTEXT_TOKENS = [
+    "messenger",
+    "linkedin",
+    "draft",
+    "προσχεδιο",
+    "μηνυμα",
+    "γραψε",
+    "φτιαξε",
+    "ετοιμασε",
+]
+
 # ── Exclude tokens ───────────────────────────────────────────────────────────
 _ROUTINE_EXCLUDE_TOKENS = ["messenger", "μηνυμα"]
 _MESSENGER_EXCLUDE      = ["σχολει", "ποδοσφαιρ", "μπασκετ", "κατασκην"]
@@ -95,6 +141,17 @@ def _normalize(text: str) -> str:
 
 def _contains_any(text: str, tokens: list[str]) -> bool:
     return any(tok in text for tok in tokens)
+
+def _has_future_intent_without_live_presence(normalized: str) -> bool:
+    has_future = _contains_any(normalized, _FUTURE_INTENT_TOKENS)
+    has_live = _contains_any(normalized, _PRESENT_LIVE_TOKENS)
+    return has_future and not has_live
+
+def _is_draft_or_past_reference_context(normalized: str) -> bool:
+    return _contains_any(normalized, _DRAFT_CONTEXT_TOKENS) or _contains_any(normalized, _PAST_REFERENCE_TOKENS)
+
+def _looks_like_live_presence_statement(normalized: str) -> bool:
+    return _contains_any(normalized, _PRESENT_LIVE_TOKENS) and not _contains_any(normalized, _PAST_REFERENCE_TOKENS)
 
 
 def _extract_iso_dates(text: str) -> list[str]:
@@ -414,6 +471,9 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
 
     has_outing = _contains_any(normalized, _OUTING_TOKENS)
     has_progress = _contains_any(normalized, _OUTING_PROGRESS_TOKENS)
+
+    if _has_future_intent_without_live_presence(normalized):
+        return []
 
     # Generic outing signal for user/family being out of home
     if not (has_outing and has_progress):
@@ -846,6 +906,10 @@ def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> l
     has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
     has_together = _contains_any(normalized, _TOGETHER_TOKENS)
 
+    if has_sofia and has_together:
+        if _is_draft_or_past_reference_context(normalized) and not _looks_like_live_presence_statement(normalized):
+            return []
+
     group_outing_tokens = [
         "ηρθαμε", "ήρθαμε", "πηγαμε", "πήγαμε", "ειμαστε", "είμαστε",
         "ολοι", "όλοι", "οικογενειακ", "μαζι", "μαζί",
@@ -858,7 +922,7 @@ def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> l
     if has_sofia and has_together:
         pass
     # Softer path: group outing wording can reinforce an already-active Sofia context
-    elif has_group_outing and _sofia_state_is_active(now):
+    elif has_group_outing and _sofia_state_is_active(now) and _looks_like_live_presence_statement(normalized):
         pass
     else:
         return []
