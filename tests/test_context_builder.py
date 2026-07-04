@@ -698,3 +698,23 @@ def test_reminder_request_skips_semantic():
     )
 
     assert result == "reminder_request"
+
+def test_classify_memory_query_intent_action_command():
+    import memory.context_builder as cb
+    result = cb.classify_memory_query_intent('άνοιξε τα φώτα')
+    assert result == 'action_command'
+
+def test_classify_memory_query_intent_weather():
+    import memory.context_builder as cb
+    result = cb.classify_memory_query_intent('τι καιρο θα κανει αυριο;')
+    assert result == 'weather_or_utility'
+
+def test_classify_memory_query_intent_nostalgia():
+    import memory.context_builder as cb
+    result = cb.classify_memory_query_intent('τι καναμε περυσι το καλοκαιρι;')
+    assert result == 'nostalgia_query'
+
+def test_classify_memory_query_intent_explicit_storage():
+    import memory.context_builder as cb
+    result = cb.classify_memory_query_intent('να θυμασαι οτι ο λαζαρος αλλαξε σχολειο')
+    assert result == 'explicit_memory_storage'

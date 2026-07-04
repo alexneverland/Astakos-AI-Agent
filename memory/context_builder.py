@@ -465,6 +465,79 @@ def looks_like_reminder_or_task_request(text: str) -> bool:
 
 
 
+def looks_like_action_command(text: str) -> bool:
+    clean = _normalize_text(text)
+    if not clean:
+        return False
+    
+    action_starts = (
+        "ανοιξε",
+        "κλεισε",
+        "βαλε",
+        "στειλε",
+        "παγωσε",
+        "ξεπαγωσε",
+        "ρυθμισε",
+        "θυμισε",
+        "υπενθυμισε",
+        "υπενθυμιση",
+        "ξεκινα",
+        "σταματα",
+    )
+    return clean.startswith(action_starts)
+
+
+def looks_like_weather_utility_query(text: str) -> bool:
+    clean = _normalize_text(text)
+    if not clean:
+        return False
+    
+    utility_markers = (
+        "τι καιρο",
+        "καιρος",
+        "μεταφρασε",
+        "ποσο κανει",
+        "συνταγη για",
+    )
+    return any(marker in clean for marker in utility_markers)
+
+
+def looks_like_nostalgia_query(text: str) -> bool:
+    clean = _normalize_text(text)
+    if not clean:
+        return False
+        
+    nostalgia_markers = (
+        "περυσι",
+        "παλια",
+        "θυμασαι οταν",
+        "θυμασαι που",
+        "εκεινο το καλοκαιρι",
+        "περασαμε",
+        "διακοπες στο",
+        "διακοπες στην",
+        "τι καναμε",
+        "που πηγαμε",
+    )
+    return any(marker in clean for marker in nostalgia_markers)
+
+
+def looks_like_explicit_memory_storage(text: str) -> bool:
+    clean = _normalize_text(text)
+    if not clean:
+        return False
+        
+    storage_markers = (
+        "να θυμασαι",
+        "σημειωσε",
+        "κρατα",
+        "κρατησε",
+        "μην ξεχασεις",
+        "αποθηκευσε",
+    )
+    return any(marker in clean for marker in storage_markers)
+
+
 def _looks_low_complexity_query(query: str) -> bool:
     if not query:
         return True
@@ -527,6 +600,18 @@ def classify_memory_query_intent(
 
     if looks_like_news_or_web_fact_query(clean):
         return "news_opening"
+
+    if looks_like_explicit_memory_storage(clean):
+        return "explicit_memory_storage"
+
+    if looks_like_action_command(clean):
+        return "action_command"
+
+    if looks_like_weather_utility_query(clean):
+        return "weather_or_utility"
+
+    if looks_like_nostalgia_query(clean):
+        return "nostalgia_query"
 
     if has_recent_web_results and looks_like_web_followup_query(clean):
         return "web_followup"
@@ -870,6 +955,18 @@ def build_memory_context(
         elif query_intent == "news_opening":
             effective_semantic_k = 0
             semantic_adjust_reason = "news_or_web_fact_skip"
+        elif query_intent == "explicit_memory_storage":
+            effective_semantic_k = 0
+            semantic_adjust_reason = "explicit_memory_storage_skip"
+        elif query_intent == "action_command":
+            effective_semantic_k = 0
+            semantic_adjust_reason = "action_command_skip"
+        elif query_intent == "weather_or_utility":
+            effective_semantic_k = 0
+            semantic_adjust_reason = "weather_or_utility_skip"
+        elif query_intent == "nostalgia_query":
+            effective_semantic_k = max(semantic_k, 12)
+            semantic_adjust_reason = "nostalgia_query_boost"
         elif query_intent == "web_followup":
             effective_semantic_k = min(semantic_k, 2)
             semantic_adjust_reason = "recent_web_context_downshift"
