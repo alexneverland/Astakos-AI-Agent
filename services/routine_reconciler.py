@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 
 # ── Subject tokens ───────────────────────────────────────────────────────────
-_ALEXANDROS_TOKENS      = ["αλεξανδρ"]
+_ALEXANDROS_TOKENS      = ["αλεξανδρ", "μικρ", "παιδι"]
 _SOFIA_TOKENS           = ["σοφια"]
 
 # ── Activity / event tokens ──────────────────────────────────────────────────
@@ -463,11 +463,7 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
       - suppress park-like child routines while outing is in progress
       - suppress home-only routines (e.g. cooking) while user is out of home
     """
-    has_child = (
-        _contains_any(normalized, _ALEXANDROS_TOKENS)
-        or "παιδι" in normalized
-        or "μικρ" in normalized
-    )
+    has_child = _contains_any(normalized, _ALEXANDROS_TOKENS)
 
     has_outing = _contains_any(normalized, _OUTING_TOKENS)
     has_progress = _contains_any(normalized, _OUTING_PROGRESS_TOKENS)
@@ -560,7 +556,9 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
       - state:alexandros:outing = done (for the rest of today)
     Only applies if there is already an active outing/out-of-home context.
     """
-    if not _contains_any(normalized, _HOME_RETURN_TOKENS):
+    has_home = "σπιτι" in normalized
+    has_presence = _contains_any(normalized, _PRESENT_LIVE_TOKENS + _RETURN_TOKENS + ["εφτασα", "ηρθα", "μπηκα"])
+    if not (has_home and has_presence):
         return []
 
     from memory.routine_db import get_context_state
@@ -590,7 +588,7 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
             "until_date": None,
             "reason": "returned_home_from_outing",
             "subject_tokens": [],
-            "include_tokens": [],
+            "include_tokens": ["σπιτι", "γυρισα", "ηρθα", "μπηκα", "επιστρεψα", "πισω", "ειμαστε", "εφτασα"],
             "exclude_tokens": [],
         }
     ]
@@ -603,7 +601,7 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
                 "value": "done",
                 "until_date": until,
                 "reason": "returned_home_from_outing",
-                "subject_tokens": _ALEXANDROS_TOKENS,
+                "subject_tokens": _ALEXANDROS_TOKENS + ["ολοι", "εμεις", "μας", "γυρισαμε", "ηρθαμε", "επιστρεψαμε", "ειμαστε", "εφτασαμε"],
                 "include_tokens": _OUTING_TOKENS,
                 "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
             }
@@ -680,11 +678,7 @@ def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list
     """
     has_school_break = _contains_any(normalized, _SCHOOL_BREAK_TOKENS)
     has_school_ref   = _contains_any(normalized, _SCHOOL_TOKENS)
-    has_child_ref    = (
-        _contains_any(normalized, _ALEXANDROS_TOKENS)
-        or "παιδι" in normalized
-        or "μικρ" in normalized
-    )
+    has_child_ref    = _contains_any(normalized, _ALEXANDROS_TOKENS)
     if not (has_school_ref and has_child_ref and has_school_break):
         return []
     until = None
@@ -830,7 +824,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
             "until_date": until,
             "reason": f"shift_{shift_val}_week",
             "subject_tokens": [],
-            "include_tokens": _WORK_TOKENS,
+            "include_tokens": _WORK_TOKENS + ["αναχωρηση"] + _SHIFT_PM_TOKENS + _SHIFT_AM_TOKENS,
             "exclude_tokens": [],
         }
         directives.append(d_state)
@@ -1120,7 +1114,7 @@ def score_candidate_directive(
     has_activity = bool(include_tokens) and any(tok in normalized_fact for tok in include_tokens)
     has_scope    = bool(until_date)
     # State = any word indicating a change of state / event in life
-    has_state    = _contains_any(
+    has_state    = (matched_rule_name == "llm_extracted") or _contains_any(
         normalized_fact,
         _SUMMER_BREAK_TOKENS + _ABSENCE_TOKENS + _RETURN_TOKENS
         + _STOP_TOKENS + _CAMP_TOKENS + _WORK_TOKENS + _WEEK_TOKENS,
@@ -1194,8 +1188,12 @@ def score_candidate_directive(
     has_alex  = _contains_any(normalized_fact, _ALEXANDROS_TOKENS)
     has_sofia = _contains_any(normalized_fact, _SOFIA_TOKENS)
     if has_alex and has_sofia:
-        score += _P_MULTI_PERSON
-        _append_flag(ambiguity_flags, "multiple_people")
+        # Χαλαρώνουμε το πέναλτι αν το κείμενο δείχνει ξεκάθαρα ότι δρουν μαζί
+        if _contains_any(normalized_fact, ["μαζι", "ολοι", "παρεα", "μας"]):
+            _append_signal(signals, "multiple_people_together")
+        else:
+            score += _P_MULTI_PERSON
+            _append_flag(ambiguity_flags, "multiple_people")
 
     final_score = _clamp_score(score)
 
@@ -1294,7 +1292,7 @@ def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
     """
     has_sleep = "κοιμαται" in normalized or "υπνο" in normalized
     has_quiet = "ησυχια" in normalized or "σιγα" in normalized
-    has_child = _contains_any(normalized, _ALEXANDROS_TOKENS) or "μικρ" in normalized or "παιδι" in normalized
+    has_child = _contains_any(normalized, _ALEXANDROS_TOKENS)
     
     if not ((has_sleep and has_child) or has_quiet):
         return []
@@ -1309,7 +1307,7 @@ def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
         "until_date": until,
         "reason": "quiet_hours_requested",
         "subject_tokens": _ALEXANDROS_TOKENS if has_child else [],
-        "include_tokens": ["ησυχια", "υπνο", "κοιμαται"],
+        "include_tokens": ["ησυχια", "υπνο", "κοιμαται", "σιγα"],
         "exclude_tokens": [],
     }
     return [d_state]
@@ -1395,6 +1393,8 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
         subject_tokens = _ALEXANDROS_TOKENS
     elif "σοφ" in entity or "sofia" in entity:
         subject_tokens = _SOFIA_TOKENS
+    elif entity in {"family", "οικογενεια", "εμεις", "user", "εγω", "null", "none", ""}:
+        subject_tokens = []
     else:
         subject_tokens = [entity]
 
@@ -1532,13 +1532,32 @@ def _infer_llm_reconciliation_candidates(
     try:
         from core.brain import llm
         from langchain_core.messages import HumanMessage
+        from memory.routine_db import get_context_states
     except Exception:
         return []
 
     today = now.strftime("%Y-%m-%d")
+    
+    # Fetch active contexts to give the LLM situational awareness
+    active_contexts = []
+    try:
+        states = get_context_states(list(_CANONICAL_CONTEXT_KEYS))
+        for k, v in states.items():
+            val = v.get("value")
+            until = v.get("expires_at")
+            if val is not None:
+                ctx_str = f"- {k}: {val}"
+                if until:
+                    ctx_str += f" (έως {until})"
+                active_contexts.append(ctx_str)
+    except Exception:
+        pass
+        
+    context_section = "\nΕνεργές Καταστάσεις (Context Flags) αυτή τη στιγμή:\n" + "\n".join(active_contexts) + "\nΛάβετες υπόψη για να καταλάβεις καλύτερα το νόημα.\n" if active_contexts else ""
 
     prompt = f"""
 Είσαι extractor για routine reconciliation.
+{context_section}
 
 Σήμερα είναι {today}.
 

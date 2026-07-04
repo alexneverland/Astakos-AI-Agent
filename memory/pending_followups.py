@@ -16,6 +16,11 @@ def _local_now() -> datetime:
     return datetime.now(FOLLOWUP_LOCAL_TZ)
 
 
+def _apply_quiet_hours(target: datetime) -> datetime:
+    if 0 <= target.hour < 8:
+        return target.replace(hour=8, minute=30, second=0, microsecond=0)
+    return target
+
 def _coerce_local_dt(dt: Optional[datetime] = None) -> datetime:
     dt = dt or _local_now()
     if dt.tzinfo is None:
@@ -306,10 +311,10 @@ def _next_occurrence_for_window(now: datetime, target_window: str, fallback_dela
         if target <= now:
             target = target + timedelta(days=1)
             target = _apply_weekend_window_adjustment(target)
-        return target
+        return _apply_quiet_hours(target)
 
     if target_window == "same_day_short_checkin":
-        return now + timedelta(minutes=min(fallback_delay_minutes, 90))
+        return _apply_quiet_hours(now + timedelta(minutes=min(fallback_delay_minutes, 90)))
     if target_window == "same_day_evening":
         return _today_or_tomorrow(19, 30)
     if target_window == "next_day_morning":
@@ -321,11 +326,11 @@ def _next_occurrence_for_window(now: datetime, target_window: str, fallback_dela
     if target_window == "next_day_evening":
         return _today_or_tomorrow(19, 30)
     if target_window == "after_likely_completion":
-        return now + timedelta(minutes=min(max(fallback_delay_minutes, 60), 300))
+        return _apply_quiet_hours(now + timedelta(minutes=min(max(fallback_delay_minutes, 60), 300)))
     if target_window == "explicit_timer":
-        return now + timedelta(minutes=fallback_delay_minutes)
+        return _apply_quiet_hours(now + timedelta(minutes=fallback_delay_minutes))
 
-    return now + timedelta(minutes=min(max(fallback_delay_minutes, 60), 300))
+    return _apply_quiet_hours(now + timedelta(minutes=min(max(fallback_delay_minutes, 60), 300)))
 
 
 def normalize_followup_delay(
@@ -1520,6 +1525,14 @@ def maybe_create_followup_from_exchange(
         return None
 
     if not clean_user:
+        return None
+
+    # Skip followups if the exchange is just tool output or routine system messages
+    if "routine" in agent_name.lower():
+        return None
+    if "σύστημα:" in clean_user.lower() or "[system]" in clean_user.lower():
+        return None
+    if "αποτέλεσμα εργαλείου" in clean_user.lower() or "αποτέλεσμα ρουτίνας" in clean_user.lower():
         return None
 
     low_user = clean_user.lower()
