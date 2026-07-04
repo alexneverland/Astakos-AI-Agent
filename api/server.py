@@ -132,7 +132,13 @@ class WsLogger:
 from core.graph import build_graph as _build_graph
 app_graph = _build_graph()
 
-def append_to_chat_history(role: str, content: str, agent: str | None = None):
+def append_to_chat_history(
+    role: str,
+    content: str,
+    agent: str | None = None,
+    *,
+    return_saved: bool = False,
+):
     """Προσθήκη μηνύματος στο shared SQLite conversation history (web channel) και websocket push."""
     now = datetime.now()
     shared_message_id = None
@@ -161,6 +167,8 @@ def append_to_chat_history(role: str, content: str, agent: str | None = None):
         })
     except Exception as e:
         print(f"[ConversationHistory/web]: Σφάλμα shared write: {e}")
+    if return_saved:
+        return {"id": shared_message_id, "rowid": shared_message_rowid}
     return shared_message_id
 
 
@@ -761,7 +769,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     # ── Αποθήκευση user message στο history ────────────────────
     # Note: We save the original `user_input` to the UI chat history, 
     # not the XML-wrapped version, to keep the frontend looking clean.
-    current_history_id = append_to_chat_history("user", user_input)
+    current_history_saved = append_to_chat_history("user", user_input, return_saved=True)
+    current_history_id = current_history_saved.get("id")
+    current_history_rowid = current_history_saved.get("rowid")
 
     final_ai_response = ""
     handling_agent    = "Chat_Agent"
@@ -896,11 +906,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             tool_result_fallbacks,
             recent_linkedin_prompt_active=linkedin_prompt_active,
         ):
-            draft_msg = build_linkedin_draft_ready_reply(tool_result_fallbacks)
-            if final_ai_response and draft_msg not in final_ai_response:
-                final_ai_response = final_ai_response + "\n\n" + draft_msg
-            else:
-                final_ai_response = draft_msg
+            final_ai_response = build_linkedin_draft_ready_reply(tool_result_fallbacks)
 
         if any(looks_like_terminal_messenger_draft_result(r) for r in tool_result_fallbacks):
             final_ai_response = build_messenger_draft_ready_reply(tool_result_fallbacks)
@@ -964,7 +970,13 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             clean_ai = strip_operational_assistant_paragraphs(clean_ai).strip() or clean_ai
             _trace.finalize(response=clean_ai)
             
-            append_to_chat_history("assistant", clean_ai, agent=handling_agent)
+            assistant_history_saved = append_to_chat_history(
+                "assistant",
+                clean_ai,
+                agent=handling_agent,
+                return_saved=True,
+            )
+            assistant_history_rowid = assistant_history_saved.get("rowid")
             
             t_bg_0 = perf_counter()
             enqueue_fast_task(log_exchange,                      clean_user, clean_ai, handling_agent, "web")
@@ -979,6 +991,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         return JSONResponse({
             "agent":    handling_agent,
             "response": clean_ai,  # Επιστρέφουμε την απάντηση στο Frontend
+            "user_rowid": current_history_rowid,
+            "assistant_rowid": assistant_history_rowid if final_ai_response else None,
         })
 
     except Exception as e:

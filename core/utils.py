@@ -895,30 +895,89 @@ def build_web_failure_reply(user_text: str, tool_results: list) -> str:
     kind = 'νούμερο/στοιχείο' if is_qty else 'πληροφορία'
     return f'Μάστορα, προσπάθησα να το επιβεβαιώσω από web sources, αλλά αυτή τη στιγμή δεν πήρα αξιόπιστο αποτέλεσμα από τα εργαλεία μου, οπότε δεν θέλω να σου πω {kind} στον αέρα. Αν θέλεις, δώσε μου συγκεκριμένο link ή το ξαναπιάνουμε αργότερα.'
 
+def parse_linkedin_draft_result(text: str) -> dict | None:
+    content = clean_message(text).strip()
+    if not content:
+        return None
+
+    if content.startswith("SUCCESS_JSON:"):
+        raw = content[len("SUCCESS_JSON:"):].strip()
+        import json
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return None
+        if isinstance(data, dict) and data.get("kind") == "linkedin_draft_saved":
+            return data
+        return None
+
+    # legacy fallback
+    legacy = content.lower()
+    if legacy.startswith("success:") and "draft" in legacy and "approval" in legacy:
+        return {
+            "status": "success",
+            "kind": "linkedin_draft_saved",
+            "draft_text": "",
+            "photo_path": "",
+        }
+
+    return None
+
 def looks_like_terminal_linkedin_draft_result(text: str) -> bool:
     """Return True when a LinkedIn draft tool already finished successfully and the turn should stop."""
-    content = clean_message(text).strip().lower()
-    if not content or not content.startswith("success:"):
-        return False
-    return "draft" in content and "approval" in content
+    return parse_linkedin_draft_result(text) is not None
 
 def build_linkedin_draft_ready_reply(tool_results: list[str]) -> str:
     """Build a clean user-facing confirmation after the LinkedIn draft is already parked."""
-    photo_attached = False
+    import os
+    import json
+    draft_text = ""
+    photo_path = ""
+
     for raw in tool_results:
-        text = clean_message(raw).strip().lower()
-        if not text or looks_like_terminal_linkedin_draft_result(text):
+        parsed = parse_linkedin_draft_result(raw)
+        if not parsed:
             continue
-        if "[send_photo:" in text or "image_path" in text or "photo_path" in text:
-            photo_attached = True
+        draft_text = str(parsed.get("draft_text") or "").strip()
+        photo_path = str(parsed.get("photo_path") or "").strip()
+        if draft_text or photo_path:
+            break
 
-    if photo_attached:
-        return (
-            "Έγινε, μάστορα. Το draft του LinkedIn είναι έτοιμο και το έχω παρκαρισμένο "
-            "μαζί με την εικόνα για έγκριση. Αν θες, στο δείχνω ή το δημοσιεύω μόλις μου πεις."
-        )
+    # fallback από το linkedin_draft.json αν το tool result είναι legacy
+    if not draft_text:
+        try:
+            from config import LINKEDIN_DRAFT_FILE
+            if os.path.exists(LINKEDIN_DRAFT_FILE):
+                with open(LINKEDIN_DRAFT_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                draft_text = str(data.get("content") or data.get("text") or "").strip()
+                if not photo_path:
+                    photo_path = str(data.get("image_path") or "").strip()
+        except Exception:
+            pass
 
-    return (
-        "Έγινε, μάστορα. Το draft του LinkedIn είναι έτοιμο και παρκαρισμένο για έγκριση. "
-        "Αν θες, στο δείχνω ή το δημοσιεύω μόλις μου πεις."
-    )
+    lines = ["Ορίστε το LinkedIn post που ετοίμασα:"]
+
+    if draft_text:
+        lines.extend([
+            "",
+            "***",
+            "",
+            draft_text,
+            "",
+            "***",
+        ])
+
+    if photo_path:
+        lines.extend([
+            "",
+            "Εικόνα που ετοίμασα:",
+            f"[CREATED_FILE: {photo_path}]",
+        ])
+
+    lines.extend([
+        "",
+        "Το αποθήκευσα. Θέλεις αλλαγές ή να το ανεβάσω;",
+    ])
+
+    return "\n".join(lines)

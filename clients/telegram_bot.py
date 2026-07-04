@@ -1284,6 +1284,34 @@ def _tool_results_fallback_response(user_text: str, tool_results: list[str]) -> 
     return "Βρήκα αυτά τα σχετικά στοιχεία, αλλά δεν μπόρεσα να τα συνθέσω καθαρά:\n\n" + joined_results[:1800]
 
 
+def _build_web_approval_result_message(tool_name: str, execution_result) -> str:
+    """Build a deterministic Web UI reply after Telegram approval of a web-origin tool."""
+    from core.utils import (
+        clean_message,
+        looks_like_terminal_messenger_draft_result,
+        build_messenger_draft_ready_reply,
+        looks_like_terminal_linkedin_draft_result,
+        build_linkedin_draft_ready_reply,
+    )
+
+    if tool_name == "execute_local_pipeline":
+        return "Στάλθηκε, μάστορα."
+
+    raw = clean_message(str(execution_result or "")).strip()
+    if not raw:
+        return "Έγινε, μάστορα."
+
+    tool_results = [raw]
+
+    if any(looks_like_terminal_messenger_draft_result(r) for r in tool_results):
+        return build_messenger_draft_ready_reply(tool_results)
+
+    if any(looks_like_terminal_linkedin_draft_result(r) for r in tool_results):
+        return build_linkedin_draft_ready_reply(tool_results)
+
+    return _tool_results_fallback_response(tool_name, tool_results)
+
+
 def _load_shared_context_messages(channel: str) -> list:
     """Φορτώνει μικτό shared context. Αν αποτύχει, ο caller κάνει fallback στο legacy history."""
     try:
@@ -1944,11 +1972,7 @@ def handle_message(user_text: str, chat_id: str):
             tool_result_fallbacks,
             recent_linkedin_prompt_active=linkedin_prompt_active,
         ):
-            draft_msg = build_linkedin_draft_ready_reply(tool_result_fallbacks)
-            if final_ai_response and draft_msg not in final_ai_response:
-                final_ai_response = final_ai_response + "\n\n" + draft_msg
-            else:
-                final_ai_response = draft_msg
+            final_ai_response = build_linkedin_draft_ready_reply(tool_result_fallbacks)
 
         if any(looks_like_terminal_messenger_draft_result(r) for r in tool_result_fallbacks):
             final_ai_response = build_messenger_draft_ready_reply(tool_result_fallbacks)
@@ -2215,34 +2239,16 @@ def _handle_approval_callback(cq: dict):
                 if execution["ok"]:
                     send_telegram_msg(f"✅ Το `{tool_name}` εκτελέστηκε.\nΗ απάντηση θα σταλεί στο Web UI.")
                     
-                    def _resume_web():
-                        try:
-                            from api.server import append_to_chat_history
-                            from core.brain import llm, safe_llm_invoke
-                            from langchain_core.messages import HumanMessage
-                            from core.utils import clean_message
-                            import datetime
+                    try:
+                        from api.server import append_to_chat_history
 
-                            prompt = (
-                                f"Το εργαλείο `{tool_name}` εγκρίθηκε από τον χρήστη μέσω Telegram "
-                                f"και εκτελέστηκε επιτυχώς.\n\n"
-                                f"Αποτέλεσμα εργαλείου:\n{execution['result']}\n\n"
-                                f"Γράψε τη φυσική τελική απάντηση που πρέπει να δει ο χρήστης στο Web UI, "
-                                f"στα Ελληνικά, χωρίς να λες εσωτερικά τεχνικά πράγματα."
-                            )
-
-                            response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
-                            final_resp = clean_message(getattr(response, "content", "")).strip()
-
-                            if not final_resp:
-                                final_resp = clean_message(str(execution["result"])).strip()
-
-                            append_to_chat_history("assistant", final_resp, agent="Web_Agent")
-                        except Exception as e:
-                            print(f"[ApprovalCallback Web Resume Error]: {e}")
-
-                    import threading
-                    threading.Thread(target=_resume_web, daemon=True).start()
+                        final_resp = _build_web_approval_result_message(
+                            tool_name,
+                            execution.get("result"),
+                        )
+                        append_to_chat_history("assistant", final_resp, agent="Web_Agent")
+                    except Exception as e:
+                        print(f"[ApprovalCallback Web Resume Error]: {e}")
 
                 elif execution["status"] == "tool_not_found":
                     send_telegram_msg(f"❌ Tool `{tool_name}` δεν βρέθηκε (Web flow).")

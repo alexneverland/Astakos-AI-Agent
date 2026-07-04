@@ -25,7 +25,11 @@ def test_update_pending_linkedin_post_uses_configured_draft_file(monkeypatch, tm
     )
 
     data = json.loads(draft_file.read_text(encoding="utf-8"))
-    assert "έτοιμο" in result or "draft" in result.lower()
+    assert result.startswith("SUCCESS_JSON:")
+    payload = json.loads(result[len("SUCCESS_JSON:"):])
+    assert payload["kind"] == "linkedin_draft_saved"
+    assert payload["draft_text"] == "hello linkedin"
+    assert payload["photo_path"] == "outputs/photo.png"
     assert data["text"] == "hello linkedin"
     assert data["content"] == "hello linkedin"
     assert data["image_path"] == "outputs/photo.png"

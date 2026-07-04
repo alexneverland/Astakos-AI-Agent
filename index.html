@@ -966,6 +966,14 @@
         return msg?.rowid || msg?.id || null;
     }
 
+    function markRenderedRowId(rowid) {
+        const stableId = Number(rowid) || rowid;
+        if (stableId) {
+            renderedHistoryRowIds.add(stableId);
+            if (Number(stableId) > lastKnownMsgId) lastKnownMsgId = Number(stableId);
+        }
+    }
+
     function normalizeEchoText(text) {
         return String(text || "")
             .replace(/<br\s*\/?>/gi, "\n")
@@ -1081,6 +1089,7 @@
             if (!res.ok) return;
             const data = await res.json();
             if (data.messages && data.messages.length > 0) {
+                data.messages.sort((a, b) => (Number(a.rowid) || 0) - (Number(b.rowid) || 0));
                 data.messages.forEach(renderHistoryMsg);
             }
             if (data.max_id && data.max_id > lastKnownMsgId) lastKnownMsgId = data.max_id;
@@ -1093,6 +1102,7 @@
             const response = await fetch('http://127.0.0.1:8000/history');
             const data = await response.json();
             if (data.history && data.history.length > 0) {
+                data.history.sort((a, b) => (Number(a.rowid) || 0) - (Number(b.rowid) || 0));
                 data.history.forEach(msg => renderHistoryMsg(msg));
                 const historyMaxRowId = Math.max(0, ...data.history.map(msg => Number(msg.rowid) || 0));
                 if (historyMaxRowId > lastKnownMsgId) lastKnownMsgId = historyMaxRowId;
@@ -1218,6 +1228,8 @@
                 });
                 const data = await response.json();
                 chatBox.removeChild(loadingDiv);
+                markRenderedRowId(data.user_rowid);
+                markRenderedRowId(data.assistant_rowid);
                 appendAssistantResponseOnce(data.response, data.agent);
                 if (isDrawerOpen) speakText(data.response);
             }
