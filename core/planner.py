@@ -10,9 +10,6 @@ import re
 from datetime import datetime
 from langchain_core.messages import HumanMessage, AIMessage
 
-# Path του pending plan file (project root)
-_PLANNER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PLAN_PENDING_PATH = os.path.join(_PLANNER_DIR, "plan_pending.json")
 
 # Λέξεις επιβεβαίωσης / ακύρωσης
 _CONFIRM_WORDS = {
@@ -77,16 +74,11 @@ GOAL: {goal}
         plan_text += f"{t['step']}. {t['description']}\n"
     plan_text += f"\n▶️ Ξεκινάω; (ναι / όχι)"
 
-    # Αποθηκεύουμε το plan σε pending file — θα το φορτώσει ο pre_check_node
+    # Αποθηκεύουμε το plan στο SQLite state db — θα το φορτώσει ο pre_check_node
     try:
-        pending = {
-            "goal": goal,
-            "tasks": tasks,
-            "created_at": datetime.now().isoformat(),
-        }
-        with open(PLAN_PENDING_PATH, "w", encoding="utf-8") as f:
-            json.dump(pending, f, ensure_ascii=False, indent=2)
-        print(f"\033[95m[Planner]: Plan saved to pending — αναμένω επιβεβαίωση\033[0m")
+        from memory.pending_plans import save_pending_plan
+        save_pending_plan(goal, tasks)
+        print(f"\033[95m[Planner]: Plan saved to SQLite pending_plans — αναμένω επιβεβαίωση\033[0m")
     except Exception as e:
         print(f"\033[91m[Planner]: Error saving pending plan: {e}\033[0m")
 
@@ -253,15 +245,16 @@ def pre_check_node(state):
     # Κανονικοποίηση: αφαίρεση περιττών σημείων στίξης
     last_msg_norm = last_msg.rstrip("!.;").strip()
 
-    if not os.path.exists(PLAN_PENDING_PATH):
+    from memory.pending_plans import get_pending_plan, clear_pending_plan
+
+    pending = get_pending_plan()
+    if not pending:
         return {}
 
     # ── Επιβεβαίωση ──────────────────────────────────────────────
     if last_msg in _CONFIRM_WORDS or last_msg_norm in _CONFIRM_WORDS:
         try:
-            with open(PLAN_PENDING_PATH, "r", encoding="utf-8") as f:
-                pending = json.load(f)
-            os.remove(PLAN_PENDING_PATH)
+            clear_pending_plan()
             print(f"\033[95m[PreCheck]: ✅ Plan επιβεβαιώθηκε — {len(pending['tasks'])} βήματα\033[0m")
             return {
                 "plan_tasks":                  pending["tasks"],
@@ -278,7 +271,7 @@ def pre_check_node(state):
     # ── Ακύρωση ──────────────────────────────────────────────────
     elif last_msg in _CANCEL_WORDS or last_msg_norm in _CANCEL_WORDS:
         try:
-            os.remove(PLAN_PENDING_PATH)
+            clear_pending_plan()
         except Exception:
             pass
         print(f"\033[95m[PreCheck]: ❌ Plan ακυρώθηκε από τον χρήστη\033[0m")
@@ -289,7 +282,7 @@ def pre_check_node(state):
 
     # ── Άλλο μήνυμα ενώ υπάρχει pending → stale, σβήσε ─────────
     try:
-        os.remove(PLAN_PENDING_PATH)
+        clear_pending_plan()
         print(f"\033[90m[PreCheck]: Stale pending plan removed\033[0m")
     except Exception:
         pass
