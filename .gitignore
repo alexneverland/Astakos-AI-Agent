@@ -71,3 +71,4 @@ Desktop.ini
 .calendar_briefing_sent
 tmp/
 .pytest_tmp*/
+!data/routine_tokens.json

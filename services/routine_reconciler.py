@@ -3,124 +3,20 @@ import json
 from datetime import datetime, timedelta
 
 
-# ── Subject tokens ───────────────────────────────────────────────────────────
-_ALEXANDROS_TOKENS      = ["αλεξανδρ", "μικρ", "παιδι"]
-_SOFIA_TOKENS           = ["σοφια"]
+# ── Configuration Loader ─────────────────────────────────────────────────────
+import os
+import json
+import sys
 
-# ── Activity / event tokens ──────────────────────────────────────────────────
-_FOOTBALL_TOKENS        = ["ποδοσφαιρο", "προπονηση", "μπαλα"]
-_BASKETBALL_TOKENS      = ["μπασκετ", "μπασκεμπολ"]
-_CHILD_ACTIVITY_TOKENS  = _FOOTBALL_TOKENS + _BASKETBALL_TOKENS + ["δραστηριοτητ", "τμημα", "μαθημα"]
-_SUMMER_BREAK_TOKENS    = ["καλοκαιρ", "σταματ", "ξαναρχ", "σεπτεμβρ"]
-_CAMP_TOKENS            = ["κατασκην", "camp"]
-_SCHOOL_TOKENS          = ["σχολει", "σχολικ"]
-_SCHOOL_BREAK_TOKENS    = ["δεν εχει σχολει", "τελειωσε το σχολει", "διακοπ", "καλοκαιρ"]
-_MORNING_TOKENS         = ["πρωι", "πρωιν", "ξυπνημ", "ετοιμασι"]
-_GRANDMA_TOKENS         = ["γιαγια"]
-_TRIP_TOKENS            = ["διακοπ", "ταξιδ", "εκδρομ"]
-
-# ── State / action tokens ────────────────────────────────────────────────────
-_ABSENCE_TOKENS         = ["λειπει", "εφυγε", "δεν ειναι εδω", "απουσιαζει"]
-_RETURN_TOKENS          = ["επιστρεφ", "γυρισ", "επεστρεψ", "ηρθε πισω", "ξαναγυρ"]
-_STOP_TOKENS            = ["σταματ", "δεν εχει", "δεν παει", "δεν θα παει", "τελειωσ"]
-_SHIFT_PM_TOKENS        = ["απογευμα", "βραδυ", "βραδιν"]
-_SHIFT_AM_TOKENS        = ["πρωι", "πρωιν"]
-_WORK_TOKENS            = ["δουλει", "δουλευ", "βαρδι", "σεφτ"]
-_WEEK_TOKENS            = ["εβδομαδ", "αυτη την εβδομαδ", "αυτη εβδομαδ"]
-_TOGETHER_TOKENS        = [
-    "μαζι",
-    "ειμαι με",
-    "ειμαστε με",
-    "ειμαστε μαζι",
-    "ολοι μαζι",
-    "παρεα με",
-]
-_NOT_TOGETHER_TOKENS    = [
-    "δεν ειμαι με",
-    "δεν ειμαστε μαζι",
-    "δεν ειμαστε πια μαζι",
-    "δεν ειμαι πια με",
-    "χωρισ",
-]
-
-
-_FUTURE_INTENT_TOKENS = [
-    "θα ",
-    "να ",
-    "αν ",
-    "ισως",
-    "μπορει",
-    "λέω να",
-    "λεω να",
-    "σκεφτομαι να",
-]
-
-_PRESENT_LIVE_TOKENS = [
-    "ειμαι",
-    "ειμαστε",
-    "βρισκομαι",
-    "βρισκομαστε",
-    "φτασαμε",
-    "ηρθαμε",
-    "πηγαμε",
-    "βγηκαμε",
-    "ηδη",
-]
-
-_PAST_REFERENCE_TOKENS = [
-    "χθες",
-    "χτεσ",
-    "πριν",
-    "το βραδυ",
-    "περασα",
-    "περασαμε",
-    "ηταν",
-    "θυμηθηκα",
-]
-
-_DRAFT_CONTEXT_TOKENS = [
-    "messenger",
-    "linkedin",
-    "draft",
-    "προσχεδιο",
-    "μηνυμα",
-    "γραψε",
-    "φτιαξε",
-    "ετοιμασε",
-]
-
-# ── Exclude tokens ───────────────────────────────────────────────────────────
-_ROUTINE_EXCLUDE_TOKENS = ["messenger", "μηνυμα"]
-_MESSENGER_EXCLUDE      = ["σχολει", "ποδοσφαιρ", "μπασκετ", "κατασκην"]
-
-# ── Work-routine conflict targets ────────────────────────────────────────────
-_WORK_DEPARTURE_TOKENS  = ["αναχωρησ", "φευγ", "δουλεια", "δουλειαν"]
-_SLEEP_TOKENS           = ["υπνο", "κοιμ", "νυχτ"]
-_LUNCH_TOKENS           = ["μεσημερ", "φαγητ", "γευμ"]
-
-_OUTING_TOKENS = [
-    "πισιν", "μπανι", "θαλασσ", "παραλι", "εκδρομ",
-    "πικνικ", "βολτα", "παιδικ", "κουνι", "παιχνιδ",
-    "εξω", "club",
-]
-
-_OUTING_PROGRESS_TOKENS = [
-    "ειμαστε", "πηγαμε", "παμε", "φτασαμε", "αραζ",
-    "κατσαμε", "ειμαι με", "ολοι μαζι",
-]
-
-_HOME_RETURN_TOKENS = [
-    "γυρισαμε σπιτι", "γυρισαμε σπιτι", "ειμαστε σπιτι",
-    "ηρθαμε σπιτι", "επιστρεψαμε σπιτι", "πισω σπιτι",
-]
-
-_OUTING_ROUTINE_TOKENS = [
-    "παρκο", "βολτα", "παιχνιδ", "κουνι", "παιδικ",
-]
-
-_HOME_ONLY_ROUTINE_TOKENS = [
-    "μαγειρ", "φαγητ", "γευμα", "μεσημεριαν", "κουζιν",
-]
+_TOKENS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'routine_tokens.json')
+try:
+    with open(_TOKENS_PATH, 'r', encoding='utf-8') as f:
+        _tokens_data = json.load(f)
+        for _k, _v in _tokens_data.items():
+            globals()[_k] = _v
+except Exception as e:
+    print(f"Error loading routine tokens from {_TOKENS_PATH}: {e}")
+    sys.exit(1)
 
 # ── Scoring thresholds [Phase 3B] ────────────────────────────────────────────
 _AUTO_APPLY_THRESHOLD = 0.80   # score >= this → auto-apply
