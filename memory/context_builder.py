@@ -473,22 +473,34 @@ def looks_like_action_command(text: str) -> bool:
     clean = _normalize_text(text)
     if not clean:
         return False
-    
-    action_starts = (
-        "ανοιξε",
-        "κλεισε",
-        "βαλε",
-        "στειλε",
-        "παγωσε",
-        "ξεπαγωσε",
-        "ρυθμισε",
-        "θυμισε",
-        "υπενθυμισε",
-        "υπενθυμιση",
-        "ξεκινα",
-        "σταματα",
+
+    short_utility_starts = (
+        "ανοιξε τον",
+        "ανοιξε το",
+        "κλεισε τον",
+        "κλεισε το",
+        "παγωσε τη",
+        "παγωσε το",
+        "ξεπαγωσε τη",
+        "ξεπαγωσε το",
+        "θυμισε μου",
+        "υπενθυμισε μου",
     )
-    return clean.startswith(action_starts)
+
+    if clean.startswith(short_utility_starts):
+        return True
+
+    utility_markers = (
+        "στις ",
+        "σε ",
+        "μετα απο ",
+        "για υπενθυμιση",
+    )
+
+    if clean.startswith(("θυμισε μου", "υπενθυμισε μου")) and any(marker in clean for marker in utility_markers):
+        return True
+
+    return False
 
 
 def looks_like_weather_utility_query(text: str) -> bool:
@@ -963,8 +975,8 @@ def build_memory_context(
             effective_semantic_k = 0
             semantic_adjust_reason = "explicit_memory_storage_skip"
         elif query_intent == "action_command":
-            effective_semantic_k = 0
-            semantic_adjust_reason = "action_command_skip"
+            effective_semantic_k = min(semantic_k, 2)
+            semantic_adjust_reason = "action_command_downshift"
         elif query_intent == "weather_or_utility":
             effective_semantic_k = 0
             semantic_adjust_reason = "weather_or_utility_skip"

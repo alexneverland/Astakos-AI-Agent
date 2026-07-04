@@ -22,6 +22,11 @@ _CANCEL_WORDS = {
     "σταμάτα", "σταματα", "άκυρο", "ακυρο",
 }
 
+def _planner_pending_user_key(state) -> str:
+    channel = str(state.get("channel") or "unknown").strip().lower()
+    user_id = str(state.get("user_id") or state.get("thread_id") or "default").strip()
+    return f"{channel}:{user_id}"
+
 
 # ────────────────────────────────────────────────────────────────
 # Planner Node — δημιουργεί task list από goal
@@ -77,7 +82,8 @@ GOAL: {goal}
     # Αποθηκεύουμε το plan στο SQLite state db — θα το φορτώσει ο pre_check_node
     try:
         from memory.pending_plans import save_pending_plan
-        save_pending_plan(goal, tasks)
+        pending_user_key = _planner_pending_user_key(state)
+        save_pending_plan(goal, tasks, user_id=pending_user_key)
         print(f"\033[95m[Planner]: Plan saved to SQLite pending_plans — αναμένω επιβεβαίωση\033[0m")
     except Exception as e:
         print(f"\033[91m[Planner]: Error saving pending plan: {e}\033[0m")
@@ -247,14 +253,15 @@ def pre_check_node(state):
 
     from memory.pending_plans import get_pending_plan, clear_pending_plan
 
-    pending = get_pending_plan()
+    pending_user_key = _planner_pending_user_key(state)
+    pending = get_pending_plan(user_id=pending_user_key)
     if not pending:
         return {}
 
     # ── Επιβεβαίωση ──────────────────────────────────────────────
     if last_msg in _CONFIRM_WORDS or last_msg_norm in _CONFIRM_WORDS:
         try:
-            clear_pending_plan()
+            clear_pending_plan(user_id=pending_user_key)
             print(f"\033[95m[PreCheck]: ✅ Plan επιβεβαιώθηκε — {len(pending['tasks'])} βήματα\033[0m")
             return {
                 "plan_tasks":                  pending["tasks"],
@@ -271,7 +278,7 @@ def pre_check_node(state):
     # ── Ακύρωση ──────────────────────────────────────────────────
     elif last_msg in _CANCEL_WORDS or last_msg_norm in _CANCEL_WORDS:
         try:
-            clear_pending_plan()
+            clear_pending_plan(user_id=pending_user_key)
         except Exception:
             pass
         print(f"\033[95m[PreCheck]: ❌ Plan ακυρώθηκε από τον χρήστη\033[0m")
@@ -280,12 +287,8 @@ def pre_check_node(state):
             "next_agent": "__plan_cancelled__",
         }
 
-    # ── Άλλο μήνυμα ενώ υπάρχει pending → stale, σβήσε ─────────
-    try:
-        clear_pending_plan()
-        print(f"\033[90m[PreCheck]: Stale pending plan removed\033[0m")
-    except Exception:
-        pass
+    # ── Άλλο μήνυμα ενώ υπάρχει pending → άφησέ το ζωντανό ─────────
+    print("\033[90m[PreCheck]: Pending plan preserved (non-confirm/non-cancel message)\033[0m")
     return {}
 
 

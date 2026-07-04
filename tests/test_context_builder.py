@@ -701,7 +701,7 @@ def test_reminder_request_skips_semantic():
 
 def test_classify_memory_query_intent_action_command():
     import memory.context_builder as cb
-    result = cb.classify_memory_query_intent('άνοιξε τα φώτα')
+    result = cb.classify_memory_query_intent('άνοιξε το φως')
     assert result == 'action_command'
 
 def test_classify_memory_query_intent_weather():

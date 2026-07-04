@@ -1,22 +1,151 @@
 import re
 import json
+import os
 from datetime import datetime, timedelta
 
 
-# ── Configuration Loader ─────────────────────────────────────────────────────
-import os
-import json
-import sys
 
-_TOKENS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'routine_tokens.json')
+_TOKENS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "data",
+    "routine_tokens.json",
+)
+
+_REQUIRED_TOKEN_KEYS = (
+    "_ABSENCE_TOKENS",
+    "_ALEXANDROS_TOKENS",
+    "_BASKETBALL_TOKENS",
+    "_CAMP_TOKENS",
+    "_CHILD_ACTIVITY_TOKENS",
+    "_DRAFT_CONTEXT_TOKENS",
+    "_FOOTBALL_TOKENS",
+    "_FUTURE_INTENT_TOKENS",
+    "_GRANDMA_TOKENS",
+    "_HOME_ONLY_ROUTINE_TOKENS",
+    "_HOME_RETURN_TOKENS",
+    "_LUNCH_TOKENS",
+    "_MESSENGER_EXCLUDE",
+    "_MORNING_TOKENS",
+    "_NOT_TOGETHER_TOKENS",
+    "_OUTING_PROGRESS_TOKENS",
+    "_OUTING_ROUTINE_TOKENS",
+    "_OUTING_TOKENS",
+    "_PAST_REFERENCE_TOKENS",
+    "_PRESENT_LIVE_TOKENS",
+    "_RETURN_TOKENS",
+    "_ROUTINE_EXCLUDE_TOKENS",
+    "_SCHOOL_BREAK_TOKENS",
+    "_SCHOOL_TOKENS",
+    "_SHIFT_AM_TOKENS",
+    "_SHIFT_PM_TOKENS",
+    "_SLEEP_TOKENS",
+    "_SOFIA_TOKENS",
+    "_STOP_TOKENS",
+    "_SUMMER_BREAK_TOKENS",
+    "_TOGETHER_TOKENS",
+    "_TRIP_TOKENS",
+    "_WEEK_TOKENS",
+    "_WORK_DEPARTURE_TOKENS",
+    "_WORK_TOKENS",
+)
+
+def _load_routine_tokens() -> dict:
+    with open(_TOKENS_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, dict):
+        raise ValueError("routine_tokens.json must contain a JSON object")
+
+    missing = [key for key in _REQUIRED_TOKEN_KEYS if key not in data]
+    if missing:
+        raise ValueError(f"routine_tokens.json missing required keys: {missing}")
+
+    for key in _REQUIRED_TOKEN_KEYS:
+        value = data[key]
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise ValueError(f"{key} must be a list[str]")
+
+    return data
+
 try:
-    with open(_TOKENS_PATH, 'r', encoding='utf-8') as f:
-        _tokens_data = json.load(f)
-        for _k, _v in _tokens_data.items():
-            globals()[_k] = _v
+    _tokens_data = _load_routine_tokens()
 except Exception as e:
-    print(f"Error loading routine tokens from {_TOKENS_PATH}: {e}")
-    sys.exit(1)
+    print(f"[RoutineReconciler] Failed to load token config from {_TOKENS_PATH}: {e}")
+    # Controlled fallback for basic functionality if JSON is corrupt
+    _tokens_data = {
+        "_ABSENCE_TOKENS": ['λειπει', 'εφυγε', 'δεν ειναι εδω', 'απουσιαζει'],
+        "_ALEXANDROS_TOKENS": ['αλεξανδρ', 'μικρ', 'παιδι'],
+        "_BASKETBALL_TOKENS": ['μπασκετ', 'μπασκεμπολ'],
+        "_CAMP_TOKENS": ['κατασκην', 'camp'],
+        "_CHILD_ACTIVITY_TOKENS": ['ποδοσφαιρο', 'προπονηση', 'μπαλα', 'μπασκετ', 'μπασκεμπολ'],
+        "_DRAFT_CONTEXT_TOKENS": ['messenger', 'linkedin', 'draft', 'προσχεδιο', 'μηνυμα'],
+        "_FOOTBALL_TOKENS": ['ποδοσφαιρο', 'προπονηση', 'μπαλα'],
+        "_FUTURE_INTENT_TOKENS": ['θα ', 'να ', 'αν ', 'ισως', 'μπορει'],
+        "_GRANDMA_TOKENS": ['γιαγια'],
+        "_HOME_ONLY_ROUTINE_TOKENS": ['μαγειρ', 'φαγητ', 'γευμα', 'μεσημεριαν', 'κουζιν'],
+        "_HOME_RETURN_TOKENS": ['γυρισαμε σπιτι', 'γυρισαμε σπιτι', 'ειμαστε σπιτι', 'ηρθαμε σπιτι', 'επιστρεψαμε σπιτι'],
+        "_LUNCH_TOKENS": ['μεσημερ', 'φαγητ', 'γευμ'],
+        "_MESSENGER_EXCLUDE": ['σχολει', 'ποδοσφαιρ', 'μπασκετ', 'κατασκην'],
+        "_MORNING_TOKENS": ['πρωι', 'πρωιν', 'ξυπνημ', 'ετοιμασι'],
+        "_NOT_TOGETHER_TOKENS": ['δεν ειμαι με', 'δεν ειμαστε μαζι', 'δεν ειμαστε πια μαζι', 'δεν ειμαι πια με', 'χωρισ'],
+        "_OUTING_PROGRESS_TOKENS": ['ειμαστε', 'πηγαμε', 'παμε', 'φτασαμε', 'αραζ'],
+        "_OUTING_ROUTINE_TOKENS": ['παρκο', 'βολτα', 'παιχνιδ', 'κουνι', 'παιδικ'],
+        "_OUTING_TOKENS": ['πισιν', 'μπανι', 'θαλασσ', 'παραλι', 'εκδρομ'],
+        "_PAST_REFERENCE_TOKENS": ['χθες', 'χτεσ', 'πριν', 'το βραδυ', 'περασα'],
+        "_PRESENT_LIVE_TOKENS": ['ειμαι', 'ειμαστε', 'βρισκομαι', 'βρισκομαστε', 'φτασαμε'],
+        "_RETURN_TOKENS": ['επιστρεφ', 'γυρισ', 'επεστρεψ', 'ηρθε πισω', 'ξαναγυρ'],
+        "_ROUTINE_EXCLUDE_TOKENS": ['messenger', 'μηνυμα'],
+        "_SCHOOL_BREAK_TOKENS": ['δεν εχει σχολει', 'τελειωσε το σχολει', 'διακοπ', 'καλοκαιρ'],
+        "_SCHOOL_TOKENS": ['σχολει', 'σχολικ'],
+        "_SHIFT_AM_TOKENS": ['πρωι', 'πρωιν'],
+        "_SHIFT_PM_TOKENS": ['απογευμα', 'βραδυ', 'βραδιν'],
+        "_SLEEP_TOKENS": ['υπνο', 'κοιμ', 'νυχτ'],
+        "_SOFIA_TOKENS": ['σοφια'],
+        "_STOP_TOKENS": ['σταματ', 'δεν εχει', 'δεν παει', 'δεν θα παει', 'τελειωσ'],
+        "_SUMMER_BREAK_TOKENS": ['καλοκαιρ', 'σταματ', 'ξαναρχ', 'σεπτεμβρ'],
+        "_TOGETHER_TOKENS": ['μαζι', 'ειμαι με', 'ειμαστε με', 'ειμαστε μαζι', 'ολοι μαζι'],
+        "_TRIP_TOKENS": ['διακοπ', 'ταξιδ', 'εκδρομ'],
+        "_WEEK_TOKENS": ['εβδομαδ', 'αυτη την εβδομαδ', 'αυτη εβδομαδ'],
+        "_WORK_DEPARTURE_TOKENS": ['αναχωρησ', 'φευγ', 'δουλεια', 'δουλειαν'],
+        "_WORK_TOKENS": ['δουλει', 'δουλευ', 'βαρδι', 'σεφτ'],
+    }
+
+_ABSENCE_TOKENS = _tokens_data['_ABSENCE_TOKENS']
+_ALEXANDROS_TOKENS = _tokens_data['_ALEXANDROS_TOKENS']
+_BASKETBALL_TOKENS = _tokens_data['_BASKETBALL_TOKENS']
+_CAMP_TOKENS = _tokens_data['_CAMP_TOKENS']
+_CHILD_ACTIVITY_TOKENS = _tokens_data['_CHILD_ACTIVITY_TOKENS']
+_DRAFT_CONTEXT_TOKENS = _tokens_data['_DRAFT_CONTEXT_TOKENS']
+_FOOTBALL_TOKENS = _tokens_data['_FOOTBALL_TOKENS']
+_FUTURE_INTENT_TOKENS = _tokens_data['_FUTURE_INTENT_TOKENS']
+_GRANDMA_TOKENS = _tokens_data['_GRANDMA_TOKENS']
+_HOME_ONLY_ROUTINE_TOKENS = _tokens_data['_HOME_ONLY_ROUTINE_TOKENS']
+_HOME_RETURN_TOKENS = _tokens_data['_HOME_RETURN_TOKENS']
+_LUNCH_TOKENS = _tokens_data['_LUNCH_TOKENS']
+_MESSENGER_EXCLUDE = _tokens_data['_MESSENGER_EXCLUDE']
+_MORNING_TOKENS = _tokens_data['_MORNING_TOKENS']
+_NOT_TOGETHER_TOKENS = _tokens_data['_NOT_TOGETHER_TOKENS']
+_OUTING_PROGRESS_TOKENS = _tokens_data['_OUTING_PROGRESS_TOKENS']
+_OUTING_ROUTINE_TOKENS = _tokens_data['_OUTING_ROUTINE_TOKENS']
+_OUTING_TOKENS = _tokens_data['_OUTING_TOKENS']
+_PAST_REFERENCE_TOKENS = _tokens_data['_PAST_REFERENCE_TOKENS']
+_PRESENT_LIVE_TOKENS = _tokens_data['_PRESENT_LIVE_TOKENS']
+_RETURN_TOKENS = _tokens_data['_RETURN_TOKENS']
+_ROUTINE_EXCLUDE_TOKENS = _tokens_data['_ROUTINE_EXCLUDE_TOKENS']
+_SCHOOL_BREAK_TOKENS = _tokens_data['_SCHOOL_BREAK_TOKENS']
+_SCHOOL_TOKENS = _tokens_data['_SCHOOL_TOKENS']
+_SHIFT_AM_TOKENS = _tokens_data['_SHIFT_AM_TOKENS']
+_SHIFT_PM_TOKENS = _tokens_data['_SHIFT_PM_TOKENS']
+_SLEEP_TOKENS = _tokens_data['_SLEEP_TOKENS']
+_SOFIA_TOKENS = _tokens_data['_SOFIA_TOKENS']
+_STOP_TOKENS = _tokens_data['_STOP_TOKENS']
+_SUMMER_BREAK_TOKENS = _tokens_data['_SUMMER_BREAK_TOKENS']
+_TOGETHER_TOKENS = _tokens_data['_TOGETHER_TOKENS']
+_TRIP_TOKENS = _tokens_data['_TRIP_TOKENS']
+_WEEK_TOKENS = _tokens_data['_WEEK_TOKENS']
+_WORK_DEPARTURE_TOKENS = _tokens_data['_WORK_DEPARTURE_TOKENS']
+_WORK_TOKENS = _tokens_data['_WORK_TOKENS']
+
 
 # ── Scoring thresholds [Phase 3B] ────────────────────────────────────────────
 _AUTO_APPLY_THRESHOLD = 0.80   # score >= this → auto-apply
