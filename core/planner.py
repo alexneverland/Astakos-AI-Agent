@@ -238,7 +238,7 @@ Steps:
 
 def pre_check_node(state):
     """
-    Entry point του graph. Ελέγχει plan_pending.json και κατευθύνει:
+    Entry point του graph. Ελέγχει το pending plan στη SQLite και κατευθύνει:
     - "ναι" + pending  → φορτώνει plan, route: task_executor
     - "όχι" + pending  → σβήνει plan,  route: cancel
     - άλλο / no pending → route: supervisor (κανονική ροή)
