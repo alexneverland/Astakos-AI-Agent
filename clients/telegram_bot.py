@@ -87,6 +87,7 @@ from memory.session_memory import (
     log_exchange,
     _run_session_summary,
     startup_stale_cleanup,
+    _maybe_trigger_auto_session_summary,
 )
 from tools.telegram import send_telegram_msg, send_telegram_voice, send_telegram_msg_full
 from services.gemini import safe_gemini_call
@@ -4546,6 +4547,9 @@ if __name__ == "__main__":
 
     # Stale working memory cleanup (hard restart recovery)
     startup_stale_cleanup(channel="telegram")
+    
+    # Resume pending summaries that might have crashed mid-flight or piled up
+    _maybe_trigger_auto_session_summary(channel="telegram")
 
 
     print("\u2501" * 50)
