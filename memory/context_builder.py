@@ -227,6 +227,7 @@ def looks_like_tool_result_query(text: str) -> bool:
         "⏳",
         "⚙️",
         "❌",
+        "📊",
     )
     tool_result_markers = (
         "συντεταγμενες:",
@@ -250,6 +251,9 @@ def looks_like_tool_result_query(text: str) -> bool:
         "market in:",
         "bazaar:",
         "efresh:",
+        "συνοψη σημερα",
+        "αποθηκευτηκε",
+        "goal",
     )
     return (
         low.startswith("τίτλος:")

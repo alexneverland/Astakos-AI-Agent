@@ -1073,7 +1073,7 @@ def save_goal(project: str, description: str, status: str = "active") -> bool:
     """Αποθηκεύει ή ενημερώνει goal. Κάνει overwrite αν υπάρχει ήδη."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = _safe_chroma_get(where={"category": "goal", "project": project})
+            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
             if existing["ids"]:
                 vector_store._collection.delete(ids=existing["ids"])
                 print(f"\033[94m[Goals]: Overwrite '{project}'\033[0m")
@@ -1096,7 +1096,7 @@ def update_goal_status(project: str, status: str) -> bool:
     """Αλλάζει το status ενός goal."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = _safe_chroma_get(where={"category": "goal", "project": project})
+            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
             if not existing["ids"]:
                 return False
             old_meta = dict(existing["metadatas"][0])
