@@ -91,6 +91,108 @@ def _tokenize_followup_text(text: str) -> list[str]:
     return [tok for tok in normalized.split() if len(tok) >= 4]
 
 
+def _build_followup_theme_tokens(
+    *,
+    topic: str,
+    subject: str = "",
+    source_user_text: str = "",
+    reason: str = "",
+    include_reason: bool = True,
+) -> set[str]:
+    parts = [
+        subject or "",
+        source_user_text or "",
+    ]
+
+    if include_reason:
+        parts.append(reason or "")
+
+    tokens = set()
+    for part in parts:
+        for tok in _tokenize_followup_text(part):
+            if len(tok) >= 4:
+                tokens.add(tok)
+
+    generic = {
+        "σημερα", "αυριο", "τελικα", "μετα", "αργοτερα",
+        "κανε", "κανω", "κανεις", "παμε", "πηγα", "παω",
+        "λεω", "ειπα", "δουμε", "δω", "σου", "μου",
+        "follow", "check", "later", "update", "πηρα", "παρω",
+    }
+    return {tok for tok in tokens if tok not in generic}
+
+
+def _active_followup_is_same_theme(
+    *,
+    topic: str,
+    subject: str,
+    source_user_text: str,
+    reason: str,
+    existing_topic: str,
+    existing_subject: str,
+    existing_source_user_text: str,
+    existing_reason: str,
+) -> bool:
+    topic = (topic or "").strip().lower()
+    existing_topic = (existing_topic or "").strip().lower()
+
+    if not topic or topic != existing_topic:
+        return False
+
+    new_tokens = _build_followup_theme_tokens(
+        topic=topic,
+        subject=subject,
+        source_user_text=source_user_text,
+        reason=reason,
+        include_reason=False,
+    )
+    old_tokens = _build_followup_theme_tokens(
+        topic=existing_topic,
+        subject=existing_subject,
+        source_user_text=existing_source_user_text,
+        reason=existing_reason,
+        include_reason=False,
+    )
+
+    if not new_tokens or not old_tokens:
+        return False
+
+    new_subject_tokens = _build_followup_theme_tokens(
+        topic="",
+        subject=subject,
+        source_user_text="",
+        reason="",
+        include_reason=False,
+    )
+    old_subject_tokens = _build_followup_theme_tokens(
+        topic="",
+        subject=existing_subject,
+        source_user_text="",
+        reason="",
+        include_reason=False,
+    )
+
+    overlap = new_tokens & old_tokens
+    subject_overlap = new_subject_tokens & old_subject_tokens
+
+    if len(subject_overlap) >= 2:
+        return True
+
+    if any(len(tok) >= 8 for tok in subject_overlap):
+        return True
+
+    if len(overlap) >= 2:
+        return True
+
+    if len(overlap) == 1:
+        only_token = next(iter(overlap))
+        if len(only_token) >= 8:
+            return True
+
+    return False
+
+
+
 def _delay_until_next_window(now: datetime, hour: int, minute: int = 0) -> int:
     target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if target <= now:
@@ -326,20 +428,45 @@ def create_pending_followup(
 
         existing = conn.execute(
             """
-            SELECT id
+            SELECT id, topic, subject, source_user_text, metadata_json, arc_key
             FROM pending_followups
-            WHERE status='pending' AND (
-                (topic=? AND subject=?)
-                OR arc_key=?
-            )
+            WHERE status='pending'
             ORDER BY id DESC
-            LIMIT 1
-            """,
-            (topic, subject, arc_key),
-        ).fetchone()
+            """
+        ).fetchall()
 
-        if existing:
-            return None
+        for row in existing:
+            existing_id = int(row[0])
+            existing_topic = str(row[1] or "").strip().lower()
+            existing_subject = str(row[2] or "")
+            existing_source_user_text = str(row[3] or "")
+            existing_arc_key = str(row[5] or "").strip()
+
+            try:
+                existing_meta = json.loads(row[4] or "{}")
+            except Exception:
+                existing_meta = {}
+
+            existing_reason = str(existing_meta.get("reason") or "")
+
+            if topic == existing_topic and subject == existing_subject:
+                return None
+
+            if arc_key and existing_arc_key and arc_key == existing_arc_key:
+                return None
+
+            if _active_followup_is_same_theme(
+                topic=topic,
+                subject=subject,
+                source_user_text=source_user_text,
+                reason=str((metadata or {}).get("reason") or ""),
+                existing_topic=existing_topic,
+                existing_subject=existing_subject,
+                existing_source_user_text=existing_source_user_text,
+                existing_reason=existing_reason,
+            ):
+                print(f"[FollowUp]: create-skip same-theme active arc (existing #{existing_id})")
+                return None
 
         cur = conn.execute(
             """
@@ -571,6 +698,8 @@ def mark_followup_sent(followup_id: int, decision_reason: str = "followup_sent")
     finally:
         conn.close()
 
+    record_followup_outcome(followup_id, +0.2, decision_reason)
+
 
 def resolve_followup(followup_id: int, reason: str):
     conn = _conn()
@@ -591,6 +720,8 @@ def resolve_followup(followup_id: int, reason: str):
         conn.commit()
     finally:
         conn.close()
+        
+    record_followup_outcome(followup_id, +1.0, reason)
 
 
 def defer_followup(
@@ -879,22 +1010,30 @@ def _set_followup_decision(followup_id: int, decision: str, reason: str = ""):
 def expire_old_followups(now_iso: str):
     conn = _conn()
     try:
-        conn.execute(
-            """
-            UPDATE pending_followups
-            SET status='expired',
-                resolution_reason='ttl_expired',
-                resolved_at=CURRENT_TIMESTAMP,
-                last_decision='expired',
-                decision_reason='ttl_expired',
-                outcome_score=COALESCE(outcome_score, 0.0) - 0.5
-            WHERE status='pending' AND expires_at <= ?
-            """,
-            (now_iso,),
+        cur = conn.execute(
+            "SELECT id FROM pending_followups WHERE status='pending' AND expires_at <= ?",
+            (now_iso,)
         )
-        conn.commit()
+        expired_ids = [row[0] for row in cur.fetchall()]
+
+        if expired_ids:
+            conn.execute(
+                """
+                UPDATE pending_followups
+                SET status='expired',
+                    resolution_reason='ttl_expired',
+                    resolved_at=CURRENT_TIMESTAMP,
+                    last_decision='expired'
+                WHERE status='pending' AND expires_at <= ?
+                """,
+                (now_iso,),
+            )
+            conn.commit()
     finally:
         conn.close()
+
+    for fid in expired_ids:
+        record_followup_outcome(fid, -0.5, "ttl_expired")
 
 
 def find_pending_followups(limit: int = 20) -> list[dict]:

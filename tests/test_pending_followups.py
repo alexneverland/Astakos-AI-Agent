@@ -1277,3 +1277,125 @@ def test_backfill_legacy_followups_populates_missing_metadata_and_reanchors_pend
     assert row["metadata"]["ttl_hours"] == 18
     assert row["metadata"]["delay_minutes_final"] >= 8 * 60
     assert "T11:30:" in row["followup_after_ts"]
+
+
+def test_active_followup_same_theme_detects_related_food_variants():
+    assert pf._active_followup_is_same_theme(
+        topic="food_purchase",
+        subject="ψήσιμο μπριζόλας",
+        source_user_text="οι μπριζόλες αύριο",
+        reason="follow up on steak preparation",
+        existing_topic="food_purchase",
+        existing_subject="συνοδευτικό για μπριζόλες",
+        existing_source_user_text="θα αποφασίσουμε αν θα κάνουμε πατάτες ή ρύζι με τις μπριζόλες",
+        existing_reason="check meal decision later",
+    ) is True
+
+
+def test_create_pending_followup_skips_same_theme_active_arc(temp_state_db):
+    first_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="food_purchase",
+        subject="ψήσιμο μπριζόλας",
+        source_user_text="οι μπριζόλες αύριο",
+        source_ai_text="έγινε μάστορα",
+        followup_after_ts="2030-01-01T19:00:00",
+        confidence=0.82,
+        metadata={"reason": "follow up on steak preparation"},
+    )
+
+    second_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="food_purchase",
+        subject="συνοδευτικό για μπριζόλες",
+        source_user_text="θα αποφασίσουμε αν θα κάνουμε πατάτες ή ρύζι με τις μπριζόλες",
+        source_ai_text="οκ",
+        followup_after_ts="2030-01-01T20:00:00",
+        confidence=0.81,
+        metadata={"reason": "check meal decision later"},
+    )
+
+    assert isinstance(first_id, int)
+    assert second_id is None
+
+    rows = _fetch_all(temp_state_db)
+    assert len(rows) == 1
+
+
+def test_create_pending_followup_allows_different_theme_same_topic(temp_state_db):
+    first_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="food_purchase",
+        subject="μπριζόλες λαιμού",
+        source_user_text="πήρα μπριζόλες για αύριο",
+        source_ai_text="έγινε",
+        followup_after_ts="2030-01-01T19:00:00",
+        confidence=0.82,
+        metadata={"reason": "follow up on steaks"},
+    )
+
+    second_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="food_purchase",
+        subject="ψώνια για γλυκό",
+        source_user_text="μετά θα πάρω και παγωτό για το βράδυ",
+        source_ai_text="οκ",
+        followup_after_ts="2030-01-01T20:00:00",
+        confidence=0.81,
+        metadata={"reason": "follow up on dessert"},
+    )
+
+    assert isinstance(first_id, int)
+    assert isinstance(second_id, int)
+
+    rows = _fetch_all(temp_state_db)
+    assert len(rows) == 2
+
+
+def test_active_followup_same_theme_does_not_merge_generic_single_token_outings():
+    assert pf._active_followup_is_same_theme(
+        topic="outing",
+        subject="βόλτα με Σοφία",
+        source_user_text="θα βγω με τη Σοφία",
+        reason="follow up on outing",
+        existing_topic="outing",
+        existing_subject="βόλτα με Αλέξανδρο",
+        existing_source_user_text="πήγα τον Αλέξανδρο βόλτα",
+        existing_reason="check outing later",
+    ) is False
+
+
+def test_create_pending_followup_allows_same_topic_when_overlap_is_only_generic(temp_state_db):
+    first_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="βόλτα με Σοφία",
+        source_user_text="θα βγω με τη Σοφία",
+        source_ai_text="έγινε",
+        followup_after_ts="2030-01-01T19:00:00",
+        confidence=0.82,
+        metadata={"reason": "follow up on outing"},
+    )
+
+    second_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="βόλτα με Αλέξανδρο",
+        source_user_text="πήγα τον Αλέξανδρο βόλτα",
+        source_ai_text="οκ",
+        followup_after_ts="2030-01-01T20:00:00",
+        confidence=0.81,
+        metadata={"reason": "check outing later"},
+    )
+
+    assert isinstance(first_id, int)
+    assert isinstance(second_id, int)
+
+    rows = _fetch_all(temp_state_db)
+    assert len(rows) == 2
