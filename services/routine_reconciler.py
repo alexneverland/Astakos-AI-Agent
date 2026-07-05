@@ -507,6 +507,7 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
     until = max(dates) if dates else now.strftime("%Y-%m-%d")
 
     out = []
+    has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
 
     # Always set generic out-of-home state
     d_user_out = {
@@ -520,6 +521,30 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
         "exclude_tokens": [],
     }
     out.append(d_user_out)
+
+    if has_child:
+        out.append({
+            "kind": "context_state_set",
+            "key": "alexandros_with_user",
+            "value": "true",
+            "until_date": until,
+            "reason": "family_outing_in_progress",
+            "subject_tokens": _ALEXANDROS_TOKENS,
+            "include_tokens": _OUTING_TOKENS,
+            "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
+        })
+
+    if has_child and has_sofia:
+        out.append({
+            "kind": "context_state_set",
+            "key": "alexandros_with_sofia",
+            "value": "true",
+            "until_date": until,
+            "reason": "family_outing_in_progress",
+            "subject_tokens": _ALEXANDROS_TOKENS + _SOFIA_TOKENS,
+            "include_tokens": _OUTING_TOKENS,
+            "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
+        })
 
     # Only set child-specific outing state if child is actually mentioned
     if has_child:
@@ -918,6 +943,50 @@ def _sofia_state_is_active(now: datetime) -> bool:
 
     return str(state_data.get("value", "")).lower() == "true"
 
+
+def _rule_alexandros_with_sofia_without_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+    has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
+    has_child = _contains_any(normalized, _ALEXANDROS_TOKENS)
+    has_outing = _contains_any(normalized, _OUTING_TOKENS + _OUTING_ROUTINE_TOKENS)
+    user_not_with_them = _contains_any(normalized, _NOT_TOGETHER_TOKENS) or "εγω σπιτι" in normalized or "ειμαι σπιτι" in normalized
+
+    if not (has_sofia and has_child and has_outing and user_not_with_them):
+        return []
+
+    until = max(dates) if dates else now.strftime("%Y-%m-%d")
+
+    return [
+        {
+            "kind": "context_state_set",
+            "key": "sofia_with_user",
+            "value": "false",
+            "until_date": until,
+            "reason": "sofia_with_child_without_user",
+            "subject_tokens": _SOFIA_TOKENS,
+            "include_tokens": _ALEXANDROS_TOKENS + _OUTING_TOKENS,
+            "exclude_tokens": [],
+        },
+        {
+            "kind": "context_state_set",
+            "key": "alexandros_with_sofia",
+            "value": "true",
+            "until_date": until,
+            "reason": "sofia_with_child_without_user",
+            "subject_tokens": _ALEXANDROS_TOKENS + _SOFIA_TOKENS,
+            "include_tokens": _OUTING_TOKENS,
+            "exclude_tokens": [],
+        },
+        {
+            "kind": "context_state_set",
+            "key": "alexandros_away_from_home",
+            "value": "true",
+            "until_date": until,
+            "reason": "child_out_with_sofia",
+            "subject_tokens": _ALEXANDROS_TOKENS,
+            "include_tokens": _SOFIA_TOKENS + _OUTING_TOKENS,
+            "exclude_tokens": [],
+        },
+    ]
 
 def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
@@ -1747,6 +1816,7 @@ def infer_routine_reconciliation_candidates(
         ("alexandros_away_general",        _rule_alexandros_away_general,        (normalized_fact, dates, current)),
         ("school_break",                   _rule_school_break,                   (normalized_fact, dates, current)),
         ("child_activity_pause",           _rule_child_activity_pause,           (normalized_fact, dates, current)),
+        ("alexandros_with_sofia_without_user", _rule_alexandros_with_sofia_without_user, (normalized_fact, dates, current)),
         ("sofia_with_user",                _rule_sofia_with_user,                (normalized_fact, dates, current)),
         ("sofia_not_with_user",            _rule_sofia_not_with_user,            (normalized_fact, dates, current)),
         ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, dates, current)),

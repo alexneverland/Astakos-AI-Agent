@@ -79,6 +79,23 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
     ctx["alexandros_present"] = not bool(away_state)
     return ctx
 
+def resolve_context_bool(key: str, now: datetime | None = None) -> bool | None:
+    current = now or datetime.now()
+    today = current.strftime("%Y-%m-%d")
+    from memory.routine_db import get_context_state
+    state_data = get_context_state(key)
+    if not state_data:
+        return None
+    expires_at = state_data.get("expires_at")
+    if expires_at and expires_at < today:
+        return None
+    val = str(state_data.get("value", "")).lower()
+    if val == "true":
+        return True
+    if val == "false":
+        return False
+    return None
+
 def resolve_alexandros_away_state(now: datetime | None = None) -> bool | None:
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
