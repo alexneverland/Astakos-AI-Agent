@@ -1361,6 +1361,43 @@ def _read_json_file(path: str, default):
     return default
 
 
+def _debug_condition_state_details(flag_name: str, effective_value, raw_states: dict, now_dt) -> dict:
+    raw_item = raw_states.get(flag_name) or {}
+    raw_value = raw_item.get("value")
+    raw_expires = raw_item.get("expires_at")
+    today = now_dt.strftime("%Y-%m-%d")
+
+    reason = None
+
+    if raw_expires and raw_expires < today:
+        reason = f"expired at {raw_expires}"
+    elif flag_name == "user_out_of_home":
+        try:
+            from services.routine_context import _recent_gps_status
+            gps_status = _recent_gps_status(now_dt)
+        except Exception:
+            gps_status = None
+
+        raw_bool = str(raw_value).strip().lower() == "true"
+        if raw_bool and effective_value is False and gps_status == "home":
+            reason = "GPS says home"
+        elif raw_bool and effective_value is True and gps_status == "away":
+            reason = "GPS confirms away"
+    elif flag_name == "current_shift":
+        if now_dt.weekday() >= 5 and str(raw_value or "").lower() in {"morning", "afternoon", "night"} and effective_value == "off":
+            reason = "weekend override"
+    elif flag_name == "state:alexandros:outing":
+        if raw_value and effective_value is None and raw_expires and raw_expires < today:
+            reason = f"expired outing state from {raw_expires}"
+
+    return {
+        "stored_value": raw_value,
+        "stored_expires_at": raw_expires,
+        "effective_value": effective_value,
+        "reason": reason,
+    }
+
+
 @server.get("/debug/runtime")
 async def debug_runtime(_=Depends(require_token)):
     """
@@ -1393,6 +1430,21 @@ async def debug_runtime(_=Depends(require_token)):
         ctx = {}
         evaluate_routine_conditions = lambda c_list, cx: {"allowed": True, "results": []}
         get_routine_conditions = lambda rid: []
+
+    raw_context_states = {}
+    try:
+        from memory.routine_db import get_context_states
+        raw_context_states = get_context_states([
+            "alexandros_away_from_home",
+            "current_shift",
+            "user_out_of_home",
+            "state:alexandros:outing",
+            "user_at_work",
+            "family_at_home",
+            "sofia_with_user",
+        ])
+    except Exception:
+        raw_context_states = {}
 
     try:
         conn   = _sqlite3.connect(db_path, check_same_thread=False)
@@ -1449,6 +1501,25 @@ async def debug_runtime(_=Depends(require_token)):
             eval_result = evaluate_routine_conditions(conditions_list, ctx)
             cond_res = eval_result.get("allowed", True)
             cond_results = eval_result.get("results", [])
+            for res in cond_results:
+                try:
+                    flag_name = res.get("flag")
+                    if not flag_name:
+                        payload = res.get("condition_payload") or {}
+                        if isinstance(payload, dict):
+                            flag_name = payload.get("flag")
+                    if flag_name:
+                        details = _debug_condition_state_details(
+                            flag_name=flag_name,
+                            effective_value=res.get("actual_value"),
+                            raw_states=raw_context_states,
+                            now_dt=now_dt,
+                        )
+                        res["debug_stored_value"] = details["stored_value"]
+                        res["debug_stored_expires_at"] = details["stored_expires_at"]
+                        res["debug_reason"] = details["reason"]
+                except Exception:
+                    pass
 
             # Extract an actual value for UI if the first condition has a 'flag' (context_flag, shift_mode)
             if conditions_list and conditions_list[0].get("condition_type") in ("context_flag", "shift_mode"):
@@ -1549,6 +1620,25 @@ async def debug_runtime(_=Depends(require_token)):
             eval_result = evaluate_routine_conditions(conditions_list, ctx)
             cond_res = eval_result.get("allowed", True)
             cond_results = eval_result.get("results", [])
+            for res in cond_results:
+                try:
+                    flag_name = res.get("flag")
+                    if not flag_name:
+                        payload = res.get("condition_payload") or {}
+                        if isinstance(payload, dict):
+                            flag_name = payload.get("flag")
+                    if flag_name:
+                        details = _debug_condition_state_details(
+                            flag_name=flag_name,
+                            effective_value=res.get("actual_value"),
+                            raw_states=raw_context_states,
+                            now_dt=now_dt,
+                        )
+                        res["debug_stored_value"] = details["stored_value"]
+                        res["debug_stored_expires_at"] = details["stored_expires_at"]
+                        res["debug_reason"] = details["reason"]
+                except Exception:
+                    pass
 
             # Extract an actual value for UI if the first condition has a 'flag' (context_flag, shift_mode)
             if conditions_list and conditions_list[0].get("condition_type") in ("context_flag", "shift_mode"):

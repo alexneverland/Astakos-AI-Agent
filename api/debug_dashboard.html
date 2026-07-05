@@ -1,4 +1,4 @@
-﻿﻿<!DOCTYPE html>
+﻿﻿﻿<!DOCTYPE html>
 <html lang="el">
 <head>
 <meta charset="UTF-8">
@@ -887,12 +887,25 @@ function render(d) {
         
         // Match results with conditions by index
         if (r.condition_results && r.condition_results[idx]) {
-           const res = r.condition_results[idx];
-           if (res.actual_value !== undefined && res.actual_value !== null) {
-              html += `<div class="mono-small">Now: ${res.actual_value}</div>`;
-           } else if (res.actual_value === null && (cond.condition_type === "context_flag" || cond.condition_type === "shift_mode")) {
-              html += `<div class="mono-small">Now: null</div>`;
-           }
+          const res = r.condition_results[idx];
+        
+          if (res.actual_value !== undefined && res.actual_value !== null) {
+            html += `<div class="mono-small">Effective: ${res.actual_value}</div>`;
+          } else if (res.actual_value === null && (cond.condition_type === "context_flag" || cond.condition_type === "shift_mode")) {
+            html += `<div class="mono-small">Effective: null</div>`;
+          }
+        
+          if (res.debug_stored_value !== undefined) {
+            html += `<div class="mono-small">Stored: ${res.debug_stored_value}</div>`;
+          }
+        
+          if (res.debug_stored_expires_at) {
+            html += `<div class="mono-small">Expires: ${res.debug_stored_expires_at}</div>`;
+          }
+        
+          if (res.debug_reason) {
+            html += `<div class="mono-small off">Why: ${esc(res.debug_reason)}</div>`;
+          }
         }
       });
       html += `</div>`;
