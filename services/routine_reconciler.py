@@ -90,7 +90,7 @@ except Exception as e:
         "_NOT_TOGETHER_TOKENS": ['δεν ειμαι με', 'δεν ειμαστε μαζι', 'δεν ειμαστε πια μαζι', 'δεν ειμαι πια με', 'χωρισ'],
         "_OUTING_PROGRESS_TOKENS": ['ειμαστε', 'πηγαμε', 'παμε', 'φτασαμε', 'αραζ'],
         "_OUTING_ROUTINE_TOKENS": ['παρκο', 'βολτα', 'παιχνιδ', 'κουνι', 'παιδικ'],
-        "_OUTING_TOKENS": ['πισιν', 'μπανι', 'θαλασσ', 'παραλι', 'εκδρομ'],
+        "_OUTING_TOKENS": ['πισιν', 'μπανι', 'θαλασσ', 'παραλι', 'εκδρομ', 'παρκο', 'βολτ', 'παιχνιδ', 'κουνι', 'παιδικ'],
         "_PAST_REFERENCE_TOKENS": ['χθες', 'χτεσ', 'πριν', 'το βραδυ', 'περασα'],
         "_PRESENT_LIVE_TOKENS": ['ειμαι', 'ειμαστε', 'βρισκομαι', 'βρισκομαστε', 'φτασαμε'],
         "_RETURN_TOKENS": ['επιστρεφ', 'γυρισ', 'επεστρεψ', 'ηρθε πισω', 'ξαναγυρ'],
@@ -128,6 +128,10 @@ _NOT_TOGETHER_TOKENS = _tokens_data['_NOT_TOGETHER_TOKENS']
 _OUTING_PROGRESS_TOKENS = _tokens_data['_OUTING_PROGRESS_TOKENS']
 _OUTING_ROUTINE_TOKENS = _tokens_data['_OUTING_ROUTINE_TOKENS']
 _OUTING_TOKENS = _tokens_data['_OUTING_TOKENS']
+
+for _tok in ("παρκο", "βολτ", "παιχνιδ", "κουνι", "παιδικ"):
+    if _tok not in _OUTING_TOKENS:
+        _OUTING_TOKENS.append(_tok)
 _PAST_REFERENCE_TOKENS = _tokens_data['_PAST_REFERENCE_TOKENS']
 _PRESENT_LIVE_TOKENS = _tokens_data['_PRESENT_LIVE_TOKENS']
 _RETURN_TOKENS = _tokens_data['_RETURN_TOKENS']

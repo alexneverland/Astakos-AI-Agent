@@ -3,6 +3,10 @@ from services.gemini import safe_gemini_call
 from core.utils import clean_message
 from memory.routine_db import set_context_state
 from datetime import datetime
+from services.routine_reconciler import (
+    reconcile_fact_to_routines,
+    apply_routine_reconciliation_directives,
+)
 
 _CONTEXT_EXTRACTION_PROMPT = """
 Είσαι ο Αστακός, ένα AI assistant. Ο χρήστης (Λάζαρος) σου στέλνει ένα μήνυμα.
@@ -129,6 +133,27 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = ""):
                 str_val = "true" if value else "false"
                 set_context_state(key, str_val, expires_at=today_str)
                 print(f"[ContextExtractor] Updated {key} = {str_val}")
+
+        recon = reconcile_fact_to_routines(
+            user_text,
+            category="family",
+            reason="live_message_context",
+            now=datetime.now(),
+        )
+
+        directives = []
+        for item in recon.get("scored_directives", []):
+            if item.get("decision") == "auto_apply":
+                directive = item.get("directive")
+                if directive:
+                    directives.append(directive)
+
+        if directives:
+            apply_routine_reconciliation_directives(directives)
+            print(
+                f"[ContextExtractor] Applied {len(directives)} reconciler directive(s) "
+                f"from live message"
+            )
 
     except Exception as exc:
         print(f"[ContextExtractor Error]: {exc}")
