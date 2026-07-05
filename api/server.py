@@ -1501,13 +1501,20 @@ async def debug_runtime(_=Depends(require_token)):
             eval_result = evaluate_routine_conditions(conditions_list, ctx)
             cond_res = eval_result.get("allowed", True)
             cond_results = eval_result.get("results", [])
-            for res in cond_results:
+            for idx, res in enumerate(cond_results):
                 try:
-                    flag_name = res.get("flag")
-                    if not flag_name:
-                        payload = res.get("condition_payload") or {}
-                        if isinstance(payload, dict):
-                            flag_name = payload.get("flag")
+                    flag_name = None
+
+                    payload = None
+                    if idx < len(conditions_list):
+                        payload = conditions_list[idx].get("condition_payload")
+                        if isinstance(payload, str):
+                            import json
+                            payload = json.loads(payload)
+
+                    if isinstance(payload, dict):
+                        flag_name = payload.get("flag")
+
                     if flag_name:
                         details = _debug_condition_state_details(
                             flag_name=flag_name,
@@ -1620,13 +1627,20 @@ async def debug_runtime(_=Depends(require_token)):
             eval_result = evaluate_routine_conditions(conditions_list, ctx)
             cond_res = eval_result.get("allowed", True)
             cond_results = eval_result.get("results", [])
-            for res in cond_results:
+            for idx, res in enumerate(cond_results):
                 try:
-                    flag_name = res.get("flag")
-                    if not flag_name:
-                        payload = res.get("condition_payload") or {}
-                        if isinstance(payload, dict):
-                            flag_name = payload.get("flag")
+                    flag_name = None
+
+                    payload = None
+                    if idx < len(conditions_list):
+                        payload = conditions_list[idx].get("condition_payload")
+                        if isinstance(payload, str):
+                            import json
+                            payload = json.loads(payload)
+
+                    if isinstance(payload, dict):
+                        flag_name = payload.get("flag")
+
                     if flag_name:
                         details = _debug_condition_state_details(
                             flag_name=flag_name,
