@@ -1379,7 +1379,10 @@ def _debug_condition_state_details(flag_name: str, effective_value, raw_states: 
             gps_status = None
 
         raw_bool = str(raw_value).strip().lower() == "true"
-        if raw_bool and effective_value is False and gps_status == "home":
+        raw_updated = str(raw_item.get("updated_at") or "").strip()
+        if raw_bool and effective_value is True and gps_status == "home" and raw_updated:
+            reason = "recent live message override over GPS-home"
+        elif raw_bool and effective_value is False and gps_status == "home":
             reason = "GPS says home"
         elif raw_bool and effective_value is True and gps_status == "away":
             reason = "GPS confirms away"

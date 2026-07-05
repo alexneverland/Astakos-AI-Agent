@@ -1,6 +1,6 @@
 import json
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from config import GPS_STORAGE_FILE, HOME_COORDS, HOME_RADIUS_M
 
@@ -206,6 +206,19 @@ def resolve_user_out_of_home(now: datetime | None = None) -> bool:
             stored_value = str(state_data.get("value")).lower() == "true"
             gps_status = _recent_gps_status(current)
             if stored_value and gps_status == "home":
+                updated_at = str(state_data.get("updated_at") or "").strip()
+                if updated_at:
+                    try:
+                        updated_dt = datetime.fromisoformat(updated_at.replace(" ", "T"))
+                        if updated_dt.tzinfo is not None:
+                            updated_dt = updated_dt.astimezone(current.tzinfo) if current.tzinfo else updated_dt.replace(tzinfo=None)
+                        elif current.tzinfo is not None:
+                            updated_dt = updated_dt.replace(tzinfo=current.tzinfo)
+                        age = current - updated_dt
+                        if timedelta(0) <= age <= timedelta(hours=2):
+                            return True
+                    except Exception:
+                        pass
                 return False
             return stored_value
     return False
