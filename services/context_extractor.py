@@ -2,6 +2,7 @@ import json
 from services.gemini import safe_gemini_call
 from core.utils import clean_message
 from memory.routine_db import set_context_state
+from memory.conversation_history import load_recent_context
 from datetime import datetime
 from services.routine_reconciler import (
     reconcile_fact_to_routines,
@@ -40,32 +41,32 @@ _CONTEXT_EXTRACTION_PROMPT = """
 Παράδειγμα 1:
 Μήνυμα: "Καλημέρα, ξεκινήσαμε, είμαστε στον δρόμο, πάμε για μπάνιο όλοι μαζί."
 Απάντηση:
-{"user_out_of_home": true, "sofia_with_user": true, "family_at_home": false}
+{{"user_out_of_home": true, "sofia_with_user": true, "family_at_home": false}}
 
 Παράδειγμα 2:
 Μήνυμα: "Έφτασα γραφείο, τα λέμε."
 Απάντηση:
-{"user_at_work": true, "user_out_of_home": true, "sofia_with_user": false}
+{{"user_at_work": true, "user_out_of_home": true, "sofia_with_user": false}}
 
 Παράδειγμα 3:
 Μήνυμα: "Σε κάνα 15 λεπτά φεύγουμε για το πάρκο."
 Απάντηση:
-{}
+{{}}
 
 Παράδειγμα 4:
 Μήνυμα: "Είμαστε τώρα όλοι μαζί στην παραλία."
 Απάντηση:
-{"user_out_of_home": true, "sofia_with_user": true, "family_at_home": false}
+{{"user_out_of_home": true, "sofia_with_user": true, "family_at_home": false}}
 
 Παράδειγμα 5:
 Μήνυμα: "Εγώ είμαι σπίτι, η Σοφία με τον Αλέξανδρο είναι στο πάρκο."
 Απάντηση:
-{"user_out_of_home": false, "sofia_with_user": false, "alexandros_with_sofia": true, "alexandros_away_from_home": true}
+{{"user_out_of_home": false, "sofia_with_user": false, "alexandros_with_sofia": true, "alexandros_away_from_home": true}}
 
 Παράδειγμα 6:
 Μήνυμα: "Πάμε τώρα μαζί με τον Αλέξανδρο πάρκο."
 Απάντηση:
-{"user_out_of_home": true, "alexandros_with_user": true, "alexandros_away_from_home": false}
+{{"user_out_of_home": true, "alexandros_with_user": true, "alexandros_away_from_home": false}}
 
 Μήνυμα Χρήστη: "{user_text}"
 Απάντηση AI (πρόσφατη/τρέχουσα): "{ai_text}"
@@ -101,6 +102,83 @@ def _looks_like_future_departure(text: str) -> bool:
         "φεύγουμε σε",
     )
     return any(marker in t for marker in future_markers)
+
+def _normalize_live_text(text: str) -> str:
+    return clean_message(text or "").strip().lower()
+
+
+def _has_park_live_presence(text: str) -> bool:
+    t = _normalize_live_text(text)
+    park_tokens = (
+        "στο παρκο",
+        "στο πάρκο",
+        "παρκο",
+        "πάρκο",
+        "παιδικη χαρα",
+        "παιδική χαρά",
+        "κουνιες",
+        "κούνιες",
+    )
+    live_tokens = (
+        "τωρα",
+        "τώρα",
+        "ειμαστε",
+        "είμαστε",
+        "καθομαστε",
+        "καθόμαστε",
+        "κατσαμε",
+        "κάτσαμε",
+        "θα κατσουμε",
+        "θα κάτσουμε",
+        "ακομα",
+        "ακόμα",
+        "εδω",
+        "εδώ",
+    )
+    return any(p in t for p in park_tokens) and any(l in t for l in live_tokens)
+
+
+def _looks_like_found_them_reply(text: str) -> bool:
+    t = _normalize_live_text(text)
+    markers = (
+        "τους βρηκα",
+        "τους βρήκα",
+        "πηγα και τους βρηκα",
+        "πήγα και τους βρήκα",
+        "τωρα στο παρκο και τους βρηκα",
+        "τώρα στο πάρκο και τους βρήκα",
+    )
+    return any(m in t for m in markers)
+
+
+def _looks_like_everyone_together(text: str) -> bool:
+    t = _normalize_live_text(text)
+    markers = (
+        "ολοι μαζι",
+        "όλοι μαζί",
+        "ειμαστε ολοι μαζι",
+        "είμαστε όλοι μαζί",
+        "μαζι ολοι",
+        "μαζί όλοι",
+    )
+    return any(m in t for m in markers)
+
+
+def _recent_family_context_hint() -> str:
+    try:
+        entries = load_recent_context(limit=6, channel="telegram") or []
+    except Exception:
+        return ""
+
+    parts = []
+    for item in entries[-6:]:
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "").strip()
+        if content:
+            parts.append(content.lower())
+    return "\n".join(parts)
+
 
 def extract_and_update_context_flags(user_text: str, ai_text: str = ""):
     """
@@ -153,6 +231,44 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = ""):
 
         if payload.get("alexandros_with_user") is True and payload.get("sofia_with_user") is True:
             payload["alexandros_with_sofia"] = True
+
+        # Context-aware enrichment for short live follow-up replies like:
+        # "τους βρήκα", "είμαστε όλοι μαζί", "είμαστε ακόμα πάρκο"
+        normalized_user = _normalize_live_text(user_text)
+
+        if _has_park_live_presence(user_text):
+            payload.setdefault("user_out_of_home", True)
+
+        if _looks_like_everyone_together(user_text):
+            payload["user_out_of_home"] = True
+            payload["sofia_with_user"] = True
+            payload["alexandros_with_user"] = True
+            payload["alexandros_with_sofia"] = True
+            payload["alexandros_away_from_home"] = False
+
+        elif _looks_like_found_them_reply(user_text) and _has_park_live_presence(user_text):
+            payload["user_out_of_home"] = True
+            payload["alexandros_with_user"] = True
+            payload["alexandros_away_from_home"] = False
+
+            recent_hint = _recent_family_context_hint()
+            has_recent_sofia = (
+                "σοφια" in normalized_user or "σοφία" in normalized_user
+                or "σοφια" in recent_hint or "σοφία" in recent_hint
+            )
+            has_recent_alexandros = (
+                "αλεξανδρ" in normalized_user
+                or "αλεξανδρ" in recent_hint
+                or "μικρο" in recent_hint
+                or "μικρό" in recent_hint
+            )
+
+            if has_recent_sofia:
+                payload["sofia_with_user"] = True
+
+            if has_recent_sofia and has_recent_alexandros:
+                payload["alexandros_with_sofia"] = True
+
 
         for key, value in payload.items():
             if key in valid_keys and isinstance(value, bool):
