@@ -1692,13 +1692,18 @@ def _looks_like_recent_followup_resolution_reply(user_text: str, within_seconds:
     finally:
         conn.close()
 
-    cutoff = datetime.now() - timedelta(seconds=within_seconds)
+    # cutoff = datetime.now() - timedelta(seconds=within_seconds) # moved inside loop
 
     for topic, subject, resolved_at, resolution_reason in rows:
         try:
             resolved_dt = datetime.fromisoformat(str(resolved_at).replace(" ", "T"))
         except Exception:
             continue
+
+        if resolved_dt.tzinfo is None:
+            cutoff = datetime.now() - timedelta(seconds=within_seconds)
+        else:
+            cutoff = datetime.now(resolved_dt.tzinfo) - timedelta(seconds=within_seconds)
 
         if resolved_dt < cutoff:
             continue

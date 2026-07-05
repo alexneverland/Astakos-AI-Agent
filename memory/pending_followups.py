@@ -706,7 +706,7 @@ def get_recently_resolved_followups(limit: int = 5, within_seconds: int = 180) -
         out = []
         for row in rows:
             try:
-                resolved_at = datetime.fromisoformat(str(row[6]).replace(" ", "T"))
+                resolved_at = _coerce_local_dt(datetime.fromisoformat(str(row[6]).replace(" ", "T")))
             except Exception:
                 continue
             if resolved_at < cutoff:
@@ -1767,7 +1767,10 @@ NEW USER MESSAGE
 - αν ο χρήστης λέει ότι το έκανε ήδη ή έκλεισε το θέμα, τότε should_defer=false
 - αν δεν είσαι αρκετά σίγουρος, should_defer=false
 """
-    raw = llm.invoke(prompt).content.strip()
+    response = llm.invoke(prompt)
+    raw = response.content if hasattr(response, "content") else str(response)
+    raw = _coerce_text_scalar(raw, "")
+    raw = raw.strip()
 
     try:
         data = json.loads(raw)

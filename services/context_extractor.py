@@ -188,9 +188,11 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
     if not user_text or len(user_text.strip()) < 3:
         return
 
-    prompt = _CONTEXT_EXTRACTION_PROMPT.format(user_text=user_text, ai_text=ai_text)
-    
     try:
+        prompt = _CONTEXT_EXTRACTION_PROMPT.format(
+            user_text=user_text,
+            ai_text=ai_text,
+        )
         response = safe_gemini_call(prompt)
         text = response.text if hasattr(response, "text") else str(response)
         cleaned = clean_message(text).strip()
@@ -303,4 +305,4 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             )
 
     except Exception as exc:
-        print(f"[ContextExtractor Error]: {exc}")
+        print(f"[ContextExtractor Error]: {exc!r}")
