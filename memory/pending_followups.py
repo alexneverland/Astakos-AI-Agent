@@ -8,6 +8,47 @@ from zoneinfo import ZoneInfo
 from config import STATE_DB
 
 
+
+def _coerce_text_scalar(value, default: str = "") -> str:
+    if value is None:
+        return default
+
+    if isinstance(value, list):
+        flat = []
+        for item in value:
+            if item is None:
+                continue
+            if isinstance(item, (str, int, float, bool)):
+                s = str(item).strip()
+                if s:
+                    flat.append(s)
+        return " ".join(flat) if flat else default
+
+    if isinstance(value, dict):
+        return default
+
+    return str(value).strip()
+
+def _coerce_int_scalar(value, default: int = 0) -> int:
+    if isinstance(value, list):
+        if not value:
+            return default
+        value = value[0]
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+def _coerce_float_scalar(value, default: float = 0.0) -> float:
+    if isinstance(value, list):
+        if not value:
+            return default
+        value = value[0]
+    try:
+        return float(value)
+    except Exception:
+        return default
+
 FOLLOWUP_TTL_HOURS = 12
 FOLLOWUP_LOCAL_TZ = ZoneInfo("Europe/Athens")
 
@@ -138,7 +179,7 @@ def _active_followup_is_same_theme(
     existing_source_user_text: str,
     existing_reason: str,
 ) -> bool:
-    topic = (topic or "").strip().lower()
+    topic = _coerce_text_scalar(topic, "").lower()
     existing_topic = (existing_topic or "").strip().lower()
 
     if not topic or topic != existing_topic:
@@ -234,8 +275,8 @@ def _compute_followup_ttl_hours(
     target_window: str = "",
     topic: str = "",
 ) -> int:
-    target_window = (target_window or "").strip().lower()
-    topic = (topic or "").strip().lower()
+    target_window = _coerce_text_scalar(target_window, "").lower()
+    topic = _coerce_text_scalar(topic, "").lower()
 
     if target_window in {
         "next_day_morning",
@@ -272,7 +313,7 @@ def _infer_legacy_target_window(
     delay_minutes_raw: int = 0,
 ) -> str:
     text = _normalize_match_text(f"{source_user_text} {reason}")
-    topic = (topic or "").strip().lower()
+    topic = _coerce_text_scalar(topic, "").lower()
 
     if "σε " in text and "ωρ" in text:
         return "explicit_timer"
@@ -302,7 +343,7 @@ def _infer_legacy_target_window(
 
 
 def _next_occurrence_for_window(now: datetime, target_window: str, fallback_delay_minutes: int) -> datetime:
-    target_window = (target_window or "").strip().lower()
+    target_window = _coerce_text_scalar(target_window, "").lower()
     fallback_delay_minutes = max(15, int(fallback_delay_minutes or 60))
 
     def _today_or_tomorrow(hour: int, minute: int = 0) -> datetime:
@@ -341,8 +382,8 @@ def normalize_followup_delay(
     now: Optional[datetime] = None,
 ) -> int:
     text = _normalize_match_text(source_user_text or "")
-    topic = (topic or "").strip().lower()
-    target_window = (target_window or "").strip().lower()
+    topic = _coerce_text_scalar(topic, "").lower()
+    target_window = _coerce_text_scalar(target_window, "").lower()
     
     known_windows = {
         "",
@@ -952,7 +993,7 @@ def find_followups_for_control(
 ) -> list[dict]:
     ensure_pending_followups_table()
     query_tokens = set(_tokenize_followup_text(subject_query))
-    topic = (topic or "").strip().lower()
+    topic = _coerce_text_scalar(topic, "").lower()
     conn = _conn()
     try:
         placeholders = ",".join("?" for _ in statuses)
@@ -1741,10 +1782,10 @@ NEW USER MESSAGE
 
     return {
         "should_defer": bool(data.get("should_defer")),
-        "delay_minutes": int(data.get("delay_minutes") or 0),
-        "target_window": str(data.get("target_window") or "").strip(),
-        "reason": str(data.get("reason") or "").strip(),
-        "confidence": float(data.get("confidence") or 0.0),
+        "delay_minutes": _coerce_int_scalar(data.get("delay_minutes"), 0),
+        "target_window": _coerce_text_scalar(data.get("target_window"), ""),
+        "reason": _coerce_text_scalar(data.get("reason"), ""),
+        "confidence": _coerce_float_scalar(data.get("confidence"), 0.0),
     }
 
 
@@ -1758,7 +1799,7 @@ def maybe_resolve_followups_from_user_message(user_text: str) -> int:
     try:
         rows = conn.execute(
             """
-            SELECT id, topic, subject, source_user_text
+            SELECT id, topic, subject, source_user_text, status
             FROM pending_followups
             WHERE status IN ('pending', 'sent')
             ORDER BY CASE WHEN status='sent' THEN 0 ELSE 1 END, id DESC
@@ -1805,7 +1846,8 @@ def maybe_resolve_followups_from_user_message(user_text: str) -> int:
         resolved_count = 0
 
         for row in rows:
-            followup_id, topic, subject, source_user_text = row
+            followup_id, topic, subject, source_user_text, followup_status = row
+            followup_status = str(followup_status or "").strip().lower()
 
             shared_tokens = [
                 tok for tok in _normalize_match_text(subject).split()

@@ -514,6 +514,101 @@ RECENT CONTEXT:
             "reason": "fallback_non_assumptive",
         }
 
+def _followup_log_label(item: dict) -> str:
+    topic = str(item.get("topic") or "").strip().lower()
+    subject = str(item.get("subject") or "").strip()
+    if topic and subject:
+        return f"{topic} :: {subject}"
+    if subject:
+        return subject
+    if topic:
+        return topic
+    return f"id={item.get('id')}"
+
+def _short_followup_reason(reason: str, limit: int = 220) -> str:
+    from core.utils import clean_message
+    text = clean_message(reason or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+def _followup_skip_means_defer(reason: str) -> bool:
+    from memory.pending_followups import _normalize_followup_signal_text
+    text = _normalize_followup_signal_text(reason)
+    markers = (
+        "πολυ νωρις",
+        "νωρις",
+        "αργοτερα",
+        "το βραδυ",
+        "ακομα",
+        "ξεκουραζεται",
+        "κοιμαται",
+        "δεν εχει γινει ακομα",
+        "before",
+        "not yet",
+        "later",
+        "tonight",
+    )
+    return any(marker in text for marker in markers)
+
+def _followup_skip_means_resolved(reason: str) -> bool:
+    from memory.pending_followups import _normalize_followup_signal_text
+    text = _normalize_followup_signal_text(reason)
+    markers = (
+        "εχει ηδη ολοκληρωθει",
+        "ηδη ολοκληρωθηκε",
+        "δεν απαιτειται νεο follow-up",
+        "δεν απαιτειται περαιτερω follow-up",
+        "δεν χρειαζεται αλλο",
+        "δεν χρειαζεται περαιτερω",
+        "εχουμε ηδη μιλησει",
+        "ηδη συζητησαμε",
+        "εχουν ηδη φτασει σπιτι",
+        "ειναι σπιτι",
+        "ηδη σταλθηκε",
+        "already completed",
+        "already discussed",
+        "no further follow-up",
+    )
+    return any(marker in text for marker in markers)
+
+def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
+    from datetime import datetime
+    from memory.pending_followups import defer_followup, resolve_followup, _set_followup_decision, normalize_followup_delay
+
+    reason = str(decision.get("reason") or "").strip()
+    topic = str(item.get("topic") or "").strip().lower()
+    metadata = item.get("metadata") or {}
+
+    target_window = str(metadata.get("target_window") or "").strip()
+    raw_delay = int(metadata.get("delay_minutes_raw") or metadata.get("delay_minutes_final") or 60)
+
+    if _followup_skip_means_defer(reason):
+        delay_minutes = normalize_followup_delay(
+            topic=topic,
+            suggested_minutes=raw_delay,
+            source_user_text=str(item.get("source_user_text") or ""),
+            target_window=target_window,
+            now=datetime.now(),
+        )
+        defer_followup(
+            item["id"],
+            delay_minutes=delay_minutes,
+            reason=f"deferred:skip:{reason or 'too_early'}",
+            target_window=target_window,
+            topic=topic,
+        )
+        _set_followup_decision(item["id"], "deferred", reason or "too_early")
+        return "deferred"
+
+    if _followup_skip_means_resolved(reason):
+        resolve_followup(item["id"], f"resolved_by_skip:{reason or 'no_further_followup_needed'}")
+        _set_followup_decision(item["id"], "resolved", reason or "no_further_followup_needed")
+        return "resolved"
+
+    _set_followup_decision(item["id"], "skip", reason or "skip_without_state_change")
+    return "kept_pending"
+
 def job_check_pending_followups():
     from datetime import datetime
     try:
@@ -528,7 +623,7 @@ def job_check_pending_followups():
 
         for item in due[:3]:
             if has_recent_sent_followup(within_minutes=90):
-                print(f"[FollowUp]: skip #{item['id']} recent global followup")
+                print(f"[FollowUp]: skip #{item['id']} ({_followup_log_label(item)}) recent global followup")
                 continue
 
             arc_key = item.get("arc_key") or build_followup_arc_key(
@@ -536,7 +631,7 @@ def job_check_pending_followups():
                 item.get("subject", ""),
             )
             if has_recent_sent_followup_for_arc(arc_key, within_minutes=240):
-                print(f"[FollowUp]: skip #{item['id']} recent arc followup")
+                print(f"[FollowUp]: skip #{item['id']} ({_followup_log_label(item)}) recent arc followup")
                 continue
 
             lower_ctx = (recent_context or "").lower()
@@ -576,14 +671,18 @@ def job_check_pending_followups():
                     )
                     print(
                         f"[FollowUp]: forced-light-send #{item['id']} "
-                        f"-> {item['subject']}"
+                        f"({_followup_log_label(item)})"
                     )
                     continue
 
+                skip_action = _apply_followup_skip_outcome(item, decision)
+
                 print(
                     f"[FollowUp]: skip #{item['id']} "
+                    f"({_followup_log_label(item)}) "
+                    f"action={skip_action} "
                     f"stage={decision.get('stage')} "
-                    f"reason={decision.get('reason')}"
+                    f"reason={_short_followup_reason(decision.get('reason', ''))}"
                 )
                 continue
 
