@@ -1325,7 +1325,12 @@ def record_followup_outcome(followup_id: int, delta: float, reason: str):
         conn.close()
 
 
-def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name: str, active_followups_str: str = "") -> dict | None:
+def extract_followup_candidate_with_llm(
+    user_text: str,
+    ai_text: str,
+    agent_name: str,
+    active_followups_text: str = "",
+) -> dict | None:
     import json
     import re
     from services.gemini import safe_gemini_call
@@ -1401,7 +1406,7 @@ def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name
 - "αγορά και ψήσιμο για τις μπριζόλες λαιμού"
 - "να δω πώς πήγε το πράγμα αργότερα"
 
-{active_followups_str}
+{active_followups_text}
 
 [Agent]: {agent_name}
 [User]: {user_text[:800]}
