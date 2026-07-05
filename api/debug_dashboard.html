@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿﻿<!DOCTYPE html>
 <html lang="el">
 <head>
 <meta charset="UTF-8">
@@ -412,16 +412,16 @@ function renderStatusStrip(d) {
   const systemClass = stale ? 'warn' : 'ok';
   document.getElementById('status-strip').innerHTML = `
     <div class="status-item" data-search="system scheduler ${systemLabel.toLowerCase()}" data-kind="errors">
-      <div class="label">System</div><div class="value ${systemClass}">${systemLabel} · ${secondsLabel(d.snapshot_age_s)}</div>
+      <div class="label">System</div><div class="value ${systemClass}">${systemLabel} - ${secondsLabel(d.snapshot_age_s)}</div>
     </div>
     <div class="status-item" data-search="last user ${esc(last.channel || '')}" data-channel="${esc(last.channel || '')}">
-      <div class="label">Last user</div><div class="value">${esc(last.channel || 'none')} · ${secondsLabel(conv.seconds_since_last_user_activity)}</div>
+      <div class="label">Last user</div><div class="value">${esc(last.channel || 'none')} - ${secondsLabel(conv.seconds_since_last_user_activity)}</div>
     </div>
     <div class="status-item" data-search="approvals pending" data-kind="${approvals ? 'errors' : ''}">
       <div class="label">Approvals</div><div class="value ${approvals ? 'warn' : 'ok'}">${approvals}</div>
     </div>
     <div class="status-item" data-search="routines active blocked" data-kind="routines">
-      <div class="label">Routines</div><div class="value">${active} active · <span class="${blocked ? 'warn' : 'ok'}">${blocked} blocked</span></div>
+      <div class="label">Routines</div><div class="value">${active} active - <span class="${blocked ? 'warn' : 'ok'}">${blocked} blocked</span></div>
     </div>
     <div class="status-item" data-search="queue scheduler"><div class="label">Queue</div><div class="value ${s.queue_size > 5 ? 'warn' : ''}">${s.queue_size ?? '?'}</div></div>
     <div class="status-item" data-search="updated refresh"><div class="label">Updated</div><div class="value">${new Date().toLocaleTimeString('el-GR')}</div></div>
@@ -463,7 +463,7 @@ function renderLatencyPanel(traces) {
     <div class="latency-summary" data-search="latency ${esc(latest.agent || '')}" data-channel="${esc(latest.channel || '')}">
       <div class="off" style="font-size:10px;text-transform:uppercase">Latest turn</div>
       <strong>${esc(latest.agent || 'Unknown agent')}</strong>
-      <div class="off" style="margin-top:3px">${esc(latest.channel || '-')} · ${(latest.timestamp || '').slice(11,19)} · ${latest.tool_calls?.length || 0} tools</div>
+      <div class="off" style="margin-top:3px">${esc(latest.channel || '-')} - ${(latest.timestamp || '').slice(11,19)} - ${latest.tool_calls?.length || 0} tools</div>
     </div>
     ${metrics.slice(1).map(([label, value]) => {
       const ms = value == null ? null : Number(value);
@@ -471,7 +471,7 @@ function renderLatencyPanel(traces) {
       const color = latencyColor(ms);
       return `<div class="latency-metric" data-search="latency ${label.toLowerCase()}">
         <div class="metric-label">${label}</div>
-        <div class="metric-value" style="color:${color}">${ms == null ? '—' : ms >= 1000 ? `${(ms/1000).toFixed(1)}s` : `${Math.round(ms)}ms`}</div>
+        <div class="metric-value" style="color:${color}">${ms == null ? '-' : ms >= 1000 ? `${(ms/1000).toFixed(1)}s` : `${Math.round(ms)}ms`}</div>
         <div class="metric-track"><div class="metric-fill" style="width:${width}%;background:${color}"></div></div>
       </div>`;
     }).join('')}`;
@@ -606,7 +606,7 @@ function logRow(e) {
   </tr>`;
 }
 function cleanEventName(raw){
-  if(!raw) return '—';
+  if(!raw) return '-';
   // Legacy format: str({'event': 'Foo', 'sent_at': datetime(...)}) → εξάγω μόνο το όνομα
   const m = raw.match(/['\"]event['\"]\s*:\s*['\"]([^'"]+)['"]/);
   if(m) return m[1];
@@ -621,7 +621,7 @@ function debugTypeBadge(v){
     pending_cleanup: ['b-orange', 'cleanup'],
     condition_eval: ['b-muted', 'condition'],
   };
-  const item = map[v] || ['b-muted', v || '—'];
+  const item = map[v] || ['b-muted', v || '-'];
   return `<span class="badge ${item[0]}">${item[1]}</span>`;
 }
 
@@ -633,7 +633,7 @@ function debugSourceBadge(v){
     timeout_guard: ['b-orange', 'timeout'],
     system: ['b-muted', 'system'],
   };
-  const item = map[v] || ['b-muted', v || '—'];
+  const item = map[v] || ['b-muted', v || '-'];
   return `<span class="badge ${item[0]}">${item[1]}</span>`;
 }
 
@@ -647,7 +647,7 @@ function debugEffectBadge(v){
     cooldown_changed: ['b-red', 'cooldown'],
     no_change: ['b-muted', 'no-change'],
   };
-  const item = map[v] || ['b-muted', v || '—'];
+  const item = map[v] || ['b-muted', v || '-'];
   return `<span class="badge ${item[0]}">${item[1]}</span>`;
 }
 
@@ -708,11 +708,11 @@ function stateBadge(r) {
 
 function jobRow(j) {
   const icon = j.disabled ? '🚫' : j.fail_count > 0 ? '⚠️' : '✅';
-  const next = j.disabled ? '—' : `${j.next_in_secs}s`;
-  const dur  = j.last_duration != null ? `${j.last_duration.toFixed(2)}s` : '—';
+  const next = j.disabled ? '-' : `${j.next_in_secs}s`;
+  const dur  = j.last_duration != null ? `${j.last_duration.toFixed(2)}s` : '-';
   return `<tr>
     <td>${icon} <b>${j.name}</b></td>
-    <td class="off">${j.last_run||'—'}</td>
+    <td class="off">${j.last_run||'-'}</td>
     <td class="${j.disabled?'err':'ok'}">${next}</td>
     <td>${dur}</td>
     <td class="${j.fail_count>0?'warn':'ok'}">${j.fail_count}</td>
@@ -1157,30 +1157,30 @@ function render(d) {
   html += `<div class="card"><h2>Messenger Draft</h2>
     <div class="kv"><span class="k">Exists</span><span class="v ${md.exists?'ok':'off'}">${md.exists?'YES':'NO'}</span></div>
     <div class="kv"><span class="k">Active</span><span class="v ${md.active?'ok':md.exists?'warn':'off'}">${md.active?'YES':'NO'}</span></div>
-    <div class="kv"><span class="k">Reason</span><span class="v">${md.reason||'—'}</span></div>
-    <div class="kv"><span class="k">Target</span><span class="v">${md.target_name||'—'}</span></div>
-    <div class="kv"><span class="k">Status</span><span class="v">${md.status||'—'}</span></div>
-    <div class="kv"><span class="k">Created</span><span class="v">${(md.created_at||'').replace('T',' ')||'—'}</span></div>
-    <div class="kv"><span class="k">Expires in</span><span class="v ${md.active?'ok':'warn'}">${md.expires_in_seconds!=null?Math.round(md.expires_in_seconds/60)+'m':'—'}</span></div>
+    <div class="kv"><span class="k">Reason</span><span class="v">${md.reason||'-'}</span></div>
+    <div class="kv"><span class="k">Target</span><span class="v">${md.target_name||'-'}</span></div>
+    <div class="kv"><span class="k">Status</span><span class="v">${md.status||'-'}</span></div>
+    <div class="kv"><span class="k">Created</span><span class="v">${(md.created_at||'').replace('T',' ')||'-'}</span></div>
+    <div class="kv"><span class="k">Expires in</span><span class="v ${md.active?'ok':'warn'}">${md.expires_in_seconds!=null?Math.round(md.expires_in_seconds/60)+'m':'-'}</span></div>
     <div class="kv"><span class="k">Message chars</span><span class="v">${md.message_chars??0}</span></div>
   </div>`;
 
   const approvals = d.approvals || {};
   const acts = d.pending_actions||[];
   if (acts.length === 0) {
-    html += `<div class="card"><h2>🔐 Pending Actions</h2>
+    html += `<div class="card"><h2>Pending Actions</h2>
       <div class="kv"><span class="k">Pending approvals</span><span class="v ok">${approvals.pending_count??0}</span></div>
-      <div class="kv"><span class="k">Tools</span><span class="v off">—</span></div>
+      <div class="kv"><span class="k">Tools</span><span class="v off">-</span></div>
     </div>`;
   }
   if (acts.length > 0) {
-    html += `<div class="card"><h2>🔐 Pending Actions (${acts.length})</h2>
+    html += `<div class="card"><h2>Pending Actions (${acts.length})</h2>
       <table><tr><th>Tool</th><th>Args</th><th>Requested</th><th>Age</th><th>Ενέργειες</th></tr>
       ${acts.map(a=>`<tr>
         <td><b>${a.tool_name}</b></td>
         <td class="off" style="font-size:11px;max-width:420px;white-space:normal;word-break:break-word">${JSON.stringify(a.tool_args||{})}</td>
-        <td class="off">${(a.requested_at||'').replace('T',' ').slice(0,16)||'—'}</td>
-        <td class="${(a.age_seconds||0)>900?'warn':'off'}">${a.age_seconds!=null?Math.round(a.age_seconds/60)+'m':'—'}</td>
+        <td class="off">${(a.requested_at||'').replace('T',' ').slice(0,16)||'-'}</td>
+        <td class="${(a.age_seconds||0)>900?'warn':'off'}">${a.age_seconds!=null?Math.round(a.age_seconds/60)+'m':'-'}</td>
         <td style="white-space:nowrap">
           <button onclick="resolveAction('${a.tool_call_id}','approve')" style="background:#1a4a2a;color:#4ade80;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;margin-right:4px">Approve</button>
           <button onclick="resolveAction('${a.tool_call_id}','reject')"  style="background:#4a1a1a;color:#f87171;border:none;padding:3px 10px;border-radius:4px;cursor:pointer">Reject</button>
@@ -1201,7 +1201,7 @@ function render(d) {
           ${r.paused_until ? `<div style="font-size:10px;color:var(--orange);margin-bottom:4px;font-weight:bold" title="Reason: ${r.pause_reason||'N/A'}">⏸️ Paused until: <br/>${r.paused_until}</div>` : ''}
           ${r.muted_until ? `<div style="font-size:10px;color:var(--purple);margin-bottom:4px;font-weight:bold">🔇 Muted until: <br/>${r.muted_until}</div>` : ''}
           <div style="width:80px;margin-bottom:4px">${confBar(r.confidence)}</div>
-          <div style="font-size:10px;color:var(--text-muted)">CD: <span class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null?r.cooldown_remaining_h+'h':'—'}</span></div>
+          <div style="font-size:10px;color:var(--text-muted)">CD: <span class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null?r.cooldown_remaining_h+'h':'-'}</span></div>
         </td>
         <td class="cell-tight" style="text-align:right;vertical-align:middle;white-space:nowrap">
           <button onclick="resetCooldown(${r.id})" title="Reset Cooldown" style="background:rgba(56, 189, 248, 0.15);color:var(--blue-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;margin-right:4px;font-size:14px">⚡</button>
@@ -1242,7 +1242,7 @@ function render(d) {
       <div class="table-wrap"><table class="routines-table"><tr><th class="cell-tight">ID</th><th class="cell-tight">Schedule</th><th>Event</th><th>Rules</th><th class="cell-tight">Status</th><th class="cell-tight" style="text-align:right">Ενέργειες</th></tr>
       ${rout.non_active.map(r=>`<tr>
         <td class="off cell-tight" style="font-size:11px;vertical-align:middle">#${r.id}</td>
-        <td class="cell-tight" style="vertical-align:middle"><div style="font-size:11px;color:var(--text-muted)">${r.day||'—'}</div><div style="font-weight:600;font-size:13px">${r.time||'—'}</div></td>
+        <td class="cell-tight" style="vertical-align:middle"><div style="font-size:11px;color:var(--text-muted)">${r.day||'-'}</div><div style="font-weight:600;font-size:13px">${r.time||'-'}</div></td>
         <td class="cell-event" style="vertical-align:middle; font-weight: 500">${r.event}</td>
         <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}</div></td>
         <td class="cell-tight" style="vertical-align:middle">
@@ -1301,13 +1301,13 @@ function render(d) {
   }
   document.getElementById('grid').innerHTML = html;
   enhanceRenderedDashboard(document.getElementById('grid'));
-  // Live Log — ξεχωριστό section στο κάτω μέρος
+  // Live Log - ξεχωριστό section στο κάτω μέρος
   const recentLogs = [...(evts.recent_logs||[])].reverse();
   const logContainer = document.getElementById('log-section');
   if (recentLogs.length > 0) {
     logContainer.innerHTML = `<div class="card" style="grid-column:1/-1">
       <h2 style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'">
-        📋 Live Log <span style="color:var(--muted);font-size:12px;font-weight:400">(σήμερα — ${recentLogs.length} entries) ▾</span>
+        📋 Live Log <span style="color:var(--muted);font-size:12px;font-weight:400">(σήμερα - ${recentLogs.length} entries) ▾</span>
       </h2>
       <div>
         <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
@@ -1381,9 +1381,9 @@ async function fetchTraces() {
       return `<tr data-channel="${esc(t.channel || '')}" data-kind="${isIssue(t) ? 'errors' : ''}" data-search="${esc(`${t.agent || ''} ${t.channel || ''} ${t.user_message || ''} ${t.response || ''}`.toLowerCase())}">
         <td style="color:var(--muted);font-size:11px;white-space:nowrap">${ts}</td>
         <td style="font-size:13px" title="${t.channel}">${ch}</td>
-        <td style="font-size:12px;color:#7ec8e3;white-space:nowrap"><b>${t.agent||'—'}</b></td>
+        <td style="font-size:12px;color:#7ec8e3;white-space:nowrap"><b>${t.agent||'-'}</b></td>
         <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${msg}">${msg}</td>
-        <td style="max-width:300px">${tools || '<span style="color:#444">—</span>'}</td>
+        <td style="max-width:300px">${tools || '<span style="color:#444">-</span>'}</td>
         <td style="font-size:11px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${resp}">${resp}</td>
         <td style="white-space:nowrap">${badges.join(' ')} ${dur}</td>
       </tr>`;
@@ -1395,7 +1395,7 @@ async function fetchTraces() {
     container.innerHTML = `<div class="card" style="border-left:3px solid var(--blue)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <h2 style="margin:0">🔍 Execution Traces</h2>
-        <span style="color:var(--muted);font-size:12px">${filtered.length}/${allCount} turns · issues ${issueCount} · old hidden ${hideOld?oldIssueCount:0}</span>
+        <span style="color:var(--muted);font-size:12px">${filtered.length}/${allCount} turns - issues ${issueCount} - old hidden ${hideOld?oldIssueCount:0}</span>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
         ${btn('all','All')}
@@ -1485,12 +1485,12 @@ function renderReflections(reflections, showApplied = false) {
   const rows = visible.map(r => `
     <tr>
       <td class="off">#${r.id}</td>
-      <td>${r.created_at?.substring(0,16)||'—'}</td>
-      <td><span class="badge b-blue">${r.source||'—'}</span></td>
+      <td>${r.created_at?.substring(0,16)||'-'}</td>
+      <td><span class="badge b-blue">${r.source||'-'}</span></td>
       <td style="max-width:300px">${r.observation}</td>
       <td><code>${r.action}</code></td>
       <td class="${r.confidence>=0.75?'ok':r.confidence>=0.5?'warn':'err'}">${(r.confidence*100).toFixed(0)}%</td>
-      <td style="max-width:200px;color:var(--muted);font-size:11px">${r.lesson||'—'}</td>
+      <td style="max-width:200px;color:var(--muted);font-size:11px">${r.lesson||'-'}</td>
       <td style="white-space:nowrap">
         ${r.applied
           ? '<span class="ok">✅ Applied</span>'
@@ -1604,7 +1604,7 @@ function renderCharts(d) {
     });
   }
 
-  // 1. Routine States — doughnut
+  // 1. Routine States - doughnut
   const stateMap = d.routines?.state_counts || {};
   const stateLabels = Object.keys(stateMap);
   mkChart('chart-routines', 'doughnut', stateLabels, [{
@@ -1628,7 +1628,7 @@ function renderCharts(d) {
     borderRadius: 4
   }]);
 
-  // 3. Event Throughput — horizontal bar (top 8 job/action combos)
+  // 3. Event Throughput - horizontal bar (top 8 job/action combos)
   const tpEntries = Object.entries(throughput).sort((a,b)=>b[1]-a[1]).slice(0,8);
   mkChart('chart-throughput', 'bar', tpEntries.map(e=>e[0]), [{
     label: 'Count',
@@ -1637,7 +1637,7 @@ function renderCharts(d) {
     borderRadius: 4
   }], { indexAxis: 'y' });
 
-  // 4. Routine confirmations today — από event log
+  // 4. Routine confirmations today - από event log
   const events = d.events_1h?.recent_logs || [];
   const confByHour = {};
   events.forEach(ev => {
@@ -1747,7 +1747,7 @@ async function fetchMemoryAudit() {
     }).join('');
 
     container.innerHTML = `<div class="card" style="border-left:3px solid #a78bfa">
-      <h2>🧠 Memory Audit — σήμερα (${total} ops)</h2>
+      <h2>🧠 Memory Audit - σήμερα (${total} ops)</h2>
       <div style="margin:8px 0 12px">${summary || '<span style="color:var(--muted)">Δεν υπάρχουν εγγραφές ακόμα.</span>'}</div>
       ${rows ? `<div style="max-height:260px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="color:var(--muted);text-align:left;border-bottom:1px solid #333">
