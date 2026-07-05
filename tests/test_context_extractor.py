@@ -83,3 +83,31 @@ def test_context_extractor_future_departure_still_does_not_set_live_presence(moc
     # Because _looks_like_future_departure is true, "user_out_of_home" should NOT be set
     assert "user_out_of_home" not in calls
     assert "alexandros_with_user" not in calls
+
+def test_context_extractor_still_here_at_park(mock_gemini, mock_db, mock_reconciler, mock_history):
+    user_text = "είμαστε ακόμα εδώ στο πάρκο"
+    extract_and_update_context_flags(user_text)
+    
+    calls = {call[0][0]: call[0][1] for call in mock_db.call_args_list}
+    
+    # Enriched by _has_park_live_presence
+    assert calls.get("user_out_of_home") == "true"
+
+
+def test_context_extractor_found_them_and_staying(mock_gemini, mock_db, mock_reconciler, mock_history):
+    # recent context has Sofia/Alexandros
+    mock_history.return_value = [
+        {"content": "η σοφία είναι στο πάρκο με τον αλέξανδρο"}
+    ]
+    
+    user_text = "στο πάρκο, τους βρήκα και θα κάτσουμε κι άλλο"
+    extract_and_update_context_flags(user_text)
+    
+    calls = {call[0][0]: call[0][1] for call in mock_db.call_args_list}
+    
+    assert calls.get("user_out_of_home") == "true"
+    assert calls.get("alexandros_with_user") == "true"
+    assert calls.get("alexandros_away_from_home") == "false"
+    assert calls.get("sofia_with_user") == "true"
+    assert calls.get("alexandros_with_sofia") == "true"
+

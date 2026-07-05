@@ -257,10 +257,9 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = ""):
                 or "σοφια" in recent_hint or "σοφία" in recent_hint
             )
             has_recent_alexandros = (
-                "αλεξανδρ" in normalized_user
-                or "αλεξανδρ" in recent_hint
-                or "μικρο" in recent_hint
-                or "μικρό" in recent_hint
+                "αλεξανδρ" in normalized_user or "αλέξανδρ" in normalized_user
+                or "αλεξανδρ" in recent_hint or "αλέξανδρ" in recent_hint
+                or "μικρο" in recent_hint or "μικρό" in recent_hint
             )
 
             if has_recent_sofia:
