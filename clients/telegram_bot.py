@@ -304,6 +304,8 @@ def _build_followup_state_snapshot() -> dict:
         "family_at_home",
         "alexandros_away_from_home",
         "alexandros_away_reason",
+        "alexandros_with_user",
+        "alexandros_with_sofia",
         "quiet_hours",
         "current_shift",
         "state:alexandros:outing",
@@ -2916,6 +2918,8 @@ def _proactive_state_keys_for_event(event_name: str) -> list[str]:
     keys.extend([
         "alexandros_away_from_home",
         "alexandros_away_reason",
+        "alexandros_with_user",
+        "alexandros_with_sofia",
         "football_season",
         "school_open",
         "user_at_work",
@@ -2988,6 +2992,8 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     user_at_work = state_value("user_at_work") == "true"
     user_out_of_home = state_value("user_out_of_home") == "true"
     quiet_hours = state_value("quiet_hours") == "true"
+    alexandros_with_user = state_value("alexandros_with_user") == "true"
+    alexandros_with_sofia = state_value("alexandros_with_sofia") == "true"
 
     # Namespaced generic states
     outing_state = state_value("state:alexandros:outing")
@@ -2999,6 +3005,10 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
         if outing_state in {"in_progress", "done"}:
             return "[SILENT_SKIP]"
         if away:
+            return "[CONTEXT_SKIP]"
+        if alexandros_with_user:
+            return "[CONTEXT_SKIP]"
+        if alexandros_with_sofia:
             return "[CONTEXT_SKIP]"
         if user_at_work:
             return "[CONTEXT_SKIP]"
