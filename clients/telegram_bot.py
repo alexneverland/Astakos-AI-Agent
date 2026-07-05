@@ -533,7 +533,6 @@ def _short_followup_reason(reason: str, limit: int = 220) -> str:
     return text[: limit - 3].rstrip() + "..."
 
 def _followup_skip_means_defer(reason: str) -> bool:
-    from memory.pending_followups import _normalize_followup_signal_text
     text = _normalize_followup_signal_text(reason)
     markers = (
         "πολυ νωρις",
@@ -552,7 +551,6 @@ def _followup_skip_means_defer(reason: str) -> bool:
     return any(marker in text for marker in markers)
 
 def _followup_skip_means_resolved(reason: str) -> bool:
-    from memory.pending_followups import _normalize_followup_signal_text
     text = _normalize_followup_signal_text(reason)
     markers = (
         "εχει ηδη ολοκληρωθει",

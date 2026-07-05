@@ -77,6 +77,11 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = ""):
             
         for key, value in payload.items():
             if key in valid_keys and isinstance(value, bool):
+                if key == "user_out_of_home" and value is True:
+                    if _looks_like_future_departure(user_text):
+                        print("🤖 [ContextExtractor] Ignored user_out_of_home=true due to future departure phrasing")
+                        continue
+                
                 # Save to database
                 str_val = "true" if value else "false"
                 set_context_state(key, str_val, expires_at=today_str)
