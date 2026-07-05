@@ -673,7 +673,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply)
+            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
             return JSONResponse({"agent": "Chat_Agent", "response": reply})
 
         if pending_asset and reply_kind == "no" and asset_prompt_active:
@@ -690,7 +690,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply)
+            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
             return JSONResponse({"agent": "Chat_Agent", "response": reply})
     except Exception as e:
         print(f"[PendingAssets]: Web text handler error: {e}")
@@ -725,7 +725,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply)
+            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
 
             _trace = ExecutionTrace(channel="web", user_message=user_input)
             _trace.mark_phase("messenger_intent_clear_intercept", 1)
@@ -758,7 +758,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply)
+            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
 
             _trace = ExecutionTrace(channel="web", user_message=user_input)
             _trace.mark_phase("messenger_intent_clarify_intercept", 1)
@@ -989,7 +989,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(_enqueue_slow_memory_sifter,       clean_user, clean_ai, handling_agent, "web")
             enqueue_slow_task(update_capabilities_from_exchange, clean_user, clean_ai, handling_agent)
             enqueue_slow_task(_enqueue_followup_pipeline, clean_user, clean_ai, handling_agent, "web")
-            enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai)
+            enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")
             _trace.mark_phase("background_enqueue_ms", int((perf_counter() - t_bg_0) * 1000))
 
             _trace.save()
@@ -1268,7 +1268,7 @@ async def upload_file(
         enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
         enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
         enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
-        enqueue_slow_task(extract_and_update_context_flags, user_log_msg, chat_ai_msg)
+        enqueue_slow_task(extract_and_update_context_flags, user_log_msg, chat_ai_msg, "web")
 
         from memory.pending_assets import looks_like_asset_confirmation_prompt
         if looks_like_asset_confirmation_prompt(chat_ai_msg):

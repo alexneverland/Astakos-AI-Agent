@@ -164,9 +164,9 @@ def _looks_like_everyone_together(text: str) -> bool:
     return any(m in t for m in markers)
 
 
-def _recent_family_context_hint() -> str:
+def _recent_family_context_hint(channel: str = "telegram") -> str:
     try:
-        entries = load_recent_context(limit=6, channel="telegram") or []
+        entries = load_recent_context(limit=6, channel=channel) or []
     except Exception:
         return ""
 
@@ -180,7 +180,7 @@ def _recent_family_context_hint() -> str:
     return "\n".join(parts)
 
 
-def extract_and_update_context_flags(user_text: str, ai_text: str = ""):
+def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel: str = "telegram"):
     """
     Calls the LLM to extract context flags based on the user's message,
     and directly updates astakos_routines.db context states.
@@ -251,7 +251,7 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = ""):
             payload["alexandros_with_user"] = True
             payload["alexandros_away_from_home"] = False
 
-            recent_hint = _recent_family_context_hint()
+            recent_hint = _recent_family_context_hint(channel=channel)
             has_recent_sofia = (
                 "σοφια" in normalized_user or "σοφία" in normalized_user
                 or "σοφια" in recent_hint or "σοφία" in recent_hint
