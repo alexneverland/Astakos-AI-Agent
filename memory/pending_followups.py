@@ -340,20 +340,85 @@ def normalize_followup_delay(
     target_window: str = "",
     now: Optional[datetime] = None,
 ) -> int:
-    value = int(suggested_minutes or 0)
+    text = _normalize_match_text(source_user_text or "")
+    topic = (topic or "").strip().lower()
+    target_window = (target_window or "").strip().lower()
+    
+    known_windows = {
+        "",
+        "explicit_timer",
+        "same_day_short_checkin",
+        "same_day_evening",
+        "next_day_morning",
+        "next_day_late_morning",
+        "next_day_afternoon",
+        "next_day_evening",
+        "after_likely_completion",
+    }
+    if target_window not in known_windows:
+        target_window = ""
+        
+    raw_value = int(suggested_minutes or 0)
     now = _coerce_local_dt(now)
-    
-    # Trust the LLM's sophisticated reasoning for the delay
-    if value < 15:
-        value = 15
-    if value > 48 * 60:
-        value = 48 * 60
 
-    target_time = now + timedelta(minutes=value)
+    # Base trust in LLM, but keep sane bounds
+    value = max(15, min(raw_value, 48 * 60))
 
-    # 🌙 Apply Quiet Hours (00:00 - 08:00) so we never spam at night
-    target_time = _apply_quiet_hours(target_time)
-    
+    # 1) If user explicitly asked for a concrete timer, trust the LLM delay
+    if target_window == "explicit_timer":
+        target_time = _apply_quiet_hours(now + timedelta(minutes=value))
+        final_minutes = int((target_time - now).total_seconds() / 60.0)
+        return max(15, final_minutes)
+
+    # 2) Semantic windows still own the scheduling intent
+    if target_window == "same_day_short_checkin":
+        semantic_delay = max(20, min(value, 90))
+        target_time = _apply_quiet_hours(now + timedelta(minutes=semantic_delay))
+        final_minutes = int((target_time - now).total_seconds() / 60.0)
+        return max(15, final_minutes)
+
+    if target_window == "same_day_evening":
+        target_time = _next_occurrence_for_window(now, target_window, value)
+        final_minutes = int((target_time - now).total_seconds() / 60.0)
+        return max(15, final_minutes)
+
+    if target_window in {
+        "next_day_morning",
+        "next_day_late_morning",
+        "next_day_afternoon",
+        "next_day_evening",
+        "after_likely_completion",
+    }:
+        target_time = _next_occurrence_for_window(now, target_window, value)
+        final_minutes = int((target_time - now).total_seconds() / 60.0)
+        return max(15, final_minutes)
+
+    # 3) Fallback semantic heuristics when LLM didn't provide a good window
+    if topic == "outing":
+        fallback_delay = max(30, min(value, 180))
+        target_time = _apply_quiet_hours(now + timedelta(minutes=fallback_delay))
+        final_minutes = int((target_time - now).total_seconds() / 60.0)
+        return max(15, final_minutes)
+
+    if topic == "food_purchase":
+        if "αυριο" in text or "αύριο" in text:
+            target_time = _next_occurrence_for_window(now, "next_day_late_morning", value)
+            final_minutes = int((target_time - now).total_seconds() / 60.0)
+            return max(15, final_minutes)
+
+        if "αποψε" in text or "απόψε" in text or "βραδ" in text:
+            fallback_delay = max(45, min(value, 240))
+            target_time = _apply_quiet_hours(now + timedelta(minutes=fallback_delay))
+            final_minutes = int((target_time - now).total_seconds() / 60.0)
+            return max(15, final_minutes)
+
+        fallback_delay = max(90, min(value, 360))
+        target_time = _apply_quiet_hours(now + timedelta(minutes=fallback_delay))
+        final_minutes = int((target_time - now).total_seconds() / 60.0)
+        return max(15, final_minutes)
+
+    # 4) Generic fallback: trust LLM minutes, then quiet hours
+    target_time = _apply_quiet_hours(now + timedelta(minutes=value))
     final_minutes = int((target_time - now).total_seconds() / 60.0)
     return max(15, final_minutes)
 
@@ -1517,7 +1582,12 @@ def maybe_create_followup_from_exchange(
             lines.append(f"[#{f['id']}] topic: {f['topic']}, subject: {f['subject']}")
         active_str = "\n".join(lines)
 
-    candidate = extract_followup_candidate_with_llm(clean_user, clean_ai, agent_name, active_str)
+    candidate = extract_followup_candidate_with_llm(
+        clean_user,
+        clean_ai,
+        agent_name,
+        active_followups_text=active_str,
+    )
     if not candidate:
         return None
 

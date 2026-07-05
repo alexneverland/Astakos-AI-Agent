@@ -183,7 +183,7 @@ def test_maybe_create_followup_from_exchange_inserts_when_llm_candidate_is_valid
     monkeypatch.setattr(
         pf,
         "extract_followup_candidate_with_llm",
-        lambda user_text, ai_text, agent_name: {
+        lambda user_text, ai_text, agent_name, active_followups_text="": {
             "should_follow_up": True,
             "topic": "food_purchase",
             "subject": "μπριζόλες λαιμού",
@@ -211,7 +211,7 @@ def test_maybe_create_followup_from_exchange_skips_low_confidence(temp_state_db,
     monkeypatch.setattr(
         pf,
         "extract_followup_candidate_with_llm",
-        lambda user_text, ai_text, agent_name: {
+        lambda user_text, ai_text, agent_name, active_followups_text="": {
             "should_follow_up": True,
             "topic": "food_purchase",
             "subject": "μπριζόλες λαιμού",
@@ -386,7 +386,7 @@ def test_maybe_create_followup_from_exchange_stores_raw_and_final_delay(temp_sta
     monkeypatch.setattr(
         pf,
         "extract_followup_candidate_with_llm",
-        lambda user_text, ai_text, agent_name: {
+        lambda user_text, ai_text, agent_name, active_followups_text="": {
             "should_follow_up": True,
             "topic": "outing",
             "subject": "συνάντηση με Σοφία",
@@ -543,7 +543,7 @@ def test_enqueue_followup_pipeline_skips_create_after_resolution_update(monkeypa
     monkeypatch.setattr(
         bot,
         "extract_followup_candidate_with_llm",
-        lambda user_text, ai_text, agent_name: {
+        lambda user_text, ai_text, agent_name, active_followups_text="": {
             "should_follow_up": True,
             "topic": "food_purchase",
             "subject": "brizoles laimou",
@@ -588,7 +588,7 @@ def test_enqueue_followup_pipeline_allows_distinct_new_arc_after_resolution(monk
     monkeypatch.setattr(
         bot,
         "extract_followup_candidate_with_llm",
-        lambda user_text, ai_text, agent_name: {
+        lambda user_text, ai_text, agent_name, active_followups_text="": {
             "should_follow_up": True,
             "topic": "outing",
             "subject": "παρκο με οικογενεια",
