@@ -1305,7 +1305,7 @@ def record_followup_outcome(followup_id: int, delta: float, reason: str):
         conn.close()
 
 
-def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name: str) -> dict | None:
+def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name: str, active_followups_str: str = "") -> dict | None:
     import json
     import re
     from services.gemini import safe_gemini_call
@@ -1343,6 +1343,8 @@ def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name
 }}
 
 Κανόνες:
+- Αν στο [Active Pending Follow-ups] δεις ένα θέμα που ταιριάζει απόλυτα με τη νέα συζήτηση (π.χ. συζητάνε ξανά για το ίδιο μπάνιο), ΜΗΝ βάλεις should_follow_up: true. Αντ' αυτού βάλε update_existing_id: <το id του> ώστε να ανανεωθεί ο χρόνος του υπάρχοντος!
+Κανόνες:
 - subject μέχρι 4 λέξεις
 - προτίμησε compact noun phrase, όχι πλήρη περιγραφή
 - απόφυγε "και", "για", "ώστε", "να"
@@ -1378,6 +1380,8 @@ def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name
 Παραδείγματα κακού subject:
 - "αγορά και ψήσιμο για τις μπριζόλες λαιμού"
 - "να δω πώς πήγε το πράγμα αργότερα"
+
+{active_followups_str}
 
 [Agent]: {agent_name}
 [User]: {user_text[:800]}
@@ -1550,9 +1554,40 @@ def maybe_create_followup_from_exchange(
     if len(clean_user.split()) <= 3 and any(m in low_user for m in skip_markers):
         return None
 
-    candidate = extract_followup_candidate_with_llm(clean_user, clean_ai, agent_name)
-    if not candidate or not candidate.get("should_follow_up"):
+    active_followups = find_pending_followups(limit=10, active_only=True)
+    active_str = ""
+    if active_followups:
+        lines = ["[Active Pending Follow-ups]"]
+        for f in active_followups:
+            lines.append(f"[#{f['id']}] topic: {f['topic']}, subject: {f['subject']}")
+        active_str = "\n".join(lines)
+
+    candidate = extract_followup_candidate_with_llm(clean_user, clean_ai, agent_name, active_str)
+    if not candidate:
         return None
+
+    update_id = candidate.get("update_existing_id")
+    if update_id:
+        topic_for_defer = ""
+        for f in active_followups:
+            if f["id"] == update_id:
+                topic_for_defer = f["topic"]
+                break
+        
+        from memory.pending_followups import defer_followup
+        defer_followup(
+            followup_id=update_id,
+            delay_minutes=candidate.get("delay_minutes", 60),
+            reason=candidate.get("reason", "updated_by_deduplication"),
+            target_window=candidate.get("target_window", ""),
+            topic=topic_for_defer
+        )
+        print(f"[FollowUp]: merged new info into existing #{update_id}")
+        return update_id
+
+    if not candidate.get("should_follow_up"):
+        return None
+
     return create_pending_followup_from_candidate(
         candidate=candidate,
         source_channel=channel,
@@ -1601,6 +1636,8 @@ New user message:
 }}
 
 Κανόνες:
+- Αν στο [Active Pending Follow-ups] δεις ένα θέμα που ταιριάζει απόλυτα με τη νέα συζήτηση (π.χ. συζητάνε ξανά για το ίδιο μπάνιο), ΜΗΝ βάλεις should_follow_up: true. Αντ' αυτού βάλε update_existing_id: <το id του> ώστε να ανανεωθεί ο χρόνος του υπάρχοντος!
+Κανόνες:
 - resolves=true αν ο χρήστης λέει ότι το έκανε, δεν το έκανε, πήγε για αύριο, βρήκε το πρόσωπο, γύρισε, ακυρώθηκε, μετατέθηκε
 - resolves=false αν είναι άσχετο ή δεν αρκεί
 - confidence 0.0 έως 1.0
@@ -1646,6 +1683,8 @@ NEW USER MESSAGE
   "confidence": 0.0
 }}
 
+Κανόνες:
+- Αν στο [Active Pending Follow-ups] δεις ένα θέμα που ταιριάζει απόλυτα με τη νέα συζήτηση (π.χ. συζητάνε ξανά για το ίδιο μπάνιο), ΜΗΝ βάλεις should_follow_up: true. Αντ' αυτού βάλε update_existing_id: <το id του> ώστε να ανανεωθεί ο χρόνος του υπάρχοντος!
 Κανόνες:
 - should_defer=true μόνο αν ο χρήστης ΔΕΝ λέει ότι το έκανε, αλλά το μεταθέτει για μετά
 - παραδείγματα defer:
