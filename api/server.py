@@ -1436,6 +1436,8 @@ async def debug_runtime(_=Depends(require_token)):
         from memory.routine_db import get_context_states
         raw_context_states = get_context_states([
             "alexandros_away_from_home",
+            "alexandros_with_user",
+            "alexandros_with_sofia",
             "current_shift",
             "user_out_of_home",
             "state:alexandros:outing",

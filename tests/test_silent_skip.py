@@ -671,6 +671,13 @@ def test_force_context_skip_from_state_when_child_away_from_home():
     }
     assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) == "[CONTEXT_SKIP]"
 
+def test_force_context_skip_from_state_when_child_is_out_with_sofia_for_sleep():
+    snap = {
+        "alexandros_with_sofia": {"value": "true", "expires_at": "2026-07-05"},
+        "alexandros_away_from_home": {"value": "true", "expires_at": "2026-07-05"},
+    }
+    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap) == "[CONTEXT_SKIP]"
+
 def test_force_proactive_skip_from_state_does_not_skip_park_when_only_out_of_home():
     snap = {
         "user_out_of_home": {"value": "true", "expires_at": None},

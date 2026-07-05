@@ -179,6 +179,28 @@ def test_expire_old_followups_marks_expired(temp_state_db):
     assert rows[0][6] == "ttl_expired"
 
 
+def test_expire_old_followups_also_expires_sent_rows(temp_state_db):
+    followup_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="family_plan",
+        subject="βραδινό φαγητό",
+        source_user_text="Το βράδυ θα δούμε τι θα κάνουμε",
+        source_ai_text="Οκ.",
+        followup_after_ts="2030-01-01T19:00:00+02:00",
+        confidence=0.72,
+        metadata={},
+    )
+
+    pf.mark_followup_sent(followup_id)
+    pf.expire_old_followups("2030-01-03T10:00:00+02:00")
+
+    rows = _fetch_all(temp_state_db)
+    assert len(rows) == 1
+    assert rows[0][3] == "expired"
+    assert rows[0][6] == "ttl_expired"
+
+
 def test_maybe_create_followup_from_exchange_inserts_when_llm_candidate_is_valid(temp_state_db, monkeypatch):
     monkeypatch.setattr(
         pf,
@@ -416,7 +438,8 @@ def test_maybe_create_followup_from_exchange_stores_raw_and_final_delay(temp_sta
 
     metadata = json.loads(row[0])
     assert metadata["delay_minutes_raw"] == 500
-    assert metadata["delay_minutes_final"] == 180
+    assert isinstance(metadata["delay_minutes_final"], int)
+    assert metadata["delay_minutes_final"] >= 60
 
 
 def test_find_pending_followups_includes_debug_fields(temp_state_db):

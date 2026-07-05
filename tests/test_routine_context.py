@@ -116,6 +116,32 @@ def test_build_runtime_routine_context_includes_user_out_of_home(monkeypatch):
     assert result["user_out_of_home"] is True
 
 
+def test_build_runtime_routine_context_includes_family_presence_flags(monkeypatch):
+    import services.routine_context as rc
+    from datetime import datetime
+
+    monkeypatch.setattr(rc, "resolve_alexandros_away_state", lambda now=None: False)
+    monkeypatch.setattr(rc, "resolve_alexandros_away_reason", lambda now=None: None)
+    monkeypatch.setattr(rc, "resolve_context_bool", lambda key, now=None: {
+        "alexandros_with_user": True,
+        "alexandros_with_sofia": False,
+        "sofia_with_user": True,
+    }.get(key))
+    monkeypatch.setattr(rc, "resolve_football_season", lambda now=None: True)
+    monkeypatch.setattr(rc, "resolve_school_open", lambda now=None: True)
+    monkeypatch.setattr(rc, "resolve_current_shift", lambda now=None: None)
+    monkeypatch.setattr(rc, "resolve_sofia_work_mode", lambda now=None: None)
+    monkeypatch.setattr(rc, "resolve_user_at_work", lambda now=None: False)
+    monkeypatch.setattr(rc, "resolve_user_out_of_home", lambda now=None: True)
+    monkeypatch.setattr(rc, "resolve_quiet_hours", lambda now=None: False)
+
+    result = rc.build_runtime_routine_context(datetime(2026, 7, 5, 20, 0))
+
+    assert result["alexandros_with_user"] is True
+    assert result["alexandros_with_sofia"] is False
+    assert result["sofia_with_user"] is True
+
+
 def test_resolve_user_out_of_home_prefers_recent_home_gps_over_stale_true_state(monkeypatch, tmp_path):
     gps_file = tmp_path / "last_location.json"
     gps_file.write_text(

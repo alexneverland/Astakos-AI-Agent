@@ -1077,7 +1077,7 @@ def expire_old_followups(now_iso: str):
     conn = _conn()
     try:
         cur = conn.execute(
-            "SELECT id FROM pending_followups WHERE status='pending' AND expires_at <= ?",
+            "SELECT id FROM pending_followups WHERE status IN ('pending', 'sent') AND expires_at <= ?",
             (now_iso,)
         )
         expired_ids = [row[0] for row in cur.fetchall()]
@@ -1088,11 +1088,11 @@ def expire_old_followups(now_iso: str):
                 UPDATE pending_followups
                 SET status='expired',
                     resolution_reason='ttl_expired',
-                    resolved_at=CURRENT_TIMESTAMP,
+                    resolved_at=?,
                     last_decision='expired'
-                WHERE status='pending' AND expires_at <= ?
+                WHERE status IN ('pending', 'sent') AND expires_at <= ?
                 """,
-                (now_iso,),
+                (now_iso, now_iso),
             )
             conn.commit()
     finally:

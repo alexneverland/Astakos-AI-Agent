@@ -610,9 +610,9 @@ def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
     return "kept_pending"
 
 def job_check_pending_followups():
-    from datetime import datetime
+    from memory.pending_followups import _local_now
     try:
-        now_iso = datetime.now().isoformat(timespec="seconds")
+        now_iso = _local_now().isoformat(timespec="seconds")
         expire_old_followups(now_iso)
 
         due = get_due_pending_followups(now_iso)
@@ -3028,6 +3028,10 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
         if sleep_state in {"in_progress", "done"}:
             return "[SILENT_SKIP]"
         if away:
+            return "[CONTEXT_SKIP]"
+        if alexandros_with_user:
+            return "[CONTEXT_SKIP]"
+        if alexandros_with_sofia:
             return "[CONTEXT_SKIP]"
         if quiet_hours:
             return "[CONTEXT_SKIP]"

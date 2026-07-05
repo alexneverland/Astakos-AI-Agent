@@ -126,9 +126,13 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = ""):
         
         # Validate and apply only known flags
         valid_keys = {
-            "user_out_of_home", "family_at_home", 
-            "sofia_with_user", "alexandros_away_from_home", 
-            "user_at_work"
+            "user_out_of_home",
+            "family_at_home",
+            "sofia_with_user",
+            "alexandros_away_from_home",
+            "user_at_work",
+            "alexandros_with_user",
+            "alexandros_with_sofia",
         }
         
         # Only update if the payload is a dictionary
@@ -147,8 +151,8 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = ""):
         if payload.get("alexandros_with_sofia") is True and payload.get("alexandros_with_user") is not True:
             payload["alexandros_away_from_home"] = True
 
-        if payload.get("sofia_with_user") is True:
-            payload["alexandros_with_sofia"] = False
+        if payload.get("alexandros_with_user") is True and payload.get("sofia_with_user") is True:
+            payload["alexandros_with_sofia"] = True
 
         for key, value in payload.items():
             if key in valid_keys and isinstance(value, bool):
