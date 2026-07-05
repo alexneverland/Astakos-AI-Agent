@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🦞 Astakos Runtime Dashboard</title>
+<title>Astakos Runtime Dashboard</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
   
@@ -252,7 +252,7 @@
 </head>
 <body>
 <div id="refresh-bar" style="width:0%"></div>
-<h1>🦞 Astakos Runtime Dashboard</h1>
+<h1>Astakos Runtime Dashboard</h1>
 <div class="ts" id="ts">Φόρτωση...</div>
 <div id="status-strip" class="status-strip">
   <div class="status-item"><div class="label">System</div><div class="value off">Loading</div></div>
@@ -1044,12 +1044,12 @@ function render(d) {
   function prettyFollowupWindow(key) {
     const map = {
       explicit_timer: "Explicit timer",
-      same_day_short_checkin: "Same day · short check-in",
-      same_day_evening: "Same day · evening",
-      next_day_morning: "Next day · morning",
-      next_day_late_morning: "Next day · late morning",
-      next_day_afternoon: "Next day · afternoon",
-      next_day_evening: "Next day · evening",
+      same_day_short_checkin: "Same day - short check-in",
+      same_day_evening: "Same day - evening",
+      next_day_morning: "Next day - morning",
+      next_day_late_morning: "Next day - late morning",
+      next_day_afternoon: "Next day - afternoon",
+      next_day_evening: "Next day - evening",
       after_likely_completion: "After likely completion",
     };
     return map[key] || key || "-";
@@ -1182,14 +1182,14 @@ function render(d) {
         <td class="off">${(a.requested_at||'').replace('T',' ').slice(0,16)||'—'}</td>
         <td class="${(a.age_seconds||0)>900?'warn':'off'}">${a.age_seconds!=null?Math.round(a.age_seconds/60)+'m':'—'}</td>
         <td style="white-space:nowrap">
-          <button onclick="resolveAction('${a.tool_call_id}','approve')" style="background:#1a4a2a;color:#4ade80;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;margin-right:4px">✅ Approve</button>
-          <button onclick="resolveAction('${a.tool_call_id}','reject')"  style="background:#4a1a1a;color:#f87171;border:none;padding:3px 10px;border-radius:4px;cursor:pointer">❌ Reject</button>
+          <button onclick="resolveAction('${a.tool_call_id}','approve')" style="background:#1a4a2a;color:#4ade80;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;margin-right:4px">Approve</button>
+          <button onclick="resolveAction('${a.tool_call_id}','reject')"  style="background:#4a1a1a;color:#f87171;border:none;padding:3px 10px;border-radius:4px;cursor:pointer">Reject</button>
         </td>
       </tr>`).join('')}</table></div>`;
   }
 
   if ((rout.active||[]).length > 0) {
-    html += `<div class="card" style="grid-column:1/-1"><h2>🗓️ Active Routines (${rout.active.length})</h2>
+    html += `<div class="card" style="grid-column:1/-1"><h2>Active Routines (${rout.active.length})</h2>
       <div class="table-wrap"><table class="routines-table"><tr><th class="cell-tight">ID</th><th class="cell-tight">Schedule</th><th>Event</th><th>Rules</th><th class="cell-tight">Status</th><th class="cell-tight" style="text-align:right">Ενέργειες</th></tr>
       ${rout.active.map(r=>`<tr>
         <td class="off cell-tight" style="font-size:11px; vertical-align:middle">#${r.id}</td>
@@ -1205,8 +1205,8 @@ function render(d) {
         </td>
         <td class="cell-tight" style="text-align:right;vertical-align:middle;white-space:nowrap">
           <button onclick="resetCooldown(${r.id})" title="Reset Cooldown" style="background:rgba(56, 189, 248, 0.15);color:var(--blue-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;margin-right:4px;font-size:14px">⚡</button>
-          <button onclick="toggleEdit(${r.id})" title="Edit" style="background:rgba(251, 191, 36, 0.15);color:var(--yellow-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;margin-right:4px;font-size:14px">✏️</button>
-          <button onclick="deleteRoutine(${r.id})" title="Delete" style="background:rgba(251, 113, 133, 0.15);color:var(--red-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;font-size:14px">🗑️</button>
+          <button onclick="toggleEdit(${r.id})" title="Edit" style="background:rgba(251, 191, 36, 0.15);color:var(--yellow-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;margin-right:4px;font-size:14px">Edit</button>
+          <button onclick="deleteRoutine(${r.id})" title="Delete" style="background:rgba(251, 113, 133, 0.15);color:var(--red-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;font-size:14px">Delete</button>
         </td>
       </tr>
       <tr id="edit-row-${r.id}" style="display:none;background:var(--bg-base)">
@@ -1223,7 +1223,7 @@ function render(d) {
             <label style="color:var(--text-muted);font-size:11px">Event:
               <input id="edit-event-${r.id}" value="${r.event}" style="background:var(--bg-glass);color:var(--text-main);border:1px solid var(--border-glass);border-radius:4px;padding:4px 8px;width:220px;margin-left:4px">
             </label>
-            <button onclick="saveEdit(${r.id})" style="background:rgba(52, 211, 153, 0.15);color:var(--green-soft);border:none;padding:4px 12px;border-radius:4px;cursor:pointer">💾 Save</button>
+            <button onclick="saveEdit(${r.id})" style="background:rgba(52, 211, 153, 0.15);color:var(--green-soft);border:none;padding:4px 12px;border-radius:4px;cursor:pointer">Save</button>
             <button onclick="toggleEdit(${r.id})" style="background:rgba(148, 163, 184, 0.15);color:var(--text-muted);border:none;padding:4px 12px;border-radius:4px;cursor:pointer">✕</button>
           </div>
         </td>
@@ -1232,13 +1232,13 @@ function render(d) {
 
   const sc = rout.state_counts||{};
   if (Object.keys(sc).length > 0) {
-    html += `<div class="card"><h2>📈 Routine State Counts</h2>
+    html += `<div class="card"><h2>Routine State Counts</h2>
       ${Object.entries(sc).map(([st,c])=>`<div class="kv"><span class="k">${stateBadge(st)}</span><span class="v">${c}</span></div>`).join('')}
     </div>`;
   }
 
   if ((rout.non_active||[]).length > 0) {
-    html += `<div class="card" style="grid-column:1/-1"><h2>🔄 Non-Active Routines (${rout.non_active.length})</h2>
+    html += `<div class="card" style="grid-column:1/-1"><h2>Non-Active Routines (${rout.non_active.length})</h2>
       <div class="table-wrap"><table class="routines-table"><tr><th class="cell-tight">ID</th><th class="cell-tight">Schedule</th><th>Event</th><th>Rules</th><th class="cell-tight">Status</th><th class="cell-tight" style="text-align:right">Ενέργειες</th></tr>
       ${rout.non_active.map(r=>`<tr>
         <td class="off cell-tight" style="font-size:11px;vertical-align:middle">#${r.id}</td>
@@ -1252,10 +1252,10 @@ function render(d) {
         <td class="cell-tight" style="text-align:right;vertical-align:middle;white-space:nowrap">
           ${r.state==='trigger_pending'
             ? `<button onclick="confirmRoutine(${r.id})" title="Confirm" style="background:rgba(52, 211, 153, 0.15);color:var(--green-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;margin-right:4px;font-size:14px">✅</button>`
-            : `<button onclick="activateRoutine(${r.id})" title="Activate" style="background:rgba(52, 211, 153, 0.15);color:var(--green-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;margin-right:4px;font-size:14px">▶️</button>`
+            : `<button onclick="activateRoutine(${r.id})" title="Activate" style="background:rgba(52, 211, 153, 0.15);color:var(--green-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;margin-right:4px;font-size:14px">Activate</button>`
           }
-          <button onclick="toggleEdit(${r.id})" title="Edit" style="background:rgba(251, 191, 36, 0.15);color:var(--yellow-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;margin-right:4px;font-size:14px">✏️</button>
-          <button onclick="deleteRoutine(${r.id})" title="Delete" style="background:rgba(251, 113, 133, 0.15);color:var(--red-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;font-size:14px">🗑️</button>
+          <button onclick="toggleEdit(${r.id})" title="Edit" style="background:rgba(251, 191, 36, 0.15);color:var(--yellow-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;margin-right:4px;font-size:14px">Edit</button>
+          <button onclick="deleteRoutine(${r.id})" title="Delete" style="background:rgba(251, 113, 133, 0.15);color:var(--red-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;font-size:14px">Delete</button>
         </td>
       </tr>
       <tr id="edit-row-${r.id}" style="display:none;background:var(--bg-base)">
@@ -1272,7 +1272,7 @@ function render(d) {
             <label style="color:var(--text-muted);font-size:11px">Event:
               <input id="edit-event-${r.id}" value="${r.event||''}" style="background:var(--bg-glass);color:var(--text-main);border:1px solid var(--border-glass);border-radius:4px;padding:4px 8px;width:180px;margin-left:4px">
             </label>
-            <button onclick="saveEdit(${r.id})" style="background:rgba(52, 211, 153, 0.15);color:var(--green-soft);border:none;padding:4px 12px;border-radius:4px;cursor:pointer">💾 Save</button>
+            <button onclick="saveEdit(${r.id})" style="background:rgba(52, 211, 153, 0.15);color:var(--green-soft);border:none;padding:4px 12px;border-radius:4px;cursor:pointer">Save</button>
             <button onclick="toggleEdit(${r.id})" style="background:rgba(148, 163, 184, 0.15);color:var(--text-muted);border:none;padding:4px 10px;border-radius:4px;cursor:pointer">Cancel</button>
           </div>
         </td>
@@ -1282,7 +1282,7 @@ function render(d) {
   const tp = evts.throughput||{};
   if (Object.keys(tp).length > 0) {
     const mx = Math.max(...Object.values(tp),1);
-    html += `<div class="card"><h2>⚡ Event Throughput (last 1h)</h2>
+    html += `<div class="card"><h2>Event Throughput (last 1h)</h2>
       ${Object.entries(tp).sort((a,b)=>b[1]-a[1]).map(([k,v])=>{
         const p = Math.round(v/mx*100);
         return `<div style="margin-bottom:5px">
