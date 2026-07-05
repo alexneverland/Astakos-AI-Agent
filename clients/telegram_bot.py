@@ -74,6 +74,7 @@ def _safe_clear_draft() -> bool:
     except Exception:
         return False
 
+from services.context_extractor import extract_and_update_context_flags
 from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
 from core.exceptions import SchedulerCrashError, PendingTimeoutError, DBWriteError
 from core.brain import llm, safe_llm_invoke
@@ -783,6 +784,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
             enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
+            enqueue_slow_task(extract_and_update_context_flags, caption or user_log_msg, chat_ai_msg)
         except Exception as e:
             print(f"[Document/History]: {e}")
 
@@ -1021,6 +1023,7 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, final_response, handling_agent, "telegram")
     enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, final_response, handling_agent)
     enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, final_response, handling_agent, "telegram")
+    enqueue_slow_task(extract_and_update_context_flags, user_log_msg, final_response)
 
     try:
         from memory.pending_assets import create_pending_asset_archive, looks_like_asset_confirmation_prompt
@@ -1742,6 +1745,7 @@ def handle_message(user_text: str, chat_id: str):
         enqueue_fast_task(_enqueue_slow_memory_sifter, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
         enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, confirm_reply, "Chat_Agent")
         enqueue_slow_task(_enqueue_followup_pipeline, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
+        enqueue_slow_task(extract_and_update_context_flags, clean_user_text, confirm_reply)
         return
 
     if pending_asset and reply_kind == "no" and asset_prompt_active:
@@ -1753,6 +1757,7 @@ def handle_message(user_text: str, chat_id: str):
         enqueue_fast_task(_enqueue_slow_memory_sifter, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
         enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, cancel_reply, "Chat_Agent")
         enqueue_slow_task(_enqueue_followup_pipeline, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
+        enqueue_slow_task(extract_and_update_context_flags, clean_user_text, cancel_reply)
         return
 
     # ── Messenger Draft Intent Guard ─────────────────────────────
@@ -2063,6 +2068,7 @@ def handle_message(user_text: str, chat_id: str):
             enqueue_fast_task(_enqueue_slow_memory_sifter,        user_text, final_ai_response, handling_agent, "telegram")
             enqueue_slow_task(update_capabilities_from_exchange,  user_text, final_ai_response, handling_agent)
             enqueue_slow_task(_enqueue_followup_pipeline, user_text, final_ai_response, handling_agent, "telegram")
+            enqueue_slow_task(extract_and_update_context_flags, user_text, final_ai_response)
             
             background_enqueue_ms = int((perf_counter() - t_bg_0) * 1000)
             _trace.mark_phase("background_enqueue_ms", background_enqueue_ms)
