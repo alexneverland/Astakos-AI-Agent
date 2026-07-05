@@ -1624,7 +1624,7 @@ def classify_followup_deferral_with_llm(
     source_user_text: str,
     current_user_text: str,
 ) -> dict:
-    from core.brain import llm_flash
+    from core.brain import llm
 
     prompt = f"""
 Είσαι classifier για conversational follow-ups.
@@ -1657,7 +1657,7 @@ NEW USER MESSAGE
 - αν ο χρήστης λέει ότι το έκανε ήδη ή έκλεισε το θέμα, τότε should_defer=false
 - αν δεν είσαι αρκετά σίγουρος, should_defer=false
 """
-    raw = llm_flash.invoke(prompt).content.strip()
+    raw = llm.invoke(prompt).content.strip()
 
     try:
         data = json.loads(raw)
