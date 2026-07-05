@@ -340,67 +340,22 @@ def normalize_followup_delay(
     target_window: str = "",
     now: Optional[datetime] = None,
 ) -> int:
-    text = _normalize_match_text(source_user_text or "")
-    topic = (topic or "").strip().lower()
-    target_window = (target_window or "").strip().lower()
-    raw_value = int(suggested_minutes or 0)
-    value = raw_value
+    value = int(suggested_minutes or 0)
     now = _coerce_local_dt(now)
-    hour = int(now.hour)
+    
+    # Trust the LLM's sophisticated reasoning for the delay
+    if value < 15:
+        value = 15
+    if value > 48 * 60:
+        value = 48 * 60
 
-    if value < 30:
-        value = 30
-    if value > 720:
-        value = 720
+    target_time = now + timedelta(minutes=value)
 
-    if target_window == "explicit_timer":
-        return value
-
-    if target_window == "same_day_short_checkin":
-        return max(20, min(value, 90))
-
-    if target_window == "same_day_evening":
-        if hour < 18:
-            delay = _delay_until_next_window(now, 19, 30)
-            return max(120, min(delay, 12 * 60))
-        return max(45, min(value, 240))
-
-    if target_window == "next_day_morning":
-        delay = _delay_until_next_day_window(now, 9, 30)
-        return max(8 * 60, min(delay, 24 * 60))
-
-    if target_window == "next_day_late_morning":
-        delay = _delay_until_next_day_window(now, 11, 30)
-        return max(8 * 60, min(delay, 24 * 60))
-
-    if target_window == "next_day_afternoon":
-        delay = _delay_until_next_day_window(now, 14, 30)
-        return max(10 * 60, min(delay, 30 * 60))
-
-    if target_window == "next_day_evening":
-        delay = _delay_until_next_day_window(now, 19, 30)
-        return max(12 * 60, min(delay, 30 * 60))
-
-    if target_window == "after_likely_completion":
-        if topic == "outing":
-            return max(45, min(value, 180))
-        if topic == "food_purchase":
-            return max(90, min(value, 360))
-        return max(60, min(value, 300))
-
-    # fallback heuristic αν το LLM δεν έδωσε usable window
-    if topic == "outing":
-        return max(30, min(value, 180))
-
-    if topic == "food_purchase":
-        if "αυριο" in text or "αύριο" in text:
-            delay = _delay_until_next_day_window(now, 11, 30)
-            return max(8 * 60, min(delay, 24 * 60))
-        if "αποψε" in text or "απόψε" in text or "βραδ" in text:
-            return max(45, min(value, 240))
-        return max(90, min(value, 360))
-
-    return max(60, min(value, 480))
+    # 🌙 Apply Quiet Hours (00:00 - 08:00) so we never spam at night
+    target_time = _apply_quiet_hours(target_time)
+    
+    final_minutes = int((target_time - now).total_seconds() / 60.0)
+    return max(15, final_minutes)
 
 
 def create_pending_followup(
@@ -1348,7 +1303,7 @@ def extract_followup_candidate_with_llm(user_text: str, ai_text: str, agent_name
 - subject μέχρι 4 λέξεις
 - προτίμησε compact noun phrase, όχι πλήρη περιγραφή
 - απόφυγε "και", "για", "ώστε", "να"
-- delay_minutes integer από 30 έως 720
+- delay_minutes integer (ο χρόνος σε λεπτά που πρέπει να περιμένουμε, πχ. 180, 480, 1440)
 - confidence 0.0 έως 1.0
 - μην επιστρέψεις τίποτα εκτός JSON
 - target_window πρέπει να περιγράφει ΠΟΤΕ έχει φυσικό νόημα να ξαναμιλήσουμε
