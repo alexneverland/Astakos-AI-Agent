@@ -682,7 +682,7 @@ def test_force_silent_skip_from_state_when_football_off_season():
         "football_season": {"value": "false", "expires_at": "2026-09-01"},
         "state:alexandros:sports_training": {"value": "off_season", "expires_at": "2026-09-01"},
     }
-    assert bot._force_proactive_skip_from_state("ποδόσφαιρο Αλέξανδρου", snap) == "[SILENT_SKIP]"
+    assert bot._force_proactive_skip_from_state("ποδόσφαιρο Αλέξανδρου", snap).startswith("[SILENT_SKIP]")
 
 def test_force_context_skip_from_state_when_child_away_from_home():
     snap = {
@@ -865,3 +865,15 @@ def test_force_context_skip_from_state_sleep_skips_when_user_at_work():
         "user_at_work": {"value": "true", "expires_at": "2026-07-05"},
     }
     assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith("[CONTEXT_SKIP] ο Λάζαρος λείπει")
+
+def test_force_context_skip_from_state_message_to_sofia_skips_when_together():
+    snap = {
+        "sofia_with_user": {"value": "true", "expires_at": "2026-07-05"},
+    }
+    assert bot._force_proactive_skip_from_state("Σύνταξη πρωινού μηνύματος στη Σοφία στο Messenger", snap).startswith("[CONTEXT_SKIP]")
+
+def test_force_context_skip_from_state_message_to_sofia_does_not_skip_when_apart():
+    snap = {
+        "sofia_with_user": {"value": "false", "expires_at": "2026-07-05"},
+    }
+    assert bot._force_proactive_skip_from_state("Σύνταξη πρωινού μηνύματος στη Σοφία στο Messenger", snap) is None

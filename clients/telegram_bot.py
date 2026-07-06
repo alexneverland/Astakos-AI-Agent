@@ -3025,6 +3025,7 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     quiet_hours = state_value("quiet_hours") == "true"
     alexandros_with_user = state_value("alexandros_with_user") == "true"
     alexandros_with_sofia = state_value("alexandros_with_sofia") == "true"
+    sofia_with_user = state_value("sofia_with_user") == "true"
 
     # Namespaced generic states
     outing_state = state_value("state:alexandros:outing")
@@ -3050,7 +3051,9 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
         or "κουζιν" in event_l
     ):
         if user_out_of_home:
-            return "[CONTEXT_SKIP]"
+            return "[CONTEXT_SKIP] ο Λάζαρος λείπει από το σπίτι"
+        if user_at_work:
+            return "[CONTEXT_SKIP] ο Λάζαρος είναι στη δουλειά"
 
     # SLEEP
     if "ύπν" in event_l or "υπν" in event_l or "sleep" in event_l:
@@ -3067,17 +3070,25 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
 
     # FOOTBALL / TRAINING
     if "ποδόσφ" in event_l or "ποδοσφ" in event_l or "training" in event_l or "προπόνη" in event_l:
-        if away:
-            return "[CONTEXT_SKIP]"
         if sports_state in {"off_season", "paused", "done"}:
-            return "[SILENT_SKIP]"
+            return "[SILENT_SKIP] sports training already handled or paused"
         if football_season == "false":
-            return "[SILENT_SKIP]"
+            return "[SILENT_SKIP] not football season"
+        if away:
+            return "[CONTEXT_SKIP] ο Αλέξανδρος δεν είναι στο σπίτι"
+        if alexandros_with_sofia and not alexandros_with_user:
+            return "[CONTEXT_SKIP] ο Αλέξανδρος είναι με τη Σοφία"
 
     # SCHOOL
     if "σχολ" in event_l:
         if school_open == "false":
-            return "[SILENT_SKIP]"
+            return "[SILENT_SKIP] τα σχολεία είναι κλειστά"
+        if away:
+            return "[CONTEXT_SKIP] ο Αλέξανδρος δεν είναι στο σπίτι"
+    # MESSAGE TO SOFIA
+    if "μήνυμα στη σοφία" in event_l or "μηνυμα" in event_l or "σοφία" in event_l:
+        if sofia_with_user:
+            return "[CONTEXT_SKIP] Η Σοφία είναι μαζί με τον Λάζαρο, δεν χρειάζεται μήνυμα"
 
     return None
 
