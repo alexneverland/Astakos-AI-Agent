@@ -226,6 +226,18 @@ def should_skip_proactive_for_recent_activity(
 def _looks_like_contextual_not_needed_reply(text: str) -> bool:
     normalized = _normalize_gr(text or "")
 
+    strong_not_needed_markers = (
+        "δεν θα χρειαστει",
+        "δεν χρειαζεται",
+        "μιλησα μαζι της",
+        "μιλησα στο τηλεφωνο",
+        "κλεινει εδω",
+        "αν ξανα χρειαστω θα σου πω",
+        "αν χρειαστω θα σου πω",
+    )
+    if any(m in normalized for m in strong_not_needed_markers):
+        return True
+
     phrase_markers = (
         "ειμαστε μαζι",
         "ημαστε μαζι",
@@ -572,6 +584,20 @@ def _followup_skip_means_resolved(reason: str) -> bool:
     )
     return any(marker in text for marker in markers)
 
+def _looks_terminal_followup_skip_reason(reason: str) -> bool:
+    text = _normalize_gr(reason or "")
+    markers = [
+        "προηγουμενης ημερας",
+        "πλεον βρισκομαστε",
+        "δεν εχει νοημα τωρα",
+        "εχει ηδη παρελθει",
+        "δεν απαιτειται follow-up",
+        "ηδη στη δουλεια",
+        "αφυπνιση",
+        "ξυπνητηρι",
+    ]
+    return any(m in text for m in markers)
+
 def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
     from datetime import datetime
     from memory.pending_followups import defer_followup, resolve_followup, _set_followup_decision, normalize_followup_delay
@@ -601,9 +627,9 @@ def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
         _set_followup_decision(item["id"], "deferred", reason or "too_early")
         return "deferred"
 
-    if _followup_skip_means_resolved(reason):
-        resolve_followup(item["id"], f"resolved_by_skip:{reason or 'no_further_followup_needed'}")
-        _set_followup_decision(item["id"], "resolved", reason or "no_further_followup_needed")
+    if _followup_skip_means_resolved(reason) or _looks_terminal_followup_skip_reason(reason):
+        resolve_followup(item["id"], f"resolved_by_skip:{reason or 'stale_followup_no_longer_relevant'}")
+        _set_followup_decision(item["id"], "resolved", reason or "stale_followup_no_longer_relevant")
         return "resolved"
 
     _set_followup_decision(item["id"], "skip", reason or "skip_without_state_change")
