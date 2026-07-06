@@ -844,3 +844,24 @@ def test_park_routine_skips_when_alexandros_is_with_sofia_without_user():
     assert result is not None
     assert result.startswith("[CONTEXT_SKIP]")
     assert "Σοφία" in result or "σοφία" in result
+
+def test_force_context_skip_from_state_sleep_does_not_skip_when_all_at_home():
+    snap = {
+        "alexandros_with_user": {"value": "true", "expires_at": "2026-07-05"},
+        "alexandros_with_sofia": {"value": "true", "expires_at": "2026-07-05"},
+        "user_out_of_home": {"value": "false", "expires_at": "2026-07-05"},
+        "alexandros_away_from_home": {"value": "false", "expires_at": "2026-07-05"},
+    }
+    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap) is None
+
+def test_force_context_skip_from_state_sleep_skips_when_user_out_of_home():
+    snap = {
+        "user_out_of_home": {"value": "true", "expires_at": "2026-07-05"},
+    }
+    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith("[CONTEXT_SKIP] ο Λάζαρος λείπει")
+
+def test_force_context_skip_from_state_sleep_skips_when_user_at_work():
+    snap = {
+        "user_at_work": {"value": "true", "expires_at": "2026-07-05"},
+    }
+    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith("[CONTEXT_SKIP] ο Λάζαρος λείπει")
