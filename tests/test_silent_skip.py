@@ -877,3 +877,21 @@ def test_force_context_skip_from_state_message_to_sofia_does_not_skip_when_apart
         "sofia_with_user": {"value": "false", "expires_at": "2026-07-05"},
     }
     assert bot._force_proactive_skip_from_state("Σύνταξη πρωινού μηνύματος στη Σοφία στο Messenger", snap) is None
+
+def test_force_context_skip_from_state_wake_up_skips_when_at_work():
+    snap = {
+        "user_at_work": {"value": "true", "expires_at": "2026-07-05"},
+    }
+    assert bot._force_proactive_skip_from_state("ξύπνημα Λάζαρου", snap).startswith("[CONTEXT_SKIP] ο Λάζαρος είναι ήδη στη δουλειά (βάρδια)")
+
+def test_force_context_skip_from_state_wake_up_skips_when_out_of_home():
+    snap = {
+        "user_out_of_home": {"value": "true", "expires_at": "2026-07-05"},
+    }
+    assert bot._force_proactive_skip_from_state("ξύπνημα Λάζαρου", snap).startswith("[CONTEXT_SKIP] ο Λάζαρος είναι ήδη εκτός σπιτιού")
+
+def test_force_context_skip_from_state_work_departure_skips_when_at_work():
+    snap = {
+        "user_at_work": {"value": "true", "expires_at": "2026-07-05"},
+    }
+    assert bot._force_proactive_skip_from_state("αναχώρηση για δουλειά", snap).startswith("[CONTEXT_SKIP] ο Λάζαρος βρίσκεται ήδη στη δουλειά (βάρδια)")

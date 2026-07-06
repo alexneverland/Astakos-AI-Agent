@@ -3056,7 +3056,7 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
             return "[CONTEXT_SKIP] ο Λάζαρος είναι στη δουλειά"
 
     # SLEEP
-    if "ύπν" in event_l or "υπν" in event_l or "sleep" in event_l:
+    if ("ύπν" in event_l or "υπν" in event_l or "sleep" in event_l) and "ξυπν" not in event_l and "ξύπν" not in event_l:
         if sleep_state in {"in_progress", "done"}:
             return "[SILENT_SKIP] sleep already handled"
         if away:
@@ -3089,6 +3089,17 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     if "μήνυμα στη σοφία" in event_l or "μηνυμα" in event_l or "σοφία" in event_l:
         if sofia_with_user:
             return "[CONTEXT_SKIP] Η Σοφία είναι μαζί με τον Λάζαρο, δεν χρειάζεται μήνυμα"
+    # WAKE UP
+    if "ξύπνημα" in event_l or "ξυπνημα" in event_l:
+        if user_at_work:
+            return "[CONTEXT_SKIP] ο Λάζαρος είναι ήδη στη δουλειά (βάρδια)"
+        if user_out_of_home:
+            return "[CONTEXT_SKIP] ο Λάζαρος είναι ήδη εκτός σπιτιού"
+
+    # WORK DEPARTURE
+    if "αναχώρηση" in event_l and "δουλειά" in event_l:
+        if user_at_work:
+            return "[CONTEXT_SKIP] ο Λάζαρος βρίσκεται ήδη στη δουλειά (βάρδια)"
 
     return None
 
