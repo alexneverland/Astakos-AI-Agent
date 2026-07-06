@@ -240,12 +240,9 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
 
         if payload.get("alexandros_with_user") is True:
             payload["alexandros_away_from_home"] = False
-
-        if payload.get("alexandros_with_sofia") is True and payload.get("alexandros_with_user") is not True:
-            if payload.get("family_at_home") is True or has_home_presence:
-                payload["alexandros_away_from_home"] = False
-            else:
-                payload["alexandros_away_from_home"] = True
+            
+        if payload.get("family_at_home") is True:
+            payload["alexandros_away_from_home"] = False
 
         if payload.get("alexandros_with_user") is True and payload.get("sofia_with_user") is True:
             payload["alexandros_with_sofia"] = True

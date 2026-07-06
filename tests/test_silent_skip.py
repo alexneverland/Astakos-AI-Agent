@@ -37,12 +37,12 @@ _STUB_MODULE_NAMES = [
     "config",
     "langchain_core", "langchain_core.messages",
     "memory", "memory.event_log", "memory.vector_store",
-    "memory.working_memory", "memory.session_memory",
+    "memory.working_memory", "memory.session_memory", "memory.pending_followups",
     "memory.context_builder", "memory.routine_db",
     "core", "core.brain", "core.graph", "core.agents",
     "core.exceptions", "core.event_bus",
     "core.routine_state", "core.prompts", "core.utils",
-    "services", "services.gemini", "services.embeddings", "services.routine_context",
+    "services", "services.gemini", "services.embeddings", "services.context_extractor", "services.messenger_intent", "services.routine_context",
     "services.routine_conditions",
     "tools", "tools.telegram",
     "telegram", "telegram.ext",
@@ -73,7 +73,7 @@ def _stub_modules():
     # ── memory.* ──────────────────────────────────────────────
     for mod in [
         "memory", "memory.event_log", "memory.vector_store",
-        "memory.working_memory", "memory.session_memory",
+        "memory.working_memory", "memory.session_memory", "memory.pending_followups",
         "memory.context_builder", "memory.routine_db",
         "memory.pending_assets",
     ]:
@@ -96,7 +96,23 @@ def _stub_modules():
     sm.log_exchange           = MagicMock()
     sm._run_session_summary   = MagicMock()
     sm.startup_stale_cleanup  = MagicMock()
-
+    sm._maybe_trigger_auto_session_summary = MagicMock()
+    pf = sys.modules["memory.pending_followups"]
+    pf.ensure_pending_followups_table = lambda: None
+    pf.maybe_create_followup_from_exchange = lambda *a, **k: None
+    pf.maybe_resolve_followups_from_user_message = lambda *a, **k: 0
+    pf.looks_like_followup_resolution_update = lambda *a, **k: False
+    pf.extract_followup_candidate_with_llm = lambda *a, **k: None
+    pf.create_pending_followup_from_candidate = lambda *a, **k: None
+    pf.get_recently_resolved_followups = lambda *a, **k: []
+    pf.candidate_is_distinct_from_recently_resolved = lambda *a, **k: True
+    pf.get_due_pending_followups = lambda *a, **k: []
+    pf.mark_followup_sent = lambda *a, **k: None
+    pf.expire_old_followups = lambda *a, **k: 0
+    pf.has_recent_sent_followup = lambda *a, **k: False
+    pf.has_recent_sent_followup_for_arc = lambda *a, **k: False
+    pf.build_followup_arc_key = lambda topic, subject: f"{topic}::{subject}"
+    pf.record_followup_outcome = lambda *a, **k: None
     pa = sys.modules["memory.pending_assets"]
     pa.clear_expired_pending_assets = MagicMock()
     pa.process_pending_assets_from_message = MagicMock()
@@ -192,8 +208,12 @@ def _stub_modules():
     for mod in [
         "services", "services.gemini", "services.embeddings",
         "services.routine_context", "services.routine_conditions",
+        "services.context_extractor", "services.messenger_intent",
     ]:
         sys.modules[mod] = types.ModuleType(mod)
+
+    sys.modules["services.context_extractor"].extract_and_update_context_flags = MagicMock()
+    sys.modules["services.messenger_intent"].classify_messenger_intent = MagicMock(return_value=None)
 
     sys.modules["services.routine_context"].build_runtime_routine_context = MagicMock(return_value={
         "today": "2026-06-17",
@@ -655,7 +675,7 @@ def test_force_silent_skip_from_state_when_park_already_in_progress():
     snap = {
         "state:alexandros:outing": {"value": "in_progress", "expires_at": None}
     }
-    assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) == "[SILENT_SKIP]"
+    assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap).startswith("[SILENT_SKIP]")
 
 def test_force_silent_skip_from_state_when_football_off_season():
     snap = {
@@ -669,7 +689,7 @@ def test_force_context_skip_from_state_when_child_away_from_home():
         "alexandros_away_from_home": {"value": "true", "expires_at": "2026-06-25"},
         "alexandros_away_reason": {"value": "camp", "expires_at": "2026-06-25"},
     }
-    assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) == "[CONTEXT_SKIP]"
+    assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap).startswith("[CONTEXT_SKIP]")
 
 def test_force_context_skip_from_state_when_child_is_out_with_sofia_for_sleep():
     snap = {
@@ -691,7 +711,7 @@ def test_force_proactive_skip_from_state_returns_silent_skip_for_done_park():
     snap = {
         "state:alexandros:outing": {"value": "done", "expires_at": None}
     }
-    assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) == "[SILENT_SKIP]"
+    assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap).startswith("[SILENT_SKIP]")
 
 def test_force_proactive_skip_from_context_uses_generic_overlap_and_progress_markers():
     ctx = "Μόλις φτάσαμε στο πάρκο και είμαστε ήδη εκεί με τον μικρό."
@@ -800,3 +820,27 @@ if __name__ == "__main__":
         print(f"\n{passed} passed, {failed} failed")
     finally:
         teardown_module(None)
+def test_park_routine_not_skipped_just_because_alexandros_is_with_user():
+    import clients.telegram_bot as bot
+    snap = {
+        "alexandros_away_from_home": {"value": "false"},
+        "alexandros_with_user": {"value": "true"},
+        "alexandros_with_sofia": {"value": "false"},
+        "user_at_work": {"value": "false"},
+        "state:alexandros:outing": {"value": ""},
+    }
+    assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) is None
+
+def test_park_routine_skips_when_alexandros_is_with_sofia_without_user():
+    import clients.telegram_bot as bot
+    snap = {
+        "alexandros_away_from_home": {"value": "false"},
+        "alexandros_with_user": {"value": "false"},
+        "alexandros_with_sofia": {"value": "true"},
+        "user_at_work": {"value": "false"},
+        "state:alexandros:outing": {"value": ""},
+    }
+    result = bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap)
+    assert result is not None
+    assert result.startswith("[CONTEXT_SKIP]")
+    assert "Σοφία" in result or "σοφία" in result

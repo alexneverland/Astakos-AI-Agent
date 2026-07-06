@@ -3034,15 +3034,13 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     # PARK / OUTING
     if "πάρκο" in event_l or "park" in event_l or "βόλτ" in event_l:
         if outing_state in {"in_progress", "done"}:
-            return "[SILENT_SKIP]"
+            return "[SILENT_SKIP] outing already handled"
         if away:
-            return "[CONTEXT_SKIP]"
-        if alexandros_with_user:
-            return "[CONTEXT_SKIP]"
-        if alexandros_with_sofia:
-            return "[CONTEXT_SKIP]"
+            return "[CONTEXT_SKIP] ο Αλέξανδρος δεν είναι διαθέσιμος στο σπίτι τώρα"
+        if alexandros_with_sofia and not alexandros_with_user:
+            return "[CONTEXT_SKIP] ο Αλέξανδρος είναι με τη Σοφία τώρα"
         if user_at_work:
-            return "[CONTEXT_SKIP]"
+            return "[CONTEXT_SKIP] ο Λάζαρος είναι στη δουλειά τώρα" 
 
     # COOKING / HOME MEAL
     if (
@@ -3741,15 +3739,19 @@ def startup_check_missed_routines():
                 continue
 
             is_context_skip = "[CONTEXT_SKIP]" in msg
+            context_skip_preview = ""
             if is_context_skip:
-                msg = msg.replace("[CONTEXT_SKIP]", "").strip()
+                context_skip_preview = msg.replace("[CONTEXT_SKIP]", "").strip()
+                if not context_skip_preview:
+                    context_skip_preview = "context_skip_without_explanation"
+                msg = context_skip_preview
 
             if is_context_skip:
                 _clear_routine_pending_confirmation(r_id)
                 muted_until = _apply_context_mute(r_id, event_name, ctx)
                 log_event("routines", "routine_context_skip", routine_id=r_id, event=event_name,
                           deferred=True, missed_minutes=missed_min,
-                          muted_until=muted_until, preview=msg[:160], debug_type="proactive_policy", debug_source="scheduler", debug_effect="context_skip")
+                          muted_until=muted_until, preview=(context_skip_preview or msg)[:160], debug_type="proactive_policy", debug_source="scheduler", debug_effect="context_skip")
                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name,
                          deferred=True, channel="telegram")
                 print(f"\033[90m[MissedRoutines]: CONTEXT_SKIP '{event_name}' ({missed_min} λεπτά αργά) → '{msg[:80]}'\033[0m")
@@ -4120,9 +4122,13 @@ def job_check_routines():
                         conn.commit()
                     else:
                         is_context_skip = False
+                        context_skip_preview = ""
                         if "[CONTEXT_SKIP]" in msg:
                             is_context_skip = True
-                            msg = msg.replace("[CONTEXT_SKIP]", "").strip()
+                            context_skip_preview = msg.replace("[CONTEXT_SKIP]", "").strip()
+                            if not context_skip_preview:
+                                context_skip_preview = "context_skip_without_explanation"
+                            msg = context_skip_preview
 
                         context_skip_ctx = ""
                         if is_context_skip:
@@ -4142,7 +4148,7 @@ def job_check_routines():
                                     event=event_name,
                                     batch=True, 
                                     muted_until=muted_until, 
-                                    preview=msg[:160],
+                                    preview=(context_skip_preview or msg)[:160],
                                     debug_type="proactive_decision",
                                     debug_source="scheduler",
                                     debug_effect="notification_skipped",
@@ -4193,9 +4199,13 @@ def job_check_routines():
                         _apply_context_mute(r_id, event_name, ctx)
                     else:
                         is_context_skip = False
+                        context_skip_preview = ""
                         if "[CONTEXT_SKIP]" in msg:
                             is_context_skip = True
-                            msg = msg.replace("[CONTEXT_SKIP]", "").strip()
+                            context_skip_preview = msg.replace("[CONTEXT_SKIP]", "").strip()
+                            if not context_skip_preview:
+                                context_skip_preview = "context_skip_without_explanation"
+                            msg = context_skip_preview
 
                         cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                         conn.commit()
@@ -4213,7 +4223,7 @@ def job_check_routines():
                                 routine_id=r_id, 
                                 event=event_name,
                                 muted_until=muted_until, 
-                                preview=msg[:160],
+                                preview=(context_skip_preview or msg)[:160],
                                 debug_type="proactive_decision",
                                 debug_source="scheduler",
                                 debug_effect="notification_skipped",
