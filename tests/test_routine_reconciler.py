@@ -919,3 +919,66 @@ def test_family_outing_future_plan_with_unrelated_live_clause_does_not_set_outin
     )
 
     assert directives == []
+
+def test_shift_logic_tomorrow_morning_work_auto_applies():
+    from datetime import datetime
+    from services.routine_reconciler import infer_routine_reconciliation_candidates, score_candidate_directive, _normalize
+
+    fact = "[USER_FACT]: Αύριο είμαι πρωινός στη δουλειά, 5:30 ξύπνημα."
+
+    candidates = infer_routine_reconciliation_candidates(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 7, 5, 22, 45, 0),  # Κυριακή βράδυ
+    )
+
+    assert any(
+        c["kind"] == "context_state_set"
+        and c["reason"] == "shift_morning_week"
+        and c["key"] == "current_shift"
+        and c["value"] == "morning"
+        and c["rule_name"] == "shift_logic"
+        for c in candidates
+    )
+
+    normalized_fact = _normalize(fact)
+    scored = [
+        score_candidate_directive(
+            c,
+            normalized_fact=normalized_fact,
+            matched_rule_name=c["rule_name"],
+        )
+        for c in candidates
+    ]
+
+    assert any(
+        d["rule_name"] == "shift_logic"
+        and d["decision"] == "auto_apply"
+        and d["auto_apply"] is True
+        and d["key"] == "current_shift"
+        and d["value"] == "morning"
+        for d in scored
+    )
+
+def test_shift_logic_tomorrow_afternoon_work_auto_applies():
+    from datetime import datetime
+    from services.routine_reconciler import infer_routine_reconciliation_candidates
+
+    fact = "[USER_FACT]: Αύριο είμαι απογευματινός στη δουλειά."
+
+    candidates = infer_routine_reconciliation_candidates(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 7, 6, 21, 0, 0),
+    )
+
+    assert any(
+        c["kind"] == "context_state_set"
+        and c["reason"] == "shift_afternoon_week"
+        and c["key"] == "current_shift"
+        and c["value"] == "afternoon"
+        and c["rule_name"] == "shift_logic"
+        for c in candidates
+    )

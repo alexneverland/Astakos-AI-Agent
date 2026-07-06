@@ -261,6 +261,23 @@ def _has_explicit_weekday_reference(normalized: str) -> bool:
     )
 
 
+def _extract_relative_day_scope_dt(normalized: str, now: datetime) -> datetime | None:
+    """
+    Επιστρέφει συγκεκριμένη ημερομηνία όταν ο χρήστης μιλάει για
+    κοντινό relative scope όπως:
+    - αύριο
+    - μεθαύριο
+
+    Δεν αφορά generic future plans τύπου "κάποια στιγμή", μόνο καθαρό day anchor.
+    """
+    if "αυριο" in normalized or "αύριο" in normalized:
+        return now + timedelta(days=1)
+
+    if "μεθαυριο" in normalized or "μεθαύριο" in normalized:
+        return now + timedelta(days=2)
+
+    return None
+
 def _extract_explicit_weekday_scope_dt(normalized: str, now: datetime) -> datetime | None:
     weekday_aliases = {
         "δευτερα": 0,
@@ -847,7 +864,14 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     has_next_week = _has_next_workweek_scope(normalized)
     has_this_week = _has_this_workweek_scope(normalized)
     explicit_weekday_dt = _extract_explicit_weekday_scope_dt(normalized, now)
-    has_week_scope = has_next_week or has_this_week or explicit_weekday_dt is not None
+    relative_day_dt = _extract_relative_day_scope_dt(normalized, now)
+
+    has_week_scope = (
+        has_next_week
+        or has_this_week
+        or explicit_weekday_dt is not None
+        or relative_day_dt is not None
+    )
 
     if not has_shift:
         return []
@@ -865,6 +889,8 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
                 effective_dt = now
         elif explicit_weekday_dt is not None:
             effective_dt = explicit_weekday_dt
+        elif relative_day_dt is not None:
+            effective_dt = relative_day_dt
         elif has_next_week:
             effective_dt = _next_monday(now)
         else:
@@ -1267,7 +1293,13 @@ def score_candidate_directive(
         and has_activity
         and has_state
         and has_scope
-        and _has_explicit_weekday_reference(normalized_fact)
+        and (
+            _has_explicit_weekday_reference(normalized_fact)
+            or "αυριο" in normalized_fact
+            or "αύριο" in normalized_fact
+            or "μεθαυριο" in normalized_fact
+            or "μεθαύριο" in normalized_fact
+        )
     )
 
     if matched_rule_name in _CONSERVATIVE_RULES and not explicit_shift_schedule:
@@ -2126,3 +2158,4 @@ def reconcile_fact_to_routines(
         "scored_directives":        scored_directives,
     })
     return apply_stats
+
