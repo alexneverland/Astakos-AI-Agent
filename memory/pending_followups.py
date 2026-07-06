@@ -1575,6 +1575,67 @@ def looks_like_negative_plan_update(user_text: str) -> bool:
     return has_negative and has_future_context and not has_completion
 
 
+
+def looks_like_operational_reminder_exchange(user_text: str, ai_text: str = "") -> bool:
+    user_norm = _normalize_match_text(user_text)
+    ai_norm = _normalize_match_text(ai_text)
+
+    if not user_norm and not ai_norm:
+        return False
+
+    reminder_request_markers = (
+        "θυμισε μου",
+        "υπενθυμισε μου",
+        "βαλε υπενθυμιση",
+        "βαλτο υπενθυμιση",
+        "να μου το θυμισεις",
+        "ξυπνημα",
+        "ξυπνητηρι",
+        "alarm",
+        "αφυπνιση",
+    )
+
+    reminder_confirmation_markers = (
+        "υπενθυμιση ρυθμιστηκε",
+        "υπενθυμιση οριστηκε",
+        "ξυπνητηρι ρυθμιστηκε",
+        "alarm set",
+    )
+
+    has_time_reference = (
+        ":" in user_norm
+        or "πρωι" in user_norm
+        or "βραδυ" in user_norm
+        or "αυριο" in user_norm
+        or "σε " in user_norm
+    )
+
+    user_looks_like_reminder = (
+        any(marker in user_norm for marker in reminder_request_markers)
+        or (
+            has_time_reference
+            and any(marker in user_norm for marker in ("ξυπνημα", "ξυπνητηρι", "θυμισε", "υπενθυμιση"))
+        )
+    )
+
+    ai_looks_like_confirmation = any(
+        marker in ai_norm for marker in reminder_confirmation_markers
+    )
+
+    # Κλασικό operational pair:
+    # user asks reminder/alarm + assistant confirms scheduling
+    if user_looks_like_reminder and ai_looks_like_confirmation:
+        return True
+
+    # Ακόμα κι αν δεν υπάρχει confirmation string, σκέτο wake-up/alarm setup
+    # δεν θέλουμε να γίνεται follow-up candidate
+    if user_looks_like_reminder and any(
+        marker in user_norm for marker in ("ξυπνημα", "ξυπνητηρι", "05:30", "5:30")
+    ):
+        return True
+
+    return False
+
 def maybe_create_followup_from_exchange(
     *,
     user_text: str,
@@ -1592,6 +1653,9 @@ def maybe_create_followup_from_exchange(
         return None
 
     if looks_like_negative_plan_update(clean_user):
+        return None
+
+    if looks_like_operational_reminder_exchange(clean_user, clean_ai):
         return None
 
     if not clean_user:

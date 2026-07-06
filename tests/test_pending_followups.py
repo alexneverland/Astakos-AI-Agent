@@ -1480,3 +1480,66 @@ def test_maybe_create_followup_skips_mixed_messenger_send_exchange(temp_state_db
     )
 
     assert result is None
+
+def test_maybe_create_followup_skips_operational_reminder_exchange(temp_state_db):
+    import memory.pending_followups as pf
+
+    followup_id = pf.maybe_create_followup_from_exchange(
+        user_text="θύμισε μου αύριο 5:30 να ξυπνήσω γιατί είμαι πρωινός",
+        ai_text="✅ Υπενθύμιση ρυθμίστηκε για τις 2026-07-06 05:30!",
+        agent_name="Home_Agent",
+        channel="telegram",
+    )
+
+    assert followup_id is None
+    assert pf.find_pending_followups(limit=10) == []
+
+def test_maybe_create_followup_skips_wakeup_shift_reminder_exchange(temp_state_db):
+    import memory.pending_followups as pf
+
+    followup_id = pf.maybe_create_followup_from_exchange(
+        user_text="Ναι φίλε τελειώνουμε φαι και πάμε και λογικά θα κοιμηθώ εγώ πρώτος αύριο πρωινός στην δουλειά 5:30 ξύπνημα",
+        ai_text="✅ Υπενθύμιση ρυθμίστηκε για τις 2026-07-06 05:30!",
+        agent_name="Home_Agent",
+        channel="telegram",
+    )
+
+    assert followup_id is None
+    assert pf.find_pending_followups(limit=10) == []
+
+def test_maybe_create_followup_non_reminder_flow_still_allowed(temp_state_db, monkeypatch):
+    import memory.pending_followups as pf
+
+    monkeypatch.setattr(
+        pf,
+        "extract_followup_candidate_with_llm",
+        lambda user_text, ai_text, agent_name, active_followups_text="": {
+            "should_follow_up": True,
+            "topic": "food_purchase",
+            "subject": "μπριζόλες λαιμού",
+            "delay_minutes": 180,
+            "confidence": 0.86,
+            "reason": "worth checking later",
+            "target_window": "same_day_evening",
+        },
+    )
+
+    followup_id = pf.maybe_create_followup_from_exchange(
+        user_text="πήρα τις μπριζόλες λαιμού και θα δούμε το βράδυ πώς θα τις κάνουμε",
+        ai_text="ωραία, το κρατάω",
+        agent_name="Home_Agent",
+        channel="telegram",
+    )
+
+    assert isinstance(followup_id, int)
+    rows = pf.find_pending_followups(limit=10)
+    assert len(rows) == 1
+    assert rows[0]["topic"] == "food_purchase"
+
+def test_looks_like_operational_reminder_exchange_detects_alarm_pair():
+    import memory.pending_followups as pf
+
+    assert pf.looks_like_operational_reminder_exchange(
+        "θύμισε μου αύριο 5:30 να ξυπνήσω",
+        "✅ Υπενθύμιση ρυθμίστηκε για τις 2026-07-06 05:30!",
+    ) is True
