@@ -3055,15 +3055,15 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     # SLEEP
     if "ύπν" in event_l or "υπν" in event_l or "sleep" in event_l:
         if sleep_state in {"in_progress", "done"}:
-            return "[SILENT_SKIP]"
+            return "[SILENT_SKIP] sleep already handled"
         if away:
-            return "[CONTEXT_SKIP]"
-        if alexandros_with_user:
-            return "[CONTEXT_SKIP]"
-        if alexandros_with_sofia:
-            return "[CONTEXT_SKIP]"
+            return "[CONTEXT_SKIP] ο Αλέξανδρος δεν είναι στο σπίτι τώρα"
+        if alexandros_with_sofia and not alexandros_with_user:
+            return "[CONTEXT_SKIP] ο Αλέξανδρος είναι με τη Σοφία τώρα"
+        if user_out_of_home or user_at_work:
+            return "[CONTEXT_SKIP] ο Λάζαρος λείπει από το σπίτι"
         if quiet_hours:
-            return "[CONTEXT_SKIP]"
+            return "[CONTEXT_SKIP] είναι ώρες κοινής ησυχίας"
 
     # FOOTBALL / TRAINING
     if "ποδόσφ" in event_l or "ποδοσφ" in event_l or "training" in event_l or "προπόνη" in event_l:
