@@ -1644,7 +1644,11 @@ def handle_message(user_text: str, chat_id: str):
 
                 pending_routine_confirmations.pop(rid, None)
         elif any(w in text_check for w in no_words) or llm_dismissed:
-            from memory.routine_db import decay_routine, remove_pending_confirmation
+            from memory.routine_db import (
+                decay_routine,
+                remove_pending_confirmation,
+                mark_routine_responded,
+            )
             from memory.event_log import log_event
 
             for rid in list(pending_routine_confirmations.keys()):
@@ -1679,6 +1683,7 @@ def handle_message(user_text: str, chat_id: str):
                         debug_effect="routine_changed",
                     )
                 else:
+                    mark_routine_responded(rid)
                     print(f"📉 [Routine Dismissed - Contextual, No Decay]: {pdata}")
                     log_event(
                         "routines",

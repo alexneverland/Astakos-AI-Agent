@@ -407,7 +407,7 @@ def test_shift_logic_candidate_scores_debug_only():
         and c["rule_name"] == "shift_logic"
         for c in candidates
     ), "Expected shift_logic candidate with shift_afternoon_week reason and Sunday until_date"
-    # Score it and verify it stays debug_only (never auto_apply — conservative rule)
+    # Score it and verify it auto applies now
     normalized_fact = _normalize(fact)
     scored = [
         score_candidate_directive(
@@ -420,10 +420,9 @@ def test_shift_logic_candidate_scores_debug_only():
 
     assert any(
         d["rule_name"] == "shift_logic"
-        and d["decision"] == "debug_only"
-        and _DEBUG_ONLY_THRESHOLD <= d["score"] < _AUTO_APPLY_THRESHOLD
+        and d["decision"] == "auto_apply"
         for d in scored
-    ), "shift_logic should stay debug_only: DEBUG_ONLY_THRESHOLD <= score < AUTO_APPLY_THRESHOLD"
+    )
 
     # The backward-compat wrapper only returns the auto_apply bucket, so a
     # debug_only-only rule like shift_logic must NOT show up in its output.
@@ -433,9 +432,9 @@ def test_shift_logic_candidate_scores_debug_only():
         reason="user_stated",
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
-    assert not any(
+    assert any(
         d.get("reason") == "shift_afternoon_week" for d in directives
-    ), "infer_routine_reconciliation_directives only returns auto_apply directives — shift_logic is debug_only"
+    ), "infer_routine_reconciliation_directives returns auto_apply directives"
 
 
 def test_shift_logic_explicit_weekday_auto_applies():
@@ -982,3 +981,21 @@ def test_shift_logic_tomorrow_afternoon_work_auto_applies():
         and c["rule_name"] == "shift_logic"
         for c in candidates
     )
+
+def test_shift_logic_relative_day_schedule_is_not_conservative():
+    from services.routine_reconciler import infer_routine_reconciliation_candidates, score_candidate_directive, _normalize
+    from datetime import datetime
+
+    text = "αύριο είμαι πρωινός στη δουλειά 5:30 ξύπνημα"
+    now = datetime(2026, 7, 5, 22, 0)
+
+    candidates = infer_routine_reconciliation_candidates(text, category="work", reason="user_stated", now=now)
+    shift = next(c for c in candidates if c.get("key") == "current_shift")
+    scored = score_candidate_directive(
+        shift,
+        normalized_fact=_normalize(text),
+        matched_rule_name="shift_logic",
+    )
+
+    assert "shift_logic_conservative" not in scored.get("ambiguity_flags", [])
+    assert scored.get("score", 0) >= 0.75

@@ -1286,25 +1286,45 @@ def score_candidate_directive(
         score += _W_SPECIAL
         _append_signal(signals, f"special_rule:{matched_rule_name}")
 
+    has_relative_day_scope = (
+        "αυριο" in normalized_fact
+        or "αύριο" in normalized_fact
+        or "μεθαυριο" in normalized_fact
+        or "μεθαύριο" in normalized_fact
+    )
+
     explicit_shift_schedule = (
         matched_rule_name == "shift_logic"
         and kind == "context_state_set"
         and directive_key == "current_shift"
         and has_activity
         and has_state
-        and has_scope
         and (
             _has_explicit_weekday_reference(normalized_fact)
-            or "αυριο" in normalized_fact
-            or "αύριο" in normalized_fact
-            or "μεθαυριο" in normalized_fact
-            or "μεθαύριο" in normalized_fact
+            or has_relative_day_scope
+            or (
+                has_scope
+                and (
+                    "πρωιν" in normalized_fact
+                    or "απογευματ" in normalized_fact
+                    or "βάρδια" in normalized_fact
+                    or "βαρδια" in normalized_fact
+                    or "δουλει" in normalized_fact
+                )
+            )
         )
     )
 
-    if matched_rule_name in _CONSERVATIVE_RULES and not explicit_shift_schedule:
+    if (
+        matched_rule_name in _CONSERVATIVE_RULES
+        and matched_rule_name != "shift_logic"
+        and not explicit_shift_schedule
+    ):
         score += _P_CONSERVATIVE
         _append_flag(ambiguity_flags, f"{matched_rule_name}_conservative")
+    elif matched_rule_name == "shift_logic" and not explicit_shift_schedule:
+        score += _P_CONSERVATIVE
+        _append_flag(ambiguity_flags, "shift_logic_conservative")
     elif explicit_shift_schedule:
         score += 0.10
         _append_signal(signals, "shift_logic:explicit_schedule")
