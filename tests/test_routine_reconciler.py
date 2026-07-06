@@ -999,3 +999,24 @@ def test_shift_logic_relative_day_schedule_is_not_conservative():
 
     assert "shift_logic_conservative" not in scored.get("ambiguity_flags", [])
     assert scored.get("score", 0) >= 0.75
+
+def test_sofia_with_alexandros_at_home_while_user_at_work_does_not_set_sofia_with_user():
+    from services.routine_reconciler import infer_routine_reconciliation_candidates
+    from datetime import datetime
+
+    text = "Εγώ είμαι πρωινή βάρδια αυτή την εβδομάδα και η Σοφία σήμερα είναι με τον Αλέξανδρο στο σπίτι"
+    now = datetime(2026, 7, 6, 8, 30)
+
+    candidates = infer_routine_reconciliation_candidates(
+        text,
+        category="family",
+        reason="live_message_context",
+        now=now,
+    )
+
+    sofia_true = [
+        c for c in candidates
+        if c.get("key") == "sofia_with_user" and str(c.get("value")).lower() == "true"
+    ]
+
+    assert sofia_true == []

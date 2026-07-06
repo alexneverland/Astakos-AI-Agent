@@ -1024,6 +1024,16 @@ def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> l
     has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
     has_together = _contains_any(normalized, _TOGETHER_TOKENS)
 
+    has_home_marker = _contains_any(normalized, ["σπιτι", "σπίτι", "στο σπιτι", "στο σπίτι"])
+    has_alex = _contains_any(normalized, _ALEXANDROS_TOKENS)
+    has_user_work_context = _contains_any(
+        normalized,
+        _WORK_TOKENS + _SHIFT_AM_TOKENS + _SHIFT_PM_TOKENS + ["δουλεια", "δουλειά", "βαρδια", "βάρδια"]
+    )
+
+    if has_sofia and has_alex and has_home_marker and has_user_work_context:
+        return []
+
     if has_sofia and has_together:
         if _is_draft_or_past_reference_context(normalized) and not _looks_like_live_presence_statement(normalized):
             return []

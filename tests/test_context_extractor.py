@@ -111,3 +111,27 @@ def test_context_extractor_found_them_and_staying(mock_gemini, mock_db, mock_rec
     assert calls.get("sofia_with_user") == "true"
     assert calls.get("alexandros_with_sofia") == "true"
 
+
+def test_home_with_sofia_does_not_mark_alexandros_away_from_home(monkeypatch):
+    import services.context_extractor as ce
+
+    calls = {}
+
+    def fake_set_context_state(key, value, expires_at=None):
+        calls[key] = value
+
+    class DummyResp:
+        text = '{"user_at_work": true, "user_out_of_home": true, "family_at_home": true, "sofia_with_user": false, "alexandros_with_sofia": true}'
+
+    monkeypatch.setattr(ce, "set_context_state", fake_set_context_state)
+    monkeypatch.setattr(ce, "safe_gemini_call", lambda prompt: DummyResp())
+    monkeypatch.setattr(ce, "reconcile_fact_to_routines", lambda *a, **k: {"scored_directives": []})
+
+    ce.extract_and_update_context_flags(
+        "Εγώ είμαι πρωινή βάρδια αυτή την εβδομάδα και η Σοφία σήμερα είναι με τον Αλέξανδρο στο σπίτι",
+        "",
+        "telegram",
+    )
+
+    assert calls.get("alexandros_with_sofia") == "true"
+    assert calls.get("alexandros_away_from_home") == "false"

@@ -225,11 +225,27 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         today_str = datetime.now().strftime("%Y-%m-%d")
             
         # Derived consistency rules for family presence
+        normalized_user = _normalize_live_text(user_text)
+        has_home_presence = any(
+            marker in normalized_user
+            for marker in (
+                "σπιτι",
+                "σπίτι",
+                "στο σπιτι",
+                "στο σπίτι",
+                "ειναι στο σπιτι",
+                "είναι στο σπίτι",
+            )
+        )
+
         if payload.get("alexandros_with_user") is True:
             payload["alexandros_away_from_home"] = False
 
         if payload.get("alexandros_with_sofia") is True and payload.get("alexandros_with_user") is not True:
-            payload["alexandros_away_from_home"] = True
+            if payload.get("family_at_home") is True or has_home_presence:
+                payload["alexandros_away_from_home"] = False
+            else:
+                payload["alexandros_away_from_home"] = True
 
         if payload.get("alexandros_with_user") is True and payload.get("sofia_with_user") is True:
             payload["alexandros_with_sofia"] = True
