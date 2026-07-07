@@ -652,18 +652,32 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
         prompt += f"[ΣΥΝΕΧΕΙΑ ΑΠΟ ΠΡΟΗΓΟΥΜΕΝΗ SESSION]\n{session_hint}\n\n"
 
     # ── Long-Term Goals ──────────────────────────────────────────
-    try:
-        from memory.vector_store import get_active_goals
-        active_goals = get_active_goals()
-        if active_goals:
-            prompt += "═══ ΣΤΟΧΟΙ ΣΕ ΕΞΕΛΙΞΗ ═══\n"
-            for g in active_goals:
-                status_icon = "🎯" if g["status"] == "active" else "⏸"
-                prompt += " " + status_icon + " [" + g['project'] + "] " + g['description'] + " (από " + g['date'] + ")\n"
-            prompt += "💡 Αν η συζητηση αφορά κάποιον από αυτούς, ανέφερε τη συνέχεια φυσικά.\n"
-            prompt += "══════════════════════════\n\n"
-    except Exception as _e:
-        print(f"⚠️ [Goals Context Error]: {_e}")
+    # Contextual Injection: Βάζουμε τους στόχους μόνο αν η συζήτηση φαίνεται να έχει ουσία (όχι σε ρουτίνες) 
+    # ή αν έχει σχετικά keywords, ή αν είναι ο Planner/Proactive.
+    goal_keywords = ["στόχ", "goal", "δουλει", "project", "plan", "πλάνο", "πρόοδ", "εξέλιξη", "επόμεν", "δουλέψ", "φτιάξ", "συνεχίσ", "τι κάνουμε", "task"]
+    is_goal_related = any(kw in clean_text for kw in goal_keywords)
+    
+    should_inject_goals = False
+    if agent_role in ["Planner", "Proactive_Agent"]:
+        should_inject_goals = True
+    elif is_goal_related:
+        should_inject_goals = True
+    elif len(clean_text) > 15 and not is_routine_command:
+        should_inject_goals = True
+
+    if should_inject_goals:
+        try:
+            from memory.vector_store import get_active_goals
+            active_goals = get_active_goals()
+            if active_goals:
+                prompt += "═══ ΣΤΟΧΟΙ ΣΕ ΕΞΕΛΙΞΗ ═══\n"
+                for g in active_goals:
+                    status_icon = "🎯" if g["status"] == "active" else "⏸"
+                    prompt += " " + status_icon + " [" + g['project'] + "] " + g['description'] + " (από " + g['date'] + ")\n"
+                prompt += "💡 Αν η συζητηση αφορά κάποιον από αυτούς, ανέφερε τη συνέχεια φυσικά.\n"
+                prompt += "══════════════════════════\n\n"
+        except Exception as _e:
+            print(f"⚠️ [Goals Context Error]: {_e}")
 
     cap_context = get_capability_context()
     if cap_context:
