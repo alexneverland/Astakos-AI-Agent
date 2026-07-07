@@ -4464,9 +4464,10 @@ def job_goal_followup():
         stale_goals = []
         for g in goals:
             try:
+                emb = vector_store.embeddings.embed_query(g["project"] + " " + g["description"])
                 with vector_lock:
                     results = vector_store._collection.query(
-                        query_texts=[g["project"] + " " + g["description"]],
+                        query_embeddings=[emb],
                         n_results=3,
                         where={"timestamp": {"$gte": cutoff_ts}},
                     )
