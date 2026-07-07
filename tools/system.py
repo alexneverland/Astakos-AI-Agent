@@ -3053,17 +3053,19 @@ def get_fit_summary(days_ago: int = 1) -> str:
 
 
 @tool
-def save_goal_tool(project: str, description: str, status: str = "active") -> str:
+def save_goal_tool(project: str, description: str, status: str = "active", progress: int = 0, milestones: str = "") -> str:
     """
     Αποθηκεύει ή ενημερώνει ένα long-term goal του Λάζαρου.
     project: Σύντομο όνομα project (π.χ. 'ShiftMaster', 'Astakos', 'PraxisERP').
     description: Τι θέλει να πετύχει (π.χ. 'Να τελειώσει το licensing module').
     status: 'active' (σε εξέλιξη) | 'paused' (στο ράφι) | 'done' (ολοκληρώθηκε).
+    progress: Ποσοστό προόδου 0-100.
+    milestones: Μικρότερα βήματα ή milestones (ως string).
     """
     from memory.vector_store import save_goal
-    ok = save_goal(project=project, description=description, status=status)
+    ok = save_goal(project=project, description=description, status=status, progress=progress, milestones=milestones)
     if ok:
-        return f"✅ Goal '{project}' αποθηκεύτηκε ({status})."
+        return f"✅ Goal '{project}' αποθηκεύτηκε ({status}, {progress}%)."
     return f"❌ Αποτυχία αποθήκευσης goal '{project}'."
 
 
@@ -3078,6 +3080,34 @@ def update_goal_status_tool(project: str, status: str) -> str:
     ok = update_goal_status(project=project, status=status)
     if ok:
         return f"✅ Goal '{project}' → {status}."
+    return f"❌ Δεν βρέθηκε goal '{project}'."
+
+
+@tool
+def update_goal_progress_tool(project: str, progress: int) -> str:
+    """
+    Ενημερώνει το ποσοστό προόδου ενός υπάρχοντος goal (0-100).
+    project: Το όνομα του project.
+    progress: Ένας ακέραιος από 0 έως 100.
+    """
+    from memory.vector_store import update_goal_progress
+    ok = update_goal_progress(project=project, progress=progress)
+    if ok:
+        return f"✅ Goal '{project}' πρόοδος → {progress}%."
+    return f"❌ Δεν βρέθηκε goal '{project}'."
+
+
+@tool
+def update_goal_milestones_tool(project: str, milestones: str) -> str:
+    """
+    Ενημερώνει τα milestones ενός υπάρχοντος goal.
+    project: Το όνομα του project.
+    milestones: Τα νέα milestones (σε string μορφή, π.χ. '1) UI, 2) DB').
+    """
+    from memory.vector_store import update_goal_milestones
+    ok = update_goal_milestones(project=project, milestones=milestones)
+    if ok:
+        return f"✅ Goal '{project}' milestones ενημερώθηκαν."
     return f"❌ Δεν βρέθηκε goal '{project}'."
 
 
@@ -3641,7 +3671,7 @@ all_tools = [
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
     search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url,
-    duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, tool_stats, system_doctor, memory_review,
+    duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, update_goal_progress_tool, update_goal_milestones_tool, tool_stats, system_doctor, memory_review,
     repo_mapper,
     scan_receipt,
     text_stats,

@@ -673,7 +673,10 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
                 prompt += "═══ ΣΤΟΧΟΙ ΣΕ ΕΞΕΛΙΞΗ ═══\n"
                 for g in active_goals:
                     status_icon = "🎯" if g["status"] == "active" else "⏸"
-                    prompt += " " + status_icon + " [" + g['project'] + "] " + g['description'] + " (από " + g['date'] + ")\n"
+                    prog_str = f" | Πρόοδος: {g.get('progress', 0)}%" if g.get('progress') else ""
+                    prompt += " " + status_icon + " [" + g['project'] + "] " + g['description'] + " (από " + g['date'] + ")" + prog_str + "\n"
+                    if g.get('milestones'):
+                        prompt += f"    Milestones: {g['milestones']}\n"
                 prompt += "💡 Αν η συζητηση αφορά κάποιον από αυτούς, ανέφερε τη συνέχεια φυσικά.\n"
                 prompt += "══════════════════════════\n\n"
         except Exception as _e:

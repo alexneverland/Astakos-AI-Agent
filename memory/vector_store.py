@@ -1069,7 +1069,7 @@ def save_photo_to_index(file_path: str, analysis: str, caption: str = ""):
 # Long-Term Goals
 # ================================================================
 
-def save_goal(project: str, description: str, status: str = "active") -> bool:
+def save_goal(project: str, description: str, status: str = "active", progress: int = 0, milestones: str = "") -> bool:
     """Αποθηκεύει ή ενημερώνει goal. Κάνει overwrite αν υπάρχει ήδη."""
     try:
         with vector_lock, _cross_process_lock():
@@ -1080,12 +1080,13 @@ def save_goal(project: str, description: str, status: str = "active") -> bool:
             text = f"[GOAL] {project}: {description}"
             metadata = {
                 "category": "goal", "project": project, "status": status,
+                "progress": progress, "milestones": milestones,
                 "agent": "GoalTracker", "timestamp": datetime.now().timestamp(),
                 "date": datetime.now().strftime("%Y-%m-%d"), "retrieval_count": 0,
                 "importance": 10, "confidence": 0.95, "last_accessed": datetime.now().timestamp(),
             }
             vector_store.add_texts([text], metadatas=[metadata])
-            print(f"\033[92m[Goals]: '{project}' ({status})\033[0m")
+            print(f"\033[92m[Goals]: '{project}' ({status}, {progress}%)\033[0m")
             return True
     except Exception as e:
         print(f"\033[91m[Goals Error]: {e}\033[0m")
@@ -1110,6 +1111,42 @@ def update_goal_status(project: str, status: str) -> bool:
         return False
 
 
+def update_goal_progress(project: str, progress: int) -> bool:
+    """Ανανεώνει το ποσοστό προόδου ενός goal (0-100)."""
+    try:
+        with vector_lock, _cross_process_lock():
+            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            if not existing["ids"]:
+                return False
+            old_meta = dict(existing["metadatas"][0])
+            vector_store._collection.delete(ids=existing["ids"])
+            new_meta = {**old_meta, "progress": max(0, min(100, progress)), "timestamp": datetime.now().timestamp()}
+            vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
+            print(f"\033[92m[Goals]: '{project}' πρόοδος → {progress}%\033[0m")
+            return True
+    except Exception as e:
+        print(f"\033[91m[Goals Error]: {e}\033[0m")
+        return False
+
+
+def update_goal_milestones(project: str, milestones: str) -> bool:
+    """Ανανεώνει τα milestones ενός goal."""
+    try:
+        with vector_lock, _cross_process_lock():
+            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            if not existing["ids"]:
+                return False
+            old_meta = dict(existing["metadatas"][0])
+            vector_store._collection.delete(ids=existing["ids"])
+            new_meta = {**old_meta, "milestones": milestones, "timestamp": datetime.now().timestamp()}
+            vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
+            print(f"\033[92m[Goals]: '{project}' milestones ενημερώθηκαν\033[0m")
+            return True
+    except Exception as e:
+        print(f"\033[91m[Goals Error]: {e}\033[0m")
+        return False
+
+
 def get_active_goals() -> list[dict]:
     """Επιστρέφει active/paused goals."""
     try:
@@ -1123,6 +1160,8 @@ def get_active_goals() -> list[dict]:
                     "description": doc.split(": ", 1)[-1].replace("[GOAL] ", ""),
                     "status":      meta.get("status", "active"),
                     "date":        meta.get("date", ""),
+                    "progress":    meta.get("progress", 0),
+                    "milestones":  meta.get("milestones", ""),
                 })
         return goals
     except Exception as e:

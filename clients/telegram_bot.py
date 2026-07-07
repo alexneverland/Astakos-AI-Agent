@@ -4485,7 +4485,16 @@ def job_goal_followup():
 
         # LLM crafts natural follow-up message
         from services.gemini import safe_gemini_call
-        goals_text = "\n".join(f"- {g['project']}: {g['description']}" for g in stale_goals[:3])
+        goals_text_lines = []
+        for g in stale_goals[:3]:
+            line = f"- {g['project']}: {g['description']}"
+            if g.get('progress'):
+                line += f" (Πρόοδος: {g['progress']}%)"
+            if g.get('milestones'):
+                line += f"\n  Milestones: {g['milestones']}"
+            goals_text_lines.append(line)
+        goals_text = "\n".join(goals_text_lines)
+
         prompt = f"""Είσαι ο Αστακός, ο AI βοηθός του Λάζαρου. 
 Ο Λάζαρος έχει τους εξής ανοιχτούς στόχους που δεν αναφέρθηκαν τις τελευταίες 7 μέρες:
 
