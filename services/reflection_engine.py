@@ -286,15 +286,16 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
 
         # Σύνοψη traces (conversations)
         trace_summary = []
-        for t in traces[-30:]:  # max 30 traces
+        for t in traces:  # max 30 traces removed to include all history
             channel  = t.get("channel", "?")
             agent    = t.get("agent", "?")
             user_msg = t.get("user_message", "")[:60]
+            bot_resp = t.get("response", "")[:80].replace("\n", " ")
             tools    = [tc.get("tool", "") for tc in t.get("tool_calls", [])]
             dur      = t.get("duration_ms", 0)
             err      = t.get("error") or any(tc.get("error") for tc in t.get("tool_calls", []))
             loop     = t.get("loop_guard", False)
-            line     = f"[{channel}/{agent}] '{user_msg}' tools={tools} dur={dur}ms"
+            line     = f"[{channel}/{agent}] '{user_msg}' -> '{bot_resp}' tools={tools} dur={dur}ms"
             if err:   line += " ❌error"
             if loop:  line += " 🔁loop"
             trace_summary.append(line)
@@ -371,8 +372,9 @@ def _apply_action(reflection: dict) -> bool:
     routine_id = reflection.get("routine_id")
     value      = reflection.get("action_value")
 
-    # save_to_memory δεν χρειάζεται routine_id — handle πρώτα
-    if action == "save_to_memory":
+    # save_to_memory ή actions χωρίς routine_id (συνήθως planner/conversations)
+    # πρέπει να αποθηκευτούν ως lesson.
+    if action == "save_to_memory" or not routine_id:
         lesson = reflection.get("lesson", "")
         if lesson:
             try:
@@ -386,25 +388,13 @@ def _apply_action(reflection: dict) -> bool:
             except Exception as me:
                 print(f"⚠️ [Reflection] ChromaDB save failed: {me}")
                 return False
-        return False
-
-    # Planner/conversation reflections δεν έχουν routine_id —
-    # fallback: αποθήκευση lesson στο ChromaDB ως γνώση.
-    if not routine_id:
-        lesson = reflection.get("lesson", "")
-        if lesson:
-            try:
-                from memory.vector_store import vector_store
-                vector_store.add_texts(
-                    [f"[REFLECTION]: {lesson}"],
-                    metadatas=[{"category": "reflection", "source": "reflection_engine"}]
-                )
-                print(f"🧠 [Reflection]: Lesson saved to ChromaDB (no routine_id)")
-                return True
-            except Exception as me:
-                print(f"⚠️ [Reflection] ChromaDB save failed: {me}")
-                return False
-        return False
+        
+        # Αν το action χρειάζεται routine_id αλλά δεν υπάρχει, abort.
+        if not routine_id:
+            return False
+        # Αν το action είναι save_to_memory αλλά δεν έχει lesson, abort.
+        if action == "save_to_memory":
+            return False
 
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -448,16 +438,8 @@ def _apply_action(reflection: dict) -> bool:
             print(f"🔧 [Reflection]: #{routine_id} time → {time_str} (raw: {value})")
 
         elif action == "save_to_memory":
-            lesson = reflection.get("lesson", "")
-            if lesson:
-                try:
-                    from memory.vector_store import save_memory
-                    save_memory(f"[REFLECTION]: {lesson}", source="reflection_engine")
-                    print(f"🧠 [Reflection]: Lesson saved to ChromaDB")
-                except Exception as me:
-                    print(f"⚠️ [Reflection] ChromaDB save failed: {me}")
-            conn.close()
-            return True
+            # This is a fallback in case it slips through, though the block above handles it.
+            return False
 
         conn.commit()
         conn.close()
@@ -575,7 +557,7 @@ def run_reflection() -> dict:
         msg    = header + "\n\n---\n\n".join(telegram_lines)
         if len(msg) > 4000:
             msg = msg[:3990] + "..."
-        send_telegram_msg(msg)
+        send_telegram_msg(msg, disable_notification=True)
 
     stats = {
         "analyzed": len(reflections), "applied": applied, "pending": pending,

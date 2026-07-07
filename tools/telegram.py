@@ -9,17 +9,17 @@ import re
 import html
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
-def send_telegram_msg_full(text: str, prefix: str = "", max_len: int = 3500):
+def send_telegram_msg_full(text: str, prefix: str = "", max_len: int = 3500, disable_notification: bool = False):
     """Στέλνει ολόκληρο το κείμενο σε Telegram, σπάζοντάς το σε κομμάτια αν χρειαστεί
     (αντί να το κόβει στη μέση). Telegram hard limit = 4096 chars/μήνυμα."""
     full = f"{prefix}{text}" if prefix else text
     if len(full) <= max_len:
-        send_telegram_msg(full)
+        send_telegram_msg(full, disable_notification=disable_notification)
         return
     chunks = [full[i:i + max_len] for i in range(0, len(full), max_len)]
     for idx, chunk in enumerate(chunks, 1):
         suffix = f"\n\n[{idx}/{len(chunks)}]" if len(chunks) > 1 else ""
-        send_telegram_msg(chunk + suffix)
+        send_telegram_msg(chunk + suffix, disable_notification=disable_notification)
 
 
 def format_for_telegram(text: str) -> str:
@@ -61,7 +61,7 @@ def _plain_telegram_fallback(text: str) -> str:
     text = re.sub(r'</?(?:b|i|u|s|code|pre)>', '', text)
     return html.unescape(text)
 
-def send_telegram_msg(text: str) -> int | None:
+def send_telegram_msg(text: str, disable_notification: bool = False) -> int | None:
     """Στέλνει μήνυμα στο Telegram. Επιστρέφει το message_id ή None."""
     token = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
@@ -77,7 +77,8 @@ def send_telegram_msg(text: str) -> int | None:
         "chat_id": chat_id,
         "text": safe_text,
         "parse_mode": "HTML",
-        "disable_web_page_preview": True
+        "disable_web_page_preview": True,
+        "disable_notification": disable_notification
     }
 
     try:
