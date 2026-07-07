@@ -2155,6 +2155,8 @@ async def debug_goals(_=Depends(require_token)):
                 "description": doc.split(": ", 1)[-1].replace("[GOAL] ", ""),
                 "status":      meta.get("status", "active"),
                 "date":        meta.get("date", ""),
+                "progress":    meta.get("progress", 0),
+                "milestones":  meta.get("milestones", ""),
                 "chroma_id":   ids[i] if i < len(ids) else "",
             })
         goals.sort(key=lambda g: (g["status"] != "active", g["date"]))

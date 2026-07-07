@@ -1,4 +1,4 @@
-﻿﻿﻿﻿<!DOCTYPE html>
+﻿﻿﻿<!DOCTYPE html>
 <html lang="el">
 <head>
 <meta charset="UTF-8">
@@ -1464,13 +1464,14 @@ function renderGoals(goals) {
     '<tr>'
     + '<td>' + icon(g.status) + ' <span style="color:' + color(g.status) + ';font-weight:600">' + g.status + '</span></td>'
     + '<td><strong>' + g.project + '</strong></td>'
-    + '<td>' + g.description + '</td>'
+    + '<td>' + g.description + (g.milestones ? '<br><span style="color:var(--muted);font-size:0.85em">Milestones: ' + g.milestones + '</span>' : '') + '</td>'
+    + '<td>' + (g.progress || 0) + '%</td>'
     + '<td style="color:var(--muted);font-size:0.85em">' + g.date + '</td>'
     + '<td><button onclick="deleteGoal(\'' + g.project + '\')" style="background:#7a2a2a;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer">🗑 Delete</button></td>'
     + '</tr>').join('');
   container.innerHTML = '<div class="card" style="grid-column:span 2">'
     + '<h2>🎯 LONG-TERM GOALS (' + goals.length + ')</h2>'
-    + '<table><tr><th>Status</th><th>Project</th><th>Description</th><th>Date</th><th>Action</th></tr>'
+    + '<table><tr><th>Status</th><th>Project</th><th>Description</th><th>Progress</th><th>Date</th><th>Action</th></tr>'
     + rows + '</table></div>';
   enhanceRenderedDashboard(container);
 }
