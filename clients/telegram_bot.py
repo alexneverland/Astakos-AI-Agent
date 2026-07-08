@@ -3996,10 +3996,10 @@ def job_check_routines():
                     if time_diff_mins < -1000:
                         time_diff_mins += 24 * 60
                     
-                    # We trigger if the routine is anywhere between 0 and 30 minutes in the future.
+                    # We trigger if the routine is anywhere between 0 and 15 minutes in the future.
                     # Because we update the state to 'trigger_pending', it won't spam.
-                    # If bot was offline and we missed the exact 30-min mark, it catches it now!
-                    if not (0 <= time_diff_mins <= 30):
+                    # If bot was offline and we missed the exact 15-min mark, it catches it now!
+                    if not (0 <= time_diff_mins <= 15):
                         continue
 
                     conflict_group = db_conflict_group if db_conflict_group else _get_conflict_group(event_name)

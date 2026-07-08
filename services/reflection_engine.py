@@ -289,8 +289,8 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
         for t in traces:  # max 30 traces removed to include all history
             channel  = t.get("channel", "?")
             agent    = t.get("agent", "?")
-            user_msg = t.get("user_message", "")[:60]
-            bot_resp = t.get("response", "")[:80].replace("\n", " ")
+            user_msg = t.get("user_message", "")
+            bot_resp = t.get("response", "").replace("\n", " ")
             tools    = [tc.get("tool", "") for tc in t.get("tool_calls", [])]
             dur      = t.get("duration_ms", 0)
             err      = t.get("error") or any(tc.get("error") for tc in t.get("tool_calls", []))
