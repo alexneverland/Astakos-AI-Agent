@@ -219,7 +219,12 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
             return
             
         raw = re.sub(r"```json|```", "", resp_text.strip()).strip()
-        if raw.lower() == "null":
+        start = raw.find('{')
+        end = raw.rfind('}')
+        if start != -1 and end != -1:
+            raw = raw[start:end+1]
+            
+        if raw.lower() == "null" or not raw:
             return
             
         data = json.loads(raw)

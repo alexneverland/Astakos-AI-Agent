@@ -988,19 +988,99 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
         return f"❌ Σφάλμα: {str(e)}"
 
 @tool
-def get_navigation_info(destination: str) -> str:
-    """Παρέχει κλικαριστά links για χάρτη και πλοήγηση από Piston 7."""
-    home_base = "Piston 7, Thessaloniki"
-    dest_clean = urllib.parse.quote_plus(destination)
-    home_clean = urllib.parse.quote_plus(home_base)
+def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE") -> str:
+    """Παρέχει χρόνο, απόσταση (με live κίνηση) και links για πλοήγηση.
+    Εάν δεν δοθεί origin, θεωρεί ως προεπιλογή την έδρα (Piston 7, Thessaloniki).
+    Μπορείς να περάσεις το αποτέλεσμα του get_current_location στο origin (π.χ. '40.67,22.93').
+    Το mode μπορεί να είναι "DRIVE" (οδήγηση, προεπιλογή) ή "WALK" (περπάτημα).
+    """
+    import os
+    import re
+    import urllib.parse
+    import requests
 
+    home_base = "Piston 7, Thessaloniki"
+    final_origin = origin if origin else home_base
+
+    # Ensure mode is valid
+    mode = mode.upper()
+    if mode not in ["DRIVE", "WALK"]:
+        mode = "DRIVE"
+
+    dest_clean = urllib.parse.quote_plus(destination)
+    origin_clean = urllib.parse.quote_plus(final_origin)
+
+    dir_mode = "driving" if mode == "DRIVE" else "walking"
     search_url = f"https://www.google.com/maps/search/?api=1&query={dest_clean}"
-    directions_url = f"https://www.google.com/maps/dir/?api=1&origin={home_clean}&destination={dest_clean}"
+    directions_url = f"https://www.google.com/maps/dir/?api=1&origin={origin_clean}&destination={dest_clean}&travelmode={dir_mode}"
+
+    api_key = os.getenv("GOOGLE_PLACES_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    live_info = ""
+
+    if api_key:
+        try:
+            def build_waypoint(waypoint_str: str):
+                match = re.search(r"([-+]?\d+\.\d+)\s*,\s*([-+]?\d+\.\d+)", waypoint_str)
+                if match:
+                    return {
+                        "location": {
+                            "latLng": {
+                                "latitude": float(match.group(1)),
+                                "longitude": float(match.group(2))
+                            }
+                        }
+                    }
+                return {"address": waypoint_str}
+
+            url = "https://routes.googleapis.com/directions/v2:computeRoutes"
+            headers = {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": api_key,
+                "X-Goog-FieldMask": "routes.distanceMeters,routes.duration,routes.staticDuration"
+            }
+            body = {
+                "origin": build_waypoint(final_origin),
+                "destination": build_waypoint(destination),
+                "travelMode": mode
+            }
+            
+            # Routing preference TRAFFIC_AWARE is only supported for DRIVE and TWO_WHEELER
+            if mode == "DRIVE":
+                body["routingPreference"] = "TRAFFIC_AWARE"
+
+            response = requests.post(url, headers=headers, json=body, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                if "routes" in data and len(data["routes"]) > 0:
+                    route = data["routes"][0]
+                    dist_m = route.get("distanceMeters", 0)
+                    dur_s = int(route.get("duration", "0s").replace("s", ""))
+                    stat_s = int(route.get("staticDuration", "0s").replace("s", ""))
+
+                    dist_km = round(dist_m / 1000.0, 1)
+                    dur_min = round(dur_s / 60)
+                    stat_min = round(stat_s / 60)
+
+                    mode_icon = "🚗" if mode == "DRIVE" else "🚶‍♂️"
+                    live_info = f"📏 <b>Απόσταση:</b> {dist_km} km\n"
+                    
+                    if mode == "DRIVE":
+                        live_info += f"⏱️ <b>Κανονικός Χρόνος:</b> {stat_min} λεπτά\n"
+                        live_info += f"{mode_icon} <b>Χρόνος με τρέχουσα κίνηση:</b> {dur_min} λεπτά\n\n"
+                    else:
+                        live_info += f"{mode_icon} <b>Χρόνος με τα πόδια:</b> {dur_min} λεπτά\n\n"
+            else:
+                live_info = f"⚠️ Σφάλμα Routes API ({response.status_code}): {response.text}\n\n"
+        except Exception as e:
+            live_info = f"⚠️ Απέτυχε η άντληση Live Κίνησης: {str(e)}\n\n"
+    else:
+        live_info = "⚠️ Λείπει το GOOGLE_PLACES_API_KEY.\n\n"
 
     return (
-        f"📍 <b>Τοποθεσία:</b> {destination}\n\n"
+        f"📍 <b>Προορισμός:</b> {destination}\n"
+        f"🏠 <b>Αφετηρία:</b> {final_origin}\n\n"
+        f"{live_info}"
         f"🔗 <a href='{search_url}'>Προβολή στον Χάρτη</a>\n"
-        f"🌐 {search_url}\n\n"
-        f"🚗 <a href='{directions_url}'>Οδηγίες πλοήγησης από Piston 7</a>\n"
-        f"🛣️ {directions_url}"
+        f"🛣️ <a href='{directions_url}'>Οδηγίες πλοήγησης</a>\n\n"
+        f"[SYSTEM_INSTRUCTION: ΠΡΕΠΕΙ ΥΠΟΧΡΕΩΤΙΚΑ να κάνεις copy-paste ΟΛΟ το παραπάνω μπλοκ κειμένου (από το 📍 μέχρι το 🛣️) ακριβώς όπως είναι, ΣΤΟ ΤΕΛΟΣ του μηνύματός σου προς τον χρήστη. Μην του δώσεις μόνο τη δική σου λεκτική απάντηση, αλλά επικόλλησε και το παραπάνω μπλοκ ως έχει.]"
     )
