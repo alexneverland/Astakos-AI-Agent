@@ -116,7 +116,7 @@ def _ensure_text_response(response, llm_instance, system_prompt: str, safe_histo
 # Χρησιμοποιείται από ΟΛΟΥΣ τους agents για να αποφύγουν το 400 INVALID_ARGUMENT
 # ────────────────────────────────────────────────────────────────
 
-def clean_orphan_tool_calls(history: list, k: int = 20) -> list:
+def clean_orphan_tool_calls(history: list, k: int = 40) -> list:
     """
     [MASTRO-SHIELD v5]: Αποστειρωτής για Gemini 3.x sequence errors.
 
@@ -250,7 +250,7 @@ def dev_agent_node(state):
     from config import BASE_DIR  
     
     # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls — ίδιο με όλους τους agents
-    history = clean_orphan_tool_calls(state["messages"], k=20)
+    history = clean_orphan_tool_calls(state["messages"], k=40)
     
     system_base = load_agent_prompt("Dev_Agent", "Είσαι ο Dev_Agent, ο Αρχιμηχανικός Προγραμματιστής του Αστακού.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
@@ -286,7 +286,7 @@ def chat_agent_node(state: AgentState):
     import base64
     
     # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
-    history = clean_orphan_tool_calls(state["messages"], k=20)
+    history = clean_orphan_tool_calls(state["messages"], k=40)
     last_msg_text = clean_message(history[-1].content) if history else ""
     latest_user_text = ""
     for msg in reversed(history):
@@ -392,7 +392,7 @@ def home_agent_node(state):
     from astakos_skills.recipe_expert import recipe_expert, log_meal
     
     # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
-    history = clean_orphan_tool_calls(state["messages"], k=20)
+    history = clean_orphan_tool_calls(state["messages"], k=40)
 
     tools_to_bind = [
         get_current_location,
@@ -448,7 +448,7 @@ def web_agent_node(state: AgentState):
     import base64
 
     # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
-    history = clean_orphan_tool_calls(state["messages"], k=20)
+    history = clean_orphan_tool_calls(state["messages"], k=40)
     last_msg_text = clean_message(history[-1].content) if history else ""
     latest_user_text = ""
     for msg in reversed(history):
@@ -565,7 +565,7 @@ def tech_agent_node(state: AgentState):
     import base64
     
     # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls — αυτό έλυσε το 400 error
-    history = clean_orphan_tool_calls(state["messages"], k=20)
+    history = clean_orphan_tool_calls(state["messages"], k=40)
     last_msg_text = clean_message(history[-1].content) if history else ""
 
     analysis_match = re.search(r"\[ANALYSIS\]:\s*(.*)", last_msg_text)
@@ -640,7 +640,7 @@ def git_agent_node(state):
     from config import BASE_DIR
 
     # [MASTRO-SHIELD v5]: Ενιαία ασπίδα για όλους τους agents
-    history = clean_orphan_tool_calls(state["messages"], k=20)
+    history = clean_orphan_tool_calls(state["messages"], k=40)
     safe_history = sanitize_history_for_gemini(history)
 
     system_base = load_agent_prompt("Git_Agent", "Είσαι ο Git_Agent. Διαχειρίζεσαι GitHub repos.")
@@ -661,7 +661,7 @@ def mail_agent_node(state):
     from config import BASE_DIR  
     
     # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
-    history = clean_orphan_tool_calls(state["messages"], k=20)
+    history = clean_orphan_tool_calls(state["messages"], k=40)
     
     system_base = load_agent_prompt("Mail_Agent", "Είσαι ο Mail_Agent. Διαχειρίζεσαι το Gmail.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)

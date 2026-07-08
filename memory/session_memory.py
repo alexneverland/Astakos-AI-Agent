@@ -33,7 +33,7 @@ from memory.conversation_history import (
 # ════════════════════════════════════════════════════════════════
 
 SESSION_LOGS: list = []  # Ενιαίο log — όλα τα channels μαζί
-AUTO_SESSION_SUMMARY_EXCHANGE_THRESHOLD = 40
+AUTO_SESSION_SUMMARY_EXCHANGE_THRESHOLD = 20
 _auto_summary_lock = threading.Lock()
 
 
