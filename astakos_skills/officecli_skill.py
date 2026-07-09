@@ -10,8 +10,7 @@ def run_officecli(command: str) -> str:
     Το OfficeCLI υποστηρίζει templates, rendering HTML σε docx, formulas στο Excel κ.α.
 
     ΑΠΑΓΟΡΕΥΕΤΑΙ: Μην χρησιμοποιείς τα παλιά create_file_tool ή generate_word_doc για Office αρχεία. 
-    Χρησιμοποίησε ΑΠΟΚΛΕΙΣΤΙΚΑ αυτό το tool.
-    
+    Χρησιμοποίησε αυτό το tool για απλές μετατροπές ή templates. ΑΝ ΟΜΩΣ χρειάζεται περίπλοκη δομή (π.χ. custom ημερολόγια, ειδικά κελιά με openpyxl/python-docx), ΕΠΙΤΡΕΠΕΤΑΙ να χρησιμοποιήσεις python (run_terminal_command ή run_code) παρακάμπτοντας αυτό το tool.
     ΠΑΝΤΑ να δημιουργείς ή να σώζεις τα αρχεία μέσα στον φάκελο:
     C:/astakos_v2/outputs/
     Ώστε το drive_manager και τα Web UIs να τα βρίσκουν!
