@@ -614,7 +614,8 @@ def tech_agent_node(state: AgentState):
 
     from tools.system import (
         read_local_file, drive_manager, archive_file, search_memory,
-        save_to_memory, create_file_tool, get_current_location, tool_stats, system_doctor, memory_review
+        save_to_memory, create_file_tool, get_current_location, tool_stats, system_doctor, memory_review,
+        run_terminal_command, write_code, run_code
     )
 
     tech_tools = [
@@ -628,7 +629,10 @@ def tech_agent_node(state: AgentState):
         tool_stats,
         system_doctor,
         memory_review,
-        run_officecli
+        run_officecli,
+        run_terminal_command,
+        write_code,
+        run_code
     ]
     
     response = llm_heavy.bind_tools(tech_tools).invoke(final_messages)
