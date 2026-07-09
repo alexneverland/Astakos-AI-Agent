@@ -5,7 +5,16 @@
     "agent": "Tech_Agent",
     "risk_level": "SAFE",
     "priority": 8,
-    "triggers": ["tool stats", "ποια tools αποτυγχάνουν", "tool performance", "tool errors", "στατιστικά tools", "αποτυχίες tools", "tool failures", "πόσες φορές καλέστηκε"]
+    "triggers": [
+      "tool stats",
+      "ποια tools αποτυγχάνουν",
+      "tool performance",
+      "tool errors",
+      "στατιστικά tools",
+      "αποτυχίες tools",
+      "tool failures",
+      "πόσες φορές καλέστηκε"
+    ]
   },
   {
     "name": "system_doctor",
@@ -13,7 +22,19 @@
     "agent": "Tech_Agent",
     "risk_level": "SAFE",
     "priority": 10,
-    "triggers": ["/doctor", "doctor", "system doctor", "health check", "runtime health", "έλεγχος συστήματος", "όλα καλά με το σύστημα", "όλα καλά με το debug", "πως πάει ο αστακός", "δες αν όλα πάνε καλά", "τι δείχνει το debug"]
+    "triggers": [
+      "/doctor",
+      "doctor",
+      "system doctor",
+      "health check",
+      "runtime health",
+      "έλεγχος συστήματος",
+      "όλα καλά με το σύστημα",
+      "όλα καλά με το debug",
+      "πως πάει ο αστακός",
+      "δες αν όλα πάνε καλά",
+      "τι δείχνει το debug"
+    ]
   },
   {
     "name": "memory_review",
@@ -21,7 +42,19 @@
     "agent": "Tech_Agent",
     "risk_level": "SAFE",
     "priority": 10,
-    "triggers": ["memory review", "τι αποθήκευσε στη μνήμη", "τι έβαλε στη μνήμη", "memory panel", "μνήμη review", "memory log", "τι κατέγραψε στη μνήμη", "review memory", "τι έγραψε στη μνήμη", "έλεγξε τη μνήμη", "audit μνήμης"]
+    "triggers": [
+      "memory review",
+      "τι αποθήκευσε στη μνήμη",
+      "τι έβαλε στη μνήμη",
+      "memory panel",
+      "μνήμη review",
+      "memory log",
+      "τι κατέγραψε στη μνήμη",
+      "review memory",
+      "τι έγραψε στη μνήμη",
+      "έλεγξε τη μνήμη",
+      "audit μνήμης"
+    ]
   },
   {
     "name": "text_stats",
@@ -29,7 +62,12 @@
     "agent": "Dev_Agent",
     "risk_level": "SAFE",
     "priority": 9,
-    "triggers": ["text stats", "count words", "count characters", "reading time"]
+    "triggers": [
+      "text stats",
+      "count words",
+      "count characters",
+      "reading time"
+    ]
   },
   {
     "name": "scan_receipt",
@@ -37,7 +75,15 @@
     "agent": "Dev_Agent",
     "risk_level": "WARNING",
     "priority": 9,
-    "triggers": ["scan receipt", "απόδειξη", "αποδείξεις", "σκανάρισμα απόδειξης", "καταγραφή εξόδων", "σκανάρε έξοδα", "φωτογραφία απόδειξης"]
+    "triggers": [
+      "scan receipt",
+      "απόδειξη",
+      "αποδείξεις",
+      "σκανάρισμα απόδειξης",
+      "καταγραφή εξόδων",
+      "σκανάρε έξοδα",
+      "φωτογραφία απόδειξης"
+    ]
   },
   {
     "name": "repo_mapper",
@@ -45,7 +91,21 @@
     "agent": "Dev_Agent",
     "risk_level": "SAFE",
     "priority": 10,
-    "triggers": ["repo map", "repo mapper", "σκάναρε project", "αρχιτεκτονική project", "δέντρο αρχείων", "ποιες functions", "ποιες classes", "δομή του project", "map το project", "ανάλυση κώδικα", "ast scan", "που είναι η function", "που ορίζεται"]
+    "triggers": [
+      "repo map",
+      "repo mapper",
+      "σκάναρε project",
+      "αρχιτεκτονική project",
+      "δέντρο αρχείων",
+      "ποιες functions",
+      "ποιες classes",
+      "δομή του project",
+      "map το project",
+      "ανάλυση κώδικα",
+      "ast scan",
+      "που είναι η function",
+      "που ορίζεται"
+    ]
   },
   {
     "name": "google_fit",
@@ -53,7 +113,21 @@
     "agent": "Home_Agent",
     "risk_level": "SAFE",
     "priority": 10,
-    "triggers": ["βήματα", "ύπνος", "παλμοί", "καρδιά", "bpm", "fit", "samsung health", "υγεία", "δραστηριότητα", "steps", "sleep", "heart rate", "κοιμήθηκα"]
+    "triggers": [
+      "βήματα",
+      "ύπνος",
+      "παλμοί",
+      "καρδιά",
+      "bpm",
+      "fit",
+      "samsung health",
+      "υγεία",
+      "δραστηριότητα",
+      "steps",
+      "sleep",
+      "heart rate",
+      "κοιμήθηκα"
+    ]
   },
   {
     "name": "nutrition_analysis",
@@ -61,7 +135,17 @@
     "agent": "Home_Agent",
     "risk_level": "SAFE",
     "priority": 10,
-    "triggers": ["nutrition", "ετικέτα", "συστατικά", "θερμίδες", "διατροφική", "καλλυντικό", "e-number", "additives", "τι περιέχει"]
+    "triggers": [
+      "nutrition",
+      "ετικέτα",
+      "συστατικά",
+      "θερμίδες",
+      "διατροφική",
+      "καλλυντικό",
+      "e-number",
+      "additives",
+      "τι περιέχει"
+    ]
   },
   {
     "name": "story_maker",
@@ -69,7 +153,13 @@
     "agent": "Chat_Agent",
     "risk_level": "SAFE",
     "priority": 10,
-    "triggers": ["/story", "παραμύθι", "παραμυθάκι", "ιστορία για τον αλέξανδρο", "story for alexandros"]
+    "triggers": [
+      "/story",
+      "παραμύθι",
+      "παραμυθάκι",
+      "ιστορία για τον αλέξανδρο",
+      "story for alexandros"
+    ]
   },
   {
     "name": "messenger",
@@ -77,7 +167,17 @@
     "agent": "Chat_Agent",
     "risk_level": "CRITICAL",
     "priority": 9,
-    "triggers": ["messenger", "facebook", "στείλε μήνυμα", "γράψε στη σοφία", "γράψε στη μαρία", "στείλε στη σοφία", "πρωινό μήνυμα", "στείλε στον", "γράψε στον"]
+    "triggers": [
+      "messenger",
+      "facebook",
+      "στείλε μήνυμα",
+      "γράψε στη σοφία",
+      "γράψε στη μαρία",
+      "στείλε στη σοφία",
+      "πρωινό μήνυμα",
+      "στείλε στον",
+      "γράψε στον"
+    ]
   },
   {
     "name": "image_generation",
@@ -85,7 +185,16 @@
     "agent": "Web_Agent",
     "risk_level": "WARNING",
     "priority": 10,
-    "triggers": ["φτιάξε εικόνα", "δημιούργησε εικόνα", "generate image", "φτιάξε φωτογραφία", "δημιούργησε φωτό", "create image", "φτιάξε μια φωτογραφία", "ζωγράφισε"]
+    "triggers": [
+      "φτιάξε εικόνα",
+      "δημιούργησε εικόνα",
+      "generate image",
+      "φτιάξε φωτογραφία",
+      "δημιούργησε φωτό",
+      "create image",
+      "φτιάξε μια φωτογραφία",
+      "ζωγράφισε"
+    ]
   },
   {
     "name": "linkedin_post",
@@ -93,7 +202,18 @@
     "agent": "Web_Agent",
     "risk_level": "CRITICAL",
     "priority": 15,
-    "triggers": ["linkedin", "linked in", "ανάρτηση", "ανέβασε στο linkedin", "γράψε post", "δημοσίευση", "linkedin post", "φτιάξε post", "post στο linkedin", "ποστ στο linkedin"]
+    "triggers": [
+      "linkedin",
+      "linked in",
+      "ανάρτηση",
+      "ανέβασε στο linkedin",
+      "γράψε post",
+      "δημοσίευση",
+      "linkedin post",
+      "φτιάξε post",
+      "post στο linkedin",
+      "ποστ στο linkedin"
+    ]
   },
   {
     "name": "weather",
@@ -101,7 +221,15 @@
     "agent": "Web_Agent",
     "risk_level": "SAFE",
     "priority": 8,
-    "triggers": ["καιρός", "πρόγνωση", "βροχή", "θερμοκρασία", "weather", "forecast", "τι καιρό κάνει"]
+    "triggers": [
+      "καιρός",
+      "πρόγνωση",
+      "βροχή",
+      "θερμοκρασία",
+      "weather",
+      "forecast",
+      "τι καιρό κάνει"
+    ]
   },
   {
     "name": "news",
@@ -109,7 +237,14 @@
     "agent": "Web_Agent",
     "risk_level": "SAFE",
     "priority": 8,
-    "triggers": ["ειδήσεις", "νέα", "επικαιρότητα", "news", "τι γίνεται", "τελευταία νέα"]
+    "triggers": [
+      "ειδήσεις",
+      "νέα",
+      "επικαιρότητα",
+      "news",
+      "τι γίνεται",
+      "τελευταία νέα"
+    ]
   },
   {
     "name": "web_search",
@@ -117,7 +252,18 @@
     "agent": "Web_Agent",
     "risk_level": "SAFE",
     "priority": 8,
-    "triggers": ["ψάξε στο internet", "google", "duckduckgo", "ψάξε online", "άνοιξε το site", "browse", "open url", "αναζήτησε", "ψάξε", "βρες πληροφορίες"]
+    "triggers": [
+      "ψάξε στο internet",
+      "google",
+      "duckduckgo",
+      "ψάξε online",
+      "άνοιξε το site",
+      "browse",
+      "open url",
+      "αναζήτησε",
+      "ψάξε",
+      "βρες πληροφορίες"
+    ]
   },
   {
     "name": "flights",
@@ -125,7 +271,14 @@
     "agent": "Dev_Agent",
     "risk_level": "SAFE",
     "priority": 10,
-    "triggers": ["πτήση", "αεροπορικά", "αεροδρόμιο", "flight", "airline", "εισιτήριο αεροπλάνο"]
+    "triggers": [
+      "πτήση",
+      "αεροπορικά",
+      "αεροδρόμιο",
+      "flight",
+      "airline",
+      "εισιτήριο αεροπλάνο"
+    ]
   },
   {
     "name": "ferries",
@@ -133,7 +286,14 @@
     "agent": "Web_Agent",
     "risk_level": "SAFE",
     "priority": 10,
-    "triggers": ["πλοίο", "ακτοπλοϊκά", "ferry", "seajets", "golden star", "δρομολόγιο πλοίου"]
+    "triggers": [
+      "πλοίο",
+      "ακτοπλοϊκά",
+      "ferry",
+      "seajets",
+      "golden star",
+      "δρομολόγιο πλοίου"
+    ]
   },
   {
     "name": "recipe",
@@ -141,7 +301,17 @@
     "agent": "Home_Agent",
     "risk_level": "SAFE",
     "priority": 9,
-    "triggers": ["συνταγή", "μαγειρεύω", "τι να φτιάξω", "τι να μαγειρέψω", "recipe", "μενού", "φαγητό", "μαγειρική", "τι φάμε"]
+    "triggers": [
+      "συνταγή",
+      "μαγειρεύω",
+      "τι να φτιάξω",
+      "τι να μαγειρέψω",
+      "recipe",
+      "μενού",
+      "φαγητό",
+      "μαγειρική",
+      "τι φάμε"
+    ]
   },
   {
     "name": "shopping_list",
@@ -149,7 +319,16 @@
     "agent": "Home_Agent",
     "risk_level": "WARNING",
     "priority": 8,
-    "triggers": ["λίστα", "αγορές", "supermarket", "να αγοράσω", "shopping list", "βάλε στη λίστα", "πρόσθεσε στη λίστα", "διέγραψε από τη λίστα"]
+    "triggers": [
+      "λίστα",
+      "αγορές",
+      "supermarket",
+      "να αγοράσω",
+      "shopping list",
+      "βάλε στη λίστα",
+      "πρόσθεσε στη λίστα",
+      "διέγραψε από τη λίστα"
+    ]
   },
   {
     "name": "supermarket_prices",
@@ -157,7 +336,19 @@
     "agent": "Home_Agent",
     "risk_level": "SAFE",
     "priority": 9,
-    "triggers": ["τιμή", "τιμές", "σούπερ μάρκετ", "προσφορά", "goldmall", "σκλαβενίτης", "μασούτης", "αλφαμέγα", "lidl", "πόσο κοστίζει", "φτηνά"]
+    "triggers": [
+      "τιμή",
+      "τιμές",
+      "σούπερ μάρκετ",
+      "προσφορά",
+      "goldmall",
+      "σκλαβενίτης",
+      "μασούτης",
+      "αλφαμέγα",
+      "lidl",
+      "πόσο κοστίζει",
+      "φτηνά"
+    ]
   },
   {
     "name": "git_ops",
@@ -165,7 +356,23 @@
     "agent": "Git_Agent",
     "risk_level": "CRITICAL",
     "priority": 10,
-    "triggers": ["git commit", "git push", "git pull", "git log", "git status", "git diff", "git branch", "commit", "branch", "diff", "HEAD", "origin/main", "δες commit", "τελευταία commits", "ιστορικό commit"]
+    "triggers": [
+      "git commit",
+      "git push",
+      "git pull",
+      "git log",
+      "git status",
+      "git diff",
+      "git branch",
+      "commit",
+      "branch",
+      "diff",
+      "HEAD",
+      "origin/main",
+      "δες commit",
+      "τελευταία commits",
+      "ιστορικό commit"
+    ]
   },
   {
     "name": "code_git",
@@ -173,7 +380,21 @@
     "agent": "Dev_Agent",
     "risk_level": "WARNING",
     "priority": 9,
-    "triggers": ["κώδικας", "python", "script", "bug", "error", "powershell", "debugging", "skill", "νέο skill", "αρχείο py", ".py", "γράψε κώδικα", "φτιάξε script"]
+    "triggers": [
+      "κώδικας",
+      "python",
+      "script",
+      "bug",
+      "error",
+      "powershell",
+      "debugging",
+      "skill",
+      "νέο skill",
+      "αρχείο py",
+      ".py",
+      "γράψε κώδικα",
+      "φτιάξε script"
+    ]
   },
   {
     "name": "terminal",
@@ -181,7 +402,16 @@
     "agent": "Dev_Agent",
     "risk_level": "DYNAMIC",
     "priority": 10,
-    "triggers": ["τρέξε εντολή", "powershell", "cmd", "terminal", "εκτέλεσε", "run command", "τρέξε στο terminal", "εντολή συστήματος"]
+    "triggers": [
+      "τρέξε εντολή",
+      "powershell",
+      "cmd",
+      "terminal",
+      "εκτέλεσε",
+      "run command",
+      "τρέξε στο terminal",
+      "εντολή συστήματος"
+    ]
   },
   {
     "name": "email",
@@ -189,7 +419,17 @@
     "agent": "Mail_Agent",
     "risk_level": "CRITICAL",
     "priority": 10,
-    "triggers": ["email", "gmail", "μαιλ", "αποστολή email", "διάβασε email", "νέα email", "εισερχόμενα", "στείλε email", "απάντησε email"]
+    "triggers": [
+      "email",
+      "gmail",
+      "μαιλ",
+      "αποστολή email",
+      "διάβασε email",
+      "νέα email",
+      "εισερχόμενα",
+      "στείλε email",
+      "απάντησε email"
+    ]
   },
   {
     "name": "vacuum",
@@ -197,7 +437,16 @@
     "agent": "Home_Agent",
     "risk_level": "WARNING",
     "priority": 10,
-    "triggers": ["σκούπα", "ρομπότ", "vacuum", "xiaomi", "καθάρισε", "σκούπισε", "robot", "ρόμπα"]
+    "triggers": [
+      "σκούπα",
+      "ρομπότ",
+      "vacuum",
+      "xiaomi",
+      "καθάρισε",
+      "σκούπισε",
+      "robot",
+      "ρόμπα"
+    ]
   },
   {
     "name": "calendar_tasks",
@@ -205,7 +454,18 @@
     "agent": "Home_Agent",
     "risk_level": "NOTIFY",
     "priority": 9,
-    "triggers": ["ημερολόγιο", "calendar", "task", "ραντεβού", "προγραμμάτισε", "υπενθύμισε", "reminder", "βάλε στο ημερολόγιο", "google tasks", "task list"]
+    "triggers": [
+      "ημερολόγιο",
+      "calendar",
+      "task",
+      "ραντεβού",
+      "προγραμμάτισε",
+      "υπενθύμισε",
+      "reminder",
+      "βάλε στο ημερολόγιο",
+      "google tasks",
+      "task list"
+    ]
   },
   {
     "name": "maps_places",
@@ -213,7 +473,18 @@
     "agent": "Web_Agent",
     "risk_level": "SAFE",
     "priority": 9,
-    "triggers": ["χάρτης", "maps", "πού είναι", "διεύθυνση", "φαρμακείο", "εστιατόριο", "πλοήγηση", "οδηγίες", "πού βρίσκεται", "απόσταση"]
+    "triggers": [
+      "χάρτης",
+      "maps",
+      "πού είναι",
+      "διεύθυνση",
+      "φαρμακείο",
+      "εστιατόριο",
+      "πλοήγηση",
+      "οδηγίες",
+      "πού βρίσκεται",
+      "απόσταση"
+    ]
   },
   {
     "name": "location",
@@ -221,7 +492,14 @@
     "agent": "Web_Agent",
     "risk_level": "SAFE",
     "priority": 7,
-    "triggers": ["πού είμαι", "τρέχουσα τοποθεσία", "current location", "location", "gps", "τοποθεσία μου"]
+    "triggers": [
+      "πού είμαι",
+      "τρέχουσα τοποθεσία",
+      "current location",
+      "location",
+      "gps",
+      "τοποθεσία μου"
+    ]
   },
   {
     "name": "drive",
@@ -229,7 +507,15 @@
     "agent": "Tech_Agent",
     "risk_level": "NOTIFY",
     "priority": 9,
-    "triggers": ["drive", "google drive", "ανέβασε αρχείο", "κατέβασε αρχείο", "αρχείο στο drive", "βρες στο drive", "αποθήκευσε στο drive"]
+    "triggers": [
+      "drive",
+      "google drive",
+      "ανέβασε αρχείο",
+      "κατέβασε αρχείο",
+      "αρχείο στο drive",
+      "βρες στο drive",
+      "αποθήκευσε στο drive"
+    ]
   },
   {
     "name": "spotify",
@@ -237,7 +523,17 @@
     "agent": "Chat_Agent",
     "risk_level": "WARNING",
     "priority": 8,
-    "triggers": ["spotify", "μουσική", "παίξε μουσική", "βάλε μουσική", "παύση", "επόμενο", "play music", "άλλαξε τραγούδι", "τι παίζει"]
+    "triggers": [
+      "spotify",
+      "μουσική",
+      "παίξε μουσική",
+      "βάλε μουσική",
+      "παύση",
+      "επόμενο",
+      "play music",
+      "άλλαξε τραγούδι",
+      "τι παίζει"
+    ]
   },
   {
     "name": "photos",
@@ -245,7 +541,16 @@
     "agent": "Chat_Agent",
     "risk_level": "SAFE",
     "priority": 8,
-    "triggers": ["φωτογραφία", "φώτο", "εικόνα", "photos", "δείξε φωτό", "βρες φωτογραφία", "η φωτό με", "photo"]
+    "triggers": [
+      "φωτογραφία",
+      "φώτο",
+      "εικόνα",
+      "photos",
+      "δείξε φωτό",
+      "βρες φωτογραφία",
+      "η φωτό με",
+      "photo"
+    ]
   },
   {
     "name": "routines",
@@ -253,7 +558,17 @@
     "agent": "Home_Agent",
     "risk_level": "WARNING",
     "priority": 9,
-    "triggers": ["routine", "routines", "μάθε ρουτίνα", "πρωινή ρουτίνα", "βραδινή ρουτίνα", "αυτόματη εκτέλεση", "κάθε πρωί", "κάθε βράδυ", "ρουτίνα"]
+    "triggers": [
+      "routine",
+      "routines",
+      "μάθε ρουτίνα",
+      "πρωινή ρουτίνα",
+      "βραδινή ρουτίνα",
+      "αυτόματη εκτέλεση",
+      "κάθε πρωί",
+      "κάθε βράδυ",
+      "ρουτίνα"
+    ]
   },
   {
     "name": "archive",
@@ -261,7 +576,13 @@
     "agent": "Tech_Agent",
     "risk_level": "WARNING",
     "priority": 7,
-    "triggers": ["αρχειοθέτησε", "archive", "αποθήκευσε στη μνήμη", "κράτα αυτό", "αρχειοθέτηση αρχείου"]
+    "triggers": [
+      "αρχειοθέτησε",
+      "archive",
+      "αποθήκευσε στη μνήμη",
+      "κράτα αυτό",
+      "αρχειοθέτηση αρχείου"
+    ]
   },
   {
     "name": "child_activities",
@@ -269,7 +590,14 @@
     "agent": "Home_Agent",
     "risk_level": "SAFE",
     "priority": 9,
-    "triggers": ["τι να κάνω με τον μικρό", "τι να κάνω με τον αλέξανδρο", "παιχνίδι με τον αλέξανδρο", "δραστηριότητα για παιδί", "lego με τον αλέξανδρο", "ιδέες για τον αλέξανδρο"]
+    "triggers": [
+      "τι να κάνω με τον μικρό",
+      "τι να κάνω με τον αλέξανδρο",
+      "παιχνίδι με τον αλέξανδρο",
+      "δραστηριότητα για παιδί",
+      "lego με τον αλέξανδρο",
+      "ιδέες για τον αλέξανδρο"
+    ]
   },
   {
     "name": "long_term_goals",
@@ -277,7 +605,16 @@
     "agent": "Chat_Agent",
     "risk_level": "WARNING",
     "priority": 9,
-    "triggers": ["θέλω να τελειώσω", "στόχος μου", "να ολοκληρώσω", "goal", "σκοπός μου", "μακροπρόθεσμο", "να βγάλω production", "να λανσάρω"]
+    "triggers": [
+      "θέλω να τελειώσω",
+      "στόχος μου",
+      "να ολοκληρώσω",
+      "goal",
+      "σκοπός μου",
+      "μακροπρόθεσμο",
+      "να βγάλω production",
+      "να λανσάρω"
+    ]
   },
   {
     "name": "project_tools",
@@ -285,7 +622,16 @@
     "agent": "Dev_Agent",
     "risk_level": "WARNING",
     "priority": 10,
-    "triggers": ["διάβασε αρχείο project", "επεξεργάσου αρχείο", "grep project", "δες τα αρχεία", "list project files", "edit project file", "write project file", "grep project files"]
+    "triggers": [
+      "διάβασε αρχείο project",
+      "επεξεργάσου αρχείο",
+      "grep project",
+      "δες τα αρχεία",
+      "list project files",
+      "edit project file",
+      "write project file",
+      "grep project files"
+    ]
   },
   {
     "name": "generate_excel",
@@ -293,7 +639,16 @@
     "agent": "Dev_Agent",
     "risk_level": "SAFE",
     "priority": 9,
-    "triggers": ["φτιάξε excel", "δημιούργησε excel", "φτιάξε xlsx", "φτιάξε spreadsheet", "make excel", "create excel", "generate excel", "excel αρχείο"]
+    "triggers": [
+      "φτιάξε excel",
+      "δημιούργησε excel",
+      "φτιάξε xlsx",
+      "φτιάξε spreadsheet",
+      "make excel",
+      "create excel",
+      "generate excel",
+      "excel αρχείο"
+    ]
   },
   {
     "name": "generate_word_doc",
@@ -301,7 +656,17 @@
     "agent": "Dev_Agent",
     "risk_level": "SAFE",
     "priority": 9,
-    "triggers": ["φτιάξε word", "δημιούργησε word", "φτιάξε docx", "φτιάξε έγγραφο", "make word", "create word", "generate word", "word document", "docx αρχείο"]
+    "triggers": [
+      "φτιάξε word",
+      "δημιούργησε word",
+      "φτιάξε docx",
+      "φτιάξε έγγραφο",
+      "make word",
+      "create word",
+      "generate word",
+      "word document",
+      "docx αρχείο"
+    ]
   },
   {
     "name": "generate_pdf",
@@ -309,7 +674,16 @@
     "agent": "Dev_Agent",
     "risk_level": "SAFE",
     "priority": 9,
-    "triggers": ["φτιάξε pdf", "δημιούργησε pdf", "κάνε pdf", "εξαγωγή pdf", "make pdf", "create pdf", "generate pdf", "pdf αρχείο"]
+    "triggers": [
+      "φτιάξε pdf",
+      "δημιούργησε pdf",
+      "κάνε pdf",
+      "εξαγωγή pdf",
+      "make pdf",
+      "create pdf",
+      "generate pdf",
+      "pdf αρχείο"
+    ]
   },
   {
     "name": "generate_csv",
@@ -317,6 +691,43 @@
     "agent": "Dev_Agent",
     "risk_level": "SAFE",
     "priority": 9,
-    "triggers": ["φτιάξε csv", "δημιούργησε csv", "κάνε csv", "εξαγωγή csv", "make csv", "create csv", "generate csv", "csv αρχείο"]
+    "triggers": [
+      "φτιάξε csv",
+      "δημιούργησε csv",
+      "κάνε csv",
+      "εξαγωγή csv",
+      "make csv",
+      "create csv",
+      "generate csv",
+      "csv αρχείο"
+    ]
+  },
+  {
+    "name": "list_agent_skills",
+    "description": "Επιστρέφει μια λίστα με όλα τα διαθέσιμα 'Agent Skills' (του Addy Osmani).",
+    "agent": "Dev_Agent",
+    "risk_level": "SAFE",
+    "priority": 8,
+    "triggers": [
+      "agent skills",
+      "διαθέσιμα skills",
+      "λίστα με skills",
+      "τι skills έχουμε",
+      "list skills"
+    ]
+  },
+  {
+    "name": "read_agent_skill",
+    "description": "Διαβάζει τους κανόνες και το workflow ενός συγκεκριμένου 'Agent Skill'.",
+    "agent": "Dev_Agent",
+    "risk_level": "SAFE",
+    "priority": 8,
+    "triggers": [
+      "χρησιμοποίησε skill",
+      "διάβασε skill",
+      "read skill",
+      "εφάρμοσε skill",
+      "έλεγχος με skill"
+    ]
   }
 ]

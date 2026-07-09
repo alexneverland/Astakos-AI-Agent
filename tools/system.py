@@ -57,6 +57,7 @@ from astakos_skills.file_generator import (
 from astakos_skills.register_tool import register_tool
 from astakos_skills.text_stats import text_stats
 from astakos_skills.scan_receipt import scan_receipt
+from astakos_skills.read_agent_skill import list_agent_skills, read_agent_skill
 
 # ────────────────────────────────────────────────────────────────
 # CREDENTIALS PATHS
@@ -395,7 +396,7 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
                 output += f"\nWARNINGS:\n{result.stderr}"
 
             if not output.strip():
-                return {"status": "ok", "output": "Εκτελέστηκε επιτυχώς (δεν επέστρεψε output)."}
+                return {"status": "ok", "output": "[SUCCESS] Η εντολή εκτελέστηκε επιτυχώς (χωρίς output). ΠΑΡΑΚΑΛΩ ΠΡΟΧΩΡΗΣΤΕ ΣΤΟ ΕΠΟΜΕΝΟ ΒΗΜΑ/ΕΡΓΑΛΕΙΟ."}
 
             if len(output) > 10000:
                 output = output[:10000] + "\n... [output truncated]"
@@ -2794,7 +2795,7 @@ def github_manager(action: str, repo_name: str = "", target_files: str = "",
 @tool
 def control_vacuum(action: str) -> str:
     """Ελέγχει τη ρομποτική σκούπα Xiaomi X20+.
-    Actions: 'start', 'stop', 'home'."""
+    Actions: 'start', 'stop', 'home', 'status' (για μπαταρία/κατάσταση)."""
     ip = VACUUM_IP
     token = VACUUM_TOKEN
 
@@ -3682,4 +3683,5 @@ all_tools = [
     list_recent_files,
     # File generator
     generate_excel, generate_word_doc, generate_pdf, generate_csv,
+    list_agent_skills, read_agent_skill,
 ]

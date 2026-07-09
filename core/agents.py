@@ -46,6 +46,7 @@ from tools.project_tools import (
     edit_project_file, write_project_file, grep_project_files,
     list_recent_files,
 )
+from astakos_skills.read_agent_skill import list_agent_skills, read_agent_skill
 
 from time import perf_counter
 
@@ -267,7 +268,7 @@ def dev_agent_node(state):
         # Project tools — code navigation & editing
         grant_project_access, list_project_files, read_project_file,
         edit_project_file, write_project_file, grep_project_files, repo_mapper,
-        list_recent_files,
+        list_recent_files, list_agent_skills, read_agent_skill,
     ]
     
     safe_history = sanitize_history_for_gemini(history)
