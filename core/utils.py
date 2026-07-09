@@ -604,7 +604,7 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
         "αρχειοθέτηση", "σώσε το"
     ]
 
-    k_value = 0 if has_current_photo else (3 if is_vision else 8)
+    k_value = 0 if has_current_photo else (3 if is_vision else 4)
     is_routine_command = clean_text in ignore_words or clean_text.startswith(("ναι ", "οχι ", "όχι "))
     has_skip_keyword = any(kw in clean_text for kw in SKIP_SEMANTIC_KEYWORDS)
 
