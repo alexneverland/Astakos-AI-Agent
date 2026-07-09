@@ -82,3 +82,6 @@ Desktop.ini
 tmp/
 .pytest_tmp*/
 !data/routine_tokens.json
+
+# OfficeCLI binary
+vendor/officecli/*.exe

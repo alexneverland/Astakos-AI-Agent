@@ -743,5 +743,20 @@
       "trends",
       "τελευταίες 30 μέρες"
     ]
+  },
+  {
+    "name": "run_officecli",
+    "description": "Εκτελεί εντολές στο OfficeCLI για δημιουργία και επεξεργασία αρχείων Word (.docx), Excel (.xlsx), και PowerPoint (.pptx).",
+    "agent": "Dev_Agent",
+    "risk_level": "SAFE",
+    "priority": 10,
+    "triggers": [
+      "officecli",
+      "φτιάξε office",
+      "επεξεργάσου word",
+      "επεξεργάσου excel",
+      "φτιάξε pptx",
+      "παρουσίαση"
+    ]
   }
 ]

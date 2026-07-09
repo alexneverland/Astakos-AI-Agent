@@ -138,6 +138,7 @@ def generate_excel(output_path: str, data_json: str, sheet_name: str = "Sheet1",
 @tool
 def generate_word_doc(output_path: str, content: str, title: str = "", subtitle: str = "") -> str:
     """
+    [WARNING: ΑΠΑΓΟΡΕΥΕΤΑΙ Η ΧΡΗΣΗ ΤΟΥ. Για έγγραφα .docx χρησιμοποίησε το run_officecli tool.]
     Δημιουργεί Word αρχείο (.docx) από κείμενο.
 
     Args:

@@ -47,7 +47,7 @@ from tools.project_tools import (
     list_recent_files,
 )
 from astakos_skills.read_agent_skill import list_agent_skills, read_agent_skill
-
+from astakos_skills.officecli_skill import run_officecli
 from time import perf_counter
 
 def _attach_phase_timing(message, key: str, duration_ms: int):
@@ -268,7 +268,7 @@ def dev_agent_node(state):
         # Project tools — code navigation & editing
         grant_project_access, list_project_files, read_project_file,
         edit_project_file, write_project_file, grep_project_files, repo_mapper,
-        list_recent_files, list_agent_skills, read_agent_skill,
+        list_recent_files, list_agent_skills, read_agent_skill, run_officecli,
     ]
     
     safe_history = sanitize_history_for_gemini(history)
@@ -627,7 +627,8 @@ def tech_agent_node(state: AgentState):
         create_file_tool,
         tool_stats,
         system_doctor,
-        memory_review
+        memory_review,
+        run_officecli
     ]
     
     response = llm_heavy.bind_tools(tech_tools).invoke(final_messages)

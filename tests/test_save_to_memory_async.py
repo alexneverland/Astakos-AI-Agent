@@ -20,87 +20,88 @@ def check(desc, cond, detail=""):
         print(f"❌ {msg}")
 
 
-# ── 1. Επιστρέφει ΑΜΕΣΑ (< 1s) ────────────────────────────────────
-# Mocking embeddings + vector_store ώστε να μην κάνει πραγματικό Vertex AI call
-mock_vs  = MagicMock()
-mock_emb = MagicMock()
-mock_emb.embed_query.return_value = [0.0] * 768
-mock_vs._collection.query.return_value = {"ids": [[]], "distances": [[]]}
+def test_save_to_memory_async():
+    # ── 1. Επιστρέφει ΑΜΕΣΑ (< 1s) ────────────────────────────────────
+    # Mocking embeddings + vector_store ώστε να μην κάνει πραγματικό Vertex AI call
+    mock_vs  = MagicMock()
+    mock_emb = MagicMock()
+    mock_emb.embed_query.return_value = [0.0] * 768
+    mock_vs.similarity_search_with_score.return_value = []
+    mock_vs._collection.query.return_value = {"ids": [[]], "distances": [[]]}
 
-with patch("tools.system.embeddings", mock_emb), \
-     patch("memory.vector_store.vector_store", mock_vs):
+    with patch("memory.vector_store.embeddings", mock_emb), \
+         patch("memory.vector_store.vector_store", mock_vs):
 
-    t0 = time.time()
-    result = save_to_memory.invoke({
-        "fact": "Ο Αλέξανδρος αγαπάει τα LEGO",
-        "entities": "Αλέξανδρος, LEGO",
-        "category": "family",
-    })
-    elapsed = time.time() - t0
+        t0 = time.time()
+        result = save_to_memory.invoke({
+            "fact": "Ο Αλέξανδρος αγαπάει τα LEGO",
+            "entities": "Αλέξανδρος, LEGO",
+            "category": "family",
+        })
+        elapsed = time.time() - t0
 
-check("Επιστρέφει σε < 1s (fire-and-forget)", elapsed < 1.0,
-      f"elapsed={elapsed:.2f}s")
+    check("Επιστρέφει σε < 1s (fire-and-forget)", elapsed < 1.0,
+          f"elapsed={elapsed:.2f}s")
 
-# ── 2. Επιστρέφει string ────────────────────────────────────────────
-check("Επιστρέφει string", isinstance(result, str))
+    # ── 2. Επιστρέφει string ────────────────────────────────────────────
+    check("Επιστρέφει string", isinstance(result, str))
 
-# ── 3. Δεν κάνει blocking — δεν περιέχει 'Error' ──────────────────
-check("Δεν επιστρέφει Error", "Error" not in result, result[:80])
+    # ── 3. Δεν κάνει blocking — δεν περιέχει 'Error' ──────────────────
+    check("Δεν επιστρέφει Error", "Error" not in result, result[:80])
 
-# ── 4. Background thread γράφει τελικά στο vector_store ──────────
-# Περιμένουμε max 3s για το background thread
-mock_vs2  = MagicMock()
-mock_emb2 = MagicMock()
-mock_emb2.embed_query.return_value = [0.0] * 768
-mock_vs2._collection.query.return_value = {"ids": [[]], "distances": [[]]}
+    # ── 4. Background thread γράφει τελικά στο vector_store ──────────
+    # Περιμένουμε max 3s για το background thread
+    mock_vs2  = MagicMock()
+    mock_emb2 = MagicMock()
+    mock_emb2.embed_query.return_value = [0.0] * 768
+    mock_vs2.similarity_search_with_score.return_value = []
+    mock_vs2._collection.query.return_value = {"ids": [[]], "distances": [[]]}
 
-written = threading.Event()
-original_add = mock_vs2.add_texts
-def _capture_add(*args, **kwargs):
-    written.set()
-    return original_add(*args, **kwargs)
-mock_vs2.add_texts = _capture_add
+    written = threading.Event()
+    original_add = mock_vs2.add_texts
+    def _capture_add(*args, **kwargs):
+        written.set()
+        return original_add(*args, **kwargs)
+    mock_vs2.add_texts = _capture_add
 
-with patch("tools.system.embeddings", mock_emb2), \
-     patch("memory.vector_store.vector_store", mock_vs2):
-    save_to_memory.invoke({
-        "fact": "Η Σοφία γεννήθηκε στις 17/07/1989",
-        "entities": "Σοφία",
-        "category": "family",
-    })
-    written_in_time = written.wait(timeout=5)
+    with patch("memory.vector_store.embeddings", mock_emb2), \
+         patch("memory.vector_store.vector_store", mock_vs2):
+        save_to_memory.invoke({
+            "fact": "Η Σοφία γεννήθηκε στις 17/07/1989",
+            "entities": "Σοφία",
+            "category": "family",
+        })
+        written_in_time = written.wait(timeout=5)
 
-check("Background thread καλεί add_texts μέσα σε 5s", written_in_time)
+    check("Background thread καλεί add_texts μέσα σε 5s", written_in_time)
 
-# ── 5. Duplicate skip — add_texts ΔΕΝ καλείται ────────────────────
-mock_vs3  = MagicMock()
-mock_emb3 = MagicMock()
-mock_emb3.embed_query.return_value = [0.0] * 768
-# distance < 0.10 → duplicate
-mock_vs3._collection.query.return_value = {
-    "ids": [["existing-id"]],
-    "distances": [[0.05]]
-}
-not_written = threading.Event()
+    # ── 5. Duplicate skip — add_texts ΔΕΝ καλείται ────────────────────
+    mock_vs3  = MagicMock()
+    mock_emb3 = MagicMock()
+    mock_emb3.embed_query.return_value = [0.0] * 768
+    # distance < 0.10 → duplicate
+    mock_doc = MagicMock()
+    mock_doc.page_content = "Ο Αλέξανδρος αγαπάει τα LEGO"
+    mock_doc.metadata = {"category": "family"}
+    mock_vs3.similarity_search_with_score.return_value = [(mock_doc, 0.05)]
+    mock_vs3._collection.query.return_value = {"ids": [["existing-id"]], "distances": [[0.05]]}
+    not_written = threading.Event()
 
-with patch("tools.system.embeddings", mock_emb3), \
-     patch("memory.vector_store.vector_store", mock_vs3):
-    save_to_memory.invoke({
-        "fact": "Ο Αλέξανδρος αγαπάει τα LEGO",
-        "entities": "Αλέξανδρος, LEGO",
-        "category": "family",
-    })
-    time.sleep(3)  # δίνουμε χρόνο στο background
+    with patch("memory.vector_store.embeddings", mock_emb3), \
+         patch("memory.vector_store.vector_store", mock_vs3):
+        save_to_memory.invoke({
+            "fact": "Ο Αλέξανδρος αγαπάει τα LEGO",
+            "entities": "Αλέξανδρος, LEGO",
+            "category": "family",
+        })
+        time.sleep(3)  # δίνουμε χρόνο στο background
 
-check("Duplicate: add_texts ΔΕΝ κλήθηκε", not mock_vs3.add_texts.called,
-      f"add_texts called {mock_vs3.add_texts.call_count} times")
+    check("Duplicate: add_texts ΔΕΝ κλήθηκε", not mock_vs3.add_texts.called,
+          f"add_texts called {mock_vs3.add_texts.call_count} times")
 
+    # ── Αποτελέσματα ────────────────────────────────────────────────────
+    assert not errors, f"{len(errors)} αποτυχίες: {errors}"
 
-# ── Αποτελέσματα ────────────────────────────────────────────────────
-if errors:
-    print(f"\n❌ {len(errors)} αποτυχίες:")
-    for e in errors:
-        print(f"  - {e}")
-    sys.exit(1)
-else:
+if __name__ == "__main__":
+    test_save_to_memory_async()
     print("\n✅ Όλα τα tests πέρασαν!")

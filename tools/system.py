@@ -1699,10 +1699,11 @@ def google_tasks_tool(
 @tool
 def create_file_tool(file_type: str, filename: str, data: str) -> str:
     """
-    Δημιουργεί τοπικά αρχεία DOCX, PDF, XLSX ή TXT.
+    [WARNING: Για αρχεία .docx, .xlsx, .pptx ΑΠΑΓΟΡΕΥΕΤΑΙ η χρήση αυτού του εργαλείου. Χρησιμοποίησε ΜΟΝΟ το run_officecli]
+    Δημιουργεί τοπικά αρχεία PDF, TXT (και legacy DOCX/XLSX).
     file_type: 'docx', 'pdf', 'xlsx', 'txt'
-    filename: Το όνομα του αρχείου (π.χ. 'report.docx')
-    data: Το περιεχόμενο. Για XLSX, στείλε JSON string από λίστα/dict.
+    filename: Το όνομα του αρχείου (π.χ. 'report.txt')
+    data: Το περιεχόμενο. 
     """
     import os
     import json
