@@ -62,6 +62,17 @@ prompts.md
 # Local-only private extensions
 local_only/
 
+# Documents & Binary Files (to prevent accidental commits)
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.csv
+# Ignore txt files in docs/ to avoid accidental data commits
+docs/*.txt
+docs/*.csv
+
 # System artifacts
 .fuse_hidden*
 Thumbs.db
