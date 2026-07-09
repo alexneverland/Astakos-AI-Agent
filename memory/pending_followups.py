@@ -1802,6 +1802,7 @@ def classify_followup_deferral_with_llm(
     source_user_text: str,
     current_user_text: str,
 ) -> dict:
+    import re
     from core.brain import llm
 
     prompt = f"""
