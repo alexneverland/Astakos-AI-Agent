@@ -538,6 +538,26 @@ def looks_like_nostalgia_query(text: str) -> bool:
     return any(marker in clean for marker in nostalgia_markers)
 
 
+def looks_like_file_creation_query(text: str) -> bool:
+    clean = _normalize_text(text)
+    if not clean:
+        return False
+        
+    creation_markers = (
+        "φτιαξε",
+        "κανε μου",
+        "δημιουργησε",
+        "ημερολογιο",
+        "ενα αρχειο",
+        "excel",
+        "docx",
+        "pdf",
+        "γραψε μου",
+    )
+    return any(marker in clean for marker in creation_markers)
+
+
+
 def looks_like_explicit_memory_storage(text: str) -> bool:
     clean = _normalize_text(text)
     if not clean:
@@ -619,6 +639,10 @@ def classify_memory_query_intent(
 
     if looks_like_explicit_memory_storage(clean):
         return "explicit_memory_storage"
+
+    if looks_like_file_creation_query(clean):
+        return "file_creation"
+
 
     if looks_like_action_command(clean):
         return "action_command"
@@ -974,6 +998,9 @@ def build_memory_context(
         elif query_intent == "explicit_memory_storage":
             effective_semantic_k = 0
             semantic_adjust_reason = "explicit_memory_storage_skip"
+        elif query_intent == "file_creation":
+            effective_semantic_k = min(semantic_k, 2)
+            semantic_adjust_reason = "file_creation_downshift"
         elif query_intent == "action_command":
             effective_semantic_k = min(semantic_k, 2)
             semantic_adjust_reason = "action_command_downshift"
