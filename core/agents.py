@@ -827,5 +827,5 @@ all_tools = [
     control_vacuum, get_navigation_info,
     control_spotify, search_goldmall_offers, execute_local_pipeline, get_current_location,
     recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url,
-    duckduckgo_search, search_supermarket_prices, tool_stats, system_doctor
+    duckduckgo_search, search_supermarket_prices, tool_stats, system_doctor, run_officecli
 ]
