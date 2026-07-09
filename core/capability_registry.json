@@ -729,5 +729,19 @@
       "εφάρμοσε skill",
       "έλεγχος με skill"
     ]
+  },
+  {
+    "name": "research_last30days",
+    "description": "Διεξάγει βαθιά έρευνα στο web για οποιοδήποτε θέμα, σαρώνοντας πηγές όπως Reddit, X (Twitter), YouTube, Hacker News και Polymarket για δεδομένα των τελευταίων 30 ημερών.",
+    "agent": "Web_Agent",
+    "risk_level": "SAFE",
+    "priority": 10,
+    "triggers": [
+      "έρευνα",
+      "research",
+      "last 30 days",
+      "trends",
+      "τελευταίες 30 μέρες"
+    ]
   }
 ]

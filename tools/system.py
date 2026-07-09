@@ -35,6 +35,7 @@ from config import (
     EMAIL_ADDRESS, EMAIL_PASSWORD, GITHUB_TOKEN, VACUUM_IP, VACUUM_TOKEN, GPS_STORAGE_FILE
 )
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
+from astakos_skills.research_last30days import research_last30days
 from memory.vector_store import vector_store, vector_lock, memory
 _lexical_cache: dict = {}  # {cache_key: (timestamp, data)} — TTL 60s
 from services.embeddings import embeddings
@@ -2795,7 +2796,7 @@ def github_manager(action: str, repo_name: str = "", target_files: str = "",
 @tool
 def control_vacuum(action: str) -> str:
     """Ελέγχει τη ρομποτική σκούπα Xiaomi X20+.
-    Actions: 'start', 'stop', 'home', 'status' (για μπαταρία/κατάσταση)."""
+    Actions: 'start', 'stop', 'home', 'status' (για μπαταρία/κατάσταση), 'room:<όνομα_δωματίου>' (π.χ. room:Κουζίνα)."""
     ip = VACUUM_IP
     token = VACUUM_TOKEN
 
@@ -2816,6 +2817,35 @@ def control_vacuum(action: str) -> str:
         elif action == "home":
             vac.send("action", {"did": "astakos", "siid": 3, "aiid": 1, "in": []})
             return "Ο Αστακός έδωσε εντολή: Η σκούπα επιστρέφει στη βάση. 🏠"
+
+        elif action.startswith("room:"):
+            room_name = action.split(":", 1)[1].strip()
+            import os, json
+            
+            # Φόρτωση του room_map.json
+            room_map_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "room_map.json")
+            try:
+                with open(room_map_path, "r", encoding="utf-8") as f:
+                    room_map = json.load(f)
+            except Exception:
+                # Fallback αν δεν υπάρχει το αρχείο (έχουμε hardcoded αυτά που βρήκαμε)
+                room_map = {"Κουζίνα": 5, "Μπάνιο": 7, "Κρεβατοκάμαρα": 1, "Παιδικό": 3, "Σαλόνι": 4}
+
+            room_id = room_map.get(room_name)
+            if room_id is None:
+                available = ", ".join(room_map.keys())
+                return f"Σφάλμα: Δεν βρέθηκε το δωμάτιο '{room_name}'. Διαθέσιμα δωμάτια: {available}"
+
+            vac.send("action", {
+                "did": "astakos", 
+                "siid": 4, 
+                "aiid": 1, 
+                "in": [
+                    {"piid": 1, "value": 18}, 
+                    {"piid": 10, "value": f'{{"selects":[[{room_id},1,2,1,1]]}}'}
+                ]
+            })
+            return f"Ο Αστακός έδωσε εντολή: Η X20+ πάει για σκούπισμα στο δωμάτιο: {room_name}! 🧹"
 
         else:
             return f"Άγνωστη εντολή: {action}."
@@ -3677,6 +3707,7 @@ all_tools = [
     scan_receipt,
     text_stats,
     register_tool,
+    research_last30days,
     # Project tools
     grant_project_access, list_project_files, read_project_file,
     edit_project_file, write_project_file, grep_project_files,

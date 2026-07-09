@@ -52,8 +52,7 @@ TOOL_RISK: dict[str, str] = {
     "archive_file":             "WARNING",
     "scan_receipt":             "WARNING",
     "edit_project_file":        "WARNING",   # escalates to CRITICAL για core files (approval.py)
-
-    # ── SAFE: reads / queries / zero side-effects ────────────────
+    # ── SAFE: reads / queries / zero side-effects ────────────────
     "search_memory":            "SAFE",
     "retrieve_photo":           "SAFE",
     "read_local_file":          "SAFE",
@@ -61,6 +60,7 @@ TOOL_RISK: dict[str, str] = {
     "get_weather_forecast":     "SAFE",
     "duckduckgo_search":        "SAFE",
     "browse_url":               "SAFE",
+    "research_last30days":      "SAFE",
     "search_google_places":     "SAFE",
     "get_navigation_info":      "SAFE",
     "search_goldmall_offers":   "SAFE",
