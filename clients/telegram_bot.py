@@ -1145,8 +1145,8 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     try:
         from memory.conversation_history import append_message
         now = datetime.now()
-        append_message("user", user_log_msg, "telegram", agent=None, timestamp=now)
-        append_message("assistant", final_response, "telegram", agent="Chat_Agent", timestamp=now)
+        append_message(role="user", content=user_log_msg, channel="telegram", agent=None, timestamp=now)
+        append_message(role="assistant", content=final_response, channel="telegram", agent="Chat_Agent", timestamp=now)
     except Exception as e:
         print(f"[Photo/History]: {e}")
 
