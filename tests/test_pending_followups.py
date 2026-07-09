@@ -952,8 +952,8 @@ def test_normalize_followup_delay_food_purchase_tomorrow_targets_next_day_lunch_
         now=now,
     )
 
-    # από 22:00 σήμερα μέχρι 11:30 αύριο = 810 λεπτά
-    assert delay == 810
+    # από 22:00 σήμερα μέχρι 11:30 αύριο = 810 λεπτά (συν το jitter)
+    assert abs(delay - 810) <= 35
 
 
 def test_normalize_followup_delay_food_purchase_tomorrow_from_evening_still_targets_lunch():
@@ -968,8 +968,8 @@ def test_normalize_followup_delay_food_purchase_tomorrow_from_evening_still_targ
         now=now,
     )
 
-    # από 19:00 σήμερα μέχρι 11:30 αύριο = 990 λεπτά, αλλά clamp max 18h => 1080 ok
-    assert delay == 990
+    # από 19:00 σήμερα μέχρι 11:30 αύριο = 990 λεπτά (συν το jitter)
+    assert abs(delay - 990) <= 35
 
 
 def test_normalize_followup_delay_food_purchase_tonight_stays_short():
@@ -1016,7 +1016,7 @@ def test_normalize_followup_delay_next_day_late_morning():
         now=now,
     )
 
-    assert delay == 810
+    assert abs(delay - 810) <= 35
 
 
 def test_normalize_followup_delay_next_day_afternoon():
@@ -1048,7 +1048,7 @@ def test_normalize_followup_delay_fallback_food_tomorrow_without_window():
         now=now,
     )
 
-    assert delay == 810
+    assert abs(delay - 810) <= 35
 
 
 def test_create_pending_followup_preserves_target_window(monkeypatch, temp_state_db):
@@ -1147,7 +1147,7 @@ def test_next_day_late_morning_on_weekend_stays_as_requested():
         now=now,
     )
 
-    assert delay == 13 * 60 + 30
+    assert abs(delay - (13 * 60 + 30)) <= 35
 
 
 def test_defer_followup_moves_due_time_and_keeps_pending(temp_state_db):
@@ -1346,7 +1346,7 @@ def test_backfill_legacy_followups_populates_missing_metadata_and_reanchors_pend
     assert row["metadata"]["target_window"] == "next_day_late_morning"
     assert row["metadata"]["ttl_hours"] == 18
     assert row["metadata"]["delay_minutes_final"] >= 8 * 60
-    assert "T11:30:" in row["followup_after_ts"]
+    assert "T11:" in row["followup_after_ts"] or "T12:" in row["followup_after_ts"]
 
 
 def test_active_followup_same_theme_detects_related_food_variants():

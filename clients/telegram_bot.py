@@ -468,7 +468,10 @@ RECENT CONTEXT:
    - είτε "before_prerequisite"
    - είτε "decision_pending"
 3. "after_likely_completion" επιτρέπεται μόνο αν υπάρχει ρητό ή ισχυρό context ότι το γεγονός λογικά έχει ήδη συμβεί.
-4. Αν το follow-up δεν βγάζει νόημα τώρα, βάλε decision="skip".
+4. Αν το follow-up δεν βγάζει νόημα τώρα, βάλε decision="skip". Και επιπλέον αποφάσισε τι να κάνουμε με το skip_action:
+   - "resolve": αν το θέμα έληξε (π.χ. λέει "το έκανα", "άστο δε χρειάζεται")
+   - "defer": αν το θέμα πήγε για αργότερα (π.χ. "αύριο τελικά", "σε λίγο")
+   - "none": αν δεν αλλάζει το status
 5. Το μήνυμα πρέπει να είναι μέχρι 2 προτάσεις.
 6. Οχι markdown, όχι bullets, όχι meta κείμενο.
 7. Οχι φράσεις όπως "βλέπω ότι", "σύμφωνα με τη μνήμη", "αποθήκευσα", "έχω κρατήσει".
@@ -477,6 +480,7 @@ RECENT CONTEXT:
 Επέστρεψε ΑΥΣΤΗΡΑ JSON:
 {{
   "decision": "send" | "skip",
+  "skip_action": "resolve" | "defer" | "none",
   "stage": "before_prerequisite" | "decision_pending" | "after_likely_completion" | "skip",
   "message": "το follow-up μήνυμα ή κενό",
   "reason": "σύντομος λόγος"
@@ -581,6 +585,9 @@ def _followup_skip_means_resolved(reason: str) -> bool:
         "already completed",
         "already discussed",
         "no further follow-up",
+        "περιττο",
+        "ανεφερε ηδη",
+        "εκανε ηδη",
     )
     return any(marker in text for marker in markers)
 
@@ -603,13 +610,14 @@ def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
     from memory.pending_followups import defer_followup, resolve_followup, _set_followup_decision, normalize_followup_delay
 
     reason = str(decision.get("reason") or "").strip()
+    skip_action = str(decision.get("skip_action") or "none").strip().lower()
     topic = str(item.get("topic") or "").strip().lower()
     metadata = item.get("metadata") or {}
 
     target_window = str(metadata.get("target_window") or "").strip()
     raw_delay = int(metadata.get("delay_minutes_raw") or metadata.get("delay_minutes_final") or 60)
 
-    if _followup_skip_means_defer(reason):
+    if skip_action == "defer" or _followup_skip_means_defer(reason):
         delay_minutes = normalize_followup_delay(
             topic=topic,
             suggested_minutes=raw_delay,
@@ -627,7 +635,7 @@ def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
         _set_followup_decision(item["id"], "deferred", reason or "too_early")
         return "deferred"
 
-    if _followup_skip_means_resolved(reason) or _looks_terminal_followup_skip_reason(reason):
+    if skip_action == "resolve" or _followup_skip_means_resolved(reason) or _looks_terminal_followup_skip_reason(reason):
         resolve_followup(item["id"], f"resolved_by_skip:{reason or 'stale_followup_no_longer_relevant'}")
         _set_followup_decision(item["id"], "resolved", reason or "stale_followup_no_longer_relevant")
         return "resolved"

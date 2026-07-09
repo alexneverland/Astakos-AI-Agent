@@ -347,7 +347,9 @@ def _next_occurrence_for_window(now: datetime, target_window: str, fallback_dela
     fallback_delay_minutes = max(15, int(fallback_delay_minutes or 60))
 
     def _today_or_tomorrow(hour: int, minute: int = 0) -> datetime:
-        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        import random
+        jitter_minutes = random.randint(-15, 30)
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(minutes=jitter_minutes)
         target = _apply_weekend_window_adjustment(target)
         if target <= now:
             target = target + timedelta(days=1)
@@ -1782,6 +1784,10 @@ New user message:
         response = safe_gemini_call(prompt)
         raw = response.text if hasattr(response, "text") else str(response)
         raw = re.sub(r"```json|```", "", raw.strip()).strip()
+        start = raw.find('{')
+        end = raw.rfind('}')
+        if start != -1 and end != -1:
+            raw = raw[start:end+1]
         data = json.loads(raw)
         return data if isinstance(data, dict) else None
     except Exception as exc:
@@ -1833,8 +1839,12 @@ NEW USER MESSAGE
 """
     response = llm.invoke(prompt)
     raw = response.content if hasattr(response, "content") else str(response)
-    raw = _coerce_text_scalar(raw, "")
-    raw = raw.strip()
+    raw = _coerce_text_scalar(raw, "").strip()
+    raw = re.sub(r"```json|```", "", raw).strip()
+    start = raw.find('{')
+    end = raw.rfind('}')
+    if start != -1 and end != -1:
+        raw = raw[start:end+1]
 
     try:
         data = json.loads(raw)
