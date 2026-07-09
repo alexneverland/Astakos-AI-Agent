@@ -1,0 +1,18 @@
+# Astakos AI Agent
+
+> A local-first, LLM-agnostic multi-agent framework orchestrating proactive habits, routines, and a hybrid memory model (ChromaDB + SQLite).
+
+## Overview
+- [README.md](/README.md): Architecture, features, and setup instructions
+
+## Architecture
+- [Core Framework](/core): LangGraph state machine, Agent definitions, Planner v2, and Event Bus
+- [Memory System](/memory): Hybrid ChromaDB semantic store, SQLite conversation history, and working memory JSONs
+
+## Skills and Tools
+- [Astakos Skills](/astakos_skills): Modular Python skills (generated dynamically)
+- [Project Tools](/tools): Permission-gated local file manipulation
+- [Addy Osmani Skills](/vendor/agent-skills): External AI workflows integrated into Astakos
+
+## Configuration
+- [Config](/config.py): Environment variables, path definitions, and feature toggles (DO NOT EDIT directly unless asked)

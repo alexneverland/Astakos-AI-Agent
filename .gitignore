@@ -58,7 +58,6 @@ interview_copilot/
 venv/
 .venv/
 prompts.md
-docs/
 
 # Local-only private extensions
 local_only/
