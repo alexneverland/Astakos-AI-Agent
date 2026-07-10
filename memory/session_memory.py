@@ -1639,6 +1639,26 @@ def _looks_like_operational_reminder_exchange(user_text: str, ai_text: str) -> b
     return user_has_reminder_request and ai_has_reminder_confirmation
 
 
+def _looks_like_operational_message_exchange(user_text: str, ai_text: str) -> bool:
+    """Skip short control/system exchanges that should not become user facts."""
+    user_norm = _normalize_text(user_text)
+    ai_norm = _normalize_text(ai_text)
+
+    if user_norm.startswith("[system]:") or user_norm.startswith("[story_sent]"):
+        return True
+
+    short_send = user_norm in {"στείλε", "στειλε", "send", "ναι", "οκ", "ok"}
+    draft_or_error = any(marker in ai_norm for marker in (
+        "δεν βρέθηκε προσχέδιο",
+        "δεν βρεθηκε προσχεδιο",
+        "messenger_draft.json",
+        "προσχέδιο messenger",
+        "προσχεδιο messenger",
+    ))
+
+    return short_send and draft_or_error
+
+
 def _looks_like_recent_followup_resolution_reply(user_text: str, within_seconds: int = 300) -> bool:
     text = _normalize_text(_strip_user_fact_scaffold(user_text))
 
@@ -1863,6 +1883,10 @@ def run_memory_sifter_slow(
 
     if _looks_like_operational_reminder_exchange(user_text, ai_text):
         print("\033[90m[MemorySifterSlow]: skip operational reminder exchange\033[0m")
+        return
+
+    if _looks_like_operational_message_exchange(user_text, ai_text):
+        print("\033[90m[MemorySifterSlow]: skip operational message exchange\033[0m")
         return
 
     if _looks_like_recent_followup_resolution_reply(user_text):

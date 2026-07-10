@@ -95,6 +95,9 @@ def evaluate_routine_condition(condition: dict, context: dict, now: datetime | N
     if condition_type == "date_range":
         return _evaluate_date_range(payload, mode, current)
 
+    if condition_type == "location":
+        return _evaluate_location_condition(payload, mode, context)
+
     return {
         "allowed": True,
         "matched": False,
@@ -162,6 +165,53 @@ def _evaluate_context_flag(payload: dict, mode: str, context: dict) -> dict:
             "allowed": not matched,
             "matched": matched,
             "reason": "context_flag_suppressed" if matched else "context_flag_not_suppressed",
+            "actual_value": actual,
+        }
+
+    return {
+        "allowed": False,
+        "matched": False,
+        "reason": f"unknown_condition_mode:{mode}",
+        "actual_value": actual,
+    }
+
+
+def _evaluate_location_condition(payload: dict, mode: str, context: dict) -> dict:
+    """Evaluate legacy location conditions against the runtime context flags."""
+    flag = str(payload.get("flag") or "").strip()
+    expected = payload.get("equals")
+
+    if flag in {"at_home", "home", "family_at_home"}:
+        actual = context.get("family_at_home")
+    elif flag in {"user_at_home"}:
+        actual = not bool(context.get("user_out_of_home"))
+    elif flag in {"user_out_of_home", "out_of_home"}:
+        actual = context.get("user_out_of_home")
+    else:
+        return {
+            "allowed": True,
+            "matched": False,
+            "reason": f"unknown_location_flag:{flag}",
+            "actual_value": None,
+        }
+
+    actual_str = str(actual).lower() if actual is not None else "null"
+    expected_str = str(expected).lower() if expected is not None else "true"
+    matched = actual_str == expected_str
+
+    if mode == "allow_when_true":
+        return {
+            "allowed": matched,
+            "matched": matched,
+            "reason": "location_allow" if matched else "location_blocked",
+            "actual_value": actual,
+        }
+
+    if mode == "suppress_when_true":
+        return {
+            "allowed": not matched,
+            "matched": matched,
+            "reason": "location_suppressed" if matched else "location_not_suppressed",
             "actual_value": actual,
         }
 

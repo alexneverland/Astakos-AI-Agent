@@ -19,6 +19,7 @@ import sys
 import time
 import json
 import requests
+import re
 import threading
 import queue
 from datetime import datetime
@@ -144,6 +145,14 @@ memory_lock           = threading.Lock()
 _bot_message_cache: dict[int, str] = {}
 _bot_message_cache_lock = threading.Lock()
 _BOT_CACHE_MAX = 50
+
+_TS_PREFIX_RE = re.compile(r"^\s*\[\d{1,2}:\d{2}\]\s*")
+
+
+def _strip_existing_time_prefix(text: str) -> str:
+    """Avoid duplicate [HH:MM] prefixes when a model already included one."""
+    return _TS_PREFIX_RE.sub("", str(text or ""), count=1).strip()
+
 
 def _cache_bot_message(message_id: int | None, text: str) -> None:
     if not message_id:
@@ -1257,11 +1266,8 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
             f"[SYSTEM]: Μόλις έγραψα και έστειλα παραμύθι με θέμα '{theme}'{char_note}. "
             f"{img_note}. Ο Λάζαρος το έχει ήδη στο Telegram."
         )
-        threading.Thread(
-            target=handle_message,
-            args=(agent_note, chat_id),
-            daemon=True
-        ).start()
+        _append_to_analytics_log("ai", agent_note, agent="StoryMaker")
+        enqueue_fast_task(update_working_memory, f"/story {theme}", agent_note)
     except Exception as e:
         send_telegram_msg(f"❌ Σφάλμα story maker: {e}")
         print(f"❌ [StoryMaker] {e}")
@@ -2153,6 +2159,7 @@ def handle_message(user_text: str, chat_id: str):
         _trace.finalize(response=final_ai_response or None)
 
         if final_ai_response:
+            final_ai_response = _strip_existing_time_prefix(final_ai_response)
             if file_path_to_send:
                 if final_ai_response:
                     if is_voice_mode:

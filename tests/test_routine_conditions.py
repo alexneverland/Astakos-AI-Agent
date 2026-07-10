@@ -49,6 +49,35 @@ def test_date_range_allows_inside_window():
     result = evaluate_routine_condition(routine, context, now=datetime(2026, 6, 17))
     assert result["allowed"] is True
 
+
+def test_legacy_location_allow_when_family_at_home():
+    routine = {
+        "condition_type": "location",
+        "condition_payload": '{"flag":"at_home","equals":true}',
+        "condition_mode": "allow_when_true",
+    }
+    context = {"family_at_home": True}
+
+    result = evaluate_routine_condition(routine, context, now=datetime(2026, 6, 17))
+    assert result["allowed"] is True
+    assert result["matched"] is True
+    assert result["reason"] == "location_allow"
+
+
+def test_legacy_location_suppresses_when_user_out_of_home():
+    routine = {
+        "condition_type": "location",
+        "condition_payload": '{"flag":"user_out_of_home","equals":true}',
+        "condition_mode": "suppress_when_true",
+    }
+    context = {"user_out_of_home": True}
+
+    result = evaluate_routine_condition(routine, context, now=datetime(2026, 6, 17))
+    assert result["allowed"] is False
+    assert result["matched"] is True
+    assert result["reason"] == "location_suppressed"
+
+
 def test_context_flag_multi_key_allow_when_all_match():
     routine = {
         "condition_type": "context_flag",
