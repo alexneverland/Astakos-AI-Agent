@@ -116,25 +116,52 @@ _EMPTY_QUERY_RESULT = {
     "distances": [[]],
 }
 
-def _safe_chroma_query(*, query_embeddings, n_results, where=None, include=None):
+
+def _refresh_vector_store(reason: str = "") -> bool:
+    """Reopen the Chroma handle when the in-process collection goes stale."""
+    global vector_store
     try:
-        kwargs = {
-            "query_embeddings": query_embeddings,
-            "n_results": n_results,
-            "include": include or ["documents", "metadatas", "distances"],
-        }
-        if where is not None:
-            kwargs["where"] = where
-        return vector_store._collection.query(**kwargs)
+        vector_store = Chroma(
+            collection_name="astakos_long_term",
+            embedding_function=embeddings,
+            persist_directory=CHROMA_DB_DIR,
+        )
+        suffix = f" ({reason})" if reason else ""
+        print(f"\033[90m[MemoryManager]: Chroma handle refreshed{suffix}\033[0m")
+        return True
     except Exception as e:
-        print(f"\033[93m[MemoryManager]: Chroma query error (graceful skip): {e}\033[0m")
-        return {
-            "ids": [[]],
-            "documents": [[]],
-            "metadatas": [[]],
-            "distances": [[]],
-            "_error": str(e),
-        }
+        print(f"\033[93m[MemoryManager]: Chroma refresh failed: {e}\033[0m")
+        return False
+
+
+def _should_retry_chroma_error(exc: Exception) -> bool:
+    text = str(exc or "")
+    lowered = text.lower()
+    return "error finding id" in lowered or "collection" in lowered and "stale" in lowered
+
+def _safe_chroma_query(*, query_embeddings, n_results, where=None, include=None):
+    kwargs = {
+        "query_embeddings": query_embeddings,
+        "n_results": n_results,
+        "include": include or ["documents", "metadatas", "distances"],
+    }
+    if where is not None:
+        kwargs["where"] = where
+
+    for attempt in range(2):
+        try:
+            return vector_store._collection.query(**kwargs)
+        except Exception as e:
+            if attempt == 0 and _should_retry_chroma_error(e) and _refresh_vector_store("query retry"):
+                continue
+            print(f"\033[93m[MemoryManager]: Chroma query error (graceful skip): {e}\033[0m")
+            return {
+                "ids": [[]],
+                "documents": [[]],
+                "metadatas": [[]],
+                "distances": [[]],
+                "_error": str(e),
+            }
 
 def _safe_chroma_delete(ids: list[str]) -> bool:
     if not ids:
@@ -147,18 +174,22 @@ def _safe_chroma_delete(ids: list[str]) -> bool:
         return False
 
 def _safe_chroma_get(*, ids=None, where=None, include=None):
-    try:
-        kwargs = {
-            "include": include or ["documents", "metadatas"],
-        }
-        if ids is not None:
-            kwargs["ids"] = ids
-        if where is not None:
-            kwargs["where"] = where
-        return vector_store._collection.get(**kwargs)
-    except Exception as e:
-        print(f"\033[93m[MemoryManager]: Chroma get error (graceful skip): {e}\033[0m")
-        return {"ids": [], "documents": [], "metadatas": [], "_error": str(e)}
+    kwargs = {
+        "include": include or ["documents", "metadatas"],
+    }
+    if ids is not None:
+        kwargs["ids"] = ids
+    if where is not None:
+        kwargs["where"] = where
+
+    for attempt in range(2):
+        try:
+            return vector_store._collection.get(**kwargs)
+        except Exception as e:
+            if attempt == 0 and _should_retry_chroma_error(e) and _refresh_vector_store("get retry"):
+                continue
+            print(f"\033[93m[MemoryManager]: Chroma get error (graceful skip): {e}\033[0m")
+            return {"ids": [], "documents": [], "metadatas": [], "_error": str(e)}
 
 
 def _json_meta_list(values) -> str:

@@ -828,6 +828,8 @@ def temporal_history_for_query(
     for message in messages:
         if target_date and message.get("date") != target_date:
             continue
+        if _looks_like_memory_correction_chatter(message.get("content", "")):
+            continue
         time_label = str(message.get("time") or "")
         if target_date and wants_morning and not ("05:00" <= time_label <= "13:00"):
             continue
@@ -870,6 +872,33 @@ def temporal_history_for_query(
     else:
         selected = pool[-limit:]
     return format_recent_messages(selected, limit=limit)
+
+
+def _looks_like_memory_correction_chatter(text: str) -> bool:
+    clean = _normalize_text(text)
+    if not clean:
+        return False
+    has_memory_marker = any(marker in clean for marker in (
+        "μνημη",
+        "memory",
+        "διαγραφ",
+        "διορθω",
+        "σωστη διευθυνση",
+        "παλιο λαθος",
+        "το ειχαμε σβησει",
+        "κεκτημενη ταχυτητα",
+    ))
+    has_fixup_marker = any(marker in clean for marker in (
+        "σβησ",
+        "διεγραψ",
+        "διαγραφ",
+        "διορθω",
+        "σωστη",
+        "λαθος",
+        "ξαναπεταχτηκε",
+        "κεκτημενη ταχυτητα",
+    ))
+    return has_memory_marker and has_fixup_marker
 
 
 def semantic_facts_for_query(

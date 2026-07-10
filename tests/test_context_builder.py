@@ -177,6 +177,36 @@ def test_history_lookup_uses_sqlite_even_without_date_words():
     assert all("μαγείρεμα" not in line for line in lines)
 
 
+def test_temporal_history_skips_memory_correction_chatter():
+    def fake_history_loader(**kwargs):
+        return [
+            {
+                "channel": "telegram",
+                "date": "2026-06-05",
+                "time": "18:00",
+                "role": "assistant",
+                "content": "Η παλιά εγγραφή Πεστών έχει διαγραφεί από τη μνήμη, ήταν δικό μου λάθος.",
+            },
+            {
+                "channel": "telegram",
+                "date": "2026-06-05",
+                "time": "18:02",
+                "role": "user",
+                "content": "Θυμάσαι που μένω στην Πιστών 7;",
+            },
+        ]
+
+    lines = temporal_history_for_query(
+        "θυμάσαι που μένω;",
+        channel="telegram",
+        history_loader=fake_history_loader,
+        now=__import__("datetime").datetime(2026, 6, 7, 12, 0),
+    )
+
+    assert any("Πιστών 7" in line for line in lines)
+    assert all("διαγραφεί από τη μνήμη" not in line for line in lines)
+
+
 def test_history_lookup_boosts_sofia_watch_gift_context():
     def fake_history_loader(**kwargs):
         return [

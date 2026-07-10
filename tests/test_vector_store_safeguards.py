@@ -88,3 +88,28 @@ def test_delete_failure_is_audited_but_save_continues(memory_mgr, monkeypatch):
     
     call_events = [call.args[0] for call in mock_audit.call_args_list]
     assert "delete_skip" in call_events
+
+
+def test_safe_chroma_query_retries_after_error_finding_id(monkeypatch):
+    class _Collection:
+        def __init__(self):
+            self.calls = 0
+
+        def query(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("Error executing plan: Internal error: Error finding id")
+            return {"ids": [["ok"]], "documents": [["doc"]], "metadatas": [[{}]], "distances": [[0.1]]}
+
+    class _VectorStore:
+        def __init__(self):
+            self._collection = _Collection()
+
+    mock_store = _VectorStore()
+    monkeypatch.setattr(vs, "vector_store", mock_store)
+    monkeypatch.setattr(vs, "_refresh_vector_store", lambda reason="": True)
+
+    result = vs._safe_chroma_query(query_embeddings=[[0.1, 0.2]], n_results=1)
+
+    assert result["ids"] == [["ok"]]
+    assert mock_store._collection.calls == 2

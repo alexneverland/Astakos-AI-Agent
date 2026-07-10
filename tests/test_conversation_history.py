@@ -221,6 +221,46 @@ def test_load_recent_context_deduplicates_overlap(tmp_path):
     assert [m["content"] for m in messages] == ["web only once"]
 
 
+def test_purge_history_by_substrings_removes_matching_messages_and_exchanges(tmp_path):
+    from memory.conversation_history import (
+        append_exchange,
+        append_message,
+        load_messages,
+        load_unsummarized_exchanges,
+        purge_history_by_substrings,
+    )
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(
+        role="assistant",
+        content="Λάθος αναφορά σε Πεστών 7",
+        channel="telegram",
+        timestamp=datetime(2026, 6, 4, 10, 0),
+        db_path=db_path,
+    )
+    append_message(
+        role="assistant",
+        content="Σωστή αναφορά σε Πιστών 7",
+        channel="telegram",
+        timestamp=datetime(2026, 6, 4, 10, 1),
+        db_path=db_path,
+    )
+    append_exchange(
+        user_text="πού το βρήκες το Πεστών;",
+        ai_text="δικό μου λάθος με το Πεστών 7",
+        agent="Chat_Agent",
+        channel="telegram",
+        timestamp=datetime(2026, 6, 4, 10, 2),
+        db_path=db_path,
+    )
+
+    stats = purge_history_by_substrings(["Πεστών"], db_path=db_path)
+
+    assert stats == {"conversation_messages": 1, "session_exchanges": 1}
+    assert [m["content"] for m in load_messages(db_path=db_path)] == ["Σωστή αναφορά σε Πιστών 7"]
+    assert load_unsummarized_exchanges(db_path=db_path) == []
+
+
 def test_session_exchanges_can_be_marked_summarized(tmp_path):
     from memory.conversation_history import (
         append_exchange,

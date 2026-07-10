@@ -491,7 +491,7 @@ def delete_from_memory(query: str) -> str:
     save_to_memory με το σωστό περιεχόμενο σε ξεχωριστό βήμα).
 
     query: Δώσε ΣΥΝΤΟΜΗ, ΣΥΓΚΕΚΡΙΜΕΝΗ φράση που ταυτοποιεί ΜΟΝΟ τη λάθος εγγραφή
-    (π.χ. "Πεστών 7"), όχι ολόκληρη την πρόταση/διόρθωση του χρήστη.
+    (π.χ. "παλιά λάθος διεύθυνση"), όχι ολόκληρη την πρόταση/διόρθωση του χρήστη.
     """
     try:
         def _norm(t: str) -> str:
@@ -505,7 +505,7 @@ def delete_from_memory(query: str) -> str:
             data = collection.get(include=["documents", "metadatas"])
 
         # 1) Ακριβές substring match ΠΡΩΤΑ — πιο αξιόπιστο από embeddings όταν
-        # οι φράσεις είναι κοντινές/παρόμοιες (π.χ. "Πεστών 7" vs "Πίστων 7":
+        # οι φράσεις είναι κοντινές/παρόμοιες (π.χ. παλιά λάθος vs σωστή διεύθυνση:
         # τα embeddings τα βλέπουν σχεδόν ίδια και μπορεί να σβήσει λάθος εγγραφή).
         literal_hits = [
             (doc_id, doc) for doc_id, doc in zip(data.get("ids", []), data.get("documents", []))

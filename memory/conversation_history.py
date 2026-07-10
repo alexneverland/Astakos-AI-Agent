@@ -706,6 +706,46 @@ def load_recent_context(
     return messages
 
 
+def purge_history_by_substrings(
+    substrings: list[str] | tuple[str, ...],
+    *,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> dict[str, int]:
+    """Delete stale history rows that contain any of the given substrings."""
+    patterns = [str(item or "").strip() for item in substrings if str(item or "").strip()]
+    if not patterns:
+        return {"conversation_messages": 0, "session_exchanges": 0}
+
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        deleted_messages = 0
+        deleted_exchanges = 0
+        for pattern in patterns:
+            like = f"%{pattern}%"
+            cursor = conn.execute(
+                """
+                DELETE FROM conversation_messages
+                WHERE content LIKE ?
+                """,
+                (like,),
+            )
+            deleted_messages += cursor.rowcount or 0
+
+            cursor = conn.execute(
+                """
+                DELETE FROM session_exchanges
+                WHERE user_text LIKE ? OR ai_text LIKE ?
+                """,
+                (like, like),
+            )
+            deleted_exchanges += cursor.rowcount or 0
+
+    return {
+        "conversation_messages": deleted_messages,
+        "session_exchanges": deleted_exchanges,
+    }
+
+
 def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
     metadata_raw = row["metadata_json"] or "{}"
     try:
