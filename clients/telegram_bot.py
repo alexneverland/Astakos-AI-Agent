@@ -8,9 +8,9 @@
 """
 clients/telegram_bot.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Ο Telegram Bot του Αστακού.
-Δέχεται μηνύματα/φωτογραφίες από τον Λάζαρο και
-απαντάει μέσω του graph (LangGraph pipeline).
+The Lobster Telegram Bot.
+Receives messages/photos from Lazaros and
+responds via the graph (LangGraph pipeline).
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
@@ -36,7 +36,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE
 
 def _normalize_gr(text: str) -> str:
-    """Αφαιρεί τόνους από ελληνικό κείμενο για accent-insensitive σύγκριση."""
+    """Removes accents from Greek text for accent-insensitive comparison."""
     import unicodedata
     raw = str(text or "").strip().lower()
     normalized = unicodedata.normalize("NFD", raw)
@@ -140,8 +140,8 @@ fast_queue            = queue.Queue()
 slow_queue            = queue.Queue()
 memory_lock           = threading.Lock()
 
-# Cache: telegram message_id → full text (τελευταία 50 bot μηνύματα)
-# Χρησιμοποιείται από _handle_message_reaction για exact match
+# Cache: telegram message_id → full text (latest 50 bot messages)
+# Used by _handle_message_reaction for exact match
 _bot_message_cache: dict[int, str] = {}
 _bot_message_cache_lock = threading.Lock()
 _BOT_CACHE_MAX = 50
@@ -159,7 +159,7 @@ def _cache_bot_message(message_id: int | None, text: str) -> None:
         return
     with _bot_message_cache_lock:
         _bot_message_cache[message_id] = text
-        # Κράτα μόνο τα τελευταία N
+        # Keep only the last N
         if len(_bot_message_cache) > _BOT_CACHE_MAX:
             oldest = sorted(_bot_message_cache.keys())[0]
             del _bot_message_cache[oldest]
@@ -169,33 +169,33 @@ pending_routine_confirmations = {}
 pending_exec_command = None
 # Pending reflection confirmations (ask-tier, 50-75% confidence): {reflection_id: {full reflection dict}}
 pending_reflection_confirmations = {}
-# Pending photo: αποθηκεύει ανάλυση φωτογραφίας που έφτασε χωρίς caption, για να συνδυαστεί με το επόμενο μήνυμα
+# Pending photo: stores the analysis of a photo that arrived without a caption, to be combined with the next message
 pending_photo_lock = threading.Lock()
 pending_photo      = None   # {analysis, filename, path, timestamp}
 pending_georgian_lock = threading.Lock()
 pending_georgian_until = 0.0
 PENDING_GEORGIAN_TTL_SECONDS = 120
 pending_sofia_lock = threading.Lock()
-pending_sofia_until = 0.0   # ka→el mode (Σοφία γράφει Γεωργιανά)
-# Voice mode toggle: όταν True, ΟΛΕΣ οι απαντήσεις είναι φωνητικές ακόμα και αν γράφεις
+pending_sofia_until = 0.0   # ka→el mode (Sophia writes Georgian)
+# Voice mode toggle: when True, ALL responses are vocal even if you are typing
 voice_mode_enabled = False
 # Scheduler reference (set in __main__, used by /status command)
 astakos_scheduler = None
 # ── Rate Limiting ─────────────────────────────────────────────
-QUIET_HOURS          = (0, 8)    # 00:00 → 08:00 χωρίς proactive
-MAX_PROACTIVE_PER_HOUR = 3       # max proactive μηνύματα/ώρα
+QUIET_HOURS          = (0, 8)    # 00:00 → 08:00 without proactive
+MAX_PROACTIVE_PER_HOUR = 3       # max proactive messages/hour
 PROACTIVE_RECENT_ACTIVITY_GRACE_SECONDS = 15 * 60
 
 _proactive_count = {"hour": -1, "count": 0}
 _proactive_lock  = threading.Lock()
 
 def is_quiet_hours() -> bool:
-    """True αν είμαστε εντός quiet window ή αν έχει γίνει override από context state."""
+    """True if we are within the quiet window or if it has been overridden by context state."""
     from services.routine_context import resolve_quiet_hours
     return resolve_quiet_hours()
 
 def can_send_proactive() -> bool:
-    """Rate-limit: max MAX_PROACTIVE_PER_HOUR proactive μηνύματα/ώρα."""
+    """Rate-limit: max MAX_PROACTIVE_PER_HOUR proactive messages/hour."""
     with _proactive_lock:
         h = datetime.now().hour
         if _proactive_count["hour"] != h:
@@ -780,7 +780,7 @@ def _save_override_state():
         pass
 
 def fast_queue_worker():
-    """Εκτελεί fast background tasks (π.χ. UI updates, deterministic memory)."""
+    """Executes fast background tasks (e.g., UI updates, deterministic memory)."""
     print("\033[90m[System]: Telegram Fast Queue Worker Ξεκίνησε!\033[0m")
     while not shutdown_event.is_set():
         try:
@@ -796,7 +796,7 @@ def fast_queue_worker():
             continue
 
 def slow_queue_worker():
-    """Εκτελεί slow background tasks (π.χ. LLM memory sifting)."""
+    """Performs slow background tasks (e.g., LLM memory sifting)."""
     print("\033[90m[System]: Telegram Slow Queue Worker Ξεκίνησε!\033[0m")
     while not shutdown_event.is_set():
         try:
@@ -825,23 +825,23 @@ def is_proactive_muted() -> bool:
 
 
 # ────────────────────────────────────────────────────────────────
-# DOCUMENT HANDLER (ΝΕΟ)
+# DOCUMENT HANDLER (NEW)
 # ────────────────────────────────────────────────────────────────
 
 def handle_document(doc_obj: dict, caption: str, chat_id: str):
-    """Κατεβάζει έγγραφα (PDF, Excel κλπ) από το Telegram στον σωστό φάκελο."""
+    """Downloads documents (PDF, Excel etc.) from Telegram to the correct folder."""
     try:
         from config import BASE_DIR
         file_id = doc_obj["file_id"]
-        # Αν δεν έχει όνομα, του δίνουμε ένα τυχαίο
+        # If it doesn't have a name, we give it a random one
         file_name = doc_obj.get("file_name", f"doc_{int(time.time())}.pdf")
 
-        # Τα έγγραφα πάνε στον telegram_uploads (όπως στο Web UI)
+        # Documents go to telegram_uploads (as in the Web UI)
         target_dir = os.path.join(BASE_DIR, "telegram_uploads")
         os.makedirs(target_dir, exist_ok=True)
         local_path = os.path.join(target_dir, file_name)
 
-        # Get file path από Telegram API
+        # Get file path from Telegram API
         file_resp = requests.get(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile",
             params={"file_id": file_id}, timeout=10
@@ -856,7 +856,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
             f.write(doc_data)
         print(f"\033[94m[Document]: Αποθηκεύτηκε στο Telegram: {local_path}\033[0m")
 
-        # Στέλνουμε μήνυμα στον χρήστη ότι το λάβαμε
+        # We send a message to the user that we received it
         send_telegram_msg(f"📄 Έγγραφο ελήφθη: `{file_name}`\nΠερίμενε, το κοιτάζω...")
 
         file_ext = os.path.splitext(file_name)[1].lower()
@@ -921,7 +921,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
 
         user_log_msg = f"[USER_UPLOADED_FILE]: {file_name}\n[FILE PATH]: {local_path}\n[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]: {memory_analysis}\n[USER_CAPTION]: {caption or ''}\n[CONTENT_SOURCE]: uploaded_document"
         
-        # Καταγραφή στο ιστορικό
+        # Record in history
         try:
             from memory.conversation_history import append_message
             now = datetime.now()
@@ -956,7 +956,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
 # VOICE HANDLER (CONSOLIDATED)
 # ────────────────────────────────────────────────────────────────
 def handle_voice(voice_obj: dict, chat_id: str):
-    """Λαμβάνει ηχητικό, το κάνει κείμενο και απαντάει φωνητικά."""
+    """Receives audio, converts it to text, and responds vocally."""
     from config import TELEGRAM_TOKEN
     from services.gemini import safe_gemini_call
     from tools.telegram import send_telegram_msg
@@ -993,13 +993,13 @@ def handle_voice(voice_obj: dict, chat_id: str):
         ai_reply = stt_response.text.strip() if stt_response and stt_response.text else "Δεν έβγαλα άκρη."
 
         print(f"\033[92m[Voice AI]: {ai_reply}\033[0m")
-        # Στέλνουμε το flag [ΦΩΝΗΤΙΚΟ] + [VOICE_INPUT] για να ξέρει η handle_message να απαντήσει με ήχο
-        # και ο Αστακός ότι το μήνυμα ήρθε από φωνή (να απαντά πιο σύντομα και καθομιλούμενα)
+        # We send the flag [ΦΩΝΗΤΙΚΟ] + [VOICE_INPUT] so that handle_message knows to reply with audio
+        # and the Lobster that the message came from voice (to reply more briefly and colloquially)
         handle_message(f"[ΦΩΝΗΤΙΚΟ]: [VOICE_INPUT] {ai_reply}", chat_id)
 
     except Exception as e:
         print(f"\033[91m[Voice Error]: {e}\033[0m")
-        # [FIX]: ΕΔΩ ΗΤΑΝ ΤΟ ΛΑΘΟΣ - Μόνο ένα όρισμα
+        # [FIX]: HERE WAS THE ERROR - Only one argument
         send_telegram_msg("🚨 Μάστορα, σκάλωσε το voice processing.") 
     finally:
         if local_path and os.path.exists(local_path):
@@ -1014,17 +1014,17 @@ def send_telegram_document(file_path, chat_id=None):
     except Exception as e:
         print(f"❌ Telegram File Error: {e}")         
 def handle_end_session(chat_id: str):
-    """Κλείνει τη συνεδρία, σώζει το summary και καθαρίζει το working memory."""
+    """Closes the session, saves the summary and clears the working memory."""
     try:
         from memory.session_memory import _run_session_summary
         from config import WORKING_MEMORY_FILE
         
         send_telegram_msg("⌛ **Αρχειοθέτηση...** Μαζεύω τις μνήμες της ημέρας και καθαρίζω τον πάγκο.")
         
-        # 1. Τρέχουμε το κεντρικό summary (όπως στο server.py)
+        # 1. We run the main summary (as in server.py)
         _run_session_summary(channel="telegram")
         
-        # 2. Καθαρίζουμε το Post-it (Working Memory)
+        # 2. Clear the Post-it (Working Memory)
         with open(WORKING_MEMORY_FILE, "w", encoding="utf-8") as f:
             f.write("ΚΕΝΟ")
             
@@ -1040,9 +1040,9 @@ def handle_end_session(chat_id: str):
 
 def handle_photo(photo_list: list, caption: str, chat_id: str):
     """
-    [MASTRO-PARITY]: Αναλύει φωτογραφία μέσω Vision LLM.
-    - Με caption: επεξεργάζεται αμέσως με το caption ως ερώτηση.
-    - Χωρίς caption: αποθηκεύει ανάλυση ως pending και περιμένει το επόμενο μήνυμα (30s).
+    [MASTRO-PARITY]: Analyzes a photo via Vision LLM.
+    - With caption: processes immediately using the caption as the prompt.
+    - Without caption: saves the analysis as pending and waits for the next message (30s).
     """
     global pending_photo
     try:
@@ -1051,14 +1051,14 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         from core.brain import llm
         from core.agents import clean_message
 
-        # 1. Λήψη αρχείου από Telegram
+        # 1. Download file from Telegram
         best_photo = max(photo_list, key=lambda p: p.get("file_size", 0))
         file_id = best_photo["file_id"]
         file_resp = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile", params={"file_id": file_id}).json()
         file_path_remote = file_resp["result"]["file_path"]
         img_data = requests.get(f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path_remote}").content
 
-        # 2. Αποθήκευση τοπικά
+        # 2. Save locally
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename  = f"photo_{timestamp_str}.jpg"
         local_path = os.path.join(PHOTOS_DIR, filename)
@@ -1066,7 +1066,7 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
             f.write(img_data)
         print(f"\033[92m[Photo]: Κατέβηκε: {filename}\033[0m")
 
-        # 3. Vision LLM — αντικειμενική ανάλυση pixels
+        # 3. Vision LLM — objective pixel analysis
         img_b64 = base64.b64encode(img_data).decode("utf-8")
         vision_prompt = "Περίγραψε αναλυτικά τι δείχνει η φωτογραφία (αντικείμενα, κείμενο, χρώματα, πλαίσιο). Απάντησε στα Ελληνικά, 3-5 προτάσεις."
         vision_msg = HumanMessage(content=[
@@ -1078,7 +1078,7 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         memory_analysis = clean_message(analysis_raw.content)
         print(f"\033[94m[Vision]: {memory_analysis[:120]}...\033[0m")
 
-        # 4α. ΜΕ caption → έλεγχος για /nutrition, /receipt ή κανονική ερώτηση
+        # 4a. WITH caption → check for /nutrition, /receipt or normal question
         if caption:
             caption_cmd = caption.strip().lower()
             if caption_cmd == "/nutrition":
@@ -1090,7 +1090,7 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
             else:
                 _process_photo_with_question(filename, local_path, memory_analysis, caption, chat_id)
 
-        # 4β. ΧΩΡΙΣ caption → αποθηκεύουμε pending, ειδοποιούμε
+        # 4b. WITHOUT caption → save as pending, notify
         else:
             with pending_photo_lock:
                 pending_photo = {
@@ -1108,12 +1108,12 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
 
 
 def _process_photo_with_question(filename: str, local_path: str, analysis: str, question: str, chat_id: str):
-    """Περνάει φωτογραφία + ερώτηση στο graph και στέλνει ΜΙΑ απάντηση (σωστό streaming pattern)."""
+    """Passes a photo + question to the graph and sends ONE response (correct streaming pattern)."""
     import re
     from langchain_core.messages import HumanMessage, AIMessage
     from core.agents import clean_message
 
-    # Φόρτωση history από shared SQLite
+    # Load history from shared SQLite
     context_msgs = _load_shared_context_messages("telegram")
 
     now_ts = datetime.now().strftime("%H:%M")
@@ -1126,7 +1126,7 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     )
     print(f"\033[94m[Photo->Graph]: {user_log_msg[:200]}\033[0m")
 
-    # Streaming — collect, send once (ίδιο pattern με handle_message)
+    # Streaming — collect, send once (same pattern as handle_message)
     final_response = ""
     try:
         from memory.execution_trace import ExecutionTrace
@@ -1187,7 +1187,7 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     except Exception as e:
         print(f"[PendingAssets]: {e}")
 
-    # Interceptor για CREATED_FILE
+    # Interceptor for CREATED_FILE
     file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_response)
     if file_match:
         file_path = file_match.group(1).strip()
@@ -1202,7 +1202,7 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     else:
         send_telegram_msg(final_response)
 def _run_nutrition(image_path: str, chat_id: str):
-    """Τρέχει τον nutrition analyzer και στέλνει αποτέλεσμα."""
+    """Runs the nutrition analyzer and sends the result."""
     try:
         from astakos_skills.nutrition_analyzer import analyze_nutrition
         result = analyze_nutrition(image_path)
@@ -1212,7 +1212,7 @@ def _run_nutrition(image_path: str, chat_id: str):
 
 
 def _run_receipt(image_path: str, chat_id: str):
-    """Τρέχει το receipt scanner και στέλνει αποτέλεσμα."""
+    """Runs the receipt scanner and sends the result."""
     try:
         from astakos_skills.scan_receipt import scan_receipt
         result = scan_receipt.invoke({"image_path": image_path})
@@ -1222,7 +1222,7 @@ def _run_receipt(image_path: str, chat_id: str):
 
 
 def _run_story_maker(theme: str, characters: str, chat_id: str):
-    """Δημιουργεί παραμύθι + εικόνες και τα στέλνει στο Telegram."""
+    """Generates a fairy tale + images and sends them to Telegram."""
     try:
         from astakos_skills.story_maker import make_story
         from tools.telegram import send_telegram_photo
@@ -1232,7 +1232,7 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
             send_telegram_msg(f"❌ {result.get('error', 'Αποτυχία δημιουργίας παραμυθιού')}")
             return
 
-        # Στέλνουμε πρώτα το κείμενο (σε κομμάτια αν είναι μεγάλο)
+        # We first send the text (in chunks if it is large)
         story_text = f"📖 *Παραμύθι: {theme}*\n\n{result['story']}"
         # Telegram limit: 4096 chars
         max_len = 4000
@@ -1241,7 +1241,7 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
             send_telegram_msg(chunk)
             time.sleep(0.5)
 
-        # Στέλνουμε τις εικόνες
+        # We send the images
         images = result.get("images", [])
         if images:
             send_telegram_msg(f"🎨 *{len(images)} εικόνες από το παραμύθι:*")
@@ -1258,8 +1258,8 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
 
         print(f"✅ [StoryMaker] Παραμύθι '{theme}' ολοκληρώθηκε.")
 
-        # Ενημερώνουμε τον agent με ΣΥΝΤΟΜΟ note — ώστε να ξέρει ότι έγραψε παραμύθι
-        # και να μη καλέσει search_memory αν ρωτήσει ο Λάζαρος για αυτό
+        # Update the agent with a SHORT note — so they know they wrote a fairy tale
+        # and not to call search_memory if Lazaros asks about this
         char_note = f" με χαρακτήρες: {characters}" if characters else ""
         img_note = f"{len(images)} εικόνες στάλθηκαν" if images else "εικόνες δεν δημιουργήθηκαν"
         agent_note = (
@@ -1274,21 +1274,21 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
 
 
 def send_voice_reply(text, chat_id):
-    """Μετατρέπει το κείμενο σε ομιλία και το στέλνει ως voice message."""
+    """Converts the text to speech and sends it as a voice message."""
     try:
-        from tools.telegram import send_telegram_voice # Σιγουρέψου ότι υπάρχει στο tools/telegram.py
+        from tools.telegram import send_telegram_voice # Make sure it exists in tools/telegram.py
         
         voice_path = os.path.join(os.getcwd(), "telegram_uploads", f"reply_{int(time.time())}.mp3")
         os.makedirs(os.path.dirname(voice_path), exist_ok=True)
 
-        # Δημιουργία του ήχου (στα ελληνικά)
+        # Creation of the sound (in Greek)
         tts = gTTS(text=text, lang='el')
         tts.save(voice_path)
 
-        # Αποστολή του αρχείου
+        # Sending of the file
         send_telegram_voice(voice_path, chat_id)
 
-        # Καθάρισμα
+        # Cleanup
         if os.path.exists(voice_path):
             os.remove(voice_path)
             
@@ -1296,16 +1296,16 @@ def send_voice_reply(text, chat_id):
         print(f"❌ TTS Error: {e}")
         send_telegram_msg(f"Μάστορα, μου κόπηκε η φωνή... (Error: {e})")
 def _append_to_analytics_log(role: str, content: str, agent: str | None = None):
-    """Καταγραφή μηνύματος στο shared SQLite conversation history (telegram channel)."""
+    """Logging of a message in the shared SQLite conversation history (telegram channel)."""
     try:
         now = datetime.now()
         shared_role = "assistant" if role in ("ai", "assistant") else role
         try:
-            # notify_telegram_message: αποθηκεύει στη shared SQLite + WebSocket broadcast στο Web UI
+            # notify_telegram_message: saves to shared SQLite + WebSocket broadcast to Web UI
             from api.server import notify_telegram_message
             notify_telegram_message(role=shared_role, content=content, agent=agent)
         except Exception:
-            # Fallback: άμεσο append χωρίς broadcast (αν ο server δεν τρέχει)
+            # Fallback: direct append without broadcast (if the server is not running)
             from memory.conversation_history import append_message
             append_message(
                 role=shared_role,
@@ -1323,7 +1323,7 @@ def _send_and_record_assistant(
     chat_id: str | None = None,
     agent: str | None = "Chat_Agent",
 ):
-    """Στέλνει assistant reply στο Telegram και το γράφει στο shared history."""
+    """Sends an assistant reply to Telegram and writes it to the shared history."""
     message_id = send_telegram_msg(content)
     if message_id:
         _append_to_analytics_log("ai", content, agent=agent)
@@ -1408,7 +1408,7 @@ def _send_georgian_translation(text: str, *, force_src: str = "auto"):
 
 
 def _tool_results_fallback_response(user_text: str, tool_results: list[str]) -> str:
-    """Συνθέτει τελική απάντηση όταν το graph γύρισε μόνο tool results."""
+    """Synthesizes a final response when the graph returned only tool results."""
     clean_results = [clean_message(r).strip() for r in tool_results if clean_message(r).strip()]
     if not clean_results:
         return ""
@@ -1462,7 +1462,7 @@ def _build_web_approval_result_message(tool_name: str, execution_result) -> str:
 
 
 def _load_shared_context_messages(channel: str) -> list:
-    """Φορτώνει μικτό shared context. Αν αποτύχει, ο caller κάνει fallback στο legacy history."""
+    """Loads mixed shared context. If it fails, the caller falls back to legacy history."""
     try:
         from memory.conversation_history import load_recent_context
         entries = load_recent_context(channel=channel, global_limit=12, channel_limit=10, total_limit=20)
@@ -1485,9 +1485,9 @@ def _load_shared_context_messages(channel: str) -> list:
 
 def _llm_routine_judge(user_msg: str, events: list) -> str:
     """
-    Κρίνει αν το μήνυμα του χρήστη επιβεβαιώνει ή απορρίπτει pending routine events.
-    Επιστρέφει: "YES" / "NO" / "UNCLEAR"
-    Χρησιμοποιεί safe_gemini_call με fallback σε UNCLEAR αν αποτύχει.
+    Determines whether the user's message confirms or rejects pending routine events.
+    Returns: "YES" / "NO" / "UNCLEAR"
+    Uses safe_gemini_call with a fallback to UNCLEAR if it fails.
     """
     try:
         from services.gemini import safe_gemini_call
@@ -1519,7 +1519,7 @@ def _llm_routine_judge(user_msg: str, events: list) -> str:
 # ────────────────────────────────────────────────────────────────
 
 def _send_pending_reflections_summary() -> None:
-    """Στέλνει ένα ενιαίο αριθμημένο μήνυμα για όλα τα pending reflections."""
+    """Sends a single numbered message for all pending reflections."""
     if not pending_reflection_confirmations:
         return
 
@@ -1559,19 +1559,19 @@ def _run_fast_chat_path(context_msgs, current_msg):
 
 
 def handle_message(user_text: str, chat_id: str):
-    """Στέλνει το μήνυμα στον Αστακό και απαντάει (Κείμενο ή Ήχο)."""
+    """Sends the message to Lobster and replies (Text or Audio)."""
     global last_interaction_time
     from tools.telegram import send_telegram_voice, send_telegram_msg
     import re
 
-    # 1. Ελέγχουμε αν ζητήθηκε φωνή (από ηχητικό, /voice εντολή, ή global toggle)
+    # 1. Check if voice was requested (from audio, /voice command, or global toggle)
     is_voice_mode = "[ΦΩΝΗΤΙΚΟ]" in user_text or "[VOICE_MESSAGE]" in user_text or voice_mode_enabled
-    is_voice_input = "[VOICE_INPUT]" in user_text  # το μήνυμα ήρθε από φωνή
+    is_voice_input = "[VOICE_INPUT]" in user_text  # the message came from voice
 
-    # 2. Καθαρίζουμε τα tags πριν πάνε στον εγκέφαλο
+    # 2. We clean the tags before they go to the brain
     clean_user_text = user_text.replace("/voice", "").replace("[ΦΩΝΗΤΙΚΟ]:", "").replace("[VOICE_MESSAGE]:", "").strip()
-    # /plan διατηρείται ώστε ο graph router να το αναγνωρίσει
-    # Αν είναι voice input, κρατάμε το hint για τον Αστακό αλλά αφαιρούμε το tag
+    # /plan is maintained so that the graph router can recognize it
+    # If it is a voice input, we keep the hint for Lobster but remove the tag
     if is_voice_input:
         clean_user_text = clean_user_text.replace("[VOICE_INPUT]", "").strip()
         clean_user_text = f"[Φωνητικό μήνυμα — απάντησε σύντομα και καθομιλούμενα]: {clean_user_text}"
@@ -1649,7 +1649,7 @@ def handle_message(user_text: str, chat_id: str):
         implicit_confirmed = False
         llm_dismissed = False
         if not explicit_yes and not is_question_like and not any(w in text_check for w in no_words):
-            # LLM κρίνει αν το μήνυμα είναι implicit confirmation/dismissal
+            # LLM judges if the message is an implicit confirmation/dismissal
             event_names = [
                 (rdata.get("event", "") if isinstance(rdata, dict) else str(rdata))
                 for rdata in pending_routine_confirmations.values()
@@ -1760,13 +1760,13 @@ def handle_message(user_text: str, chat_id: str):
         if is_yes or is_no:
             import re as _re
             numbers = [int(n) for n in _re.findall(r"\d+", text_check)]
-            # Αντιστοίχιση αριθμού -> reflection_id, με βάση τη σειρά εμφάνισης
-            # στο τελευταίο αριθμημένο μήνυμα (= σειρά εισαγωγής στο dict).
+            # Mapping number -> reflection_id, based on the order of appearance
+            # to the last numbered message (= insertion order in the dict).
             ordered_ids = list(pending_reflection_confirmations.keys())
             if numbers:
                 targets = [ordered_ids[n - 1] for n in numbers if 1 <= n <= len(ordered_ids)]
             else:
-                targets = ordered_ids  # χωρίς αριθμό → όλα μαζί (παλιά συμπεριφορά)
+                targets = ordered_ids  # without a number → all together (old behavior)
 
             if not targets:
                 send_telegram_msg("⚠️ Δεν βρήκα reflection με αυτόν τον αριθμό.")
@@ -1836,7 +1836,7 @@ def handle_message(user_text: str, chat_id: str):
     with memory_lock:
         last_interaction_time = time.time()
 
-    # ── Pending photo: αν ήρθε φωτό χωρίς caption πρόσφατα, συνδύασέ το ──
+    # ── Pending photo: if a photo arrived without a caption recently, combine it ──
     global pending_photo
     photo_prefix = ""
     with pending_photo_lock:
@@ -1845,7 +1845,7 @@ def handle_message(user_text: str, chat_id: str):
             pending_photo = None
             print(f"\033[94m[Photo+Msg]: Συνδυασμός pending φωτό + μήνυμα\033[0m")
             _process_photo_with_question(p["filename"], p["path"], p["analysis"], clean_user_text, chat_id)
-            return  # Η _process_photo_with_question έστειλε την απάντηση
+            return  # The _process_photo_with_question sent the response
 
     final_ai_response = ""
     handling_agent = "Chat_Agent"
@@ -1977,7 +1977,7 @@ def handle_message(user_text: str, chat_id: str):
 
         return
 
-    # ── Typing indicator — δείχνει "ο Αστακός πληκτρολογεί..." ──
+    # ── Typing indicator — shows "Lobster is typing..." ──
     _typing_active = {"on": True}
     def _typing_loop():
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendChatAction"
@@ -1986,16 +1986,16 @@ def handle_message(user_text: str, chat_id: str):
                 requests.post(url, json={"chat_id": chat_id, "action": "typing"}, timeout=5)
             except Exception:
                 pass
-            time.sleep(4)  # Telegram δείχνει typing για 5s — ανανεώνουμε κάθε 4s
+            time.sleep(4)  # Telegram shows typing for 5s — we refresh every 4s
     typing_thread = threading.Thread(target=_typing_loop, daemon=True)
     typing_thread.start()
 
     try:
-        # ── Context: shared mixed history από τη SQLite ────────────
+        # ── Context: shared mixed history from SQLite ────────────
         t_context_0 = perf_counter()
         context_msgs, current_msg = _build_fast_chat_context(clean_user_text)
         context_load_ms = int((perf_counter() - t_context_0) * 1000)
-        # ── Ροή μέσω LangGraph ───────────────────────────────────
+        # ── Flow via LangGraph ───────────────────────────────────_
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"
         from memory.execution_trace import ExecutionTrace
         _trace = ExecutionTrace(channel="telegram", user_message=clean_user_text)
@@ -2140,13 +2140,13 @@ def handle_message(user_text: str, chat_id: str):
             _trace.mark_phase("fallback_llm_ms", fallback_ms)
 
         if not final_ai_response:
-            # [MASTRO-FIX]: Fallback όταν ο agent δεν παρήγαγε κείμενο (π.χ. loop/recursion)
+            # [MASTRO-FIX]: Fallback when the agent did not generate text (e.g., loop/recursion)
             send_telegram_msg("⚠️ Κάτι μπλόκαρε — δεν πήρα σαφή απάντηση. Ξαναστείλε μου.")
             return
 
         file_path_to_send = None
         if final_ai_response:
-            # --- MASTRO INTERCEPTOR ΓΙΑ ΕΓΓΡΑΦΑ ---
+            # --- MASTRO INTERCEPTOR FOR DOCUMENTS ---
             file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_ai_response)
             if file_match:
                 file_path_to_send = file_match.group(1).strip()
@@ -2175,7 +2175,7 @@ def handle_message(user_text: str, chat_id: str):
                         _trace.mark_phase("telegram_send_ms", send_ms)
                         _cache_bot_message(_mid, final_ai_response)
 
-                # Στείλε το αρχείο στο Telegram ως document
+                # Send the file to Telegram as a document
                 try:
                     from tools.telegram import send_telegram_document
                     import os as _os
@@ -2185,7 +2185,7 @@ def handle_message(user_text: str, chat_id: str):
                     print(f"❌ [Doc send error]: {_de}")
                     send_telegram_msg(f"📎 Αρχείο: <code>{file_path_to_send}</code>")
             else:
-                # Κανονική Ροή (Χωρίς Έγγραφα)
+                # Normal Flow (No Documents)
                 if is_voice_mode:
                     import asyncio
                     t_voice_0 = perf_counter()
@@ -2198,11 +2198,11 @@ def handle_message(user_text: str, chat_id: str):
                     send_ms = int((perf_counter() - t_send_0) * 1000)
                     _trace.mark_phase("telegram_send_ms", send_ms)
                     _cache_bot_message(_mid, final_ai_response)
-            # Κρατάμε context για επόμενο μήνυμα
-            _typing_active["on"] = False  # Σταματάμε το typing
+            # We keep context for the next message
+            _typing_active["on"] = False  # We stop typing
             _append_to_analytics_log("user", clean_user_text)
             _append_to_analytics_log("ai", final_ai_response)
-            # Φωτογραφίες
+            # Photos
             if "[SEND_PHOTO:" in final_ai_response:
                 match = re.search(r"\[SEND_PHOTO:\s*(.+?)\]", final_ai_response)
                 if match:
@@ -2226,13 +2226,13 @@ def handle_message(user_text: str, chat_id: str):
             _trace.save()
 
     except Exception as e:
-        _typing_active["on"] = False  # Σταματάμε το typing και σε error
+        _typing_active["on"] = False  # We stop typing even on error
         import traceback
         traceback.print_exc()
         send_telegram_msg(f"❌ Σφάλμα: {str(e)}")
 
 def _send_photo_to_telegram(photo_path: str, chat_id: str):
-    """Στέλνει αρχείο φωτογραφίας στο Telegram chat."""
+    """Sends a photo file to the Telegram chat."""
     if not os.path.exists(photo_path):
         send_telegram_msg(f"⚠️ Η φωτογραφία δεν βρέθηκε στο δίσκο: `{photo_path}`")
         return
@@ -2250,7 +2250,7 @@ def _send_photo_to_telegram(photo_path: str, chat_id: str):
         print(f"\033[91m[TelegramBot Photo Send Error]: {e}\033[0m")
         send_telegram_msg(f"❌ Αδύνατη η αποστολή φωτογραφίας: {str(e)}")
 def handle_location(msg, live_update=False):
-    """Λαμβάνει live location και ελέγχει για location-based reminders."""
+    """Receives live location and checks for location-based reminders."""
     import math
 
     chat_id = str(msg.get("chat", {}).get("id", ""))
@@ -2259,7 +2259,7 @@ def handle_location(msg, live_update=False):
     lon     = loc.get("longitude")
     if not lat or not lon:
         return
-    # Αποθήκευση location στο JSON
+    # Save location to JSON
     try:
         from config import GPS_STORAGE_FILE
         import time
@@ -2307,9 +2307,9 @@ def handle_location(msg, live_update=False):
     except Exception as e:
         print(f"\033[91m[Location Reminder Error]: {e}\033[0m")
 
-    # ── Web Agent μόνο για manual location (όχι live updates) ──
+    # ── Web Agent only for manual location (no live updates) ──
     if live_update:
-        return  # Live location update → μόνο reminders, όχι μήνυμα
+        return  # Live location update → only reminders, no message
 
     from core.graph import graph
     from langchain_core.messages import HumanMessage
@@ -2343,7 +2343,7 @@ def handle_location(msg, live_update=False):
 # ────────────────────────────────────────────────────────────────
 
 def _handle_approval_callback(cq: dict):
-    """Χειρίζεται τα ✅/❌ approval callbacks από inline keyboard."""
+    """Handles the ✅/❌ approval callbacks from inline keyboard."""
     try:
         from core.approval import execute_approved_pending, get_pending, pop_pending
         from tools.system import all_tools
@@ -2353,7 +2353,7 @@ def _handle_approval_callback(cq: dict):
         chat_id = str(cq["message"]["chat"]["id"])
         msg_id  = cq["message"]["message_id"]
 
-        # Answer the callback (αφαίρεση loading spinner)
+        # Answer the callback (remove loading spinner)
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
             json={"callback_query_id": cq_id},
@@ -2366,7 +2366,7 @@ def _handle_approval_callback(cq: dict):
         action, tool_call_id = data.split(":", 1)
 
         if action == "approve":
-            item = get_pending(tool_call_id)  # get πρωτα, OXI pop
+            item = get_pending(tool_call_id)  # get first, NOT pop
             if not item:
                 # Duplicate/stale callback after a reload or an already executed action.
                 # Keep the chat quiet and just remove the old inline keyboard if possible.
@@ -2381,7 +2381,7 @@ def _handle_approval_callback(cq: dict):
             tool_name = item["tool_name"]
             origin_channel = item.get("channel", "telegram")
 
-            # Ενημέρωση keyboard → "✅ Εγκρίθηκε"
+            # Update keyboard → "✅ Approved"
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageReplyMarkup",
                 json={"chat_id": chat_id, "message_id": msg_id, "reply_markup": {"inline_keyboard": []}},
@@ -2467,29 +2467,29 @@ def _handle_approval_callback(cq: dict):
 
 def _handle_message_reaction(reaction: dict) -> None:
     """
-    Όταν ο Λάζαρος κάνει ❤️ react σε μήνυμα του Αστακού,
-    αποθηκεύει το περιεχόμενο του μηνύματος στη long-term memory.
+    When Lazaros reacts with ❤️ to a message from Astakos,
+    it saves the content of the message to the long-term memory.
     """
     try:
         chat_id = str(reaction.get("chat", {}).get("id", ""))
         if chat_id != str(TELEGRAM_CHAT_ID):
             return
 
-        # Μόνο νέα reactions (όχι αφαίρεση)
+        # Only new reactions (not removal)
         new_reactions = reaction.get("new_reaction", [])
         emojis = [r.get("emoji", "") for r in new_reactions if r.get("type") == "emoji"]
         if "❤" not in emojis and "❤️" not in emojis:
             return
 
-        # Βρες το περιεχόμενο του μηνύματος που έγινε react
+        # Find the content of the message that was reacted to
         msg_id = reaction.get("message_id")
         bot_text = None
 
-        # 1. Πρώτα ψάξε στο in-memory cache (exact match)
+        # 1. First search in the in-memory cache (exact match)
         with _bot_message_cache_lock:
             bot_text = _bot_message_cache.get(msg_id)
 
-        # 2. Fallback: τελευταίο assistant μήνυμα από SQLite
+        # 2. Fallback: last assistant message from SQLite
         if not bot_text:
             try:
                 from memory.conversation_history import load_messages
@@ -2512,7 +2512,7 @@ def _handle_message_reaction(reaction: dict) -> None:
             send_telegram_msg("❤️ Αυτό ήταν operational μήνυμα και δεν το κράτησα στη μνήμη.")
             return
 
-        # Αποθήκευσε στη long-term memory
+        # Save to long-term memory`of`
         preview = bot_text[:80].replace("\n", " ")
         print(f"\033[92m[Reaction ❤️]: Αποθήκευση: {preview}...\033[0m")
         threading.Thread(
@@ -2526,7 +2526,7 @@ def _handle_message_reaction(reaction: dict) -> None:
 
 
 def _save_reaction_to_memory(text: str) -> None:
-    """Background: αποθηκεύει το κείμενο στη ChromaDB και ειδοποιεί."""
+    """Background: stores the text in ChromaDB and sends a notification."""
     try:
         from core.utils import looks_like_operational_assistant_text
 
@@ -2547,7 +2547,7 @@ def _save_reaction_to_memory(text: str) -> None:
 
 
 def run_polling():
-    """Long-polling loop — διαβάζει updates από το Telegram API."""
+    """Long-polling loop — reads updates from the Telegram API."""
     global voice_mode_enabled
     if not TELEGRAM_TOKEN:
         print("\033[91m[TelegramBot]: Λείπει το TELEGRAM_TOKEN!\033[0m")
@@ -2557,7 +2557,7 @@ def run_polling():
         print("\033[91m[TelegramBot]: Λείπει το TELEGRAM_CHAT_ID!\033[0m")
         return
 
-    # ── Ορισμός εντολών στο Telegram menu (το "/" autocomplete) ──────────────
+    # ── Definition of commands in the Telegram menu (the "/" autocomplete) ──────────────
     _bot_commands = [
         {"command": "g",                "description": "Ελληνικά → Γεωργιανά (+ ήχος)"},
         {"command": "gr",               "description": "Γεωργιανά → Ελληνικά (μετάφραση σε Greek)"},
@@ -2617,19 +2617,19 @@ def run_polling():
                     _handle_message_reaction(reaction)
                     continue
 
-                # [MASTRO-FIX]: Πιάνουμε και τα Live Locations που έρχονται ως edited_message
+                # [MASTRO-FIX]: We also catch Live Locations that arrive as edited_message
                 msg = update.get("message") or update.get("edited_message")
                 if not msg:
                     continue
                 
                 chat_id = str(msg["chat"]["id"])
 
-                # Security: μόνο ο Λάζαρος
+                # Security: only Lazaros
                 if chat_id != str(TELEGRAM_CHAT_ID):
                     print(f"\033[93m[TelegramBot]: Μη εξουσιοδοτημένο chat: {chat_id}\033[0m")
                     continue
 
-                # 1. Τοποθεσία (GPS) - Μόνο μία φορά, σε thread, περνώντας όλο το msg
+                # 1. Location (GPS) - Only once, in a thread, passing the entire msg
                 if "location" in msg:
                     is_live_update = "edited_message" in update
                     threading.Thread(
@@ -2640,7 +2640,7 @@ def run_polling():
                     ).start()
                     continue
 
-                # 2. Φωτογραφία
+                # 2. Photo
                 if "photo" in msg:
                     caption = msg.get("caption", "")
                     threading.Thread(
@@ -2650,7 +2650,7 @@ def run_polling():
                     ).start()
                     continue
 
-                # 3. Φωνητικό (Voice)
+                # 3. Voice (Voice)
                 if "voice" in msg:
                     threading.Thread(
                         target=handle_voice,
@@ -2659,7 +2659,7 @@ def run_polling():
                     ).start()
                     continue
 
-                # 4. Έγγραφα (PDF, κλπ)
+                # 4. Documents (PDF, etc.)
                 if "document" in msg:
                     caption = msg.get("caption", "")
                     threading.Thread(
@@ -2669,7 +2669,7 @@ def run_polling():
                     ).start()
                     continue
                 
-                # 5. Κείμενο & Εντολές
+                # 5. Text & Commands
                 user_text = msg.get("text", "").strip()
                 if not user_text:
                     continue
@@ -2781,12 +2781,12 @@ def run_polling():
                     from tools.georgian import phrases_message
                     rest = user_text[len(cmd):].strip()
 
-                    # /georgian_phrases → γρήγορη λίστα
+                    # /georgian_phrases → quick list
                     if cmd == "/georgian_phrases" or rest.lower() == "phrases":
                         send_telegram_msg(phrases_message())
                         continue
 
-                    # /georgian χωρίς κείμενο → οδηγίες
+                    # /georgian without text → instructions
                     if not rest:
                         _arm_pending_georgian()
                         send_telegram_msg(
@@ -2800,10 +2800,10 @@ def run_polling():
                 if cmd in ("/gr", "/greek"):
                     rest = user_text[len(cmd):].strip()
                     if rest:
-                        # Άμεση μετάφραση ka→el
+                        # Direct translation ka→el
                         _send_georgian_translation(rest, force_src="ka")
                     else:
-                        # Pending mode: επόμενο μήνυμα θεωρείται Γεωργιανό
+                        # Pending mode: next message is considered Georgian
                         _arm_pending_sofia()
                         send_telegram_msg("🇬🇪 Στείλε το γεωργιανό κείμενο για μετάφραση σε Ελληνικά.")
                     continue
@@ -2851,7 +2851,7 @@ def run_polling():
                     continue
 
                 if cmd.startswith("/story"):
-                    # /story [θέμα]  ή  /story [θέμα] | [χαρακτήρες]
+                    # /story [theme]  or  /story [theme] | [characters]
                     rest = user_text[len("/story"):].strip()
                     if "|" in rest:
                         theme_part, chars_part = rest.split("|", 1)
@@ -2868,7 +2868,7 @@ def run_polling():
                     ).start()
                     continue
 
-                # Κανονικό μήνυμα προς τον Αστακό
+                # Regular message to the Lobster
                 print(f"\n\033[96m[Telegram] Λάζαρος: {user_text}\033[0m")
                 threading.Thread(
                     target=handle_message,
@@ -2883,11 +2883,11 @@ def run_polling():
             time.sleep(5)
 
 # ────────────────────────────────────────────────────────────────
-# SCHEDULER JOBS (χωρίς while loop — ο scheduler τα καλεί)
+# SCHEDULER JOBS (without while loop — called by the scheduler)
 # ────────────────────────────────────────────────────────────────
 
 def job_check_reminders():
-    """Ελέγχει για υπενθυμίσεις (SQL) και τις στέλνει στο Telegram."""
+    """Checks for reminders (SQL) and sends them to Telegram."""
     if is_reminders_paused():
         return
     import sqlite3
@@ -3330,7 +3330,7 @@ def _get_env_context() -> str:
 
 
 def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> str:
-    """LLM φτιάχνει φυσικό proactive μήνυμα αντί για template."""
+    """LLM creates a natural proactive message instead of a template."""
     from langchain_core.messages import HumanMessage
     from core.brain import llm
 
@@ -3434,9 +3434,9 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
 
 def _infer_muted_until(event_name: str, memory_context: str) -> str | None:
     """
-    Μικρό LLM call: βάσει context, επιστρέφει μέχρι πότε να σιγαστεί η ρουτίνα.
-    Επιστρέφει YYYY-MM-DD string ή None αν δεν μπορεί να εκτιμήσει.
-    Καλείται ΜΟΝΟ αφού έχει εντοπιστεί [SILENT_SKIP] για πρώτη φορά.
+    Small LLM call: based on context, returns until when the routine should be muted.
+    Returns a YYYY-MM-DD string or None if it cannot estimate.
+    Called ONLY after [SILENT_SKIP] has been detected for the first time.
     """
     from langchain_core.messages import HumanMessage
     from core.brain import llm
@@ -3477,9 +3477,9 @@ def _infer_muted_until(event_name: str, memory_context: str) -> str | None:
 
 def _infer_sentimental(event_name: str, memory_context: str) -> bool:
     """
-    One-time LLM assessment: κρίνει αν η ρουτίνα έχει συναισθηματική αξία.
-    Sentimental = αφορά παιδί, οικογένεια, κοινές εμπειρίες, συνήθειες με φορτίο.
-    Καλείται μία φορά και αποθηκεύεται μόνιμα στο DB.
+    One-time LLM assessment: determines if the routine has sentimental value.
+    Sentimental = relates to children, family, shared experiences, emotionally charged habits.
+    Called once and permanently stored in the DB.
     """
     from langchain_core.messages import HumanMessage
     from core.brain import llm
@@ -3542,8 +3542,8 @@ def _craft_sentimental_absent_msg(
     event_name: str, muted_from: str, muted_until: str, memory_context: str
 ) -> str:
     """
-    Φτιάχνει συναισθηματικό μήνυμα για ρουτίνα που δεν μπορεί να γίνει τώρα.
-    ΔΕΝ υπενθυμίζει την ρουτίνα — αναγνωρίζει με ζεστασιά/χιούμορ.
+    Creates an emotional message for a routine that cannot be done right now.
+    Does NOT remind of the routine — acknowledges with warmth/humor.
     """
     from langchain_core.messages import HumanMessage
     from core.brain import llm
@@ -3576,9 +3576,9 @@ def _craft_sentimental_absent_msg(
 def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int) -> str:
 
     """
-    LLM φτιάχνει deferred follow-up: ξέρει ότι ήταν offline και η ώρα πέρασε.
-    Αντί για reminder, ρωτάει/σχολιάζει αν έγινε το event — σαν φίλος που ήρθε αργά.
-    Ίδιο full pipeline (memory context, personality) με το κανονικό proactive.
+    LLM creates a deferred follow-up: it knows it was offline and time has passed.
+    Instead of a reminder, it asks/comments on whether the event took place — like a friend who arrived late.
+    Same full pipeline (memory context, personality) as the regular proactive one.
     """
     from langchain_core.messages import HumanMessage
     from core.brain import llm
@@ -3663,9 +3663,9 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
 
 def startup_check_missed_routines():
     """
-    Εκτελείται ΜΙΑ φορά στην εκκίνηση (με μικρή καθυστέρηση αρχικοποίησης).
-    Ψάχνει active ρουτίνες που έπρεπε να πυροδοτηθούν ενώ ο bot ήταν offline,
-    εντός ROUTINE_MISS_GRACE_MINUTES, και στέλνει deferred follow-up με full memory context.
+    Runs ONCE at startup (with a short initialization delay).
+    Looks for active routines that should have been triggered while the bot was offline,
+    within ROUTINE_MISS_GRACE_MINUTES, and sends a deferred follow-up with full memory context.
     """
     import sqlite3
     import time as _time
@@ -3732,8 +3732,8 @@ def startup_check_missed_routines():
 
         for r_id, event_name, confidence, time_str in missed:
             # ── Seasonal/temporary inactivity check (paused_until / active window) ──
-            # Πρέπει να τρέξει ΠΡΙΝ από κάθε missed/trigger λογική — μια ρουτίνα σε
-            # παύση ή εκτός active window δεν είναι "χαμένη", απλά δεν ισχύει τώρα.
+            # Must run BEFORE any missed/trigger logic — a routine in
+            # pause or out of active window is not "lost", it just does not apply right now.
             schedule_meta = get_routine_schedule_meta(r_id)
             inactive, inactive_reason = is_routine_temporarily_inactive_meta(schedule_meta, now=now)
             if inactive:
@@ -3743,7 +3743,7 @@ def startup_check_missed_routines():
                 print(f"\033[90m[MissedRoutines]: #{r_id} '{event_name}' — inactive ({inactive_reason}), skip.\033[0m")
                 continue
 
-            # Cooldown check — αποφεύγουμε spam αν ειδοποιήθηκε πρόσφατα
+            # Cooldown check — avoid spamming if notified recently
             info = get_routine_notify_info(r_id)
             if is_duplicate_routine(r_id, info["cooldown_hours"]):
                 print(f"\033[90m[MissedRoutines]: #{r_id} '{event_name}' — cooldown, skip.\033[0m")
@@ -3764,7 +3764,7 @@ def startup_check_missed_routines():
                 except Exception:
                     ctx = ""
 
-            # Μάρκαρε ως triggered ώστε το κανονικό job να μην το ξαναστείλει σήμερα
+            # Mark as triggered so that the regular job does not send it again today
             conn2   = sqlite3.connect(DB_PATH)
             cursor2 = conn2.cursor()
             cursor2.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
@@ -3814,7 +3814,7 @@ def startup_check_missed_routines():
             print(f"\033[92m[MissedRoutines]: ✅ Deferred '{event_name}' ({missed_min} λεπτά αργά) → '{msg[:80]}'\033[0m")
 
             if len(missed) > 1:
-                _time.sleep(300)  # 5 λεπτά παύση — ώστε να απαντήσει στο πρώτο
+                _time.sleep(300)  # 5-minute pause — to allow a response to the first one
 
     except Exception as e:
         print(f"\033[91m[MissedRoutines]: {e}\033[0m")
@@ -3822,8 +3822,8 @@ def startup_check_missed_routines():
 
 def job_check_routines():
     """
-    Ελέγχει για επερχόμενες ρουτίνες (30' νωρίτερα) και κάνει timeout decay
-    σε εκκρεμείς επιβεβαιώσεις που δεν απαντήθηκαν.
+    Checks for upcoming routines (30' in advance) and performs timeout decay
+    on pending confirmations that were not answered.
     """
     import sqlite3
     from datetime import timedelta
@@ -3863,7 +3863,7 @@ def job_check_routines():
                 )
                 print(f"\033[90m[RoutinePendingCleanup]: #{rid} '{ev}' cleared because muted until {muted_until}\033[0m")
 
-    # Quiet hours ή proactive muted
+    # Quiet hours or proactive muted_
     if is_proactive_muted():
         return
     if is_quiet_hours():
@@ -3904,8 +3904,8 @@ def job_check_routines():
                     )
                     pending_routine_confirmations.pop(rid, None)
                     remove_pending_confirmation(rid)
-    # 2. Timeout decay για εκκρεμείς επιβεβαιώσεις (>30')
-    # TRIGGER_PENDING → IGNORED → ACTIVE (cooldown doubled, confidence ανέπαφο)
+    # 2. Timeout decay for pending confirmations (>30')
+    # TRIGGER_PENDING → IGNORED → ACTIVE (cooldown doubled, confidence intact)
     if pending_routine_confirmations:
         from memory.routine_db import (
             mark_routine_ignored,
@@ -3986,7 +3986,7 @@ def job_check_routines():
                     ORDER BY priority DESC, CASE WHEN condition_type IS NOT NULL THEN 1 ELSE 0 END DESC, id ASC
                 """, (*possible_days, today_str))
 
-                # ── Anti-Spam: φιλτράρισμα με per-routine cooldown ──────────
+                # ── Anti-Spam: filtering with per-routine cooldown ──────────
                 from memory.routine_db import (
                     get_routine_notify_info, mark_routine_notified,
                     save_pending_confirmation, get_routine_muted_until,
@@ -4030,9 +4030,9 @@ def job_check_routines():
                         continue
 
                     # ── Seasonal/temporary inactivity check (paused_until / active window) ──
-                    # Πρέπει να τρέξει ΠΡΙΝ από muted_until/cooldown/proactive scoring — μια
-                    # ρουτίνα σε παύση (π.χ. καλοκαιρινό διάλειμμα) δεν θεωρείται ποτέ "missed",
-                    # δεν πειράζει το confidence, και δεν περνά από το sentimental/mute branch.
+                    # Must run BEFORE muted_until/cooldown/proactive scoring — a
+                    # a paused routine (e.g. summer break) is never considered "missed",
+                    # confidence does not matter, and it does not pass through the sentimental/mute branch.
                     schedule_meta = get_routine_schedule_meta(r_id)
                     inactive, inactive_reason = is_routine_temporarily_inactive_meta(schedule_meta, now=now)
                     if inactive:
@@ -4093,10 +4093,10 @@ def job_check_routines():
                         cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                         conn.commit()
 
-                        # Όταν η ρουτίνα είναι ήδη muted, το proactive για αυτό το slot τελειώνει εδώ.
-                        # ΔΕΝ στέλνουμε δεύτερο sentimental message από το polling loop· τα
-                        # συναισθηματικά/contextual messages παράγονται μόνο στη στιγμή που
-                        # ανιχνεύθηκε το context skip / mute, όχι ξανά σε κάθε επόμενο poll.
+                        # When the routine is already muted, the proactive for this slot ends here.
+                        # We DO NOT send a second sentimental message from the polling loop; the
+                        # emotional/contextual messages are only generated at the moment that
+                        # context skip / mute detected, not again in each subsequent poll.
                         skip_reason = f"muted_until:{muted_until}"
                         if _should_log_routine_skip(r_id, "routine_silent_skip", skip_reason):
                             log_event(
@@ -4136,13 +4136,13 @@ def job_check_routines():
                     conn.close()
                     return
 
-                # ── Batching: πολλές ρουτίνες → ένα μήνυμα ──────────────────
+                # ── Batching: multiple routines → one message ──────────────────
                 if len(due_routines) > 1:
                     names = ", ".join(f"'{e}'" for _, e, _ in due_routines)
                     msg = _craft_proactive_msg(names, 0.9, count=len(due_routines))
 
                     if msg.strip() == "[SILENT_SKIP]":
-                        # Πρώτη φορά SILENT_SKIP — εκτίμα muted_until για κάθε ρουτίνα
+                        # First time SILENT_SKIP — estimate muted_until for each routine
                         try:
                             ctx = _build_proactive_memory_context(names)
                         except Exception:
@@ -4216,12 +4216,12 @@ def job_check_routines():
                                 bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel="telegram")
                         conn.commit()
                 else:
-                    # Μία ρουτίνα → εξατομικευμένο μήνυμα
+                    # One routine → personalized message
                     r_id, event_name, confidence = due_routines[0]
                     msg = _craft_proactive_msg(event_name, confidence)
 
                     if msg.strip() == "[SILENT_SKIP]":
-                        # Πρώτη φορά SILENT_SKIP — εκτίμα muted_until
+                        # First time SILENT_SKIP — estimate muted_until
                         try:
                             ctx = _build_proactive_memory_context(event_name)
                         except Exception:
@@ -4302,7 +4302,7 @@ def job_check_routines():
 
 def job_proactive_scan():
     """
-    Ο 'Νυχτοφύλακας' — σκανάρει το watch_folder και αν βρει θέμα, στέλνει alert.
+    The 'Nightwatchman' — scans the watch_folder and if it finds an issue, sends an alert.
     """
     from tools.system import read_local_file
     WATCH_DIR = "C:\\astakos_v2\\watch_folder"
@@ -4356,7 +4356,7 @@ def job_proactive_scan():
         print(f"⚠️ [job_proactive_scan]: {e}")
 
 def job_analytics_engine():
-    """Nightly passive routine detection — τρέχει μόνο 03:00–04:00."""
+    """Nightly passive routine detection — runs only 03:00–04:00."""
     now_hour = datetime.now().hour
     if now_hour != 3:
         return
@@ -4372,7 +4372,7 @@ def job_analytics_engine():
     except Exception as e:
         print(f"[Analytics Job Error]: {e}")
 
-    # Reflection engine — τρέχει αμέσως μετά τα analytics
+    # Reflection engine — runs immediately after the analytics
     try:
         from services.reflection_engine import run_reflection
         global pending_reflection_confirmations
@@ -4388,11 +4388,11 @@ def job_analytics_engine():
         print(f"[Reflection Job Error]: {re}")
 
 def job_morning_fit_briefing():
-    """Πρωινό Google Fit briefing — τρέχει μόνο 08:00–09:00, μία φορά."""
+    """Morning Google Fit briefing — runs only 08:00–09:00, once."""
     now_hour = datetime.now().hour
     if now_hour != 8:
         return
-    # Αποφυγή διπλής αποστολής — ελέγχουμε αν το στείλαμε ήδη σήμερα
+    # Avoid double sending — we check if we already sent it today_
     flag_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".fit_briefing_sent")
     today_str = datetime.now().strftime("%Y-%m-%d")
     if os.path.exists(flag_file):
@@ -4413,7 +4413,7 @@ def job_morning_fit_briefing():
         print(f"⚠️ [FitBriefing]: {e}")
 
 def job_morning_calendar_briefing():
-    """Πρωινό Google Calendar briefing — τρέχει μόνο 08:00–09:00, μία φορά."""
+    """Morning Google Calendar briefing — runs only 08:00–09:00, once."""
     now_hour = datetime.now().hour
     if now_hour != 8:
         return
@@ -4431,7 +4431,7 @@ def job_morning_calendar_briefing():
         today_events = google_calendar_tool.invoke({"action": "today"})
         week_events  = google_calendar_tool.invoke({"action": "week"})
 
-        # Αν δεν υπάρχουν events σήμερα, στέλνουμε μόνο σύνοψη εβδομάδας
+        # If there are no events today, we only send a weekly summaryof
         if "Δεν υπάρχουν events" in today_events:
             msg = (
                 f"🌅 *Καλημέρα Λάζαρε!*\n\n"
@@ -4454,8 +4454,8 @@ def job_morning_calendar_briefing():
 
 def job_goal_followup():
     """
-    Ελέγχει active goals που δεν αναφέρθηκαν τις τελευταίες 7 μέρες.
-    Τρέχει μία φορά την ημέρα στις 10:00.
+    Checks active goals that have not been reported in the last 7 days.
+    Runs once a day at 10:00.
     """
     now_hour = datetime.now().hour
     if now_hour != 10:
@@ -4477,7 +4477,7 @@ def job_goal_followup():
         if not goals:
             return
 
-        # Semantic search: ψάχνουμε αν υπάρχουν πρόσφατες μνήμες για κάθε goal
+        # Semantic search: we search if there are recent memories for each goal
         from datetime import timedelta
         from memory.vector_store import vector_store, vector_lock
         cutoff_ts = (datetime.now() - timedelta(days=7)).timestamp()
@@ -4492,7 +4492,7 @@ def job_goal_followup():
                         n_results=3,
                         where={"timestamp": {"$gte": cutoff_ts}},
                     )
-                # Αν δεν βρήκε τίποτα πρόσφατο → stale
+                # If nothing recent was found → stale
                 if not results["ids"] or not results["ids"][0]:
                     stale_goals.append(g)
                     print(f"[GoalFollowup]: '{g['project']}' → stale (0 recent memories)")
@@ -4544,22 +4544,22 @@ def job_goal_followup():
 
 class AstakosScheduler:
     """
-    Ένας thread, όλα τα background jobs.
+    One thread, all background jobs.
     - Heartbeat 10s
     - Watchdog: fail_count + disabled_after_N_failures
     - Duration tracking
-    - status() για /status command
+    - status() for /status command
     """
 
-    MAX_FAILURES = 5  # απενεργοποίηση μετά από τόσα διαδοχικά failures
+    MAX_FAILURES = 5  # disable after this many consecutive failures
 
     def __init__(self):
         self._jobs = []
 
     def register(self, func, interval_seconds: int, name: str = None, verbose: bool = True):
         """
-        verbose=True  → log start/complete κάθε run (για σπάνια/σημαντικά jobs)
-        verbose=False → log μόνο errors (για frequent jobs: reminders, routines)
+        verbose=True  → log start/complete of each run (for rare/important jobs)
+        verbose=False → log only errors (for frequent jobs: reminders, routines)
         """
         self._jobs.append({
             "name":          name or func.__name__,
@@ -4575,7 +4575,7 @@ class AstakosScheduler:
         print(f"\033[90m[Scheduler]: Registered '{name or func.__name__}' every {interval_seconds}s (verbose={verbose})\033[0m")
 
     def _write_snapshot(self):
-        """Γράφει runtime_snapshot.json κάθε heartbeat — διαβάζεται από /debug/runtime."""
+        """Writes runtime_snapshot.json on every heartbeat — read by /debug/runtime."""
         try:
             from config import BASE_DIR
             import json as _json
@@ -4749,7 +4749,7 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_goal_followup,              interval_seconds=3600, name="goal_followup",     verbose=True)
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
 
-    # Startup check για χαμένες ρουτίνες (10s καθυστέρηση για πλήρη αρχικοποίηση)
+    # Startup check for lost routines (10s delay for full initialization)
     def _delayed_missed_check():
         import time as _t
         _t.sleep(10)
@@ -4786,7 +4786,7 @@ if __name__ == "__main__":
             _done.wait(timeout=5)
         except Exception:
             pass
-        # Graceful ChromaDB shutdown — περίμενε να τελειώσει τυχόν write
+        # Graceful ChromaDB shutdown — wait for any pending writes to finish
         try:
             from memory.vector_store import vector_lock
             acquired = vector_lock.acquire(timeout=3)

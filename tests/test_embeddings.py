@@ -1,17 +1,17 @@
 """
-Tests για το embeddings layer.
-Τρεξε ΠΡΙΝ και ΜΕΤΑ οποιαδηποτε αλλαγη στο services/embeddings.py
-για να επαληθευσεις οτι η semantic search δεν σπασε.
+Tests for the embeddings layer.
+Run BEFORE and AFTER any change in services/embeddings.py
+to verify that semantic search did not break.
 
-Απαιτει live Vertex AI connection.
-Τρεξε με: python -m pytest tests/test_embeddings.py -v -m integration
+Requires a live Vertex AI connection.
+Run with: python -m pytest tests/test_embeddings.py -v -m integration
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import math
 import pytest
 
-pytestmark = pytest.mark.integration  # Ολα τα tests εδω απαιτουν live Vertex AI
+pytestmark = pytest.mark.integration  # All tests here require live Vertex AI
 
 
 def cosine_similarity(a, b):
@@ -35,13 +35,13 @@ def test_embed_query_returns_vector(embeddings):
 
 
 def test_embed_query_dimensions(embeddings):
-    """text-embedding-004 παραγει 768-dimensional vectors."""
+    """text-embedding-004 produces 768-dimensional vectors."""
     vec = embeddings.embed_query("test")
     assert len(vec) == 768
 
 
 def test_similar_phrases_high_similarity(embeddings):
-    """Παρομοιες φρασεις → similarity > 0.8."""
+    """Similar phrases → similarity > 0.8."""
     v1 = embeddings.embed_query("ο Αλεξανδρος παει σχολειο")
     v2 = embeddings.embed_query("ο Αλεξανδρος εχει σχολειο σημερα")
     sim = cosine_similarity(v1, v2)
@@ -50,7 +50,7 @@ def test_similar_phrases_high_similarity(embeddings):
 
 
 def test_unrelated_phrases_low_similarity(embeddings):
-    """Άσχετες φρασεις → similarity < 0.6."""
+    """Irrelevant phrases → similarity < 0.6."""
     v1 = embeddings.embed_query("ο Αλεξανδρος παει σχολειο")
     v2 = embeddings.embed_query("git push origin main")
     sim = cosine_similarity(v1, v2)
@@ -59,7 +59,7 @@ def test_unrelated_phrases_low_similarity(embeddings):
 
 
 def test_cache_returns_same_vector(embeddings):
-    """Το ίδιο query επιστρεφει ακριβως το ίδιο vector (cache hit)."""
+    """The same query returns exactly the same vector (cache hit)."""
     v1 = embeddings.embed_query("cache test phrase 12345")
     v2 = embeddings.embed_query("cache test phrase 12345")
     assert v1 == v2

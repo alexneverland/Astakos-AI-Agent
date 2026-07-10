@@ -10,8 +10,8 @@ import html
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
 def send_telegram_msg_full(text: str, prefix: str = "", max_len: int = 3500, disable_notification: bool = False):
-    """Στέλνει ολόκληρο το κείμενο σε Telegram, σπάζοντάς το σε κομμάτια αν χρειαστεί
-    (αντί να το κόβει στη μέση). Telegram hard limit = 4096 chars/μήνυμα."""
+    """Sends the entire text to Telegram, splitting it into chunks if necessary
+    (instead of cutting it in half). Telegram hard limit = 4096 chars/message."""
     full = f"{prefix}{text}" if prefix else text
     if len(full) <= max_len:
         send_telegram_msg(full, disable_notification=disable_notification)
@@ -23,7 +23,7 @@ def send_telegram_msg_full(text: str, prefix: str = "", max_len: int = 3500, dis
 
 
 def format_for_telegram(text: str) -> str:
-    """Mastro-Fix: Μετατρέπει το Markdown του LLM σε ασφαλές HTML για το Telegram."""
+    """Mastro-Fix: Converts LLM Markdown into safe HTML for Telegram."""
     if not text:
         return ""
 
@@ -62,7 +62,7 @@ def _plain_telegram_fallback(text: str) -> str:
     return html.unescape(text)
 
 def send_telegram_msg(text: str, disable_notification: bool = False) -> int | None:
-    """Στέλνει μήνυμα στο Telegram. Επιστρέφει το message_id ή None."""
+    """Sends a message to Telegram. Returns the message_id or None."""
     token = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
 
@@ -99,7 +99,7 @@ def send_telegram_msg(text: str, disable_notification: bool = False) -> int | No
 
 
 async def send_telegram_photo(image_path: str, caption: str = ""):
-    """Στέλνει φωτογραφία στο Telegram από local path."""
+    """Sends a photo to Telegram from a local path."""
     import os
     token   = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
@@ -125,8 +125,8 @@ async def send_telegram_photo(image_path: str, caption: str = ""):
 
 def send_telegram_document(file_path: str, caption: str = "", drive_url: str = ""):
     """
-    Στέλνει αρχείο στο Telegram ως document (sendDocument).
-    Αν δοθεί drive_url, προσθέτει inline keyboard κουμπί "Άνοιγμα στο Google Drive".
+    Sends a file to Telegram as a document (sendDocument).
+    If drive_url is provided, it adds an inline keyboard button "Open in Google Drive".
     """
     import os, json
     token   = TELEGRAM_TOKEN
@@ -174,8 +174,8 @@ def send_telegram_document(file_path: str, caption: str = "", drive_url: str = "
 
 async def send_telegram_voice(text: str):
     """
-    [MASTRO-FIX]: Χρησιμοποιεί edge-tts αντί για gTTS.
-    Ίδια φωνή με το Web UI (el-GR-NestorasNeural), πολύ καλύτερη ποιότητα.
+    [MASTRO-FIX]: Uses edge-tts instead of gTTS.
+    Same voice as the Web UI (el-GR-NestorasNeural), much better quality.
     """
     import os
     import re
@@ -190,7 +190,7 @@ async def send_telegram_voice(text: str):
         return
 
     try:
-        # Καθαρισμός κειμένου
+        # Text cleaning Transcribed as: Text cleaning_
         clean_text = text
         clean_text = re.sub(r'```.*?```', '', clean_text, flags=re.DOTALL)
         clean_text = re.sub(r'\[.*?\]', '', clean_text)
@@ -202,7 +202,7 @@ async def send_telegram_voice(text: str):
 
         print(f"\033[95m[TTS Telegram]: Δημιουργία φωνής για: {clean_text[:50]}...\033[0m")
 
-        # edge-tts — ίδια φωνή με το Web UI
+        # edge-tts — same voice as the Web UI
         voice = "el-GR-NestorasNeural"
         communicate = edge_tts.Communicate(clean_text, voice, rate="+15%", volume="+10%")
         
@@ -218,7 +218,7 @@ async def send_telegram_voice(text: str):
             print("❌ edge-tts: Δεν παράχθηκε ήχος.")
             return
 
-        # Αποστολή στο Telegram ως voice
+        # Send to Telegram as voice
         url = f"https://api.telegram.org/bot{token}/sendVoice"
         response = requests.post(
             url,

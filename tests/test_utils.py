@@ -1,5 +1,5 @@
 """
-Tests για core/utils.py — clean_message και detect_prompt_injection (regex only).
+Tests for core/utils.py — clean_message and detect_prompt_injection (regex only).
 """
 from langchain_core.messages import AIMessage, HumanMessage
 from core.utils import is_reply_to_recent_mail_prompt, extract_list_selection_index
@@ -37,7 +37,7 @@ def test_clean_message_multimodal_skips_image():
 # -- detect_prompt_injection (regex patterns only, no LLM) --------
 
 def _check_injection(text: str) -> bool:
-    """Wrapper που δεν καλεί LLM — patchάρει το safe_gemini_call."""
+    """Wrapper that does not call an LLM — patches safe_gemini_call."""
     with patch("core.utils.detect_prompt_injection", wraps=detect_prompt_injection):
         with patch("services.gemini.safe_gemini_call", return_value=None):
             return detect_prompt_injection(text)

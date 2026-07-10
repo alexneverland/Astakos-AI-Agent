@@ -47,7 +47,7 @@ def classify_pending_asset_reply(text: str) -> str | None:
     if txt in yes_exact or (words and words[0] in yes_exact):
         return "yes"
 
-    # Η άρνηση πρέπει πάντα να κερδίζει.
+    # Negation must always win.
     if any(phrase in txt for phrase in no_phrases):
         return "no"
     if any(phrase in txt for phrase in yes_phrases):

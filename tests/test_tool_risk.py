@@ -1,5 +1,5 @@
 """
-Tests για core/tool_risk.py — get_risk() και core/approval.py — is_critical().
+Tests for core/tool_risk.py — get_risk() and core/approval.py — is_critical().
 """
 import sys, os, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,7 +45,7 @@ def test_get_news_is_safe():
     assert get_risk("get_news") == "SAFE"
 
 def test_unknown_tool_defaults_to_warning():
-    # Άγνωστο tool → WARNING (safe default)
+    # Unknown tool → WARNING (safe default)
     assert get_risk("some_unknown_tool_xyz") == "WARNING"
 
 

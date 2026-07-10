@@ -9,10 +9,10 @@ import threading
 
 class EventBus:
     """
-    Κεντρικό pub/sub σύστημα του Αστακού.
-    Αποσυνδέει components — χωρίς direct dependencies.
+    Central pub/sub system of Astakos.
+    Decouples components — no direct dependencies.
 
-    Χρήση:
+    Usage:
         from core.event_bus import bus
         bus.emit("routine_confirmed", routine_id=5, channel="telegram")
         bus.subscribe("routine_confirmed", my_handler)
@@ -23,12 +23,12 @@ class EventBus:
         self._lock = threading.Lock()
 
     def subscribe(self, event: str, handler):
-        """Εγγραφή handler για ένα event."""
+        """Register a handler for an event."""
         with self._lock:
             self._handlers[event].append(handler)
 
     def emit(self, event_name: str, **payload):
-        """Εκπομπή event σε όλους τους subscribers."""
+        """Broadcast event to all subscribers."""
         with self._lock:
             handlers = list(self._handlers.get(event_name, []))
         for fn in handlers:
@@ -38,15 +38,15 @@ class EventBus:
                 print(f"[EventBus]: ⚠️ handler error on '{event_name}': {e}")
 
     def registered_events(self) -> list:
-        """Debug: ποια events έχουν subscribers."""
+        """Debug: which events have subscribers."""
         with self._lock:
             return list(self._handlers.keys())
 
 
-# ── Singleton — import από παντού ───────────────────────────────
+# ── Singleton — import from everywhere ───────────────────────────of_thought
 bus = EventBus()
 
-# ── Κατάλογος Events (documentation) ───────────────────────────
+# ── Event List (documentation) ───────────────────────────
 # routine_triggered  (routine_id, event, confidence, batch, channel)
 # routine_confirmed  (routine_id, event, channel)
 # routine_dismissed  (routine_id, event, channel)

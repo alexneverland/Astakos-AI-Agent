@@ -90,26 +90,26 @@ def test_search_memory_can_return_sqlite_when_chroma_empty(monkeypatch):
 def test_stem_token_drops_common_greek_inflectional_endings():
     import tools.system as system
 
-    # Αυτό που πραγματικά χρειάζεται το _lexical_memory_matches δεν είναι
-    # "το στέλεχος των δύο λέξεων να είναι ίδιο" (λεπτομέρεια υλοποίησης
-    # που σπάει όταν οι λέξεις διαφέρουν σε μήκος), αλλά "το στέλεχος της
-    # λέξης-ερωτήματος να βρίσκεται μέσα στο αποθηκευμένο κείμενο":
-    # δηλ. stem(query_token) in stored_text. Ελέγχουμε ακριβώς αυτό.
+    # What _lexical_memory_matches actually needs is not
+    # "the stem of the two words must be the same" (implementation detail
+    # which breaks when words differ in length), but "the stem of the
+    # of the query-word being located within the stored text":
+    # i.e., stem(query_token) in stored_text. We check exactly this.
     assert system._stem_token("γενεθλιων") in "γενεθλια"
     assert system._stem_token("αλεξανδρος") == system._stem_token("αλεξανδρου")
     assert (system._stem_token("αλεξανδρου") in "αλεξανδρος"
             or system._stem_token("αλεξανδρος") in "αλεξανδρου")
-    # κοντές λέξεις μένουν ως έχουν (όχι θόρυβος κάτω από 4 χαρακτήρες)
+    # short words remain as they are (no noise under 4 characters)
     assert system._stem_token("σπιτι") and len(system._stem_token("σπιτι")) >= 4
 
 
 def test_lexical_memory_matches_finds_doc_despite_different_grammatical_case(monkeypatch):
     import tools.system as system
 
-    # Η μνήμη είναι αποθηκευμένη στην ονομαστική ("γενέθλια", "Αλέξανδρου"),
-    # αλλά ρωτάμε στη γενική πληθυντικού ("γενεθλιών") — φυσιολογική φράση
-    # ("για τα γενεθλιών του παιδιού"). Πριν το stemming, μόνο 1/2 tokens
-    # ταίριαζαν -> κάτω από το κατώφλι score >= 2 -> η μνήμη χανόταν εδώ.
+    # The memory is stored in the nominative case ("birthday", "Alexander's"),
+    # but we ask in the genitive plural ("γενεθλιών" / "of birthdays") — natural phrase
+    # ("for the child's birthday"). Before stemming, only 1/2 tokens
+    # matched -> below the threshold score >= 2 -> memory was being lost here.
     doc = system.SimpleNamespace(
         page_content="[USER_FACT]: Στις 2026-03-25 είναι τα γενέθλια του Αλέξανδρου, θέλει LEGO διαστημόπλοιο.",
         metadata={"category": "family"},

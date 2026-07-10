@@ -1,19 +1,19 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Project Tools — Code Navigation & Editing
-# Επιτρέπει στον Αστακό να διαβάζει και να επεξεργάζεται
-# αρχεία κώδικα από εγκεκριμένα project folders.
+# Allows the Lobster to read and process
+# code files from approved project folders.
 #
 # Permission model (project_access.json):
 #   { "C:\\my_project": {"read": true, "edit": true, "label": "MyApp"} }
 #
 # Tools:
-#   grant_project_access  — δίνει/αφαιρεί δικαίωμα σε folder (CRITICAL)
-#   list_project_files    — glob μέσα σε permitted folder (SAFE)
-#   read_project_file     — διαβάζει αρχείο με line numbers (SAFE)
+#   grant_project_access  — grants/removes permission to a folder (CRITICAL)
+#   list_project_files    — glob inside permitted folder (SAFE)
+#   read_project_file     — reads file with line numbers (SAFE)
 #   edit_project_file     — Python batch patch: old→new + syntax check (WARNING/CRITICAL)
-#   write_project_file    — full rewrite με syntax check (CRITICAL)
-#   list_recent_files     — bounded mtime scan, BASE_DIR χωρίς permission (SAFE)
+#   write_project_file    — full rewrite with syntax check (CRITICAL)
+#   list_recent_files     — bounded mtime scan, BASE_DIR without permission (SAFE)
 # ================================================================
 
 import os
@@ -61,8 +61,8 @@ def _normalize(path: str) -> str:
 
 def _check_permission(file_path: str, need_edit: bool = False) -> tuple[bool, str]:
     """
-    Ελέγχει αν το file_path βρίσκεται εντός κάποιου permitted project.
-    Επιστρέφει (ok, error_message).
+    Checks if the file_path is within a permitted project.
+    Returns (ok, error_message).
     """
     real = _normalize(file_path)
     access = _load_access()
@@ -78,7 +78,7 @@ def _check_permission(file_path: str, need_edit: bool = False) -> tuple[bool, st
 
 
 def _syntax_check(content: str, filename: str) -> tuple[bool, str]:
-    """Ελέγχει Python syntax. Επιστρέφει (ok, error_msg)."""
+    """Checks Python syntax. Returns (ok, error_msg)."""
     if not filename.endswith(".py"):
         return True, ""
     try:
@@ -89,7 +89,7 @@ def _syntax_check(content: str, filename: str) -> tuple[bool, str]:
 
 
 def _mini_diff(old: str, new: str, filename: str) -> str:
-    """Επιστρέφει compact diff summary."""
+    """Returns a compact diff summary."""
     old_lines = old.splitlines()
     new_lines = new.splitlines()
     diff = list(difflib.unified_diff(
@@ -99,7 +99,7 @@ def _mini_diff(old: str, new: str, filename: str) -> str:
     ))
     if not diff:
         return "(χωρίς αλλαγές)"
-    # Κρατάμε μέχρι 40 γραμμές diff για να μην πνίξουμε το context
+    # Keep up to 40 diff lines to avoid overwhelming the context
     summary = "\n".join(diff[:40])
     if len(diff) > 40:
         summary += f"\n... (+{len(diff)-40} γραμμές)"
@@ -111,12 +111,12 @@ def _mini_diff(old: str, new: str, filename: str) -> str:
 @tool
 def grant_project_access(folder_path: str, mode: str = "read") -> str:
     """
-    Δίνει ή αφαιρεί δικαίωμα στον Αστακό να διαβάζει/επεξεργάζεται ένα project folder.
+    Grants or revokes permission for Astakos to read/edit a project folder.
 
-    folder_path: Ο φάκελος του project (π.χ. C:\\mastroapp)
-    mode: "read"   → μόνο ανάγνωση
-          "edit"   → ανάγνωση + επεξεργασία
-          "revoke" → αφαίρεση δικαιώματος
+    folder_path: The project folder (e.g., C:\\mastroapp)
+    mode: "read"   → read-only
+          "edit"   → read + edit
+          "revoke" → revoke permission
     """
     mode = mode.strip().lower()
     if mode not in ("read", "edit", "revoke"):
@@ -133,7 +133,7 @@ def grant_project_access(folder_path: str, mode: str = "read") -> str:
         access = _load_access()
 
         if mode == "revoke":
-            # Βρίσκουμε και αφαιρούμε (case-insensitive)
+            # We find and remove (case-insensitive)
             to_del = [k for k in access if _normalize(k) == norm]
             if not to_del:
                 return f"⚠️ Δεν βρέθηκε εγγραφή για '{folder_path}'."
@@ -142,7 +142,7 @@ def grant_project_access(folder_path: str, mode: str = "read") -> str:
             _save_access(access)
             return f"✅ Αφαιρέθηκε η πρόσβαση για '{label}'."
 
-        # read ή edit
+        # read or edit
         access[folder_path] = {
             "read":       True,
             "edit":       (mode == "edit"),
@@ -157,18 +157,18 @@ def grant_project_access(folder_path: str, mode: str = "read") -> str:
 @tool
 def list_project_files(folder_path: str, pattern: str = "**/*.py") -> str:
     """
-    Επιστρέφει λίστα αρχείων από εγκεκριμένο project folder.
+    Returns a list of files from an approved project folder.
 
-    folder_path: Ο φάκελος (ή subfolder) του project
-    pattern:     Glob pattern (default: **/*.py). Παραδείγματα:
+    folder_path: The folder (or subfolder) of the project
+    pattern:     Glob pattern (default: **/*.py). Examples:
                  "*.py", "**/*.py", "core/*.py", "**/*.md"
     """
     folder_path = folder_path.strip().strip("'\"")
 
-    # Permission check (read αρκεί)
+    # Permission check (read is sufficient)
     ok, err = _check_permission(os.path.join(folder_path, "_"))
     if not ok:
-        # Δοκιμάζουμε και το ίδιο το folder
+        # We also test the folder itself
         ok, err = _check_permission(folder_path + os.sep + "x")
         if not ok:
             return err
@@ -184,13 +184,13 @@ def list_project_files(folder_path: str, pattern: str = "**/*.py") -> str:
     }
 
     matches = []
-    # Υποστηρίζουμε ** με os.walk
+    # We support ** with os.walk
     for root, dirs, files in os.walk(folder_path):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
         for fname in files:
             full = os.path.join(root, fname)
             rel  = os.path.relpath(full, folder_path)
-            # fnmatch με ** emulation: αν pattern έχει **, ελέγχουμε απλά το fname και το rel
+            # fnmatch with ** emulation: if pattern has **, we simply check fname and rel
             flat_pattern = pattern.replace("**/", "").replace("**\\", "")
             if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(fname, flat_pattern):
                 size = os.path.getsize(full)
@@ -211,11 +211,11 @@ def list_project_files(folder_path: str, pattern: str = "**/*.py") -> str:
 @tool
 def read_project_file(file_path: str, start_line: int = 1, end_line: int = 0) -> str:
     """
-    Διαβάζει αρχείο από εγκεκριμένο project folder με line numbers.
+    Reads a file from an approved project folder with line numbers.
 
-    file_path:  Πλήρες path αρχείου (π.χ. C:\\mastroapp\\core\\views.py)
-    start_line: Γραμμή έναρξης (default: 1)
-    end_line:   Γραμμή λήξης (default: 0 = μέχρι τέλος, max 500 γραμμές)
+    file_path:  Full file path (e.g., C:\\mastroapp\\core\\views.py)
+    start_line: Start line (default: 1)
+    end_line:   End line (default: 0 = until the end, max 500 lines)
     """
     file_path = file_path.strip().strip("'\"")
 
@@ -239,7 +239,7 @@ def read_project_file(file_path: str, start_line: int = 1, end_line: int = 0) ->
     total = len(all_lines)
     s = max(1, start_line) - 1
     e_line = end_line if end_line > 0 else total
-    e_line = min(e_line, s + 500)  # max 500 γραμμές ανά κλήση
+    e_line = min(e_line, s + 500)  # max 500 lines per call`
     e_line = min(e_line, total)
 
     selected = all_lines[s:e_line]
@@ -253,17 +253,17 @@ def read_project_file(file_path: str, start_line: int = 1, end_line: int = 0) ->
 @tool
 def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
     """
-    Επεξεργάζεται αρχείο σε εγκεκριμένο project folder.
-    Python batch approach: διαβάζει → replace → syntax check → γράφει.
+    Processes a file in an approved project folder.
+    Python batch approach: read → replace → syntax check → write.
 
-    file_path: Πλήρες path αρχείου
-    old_str:   Το ακριβές κείμενο που θέλεις να αλλάξεις (πρέπει να είναι μοναδικό)
-    new_str:   Το νέο κείμενο που θα αντικαταστήσει το old_str
+    file_path: Full file path
+    old_str:   The exact text you want to change (must be unique)
+    new_str:   The new text that will replace old_str
 
-    ΚΑΝΟΝΕΣ:
-    - Αν old_str δεν βρεθεί → σφάλμα (δεν γράφει τίποτα)
-    - Αν old_str βρεθεί >1 φορά → σφάλμα (ambiguous — δώσε πιο μεγάλο context)
-    - Αν .py και νέος κώδικας έχει SyntaxError → abort (δεν γράφει τίποτα)
+    RULES:
+    - If old_str is not found → error (writes nothing)
+    - If old_str is found >1 time → error (ambiguous — provide larger context)
+    - If .py and new code has a SyntaxError → abort (writes nothing)
     """
     file_path = file_path.strip().strip("'\"")
 
@@ -286,7 +286,7 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
     if old_str == new_str:
         return "⚠️ old_str και new_str είναι πανομοιότυπα — καμία αλλαγή έγινε."
 
-    # Μέτρηση εμφανίσεων
+    # Count occurrences
     count = original.count(old_str)
     if count == 0:
         return (
@@ -299,10 +299,10 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
             f"Δώσε πιο πολύ context στο old_str ώστε να είναι μοναδικό."
         )
 
-    # Εφαρμογή replace
+    # Apply replace
     patched = original.replace(old_str, new_str, 1)
 
-    # Syntax check για .py
+    # Syntax check for .py
     ok_syn, syn_err = _syntax_check(patched, fname)
     if not ok_syn:
         return (
@@ -311,7 +311,7 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
             f"Διόρθωσε το new_str και ξαναπροσπάθησε."
         )
 
-    # Γράψιμο
+    # Writing
     try:
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(patched)
@@ -324,13 +324,13 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
     delta = new_lines - old_lines
     delta_str = f"+{delta}" if delta >= 0 else str(delta)
 
-    # Βρίσκουμε σε ποια γραμμή έγινε η αλλαγή
+    # Find in which line the change occurred
     for i, (a, b) in enumerate(zip(original.splitlines(), patched.splitlines()), 1):
         if a != b:
             change_line = i
             break
     else:
-        change_line = old_lines  # προσθήκη στο τέλος
+        change_line = old_lines  # append to the end
 
     syn_msg = f"✅ Syntax check: OK" if fname.endswith(".py") else "➖ Syntax check: N/A (non-python)"
 
@@ -349,13 +349,13 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
 @tool
 def grep_project_files(folder_path: str, pattern: str, file_pattern: str = "*.py", context_lines: int = 2) -> str:
     """
-    Ψάχνει για pattern μέσα στα αρχεία ενός εγκεκριμένου project folder.
-    Επιστρέφει αρχείο + γραμμή + περιεχόμενο (σαν ripgrep).
+    Searches for a pattern within the files of an approved project folder.
+    Returns file + line + content (similar to ripgrep).
 
-    folder_path:   Ο φάκελος του project (π.χ. C:\\mastro_app)
-    pattern:       Regex pattern (π.χ. "CustomerSerializer", "def create", "temp_id=None")
-    file_pattern:  Glob για τύπο αρχείων (default: *.py). Παραδείγματα: "*.js", "*.py", "*"
-    context_lines: Γραμμές context πριν/μετά από κάθε match (default: 2, max: 5)
+    folder_path:   The project folder (e.g., C:\\mastro_app)
+    pattern:       Regex pattern (e.g., "CustomerSerializer", "def create", "temp_id=None")
+    file_pattern:  Glob for file types (default: *.py). Examples: "*.js", "*.py", "*"
+    context_lines: Lines of context before/after each match (default: 2, max: 5)
     """
     import re
 
@@ -448,8 +448,8 @@ def grep_project_files(folder_path: str, pattern: str, file_pattern: str = "*.py
     return "\n".join(lines_out)
 
 
-# Ίδιοι θορυβώδεις φάκελοι με τα list_project_files/grep_project_files,
-# + credentials (ευαίσθητο) — reused από list_recent_files.
+# Same noisy folders as list_project_files/grep_project_files,
+# + credentials (sensitive) — reused from list_recent_files.
 _RECENT_SKIP_DIRS = {
     "venv", ".venv", "__pycache__", ".git", "node_modules",
     "dist", "build", ".tox", ".mypy_cache", "migrations",
@@ -462,23 +462,23 @@ _RECENT_SKIP_FILES = {".env", "secrets.py"}
 @tool
 def list_recent_files(folder_path: str = "", top_n: int = 15) -> str:
     """
-    Βρίσκει τα πιο πρόσφατα τροποποιημένα αρχεία σε έναν φάκελο — γρήγορο,
-    bounded os.walk (ΟΧΙ subprocess/PowerShell), αγνοεί venv/.git/__pycache__/
-    node_modules και άλλους θορυβώδεις φακέλους.
+    Finds the most recently modified files in a folder — fast,
+    bounded os.walk (NOT subprocess/PowerShell), ignores venv/.git/__pycache__/
+    node_modules and other noisy folders.
 
-    ΧΡΗΣΙΜΟ ΓΙΑ: "τι άλλαξα πρόσφατα", "ποια αρχεία άγγιξα", "τι έχω αλλάξει
-    αλλά δεν έχω κάνει commit ακόμα" — ΕΙΔΙΚΑ για untracked/uncommitted αρχεία
-    που git log/git status δεν τα δείχνει εύκολα.
-    Για committed git ιστορικό προτίμησε git (run_terminal_command).
-    ΜΗΝ φτιάχνεις ad-hoc PowerShell (Get-ChildItem -Recurse) για αυτό το σκοπό
-    — είναι αργό σε μεγάλα δέντρα και κολλάει στο 30s subprocess timeout.
+    USEFUL FOR: "what did I change recently", "which files did I touch", "what have I changed
+    but not committed yet" — ESPECIALLY for untracked/uncommitted files
+    that git log/git status doesn't show easily.
+    For committed git history prefer git (run_terminal_command).
+    DO NOT write ad-hoc PowerShell (Get-ChildItem -Recurse) for this purpose
+    — it is slow on large trees and hangs on the 30s subprocess timeout.
 
-    folder_path: Φάκελος για σκανάρισμα. Άδειο = ολόκληρο το Astakos repo
-                 (BASE_DIR) — δεν χρειάζεται grant_project_access, είναι ο
-                 ίδιος ο κώδικας του Αστακού.
-                 Για εξωτερικά projects (εκτός C:\\astakos_v2) χρειάζεται
-                 πρώτα grant_project_access.
-    top_n: Πόσα πιο πρόσφατα αρχεία να επιστρέψει (default 15, max 50).
+    folder_path: Folder to scan. Empty = the entire Astakos repo
+                 (BASE_DIR) — does not require grant_project_access, it is the
+                 Astakos code itself.
+                 For external projects (outside C:\\astakos_v2) it requires
+                 grant_project_access first.
+    top_n: How many of the most recent files to return (default 15, max 50).
     """
     folder_path = (folder_path or "").strip().strip("'\"")
     top_n = max(1, min(int(top_n), 50))
@@ -500,7 +500,7 @@ def list_recent_files(folder_path: str = "", top_n: int = 15) -> str:
 
     entries: list[tuple[float, str]] = []
     scanned = 0
-    SAFETY_CAP = 8000  # bounded — δεν χρειάζεται subprocess timeout
+    SAFETY_CAP = 8000  # bounded — no subprocess timeout needed
     stopped_early = False
 
     for root, dirs, files in os.walk(target):
@@ -553,12 +553,12 @@ def list_recent_files(folder_path: str = "", top_n: int = 15) -> str:
 @tool
 def write_project_file(file_path: str, content: str) -> str:
     """
-    Γράφει ολόκληρο αρχείο σε εγκεκριμένο project folder (full rewrite).
-    Χρησιμοποίησε ΜΟΝΟ για νέα αρχεία ή όταν το edit_project_file δεν αρκεί.
-    Για υπάρχοντα αρχεία, προτίμησε edit_project_file.
+    Writes an entire file to an approved project folder (full rewrite).
+    Use ONLY for new files or when edit_project_file is not sufficient.
+    For existing files, prefer edit_project_file.
 
-    file_path: Πλήρες path αρχείου
-    content:   Πλήρες περιεχόμενο νέου αρχείου
+    file_path: Full file path
+    content:   Full content of the new file
     """
     file_path = file_path.strip().strip("'\"")
 
@@ -568,7 +568,7 @@ def write_project_file(file_path: str, content: str) -> str:
 
     fname = os.path.basename(file_path)
 
-    # Syntax check πριν γράψουμε
+    # Syntax check before writing
     ok_syn, syn_err = _syntax_check(content, fname)
     if not ok_syn:
         return (

@@ -77,8 +77,8 @@ def _merge_phase_timings(target, source):
 # ────────────────────────────────────────────────────────────────
 def _ensure_text_response(response, llm_instance, system_prompt: str, safe_history: list):
     """
-    Gemini quirk: μετά από tool execution επιστρέφει μερικές φορές κενό content.
-    Retry μέχρι 3 φορές με escalating instruction.
+    Gemini quirk: sometimes returns empty content after tool execution.
+    Retry up to 3 times with escalating instructions.
     """
     ensure_started = perf_counter()
     retry_count = 0
@@ -86,7 +86,7 @@ def _ensure_text_response(response, llm_instance, system_prompt: str, safe_histo
     if clean_message(response.content).strip() or getattr(response, "tool_calls", []):
         _attach_phase_timing(response, "ensure_text_ms", int((perf_counter() - ensure_started) * 1000))
         _attach_phase_timing(response, "ensure_text_retries", retry_count)
-        return response  # Όλα ΟΚ
+        return response  # All OK
 
     suffixes = [
         "\n\n[ΑΠΑΡΑΙΤΗΤΟ]: Πρέπει να απαντήσεις με κείμενο στον χρήστη. Ενημέρωσέ τον για ό,τι έγινε.",
@@ -110,33 +110,33 @@ def _ensure_text_response(response, llm_instance, system_prompt: str, safe_histo
     
     _attach_phase_timing(response, "ensure_text_ms", int((perf_counter() - ensure_started) * 1000))
     _attach_phase_timing(response, "ensure_text_retries", retry_count)
-    return response  # Επιστρέφουμε το original αν όλα αποτύχουν
+    return response  # We return the original if all else fails
 
 # ────────────────────────────────────────────────────────────────
-# [MASTRO-SHIELD]: Κεντρικός καθαρισμός ορφανών tool_calls
-# Χρησιμοποιείται από ΟΛΟΥΣ τους agents για να αποφύγουν το 400 INVALID_ARGUMENT
+# [MASTRO-SHIELD]: Central cleanup of orphaned tool_calls
+# Used by ALL agents to avoid 400 INVALID_ARGUMENT
 # ────────────────────────────────────────────────────────────────
 
 def clean_orphan_tool_calls(history: list, k: int = 40) -> list:
     """
-    [MASTRO-SHIELD v5]: Αποστειρωτής για Gemini 3.x sequence errors.
+    [MASTRO-SHIELD v5]: Sterilizer for Gemini 3.x sequence errors.
 
-    Αφαιρεί AIMessages που έχουν κλήση εργαλείου και ΔΕΝ ακολουθούνται από
-    αντίστοιχο ToolMessage. Το Gemini απαιτεί αυστηρή αλληλουχία:
+    Removes AIMessages that have a tool call and are NOT followed by a
+    corresponding ToolMessage. Gemini requires a strict sequence:
         AI(tool_call) → Tool(result)
-    Αν λείπει το Tool → 400 INVALID_ARGUMENT.
+    If the Tool is missing → 400 INVALID_ARGUMENT.
 
-    Δύο τρόποι να εντοπίσει tool call σε AIMessage:
-      1. Παραδοσιακός: msg.tool_calls populated (Gemini 1.x/2.x).
-      2. [ΝΕΟ v5]: Το content είναι λίστα και περιέχει part τύπου
-         "function_call" ή "tool_use" — συμβαίνει με Gemini 3.x όταν το
-         langchain_google_genai δεν ξετυλίγει σωστά τα native parts σε
-         tool_calls attribute.
+    Two ways to detect a tool call in an AIMessage:
+      1. Traditional: msg.tool_calls populated (Gemini 1.x/2.x).
+      2. [NEW v5]: The content is a list and contains a part of type
+         "function_call" or "tool_use" — this happens with Gemini 3.x when
+         langchain_google_genai does not properly unpack native parts into
+         the tool_calls attribute.
 
-    Αν εντοπιστεί ορφανό, κρατάμε μόνο το text part (αν υπάρχει) σαν
-    κανονικό AIMessage. Αν δεν υπάρχει text, το πετάμε εντελώς.
+    If an orphan is detected, we keep only the text part (if it exists) as
+    a regular AIMessage. If no text exists, we discard it completely.
     """
-    # Πρώτο πέρασμα: βασικό φιλτράρισμα από filter_messages
+    # First pass: basic filtering from filter_messages
     history = filter_messages(history, k=k)
 
     clean = []
@@ -145,11 +145,11 @@ def clean_orphan_tool_calls(history: list, k: int = 40) -> list:
             clean.append(msg)
             continue
 
-        # Έλεγχος 1: tool_calls attribute (παραδοσιακός τρόπος)
+        # Check 1: tool_calls attribute (traditional way)
         tool_calls = getattr(msg, "tool_calls", [])
         expected_ids = set(tc.get("id") for tc in tool_calls if isinstance(tc, dict) and tc.get("id"))
 
-        # Έλεγχος 2: function_call/tool_use parts μέσα στο content list (Gemini 3.x)
+        # Check 2: function_call/tool_use parts within the content list (Gemini 3.x)
         has_inline_fc = False
         raw_content = getattr(msg, "content", None)
         if isinstance(raw_content, list):
@@ -175,11 +175,11 @@ def clean_orphan_tool_calls(history: list, k: int = 40) -> list:
             next_is_tool = (i + 1 < len(history) and getattr(history[i + 1], "type", "") == "tool")
             
             if missing_ids or (has_inline_fc and not next_is_tool):
-                # Ορφανή κλήση εργαλείου — κρατάμε μόνο το text content αν υπάρχει
+                # Orphaned tool call — we only keep the text content if it exists_
                 text_only = clean_message(raw_content) if raw_content else ""
                 if text_only:
                     clean.append(AIMessage(content=text_only))
-                # Αν δεν έχει text, το παρακάμπτουμε εντελώς
+                # If it doesn't have text, we skip it entirely
                 continue
 
         clean.append(msg)
@@ -205,20 +205,20 @@ def supervisor_node(state):
     router_llm = llm.with_structured_output(Router)
     last_content = clean_message(state['messages'][-1].content)
 
-    # ── /plan: υψηλότερη προτεραιότητα από όλα ────────────────────
-    # Χρησιμοποιούμε regex γιατί το server βάζει timestamp [HH:MM] πριν το μήνυμα
+    # ── /plan: higher priority than everything else ────────────────────
+    # We use regex because the server prepends a timestamp [HH:MM] to the message
     import re as _re
     if _re.search(r'(?:^|\])\s*/plan', last_content.strip()):
         print(f"\033[95m[Τροχονόμος]: -> planner (/plan command)\033[0m")
         return {"next_agent": "planner"}
 
-    # ── Capability Registry: πρώτο φίλτρο πριν το LLM ───────────
+    # ── Capability Registry: first filter before the LLM ───────────
     registry_agent = lookup_agent(str(last_content))
     if registry_agent:
         print(f"\033[95m[Τροχονόμος]: -> {registry_agent} (registry)\033[0m")
         return {"next_agent": registry_agent}
 
-    # ── LLM fallback: κανονική απόφαση Supervisor ─────────────────
+    # ── LLM fallback: normal Supervisor decision ─────────────────
     system_base = load_agent_prompt("supervisor", "Είσαι ο Εργοδηγός του Αστακού.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
 
@@ -250,7 +250,7 @@ def dev_agent_node(state):
     from core.utils import load_agent_prompt
     from config import BASE_DIR  
     
-    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls — ίδιο με όλους τους agents
+    # [MASTRO-SHIELD]: Cleanup of orphan tool_calls — same for all agents
     history = clean_orphan_tool_calls(state["messages"], k=40)
     
     system_base = load_agent_prompt("Dev_Agent", "Είσαι ο Dev_Agent, ο Αρχιμηχανικός Προγραμματιστής του Αστακού.")
@@ -286,7 +286,7 @@ def chat_agent_node(state: AgentState):
     import os
     import base64
     
-    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
+    # [MASTRO-SHIELD]: Cleanup of orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
     last_msg_text = clean_message(history[-1].content) if history else ""
     latest_user_text = ""
@@ -345,8 +345,8 @@ def chat_agent_node(state: AgentState):
     from tools.system import archive_file, retrieve_photo, save_to_memory, delete_from_memory, search_memory, control_spotify, get_current_location, read_local_file
     from tools.web import execute_local_pipeline, relay_local_payload, search_supermarket_prices
 
-    # [FAREWELL GUARD]: Αν ο χρήστης αποχαιρετά, αφαιρούμε archive_file
-    # ώστε το LLM να μην αρχειοθετεί αυτόματα αρχεία που βρίσκονται στο context.
+    # [FAREWELL GUARD]: If the user says goodbye, we remove archive_file
+    # so that the LLM does not automatically archive files that are in the context.
     _FAREWELL_WORDS = (
         "καληνύχτα", "καλη νύχτα", "gn ", "good night", "αντίο", "bye",
         "ta leme", "τα λέμε", "γεια σου", "γεια χαρα", "ciao", "adio",
@@ -392,7 +392,7 @@ def home_agent_node(state):
     from tools.web import get_navigation_info, search_goldmall_offers
     from astakos_skills.recipe_expert import recipe_expert, log_meal
     
-    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
+    # [MASTRO-SHIELD]: Cleaning up orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
 
     tools_to_bind = [
@@ -448,7 +448,7 @@ def web_agent_node(state: AgentState):
     import os
     import base64
 
-    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
+    # [MASTRO-SHIELD]: Cleanup of orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
     last_msg_text = clean_message(history[-1].content) if history else ""
     latest_user_text = ""
@@ -536,8 +536,8 @@ def web_agent_node(state: AgentState):
         from langchain_core.messages import AIMessage as _AIMsg
         return {"messages": [_AIMsg(content=guarded_reply)], "current_agent": "Web_Agent"}
 
-    # [MASTRO-FIX]: Αν η σύνθεση είναι κενή (blocked server-side) και υπάρχουν
-    # tool results στο history, επιστρέφουμε τα raw αποτελέσματα ως fallback.
+    # [MASTRO-FIX]: If the composition is empty (blocked server-side) and there are
+    # tool results in history, we return the raw results as a fallback.
     if not content and not has_tool_calls:
         tool_results = [m for m in history if getattr(m, "type", "") == "tool"]
         if tool_results:
@@ -565,7 +565,7 @@ def tech_agent_node(state: AgentState):
     import os
     import base64
     
-    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls — αυτό έλυσε το 400 error
+    # [MASTRO-SHIELD]: Cleaning orphan tool_calls — this resolved the 400 error
     history = clean_orphan_tool_calls(state["messages"], k=40)
     last_msg_text = clean_message(history[-1].content) if history else ""
 
@@ -645,7 +645,7 @@ def git_agent_node(state):
     from core.utils import load_agent_prompt, build_prompt
     from config import BASE_DIR
 
-    # [MASTRO-SHIELD v5]: Ενιαία ασπίδα για όλους τους agents
+    # [MASTRO-SHIELD v5]: Unified shield for all agents
     history = clean_orphan_tool_calls(state["messages"], k=40)
     safe_history = sanitize_history_for_gemini(history)
 
@@ -666,7 +666,7 @@ def mail_agent_node(state):
     from core.utils import load_agent_prompt, extract_list_selection_index
     from config import BASE_DIR  
     
-    # [MASTRO-SHIELD]: Καθαρισμός ορφανών tool_calls
+    # [MASTRO-SHIELD]: Cleanup of orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
     
     system_base = load_agent_prompt("Mail_Agent", "Είσαι ο Mail_Agent. Διαχειρίζεσαι το Gmail.")
@@ -674,7 +674,7 @@ def mail_agent_node(state):
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
     # [MASTRO-FIX v4]: Inject known email IDs into system_prompt.
-    # Prefer newest IDs from recent turns, so "διάβασέ το" keeps working on
+    # Prefer newest IDs from recent turns, so "read it" keeps working on
     # the mail the user just discussed instead of an older email in history.
     import re as _re_mail
     _known_ids = []
@@ -723,7 +723,7 @@ def mail_agent_node(state):
             for msg in history[last_human_idx:]
             if getattr(msg, 'type', '') == 'ai'
         )
-        # Έλεγχος πρόθεσης χρήστη
+        # User intent check
         user_q = next(
             (clean_message(m.content) for m in reversed(history)
              if getattr(m, "type", "") == "human"),

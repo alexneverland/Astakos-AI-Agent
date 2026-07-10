@@ -1,21 +1,21 @@
 """
-Tests για Mail_Agent loop guard logic (v2, v3, v4).
-Δοκιμάζουμε τη λογική απευθείας χωρίς να φορτώνουμε ολόκληρο το core.agents
-(εξαρτήσεις όπως ChromaDB, Vertex AI κτλ είναι βαριές και δεν υπάρχουν στο CI).
-Τρέξε: pytest tests/test_mail_agent_loop_guard.py -v
+Tests for Mail_Agent loop guard logic (v2, v3, v4).
+We test the logic directly without loading the entire core.agents
+(dependencies like ChromaDB, Vertex AI, etc. are heavy and do not exist in the CI).
+Run: pytest tests/test_mail_agent_loop_guard.py -v
 """
 import re
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 
 
-# ── Εξαγωγή λογικής που αντιστοιχεί στον κώδικα του agents.py ──────────────
+# ── Extraction of logic corresponding to the agents.py code ──────────────
 
 def _clean(x):
     return x if isinstance(x, str) else (x or "")
 
 
 def _extract_known_ids(history):
-    """Αντιγράφει τη λογική v4 ID extraction: newest IDs first."""
+    """Replicates the v4 ID extraction logic: newest IDs first."""
     known_ids = []
     for msg in reversed(history):
         c = _clean(getattr(msg, "content", "") or "")
@@ -27,7 +27,7 @@ def _extract_known_ids(history):
 
 
 def _current_turn_mail_results(history):
-    """Αντιγράφει τη λογική v3 last_human_idx (lines 564-574 agents.py)."""
+    """Copies the v3 last_human_idx logic (lines 564-574 agents.py)."""
     last_human_idx = next(
         (len(history) - 1 - i for i, m in enumerate(reversed(history))
          if getattr(m, "type", "") == "human"),
@@ -43,8 +43,8 @@ def _current_turn_mail_results(history):
 
 
 def _auto_read_result(mail_tool_results):
-    """Αντιγράφει τη λογική v4 auto-read (lines 580-597 agents.py).
-    Επιστρέφει (email_id, True) αν πρέπει auto-read, αλλιώς (None, False)."""
+    """Copies the v4 auto-read logic (lines 580-597 agents.py).
+    Returns (email_id, True) if auto-read is required, otherwise (None, False)."""
     search_hits = [r for r in mail_tool_results if r.startswith("ID: ")]
     read_hits = [r for r in mail_tool_results if "Περιεχόμενο:" in r]
     if search_hits and not read_hits:
@@ -59,19 +59,19 @@ def _auto_read_result(mail_tool_results):
 # ═══════════════════════════════════════════════════════════════════════
 
 def test_v3_empty_on_new_turn_with_no_tools():
-    """Νέα ερώτηση χωρίς tool results στο current turn → κενή λίστα."""
+    """New question without tool results in the current turn → empty list."""
     history = [
         HumanMessage(content="irthe neo mail"),
         AIMessage(content="Vrika to"),
         ToolMessage(content="ID: abc1234567890123 | Kaggle", tool_call_id="x"),
         AIMessage(content="Thes na to diavaso?"),
-        HumanMessage(content="nai"),  # νέο turn, κανένα tool μετά
+        HumanMessage(content="nai"),  # new turn, no tool after
     ]
     assert _current_turn_mail_results(history) == []
 
 
 def test_v3_detects_results_in_same_turn():
-    """Tool result ΜΕΤΑ το τελευταίο human → ανιχνεύεται."""
+    """Tool result AFTER the last human → detected."""
     history = [
         HumanMessage(content="irthe neo mail kaggle"),
         ToolMessage(content="ID: 19ec7b7695a56646 | Kaggle | Day 1",
@@ -83,7 +83,7 @@ def test_v3_detects_results_in_same_turn():
 
 
 def test_v3_read_result_detected():
-    """📩 Περιεχόμενο: prefix ανιχνεύεται."""
+    """📩 Content: prefix detected."""
     history = [
         HumanMessage(content="diabase to"),
         ToolMessage(content="📩 Περιεχόμενο: Hello World",
@@ -95,13 +95,13 @@ def test_v3_read_result_detected():
 
 
 def test_v3_old_results_not_included_in_new_turn():
-    """ToolMessages από παλιό turn δεν μπαίνουν στα results του νέου turn."""
+    """ToolMessages from an old turn are not included in the results of the new turn."""
     history = [
         HumanMessage(content="παλιά ερώτηση"),
         ToolMessage(content="ID: abc1234567890123 | old", tool_call_id="old"),
         AIMessage(content="Ιδού"),
         HumanMessage(content="νέα ερώτηση"),
-        # Κανένα tool μετά το νέο HumanMessage
+        # No tool after the new HumanMessage
     ]
     assert _current_turn_mail_results(history) == []
 
@@ -111,7 +111,7 @@ def test_v3_old_results_not_included_in_new_turn():
 # ═══════════════════════════════════════════════════════════════════════
 
 def test_v4_auto_read_triggers_on_search_only():
-    """Μόνο search results (ID:) → auto-read με σωστό ID."""
+    """Only search results (ID:) → auto-read with the correct ID."""
     results = ["ID: 19ec7b7695a56646 | Kaggle | Day 1 | Sun 14 Jun"]
     eid, should = _auto_read_result(results)
     assert should is True
@@ -119,7 +119,7 @@ def test_v4_auto_read_triggers_on_search_only():
 
 
 def test_v4_auto_read_skips_when_read_result_exists():
-    """Υπάρχει read result (Περιεχόμενο:) → δεν κάνει auto-read, synthesize."""
+    """There is a read result (Content:) → does not auto-read, synthesize."""
     results = [
         "ID: 19ec7b7695a56646 | Kaggle | Day 1",
         "📩 Περιεχόμενο: Αγαπητέ Λάζαρε...",
@@ -130,14 +130,14 @@ def test_v4_auto_read_skips_when_read_result_exists():
 
 
 def test_v4_auto_read_skips_when_no_valid_id():
-    """Αν δεν υπάρχει valid 16-char hex ID → δεν κάνει auto-read."""
+    """If there is no valid 16-char hex ID → it does not auto-read."""
     results = ["ID: SHORT | bad format"]
     eid, should = _auto_read_result(results)
     assert should is False
 
 
 def test_v4_auto_read_uses_first_id_when_multiple():
-    """Πολλά IDs → παίρνει το πρώτο."""
+    """Multiple IDs → takes the first one."""
     results = [
         "ID: aaaa000000000001 | Email 1",
         "ID: bbbb000000000002 | Email 2",
@@ -152,7 +152,7 @@ def test_v4_auto_read_uses_first_id_when_multiple():
 # ═══════════════════════════════════════════════════════════════════════
 
 def test_v4_id_extracted_from_tool_message():
-    """ID εξάγεται από ToolMessage στο ιστορικό."""
+    """ID is extracted from ToolMessage in the history."""
     history = [
         HumanMessage(content="irthe neo mail"),
         ToolMessage(content="ID: 19ec7b7695a56646 | Kaggle | Day 1",
@@ -163,7 +163,7 @@ def test_v4_id_extracted_from_tool_message():
 
 
 def test_v4_id_extracted_from_sanitized_human_message():
-    """ID εξάγεται και από sanitized HumanMessage (αποτέλεσμα sanitize_history_for_gemini)."""
+    """ID is also extracted from sanitized HumanMessage (result of sanitize_history_for_gemini)."""
     history = [
         HumanMessage(content="[Αποτέλεσμα Εργαλείου None]: ID: 19ec7b7695a56646 | Kaggle"),
     ]
@@ -172,7 +172,7 @@ def test_v4_id_extracted_from_sanitized_human_message():
 
 
 def test_v4_id_extracted_from_ai_message():
-    """ID εξάγεται και από AIMessage (όταν o agent ανέφερε το ID στην απάντησή του)."""
+    """ID is also extracted from AIMessage (when the agent mentioned the ID in its response)."""
     history = [
         AIMessage(content="Βρήκα email με ID: 19ec7b7695a56646 από Kaggle."),
     ]
@@ -181,7 +181,7 @@ def test_v4_id_extracted_from_ai_message():
 
 
 def test_v4_no_duplicate_ids():
-    """Το ίδιο ID δεν εμφανίζεται δύο φορές."""
+    """The same ID does not appear twice."""
     history = [
         HumanMessage(content="ID: 19ec7b7695a56646 first"),
         ToolMessage(content="ID: 19ec7b7695a56646 | again", tool_call_id="x"),
@@ -191,7 +191,7 @@ def test_v4_no_duplicate_ids():
 
 
 def test_v4_multiple_different_ids_collected():
-    """Πολλά διαφορετικά IDs συλλέγονται."""
+    """Many different IDs are collected."""
     history = [
         ToolMessage(content="ID: aaaa000000000001 | Email 1\nID: bbbb000000000002 | Email 2",
                     tool_call_id="x"),
@@ -202,7 +202,7 @@ def test_v4_multiple_different_ids_collected():
 
 
 def test_v4_latest_turn_id_is_preferred():
-    """Αν υπάρχουν παλιά και νέα IDs, πρώτο πρέπει να βγαίνει το πιο πρόσφατο."""
+    """If there are old and new IDs, the most recent one must come first."""
     history = [
         ToolMessage(content="ID: aaaa000000000001 | Old Kaggle email",
                     tool_call_id="old"),
@@ -217,7 +217,7 @@ def test_v4_latest_turn_id_is_preferred():
 
 
 def test_v4_empty_history_no_ids():
-    """Άδειο ιστορικό → κανένα ID."""
+    """Empty history → no ID."""
     assert _extract_known_ids([]) == []
 
 
@@ -270,7 +270,7 @@ def test_full_flow_read_result_then_synthesize():
 
 def test_full_flow_second_turn_uses_hint():
     """
-    Turn 2 (new human message 'ναι διάβασε'):
+    Turn 2 (new human message 'yes read'):
     → v3 returns empty (no tool results after new human)
     → v4 hint extraction finds ID from previous ToolMessage
     → hint injected into system_prompt

@@ -1,6 +1,6 @@
 """
-Tests για το save_to_memory fire-and-forget async behaviour.
-Τρέξε: venv/Scripts/python.exe tests/test_save_to_memory_async.py
+Tests for the save_to_memory fire-and-forget async behaviour.
+Run: venv/Scripts/python.exe tests/test_save_to_memory_async.py
 """
 import sys, os, time, threading
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,8 +21,8 @@ def check(desc, cond, detail=""):
 
 
 def test_save_to_memory_async():
-    # ── 1. Επιστρέφει ΑΜΕΣΑ (< 1s) ────────────────────────────────────
-    # Mocking embeddings + vector_store ώστε να μην κάνει πραγματικό Vertex AI call
+    # ── 1. Returns IMMEDIATELY (< 1s) ─────────────────────────────────
+    # Mocking embeddings + vector_store to avoid making a real Vertex AI call_
     mock_vs  = MagicMock()
     mock_emb = MagicMock()
     mock_emb.embed_query.return_value = [0.0] * 768
@@ -43,14 +43,14 @@ def test_save_to_memory_async():
     check("Επιστρέφει σε < 1s (fire-and-forget)", elapsed < 1.0,
           f"elapsed={elapsed:.2f}s")
 
-    # ── 2. Επιστρέφει string ────────────────────────────────────────────
+    # ── 2. Returns string ───────────────────────────────────────────────
     check("Επιστρέφει string", isinstance(result, str))
 
-    # ── 3. Δεν κάνει blocking — δεν περιέχει 'Error' ──────────────────
+    # ── 3. Does not block — does not contain 'Error' ──────────────────
     check("Δεν επιστρέφει Error", "Error" not in result, result[:80])
 
-    # ── 4. Background thread γράφει τελικά στο vector_store ──────────
-    # Περιμένουμε max 3s για το background thread
+    # ── 4. Background thread finally writes to vector_store ──────────
+    # We wait for a max of 3s for the background thread`of`
     mock_vs2  = MagicMock()
     mock_emb2 = MagicMock()
     mock_emb2.embed_query.return_value = [0.0] * 768
@@ -75,7 +75,7 @@ def test_save_to_memory_async():
 
     check("Background thread καλεί add_texts μέσα σε 5s", written_in_time)
 
-    # ── 5. Duplicate skip — add_texts ΔΕΝ καλείται ────────────────────
+    # ── 5. Duplicate skip — add_texts IS NOT called ───────────────────
     mock_vs3  = MagicMock()
     mock_emb3 = MagicMock()
     mock_emb3.embed_query.return_value = [0.0] * 768
@@ -94,12 +94,12 @@ def test_save_to_memory_async():
             "entities": "Αλέξανδρος, LEGO",
             "category": "family",
         })
-        time.sleep(3)  # δίνουμε χρόνο στο background
+        time.sleep(3)  # we give time to the background
 
     check("Duplicate: add_texts ΔΕΝ κλήθηκε", not mock_vs3.add_texts.called,
           f"add_texts called {mock_vs3.add_texts.call_count} times")
 
-    # ── Αποτελέσματα ────────────────────────────────────────────────────
+    # ── Results ─────────────────────────────────────────────────────────
     assert not errors, f"{len(errors)} αποτυχίες: {errors}"
 
 if __name__ == "__main__":

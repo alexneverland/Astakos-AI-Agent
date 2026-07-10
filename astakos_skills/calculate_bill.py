@@ -1,36 +1,36 @@
 def calculate_bill_cost(consumption_kwh, previous_balance, current_fixed_charges, municipal_charges, vat_rate=0.06):
     """
-    Υπολογίζει το κόστος του λογαριασμού ρεύματος με βάση τα στοιχεία του PDF.
+    Calculates the electricity bill cost based on the PDF data.
     """
-    # Τιμές από τον λογαριασμό
+    # Values from the account
     tier1_limit = 101
     tier1_rate = 0.13630
     tier2_rate = 0.14500
     kot_discount = 0.07500
     etmear_rate = 0.01700
     
-    # Χρέωση ενέργειας
+    # Energy charge
     if consumption_kwh <= tier1_limit:
         energy_charge = consumption_kwh * tier1_rate
     else:
         energy_charge = (tier1_limit * tier1_rate) + ((consumption_kwh - tier1_limit) * tier2_rate)
     
-    # Έκπτωση ΚΟΤ
+    # Social Residential Tariff (KOT) Discount
     discount = consumption_kwh * kot_discount
     
-    # Ρυθμιζόμενες χρεώσεις (ΕΤΜΕΑΡ)
+    # Regulated charges (ETMEAR)
     etmear_charge = consumption_kwh * etmear_rate
     
-    # Σύνολο προ ΦΠΑ
+    # Total before VAT
     subtotal = energy_charge + current_fixed_charges + etmear_charge - discount
     
-    # ΦΠΑ
+    # VAT
     vat = subtotal * vat_rate
     
-    # Τελικό ποσό τρέχοντος
+    # Final amount of current
     total_current = subtotal + vat + municipal_charges
     
-    # Συνολικό ποσό με παλαιότερο χρέος
+    # Total amount with older debt
     total_to_pay = total_current + previous_balance
     
     return {
@@ -43,7 +43,7 @@ def calculate_bill_cost(consumption_kwh, previous_balance, current_fixed_charges
         "total_to_pay": round(total_to_pay, 2)
     }
 
-# Τεστ με τα δεδομένα του λογαριασμού
-# 133 kWh, 110€ ανεξόφλητο, 4.83 πάγια, 13.09 δημοτικά
+# Test with the account data
+# 133 kWh, 110€ unpaid balance, 4.83 standing charges, 13.09 municipal fees
 result = calculate_bill_cost(133, 110, 4.83, 13.09)
 print(result)

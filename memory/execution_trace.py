@@ -2,15 +2,15 @@
 # Project: Astakos AI Agent 🦞
 # Module:  Execution Trace — Per-turn agent/tool call recorder
 #
-# Γράφει ένα JSON trace ανά συνομιλία:
+# Writes a JSON trace per conversation:
 #   logs/traces/YYYY-MM-DD.json
 #
-# Κάθε trace περιέχει:
+# Each trace contains:
 #   - user_message, channel, timestamp
-#   - agent που χειρίστηκε
-#   - κάθε tool call: name, args (preview), result (preview), duration_ms
+#   - agent that handled
+#   - each tool call: name, args (preview), result (preview), duration_ms
 #   - final response (preview)
-#   - error / loop_guard αν υπάρχει
+#   - error / loop_guard if it exists
 # ================================================================
 
 import os
@@ -23,8 +23,8 @@ from datetime import datetime
 _TRACES_DIR = os.path.join(os.path.dirname(__file__), "..", "logs", "traces")
 _write_lock = threading.Lock()
 
-_MAX_STR = 300   # max chars για args/result preview
-_MAX_MSG = 200   # max chars για user/response preview
+_MAX_STR = 300   # max chars for args/result preview
+_MAX_MSG = 200   # max chars for user/response preview
 
 
 def _truncate(val, maxlen: int = _MAX_STR) -> str:
@@ -34,11 +34,11 @@ def _truncate(val, maxlen: int = _MAX_STR) -> str:
 
 class ExecutionTrace:
     """
-    Δημιουργείται στην αρχή κάθε graph.stream() call.
-    Συλλέγει δεδομένα ενώ τρέχει το stream.
-    Αποθηκεύεται με .save() στο τέλος.
+    Created at the beginning of each graph.stream() call.
+    Collects data while the stream is running.
+    Saved using .save() at the end.
 
-    Χρήση:
+    Usage:
         trace = ExecutionTrace(channel="telegram", user_message="...")
         for event in graph.stream(...):
             trace.process_event(event)
@@ -52,7 +52,7 @@ class ExecutionTrace:
         self.timestamp      = datetime.now().isoformat(timespec="seconds")
         self.channel        = channel
         self.user_message   = _truncate(user_message, _MAX_MSG)
-        self.agent          = None          # τελευταίος agent node
+        self.agent          = None          # last agent node
         self.tool_calls     = []            # list of dicts
         self.response       = None          # final response preview
         self.error          = None
@@ -63,7 +63,7 @@ class ExecutionTrace:
     # ── Stream event processor ───────────────────────────────────
 
     def process_event(self, event: dict):
-        """Καλείται για κάθε event του graph.stream()."""
+        """Called for each event of graph.stream()."""
         for node, data in event.items():
             if node == "tool_loop_block":
                 self.loop_guard = True
@@ -72,7 +72,7 @@ class ExecutionTrace:
             msgs = data.get("messages", [])
             for msg in msgs:
                 self._process_message(node, msg)
-            # Agent node → αποθήκευσε όνομα
+            # Agent node → save name
             if node not in ("supervisor", "tools", "__end__"):
                 self.agent = node
 
@@ -85,7 +85,7 @@ class ExecutionTrace:
                 except Exception:
                     continue
 
-        # AIMessage με tool_calls → pending calls
+        # AIMessage with tool_calls → pending calls
         tool_calls = getattr(msg, "tool_calls", None)
         if tool_calls:
             for tc in tool_calls:
@@ -98,7 +98,7 @@ class ExecutionTrace:
                     "t0":         time.monotonic(),
                 }
 
-        # ToolMessage → match με pending και record result
+        # ToolMessage → match with pending and record result
         if getattr(msg, "type", None) == "tool" or msg.__class__.__name__ == "ToolMessage":
             tid     = getattr(msg, "tool_call_id", None)
             name    = getattr(msg, "name", None)
@@ -111,7 +111,7 @@ class ExecutionTrace:
 
             result_str  = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
 
-            # Detect loop guard στο result
+            # Detect loop guard in the result
             if "Tool loop stopped" in result_str or "Repeated tool call" in result_str:
                 self.loop_guard = True
 
@@ -126,14 +126,14 @@ class ExecutionTrace:
     # ── Finalize & Save ──────────────────────────────────────────
 
     def mark_phase(self, name: str, duration_ms: int):
-        """Αποθηκεύει timing για ένα συγκεκριμένο phase του turn."""
+        """Saves the timing for a specific phase of the turn."""
         try:
             self.phase_timings[name] = int(duration_ms)
         except Exception:
             self.phase_timings[name] = duration_ms
 
     def finalize(self, response: str | None = None, error: str | None = None):
-        """Κλείνει το trace με final response και error."""
+        """Closes the trace with a final response and error."""
         if response:
             self.response = _truncate(response, _MAX_MSG)
             if "Tool loop stopped" in response or "Repeated tool call" in response or "επαναλαμβανόμενες κλήσεις εργαλείων" in response:
@@ -143,7 +143,7 @@ class ExecutionTrace:
         self.duration_ms = int((time.monotonic() - self.start_ts) * 1000)
 
     def save(self):
-        """Αποθηκεύει στο logs/traces/YYYY-MM-DD.json (thread-safe append)."""
+        """Saves to logs/traces/YYYY-MM-DD.json (thread-safe append)."""
         try:
             os.makedirs(_TRACES_DIR, exist_ok=True)
             today     = datetime.now().strftime("%Y-%m-%d")
@@ -185,7 +185,7 @@ class ExecutionTrace:
 # ── Convenience: read today's traces ────────────────────────────
 
 def load_traces(date: str | None = None, limit: int = 50) -> list:
-    """Διαβάζει traces ημέρας (default: σήμερα). Επιστρέφει τα τελευταία N."""
+    """Reads day traces (default: today). Returns the last N."""
     day      = date or datetime.now().strftime("%Y-%m-%d")
     log_file = os.path.join(_TRACES_DIR, f"{day}.json")
     if not os.path.exists(log_file):

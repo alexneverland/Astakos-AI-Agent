@@ -6,11 +6,11 @@
 # ================================================================
 
 """
-main.py — CLI Entry Point του Αστακού
+main.py — Astakos CLI Entry Point
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Τρέξε: python main.py
+Run: python main.py
 
-Εναλλακτικά:
+Alternatively:
   API Server  → uvicorn api.server:server --reload
   Telegram Bot → python clients/telegram_bot.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -179,7 +179,7 @@ def _drain_queue(timeout: float = 5.0) -> None:
 
 
 def _do_session_summary():
-    """Τρέχει session summary με timeout 5s."""
+    """Runs session summary with a 5s timeout."""
     if _summary_done.is_set():
         return
     _summary_done.set()
@@ -201,7 +201,7 @@ def _do_session_summary():
 def main():
     global last_interaction_time
 
-    # Εκκίνηση workers
+    # Start workers
     threading.Thread(target=reminder_worker,  daemon=True).start()
     threading.Thread(target=proactive_worker, daemon=True).start()
     threading.Thread(target=queue_worker,     daemon=True).start()

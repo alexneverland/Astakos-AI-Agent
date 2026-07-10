@@ -67,14 +67,14 @@ def test_user_fact_skipped_when_lexical_overlap_exists(memory_mgr, monkeypatch):
             self.metadata = {"category": "home"}
 
     # Mock similarity_search_with_score to return embedding-near AND lexical-rich doc
-    # Score < 0.25 and shared tokens >= 2 ("μετρητής", "δεδδηε")
+    # Score < 0.25 and shared tokens >= 2 ("meter", "deddie")
     mock_search = MagicMock(return_value=[(MockDoc("[USER_FACT] Ο μετρητής ΔΕΔΔΗΕ βρίσκεται στο ισόγειο"), 0.15)])
     monkeypatch.setattr(vs.vector_store, "similarity_search_with_score", mock_search)
     
     mock_add = MagicMock()
     monkeypatch.setattr(vs.vector_store, "add_texts", mock_add)
 
-    # Should have shared tokens "μετρητής", "δεδδηε", "ισόγειο" -> 3 tokens
+    # Should have shared tokens "μετρητής" (meter), "δεδδηε" (HEDNO), "ισόγειο" (ground floor) -> 3 tokens
     result = memory_mgr.save("fact", fact="[USER_FACT] Ο μετρητής ΔΕΔΔΗΕ είναι στο ισόγειο", category="home", agent_name="test_agent")
     
     # Should duplicate skip and NOT add

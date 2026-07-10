@@ -8,18 +8,18 @@
 # ================================================================
 #
 # Usage:
-#   python clean.py                       # Όλα τα tasks (default)
-#   python clean.py --dry-run             # Δες τι θα έκανε χωρίς αλλαγή
-#   python clean.py --capabilities        # Μόνο σύμπτυξη capabilities
-#   python clean.py --sessions            # Μόνο trim sessions
-#   python clean.py --working-memory      # Μόνο σύμπτυξη working memory
-#   python clean.py --sessions-keep 20    # Custom όριο για sessions
-#   python clean.py --memory-audit        # Μόνο rotation logs/memory_audit
+#   python clean.py                       # All tasks (default)
+#   python clean.py --dry-run             # See what it would do without making changes
+#   python clean.py --capabilities        # Only collapse capabilities
+#   python clean.py --sessions            # Trim sessions only
+#   python clean.py --working-memory      # Only working memory consolidation
+#   python clean.py --sessions-keep 20    # Custom limit for sessions
+#   python clean.py --memory-audit        # Only rotation logs/memory_audit
 #   python clean.py --memory-audit-keep 60
-#   python clean.py --no-backup           # Παράκαμψη backup (όχι recommended)
-#   python clean.py --photos              # Σβήσε temp φωτογραφίες (αναρχειοθέτητες)
+#   python clean.py --no-backup           # Bypass backup (not recommended)
+#   python clean.py --photos              # Delete temp photos (unarchived)
 #
-# Συνδυάζονται:
+# Combined:
 #   python clean.py --capabilities --sessions --dry-run
 #
 # ================================================================
@@ -32,7 +32,7 @@ import argparse
 import sqlite3
 from datetime import datetime
 
-# Προσθήκη του project root στο path για να φορτώσει core/config
+# Add the project root to the path to load core/config
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # ────────────────────────────────────────────────────────────────
@@ -42,11 +42,11 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 BACKUP_DIR   = os.path.join(PROJECT_ROOT, "_cleaner_backups")
 
-# Προεπιλεγμένα όρια rotation
+# Default rotation limits
 DEFAULT_SESSIONS_KEEP = 30
 DEFAULT_MEMORY_AUDIT_KEEP_DAYS = 60
 
-# Paths αρχείων (με fallback αν δεν φορτώσει το config)
+# File paths (with fallback if config fails to load)
 try:
     from config import (
         WORKING_MEMORY_FILE,
@@ -67,7 +67,7 @@ except ImportError:
 PHOTOS_INDEX_FILE = os.path.join(PROJECT_ROOT, "astakos_photos_index.json")
 PHOTOS_DIR        = os.path.join(PROJECT_ROOT, "telegram_photos")
 
-# LLM loader (lazy, με fallback αν δεν φορτώσει)
+# LLM loader (lazy, with fallback if it doesn't load)
 def _load_llm():
     try:
         from core.brain import llm_heavy
@@ -82,24 +82,24 @@ def _load_llm():
 # ────────────────────────────────────────────────────────────────
 
 _COLORS = {
-    "info":   "\033[94m",  # μπλε
-    "ok":     "\033[92m",  # πράσινο
-    "warn":   "\033[93m",  # κίτρινο
-    "err":    "\033[91m",  # κόκκινο
-    "header": "\033[95m",  # μωβ
-    "dim":    "\033[90m",  # γκρι
+    "info":   "\033[94m",  # blue
+    "ok":     "\033[92m",  # green
+    "warn":   "\033[93m",  # yellow
+    "err":    "\033[91m",  # red
+    "header": "\033[95m",  # purple
+    "dim":    "\033[90m",  # gray
 }
 _RESET = "\033[0m"
 
 
 def log(msg: str, color: str = "info") -> None:
-    """Έγχρωμο logging Mastro-style."""
+    """Mastro-style color logging."""
     c = _COLORS.get(color, "")
     print(f"{c}{msg}{_RESET}")
 
 
 def header(title: str) -> None:
-    """Header για κάθε task."""
+    """Header for each task."""
     line = "─" * 60
     log(f"\n{line}", "dim")
     log(f"🦞 {title}", "header")
@@ -112,8 +112,8 @@ def header(title: str) -> None:
 
 def backup_file(path: str, enabled: bool = True) -> str:
     """
-    Αντιγράφει το αρχείο σε φάκελο _cleaner_backups/ με timestamp.
-    Επιστρέφει το path του backup ή "" αν δεν έγινε.
+    Copies the file to a _cleaner_backups/ folder with a timestamp.
+    Returns the backup path or "" if it was not created.
     """
     if not enabled:
         log("⏭️  Παράκαμψη backup (--no-backup)", "warn")
@@ -129,7 +129,7 @@ def backup_file(path: str, enabled: bool = True) -> str:
 
 
 def safe_load_json(path: str):
-    """Φορτώνει JSON με fallback σε None αν αποτύχει."""
+    """Loads JSON with a fallback to None if it fails."""
     if not os.path.exists(path):
         log(f"⚠️  Δεν υπάρχει: {os.path.basename(path)}", "warn")
         return None
@@ -142,7 +142,7 @@ def safe_load_json(path: str):
 
 
 def safe_save_json(path: str, data, dry_run: bool = False) -> bool:
-    """Γράφει JSON. Σε dry_run, δεν αγγίζει το αρχείο."""
+    """Writes JSON. In dry_run, it does not touch the file."""
     if dry_run:
         log("🧪 DRY-RUN: δεν γράφτηκε τίποτα", "warn")
         return True
@@ -157,7 +157,7 @@ def safe_save_json(path: str, data, dry_run: bool = False) -> bool:
 
 
 def strip_markdown_json(text: str) -> str:
-    """Καθαρίζει markdown wrappers (```json ... ```) γύρω από LLM output."""
+    """Cleans markdown wrappers (```json ... ```) around LLM output."""
     text = text.strip()
     if text.startswith("```json"):
         text = text[7:]
@@ -501,13 +501,13 @@ def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
 
 
 # ────────────────────────────────────────────────────────────────
-# TASK 6: PHOTOS — Σβήσε αναρχειοθέτητες φωτογραφίες
+# TASK 6: PHOTOS — Delete unarchived photos
 # ────────────────────────────────────────────────────────────────
 
 def clean_photos(dry_run: bool = False) -> bool:
     """
-    Διαβάζει το astakos_photos_index.json, βρίσκει ποια .jpg στο telegram_photos/
-    δεν είναι αρχειοθετημένη, και τα σβήνει.
+    Reads astakos_photos_index.json, finds which .jpg files in telegram_photos/
+    are not archived, and deletes them.
     """
     header("Καθαρισμός αναρχειοθέτητων φωτογραφιών (telegram_photos/)")
 
@@ -515,18 +515,18 @@ def clean_photos(dry_run: bool = False) -> bool:
         log(f"⚠️  Ο φάκελος {PHOTOS_DIR} δεν υπάρχει.", "warn")
         return True
 
-    # Φόρτωση index
+    # Load index
     index_data = safe_load_json(PHOTOS_INDEX_FILE) or []
     archived_paths = set()
     for entry in index_data:
         fp = entry.get("file_path", "")
         if fp:
-            # Κρατάμε μόνο το basename για σύγκριση
+            # Keep only the basename for comparison
             archived_paths.add(os.path.basename(fp).lower())
 
     log(f"📚 Αρχειοθετημένες φωτό στο index: {len(archived_paths)}", "info")
 
-    # Σάρωση φακέλου
+    # Folder scan
     all_files = [f for f in os.listdir(PHOTOS_DIR) if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))]
     log(f"📁 Φωτογραφίες στον φάκελο: {len(all_files)}", "info")
 
@@ -562,7 +562,7 @@ def rotate_memory_audit_logs(
     dry_run: bool = False,
     audit_dir: str = MEMORY_AUDIT_DIR,
 ) -> bool:
-    """Σβήνει παλιά daily memory audit JSON files, κρατώντας τις τελευταίες keep_days ημέρες."""
+    """Deletes old daily memory audit JSON files, keeping the last keep_days days."""
     header(f"Memory audit retention (κρατά {keep_days} μέρες)")
     if keep_days < 1:
         log("❌ Το keep_days πρέπει να είναι >= 1.", "err")
@@ -635,7 +635,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Αν δεν επιλέχθηκε κανένα συγκεκριμένο task, τα τρέχουμε όλα
+    # If no specific task was selected, we run them all
     no_specific = not any([
         args.capabilities, args.conversation_db,
         args.sessions, args.profile, args.photos, args.memory_audit

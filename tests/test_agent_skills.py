@@ -4,8 +4,8 @@ from astakos_skills.read_agent_skill import list_agent_skills, read_agent_skill
 
 def test_list_agent_skills_contains_known_skill():
     """
-    Δοκιμή ότι το εργαλείο επιστρέφει λίστα που περιέχει τα γνωστά skills
-    (π.χ. 'test-driven-development', 'using-agent-skills').
+    Test that the tool returns a list containing the known skills
+    (e.g., 'test-driven-development', 'using-agent-skills').
     """
     result = list_agent_skills.invoke({})
     assert "Διαθέσιμα Agent Skills:" in result
@@ -14,7 +14,7 @@ def test_list_agent_skills_contains_known_skill():
 
 def test_read_agent_skill_valid():
     """
-    Δοκιμή ότι η ανάγνωση ενός υπαρκτού skill επιστρέφει το περιεχόμενό του.
+    Test that reading an existing skill returns its content.
     """
     result = read_agent_skill.invoke({"skill_name": "using-agent-skills"})
     assert "=== KANONEΣ / WORKFLOW ΓΙΑ ΤΟ SKILL: using-agent-skills ===" in result
@@ -22,7 +22,7 @@ def test_read_agent_skill_valid():
 
 def test_read_agent_skill_invalid():
     """
-    Δοκιμή ότι η ανάγνωση ενός ανύπαρκτου skill επιστρέφει κατάλληλο μήνυμα λάθους.
+    Test that reading a non-existent skill returns an appropriate error message.
     """
     result = read_agent_skill.invoke({"skill_name": "non-existent-skill-123"})
     assert "Σφάλμα:" in result

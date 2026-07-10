@@ -12,24 +12,24 @@ from datetime import datetime
 import sqlite3
 from langchain_core.messages import HumanMessage
 from config import WORKING_MEMORY_FILE, STATE_DB
-from memory.vector_store import memory, is_semantically_duplicate, memory_lock  # [MASTRO-FIX]: ΕΝΑ lock, όχι δύο
+from memory.vector_store import memory, is_semantically_duplicate, memory_lock  # [MASTRO-FIX]: ONE lock, not two
 from core.utils import clean_message
 
 # ════════════════════════════════════════════════════════════════
-# WORKING MEMORY — "Προσκήνιο" (τι κάνει ο Λάζαρος ΤΩΡΑ)
+# WORKING MEMORY — "Foreground" (what Lazarus is doing NOW)
 # ════════════════════════════════════════════════════════════════
 
 def update_working_memory(user_text, ai_text):
-    """Εξάγει ακαριαία context tags από τον διάλογο."""
+    """Instantly extracts context tags from the dialogue."""
     try:
         print("\033[90m[System]: Ξεκίνησε η ανάλυση Προσκηνίου...\033[0m")
         from core.brain import llm, safe_llm_invoke
 
-        # Φοράμε τα "γυαλιά" (Smart Parser) πριν κόψουμε τους χαρακτήρες
+        # We put on the "glasses" (Smart Parser) before cutting the characters
         safe_user = clean_message(user_text)
         safe_ai = clean_message(ai_text)
 
-        # Επιλέγουμε τους τελευταίους 400 χαρακτήρες
+        # We select the last 400 characters
         user_context = safe_user[-400:] if len(safe_user) > 400 else safe_user
         ai_context = safe_ai[-400:] if len(safe_ai) > 400 else safe_ai
 
@@ -53,8 +53,8 @@ def update_working_memory(user_text, ai_text):
 
         response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
         
-        # [MASTRO-CLEAN]: Χρησιμοποιούμε τον Smart Parser ΚΑΙ στην έξοδο! 
-        # Τέλος τα "isinstance(list)" και οι λούπες.
+        # [MASTRO-CLEAN]: We use the Smart Parser on the output as well!
+        # No more "isinstance(list)" and loops.
         new_tags = clean_message(response.content)
 
         print(f"\n\033[94m[DEBUG Προσκήνιο]: '{new_tags}'\033[0m")
@@ -63,7 +63,7 @@ def update_working_memory(user_text, ai_text):
             print("Λάζαρος: ", end="", flush=True)
             return
 
-        from memory.vector_store import memory # Φρόντισε να υπάρχει αυτό το import
+        from memory.vector_store import memory # Make sure this import exists
         memory.save(memory_type="working", new_tags=new_tags)
         print(f"\033[92m[Προσκήνιο JSON]: ΓΡΑΦΤΗΚΕ -> {new_tags}\033[0m")
         print("Λάζαρος: ", end="", flush=True)
@@ -74,7 +74,7 @@ def update_working_memory(user_text, ai_text):
 
 
 # ════════════════════════════════════════════════════════════════
-# CAPABILITIES LOG — "Αυτογνωσία"
+# CAPABILITIES LOG — "Self-awareness"
 # ════════════════════════════════════════════════════════════════
 
 def _load_capabilities() -> dict:
@@ -102,7 +102,7 @@ def _load_capabilities() -> dict:
 
 
 def _save_capability(capability_type: str, description: str) -> str:
-    # [MASTRO-FIX]: Χρήση του memory_lock από vector_store — ένα lock για όλα
+    # [MASTRO-FIX]: Use of memory_lock from vector_store — one lock for everything
     with memory_lock:
         data = _load_capabilities()
         conn = None
@@ -127,7 +127,7 @@ def _save_capability(capability_type: str, description: str) -> str:
                 key = "cannot_do"
                 db_type = "cannot_do"
 
-            # Threshold 0.88 ΟΚ για capabilities (γενικές ικανότητες)
+            # Threshold 0.88 OK for capabilities (general abilities)
             if is_semantically_duplicate(description, data[key], threshold=0.88):
                 conn.commit()
                 return "duplicate"

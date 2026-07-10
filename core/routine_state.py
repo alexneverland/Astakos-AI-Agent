@@ -10,14 +10,14 @@ from core.exceptions import RoutineConflictError
 
 
 class RoutineState(Enum):
-    LEARNED         = "learned"          # 1η αναφορά — inactive, δεν ειδοποιεί
-    ACTIVE          = "active"           # ≥2 αναφορές — ειδοποιεί κανονικά
-    TRIGGER_PENDING = "trigger_pending"  # Notification στάλθηκε, περιμένει απάντηση
-    CONFIRMED       = "confirmed"        # Χρήστης είπε "ναι" → αμέσως ACTIVE
+    LEARNED         = "learned"          # 1st report — inactive, does not notify
+    ACTIVE          = "active"           # ≥2 reports — alerts normally
+    TRIGGER_PENDING = "trigger_pending"  # Notification sent, awaiting reply
+    CONFIRMED       = "confirmed"        # User said "yes" → immediately ACTIVE
     IGNORED         = "ignored"          # Timeout — cooldown doubled → ACTIVE
-    DISMISSED       = "dismissed"        # Χρήστης είπε "όχι" → decay → ACTIVE/DECAYED
-    DECAYED         = "decayed"          # Confidence < 0.1 → προς ARCHIVED
-    ARCHIVED        = "archived"         # Νεκρή — δεν ειδοποιεί, μόνο re-teach επιτρέπεται
+    DISMISSED       = "dismissed"        # User said "no" → decay → ACTIVE/DECAYED
+    DECAYED         = "decayed"          # Confidence < 0.1 → to ARCHIVED
+    ARCHIVED        = "archived"         # Dead — does not notify, only re-teach is allowed
 
 
 # ────────────────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ class RoutineState(Enum):
 
 VALID_TRANSITIONS: dict[RoutineState, list[RoutineState]] = {
     RoutineState.LEARNED: [
-        RoutineState.ACTIVE,     # 2η αναφορά
+        RoutineState.ACTIVE,     # 2nd report
         RoutineState.ARCHIVED,   # manual delete
     ],
     RoutineState.ACTIVE: [
@@ -42,30 +42,30 @@ VALID_TRANSITIONS: dict[RoutineState, list[RoutineState]] = {
         RoutineState.ACTIVE,
     ],
     RoutineState.CONFIRMED: [
-        RoutineState.ACTIVE,      # auto-immediate μετά από confirm
+        RoutineState.ACTIVE,      # auto-immediate after confirm
     ],
     RoutineState.IGNORED: [
         RoutineState.ACTIVE,      # cooldown expired, ready again
-        RoutineState.DECAYED,     # confidence < 0.1 μετά από πολλά ignores
+        RoutineState.DECAYED,     # confidence < 0.1 after many ignores
     ],
     RoutineState.DISMISSED: [
-        RoutineState.ACTIVE,      # confidence ακόμα OK μετά από decay
+        RoutineState.ACTIVE,      # confidence still OK after decay
         RoutineState.DECAYED,     # confidence < 0.1
     ],
     RoutineState.DECAYED: [
-        RoutineState.ARCHIVED,    # τελικός θάνατος
-        RoutineState.ACTIVE,      # re-taught (νέο upsert)
+        RoutineState.ARCHIVED,    # final death
+        RoutineState.ACTIVE,      # re-taught (new upsert)
     ],
     RoutineState.ARCHIVED: [
-        RoutineState.LEARNED,     # re-teach από μηδέν
+        RoutineState.LEARNED,     # re-teach from scratch
     ],
 }
 
 
 def validate_transition(from_state: RoutineState, to_state: RoutineState) -> None:
     """
-    Raises RoutineConflictError αν η μετάβαση δεν επιτρέπεται.
-    Χρήση: validate_transition(current_state, RoutineState.TRIGGER_PENDING)
+    Raises RoutineConflictError if the transition is not allowed.
+    Usage: validate_transition(current_state, RoutineState.TRIGGER_PENDING)
     """
     if from_state == to_state:
         return
@@ -83,7 +83,7 @@ def validate_transition(from_state: RoutineState, to_state: RoutineState) -> Non
 
 
 def is_notifiable(state: RoutineState) -> bool:
-    """True αν η ρουτίνα μπορεί να ειδοποιήσει τώρα."""
+    """True if the routine can notify now."""
     return state == RoutineState.ACTIVE
 
 

@@ -28,21 +28,21 @@ PROJECT_ID = os.getenv("PROJECT_ID", "astakos-finall")
 LOCATION = os.getenv("LOCATION", "us-central1")
 
 # ==========================================
-# 2. ΦΑΚΕΛΟΙ (DIRECTORIES)
+# 2. DIRECTORIES
 # ==========================================
 WORKSPACE_DIR     = os.path.join(BASE_DIR, "astakos_skills")
 PHOTOS_DIR        = os.path.join(BASE_DIR, "telegram_photos")
 CHROMA_DB_DIR     = os.path.join(BASE_DIR, "chroma_db")
-UPLOADS_DIR       = os.path.join(BASE_DIR, "telegram_uploads")  # ← κεντρικός uploads φάκελος
+UPLOADS_DIR       = os.path.join(BASE_DIR, "telegram_uploads")  # ← main uploads folder
 MEMORY_AUDIT_DIR  = os.path.join(BASE_DIR, "logs", "memory_audit")
 
 for directory in [WORKSPACE_DIR, PHOTOS_DIR, CHROMA_DB_DIR, UPLOADS_DIR, MEMORY_AUDIT_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # ==========================================
-# 3. ΑΡΧΕΙΑ ΜΝΗΜΗΣ & JSON (PATHS)
+# 3. MEMORY FILES & JSON (PATHS)
 # ==========================================
-# Όλα τα JSON μνήμης είναι στον ROOT φάκελο (BASE_DIR)
+# All memory JSONs are in the ROOT folder (BASE_DIR)
 WORKING_MEMORY_FILE  = os.path.join(BASE_DIR, "astakos_working_memory.json")
 PHOTOS_INDEX_FILE    = os.path.join(BASE_DIR, "astakos_photos_index.json")
 DOCS_INDEX_FILE      = os.path.join(BASE_DIR, "astakos_docs_index.json")    
@@ -52,11 +52,11 @@ EMBEDDINGS_CACHE_DB  = os.path.join(BASE_DIR, "astakos_embeddings_cache.db")
 PROFILE_DB           = os.path.join(BASE_DIR, "astakos_profile.db")
 SESSIONS_FILE        = os.path.join(BASE_DIR, "astakos_sessions.json")
 CONVERSATION_DB_FILE = os.path.join(BASE_DIR, "astakos_conversation_history.db")
-# GPS: Συντεταγμένες σπιτιού για location reminders (reminders ζουν πλέον στο STATE_DB)
-HOME_COORDS   = (40.646558, 22.939036)   # Piston 7 — διόρθωσε αν χρειαστεί
-HOME_RADIUS_M = 150                   # trigger εντός 150 μέτρων
-WORK_COORDS   = (40.690914, 22.929607)   # ΒΙ.ΠΕ. Ευκαρπίας
-WORK_RADIUS_M = 300                   # Λίγο μεγαλύτερη ακτίνα για βιομηχανική περιοχή
+# GPS: Home coordinates for location reminders (reminders now live in STATE_DB)
+HOME_COORDS   = (40.646558, 22.939036)   # Piston 7 — correct if necessary
+HOME_RADIUS_M = 150                   # trigger within 150 meters
+WORK_COORDS   = (40.690914, 22.929607)   # Industrial Area (Ind. Area) of Efkarpia
+WORK_RADIUS_M = 300                   # Slightly larger radius for industrial area
 CAPABILITIES_FILE    = os.path.join(BASE_DIR, "astakos_capabilities.json")
 MESSENGER_DRAFT_FILE = os.path.join(BASE_DIR, "messenger_draft.json")
 MESSENGER_DRAFT_TTL_SECONDS = int(os.getenv("MESSENGER_DRAFT_TTL_SECONDS", "1800"))
@@ -67,14 +67,14 @@ STATE_DB             = os.path.join(BASE_DIR, "astakos_state.db")
 GPS_STORAGE_FILE     = os.path.join(BASE_DIR, "last_location.json")
 
 # ==========================================
-# 4. ΡΥΘΜΙΣΕΙΣ AI
+# 4. AI SETTINGS
 # ==========================================
 SIM_THRESHOLD_DISTANCE = 0.30
 SIM_THRESHOLD          = 0.88
 
 # ==========================================
-# 5. ΡΥΘΜΙΣΕΙΣ ROUTINES
+# 5. ROUTINES SETTINGS
 # ==========================================
-# Αν ο bot ήταν offline και μια ρουτίνα χάθηκε, στέλνει deferred follow-up
-# μόνο αν το χαμένο trigger δεν είναι παλαιότερο από X λεπτά.
+# If the bot was offline and a routine was missed, it sends a deferred follow-up
+# only if the missed trigger is not older than X minutes.
 ROUTINE_MISS_GRACE_MINUTES = 90

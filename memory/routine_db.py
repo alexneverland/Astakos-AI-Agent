@@ -9,7 +9,7 @@ from core.exceptions import RoutineConflictError, DBWriteError
 from core.routine_state import RoutineState, validate_transition, is_notifiable, state_from_str
 
 DB_PATH      = os.path.join(os.path.dirname(__file__), "..", "astakos_routines.db")
-db_write_lock = threading.Lock()  # Serializes writes — reads χωρίς lock (WAL mode)
+db_write_lock = threading.Lock()  # Serializes writes — lock-free reads (WAL mode)
 
 # ────────────────────────────────────────────────────────────────
 # CANONICALIZATION LAYER
@@ -41,7 +41,7 @@ def normalize_event(event: str) -> str:
 
 
 def normalize_search_text(text: str) -> str:
-    """Accent-insensitive normalizer για lightweight routine matching."""
+    """Accent-insensitive normalizer for lightweight routine matching."""
     import unicodedata
 
     raw = str(text or "").strip().lower()
@@ -53,7 +53,7 @@ def make_fingerprint(day: str, time: str, event: str) -> str:
     return hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
 
 def event_similarity(a: str, b: str) -> float:
-    """Stage 2: difflib ratio για minor variations."""
+    """Stage 2: difflib ratio for minor variations."""
     return SequenceMatcher(None, normalize_event(a), normalize_event(b)).ratio()
 
 # ────────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ def event_similarity(a: str, b: str) -> float:
 # ────────────────────────────────────────────────────────────────
 
 def _cosine_similarity(a: list, b: list) -> float:
-    """Cosine similarity χωρίς numpy — pure Python."""
+    """Cosine similarity without numpy — pure Python."""
     dot    = sum(x * y for x, y in zip(a, b))
     norm_a = sum(x * x for x in a) ** 0.5
     norm_b = sum(x * x for x in b) ** 0.5
@@ -71,8 +71,8 @@ def _cosine_similarity(a: list, b: list) -> float:
 
 def _embedding_similarity(text_a: str, text_b: str) -> float:
     """
-    Stage 3: Semantic similarity μέσω VertexAI embeddings (με cache).
-    Επιστρέφει 0.0 αν τα embeddings δεν είναι διαθέσιμα.
+    Stage 3: Semantic similarity via VertexAI embeddings (with cache).
+    Returns 0.0 if the embeddings are not available.
     """
     try:
         from services.embeddings import embeddings as emb_service
@@ -80,7 +80,7 @@ def _embedding_similarity(text_a: str, text_b: str) -> float:
         vec_b = emb_service.embed_query(normalize_event(text_b))
         return _cosine_similarity(vec_a, vec_b)
     except Exception:
-        return 0.0  # graceful fallback — Stage 3 παραλείπεται
+        return 0.0  # graceful fallback — Stage 3 is omitted
 
 # ────────────────────────────────────────────────────────────────
 # DB SETUP & MIGRATION
@@ -88,15 +88,15 @@ def _embedding_similarity(text_a: str, text_b: str) -> float:
 
 def get_connection(write: bool = False):
     """
-    Επιστρέφει SQLite connection με WAL mode (graceful fallback αν δεν υποστηρίζεται).
-    check_same_thread=False για multi-thread safety.
+    Returns an SQLite connection in WAL mode (graceful fallback if not supported).
+    check_same_thread=False for multi-thread safety.
     """
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=3000")
     except sqlite3.Error:
-        pass  # Fallback: default journal mode (π.χ. network drive, read-only fs)
+        pass  # Fallback: default journal mode (e.g., network drive, read-only fs)of
     return conn
 
 def setup_db():
@@ -235,7 +235,7 @@ def setup_db():
 # ────────────────────────────────────────────────────────────────
 
 def get_routine_state(routine_id: int) -> RoutineState:
-    """Επιστρέφει το τρέχον state μιας ρουτίνας. Άγνωστο → LEARNED."""
+    """Returns the current state of a routine. Unknown → LEARNED."""
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT state FROM routines WHERE id=?", (routine_id,))
@@ -248,13 +248,13 @@ def get_routine_state(routine_id: int) -> RoutineState:
 
 def transition_routine(routine_id: int, to_state: RoutineState) -> None:
     """
-    Validated state transition. Raises RoutineConflictError αν δεν επιτρέπεται.
-    Ενημερώνει και το is_active για backward compatibility.
+    Validated state transition. Raises RoutineConflictError if not allowed.
+    Also updates is_active for backward compatibility.
     """
     current = get_routine_state(routine_id)
-    validate_transition(current, to_state)  # raises RoutineConflictError αν invalid
+    validate_transition(current, to_state)  # raises RoutineConflictError if invalid_
 
-    # is_active: True μόνο για ACTIVE (backward compat με παλιό κώδικα)
+    # is_active: True only for ACTIVE (backward compat with old code)
     active_flag = 1 if to_state == RoutineState.ACTIVE else 0
 
     conn   = get_connection()
@@ -281,22 +281,22 @@ def transition_routine(routine_id: int, to_state: RoutineState) -> None:
 
 def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
     """
-    3-stage dedup πριν αποθηκεύσει:
+    3-stage dedup before saving:
       Stage 1 — exact fingerprint match
-      Stage 2 — difflib fuzzy match (>= 0.72) για ίδιο day/time slot
-      Stage 3 — embedding cosine similarity (>= 0.88) για ίδιο day/time slot
+      Stage 2 — difflib fuzzy match (>= 0.72) for the same day/time slot
+      Stage 3 — embedding cosine similarity (>= 0.88) for the same day/time slot
 
     State transitions:
-      - Νέα ρουτίνα → LEARNED
-      - 2η+ αναφορά  → ACTIVE (αν ήταν LEARNED/DECAYED)
-    Raises: DBWriteError αν η εγγραφή αποτύχει.
+      - New routine → LEARNED
+      - 2nd+ report  → ACTIVE (if it was LEARNED/DECAYED)
+    Raises: DBWriteError if the write operation fails.
     """
     c_day   = normalize_day(day)
     c_time  = normalize_time(time)
     c_event = event.strip()
     fp      = make_fingerprint(c_day, c_time, c_event)
 
-    # Reads χωρίς lock (WAL mode επιτρέπει concurrent reads)
+    # Reads without lock (WAL mode allows concurrent reads)
     conn   = get_connection()
     cursor = conn.cursor()
 
@@ -308,7 +308,7 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
         new_conf = min(1.0, conf + confidence_boost)
         new_m    = (mentions or 1) + 1
         new_state = RoutineState.ACTIVE if new_m >= 2 else RoutineState.LEARNED
-        # Αν ήταν DECAYED και ξαναναφέρθηκε → ACTIVE (re-teach)
+        # If it was DECAYED and reported again → ACTIVE (re-teach)
         cur_state = state_from_str(cur_state_str)
         if cur_state == RoutineState.DECAYED:
             new_state = RoutineState.ACTIVE
@@ -328,7 +328,7 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
             print(f"[routine_db S1]: #{r_id} {cur_state.value} → {new_state.value} (mention #{new_m})")
         return "updated"
 
-    # Φέρνουμε candidates ίδιου day/time για Stage 2 & 3
+    # We fetch candidates of the same day/time for Stage 2 & 3
     cursor.execute(
         "SELECT id, event_name, confidence, mention_count, state FROM routines WHERE day_of_week=? AND time_str=?",
         (c_day, c_time)
@@ -365,12 +365,12 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
 
     # ── Stage 3: embedding cosine similarity ─────────────────────
     for r_id, ex_ev, conf, mentions, cur_state_str in candidates:
-        # Sanity check: αν τα texts είναι πολύ διαφορετικά σε μήκος, skip
+        # Sanity check: if the texts are too different in length, skip
         len_ratio = min(len(c_event), len(ex_ev)) / max(len(c_event), len(ex_ev)) if max(len(c_event), len(ex_ev)) > 0 else 0
         if len_ratio < 0.4:
-            continue  # π.χ. "πάρκο" vs "μαγείρεμα σνίτσελ" — πολύ διαφορετικά
+            continue  # e.g., "park" vs "cooking schnitzel" — very different
         sim = _embedding_similarity(c_event, ex_ev)
-        if sim >= 0.92:  # αυξήθηκε από 0.88 για λιγότερα false positives
+        if sim >= 0.92:  # increased from 0.88 for fewer false positives
             new_conf = min(1.0, conf + confidence_boost)
             new_m    = (mentions or 1) + 1
             new_fp   = make_fingerprint(c_day, c_time, c_event)
@@ -396,7 +396,7 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
             print(f"[routine_db S3]: embedding merge '{ex_ev}' → '{c_event}' (sim={sim:.2f}, {cur_state.value}→{new_state.value})")
             return "merged"
 
-    # ── Νέα εγγραφή → state=LEARNED (inactive μέχρι 2η αναφορά) ─
+    # ── New entry → state=LEARNED (inactive until 2nd reference) ─
     try:
         with db_write_lock:
             cursor.execute('''
@@ -419,7 +419,7 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
 
 
 def delete_routine_db(routine_id: int) -> bool:
-    """Διαγράφει οριστικά μια ρουτίνα από τη βάση."""
+    """Permanently deletes a routine from the database."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -434,7 +434,7 @@ def delete_routine_db(routine_id: int) -> bool:
 
 
 def update_routine_db(routine_id: int, new_time: str = None, new_day: str = None) -> bool:
-    """Ενημερώνει ώρα/ημέρα υπάρχουσας ρουτίνας και κάνει re-fingerprint."""
+    """Updates the time/day of an existing routine and performs a re-fingerprint."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -465,10 +465,10 @@ def update_routine_db(routine_id: int, new_time: str = None, new_day: str = None
 def confirm_routine(routine_id: int):
     """
     TRIGGER_PENDING → CONFIRMED → ACTIVE (double transition, auto-immediate).
-    Αυξάνει confidence + mention_count.
+    Increases confidence + mention_count.
     """
     current_state = get_routine_state(routine_id)
-    # Idempotent: ήδη active από προηγούμενη session (pending δεν καθαρίστηκε λόγω crash)
+    # Idempotent: already active from a previous session (pending was not cleared due to a crash)
     if current_state == RoutineState.ACTIVE:
         remove_pending_confirmation(routine_id)
         return
@@ -483,7 +483,7 @@ def confirm_routine(routine_id: int):
         new_m    = (row[1] or 1) + 1
         try:
             with db_write_lock:
-                # CONFIRMED → ACTIVE αμέσως (single write, valid shortcut)
+                # CONFIRMED → ACTIVE immediately (single write, valid shortcut)
                 cursor.execute(
                     "UPDATE routines SET confidence=?, decay_counter=0, is_active=1, mention_count=?, state='active' WHERE id=?",
                     (new_conf, new_m, routine_id)
@@ -499,9 +499,9 @@ def confirm_routine(routine_id: int):
 def decay_routine(routine_id: int):
     """
     Decay confidence. State transitions:
-      - Everyday + confidence >= 0.1 → ACTIVE (skip today, επιστροφή αύριο)
-      - Non-everyday + confidence >= 0.1 → DISMISSED (user said no, αλλά ρουτίνα επιβιώνει)
-      - confidence < 0.1  → DECAYED (προς archived)
+      - Everyday + confidence >= 0.1 → ACTIVE (skip today, return tomorrow)
+      - Non-everyday + confidence >= 0.1 → DISMISSED (user said no, but routine survives)
+      - confidence < 0.1  → DECAYED (towards archived)
     """
     conn   = get_connection()
     cursor = conn.cursor()
@@ -562,7 +562,7 @@ def decay_routine(routine_id: int):
         log_event("routines", "decay", routine_id=routine_id, new_confidence=new_conf, new_state=new_state.value)
 
 def get_routines_for_day(day: str) -> list:
-    """Επιστρέφει active ρουτίνες για την ημέρα. Φιλτράρει με state='active'."""
+    """Returns active routines for the day. Filters by state='active'."""
     conn   = get_connection()
     cursor = conn.cursor()
     c_day  = normalize_day(day)
@@ -572,8 +572,8 @@ def get_routines_for_day(day: str) -> list:
         WHERE (
             day_of_week=?
             OR day_of_week='Everyday'
-            OR (day_of_week IN ('Weekdays','Εργάσιμες','καθημερινές') AND ? IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Weekdays','Εργάσιμες','καθημερινές'))
-            OR (day_of_week IN ('Weekends','Σαββατοκύριακο','σκ') AND ? IN ('Saturday', 'Sunday', 'Weekends','Σαββατοκύριακο','σκ'))
+            OR (day_of_week IN ('Weekdays','Weekdays','weekdays') AND ? IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Weekdays','Weekdays','weekdays'))
+            OR (day_of_week IN ('Weekends','Weekend','weekend') AND ? IN ('Saturday', 'Sunday', 'Weekends','Weekend','weekend'))
         )
         AND state='active'
         ORDER BY time_str ASC
@@ -602,7 +602,7 @@ COOLDOWN_MAX_HOURS     = 72.0
 
 def clamp_cooldown_hours(value) -> float:
     """
-    Κανονικοποιεί οποιαδήποτε cooldown τιμή στα canonical όρια του συστήματος.
+    Normalizes any cooldown value within the canonical limits of the system.
     """
     try:
         cd = float(value)
@@ -613,7 +613,7 @@ def clamp_cooldown_hours(value) -> float:
 
 
 def mark_routine_notified(routine_id: int):
-    """TRIGGER_PENDING: routine ειδοποιήθηκε — αναμένει επιβεβαίωση."""
+    """TRIGGER_PENDING: routine notified — awaiting confirmation."""
     validate_transition(get_routine_state(routine_id), RoutineState.TRIGGER_PENDING)
     conn   = get_connection()
     cursor = conn.cursor()
@@ -627,10 +627,10 @@ def mark_routine_notified(routine_id: int):
 
 
 def mark_routine_ignored(routine_id: int):
-    """Timeout (όχι απόρριψη): TRIGGER_PENDING → IGNORED → ACTIVE + διπλασιασμός cooldown."""
+    """Timeout (not rejection): TRIGGER_PENDING → IGNORED → ACTIVE + doubling of cooldown."""
     current = get_routine_state(routine_id)
     if current == RoutineState.ACTIVE:
-        # Ήδη confirmed από τον χρήστη — δεν χρειάζεται ignore
+        # Already confirmed by the user — no need to ignore
         remove_pending_confirmation(routine_id)
         return
     validate_transition(current, RoutineState.IGNORED)
@@ -659,7 +659,7 @@ def mark_routine_ignored(routine_id: int):
 
 
 def mark_routine_responded(routine_id: int):
-    """Χρήστης ανταποκρίθηκε — reset cooldown."""
+    """User responded — reset cooldown."""
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
@@ -680,12 +680,12 @@ def mark_routine_responded(routine_id: int):
 
 def reset_routine_cooldown(routine_id: int, clear_last_notified: bool = True) -> None:
     """
-    Χειροκίνητο reset του cooldown μιας ρουτίνας.
-    - γυρίζει notify_cooldown_hours στο default
-    - μηδενίζει ignore_count
-    - προαιρετικά καθαρίζει το last_notified_ts ώστε να μπορεί να ξανασταλεί
-      στο επόμενο valid slot χωρίς να μπλοκάρει από duplicate check
-    - επαναφέρει state='active'
+    Manual reset of a routine's cooldown.
+    - resets notify_cooldown_hours to default
+    - resets ignore_count to zero
+    - optionally clears last_notified_ts so it can be resent
+      in the next valid slot without being blocked by duplicate check
+    - restores state='active'
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -753,17 +753,17 @@ def get_routine_notify_info(routine_id: int) -> dict:
 
 
 # ────────────────────────────────────────────────────────────────
-# MUTED UNTIL: Ρουτίνα σε σίγαση μέχρι ημερομηνία
+# MUTED UNTIL: Routine muted until date
 # ────────────────────────────────────────────────────────────────
 
 def set_routine_muted_until(routine_id: int, until_date_str: str) -> None:
     """
-    Βάζει τη ρουτίνα σε σίγαση μέχρι until_date_str (YYYY-MM-DD).
-    Αποθηκεύει και muted_from (σήμερα). ΔΕΝ αγγίζει sentimental_silenced — αν ο χρήστης
-    είχε ζητήσει ρητά silence_emotional παλιότερα, αυτό ΔΕΝ πρέπει να σβήνεται σιωπηλά σε
-    κάθε νέο/extended mute (πριν: reset σε 0 κάθε φορά — bug). sentimental_last_sent
-    γίνεται σήμερα (όχι NULL) ώστε το cooldown (sentimental_send_every) να ξεκινά ΤΩΡΑ,
-    όχι instant sentimental msg στο επόμενο poll (60s μετά το mute — bug).
+    Mutes the routine until until_date_str (YYYY-MM-DD).
+    Also saves muted_from (today). Does NOT touch sentimental_silenced — if the user
+    had explicitly requested silence_emotional in the past, this should NOT be silently deleted during
+    every new/extended mute (previously: reset to 0 every time — bug). sentimental_last_sent
+    becomes today (not NULL) so that the cooldown (sentimental_send_every) starts NOW,
+    rather than sending an instant sentimental msg on the next poll (60s after the mute — bug).
     """
     today = datetime.now().strftime("%Y-%m-%d")
     conn   = get_connection()
@@ -784,8 +784,8 @@ def set_routine_muted_until(routine_id: int, until_date_str: str) -> None:
 
 def clear_routine_muted_until(routine_id: int) -> None:
     """
-    Αφαιρεί τη σίγαση — reset muted_from, sentimental_last_sent, sentimental_silenced.
-    Καλείται αυτόματα όταν λήξει η muted_until, ή manual unmute.
+    Removes the mute — resets muted_from, sentimental_last_sent, sentimental_silenced.
+    Called automatically when muted_until expires, or on manual unmute.
     """
     conn   = get_connection()
     cursor = conn.cursor()
@@ -806,8 +806,8 @@ def clear_routine_muted_until(routine_id: int) -> None:
 
 def get_routine_muted_until(routine_id: int) -> str | None:
     """
-    Επιστρέφει muted_until (YYYY-MM-DD) ή None αν δεν είναι σε σίγαση.
-    Αν η ημερομηνία έχει περάσει, καθαρίζει αυτόματα και επιστρέφει None.
+    Returns muted_until (YYYY-MM-DD) or None if not muted.
+    If the date has passed, it automatically clears it and returns None.
     """
     conn   = get_connection()
     cursor = conn.cursor()
@@ -819,7 +819,7 @@ def get_routine_muted_until(routine_id: int) -> str | None:
     muted_until = row[0]
     today = datetime.now().strftime("%Y-%m-%d")
     if muted_until < today:
-        # Ημερομηνία πέρασε — αυτόματο unmute
+        # Date passed — automatic unmute
         clear_routine_muted_until(routine_id)
         return None
     return muted_until
@@ -827,13 +827,13 @@ def get_routine_muted_until(routine_id: int) -> str | None:
 
 
 # ────────────────────────────────────────────────────────────────
-# SENTIMENTAL ROUTINES: Συναισθηματικά μηνύματα κατά τη σίγαση
+# SENTIMENTAL ROUTINES: Emotional messages during muting
 # ────────────────────────────────────────────────────────────────
 
 def set_routine_sentimental(routine_id: int, sentimental: bool, send_every: int = 2) -> None:
     """
-    Ορίζει αν μια ρουτίνα έχει συναισθηματική αξία (μόνιμο flag).
-    send_every: στείλε emotional msg κάθε N μέρες κατά τη σίγαση.
+    Defines whether a routine has emotional value (permanent flag).
+    send_every: send an emotional msg every N days during muting.
     """
     conn   = get_connection()
     cursor = conn.cursor()
@@ -849,7 +849,7 @@ def set_routine_sentimental(routine_id: int, sentimental: bool, send_every: int 
 
 def get_sentimental_info(routine_id: int) -> dict:
     """
-    Επιστρέφει όλες τις sentimental πληροφορίες για μια ρουτίνα:
+    Returns all sentimental information for a routine:
       sentimental, muted_from, muted_until, sentimental_send_every,
       sentimental_last_sent, sentimental_silenced
     """
@@ -879,7 +879,7 @@ def get_sentimental_info(routine_id: int) -> dict:
 
 
 def update_sentimental_last_sent(routine_id: int, date_str: str) -> None:
-    """Καταγράφει πότε στάλθηκε το τελευταίο sentimental μήνυμα."""
+    """Records when the last sentimental message was sent."""
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
@@ -893,8 +893,8 @@ def update_sentimental_last_sent(routine_id: int, date_str: str) -> None:
 
 def set_sentimental_silenced(routine_id: int, silenced: bool) -> None:
     """
-    User override: αν silenced=True, δεν στέλνεται κανένα sentimental μήνυμα
-    για την τρέχουσα muted περίοδο. Επαναφέρεται αυτόματα στο unmute.
+    User override: if silenced=True, no sentimental message is sent
+    for the current muted period. It is automatically reset upon unmute.
     """
     conn   = get_connection()
     cursor = conn.cursor()
@@ -913,19 +913,19 @@ def set_sentimental_silenced(routine_id: int, silenced: bool) -> None:
 
 def find_routines_by_name(event_name: str, min_similarity: float = 0.75) -> list[dict]:
     """
-    Βρίσκει τις πιο πιθανές ρουτίνες (state='active' ή 'learned') από ένα όνομα
-    που είπε ο χρήστης σε φυσική κουβέντα (όχι απαραίτητα το exact canonical event_name).
+    Finds the most likely routines (state='active' or 'learned') from a name
+    spoken by the user in natural conversation (not necessarily the exact canonical event_name).
 
-    3-stage match, ίδια λογική με το upsert_routine αλλά ΧΩΡΙΣ φιλτράρισμα day/time
-    (ψάχνει σε ΟΛΕΣ τις ρουτίνες):
-      Stage 1 — exact normalized match (επιστρέφει ΟΛΕΣ τις exact matches)
-      Stage 2 — difflib fuzzy ratio (>= min_similarity· πριν ήταν 0.55 — θόρυβος σε
-                κοντά strings προκαλούσε false matches όπως "μαγείρεμα" αντί άσχετου
-                event_name. 0.75 μειώνει τα false positives, χωρίς να σκοτώνει genuine
+    3-stage match, same logic as upsert_routine but WITHOUT day/time filtering
+    (searches across ALL routines):
+      Stage 1 — exact normalized match (returns ALL exact matches)
+      Stage 2 — difflib fuzzy ratio (>= min_similarity; previously 0.55 — noise in
+                short strings caused false matches like "cooking" instead of an unrelated
+                event_name. 0.75 reduces false positives, without killing genuine
                 paraphrases.)
-      Stage 3 — embedding cosine similarity (>= 0.80) αν το difflib αποτύχει
+      Stage 3 — embedding cosine similarity (>= 0.80) if difflib fails
  
-    Επιστρέφει λίστα από dicts με id/day/time/event/type/state/confidence.
+    Returns a list of dicts with id/day/time/event/type/state/confidence.
     """
     conn   = get_connection()
     cursor = conn.cursor()
@@ -974,7 +974,7 @@ def find_routines_by_name(event_name: str, min_similarity: float = 0.75) -> list
 
 
 def find_routine_by_name(event_name: str, min_similarity: float = 0.75) -> dict | None:
-    """Backward-compatible wrapper που επιστρέφει μόνο την πρώτη match."""
+    """Backward-compatible wrapper that returns only the first match."""
     matches = find_routines_by_name(event_name, min_similarity=min_similarity)
     return matches[0] if matches else None
 
@@ -1099,19 +1099,19 @@ def find_routines_for_reconciliation(
     exclude_tokens: list[str] | None = None,
 ) -> list[dict]:
     """
-    Conservative matcher για automatic fact→routine reconciliation.
+    Conservative matcher for automatic fact→routine reconciliation.
 
-    Σε αντίθεση με το find_routines_by_name(), εδώ ΔΕΝ θέλουμε fuzzy/embedding guesswork.
-    Θέλουμε deterministic, token-based matching πάνω στο stored event_name ώστε facts όπως:
-      - "ο Αλέξανδρος είναι κατασκήνωση"
-      - "το ποδόσφαιρο του Αλέξανδρου σταμάτησε για το καλοκαίρι"
-    να μπορούν να βρουν ΟΛΕΣ τις σχετικές ρουτίνες χωρίς να πειράξουν άσχετες.
+    Unlike find_routines_by_name(), here we DO NOT want fuzzy/embedding guesswork.
+    We want deterministic, token-based matching on the stored event_name so that facts like:
+      - "Alexandros is at camp"
+      - "Alexandros's football stopped for the summer"
+    can find ALL relevant routines without affecting unrelated ones.
 
-    Κανόνες:
-      - Όλα τα subject_tokens πρέπει να υπάρχουν
-      - Αν include_tokens δοθούν, πρέπει να υπάρχει τουλάχιστον ένα
-      - Αν exclude_tokens δοθούν, κανένα δεν πρέπει να υπάρχει
-      - Ψάχνουμε μόνο σε state='active' ή 'learned'
+    Rules:
+      - All subject_tokens must be present
+      - If include_tokens are provided, at least one must be present
+      - If exclude_tokens are provided, none must be present
+      - We only search in state='active' or 'learned'
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -1153,19 +1153,19 @@ def find_routines_for_reconciliation(
 # ────────────────────────────────────────────────────────────────
 # SEASONAL / TEMPORARY INACTIVITY: active_from / active_until / paused_until
 #
-# Ορθογώνιο στο muted_until (notification layer — "μη μου στείλεις") και στο
-# RoutineState (lifecycle layer — learned/active/decayed/...). Το paused_until
-# / active_from / active_until είναι business-logic layer: "αυτή η ρουτίνα
-# δεν ισχύει τώρα" (π.χ. ποδόσφαιρο που σταματά καλοκαίρι, κατασκήνωση,
-# βάρδια). ΔΕΝ αγγίζει confidence, ΔΕΝ αγγίζει state, ΔΕΝ διαγράφει τίποτα.
+# Rectangle in muted_until (notification layer — "do not send me") and in
+# RoutineState (lifecycle layer — learned/active/decayed/...). The paused_until
+# / active_from / active_until are business-logic layer: "this routine
+# not applicable now" (e.g. football stopping in summer, camp,
+# shift). DOES NOT touch confidence, DOES NOT touch state, DOES NOT delete anything.
 # ────────────────────────────────────────────────────────────────
 
 def ensure_routine_schedule_columns() -> None:
     """
-    Migration-safe προσθήκη πεδίων seasonal/temporary inactivity στο routines:
+    Migration-safe addition of seasonal/temporary inactivity fields to routines:
       active_from, active_until, paused_until, resume_rule, pause_reason.
-    Idempotent (PRAGMA table_info guard, ίδιο pattern με setup_db()) — ασφαλές
-    να κληθεί πολλές φορές / σε ήδη existing DB.
+    Idempotent (PRAGMA table_info guard, same pattern as setup_db()) — safe
+    to be called multiple times / on an already existing DB.
     """
     conn   = get_connection()
     cursor = conn.cursor()
@@ -1193,8 +1193,8 @@ def ensure_routine_schedule_columns() -> None:
 
 def get_routine_schedule_meta(routine_id: int) -> dict:
     """
-    Επιστρέφει active_from / active_until / paused_until / resume_rule / pause_reason
-    για μία ρουτίνα. Άγνωστο id → dict με όλα None (ίδιο defensive pattern με
+    Returns active_from / active_until / paused_until / resume_rule / pause_reason
+    for a routine. Unknown id → dict with all None (same defensive pattern as
     get_sentimental_info).
     """
     conn   = get_connection()
@@ -1222,10 +1222,10 @@ def get_routine_schedule_meta(routine_id: int) -> dict:
 
 def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | None = None) -> None:
     """
-    Παύει προσωρινά τη ρουτίνα μέχρι paused_until (YYYY-MM-DD) — π.χ. καλοκαιρινό
-    διάλειμμα, κατασκήνωση. ΔΕΝ αγγίζει confidence/state· η ρουτίνα παραμένει
-    ως έχει, απλά δεν "μετράει" στον scheduler μέχρι να περάσει η ημερομηνία
-    (βλ. is_routine_temporarily_inactive_meta).
+    Temporarily pauses the routine until paused_until (YYYY-MM-DD) — e.g., summer
+    break, camp. Does NOT touch confidence/state; the routine remains
+    as is, it simply does not "count" in the scheduler until the date has passed
+    (see is_routine_temporarily_inactive_meta).
     """
     conn   = get_connection()
     cursor = conn.cursor()
@@ -1242,7 +1242,7 @@ def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | N
 
 
 def clear_routine_paused_until(routine_id: int) -> None:
-    """Αφαιρεί την προσωρινή παύση (manual resume) — καθαρίζει και pause_reason."""
+    """Removes the temporary pause (manual resume) — also clears the pause_reason."""
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
@@ -1260,11 +1260,11 @@ def clear_routine_paused_until(routine_id: int) -> None:
 def set_routine_active_window(routine_id: int, active_from: str | None = None,
                                active_until: str | None = None, reason: str | None = None) -> None:
     """
-    Ορίζει (set_window) ή καθαρίζει (clear_window, καλώντας με active_from=None,
-    active_until=None) το παράθυρο active_from/active_until μιας ρουτίνας.
-    reason είναι προαιρετικό — αν δεν δοθεί, το υπάρχον pause_reason ΔΕΝ αγγίζεται
-    (ώστε ένα clear_window χωρίς reason να μη σβήνει σιωπηλά τον λόγο ενός
-    προηγούμενου pause).
+    Sets (set_window) or clears (clear_window, by calling with active_from=None,
+    active_until=None) the active_from/active_until window of a routine.
+    reason is optional — if not provided, the existing pause_reason is NOT modified
+    (so that a clear_window without a reason does not silently erase the reason of a
+    previous pause).
     """
     conn   = get_connection()
     cursor = conn.cursor()
@@ -1288,7 +1288,7 @@ def set_routine_active_window(routine_id: int, active_from: str | None = None,
 
 
 def set_routine_resume_rule(routine_id: int, resume_rule: str | None = None) -> None:
-    """Ορίζει το resume_rule (π.χ. 'every_september', 'next_school_year', 'manual_only')."""
+    """Defines the resume_rule (e.g., 'every_september', 'next_school_year', 'manual_only')."""
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
@@ -1305,20 +1305,20 @@ def set_routine_resume_rule(routine_id: int, resume_rule: str | None = None) -> 
 
 def is_routine_temporarily_inactive_meta(routine: dict, now: datetime | None = None) -> tuple[bool, str | None]:
     """
-    Κεντρικό gate: αποφασίζει αν μια ρουτίνα είναι ΠΡΟΣΩΡΙΝΑ ανενεργή, ΧΩΡΙΣ να
-    είναι disabled/deleted/decayed. `routine` = dict με (τουλάχιστον) τα κλειδιά
-    paused_until / active_from / active_until — π.χ. ό,τι επιστρέφει
+    Central gate: decides if a routine is TEMPORARILY inactive, WITHOUT
+    being disabled/deleted/decayed. `routine` = dict with (at least) the keys
+    paused_until / active_from / active_until — e.g., whatever is returned by
     get_routine_schedule_meta().
 
-    ΚΡΙΣΙΜΟ: inactive ≠ disabled, inactive ≠ deleted. Ο caller (scheduler) πρέπει
-    να skip-άρει trigger/confirm/send/proactive scoring ΧΩΡΙΣ να το μετρήσει ως
-    missed/failure και ΧΩΡΙΣ να αγγίξει confidence/state.
+    CRITICAL: inactive ≠ disabled, inactive ≠ deleted. The caller (scheduler) must
+    skip trigger/confirm/send/proactive scoring WITHOUT counting it as
+    missed/failure and WITHOUT touching confidence/state.
 
-    Επιστρέφει:
-      (True,  "paused_until")        — ενεργό paused_until, today <= paused_until
+    Returns:
+      (True,  "paused_until")        — active paused_until, today <= paused_until
       (True,  "before_active_from")  — today < active_from
       (True,  "after_active_until")  — today > active_until
-      (False, None)                  — κανονικά ενεργή
+      (False, None)                  — normally active
     """
     today = (now or datetime.now()).strftime("%Y-%m-%d")
 
@@ -1395,7 +1395,7 @@ def load_pending_confirmations() -> dict:
     """)
     rows = cursor.fetchall()
 
-    # βρες stale rows για cleanup
+    # find stale rows for cleanup
     cursor.execute("""
         SELECT pc.routine_id
         FROM pending_confirmations pc

@@ -153,9 +153,9 @@ def looks_like_tool_output(query: str) -> bool:
     return any(marker in clean for marker in _TOOL_OUTPUT_MARKERS)
 
 
-# Prefixes που βάζει το σύστημα σε μηνύματα (upload, vision, tool results).
-# Στριπάρονται πριν το semantic search ώστε να ψάχνουμε με το πραγματικό
-# κείμενο του χρήστη, όχι με filenames/system tags.
+# Prefixes added by the system to messages (upload, vision, tool results).
+# Stripped before semantic search so that we search with the actual text
+# user text, not with filenames/system tags.
 _SYSTEM_PREFIX_RE = re.compile(
     r"^\s*\["
     r"(?:USER_UPLOADED_FILE|CURRENT_PHOTO_PATH|ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ|SYSTEM|TOOL_RESULT)"
@@ -165,8 +165,8 @@ _SYSTEM_PREFIX_RE = re.compile(
 
 
 def _clean_query_for_search(query: str) -> str:
-    """Αφαιρεί system prefixes (π.χ. [USER_UPLOADED_FILE]: web_xxx.txt) από το query.
-    Κρατάει μόνο το πραγματικό κείμενο του χρήστη για semantic search."""
+    """Removes system prefixes (e.g., [USER_UPLOADED_FILE]: web_xxx.txt) from the query.
+    Keeps only the user's actual text for semantic search."""
     cleaned = _SYSTEM_PREFIX_RE.sub("", query).strip()
     return cleaned if cleaned else query
 
@@ -461,7 +461,7 @@ def looks_like_reminder_or_task_request(text: str) -> bool:
     if has_reminder_language and has_action_language:
         return True
 
-    # fallback για πολύ τυπικό "θύμισέ μου στις 19:00 ..."
+    # fallback for very typical "remind me at 19:00 ..."
     if ("θυμ" in clean or "υπενθυμ" in clean) and re.search(r"\b\d{1,2}:\d{2}\b", clean):
         return True
 
@@ -582,21 +582,21 @@ def _looks_low_complexity_query(query: str) -> bool:
     if not q:
         return True
 
-    # Αφαίρεσε timestamp prefix τύπου [10:24]
+    # Remove timestamp prefix of type [10:24]
     q = re.sub(r"^\[\d{1,2}:\d{2}\]\s*", "", q).strip()
 
-    # Πολύ μικρά acknowledgements
+    # Very small acknowledgements
     if q in _SIMPLE_ACKS:
         return True
 
-    # Πολύ σύντομο μήνυμα χωρίς ερώτηση
+    # Very short message without a question
     word_count = len(q.split())
     has_question = "?" in q or ";" in q
 
     if word_count <= 3 and not has_question:
         return True
 
-    # Σύντομα status / follow-up χωρίς ξεκάθαρο info request
+    # Brief status / follow-up without a clear info request
     low_signal_starts = (
         "ναι ",
         "οκ ",
@@ -717,11 +717,11 @@ def _query_tokens(query: str) -> list[str]:
 
 
 def _stem_token(token: str) -> str:
-    """Πρόχειρο ελληνικό stemming: κόβει τις πιο συνηθισμένες κλιτικές καταλήξεις
-    (πτώσεις/αριθμός: -ος/-ου/-ο/-οι/-ων/-ους, -α/-ας/-ες κ.λπ.) ώστε
-    'γενεθλια' να ταιριάζει με 'γενεθλιων' και 'αλεξανδρος' με 'αλεξανδρου'.
-    Κρατάει πάντα στέλεχος >= 4 χαρακτήρων (ίδιο όριο με τα tokens) για να
-    μην αυξάνεται ο θόρυβος από πολύ κοντά στελέχη.
+    """Rough Greek stemming: cuts off the most common inflectional endings
+    (cases/number: -ος/-ου/-ο/-οι/-ων/-ους, -α/-ας/-ες etc.) so that
+    'γενεθλια' matches 'γενεθλιων' and 'αλεξανδρος' with 'αλεξανδρου'.
+    Always keeps a stem of >= 4 characters (same limit as tokens) to
+    prevent noise from very short stems.
     """
     if len(token) >= 7:
         return token[:-2]
@@ -731,12 +731,12 @@ def _stem_token(token: str) -> str:
 
 
 def _date_marker(message_date: str, today: str, yesterday: str) -> str:
-    """Ένδειξη μέρας στις γραμμές 'πρόσφατου ιστορικού' ώστε να μη μπερδεύονται
-    χθεσινά με σημερινά μηνύματα μέσα στο ίδιο context-window (π.χ. 'χθες 20:48'
-    αντί για ένα γυμνό '20:48' που μοιάζει σαν να μόλις ειπώθηκε σήμερα — αυτό
-    ακριβώς έκανε τον Αστακό να περάσει χθεσινές μπριζόλες για σημερινό φαγητό).
-    Άδειο string για το 'σήμερα' -> καμία αλλαγή στην υπάρχουσα μορφή για την
-    συντριπτική πλειοψηφία των γραμμών.
+    """Day indicator in 'recent history' lines to avoid confusing
+    yesterday's messages with today's within the same context-window (e.g., 'yesterday 20:48'
+    instead of a bare '20:48' which looks as if it was just said today — this
+    is exactly what caused Astakos to mistake yesterday's steaks for today's food).
+    Empty string for 'today' -> no change to the existing format for the
+    vast majority of lines.
     """
     if not message_date or message_date == today:
         return ""
@@ -802,7 +802,7 @@ def temporal_history_for_query(
     if limit <= 0:
         return []
     # [PERF]: SQL scan only for explicit time or recall/history intent.
-    # Plain semantic queries stay on Chroma; "θυμάσαι/δώρο/γενέθλια" still
+    # Plain semantic queries stay on Chroma; "remember/gift/birthday" still_
     # search SQLite because many details may exist only in conversation history.
     if not has_temporal_marker and not has_recall_marker:
         return []
@@ -954,9 +954,9 @@ def build_memory_context(
     write_debug: bool = True,
 ) -> MemoryContext:
     from time import perf_counter
-    # Χρησιμοποιούμε clean_query για semantic search & debug — αφαιρούμε
-    # system prefixes ([USER_UPLOADED_FILE], [CURRENT_PHOTO_PATH] κ.λπ.)
-    # ώστε το embedding να γίνει με το πραγματικό κείμενο του χρήστη.
+    # We use clean_query for semantic search & debug — we remove
+    # system prefixes ([USER_UPLOADED_FILE], [CURRENT_PHOTO_PATH] etc.)
+    # so that the embedding is done with the user's actual text.
     clean_query = _clean_query_for_search(query)
 
     is_tool_output = looks_like_tool_output(query)
@@ -1116,10 +1116,10 @@ def _record_memory_context_debug(
         "query_intent": query_intent,
     }
     if is_tool_output:
-        # [MASTRO-FIX]: Το query εδώ είναι εσωτερικό tool-output (όχι πραγματικό
-        # ερώτημα χρήστη) — το looks_like_tool_output() ήδη μηδένισε όλες τις
-        # αναζητήσεις μνήμης. Δείχνουμε ξεκάθαρα ΓΙΑΤΙ recent/sqlite/semantic=0,
-        # αντί να τυπώνουμε το garbage string σαν να ήταν πραγματικό query.
+        # [MASTRO-FIX]: The query here is an internal tool-output (not real
+        # user query) — looks_like_tool_output() has already reset all
+        # memory searches. We clearly show WHY recent/sqlite/semantic=0,
+        # instead of printing the garbage string as if it were a real query.
         print(
             f"\033[90m[MemoryContext]: channel={channel} — tool-output εντοπίστηκε "
             f"('{payload['query_preview'][:60]}...'), παράλειψη αναζήτησης μνήμης "

@@ -3,24 +3,24 @@ import requests
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 
-# Φόρτωση κλειδιού
+# Load key
 load_dotenv()
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY")
 
 @tool
 def search_flights(origin: str, destination: str, dates: str, return_date: str) -> str:
     """
-    Αναζητά πραγματικές πτήσεις και επιστρέφει τιμές.
+    Searches for real flights and returns prices.
     
-    ΚΑΝΟΝΕΣ ΧΡΗΣΗΣ (ΜΗΝ τους παραβείς):
-    1. origin & destination: ΜΟΝΟ IATA κωδικοί με κεφαλαία (π.χ. SKG, KUT).
-    2. dates: Ημερομηνίες αναχώρησης (π.χ. "2026-08-09,2026-08-10").
-    3. return_date: Ημερομηνία επιστροφής (π.χ. "2026-08-15"). Αν είναι απλή μετάβαση, βάλε ΑΥΣΤΗΡΑ τη λέξη "None".
+    USAGE RULES (DO NOT violate them):
+    1. origin & destination: ONLY capitalized IATA codes (e.g., SKG, KUT).
+    2. dates: Departure dates (e.g., "2026-08-09,2026-08-10").
+    3. return_date: Return date (e.g., "2026-08-15"). If it is a one-way trip, STRICTLY use the word "None".
     """
     if not SERPAPI_KEY:
         return "❌ Σφάλμα: Δεν βρέθηκε το SERPAPI_KEY στο .env"
 
-    # Σπάμε τις ημερομηνίες
+    # We split the dates
     dates_list = [d.strip() for d in dates.split(",")]
     
     final_output = []
@@ -37,7 +37,7 @@ def search_flights(origin: str, destination: str, dates: str, return_date: str) 
             "api_key": SERPAPI_KEY
         }
 
-        # [MASTRO-FIX]: Ελέγχουμε αν μας έστειλε τη λέξη "None"
+        # [MASTRO-FIX]: We check if they sent us the word "None"
         if return_date and return_date.lower() != "none":
             params["type"] = "1"
             params["return_date"] = return_date
@@ -61,7 +61,7 @@ def search_flights(origin: str, destination: str, dates: str, return_date: str) 
                 final_output.append("❌ Δεν βρέθηκαν πτήσεις.\n")
                 continue
 
-            for idx, flight in enumerate(all_flights[:3]): # Φέρνουμε τα 3 πιο φθηνά
+            for idx, flight in enumerate(all_flights[:3]): # We fetch the 3 cheapest
                 flights_info = flight.get("flights", [{}])[0]
                 airline = flights_info.get("airline", "Άγνωστη")
                 price = flight.get("price", "Άγνωστη")
@@ -69,12 +69,12 @@ def search_flights(origin: str, destination: str, dates: str, return_date: str) 
                 arrival_time = flights_info.get("arrival_airport", {}).get("time", "")
                 
                 final_output.append(f"  [{idx+1}] {airline} | 💶 Τιμή: {price}€ | Ώρες: {departure_time} - {arrival_time}")
-            final_output.append("") # Κενή γραμμή για διαχωρισμό
+            final_output.append("") # Empty line for separation
                 
         except Exception as e:
             final_output.append(f"❌ Σφάλμα δικτύου: {e}\n")
 
     final_output.append("-" * 50)
     
-    # Επιστρέφουμε το κείμενο στον Agent αντί να το τυπώσουμε απλά
+    # We return the text to the Agent instead of simply printing it
     return "\n".join(final_output)

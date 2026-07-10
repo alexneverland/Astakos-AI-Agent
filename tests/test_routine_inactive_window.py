@@ -1,12 +1,12 @@
 # ================================================================
-# Tests: Case F — μια inactive (paused / εκτός active window) ρουτίνα
-# ΔΕΝ πρέπει να παράγει missed/failure side effects.
+# Tests: Case F — one inactive (paused / outside active window) routine
+# MUST NOT produce missed/failure side effects.
 #
-# Στυλ: real-module patching (όπως test_event_log_and_missed_routines.py).
-# Σημαντικό: ΔΕΝ κάνουμε mock το is_routine_temporarily_inactive_meta —
-# τρέχει η ΠΡΑΓΜΑΤΙΚΗ συνάρτηση (γνήσιο integration test της ημερομηνιακής
-# λογικής), μόνο το get_routine_schedule_meta γίνεται mock ώστε να μην
-# αγγίξουμε το πραγματικό DB.
+# Style: real-module patching (like test_event_log_and_missed_routines.py).
+# Important: We do NOT mock is_routine_temporarily_inactive_meta —
+# runs the ACTUAL function (genuine integration test of the date-based
+# logic), only get_routine_schedule_meta is mocked so that we do not_
+# touch the real DB.
 # ================================================================
 import os
 import sqlite3
@@ -34,7 +34,7 @@ def _make_routines_db(path, rows):
     conn.close()
 
 
-_FIXED_NOW = datetime(2026, 6, 17, 12, 0, 0)  # Wednesday — ίδιο "σήμερα" με test_routine_schedule_meta.py
+_FIXED_NOW = datetime(2026, 6, 17, 12, 0, 0)  # Wednesday — same "today" as test_routine_schedule_meta.py
 
 _PAUSED_META = {
     "active_from": None, "active_until": None,
@@ -57,9 +57,9 @@ _ACTIVE_META = {
 
 def _run_missed(db_rows, schedule_meta, grace=90, craft_return="deferred_msg"):
     """
-    Τρέχει το πραγματικό startup_check_missed_routines() πάνω σε πραγματικό sqlite DB,
-    με μόνο το get_routine_schedule_meta mocked (το is_routine_temporarily_inactive_meta
-    είναι το ΠΡΑΓΜΑΤΙΚΟ).
+    Runs the actual startup_check_missed_routines() on a real sqlite DB,
+    with only get_routine_schedule_meta mocked (is_routine_temporarily_inactive_meta
+    is the REAL one).
     Returns: (sent, logged, mark_notified_calls, save_pending_calls)
     """
     import clients.telegram_bot as bot
@@ -131,14 +131,14 @@ def test_missed_paused_routine_logs_inactive_skip_with_reason():
 
 
 def test_missed_paused_routine_does_not_mark_notified_or_pending():
-    """Case F: καμία missed/failure side effect — δεν θεωρείται 'χαμένη'."""
+    """Case F: no missed/failure side effect — it is not considered 'lost'."""
     _, _, mark_notified_calls, save_pending_calls = _run_missed([_missed_row()], _PAUSED_META)
     assert mark_notified_calls == []
     assert save_pending_calls == []
 
 
 def test_missed_paused_routine_does_not_update_last_triggered():
-    """Case F: το last_triggered ΔΕΝ αλλάζει για inactive ρουτίνα (συνέχισε με continue πριν το UPDATE)."""
+    """Case F: last_triggered does NOT change for an inactive routine (proceed with continue before the UPDATE)."""
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "astakos_routines.db")
         _make_routines_db(db_path, [_missed_row(last_triggered=None)])
@@ -174,7 +174,7 @@ def test_missed_paused_routine_does_not_update_last_triggered():
 
 
 def test_missed_before_active_from_also_skips():
-    """Άλλο reason (before_active_from) — επίσης δεν θεωρείται missed."""
+    """Another reason (before_active_from) — also not considered missed."""
     sent, logged, mark_notified_calls, save_pending_calls = _run_missed(
         [_missed_row()], _BEFORE_ACTIVE_FROM_META
     )
@@ -186,7 +186,7 @@ def test_missed_before_active_from_also_skips():
 
 
 def test_missed_active_routine_still_processed_normally_baseline():
-    """Regression baseline: μια ΚΑΝΟΝΙΚΗ (active) ρουτίνα συνεχίζει να δουλεύει όπως πριν."""
+    """Regression baseline: an ACTIVE routine continues to work as before."""
     sent, logged, mark_notified_calls, save_pending_calls = _run_missed(
         [_missed_row()], _ACTIVE_META, craft_return="Πάμε ποδόσφαιρο;"
     )
@@ -202,8 +202,8 @@ def test_missed_active_routine_still_processed_normally_baseline():
 
 def _run_job(db_rows, schedule_meta, cooldown=False):
     """
-    Τρέχει το πραγματικό job_check_routines() πάνω σε πραγματικό sqlite DB,
-    με μόνο το get_routine_schedule_meta mocked.
+    Runs the actual job_check_routines() on a real sqlite DB,
+    with only get_routine_schedule_meta mocked.
     Returns: (sent, logged, mark_notified_calls, save_pending_calls)
     """
     import clients.telegram_bot as bot
@@ -253,7 +253,7 @@ def _run_job(db_rows, schedule_meta, cooldown=False):
 
 
 def _due_row(**kw):
-    """Ρουτίνα στο target_time = _FIXED_NOW + 30min, δηλ. time_str = '12:30'."""
+    """Routine at target_time = _FIXED_NOW + 30min, i.e., time_str = '12:30'."""
     target = _FIXED_NOW + timedelta(minutes=30)
     defaults = dict(
         id=14, event_name="ποδόσφαιρο Αλέξανδρου", confidence=0.85,
@@ -279,14 +279,14 @@ def test_job_paused_routine_logs_inactive_skip():
 
 
 def test_job_paused_routine_does_not_mark_notified_or_pending():
-    """Case F: καμία missed/failure side effect στο proactive scheduler."""
+    """Case F: no missed/failure side effects in the proactive scheduler."""
     _, _, mark_notified_calls, save_pending_calls = _run_job([_due_row()], _PAUSED_META)
     assert mark_notified_calls == []
     assert save_pending_calls == []
 
 
 def test_job_paused_routine_does_not_update_last_triggered():
-    """Case F: last_triggered παραμένει αμετάβλητο — η inactive ρουτίνα κάνει continue πριν από κάθε UPDATE."""
+    """Case F: last_triggered remains unchanged — the inactive routine continues before any UPDATE."""
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "astakos_routines.db")
         _make_routines_db(db_path, [_due_row(last_triggered=None)])
@@ -324,9 +324,9 @@ def test_job_paused_routine_does_not_update_last_triggered():
 
 def test_job_active_routine_still_reaches_cooldown_check_baseline():
     """
-    Regression baseline: μια active ρουτίνα ΔΕΝ μπλοκάρεται από inactive-check —
-    προχωράει κανονικά στο cooldown filtering (που εδώ αναγκάζουμε να πετύχει,
-    απλά για να αποδείξουμε ότι η ροή συνέχισε μετά το is_routine_temporarily_inactive_meta).
+    Regression baseline: an active routine is NOT blocked by inactive-check —
+    it proceeds normally to cooldown filtering (which we force to succeed here,
+    simply to prove that the flow continued after is_routine_temporarily_inactive_meta).
     """
     _, logged, _, _ = _run_job([_due_row()], _ACTIVE_META, cooldown=True)
     assert not any(action == "inactive_skip" for _, action, _ in logged)

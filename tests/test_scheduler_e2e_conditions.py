@@ -158,37 +158,37 @@ def test_shift_mode_require_true():
 
 
 def test_conflict_resolution_priority_higher_wins():
-    # Δύο ρουτίνες με ίδιο keyword ('Σχολείο'), οπότε πέφτουν στο ίδιο conflict group
+    # Two routines with the same keyword ('Σχολείο'), so they fall into the same conflict group
     rows = [
         _due_row(rid=1, name="Σχολείο Αλέξανδρου", priority=10),
-        _due_row(rid=2, name="Σχολείο Πρωινή Προετοιμασία", priority=20), # Υψηλότερο priority
+        _due_row(rid=2, name="Σχολείο Πρωινή Προετοιμασία", priority=20), # Higher priority
     ]
     
     sent, logged = _run_job(rows)
     
-    # Πρέπει να σταλεί μόνο ΜΙΑ ειδοποίηση (η #2)
+    # Only ONE notification must be sent (the #2)
     assert len(sent) == 1
     
-    # Η χαμηλότερη priority ΔΕΝ κάνει log event (απλά τυπώνει στο stdout).
-    # Ελέγχουμε απλά ότι η ειδοποίηση εστάλη για την 1.
-    # Θα μπορούσαμε να ελέγξουμε το arguments του craft function αλλά το mock είναι generic.
+    # The lowest priority DOES NOT log an event (it simply prints to stdout).
+    # We simply check that the notification was sent for 1.
+    # We could check the arguments of the craft function, but the mock is generic.
 
 
 def test_conflict_resolution_with_conditions_skips_lower_priority_only_if_higher_is_allowed():
-    # Αν η high priority γίνει routine_condition_blocked επειδή το condition της απέτυχε, 
-    # τότε η χαμηλότερη priority ΔΕΝ πρέπει να κοπεί λόγω priority (αφού η άλλη δεν έπαιξε!).
+    # If the high priority becomes routine_condition_blocked because its condition failed,
+    # then the lower priority MUST NOT be cut due to priority (since the other one did not play!).
     rows = [
         _due_row(rid=1, name="Μπάσκετ Αλέξανδρου", priority=10),
         _due_row(rid=2, name="Μπάσκετ Κατασκήνωση", priority=20),
     ]
     
     conditions = {
-        # Η #2 απαιτεί camp=True
+        # #2 requires camp=True
         2: {"condition_type": "context_flag", "condition_payload": '{"flag": "alexandros_away_from_home", "equals": true}', "condition_mode": "allow_when_true"}
     }
     
-    # Περίπτωση 1: Δεν είμαστε camp
-    # Η #2 κόβεται λόγω condition. Η #1 πρέπει να περάσει κανονικά (αφού δεν προστέθηκε στο triggered_conflict_groups η #2).
+    # Case 1: We are not a camp
+    # #2 is cut off due to condition. #1 should pass normally (since #2 was not added to triggered_conflict_groups).
     context1 = {"alexandros_away_from_home": False}
     sent1, logged1 = _run_job(rows, routine_conditions=conditions, context_state=context1)
     
@@ -196,48 +196,48 @@ def test_conflict_resolution_with_conditions_skips_lower_priority_only_if_higher
     
     skips = [kw for cat, action, kw in logged1 if action == "routine_condition_blocked"]
     assert len(skips) == 1
-    assert skips[0]["routine_id"] == 2 # Η #2 κόπηκε
+    assert skips[0]["routine_id"] == 2 # #2 was cut off
     
-    # Περίπτωση 2: Είμαστε camp
-    # Η #2 επιτρέπεται λόγω condition. Η #1 κόβεται επειδή έχει μικρότερο priority.
+    # Case 2: We are a camp
+    # #2 is allowed due to condition. #1 is cut off because it has lower priority.
     context2 = {"alexandros_away_from_home": True}
     sent2, logged2 = _run_job(rows, routine_conditions=conditions, context_state=context2)
     
     assert len(sent2) == 1
     skips2 = [kw for cat, action, kw in logged2 if action == "routine_condition_blocked"]
-    assert len(skips2) == 0 # Δεν υπάρχει condition block. Η #1 κόπηκε αθόρυβα λόγω priority.
+    assert len(skips2) == 0 # No condition block exists. #1 was silently cut due to priority.
 
 def test_conflict_resolution_specificity_breaks_ties():
-    # Δύο ρουτίνες με ίδιο keyword ('Σχολείο'), οπότε πέφτουν στο ίδιο conflict group
-    # Και οι δύο έχουν priority 0.
-    # Η πρώτη (id=1) μπήκε πρώτη (id=1 < id=2).
-    # Όμως η δεύτερη έχει condition. Η δεύτερη πρέπει να αξιολογηθεί ΠΡΩΤΗ λόγω specificity.
+    # Two routines with the same keyword ('School'), so they fall into the same conflict group
+    # Both have priority 0.
+    # The first one (id=1) entered first (id=1 < id=2).
+    # But the second one has a condition. The second one must be evaluated FIRST due to specificity.
     rows = [
         _due_row(rid=1, name="Σχολείο Αλέξανδρου", priority=0),
         _due_row(rid=2, name="Σχολείο Διακοπές", priority=0, ctype="context_flag"),
     ]
     
     conditions = {
-        # Η #2 έχει condition (πχ. απαιτεί school_open=False)
+        # #2 has a condition (e.g., requires school_open=False)
         2: {"condition_type": "context_flag", "condition_payload": '{"flag": "school_open", "equals": false}', "condition_mode": "allow_when_true"}
     }
     
-    # Αν η βάση σέβεται το specificity, θα αξιολογήσει την #2 πρώτη.
-    # Ας δώσουμε context που ΕΠΙΤΡΕΠΕΙ την #2 (school_open=False).
+    # If the database respects specificity, it will evaluate #2 first.
+    # Let's provide context that ALLOWS #2 (school_open=False).
     context = {"school_open": False}
     sent, logged = _run_job(rows, routine_conditions=conditions, context_state=context)
     
-    # Η #2 επετράπη, οπότε έκανε trigger και έβαλε το group στο conflict set.
-    # Η #1 θα πρέπει να έχει κοπεί (και να μην εστάλη).
+    # #2 was allowed, so it triggered and placed the group in the conflict set.
+    # #1 should have been cut (and not sent).
     assert len(sent) == 1
     
-    # Ελέγχουμε ποια ρουτίνα έκανε trigger
+    # We check which routine triggered
     triggered_rids = [kw["routine_id"] for cat, action, kw in logged if action == "routine_triggered"]
     assert len(triggered_rids) == 1
-    assert triggered_rids[0] == 2 # Η #2 "νίκησε" λόγω specificity!
+    assert triggered_rids[0] == 2 # #2 "won" due to specificity!
 
 def test_conflict_resolution_deep_integration():
-    # 3 routines in the SAME conflict group ("Αθλητισμός"), scheduled for the EXACT SAME time.
+    # 3 routines in the SAME conflict group ("Sports"), scheduled for the EXACT SAME time.
     # #1: Priority 10, no condition (Fallback)
     # #2: Priority 20, condition: football_season == true (allow_when_true)
     # #3: Priority 30, condition: alexandros_away_from_home == true (suppress_when_true)

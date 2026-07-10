@@ -929,7 +929,7 @@ def test_shift_logic_tomorrow_morning_work_auto_applies():
         fact,
         category="lazaros",
         reason="user_stated",
-        now=datetime(2026, 7, 5, 22, 45, 0),  # Κυριακή βράδυ
+        now=datetime(2026, 7, 5, 22, 45, 0),  # Sunday night
     )
 
     assert any(

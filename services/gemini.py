@@ -11,24 +11,24 @@ from core.utils import clean_message
 
 class MastroResponse:
     """
-    [MASTRO-RESPONSE v4]: Υβριδική δομή για πλήρη Multimodal υποστήριξη.
-    Διατηρεί το '.text' ως string για συμβατότητα με Firewalls/Sifters,
-    αλλά κρατάει και το αυθεντικό '.content' (λίστα ή dict) ανέπαφο.
+    [MASTRO-RESPONSE v4]: Hybrid structure for full Multimodal support.
+    Keeps '.text' as a string for compatibility with Firewalls/Sifters,
+    but also keeps the original '.content' (list or dict) intact.
     """
     def __init__(self, content):
-        # Κρατάμε τη δομή της Google αυτούσια για μελλοντική χρήση (π.χ. εικόνες/tools)
+        # We keep the Google structure intact for future use (e.g., images/tools)
         self.content = content
-        # Χρησιμοποιούμε τον Smart Parser για να έχουμε ΠΑΝΤΑ έτοιμο και ένα καθαρό string
+        # We use the Smart Parser to ALWAYS have a clean string ready
         self.text = clean_message(content)
 
 def safe_gemini_call(prompt: str, retries: int = 4, base_delay: float = 2.0):
     """
-    Mastro-Shield v4: Exponential backoff retry για out-of-band βοηθητικές 
-    κλήσεις (Sifters, Firewalls) με πλήρη υποστήριξη των νέων δομών δομών.
+    Mastro-Shield v4: Exponential backoff retry for out-of-band helper 
+    calls (Sifters, Firewalls) with full support for the new data structures.
     """
     for attempt in range(retries):
         try:
-            # Εκτέλεση κλήσης μέσω του ενοποιημένου εγκεφάλου (LangChain)
+            # Execution of call via the unified brain (LangChain)
             response = llm.invoke(prompt)
             return MastroResponse(response.content)
 

@@ -1,10 +1,10 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Google Fit REST API
-# Auth:    OAuth2 token.json (ίδιο με mail/drive/calendar)
+# Auth:    OAuth2 token.json (same as mail/drive/calendar)
 #
-# Σημείωση: Google Fit API είναι deprecated αλλά λειτουργικό.
-# Για αξιόπιστο background sync χωρίς να ανοίγεις app:
+# Note: Google Fit API is deprecated but functional.
+# For reliable background sync without opening the app:
 #   Samsung Health → Settings → Connected services → Google Fit → ON
 # ================================================================
 
@@ -155,7 +155,7 @@ def _list_data_sources(service, data_type_name: str) -> list[str]:
 
 
 def _day_range_ms(days_ago: int = 0):
-    """Επιστρέφει (start_ms, end_ms) για X ημέρες πίσω (0 = σήμερα, 1 = χθες)."""
+    """Returns (start_ms, end_ms) for X days back (0 = today, 1 = yesterday)."""
     now = datetime.datetime.now()
     target = now - datetime.timedelta(days=days_ago)
     start = target.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -166,7 +166,7 @@ def _day_range_ms(days_ago: int = 0):
 
 
 def get_steps(days_ago: int = 0) -> int:
-    """Επιστρέφει αριθμό βημάτων για την ημέρα."""
+    """Returns the number of steps for the day."""
     service = _fitness_service()
     start_ms, end_ms = _day_range_ms(days_ago)
 
@@ -188,7 +188,7 @@ def get_steps(days_ago: int = 0) -> int:
 
 def get_sleep(days_ago: int = 1) -> dict:
     """
-    Επιστρέφει ύπνο για τη νύχτα (default: χθες βράδυ).
+    Returns sleep data for the night (default: last night).
     Returns: {"total_minutes": int, "deep_minutes": int, "light_minutes": int, "rem_minutes": int}
     """
     service = _fitness_service()
@@ -269,7 +269,7 @@ def _collect_raw_heart_rates(service, start_ms: int, end_ms: int) -> list[float]
 
 
 def get_heart_rate(days_ago: int = 0) -> dict:
-    """Επιστρέφει μέσο και μέγιστο καρδιακό παλμό."""
+    """Returns average and maximum heart rate."""
     service = _fitness_service()
     start_ms, end_ms = _day_range_ms(days_ago)
     if days_ago == 0:

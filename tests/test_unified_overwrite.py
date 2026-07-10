@@ -1,13 +1,13 @@
 """
-Tests για το ΕΝΟΠΟΙΗΜΕΝΟ overwrite στο AstakosMemoryManager._save_fact:
-ΜΙΑ απόφαση (decide_memory_overwrite) πρέπει να καθοδηγεί ΚΑΙ τη Chroma
-ΚΑΙ το JSON Profile — όχι δύο ανεξάρτητα (και πιθανώς αντικρουόμενα) περάσματα.
+Tests for the UNIFIED overwrite in AstakosMemoryManager._save_fact:
+A SINGLE decision (decide_memory_overwrite) must guide BOTH Chroma
+AND the JSON Profile — not two independent (and potentially conflicting) passes.
 
-Καλύπτει:
-  (a) keep_old=True  -> return False, ΚΑΜΙΑ εγγραφή σε Chroma ή JSON (no dup write)
-  (b) keep_old=False -> ίδια ακριβώς εγγραφή αντικαθίσταται και στα δύο stores
-  (c) γενικά facts (όχι [LESSON]/[USER_FACT], καμία κοντινή παλιά εγγραφή)
-      -> προστίθενται κανονικά και στα δύο stores, χωρίς απόκλιση
+Covers:
+  (a) keep_old=True  -> return False, NO write to Chroma or JSON (no dup write)
+  (b) keep_old=False -> the exact same record is replaced in both stores
+  (c) general facts (not [LESSON]/[USER_FACT], no nearby old record)
+      -> added normally to both stores, without divergence
 """
 import json
 import os
@@ -20,7 +20,7 @@ from memory.vector_store import AstakosMemoryManager
 
 
 def _make_same_cat_result(old_id, old_content, distance, old_meta=None):
-    """Μιμείται το επιστρεφόμενο σχήμα του vector_store._collection.query()."""
+    """Mimics the returned shape of vector_store._collection.query()."""
     return {
         "ids": [[old_id]],
         "documents": [[old_content]],
@@ -35,9 +35,9 @@ def _empty_query_result():
 
 def _patched_save_fact(profile_path, decision, same_cat_result):
     """
-    Context manager-άκι: patch-άρει ό,τι χρειάζεται το _save_fact ώστε να τρέξει
-    χωρίς πραγματική Chroma/Gemini, με ελεγχόμενη decide_memory_overwrite.
-    Επιστρέφει τα mocks ώστε το test να κάνει assertions πάνω τους.
+    Context manager: patches everything needed by _save_fact so that it runs
+    without real Chroma/Gemini, with a controlled decide_memory_overwrite.
+    Returns the mocks so that the test can run assertions on them.
     """
     return patch.multiple(
         "memory.vector_store",
@@ -48,9 +48,9 @@ def _patched_save_fact(profile_path, decision, same_cat_result):
 def _run_save_fact(tmp_path, fact, category, decision, same_cat_result,
                    profile_seed=None, dup_results=None):
     """
-    Τρέχει _save_fact με πλήρως mocked Chroma collection / embeddings / similarity
-    search, ελεγχόμενη decide_memory_overwrite και πραγματικό (προσωρινό) JSON
-    profile αρχείο. Επιστρέφει (result, mocks-dict, profile-db-μετά).
+    Runs _save_fact with fully mocked Chroma collection / embeddings / similarity
+    search, controlled decide_memory_overwrite, and a real (temporary) JSON
+    profile file. Returns (result, mocks-dict, profile-db-after).
     """
     profile_path = str(tmp_path / "astakos_profile.db")
     if profile_seed is not None:
@@ -119,7 +119,7 @@ def _run_save_fact(tmp_path, fact, category, decision, same_cat_result,
 
 
 # ──────────────────────────────────────────────────────────────────
-# (a) keep_old=True -> καμία διπλοεγγραφή πουθενά
+# (a) keep_old=True -> no duplicate entries anywhere
 # ──────────────────────────────────────────────────────────────────
 
 def test_keep_old_returns_false_and_writes_nothing(tmp_path):
@@ -137,17 +137,17 @@ def test_keep_old_returns_false_and_writes_nothing(tmp_path):
         tmp_path, new_fact, "family", decision, same_cat, profile_seed=profile_seed,
     )
 
-    # Η συνάρτηση πρέπει να σταματήσει αμέσως — τίποτα δεν γράφεται πουθενά.
+    # The function must stop immediately — nothing is written anywhere.
     assert result is False
     mock_collection.delete.assert_not_called()
     mock_vs.add_texts.assert_not_called()
 
-    # Το JSON Profile μένει ΑΚΡΙΒΩΣ όπως ήταν — όχι append, όχι replace.
+    # The JSON Profile remains EXACTLY as it was — no append, no replace.
     assert db_after == profile_seed
 
 
 # ──────────────────────────────────────────────────────────────────
-# (b) keep_old=False -> ΙΔΙΑ εγγραφή αντικαθίσταται και στα δύο stores
+# (b) keep_old=False -> SAME record is replaced in both stores
 # ──────────────────────────────────────────────────────────────────
 
 def test_overwrite_replaces_same_entry_in_both_stores(tmp_path):
@@ -159,28 +159,28 @@ def test_overwrite_replaces_same_entry_in_both_stores(tmp_path):
         "old_age_days": 1, "new_richness": 2.0, "old_richness": 1.0, "much_longer": False,
     }
     same_cat = _make_same_cat_result("old-id-2", old_content, 0.05)
-    # Ένα άσχετο fact + το προς αντικατάσταση — πρέπει να αλλάξει ΜΟΝΟ το σωστό index.
+    # An irrelevant fact + the one to be replaced — ONLY the correct index must change.
     profile_seed = {"family": ["[USER_FACT]: κάτι άσχετο", old_content]}
 
     result, mock_collection, mock_vs, db_after = _run_save_fact(
         tmp_path, new_fact, "family", decision, same_cat, profile_seed=profile_seed,
     )
 
-    # Chroma: η παλιά εγγραφή σβήνεται, η νέα προστίθεται — ΜΙΑ φορά.
+    # Chroma: the old entry is deleted, the new one is added — ONCE.
     mock_collection.delete.assert_called_once_with(ids=["old-id-2"])
     mock_vs.add_texts.assert_called_once()
     assert mock_vs.add_texts.call_args.args[0] == [new_fact]
 
-    # JSON Profile: ΑΚΡΙΒΩΣ η ίδια εγγραφή αντικαθίσταται (exact-text match) —
-    # το άσχετο fact μένει ανέπαφο, ΔΕΝ υπάρχει προσθήκη/duplicate.
+    # JSON Profile: EXACTLY the same record is replaced (exact-text match) —
+    # the irrelevant fact remains intact, there is NO addition/duplicate.
     assert len(db_after["family"]) == 2
     assert db_after["family"][0] == "[USER_FACT]: κάτι άσχετο"
     assert db_after["family"][1] == new_fact
 
 
 def test_overwrite_appends_when_no_matching_json_entry_found(tmp_path):
-    """Προϋπάρχουσα απόκλιση: η Chroma είχε κάτι που το JSON δεν είχε ποτέ —
-    το νέο fact προστίθεται (όχι σιωπηλή απώλεια), δεν κάνει crash."""
+    """Pre-existing divergence: Chroma had something that JSON never had —
+    the new fact is added (no silent loss), it does not crash."""
     old_content = "[USER_FACT]: Παλιό fact που υπήρχε ΜΟΝΟ στη Chroma"
     new_fact = "[USER_FACT]: Νέο, σωστότερο fact"
 
@@ -202,7 +202,7 @@ def test_overwrite_appends_when_no_matching_json_entry_found(tmp_path):
 
 
 # ──────────────────────────────────────────────────────────────────
-# (c) Γενικά facts (καμία κοντινή παλιά εγγραφή) -> κανονικό append παντού
+# (c) General facts (no nearby old record) -> normal append everywhere
 # ──────────────────────────────────────────────────────────────────
 
 def test_general_fact_with_no_close_match_appends_to_both_stores(tmp_path):
@@ -212,9 +212,9 @@ def test_general_fact_with_no_close_match_appends_to_both_stores(tmp_path):
         "keep_old": False, "looks_like_correction": False, "stale": False,
         "old_age_days": 0, "new_richness": 0.0, "old_richness": 0.0, "much_longer": False,
     }
-    # Καμία κοντινή εγγραφή -> old_id παραμένει None -> decide_memory_overwrite
-    # ΔΕΝ καλείται καν (η απόφαση εδώ δεν χρησιμοποιείται, απλώς δεν πρέπει να
-    # μπλοκάρει το happy-path append).
+    # No close record -> old_id remains None -> decide_memory_overwrite
+    # NOT even called (the decision here is not used, it just shouldn't
+    # blocks the happy-path append).
     same_cat = _empty_query_result()
     profile_seed = {"general": ["Κάτι παλιό άσχετο"]}
 
@@ -222,7 +222,7 @@ def test_general_fact_with_no_close_match_appends_to_both_stores(tmp_path):
         tmp_path, new_fact, "general", decision, same_cat, profile_seed=profile_seed,
     )
 
-    # Καμία διαγραφή — απλή προσθήκη και στα δύο stores.
+    # No deletion — simple addition to both stores.
     mock_collection.delete.assert_not_called()
     mock_vs.add_texts.assert_called_once()
     assert mock_vs.add_texts.call_args.args[0] == [new_fact]
@@ -264,10 +264,10 @@ def test_close_unrelated_family_fact_adds_alongside_instead_of_overwrite(tmp_pat
 
 
 # ──────────────────────────────────────────────────────────────────
-# (d) [MASTRO-FIX] High overlap (>=0.55) ΑΛΛΑ "επεισοδιακό" — διαφορετική
-#     ρητή ημερομηνία μέσα στο ίδιο το κείμενο -> add_alongside, ΟΧΙ
-#     σιωπηλή απώλεια. Πριν το fix, το overlap>=0.55 οδηγούσε ΠΑΝΤΑ σε
-#     keep_old, ανεξαρτήτως episodic-ness — αυτό ήταν το bug.
+# (d) [MASTRO-FIX] High overlap (>=0.55) BUT "episodic" — different
+#     explicit date within the text itself -> add_alongside, NO
+#     silent loss. Before the fix, overlap>=0.55 ALWAYS led to
+#     keep_old, regardless of episodic-ness — this was the bug.
 # ──────────────────────────────────────────────────────────────────
 
 def test_high_overlap_with_differing_literal_dates_adds_alongside(tmp_path):
@@ -290,9 +290,9 @@ def test_high_overlap_with_differing_literal_dates_adds_alongside(tmp_path):
         dup_results=[(dup_doc, 0.05)],
     )
 
-    # Ίδιο λεξιλόγιο (overlap=1.0), ΑΛΛΑ διαφορετική ρητή ημερομηνία μέσα στο
-    # κείμενο -> διαφορετική μέρα/περιστατικό, όχι απλή επανάληψη ενός πάγιου
-    # fact. Πρέπει να κρατηθούν ΚΑΙ ΤΑ ΔΥΟ.
+    # Same vocabulary (overlap=1.0), BUT different explicit date inside the
+    # text -> different day/incident, not just a repetition of a fixed pattern
+    # fact. BOTH must be kept.
     assert result is True
     mock_collection.delete.assert_not_called()
     mock_vs.add_texts.assert_called_once()
@@ -300,9 +300,9 @@ def test_high_overlap_with_differing_literal_dates_adds_alongside(tmp_path):
 
 
 # ──────────────────────────────────────────────────────────────────
-# (e) High overlap, ΧΩΡΙΣ καμία ένδειξη επεισοδιακού (καμία ημερομηνία,
-#     καμία state_marker/relation_type διαφορά) -> keep_old παραμένει —
-#     η ομαδοποίηση πάγιων/timeless facts (π.χ. προτιμήσεις) ΔΕΝ σπάει.
+# (e) High overlap, WITHOUT any indication of episodic (no date,
+#     no state_marker/relation_type difference) -> keep_old remains —
+#     the grouping of fixed/timeless facts (e.g. preferences) DOES NOT break.
 # ──────────────────────────────────────────────────────────────────
 
 def test_high_overlap_static_preference_still_keeps_old(tmp_path):
@@ -320,8 +320,8 @@ def test_high_overlap_static_preference_still_keeps_old(tmp_path):
         tmp_path, new_fact, "family", decision, same_cat, profile_seed=profile_seed,
     )
 
-    # Ίδιο πάγιο γούστο ξαναδιατυπωμένο, καμία ένδειξη νέου περιστατικού -> η
-    # νέα ΔΕΝ αποθηκεύεται πουθενά, ομαδοποιείται με την υπάρχουσα (όπως πριν).
+    # Same fixed preference rephrased, no indication of a new incident -> n
+    # new is NOT saved anywhere, it is grouped with the existing one (as before).
     assert result is False
     mock_collection.delete.assert_not_called()
     mock_vs.add_texts.assert_not_called()

@@ -1,7 +1,7 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Google Calendar Tool
-# Auth: OAuth2 token.json (ίδιο με mail/drive/tasks)
+# Auth: OAuth2 token.json (same as mail/drive/tasks)
 # ================================================================
 
 import os
@@ -21,7 +21,7 @@ _CALENDAR_SCOPE  = "https://www.googleapis.com/auth/calendar"
 
 
 def _get_service():
-    """Επιστρέφει authenticated Google Calendar service (μέσω token.json)."""
+    """Returns an authenticated Google Calendar service (via token.json)."""
     creds = None
     if os.path.exists(TOKEN_PATH):
         creds = Credentials.from_authorized_user_file(TOKEN_PATH, [_CALENDAR_SCOPE])
@@ -38,12 +38,12 @@ def _get_service():
 
 def _parse_dt(dt_str: str, tz: ZoneInfo) -> datetime:
     """
-    Παρσάρει datetime string σε διάφορες μορφές:
+    Parses datetime string in various formats:
     - "2026-06-15 18:00"
     - "2026-06-15T18:00:00"
     - "15/06/2026 18:00"
-    - "αύριο 18:00" / "αύριο"
-    - "Παρασκευή 18:00"
+    - "tomorrow 18:00" / "tomorrow"
+    - "Friday 18:00"
     """
     s = dt_str.strip()
     now = datetime.now(tz)
@@ -98,7 +98,7 @@ def _parse_dt(dt_str: str, tz: ZoneInfo) -> datetime:
 
 
 def _format_event(e: dict) -> str:
-    """Μορφοποιεί ένα event για εμφάνιση."""
+    """Formats an event for display."""
     title = e.get("summary", "(χωρίς τίτλο)")
     start = e.get("start", {})
     end   = e.get("end", {})
@@ -139,16 +139,16 @@ def google_calendar_tool(
     days_ahead: int = 1,
 ) -> str:
     """
-    Διαχείριση Google Calendar. Actions:
-    - list: Εμφάνιση events (days_ahead=1 σήμερα, 7 εβδομάδα κλπ)
-    - today: Events σήμερα (shortcut)
-    - week: Events επόμενων 7 ημερών (shortcut)
-    - create: Δημιουργία event (απαιτεί: title, start_time, end_time)
-    - update: Τροποποίηση event (απαιτεί: event_id + πεδία προς αλλαγή)
-    - delete: Διαγραφή event (απαιτεί: event_id)
-    - search: Αναζήτηση με λέξη-κλειδί (title ως query)
+    Google Calendar Management. Actions:
+    - list: Display events (days_ahead=1 for today, 7 for week, etc.)
+    - today: Events today (shortcut)
+    - week: Events for the next 7 days (shortcut)
+    - create: Create event (requires: title, start_time, end_time)
+    - update: Modify event (requires: event_id + fields to change)
+    - delete: Delete event (requires: event_id)
+    - search: Search by keyword (title as query)
 
-    start_time / end_time μορφές: "2026-06-15 18:00", "αύριο 18:00", "Παρασκευή 20:00"
+    start_time / end_time formats: "2026-06-15 18:00", "tomorrow 18:00", "Friday 20:00"
     """
     try:
         tz  = ZoneInfo(TIMEZONE)

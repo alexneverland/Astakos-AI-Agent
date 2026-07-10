@@ -4,26 +4,26 @@ from typing import Dict
 
 def clean_text(text: str) -> str:
     """
-    Καθαρίζει το κείμενο από σημεία στίξης και το μετατρέπει σε πεζά.
+    Cleans the text from punctuation and converts it to lowercase.
     
     Args:
-        text (str): Το αρχικό κείμενο.
+        text (str): The original text.
         
     Returns:
-        str: Το καθαρισμένο κείμενο.
+        str: The cleaned text.
     """
     translator = str.maketrans('', '', string.punctuation)
     return text.translate(translator).lower()
 
 def count_words(text: str) -> int:
     """
-    Μετράει το συνολικό αριθμό λέξεων στο κείμενο.
+    Counts the total number of words in the text.
     
     Args:
-        text (str): Το κείμενο προς ανάλυση.
+        text (str): The text to be analyzed.
         
     Returns:
-        int: Ο αριθμός των λέξεων.
+        int: The number of words.
     """
     if not text.strip():
         return 0
@@ -33,13 +33,13 @@ def count_words(text: str) -> int:
 
 def get_word_frequencies(text: str) -> Dict[str, int]:
     """
-    Υπολογίζει τη συχνότητα εμφάνισης κάθε λέξης στο κείμενο.
+    Calculates the frequency of occurrence of each word in the text.
     
     Args:
-        text (str): Το κείμενο προς ανάλυση.
+        text (str): The text to analyze.
         
     Returns:
-        Dict[str, int]: Λεξικό με τις λέξεις και τη συχνότητά τους.
+        Dict[str, int]: A dictionary with the words and their frequency.
     """
     cleaned_text = clean_text(text)
     words = cleaned_text.split()
@@ -52,7 +52,7 @@ def get_word_frequencies(text: str) -> Dict[str, int]:
 
 def main() -> None:
     """
-    Κύρια συνάρτηση εκτέλεσης του script μέσω CLI.
+    Main function for executing the script via CLI.
     """
     parser = argparse.ArgumentParser(description="Επαγγελματικό script καταμέτρησης λέξεων.")
     parser.add_argument("text", type=str, help="Το κείμενο που θέλετε να αναλύσετε")
@@ -66,7 +66,7 @@ def main() -> None:
     if args.freq:
         frequencies = get_word_frequencies(args.text)
         print("\nΣυχνότητα Λέξεων:")
-        # Ταξινόμηση κατά φθίνουσα σειρά συχνότητας
+        # Sort in descending order of frequency
         for word, count in sorted(frequencies.items(), key=lambda item: item[1], reverse=True):
             print(f"{word}: {count}")
 

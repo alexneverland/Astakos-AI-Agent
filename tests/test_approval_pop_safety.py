@@ -1,9 +1,9 @@
 """
-Tests για το pop-before-execute bug fix.
-Επαληθευει οτι το pending action ΔΕΝ χανεται αν:
-- το tool δεν βρεθει
-- το tool.invoke κανει exception
-Και οτι αφαιρειται ΜΟΝΟ μετα απο επιτυχη εκτελεση.
+Tests for the pop-before-execute bug fix.
+Verifies that the pending action is NOT lost if:
+- the tool is not found
+- tool.invoke raises an exception
+And that it is removed ONLY after successful execution.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,7 +34,7 @@ def _setup_pending(tmp_path, tool_call_id="tc-safe-1", tool_name="github_manager
 
 
 def test_pending_survives_missing_tool(tmp_path):
-    """Αν το tool δεν βρεθει, το pending action πρεπει να μεινει."""
+    """If the tool is not found, the pending action must remain."""
     pending_file = _setup_pending(tmp_path)
     with patch("core.approval.PENDING_FILE", pending_file):
         from core.approval import execute_approved_pending, get_pending
@@ -47,7 +47,7 @@ def test_pending_survives_missing_tool(tmp_path):
 
 
 def test_pending_survives_invoke_exception(tmp_path):
-    """Αν το tool.invoke κανει exception, το pending action πρεπει να μεινει."""
+    """If tool.invoke raises an exception, the pending action must remain."""
     pending_file = _setup_pending(tmp_path)
     with patch("core.approval.PENDING_FILE", pending_file):
         from core.approval import execute_approved_pending, get_pending
@@ -62,7 +62,7 @@ def test_pending_survives_invoke_exception(tmp_path):
 
 
 def test_pending_removed_only_after_success(tmp_path):
-    """Το pending αφαιρειται ΜΟΝΟ μετα απο επιτυχη invoke."""
+    """The pending is removed ONLY after a successful invoke."""
     pending_file = _setup_pending(tmp_path)
     with patch("core.approval.PENDING_FILE", pending_file):
         from core.approval import execute_approved_pending, get_pending
@@ -78,7 +78,7 @@ def test_pending_removed_only_after_success(tmp_path):
 
 
 def test_terminal_approval_adds_already_approved_flag(tmp_path):
-    """run_terminal_command παιρνει already_approved=True απο το shared approval helper."""
+    """run_terminal_command gets already_approved=True from the shared approval helper."""
     pending_file = _setup_pending(
         tmp_path,
         tool_call_id="tc-terminal",
@@ -97,7 +97,7 @@ def test_terminal_approval_adds_already_approved_flag(tmp_path):
 
 
 def test_reject_always_pops(tmp_path):
-    """Το reject παντα αφαιρει το pending — δεν χρειαζεται invoke."""
+    """Reject always removes the pending — no invoke needed."""
     pending_file = _setup_pending(tmp_path, "tc-reject-1")
     with patch("core.approval.PENDING_FILE", pending_file):
         from core.approval import get_pending, pop_pending

@@ -13,7 +13,7 @@ from datetime import datetime
 from langchain_core.tools import tool
 from config import BASE_DIR
 
-# Mastro-Import: Φέρνουμε τον εγκέφαλο μέσα στο εργαλείο!
+# Mastro-Import: Bringing the brain into the tool!
 from core.brain import llm
 from core.utils import clean_message 
 
@@ -85,17 +85,17 @@ def get_recent_meals():
 @tool
 def recipe_expert(query: str, user_context: str, ingredients: str = ""):
     """
-    ⚠️ SOS: ΚΑΛΕΣΕ ΑΥΤΟ ΤΟ ΕΡΓΑΛΕΙΟ ΥΠΟΧΡΕΩΤΙΚΑ για κάθε ερώτηση σχετικά με φαγητό, μενού ή συνταγές.
-    Το εργαλείο θα επιστρέψει τη συνταγή, αλλά Ο ΧΡΗΣΤΗΣ ΔΕΝ ΤΗ ΒΛΕΠΕΙ αυτόματα.
-    ΠΡΕΠΕΙ ΝΑ ΑΝΤΙΓΡΑΨΕΙΣ το αποτέλεσμα του εργαλείου ΜΕΣΑ στην τελική σου απάντηση!
-    ΜΗΝ πεις 'σου την άφησα παραπάνω', γιατί ο χρήστης δεν βλέπει την έξοδο του εργαλείου!
-    query: Η ερώτηση του χρήστη (π.χ. 'Τι να μαγειρέψω;')
-    user_context: Αντίγραψε εδώ τις ΜΝΗΜΕΣ που είδες για τις προτιμήσεις της οικογένειας.
-    ingredients: (Προαιρετικό) Διαθέσιμα υλικά.
+    ⚠️ SOS: YOU MUST CALL THIS TOOL for every question regarding food, menus, or recipes.
+    The tool will return the recipe, but THE USER DOES NOT SEE IT automatically.
+    YOU MUST COPY the tool's result INTO your final response!
+    DO NOT say 'I left it for you above', because the user cannot see the tool's output!
+    query: The user's question (e.g., 'What should I cook?')
+    user_context: Copy here the MEMORIES you saw regarding the family's preferences.
+    ingredients: (Optional) Available ingredients.
     """
     recent = get_recent_meals()
     print(f"\n[Tool Debug] 👨‍🍳 Ο Chef Αστακός ετοιμάζει προτάσεις...")
-    # Το εργαλείο εκτελεί την κλήση εσωτερικά... (Ο υπόλοιπος κώδικας μένει ίδιος)
+    # The tool executes the call internally... (The rest of the code remains the same)
     prompt = f"""
     Είσαι ο Chef του σπιτιού. Λειτούργησε βάσει των εξής:
     
@@ -111,10 +111,10 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
     """
     
     try:
-        # Το εργαλείο κάνει τη δική του κλήση στο Gemini!
+        # The tool makes its own call to Gemini!
         response = llm.invoke(prompt)
-        # [MASTRO-SHIELD]: clean_message αντί για raw .content
-        # ώστε να χειριστεί σωστά λίστες parts από Gemini 3.x
+        # [MASTRO-SHIELD]: clean_message instead of raw .content
+        # so as to correctly handle parts lists from Gemini 3.x
         return clean_message(response.content)
     except Exception as e:
         return f"❌ Σφάλμα κατά την παραγωγή της συνταγής από τον Chef: {str(e)}"
@@ -123,7 +123,7 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
 @tool
 def log_meal(meal_name: str):
     """
-    Καταγράφει οριστικά το φαγητό που επιλέχθηκε στο food_history.json.
+    Permanently records the selected food in food_history.json.
     """
     history = []
     print(f"\n[Tool Debug] 📝 Καταγραφή γεύματος στο JSON: {meal_name}")
@@ -141,9 +141,9 @@ def log_meal(meal_name: str):
     if not meal_name:
         return "⚠️ Δεν δόθηκε όνομα γεύματος για καταγραφή."
 
-    # [MASTRO-FIX]: Έλεγχος αν παρόμοιο γεύμα έχει ήδη καταγραφεί ΣΗΜΕΡΑ
+    # [MASTRO-FIX]: Check if a similar meal has already been logged TODAY
     for meal in history:
-        # Παίρνουμε το YYYY-MM-DD από το "2026-05-21 21:30"
+        # We get the YYYY-MM-DD from "2026-05-21 21:30"
         meal_date = meal.get("date", "").split(" ")[0] 
         existing_name = meal.get("name", "")
         if (meal_date == today_str and _is_same_meal(existing_name, meal_name)) or _is_recent_same_meal(meal, meal_name, now):

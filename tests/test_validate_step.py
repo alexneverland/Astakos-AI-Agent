@@ -1,6 +1,6 @@
 """
-Tests για validate_step_node() στο core/planner.py
-Τρέξε: pytest tests/test_validate_step.py -v
+Tests for validate_step_node() in core/planner.py
+Run: pytest tests/test_validate_step.py -v
 """
 import os
 import sys
@@ -39,7 +39,7 @@ def _import_validate():
 
 
 def _make_state(plan_active=True, idx=0, agent_response="Ολοκληρώθηκε επιτυχώς.", tasks=None):
-    """Βοηθητική συνάρτηση για δημιουργία mock state."""
+    """Helper function to create a mock state."""
     from langchain_core.messages import HumanMessage, AIMessage
 
     if tasks is None:
@@ -64,11 +64,11 @@ def _make_state(plan_active=True, idx=0, agent_response="Ολοκληρώθηκ�
 
 
 # ═══════════════════════════════════════════════════════════════
-# Tests: όχι-plan state
+# Tests: non-plan state
 # ═══════════════════════════════════════════════════════════════
 
 def test_skip_when_not_plan_active():
-    """Αν plan_active=False → επιστρέφει {} χωρίς να κάνει τίποτα."""
+    """If plan_active=False → returns {} without doing anything."""
     validate = _import_validate()
     state = _make_state(plan_active=False)
     result = validate(state)
@@ -76,7 +76,7 @@ def test_skip_when_not_plan_active():
 
 
 def test_skip_when_idx_out_of_bounds():
-    """Αν idx >= len(tasks) → skip."""
+    """If idx >= len(tasks) → skip."""
     validate = _import_validate()
     state = _make_state(plan_active=True, idx=99)
     result = validate(state)
@@ -88,16 +88,16 @@ def test_skip_when_idx_out_of_bounds():
 # ═══════════════════════════════════════════════════════════════
 
 def test_success_response_returns_false_flag():
-    """Κανονική επιτυχημένη απάντηση → plan_step_failed=False."""
+    """Normal successful response → plan_step_failed=False."""
     validate = _import_validate()
     state = _make_state(agent_response="Η ανάλυση ολοκληρώθηκε με επιτυχία.")
     result = validate(state)
     assert result.get("plan_step_failed") is False
-    assert "messages" not in result  # δεν στέλνουμε warning
+    assert "messages" not in result  # we do not send a warning
 
 
 def test_success_no_warning_message():
-    """Καλή απάντηση → δεν προστίθεται AIMessage warning."""
+    """Good response → no AIMessage warning is added."""
     validate = _import_validate()
     state = _make_state(agent_response="Εδώ είναι τα αποτελέσματα που ζητήθηκαν.")
     result = validate(state)
@@ -109,7 +109,7 @@ def test_success_no_warning_message():
 # ═══════════════════════════════════════════════════════════════
 
 def test_detects_greek_failure_word():
-    """Απάντηση με 'σφάλμα' → plan_step_failed=True."""
+    """Response with 'error' → plan_step_failed=True."""
     validate = _import_validate()
     state = _make_state(agent_response="Παρουσιάστηκε σφάλμα κατά την εκτέλεση.")
     result = validate(state)
@@ -117,7 +117,7 @@ def test_detects_greek_failure_word():
 
 
 def test_detects_english_error():
-    """Απάντηση με 'error' → plan_step_failed=True."""
+    """Response with 'error' → plan_step_failed=True."""
     validate = _import_validate()
     state = _make_state(agent_response="An error occurred while processing.")
     result = validate(state)
@@ -125,7 +125,7 @@ def test_detects_english_error():
 
 
 def test_detects_failed_signal():
-    """Απάντηση με 'failed' → plan_step_failed=True."""
+    """Response with 'failed' → plan_step_failed=True."""
     validate = _import_validate()
     state = _make_state(agent_response="The operation failed unexpectedly.")
     result = validate(state)
@@ -133,7 +133,7 @@ def test_detects_failed_signal():
 
 
 def test_detects_greek_den_mporesa():
-    """'δεν μπόρεσα' → plan_step_failed=True."""
+    """'could not' -> plan_step_failed=True."""
     validate = _import_validate()
     state = _make_state(agent_response="Δεν μπόρεσα να βρω το αρχείο.")
     result = validate(state)
@@ -141,7 +141,7 @@ def test_detects_greek_den_mporesa():
 
 
 def test_failure_includes_warning_message():
-    """Αποτυχία → προστίθεται AIMessage με ⚠️ warning."""
+    """Failure → AIMessage is added with a ⚠️ warning."""
     from langchain_core.messages import AIMessage
     validate = _import_validate()
     state = _make_state(agent_response="Παρουσιάστηκε αποτυχία.")
@@ -154,12 +154,12 @@ def test_failure_includes_warning_message():
 
 
 def test_warning_contains_step_info():
-    """Το warning περιέχει τον αριθμό βήματος και περιγραφή."""
+    """The warning contains the step number and description."""
     validate = _import_validate()
     state = _make_state(agent_response="error occurred", idx=0)
     result = validate(state)
     warning_text = result["messages"][0].content
-    # Πρέπει να αναφέρει βήμα 1
+    # Must report step 1
     assert "1" in warning_text
 
 
@@ -168,12 +168,12 @@ def test_warning_contains_step_info():
 # ═══════════════════════════════════════════════════════════════
 
 def test_progress_message_ignored():
-    """Το ⏳ progress AIMessage ΔΕΝ θεωρείται agent response."""
+    """The ⏳ progress AIMessage is NOT considered an agent response."""
     from langchain_core.messages import HumanMessage, AIMessage
     validate = _import_validate()
 
-    # State όπου το τελευταίο AIMessage είναι progress indicator
-    # και πριν αυτό υπάρχει η πραγματική agent απάντηση
+    # State where the last AIMessage is a progress indicator
+    # and before this there is the actual agent response
     state = {
         "messages": [
             HumanMessage(content="instruction"),
@@ -187,21 +187,21 @@ def test_progress_message_ignored():
         "plan_goal": "test",
     }
     result = validate(state)
-    # Πρέπει να διαβάσει την επιτυχημένη απάντηση, όχι το progress
+    # Must read the successful response, not the progress
     assert result.get("plan_step_failed") is False
 
 
 def test_empty_agent_response():
-    """Κενή απάντηση → δεν αποτυγχάνει (δεν έχει failure signals)."""
+    """Empty response → does not fail (has no failure signals)."""
     validate = _import_validate()
     state = _make_state(agent_response="")
     result = validate(state)
-    # Κενό response → plan_step_failed=False (δεν υπάρχουν failure signals)
+    # Empty response → plan_step_failed=False (no failure signals exist)
     assert result.get("plan_step_failed") is False
 
 
 def test_case_insensitive_detection():
-    """Failure detection case-insensitive: 'ERROR' → αναγνωρίζεται."""
+    """Failure detection case-insensitive: 'ERROR' → recognized."""
     validate = _import_validate()
     state = _make_state(agent_response="An ERROR was detected in the process.")
     result = validate(state)

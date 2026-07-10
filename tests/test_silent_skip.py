@@ -1,7 +1,7 @@
 """
-Tests για το SILENT_SKIP flow στο job_check_routines() (clients/telegram_bot.py).
-Stubs βαριές dependencies ώστε να τρέχει χωρίς production env.
-Τρέξε: python tests/test_silent_skip.py   ή   pytest tests/test_silent_skip.py
+Tests for the SILENT_SKIP flow in job_check_routines() (clients/telegram_bot.py).
+Stubs heavy dependencies so that it runs without a production env.
+Run: python tests/test_silent_skip.py   or   pytest tests/test_silent_skip.py
 """
 import os
 import sqlite3
@@ -14,25 +14,25 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ─────────────────────────────────────────────────────────────
-# Stub ΟΛΕΣ τις βαριές dependencies ΠΡΙΝ import του bot
+# Stub ALL heavy dependencies BEFORE importing the bot
 # ─────────────────────────────────────────────────────────────
 
-_TMP_BASE = tempfile.mkdtemp()   # persistent temp dir για το config.BASE_DIR
+_TMP_BASE = tempfile.mkdtemp()   # persistent temp dir for config.BASE_DIR
 
-# Όλα τα module names που το _stub_modules() αντικαθιστά στο sys.modules.
-# ΣΗΜΑΝΤΙΚΟ (διορθώθηκε): το snapshot + stubbing + "import clients.telegram_bot"
-# ΔΕΝ γίνονται στο module level (collection time) — γίνονται μέσα στο
-# setup_module() (βλ. παρακάτω). Λόγος: το pytest κάνει collection (import)
-# ΟΛΩΝ των test αρχείων ΠΡΙΝ ξεκινήσει η εκτέλεση ΟΠΟΙΟΥΔΗΠΟΤΕ test — άρα αν
-# το stubbing γινόταν στο module level, "δηλητηρίαζε" το sys.modules για ΟΛΑ
-# τα άλλα test αρχεία (πριν ΚΑΙ μετά αλφαβητικά), ακόμα και με ένα
-# teardown_module() στο τέλος, αφού η ζημιά είχε ήδη γίνει στη φάση collection —
-# πολύ πριν τρέξει το teardown_module() αυτού εδώ του αρχείου (π.χ.
-# tests/test_routine_schedule_control.py έπαιρνε AttributeError
-# "module 'memory.routine_db' has no attribute 'find_routines_by_name'" επειδή
-# ακριβώς αυτό συνέβαινε — έβλεπε το stub module, όχι το πραγματικό).
-# Με setup_module()/teardown_module(), η αντικατάσταση περιορίζεται ΑΚΡΙΒΩΣ
-# στο παράθυρο εκτέλεσης (όχι collection) αυτού του αρχείου.
+# All module names that _stub_modules() replaces in sys.modules.
+# IMPORTANT (fixed): snapshot + stubbing + "import clients.telegram_bot"
+# They are NOT done at the module level (collection time) — they are done inside the
+# setup_module() (see below). Reason: pytest performs collection (import)
+# OF ALL test files BEFORE the execution of ANY test begins — so if
+# stubbing was done at the module level, "poisoning" sys.modules for EVERYTHING
+# the other test files (both before AND after alphabetically), even with one
+# teardown_module() at the end, since the damage had already been done during the collection phase —
+# long before the teardown_module() of this file runs (e.g.
+# tests/test_routine_schedule_control.py was getting an AttributeError
+# "module 'memory.routine_db' has no attribute 'find_routines_by_name'" because
+# exactly that was happening — it was seeing the stub module, not the real one).
+# With setup_module()/teardown_module(), the replacement is limited EXACTLY
+# in the execution window (not collection) of this file.
 _STUB_MODULE_NAMES = [
     "config",
     "langchain_core", "langchain_core.messages",
@@ -47,8 +47,8 @@ _STUB_MODULE_NAMES = [
     "tools", "tools.telegram",
     "telegram", "telegram.ext",
 ]
-_ORIGINAL_MODULES = {}  # γεμίζει μέσα στο setup_module(), ΟΧΙ στο collection time
-bot = None  # γεμίζει μέσα στο setup_module() με το clients.telegram_bot (stubbed deps)
+_ORIGINAL_MODULES = {}  # populated inside setup_module(), NOT at collection time
+bot = None  # populated inside setup_module() with clients.telegram_bot (stubbed deps)
 
 
 def _stub_modules():
@@ -145,15 +145,15 @@ def _stub_modules():
     rdb.mark_routine_responded     = MagicMock()
     rdb.clear_pending_confirmations = MagicMock()
     rdb.mark_routine_ignored       = MagicMock()
-    # νέα stubs για muted_until
-    rdb.get_routine_muted_until    = MagicMock(return_value=None)   # δεν είναι muted by default
+    # new stubs for muted_until
+    rdb.get_routine_muted_until    = MagicMock(return_value=None)   # not muted by default
     rdb.set_routine_muted_until    = MagicMock()
     rdb.clear_routine_muted_until  = MagicMock()
-    # νέα stubs για seasonal/temporary inactivity (active_from/active_until/paused_until)
+    # new stubs for seasonal/temporary inactivity (active_from/active_until/paused_until)
     rdb.get_routine_schedule_meta  = MagicMock(return_value={
         "active_from": None, "active_until": None, "paused_until": None,
         "resume_rule": None, "pause_reason": None,
-    })  # by default: καμία ρουτίνα δεν είναι inactive
+    })  # by default: no routine is inactive
     rdb.is_routine_temporarily_inactive_meta = MagicMock(return_value=(False, None))
     rdb.set_routine_paused_until   = MagicMock()
     rdb.clear_routine_paused_until = MagicMock()
@@ -162,7 +162,7 @@ def _stub_modules():
     rdb.get_routine_condition      = MagicMock(return_value={})
     rdb.get_routine_conditions     = MagicMock(return_value=[])
     rdb.get_context_state          = MagicMock(return_value=None)
-    # νέα stubs για sentimental
+    # new stubs for sentimental
     rdb.get_sentimental_info       = MagicMock(return_value={
         "sentimental": 0, "muted_from": None, "muted_until": None,
         "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False
@@ -247,11 +247,11 @@ def _stub_modules():
 
 def setup_module(module):
     """
-    pytest xunit-style hook: τρέχει ΜΙΑ φορά, ΑΚΡΙΒΩΣ πριν το ΠΡΩΤΟ test αυτού
-    του αρχείου εκτελεστεί (φάση EXECUTION) — ΟΧΙ στη φάση collection.
-    Εδώ (και όχι στο module level) κάνουμε snapshot + stubbing + import, ώστε
-    το "δηλητηριασμένο" sys.modules να υπάρχει ΜΟΝΟ όσο διάστημα τρέχουν τα
-    tests αυτού του αρχείου — όχι κατά τη collection όλων των test αρχείων.
+    pytest xunit-style hook: runs ONCE, EXACTLY before the FIRST test of this
+    file is executed (EXECUTION phase) — NOT during the collection phase.
+    Here (and not at the module level) we perform snapshot + stubbing + import, so
+    that the "poisoned" sys.modules exists ONLY while the tests of
+    this file are running — not during the collection of all test files.
     """
     global bot
     _ORIGINAL_MODULES.update({name: sys.modules.get(name) for name in _STUB_MODULE_NAMES})
@@ -262,12 +262,12 @@ def setup_module(module):
 
 def teardown_module(module):
     """
-    pytest xunit-style hook: τρέχει ΜΙΑ φορά, μετά το ΤΕΛΕΥΤΑΙΟ test αυτού του
-    αρχείου. Επαναφέρει το sys.modules στην κατάσταση που ήταν πριν το
-    setup_module(), ώστε τα fake stub modules να μην διαρρεύσουν σε άλλα test
-    αρχεία που τρέχουν στο ίδιο pytest process πριν ή μετά από αυτό εδώ.
-    Δεν επηρεάζει τα tests ΑΥΤΟΥ του αρχείου (όλα τρέχουν με τα stubs, όπως πριν,
-    απλά τώρα μέσα στο setup_module()/teardown_module() παράθυρο).
+    pytest xunit-style hook: runs ONCE, after the LAST test of this
+    file. Restores sys.modules to the state it was in before
+    setup_module(), so that fake stub modules do not leak into other test
+    files running in the same pytest process before or after this one.
+    It does not affect the tests of THIS file (all run with the stubs, as before,
+    just now within the setup_module()/teardown_module() window).
     """
     global bot
     for name in _STUB_MODULE_NAMES:
@@ -276,10 +276,10 @@ def teardown_module(module):
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = original
-    # Το clients.telegram_bot φορτώθηκε στο setup_module() χρησιμοποιώντας τα
-    # FAKE dependencies. Το αφαιρούμε ώστε το επόμενο test αρχείο που το κάνει
-    # import να ξανατρέξει το πραγματικό module πάνω στα ΠΡΑΓΜΑΤΙΚΑ (μόλις
-    # αποκατεστημένα) dependencies.
+    # clients.telegram_bot was loaded in setup_module() using the
+    # FAKE dependencies. We remove it so that the next test file that does it
+    # import to re-run the real module on the REAL (just
+    # restored) dependencies.
     sys.modules.pop("clients.telegram_bot", None)
     bot = None
 
@@ -308,7 +308,7 @@ def _make_routines_db(path, rows):
             "(:id,:event_name,:confidence,:time_str,:day_of_week,:state,:last_triggered)", r
         )
     conn.commit()
-    conn.close()  # αναγκαίο στο Windows για να μην κλειδωθεί το db στο TemporaryDirectory cleanup
+    conn.close()  # necessary on Windows to prevent db locking during TemporaryDirectory cleanup
 
 
 def _run_job(
@@ -322,7 +322,7 @@ def _run_job(
     random_value=0.99,
 ):
     """
-    Τρέχει job_check_routines() με mocked εξωτερικά.
+    Runs job_check_routines() with mocked externals.
     Returns: (sent_messages, logged_events, bus_events)
     """
     sent       = []
@@ -350,7 +350,7 @@ def _run_job(
         db_path = os.path.join(tmp, "astakos_routines.db")
         _make_routines_db(db_path, db_rows)
 
-        # Ενημερώνω config.BASE_DIR ώστε το job να βρει το σωστό DB
+        # Update config.BASE_DIR so that the job can find the correct DB
         sys.modules["config"].BASE_DIR = tmp
 
         mock_bus = MagicMock()
@@ -375,7 +375,7 @@ def _run_job(
 
 
 def _run_missed_job(db_rows, craft_return="Ε, πήγε καλά; 😊", muted_until=None, sentimental_info=None):
-    """Τρέχει startup_check_missed_routines() με mocked εξωτερικά."""
+    """Runs startup_check_missed_routines() with mocked external dependencies."""
     sent       = []
     logged     = []
     bus_events = []
@@ -425,23 +425,23 @@ def _run_missed_job(db_rows, craft_return="Ε, πήγε καλά; 😊", muted_u
 
 
 def _today_minus(days):
-    # ΠΡΟΣΟΧΗ: πρέπει να υπολογίζεται σχετικά με το FROZEN _fixed_now(), όχι με
-    # το πραγματικό datetime.now(). Το job_check_routines() τρέχει με
-    # bot.datetime patched στο _fixed_now() (2026-06-17 12:00), άρα το
-    # last_triggered πρέπει να είναι "χθες" ΣΕ ΣΧΕΣΗ ΜΕ ΑΥΤΗ την ημερομηνία.
-    # Bug που διορθώθηκε: όταν χρησιμοποιούταν το πραγματικό "σήμερα", μόλις
-    # η πραγματική ημερομηνία προσπέρασε το 2026-06-17, το last_triggered
-    # (πραγματικό "χθες") συνέπιπτε ΤΥΧΑΙΑ με το frozen today_str
-    # ("2026-06-17"), κάνοντας τη ρουτίνα να φαίνεται "already triggered today"
-    # στο SQL WHERE (last_triggered != today_str) — όλα τα due routines
-    # φιλτράρονταν σιωπηλά, χωρίς exception/print, άδειο sent/logged/bus_events.
+    # ATTENTION: must be calculated relative to the FROZEN _fixed_now(), not to
+    # the actual datetime.now(). The job_check_routines() runs with
+    # bot.datetime patched to _fixed_now() (2026-06-17 12:00), so the
+    # last_triggered must be "yesterday" IN RELATION TO THIS date.
+    # Bug fixed: when the actual "today" was used, as soon as
+    # the actual date passed 2026-06-17, the last_triggered
+    # (actual "yesterday") COINCIDENTALLY coincided with the frozen today_str
+    # ("2026-06-17"), making the routine appear "already triggered today"
+    # in the SQL WHERE (last_triggered != today_str) — all due routines
+    # were silently filtered, without exception/print, empty sent/logged/bus_events.
     return (_fixed_now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
 
 def _due_routine():
-    """Ρουτίνα που πρέπει να πυροδοτηθεί σε ~10 λεπτά (μέσα στο 15' window)."""
+    """Routine that must be triggered in ~10 minutes (within the 15' window)."""
     now      = _fixed_now()
-    # Η ρουτίνα είναι στο target_time = now+10min → μέσα στο 15' window
+    # The routine is at target_time = now+10min → within the 15' window
     time_str = (now + timedelta(minutes=10)).strftime("%H:%M")
     return {
         "id": 1, "event_name": "park_walk", "confidence": 0.9,
@@ -451,7 +451,7 @@ def _due_routine():
 
 
 def _missed_routine():
-    """Ρουτίνα που έχασε το startup check μέσα στο grace window."""
+    """Routine that missed the startup check within the grace window."""
     now = _fixed_now()
     time_str = (now - timedelta(minutes=20)).strftime("%H:%M")
     return {
@@ -466,7 +466,7 @@ def _missed_routine():
 # ─────────────────────────────────────────────────────────────
 
 def test_silent_skip_sends_no_message():
-    """[SILENT_SKIP] → κανένα μήνυμα δεν στέλνεται."""
+    """[SILENT_SKIP] → no message is sent."""
     sent, _, _ = _run_job([_due_routine()], craft_return="[SILENT_SKIP]")
     assert sent == [], f"Δεν έπρεπε να σταλεί τίποτα, αλλά στάλθηκε: {sent}"
 
@@ -479,7 +479,7 @@ def test_silent_skip_logs_silent_skip():
 
 
 def test_silent_skip_updates_last_triggered():
-    """[SILENT_SKIP] → last_triggered = σήμερα στη DB."""
+    """[SILENT_SKIP] → last_triggered = today in the DB."""
     row = _due_routine()
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "astakos_routines.db")
@@ -516,14 +516,14 @@ def test_silent_skip_emits_bus_event():
 
 
 def test_silent_skip_with_whitespace():
-    """'  [SILENT_SKIP]  ' → μετά trim → ίδια συμπεριφορά."""
+    """'  [SILENT_SKIP]  ' → after trim → same behavior."""
     sent, logged, _ = _run_job([_due_routine()], craft_return="  [SILENT_SKIP]  ")
     assert sent == []
     assert any(action == "routine_silent_skip" for _, action in logged)
 
 
 def test_already_muted_routine_does_not_send_sentimental_followup():
-    """muted_until ενεργό → routine_silent_skip μόνο, χωρίς δεύτερο emotional/proactive send."""
+    """muted_until active → routine_silent_skip only, without a second emotional/proactive send."""
     rdb = sys.modules["memory.routine_db"]
     sent, logged, _ = _run_job(
         [_due_routine()],
@@ -549,7 +549,7 @@ def test_already_muted_routine_does_not_send_sentimental_followup():
 # ─────────────────────────────────────────────────────────────
 
 def test_context_skip_does_not_send_message():
-    """[CONTEXT_SKIP] → δεν στέλνεται μήνυμα στον χρήστη."""
+    """[CONTEXT_SKIP] → no message is sent to the user."""
     sent, _, _ = _run_job(
         [_due_routine()],
         craft_return="[CONTEXT_SKIP] Κανονικά θα πήγαινες στο πάρκο αλλά βρέχει!",
@@ -568,7 +568,7 @@ def test_context_skip_logs_context_skip():
 
 
 def test_context_skip_does_not_create_pending_confirmation():
-    """[CONTEXT_SKIP] → ούτε μήνυμα, ούτε memory pending, ούτε DB pending save."""
+    """[CONTEXT_SKIP] → no message, no memory pending, no DB pending save."""
     rdb = sys.modules["memory.routine_db"]
     bot.pending_routine_confirmations.clear()
     sent, _, _ = _run_job(
@@ -582,7 +582,7 @@ def test_context_skip_does_not_create_pending_confirmation():
 
 
 def test_context_skip_can_set_muted_window():
-    """[CONTEXT_SKIP] με long-running blocker → γράφει muted_until άμεσα."""
+    """[CONTEXT_SKIP] with a long-running blocker → writes muted_until immediately."""
     rdb = sys.modules["memory.routine_db"]
     with (
         patch.object(bot, "_build_proactive_memory_context", return_value="camp context"),
@@ -651,7 +651,7 @@ def test_should_log_routine_skip_respects_ttl(monkeypatch):
 
 
 def test_deferred_context_skip_does_not_create_pending_confirmation():
-    """Deferred [CONTEXT_SKIP] → ούτε μήνυμα ούτε pending."""
+    """Deferred [CONTEXT_SKIP] → neither message nor pending."""
     rdb = sys.modules["memory.routine_db"]
     bot.pending_routine_confirmations.clear()
     sent, logged, bus_events = _run_missed_job(
@@ -723,22 +723,22 @@ def test_force_proactive_skip_from_context_does_not_skip_without_progress_signal
     assert bot._force_proactive_skip_from_context("Πάρκο με Αλέξανδρο", ctx) is None
 
 def test_normal_msg_is_sent():
-    """Κανονικό μήνυμα → στέλνεται αυτούσιο."""
+    """Regular message → sent as is."""
     sent, _, _ = _run_job([_due_routine()], craft_return="Μάστορα, πάμε πάρκο;")
     assert sent == ["Μάστορα, πάμε πάρκο;"], f"Got: {sent}"
 
 
 def test_normal_msg_no_skip_logs():
-    """Κανονικό μήνυμα → ΟΧΙ routine_silent_skip ή routine_context_skip στο log."""
+    """Normal message → NO routine_silent_skip or routine_context_skip in the log."""
     _, logged, _ = _run_job([_due_routine()], craft_return="Μάστορα, πάμε βόλτα!")
     assert not any(action == "routine_silent_skip"  for _, action in logged)
     assert not any(action == "routine_context_skip" for _, action in logged)
 
 def test_timeout_decay_ignores_stale_pending():
     """
-    Όταν ένα routine έχει γίνει confirmed (δηλ. όχι TRIGGER_PENDING),
-    το timeout decay δεν πρέπει να γράψει timeout_decay,
-    αλλά pending_stale_cleared.
+    When a routine has been confirmed (i.e., not TRIGGER_PENDING),
+    the timeout decay should not write timeout_decay,
+    but pending_stale_cleared instead.
     """
     past_time = _fixed_now() - timedelta(minutes=40)
     bot.pending_routine_confirmations[888] = {"event": "Stale Routine", "sent_at": past_time}

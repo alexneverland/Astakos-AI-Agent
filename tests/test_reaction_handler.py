@@ -1,6 +1,6 @@
 """
-Tests για το ❤️ reaction handler.
-Τρέξε: venv/Scripts/python.exe tests/test_reaction_handler.py
+Tests for the ❤️ reaction handler.
+Run: venv/Scripts/python.exe tests/test_reaction_handler.py
 """
 import sys, os, threading, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -26,7 +26,7 @@ FAKE_CHAT_ID = "999"
 bot.TELEGRAM_CHAT_ID = FAKE_CHAT_ID
 
 
-# ── 1. Cache: αποθηκεύει και επιστρέφει σωστά ─────────────────────
+# ── 1. Cache: stores and returns correctly ─────────────────────
 bot._bot_message_cache.clear()
 bot._cache_bot_message(101, "Καλημέρα Μάστορα!")
 bot._cache_bot_message(102, "Πώς μπορώ να βοηθήσω;")
@@ -49,14 +49,14 @@ check("Cache: δεν ξεπερνά τα 50 entries", size <= bot._BOT_CACHE_MAX
       f"size={size}")
 
 
-# ── 3. _handle_message_reaction: αγνοεί άλλο chat_id ─────────────
+# ── 3. _handle_message_reaction: ignores other chat_id ─────────────
 bot._bot_message_cache.clear()
 bot._cache_bot_message(200, "Τεστ μήνυμα")
 
 saved_calls = []
 with patch.object(bot.threading, "Thread") as mock_thread:
     bot._handle_message_reaction({
-        "chat": {"id": "000"},  # άλλος χρήστης
+        "chat": {"id": "000"},  # other user
         "message_id": 200,
         "new_reaction": [{"type": "emoji", "emoji": "❤️"}],
         "old_reaction": []
@@ -64,7 +64,7 @@ with patch.object(bot.threading, "Thread") as mock_thread:
     check("Reaction: αγνοεί μη εξουσιοδοτημένο chat", not mock_thread.called)
 
 
-# ── 4. _handle_message_reaction: αγνοεί μη-❤️ reaction ───────────
+# ── 4. _handle_message_reaction: ignores non-❤️ reaction ───────────
 bot._bot_message_cache.clear()
 bot._cache_bot_message(201, "Τεστ μήνυμα 2")
 
@@ -78,7 +78,7 @@ with patch.object(bot.threading, "Thread") as mock_thread:
     check("Reaction: αγνοεί non-❤️ emoji", not mock_thread.called)
 
 
-# ── 5. _handle_message_reaction: πιάνει ❤️ και βρίσκει κείμενο από cache ──
+# ── 5. _handle_message_reaction: catches ❤️ and finds text from cache ──
 bot._bot_message_cache.clear()
 bot._cache_bot_message(202, "Αυτό είναι σημαντικό!")
 
@@ -111,8 +111,8 @@ check("Reaction ❤️: περνά το σωστό κείμενο στο thread"
       str(captured_text))
 
 
-# ── 6. _handle_message_reaction: fallback στο SQLite αν δεν υπάρχει στο cache ──
-bot._bot_message_cache.clear()  # cache κενό
+# ── 6. _handle_message_reaction: fallback to SQLite if not present in the cache ──
+bot._bot_message_cache.clear()  # empty cache
 
 thread_started2 = threading.Event()
 captured_text2 = []
@@ -136,7 +136,7 @@ with patch("clients.telegram_bot.threading.Thread", _FakeThread2), \
      patch("memory.conversation_history.load_messages", return_value=mock_history):
     bot._handle_message_reaction({
         "chat": {"id": FAKE_CHAT_ID},
-        "message_id": 999,  # δεν υπάρχει στο cache
+        "message_id": 999,  # not in cache
         "new_reaction": [{"type": "emoji", "emoji": "❤️"}],
         "old_reaction": []
     })
@@ -147,7 +147,7 @@ check("Reaction ❤️: SQLite fallback βρίσκει σωστό κείμενο
       str(captured_text2))
 
 
-# ── Αποτελέσματα ────────────────────────────────────────────────────
+# ── Results ─────────────────────────────────────────────────────────
 print()
 if errors:
     print(f"❌ {len(errors)} αποτυχίες:")

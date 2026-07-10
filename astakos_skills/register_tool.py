@@ -1,7 +1,7 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Skill:   register_tool — Auto-registration νέων tools
-# Καταχωρεί tool σε system.py, tool_risk.py, capability_registry.json
+# Skill:   register_tool — Auto-registration of new tools
+# Registers tool in system.py, tool_risk.py, capability_registry.json
 # ================================================================
 import os
 import json
@@ -85,16 +85,16 @@ def register_tool(
     dry_run: bool = False,
 ) -> str:
     """
-    Καταχωρεί αυτόματα ένα νέο tool που βρίσκεται στο astakos_skills/ σε όλα τα απαραίτητα σημεία:
+    Automatically registers a new tool located in astakos_skills/ in all necessary locations:
     1. tools/system.py  — import + all_tools list
     2. core/tool_risk.py — risk level
     3. core/capability_registry.json — agent routing + triggers
 
-    tool_name:   Το όνομα του tool (ίδιο με το filename και τη function, π.χ. 'my_tool')
-    description: Σύντομη περιγραφή για το capability registry
-    agent:       Ποιος agent το χειρίζεται (default: Dev_Agent)
+    tool_name:   The name of the tool (same as the filename and the function, e.g., 'my_tool')
+    description: Short description for the capability registry
+    agent:       Which agent handles it (default: Dev_Agent)
     risk:        SAFE / WARNING / CRITICAL (default: WARNING)
-    triggers:    Comma-separated λέξεις-κλειδιά για routing (π.χ. 'my tool, κάνε x, do x')
+    triggers:    Comma-separated keywords for routing (e.g., 'my tool, do x, do y')
     dry_run:     True = preview only, no files are changed. False = apply changes.
     """
     from config import BASE_DIR
@@ -142,7 +142,7 @@ def register_tool(
     if import_line in sys_content:
         results.append(f"⚠️  system.py: import ήδη υπάρχει")
     else:
-        # Εισαγωγή μετά από το τελευταίο astakos_skills import
+        # Import after the last astakos_skills import
         last_import = "from astakos_skills.register_tool import register_tool"
         if last_import in sys_content:
             sys_content = sys_content.replace(
@@ -162,7 +162,7 @@ def register_tool(
     if f"    {tool_name}," in sys_content or f", {tool_name}," in sys_content:
         results.append(f"⚠️  system.py: all_tools ήδη περιέχει {tool_name}")
     else:
-        # Εισαγωγή πριν το κλείσιμο ]
+        # Insert before the closing ]
         all_tools_anchor = "    register_tool,\n]"
         if all_tools_anchor in sys_content:
             sys_content = sys_content.replace(
@@ -179,7 +179,7 @@ def register_tool(
             errors.append(f"system.py: missing all_tools anchor `{all_tools_anchor}`")
             results.append(f"⚠️  system.py: δεν βρέθηκε anchor για all_tools — πρόσθεσε χειροκίνητα: {tool_name}")
 
-    # system.py θα γραφτεί ΤΕΛΕΥΤΑΙΟ μετά το registry
+    # system.py will be written LAST after registry
 
     # ── 2. core/tool_risk.py ────────────────────────────────────
     risk_path = os.path.join(BASE_DIR, "core", "tool_risk.py")
@@ -240,7 +240,7 @@ def register_tool(
         errors.append(f"capability_registry.json: {e}")
         results.append(f"⚠️  capability_registry error: {e}")
 
-    # ── system.py ΤΕΛΕΥΤΑΙΟ — debounce ξεκινά εδώ ────────────────
+    # ── system.py LAST — debounce starts here ────────────────_
     for label, before, after in (
         ("tools/system.py", sys_original, sys_content),
         ("core/tool_risk.py", risk_original, risk_content),

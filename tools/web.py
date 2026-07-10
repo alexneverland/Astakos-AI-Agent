@@ -21,7 +21,7 @@ from core.messenger_draft import active_draft_status
 try:
     from playwright_stealth import stealth_sync
 except ImportError:
-    # [MASTRO-FIX]: Σε κάποιες εκδόσεις η συνάρτηση λέγεται σκέτο 'stealth'
+    # [MASTRO-FIX]: In some versions the function is simply called 'stealth'
     try:
         from playwright_stealth import stealth as stealth_sync
     except ImportError:
@@ -29,7 +29,7 @@ except ImportError:
         stealth_sync = None
 
 def remove_accents(input_str: str) -> str:
-    """Αφαιρεί τόνους και μετατρέπει σε πεζά."""
+    """Removes accents and converts to lowercase."""
     if not isinstance(input_str, str):
         return ""
     nfkd_form = unicodedata.normalize('NFKD', input_str)
@@ -38,9 +38,9 @@ def remove_accents(input_str: str) -> str:
 
 def _greek_to_latin(s: str) -> str:
     """
-    Βασική Greek→Latin transliteration για contact matching.
-    π.χ. "σοφια" → "sofia", "αλεξανδρος" → "alexandros"
-    Χρησιμοποιείται ως fallback όταν το query είναι λατινικό.
+    Basic Greek→Latin transliteration for contact matching.
+    e.g., "σοφια" → "sofia", "αλεξανδρος" → "alexandros"
+    Used as a fallback when the query is in Latin characters.
     """
     _MAP = {
         'α':'a','β':'v','γ':'g','δ':'d','ε':'e','ζ':'z','η':'i',
@@ -94,11 +94,11 @@ def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
     if any(alias and (alias in normalized or normalized in alias) for alias in contacts):
         return True, "known contact"
     # 3) Greek↔Latin transliteration fallback:
-    #    Αν το query είναι λατινικό (π.χ. "Sophia"), transliterate τα Greek contact keys
-    #    και σύγκρινε. Επίσης, "ph" → "f" phonetic equivalence (sophia → sofia).
+    #    If the query is in Latin characters (e.g. "Sophia"), transliterate the Greek contact keys
+    #    and compare. Also, "ph" → "f" phonetic equivalence (sophia → sofia).
     _is_latin_query = all(ord(c) < 0x0370 or c.isdigit() or not c.isalpha() for c in normalized)
     if _is_latin_query:
-        # phonetic variants: ph→f, ck→k, c→k (πριν από a/o/u/l/r)
+        # phonetic variants: ph→f, ck→k, c→k (before a/o/u/l/r)
         def _phonetic(s: str) -> str:
             s = s.replace("ph", "f").replace("ck", "k").replace("th", "θ")
             return s
@@ -114,7 +114,7 @@ def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
 
 
 _CHATBOT_NOISE_PATTERNS = [
-    # Chatbot meta-text που δεν πρέπει να σταλεί
+    # Chatbot meta-text that must not be sent
     r"θέλεις αλλαγές[^.]*\?",
     r"θελεις αλλαγεσ[^.]*\?",
     r"να το στείλω[^.]*\?",
@@ -125,21 +125,21 @@ _CHATBOT_NOISE_PATTERNS = [
     r"αποθηκευσα[^.]*\.",
     r"ετοιμάζω[^.]*\.",
     r"ετοιμαζω[^.]*\.",
-    r"μήνυμα(?:\s+προς\s+\S+)?\s*:\s*",  # "Μήνυμα προς Σοφία:"
+    r"μήνυμα(?:\s+προς\s+\S+)?\s*:\s*",  # "Message to Sophia:"
     r"(?:στέλνω|στελνω|στέλνουμε|στελνουμε)\s+(?:το\s+)?μήνυμα[^.]*\.",
 ]
 
 def _sanitize_message_payload(text: str) -> str:
     """
-    Αφαιρεί chatbot meta-text από το payload πριν αποθηκευτεί ως draft.
-    Κρατά μόνο το πραγματικό μήνυμα προς αποστολή.
+    Removes chatbot meta-text from the payload before it is saved as a draft.
+    Keeps only the actual message to be sent.
     """
     if not text:
         return ""
     cleaned = text.strip()
     for pattern in _CHATBOT_NOISE_PATTERNS:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
-    # Αφαίρεση πολλαπλών κενών γραμμών
+    # Remove multiple blank lines
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     cleaned = cleaned.strip()
     return cleaned
@@ -290,10 +290,10 @@ def _score_place_match(place: dict, profile: dict) -> float:
 @tool
 def relay_local_payload(target_entity: str, payload_data: str, image_path: str = "") -> str:
     """
-    Αποθηκεύει ένα προσχέδιο μηνύματος Messenger (Facebook).
-    Χρησιμοποίησέ το ΟΤΑΝ προτείνεις στον χρήστη να στείλει ένα μήνυμα,
-    πριν πάρεις την τελική του έγκριση.
-    Προαιρετικά, δώσε image_path για να επισυναφθεί εικόνα μαζί με το μήνυμα.
+    Saves a draft Messenger (Facebook) message.
+    Use this WHEN you propose to the user to send a message,
+    before obtaining their final approval.
+    Optionally, provide an image_path to attach an image along with the message.
     """
     from core.messenger_draft import save_draft
 
@@ -318,21 +318,21 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
     if image_path and not os.path.exists(image_path):
         return f"❌ Δεν αποθήκευσα Messenger draft. Η εικόνα δεν βρέθηκε: {image_path}"
 
-    # ── Payload sanitization: αφαίρεση chatbot meta-text ─────────────
-    # Στο plan mode το LLM μπορεί να συμπεριλάβει conversational prompts
-    # ή system feedback μαζί με το πραγματικό μήνυμα. Τα αφαιρούμε.
+    # ── Payload sanitization: removal of chatbot meta-text ─────────────
+    # In plan mode, the LLM can include conversational prompts
+    # or system feedback along with the actual message. We remove them.
     clean_payload = _sanitize_message_payload(payload_data)
     if not clean_payload:
         return "❌ Δεν αποθήκευσα Messenger draft. Το μήνυμα ήταν κενό μετά το sanitization."
 
     save_draft(target_entity, clean_payload, image_path=image_path)
 
-    # Επιστρέφουμε clean output — οι οδηγίες εμφάνισης είναι στο prompts.md
+    # We return clean output — the display instructions are in prompts.md
     img_info = f"\nimage: {image_path}" if image_path else ""
     return f"✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: {clean_payload}{img_info}"
 @tool
 def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
-    """Φέρνει ειδήσεις από το Google News με τίτλο, περίληψη, πηγή και link."""
+    """Fetches news from Google News with title, summary, source, and link."""
     try:
         topic = (topic or "Γενικά").strip()
         limit = max(1, min(int(limit or 10), 20))
@@ -384,7 +384,7 @@ def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
 
 @tool
 def get_weather_forecast(location: str, days: int = 14) -> str:
-    """Επιστρέφει την αναλυτική πρόγνωση καιρού για μια περιοχή (έως 16 ημέρες)."""
+    """Returns the detailed weather forecast for a region (up to 16 days)."""
 
     WMO_CODES = {
         0: "☀️ Αίθριος", 1: "🌤 Σχεδόν αίθριος", 2: "⛅ Μερικώς συννεφιά",
@@ -457,7 +457,7 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
 
 @tool
 def search_goldmall_offers(query: str) -> str:
-    """Deep Scan σε ΟΛΕΣ τις προσφορές του Goldmall χωρίς περιορισμό."""
+    """Deep Scan of ALL Goldmall offers without limitation."""
     search_term = "σινεμά" if any(x in query.lower() for x in ["σινεμά", "ταινία", "ταινιες", "ταινίες"]) else query
 
     browser = None
@@ -476,7 +476,7 @@ def search_goldmall_offers(query: str) -> str:
             except:
                 return f"Δεν βρέθηκαν αποτελέσματα για '{search_term}'."
 
-            deals = page.locator(".deal-tile").all()[:5]  # max 5 για απόδοση
+            deals = page.locator(".deal-tile").all()[:5]  # max 5 for performance
             results = []
 
             for i, deal in enumerate(deals):
@@ -539,8 +539,8 @@ def search_goldmall_offers(query: str) -> str:
 
 @tool
 def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
-    """Στέλνει μήνυμα στο Facebook Messenger διαβάζοντας το αποθηκευμένο προσχέδιο.
-    ΚΑΛΕΣΕ ΤΟ ΜΟΝΟ αφού ο Λάζαρος επιβεβαιώσει με 'ναι/στείλε'. ΧΩΡΙΣ ΚΑΝΕΝΑ ΟΡΙΣΜΑ."""
+    """Sends a message on Facebook Messenger by reading the saved draft.
+    CALL IT ONLY after Lazaros confirms with 'yes/send'. WITHOUT ANY ARGUMENTS."""
     import time
     import json
     import os
@@ -551,7 +551,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     draft_file = MESSENGER_DRAFT_FILE
 
-    # 1. [MASTRO INTERCEPTOR]: Διάβασε το draft
+    # 1. [MASTRO INTERCEPTOR]: Read the draft
     image_path = ""
     if not target_name or not message:
         is_active, reason, draft = active_draft_status()
@@ -562,7 +562,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
         image_path = draft.get("image_path", "")
         print(f"\033[93m[Messenger]: Βρέθηκε draft για {target_name}. Εκτέλεση...\033[0m")
 
-    # 2. [MASTRO-ALIAS]: Μετατροπή Ονόματος σε ID
+    # 2. [MASTRO-ALIAS]: Convert Name to ID
     from memory.vector_store import get_profile_facts
     aliases = {}
     try:
@@ -589,7 +589,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     if not final_id:
         final_id = target_name
 
-    # 3. [SEND]: Απευθείας αποστολή — έγκριση έγινε ήδη από relay_local_payload
+    # 3. [SEND]: Direct send — approval has already been granted by relay_local_payload
     profile_dir = os.path.join(base_dir, "..", "astakos_skills", "messenger_profile")
 
     _sent_ok = False
@@ -612,14 +612,14 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
             page.goto(chat_url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(5.0)
 
-            # 4a. [IMAGE ATTACHMENT]: Επισύναψε εικόνα αν υπάρχει
+            # 4a. [IMAGE ATTACHMENT]: Attach image if it exists
             if image_path and os.path.exists(image_path):
                 print(f"\033[96m[Messenger]: Επισύναψη εικόνας: {image_path}\033[0m")
                 try:
-                    # Messenger έχει hidden file input — το βρίσκουμε και βάζουμε το αρχείο
+                    # Messenger has a hidden file input — we find it and upload the file
                     file_input = page.locator('input[type="file"]').first
                     file_input.set_input_files(image_path)
-                    # Περιμένουμε να εμφανιστεί preview της εικόνας (max 15s)
+                    # We wait for the image preview to appear (max 15s)
                     page.wait_for_selector(
                         'img[src*="blob:"], div[aria-label*="εικόν"], div[aria-label*="photo"], '
                         'div[aria-label*="image"], div[class*="image"], div[class*="photo"]',
@@ -631,8 +631,8 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
                     print(f"\033[93m[Messenger]: ⚠️ Αποτυχία επισύναψης εικόνας: {img_err}\033[0m")
                     print("\033[93m[Messenger]: Συνεχίζω με αποστολή μόνο κειμένου.\033[0m")
 
-            # 4b. [SEND TEXT]: Πληκτρολόγηση + Enter
-            # Timeout αυξημένο σε 25s — Messenger SPA μερικές φορές αργεί
+            # 4b. [SEND TEXT]: Typing + Enterof_thought
+            # Timeout increased to 25s — Messenger SPA is sometimes slow
             chat_box = page.locator('div[role="textbox"]').last
             chat_box.wait_for(state="visible", timeout=10000)
             chat_box.click()
@@ -657,8 +657,8 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
                 print(f"⚠️ [execute_local_pipeline]: draft delete failed: {_de}")
 
     # ── AUTO-CONFIRM pending routines ──────────────────────────────
-    # Αν υπάρχει TRIGGER_PENDING routine (π.χ. "πρωινό μήνυμα Σοφία"),
-    # το επιβεβαιώνουμε αυτόματα μετά από επιτυχή αποστολή.
+    # If there is a TRIGGER_PENDING routine (e.g. "morning message Sophia"),_
+    # we confirm this automatically after a successful send.
     try:
         from memory.routine_db import get_connection as _rdb_conn, confirm_routine, \
             mark_routine_responded, remove_pending_confirmation, clear_pending_confirmations
@@ -684,7 +684,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 @tool
 def browse_url(url: str) -> str:
-    """Ανοίγει μια διεύθυνση URL με browser και επιστρέφει το κείμενο της σελίδας."""
+    """Opens a URL with a browser and returns the page text."""
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -696,13 +696,13 @@ def browse_url(url: str) -> str:
             
             page = context.new_page()
             
-            # [MASTRO-FIX]: Αλεξίσφαιρος έλεγχος για το stealth_sync!
+            # [MASTRO-FIX]: Bulletproof check for stealth_sync!
             if 'stealth_sync' in globals() and stealth_sync is not None:
                 try:
                     if callable(stealth_sync):
-                        stealth_sync(page)  # Αν είναι κανονική συνάρτηση
+                        stealth_sync(page)  # If it is a normal function
                     elif hasattr(stealth_sync, 'stealth_sync'):
-                        stealth_sync.stealth_sync(page)  # Αν είναι module
+                        stealth_sync.stealth_sync(page)  # If it is a module
                 except Exception as e:
                     print(f"⚠️ [Web Tool]: Το stealth mode απέτυχε, συνεχίζω κανονικά. ({e})")
 
@@ -713,7 +713,7 @@ def browse_url(url: str) -> str:
                 browser.close()
                 return f"[WEB_TOOL_ERROR][browse_url][reason=timeout] Η σελίδα '{url}' άργησε υπερβολικά."
 
-            # Αφαιρούμε scripts/styles/banners
+            # We remove scripts/styles/banners
             text = page.evaluate("""() => {
                 const remove = document.querySelectorAll('script,style,nav,footer,header,noscript,[class*="cookie"],[class*="banner"],[id*="cookie"]');
                 remove.forEach(el => el.remove());
@@ -736,14 +736,14 @@ def browse_url(url: str) -> str:
         return f"[WEB_TOOL_ERROR][browse_url][reason=generic] Γενικό σφάλμα στο browse_url: Το εργαλείο απέτυχε ({str(e)})" 
 @tool
 def duckduckgo_search(query: str) -> str:
-    """Αναζήτηση στο διαδίκτυο.
-    ΓΙΑ ΣΥΓΚΕΚΡΙΜΕΝΟ URL χρησιμοποίησε ΠΑΝΤΑ το browse_url."""
+    """Web search.
+    FOR A SPECIFIC URL ALWAYS use browse_url."""
     from ddgs import DDGS
     from ddgs.exceptions import RatelimitException, TimeoutException, DDGSException
 
-    # backend="auto" (το default) δοκιμάζει sequential/batched ΟΛΑ τα engines (έως 8),
-    # κάτι που σε fail-cascades έφτανε 20-30+ δευτ. ανά κλήση. Pin σε 2 γρήγορα,
-    # επαληθευμένα backends (verified live: duckduckgo ~1s, google ~0.5s) με 1 fallback.
+    # backend="auto" (the default) tries sequential/batched ALL engines (up to 8),
+    # something that in fail-cascades reached 20-30+ sec. per call. Pin to 2 fast ones,
+    # verified backends (verified live: duckduckgo ~1s, google ~0.5s) with 1 fallback.
     backends_to_try = ["duckduckgo", "google"]
     last_error = "άγνωστο σφάλμα"
 
@@ -775,8 +775,8 @@ def duckduckgo_search(query: str) -> str:
     )
 @tool
 def search_supermarket_prices(query: str) -> str:
-    """Αναζητά τιμές προϊόντος από όλα τα σούπερ μάρκετ (e-katanalotis.gov.gr).
-    Παράδειγμα: 'φακές', 'γάλα', 'ελαιόλαδο'"""
+    """Searches for product prices from all supermarkets (e-katanalotis.gov.gr).
+    Example: 'lentils', 'milk', 'olive oil'"""
     import requests
     from difflib import SequenceMatcher
 
@@ -789,7 +789,7 @@ def search_supermarket_prices(query: str) -> str:
         merchants = {m['merchant_uuid']: m['display_name'] for m in result['merchants']}
         products = result['products']
 
-        # Fuzzy search — αφαίρεση τόνων για σωστό matching
+        # Fuzzy search — removal of accents for correct matching
         query_clean = remove_accents(query).upper()
         matches = []
         for p in products:
@@ -800,7 +800,7 @@ def search_supermarket_prices(query: str) -> str:
         if not matches:
             return f"❌ Δεν βρέθηκε '{query}' στο e-katanalotis."
 
-        # Κράτα τα 5 πιο σχετικά
+        # Keep the 5 most relevant
         matches = sorted(matches, key=lambda p: len(p['name']))[:5]
 
         output = []
@@ -822,8 +822,8 @@ def search_supermarket_prices(query: str) -> str:
 @tool
 def search_google_places(query: str, location: str = "Thessaloniki") -> str:
     """
-    Αναζητά εστιατόρια, καφέ και μέρη για έξοδο μέσω Google Places API (New).
-    Επιστρέφει όνομα, βαθμολογία, διεύθυνση, τύπο, τηλέφωνο, website, delivery και reviews.
+    Searches for restaurants, cafes, and nightlife venues via the Google Places API (New).
+    Returns name, rating, address, type, phone, website, delivery, and reviews.
     """
     import requests
     import os
@@ -845,7 +845,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             try:
                 with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
                     gps = json.load(f)
-                    # Αν το στίγμα είναι φρέσκο (τελευταία 24ωρα)
+                    # If the ping/location is fresh (last 24 hours)
                     if time.time() - gps['timestamp'] < 86400:
                         location = f"{gps['lat']},{gps['lon']}"
                         print(f"📍 [Web Tool]: Χρήση Live GPS στίγματος: {location}")
@@ -858,7 +858,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
 
     search_url = "https://places.googleapis.com/v1/places:searchText"
 
-    # [MASTRO-UPGRADE]: Προσθέσαμε Phone, Website, Takeout, Delivery, DineIn και Reviews στο FieldMask
+    # [MASTRO-UPGRADE]: Added Phone, Website, Takeout, Delivery, DineIn, and Reviews to the FieldMask
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": api_key,
@@ -880,7 +880,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
         )
     }
 
-    # [MASTRO-FIX]: GPS coords → locationBias (σωστός τρόπος, όχι text append)
+    # [MASTRO-FIX]: GPS coords → locationBias (the correct way, not text append)
     if "," in location and any(c.isdigit() for c in location):
         try:
             lat, lon = location.split(",")
@@ -924,7 +924,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             reverse=True,
         )[:3]
 
-        # ── Μορφοποίηση αποτελεσμάτων ─────────────────────────
+        # ── Format results ─────────────────────────
         price_map = {
             "PRICE_LEVEL_FREE": "Δωρεάν",
             "PRICE_LEVEL_INEXPENSIVE": "€",
@@ -996,10 +996,10 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
 
 @tool
 def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE") -> str:
-    """Παρέχει χρόνο, απόσταση (με live κίνηση) και links για πλοήγηση.
-    Εάν δεν δοθεί origin, θεωρεί ως προεπιλογή την έδρα (Piston 7, Thessaloniki).
-    Μπορείς να περάσεις το αποτέλεσμα του get_current_location στο origin (π.χ. '40.67,22.93').
-    Το mode μπορεί να είναι "DRIVE" (οδήγηση, προεπιλογή) ή "WALK" (περπάτημα).
+    """Provides time, distance (with live traffic) and navigation links.
+    If no origin is provided, it defaults to the headquarters (Piston 7, Thessaloniki).
+    You can pass the result of get_current_location to the origin (e.g., '40.67,22.93').
+    The mode can be "DRIVE" (driving, default) or "WALK" (walking).
     """
     import os
     import json

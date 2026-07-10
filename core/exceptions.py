@@ -7,7 +7,7 @@
 
 
 class AstakosError(Exception):
-    """Base class για όλα τα custom exceptions του Αστακού."""
+    """Base class for all custom exceptions of Astakos."""
     def __init__(self, message: str, context: dict = None):
         super().__init__(message)
         self.context = context or {}
@@ -22,16 +22,16 @@ class AstakosError(Exception):
 
 class RoutineConflictError(AstakosError):
     """
-    Raised όταν ανιχνεύεται σύγκρουση κατά το upsert ρουτίνας.
-    Π.χ. fingerprint collision με ασύμβατα δεδομένα, ή DB corruption.
+    Raised when a collision is detected during a routine upsert.
+    E.g., fingerprint collision with incompatible data, or DB corruption.
     """
     pass
 
 
 class DuplicateEventError(AstakosError):
     """
-    Raised όταν ένα event/notification προσπαθεί να σταλεί εντός cooldown.
-    Χρησιμοποιείται ως signal — δεν propagate, απλά log & skip.
+    Raised when an event/notification attempts to be sent within a cooldown period.
+    Used as a signal — does not propagate, just logs & skips.
     """
     def __init__(self, routine_id: int, cooldown_hours: float, remaining_hours: float):
         super().__init__(
@@ -45,8 +45,8 @@ class DuplicateEventError(AstakosError):
 
 class PendingTimeoutError(AstakosError):
     """
-    Raised όταν μια εκκρεμής επιβεβαίωση ρουτίνας λήξει χωρίς απάντηση.
-    Trigger για decay + ignore_count increment.
+    Raised when a pending routine confirmation expires without a response.
+    Trigger for decay + ignore_count increment.
     """
     def __init__(self, routine_id: int, event_name: str, elapsed_seconds: float):
         super().__init__(
@@ -60,8 +60,8 @@ class PendingTimeoutError(AstakosError):
 
 class SchedulerCrashError(AstakosError):
     """
-    Raised όταν ένα scheduler job αποτύχει πάνω από MAX_FAILURES φορές.
-    Trigger για auto-disable του job + alert στον χρήστη.
+    Raised when a scheduler job fails more than MAX_FAILURES times.
+    Trigger for auto-disabling the job + alerting the user.
     """
     def __init__(self, job_name: str, fail_count: int, last_error: str):
         super().__init__(
@@ -75,8 +75,8 @@ class SchedulerCrashError(AstakosError):
 
 class DBWriteError(AstakosError):
     """
-    Raised όταν μια εγγραφή στη SQLite αποτύχει (π.χ. locked, I/O error).
-    Wrapper γύρω από sqlite3.OperationalError για context-aware handling.
+    Raised when a SQLite write operation fails (e.g., locked, I/O error).
+    Wrapper around sqlite3.OperationalError for context-aware handling.
     """
     def __init__(self, operation: str, original: Exception):
         super().__init__(

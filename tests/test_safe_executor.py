@@ -1,6 +1,6 @@
 """
-Tests για τον Safe Executor (classify_command).
-Τρεξε: python -m pytest tests/ -v
+Tests for the Safe Executor (classify_command).
+Run: python -m pytest tests/ -v
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -26,7 +26,7 @@ def test_del_star_is_blocked():
 # -- REQUIRE_CONFIRMATION commands --------------------------------
 
 def test_git_push_is_warning():
-    # git push μετακινήθηκε σε WARNING (Jun 2026) — εκτελείται + Telegram notification
+    # git push moved to WARNING (Jun 2026) — executed + Telegram notification
     policy, _ = classify_command("git push origin main")
     assert policy == ExecPolicy.WARNING
 

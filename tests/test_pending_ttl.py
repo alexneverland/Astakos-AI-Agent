@@ -1,5 +1,5 @@
 """
-Tests για TTL cleanup των stale pending approvals.
+Tests for TTL cleanup of stale pending approvals.
 """
 import sys, os, json, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,7 +30,7 @@ def _item(tool: str, minutes_ago: int, status: str = "pending") -> dict:
 # ── TTL = 60 min ──────────────────────────────────────────────────
 
 def test_stale_entry_gets_expired(tmp_path):
-    """Pending action 70 λεπτών → expired."""
+    """Pending action 70 minutes → expired."""
     entries = {"old": _item("mail_manager", 70)}
     pfile = _pending_file_with(tmp_path, entries)
 
@@ -44,7 +44,7 @@ def test_stale_entry_gets_expired(tmp_path):
 
 
 def test_fresh_entry_not_expired(tmp_path):
-    """Pending action 10 λεπτών → παραμένει pending."""
+    """Pending action 10 minutes → remains pending."""
     entries = {"fresh": _item("drive_manager", 10)}
     pfile = _pending_file_with(tmp_path, entries)
 
@@ -57,7 +57,7 @@ def test_fresh_entry_not_expired(tmp_path):
 
 
 def test_already_resolved_not_touched(tmp_path):
-    """Approved/rejected entries δεν αγγίζονται ακόμα και αν είναι παλιές."""
+    """Approved/rejected entries are not touched even if they are old."""
     entries = {
         "approved_old": _item("github_manager", 120, status="approved"),
         "rejected_old": _item("mail_manager",   90,  status="rejected"),
@@ -74,7 +74,7 @@ def test_already_resolved_not_touched(tmp_path):
 
 
 def test_mixed_entries(tmp_path):
-    """Μόνο τα stale pending γίνονται expired, τα υπόλοιπα ανέπαφα."""
+    """Only stale pending ones become expired, the rest remain untouched."""
     entries = {
         "stale1":    _item("mail_manager",   65),
         "stale2":    _item("github_manager", 120),
@@ -95,7 +95,7 @@ def test_mixed_entries(tmp_path):
 
 
 def test_no_pending_file(tmp_path):
-    """Αν δεν υπάρχει αρχείο, επιστρέφει άδεια λίστα χωρίς crash."""
+    """If the file does not exist, it returns an empty list without crashing."""
     missing = str(tmp_path / "nonexistent.json")
     with patch.object(ap, "PENDING_FILE", missing):
         expired = ap.expire_stale_pending()
@@ -103,7 +103,7 @@ def test_no_pending_file(tmp_path):
 
 
 def test_load_pending_auto_expires(tmp_path):
-    """_load_pending() καλεί expire_stale_pending() αυτόματα."""
+    """_load_pending() calls expire_stale_pending() automatically."""
     entries = {
         "stale": _item("mail_manager", 90),
         "fresh": _item("drive_manager", 5),
@@ -113,11 +113,11 @@ def test_load_pending_auto_expires(tmp_path):
     with patch.object(ap, "PENDING_FILE", pfile):
         result = ap._load_pending()
 
-    # Μετά το load, το stale έχει γίνει expired στο αρχείο
+    # After the load, stale has become expired in the file
     data = json.loads(open(pfile).read())
     assert data["stale"]["status"] == "expired"
-    # Αλλά στο επιστρεφόμενο dict το expired entry μπορεί να υπάρχει — αυτό που μετράει
-    # είναι ότι το list_pending() δεν το επιστρέφει
+    # But in the returned dict, the expired entry may exist — that is what counts
+    # is that list_pending() does not return it
     with patch.object(ap, "PENDING_FILE", pfile):
         active = ap.list_pending()
     names = [x["tool_name"] for x in active]
@@ -146,5 +146,5 @@ def test_expired_entry_cannot_execute(tmp_path):
 
 
 def test_ttl_constant_is_3600():
-    """Το PENDING_TTL_SECONDS είναι 3600 (60 λεπτά)."""
+    """PENDING_TTL_SECONDS is 3600 (60 minutes)."""
     assert ap.PENDING_TTL_SECONDS == 3600

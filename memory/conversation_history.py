@@ -22,8 +22,8 @@ from config import CONVERSATION_DB_FILE
 
 LEGACY_FALLBACK_DATE = "1970-01-01"
 
-# [DEDUP GUARD]: In-memory set — αποτρέπει rapid double-writes για το ίδιο
-# (channel, role, content) μέσα σε DEDUP_TTL_SECONDS δευτερόλεπτα.
+# [DEDUP GUARD]: In-memory set — prevents rapid double-writes for the same item
+# (channel, role, content) within DEDUP_TTL_SECONDS seconds.
 _dedup_lock = threading.Lock()
 _dedup_recent: dict[tuple, float] = {}  # key → last_write_epoch
 DEDUP_TTL_SECONDS = 5.0
@@ -34,10 +34,10 @@ def _dedup_key(channel: str, role: str, content: str, db_path: str = CONVERSATIO
 
 
 def _is_recent_duplicate(key: tuple) -> bool:
-    """True αν το ίδιο (channel, role, content[:200]) γράφτηκε πριν < DEDUP_TTL_SECONDS."""
+    """True if the same (channel, role, content[:200]) was written less than DEDUP_TTL_SECONDS ago."""
     now = time.monotonic()
     with _dedup_lock:
-        # Καθαρισμός παλιών εγγραφών
+        # Clean up old records
         expired = [k for k, t in _dedup_recent.items() if now - t > DEDUP_TTL_SECONDS * 10]
         for k in expired:
             del _dedup_recent[k]
@@ -139,9 +139,9 @@ def default_session_id(ts: datetime | None = None) -> str:
 
 
 # ── Code-session content truncation ─────────────────────────────
-# Τα assistant μηνύματα που περιέχουν diffs/terminal output/grep results
-# αποθηκεύονται truncated: μόνο το πρώτο summary paragraph.
-# Έτσι δεν μολύνουν το load_recent_context και το temporal search.
+# Assistant messages that contain diffs/terminal output/grep results
+# saved truncated: only the first summary paragraph.
+# This way, they do not pollute load_recent_context and temporal search.
 _CODE_MARKERS = (
     "```diff",
     "terminal output",
@@ -154,13 +154,13 @@ _CODE_MARKERS = (
     "+++ b/",
     "--- a/",
 )
-_MAX_ASSISTANT_CONTENT = 600  # chars — πάνω από αυτό + code marker → truncate
+_MAX_ASSISTANT_CONTENT = 600  # chars — above this + code marker → truncate
 
 
 def _truncate_code_content(role: str, text: str) -> str:
     """
-    Αν το μήνυμα είναι assistant και περιέχει code session markers,
-    κρατάμε μόνο το πρώτο μη-κενό paragraph (summary line) + marker.
+    If the message is from the assistant and contains code session markers,
+    we keep only the first non-empty paragraph (summary line) + marker.
     """
     if role not in ("assistant", "ai"):
         return text
@@ -170,10 +170,10 @@ def _truncate_code_content(role: str, text: str) -> str:
     if not any(m in low for m in _CODE_MARKERS):
         return text
 
-    # Κρατάμε μέχρι το πρώτο ``` block ή μέχρι 400 chars
+    # Keep up to the first ``` block or up to 400 chars_
     cut = text.find("```")
     if cut == -1:
-        # Χωρίς code block: κρατάμε πρώτο paragraph
+        # Without code block: keep the first paragraphof
         cut = text.find("\n\n")
     if cut == -1 or cut > 400:
         cut = 400
@@ -206,7 +206,7 @@ def append_message(
         "metadata": metadata or {},
     }
 
-    # [DEDUP GUARD]: Αποτρέπει rapid double-writes
+    # [DEDUP GUARD]: Prevents rapid double-writes
     _key = _dedup_key(channel, role, content, db_path)
     if _is_recent_duplicate(_key):
         print(f"\033[93m[ConvHistory]: Dedup skip — {channel}/{role} '{content[:40]}'[0m")
@@ -490,18 +490,18 @@ def load_messages_since(
 
     with _conn(db_path) as conn:
         if limit is not None:
-            # Παίρνουμε τα ΠΙΟ ΠΡΟΣΦΑΤΑ `limit` μηνύματα μέσα στο παράθυρο
-            # (ORDER BY ... DESC + LIMIT) και μετά τα ξαναταξινομούμε
-            # χρονολογικά (ASC) στο τελικό αποτέλεσμα.
+            # We get the MOST RECENT `limit` messages within the window
+            # (ORDER BY ... DESC + LIMIT) and then we resort them
+            # chronologically (ASC) in the final result._
             #
-            # Πριν, το LIMIT έπεφτε πάνω σε ήδη ASC ταξινομημένα δεδομένα:
-            # όταν το παράθυρο (since_date..σήμερα) περιείχε περισσότερα
-            # μηνύματα από το `limit` (π.χ. 1968 μηνύματα σε 30 μέρες ενώ
-            # το temporal_history_for_query καλεί με limit=1500), η query
-            # επέστρεφε τα 1500 ΠΑΛΙΟΤΕΡΑ -- κόβοντας ολόκληρη την πιο
-            # πρόσφατη εβδομάδα έξω από το αποτέλεσμα. Έτσι το SQL/temporal
-            # επίπεδο μνήμης ήταν ουσιαστικά τυφλό για το "τι είπαμε
-            # πρόσφατα", παρότι η ερώτηση ζητούσε ακριβώς αυτό.
+            # Before, the LIMIT was applied to already ASC sorted data:
+            # when the window (since_date..today) contained more_of_thought
+            # messages from the `limit` (e.g. 1968 messages in 30 days while
+            # temporal_history_for_query calls with limit=1500), the query
+            # return the 1500 OLDEST -- cutting off the entire oldest
+            # recent week out of the result. Thus the SQL/temporal
+            # memory layer was essentially blind to "what we said"
+            # recently", even though the question asked for exactly that.
             rows = conn.execute(
                 f"""
                 SELECT * FROM (
@@ -540,9 +540,9 @@ def load_messages_after_rowid(
     db_path: str = CONVERSATION_DB_FILE,
 ) -> list[dict[str, Any]]:
     """
-    Επιστρέφει μηνύματα με rowid > after_rowid, ταξινομημένα chronologically.
-    Το rowid είναι το implicit SQLite integer key — monotonically increasing.
-    Χρησιμοποιείται για polling από το Web UI ώστε να πάρει μόνο νέα μηνύματα.
+    Returns messages with rowid > after_rowid, sorted chronologically.
+    The rowid is the implicit SQLite integer key — monotonically increasing.
+    Used for polling by the Web UI to retrieve only new messages.
     """
     init_db(db_path)
     clauses = ["rowid > ?"]
@@ -562,7 +562,7 @@ def load_messages_after_rowid(
             params,
         ).fetchall()
     msgs = [_row_to_message(row) for row in rows]
-    # Προσθήκη rowid στο dict για να το χρησιμοποιήσει το frontend
+    # Add rowid to the dict for the frontend to use
     for msg, row in zip(msgs, rows):
         msg["rowid"] = row["rowid"] if hasattr(row, "keys") else row[0]
     return msgs
@@ -572,7 +572,7 @@ def get_max_rowid(
     *,
     db_path: str = CONVERSATION_DB_FILE,
 ) -> int:
-    """Επιστρέφει το μέγιστο rowid στο conversation_messages table (0 αν είναι κενό)."""
+    """Returns the maximum rowid in the conversation_messages table (0 if it is empty)."""
     init_db(db_path)
     with _conn(db_path) as conn:
         row = conn.execute("SELECT MAX(rowid) FROM conversation_messages").fetchone()

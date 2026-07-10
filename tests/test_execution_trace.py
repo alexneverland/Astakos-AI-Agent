@@ -1,6 +1,6 @@
 """
-Tests για memory/execution_trace.py
-Τρέξε: pytest tests/test_execution_trace.py -v
+Tests for memory/execution_trace.py
+Run: pytest tests/test_execution_trace.py -v
 """
 import os
 import sys
@@ -15,7 +15,7 @@ import memory.execution_trace as et_module
 from memory.execution_trace import ExecutionTrace, load_traces, _truncate
 
 
-# ── Fixture helper (χωρίς pytest tmp_path — FUSE permission issues) ───────────
+# ── Fixture helper (without pytest tmp_path — FUSE permission issues) ───────────
 def _tmpdir():
     return tempfile.mkdtemp(dir=tempfile.gettempdir(), prefix="astakos_trace_test_")
 
@@ -196,7 +196,7 @@ def test_finalize_duration_accumulates():
 
 
 # ═══════════════════════════════════════════════════════════════
-# save + load_traces  (χρησιμοποιεί /tmp για να αποφύγει FUSE perms)
+# save + load_traces  (uses /tmp to avoid FUSE perms)
 # ═══════════════════════════════════════════════════════════════
 
 def test_save_creates_file():

@@ -1,13 +1,13 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  File Generator — Excel, Word, PDF, CSV
-# Επιτρέπει στον Αστακό να δημιουργεί αρχεία διαφόρων τύπων.
+# Allows Lobster to create files of various types.
 #
 # Tools:
-#   generate_excel    — .xlsx με headers + rows (WARNING)
-#   generate_word_doc — .docx με τίτλο και περιεχόμενο (WARNING)
-#   generate_pdf      — .pdf με τίτλο και περιεχόμενο (WARNING)
-#   generate_csv      — .csv από JSON data (WARNING)
+#   generate_excel    — .xlsx with headers + rows (WARNING)
+#   generate_word_doc — .docx with title and content (WARNING)
+#   generate_pdf      — .pdf with title and content (WARNING)
+#   generate_csv      — .csv from JSON data (WARNING)
 # ================================================================
 
 import os
@@ -19,12 +19,12 @@ from langchain_core.tools import tool
 
 
 # ── Default output folder ────────────────────────────────────────
-# Χρησιμοποιεί Desktop του χρήστη αν δεν δοθεί πλήρης path.
+# Uses the user's Desktop if a full path is not provided.
 _DESKTOP = os.path.join(os.path.expanduser("~"), "Desktop")
 
 
 def _resolve_path(output_path: str, default_ext: str) -> str:
-    """Αν το output_path είναι μόνο filename (χωρίς dir), το βάζει στο Desktop."""
+    """If output_path is only a filename (without a directory), it places it on the Desktop."""
     if not os.path.isabs(output_path):
         output_path = os.path.join(_DESKTOP, output_path)
     if not output_path.lower().endswith(default_ext):
@@ -38,15 +38,15 @@ def _resolve_path(output_path: str, default_ext: str) -> str:
 @tool
 def generate_excel(output_path: str, data_json: str, sheet_name: str = "Sheet1", title: str = "") -> str:
     """
-    Δημιουργεί Excel αρχείο (.xlsx) από δεδομένα.
+    Creates an Excel file (.xlsx) from data.
 
     Args:
-        output_path: Πλήρης path αρχείου, π.χ. 'C:\\Users\\PC\\Desktop\\report.xlsx'.
-                     Αν δοθεί μόνο όνομα, αποθηκεύεται στο Desktop.
-        data_json:   JSON string με list of dicts.
-                     Παράδειγμα: '[{"Όνομα":"Γιάννης","Ηλικία":30},{"Όνομα":"Μαρία","Ηλικία":25}]'
-        sheet_name:  Όνομα sheet (default: Sheet1).
-        title:       Προαιρετικός τίτλος που εμφανίζεται στην κορυφή.
+        output_path: Full file path, e.g., 'C:\\Users\\PC\\Desktop\\report.xlsx'.
+                     If only a name is provided, it is saved to the Desktop.
+        data_json:   JSON string with a list of dicts.
+                     Example: '[{"Name":"John","Age":30},{"Name":"Maria","Age":25}]'
+        sheet_name:  Sheet name (default: Sheet1).
+        title:       Optional title displayed at the top.
     """
     try:
         import openpyxl
@@ -71,7 +71,7 @@ def generate_excel(output_path: str, data_json: str, sheet_name: str = "Sheet1",
 
         row_offset = 1
 
-        # Τίτλος (προαιρετικός)
+        # Title (optional)
         if title:
             headers = list(data[0].keys())
             ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
@@ -138,18 +138,18 @@ def generate_excel(output_path: str, data_json: str, sheet_name: str = "Sheet1",
 @tool
 def generate_word_doc(output_path: str, content: str, title: str = "", subtitle: str = "") -> str:
     """
-    [WARNING: ΑΠΑΓΟΡΕΥΕΤΑΙ Η ΧΡΗΣΗ ΤΟΥ. Για έγγραφα .docx χρησιμοποίησε το run_officecli tool.]
-    Δημιουργεί Word αρχείο (.docx) από κείμενο.
+    [WARNING: DO NOT USE. For .docx documents, use the run_officecli tool.]
+    Creates a Word file (.docx) from text.
 
     Args:
-        output_path: Πλήρης path, π.χ. 'C:\\Users\\PC\\Desktop\\report.docx'.
-        content:     Κείμενο εγγράφου. Υποστηρίζει:
-                     - Κενή γραμμή = νέα παράγραφος
-                     - Γραμμές που αρχίζουν με '## ' = Heading 2
-                     - Γραμμές που αρχίζουν με '# ' = Heading 1
-                     - Γραμμές που αρχίζουν με '- ' ή '* ' = bullet
-        title:       Τίτλος εγγράφου (στην κορυφή, bold μεγάλα).
-        subtitle:    Προαιρετικός υπότιτλος.
+        output_path: Full path, e.g., 'C:\\Users\\PC\\Desktop\\report.docx'.
+        content:     Document text. Supports:
+                     - Empty line = new paragraph
+                     - Lines starting with '## ' = Heading 2
+                     - Lines starting with '# ' = Heading 1
+                     - Lines starting with '- ' or '* ' = bullet
+        title:       Document title (at the top, bold large).
+        subtitle:    Optional subtitle.
     """
     try:
         from docx import Document
@@ -163,12 +163,12 @@ def generate_word_doc(output_path: str, content: str, title: str = "", subtitle:
     try:
         doc = Document()
 
-        # Τίτλος
+        # Title
         if title:
             h = doc.add_heading(title, level=0)
             h.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        # Υπότιτλος
+        # Subtitle
         if subtitle:
             p = doc.add_paragraph(subtitle)
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -177,7 +177,7 @@ def generate_word_doc(output_path: str, content: str, title: str = "", subtitle:
         if title or subtitle:
             doc.add_paragraph("")  # spacer
 
-        # Parse περιεχόμενο
+        # Parse content
         for line in content.split("\n"):
             stripped = line.rstrip()
             if stripped.startswith("## "):
@@ -203,16 +203,16 @@ def generate_word_doc(output_path: str, content: str, title: str = "", subtitle:
 @tool
 def generate_pdf(output_path: str, content: str, title: str = "", author: str = "Αστακός") -> str:
     """
-    Δημιουργεί PDF αρχείο από κείμενο.
+    Creates a PDF file from text.
 
     Args:
-        output_path: Πλήρης path, π.χ. 'C:\\Users\\PC\\Desktop\\report.pdf'.
-        content:     Κείμενο. Υποστηρίζει:
-                     - Γραμμές με '## ' = section header
-                     - Γραμμές με '- ' = bullet
-                     - Κενές γραμμές = spacer
-        title:       Τίτλος (στην κορυφή).
-        author:      Metadata author (default: Αστακός).
+        output_path: Full path, e.g., 'C:\\Users\\PC\\Desktop\\report.pdf'.
+        content:     Text. Supports:
+                     - Lines starting with '## ' = section header
+                     - Lines starting with '- ' = bullet
+                     - Empty lines = spacer
+        title:       Title (at the top).
+        author:      Metadata author (default: Lobster).
     """
     try:
         from reportlab.lib.pagesizes import A4
@@ -304,13 +304,13 @@ def generate_pdf(output_path: str, content: str, title: str = "", author: str = 
 @tool
 def generate_csv(output_path: str, data_json: str, delimiter: str = ",") -> str:
     """
-    Δημιουργεί CSV αρχείο από δεδομένα.
+    Creates a CSV file from data.
 
     Args:
-        output_path: Πλήρης path, π.χ. 'C:\\Users\\PC\\Desktop\\data.csv'.
-        data_json:   JSON string με list of dicts.
-                     Παράδειγμα: '[{"Κωδικός":"001","Τιμή":9.99}]'
-        delimiter:   Διαχωριστικό (default: ',').
+        output_path: Full path, e.g. 'C:\\Users\\PC\\Desktop\\data.csv'.
+        data_json:   JSON string with a list of dicts.
+                     Example: '[{"Code":"001","Price":9.99}]'
+        delimiter:   Delimiter (default: ',').
     """
     try:
         data = json.loads(data_json)

@@ -85,9 +85,9 @@ DANGEROUS_WORDS = [
 @tool
 def archive_file(filename: str, content_summary: str) -> str:
     """
-    Αρχειοθετεί μόνιμα ένα αρχείο (φωτογραφία, έγγραφο, PDF) στη μνήμη (JSON + ChromaDB).
-    filename: Το ακριβές τεχνικό όνομα του αρχείου (π.χ. web_xxx.pdf ή web_xxx.png).
-    content_summary: Σύνοψη του περιεχομένου του εγγράφου ή η ανάλυση της εικόνας.
+    Permanently archives a file (photo, document, PDF) in memory (JSON + ChromaDB).
+    filename: The exact technical name of the file (e.g., web_xxx.pdf or web_xxx.png).
+    content_summary: Summary of the document's content or the analysis of the image.
     """
     try:
         import os
@@ -125,7 +125,7 @@ def archive_file(filename: str, content_summary: str) -> str:
     except Exception as e:
         return f"❌ Σφάλμα αρχειοθέτησης: {str(e)}"
 
-# Channel για Memory Provenance — ορίζεται από server.py/telegram_bot.py
+# Channel for Memory Provenance — defined by server.py/telegram_bot.py
 _CURRENT_CHANNEL: str = "unknown"
 
 
@@ -189,11 +189,11 @@ def _memory_query_tokens(query: str) -> list[str]:
 
 
 def _stem_token(token: str) -> str:
-    """Πρόχειρο ελληνικό stemming: κόβει τις πιο συνηθισμένες κλιτικές καταλήξεις
-    (πτώσεις/αριθμός: -ος/-ου/-ο/-οι/-ων/-ους, -α/-ας/-ες κ.λπ.) ώστε
-    'γενεθλια' να ταιριάζει με 'γενεθλιων' και 'αλεξανδρος' με 'αλεξανδρου'.
-    Κρατάει πάντα στέλεχος >= 4 χαρακτήρων (ίδιο όριο με τα tokens) για να
-    μην αυξάνεται ο θόρυβος από πολύ κοντά στελέχη.
+    """Rough Greek stemming: cuts off the most common inflectional endings
+    (cases/number: -ος/-ου/-ο/-οι/-ων/-ους, -α/-ας/-ες etc.) so that
+    'γενεθλια' matches 'γενεθλιων' and 'αλεξανδρος' matches 'αλεξανδρου'.
+    Always keeps a stem of >= 4 characters (the same limit as tokens) to
+    prevent noise from increasing due to very short stems.
     """
     if len(token) >= 7:
         return token[:-2]
@@ -204,7 +204,7 @@ def _stem_token(token: str) -> str:
 
 def _lexical_memory_matches(query: str, category: str = "", limit: int = 4) -> list:
     """Keyword fallback over Chroma docs; complements embeddings for exact user terms.
-    L1 cache (60s TTL) αποφεύγει full collection.get() σε κάθε κλήση."""
+    L1 cache (60s TTL) avoids full collection.get() on every call."""
     import time as _time
     tokens = _memory_query_tokens(query)
     if len(tokens) < 2:
@@ -246,14 +246,14 @@ def _lexical_memory_matches(query: str, category: str = "", limit: int = 4) -> l
 
 @tool
 def search_memory(query: str, category: str = "") -> str:
-    """Αναζήτηση στη μακροπρόθεσμη μνήμη. Κάλεσέ το ΜΙΑ ΦΟΡΑ ΜΟΝΟ. Αν έχεις ήδη [Πληροφορία από αναζήτηση] στο context ΜΗΝ ξανακαλέσεις. Χρησιμοποίησέ το πριν απαντήσεις σε:
-    1. Ερωτήσεις για τον Λάζαρο, την οικογένεια, το σπίτι, τις συνήθειες ή τα projects.
-    2. Ζητήματα που απαιτούν προτάσεις, συμβουλές ή λύσεις.
-    3. Αναφορές στο παρελθόν ή στον εξοπλισμό που υπάρχει.
+    """Search in long-term memory. Call this ONCE ONLY. If you already have [Information from search] in the context DO NOT call it again. Use it before answering:
+    1. Questions about Lazaros, family, home, habits, or projects.
+    2. Issues that require suggestions, advice, or solutions.
+    3. References to the past or to existing equipment.
 
     Args:
-        query: Keywords (π.χ. 'Αλέξανδρος φαγητό', 'Mastroapp backend')
-        category: Προαιρετικό φίλτρο: 'lazaros', 'family', 'projects', 'home', 'lesson', 'photos'
+        query: Keywords (e.g., 'Alexandros food', 'Mastroapp backend')
+        category: Optional filter: 'lazaros', 'family', 'projects', 'home', 'lesson', 'photos'
     """
     VALID_CATS = {"lazaros", "family", "projects", "home", "lesson", "session", "photos"}
     try:
@@ -282,7 +282,7 @@ def search_memory(query: str, category: str = "") -> str:
                     continue
                 seen_docs.add(key)
                 merged_results.append(doc)
-            # [PERF]: 1 similarity_search αντί 3 — primary_query αρκεί (expanded queries δεν βελτιώνουν σημαντικά)
+            # [PERF]: 1 similarity_search instead of 3 — primary_query is sufficient (expanded queries do not improve significantly)
             for search_query in search_queries[:1]:
                 if effective_category:
                     batch = vector_store.similarity_search(search_query, k=6, filter={"category": effective_category})
@@ -310,7 +310,7 @@ def search_memory(query: str, category: str = "") -> str:
         if not results and not sql_lines and not latest and not profile_lines:
             return "System: Δεν βρέθηκε σχετικό ιστορικό SQLite ή μνήμη Chroma. Απάντα με τις γενικές σου γνώσεις."
 
-        # bump retrieval_count async — δεν μπλοκάρει την απάντηση
+        # bump retrieval_count async — does not block the response
         if results:
             import threading as _thr
             def _bump_async():
@@ -373,12 +373,12 @@ def search_memory(query: str, category: str = "") -> str:
 @tool
 def run_terminal_command(command: str, already_approved: bool = False) -> str:
     """
-    Εκτελεί εντολές PowerShell στο PC του Λάζαρου (Piston-7) και επιστρέφει το αποτέλεσμα.
-    Ιδανικό για:
-    - Ανάγνωση logs (π.χ. 'Get-Content C:\\path\\to\\mastroapp\\logs\\error.log -Tail 50').
-    - Έλεγχο ports (π.χ. 'netstat -ano | findstr 8000').
-    - Εκτέλεση tests (π.χ. 'python manage.py test').
-    already_approved=True: παρακάμπτει μόνο το confirmation gate, όχι BLOCKED εντολές.
+    Executes PowerShell commands on Lazaros's PC (Piston-7) and returns the result.
+    Ideal for:
+    - Reading logs (e.g., 'Get-Content C:\\path\\to\\mastroapp\\logs\\error.log -Tail 50').
+    - Checking ports (e.g., 'netstat -ano | findstr 8000').
+    - Running tests (e.g., 'python manage.py test').
+    already_approved=True: bypasses only the confirmation gate, not BLOCKED commands.
     """
     import subprocess
     from core.safe_executor import safe_execute, classify_command, ExecPolicy
@@ -409,7 +409,7 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
         except Exception as e:
             return {"status": "ok", "output": f"❌ Terminal Error: {str(e)}"}
 
-    # Ακόμη και μετά από approval, τα hard-blocked commands δεν εκτελούνται ποτέ.
+    # Even after approval, hard-blocked commands are never executed.
     if already_approved:
         policy, reason = classify_command(command)
         if policy == ExecPolicy.BLOCKED:
@@ -428,20 +428,20 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
 @tool
 def save_to_memory(fact: str, entities: str = "", category: str = "other", reason: str = "agent_inferred") -> str:
     """
-    Αποθηκεύει πληροφορίες ΣΗΜΑΣΙΟΛΟΓΙΚΑ.
-    fact: Το γεγονός (π.χ. "Ο Αλέξανδρος τρώει μόνο φακές").
-    entities: Λέξεις-κλειδιά χωρισμένες με κόμμα (π.χ. "Αλέξανδρος, Φαγητό, Προτίμηση").
-    category: Η κατηγορία (π.χ. 'family', 'home', 'lazaros', 'tech', 'work').
-    reason: Γιατί αποθηκεύεται — 'user_stated' αν το είπε ρητά ο χρήστης, 'agent_inferred' αλλιώς.
+    Saves information SEMANTICALLY.
+    fact: The fact (e.g., "Alexandros only eats lentils").
+    entities: Keywords separated by commas (e.g., "Alexandros, Food, Preference").
+    category: The category (e.g., 'family', 'home', 'lazaros', 'tech', 'work').
+    reason: Why it is being saved — 'user_stated' if explicitly said by the user, 'agent_inferred' otherwise.
 
-    ⚡ Fire-and-forget: η ChromaDB/Vertex AI δουλειά γίνεται σε background thread.
-    Επιστρέφει αμέσως ώστε ο agent να μη μπλοκάρει τον χρήστη ~11s.
+    ⚡ Fire-and-forget: ChromaDB/Vertex AI work is done in a background thread.
+    Returns immediately so that the agent does not block the user for ~11s.
     """
     import datetime
     import threading
     from tools import system as _self
 
-    # Capture channel context ΠΡΙΝ το thread (module-level var, thread-unsafe αν διαβαστεί αργότερα)
+    # Capture channel context BEFORE the thread (module-level var, thread-unsafe if read later)
     _source = _self._CURRENT_CHANNEL
 
     def _do_save():
@@ -479,19 +479,19 @@ def save_to_memory(fact: str, entities: str = "", category: str = "other", reaso
 
 @tool
 def delete_from_memory(query: str) -> str:
-    """Διαγράφει ΟΡΙΣΤΙΚΑ μια πληροφορία από τη μνήμη (Chroma).
+    """PERMANENTLY deletes information from memory (Chroma).
 
-    ΧΡΗΣΙΜΟΠΟΙΗΣΕ ΑΥΤΟ ΤΟ TOOL (όχι save_to_memory) όποτε ο χρήστης ζητάει ρητά
-    να σβήσεις/διαγράψεις/αφαιρέσεις μια ήδη αποθηκευμένη πληροφορία επειδή είναι
-    λάθος, ξεπερασμένη ή άσχετη — π.χ. "σβήσε τη μνήμη που λέει Χ", "διέγραψε αυτό
-    για το Υ", "αυτό που είπα για Χ είναι λάθος, βγάλε το" κ.λπ.
-    Το save_to_memory ΜΟΝΟ προσθέτει νέες εγγραφές· σε αίτημα διαγραφής/διόρθωσης
-    αφήνει τη λάθος εγγραφή στη θέση της — γι' αυτό σε τέτοιες περιπτώσεις πάντα
-    προτίμησε το delete_from_memory (αν χρειάζεται, μπορείς μετά να καλέσεις και
-    save_to_memory με το σωστό περιεχόμενο σε ξεχωριστό βήμα).
+    USE THIS TOOL (not save_to_memory) whenever the user explicitly requests
+    to erase/delete/remove already stored information because it is
+    incorrect, outdated, or irrelevant — e.g., "erase the memory that says X", "delete this
+    about Y", "what I said about X is wrong, remove it" etc.
+    The save_to_memory tool ONLY adds new entries; upon a deletion/correction request,
+    it leaves the incorrect entry in place — which is why in such cases you should always
+    prefer delete_from_memory (if needed, you can subsequently call
+    save_to_memory with the correct content in a separate step).
 
-    query: Δώσε ΣΥΝΤΟΜΗ, ΣΥΓΚΕΚΡΙΜΕΝΗ φράση που ταυτοποιεί ΜΟΝΟ τη λάθος εγγραφή
-    (π.χ. "παλιά λάθος διεύθυνση"), όχι ολόκληρη την πρόταση/διόρθωση του χρήστη.
+    query: Provide a BRIEF, SPECIFIC phrase that identifies ONLY the incorrect entry
+    (e.g., "old wrong address"), not the user's entire sentence/correction.
     """
     try:
         def _norm(t: str) -> str:
@@ -504,9 +504,9 @@ def delete_from_memory(query: str) -> str:
             collection = vector_store._collection
             data = collection.get(include=["documents", "metadatas"])
 
-        # 1) Ακριβές substring match ΠΡΩΤΑ — πιο αξιόπιστο από embeddings όταν
-        # οι φράσεις είναι κοντινές/παρόμοιες (π.χ. παλιά λάθος vs σωστή διεύθυνση:
-        # τα embeddings τα βλέπουν σχεδόν ίδια και μπορεί να σβήσει λάθος εγγραφή).
+        # 1) Exact substring match FIRST — more reliable than embeddings when_
+        # the phrases are close/similar (e.g. old incorrect vs correct address:
+        # the embeddings see them as almost identical and a wrong record might be deleted).
         literal_hits = [
             (doc_id, doc) for doc_id, doc in zip(data.get("ids", []), data.get("documents", []))
             if norm_query and norm_query in _norm(doc)
@@ -526,8 +526,8 @@ def delete_from_memory(query: str) -> str:
                 f"Πες μου πιο συγκεκριμένα ποια να σβήσω:\n{previews}"
             )
 
-        # 2) Fallback: σημασιολογική αναζήτηση (embeddings), μόνο όταν δεν
-        # υπάρχει κανένα literal match.
+        # 2) Fallback: semantic search (embeddings), only when no
+        # there is no literal match. u_00ad_ u_00ad__
         query_emb = embeddings.embed_query(query)
         with vector_lock:
             results = collection.query(query_embeddings=[query_emb], n_results=1)
@@ -555,7 +555,7 @@ def delete_from_memory(query: str) -> str:
 
 @tool
 def retrieve_photo(query: str) -> str:
-    """Ανακτά φωτογραφία από τη μνήμη. ΟΤΑΝ επιστρέψει [SEND_PHOTO: path], ΣΥΜΠΕΡΙΛΑΒΕ ΤΟ ΑΥΤΟΥΣΙΟ στην απάντησή σου."""
+    """Retrieves a photo from memory. WHEN it returns [SEND_PHOTO: path], INCLUDE IT EXACTLY AS IS in your response."""
     try:
         import numpy as np
 
@@ -672,19 +672,19 @@ def _same_pending_reminder(existing_task: str, new_task: str, existing_time: str
 @tool
 def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = None, action: str = "add", location: str = None) -> str:
     """
-    Διαχειρίζεται τοπικές υπενθυμίσεις.
-    action: 'add' (νέα), 'read' (ανάγνωση ΜΟΝΟ pending), 'done' (ολοκλήρωση)
-    task: Για 'add' → περιγραφή. Για 'done' → keyword της υπενθύμισης που κλείνει.
-    location: ΜΟΝΟ για τοποθεσία-based υπενθυμίσεις. Χρησιμοποίησε 'home' όταν
-              ο Λάζαρος λέει 'όταν φτάσω σπίτι', 'μόλις πάω σπίτι' κλπ.
-              Όταν δίνεται location, ΜΗΝ δίνεις minutes_from_now ή exact_time.
+    Manages local reminders.
+    action: 'add' (new), 'read' (read pending ONLY), 'done' (completion)
+    task: For 'add' → description. For 'done' → keyword of the reminder being completed.
+    location: ONLY for location-based reminders. Use 'home' when
+              Lazaros says 'when I get home', 'as soon as I go home' etc.
+              When location is provided, DO NOT provide minutes_from_now or exact_time.
     """
     conn = None
     try:
         conn = sqlite3.connect(STATE_DB)
         cursor = conn.cursor()
 
-        # ── READ: Επιστρέφει ΜΟΝΟ pending ──────────────────────
+        # ── READ: Returns ONLY pending ──────────────────────
         if action == "read":
             cursor.execute("SELECT task, time FROM reminders WHERE status='pending'")
             pending = cursor.fetchall()
@@ -699,7 +699,7 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
                     lines.append(f"• [{tm}] {t}")
             return "📋 Εκκρεμείς υπενθυμίσεις:\n" + "\n".join(lines)
 
-        # ── DONE: Κλείνει υπενθύμιση με keyword ────────────────
+        # ── DONE: Closes reminder with keyword ────────────────
         elif action == "done":
             cursor.execute("SELECT id, task FROM reminders WHERE status='pending'")
             pending = cursor.fetchall()
@@ -716,7 +716,7 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             conn.commit()
             return f"✅ Η υπενθύμιση '{task}' ολοκληρώθηκε."
 
-        # ── ADD: Νέα υπενθύμιση ─────────────────────────────────
+        # ── ADD: New reminder ─────────────────────────────────
         else:
             from datetime import datetime, timedelta
 
@@ -766,19 +766,19 @@ from memory.routine_db import upsert_routine
 @tool
 def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: str = "general") -> str:
     """
-    [CRITICAL]: Χρησιμοποίησέ το ΟΤΑΝ ο Λάζαρος αναφέρει μια συνήθεια,
-    μια ρουτίνα ή κάτι που επαναλαμβάνεται (π.χ. "Κάθε Παρασκευή στις 13:00 πάω λαϊκή").
+    [CRITICAL]: Use this WHEN Lazaros mentions a habit,
+    a routine, or something that is repeated (e.g., "Every Friday at 13:00 I go to the farmers market").
 
-    ΚΑΝΟΝΕΣ ΓΙΑ ΤΑ ΟΡΙΣΜΑΤΑ:
-    - day_of_week: Αγγλικό canonical ("Monday"…"Sunday") ή "Everyday" για καθημερινή ρουτίνα.
-    - time_str: Ώρα σε HH:MM (π.χ. "13:00"). Αν δεν αναφέρεται ώρα, ΜΗΝ καλέσεις το tool.
-    - event_name: ΣΥΝΤΟΜΗ canonical περιγραφή σε 2-4 λέξεις (π.χ. "μήνυμα Κώστα", "λαϊκή αγορά",
-      "γυμναστήριο"). ΜΗΝ βάλεις "Κάθε μέρα", "Κάθε πρωί" ή χρονικές φράσεις — αυτές ανήκουν
-      στο day_of_week/time_str. Το event_name πρέπει να είναι ΣΤΑΘΕΡΟ για την ίδια δραστηριότητα.
+    RULES FOR ARGUMENTS:
+    - day_of_week: English canonical ("Monday"…"Sunday") or "Everyday" for a daily routine.
+    - time_str: Time in HH:MM (e.g., "13:00"). If no time is mentioned, DO NOT call the tool.
+    - event_name: BRIEF canonical description in 2-4 words (e.g., "message Kostas", "farmers market",
+      "gym"). DO NOT include "Every day", "Every morning", or time phrases — these belong
+      to day_of_week/time_str. The event_name must be CONSISTENT for the same activity.
     - event_type: "family", "work", "hobby", "general".
 
-    ΠΡΟΣΟΧΗ: Κάλεσέ το ΜΟΝΟ για recurring δραστηριότητες. Αγνόησε one-off γεγονότα
-    ("σήμερα πήγα…", "αύριο έχω…").
+    ATTENTION: Call this ONLY for recurring activities. Ignore one-off events
+    ("today I went…", "tomorrow I have…").
     """
     from datetime import datetime
 
@@ -815,12 +815,12 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
 @tool
 def delete_routine(event_name: str, day_of_week: str = "", time_str: str = "") -> str:
     """
-    [ACTION]: Διαγράφει οριστικά μια ρουτίνα από τον scheduler (βάση ρουτινών).
-    Χρησιμοποίησέ το ΟΤΑΝ ο Λάζαρος ζητά ρητά να διαγραφεί / ακυρωθεί / καταργηθεί 
-    μια επαναλαμβανόμενη ρουτίνα (όχι event του ημερολογίου, όχι απλή μνήμη, αλλά ρουτίνα!).
-    - event_name: Το όνομα ή μέρος του ονόματος της ρουτίνας.
-    - day_of_week: (Προαιρετικό) Ημέρα για πιο ακριβή αναζήτηση.
-    - time_str: (Προαιρετικό) Ώρα (HH:MM) για πιο ακριβή αναζήτηση.
+    [ACTION]: Permanently deletes a routine from the scheduler (routine database).
+    Use this WHEN Lazarus explicitly asks to delete / cancel / abolish 
+    a recurring routine (not a calendar event, not a simple memory, but a routine!).
+    - event_name: The name or part of the name of the routine.
+    - day_of_week: (Optional) Day for a more precise search.
+    - time_str: (Optional) Time (HH:MM) for a more precise search.
     """
     try:
         from memory.routine_db import find_routines_for_schedule_control, delete_routine_db
@@ -856,14 +856,14 @@ def edit_routine(
     time_str: str = "",
 ) -> str:
     """
-    [ACTION]: Αλλάζει την ώρα ή/και την ημέρα μιας υφιστάμενης ρουτίνας στον scheduler.
-    Χρησιμοποίησέ το αντί του learn_routine όταν ο Λάζαρος ζητά να ΑΛΛΑΞΕΙ ώρα 
-    ή μέρα σε κάτι που ήδη υπάρχει!
-    - event_name: Το όνομα (ή μέρος) της υπάρχουσας ρουτίνας.
-    - new_time_str: Η νέα ώρα (π.χ. "23:00"). Άφησέ το κενό αν δεν αλλάζει.
-    - new_day_of_week: Η νέα μέρα (π.χ. "Everyday", "Monday"). Άφησέ το κενό αν δεν αλλάζει.
-    - day_of_week: (Προαιρετικό) Ημέρα της υπάρχουσας ρουτίνας για αποσαφήνιση.
-    - time_str: (Προαιρετικό) Ώρα της υπάρχουσας ρουτίνας για αποσαφήνιση.
+    [ACTION]: Changes the time and/or day of an existing routine in the scheduler.
+    Use this instead of learn_routine when Lazaros asks to CHANGE the time 
+    or day of something that already exists!
+    - event_name: The name (or part) of the existing routine.
+    - new_time_str: The new time (e.g., "23:00"). Leave empty if it does not change.
+    - new_day_of_week: The new day (e.g., "Everyday", "Monday"). Leave empty if it does not change.
+    - day_of_week: (Optional) Day of the existing routine for clarification.
+    - time_str: (Optional) Time of the existing routine for clarification.
     """
     if not new_time_str and not new_day_of_week:
         return "⚠️ Πρέπει να δώσεις νέα ώρα ή νέα ημέρα για να γίνει η αλλαγή."
@@ -887,7 +887,7 @@ def edit_routine(
 
         r_id = routines[0]["id"]
         
-        # Αν δόθηκε new_time_str, σιγουρέψου ότι είναι HH:MM
+        # If new_time_str was provided, make sure it is HH:MM
         if new_time_str:
             if not re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", new_time_str):
                 return f"❌ Λάθος format νέας ώρας: '{new_time_str}'. Χρησιμοποίησε 'HH:MM'."
@@ -901,9 +901,9 @@ def edit_routine(
 @tool
 def get_routines(day_of_week: str) -> str:
     """
-    [QUERY]: Επιστρέφει τις καταγεγραμμένες ρουτίνες για μια συγκεκριμένη μέρα.
-    Χρησιμοποίησέ το όταν ο Λάζαρος ρωτάει "τι έχω την Παρασκευή;" ή "ποιες ρουτίνες ξέρεις;".
-    - day_of_week: π.χ. "Monday", "Friday", "Everyday"
+    [QUERY]: Returns the recorded routines for a specific day.
+    Use this when Lazaros asks "what do I have on Friday?" or "which routines do you know?".
+    - day_of_week: e.g. "Monday", "Friday", "Everyday"
     """
     try:
         from memory.routine_db import get_routines_for_day
@@ -966,39 +966,39 @@ def _looks_like_manual_followup_control(text: str) -> bool:
 @tool
 def control_routine_notifications(event_name: str, action: str, until_date: str = "", source_text: str = "") -> str:
     """
-    [OVERRIDE]: Χειροκίνητος έλεγχος των proactive υπενθυμίσεων μιας ρουτίνας, ΜΟΝΟ όταν
-    ο Λάζαρος το ζητήσει ΡΗΤΑ μέσα στην κουβέντα (όχι αυτόματα από εσένα ή από τον
-    προγραμματισμένο job — αυτό είναι ξεχωριστό κανάλι, ο χρήστης παίρνει τον έλεγχο).
+    [OVERRIDE]: Manual control of a routine's proactive reminders, ONLY when
+    Lazaros EXPLICITLY requests it within the conversation (not automatically by you or by the
+    scheduled job — this is a separate channel, the user takes control).
 
-    ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ — ΜΗΝ το καλέσεις ποτέ μόνο επειδή ο χρήστης σου είπε μια ΠΛΗΡΟΦΟΡΙΑ
-    (π.χ. "ο Αλέξανδρος λείπει κατασκήνωση", "γυρνάει σε 9 μέρες"). Μια πληροφορία ΔΕΝ
-    είναι αίτημα. Κάλεσέ το ΜΟΝΟ όταν υπάρχει ρητό αίτημα ελέγχου ειδοποιήσεων — λέξεις/
-    νόημα τύπου "μη μου στείλεις", "σίγασε", "άσε ήσυχο", "σταμάτα τις ειδοποιήσεις",
-    "ξαναενεργοποίησε". Αν ο χρήστης απλά σε ενημερώνει για κάτι, απάντησε κανονικά στην
-    κουβέντα — ΜΗΝ μαντέψεις ότι θέλει mute και ΜΗΝ σκανάρεις άλλες ρουτίνες "για καλό".
-    Μία κλήση ανά ρουτίνα που ζητήθηκε ρητά — όχι επανάληψη της ίδιας κλήσης στον ίδιο γύρο.
+    VERY IMPORTANT — NEVER call this just because the user told you a piece of INFORMATION
+    (e.g., "Alexandros is away at camp", "he returns in 9 days"). A piece of information IS
+    NOT a request. Call this ONLY when there is an explicit request to check notifications — words/
+    meaning like "don't send me", "mute", "leave alone", "stop notifications",
+    "reactivate". If the user is simply informing you about something, reply normally in the
+    conversation — DO NOT guess that they want to mute and DO NOT scan other routines "just in case".
+    One call per routine explicitly requested — no repetition of the same call in the same turn.
 
-    ΠΑΡΑΔΕΙΓΜΑΤΑ ΡΗΤΟΥ ΑΙΤΗΜΑΤΟΣ (μόνο αυτά τα patterns, όχι γενίκευση σε κάθε ρουτίνα):
-    - "Δεν χρειάζεται να μου στείλεις για το πάρκο μέχρι να γυρίσει ο Αλέξανδρος στις 26/6"
+    EXAMPLES OF EXPLICIT REQUESTS (only these patterns, do not generalize to every routine):
+    - "No need to send me about the park until Alexandros returns on 26/6"
       → action="mute", until_date="2026-06-26"
-    - "Άσε ήσυχο το ξυπνητήρι όλη την εβδομάδα, είμαι απόγευμα στη δουλειά"
-      → action="mute", until_date=<υπολόγισέ το ΕΣΥ από τα συμφραζόμενα, π.χ. επόμενη Κυριακή>
-    - "Ξανά ενεργοποίησε τις ειδοποιήσεις για το πάρκο" ή "γύρισε ο Αλέξανδρος"
+    - "Leave the alarm alone all week, I'm on afternoon shift at work"
+      → action="mute", until_date=<calculate it YOURSELF from the context, e.g., next Sunday>
+    - "Reactivate the notifications for the park" or "Alexandros is back"
       → action="unmute"
-    - "Μην στείλεις ΤΙΠΟΤΑ, ούτε ζεστό μήνυμα, για το πάρκο μέχρι να γυρίσει"
+    - "Don't send ANYTHING, not even a warm message, for the park until he returns"
       → action="silence_emotional"
-    - "Μπορείς να στέλνεις πάλι κάποιο μήνυμα για το πάρκο όσο λείπει"
+    - "You can send some message for the park again while he is away"
       → action="allow_emotional"
 
-    ΟΡΙΣΜΑΤΑ:
-    - event_name: το όνομα της ρουτίνας όπως το είπε ο χρήστης (π.χ. "πάρκο", "ξυπνητήρι
-      δουλειάς") — ΔΕΝ χρειάζεται να είναι ακριβές, γίνεται fuzzy match στη μνήμη.
-    - action: ένα από "mute", "unmute", "silence_emotional", "allow_emotional".
-    - until_date: ΜΟΝΟ για action="mute". Μορφή YYYY-MM-DD. Υπολόγισέ την ΕΣΥ από τα
-      συμφραζόμενα (σήμερα + Χ μέρες, "αυτή την εβδομάδα" κλπ) — ΜΗΝ ζητήσεις από τον
-      χρήστη να την πει σε ISO format ρητά.
-    - source_text: Το ακριβές αρχικό μήνυμα/πρόταση του χρήστη που οδήγησε σε
-      αυτή την κλήση (ΠΑΝΤΑ ΥΠΟΧΡΕΩΤΙΚΟ).
+    ARGUMENTS:
+    - event_name: the name of the routine as spoken by the user (e.g., "park", "work
+      alarm") — DOES NOT need to be exact, a fuzzy match is performed in memory.
+    - action: one of "mute", "unmute", "silence_emotional", "allow_emotional".
+    - until_date: ONLY for action="mute". Format YYYY-MM-DD. Calculate it YOURSELF from the
+      context (today + X days, "this week" etc) — DO NOT ask the
+      user to explicitly state it in ISO format.
+    - source_text: The exact original message/sentence of the user that led to
+      this call (ALWAYS MANDATORY).
     """
     from datetime import datetime
     from memory.routine_db import (
@@ -1110,26 +1110,26 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
 @tool
 def control_routine_condition(event_name: str, action: str, condition_type: str = "", payload_json: str = "", condition_mode: str = "", source_text: str = "", day_of_week: str = "", time_str: str = "") -> str:
     """
-    [OVERRIDE]: Προσθέτει ή Αφαιρεί "συνθήκες" (conditions) από μια ρουτίνα.
-    Χρησιμοποίησέ το ΟΤΑΝ ο χρήστης ζητάει μια ρουτίνα να εξαρτάται από έναν εξωτερικό παράγοντα
-    (π.χ. βάρδια, καιρός, τοποθεσία) ή όταν λέει ότι κάτι "δεν ισχύει όταν..."
+    [OVERRIDE]: Adds or Removes "conditions" from a routine.
+    Use this WHEN the user requests a routine to depend on an external factor
+    (e.g., shift, weather, location) or when they state that something "does not apply when..."
 
-    ΟΡΙΣΜΑΤΑ:
-    - event_name: Το όνομα της ρουτίνας-στόχου όπως το είπε ο χρήστης — γίνεται fuzzy match.
-    - action: "add" (για να βάλεις συνθήκη) ή "remove" (για να καθαρίσεις τη συνθήκη).
-    - condition_type: π.χ. "shift_mode" (εξάρτηση από βάρδια), "context_flag" (εξάρτηση από γενικό flag όπως school_open).
-    - payload_json: JSON string με τις παραμέτρους (π.χ. '{"flag": "current_shift", "equals": "afternoon"}').
-    - condition_mode: "allow_when_true" (επιτρέπεται ΜΟΝΟ αν ισχύει) ή "suppress_when_true" (ΑΚΥΡΩΝΕΤΑΙ όταν ισχύει).
-    - source_text: Το ακριβές αρχικό μήνυμα/πρόταση του χρήστη (ΠΑΝΤΑ ΥΠΟΧΡΕΩΤΙΚΟ).
-    - day_of_week: (Προαιρετικό) Αν ο χρήστης προσδιόρισε μέρα (π.χ. "Sunday", "Monday").
-    - time_str: (Προαιρετικό) Αν ο χρήστης προσδιόρισε ώρα (π.χ. "13:00").
+    ARGUMENTS:
+    - event_name: The name of the target routine as spoken by the user — fuzzy matched.
+    - action: "add" (to add a condition) or "remove" (to clear the condition).
+    - condition_type: e.g., "shift_mode" (shift dependency), "context_flag" (dependency on a general flag like school_open).
+    - payload_json: JSON string with the parameters (e.g., '{"flag": "current_shift", "equals": "afternoon"}').
+    - condition_mode: "allow_when_true" (allowed ONLY if true) or "suppress_when_true" (CANCELLED when true).
+    - source_text: The exact original message/sentence of the user (ALWAYS MANDATORY).
+    - day_of_week: (Optional) If the user specified a day (e.g., "Sunday", "Monday").
+    - time_str: (Optional) If the user specified a time (e.g., "13:00").
 
 
-    ΠΑΡΑΔΕΙΓΜΑΤΑ:
-    "Όταν έχω απόγευμα το πάρκο το πάει η Σοφία" (δηλαδή το πάρκο για μένα ΔΕΝ ισχύει το απόγευμα)
+    EXAMPLES:
+    "When I have an afternoon shift, Sofia takes the park" (meaning the park for me does NOT apply in the afternoon)
     -> action="add", condition_type="shift_mode", payload_json='{"flag": "current_shift", "equals": "afternoon"}', condition_mode="suppress_when_true"
 
-    "Η προπόνηση ισχύει μόνο όταν έχω πρωί"
+    "Training only applies when I have a morning shift"
     -> action="add", condition_type="shift_mode", payload_json='{"flag": "current_shift", "equals": "morning"}', condition_mode="allow_when_true"
     """
     import json
@@ -1169,9 +1169,9 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
             label = routine["event"]
             r_day = str(routine["day"]).lower()
             
-            # Έξυπνος έλεγχος: Αν η συνθήκη αφορά βάρδια (shift) και η ρουτίνα είναι ΑΠΟΚΛΕΙΣΤΙΚΑ Σαββατοκύριακο, 
-            # την αγνοούμε αυτόματα, καθώς οι βάρδιες του χρήστη είναι Δευτέρα-Παρασκευή.
-            # Αν ο χρήστης έδωσε ρητά day_of_week, τότε το επιτρέπουμε.
+            # Smart check: If the condition concerns a shift and the routine is EXCLUSIVELY for the Weekend,
+            # we ignore it automatically, as the user's shifts are Monday-Friday.
+            # If the user explicitly provided day_of_week, then we allow it.
             if condition_type == "shift_mode" and r_day in ("saturday", "sunday") and not day_of_week:
                 results.append(f"⏩ Η ρουτίνα '{label}' αγνοήθηκε αυτόματα γιατί τρέχει '{routine['day']}' (ΣΚ) και δεν έχεις βάρδιες.")
                 continue
@@ -1208,44 +1208,44 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
                               active_from: str = "", active_until: str = "",
                               resume_rule: str = "", reason: str = "", source_text: str = "") -> str:
     """
-    [OVERRIDE]: Χειροκίνητος έλεγχος της ΕΠΟΧΙΚΗΣ/ΠΡΟΣΩΡΙΝΗΣ ανενεργότητας μιας ρουτίνας
-    (όχι ειδοποιήσεων — γι' αυτό υπάρχει το control_routine_notifications). Χρησιμοποίησέ
-    το ΜΟΝΟ όταν ο Λάζαρος ζητήσει ΡΗΤΑ να "παγώσει" / "σταματήσει" / "ξαναρχίσει" μια
-    ρουτίνα λόγω καλοκαιρινού διαλείμματος, κατασκήνωσης, αλλαγής σεζόν κλπ.
+    [OVERRIDE]: Manual control of the SEASONAL/TEMPORARY inactivity of a routine
+    (not notifications — that's what control_routine_notifications is for). Use
+    it ONLY when Lazaros EXPLICITLY asks to "freeze" / "stop" / "resume" a
+    routine due to summer break, camp, season change, etc.
 
-    ΔΙΑΦΟΡΑ ΑΠΟ ΤΟ control_routine_notifications:
-    - control_routine_notifications = "μη μου ΣΤΕΙΛΕΙΣ" (notification layer, η ρουτίνα
-      παραμένει ενεργή από πλευράς confidence/missed-tracking).
-    - control_routine_schedule = "αυτή η ρουτίνα ΔΕΝ ΙΣΧΥΕΙ τώρα" (business-logic layer —
-      δεν μπαίνει σε missed/failed λογική, δεν πέφτει confidence, απλά "παγώνει").
-    Για καλοκαιρινό διάλειμμα σχολικής/εποχικής δραστηριότητας (π.χ. ποδόσφαιρο, σχολή)
-    χρησιμοποίησε ΠΑΝΤΑ αυτό το tool, ΟΧΙ mute, εκτός αν ο Λάζαρος ζητήσει ρητά "mute"/
-    "σίγαση ειδοποιήσεων".
+    DIFFERENCE FROM control_routine_notifications:
+    - control_routine_notifications = "do not SEND me" (notification layer, the routine
+      remains active in terms of confidence/missed-tracking).
+    - control_routine_schedule = "this routine DOES NOT APPLY now" (business-logic layer —
+      it does not enter missed/failed logic, confidence does not drop, it simply "freezes").
+    For a summer break of a school/seasonal activity (e.g., football, school)
+    ALWAYS use this tool, NOT mute, unless Lazaros explicitly asks for "mute"/
+    "mute notifications".
 
-    ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ — ΜΗΝ το καλέσεις μόνο επειδή ο χρήστης σου είπε μια ΠΛΗΡΟΦΟΡΙΑ (π.χ.
-    "ο Αλέξανδρος λείπει κατασκήνωση 2 βδομάδες"). Μια πληροφορία ΔΕΝ είναι αίτημα. Κάλεσέ
-    το ΜΟΝΟ όταν υπάρχει ρητό αίτημα παύσης/επαναφοράς ρουτίνας.
+    VERY IMPORTANT — DO NOT call it just because the user gave you an INFORMATION (e.g.,
+    "Alexandros is away at camp for 2 weeks"). An information IS NOT a request. Call
+    it ONLY when there is an explicit request to pause/resume a routine.
 
-    ΟΡΙΣΜΑΤΑ:
-    - event_name: το όνομα της ρουτίνας όπως το είπε ο χρήστης — fuzzy match στη μνήμη.
-    - action: ένα από "pause", "resume", "set_window", "clear_window".
-      • pause → παγώνει τη ρουτίνα μέχρι until_date (YYYY-MM-DD), προαιρετικό reason
-        (π.χ. "summer_break", "camp", "shift_change") και προαιρετικό resume_rule
-        (π.χ. "every_september", "next_school_year", "manual_only").
-      • resume → αφαιρεί την παύση, η ρουτίνα ξαναμπαίνει αμέσως σε κανονική λειτουργία.
-      • set_window → ορίζει active_from και/ή active_until (YYYY-MM-DD) — η ρουτίνα
-        ισχύει ΜΟΝΟ μέσα σε αυτό το παράθυρο ημερομηνιών.
-      • clear_window → αφαιρεί το active_from/active_until παράθυρο.
-    - until_date: ΜΟΝΟ για action="pause". Υπολόγισέ το ΕΣΥ από τα συμφραζόμενα.
-    - active_from / active_until: ΜΟΝΟ για action="set_window" (YYYY-MM-DD, μπορεί να
-      δοθεί μόνο το ένα από τα δύο).
-    - resume_rule: προαιρετικό, μαζί με action="pause" — πώς/πότε θα ξαναρχίσει.
-    - reason: προαιρετικό, ανθρώπινη περιγραφή του λόγου (π.χ. "summer_break").
-    - source_text: Το ακριβές αρχικό μήνυμα/πρόταση του χρήστη που οδήγησε σε
-      αυτή την κλήση (ΠΑΝΤΑ ΥΠΟΧΡΕΩΤΙΚΟ).
+    ARGUMENTS:
+    - event_name: the name of the routine as spoken by the user — fuzzy match in memory.
+    - action: one of "pause", "resume", "set_window", "clear_window".
+      • pause → freezes the routine until until_date (YYYY-MM-DD), optional reason
+        (e.g., "summer_break", "camp", "shift_change") and optional resume_rule
+        (e.g., "every_september", "next_school_year", "manual_only").
+      • resume → removes the pause, the routine immediately returns to normal operation.
+      • set_window → sets active_from and/or active_until (YYYY-MM-DD) — the routine
+        applies ONLY within this date window.
+      • clear_window → removes the active_from/active_until window.
+    - until_date: ONLY for action="pause". Calculate it YOURSELF from the context.
+    - active_from / active_until: ONLY for action="set_window" (YYYY-MM-DD, only
+      one of the two can be provided).
+    - resume_rule: optional, along with action="pause" — how/when it will resume.
+    - reason: optional, human description of the reason (e.g., "summer_break").
+    - source_text: The exact original message/sentence of the user that led to
+      this call (ALWAYS MANDATORY).
 
-    ΠΑΡΑΔΕΙΓΜΑ:
-    "Το ποδόσφαιρο του Αλέξανδρου σταματά μέχρι το Σεπτέμβριο για το καλοκαίρι"
+    EXAMPLE:
+    "Alexandros' football stops until September for the summer"
       → action="pause", until_date="2026-09-01", reason="summer_break",
         resume_rule="every_september"
     """
@@ -1371,24 +1371,24 @@ def control_routine_cooldown(
     time_str: str = "",
 ) -> str:
     """
-    [OVERRIDE]: Χειροκίνητος έλεγχος cooldown ρουτίνας.
+    [OVERRIDE]: Manual routine cooldown control.
 
-    Χρησιμοποίησέ το ΜΟΝΟ όταν ο χρήστης ζητά ρητά κάτι όπως:
-    - "μηδένισε το cooldown"
-    - "reset το cooldown"
-    - "βγάλτο από cooldown"
-    - "θέλω να μπορεί να σταλεί αύριο κανονικά"
-    - "να ξανασταλεί κανονικά"
+    Use this ONLY when the user explicitly requests something like:
+    - "reset the cooldown"
+    - "reset cooldown"
+    - "take it out of cooldown"
+    - "I want it to be sent normally tomorrow"
+    - "to be resent normally"
 
-    ΜΗΝ το καλείς για απλό context update.
-    ΜΗΝ το καλείς επειδή ο χρήστης απλώς άργησε να απαντήσει.
-    ΜΗΝ το μπερδεύεις με mute/schedule/conditions.
+    DO NOT call this for a simple context update.
+    DO NOT call this just because the user was late to reply.
+    DO NOT confuse this with mute/schedule/conditions.
 
-    ΟΡΙΣΜΑΤΑ:
-    - event_name: όνομα ρουτίνας όπως το είπε ο χρήστης
-    - action: μόνο "reset"
-    - source_text: το ακριβές μήνυμα του χρήστη
-    - day_of_week/time_str: προαιρετική αποσαφήνιση αν υπάρχουν πολλές παρόμοιες ρουτίνες
+    ARGUMENTS:
+    - event_name: routine name as stated by the user
+    - action: "reset" only
+    - source_text: the exact message of the user
+    - day_of_week/time_str: optional clarification if multiple similar routines exist
     """
     from memory.routine_db import (
         find_routines_for_schedule_control,
@@ -1451,20 +1451,20 @@ def control_pending_followup(
     target_window: str = "",
 ) -> str:
     """
-    [OVERRIDE]: Χειροκίνητος έλεγχος pending conversational follow-ups.
+    [OVERRIDE]: Manual check of pending conversational follow-ups.
 
-    Χρησιμοποίησέ το ΜΟΝΟ όταν ο χρήστης ζητά ρητά να αλλάξει/σβήσει/μεταθέσει ένα pending follow-up.
+    Use this ONLY when the user explicitly asks to change/delete/defer a pending follow-up.
 
-    Παραδείγματα:
-    - "σβήσε το pending followup για τις μπριζόλες"
-    - "άλλαξε το pending για το πάρκο πιο αργά"
-    - "μετάθεσε το followup για τη Σοφία για αύριο το απόγευμα"
-    - "στρώσε τα παλιά pending followups"
+    Examples:
+    - "delete the pending followup for the steaks"
+    - "change the pending for the park to later"
+    - "defer the followup for Sophia to tomorrow afternoon"
+    - "fix the old pending followups"
 
     actions:
-    - "delete": διαγράφει το matching follow-up
-    - "defer": μεταθέτει το matching follow-up με νέα λεπτά/window
-    - "repair_legacy": κάνει backfill σε παλιά followups που λείπουν metadata πεδία
+    - "delete": deletes the matching follow-up
+    - "defer": defers the matching follow-up with new minutes/window
+    - "repair_legacy": backfills old followups that are missing metadata fields
     """
     from memory.pending_followups import (
         backfill_legacy_followups,
@@ -1539,8 +1539,8 @@ def control_pending_followup(
 
 @tool
 def manage_list(action: str, list_name: str, item: str = "") -> str:
-    """Διαχειρίζεται λίστες. Actions: 'add', 'remove', 'read', 'clear', 'delete'.
-    Για πολλά αντικείμενα ταυτόχρονα, χώρισέ τα με κόμμα (item='γάλα, τυρί')."""
+    """Manages lists. Actions: 'add', 'remove', 'read', 'clear', 'delete'.
+    For multiple items at once, separate them with a comma (item='milk, cheese')."""
     conn = None
     try:
         conn = sqlite3.connect(STATE_DB)
@@ -1615,16 +1615,16 @@ def google_tasks_tool(
     max_results: int = 20,
 ) -> str:
     """
-    Διαχειρίζεται Google Tasks.
+    Manages Google Tasks.
     Actions:
-      'create'   — νέα εργασία (θέλει title, προαιρετικά due/notes)
-      'list'     — λίστα ανοιχτών εργασιών
-      'complete' — ολοκλήρωση εργασίας (θέλει task_id)
-      'update'   — αλλαγή title/due/notes (θέλει task_id και ένα πεδίο)
-      'delete'   — διαγραφή εργασίας (θέλει task_id, CRITICAL approval)
-    🚨 [MASTRO-RULE ΓΙΑ ΤΟΝ ΤΙΤΛΟ]: Η παράμετρος 'title' ΠΡΕΠΕΙ να περιγράφει ξεκάθαρα την εργασία (π.χ. 'Φροντίδα τριανταφυλλιάς').
-    ΑΠΑΓΟΡΕΥΕΤΑΙ ΑΥΣΤΗΡΑ να χρησιμοποιείς ρήματα της εντολής (π.χ. 'βάλε', 'κάνε', 'θύμισέ μου', 'υπενθύμιση') ως τίτλο.
-    Αν ο χρήστης λέει απλά 'βάλε μια υπενθύμιση' χωρίς να διευκρινίζει το θέμα, ΜΗΝ καλείς αυτό το εργαλείο. Ρώτα τον πρώτα τι θέλει να γράψεις!
+      'create'   — new task (requires title, optionally due/notes)
+      'list'     — list of open tasks
+      'complete' — complete a task (requires task_id)
+      'update'   — modify title/due/notes (requires task_id and at least one field)
+      'delete'   — delete a task (requires task_id, CRITICAL approval)
+    🚨 [MASTER-RULE FOR TITLE]: The 'title' parameter MUST clearly describe the task (e.g., 'Rose bush care').
+    It is STRICTLY FORBIDDEN to use command verbs (e.g., 'put', 'do', 'remind me', 'reminder') as a title.
+    If the user simply says 'add a reminder' without specifying the topic, DO NOT call this tool. Ask them first what they want you to write!
     """
     try:
         action = (action or "list").strip().lower()
@@ -1700,11 +1700,11 @@ def google_tasks_tool(
 @tool
 def create_file_tool(file_type: str, filename: str, data: str) -> str:
     """
-    [WARNING: Για αρχεία .docx, .xlsx, .pptx ΑΠΑΓΟΡΕΥΕΤΑΙ η χρήση αυτού του εργαλείου. Χρησιμοποίησε ΜΟΝΟ το run_officecli]
-    Δημιουργεί τοπικά αρχεία PDF, TXT (και legacy DOCX/XLSX).
+    [WARNING: For .docx, .xlsx, .pptx files, the use of this tool is FORBIDDEN. Use ONLY run_officecli]
+    Creates local PDF, TXT (and legacy DOCX/XLSX) files.
     file_type: 'docx', 'pdf', 'xlsx', 'txt'
-    filename: Το όνομα του αρχείου (π.χ. 'report.txt')
-    data: Το περιεχόμενο. 
+    filename: The name of the file (e.g., 'report.txt')
+    data: The content. 
     """
     import os
     import json
@@ -1713,7 +1713,7 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
     output_dir = os.path.realpath(os.path.join(BASE_DIR, "outputs"))
     os.makedirs(output_dir, exist_ok=True)
 
-    # [SECURITY]: basename + resolve check — αποτρέπει path traversal (π.χ. ../config.py)
+    # [SECURITY]: basename + resolve check — prevents path traversal (e.g., ../config.py)
     safe_filename = os.path.basename(filename)
     if not safe_filename:
         return "❌ Σφάλμα: Μη έγκυρο όνομα αρχείου."
@@ -1748,7 +1748,7 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
                 pdf.add_font("DejaVu", "", font_path, uni=True)
                 pdf.set_font("DejaVu", size=12)
             else:
-                # Fallback χωρίς ελληνικά αν λείπει το font
+                # Fallback without Greek if the font is missing
                 pdf.set_font("Arial", size=12)
             pdf.multi_cell(0, 10, data)
             pdf.output(full_path)
@@ -1767,7 +1767,7 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
 @tool
 def generate_image_tool(prompt: str) -> str:
     """
-    Δημιουργεί μια εικόνα βασισμένη σε μια περιγραφή (prompt) μέσω Vertex AI Imagen.
+    Creates an image based on a description (prompt) via Vertex AI Imagen.
     """
     import os
     import time
@@ -1788,7 +1788,7 @@ def generate_image_tool(prompt: str) -> str:
 
         vertexai.init(
             project=os.getenv("PROJECT_ID", "astakos-finall"),
-            location="us-central1"  # Imagen δεν υποστηρίζει "global"
+            location="us-central1"  # Imagen does not support "global"
         )
         model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
         response = model.generate_images(
@@ -1819,19 +1819,19 @@ def drive_manager(
     share_email: str = None,
     share_role: str = "reader",
 ) -> str:
-    """Διαχειρίζεται το Google Drive του Λάζαρου.
+    """Manages Lazaros's Google Drive.
 
     Actions:
-      'list_files'   — Λίστα αρχείων σε folder (default: root astakos folder)
-      'search'       — Αναζήτηση με όνομα ή λέξη-κλειδί (χρειάζεται query=)
-      'download'     — Κατέβασμα αρχείου (χρειάζεται file_id=)
-      'upload'       — Ανέβασμα αρχείου (χρειάζεται local_path=)
-      'delete'       — Διαγραφή αρχείου (χρειάζεται file_id=)
-      'rename'       — Μετονομασία (χρειάζεται file_id= + new_name=)
-      'move'         — Μετακίνηση σε άλλο φάκελο (χρειάζεται file_id= + target_folder_id=)
-      'share'        — Κοινή χρήση (χρειάζεται file_id= + share_email= + share_role='reader'/'writer')
-      'create_folder'— Δημιουργία φακέλου (χρειάζεται new_name=, προαιρετικά folder_id= για parent)
-      'info'         — Πληροφορίες αρχείου (χρειάζεται file_id=)
+      'list_files'   — List files in folder (default: root astakos folder)
+      'search'       — Search by name or keyword (requires query=)
+      'download'     — Download file (requires file_id=)
+      'upload'       — Upload file (requires local_path=)
+      'delete'       — Delete file (requires file_id=)
+      'rename'       — Rename (requires file_id= + new_name=)
+      'move'         — Move to another folder (requires file_id= + target_folder_id=)
+      'share'        — Share (requires file_id= + share_email= + share_role='reader'/'writer')
+      'create_folder'— Create folder (requires new_name=, optionally folder_id= for parent)
+      'info'         — File information (requires file_id=)
     """
     try:
         from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
@@ -1909,7 +1909,7 @@ def drive_manager(
             while not done:
                 _, done = downloader.next_chunk()
 
-            # [SECURITY]: download πάντα στο outputs — local_path αγνοείται αν είναι εκτός
+            # [SECURITY]: always download to outputs — local_path is ignored if it is outside
             from config import BASE_DIR as _BASE_DIR
             _outputs_dir = os.path.realpath(os.path.join(_BASE_DIR, "outputs"))
             os.makedirs(_outputs_dir, exist_ok=True)
@@ -1924,7 +1924,7 @@ def drive_manager(
             with open(save_target, "wb") as f:
                 f.write(fh.getvalue())
 
-            # Αν είναι text, επέστρεψε και το περιεχόμενο
+            # If it is text, also return the content
             if mime_type == 'application/vnd.google-apps.document' or file_name.endswith('.txt'):
                 content = fh.getvalue().decode('utf-8', errors='ignore')[:6000]
                 return f"✅ '{file_name}' κατέβηκε → {save_target}\n\n{content}"
@@ -1934,7 +1934,7 @@ def drive_manager(
         elif action == "upload":
             if not local_path or not os.path.exists(local_path):
                 return f"❌ Αρχείο δεν βρέθηκε: {local_path}"
-            # [SECURITY]: upload μόνο από allowed dirs — αποτρέπει ανέβασμα credentials/config
+            # [SECURITY]: upload only from allowed dirs — prevents uploading credentials/config
             from config import BASE_DIR as _BASE_DIR
             _upload_allowed = [
                 os.path.realpath(os.path.join(_BASE_DIR, "outputs")),
@@ -2033,16 +2033,16 @@ def drive_manager(
 
 @tool
 def read_local_file(file_path: str) -> str:
-    """Διαβάζει PDF, XLSX, CSV, DOCX, TXT, PY, JS (Mastro-Optimized)."""
+    """Reads PDF, XLSX, CSV, DOCX, TXT, PY, JS (Mastro-Optimized)."""
     import os
     from config import BASE_DIR, PHOTOS_DIR
     
-    # Καθαρισμός path
+    # Path cleanup
     file_path = file_path.strip().strip("'").strip('"')
     filename = os.path.basename(file_path)
     base_dir = BASE_DIR
 
-    # [SECURITY]: Μόνο αυτοί οι φάκελοι επιτρέπονται για ανάγνωση
+    # [SECURITY]: Only these folders are allowed to be read
     _allowed_dirs = [
         os.path.realpath(PHOTOS_DIR),
         os.path.realpath(os.path.join(base_dir, "telegram_uploads")),
@@ -2050,8 +2050,8 @@ def read_local_file(file_path: str) -> str:
         os.path.realpath(os.path.join(base_dir, "uploads")),
         os.path.realpath(os.path.join(base_dir, "outputs")),
         os.path.realpath(os.path.join(base_dir, "watch_folder")),
-        # [SELF-DIAGNOSIS]: Source code φάκελοι — ο Αστακός μπορεί να διαβάζει
-        # τον κώδικά του για self-debugging (π.χ. γιατί απέτυχε ένα tool).
+        # [SELF-DIAGNOSIS]: Source code folders — Lobster can read
+        # its code for self-debugging (e.g., why a tool failed).
         os.path.realpath(os.path.join(base_dir, "tools")),
         os.path.realpath(os.path.join(base_dir, "core")),
         os.path.realpath(os.path.join(base_dir, "memory")),
@@ -2064,7 +2064,7 @@ def read_local_file(file_path: str) -> str:
         os.path.realpath(os.path.join(BASE_DIR, "messenger_draft.json")),
         os.path.realpath(os.path.join(BASE_DIR, "linkedin_draft.json")),
     ]
-    # [SECURITY]: Sensitive αρχεία που δεν επιτρέπονται ακόμα και αν είναι σε allowed dir
+    # [SECURITY]: Sensitive files that are not allowed even if they are in an allowed dir
     _blocked_filenames = {
         "config.py", ".env", "secrets.py",
     }
@@ -2090,7 +2090,7 @@ def read_local_file(file_path: str) -> str:
     full_path = None
     print(f"\033[93m[Tool Debug]: Ψάχνω το αρχείο: {filename}\033[0m")
 
-    # Αν δόθηκε absolute path, έλεγξε ότι είναι εντός allowed dirs
+    # If an absolute path was provided, check that it is within the allowed dirs
     if os.path.isabs(file_path):
         if os.path.exists(file_path) and os.path.isfile(file_path) and (_in_allowed(file_path) or _is_allowed_file(file_path)):
             full_path = file_path
@@ -2106,7 +2106,7 @@ def read_local_file(file_path: str) -> str:
                 print(f"\033[92m[Tool Debug]: ✅ Exact allowed file -> {full_path}\033[0m")
                 break
 
-    # Αναζήτηση με basename στους allowed dirs
+    # Search by basename in the allowed dirs_
     if not full_path:
         for d in _allowed_dirs:
             test_path = os.path.join(d, filename)
@@ -2122,11 +2122,11 @@ def read_local_file(file_path: str) -> str:
 
     try:
         if ext == ".pdf":
-            # Χρήση pypdf (πιο αξιόπιστη από PyPDF2)
+            # Using pypdf (more reliable than PyPDF2)
             try:
                 from pypdf import PdfReader
             except ImportError:
-                from PyPDF2 import PdfReader # Fallback αν δεν έχεις προλάβει το install
+                from PyPDF2 import PdfReader # Fallback if you haven't managed to install in time
             
             text = ""
             reader = PdfReader(full_path)
@@ -2134,7 +2134,7 @@ def read_local_file(file_path: str) -> str:
                 extracted = page.extract_text()
                 if extracted:
                     text += extracted + "\n"
-                if len(text) > 12000: # Όριο για να μην «πνίξουμε» το context
+                if len(text) > 12000: # Limit to avoid "choking" the context
                     break
             
             if not text.strip():
@@ -2164,7 +2164,7 @@ def read_local_file(file_path: str) -> str:
             text = "\n".join([p.text for p in doc.paragraphs])
             return f"📝 Word ({filename}):\n{text[:12000]}"
 
-        else: # TXT, PY, JS, κλπ.
+        else: # TXT, PY, JS, etc.
             with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
                 return f"📄 Αρχείο ({filename}):\n{f.read(12000)}"
 
@@ -2173,7 +2173,7 @@ def read_local_file(file_path: str) -> str:
 
 @tool
 def write_code(filename: str, code: str) -> str:
-    """Γράφει κώδικα ΜΟΝΟ μέσα στον φάκελο astakos_skills."""
+    """Writes code ONLY inside the astakos_skills folder."""
     safe_filename = os.path.basename(filename)
     if safe_filename in PROTECTED_FILES:
         return f"System Error: ΑΠΑΓΟΡΕΥΕΤΑΙ να τροποποιήσεις το {safe_filename}."
@@ -2202,9 +2202,9 @@ def write_code(filename: str, code: str) -> str:
 @tool
 def run_code(filename: str, script_args: str = "") -> str:
     """
-    Εκτελεί ένα αρχείο Python ΜΟΝΟ από τον φάκελο astakos_skills.
-    Μπορείς να περάσεις προαιρετικά ορίσματα (script_args) ως string.
-    Παράδειγμα: script_args="SKG KUT 2026-08-09 -r 2026-08-15"
+    Executes a Python file ONLY from the astakos_skills folder.
+    You can optionally pass arguments (script_args) as a string.
+    Example: script_args="SKG KUT 2026-08-09 -r 2026-08-15"
     """
     import os
     import sys
@@ -2248,8 +2248,8 @@ def run_code(filename: str, script_args: str = "") -> str:
 
 @tool
 def write_custom_tool(tool_name: str, tool_code: str) -> str:
-    """Γράφει και τεστάρει νέο tool στο astakos_skills/.
-    Δεν το καταχωρεί αυτόματα σε system/risk/registry — αυτό γίνεται με register_tool."""
+    """Writes and tests a new tool in astakos_skills/.
+    It does not register it automatically in system/risk/registry — this is done with register_tool."""
     import ast
 
     clean_code = re.sub(r"```(?:python)?", "", tool_code).replace("```", "").strip()
@@ -2270,7 +2270,7 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
     def _has_tool_decorator(function_node):
         return any(_decorator_name(dec).split(".")[-1] == "tool" for dec in function_node.decorator_list)
 
-    # [SECURITY]: Blocklist για generated tool code — filesystem, network, execution
+    # [SECURITY]: Blocklist for generated tool code — filesystem, network, execution
     _dangerous_patterns = [
         r"subprocess",
         r"os\s*\.\s*system",
@@ -2309,8 +2309,8 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
     for _dp in _dangerous_patterns:
         if re.search(_dp, clean_code, re.IGNORECASE):
             return f"System Error: Απορρίφθηκε — ανιχνεύτηκε απαγορευμένο pattern: `{_dp}`."
-    dangerous_pattern = None  # legacy — αντικαταστάθηκε από _dangerous_patterns
-    # (legacy check αντικαταστάθηκε από _dangerous_patterns loop πάνω)
+    dangerous_pattern = None  # legacy — replaced by _dangerous_patterns
+    # (legacy check replaced by the _dangerous_patterns loop above)
 
     try:
         tree = ast.parse(clean_code)
@@ -2448,7 +2448,7 @@ SCOPES = [
 ]
 
 def get_gmail_service():
-    """Δημιουργεί το service του Gmail API χρησιμοποιώντας OAuth."""
+    """Creates the Gmail API service using OAuth."""
     creds = None
     if os.path.exists(TOKEN_PATH):
         creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
@@ -2482,7 +2482,7 @@ def decode_base64(data):
 
 
 def extract_body(payload):
-    """Εξάγει body με fallback: plain text → HTML → nested parts."""
+    """Extracts body with fallback: plain text → HTML → nested parts."""
     import html
 
     def _parse_part(part):
@@ -2510,7 +2510,7 @@ def extract_body(payload):
         return ""
 
     def _html_to_text(raw_html):
-        # <br> και </p> → newlines για αναγνώσιμο κείμενο
+        # <br> and </p> → newlines for readable text
         raw_html = re.sub(r'<br\s*/?>', '\n', raw_html, flags=re.IGNORECASE)
         raw_html = re.sub(r'</p>', '\n', raw_html, flags=re.IGNORECASE)
         text = re.sub(r'<[^>]+>', ' ', raw_html)
@@ -2521,7 +2521,7 @@ def extract_body(payload):
 
 
 def clean_text(text):
-    """Καθαρίζει whitespace και αφαιρεί quoted replies (γραμμές με >)."""
+    """Cleans whitespace and removes quoted replies (lines with >)."""
     lines = text.splitlines()
     lines = [l for l in lines if not l.strip().startswith('>')]
     cleaned = '\n'.join(lines)
@@ -2555,12 +2555,12 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
                  to_email: str = None, subject: str = None, body: str = None,
                  limit: int = 10) -> str:
     """
-    Διαχείριση Gmail μέσω Google API. 
-    Actions: 'search' (θέλει query), 'read_full' (θέλει email_id), 
-             'read_thread' (θέλει email_id, διαβάζει όλη τη συνομιλία),
-             'send' (θέλει to_email, subject, body),
-             'reply' (θέλει email_id, body),
-             'delete' (θέλει email_id).
+    Gmail management via Google API. 
+    Actions: 'search' (requires query), 'read_full' (requires email_id), 
+             'read_thread' (requires email_id, reads the entire conversation),
+             'send' (requires to_email, subject, body),
+             'reply' (requires email_id, body),
+             'delete' (requires email_id).
     """
     try:
         if not action:
@@ -2797,8 +2797,8 @@ def github_manager(action: str, repo_name: str = "", target_files: str = "",
 
 @tool
 def control_vacuum(action: str) -> str:
-    """Ελέγχει τη ρομποτική σκούπα Xiaomi X20+.
-    Actions: 'start', 'stop', 'home', 'status' (για μπαταρία/κατάσταση), 'room:<όνομα_δωματίου>' (π.χ. room:Κουζίνα)."""
+    """Controls the Xiaomi X20+ robot vacuum.
+    Actions: 'start', 'stop', 'home', 'status' (for battery/status), 'room:<room_name>' (e.g., room:Kitchen)."""
     ip = VACUUM_IP
     token = VACUUM_TOKEN
 
@@ -2824,13 +2824,13 @@ def control_vacuum(action: str) -> str:
             room_name = action.split(":", 1)[1].strip()
             import os, json
             
-            # Φόρτωση του room_map.json
+            # Loading of room_map.json
             room_map_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "room_map.json")
             try:
                 with open(room_map_path, "r", encoding="utf-8") as f:
                     room_map = json.load(f)
             except Exception:
-                # Fallback αν δεν υπάρχει το αρχείο (έχουμε hardcoded αυτά που βρήκαμε)
+                # Fallback if the file does not exist (we have hardcoded the ones we found)
                 room_map = {"Κουζίνα": 5, "Μπάνιο": 7, "Κρεβατοκάμαρα": 1, "Παιδικό": 3, "Σαλόνι": 4}
 
             room_id = room_map.get(room_name)
@@ -2857,11 +2857,11 @@ def control_vacuum(action: str) -> str:
 @tool
 def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str = None) -> str:
     """
-    Δημοσιεύει κείμενο και προαιρετικά εικόνες στο LinkedIn.
-    Αν δεν δοθεί text, το τραβάει αυτόματα από το linkedin_draft.json.
-    image_path: μία εικόνα (backward compat)
-    image_paths: πολλαπλές εικόνες χωρισμένες με κόμμα, π.χ. "C:/a.jpg,C:/b.jpg,C:/c.jpg"
-                 Οι εικόνες ανεβαίνουν ως carousel στο LinkedIn (έως 9).
+    Publishes text and optionally images to LinkedIn.
+    If no text is provided, it is automatically retrieved from linkedin_draft.json.
+    image_path: a single image (backward compatibility)
+    image_paths: multiple images separated by commas, e.g., "C:/a.jpg,C:/b.jpg,C:/c.jpg"
+                 The images are uploaded as a carousel on LinkedIn (up to 9).
     """
     import os
     import json
@@ -2869,7 +2869,7 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
     from dotenv import load_dotenv, find_dotenv
     from config import LINKEDIN_DRAFT_FILE
 
-    # [MASTRO-INTERCEPTOR]: Αυτονομία από τη Working Memory
+    # [MASTRO-INTERCEPTOR]: Autonomy from Working Memory
     if not text:
         if os.path.exists(LINKEDIN_DRAFT_FILE):
             try:
@@ -2885,7 +2885,7 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
     if not text:
         return "❌ Σφάλμα: Δεν βρέθηκε κείμενο (ούτε στο draft, ούτε στα ορίσματα)."
 
-    # Συγκέντρωση όλων των paths σε μια λίστα
+    # Gathering of all paths into a list
     all_paths = []
     if image_paths:
         all_paths = [p.strip() for p in image_paths.split(",") if p.strip()]
@@ -2909,14 +2909,14 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
     }
 
     try:
-        # 1. Ταυτοποίηση
+        # 1. Identification
         user_res = requests.get("https://api.linkedin.com/v2/userinfo", headers=headers)
         if user_res.status_code != 200: return f"❌ Auth Error: {user_res.text}"
         person_urn = f"urn:li:person:{user_res.json().get('sub')}"
 
-        # 2. Upload Images (μία ή πολλαπλές)
+        # 2. Upload Images (single or multiple)
         asset_urns = []
-        for path in all_paths[:9]:  # LinkedIn max 9 εικόνες
+        for path in all_paths[:9]:  # LinkedIn max 9 images
             reg_url = "https://api.linkedin.com/v2/assets?action=registerUpload"
             reg_data = {"registerUploadRequest": {"recipes": ["urn:li:digitalmediaRecipe:feedshare-image"], "owner": person_urn, "serviceRelationships": [{"relationshipType": "OWNER", "identifier": "urn:li:userGeneratedContent"}]}}
             reg_res = requests.post(reg_url, headers=headers, json=reg_data)
@@ -2927,7 +2927,7 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
                     requests.post(upload_url, headers={"Authorization": f"Bearer {token}"}, data=f.read())
                 asset_urns.append(asset_urn)
 
-        # 3. Δημιουργία Post
+        # 3. Create Post
         post_url = "https://api.linkedin.com/v2/ugcPosts"
         media_content = {
             "shareCommentary": {"text": text},
@@ -2949,7 +2949,7 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
         res = requests.post(post_url, headers=headers, json=payload)
 
         if res.status_code == 201:
-            # [MASTRO-CLEANUP]: Καθαρισμός draft μετά την επιτυχία
+            # [MASTRO-CLEANUP]: Draft cleanup after success
             if os.path.exists(LINKEDIN_DRAFT_FILE):
                 with open(LINKEDIN_DRAFT_FILE, "w", encoding="utf-8") as f:
                     json.dump({}, f)
@@ -2964,7 +2964,7 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
 import math
 
 def _is_home(lat: float, lon: float, home_lat: float = 40.646537, home_lon: float = 22.939025, radius_m: float = 150) -> bool:
-    """Ελέγχει αν οι συντεταγμένες είναι εντός 150 μέτρα από το Piston 7."""
+    """Checks if the coordinates are within 150 meters of Piston 7."""
     R = 6371000
     dlat = math.radians(lat - home_lat)
     dlon = math.radians(lon - home_lon)
@@ -2975,8 +2975,8 @@ def _is_home(lat: float, lon: float, home_lat: float = 40.646537, home_lon: floa
 @tool
 def get_current_location() -> str:
     """
-    Επιστρέφει το τελευταίο καταγεγραμμένο GPS στίγμα του Λάζαρου από το last_location.json.
-    Χρησιμοποιείται για να ξέρουμε πού βρίσκεται ο χρήστης σε πραγματικό χρόνο.
+    Returns the last recorded GPS coordinate of Lazaros from last_location.json.
+    Used to know where the user is in real-time.
     """
     import json
     import os
@@ -2994,7 +2994,7 @@ def get_current_location() -> str:
             lon = data.get("lon")
             ts = data.get("timestamp", 0)
 
-            # Υπολογισμός "φρεσκάδας"
+            # Calculation of "freshness"
             diff_minutes = int((time.time() - ts) / 60)
             last_seen = datetime.fromtimestamp(ts).strftime('%H:%M:%S')
 
@@ -3019,9 +3019,9 @@ def control_spotify(
     action: str,
     query: str = ""
 ) -> str:
-    """Ελέγχει το Spotify.
+    """Controls Spotify.
     action: 'play', 'pause', 'next', 'now_playing', 'top_tracks', 'search'
-    query: Τίτλος/Καλλιτέχνης για action='search'"""
+    query: Title/Artist for action='search'"""
     try:
         scope = "user-modify-playback-state user-read-playback-state user-top-read user-read-currently-playing"
         sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=scope))
@@ -3074,9 +3074,9 @@ def control_spotify(
 @tool
 def get_fit_summary(days_ago: int = 1) -> str:
     """
-    Επιστρέφει σύνοψη Google Fit για τον Λάζαρο.
-    days_ago=0 → σήμερα, days_ago=1 → χθες (default).
-    Περιλαμβάνει: βήματα, ύπνο (ώρες + deep/REM), καρδιακούς παλμούς.
+    Returns a Google Fit summary for Lazaros.
+    days_ago=0 → today, days_ago=1 → yesterday (default).
+    Includes: steps, sleep (hours + deep/REM), heart rate.
     """
     try:
         from astakos_skills.google_fit import get_daily_summary
@@ -3088,12 +3088,12 @@ def get_fit_summary(days_ago: int = 1) -> str:
 @tool
 def save_goal_tool(project: str, description: str, status: str = "active", progress: int = 0, milestones: str = "") -> str:
     """
-    Αποθηκεύει ή ενημερώνει ένα long-term goal του Λάζαρου.
-    project: Σύντομο όνομα project (π.χ. 'ShiftMaster', 'Astakos', 'PraxisERP').
-    description: Τι θέλει να πετύχει (π.χ. 'Να τελειώσει το licensing module').
-    status: 'active' (σε εξέλιξη) | 'paused' (στο ράφι) | 'done' (ολοκληρώθηκε).
-    progress: Ποσοστό προόδου 0-100.
-    milestones: Μικρότερα βήματα ή milestones (ως string).
+    Saves or updates a long-term goal for Lazaros.
+    project: Short project name (e.g., 'ShiftMaster', 'Astakos', 'PraxisERP').
+    description: What he wants to achieve (e.g., 'To finish the licensing module').
+    status: 'active' (in progress) | 'paused' (shelved) | 'done' (completed).
+    progress: Progress percentage 0-100.
+    milestones: Smaller steps or milestones (as a string).
     """
     from memory.vector_store import save_goal
     ok = save_goal(project=project, description=description, status=status, progress=progress, milestones=milestones)
@@ -3105,8 +3105,8 @@ def save_goal_tool(project: str, description: str, status: str = "active", progr
 @tool
 def update_goal_status_tool(project: str, status: str) -> str:
     """
-    Ενημερώνει το status ενός υπάρχοντος goal.
-    project: Το όνομα του project (π.χ. 'ShiftMaster').
+    Updates the status of an existing goal.
+    project: The name of the project (e.g., 'ShiftMaster').
     status: 'active' | 'paused' | 'done'
     """
     from memory.vector_store import update_goal_status
@@ -3119,9 +3119,9 @@ def update_goal_status_tool(project: str, status: str) -> str:
 @tool
 def update_goal_progress_tool(project: str, progress: int) -> str:
     """
-    Ενημερώνει το ποσοστό προόδου ενός υπάρχοντος goal (0-100).
-    project: Το όνομα του project.
-    progress: Ένας ακέραιος από 0 έως 100.
+    Updates the progress percentage of an existing goal (0-100).
+    project: The name of the project.
+    progress: An integer from 0 to 100.
     """
     from memory.vector_store import update_goal_progress
     ok = update_goal_progress(project=project, progress=progress)
@@ -3133,9 +3133,9 @@ def update_goal_progress_tool(project: str, progress: int) -> str:
 @tool
 def update_goal_milestones_tool(project: str, milestones: str) -> str:
     """
-    Ενημερώνει τα milestones ενός υπάρχοντος goal.
-    project: Το όνομα του project.
-    milestones: Τα νέα milestones (σε string μορφή, π.χ. '1) UI, 2) DB').
+    Updates the milestones of an existing goal.
+    project: The name of the project.
+    milestones: The new milestones (in string format, e.g., '1) UI, 2) DB').
     """
     from memory.vector_store import update_goal_milestones
     ok = update_goal_milestones(project=project, milestones=milestones)
@@ -3147,9 +3147,9 @@ def update_goal_milestones_tool(project: str, milestones: str) -> str:
 @tool
 def tool_stats(days: int = 7) -> str:
     """
-    Εμφανίζει στατιστικά απόδοσης των tools για τις τελευταίες N μέρες.
-    days: Πόσες μέρες πίσω να κοιτάξει (default 7).
-    Επιστρέφει ανά tool: κλήσεις, σφάλματα, error rate, μέση διάρκεια.
+    Displays performance statistics of the tools for the last N days.
+    days: How many days back to look (default 7).
+    Returns per tool: calls, errors, error rate, average duration.
     """
     import os, json
     from datetime import datetime, timedelta
@@ -3187,7 +3187,7 @@ def tool_stats(days: int = 7) -> str:
     if not stats:
         return f"📊 Δεν βρέθηκαν traces για τις τελευταίες {days} μέρες."
 
-    # Ταξινόμηση: πρώτα όσα έχουν errors, μετά αλφαβητικά
+    # Sorting: first those with errors, then alphabetically
     rows = []
     for name, s in sorted(stats.items(), key=lambda x: (-x[1]["errors"], x[0])):
         calls = s["calls"]
@@ -3342,8 +3342,8 @@ def _doctor_status_label(*, warnings: list[str], pending_actions: list, logs: di
 @tool
 def system_doctor(days: int = 1) -> str:
     """
-    Γρήγορος read-only έλεγχος υγείας του Astakos runtime.
-    days: πόσες μέρες logs/traces να κοιτάξει (default 1, δηλαδή σήμερα).
+    Fast read-only health check of the Astakos runtime.
+    days: how many days of logs/traces to look at (default 1, i.e. today).
     """
     lines: list[str] = []
     warnings: list[str] = []
@@ -3519,7 +3519,7 @@ def _doctor_conditioned_routines() -> str:
 # ────────────────────────────────────────────────────────────────
 
 def _load_audit_log(days: int = 1) -> list[dict]:
-    """Φορτώνει entries από το memory audit log για τις τελευταίες X μέρες."""
+    """Loads entries from the memory audit log for the last X days."""
     from config import MEMORY_AUDIT_DIR
     from datetime import date, timedelta
     entries = []
@@ -3608,11 +3608,11 @@ def _append_memory_review_section(
 @tool
 def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
     """
-    Εμφανίζει τι αποθήκευσε ο Αστακός στη μνήμη τις τελευταίες X ημέρες.
-    Περιλαμβάνει: νέες εγγραφές, overwrites, duplicates που παραλείφθηκαν, reflections.
-    days: πόσες μέρες πίσω (default=1 = σήμερα).
-    op: προαιρετικό φίλτρο (add, overwrite, add_alongside, skip, skip_duplicate, skip_keep_old, reflection).
-    category: προαιρετικό φίλτρο category (π.χ. family, lazeros, projects).
+    Displays what Astakos stored in memory during the last X days.
+    Includes: new entries, overwrites, duplicates skipped, reflections.
+    days: how many days back (default=1 = today).
+    op: optional filter (add, overwrite, add_alongside, skip, skip_duplicate, skip_keep_old, reflection).
+    category: optional category filter (e.g., family, lazeros, projects).
     """
     all_entries = _load_audit_log(days)
     entries = _filter_memory_audit_entries(all_entries, op=op, category=category)
@@ -3626,7 +3626,7 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
         filter_text = f" με φίλτρα ({', '.join(filters)})" if filters else ""
         return f"📋 Memory Review: {period.lower()}{filter_text} δεν υπάρχουν εγγραφές."
 
-    # Ομαδοποίηση ανά operation
+    # Grouping by operation
     adds        = [e for e in entries if e.get("op") == "add"]
     overwrites  = [e for e in entries if e.get("op") == "overwrite"]
     alongside   = [e for e in entries if e.get("op") == "add_alongside"]

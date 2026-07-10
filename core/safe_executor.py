@@ -7,7 +7,7 @@ class ExecPolicy(Enum):
     REQUIRE_CONFIRMATION = "require_confirmation"
     BLOCKED             = "blocked"
 
-# ── Patterns (σειρά: πιο επικίνδυνα πρώτα) ──────────────────────
+# ── Patterns (order: most dangerous first) ──────────────────────
 _BLOCKED = [
     # ── Unix destructive ───────────────────────────────────────
     r"rm\s+-[rf]{1,2}\s+/",              # rm -rf /
@@ -63,7 +63,7 @@ _REQUIRE_CONFIRM = [
     r"open\s*\([^)]*capability_registry\.json[^)]*[\x27\x22][wa]",  # write/append open
 ]
 _WARNING = [
-    r"Remove-Item",                  # χωρίς -Recurse -Force
+    r"Remove-Item",                  # without -Recurse -Force
     r"pip\s+install",
     r"npm\s+install",                # npm packages
     r"git\s+commit",
@@ -160,8 +160,8 @@ def classify_command(cmd: str) -> tuple[ExecPolicy, str]:
 
 def safe_execute(cmd: str, executor_func, confirm_callback=None) -> dict:
     """
-    Κεντρικό gate για όλες τις εκτελέσεις.
-    confirm_callback: async fn που στέλνει Telegram και περιμένει ναι/όχι
+    Central gate for all executions.
+    confirm_callback: async fn that sends a Telegram message and waits for yes/no
     """
     policy, matched = classify_command(cmd)
 
@@ -174,7 +174,7 @@ def safe_execute(cmd: str, executor_func, confirm_callback=None) -> dict:
         from memory.event_log import log_event
         log_event("safe_executor", "pending_confirmation", cmd=cmd[:80])
         if confirm_callback:
-            confirmed = confirm_callback(cmd)  # στέλνει Telegram, περιμένει
+            confirmed = confirm_callback(cmd)  # sends Telegram, waits
             if not confirmed:
                 return {"status": "cancelled", "reason": "Ο χρήστης δεν επιβεβαίωσε."}
         else:
@@ -186,5 +186,5 @@ def safe_execute(cmd: str, executor_func, confirm_callback=None) -> dict:
         log_event("safe_executor", "warning_executed", cmd=cmd[:80])
         send_telegram_msg(f"⚠️ SafeExec WARNING: `{cmd[:100]}`")
 
-    # SAFE ή WARNING approved → εκτέλεση
+    # SAFE or WARNING approved → execution
     return executor_func(cmd)

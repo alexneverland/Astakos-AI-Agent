@@ -1,6 +1,6 @@
 # ================================================================
-# Tests: is_routine_temporarily_inactive_meta() — καθαρή λογική
-# (χωρίς DB, καθαρά state-machine cases A-E + backward-compat)
+# Tests: is_routine_temporarily_inactive_meta() — pure logic
+# (no DB, purely state-machine cases A-E + backward-compat)
 # ================================================================
 from datetime import datetime
 
@@ -9,7 +9,7 @@ import pytest
 from memory.routine_db import is_routine_temporarily_inactive_meta
 
 
-_NOW = datetime(2026, 6, 17, 12, 0, 0)  # "σήμερα" στα tests = 2026-06-17
+_NOW = datetime(2026, 6, 17, 12, 0, 0)  # "today" in tests = 2026-06-17
 
 
 def _meta(**kw):
@@ -21,7 +21,7 @@ def _meta(**kw):
     return defaults
 
 
-# ── A: paused_until στο μέλλον ⇒ inactive ──────────────────────
+# ── A: paused_until in the future ⇒ inactive ──────────────────────
 
 def test_paused_until_future_is_inactive():
     meta = _meta(paused_until="2026-09-01")
@@ -31,14 +31,14 @@ def test_paused_until_future_is_inactive():
 
 
 def test_paused_until_today_is_still_inactive():
-    """paused_until == σήμερα ⇒ ακόμα παγωμένη (inclusive boundary)."""
+    """paused_until == today ⇒ still paused (inclusive boundary)."""
     meta = _meta(paused_until="2026-06-17")
     inactive, reason = is_routine_temporarily_inactive_meta(meta, now=_NOW)
     assert inactive is True
     assert reason == "paused_until"
 
 
-# ── B: paused_until στο παρελθόν ⇒ active ──────────────────────
+# ── B: paused_until in the past ⇒ active ──────────────────────
 
 def test_paused_until_past_is_active():
     meta = _meta(paused_until="2026-01-01")
@@ -47,7 +47,7 @@ def test_paused_until_past_is_active():
     assert reason is None
 
 
-# ── C: πριν από active_from ⇒ inactive ─────────────────────────
+# ── C: before active_from ⇒ inactive ─────────────────────────
 
 def test_before_active_from_is_inactive():
     meta = _meta(active_from="2026-07-01")
@@ -57,14 +57,14 @@ def test_before_active_from_is_inactive():
 
 
 def test_active_from_today_is_active():
-    """active_from == σήμερα ⇒ ήδη ξεκίνησε (inclusive boundary)."""
+    """active_from == today ⇒ already started (inclusive boundary)."""
     meta = _meta(active_from="2026-06-17")
     inactive, reason = is_routine_temporarily_inactive_meta(meta, now=_NOW)
     assert inactive is False
     assert reason is None
 
 
-# ── D: μετά το active_until ⇒ inactive ─────────────────────────
+# ── D: after active_until ⇒ inactive ─────────────────────────
 
 def test_after_active_until_is_inactive():
     meta = _meta(active_until="2026-05-01")
@@ -74,14 +74,14 @@ def test_after_active_until_is_inactive():
 
 
 def test_active_until_today_is_active():
-    """active_until == σήμερα ⇒ ισχύει ακόμα σήμερα (inclusive boundary)."""
+    """active_until == today ⇒ still valid today (inclusive boundary)."""
     meta = _meta(active_until="2026-06-17")
     inactive, reason = is_routine_temporarily_inactive_meta(meta, now=_NOW)
     assert inactive is False
     assert reason is None
 
 
-# ── E: μέσα στο active window ⇒ active ─────────────────────────
+# ── E: inside active window ⇒ active ─────────────────────────
 
 def test_inside_active_window_is_active():
     meta = _meta(active_from="2026-01-01", active_until="2026-12-31")
@@ -90,10 +90,10 @@ def test_inside_active_window_is_active():
     assert reason is None
 
 
-# ── Backward compatibility: καμία στήλη ορισμένη ───────────────
+# ── Backward compatibility: no columns defined ───────────────
 
 def test_all_fields_none_is_active_backward_compat():
-    """Παλιές ρουτίνες χωρίς τα νέα schedule πεδία πρέπει να παραμένουν active."""
+    """Old routines without the new schedule fields must remain active."""
     meta = _meta()
     inactive, reason = is_routine_temporarily_inactive_meta(meta, now=_NOW)
     assert inactive is False
@@ -101,16 +101,16 @@ def test_all_fields_none_is_active_backward_compat():
 
 
 def test_missing_keys_in_dict_defaults_to_active():
-    """Ένα dict χωρίς καθόλου τα schedule keys δεν πρέπει να σκάει."""
+    """A dict without any schedule keys at all should not crash."""
     inactive, reason = is_routine_temporarily_inactive_meta({}, now=_NOW)
     assert inactive is False
     assert reason is None
 
 
-# ── Priority: paused_until υπερισχύει του active window check ──
+# ── Priority: paused_until overrides the active window check ──
 
 def test_paused_until_takes_priority_over_active_window():
-    """Αν είναι ΚΑΙ paused ΚΑΙ μέσα στο active window, το pause κερδίζει."""
+    """If it is BOTH paused AND inside the active window, pause wins."""
     meta = _meta(active_from="2026-01-01", active_until="2026-12-31",
                  paused_until="2026-09-01")
     inactive, reason = is_routine_temporarily_inactive_meta(meta, now=_NOW)
@@ -121,7 +121,7 @@ def test_paused_until_takes_priority_over_active_window():
 # ── now defaults to datetime.now() when omitted ────────────────
 
 def test_now_defaults_to_current_time_when_omitted():
-    """Χωρίς now=, η συνάρτηση πρέπει να δουλέψει με datetime.now() χωρίς exception."""
+    """Without now=, the function must work with datetime.now() without raising an exception."""
     meta = _meta()
     inactive, reason = is_routine_temporarily_inactive_meta(meta)
     assert inactive is False

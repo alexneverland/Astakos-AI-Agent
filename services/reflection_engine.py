@@ -1,9 +1,9 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Reflection Engine — Agent Self-Evaluation
-# Τρέχει κάθε βράδυ 03:00 μετά το analytics engine.
-# Αναλύει events της μέρας, γράφει observations, εφαρμόζει
-# αλλαγές αυτόματα (confidence > 0.75) ή ρωτάει (0.5-0.75).
+# Runs every night at 03:00 after the analytics engine.
+# Analyzes the day's events, writes observations, applies
+# automatic changes (confidence > 0.75) or asks (0.5-0.75).
 # ================================================================
 
 import os
@@ -29,8 +29,8 @@ _BASE    = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(_BASE, "..", "astakos_routines.db")
 LOG_DIR  = os.path.join(_BASE, "..", "logs", "events")
 
-AUTO_APPLY_THRESHOLD = 0.75   # πάνω από αυτό → αυτόματη εφαρμογή
-ASK_THRESHOLD        = 0.50   # πάνω από αυτό → ρωτάει τον Λάζαρο
+AUTO_APPLY_THRESHOLD = 0.75   # above this → automatic application
+ASK_THRESHOLD        = 0.50   # above this → asks Lazaros
 REFLECTION_PENDING   = 0
 REFLECTION_APPLIED   = 1
 REFLECTION_REJECTED  = -1
@@ -54,10 +54,10 @@ def _ensure_table():
             action_value TEXT
         )
     """)
-    # Migration για ήδη υπάρχουσες βάσεις (δημιουργήθηκαν πριν τα routine_id/action_value) —
-    # χωρίς αυτά, ένα "ναι" σε pending reflection με action="increase_cooldown"/"change_time"
-    # δεν είχε πού να εφαρμοστεί (ο _apply_action βλέπει routine_id=None και κάνει fallback
-    # σε save_to_memory αντί να αλλάξει τη ρουτίνα).
+    # Migration for already existing databases (created before routine_id/action_value) —
+    # without these, a "yes" in pending reflection with action="increase_cooldown"/"change_time"
+    # there was nowhere to apply it (_apply_action sees routine_id=None and falls back
+    # in save_to_memory instead of changing the routine).
     cursor = conn.execute("PRAGMA table_info(reflections)")
     existing_cols = {row[1] for row in cursor.fetchall()}
     if "routine_id" not in existing_cols:
@@ -72,8 +72,8 @@ def _ensure_table():
 
 def _already_reflected(observation: str, action: str, routine_id=None, action_value=None) -> bool:
     """
-    Ελέγχει αν υπάρχει ήδη ίδιο reflection που είτε εφαρμόστηκε είτε περιμένει απάντηση.
-    Έτσι αποφεύγουμε να ξαναγράφουμε ask-tier duplicates κάθε νύχτα.
+    Checks if an identical reflection already exists that has either been applied or is awaiting a response.
+    This prevents us from rewriting ask-tier duplicates every night.
     """
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -126,7 +126,7 @@ def _build_lesson_key(lesson: str) -> str:
 
 def _save_reflection(source, observation, action, confidence, lesson, applied=False,
                       routine_id=None, action_value=None) -> int:
-    """Επιστρέφει το id της εγγραφής (χρειάζεται για το Telegram ναι/όχι follow-up)."""
+    """Returns the ID of the record (needed for the Telegram yes/no follow-up)."""
     conn = sqlite3.connect(DB_PATH)
     now  = datetime.now().isoformat(timespec="seconds")
     cursor = conn.execute(
@@ -155,7 +155,7 @@ def _save_reflection(source, observation, action, confidence, lesson, applied=Fa
 
 
 def load_pending_reflections() -> dict[int, dict]:
-    """Φορτώνει unapplied ask-tier reflections ώστε να επιβιώνουν σε restart."""
+    """Loads unapplied ask-tier reflections so that they survive a restart."""
     _ensure_table()
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -211,7 +211,7 @@ def mark_reflection_rejected(reflection_id: int) -> None:
 # ── Data Collection ──────────────────────────────────────────────
 
 def _load_today_events(days_back=1) -> list[dict]:
-    """Φορτώνει events από το daily log."""
+    """Loads events from the daily log."""
     target = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
     log_file = os.path.join(LOG_DIR, f"{target}.json")
     if not os.path.exists(log_file):
@@ -224,7 +224,7 @@ def _load_today_events(days_back=1) -> list[dict]:
 
 
 def _load_conversation_traces(days_back=1) -> list[dict]:
-    """Φορτώνει conversation traces από το ExecutionTrace σύστημα."""
+    """Loads conversation traces from the ExecutionTrace system."""
     try:
         traces_dir = os.path.join(_BASE, "..", "logs", "traces")
         target = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
@@ -238,7 +238,7 @@ def _load_conversation_traces(days_back=1) -> list[dict]:
 
 
 def _get_routine_stats() -> list[dict]:
-    """Στατιστικά ρουτινών — ignore_count, mention_count, state, cooldown."""
+    """Routine statistics — ignore_count, mention_count, state, cooldown."""
     try:
         conn   = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -269,8 +269,8 @@ def _get_routine_stats() -> list[dict]:
 
 def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[dict]:
     """
-    Στέλνει δεδομένα στο Gemini και παίρνει reflections.
-    Επιστρέφει λίστα από:
+    Sends data to Gemini and retrieves reflections.
+    Returns a list of:
     {observation, action, confidence, lesson, source, routine_id?}
     """
     try:
@@ -284,7 +284,7 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
         )
         model = GenerativeModel(MAIN_MODEL)
 
-        # Σύνοψη traces (conversations)
+        # Summary of traces (conversations)
         trace_summary = []
         for t in traces:  # max 30 traces removed to include all history
             channel  = t.get("channel", "?")
@@ -300,7 +300,7 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
             if loop:  line += " 🔁loop"
             trace_summary.append(line)
 
-        # Σύνοψη routines
+        # Summary of routines
         routine_summary = []
         for r in routine_stats:
             routine_summary.append(
@@ -347,7 +347,9 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
         response = model.generate_content(prompt)
         text = response.text.strip()
 
-        # Καθαρισμός markdown
+        # Markdown cleaning Regardless of whether you need to translate "Καθαρισμός markdown" to "Markdown cleaning" or "Markdown cleanup", here is the direct translation:
+
+# Markdown cleanup_
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -365,15 +367,15 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
 
 def _apply_action(reflection: dict) -> bool:
     """
-    Εφαρμόζει αλλαγή στη βάση βάσει action.
-    Επιστρέφει True αν εφαρμόστηκε.
+    Applies a change to the database based on the action.
+    Returns True if it was applied.
     """
     action     = reflection.get("action", "")
     routine_id = reflection.get("routine_id")
     value      = reflection.get("action_value")
 
-    # save_to_memory ή actions χωρίς routine_id (συνήθως planner/conversations)
-    # πρέπει να αποθηκευτούν ως lesson.
+    # save_to_memory or actions without routine_id (usually planner/conversations)
+    # must be saved as lesson.
     if action == "save_to_memory" or not routine_id:
         lesson = reflection.get("lesson", "")
         if lesson:
@@ -389,10 +391,10 @@ def _apply_action(reflection: dict) -> bool:
                 print(f"⚠️ [Reflection] ChromaDB save failed: {me}")
                 return False
         
-        # Αν το action χρειάζεται routine_id αλλά δεν υπάρχει, abort.
+        # If the action requires a routine_id but it does not exist, abort.
         if not routine_id:
             return False
-        # Αν το action είναι save_to_memory αλλά δεν έχει lesson, abort.
+        # If the action is save_to_memory but has no lesson, abort.
         if action == "save_to_memory":
             return False
 
@@ -430,7 +432,7 @@ def _apply_action(reflection: dict) -> bool:
                 mins  = int(round((fval - hours) * 60))
                 time_str = f"{hours:02d}:{mins:02d}"
             except (ValueError, TypeError):
-                time_str = str(value)  # αν είναι ήδη "HH:MM", κρατάμε ως έχει
+                time_str = str(value)  # if it is already "HH:MM", we keep it as is
             conn.execute(
                 "UPDATE routines SET time_str=? WHERE id=?",
                 (time_str, routine_id)
@@ -454,8 +456,8 @@ def _apply_action(reflection: dict) -> bool:
 
 def run_reflection() -> dict:
     """
-    Κύρια συνάρτηση. Τρέχει μετά το analytics engine.
-    Επιστρέφει stats: {analyzed, applied, pending, skipped}
+    Main function. Runs after the analytics engine.
+    Returns stats: {analyzed, applied, pending, skipped}
     """
     from tools.telegram import send_telegram_msg
 
@@ -507,7 +509,7 @@ def run_reflection() -> dict:
 
         seen_reflection_keys.add(reflection_key)
 
-        # Skip αν έχει ήδη εφαρμοστεί το ίδιο observation+action
+        # Skip if the same observation+action has already been applied
         if _already_reflected(obs, action, routine_id=routine_id, action_value=action_value):
             print(f"[Reflection]: ⏭ Skip duplicate: '{obs[:40]}...'")
             skipped += 1
@@ -520,7 +522,7 @@ def run_reflection() -> dict:
             seen_lesson_keys.add(lesson_key)
 
         if confidence >= AUTO_APPLY_THRESHOLD:
-            # Αυτόματη εφαρμογή
+            # Automatic application
             success = _apply_action(r)
             _save_reflection(source, obs, action, confidence, lesson, applied=success,
                               routine_id=routine_id, action_value=action_value)
@@ -531,8 +533,8 @@ def run_reflection() -> dict:
                 skipped += 1
 
         elif confidence >= ASK_THRESHOLD:
-            # Ρωτάει τον Λάζαρο — κρατάμε το id ώστε ένα "ναι" στο Telegram να μπορεί
-            # να εφαρμόσει ΑΥΤΟ ΤΟ reflection συγκεκριμένα (βλ. clients/telegram_bot.py)
+            # Asks Lazaros — we keep the id so that a "yes" on Telegram can
+            # to apply THIS reflection specifically (see clients/telegram_bot.py)
             new_id = _save_reflection(source, obs, action, confidence, lesson, applied=False,
                                        routine_id=routine_id, action_value=action_value)
             pending += 1
@@ -541,17 +543,17 @@ def run_reflection() -> dict:
                 "routine_id": routine_id, "action_value": action_value,
                 "lesson": lesson, "source": source, "confidence": confidence,
             })
-            # Σημείωση: ΔΕΝ στέλνουμε εδώ το "Να το εφαρμόσω;" μήνυμα.
-            # Το telegram_bot.py χτίζει ΕΝΑ αριθμημένο μήνυμα για ΟΛΑ τα τρέχοντα
-            # pending (παλιά + νέα) ώστε οι αριθμοί #1, #2... να αντιστοιχούν σωστά
-            # σε ό,τι περιμένει απάντηση — βλ. pending_reflection_confirmations.
+            # Note: We DO NOT send the "Should I apply it?" message here.
+            # telegram_bot.py builds ONE numbered message for ALL current items
+            # pending (old + new) so that numbers #1, #2... correspond correctly
+            # for whatever is awaiting a response — see pending_reflection_confirmations.
         else:
-            # Χαμηλή confidence — αποθηκεύω μόνο
+            # Low confidence — saving only
             _save_reflection(source, obs, action, confidence, lesson, applied=False,
                               routine_id=routine_id, action_value=action_value)
             skipped += 1
 
-    # Αποστολή Telegram
+    # Telegram Send
     if telegram_lines:
         header = "🧠 *Astakos Self-Reflection — Νυχτερινή Ανάλυση*\n\n"
         msg    = header + "\n\n---\n\n".join(telegram_lines)

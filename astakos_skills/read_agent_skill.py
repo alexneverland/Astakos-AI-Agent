@@ -7,8 +7,8 @@ VENDOR_SKILLS_DIR = os.path.join(BASE_DIR, "vendor", "agent-skills", "skills")
 @tool
 def list_agent_skills() -> str:
     """
-    Επιστρέφει μια λίστα με όλα τα διαθέσιμα 'Agent Skills' (του Addy Osmani).
-    Χρησιμοποίησε αυτήν την εντολή για να δεις τι skills υπάρχουν πριν ζητήσεις να διαβάσεις κάποιο.
+    Returns a list of all available 'Agent Skills' (by Addy Osmani).
+    Use this command to see what skills exist before requesting to read one.
     """
     if not os.path.exists(VENDOR_SKILLS_DIR):
         return "⚠️ Σφάλμα: Ο φάκελος vendor/agent-skills/skills δεν βρέθηκε."
@@ -30,9 +30,9 @@ def list_agent_skills() -> str:
 @tool
 def read_agent_skill(skill_name: str) -> str:
     """
-    Διαβάζει τους κανόνες και το workflow ενός συγκεκριμένου 'Agent Skill' (του Addy Osmani).
-    Πέρνα ακριβώς το όνομα του skill (π.χ. 'test-driven-development').
-    Ακολούθησε τις οδηγίες του skill πιστά κατά την εκτέλεση του task σου.
+    Reads the rules and workflow of a specific 'Agent Skill' (by Addy Osmani).
+    Pass exactly the name of the skill (e.g., 'test-driven-development').
+    Follow the skill's instructions faithfully during the execution of your task.
     """
     skill_name = skill_name.strip()
     skill_file = os.path.join(VENDOR_SKILLS_DIR, skill_name, "SKILL.md")

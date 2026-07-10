@@ -126,15 +126,15 @@ def test_load_messages_since_filters_role_channel_and_date(tmp_path):
 
 
 def test_load_messages_since_returns_most_recent_when_window_exceeds_limit(tmp_path):
-    """Bug πραγματικού περιστατικού: σε 30 μέρες υπήρχαν 1968 μηνύματα, ενώ το
-    temporal_history_for_query καλεί load_messages_since με limit=1500. Πριν, η
-    'ORDER BY timestamp ASC ... LIMIT' επέστρεφε τα 1500 ΠΑΛΙΟΤΕΡΑ μέσα στο
-    παράθυρο -- κόβοντας έξω ολόκληρη την πιο πρόσφατη εβδομάδα (το SQL/temporal
-    επίπεδο μνήμης ήταν τυφλό ακριβώς για το 'τι είπαμε πρόσφατα').
+    """Real-world bug: within 30 days there were 1968 messages, while
+    temporal_history_for_query calls load_messages_since with limit=1500. Previously,
+    the 'ORDER BY timestamp ASC ... LIMIT' returned the 1500 OLDEST within the
+    window -- cutting out the entire most recent week (the SQL/temporal
+    memory layer was blind precisely to 'what we said recently').
 
-    Εδώ αναπαράγουμε το ίδιο σε μικρή κλίμακα: 5 μηνύματα στο παράθυρο, limit=3
-    -- πρέπει να επιστρέφονται τα 3 πιο ΠΡΟΣΦΑΤΑ (σε σωστή χρονολογική σειρά),
-    όχι τα 3 παλιότερα.
+    Here we reproduce the same on a small scale: 5 messages in the window, limit=3
+    -- the 3 most RECENT must be returned (in correct chronological order),
+    not the 3 oldest.
     """
     from memory.conversation_history import append_message, load_messages_since
 

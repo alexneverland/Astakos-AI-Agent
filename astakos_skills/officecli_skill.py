@@ -45,21 +45,21 @@ def _created_file_tags(outputs_dir: str, before: dict[str, float]) -> str:
 @tool
 def run_officecli(command: str) -> str:
     """
-    Εκτελεί εντολές στο OfficeCLI για δημιουργία και επεξεργασία αρχείων Word (.docx), Excel (.xlsx), και PowerPoint (.pptx).
-    Το OfficeCLI υποστηρίζει templates, rendering HTML σε docx, formulas στο Excel κ.α.
+    Executes commands in OfficeCLI to create and edit Word (.docx), Excel (.xlsx), and PowerPoint (.pptx) files.
+    OfficeCLI supports templates, HTML to docx rendering, Excel formulas, etc.
 
-    ΑΠΑΓΟΡΕΥΕΤΑΙ: Μην χρησιμοποιείς τα παλιά create_file_tool ή generate_word_doc για Office αρχεία. 
-    Χρησιμοποίησε αυτό το tool για απλές μετατροπές ή templates. ΑΝ ΟΜΩΣ χρειάζεται περίπλοκη δομή (π.χ. custom ημερολόγια, ειδικά κελιά με openpyxl/python-docx), ΕΠΙΤΡΕΠΕΤΑΙ να χρησιμοποιήσεις python (run_terminal_command ή run_code) παρακάμπτοντας αυτό το tool.
-    ΠΑΝΤΑ να δημιουργείς ή να σώζεις τα αρχεία μέσα στον φάκελο:
+    FORBIDDEN: Do not use the old create_file_tool or generate_word_doc for Office files. 
+    Use this tool for simple conversions or templates. HOWEVER, IF a complex structure is needed (e.g., custom calendars, specific cells using openpyxl/python-docx), you ARE ALLOWED to use python (run_terminal_command or run_code), bypassing this tool.
+    ALWAYS create or save files inside the folder:
     C:/astakos_v2/outputs/
-    Ώστε το drive_manager και τα Web UIs να τα βρίσκουν!
+    So that drive_manager and the Web UIs can find them!
     
-    Παραδείγματα:
+    Examples:
     - officecli add deck.pptx / --type slide --title "Intro"
     - officecli render template.docx data.json --out C:/astakos_v2/outputs/report.docx
     - officecli formula calc C:/astakos_v2/outputs/data.xlsx
     
-    Αν το command ξεκινάει με 'officecli ', θα αντικατασταθεί με το πλήρες path του εκτελέσιμου.
+    If the command starts with 'officecli ', it will be replaced with the full path of the executable.
     """
     officecli_path = os.path.join(BASE_DIR, "vendor", "officecli", "officecli.exe")
     outputs_dir = os.path.join(BASE_DIR, "outputs")
@@ -68,7 +68,7 @@ def run_officecli(command: str) -> str:
     if not os.path.exists(officecli_path):
         return f"❌ Το OfficeCLI δεν βρέθηκε στο {officecli_path}. Παρακαλώ κατεβάστε το πρώτα."
     
-    # Αφαίρεση του 'officecli ' από την αρχή αν υπάρχει, για να βάλουμε το δικό μας path
+    # Remove 'officecli ' from the beginning if it exists, in order to insert our own path
     if command.startswith("officecli "):
         command = command[10:]
         
@@ -76,7 +76,7 @@ def run_officecli(command: str) -> str:
         return "❌ Μη ασφαλής OfficeCLI εντολή: περιέχει shell metacharacters."
     
     try:
-        # Εκτελούμε την εντολή μέσα στον φάκελο outputs για μεγαλύτερη ασφάλεια
+        # We execute the command inside the outputs folder for greater security
         before_outputs = _snapshot_outputs(outputs_dir)
         args = shlex.split(command, posix=False)
         args = [arg.strip('"') for arg in args]

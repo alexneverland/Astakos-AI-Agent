@@ -5,9 +5,9 @@ import os
 import signal
 from watchfiles import watch
 
-# Σιγουρεύουμε UTF-8 στο stdout/stderr — αν αυτό τρέξει μέσα από κονσόλα
-# χωρίς chcp 65001 (π.χ. απευθείας, όχι μέσω start_astakos.bat), τα ελληνικά
-# στα prints πιο κάτω θα έσκαγαν με UnicodeEncodeError πάνω στο cp1252.
+# Ensure UTF-8 on stdout/stderr — if this runs inside a console
+# without chcp 65001 (e.g. directly, not via start_astakos.bat), the Greek characters
+# the prints below would crash with UnicodeEncodeError on cp1252.
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -20,10 +20,10 @@ LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_telegr
 
 # ────────────────────────────────────────────────────────────────
 # SINGLE-INSTANCE LOCK
-# Εμποδίζει να τρέξουν 2 watchdogs ταυτόχρονα (διπλό polling στο
-# ίδιο Telegram token → conflict / διπλά reminders). Το OS κρατάει
-# το lock όσο ζει η διαδικασία και το ελευθερώνει αυτόματα ακόμα
-# και σε crash/kill — δεν χρειάζεται manual cleanup ενός pidfile.
+# Prevents 2 watchdogs from running simultaneously (double polling on the
+# same Telegram token → conflict / double reminders). The OS keeps
+# the lock as long as the process lives and releases it automatically even
+# and on crash/kill — no manual cleanup of a pidfile is required.
 # ────────────────────────────────────────────────────────────────
 _lock_file = None
 if os.name == "nt":

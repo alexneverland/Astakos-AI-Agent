@@ -1,6 +1,6 @@
 """
-Tests για AstakosMemoryManager.save() με mocked dependencies.
-Δεν χρειάζεται live ChromaDB.
+Tests for AstakosMemoryManager.save() with mocked dependencies.
+No live ChromaDB is required.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from unittest.mock import patch, MagicMock
 
 
-# -- Routing tests (σωστή function ανά memory_type) ---------------
+# -- Routing tests (correct function per memory_type) ---------------
 
 def test_save_fact_calls_save_fact():
     from memory.vector_store import AstakosMemoryManager

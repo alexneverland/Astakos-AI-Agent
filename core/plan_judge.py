@@ -1,16 +1,16 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Plan Judge
-# Αποφασίζει αν ένα μήνυμα χρειάζεται multi-step planning (auto-plan)
+# Decides if a message requires multi-step planning (auto-plan)
 #
 # Flow:
-#   1. Heuristic pre-filter (γρήγορο, χωρίς LLM)
-#   2. LLM judge (Gemini) μόνο αν το heuristic δώσει πράσινο φως
+#   1. Heuristic pre-filter (fast, without LLM)
+#   2. LLM judge (Gemini) only if the heuristic gives the green light
 # ================================================================
 
 import re
 
-# ── Heuristic: markers που υποδεικνύουν multi-step πρόθεση ──────
+# ── Heuristic: markers indicating multi-step intent ──────
 _MULTI_STEP_MARKERS = [
     "πρώτα", "αρχικά", "αρχικα", "στη συνέχεια", "στη συνεχεια",
     "κατόπιν", "κατοπιν", "έπειτα", "επειτα", "τέλος", "τελος",
@@ -18,34 +18,34 @@ _MULTI_STEP_MARKERS = [
     "first", "then", "finally", "after that",
 ]
 
-# Κατώφλι λέξεων: πάνω από αυτό → αξίζει LLM evaluation ανεξαρτήτως markers
+# Word threshold: above this → LLM evaluation is worthwhile regardless of markers
 _WORD_COUNT_THRESHOLD = 20
 
 
 def _needs_llm_evaluation(message: str) -> bool:
     """
-    Heuristic pre-filter. Επιστρέφει True αν αξίζει να καλέσουμε το LLM.
-    Αποτρέπει άχρηστα LLM calls για κοντά, απλά μηνύματα.
+    Heuristic pre-filter. Returns True if it is worth calling the LLM.
+    Prevents useless LLM calls for short, simple messages.
     """
     msg_lower = message.lower()
     words = msg_lower.split()
 
-    # Μεγάλο μήνυμα → πάντα evaluate
+    # Large message → always evaluate
     if len(words) >= _WORD_COUNT_THRESHOLD:
         return True
 
-    # Κοντό μήνυμα: χρειάζεται ≥2 distinct markers για να είναι ύποπτο
+    # Short message: needs ≥2 distinct markers to be suspicious
     found_markers = sum(1 for m in _MULTI_STEP_MARKERS if m in msg_lower)
     return found_markers >= 2
 
 
 def should_auto_plan(message: str) -> bool:
     """
-    Κύρια συνάρτηση του judge.
-    Επιστρέφει True αν ο Αστακός πρέπει να δρομολογήσει αυτόματα στον planner.
+    Main function of the judge.
+    Returns True if Astakos should automatically route to the planner.
 
-    - Σε περίπτωση LLM error → False (conservative, δεν σπάει τη ροή)
-    - Heuristic short-circuit: αν το μήνυμα είναι προφανώς απλό → False χωρίς LLM call
+    - In case of an LLM error → False (conservative, does not break the flow)
+    - Heuristic short-circuit: if the message is obviously simple → False without an LLM call
     """
     if not message or not message.strip():
         return False

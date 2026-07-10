@@ -1,8 +1,8 @@
 """
 tests/test_routine_reconciler_scoring.py
 
-Phase 3B scoring tests για το services/routine_reconciler.py.
-Δεν απαιτείται database — όλα τρέχουν pure-Python.
+Phase 3B scoring tests for services/routine_reconciler.py.
+No database is required — everything runs in pure-Python.
 """
 from datetime import datetime
 
@@ -153,7 +153,7 @@ class TestSchoolBreak:
         assert d["auto_apply"] is True
 
     def test_without_child_subject_rejected_or_debug(self):
-        # No αλεξανδρ / παιδι / μικρ → rule should not even fire
+        # No alexandr / paidi / mikr → rule should not even fire
         fact = "[USER_FACT] δεν εχει σχολει διακοπ σεπτεμβρ"
         candidates = _candidates(fact)
         school_break_candidates = [c for c in candidates if c["rule_name"] == "school_break"]
@@ -161,7 +161,7 @@ class TestSchoolBreak:
         assert school_break_candidates == []
 
     def test_without_scope_no_candidate(self):
-        # αλεξανδρ + σχολει but no date/σεπτεμβρ → rule guard prevents candidate
+        # alexandr + scholei but no date/septembr → rule guard prevents candidate
         fact = "[USER_FACT] ο αλεξανδρ δεν εχει σχολει"
         candidates = _candidates(fact)
         school_break_candidates = [c for c in candidates if c["rule_name"] == "school_break"]
@@ -204,7 +204,7 @@ class TestShiftWeek:
 
 class TestAmbiguousMultiplePeople:
     def test_multiple_people_flag(self):
-        # Both Αλέξανδρος and Σοφία in the same fact → penalty
+        # Both Alexandros and Sofia in the same fact → penalty
         fact = "[USER_FACT] ο αλεξανδρ και η σοφια κατασκην για 7 μερες"
         scored = _scored(fact)
         camp_hits = [d for d in scored if d["rule_name"] == "camp_absence"]

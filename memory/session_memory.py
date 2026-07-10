@@ -29,16 +29,16 @@ from memory.conversation_history import (
     mark_exchanges_summarized,
 )
 # ════════════════════════════════════════════════════════════════
-# SESSION SUMMARY — "Ημερολόγιο Συνεργάτη"
+# SESSION SUMMARY — "Partner Log"
 # ════════════════════════════════════════════════════════════════
 
-SESSION_LOGS: list = []  # Ενιαίο log — όλα τα channels μαζί
+SESSION_LOGS: list = []  # Unified log — all channels together
 AUTO_SESSION_SUMMARY_EXCHANGE_THRESHOLD = 20
 _auto_summary_lock = threading.Lock()
 
 
 def log_exchange(user_text, ai_text, agent: str, channel: str = "web"):
-    """Προσθέτει ένα ζεύγος ερώτησης-απάντησης στο session log (per channel)."""
+    """Adds a question-answer pair to the session log (per channel)."""
     now = datetime.now()
     safe_user = clean_message(user_text)
     safe_ai = clean_message(ai_text)
@@ -88,7 +88,7 @@ def _maybe_trigger_auto_session_summary(channel: str) -> None:
 
 
 def load_last_session_hint(channel: str = "web") -> str:
-    """Φορτώνει το hint της τελευταίας session."""
+    """Loads the hint from the last session."""
     conn = None
     try:
         conn = sqlite3.connect(STATE_DB)
@@ -128,7 +128,7 @@ def load_last_session_hint(channel: str = "web") -> str:
             conn.close()
 
 
-is_summarizing = False  # Πρέπει να οριστεί έξω από τη συνάρτηση
+is_summarizing = False  # Must be defined outside the function
 
 
 def _normalize_text(value: str) -> str:
@@ -986,7 +986,7 @@ def _infer_memory_category(text: str) -> str:
 
 
 def _extract_explicit_memory_payload(text: str) -> str | None:
-    """Extract the actual payload from explicit commands like 'Κράτα στη μνήμη ότι ...'."""
+    """Extract the actual payload from explicit commands like 'Keep in memory that ...'."""
     compact = " ".join(clean_message(text).split())
     if not compact:
         return None
@@ -1044,9 +1044,9 @@ def _extract_confirmed_memory_candidate(
     if len(source_text) < 8 and len(confirmation_text) < 20:
         return None
 
-    # Απαιτείται ρητή επιβεβαίωση από τον AI — και αν ο χρήστης έδωσε ρητό
-    # "Κράτα στη μνήμη ότι X", κρατάμε το X, όχι meta-κείμενο τύπου
-    # "ο χρήστης ζήτησε να αποθηκευτεί".
+    # Explicit confirmation from the AI is required — and whether the user gave explicit
+    # "Remember that X", we keep X, not meta-text like
+    # "the user requested to save".of_thought
     detail = None
     explicit_payload = _extract_explicit_memory_payload(source_text)
     if confirmation_text:
@@ -1058,7 +1058,7 @@ def _extract_confirmed_memory_candidate(
         if memory_match:
             detail = memory_match.group(0).strip()
     if not detail:
-        # Ο AI δεν επιβεβαίωσε ρητά → παράκαμψη, ο LLM sifter θα αποφασίσει
+        # AI did not explicitly confirm → bypass, the LLM sifter will decide
         return None
     if explicit_payload and _looks_like_generic_memory_confirmation(detail):
         detail = explicit_payload
@@ -1082,7 +1082,7 @@ def _extract_confirmed_memory_candidate(
 
 
 def _run_session_summary(channel: str = "web"):
-    """Αρχειοθετεί τη συνεδρία (per channel) με προστασία από διπλοεγγραφές."""
+    """Archives the session (per channel) with protection against duplicate entries."""
     global is_summarizing, SESSION_LOGS
 
     try:
@@ -1092,7 +1092,7 @@ def _run_session_summary(channel: str = "web"):
         persistent_log = []
     using_persistent_log = bool(persistent_log)
     current_log = persistent_log if using_persistent_log else list(SESSION_LOGS)
-    # 1. Ασπίδα: Αν ήδη τρέχει ή αν δεν υπάρχουν μηνύματα, βγες αμέσως
+    # 1. Shield: If it is already running or if there are no messages, exit immediately
     if is_summarizing or not current_log:
         return
 
@@ -1100,7 +1100,7 @@ def _run_session_summary(channel: str = "web"):
         is_summarizing = True
         print(f"\n\033[94m[Session/{channel}]: Έναρξη αρχειοθέτησης...\033[0m")
         
-        # 2. Αδειάζουμε ΑΜΕΣΩΣ για να μην το ξαναπιάσει άλλος worker
+        # 2. We empty it IMMEDIATELY so that no other worker grabs it again
         current_batch = list(current_log)
         SESSION_LOGS.clear()
         channels = sorted({e.get("channel", channel) for e in current_batch})
@@ -1111,7 +1111,7 @@ def _run_session_summary(channel: str = "web"):
             for e in current_batch
         ])
 
-        # 3. Το prompt με αυστηρό format ημερομηνίας (για να ταιριάζει με τα παλιά σου logs)
+        # 3. The prompt with a strict date format (to match your old logs)
         summary_prompt = f"""
 Ανάλυσε αυτή τη συνομιλία μεταξύ Λάζαρου και Αστακού και συμπλήρωσε ένα JSON αναφοράς.
 Απάντησε ΜΟΝΟ με το JSON.
@@ -1135,22 +1135,22 @@ def _run_session_summary(channel: str = "web"):
         try:
             summary = json.loads(raw)
         except json.JSONDecodeError:
-            # Αν αποτύχει, ξαναβάζουμε τα μηνύματα πίσω για να μην τα χάσουμε
+            # If it fails, we put the messages back so we don't lose them
             if not using_persistent_log:
-                SESSION_LOGS[:0] = current_batch  # Επαναφορά στην αρχή
+                SESSION_LOGS[:0] = current_batch  # Reset to start
                 print("\033[91m[Session]: Μη έγκυρο format. Τα μηνύματα επεστράφησαν στο log.\033[0m")
             else:
                 print("\033[91m[Session]: Μη έγκυρο format. Τα shared exchanges έμειναν unsummarized.\033[0m")
             return
 
-        # 4. Εμπλουτισμός του κειμένου για τη Vector DB
+        # 4. Enrichment of the text for the Vector DB
         session_text = (
             f"[SESSION {summary.get('date', '')}] {summary.get('summary', '')} "
             f"Εκκρεμότητες: {', '.join(summary.get('pending', [])) if summary.get('pending') else 'καμία'}. "
             f"Hint: {summary.get('next_session_hint', '')}"
         )
 
-        # 5. Αποθήκευση (Εδώ ο MemoryManager θα κάνει και το overwrite αν χρειαστεί)
+        # 5. Save (Here the MemoryManager will also perform the overwrite if needed)
         memory.save(memory_type="session", summary=summary, session_text=session_text)
         if using_persistent_log:
             mark_exchanges_summarized([e["id"] for e in current_batch])
@@ -1158,9 +1158,9 @@ def _run_session_summary(channel: str = "web"):
         bus.emit("session_ended", channel=summary_channel, mood=summary.get("mood", "unknown"), summary=summary.get("summary", ""))
 
     except Exception as e:
-        # Recovery σε περίπτωση σφάλματος
+        # Recovery in case of error
         if not using_persistent_log:
-            SESSION_LOGS[:0] = current_batch  # Επαναφορά στην αρχή
+            SESSION_LOGS[:0] = current_batch  # Reset to the beginning
         print(f"\033[91m[Session Error]: {e}\033[0m")
     finally:
         is_summarizing = False
@@ -1323,7 +1323,7 @@ def _candidate_debug_summary(candidate: dict) -> str:
     )
 
 # ════════════════════════════════════════════════════════════════
-# MEMORY SIFTER — "Αρχειοθέτης"
+# MEMORY SIFTER — "Archivist"
 # ════════════════════════════════════════════════════════════════
 
 def _fact_matches_any(fact: str, existing_facts: list[str]) -> bool:
@@ -1610,7 +1610,7 @@ def _should_skip_ephemeral_candidate(candidate: dict, source_text: str) -> bool:
     if state_markers:
         return False
 
-    # Food/family outcomes τύπου "του άρεσε", "ενθουσιάστηκε" κτλ. να μη χαθούν.
+    # Food/family outcomes of the type "liked it", "was thrilled", etc. should not be lost.
     if topic == "food":
         norm = _normalize_text(source_text)
         if any(marker in norm for marker in ("του αρεσε", "του άρεσε", "ενθουσιαστ", "ξανατρω", "τρωει", "τρώει")):
@@ -1921,13 +1921,13 @@ def run_memory_sifter_slow(
     }
 
     try:
-        # 1. Προετοιμασία Prompt για το Gemini
+        # 1. Prompt Preparation for Gemini
         cats_desc = "\n".join([f'  - "{k}": {v}' for k, v in MEMORY_CATS.items()])
         
-        # ── Sliding-window context: τελευταία exchanges πριν το τρέχον ──
-        # Ο sifter μπαίνει στην ουρά ΠΡΙΝ το log_exchange (βλ. enqueue σειρά
-        # στο api/server.py), άρα το SESSION_LOGS εδώ ΔΕΝ περιέχει ακόμα το
-        # τρέχον exchange -> καμία διπλοεγγραφή/race condition.
+        # ── Sliding-window context: last exchanges before the current one ──
+        # The sifter enters the queue BEFORE the log_exchange (see enqueue order)
+        # in api/server.py), so the SESSION_LOGS here does NOT yet contain the
+        # current exchange -> no double entry/race condition.
         recent_context_block = ""
         try:
             recent_entries = SESSION_LOGS[-4:]
@@ -2029,12 +2029,12 @@ def run_memory_sifter_slow(
         if not raw_clean.startswith("["):
             return
             
-        # --- [MASTRO-JSON-SHIELD]: Αυτόματη διόρθωση για ξεχασμένα κόμματα του LLM ---
+        # --- [MASTRO-JSON-SHIELD]: Automatic correction for LLM's forgotten commas ---
         try:
             memories = json.loads(raw_clean)
         except json.JSONDecodeError:
             try:
-                # Καθαρίζουμε trailing commas πριν από κλείσιμο λίστας ή αντικειμένου
+                # We clean trailing commas before closing a list or object
                 fixed_raw = re.sub(r',\s*\]', ']', raw_clean)
                 fixed_raw = re.sub(r',\s*\}', '}', fixed_raw)
                 memories = json.loads(fixed_raw)
@@ -2056,7 +2056,7 @@ def run_memory_sifter_slow(
             fact = candidate.get("fact", "").strip()
             category = candidate.get("category", "lazaros")
 
-            # [QUESTION GUARD]: Αν το fact είναι ερώτηση, παράκαμψε το
+            # [QUESTION GUARD]: If the fact is a question, skip it
             _fact_body = _strip_user_fact_scaffold(fact)
             if _looks_like_question_fact(fact):
                 print(f"\033[93m[Sifter]: Question guard — skipping fact: {_fact_body[:60]}\033[0m")
@@ -2105,12 +2105,12 @@ def run_memory_sifter_slow(
 
             # 2. --- PENDING ASSET ARCHITECTURE ---
             if "[PHOTO]" in fact or category == "photos":
-                # Ο session sifter ΔΕΝ είναι canonical writer για photo archive.
-                # Το μόνιμο save (Chroma + PHOTOS_INDEX_FILE) γίνεται μόνο
-                # μέσω memory.save(memory_type="photo", ...) μετά από explicit confirm.
+                # The session sifter is NOT a canonical writer for the photo archive.
+                # Permanent saving (Chroma + PHOTOS_INDEX_FILE) is done only
+                # via memory.save(memory_type="photo", ...) after explicit confirm.
                 print("\033[90m[MemorySifterSlow]: photo fact detected — skip direct photo index write\033[0m")
 
-            # 3. Αποθήκευση στη ChromaDB
+            # 3. Save to ChromaDB
             memory.save(**candidate)
             accepted_candidates.append(candidate)
             accepted_facts.append(fact)
@@ -2136,7 +2136,7 @@ def run_memory_sifter_slow(
 
 
 def trigger_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
-    """Wrapper — εκτελείται μέσω Queue Worker."""
+    """Wrapper — executed via Queue Worker."""
     seed_facts = run_memory_sifter_fast(user_text, ai_text, agent_name, channel)
     run_memory_sifter_slow(user_text, ai_text, agent_name, channel, deterministic_seed_facts=seed_facts)
 
@@ -2147,12 +2147,12 @@ def trigger_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unkno
 
 def startup_stale_cleanup(channel: str = "telegram") -> bool:
     """
-    Εκτελείται κατά την εκκίνηση.
-    Αν το astakos_working_memory.json έχει entries από προηγούμενη μέρα
-    (δηλ. δεν έτρεξε /end λόγω hard restart), τρέχει πρώτα session summary
-    (για να αποθηκευτούν οι ανεπεξέργαστοι exchanges) και μετά σβήνει τα tags.
+    Executed during startup.
+    If astakos_working_memory.json has entries from a previous day
+    (i.e., /end did not run due to a hard restart), it first runs session summary
+    (so that unprocessed exchanges are saved) and then clears the tags.
 
-    Επιστρέφει True αν εκτελέστηκε cleanup, False αν δεν χρειαζόταν.
+    Returns True if cleanup was executed, False if it was not needed.
     """
     try:
         from config import WORKING_MEMORY_FILE
@@ -2162,7 +2162,7 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
             print("\033[90m[Startup]: Δεν βρέθηκε working memory file — παράκαμψη.\033[0m")
             return False
 
-        # Έλεγξε αν το αρχείο έχει entries
+        # Check if the file has entries
         try:
             with open(WORKING_MEMORY_FILE, "r", encoding="utf-8") as f:
                 tags = json.load(f)
@@ -2173,7 +2173,7 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
             print("\033[90m[Startup]: Working memory κενό — παράκαμψη.\033[0m")
             return False
 
-        # Έλεγξε αν το αρχείο τροποποιήθηκε πριν από σήμερα
+        # Check if the file was modified before today
         mtime = os.path.getmtime(WORKING_MEMORY_FILE)
         file_date = _date.fromtimestamp(mtime)
         today = _date.today()
@@ -2187,10 +2187,10 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
             f"(hard restart εντοπίστηκε). Εκτέλεση session summary πριν τον καθαρισμό...\033[0m"
         )
 
-        # 1. Τρέξε πρώτα το session summary (αποθηκεύει unsummarized exchanges)
+        # 1. Run the session summary first (stores unsummarized exchanges)_
         _run_session_summary(channel=channel)
 
-        # 2. Σβήσε τα stale tags
+        # 2. Delete the stale tags
         try:
             with open(WORKING_MEMORY_FILE, "w", encoding="utf-8") as f:
                 json.dump([], f, ensure_ascii=False, indent=2)

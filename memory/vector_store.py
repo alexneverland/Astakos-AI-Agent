@@ -21,7 +21,7 @@ _audit_lock = threading.Lock()
 
 
 def _audit_log(op: str, **kwargs):
-    """Γράφει μια εγγραφή στο daily memory audit log (logs/memory_audit/YYYY-MM-DD.json)."""
+    """Writes an entry to the daily memory audit log (logs/memory_audit/YYYY-MM-DD.json)."""
     try:
         today    = datetime.now().strftime("%Y-%m-%d")
         log_file = os.path.join(MEMORY_AUDIT_DIR, f"{today}.json")
@@ -220,7 +220,7 @@ def _ensure_profile_fact_schema(cursor) -> None:
 
 
 def is_semantically_duplicate(new_text: str, existing_list: list, threshold: float = 0.88) -> bool:
-    """Ελέγχει αν το νόημα του new_text υπάρχει ήδη στην existing_list."""
+    """Checks if the meaning of new_text already exists in existing_list."""
     text_list = []
     for item in existing_list:
         if isinstance(item, str):
@@ -296,15 +296,15 @@ def memory_has_date(text: str) -> bool:
     if "στις" in low:
         return True
     
-    # Ψάχνουμε για έτη π.χ. 2024, 1998
+    # We are looking for years e.g. 2024, 1998
     if re.search(r"\b(19|20)\d{2}\b", text_str):
         return True
         
-    # Ψάχνουμε για ημερομηνίες π.χ. 12/05, 12/05/2024, 12-05
+    # Looking for dates e.g. 12/05, 12/05/2024, 12-05
     if re.search(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", text_str):
         return True
         
-    # Λέξεις κλειδιά
+    # Keywords
     if any(word in low for word in ["σήμερα", "αυριο", "αύριο", "χθες", "χτες", "φετος", "φέτος", "περσι", "πέρυσι"]):
         return True
         
@@ -379,11 +379,11 @@ def memory_has_meaningful_overlap(new_fact: str, old_content: str, *, min_shared
 
 
 def _first_literal_date(text: str) -> str | None:
-    """Επιστρέφει την πρώτη ρητή ημερομηνία YYYY-MM-DD μέσα στο ίδιο το κείμενο
-    (π.χ. "Στις 2026-06-17, ..."). Σκόπιμα ΔΕΝ διαβάζει metadata — οι deterministic
-    extractors στο session_memory.py προτάσσουν πάντα αυτή τη μορφή στο κείμενο,
-    άρα είναι πιο αξιόπιστο σήμα από το metadata time_scope (που έχει default σε
-    "σήμερα" ακόμα και για timeless facts χωρίς καμία ρητή ημερομηνία)."""
+    """Returns the first explicit date YYYY-MM-DD within the text itself
+    (e.g., "On 2026-06-17, ..."). It intentionally does NOT read metadata — the deterministic
+    extractors in session_memory.py always prepend this format to the text,
+    making it a more reliable signal than the metadata time_scope (which defaults to
+    "today" even for timeless facts without any explicit date)."""
     import re
     match = re.search(r"\b(19|20)\d{2}-\d{2}-\d{2}\b", str(text))
     return match.group(0) if match else None
@@ -398,20 +398,20 @@ def memory_looks_episodic(
     new_state_markers: list | None = None,
     old_state_markers: list | None = None,
 ) -> bool:
-    """True αν το νέο fact πιθανότατα περιγράφει ΔΙΑΦΟΡΕΤΙΚΟ περιστατικό/μέρα ή
-    εξέλιξη κατάστασης σε σχέση με το παλιό — όχι απλή επανάληψη ενός
-    timeless/static fact (π.χ. πάγια προτίμηση). Σε αυτή την περίπτωση το
-    overlap-based dedup δεν πρέπει να σβήσει σιωπηλά το νέο fact μόνο επειδή
-    μοιράζεται λεξιλόγιο με ένα παλιότερο, άσχετο-ως-προς-τη-μέρα fact.
+    """True if the new fact likely describes a DIFFERENT incident/day or
+    state evolution compared to the old one — not a simple repetition of a
+    timeless/static fact (e.g., permanent preference). In this case, the
+    overlap-based dedup should not silently delete the new fact just because
+    it shares vocabulary with an older, day-unrelated fact.
 
-    Σήματα, με σειρά προτεραιότητας:
-      1. relation_type δηλώνει ρητά εξέλιξη κατάστασης (follow_up/state_update/
-         temporary_state) — σχεδιαστικά ΠΟΤΕ απλή επανάληψη.
-      2. state_markers στο νέο fact (started/stopped/away/returned/...) —
-         συγκεκριμένο περιστατικό/αλλαγή κατάστασης, όχι πάγια δήλωση.
-      3. Ρητή, διαφορετική ημερομηνία μέσα στο ίδιο το κείμενο και των δύο
-         facts (π.χ. "Στις 2026-06-13" vs "Στις 2026-05-20") — δύο ξεχωριστές
-         μέρες/περιστατικά, όχι το ίδιο γεγονός ξαναδιατυπωμένο.
+    Signals, in order of priority:
+      1. relation_type explicitly indicates state evolution (follow_up/state_update/
+         temporary_state) — by design, NEVER a simple repetition.
+      2. state_markers in the new fact (started/stopped/away/returned/...) —
+         specific incident/state change, not a permanent statement.
+      3. Explicit, different date within the text of both
+         facts (e.g., "On 2026-06-13" vs "On 2026-05-20") — two separate
+         days/incidents, not the same event rephrased.
     """
     if str(new_relation_type or "").strip() in ("follow_up", "state_update", "temporary_state"):
         return True
@@ -445,15 +445,15 @@ def decide_memory_storage_action(
     different family events can be close enough to look related. Only explicit
     corrections are allowed to delete old memories automatically.
 
-    [MASTRO-FIX]: Το παλιό overlap>=duplicate_overlap -> "keep_old" έσβηνε
-    σιωπηλά ΚΑΘΕ νέο fact που μοιραζόταν λεξιλόγιο με ένα παλιότερο, ΠΡΙΝ καν
-    συγκριθεί η λεπτομέρεια (richness) — πρόβλημα ειδικά για κοντά, επαναλαμβανόμενα
-    οικογενειακά γεγονότα (π.χ. βόλτες στο πάρκο), που χάνονταν χωρίς ίχνος.
-    Τώρα ελέγχουμε πρώτα αν το ζευγάρι "μοιάζει επεισοδιακό" (memory_looks_episodic,
-    βασισμένο στα ήδη υπάρχοντα relation_type/state_markers metadata + ρητή
-    ημερομηνία στο κείμενο) — αν ναι, κρατάμε ΚΑΙ ΤΑ ΔΥΟ (add_alongside) ακόμα
-    και με υψηλό overlap. Το keep_old/ομαδοποίηση εξακολουθεί να ισχύει κανονικά
-    για πάγια/timeless facts που απλά ξαναδιατυπώθηκαν.
+    [MASTRO-FIX]: The old overlap>=duplicate_overlap -> "keep_old" silently
+    deleted EVERY new fact that shared vocabulary with an older one, BEFORE even
+    comparing the detail (richness) — a problem especially for close, repetitive
+    family events (e.g., walks in the park), which were lost without a trace.
+    Now we first check if the pair "looks episodic" (memory_looks_episodic,
+    based on the already existing relation_type/state_markers metadata + explicit
+    date in the text) — if yes, we keep BOTH (add_alongside) even
+    with high overlap. The keep_old/grouping still applies normally
+    for permanent/timeless facts that were simply rephrased.
     """
     overlap = memory_overlap_ratio(new_fact, old_content)
     episodic = memory_looks_episodic(
@@ -514,7 +514,7 @@ def decide_memory_overwrite(
 
 
 class AstakosMemoryManager:
-    """Κεντρικός Memory Manager — το ΕΝΑ και ΜΟΝΑΔΙΚΟ σημείο εγγραφής."""
+    """Central Memory Manager — the ONE and ONLY write point."""
 
     def save(self, memory_type: str, **kwargs):
         with vector_lock, memory_lock, _cross_process_lock():
@@ -585,23 +585,23 @@ class AstakosMemoryManager:
     ):
         from config import PROFILE_DB
 
-        # ── Threshold ανά τύπο fact ──────────────────────────────
+        # ── Threshold per fact type ──────────────────────────────
         if "[LESSON]" in fact:
-            dup_threshold = 0.82   # τεχνικά μαθήματα — αυστηρό
+            dup_threshold = 0.82   # technical courses — strict
         elif "[USER_FACT]" in fact:
-            dup_threshold = 0.82   # γεγονότα — μέτριο
+            dup_threshold = 0.82   # events — medium
         else:
-            dup_threshold = 0.85   # γενικό
+            dup_threshold = 0.85   # general
 
-        # [MASTRO-FIX]: Ενοποιημένο overwrite — ΜΙΑ απόφαση (decide_memory_overwrite) για
-        # ΟΛΑ τα stores. Αν εδώ αποφασίσουμε ότι πρέπει να αντικατασταθεί η παλιά
-        # Chroma-εγγραφή, αποθηκεύουμε το ΑΚΡΙΒΕΣ κείμενό της ώστε το βήμα 4
-        # (JSON Profile) να βρει και να αντικαταστήσει ΤΗΝ ΙΔΙΑ εγγραφή — όχι να
-        # τρέξει ξεχωριστό, ενδεχομένως αντικρουόμενο, similarity-check.
+        # [MASTRO-FIX]: Unified overwrite — ONE decision (decide_memory_overwrite) for
+        # ALL stores. If we decide here that the old one must be replaced
+        # Chroma-record, we store its EXACT text so that step 4
+        # (JSON Profile) find and replace THE SAME record — not to
+        # run a separate, potentially conflicting, similarity-check.
         replace_old_fact_text = None
         add_alongside_old_text = None
 
-        # 1. Semantic Overwrite για [LESSON] / [USER_FACT] — category-safe πρώτα
+        # 1. Semantic Overwrite for [LESSON] / [USER_FACT] — category-safe first
         if "[LESSON]" in fact or "[USER_FACT]" in fact:
             query_emb = embeddings.embed_query(fact)
 
@@ -611,9 +611,9 @@ class AstakosMemoryManager:
                 except (IndexError, TypeError):
                     return {}
 
-            # Ψάξε ΠΡΩΤΑ μέσα στην ΙΔΙΑ category — αποφεύγουμε να συγκρίνουμε
-            # (και ενδεχομένως να σβήσουμε) άσχετη μνήμη άλλης κατηγορίας απλά
-            # επειδή το embedding της έτυχε να μοιάζει.
+            # Search FIRST within the SAME category — we avoid comparing
+            # (and potentially erase) irrelevant memory of another category simply
+            # because its embedding happened to be similar.
             same_cat = _safe_chroma_query(
                 query_embeddings=[query_emb],
                 n_results=1,
@@ -632,8 +632,8 @@ class AstakosMemoryManager:
                     dist = d
 
             if old_id is None and not same_cat.get("_error"):
-                # Τίποτα κοντινό μέσα στην category — δες αν υπάρχει κάτι ύποπτα
-                # κοντινό cross-category. Μόνο ενημέρωση, ΔΕΝ σβήνουμε ποτέ cross-category.
+                # Nothing close within the category — see if there is something suspicious
+                # close cross-category. Update only, we NEVER delete cross-category.
                 cross = _safe_chroma_query(
                     query_embeddings=[query_emb],
                     n_results=1,
@@ -686,11 +686,11 @@ class AstakosMemoryManager:
                         f"{len(old_content)} χαρ.) > Νέα (richness={decision['new_richness']:.1f}, {len(str(fact))} χαρ.) "
                         f"— παραμένει η λεπτομερής, η νέα ΔΕΝ αποθηκεύεται (αποφυγή διπλοεγγραφής).\033[0m"
                     )
-                    # [MASTRO-FIX]: keep_old σήμαινε μέχρι τώρα μόνο "μη σβήσεις την
-                    # παλιά" — αλλά ο κώδικας συνέχιζε ούτως ή άλλως στην αποθήκευση
-                    # της νέας, καταλήγοντας με ΔΥΟ σχεδόν-ίδιες εγγραφές στη Chroma
-                    # (το loose SIM_THRESHOLD_DISTANCE=0.30 δεν την έπιανε πάντα).
-                    # Αν αποφασίσαμε "κράτα την παλιά", σταματάμε εδώ — σε ΚΑΝΕΝΑ store.
+                    # [MASTRO-FIX]: keep_old until now only meant "do not delete the
+                    # old" — but the code proceeded to save anyway
+                    # of the new one, ending up with TWO almost-identical entries in Chroma
+                    # (the loose SIM_THRESHOLD_DISTANCE=0.30 did not always catch it).
+                    # If we decided to "keep the old one", we stop here — in NO store.
                     _audit_log("skip_keep_old", category=category,
                                fact=str(fact)[:100], old=str(old_content)[:100],
                                old_richness=round(decision["old_richness"], 1),
@@ -734,11 +734,11 @@ class AstakosMemoryManager:
                                reason=", ".join(reason_tag) if reason_tag else "richness",
                                distance=round(float(dist), 3) if dist is not None else None,
                                overlap=round(float(storage["overlap"]), 3))
-                    # Η ΙΔΙΑ απόφαση θα καθοδηγήσει και το JSON Profile παρακάτω —
-                    # κρατάμε το ακριβές κείμενο της παλιάς εγγραφής για να τη βρούμε εκεί.
+                    # The SAME decision will also guide the JSON Profile below —
+                    # we keep the exact text of the old record to find it there.
                     replace_old_fact_text = old_content
 
-        # 2. Duplicate check με dynamic threshold
+        # 2. Duplicate check with dynamic threshold
         results = vector_store.similarity_search_with_score(fact, k=1)
         for doc, score in results:
             if score >= SIM_THRESHOLD_DISTANCE:
@@ -794,7 +794,7 @@ class AstakosMemoryManager:
             )
             return False
 
-        # 3. Αποθήκευση Chroma
+        # 3. Chroma Storage
         # Auto-compute importance
         if "goal" in category:
             _importance = 10
@@ -850,7 +850,7 @@ class AstakosMemoryManager:
             relation_type=relation_type or "",
         )
 
-# 4. Αποθήκευση DB Profile — με έξυπνο OVERWRITE
+# 4. Save DB Profile — with smart OVERWRITE
         if category != "photos":
             import sqlite3
             conn = None
@@ -895,9 +895,9 @@ class AstakosMemoryManager:
                     conn.close()
 
         # 5. Automatic fact -> routine reconciliation (conservative)
-        # Τρέχει ΜΕΤΑ την επιτυχή αποθήκευση ώστε να στηρίζεται μόνο σε facts που
-        # όντως "κάθισαν" στη μνήμη. Σκοπίμως fail-open: αν κάτι πάει στραβά εδώ,
-        # η μνήμη παραμένει αποθηκευμένη και απλώς παραλείπεται το auto-adjust.
+        # Runs AFTER successful saving so that it relies only on facts that
+        # indeed "sat" in memory. Intentionally fail-open: if something goes wrong here,
+        # the memory remains stored and the auto-adjust is simply skipped.
         try:
             from services.routine_reconciler import reconcile_fact_to_routines
 
@@ -1042,8 +1042,8 @@ class AstakosMemoryManager:
 
 def bump_retrieval_count(doc_ids: list[str]):
     """
-    Αυξάνει κατά 1 το retrieval_count για κάθε doc_id.
-    Καλείται μετά από κάθε semantic search που επιστρέφει αποτελέσματα.
+    Increments the retrieval_count by 1 for each doc_id.
+    Called after each semantic search that returns results.
     """
     if not doc_ids:
         return
@@ -1066,14 +1066,14 @@ def bump_retrieval_count(doc_ids: list[str]):
 
 def compute_score(metadata: dict) -> float:
     """
-    Υπολογίζει το score μιας μνήμης.
+    Calculates the score of a memory.
     score = importance*0.4 + retrieval_count_norm*0.3 + confidence*0.2 + freshness*0.1
     """
     from datetime import datetime as _dt
     importance     = float(metadata.get("importance", 5)) / 10.0
-    retrieval      = min(float(metadata.get("retrieval_count", 0)) / 20.0, 1.0)  # cap στο 20
+    retrieval      = min(float(metadata.get("retrieval_count", 0)) / 20.0, 1.0)  # cap at 20
     confidence     = float(metadata.get("confidence", 0.7))
-    # Freshness: 1.0 = σήμερα, 0.0 = 365 μέρες πριν
+    # Freshness: 1.0 = today, 0.0 = 365 days ago
     last_ts = metadata.get("last_accessed") or metadata.get("timestamp", 0)
     days_old = (_dt.now().timestamp() - float(last_ts)) / 86400.0
     freshness = max(0.0, 1.0 - days_old / 365.0)
@@ -1093,7 +1093,7 @@ memory = AstakosMemoryManager()
 
 
 def save_photo_to_index(file_path: str, analysis: str, caption: str = ""):
-    """Wrapper — στέλνει τα δεδομένα φωτογραφίας στον Memory Manager."""
+    """Wrapper — sends the photo data to the Memory Manager."""
     memory.save(memory_type="photo", file_path=file_path, analysis=analysis, caption=caption)
 
 # ================================================================
@@ -1101,7 +1101,7 @@ def save_photo_to_index(file_path: str, analysis: str, caption: str = ""):
 # ================================================================
 
 def save_goal(project: str, description: str, status: str = "active", progress: int = 0, milestones: str = "") -> bool:
-    """Αποθηκεύει ή ενημερώνει goal. Κάνει overwrite αν υπάρχει ήδη."""
+    """Saves or updates a goal. Overwrites if it already exists."""
     try:
         with vector_lock, _cross_process_lock():
             existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
@@ -1125,7 +1125,7 @@ def save_goal(project: str, description: str, status: str = "active", progress: 
 
 
 def update_goal_status(project: str, status: str) -> bool:
-    """Αλλάζει το status ενός goal."""
+    """Changes the status of a goal."""
     try:
         with vector_lock, _cross_process_lock():
             existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
@@ -1143,7 +1143,7 @@ def update_goal_status(project: str, status: str) -> bool:
 
 
 def update_goal_progress(project: str, progress: int) -> bool:
-    """Ανανεώνει το ποσοστό προόδου ενός goal (0-100)."""
+    """Updates the progress percentage of a goal (0-100)."""
     try:
         with vector_lock, _cross_process_lock():
             existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
@@ -1161,7 +1161,7 @@ def update_goal_progress(project: str, progress: int) -> bool:
 
 
 def update_goal_milestones(project: str, milestones: str) -> bool:
-    """Ανανεώνει τα milestones ενός goal."""
+    """Updates the milestones of a goal."""
     try:
         with vector_lock, _cross_process_lock():
             existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
@@ -1179,7 +1179,7 @@ def update_goal_milestones(project: str, milestones: str) -> bool:
 
 
 def get_active_goals() -> list[dict]:
-    """Επιστρέφει active/paused goals."""
+    """Returns active/paused goals."""
     try:
         with vector_lock, _cross_process_lock():
             results = vector_store._collection.get(where={"category": "goal"})

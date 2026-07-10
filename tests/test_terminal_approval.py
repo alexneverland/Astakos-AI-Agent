@@ -1,7 +1,7 @@
 """
-Tests για το terminal approval flow bug fix.
-Επαληθευει οτι run_terminal_command με already_approved=True
-παρακαμπτει το safe_execute gate και εκτελει την εντολη.
+Tests for the terminal approval flow bug fix.
+Verifies that run_terminal_command with already_approved=True
+bypasses the safe_execute gate and executes the command.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock
 
 
 def test_warning_command_without_approval_executes():
-    """git push είναι WARNING πλέον: εκτελείται χωρίς approval gate, με warning policy."""
+    """git push is now a WARNING: it runs without an approval gate, under a warning policy."""
     from core.safe_executor import safe_execute
 
     mock_executor = MagicMock(return_value={"status": "ok", "output": "done"})
@@ -21,14 +21,14 @@ def test_warning_command_without_approval_executes():
 
 
 def test_already_approved_bypasses_safe_execute():
-    """already_approved=True εκτελει εντολη ακομα και αν ειναι REQUIRE_CONFIRMATION."""
+    """already_approved=True executes the command even if it is REQUIRE_CONFIRMATION."""
     from tools.system import run_terminal_command
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             stdout="pushed successfully", stderr="", returncode=0
         )
-        # .func για να καλεσουμε την raw function αντι για το StructuredTool wrapper
+        # .func to call the raw function instead of the StructuredTool wrapper
         result = run_terminal_command.func("git push origin main", already_approved=True)
 
     assert "pushed" in result.lower() or result != ""
@@ -36,7 +36,7 @@ def test_already_approved_bypasses_safe_execute():
 
 
 def test_normal_safe_command_executes_without_flag():
-    """SAFE εντολη εκτελειται κανονικα χωρις already_approved."""
+    """SAFE command is executed normally without already_approved."""
     from tools.system import run_terminal_command
 
     with patch("subprocess.run") as mock_run:
@@ -50,7 +50,7 @@ def test_normal_safe_command_executes_without_flag():
 
 
 def test_blocked_command_stays_blocked_even_with_approval():
-    """BLOCKED εντολη (rm -rf /) πρεπει να μπλοκαριστει ακομα και με already_approved=True."""
+    """BLOCKED command (rm -rf /) must be blocked even with already_approved=True."""
     from tools.system import run_terminal_command
 
     with patch("subprocess.run") as mock_run:

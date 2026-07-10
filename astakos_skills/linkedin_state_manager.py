@@ -7,7 +7,7 @@ MEMORY_FILE = LINKEDIN_DRAFT_FILE
 
 @tool
 def update_pending_linkedin_post(draft_text: str, photo_path: str = "") -> str:
-    """Αποθηκεύει το draft του LinkedIn post. photo_path προαιρετικό — αν η εικόνα απέτυχε, αποθήκευσε χωρίς αυτή και σταμάτα."""
+    """Saves the LinkedIn post draft. photo_path is optional — if the image failed, save without it and stop."""
     data = {}
     if os.path.exists(MEMORY_FILE):
         with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
@@ -36,7 +36,7 @@ def update_pending_linkedin_post(draft_text: str, photo_path: str = "") -> str:
 
 @tool
 def process_and_clear_linkedin_post() -> str:
-    """Διαβάζει το pending post, το δημοσιεύει στο LinkedIn και καθαρίζει τη μνήμη."""
+    """Reads the pending post, publishes it to LinkedIn, and clears the memory."""
     if not os.path.exists(MEMORY_FILE):
         return "Σφάλμα: Δεν υπάρχει αρχείο μνήμης."
 
@@ -49,10 +49,10 @@ def process_and_clear_linkedin_post() -> str:
         return "Δεν υπάρχει εκκρεμές post για δημοσίευση."
 
     try:
-        # [MASTRO-FIX 1]: Σωστό import του εργαλείου από το system.py!
+        # [MASTRO-FIX 1]: Correct import of the tool from system.py!
         from tools.system import post_to_linkedin
         
-        # [MASTRO-FIX 2]: Επειδή είναι @tool, το καλούμε με .invoke()
+        # [MASTRO-FIX 2]: Since it is a @tool, we call it with .invoke()
         result = post_to_linkedin.invoke({
             "text": post_data['text'], 
             "image_path": post_data.get('photo_path')
@@ -62,7 +62,7 @@ def process_and_clear_linkedin_post() -> str:
     except Exception as e:
         return f"Σφάλμα κατά τη δημοσίευση: {e}"
     
-    # Καθαρισμός
+    # Cleanup
     data.pop('pending_linkedin_post', None)
     data.pop('text', None)
     data.pop('content', None)

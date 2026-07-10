@@ -952,7 +952,7 @@ def test_normalize_followup_delay_food_purchase_tomorrow_targets_next_day_lunch_
         now=now,
     )
 
-    # από 22:00 σήμερα μέχρι 11:30 αύριο = 810 λεπτά (συν το jitter)
+    # from 22:00 today until 11:30 tomorrow = 810 minutes (plus jitter)
     assert abs(delay - 810) <= 35
 
 
@@ -968,7 +968,7 @@ def test_normalize_followup_delay_food_purchase_tomorrow_from_evening_still_targ
         now=now,
     )
 
-    # από 19:00 σήμερα μέχρι 11:30 αύριο = 990 λεπτά (συν το jitter)
+    # from 19:00 today until 11:30 tomorrow = 990 minutes (plus jitter)
     assert abs(delay - 990) <= 35
 
 

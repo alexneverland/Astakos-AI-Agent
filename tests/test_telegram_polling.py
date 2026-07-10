@@ -1,6 +1,6 @@
 """
-Tests για Web UI polling: load_messages_after_rowid, get_max_rowid, notify flow.
-Κάθε test παίρνει δικό του tmp_path — δεν μοιράζονται DB αρχείο.
+Tests for Web UI polling: load_messages_after_rowid, get_max_rowid, notify flow.
+Each test gets its own tmp_path — they do not share a DB file.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -1,11 +1,11 @@
 """
 tools/georgian.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Εργαλείο μετάφρασης Ελληνικά ↔ Γεωργιανά
-με φωνητική αναπαραγωγή μέσω edge-tts.
+Greek ↔ Georgian translation tool
+with voice playback via edge-tts.
 
-Χρησιμοποιεί Google Translate unofficial API
-(client=gtx) — χωρίς API key.
+Uses the unofficial Google Translate API
+(client=gtx) — without an API key.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
@@ -13,7 +13,7 @@ from __future__ import annotations
 import io
 import requests
 
-# ── Γεωργιανό αλφάβητο (Mkhedruli) → Λατινική φωνητική ──────────────────────
+# ── Georgian alphabet (Mkhedruli) → Latin phonetics ──────────────────────
 _KA_PHONETICS: dict[str, str] = {
     "ა": "a",  "ბ": "b",  "გ": "g",  "დ": "d",  "ე": "e",
     "ვ": "v",  "ზ": "z",  "თ": "th", "ი": "i",  "კ": "k'",
@@ -26,36 +26,36 @@ _KA_PHONETICS: dict[str, str] = {
 
 
 def _to_phonetic(text: str) -> str:
-    """Μετατρέπει Γεωργιανό κείμενο σε Λατινική φωνητική."""
+    """Translates Georgian text into Latin phonetics."""
     return "".join(_KA_PHONETICS.get(c, c) for c in text)
 
 
 def _is_georgian(text: str) -> bool:
-    """True αν το κείμενο περιέχει Γεωργιανούς χαρακτήρες (Mkhedruli U+10D0–U+10FF)."""
+    """True if the text contains Georgian characters (Mkhedruli U+10D0–U+10FF)."""
     return any("ა" <= c <= "ჿ" for c in text)
 
 
 def translate(text: str, *, src: str = "auto", tgt: str = "ka") -> dict[str, str]:
     """
-    Μεταφράζει κείμενο μέσω Google Translate (unofficial, χωρίς key).
+    Translates text via Google Translate (unofficial, without key).
 
-    Με src="auto":
-      • Αν το κείμενο είναι Γεωργιανό  → μεταφράζει σε Ελληνικά (ka→el)
-      • Αλλιώς                          → μεταφράζει σε Γεωργιανά (el→ka)
+    With src="auto":
+      • If the text is Georgian  → translates to Greek (ka→el)
+      • Otherwise                → translates to Georgian (el→ka)
 
     Returns:
         {
-          "translated": str,   # μεταφρασμένο κείμενο
-          "phonetic":   str,   # Latin phonetics (μόνο αν tgt=="ka")
-          "src":        str,   # γλώσσα πηγής που χρησιμοποιήθηκε
-          "tgt":        str,   # γλώσσα στόχος που χρησιμοποιήθηκε
+          "translated": str,   # translated text
+          "phonetic":   str,   # Latin phonetics (only if tgt=="ka")
+          "src":        str,   # source language used
+          "tgt":        str,   # target language used
         }
     """
     if src == "auto":
         src = "ka" if _is_georgian(text) else "el"
         tgt = "el" if src == "ka" else "ka"
     else:
-        # Forced direction: tgt = αντίθετο του src
+        # Forced direction: tgt = opposite of src
         tgt = "el" if src == "ka" else "ka"
 
     resp = requests.get(
@@ -79,7 +79,7 @@ _EDGE_VOICES: dict[str, str] = {
 
 
 async def _tts_edge(text: str, voice: str) -> bytes:
-    """Async helper: παράγει audio μέσω edge-tts."""
+    """Async helper: generates audio via edge-tts."""
     import edge_tts
 
     buf = io.BytesIO()
@@ -93,8 +93,8 @@ async def _tts_edge(text: str, voice: str) -> bytes:
 
 def tts_audio(text: str, lang: str = "ka") -> bytes:
     """
-    Παράγει audio bytes μέσω edge-tts.
-    Γεωργιανά: ka-GE-EkaNeural (Microsoft neural voice — υποστηρίζει ka).
+    Generates audio bytes via edge-tts.
+    Georgian: ka-GE-EkaNeural (Microsoft neural voice — supports ka).
     """
     import asyncio
 
@@ -102,7 +102,7 @@ def tts_audio(text: str, lang: str = "ka") -> bytes:
     return asyncio.run(_tts_edge(text, voice))
 
 
-# ── Γρήγορες φράσεις (pre-translated) ───────────────────────────────────────
+# ── Quick phrases (pre-translated) ─────────────────────────────────────────
 QUICK_PHRASES: dict[str, list[dict[str, str]]] = {
     "💕 Αγάπη": [
         {"el": "Σ'αγαπώ",              "ka": "გიყვარხარ",                    "ph": "giq'varxar"},
@@ -145,7 +145,7 @@ QUICK_PHRASES: dict[str, list[dict[str, str]]] = {
 
 
 def phrases_message() -> str:
-    """Επιστρέφει ένα Telegram-ready κείμενο με όλες τις γρήγορες φράσεις."""
+    """Returns a Telegram-ready text with all the quick phrases."""
     lines = ["🇬🇪 <b>Γρήγορες Φράσεις Ελληνικά → Γεωργιανά</b>\n"]
     for cat, phrases in QUICK_PHRASES.items():
         lines.append(f"<b>{cat}</b>")

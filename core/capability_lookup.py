@@ -1,9 +1,9 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Capability Registry Lookup
-# Πρώτο φίλτρο routing — keyword match πριν πάει στο LLM Supervisor.
-# Αν βρει ξεκάθαρο match → επιστρέφει agent αμέσως.
-# Αν όχι → None (LLM αποφασίζει κανονικά).
+# First routing filter — keyword match before going to the LLM Supervisor.
+# If a clear match is found → returns agent immediately.
+# If not → None (LLM decides normally).
 # ================================================================
 
 import os
@@ -73,15 +73,15 @@ def _normalize(text: str) -> str:
 
 def _matches_trigger(msg: str, trigger: str) -> bool:
     t = _normalize(trigger)
-    # Word boundary μόνο — αποφεύγουμε substring matches (π.χ. "git" μέσα σε "github")
+    # Word boundary only — we avoid substring matches (e.g., "git" inside "github")
     return bool(re.search(r'(?<!\w)' + re.escape(t) + r'(?!\w)', msg))
 
 def lookup_agent(user_message: str) -> str | None:
     """
-    Ψάχνει στο registry για keyword match.
-    Επιστρέφει agent name (π.χ. 'Home_Agent') ή None αν δεν βρει.
+    Searches the registry for a keyword match.
+    Returns the agent name (e.g., 'Home_Agent') or None if not found.
 
-    Χρησιμοποιεί priority για disambiguation αν υπάρχουν πολλά matches.
+    Uses priority for disambiguation if there are multiple matches.
     """
     _load_registry()
     if not _registry:
@@ -89,7 +89,7 @@ def lookup_agent(user_message: str) -> str | None:
 
     msg = _normalize(user_message)
 
-    # LinkedIn check ΠΡΩΤΑ — override όλα τα άλλα
+    # LinkedIn check FIRST — override everything else
     if _matches_trigger(msg, "linkedin"):
         for ct in _LINKEDIN_CREATION:
             if _matches_trigger(msg, ct):
@@ -111,7 +111,7 @@ def lookup_agent(user_message: str) -> str | None:
     for cap in _registry:
         triggers = cap.get("triggers", [])
         for trigger in triggers:
-            # Ελέγχουμε αν το trigger υπάρχει ως λέξη/φράση στο μήνυμα
+            # Check if the trigger exists as a word/phrase in the message
             if _matches_trigger(msg, trigger):
                 matches.append({
                     "name":     cap["name"],
@@ -119,25 +119,25 @@ def lookup_agent(user_message: str) -> str | None:
                     "priority": cap.get("priority", 5),
                     "trigger":  trigger,
                 })
-                break  # Ένα match ανά capability αρκεί
+                break  # One match per capability is enough
 
     if not matches:
         return None
 
-    # Αν υπάρχουν πολλά matches, παίρνουμε το υψηλότερο priority
+    # If there are multiple matches, we take the one with the highest priority
     best = sorted(matches, key=lambda x: x["priority"], reverse=True)[0]
     print(f"🎯 [CapabilityRegistry]: '{best['trigger']}' → {best['agent']} ({best['name']})")
     return best["agent"]
 
 
 def get_all_capabilities() -> list[dict]:
-    """Επιστρέφει όλες τις capabilities για debug/dashboard."""
+    """Returns all capabilities for debug/dashboard."""
     _load_registry()
     return _registry
 
 
 def reload_registry():
-    """Force reload — για hot-reload χωρίς restart."""
+    """Force reload — for hot-reloading without restart."""
     global _registry
     _registry = []
     _load_registry()

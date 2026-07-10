@@ -21,19 +21,19 @@ from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 # ────────────────────────────────────────────────────────────────
 
 class AgentState(TypedDict):
-    """Το State που μοιράζονται όλοι οι Agents."""
+    """The State shared by all Agents."""
     messages: Annotated[list, add_messages]
     next_agent: NotRequired[str]
     current_agent: NotRequired[str]
     approval_status: NotRequired[str]   # "ok" | "pending" | "blocked"
-    plan_active: NotRequired[bool]                  # True αν τρέχει plan
-    plan_awaiting_confirmation: NotRequired[bool]   # True αν περιμένει "ναι/όχι"
-    plan_tasks: NotRequired[list]                   # task list από Planner
-    plan_index: NotRequired[int]                    # τρέχον βήμα
-    plan_results: NotRequired[list]                 # αποτελέσματα βημάτων
-    plan_goal: NotRequired[str]                     # το αρχικό goal
-    plan_step_failed: NotRequired[bool]             # True αν το τελευταίο βήμα έδειξε αποτυχία
-    replan_skipped_steps: NotRequired[list]         # indices βημάτων που παραλείφθηκαν (replan)
+    plan_active: NotRequired[bool]                  # True if a plan is running
+    plan_awaiting_confirmation: NotRequired[bool]   # True if waiting for "yes/no"
+    plan_tasks: NotRequired[list]                   # task list from Planner
+    plan_index: NotRequired[int]                    # current step
+    plan_results: NotRequired[list]                 # step results
+    plan_goal: NotRequired[str]                     # the initial goalof_thought
+    plan_step_failed: NotRequired[bool]             # True if the last step showed failure
+    replan_skipped_steps: NotRequired[list]         # indices of skipped steps (replan)
     channel: NotRequired[str]                       # "telegram" | "web" | "terminal"
 
 # ────────────────────────────────────────────────────────────────
@@ -42,9 +42,9 @@ class AgentState(TypedDict):
 
 def clean_message(msg_content) -> str:
     """
-    [SMART PARSER]: Εξάγει το καθαρό κείμενο από οποιοδήποτε format.
-    Δέχεται string ή multimodal λίστες και επιστρέφει ΠΑΝΤΑ ένα καθαρό string.
-    Ιδανικό για Regex, Semantic Search και Logs.
+    [SMART PARSER]: Extracts clean text from any format.
+    Accepts strings or multimodal lists and ALWAYS returns a clean string.
+    Ideal for Regex, Semantic Search, and Logs.
     """
     if msg_content is None: 
         return ""
@@ -57,7 +57,7 @@ def clean_message(msg_content) -> str:
             if isinstance(item, str):
                 parts.append(item)
             elif isinstance(item, dict):
-                # Ψάχνουμε το κλειδί 'text', αγνοώντας tool_calls ή image_urls
+                # We are looking for the 'text' key, ignoring tool_calls or image_urls
                 val = item.get("text", "")
                 if val: parts.append(str(val))
         return " ".join(parts).strip()
@@ -405,9 +405,9 @@ def is_medium_web_chat_path_candidate(user_text: str) -> bool:
 def extract_list_selection_index(text: str) -> int | None:
     """
     Detects an explicit 1-based choice from natural language follow-ups like:
-    - "το 2"
-    - "το 2ο"
-    - "το δεύτερο"
+    - "the 2nd" (e.g., "the 2")
+    - "the 2nd" (e.g., "the 2nd")
+    - "the second" (e.g., "the second")
     Returns a zero-based index, or None if no explicit selection is found.
     """
     if not text:
@@ -444,45 +444,45 @@ def extract_list_selection_index(text: str) -> int | None:
 
 def sanitize_history_for_gemini(messages: list) -> list:
     """
-    [MASTRO-FIX]: Σιδερώνει το ιστορικό για να μην κρασάρει το Gemini με Error 400.
-    Μετατρέπει τα ToolMessages και τα AI ToolCalls σε απλά κείμενα 
-    ώστε να διατηρείται η πληροφορία χωρίς να παραβιάζεται η αυστηρή δομή του API.
+    [MASTRO-FIX]: Flattens the history to prevent Gemini from crashing with Error 400.
+    Converts ToolMessages and AI ToolCalls into plain text 
+    so that information is preserved without violating the strict structure of the API.
     """
     from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
     sanitized = []
     for msg in messages:
         if msg.type == "tool":
-            # Μετατρέπουμε το output του tool σε ένα απλό System/Human context
-            # για να μην μπερδεύεται ο επόμενος Agent
+            # Convert the tool's output into a simple System/Human context
+            # so that the next Agent does not get confused
             sanitized.append(HumanMessage(content=f"[Αποτέλεσμα Εργαλείου {msg.name}]: {clean_message(msg.content)}"))
         
         elif msg.type == "ai" and hasattr(msg, "tool_calls") and msg.tool_calls:
-            # Αν το AI έκανε tool_call, κρατάμε μόνο το σκεπτικό του (αν υπάρχει)
+            # If the AI made a tool_call, we only keep its reasoning (if it exists)
             text_content = clean_message(msg.content)
             if not text_content:
                 text_content = f"[Κλήση Εργαλείου: {msg.tool_calls[0]['name']}]"
             sanitized.append(AIMessage(content=text_content))
             
         else:
-            # System, Human, ή καθαρά AI messages περνάνε ανέπαφα
+            # System, Human, or pure AI messages pass through intact
             sanitized.append(msg)
             
     return sanitized
 def filter_messages(messages: list, k: int = 40) -> list:
-    """Καθαρίζει το ιστορικό από σφάλματα που σπάνε το Gemini API."""
+    """Clears the history of errors that break the Gemini API."""
     if not messages:
         return []
 
     safe_list = list(messages[-k:])
     cleaned_list = []
 
-    # Πρώτο πέρασμα: βασικός καθαρισμός
+    # First pass: basic cleaning
     for msg in safe_list:
         msg_type = getattr(msg, "type", "")
 
         if msg_type == "tool":
-            # Χρήση Smart Parser αντί για απλό str()
+            # Use of Smart Parser instead of simple str()
             if not msg.content or clean_message(msg.content) == "":
                 msg = ToolMessage(
                     content="System Error: Το εργαλείο δεν επέστρεψε δεδομένα.",
@@ -492,7 +492,7 @@ def filter_messages(messages: list, k: int = 40) -> list:
             cleaned_list.append(msg)
 
         elif msg_type == "ai":
-            # Αν δεν έχει ούτε κείμενο ούτε tool_calls, πέταξέ το
+            # If it has neither text nor tool_calls, discard it
             if not clean_message(msg.content) and not getattr(msg, "tool_calls", None):
                 continue
             cleaned_list.append(msg)
@@ -500,7 +500,7 @@ def filter_messages(messages: list, k: int = 40) -> list:
         else:
             cleaned_list.append(msg)
 
-    # Δεύτερο πέρασμα: Αφαίρεση "ορφανών" tool_calls (Gemini 400 Error Fix)
+    # Second pass: Remove "orphan" tool_calls (Gemini 400 Error Fix)
     final_list = []
     i = 0
     while i < len(cleaned_list):
@@ -523,7 +523,7 @@ def filter_messages(messages: list, k: int = 40) -> list:
         final_list.append(msg)
         i += 1
 
-    # Αν ξεκινά με ToolMessage (χωρίς προηγούμενο AI), κόψε το
+    # If it starts with a ToolMessage (without a preceding AI), cut it off
     while final_list and getattr(final_list[0], "type", "") == "tool":
         final_list.pop(0)
 
@@ -534,7 +534,7 @@ def filter_messages(messages: list, k: int = 40) -> list:
 # ────────────────────────────────────────────────────────────────
 
 def load_agent_prompt(agent_name: str, default_fallback: str = "") -> str:
-    """Διαβάζει οδηγίες από το prompts.md με βάση τα headers (##)."""
+    """Reads instructions from prompts.md based on the headers (##)."""
     try:
         core_dir = os.path.dirname(os.path.abspath(__file__))
         md_path = os.path.join(core_dir, "prompts.md")
@@ -560,7 +560,7 @@ def load_agent_prompt(agent_name: str, default_fallback: str = "") -> str:
         return default_fallback
 
 # ────────────────────────────────────────────────────────────────
-# 4. SKIP SEMANTIC SEARCH — Keywords που θέλουν tool/live data
+# 4. SKIP SEMANTIC SEARCH — Keywords that require a tool/live data
 # ────────────────────────────────────────────────────────────────
 
 SKIP_SEMANTIC_KEYWORDS = [
@@ -581,7 +581,7 @@ SKIP_SEMANTIC_KEYWORDS = [
 # ────────────────────────────────────────────────────────────────
 
 def build_prompt(state_messages, agent_role="", channel: str | None = None) -> str:
-    """Η κεντρική μηχανή σύνθεσης Prompt."""
+    """The main Prompt synthesis engine."""
     from config import WORKING_MEMORY_FILE, BASE_DIR
     from memory.working_memory import get_capability_context
     from memory.session_memory import load_last_session_hint
@@ -589,7 +589,7 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
     identity = load_agent_prompt("identity_block", "Είσαι ο Αστακός, ο AI συνεργάτης του Λάζαρου.")
     identity = identity.replace("{BASE_DIR}", BASE_DIR)
 
-    # Η clean_message ήδη έκανε σωστά τη δουλειά της εδώ, το αφήνουμε.
+    # clean_message already did its job correctly here, we leave it as is.
     last_msg = clean_message(state_messages[-1].content) if state_messages else ""
     is_vision = "[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]" in last_msg or "[CURRENT_PHOTO_PATH]" in last_msg
     has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
@@ -652,8 +652,8 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
         prompt += f"[ΣΥΝΕΧΕΙΑ ΑΠΟ ΠΡΟΗΓΟΥΜΕΝΗ SESSION]\n{session_hint}\n\n"
 
     # ── Long-Term Goals ──────────────────────────────────────────
-    # Contextual Injection: Βάζουμε τους στόχους μόνο αν η συζήτηση φαίνεται να έχει ουσία (όχι σε ρουτίνες) 
-    # ή αν έχει σχετικά keywords, ή αν είναι ο Planner/Proactive.
+    # Contextual Injection: We only set the goals if the conversation seems to have substance (not in routines)
+    # or if it has related keywords, or if it is the Planner/Proactive.
     goal_keywords = ["στόχ", "goal", "δουλει", "project", "plan", "πλάνο", "πρόοδ", "εξέλιξη", "επόμεν", "δουλέψ", "φτιάξ", "συνεχίσ", "τι κάνουμε", "task"]
     is_goal_related = any(kw in clean_text for kw in goal_keywords)
     
@@ -713,17 +713,17 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
 
 def detect_prompt_injection(user_input) -> bool:
     """
-    Mastro-Shield v3: Hybrid injection detection με υποστήριξη Multimodal.
-    Χρησιμοποιεί τον Smart Parser για να εξάγει το κείμενο, αποτρέποντας
-    κρασαρίσματα ή bypass όταν ο χρήστης ανεβάζει εικόνες (λίστες).
+    Mastro-Shield v3: Hybrid injection detection with Multimodal support.
+    Uses the Smart Parser to extract text, preventing
+    crashes or bypasses when the user uploads images (lists).
     """
-    # Εξάγουμε το καθαρό κείμενο. Αν είναι εικόνα σκέτη, επιστρέφει ""
+    # We extract the clean text. If it is just an image, it returns ""
     text_to_check = clean_message(user_input)
     
     if not text_to_check:
         return False
 
-    # ── 1. FAST REGEX (αγγλικά + ελληνικά) ─────────────────────
+    # ── 1. FAST REGEX (English + Greek) ─────────────────────
     blacklist_patterns = [
         r"ignore\s+(all\s+)?previous\s+instructions",
         r"forget\s+(all\s+)?previous\s+instructions",
@@ -960,7 +960,7 @@ def build_linkedin_draft_ready_reply(tool_results: list[str]) -> str:
         if draft_text or photo_path:
             break
 
-    # fallback από το linkedin_draft.json αν το tool result είναι legacy
+    # fallback from linkedin_draft.json if the tool result is legacy
     if not draft_text:
         try:
             from config import LINKEDIN_DRAFT_FILE

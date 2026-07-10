@@ -1,14 +1,14 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Skill:   repo_mapper — Repo Architecture Scanner
-# Σκανάρει project folder, επιστρέφει δέντρο + AST ανάλυση
+# Scans project folder, returns tree + AST analysis
 # ================================================================
 import os
 import ast
 import json
 from langchain_core.tools import tool
 
-# ── Φάκελοι/αρχεία που αγνοούνται ────────────────────────────
+# ── Ignored folders/files ────────────────────────────────────
 _SKIP_DIRS = {
     "venv", ".venv", "__pycache__", ".git", ".pytest_tmp", ".pytest_cache",
     "node_modules", "dist", "build", ".tox", ".mypy_cache", "migrations",
@@ -19,7 +19,7 @@ _SKIP_EXTS = {".pyc", ".pyo", ".pyd", ".so", ".dll", ".db", ".sqlite3",
               ".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".xlsx",
               ".xls", ".docx", ".mp3", ".mp4", ".wav", ".bin", ".lock"}
 
-# ── Decorator patterns που αναγνωρίζουμε ─────────────────────
+# ── Decorator patterns that we recognize ─────────────────────
 _KNOWN_DECORATORS = {
     "tool":             "🔧 LangChain Tool",
     "app.get":          "🌐 GET Route",
@@ -35,7 +35,7 @@ _KNOWN_DECORATORS = {
     "classmethod":      "📎 Class Method",
 }
 
-# ── Base classes που ταξινομούμε ──────────────────────────────
+# ── Base classes that we classify ──────────────────────────────
 _CLASS_BASES = {
     "Model":       "🗄️  Django Model",
     "BaseModel":   "📐 Pydantic Model",
@@ -46,7 +46,7 @@ _CLASS_BASES = {
 
 
 def _get_decorator_label(dec_node) -> str:
-    """Επιστρέφει label για έναν decorator node."""
+    """Returns a label for a decorator node."""
     if isinstance(dec_node, ast.Name):
         name = dec_node.id
     elif isinstance(dec_node, ast.Attribute):
@@ -76,7 +76,7 @@ def _class_label(bases) -> str:
 
 
 def _analyze_file(filepath: str) -> dict:
-    """AST shallow analysis ενός .py αρχείου."""
+    """AST shallow analysis of a .py file."""
     try:
         with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             src = f.read()
@@ -117,7 +117,7 @@ def _analyze_file(filepath: str) -> dict:
 
 
 def _scan_dir(root: str, max_depth: int, current_depth: int = 0) -> dict:
-    """Recursive directory scan — επιστρέφει nested dict."""
+    """Recursive directory scan — returns a nested dict."""
     result = {"files": [], "dirs": {}}
     if current_depth >= max_depth:
         return result
@@ -146,7 +146,7 @@ def _scan_dir(root: str, max_depth: int, current_depth: int = 0) -> dict:
 
 
 def _render_tree(node: dict, prefix: str = "", name: str = "") -> list[str]:
-    """Μετατρέπει το dict δέντρο σε lines κειμένου."""
+    """Converts the dict tree into lines of text."""
     lines = []
     if name:
         lines.append(f"{prefix}📁 {name}/")
@@ -154,7 +154,7 @@ def _render_tree(node: dict, prefix: str = "", name: str = "") -> list[str]:
     else:
         child_prefix = prefix
 
-    # Αρχεία
+    # Files
     files = node.get("files", [])
     dirs  = node.get("dirs", {})
     all_items = len(files) + len(dirs)
@@ -186,13 +186,13 @@ def _render_tree(node: dict, prefix: str = "", name: str = "") -> list[str]:
 @tool
 def repo_mapper(folder_path: str, max_depth: int = 4) -> str:
     """
-    Σκανάρει ένα project folder και επιστρέφει:
-    - Text tree με δέντρο αρχείων
+    Scans a project folder and returns:
+    - Text tree representing the file structure
     - AST shallow analysis: classes, top-level functions, decorators
-    Χρήσιμο για γρήγορο debugging χωρίς να διαβάζεις αρχείο-αρχείο.
+    Useful for quick debugging without reading file by file.
 
-    folder_path: Ο φάκελος του project (π.χ. C:\\astakos_v2 ή C:\\astakos_v2\\core)
-    max_depth: Βάθος αναζήτησης (default 4, max 6)
+    folder_path: The project folder (e.g., C:\\astakos_v2 or C:\\astakos_v2\\core)
+    max_depth: Search depth (default 4, max 6)
     """
     folder_path = folder_path.strip().strip("'\"")
     max_depth   = max(1, min(int(max_depth), 6))
@@ -255,7 +255,7 @@ def repo_mapper(folder_path: str, max_depth: int = 4) -> str:
     output = "\n".join(lines)
     output += f"\n\n```json\n{json_str}\n```"
 
-    # Όριο για να μην πνίξουμε το context
+    # Limit to avoid overwhelming the context
     if len(output) > 18000:
         output = output[:18000] + "\n\n... [αποκοπή — χρησιμοποίησε μικρότερο max_depth ή πιο συγκεκριμένο subfolder]"
 

@@ -1,6 +1,6 @@
 """
-Tests για core/plan_judge.py
-Τρέξε: pytest tests/test_plan_judge.py -v
+Tests for core/plan_judge.py
+Run: pytest tests/test_plan_judge.py -v
 """
 import os
 import sys
@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # ── Helpers ──────────────────────────────────────────────────────
 
 def _stub_deps():
-    """Stubbing βαριών dependencies ώστε να μπορεί να γίνει import χωρίς config/bot."""
+    """Stubbing heavy dependencies so that it can be imported without a config/bot."""
     for mod_name in ["services", "services.gemini", "config"]:
         if mod_name not in sys.modules:
             sys.modules[mod_name] = types.ModuleType(mod_name)
@@ -31,7 +31,7 @@ def _make_gemini_mock(text: str):
 
 def _import_judge():
     _stub_deps()
-    # Force re-import αν ήδη φορτώθηκε
+    # Force re-import if already loaded
     if "core.plan_judge" in sys.modules:
         del sys.modules["core.plan_judge"]
     from core.plan_judge import should_auto_plan, _needs_llm_evaluation
@@ -39,47 +39,47 @@ def _import_judge():
 
 
 # ═══════════════════════════════════════════════════════════════
-# Heuristic tests — χωρίς LLM call
+# Heuristic tests — without LLM call
 # ═══════════════════════════════════════════════════════════════
 
 def test_heuristic_short_simple_message_skips_llm():
-    """Κοντό απλό μήνυμα → heuristic False → δεν καλείται το LLM."""
+    """Short simple message → heuristic False → LLM is not called."""
     _, needs_eval = _import_judge()
     assert needs_eval("τι καιρό κάνει;") is False
 
 
 def test_heuristic_long_message_triggers_llm():
-    """Μήνυμα με πολλές λέξεις → heuristic True → πάει στο LLM."""
+    """Message with many words → heuristic True → goes to the LLM."""
     _, needs_eval = _import_judge()
     long_msg = "θέλω να δημιουργήσεις ένα report για τα έξοδα του μήνα και να το στείλεις με email στον λογιστή μου αφού πρώτα το αναλύσεις"
     assert needs_eval(long_msg) is True
 
 
 def test_heuristic_short_but_two_markers_triggers_llm():
-    """Κοντό μήνυμα με ≥2 multi-step markers → heuristic True."""
+    """Short message with ≥2 multi-step markers → heuristic True."""
     _, needs_eval = _import_judge()
     assert needs_eval("πρώτα αρχικά κάνε κάτι") is True
 
 
 def test_heuristic_short_one_marker_skips_llm():
-    """Κοντό μήνυμα με 1 marker → heuristic False."""
+    """Short message with 1 marker → heuristic False."""
     _, needs_eval = _import_judge()
     assert needs_eval("πρώτα απ' όλα γεια σου") is False
 
 
 def test_heuristic_empty_message():
-    """Κενό μήνυμα → False άμεσα."""
+    """Empty message → False immediately."""
     judge, _ = _import_judge()
     assert judge("") is False
     assert judge("   ") is False
 
 
 # ═══════════════════════════════════════════════════════════════
-# LLM judge tests — με mock Gemini
+# LLM judge tests — with mock Gemini
 # ═══════════════════════════════════════════════════════════════
 
 def test_judge_returns_true_on_plan():
-    """Gemini επιστρέφει PLAN → should_auto_plan = True."""
+    """Gemini returns PLAN → should_auto_plan = True."""
     judge, _ = _import_judge()
     mock_fn = _make_gemini_mock("PLAN")
     long_msg = "θέλω να αναλύσεις τα έξοδα του Ιουνίου, να φτιάξεις ένα Excel report και μετά να το στείλεις με email στη Σοφία"
@@ -88,7 +88,7 @@ def test_judge_returns_true_on_plan():
 
 
 def test_judge_returns_false_on_no():
-    """Gemini επιστρέφει NO → should_auto_plan = False."""
+    """Gemini returns NO → should_auto_plan = False."""
     judge, _ = _import_judge()
     mock_fn = _make_gemini_mock("NO")
     long_msg = "θέλω να αναλύσεις τα έξοδα του Ιουνίου μέσω ανάλυσης κατηγοριοποίησης λογιστικής"
@@ -97,16 +97,16 @@ def test_judge_returns_false_on_no():
 
 
 def test_judge_normalizes_lowercase_plan():
-    """Gemini επιστρέφει 'plan' lowercase → αναγνωρίζεται ως PLAN."""
+    """Gemini returns 'plan' lowercase → recognized as PLAN."""
     judge, _ = _import_judge()
     mock_fn = _make_gemini_mock("plan")
-    long_msg = " ".join(["κάνε"] * 25)  # 25 λέξεις → περνάει heuristic
+    long_msg = " ".join(["κάνε"] * 25)  # 25 words → passes heuristic
     with patch("services.gemini.safe_gemini_call", mock_fn, create=True):
         assert judge(long_msg) is True
 
 
 def test_judge_ignores_extra_words_after_verdict():
-    """'PLAN sure go ahead' → παίρνει μόνο το πρώτο token."""
+    """'PLAN sure go ahead' → takes only the first token."""
     judge, _ = _import_judge()
     mock_fn = _make_gemini_mock("PLAN sure go ahead")
     long_msg = " ".join(["task"] * 25)
@@ -115,7 +115,7 @@ def test_judge_ignores_extra_words_after_verdict():
 
 
 def test_judge_unknown_verdict_returns_false():
-    """Άγνωστο verdict ('MAYBE') → False (conservative)."""
+    """Unknown verdict ('MAYBE') → False (conservative)."""
     judge, _ = _import_judge()
     mock_fn = _make_gemini_mock("MAYBE")
     long_msg = " ".join(["word"] * 25)
@@ -124,7 +124,7 @@ def test_judge_unknown_verdict_returns_false():
 
 
 def test_judge_exception_returns_false():
-    """Αν το Gemini ρίξει exception → False, δεν κρασάρει."""
+    """If Gemini throws an exception → False, it does not crash."""
     judge, _ = _import_judge()
     mock_fn = MagicMock(side_effect=Exception("network error"))
     long_msg = " ".join(["fail"] * 25)
@@ -133,7 +133,7 @@ def test_judge_exception_returns_false():
 
 
 def test_judge_llm_not_called_for_short_simple():
-    """Βεβαιωνόμαστε ότι το LLM ΔΕΝ καλείται για κοντά, απλά μηνύματα."""
+    """We ensure that the LLM is NOT called for short, simple messages."""
     judge, _ = _import_judge()
     mock_fn = MagicMock()
     with patch("services.gemini.safe_gemini_call", mock_fn, create=True):
@@ -142,7 +142,7 @@ def test_judge_llm_not_called_for_short_simple():
 
 
 def test_judge_prompt_contains_message():
-    """Το prompt που στέλνεται στο LLM περιέχει το μήνυμα του χρήστη."""
+    """The prompt sent to the LLM contains the user's message."""
     judge, _ = _import_judge()
     captured = []
 
@@ -166,13 +166,13 @@ def test_judge_prompt_contains_message():
 
 def test_judge_explicit_plan_command_not_needed():
     """
-    Ο judge δεν χρειάζεται να χειρίζεται /plan — αυτό γίνεται πριν.
-    Αλλά αν περαστεί "/plan κάτι" → ελέγχουμε ότι δεν κρασάρει.
+    The judge does not need to handle /plan — this is done beforehand.
+    But if "/plan something" is passed → we check that it does not crash.
     """
     judge, _ = _import_judge()
     mock_fn = _make_gemini_mock("PLAN")
     with patch("services.gemini.safe_gemini_call", mock_fn, create=True):
-        # Δεν πρέπει να ρίξει exception
+        # Should not throw an exception
         result = judge("/plan κάνε κάτι κάτι κάτι κάτι κάτι κάτι κάτι κάτι κάτι κάτι κάτι κάτι")
         assert isinstance(result, bool)
 

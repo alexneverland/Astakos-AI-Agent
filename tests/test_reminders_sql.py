@@ -1,6 +1,6 @@
 # ================================================================
 # Tests: SQL-based reminders flow (post JSON→SQL migration)
-# Καλύπτει: clients.telegram_bot.job_check_reminders(),
+# Covers: clients.telegram_bot.job_check_reminders(),
 #           clients.telegram_bot.handle_location() (location reminders),
 #           main.reminder_worker()
 # ================================================================
@@ -12,14 +12,14 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Πάντα παλιά/μελλοντική ημερομηνία — αποφεύγουμε race conditions στο λεπτό
-# χωρίς να χρειάζεται να mockάρουμε το datetime.now() μέσα στις συναρτήσεις.
+# Always an old/future date — we avoid race conditions at the minute level
+# without needing to mock datetime.now() inside the functions.
 PAST_TIME   = "2020-01-01 00:00"
 FUTURE_TIME = "2099-01-01 00:00"
 
 
 def _make_reminders_db(path, rows):
-    """Ίδιο schema με scripts/migrate_state.py::create_tables()."""
+    """Same schema as scripts/migrate_state.py::create_tables()."""
     conn = sqlite3.connect(path)
     conn.execute(
         """
@@ -97,14 +97,14 @@ class TestJobCheckReminders:
         assert _row_status(db_path, "Στείλε email") == "pending"
 
     def test_location_reminder_excluded_from_time_query(self):
-        # loc:-prefixed time πρέπει να αγνοείται από το time-based query,
-        # ανεξάρτητα από lexicographic σύγκριση strings.
+        # loc:-prefixed time must be ignored by the time-based query,
+        # regardless of lexicographical string comparison.
         sent, db_path = self._run([{"task": "Πάρε ψωμί", "time": "loc:home"}])
         assert sent == []
         assert _row_status(db_path, "Πάρε ψωμί") == "pending"
 
     def test_duplicate_notification_skipped_and_left_pending(self):
-        # is_duplicate_notification=True → continue, όχι UPDATE.
+        # is_duplicate_notification=True → continue, not UPDATE.
         sent, db_path = self._run(
             [{"task": "Πλύσιμο αυτοκινήτου", "time": PAST_TIME}], duplicate=True
         )
@@ -122,7 +122,7 @@ class TestJobCheckReminders:
                 patch.object(bot, "is_reminders_paused", return_value=False),
                 patch.object(bot, "send_telegram_msg") as mocked_send,
             ):
-                bot.job_check_reminders()  # δεν πρέπει να σκάσει
+                bot.job_check_reminders()  # should not crash
             mocked_send.assert_not_called()
 
 
@@ -158,7 +158,7 @@ class TestLocationReminders:
         return sent, db_path
 
     def test_location_reminder_fires_within_radius(self):
-        # Ίδιες ακριβώς συντεταγμένες με HOME_COORDS → distance 0
+        # Exactly the same coordinates as HOME_COORDS → distance 0
         sent, db_path = self._run(
             [{"task": "Βγάλε το κουνέλι", "time": "loc:home"}],
             lat=self.HOME[0], lon=self.HOME[1],
@@ -168,7 +168,7 @@ class TestLocationReminders:
         assert _row_status(db_path, "Βγάλε το κουνέλι") == "done"
 
     def test_location_reminder_does_not_fire_outside_radius(self):
-        # ~1.2km βόρεια του home_coords (0.01 μοίρα lat ≈ 1.1km) — εκτός 150m radius
+        # ~1.2km north of home_coords (0.01 degree lat ≈ 1.1km) — outside 150m radius
         sent, db_path = self._run(
             [{"task": "Πάρε γάλα", "time": "loc:home"}],
             lat=self.HOME[0] + 0.01, lon=self.HOME[1],
@@ -202,9 +202,9 @@ class TestMainReminderWorker:
         monkeypatch.setattr(main_mod, "STATE_DB", db_path)
         monkeypatch.setattr(main_mod, "send_telegram_msg", lambda m: sent.append(m))
 
-        # Αναγκάζει το while loop να τρέξει ΑΚΡΙΒΩΣ μία φορά:
-        # το πρώτο wait() κάνει set() στο shutdown_event και επιστρέφει,
-        # οπότε το επόμενο while-check βγάζει τη συνάρτηση χωρίς πραγματικό sleep.
+        # Forces the while loop to run EXACTLY once:
+        # the first wait() sets the shutdown_event and returns,
+        # so the next while-check exits the function without an actual sleep.
         def fake_wait(timeout=None):
             main_mod.shutdown_event.set()
             return True

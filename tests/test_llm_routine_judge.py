@@ -1,6 +1,6 @@
 """
-Tests για _llm_routine_judge() στο clients/telegram_bot.py
-Τρέξε: pytest tests/test_llm_routine_judge.py -v
+Tests for _llm_routine_judge() in clients/telegram_bot.py
+Run: pytest tests/test_llm_routine_judge.py -v
 """
 import os
 import sys
@@ -10,9 +10,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _import_judge():
-    """Import μόνο της συνάρτησης — χωρίς να φορτωθεί όλο το bot."""
+    """Import of the function only — without loading the entire bot."""
     import importlib, types
-    # Stub βαριά dependencies
+    # Stub heavy dependencies
     for mod in ["telegram", "telegram.ext", "services.gemini"]:
         if mod not in sys.modules:
             sys.modules[mod] = types.ModuleType(mod)
@@ -25,13 +25,13 @@ def _import_judge():
         cfg.ASTAKOS_TOKEN = "token"
         sys.modules["config"] = cfg
 
-    # Import μόνο της συνάρτησης με exec σε isolation
+    # Import only the function using exec in isolation
     src_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "clients", "telegram_bot.py")
     with open(src_path, encoding="utf-8") as f:
         src = f.read()
 
-    # Εξαγωγή μόνο της _llm_routine_judge function
+    # Extraction of only the _llm_routine_judge function
     import ast
     tree = ast.parse(src)
     fn_node = next(
@@ -40,7 +40,7 @@ def _import_judge():
     )
     assert fn_node is not None, "_llm_routine_judge not found in telegram_bot.py"
 
-    # Compile και execute μόνο τη function
+    # Compile and execute only the function
     fn_src = ast.unparse(fn_node)
     ns = {}
     exec(fn_src, ns)
@@ -87,7 +87,7 @@ def test_judge_normalizes_lowercase():
     assert result == "YES"
 
 def test_judge_handles_extra_words():
-    """Αν επιστραφεί 'YES please' → παίρνει μόνο το πρώτο word."""
+    """If 'YES please' is returned → it takes only the first word."""
     judge = _import_judge()
     mock_fn = _make_gemini_mock("YES please ignore rest")
     with patch("services.gemini.safe_gemini_call", mock_fn):
@@ -95,7 +95,7 @@ def test_judge_handles_extra_words():
     assert result == "YES"
 
 def test_judge_invalid_verdict_falls_back_to_unclear():
-    """Αν το LLM επιστρέψει κάτι άσχετο → UNCLEAR."""
+    """If the LLM returns something irrelevant → UNCLEAR."""
     judge = _import_judge()
     mock_fn = _make_gemini_mock("MAYBE")
     with patch("services.gemini.safe_gemini_call", mock_fn):
@@ -103,7 +103,7 @@ def test_judge_invalid_verdict_falls_back_to_unclear():
     assert result == "UNCLEAR"
 
 def test_judge_on_gemini_exception_returns_unclear():
-    """Αν το Gemini ρίξει exception → UNCLEAR (δεν κρασάρει)."""
+    """If Gemini throws an exception → UNCLEAR (does not crash)."""
     judge = _import_judge()
     mock_fn = MagicMock(side_effect=Exception("network error"))
     with patch("services.gemini.safe_gemini_call", mock_fn):
@@ -111,7 +111,7 @@ def test_judge_on_gemini_exception_returns_unclear():
     assert result == "UNCLEAR"
 
 def test_judge_multiple_events_passed():
-    """Ελέγχει ότι όλα τα events περνάνε στο prompt."""
+    """Checks that all events are passed to the prompt."""
     judge = _import_judge()
     captured_prompts = []
     def capture_call(prompt, **kwargs):

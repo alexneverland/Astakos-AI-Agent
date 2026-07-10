@@ -1,9 +1,9 @@
 """
-Integration-ish tests για GET /messages/poll.
+Integration-ish tests for GET /messages/poll.
 
-Δεν εκκινεί τον πλήρη server (αποφεύγει LangGraph/Gemini imports).
-Χτίζει minimal FastAPI app με το πραγματικό poll_messages handler
-και real memory.conversation_history DB — μόνο auth γίνεται override.
+Does not spin up the full server (avoids LangGraph/Gemini imports).
+Builds a minimal FastAPI app using the actual poll_messages handler
+and real memory.conversation_history DB — only auth is overridden.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,12 +15,12 @@ from fastapi.testclient import TestClient
 import memory.conversation_history as ch
 
 
-# ── Minimal app που αντικαθρεπτίζει τον πραγματικό handler ─────
+# ── Minimal app that mirrors the real handler ─────
 
 def _make_app(db_path: str) -> FastAPI:
     """
-    Δημιουργεί minimal FastAPI app με το /messages/poll endpoint.
-    Το require_token γίνεται no-op. Το DB path είναι fixed per-test.
+    Creates a minimal FastAPI app with the /messages/poll endpoint.
+    The require_token becomes a no-op. The DB path is fixed per-test.
     """
     app = FastAPI()
 
@@ -61,7 +61,7 @@ def test_poll_empty_db(tmp_path):
 
 
 def test_poll_returns_all_when_after_id_zero(tmp_path):
-    """after_id=0 → επιστρέφει όλα τα μηνύματα."""
+    """after_id=0 → returns all messages."""
     db = _db(tmp_path)
     ch.append_message(role="user",      content="A", channel="telegram", db_path=db)
     ch.append_message(role="assistant", content="B", channel="telegram", db_path=db)
@@ -75,7 +75,7 @@ def test_poll_returns_all_when_after_id_zero(tmp_path):
 
 
 def test_poll_after_id_returns_only_new(tmp_path):
-    """after_id=N → μόνο μηνύματα με rowid > N."""
+    """after_id=N → only messages with rowid > N."""
     db = _db(tmp_path)
     ch.append_message(role="user", content="old", channel="telegram", db_path=db)
     mid = ch.get_max_rowid(db_path=db)
@@ -90,7 +90,7 @@ def test_poll_after_id_returns_only_new(tmp_path):
 
 
 def test_poll_max_id_advances(tmp_path):
-    """max_id αυξάνεται μετά από νέα μηνύματα."""
+    """max_id increases after new messages."""
     db = _db(tmp_path)
     client = TestClient(_make_app(db))
 
@@ -103,7 +103,7 @@ def test_poll_max_id_advances(tmp_path):
 
 
 def test_poll_channel_filter(tmp_path):
-    """channel=telegram → δεν επιστρέφει web μηνύματα."""
+    """channel=telegram → does not return web messages."""
     db = _db(tmp_path)
     ch.append_message(role="user", content="tg_msg",  channel="telegram", db_path=db)
     ch.append_message(role="user", content="web_msg", channel="web",      db_path=db)
@@ -117,7 +117,7 @@ def test_poll_channel_filter(tmp_path):
 
 
 def test_poll_no_channel_returns_all_channels(tmp_path):
-    """Χωρίς channel param → επιστρέφει telegram + web μαζί."""
+    """Without channel param → returns telegram + web together."""
     db = _db(tmp_path)
     ch.append_message(role="user", content="tg",  channel="telegram", db_path=db)
     ch.append_message(role="user", content="web", channel="web",      db_path=db)
@@ -129,7 +129,7 @@ def test_poll_no_channel_returns_all_channels(tmp_path):
 
 
 def test_poll_rowid_present_in_messages(tmp_path):
-    """Κάθε message έχει rowid (integer) — χρειάζεται το frontend cursor."""
+    """Each message has a rowid (integer) — the frontend cursor is required."""
     db = _db(tmp_path)
     ch.append_message(role="user", content="msg", channel="telegram", db_path=db)
 
@@ -141,7 +141,7 @@ def test_poll_rowid_present_in_messages(tmp_path):
 
 
 def test_poll_incremental_two_rounds(tmp_path):
-    """Simulate two polling rounds: δεύτερο round φέρνει μόνο νέα."""
+    """Simulate two polling rounds: second round brings only new data."""
     db = _db(tmp_path)
     client = TestClient(_make_app(db))
 

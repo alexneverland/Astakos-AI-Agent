@@ -1,6 +1,6 @@
 """
-Tests για το Routine State Machine.
-Τρεξε: python -m pytest tests/ -v
+Tests for the Routine State Machine.
+Run: python -m pytest tests/ -v
 """
 import pytest
 import sys, os

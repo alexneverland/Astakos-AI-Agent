@@ -1,7 +1,7 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Skill:   Nutrition Analyzer — /nutrition
-# Ανάλυση συστατικών τροφίμου από φωτογραφία (ετικέτα/συσκευασία).
+# Analysis of food ingredients from a photo (label/packaging).
 # ================================================================
 
 import os
@@ -15,8 +15,8 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or ""
 
 def analyze_nutrition(image_path: str, product_hint: str = "") -> str:
     """
-    Παίρνει path φωτογραφίας, στέλνει στο Vision LLM και επιστρέφει
-    ανάλυση διατροφικής αξίας / υγιεινότητας σε Ελληνικά.
+    Takes a photo path, sends it to the Vision LLM, and returns
+    a nutritional value / healthiness analysis in Greek.
     """
     from core.brain import llm
     from core.agents import clean_message

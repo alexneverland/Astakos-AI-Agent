@@ -29,11 +29,11 @@ def test_format_recent_messages_keeps_order_and_speaker_labels():
 
 
 def test_format_recent_messages_marks_yesterday_so_it_is_not_confused_with_today():
-    """Bug πραγματικού περιστατικού: ο Αστακός είδε ένα χθεσινοβραδινό μήνυμα για
-    μπριζόλες δίπλα σε ένα σημερινό για φακές, και τα μπέρδεψε -- επειδή και τα
-    δύο εμφανίζονταν σαν γυμνό '[telegram 20:Χ]' χωρίς ένδειξη μέρας. Η γραμμή
-    του 'σήμερα' πρέπει να μένει ΑΚΡΙΒΩΣ όπως πριν (καμία αλλαγή για την
-    συντριπτική πλειοψηφία), ενώ η χθεσινή πρέπει να σημαδεύεται καθαρά.
+    """Real-world bug: Astakos saw a message from last night about
+    steaks next to one from today about lentils, and got them mixed up -- because both
+    appeared as a bare '[telegram 20:X]' without any day indication. The line
+    for 'today' must remain EXACTLY as before (no change for the
+    vast majority), while yesterday's must be clearly marked.
     """
     import datetime as dt
 
@@ -317,9 +317,9 @@ def test_empty_memory_context_renders_empty():
 
 
 def test_temporal_history_matches_inflected_query_against_stored_form():
-    """Η αποθηκευμένη φράση χρησιμοποιεί 'γενέθλια'/'Αλέξανδρου' (ονομαστική/γενική),
-    η ερώτηση χρησιμοποιεί 'γενεθλιών' (γενική πληθυντικού) — φυσιολογική διατύπωση
-    που πριν το stemming θα έχανε το scoring boost λόγω ακριβούς substring match."""
+    """The stored phrase uses 'γενέθλια'/'Αλέξανδρου' (nominative/genitive),
+    the query uses 'γενεθλιών' (genitive plural) — a natural formulation
+    which before stemming would lose the scoring boost due to exact substring match."""
     def fake_history_loader(**kwargs):
         return [
             {
@@ -359,7 +359,7 @@ def test_semantic_skip_simple_ack_skipped():
         calls["semantic"] += 1
         return [_Doc("[USER_FACT] stale")]
 
-    # "ναι" is a simple ack, should skip semantic search
+    # "yes" is a simple ack, should skip semantic search
     query = "[10:24] ναι"
     context = build_memory_context(
         query,
@@ -508,7 +508,7 @@ def test_semantic_skip_short_important_kept():
         calls["semantic"] += 1
         return [_Doc("[USER_FACT] αλέξανδρος info")] if k > 0 else []
 
-    # Short message, but mentions "Αλέξανδρος" -> kept
+    # Short message, but mentions "Alexandros" -> kept
     query = "[10:24] ο Αλέξανδρος γύρισε"
     context = build_memory_context(
         query,
@@ -552,7 +552,7 @@ def test_semantic_skip_work_message_kept():
         calls["semantic"] += 1
         return [_Doc("[USER_FACT] work info")] if k > 0 else []
 
-    # Short message, but mentions "δουλειά" -> kept
+    # Short message, but mentions "work" -> kept
     query = "[10:24] είμαι στη δουλειά"
     context = build_memory_context(
         query,

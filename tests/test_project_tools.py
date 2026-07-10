@@ -1,6 +1,6 @@
 """
-Tests για tools/project_tools.py — permission model, read/edit/grep/list.
-Τρεξε: python -m pytest tests/test_project_tools.py -v
+Tests for tools/project_tools.py — permission model, read/edit/grep/list.
+Run: python -m pytest tests/test_project_tools.py -v
 """
 import sys, os, json, tempfile, textwrap
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -87,7 +87,7 @@ def test_syntax_check_invalid_python():
 def test_syntax_check_skips_non_python():
     from tools.project_tools import _syntax_check
     ok, err = _syntax_check("not python {{ invalid }}", "template.html")
-    assert ok  # non-.py αρχεία δεν ελέγχονται
+    assert ok  # non-.py files are not checked
 
 
 # ── read_project_file ─────────────────────────────────────────────
@@ -169,7 +169,7 @@ def test_edit_project_file_syntax_check_catches_error(tmp_path):
             new_str="return (1",  # broken syntax
         )
     assert "SyntaxError" in result or "❌" in result
-    # Αρχείο δεν πρέπει να άλλαξε
+    # File must not have changed
     with open(path) as f:
         assert "return 1" in f.read()
 
@@ -218,7 +218,7 @@ def test_list_project_files_returns_py_files(tmp_path):
     assert "views.py" in result
 
 
-# ── tool_risk για project tools ───────────────────────────────────
+# ── tool_risk for project tools ───────────────────────────────────
 
 def test_grant_project_access_is_critical():
     from core.tool_risk import get_risk
@@ -254,7 +254,7 @@ def test_edit_project_file_core_is_critical():
 # ── grep_project_files in all_tools ──────────────────────────────
 
 def test_grep_project_files_in_all_tools():
-    """Ελέγχει ότι grep_project_files αναφέρεται στο all_tools section του system.py."""
+    """Checks that grep_project_files is referenced in the all_tools section of system.py."""
     import os as _os
     system_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'tools', 'system.py')
     with open(system_path, 'r', encoding='utf-8') as f:

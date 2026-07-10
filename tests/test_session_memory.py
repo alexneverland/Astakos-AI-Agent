@@ -377,7 +377,7 @@ def test_memory_sifter_includes_recent_session_context_in_prompt(monkeypatch):
     assert "Τι θα φτιάξουμε;" in prompt
     assert "ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ" in prompt
     assert "Ωραία τα φτιάξαμε" in prompt
-    # Σειρά: παλιό πλαίσιο -> δείκτης τρέχουσας -> τρέχουσα ανταλλαγή
+    # Order: old frame -> current index -> current exchange
     assert (
         prompt.index("ΠΡΟΗΓΟΥΜΕΝΟ ΠΛΑΙΣΙΟ")
         < prompt.index("ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ")
@@ -447,7 +447,7 @@ def test_memory_sifter_skips_operational_mail_image_request(monkeypatch):
 # ─── Ephemeral conversational source tests ────────────────────────────────────
 
 def test_ephemeral_conversational_message_is_not_saved(monkeypatch):
-    """Conversational trash like 'Ναι φίλε μόλις φάγαμε και σε 10 λεπτά πάμε για ύπνο'
+    """Conversational trash like 'Yeah buddy we just ate and in 10 minutes we are going to sleep'
     must NOT be saved — it has zero future value."""
     from memory import session_memory as sm
 
@@ -456,7 +456,7 @@ def test_ephemeral_conversational_message_is_not_saved(monkeypatch):
     monkeypatch.setattr(sm, "safe_gemini_call", lambda prompt: type("R", (), {
         "text": """[
             {
-                "fact": "[USER_FACT]: Στις 2026-06-28, Ναι φίλε μόλις φάγαμε τις γίγαντες και σε 10 λεπτά πάμε για ύπνο",
+                "fact": "[USER_FACT]: On 2026-06-28, Yes my friend we just ate the giant beans and in 10 minutes we are going to sleep",
                 "category": "lazaros",
                 "topic": "health",
                 "topic_detail": "sleep",
@@ -479,7 +479,7 @@ def test_ephemeral_conversational_message_is_not_saved(monkeypatch):
 
 
 def test_food_family_outcome_still_saves(monkeypatch):
-    """Meaningful food/family outcomes ('Ο Αλέξανδρος ενθουσιάστηκε') MUST be saved."""
+    """Meaningful food/family outcomes ('Alexandros was thrilled') MUST be saved."""
     from memory import session_memory as sm
 
     saved = []
@@ -491,7 +491,7 @@ def test_food_family_outcome_still_saves(monkeypatch):
     monkeypatch.setattr(sm, "safe_gemini_call", lambda prompt: type("R", (), {
         "text": """[
             {
-                "fact": "[USER_FACT]: Στις 2026-06-28, Ο Αλέξανδρος ενθουσιάστηκε ξανά με τους γίγαντες",
+                "fact": "[USER_FACT]: On 2026-06-28, Alexandros became excited about giant beans (gigantes) again",
                 "category": "family",
                 "topic": "food",
                 "topic_detail": "meal_prep",

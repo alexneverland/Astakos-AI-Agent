@@ -1,13 +1,13 @@
 """
-Tests για το tools.system.control_routine_schedule (pause/resume/set_window/clear_window).
-Ίδιο στυλ με test_routine_control_notifications.py: monkeypatch στο πραγματικό
-memory.routine_db module, κλήση μέσω .func(...) στο underlying function του @tool.
+Tests for tools.system.control_routine_schedule (pause/resume/set_window/clear_window).
+Same style as test_routine_control_notifications.py: monkeypatch on the actual
+memory.routine_db module, call via .func(...) on the underlying function of the @tool.
 """
 
 
 def _two_routines():
-    """Fixture: 2 ρουτίνες με το ίδιο όνομα (ποδόσφαιρο Αλέξανδρου, ids 13/14) —
-    το ίδιο fixture pattern με test_routine_control_notifications.py / live DB."""
+    """Fixture: 2 routines with the same name (Alexandros' football, ids 13/14) —
+    the same fixture pattern as test_routine_control_notifications.py / live DB."""
     return [
         {"id": 13, "event": "ποδόσφαιρο Αλέξανδρου", "day": "Monday"},
         {"id": 14, "event": "ποδόσφαιρο Αλέξανδρου", "day": "Thursday"},
@@ -15,7 +15,7 @@ def _two_routines():
 
 
 # ─────────────────────────────────────────────────────────────
-# G: πολλαπλές ρουτίνες με το ίδιο όνομα → action εφαρμόζεται σε ΟΛΕΣ
+# G: multiple routines with the same name → action is applied to ALL
 # ─────────────────────────────────────────────────────────────
 
 def test_pause_applies_to_all_exact_name_matches(monkeypatch):
@@ -59,7 +59,7 @@ def test_pause_applies_to_all_exact_name_matches(monkeypatch):
 
 
 def test_pause_is_idempotent_when_already_paused_later(monkeypatch):
-    """Αν είναι ήδη παγωμένη μέχρι ΜΕΤΑγενέστερη ημερομηνία, δεν κάνει τίποτα."""
+    """If it is already frozen until a LATER date, it does nothing."""
     import tools.system as system
     import memory.routine_db as rdb
 
@@ -82,7 +82,7 @@ def test_pause_is_idempotent_when_already_paused_later(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────
-# H: resume αφαιρεί την παύση
+# H: resume removes the pause
 # ─────────────────────────────────────────────────────────────
 
 def test_resume_clears_paused_state_for_all_matches(monkeypatch):

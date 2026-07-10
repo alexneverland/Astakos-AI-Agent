@@ -1,7 +1,7 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Skill: Story Maker για τον Αλέξανδρο
-# Δημιουργεί παραμύθι + 3 εικόνες σκηνών μέσω Pollinations.ai
+# Skill: Story Maker for Alexander
+# Generates a fairy tale + 3 scene images via Pollinations.ai
 # ================================================================
 
 import os
@@ -12,9 +12,9 @@ import requests
 
 # ── Pollinations image generator ────────────────────────────────
 def _generate_image(prompt: str, output_dir: str, index: int) -> str | None:
-    """Δημιουργεί μία εικόνα. Επιστρέφει path ή None αν αποτύχει."""
+    """Creates an image. Returns the path, or None if it fails."""
     try:
-        # Παιδικό στυλ: ζωγραφιά, έντονα χρώματα, ευτυχισμένο
+        # Children's style: drawing, vibrant colors, happy
         styled = (
             f"{prompt}, children's book illustration, watercolor, "
             f"colorful, cute, magical, soft lighting, 6 year old friendly, "
@@ -37,7 +37,7 @@ def _generate_image(prompt: str, output_dir: str, index: int) -> str | None:
 
 # ── LLM story + scene prompts ────────────────────────────────────
 def _generate_story_and_prompts(theme: str, characters: str = "") -> dict:
-    """Καλεί Gemini για παραμύθι + 3 prompts εικόνων."""
+    """Calls Gemini for a fairy tale + 3 image prompts."""
     try:
         import vertexai
         from vertexai.generative_models import GenerativeModel
@@ -66,7 +66,7 @@ SCENE3: [σύντομη αγγλική περιγραφή σκηνής για ε
         )
         raw = response.text.strip()
 
-        # Χωρίζουμε παραμύθι από scenes
+        # Split fairytale into scenes
         scenes = []
         story_lines = []
         for line in raw.splitlines():
@@ -77,7 +77,7 @@ SCENE3: [σύντομη αγγλική περιγραφή σκηνής για ε
                 story_lines.append(line)
 
         story_text = "\n".join(story_lines).strip()
-        # Fallback scenes αν το μοντέλο δεν τις έγραψε
+        # Fallback scenes if the model didn't write them
         if not scenes:
             scenes = [
                 f"A brave child hero in a magical {theme} adventure",
@@ -95,7 +95,7 @@ SCENE3: [σύντομη αγγλική περιγραφή σκηνής για ε
 # ── Main entry point ─────────────────────────────────────────────
 def make_story(theme: str, characters: str = "") -> dict:
     """
-    Κύρια συνάρτηση. Επιστρέφει:
+    Main function. Returns:
     {
       "story": "...",
       "images": ["/path/img1.jpg", "/path/img2.jpg", "/path/img3.jpg"],
@@ -119,7 +119,7 @@ def make_story(theme: str, characters: str = "") -> dict:
         path = _generate_image(scene_prompt, output_dir, i)
         if path:
             images.append(path)
-        time.sleep(1)  # μικρή παύση ανάμεσα σε requests
+        time.sleep(1)  # short pause between requests
 
     return {
         "story": result["story"],

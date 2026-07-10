@@ -1,8 +1,8 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Action Approval — CRITICAL tool gate
-# Αν tool είναι CRITICAL → αποθηκεύει pending, στέλνει Telegram
-# Αν SAFE/WARNING → αφήνει το graph να συνεχίσει κανονικά
+# If tool is CRITICAL → saves as pending, sends Telegram message
+# If SAFE/WARNING → lets the graph continue normally
 # ================================================================
 
 import os
@@ -12,8 +12,8 @@ from core.tool_risk import get_risk as _get_risk
 
 def _effective_risk(tc: dict) -> str:
     """
-    Υπολογίζει το πραγματικό risk level ενός tool call.
-    Για run_terminal_command: χρησιμοποιεί classify_command() αντί για static registry.
+    Calculates the actual risk level of a tool call.
+    For run_terminal_command: uses classify_command() instead of a static registry.
     """
     name = tc["name"]
     if name == "run_terminal_command":
@@ -90,15 +90,15 @@ PENDING_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "astakos_pending_approval.json"
 )
 
-# Pending actions παλαιότερα από αυτό θεωρούνται expired και αφαιρούνται αυτόματα.
-PENDING_TTL_SECONDS: int = 3600  # 60 λεπτά
+# Pending actions older than this are considered expired and are automatically removed.
+PENDING_TTL_SECONDS: int = 3600  # 60 minutes
 
 # ────────────────────────────────────────────────────────────────
 # Pending approval store
 # ────────────────────────────────────────────────────────────────
 
 def save_pending(tool_name: str, tool_args: dict, tool_call_id: str, channel: str = "telegram"):
-    """Αποθηκεύει CRITICAL tool call για αργότερα."""
+    """Saves CRITICAL tool call for later."""
     pending = _load_pending()
     pending[tool_call_id] = {
         "tool_name":   tool_name,
@@ -116,7 +116,7 @@ def get_pending(tool_call_id: str) -> dict | None:
 
 
 def resolve_pending(tool_call_id: str, approved: bool):
-    """Σημειώνει ως approved/rejected."""
+    """Marks as approved/rejected."""
     pending = _load_pending()
     if tool_call_id in pending:
         pending[tool_call_id]["status"] = "approved" if approved else "rejected"
@@ -125,7 +125,7 @@ def resolve_pending(tool_call_id: str, approved: bool):
 
 
 def pop_pending(tool_call_id: str) -> dict | None:
-    """Διαβάζει και αφαιρεί από το pending store."""
+    """Reads and removes from the pending store."""
     pending = _load_pending()
     item = pending.pop(tool_call_id, None)
     if item:
@@ -139,8 +139,8 @@ def list_pending() -> list[dict]:
 
 def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
     """
-    Εκτελεί pending action που έχει εγκριθεί από UI/Telegram.
-    Το pending αφαιρείται μόνο μετά από επιτυχημένο tool.invoke().
+    Executes a pending action that has been approved by the UI/Telegram.
+    The pending action is removed only after a successful tool.invoke().
     """
     item = get_pending(tool_call_id)
     if not item:
@@ -193,7 +193,7 @@ def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
 
 
 def _load_pending_raw() -> dict:
-    """Φορτώνει το pending store χωρίς TTL cleanup (χρησιμοποιείται εσωτερικά)."""
+    """Loads the pending store without TTL cleanup (used internally)."""
     if not os.path.exists(PENDING_FILE):
         return {}
     try:
@@ -205,9 +205,9 @@ def _load_pending_raw() -> dict:
 
 def expire_stale_pending() -> list:
     """
-    Αφαιρεί pending actions που έχουν υπερβεί το PENDING_TTL_SECONDS.
-    Επιστρέφει λίστα με τα tool_call_ids που έγιναν expired.
-    Καλείται αυτόματα σε κάθε _load_pending().
+    Removes pending actions that have exceeded PENDING_TTL_SECONDS.
+    Returns a list of the tool_call_ids that expired.
+    Called automatically on every _load_pending().
     """
     pending = _load_pending_raw()
     now = datetime.now()
@@ -232,7 +232,7 @@ def expire_stale_pending() -> list:
 
 
 def _load_pending() -> dict:
-    """Φορτώνει μόνο ενεργά (non-expired, non-resolved) pending entries."""
+    """Loads only active (non-expired, non-resolved) pending entries."""
     expire_stale_pending()
     return _load_pending_raw()
 
@@ -248,10 +248,10 @@ def _save_pending(data: dict):
 
 def approval_check_node(state):
     """
-    Τρέχει πριν το ToolNode.
-    - SAFE / WARNING → state["approval_status"] = "ok" → συνεχίζει στα tools
-    - BLOCKED        → κόβεται άμεσα από safe executor, βάζει "blocked"
-    - CRITICAL       → αποθηκεύει pending, στέλνει Telegram, βάζει "pending"
+    Runs before the ToolNode.
+    - SAFE / WARNING → state["approval_status"] = "ok" → continues to tools
+    - BLOCKED        → immediately cut off by safe executor, sets "blocked"
+    - CRITICAL       → saves pending, sends Telegram, sets "pending"
     """
     from langchain_core.messages import AIMessage, ToolMessage
 
@@ -280,9 +280,9 @@ def approval_check_node(state):
     critical_calls = [tc for tc in tool_calls if is_critical(tc)]
 
     # ── Plan mode bypass ───────────────────────────────────────────
-    # Αν εκτελούμε βήμα εγκεκριμένου plan, τα CRITICAL tools εκτελούνται
-    # χωρίς επιπλέον Telegram confirmation — ο χρήστης ενέκρινε ήδη το plan.
-    # Εξαιρούνται: run_terminal_command (πάντα χρειάζεται ρητή έγκριση).
+    # If we are executing a step of an approved plan, CRITICAL tools are executed
+    # without extra Telegram confirmation — the user already approved the plan.
+    # Excluded: run_terminal_command (always requires explicit approval).
     if critical_calls and state.get("plan_active"):
         bypassed = [tc for tc in critical_calls if tc["name"] != "run_terminal_command"]
         still_critical = [tc for tc in critical_calls if tc["name"] == "run_terminal_command"]
@@ -294,14 +294,14 @@ def approval_check_node(state):
     if not critical_calls:
         risk_levels = [_effective_risk(tc) for tc in tool_calls]
 
-        # NOTIFY: εκτελεί + Telegram info (χωρίς buttons)
+        # NOTIFY: executes + Telegram info (without buttons)_
         if "NOTIFY" in risk_levels:
             for tc in tool_calls:
                 if _effective_risk(tc) == "NOTIFY":
                     print(f"\033[96m[Approval]: 📣 NOTIFY tool: {tc['name']}\033[0m")
                     _notify_telegram_notify(tc)
 
-        # WARNING: εκτελεί + log μόνο στο console, χωρίς Telegram
+        # WARNING: executes + logs only in the console, without Telegram
         elif "WARNING" in risk_levels:
             for tc in tool_calls:
                 if _effective_risk(tc) == "WARNING":
@@ -309,17 +309,17 @@ def approval_check_node(state):
 
         return {"approval_status": "ok"}
 
-    # Υπάρχουν CRITICAL calls — τα αποθηκεύουμε και ζητάμε approval
+    # There are CRITICAL calls — we save them and request approval
     tool_messages = []
     current_channel = state.get("channel", "telegram")
     for tc in critical_calls:
         save_pending(tc["name"], tc.get("args", {}), tc["id"], channel=current_channel)
         print(f"\033[91m[Approval]: 🚨 CRITICAL — {tc['name']} blocked, awaiting approval\033[0m")
 
-        # Στέλνουμε Telegram notification
+        # We send a Telegram notification
         _notify_telegram(tc)
 
-        # Επιστρέφουμε ToolMessage ώστε το graph να μην κολλήσει
+        # We return a ToolMessage so that the graph does not get stuck
         tool_messages.append(ToolMessage(
             content=f"⏳ Αναμονή έγκρισης για `{tc['name']}`. Σου έστειλα Telegram για επιβεβαίωση.",
             tool_call_id=tc["id"],
@@ -333,7 +333,7 @@ def approval_check_node(state):
 
 
 def _args_preview(args: dict) -> str:
-    """Φτιάχνει ασφαλές preview των args χωρίς special chars."""
+    """Creates a safe preview of the args without special chars."""
     import html
     parts = []
     for k, v in args.items():
@@ -343,7 +343,7 @@ def _args_preview(args: dict) -> str:
 
 
 def _notify_telegram_notify(tool_call: dict):
-    """Στέλνει Telegram info για NOTIFY tools (εκτελείται, χωρίς approve/reject)."""
+    """Sends Telegram info for NOTIFY tools (executed, without approve/reject)."""
     try:
         from tools.telegram import send_telegram_msg
         tool_name = tool_call["name"]
@@ -358,7 +358,7 @@ def _notify_telegram_notify(tool_call: dict):
 
 
 def _notify_telegram(tool_call: dict):
-    """Στέλνει Telegram inline keyboard για CRITICAL approval."""
+    """Sends a Telegram inline keyboard for CRITICAL approval."""
     try:
         import requests
         from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID

@@ -1,6 +1,6 @@
 """
-Tests για τα νέα skills: repo_mapper + register_tool.
-Τρέξε: pytest tests/test_new_skills.py -v
+Tests for the new skills: repo_mapper + register_tool.
+Run: pytest tests/test_new_skills.py -v
 """
 import sys, os, json, tempfile, shutil
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,10 +19,10 @@ def test_repo_mapper_invalid_folder():
 
 
 def test_repo_mapper_valid_folder(tmp_path):
-    """Σκανάρει ένα temp folder με .py αρχεία."""
+    """Scans a temp folder with .py files."""
     from astakos_skills.repo_mapper import repo_mapper
 
-    # Δημιουργία test structure
+    # Create test structure
     (tmp_path / "main.py").write_text(
         "def hello(): pass\nclass MyClass: pass\n", encoding="utf-8"
     )
@@ -63,7 +63,7 @@ def test_repo_mapper_depth_limit(tmp_path):
     (deep / "deep.py").write_text("x = 1\n", encoding="utf-8")
 
     result = repo_mapper.func(folder_path=str(tmp_path), max_depth=2)
-    assert "deep.py" not in result  # depth=2 δεν φτάνει σε a/b/c
+    assert "deep.py" not in result  # depth=2 is not enough to reach a/b/c
 
 
 def test_repo_mapper_json_output(tmp_path):
@@ -75,7 +75,7 @@ def test_repo_mapper_json_output(tmp_path):
     result = repo_mapper.func(folder_path=str(tmp_path), max_depth=2)
 
     assert "```json" in result
-    # Εξαγωγή JSON block
+    # JSON block extraction
     json_part = result.split("```json")[1].split("```")[0].strip()
     data = json.loads(json_part)
     assert "mod.py" in data
@@ -86,7 +86,7 @@ def test_repo_mapper_json_output(tmp_path):
 def test_repo_mapper_max_depth_clamped(tmp_path):
     from astakos_skills.repo_mapper import repo_mapper
     (tmp_path / "f.py").write_text("x=1\n", encoding="utf-8")
-    # max_depth=99 πρέπει να γίνει clamp στο 6
+    # max_depth=99 must be clamped to 6
     result = repo_mapper.func(folder_path=str(tmp_path), max_depth=99)
     assert "❌" not in result
 
@@ -96,7 +96,7 @@ def test_repo_mapper_max_depth_clamped(tmp_path):
 # ═══════════════════════════════════════════════════════════════
 
 def _make_fake_project(tmp_path):
-    """Δημιουργεί fake project structure για test."""
+    """Creates a fake project structure for testing."""
     skills = tmp_path / "astakos_skills"
     skills.mkdir()
     core = tmp_path / "core"
@@ -355,7 +355,7 @@ def test_register_tool_full_registration(tmp_path):
     from astakos_skills.register_tool import register_tool
     proj = _make_fake_project(tmp_path)
 
-    # Δημιουργία του skill αρχείου
+    # Creation of the skill file
     (proj / "astakos_skills" / "my_tool.py").write_text(
         "from langchain_core.tools import tool\n@tool\ndef my_tool(x: str) -> str: return x\n",
         encoding="utf-8"
@@ -393,7 +393,7 @@ def test_register_tool_full_registration(tmp_path):
 
 
 def test_register_tool_idempotent(tmp_path):
-    """Δεύτερη κλήση δεν κάνει διπλοεγγραφή."""
+    """A second call does not create a duplicate entry."""
     from astakos_skills.register_tool import register_tool
     proj = _make_fake_project(tmp_path)
     _write_minimal_skill(proj / "astakos_skills" / "my_tool.py")

@@ -37,7 +37,7 @@ def migrate():
     count = 0
     for category, items in data.items():
         if isinstance(items, dict):
-            # Για την κατηγορία contacts που είναι dictionary {name: phone}
+            # For the contacts category which is a dictionary {name: phone}
             for k, v in items.items():
                 fact_str = f"{k}: {v}"
                 c.execute('''
@@ -65,7 +65,7 @@ def migrate():
     conn.commit()
     conn.close()
     
-    # Μετονομάζουμε το παλιό json για backup
+    # Rename the old json for backup
     backup_file = JSON_FILE + ".backup"
     os.replace(JSON_FILE, backup_file)
     print(f"Το migration ολοκληρώθηκε! Μεταφέρθηκαν {count} εγγραφές.")

@@ -1,6 +1,6 @@
 """
-Tests για replan_node() και end_check_node() στο core/planner.py
-Τρέξε: pytest tests/test_pr3.py -v
+Tests for replan_node() and end_check_node() in core/planner.py
+Run: pytest tests/test_pr3.py -v
 """
 import os
 import sys
@@ -69,7 +69,7 @@ def _base_state(idx=0, tasks=None, results=None, skipped=None):
 # ══════════════════════════════════════════════════════════════════
 
 def test_replan_increments_index():
-    """replan_node αυξάνει plan_index κατά 1."""
+    """replan_node increments plan_index by 1."""
     replan, _ = _import_nodes()
     state  = _base_state(idx=0)
     result = replan(state)
@@ -77,7 +77,7 @@ def test_replan_increments_index():
 
 
 def test_replan_appends_to_results():
-    """replan_node προσθέτει skip entry στα αποτελέσματα."""
+    """replan_node adds a skip entry to the results."""
     replan, _ = _import_nodes()
     state  = _base_state(idx=1, results=["ok βήμα 1"])
     result = replan(state)
@@ -87,7 +87,7 @@ def test_replan_appends_to_results():
 
 
 def test_replan_records_skipped_index():
-    """replan_node καταγράφει το idx στη λίστα skipped."""
+    """replan_node records the idx in the skipped list."""
     replan, _ = _import_nodes()
     state  = _base_state(idx=1)
     result = replan(state)
@@ -95,7 +95,7 @@ def test_replan_records_skipped_index():
 
 
 def test_replan_accumulates_multiple_skips():
-    """Πολλαπλά skips: η λίστα μεγαλώνει σωστά."""
+    """Multiple skips: the list grows correctly."""
     replan, _ = _import_nodes()
     state  = _base_state(idx=2, skipped=[0, 1])
     result = replan(state)
@@ -103,7 +103,7 @@ def test_replan_accumulates_multiple_skips():
 
 
 def test_replan_plan_active_true_when_more_steps():
-    """Αν υπάρχουν επόμενα βήματα → plan_active=True."""
+    """If there are next steps → plan_active=True."""
     replan, _ = _import_nodes()
     state  = _base_state(idx=0)  # 3 tasks, skip idx=0 → idx=1 < 3
     result = replan(state)
@@ -111,7 +111,7 @@ def test_replan_plan_active_true_when_more_steps():
 
 
 def test_replan_plan_active_false_when_last_step():
-    """Αν skip στο τελευταίο βήμα → plan_active=False."""
+    """If skip on the last step → plan_active=False."""
     replan, _ = _import_nodes()
     state  = _base_state(idx=2)  # 3 tasks, skip idx=2 → idx=3 >= 3
     result = replan(state)
@@ -119,7 +119,7 @@ def test_replan_plan_active_false_when_last_step():
 
 
 def test_replan_clears_step_failed():
-    """Μετά το replan → plan_step_failed=False."""
+    """After replan → plan_step_failed=False."""
     replan, _ = _import_nodes()
     state  = _base_state(idx=0)
     result = replan(state)
@@ -127,7 +127,7 @@ def test_replan_clears_step_failed():
 
 
 def test_replan_emits_warning_message():
-    """replan_node εκπέμπει AIMessage με ⚠️."""
+    """replan_node emits AIMessage with ⚠️."""
     from langchain_core.messages import AIMessage
     replan, _ = _import_nodes()
     state  = _base_state(idx=0)
@@ -139,7 +139,7 @@ def test_replan_emits_warning_message():
 
 
 def test_replan_message_mentions_step_desc():
-    """Το warning αναφέρει το description του βήματος."""
+    """The warning states the description of the step."""
     replan, _ = _import_nodes()
     state  = _base_state(idx=0)
     result = replan(state)
@@ -151,7 +151,7 @@ def test_replan_message_mentions_step_desc():
 # ══════════════════════════════════════════════════════════════════
 
 def test_end_check_success_header():
-    """Χωρίς skips → header ✅."""
+    """Without skips → header ✅."""
     _, end_check = _import_nodes()
     state = {
         "plan_goal":            "test goal",
@@ -165,7 +165,7 @@ def test_end_check_success_header():
 
 
 def test_end_check_warning_header_with_skips():
-    """Με skips → header ⚠️ με count."""
+    """With skips → header ⚠️ with count."""
     _, end_check = _import_nodes()
     state = {
         "plan_goal":            "test goal",
@@ -183,7 +183,7 @@ def test_end_check_warning_header_with_skips():
 
 
 def test_end_check_lists_all_steps():
-    """end_check_node αναφέρει όλα τα βήματα."""
+    """end_check_node reports all steps."""
     _, end_check = _import_nodes()
     state = {
         "plan_goal":            "g",
@@ -201,7 +201,7 @@ def test_end_check_lists_all_steps():
 
 
 def test_end_check_marks_skipped_step():
-    """Το skip βήμα έχει badge 'παραλείφθηκε' στο summary."""
+    """The skip step has a 'skipped' badge in the summary."""
     _, end_check = _import_nodes()
     state = {
         "plan_goal":            "g",
@@ -217,7 +217,7 @@ def test_end_check_marks_skipped_step():
 
 
 def test_end_check_resets_state():
-    """end_check_node επιστρέφει plan_active=False και καθαρίζει state."""
+    """end_check_node returns plan_active=False and clears state."""
     _, end_check = _import_nodes()
     state = {
         "plan_goal":            "g",
@@ -234,7 +234,7 @@ def test_end_check_resets_state():
 
 
 def test_end_check_handles_empty_plan():
-    """end_check_node με κενά tasks/results δεν crashάρει."""
+    """end_check_node with empty tasks/results does not crash."""
     _, end_check = _import_nodes()
     state = {
         "plan_goal":            "",

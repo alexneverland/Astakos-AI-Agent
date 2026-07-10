@@ -25,7 +25,7 @@ def test_slow_sifter_replay_guard_skips_same_exchange(isolated_state_db, monkeyp
         text = """
         [
           {
-            "fact": "[USER_FACT]: Στις 2026-06-21, το ποδόσφαιρο του Αλέξανδρου σταματάει για το καλοκαίρι και ξαναρχίζει τον Σεπτέμβριο.",
+            "fact": "[USER_FACT]: On 2026-06-21, Alexandros's football stops for the summer and resumes in September.",
             "category": "family",
             "topic": "activity",
             "topic_detail": "football season",
@@ -87,7 +87,7 @@ def test_slow_sifter_allows_new_follow_up_not_replay(isolated_state_db, monkeypa
         """
         [
           {
-            "fact": "[USER_FACT]: Στις 2026-06-21, ο Αλέξανδρος σταματάει το ποδόσφαιρο για το καλοκαίρι.",
+            "fact": "[USER_FACT]: On 2026-06-21, Alexandros stops playing football for the summer.",
             "category": "family",
             "topic": "activity",
             "topic_detail": "football season",
@@ -101,7 +101,7 @@ def test_slow_sifter_allows_new_follow_up_not_replay(isolated_state_db, monkeypa
         """
         [
           {
-            "fact": "[USER_FACT]: Στις 2026-06-21, το ποδόσφαιρο του Αλέξανδρου ξαναρχίζει τον Σεπτέμβριο.",
+            "fact": "[USER_FACT]: On 2026-06-21, Alexandros's football restarts in September.",
             "category": "family",
             "topic": "activity",
             "topic_detail": "football season restart",
@@ -157,7 +157,7 @@ def test_slow_sifter_skips_seed_duplicate(isolated_state_db, monkeypatch):
         text = """
         [
           {
-            "fact": "[USER_FACT]: Στις 2026-06-21, ο Αλέξανδρος σταματάει το ποδόσφαιρο για το καλοκαίρι.",
+            "fact": "[USER_FACT]: On 2026-06-21, Alexandros stops playing football for the summer.",
             "category": "family",
             "topic": "activity",
             "topic_detail": "football season",
@@ -196,7 +196,7 @@ def test_slow_sifter_skips_same_day_family_near_duplicate(isolated_state_db, mon
         """
         [
           {
-            "fact": "[USER_FACT]: Στις 2026-06-21, ο Αλέξανδρος σταματάει το ποδόσφαιρο για το καλοκαίρι.",
+            "fact": "[USER_FACT]: On 2026-06-21, Alexandros stops playing football for the summer.",
             "category": "family",
             "entities": ["Αλέξανδρος", "ποδόσφαιρο"],
             "topic": "activity",
@@ -207,7 +207,7 @@ def test_slow_sifter_skips_same_day_family_near_duplicate(isolated_state_db, mon
             "confidence": 0.90
           },
           {
-            "fact": "[USER_FACT]: Στις 2026-06-21, οι ποδοσφαιρικές δραστηριότητες του Αλέξανδρου παγώνουν για το καλοκαίρι.",
+            "fact": "[USER_FACT]: On 2026-06-21, Alexandros's football activities are paused for the summer.",
             "category": "family",
             "entities": ["Αλέξανδρος", "ποδόσφαιρο"],
             "topic": "activity",
@@ -255,12 +255,12 @@ def test_slow_sifter_no_mark_on_parse_error(isolated_state_db, monkeypatch):
         """
         [
           {
-            "fact": "[USER_FACT]: Στις 2026-06-21, Invalid JSON
+            "fact": "[USER_FACT]: On 2026-06-21, Invalid JSON
         """,
         """
         [
           {
-            "fact": "[USER_FACT]: Στις 2026-06-21, valid fact.",
+            "fact": "[USER_FACT]: On 2026-06-21, valid fact.",
             "category": "family",
             "topic": "test",
             "topic_detail": "test",
@@ -358,7 +358,7 @@ def test_slow_sifter_skips_operational_asset_confirmation(isolated_state_db, mon
         text = """
         [
           {
-            "fact": "[PHOTO]: Έγινε, την αποθήκευσα στη μνήμη μου.",
+            "fact": "[PHOTO]: Done, I have saved it to my memory.",
             "category": "photos",
             "topic": "misc",
             "topic_detail": "archive",

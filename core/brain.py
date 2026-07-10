@@ -11,16 +11,16 @@ from langchain_google_genai import ChatGoogleGenerativeAI, HarmCategory, HarmBlo
 from rich.console import Console
 from google import genai
 
-# Αγνοούμε τα προειδοποιητικά για να είναι καθαρό το τερματικό
+# Ignore warnings to keep the terminal clean
 warnings.filterwarnings("ignore")
 
-# 1. Κεντρικός Ορισμός Μοντέλων (Strings)
+# 1. Central Model Definition (Strings)
 FAST_MODEL = "gemini-3.5-flash"
 HEAVY_MODEL = "gemini-3.1-pro-preview"
 
-# [MASTRO-SHIELD v3]: Κρατάμε μόνο τις safety categories που δέχεται
-# το Gemini text generation endpoint. Extra categories όπως JAILBREAK/IMAGE_*
-# μπορεί να ρίξουν INVALID_ARGUMENT σε ορισμένα model paths.
+# [MASTRO-SHIELD v3]: We keep only the safety categories it accepts
+# the Gemini text generation endpoint. Extra categories such as JAILBREAK/IMAGE_*
+# may raise INVALID_ARGUMENT on certain model paths.
 _BN = HarmBlockThreshold.BLOCK_NONE
 custom_safety = {
     HarmCategory.HARM_CATEGORY_HARASSMENT:         _BN,
@@ -30,8 +30,8 @@ custom_safety = {
     HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY:    _BN,
 }
 
-# 2. Αρχιτέκτονας Μοντέλων (LangChain Objects)
-# Κύριο LLM (Για γρήγορες απαντήσεις, Telegram chat, απλά validations)
+# 2. Model Architect (LangChain Objects)
+# Main LLM (For fast responses, Telegram chat, simple validations)
 llm = ChatGoogleGenerativeAI(
     model=FAST_MODEL,
     temperature=0.7,
@@ -41,7 +41,7 @@ llm = ChatGoogleGenerativeAI(
     location=os.getenv("LOCATION", "global"),
 )
 
-# Βαρύ LLM (Για σκανάρισμα ChromaDB, σύνθετο Tool Use, JSON memory parsing, API design)
+# Heavy LLM (For ChromaDB scanning, complex Tool Use, JSON memory parsing, API design)
 llm_heavy = ChatGoogleGenerativeAI(
     model=HEAVY_MODEL,
     temperature=0.1,
@@ -51,8 +51,8 @@ llm_heavy = ChatGoogleGenerativeAI(
     location=os.getenv("LOCATION", "global"),
 )
 
-# 3. Shared Vertex AI raw client (για multimodal: εικόνες, ήχος, έγγραφα)
-# Όλο το codebase τραβάει από εδώ — ένα σημείο αρχικοποίησης.
+# 3. Shared Vertex AI raw client (for multimodal: images, audio, documents)
+# The entire codebase pulls from here — a single point of initialization.
 vertex_client = genai.Client(
     vertexai=True,
     project=os.getenv("PROJECT_ID", "astakos-finall"),
@@ -66,20 +66,20 @@ print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI via GenAI SDK)\033[0m")
 def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
     from time import perf_counter
     """
-    Mastro-Shield για κύριες LLM κλήσεις: exponential backoff σε
-    network/transport errors (OAuth token refresh timeout, connection reset κ.λπ.).
+    Mastro-Shield for main LLM calls: exponential backoff on
+    network/transport errors (OAuth token refresh timeout, connection reset, etc.).
 
-    Χρήση:
+    Usage:
         from core.brain import safe_llm_invoke, llm
         response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
 
-    Πιάνει:
+    Catches:
         - google.auth.exceptions.TransportError  (OAuth refresh timeout)
         - requests.exceptions.ConnectTimeout
-        - οποιοδήποτε error με "timeout" / "transport" / "connection" στο msg
-    Δεν κάνει retry:
-        - 400/401/403 (auth/param errors — retry δεν βοηθάει)
-        - 429 quota (αφήνεται στο safe_gemini_call για sidecar calls)
+        - any error with "timeout" / "transport" / "connection" in the msg
+    Does not retry:
+        - 400/401/403 (auth/param errors — retry does not help)
+        - 429 quota (left to safe_gemini_call for sidecar calls)
     """
     _TRANSIENT = ("timeout", "transport", "connection refused",
                   "connection reset", "remote disconnected", "eof occurred",

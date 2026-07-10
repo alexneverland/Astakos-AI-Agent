@@ -1,6 +1,6 @@
 """
-Tests για astakos_skills/file_generator.py
-Τρέξε: pytest tests/test_file_generator.py -v
+Tests for astakos_skills/file_generator.py
+Run: pytest tests/test_file_generator.py -v
 """
 import os
 import sys
@@ -75,7 +75,7 @@ def test_generate_excel_empty_data():
         shutil.rmtree(d, ignore_errors=True)
 
 def test_generate_excel_with_merged_cells_no_crash():
-    """Regression: MergedCell κρας στο auto-width loop."""
+    """Regression: MergedCell crash in the auto-width loop."""
     d = _tmp()
     try:
         out = os.path.join(d, "merged.xlsx")

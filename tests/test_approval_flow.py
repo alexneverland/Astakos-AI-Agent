@@ -1,6 +1,6 @@
 """
-Tests για το approval flow — save/get/resolve/pop pending + is_critical routing.
-Δεν χρειάζεται live Telegram.
+Tests for the approval flow — save/get/resolve/pop pending + is_critical routing.
+No live Telegram required.
 """
 import sys, os, json, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -13,7 +13,7 @@ import pytest
 # -- Pending store (save/get/pop/list) ----------------------------
 
 def _make_approval_with_tmp():
-    """Επιστρέφει το approval module με temp file αντί για το real pending file."""
+    """Returns the approval module with a temp file instead of the real pending file."""
     import core.approval as ap
     return ap
 
@@ -64,13 +64,13 @@ def test_list_pending_only_returns_pending_status(tmp_path):
         pending = list_pending()
         ids = [p["tool_call_id"] for p in pending]
         assert "p1" in ids
-        assert "p2" not in ids  # approved — δεν εμφανίζεται
+        assert "p2" not in ids  # approved — is not displayed
 
 
 # -- is_critical routing ------------------------------------------
 
 def test_critical_tool_blocked_in_node():
-    """approval_check_node με CRITICAL tool → approval_status=pending."""
+    """approval_check_node with CRITICAL tool → approval_status=pending."""
     from core.approval import approval_check_node
     from langchain_core.messages import AIMessage
 
@@ -83,7 +83,7 @@ def test_critical_tool_blocked_in_node():
         assert result["approval_status"] == "pending"
 
 def test_safe_tool_passes_through():
-    """approval_check_node με SAFE tool → approval_status=ok."""
+    """approval_check_node with SAFE tool → approval_status=ok."""
     from core.approval import approval_check_node
 
     ai_msg = MagicMock()
@@ -144,7 +144,7 @@ def test_execute_local_pipeline_with_active_draft_requests_approval(monkeypatch,
     notify.assert_called_once()
 
 def test_blocked_terminal_command_is_not_saved_for_approval():
-    """BLOCKED terminal command → approval_status=blocked και δεν αποθηκεύεται pending."""
+    """BLOCKED terminal command → approval_status=blocked and pending is not saved."""
     from core.approval import approval_check_node
 
     ai_msg = MagicMock()
@@ -163,7 +163,7 @@ def test_blocked_terminal_command_is_not_saved_for_approval():
     notify.assert_not_called()
 
 def test_no_tool_calls_passes_through():
-    """approval_check_node χωρίς tool calls → approval_status=ok."""
+    """approval_check_node without tool calls → approval_status=ok."""
     from core.approval import approval_check_node
 
     ai_msg = MagicMock()

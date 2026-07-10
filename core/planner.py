@@ -1,7 +1,7 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Planning Agent
-# Παίρνει goal → βγάζει structured task list → εκτελεί βήμα-βήμα
+# Takes goal → outputs structured task list → executes step-by-step
 # ================================================================
 
 import json
@@ -11,7 +11,7 @@ from datetime import datetime
 from langchain_core.messages import HumanMessage, AIMessage
 
 
-# Λέξεις επιβεβαίωσης / ακύρωσης
+# Confirmation / cancellation words
 _CONFIRM_WORDS = {
     "ναι", "ναι!", "yes", "εντάξει", "εντάξει!", "εντοξει", "ok", "οκ", "οκ!",
     "ξεκίνα", "ξεκινα", "ξεκίνα!", "ξεκινα!", "go", "proceed",
@@ -29,19 +29,19 @@ def _planner_pending_user_key(state) -> str:
 
 
 # ────────────────────────────────────────────────────────────────
-# Planner Node — δημιουργεί task list από goal
+# Planner Node — creates a task list from a goal
 # ────────────────────────────────────────────────────────────────
 
 def planner_node(state):
     """
-    Παίρνει το goal (μήνυμα μετά το /plan) και βγάζει structured task list.
-    Αποθηκεύει στο state: plan_tasks, plan_index=0, plan_results=[]
+    Takes the goal (message after /plan) and generates a structured task list.
+    Saves to state: plan_tasks, plan_index=0, plan_results=[]
     """
     from core.brain import llm_heavy, safe_llm_invoke
     from core.utils import clean_message
 
     last_msg = clean_message(state["messages"][-1].content)
-    # Αφαιρούμε timestamp [HH:MM] και /plan prefix
+    # Remove timestamp [HH:MM] and /plan prefix
     goal = re.sub(r'^\[\d{1,2}:\d{2}\]\s*', '', last_msg).strip()
     goal = re.sub(r'^/plan\b\s*', '', goal).strip()
 
@@ -73,13 +73,13 @@ GOAL: {goal}
         print(f"\033[91m[Planner Error]: {e}\033[0m")
         tasks = [{"step": 1, "description": goal, "instruction": goal}]
 
-    # Εμφανίζουμε το plan στον χρήστη — δεν ξεκινάμε εκτέλεση ακόμα
+    # Display the plan to the user — do not start execution yet
     plan_text = f"📋 **Plan για:** _{goal}_\n\n"
     for t in tasks:
         plan_text += f"{t['step']}. {t['description']}\n"
     plan_text += f"\n▶️ Ξεκινάω; (ναι / όχι)"
 
-    # Αποθηκεύουμε το plan στο SQLite state db — θα το φορτώσει ο pre_check_node
+    # Save the plan to the SQLite state db — the pre_check_node will load itturn_thought
     try:
         from memory.pending_plans import save_pending_plan
         pending_user_key = _planner_pending_user_key(state)
@@ -96,31 +96,31 @@ GOAL: {goal}
 
 
 # ────────────────────────────────────────────────────────────────
-# Task Executor Node — εκτελεί ένα task τη φορά
+# Task Executor Node — executes one task at a time
 # ────────────────────────────────────────────────────────────────
 
 def task_executor_node(state):
     """
-    Εκτελεί το τρέχον task από το plan.
-    Αν υπάρχουν αποτελέσματα προηγούμενων βημάτων, τα περνά ως context.
+    Executes the current task from the plan.
+    If there are results from previous steps, it passes them as context.
     """
     tasks        = state.get("plan_tasks", [])
     idx          = state.get("plan_index", 0)
     results      = state.get("plan_results", [])
     goal         = state.get("plan_goal", "")
 
-    # Αν τελειώσαμε → ασυνήθιστη κατάσταση, ο graph θα δρομολογήσει σε end_check
+    # If we are done → unusual situation, the graph will route to end_check
     if idx >= len(tasks):
         return {"plan_active": False}
 
     task = tasks[idx]
     print(f"\033[95m[TaskExecutor]: Βήμα {idx+1}/{len(tasks)}: {task['description']}\033[0m")
 
-    # Χτίζουμε context από προηγούμενα αποτελέσματα
+    # We build context from previous results
     context = ""
     if results:
         context = "\n\n[ΑΠΟΤΕΛΕΣΜΑΤΑ ΠΡΟΗΓΟΥΜΕΝΩΝ ΒΗΜΑΤΩΝ]\n"
-        for i, r in enumerate(results[-3:]):  # τελευταία 3 μόνο
+        for i, r in enumerate(results[-3:]):  # last 3 only
             context += f"Βήμα {i+1}: {r[:300]}\n"
         context += "[/ΑΠΟΤΕΛΕΣΜΑΤΑ]\n\n"
 
@@ -130,7 +130,7 @@ def task_executor_node(state):
         f"⚠️ Εκτέλεσε ΜΟΝΟ αυτό το βήμα. Μη προχωρήσεις στο επόμενο βήμα."
     )
 
-    # Routing: χρησιμοποιούμε capability_lookup για να βρούμε τον σωστό agent
+    # Routing: we use capability_lookup to find the correct agent
     try:
         from core.capability_lookup import lookup_agent
         agent = lookup_agent(task["instruction"]) or "Dev_Agent"
@@ -150,12 +150,12 @@ def task_executor_node(state):
 
 
 # ────────────────────────────────────────────────────────────────
-# Capture Result Node — μετά τον agent, αποθηκεύει αποτέλεσμα
+# Capture Result Node — after the agent, stores result
 # ────────────────────────────────────────────────────────────────
 
 def capture_result_node(state):
     """
-    Τρέχει μετά τον agent, αποθηκεύει το αποτέλεσμα και προχωράει στο επόμενο βήμα.
+    Runs after the agent, stores the result, and proceeds to the next step.
     """
     from core.utils import clean_message
 
@@ -163,7 +163,7 @@ def capture_result_node(state):
     idx     = state.get("plan_index", 0)
     results = list(state.get("plan_results", []))
 
-    # Βρίσκουμε το αποτέλεσμα του agent — αγνοούμε ⏳ progress msgs
+    # Find the agent's result — ignore ⏳ progress msgs
     last_result = ""
     for msg in reversed(state["messages"]):
         content = clean_message(getattr(msg, "content", ""))
@@ -185,7 +185,7 @@ def capture_result_node(state):
 
 
 def _plan_summary(goal: str, tasks: list, results: list) -> dict:
-    """Δημιουργεί summary και αποθηκεύει post-plan reflection."""
+    """Creates a summary and stores the post-plan reflection."""
     summary = f"✅ **Plan ολοκληρώθηκε:** _{goal}_\n\n"
     for i, (task, result) in enumerate(zip(tasks, results)):
         summary += f"**{i+1}. {task['description']}**\n{result[:500]}\n\n"
@@ -232,23 +232,23 @@ Steps:
 
 
 # ────────────────────────────────────────────────────────────────
-# Pre-Check Node — τρέχει ΠΡΙΝ τον supervisor σε κάθε turn
-# Ελέγχει αν υπάρχει pending plan και αν ο χρήστης επιβεβαίωσε
+# Pre-Check Node — runs BEFORE the supervisor in each turn
+# Checks if there is a pending plan and if the user confirmed
 # ────────────────────────────────────────────────────────────────
 
 def pre_check_node(state):
     """
-    Entry point του graph. Ελέγχει το pending plan στη SQLite και κατευθύνει:
-    - "ναι" + pending  → φορτώνει plan, route: task_executor
-    - "όχι" + pending  → σβήνει plan,  route: cancel
-    - άλλο / no pending → route: supervisor (κανονική ροή)
+    Entry point of the graph. Checks the pending plan in SQLite and routes:
+    - "yes" + pending  → loads plan, route: task_executor
+    - "no" + pending  → deletes plan, route: cancel
+    - other / no pending → route: supervisor (normal flow)
     """
     from core.utils import clean_message
 
     last_msg = clean_message(state["messages"][-1].content)
-    # Αφαίρεση timestamp [HH:MM]
+    # Remove timestamp [HH:MM]
     last_msg = re.sub(r'^\[\d{1,2}:\d{2}\]\s*', '', last_msg).strip().lower()
-    # Κανονικοποίηση: αφαίρεση περιττών σημείων στίξης
+    # Normalization: removal of unnecessary punctuation marks
     last_msg_norm = last_msg.rstrip("!.;").strip()
 
     from memory.pending_plans import get_pending_plan, clear_pending_plan
@@ -258,7 +258,7 @@ def pre_check_node(state):
     if not pending:
         return {}
 
-    # ── Επιβεβαίωση ──────────────────────────────────────────────
+    # ── Confirmation ──────────────────────────────────────────────
     if last_msg in _CONFIRM_WORDS or last_msg_norm in _CONFIRM_WORDS:
         try:
             clear_pending_plan(user_id=pending_user_key)
@@ -275,7 +275,7 @@ def pre_check_node(state):
         except Exception as e:
             print(f"\033[91m[PreCheck]: Error loading pending plan: {e}\033[0m")
 
-    # ── Ακύρωση ──────────────────────────────────────────────────
+    # ── Cancel ───────────────────────────────────────────────────
     elif last_msg in _CANCEL_WORDS or last_msg_norm in _CANCEL_WORDS:
         try:
             clear_pending_plan(user_id=pending_user_key)
@@ -287,18 +287,18 @@ def pre_check_node(state):
             "next_agent": "__plan_cancelled__",
         }
 
-    # ── Άλλο μήνυμα ενώ υπάρχει pending → άφησέ το ζωντανό ─────────
+    # ── Another message while there is a pending one → leave it alive ─────────
     print("\033[90m[PreCheck]: Pending plan preserved (non-confirm/non-cancel message)\033[0m")
     return {}
 
 
 def cancel_plan_node(state):
-    """Επιστρέφει μήνυμα ακύρωσης plan."""
+    """Returns a plan cancellation message."""
     return {"messages": [AIMessage(content="❌ Plan ακυρώθηκε.")], "plan_awaiting_confirmation": False}
 
 
 # ────────────────────────────────────────────────────────────────
-# Validate Step Node — ελέγχει αν το τελευταίο βήμα πέτυχε
+# Validate Step Node — checks if the last step succeeded
 # ────────────────────────────────────────────────────────────────
 
 _FAILURE_SIGNALS = [
@@ -318,10 +318,10 @@ _FAILURE_SIGNALS = [
 
 def validate_step_node(state):
     """
-    Εκτελείται μετά από κάθε agent κατά τη διάρκεια plan.
-    Ελέγχει αν η απάντηση δείχνει αποτυχία (heuristic).
-    - Αποτυχία → AIMessage warning + plan_step_failed=True
-    - Επιτυχία → plan_step_failed=False (χωρίς μήνυμα)
+    Executed after each agent during a plan.
+    Checks if the response indicates failure (heuristic).
+    - Failure -> AIMessage warning + plan_step_failed=True
+    - Success -> plan_step_failed=False (no message)
     """
     from core.utils import clean_message
 
@@ -336,7 +336,7 @@ def validate_step_node(state):
 
     task = tasks[idx]
 
-    # Βρίσκουμε την τελευταία απάντηση του agent (αγνοούμε τα δικά μας progress msgs)
+    # Find the agent's last response (we ignore our own progress msgs)
     last_result = ""
     for msg in reversed(state["messages"]):
         if getattr(msg, "type", "") == "ai":
@@ -345,7 +345,7 @@ def validate_step_node(state):
                 last_result = content
                 break
 
-    # Ελέγχουμε και το τελευταίο tool output (ToolMessage) για error signals
+    # We also check the last tool output (ToolMessage) for error signals
     last_tool_result = ""
     for msg in reversed(state["messages"]):
         if getattr(msg, "type", "") == "tool" or msg.__class__.__name__ == "ToolMessage":
@@ -373,14 +373,14 @@ def validate_step_node(state):
 
 
 # ────────────────────────────────────────────────────────────────
-# Replan Node — auto-skip αποτυχημένου βήματος
+# Replan Node — auto-skip of failed step
 # ────────────────────────────────────────────────────────────────
 
 def replan_node(state):
     """
-    Καλείται όταν validate_step ανιχνεύσει αποτυχία.
-    Auto-skip: παραλείπει το αποτυχημένο βήμα, συνεχίζει στο επόμενο.
-    Αν δεν υπάρχει επόμενο → plan_active=False → graph → end_check.
+    Called when validate_step detects a failure.
+    Auto-skip: skips the failed step and continues to the next one.
+    If there is no next step → plan_active=False → graph → end_check.
     """
     tasks   = state.get("plan_tasks", [])
     idx     = state.get("plan_index", 0)
@@ -389,7 +389,7 @@ def replan_node(state):
 
     task_desc = tasks[idx]["description"] if idx < len(tasks) else f"Βήμα {idx + 1}"
 
-    # Καταγραφή skip
+    # Record skip
     skipped.append(idx)
     results.append(f"⚠️ Παραλείφθηκε: {task_desc}")
 
@@ -415,13 +415,13 @@ def replan_node(state):
 
 
 # ────────────────────────────────────────────────────────────────
-# End Check Node — τελικό summary + reflection
+# End Check Node — final summary + reflection
 # ────────────────────────────────────────────────────────────────
 
 def end_check_node(state):
     """
-    Τρέχει μετά το τέλος ΟΛΩΝ των βημάτων (επιτυχή ή skip).
-    Δημιουργεί final summary, αποθηκεύει post-plan reflection.
+    Runs after the end of ALL steps (successful or skipped).
+    Creates a final summary, saves post-plan reflection.
     """
     goal    = state.get("plan_goal", "")
     tasks   = state.get("plan_tasks", [])

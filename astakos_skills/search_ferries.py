@@ -1,7 +1,7 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Developer: Lazaros (Piston-7)
-# astakos_skills/search_ferries.py ← Αναζήτηση ακτοπλοϊκών δρομολογίων
+# astakos_skills/search_ferries.py ← Ferry route search
 # ================================================================
 
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -10,10 +10,10 @@ _search = DuckDuckGoSearchRun()
 
 def search_ferries(origin: str, destination: str, date: str) -> str:
     """
-    Αναζητά ακτοπλοϊκά δρομολόγια και τιμές ferry.
-    origin: Λιμάνι αναχώρησης (π.χ. 'Θεσσαλονίκη', 'Βόλος')
-    destination: Προορισμός (π.χ. 'Σκιάθος', 'Μύκονος')
-    date: Ημερομηνία ταξιδιού (π.χ. '10 Αυγούστου 2026')
+    Searches for ferry routes and prices.
+    origin: Departure port (e.g. 'Thessaloniki', 'Volos')
+    destination: Destination (e.g. 'Skiathos', 'Mykonos')
+    date: Travel date (e.g. '10 August 2026')
     """
     query = f"{origin} {destination} πλοίο ferry δρομολόγιο τιμή {date}"
     print(f"\033[94m[Ferries]: Αναζήτηση: {query}\033[0m")
@@ -23,7 +23,7 @@ def search_ferries(origin: str, destination: str, date: str) -> str:
         if not results:
             return f"❌ Δεν βρέθηκαν αποτελέσματα για {origin} → {destination} στις {date}."
         
-        # Δεύτερη αναζήτηση για επίσημα sites
+        # Second search for official sites
         query2 = f"site:ferries.gr OR site:openseas.gr OR site:gtp.gr {origin} {destination} {date}"
         results2 = _search.run(query2)
         

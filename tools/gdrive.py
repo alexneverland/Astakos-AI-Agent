@@ -1,9 +1,9 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Google Drive Uploader
-# Χρησιμοποιεί Application Default Credentials (ίδια με Vertex AI).
-# Απαιτεί: gcloud auth application-default login με Drive scope,
-# ή: gcloud auth application-default login --scopes=
+# Uses Application Default Credentials (same as Vertex AI).
+# Requires: gcloud auth application-default login with Drive scope,
+# or: gcloud auth application-default login --scopes=
 #   https://www.googleapis.com/auth/drive.file,
 #   https://www.googleapis.com/auth/cloud-platform
 # ================================================================
@@ -14,9 +14,9 @@ import mimetypes
 
 def upload_to_drive(file_path: str, folder_id: str = None) -> str:
     """
-    Ανεβάζει αρχείο στο Google Drive χρησιμοποιώντας Application Default Credentials.
-    Επιστρέφει το shareable URL (viewable από οποιονδήποτε με link),
-    ή "" αν αποτύχει.
+    Uploads a file to Google Drive using Application Default Credentials.
+    Returns the shareable URL (viewable by anyone with the link),
+    or "" if it fails.
     """
     try:
         from google.auth import default as google_auth_default
@@ -45,7 +45,7 @@ def upload_to_drive(file_path: str, folder_id: str = None) -> str:
             print("⚠️ [GDrive]: Δεν επεστράφη file_id")
             return ""
 
-        # Κάνε το αρχείο viewable από οποιονδήποτε με link
+        # Make the file viewable by anyone with a link
         service.permissions().create(
             fileId=file_id,
             body={"type": "anyone", "role": "reader"}

@@ -213,7 +213,7 @@ def _infer_relative_until(normalized_fact: str, *, now: datetime) -> str | None:
 
 
 def _infer_week_until(now: datetime) -> str:
-    """Επιστρέφει την Κυριακή της τρέχουσας εβδομάδας (end-of-week scope)."""
+    """Returns the Sunday of the current week (end-of-week scope)."""
     days_to_sunday = 6 - now.weekday()  # Mon=0, Sun=6
     return (now + timedelta(days=days_to_sunday)).strftime("%Y-%m-%d")
 
@@ -263,12 +263,12 @@ def _has_explicit_weekday_reference(normalized: str) -> bool:
 
 def _extract_relative_day_scope_dt(normalized: str, now: datetime) -> datetime | None:
     """
-    Επιστρέφει συγκεκριμένη ημερομηνία όταν ο χρήστης μιλάει για
-    κοντινό relative scope όπως:
-    - αύριο
-    - μεθαύριο
+    Returns a specific date when the user refers to a
+    near relative scope such as:
+    - tomorrow
+    - the day after tomorrow
 
-    Δεν αφορά generic future plans τύπου "κάποια στιγμή", μόνο καθαρό day anchor.
+    Does not apply to generic future plans of the "at some point" type, only to a clear day anchor.
     """
     if "αυριο" in normalized or "αύριο" in normalized:
         return now + timedelta(days=1)
@@ -346,10 +346,10 @@ def _build_directive(
     resume_rule: str | None = None,
 ) -> dict:
     """
-    Κατασκευάζει directive dict με σταθερή δομή.
-    - schedule_pause / notifications_unmute: απαιτεί subject_tokens.
-    - notifications_mute: επιτρέπει κενό subject (match μόνο by include_tokens).
-    - Για mute/pause: απαιτεί until_date.
+    Constructs a directive dict with a fixed structure.
+    - schedule_pause / notifications_unmute: requires subject_tokens.
+    - notifications_mute: allows empty subject (match only by include_tokens).
+    - For mute/pause: requires until_date.
     """
     if kind in ("schedule_pause", "notifications_unmute") and not subject_tokens:
         return {}
@@ -388,7 +388,7 @@ def _append_flag(flags: list[str], label: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _rule_seasonal_football(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """Ποδόσφαιρο Αλέξανδρου σταμάτησε καλοκαίρι → schedule_pause μέχρι Σεπτέμβριο."""
+    """Alexandros' football stopped for summer → schedule_pause until September."""
     if not (
         _contains_any(normalized, _ALEXANDROS_TOKENS)
         and _contains_any(normalized, _FOOTBALL_TOKENS)
@@ -424,7 +424,7 @@ def _rule_seasonal_football(normalized: str, dates: list[str], now: datetime) ->
 
 
 def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """Αλέξανδρος λείπει / κατασκήνωση → notifications_mute."""
+    """Alexandros is away / camping → notifications_mute."""
     if not _contains_any(normalized, _ALEXANDROS_TOKENS):
         return []
     if not (_contains_any(normalized, _CAMP_TOKENS) or _contains_any(normalized, _ABSENCE_TOKENS)):
@@ -469,7 +469,7 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
 
 
 def _rule_return_home(normalized: str) -> list[dict]:
-    """Αλέξανδρος γύρισε → context_state_set (alexandros_away_from_home = false)."""
+    """Alexandros returned → context_state_set (alexandros_away_from_home = false)."""
     if not (
         _contains_any(normalized, _ALEXANDROS_TOKENS)
         and _contains_any(normalized, _RETURN_TOKENS)
@@ -502,7 +502,7 @@ def _rule_return_home(normalized: str) -> list[dict]:
 def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Family outing / already outside:
-    Facts: "πάμε πισίνα", "είμαστε θάλασσα", "φτάσαμε πάρκο", "όλοι μαζί για μπάνιο"
+    Facts: "πάμε πισίνα" (going to the pool), "είμαστε θάλασσα" (we are at the sea), "φτάσαμε πάρκο" (we arrived at the park), "όλοι μαζί για μπάνιο" (everyone together for a swim/bath)
     Effect:
       - state:alexandros:outing = in_progress
       - user_out_of_home = true
@@ -621,7 +621,7 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
 def _rule_return_home_from_outing(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Return home after outing:
-    Facts: "γυρίσαμε σπίτι", "ήρθαμε σπίτι", "είμαστε σπίτι τώρα"
+    Facts: "we returned home", "we came home", "we are home now"
     Effect:
       - user_out_of_home = false
       - state:alexandros:outing = done (for the rest of today)
@@ -681,7 +681,7 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
     return directives
 
 def _rule_alexandros_away_general(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """Γενικός κανόνας απουσίας Αλέξανδρου (π.χ. διακοπές, με τη γιαγιά)."""
+    """General rule for Alexandros's absence (e.g., vacation, with grandmother)."""
     if not _contains_any(normalized, _ALEXANDROS_TOKENS):
         return []
         
@@ -743,9 +743,9 @@ def _rule_alexandros_away_general(normalized: str, dates: list[str], now: dateti
 def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3A — school_break:
-    Facts: "δεν έχει σχολείο", "τελείωσε το σχολείο", "από αύριο διακοπές"
-    Target: σχολικές + πρωινές ρουτίνες Αλέξανδρου
-    Action: schedule_pause — απαιτεί σαφές scope.
+    Facts: "δεν έχει σχολείο" (no school), "τελείωσε το σχολείο" (school is over), "από αύριο διακοπές" (holidays starting tomorrow)
+    Target: Alexandros' school + morning routines
+    Action: schedule_pause — requires a clear scope.
     """
     has_school_break = _contains_any(normalized, _SCHOOL_BREAK_TOKENS)
     has_school_ref   = _contains_any(normalized, _SCHOOL_TOKENS)
@@ -789,7 +789,7 @@ def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list
 def _rule_sofia_work_mode(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3C.5 — sofia_work_mode:
-    Facts: "Η Σοφία δουλεύει από το σπίτι αύριο", "Η Σοφία είναι τηλεργασία"
+    Facts: "Sofia is working from home tomorrow", "Sofia is teleworking"
     """
     has_sofia = "σοφια" in normalized
     has_work = _contains_any(normalized, _WORK_TOKENS)
@@ -822,7 +822,7 @@ def _rule_sofia_work_mode(normalized: str, dates: list[str], now: datetime) -> l
 def _rule_football_season(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3C.5 — football_season:
-    Facts: "ξεκίνησε το ποδόσφαιρο", "άρχισαν οι προπονήσεις"
+    Facts: "football started", "practices started"
     """
     has_football = "ποδοσφαιρ" in normalized or "μπαλα" in normalized or "προπονηση" in normalized
     has_start = "ξεκινησ" in normalized or "αρχισ" in normalized
@@ -855,7 +855,7 @@ def _rule_football_season(normalized: str, dates: list[str], now: datetime) -> l
 def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3A — shift_logic:
-    Facts: "αυτή την εβδομάδα έχω απόγευμα", "δεν ισχύει το ξύπνημα 5:30 όταν είμαι απόγευμα"
+    Facts: "this week I am on the afternoon shift", "waking up at 5:30 does not apply when I am on the afternoon shift"
     Target: conflicting departure / sleep routines
     Action: context_state_set for the week AND permanent condition_add directives.
     """
@@ -879,7 +879,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     directives = []
     shift_val = "afternoon" if _contains_any(normalized, _SHIFT_PM_TOKENS) else "morning"
 
-    # 1. State Update (μόνο αν αναφέρει συγκεκριμένη εβδομάδα)
+    # 1. State Update (only if a specific week is mentioned)
     if has_week_scope and has_work:
         if dates:
             try:
@@ -908,7 +908,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
             "exclude_tokens": [],
         }
         directives.append(d_state)
-    # 2. Dynamic Generic Condition for specific activities mentioned (e.g. "τρέξιμο", "γυμναστήριο")
+    # 2. Dynamic Generic Condition for specific activities mentioned (e.g. "running", "gym")
     # Instead of hardcoding morning/afternoon targets, we extract the action.
     stop_words = {
         "το", "η", "ο", "τα", "τις", "τους", "εχω", "ειμαι", "οταν", "μονο", "δεν", 
@@ -927,7 +927,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
         
     action_tokens = list(set(action_tokens))
 
-    # If they said "ισχύει/δεν ισχύει" and mentioned a shift, and we have an action token
+    # If they said "applies/does not apply" and mentioned a shift, and we have an action token
     if "ισχυει" in normalized and has_shift and action_tokens:
         d_cond_generic = _build_directive(
             "condition_add",
@@ -944,7 +944,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
             else:
                 d_cond_generic["condition_payload"] = {"flag": "current_shift", "equals": "morning"}
                 
-            # If it says "δεν ισχύει", suppress. Otherwise allow.
+            # If it says "does not apply", suppress. Otherwise allow.
             if "δεν " in normalized or "οχι" in normalized:
                 d_cond_generic["condition_mode"] = "suppress_when_true"
             else:
@@ -1017,8 +1017,8 @@ def _rule_alexandros_with_sofia_without_user(normalized: str, dates: list[str], 
 def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3A — sofia_with_user:
-    Facts: "είμαι με τη Σοφία", "είμαστε μαζί με τη Σοφία", "η Σοφία είναι μαζί μου"
-    Target: Messenger/Sofia proactive ρουτίνες
+    Facts: "είμαι με τη Σοφία" (I am with Sofia), "είμαστε μαζί με τη Σοφία" (we are together with Sofia), "η Σοφία είναι μαζί μου" (Sofia is with me)
+    Target: Messenger/Sofia proactive routines
     Action: State + Condition (sofia_with_user = true)
     """
     has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
@@ -1091,7 +1091,7 @@ def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> l
 def _rule_sofia_not_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3A — sofia_not_with_user:
-    Facts: "η Σοφία έφυγε", "η Σοφία δεν είναι εδώ", "δεν είμαστε μαζί τώρα"
+    Facts: "Sofia left", "Sofia is not here", "we are not together now"
     Target: clear Messenger/Sofia suppress context immediately
     Action: State only (sofia_with_user = false)
     """
@@ -1130,11 +1130,11 @@ def _rule_sofia_not_with_user(normalized: str, dates: list[str], now: datetime) 
 def _rule_child_activity_pause(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3A — child_activity_pause:
-    Facts: "σταμάτησε το μπάσκετ", "δεν έχει ποδόσφαιρο αυτή την εβδομάδα"
-    Target: παιδικές δραστηριότητες
-    Action: schedule_pause μέχρι explicit date ή end-of-week.
+    Facts: "stopped basketball", "no football this week"
+    Target: children's activities
+    Action: schedule_pause until explicit date or end-of-week.
 
-    Guard: stop + activity + child subject — και τα τρία.
+    Guard: stop + activity + child subject — all three.
     """
     has_child    = (
         _contains_any(normalized, _ALEXANDROS_TOKENS)
@@ -1145,8 +1145,8 @@ def _rule_child_activity_pause(normalized: str, dates: list[str], now: datetime)
     has_stop     = _contains_any(normalized, _STOP_TOKENS)
     if not (has_child and has_activity and has_stop):
         return []
-    # Αν πρόκειται ήδη για καθαρό seasonal/summer break case, το αφήνουμε
-    # στο ειδικότερο rule για να μη βγάζουμε duplicate directives.
+    # If it is already a clear seasonal/summer break case, we leave it as is
+    # to the more specific rule to avoid generating duplicate directives.
     if _contains_any(normalized, _SUMMER_BREAK_TOKENS):
         return []
     until = None
@@ -1286,8 +1286,8 @@ def score_candidate_directive(
         score += _P_NO_SCOPE
         _append_flag(ambiguity_flags, "missing_scope")
     else:
-        # notifications_unmute: η απουσία until_date είναι αναμενόμενη,
-        # όχι αδυναμία του fact. Δίνουμε full scope-equivalent credit.
+        # notifications_unmute: the absence of until_date is expected,
+        # not a failure of fact. We give full scope-equivalent credit.
         score += _W_SCOPE
         _append_signal(signals, "scope:not_required")
 
@@ -1348,7 +1348,7 @@ def score_candidate_directive(
     has_alex  = _contains_any(normalized_fact, _ALEXANDROS_TOKENS)
     has_sofia = _contains_any(normalized_fact, _SOFIA_TOKENS)
     if has_alex and has_sofia:
-        # Χαλαρώνουμε το πέναλτι αν το κείμενο δείχνει ξεκάθαρα ότι δρουν μαζί
+        # We relax the penalty if the text clearly shows that they act together
         if _contains_any(normalized_fact, ["μαζι", "ολοι", "παρεα", "μας"]):
             _append_signal(signals, "multiple_people_together")
         else:
@@ -1406,8 +1406,8 @@ def filter_directives_for_auto_apply(
 def _rule_user_at_work(normalized: str, dates: list[str], now) -> list[dict]:
     """
     User at work:
-    Facts: "Έχω πάει γραφείο", "Δουλεύω στο γραφείο σήμερα", "Είμαι δουλειά"
-    Guard: δεν πιάνει δηλώσεις βάρδιας/προγράμματος για επόμενες μέρες.
+    Facts: "Έχω πάει γραφείο" (I have gone to the office), "Δουλεύω στο γραφείο σήμερα" (I am working at the office today), "Είμαι δουλειά" (I am at work)
+    Guard: does not cover shift/schedule declarations for future days.
     """
     has_work = _contains_any(normalized, _WORK_TOKENS) or "γραφειο" in normalized
     has_user = "ειμαι" in normalized or "εχω" in normalized or "δουλευω" in normalized
@@ -1448,7 +1448,7 @@ def _rule_user_at_work(normalized: str, dates: list[str], now) -> list[dict]:
 def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
     """
     Quiet hours / sleep:
-    Facts: "Ο μικρός κοιμάται", "Ησυχία τώρα"
+    Facts: "The little one is sleeping", "Quiet now"
     """
     has_sleep = "κοιμαται" in normalized or "υπνο" in normalized
     has_quiet = "ησυχια" in normalized or "σιγα" in normalized
@@ -1457,7 +1457,7 @@ def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
     if not ((has_sleep and has_child) or has_quiet):
         return []
         
-    # Συνήθως διαρκεί λίγες ώρες, άρα until=today
+    # Usually lasts a few hours, so until=today
     until = now.strftime("%Y-%m-%d")
             
     d_state = {
@@ -1842,14 +1842,14 @@ def infer_routine_reconciliation_candidates(
     each tagged with rule_name. No scoring yet.
 
     Rule groups:
-    1. seasonal_football              — ποδόσφαιρο Αλέξανδρου καλοκαίρι
-    2. camp_absence                   — κατασκήνωση / απουσία Αλέξανδρου
-    3. return_home                    — επιστροφή Αλέξανδρου
-    4. school_break                   — σχολικές διακοπές
-    5. child_activity_pause           — παιδική δραστηριότητα pause
-    6. sofia_with_user               — είμαστε μαζί με τη Σοφία
-    7. sofia_not_with_user           — δεν είμαστε πια μαζί με τη Σοφία
-    8. shift_week                     — εβδομαδιαία αλλαγή βάρδιας
+    1. seasonal_football              — Alexandros' summer football
+    2. camp_absence                   — Alexandros' camp / absence
+    3. return_home                    — Alexandros' return
+    4. school_break                   — school holidays
+    5. child_activity_pause           — child activity pause
+    6. sofia_with_user               — we are together with Sofia
+    7. sofia_not_with_user           — we are no longer together with Sofia
+    8. shift_week                     — weekly shift change
     """
     current         = now or datetime.now()
     normalized_fact = _normalize(fact)
@@ -1866,8 +1866,8 @@ def infer_routine_reconciliation_candidates(
         now=current,
     )
 
-    # llm_candidates είναι το primary semantic path
-    # τα rule candidates είναι conservative fallback heuristics
+    # llm_candidates is the primary semantic path
+    # the rule candidates are conservative fallback heuristics
     rules = [
         ("seasonal_football",              _rule_seasonal_football,              (normalized_fact, dates, current)),
         ("football_season",                _rule_football_season,                (normalized_fact, dates, current)),

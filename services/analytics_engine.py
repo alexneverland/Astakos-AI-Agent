@@ -1,8 +1,8 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Analytics Engine — Passive Routine Detection
-# Τρέχει κάθε βράδυ 03:00. Αναλύει το chat history, βρίσκει
-# recurring patterns και καλεί upsert_routine αυτόματα.
+# Runs every night at 03:00. Analyzes the chat history, finds
+# recurring patterns and calls upsert_routine automatically.
 # ================================================================
 
 import json
@@ -20,17 +20,17 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 # ── Config ───────────────────────────────────────────────────────
-LOOKBACK_DAYS     = 30    # Μέρες ιστορικού
-MIN_OCCURRENCES   = 3     # Ελάχιστες εμφανίσεις συνολικά
-MIN_WEEKS         = 2     # Σε πόσες διαφορετικές εβδομάδες
-TIME_BUCKET_MIN   = 30    # Παράθυρο ώρας (±15 λεπτά)
-SIMILARITY_THRESH = 0.60  # Difflib threshold για grouping
-EVERYDAY_DAYS     = 5     # Αν εμφανίζεται σε 5+ ημέρες → Everyday
+LOOKBACK_DAYS     = 30    # History days
+MIN_OCCURRENCES   = 3     # Minimum total appearances
+MIN_WEEKS         = 2     # In how many different weeks
+TIME_BUCKET_MIN   = 30    # Time window (±15 minutes)
+SIMILARITY_THRESH = 0.60  # Difflib threshold for grouping_
+EVERYDAY_DAYS     = 5     # If it appears in 5+ days → Everyday_
 
 _BASE             = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE          = os.path.join(_BASE, "..", "analytics_engine_log.json")
 
-BATCH_SIZE = 80   # μηνύματα ανά LLM call
+BATCH_SIZE = 80   # messages per LLM call
 MAX_INCREMENTAL_ROWS = 2000
 ANALYTICS_STATE_KEY = "routine_analytics"
 
@@ -53,8 +53,8 @@ def _round_to_bucket(time_str: str, bucket_min: int = TIME_BUCKET_MIN) -> str:
 
 def _extract_activities_llm(msgs: list) -> list:
     """
-    Batch LLM call: παίρνει N μηνύματα, επιστρέφει list με
-    (event_name, event_type) ή None για κάθε μήνυμα.
+    Batch LLM call: takes N messages, returns a list with
+    (event_name, event_type) or None for each message.
     """
     from langchain_core.messages import HumanMessage
     from core.brain import llm, safe_llm_invoke
@@ -106,7 +106,7 @@ JSON:"""
 
 
 def _get_week_id(date_str: str) -> str:
-    """Επιστρέφει "2026-W21" για dedup ανά εβδομάδα."""
+    """Returns "2026-W21" for dedup per week."""
     try:
         d = datetime.strptime(date_str, "%Y-%m-%d")
         return f"{d.year}-W{d.isocalendar()[1]:02d}"
@@ -358,8 +358,8 @@ def _promote_incremental_candidates(*, dry_run: bool = False, state_db_path: str
 
 def run_analytics() -> dict:
     """
-    Κύρια συνάρτηση του Analytics Engine.
-    Επιστρέφει stats dict: {detected, created, merged, updated, skipped, errors}
+    Main function of the Analytics Engine.
+    Returns a stats dict: {detected, created, merged, updated, skipped, errors}
     """
     from memory import analytics_state
 
@@ -371,7 +371,7 @@ def run_analytics() -> dict:
              "updated": 0, "skipped": 0, "errors": 0}
     found_routines = []
 
-    # ── 1. Φόρτωση shared history (Web + Telegram) ───────────────
+    # ── 1. Load shared history (Web + Telegram) ───────────────
     cutoff = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
     user_msgs, history_source = _load_user_messages_for_analytics(cutoff)
 
@@ -474,8 +474,8 @@ def run_analytics_incremental(
 
 def get_candidates() -> list:
     """
-    Επιστρέφει τα patterns που δεν πέρασαν threshold ακόμα.
-    Χρήση: ο Αστακός μπορεί να απαντήσει 'τι ρουτίνες έχεις εντοπίσει;'
+    Returns the patterns that have not passed the threshold yet.
+    Usage: Lobster can answer 'what routines have you detected?'
     """
     if not os.path.exists(LOG_FILE):
         return []
@@ -483,7 +483,7 @@ def get_candidates() -> list:
         log = json.load(f)
     if not log:
         return []
-    # Τελευταίο run
+    # Last run
     last = log[-1]
     return last.get("detected_routines", [])
 
@@ -503,7 +503,7 @@ def _write_log(stats: dict, routines: list):
             "stats":             stats,
             "detected_routines": routines
         })
-        log = log[-30:]  # Κράτα τελευταία 30 runs
+        log = log[-30:]  # Keep last 30 runs
         with open(LOG_FILE, "w", encoding="utf-8") as f:
             json.dump(log, f, ensure_ascii=False, indent=2)
     except Exception as e:

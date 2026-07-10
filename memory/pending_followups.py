@@ -1625,13 +1625,13 @@ def looks_like_operational_reminder_exchange(user_text: str, ai_text: str = "") 
         marker in ai_norm for marker in reminder_confirmation_markers
     )
 
-    # Κλασικό operational pair:
+    # Classic operational pair:
     # user asks reminder/alarm + assistant confirms scheduling
     if user_looks_like_reminder and ai_looks_like_confirmation:
         return True
 
-    # Ακόμα κι αν δεν υπάρχει confirmation string, σκέτο wake-up/alarm setup
-    # δεν θέλουμε να γίνεται follow-up candidate
+    # Even if there is no confirmation string, just wake-up/alarm setup
+    # we do not want it to become a follow-up candidate
     if user_looks_like_reminder and any(
         marker in user_norm for marker in ("ξυπνημα", "ξυπνητηρι", "05:30", "5:30")
     ):

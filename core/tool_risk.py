@@ -1,30 +1,30 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Tool Risk Registry
-# Κάθε tool έχει ένα risk level:
-#   SAFE     → εκτελεί αμέσως, σιωπηλά (reads, queries)
-#   WARNING  → εκτελεί αμέσως, log μόνο στο web UI (χωρίς Telegram)
-#   NOTIFY   → εκτελεί αμέσως + Telegram info χωρίς approve/reject buttons
-#   CRITICAL → μπλοκάρει + Telegram με ✅/❌ approve/reject
+# Each tool has a risk level:
+#   SAFE     → executes immediately, silently (reads, queries)
+#   WARNING  → executes immediately, logs only in the web UI (no Telegram)
+#   NOTIFY   → executes immediately + Telegram info without approve/reject buttons_
+#   CRITICAL → blocks + Telegram with ✅/❌ approve/reject
 # ================================================================
 
 TOOL_RISK: dict[str, str] = {
     # ── CRITICAL: destructive / external send / irreversible ────
-    "run_terminal_command":     "DYNAMIC",  # risk καθορίζεται από classify_command() στο approval.py
+    "run_terminal_command":     "DYNAMIC",  # risk is determined by classify_command() in approval.py
     "github_manager":           "CRITICAL",
     "mail_manager":             "CRITICAL",
     "execute_local_pipeline":   "CRITICAL",
     "post_to_linkedin":         "CRITICAL",
     "process_and_clear_linkedin_post": "CRITICAL",
     "write_project_file":       "CRITICAL",  # full rewrite
-    "register_tool":            "CRITICAL",  # τροποποιεί system.py + tool_risk.py
+    "register_tool":            "CRITICAL",  # modifies system.py + tool_risk.py
     "grant_project_access":     "CRITICAL",  # permanent permission change
 
-    # ── NOTIFY: εκτελεί + Telegram info (χωρίς buttons) ─────────
+    # ── NOTIFY: executes + Telegram info (without buttons) ─────────
     "drive_manager":            "NOTIFY",    # upload/download/rename — handled by _effective_risk
     "google_calendar_tool":     "SAFE",      # per-action risk handled by _effective_risk() in approval.py
 
-    # ── WARNING: writes / side-effects — log μόνο στο web UI ────
+    # ── WARNING: writes / side-effects — log only in the web UI ────
     "save_goal_tool":           "WARNING",
     "update_goal_status_tool":  "WARNING",
     "update_goal_progress_tool": "WARNING",
@@ -53,9 +53,10 @@ TOOL_RISK: dict[str, str] = {
     "generate_image_tool":      "WARNING",
     "archive_file":             "WARNING",
     "scan_receipt":             "WARNING",
-    "edit_project_file":        "WARNING",   # escalates to CRITICAL για core files (approval.py)
+    "edit_project_file":        "WARNING",   # escalates to CRITICAL for core files (approval.py)
     "run_officecli":            "WARNING",
-    # ── SAFE: reads / queries / zero side-effects ────────────────
+
+    # ── SAFE: reads / queries / zero side-effects ────────────────
     "search_memory":            "SAFE",
     "retrieve_photo":           "SAFE",
     "read_local_file":          "SAFE",
@@ -92,7 +93,7 @@ TOOL_RISK: dict[str, str] = {
 }
 
 def get_risk(tool_name: str) -> str:
-    """Επιστρέφει SAFE/WARNING/NOTIFY/CRITICAL. Default: WARNING αν άγνωστο."""
+    """Returns SAFE/WARNING/NOTIFY/CRITICAL. Default: WARNING if unknown."""
     return TOOL_RISK.get(tool_name, "WARNING")
 
 def is_critical(tool_name: str) -> bool:

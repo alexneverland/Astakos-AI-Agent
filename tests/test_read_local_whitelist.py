@@ -1,6 +1,6 @@
 """
-Tests για το read_local_file whitelist — source dirs + blocklist.
-Τρέξε: venv/Scripts/python.exe tests/test_read_local_whitelist.py
+Tests for the read_local_file whitelist — source dirs + blocklist.
+Run: venv/Scripts/python.exe tests/test_read_local_whitelist.py
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,7 +23,7 @@ def check(desc, result, expect_ok: bool):
         errors.append(msg)
         print(f"❌ {msg}")
 
-# --- Source dirs: πρέπει να επιτρέπονται ---
+# --- Source dirs: must be allowed ---
 check("tools/system.py",        invoke("tools/system.py"),        expect_ok=True)
 check("tools/web.py",           invoke("tools/web.py"),           expect_ok=True)
 check("core/approval.py",       invoke("core/approval.py"),       expect_ok=True)
@@ -31,11 +31,11 @@ check("core/tool_risk.py",      invoke("core/tool_risk.py"),      expect_ok=True
 check("memory/context_builder.py", invoke("memory/context_builder.py"), expect_ok=True)
 check("memory/execution_trace.py", invoke("memory/execution_trace.py"), expect_ok=True)
 
-# --- Sensitive αρχεία: πρέπει να μπλοκάρονται ---
+# --- Sensitive files: must be blocked ---
 check("config.py (blocked)",    invoke("config.py"),              expect_ok=False)
 check(".env (blocked)",         invoke(".env"),                   expect_ok=False)
 
-# --- .db files: πρέπει να μπλοκάρονται ---
+# --- .db files: must be blocked ---
 import config as cfg
 db_path = os.path.join(cfg.BASE_DIR, "astakos_embeddings_cache.db")
 if os.path.exists(db_path):
@@ -43,7 +43,7 @@ if os.path.exists(db_path):
 else:
     print("ℹ️  .db αρχείο δεν υπάρχει — skip")
 
-# --- Αρχεία εκτός whitelist: πρέπει να μπλοκάρονται ---
+# --- Files not in whitelist: must be blocked ---
 check("C:/Windows/system32/drivers/etc/hosts (blocked)",
       invoke("C:/Windows/system32/drivers/etc/hosts"),            expect_ok=False)
 

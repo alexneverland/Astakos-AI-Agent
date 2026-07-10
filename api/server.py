@@ -70,7 +70,7 @@ last_interaction_time = time.time()
 _TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".astakos_token")
 
 def _get_or_create_token() -> str:
-    """Φορτώνει ή παράγει ένα random local bearer token."""
+    """Loads or generates a random local bearer token."""
     if os.path.exists(_TOKEN_FILE):
         with open(_TOKEN_FILE, "r") as f:
             t = f.read().strip()
@@ -89,10 +89,10 @@ async def require_token(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(_bearer)
 ):
-    """Dependency: ελέγχει το bearer token. Επιτρέπει πάντα από loopback."""
+    """Dependency: checks the bearer token. Always allows from loopback."""
     host = request.client.host if request.client else ""
     if host in ("127.0.0.1", "::1", "localhost"):
-        return  # loopback always allowed (Web UI στον ίδιο υπολογιστή)
+        return  # loopback always allowed (Web UI on the same computer)
     if not credentials or not secrets.compare_digest(credentials.credentials, LOCAL_TOKEN):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -102,7 +102,7 @@ server_loop = None
 
 
 def _broadcast_ws(payload: dict):
-    """Στέλνει JSON event σε όλα τα συνδεδεμένα WebSocket clients."""
+    """Sends a JSON event to all connected WebSocket clients."""
     import json as _json
     if not server_loop or not active_websockets:
         return
@@ -140,7 +140,7 @@ def append_to_chat_history(
     *,
     return_saved: bool = False,
 ):
-    """Προσθήκη μηνύματος στο shared SQLite conversation history (web channel) και websocket push."""
+    """Add message to the shared SQLite conversation history (web channel) and websocket push."""
     now = datetime.now()
     shared_message_id = None
     shared_message_rowid = None
@@ -175,9 +175,9 @@ def append_to_chat_history(
 
 def notify_telegram_message(role: str, content: str, agent: str | None = None) -> int | None:
     """
-    Καλείται από τον Telegram handler όταν φτάνει/αποστέλλεται μήνυμα.
-    Αποθηκεύει στη shared SQLite και ειδοποιεί το Web UI μέσω WebSocket.
-    Επιστρέφει το νέο message id ή None αν αποτύχει.
+    Called by the Telegram handler when a message arrives/is sent.
+    Saves to the shared SQLite database and notifies the Web UI via WebSocket.
+    Returns the new message id or None if it fails.
     """
     now = datetime.now()
     try:
@@ -208,7 +208,7 @@ def notify_telegram_message(role: str, content: str, agent: str | None = None) -
 
 
 def _load_shared_context_messages(channel: str, exclude_message_id: str | None = None) -> list:
-    """Φορτώνει μικτό shared context. Αν αποτύχει, ο caller κάνει fallback στο legacy history."""
+    """Loads mixed shared context. If it fails, the caller falls back to legacy history."""
     try:
         from memory.conversation_history import load_recent_context
         entries = load_recent_context(channel=channel, global_limit=12, channel_limit=10, total_limit=20)
@@ -232,7 +232,7 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
 
 
 def _tool_results_fallback_response(user_text: str, tool_results: list[str]) -> str:
-    """Συνθέτει τελική απάντηση όταν το graph γύρισε μόνο tool results."""
+    """Synthesizes a final answer when the graph returned only tool results."""
     clean_results = [clean_message(r).strip() for r in tool_results if clean_message(r).strip()]
     if not clean_results:
         return ""
@@ -357,7 +357,7 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
 # ────────────────────────────────────────────────────────────────
 
 def fast_queue_worker():
-    """Εκτελεί fast background tasks (π.χ. UI updates, deterministic memory)."""
+    """Executes fast background tasks (e.g., UI updates, deterministic memory)."""
     print("\033[90m[System]: Fast Queue Worker Ξεκίνησε!\033[0m")
     while not shutdown_event.is_set():
         try:
@@ -373,7 +373,7 @@ def fast_queue_worker():
             continue
 
 def slow_queue_worker():
-    """Εκτελεί slow background tasks (π.χ. LLM memory sifting)."""
+    """Performs slow background tasks (e.g., LLM memory sifting)."""
     print("\033[90m[System]: Slow Queue Worker Ξεκίνησε!\033[0m")
     while not shutdown_event.is_set():
         try:
@@ -416,13 +416,13 @@ def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Ξεκινάει workers, περιμένει, τερματίζει καθαρά."""
+    """Starts workers, waits, terminates cleanly."""
     global server_loop
     server_loop = asyncio.get_running_loop()
     sys.stdout = WsLogger(sys.stdout)
     threads = [
-        # reminder_worker και proactive_worker τρέχουν ΜΟΝΟ στο telegram_bot.py
-        # Εδώ κρατάμε μόνο τους fast/slow workers για τα background memory tasks
+        # reminder_worker and proactive_worker run ONLY in telegram_bot.py
+        # Here we only keep the fast/slow workers for the background memory tasks
         threading.Thread(target=fast_queue_worker, daemon=True),
         threading.Thread(target=slow_queue_worker, daemon=True),
     ]
@@ -436,11 +436,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[PendingAssets]: Init failed: {e}")
         
-    yield  # Server τρέχει εδώ
+    yield  # Server runs here
 
     print("\n[Server]: Τερματισμός...")
 
-    # Drain queue πρώτα (max 5s)
+    # Drain queue first (max 5s)
     try:
         import threading as _th
         _done = _th.Event()
@@ -482,18 +482,18 @@ server = FastAPI(lifespan=lifespan)
 logging.getLogger("uvicorn.access").disabled = True
 server.mount("/photos", StaticFiles(directory=PHOTOS_DIR), name="photos")
 
-# --- [MASTRO-ROUTE]: Επιτρέπουμε το download από τον φάκελο outputs ---
+# --- [MASTRO-ROUTE]: Allow downloading from the outputs folder ---
 from config import BASE_DIR
 outputs_dir = os.path.join(BASE_DIR, "outputs")
 os.makedirs(outputs_dir, exist_ok=True)
 server.mount("/outputs", StaticFiles(directory=outputs_dir), name="outputs")
 
-# --- [MASTRO-FIX]: Ξεχωριστός φάκελος για τις φάτσες του UI ---
+# --- [MASTRO-FIX]: Separate folder for the UI faces ---
 avatars_dir = os.path.join(BASE_DIR, "avatars")
 os.makedirs(avatars_dir, exist_ok=True)
 server.mount("/avatars", StaticFiles(directory=avatars_dir), name="avatars")
 
-# CORS — μόνο localhost (κανείς εξωτερικός δεν μπορεί να καλέσει τον server)
+# CORS — localhost only (no external source can call the server)
 server.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8000", "http://127.0.0.1:8000"],
@@ -507,14 +507,14 @@ server.add_middleware(
 # ────────────────────────────────────────────────────────────────
 # ENDPOINTS
 # ────────────────────────────────────────────────────────────────
-# [MASTRO-FIX]: Προσθήκη του endpoint για το κουμπί του Web UI
+# [MASTRO-FIX]: Add the endpoint for the Web UI button
 @server.post("/end_session")
 async def manual_session_save(_=Depends(require_token)):
-    """Επιτρέπει στο Web UI να ζητάει χειροκίνητη αρχειοθέτηση (Κουμπί)"""
+    """Allows the Web UI to request manual archiving (Button)"""
     from memory.session_memory import _run_session_summary
     import threading
     
-    # Εκτέλεση σε ξεχωριστό thread για να μην κολλήσει το API
+    # Execution in a separate thread to prevent the API from freezing
     threading.Thread(target=_run_session_summary, args=("web",), daemon=True).start()
     return JSONResponse({"status": "Η αρχειοθέτηση ξεκίνησε!"})
 @server.post("/chat")
@@ -524,7 +524,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     body       = await request.json()
     user_input = body.get("message", "").strip()
 
-    # (Mastro-Shield): Αποφυγή null ή περίεργων paths
+    # (Mastro-Shield): Avoid null or strange paths
     photo_path = body.get("photo_path")
     if photo_path is None:
         photo_path = ""
@@ -544,9 +544,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         })
 
     # 2. --- XML CONTEXT ISOLATION ---
-    # Το web/telegram είναι trusted channel (local server, μόνο Λάζαρος).
-    # ΔΕΝ κάνουμε wrap σε isolated_data — αλλιώς οι εντολές του Λάζαρου
-    # μπλοκάρονται από το ίδιο το security prompt.
+    # The web/telegram is a trusted channel (local server, Lazarus only).
+    # We do NOT wrap in isolated_data — otherwise Lazaros' commands
+    # are blocked by the security prompt itself.
     isolated_user_input = user_input
 
     recent_asset = None
@@ -574,8 +574,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     except Exception as e:
         print(f"[RecentAssetFollowup]: {e}")
 
-    # ── Routine Confirmation από Web UI ─────────────────────────
-    # Ίδια λογική με telegram_bot — accent-insensitive
+    # ── Routine Confirmation from Web UI ─────────────────────────
+    # Same logic as telegram_bot — accent-insensitive
     import unicodedata
     def _normalize_gr(t):
         return unicodedata.normalize("NFD", t).encode("ascii", "ignore").decode("ascii").lower()
@@ -622,7 +622,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     except Exception as _rce:
         print(f"[Web Routine Confirm]: {_rce}")
 
-    # ── Pending Asset Confirmation από Web UI ────────────────────
+    # ── Pending Asset Confirmation from Web UI ───────────────────
     try:
         from memory.pending_assets import (
             clear_expired_pending_assets,
@@ -771,7 +771,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     with memory_lock:
         last_interaction_time = time.time()
 
-    # ── Αποθήκευση user message στο history ────────────────────
+    # ── Save user message to history ────────────────────
     # Note: We save the original `user_input` to the UI chat history, 
     # not the XML-wrapped version, to keep the frontend looking clean.
     current_history_saved = append_to_chat_history("user", user_input, return_saved=True)
@@ -782,7 +782,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     handling_agent    = "Chat_Agent"
 
     try:
-        # ── Multimodal message αν υπάρχει αρχείο ───────────
+        # ── Multimodal message if a file exists ───────────
         if photo_path and os.path.exists(photo_path):
             import base64
             filename = os.path.basename(photo_path)
@@ -794,7 +794,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             # We inject the isolated input into the enhanced string
             enhanced_user_input = f"[USER_UPLOADED_FILE]: {filename}\n{isolated_user_input}"
 
-            # Αν είναι ΕΙΚΟΝΑ, το κάνουμε Base64 και το στέλνουμε ως image_url
+            # If it is an IMAGE, we convert it to Base64 and send it as image_url
             if ext in image_exts:
                 print(f"\033[94m[Vision]: Κωδικοποίηση εικόνας σε base64 ({ext})...\033[0m")
                 with open(photo_path, "rb") as f:
@@ -810,7 +810,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 print(f"\033[92m[Chat]: Multimodal message (Εικόνα): {filename}\033[0m")
                 print(f"\033[94m[Vision]: Έτοιμο για ανάλυση από το LLM — μήνυμα: '{isolated_user_input[:120]}'\033[0m")
 
-            # Αν είναι ΕΓΓΡΑΦΟ (PDF, Word, Excel), το στέλνουμε μόνο ως κείμενο/όνομα
+            # If it is a DOCUMENT (PDF, Word, Excel), we send it only as text/name
             else:
                 human_msg = HumanMessage(content=enhanced_user_input)
                 print(f"\033[94m[Chat]: Text message με αναφορά εγγράφου: {filename}\033[0m")
@@ -820,7 +820,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             # We feed the LangGraph state the isolated XML payload
             human_msg = HumanMessage(content=isolated_user_input)
 
-        # Timestamp στο τρέχον μήνυμα
+        # Timestamp on the current message
         now_ts = datetime.now().strftime("%H:%M")
         if isinstance(human_msg.content, str):
             human_msg = HumanMessage(content=f"[{now_ts}] {human_msg.content}")
@@ -831,7 +831,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     parts[i] = {"type": "text", "text": f"[{now_ts}] {p['text']}"}
                     break
             human_msg = HumanMessage(content=parts)
-        # ── Τρέξιμο του LangGraph ────────────────────────────────
+        # ── Running LangGraph ─────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "web"
         if photo_path and os.path.exists(photo_path):
             print(f"\033[95m[Web->Graph]: Προώθηση multimodal μηνύματος στο γράφημα — '{isolated_user_input[:120]}'\033[0m")
@@ -919,20 +919,20 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         if not final_ai_response:
             final_ai_response = _tool_results_fallback_response(isolated_user_input, tool_result_fallbacks)
 
-        # --- [MASTRO-FIX]: Επιπλέον καθάρισμα ΠΡΙΝ την αποθήκευση ---
+        # --- [MASTRO-FIX]: Additional cleaning BEFORE saving ---
         # We use the raw user_input for memory extraction so Astakos 
         # doesn't memorize the XML tags as part of your data.
         clean_user = clean_message(user_input)
         clean_ai   = clean_message(final_ai_response)
 
-        # 1. --- MASTRO INTERCEPTOR ΓΙΑ LINKS ΕΓΓΡΑΦΩΝ (Web UI) ---
+        # 1. --- MASTER INTERCEPTOR FOR REGISTRATION LINKS (Web UI) ---
         file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", clean_ai)
         if file_match:
             file_path = file_match.group(1).strip()
             filename  = os.path.basename(file_path)
             base_url  = str(request.base_url).rstrip("/")
 
-            # File card με κουμπί που ανεβάζει on-demand στο Drive
+            # File card with a button that uploads to Drive on-demand
             import json as _json
             safe_path = _json.dumps(file_path)  # properly escaped JSON string
             file_card = (
@@ -948,14 +948,14 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             )
             clean_ai = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", lambda m: file_card, clean_ai)
 
-        # 2. --- MASTRO INTERCEPTOR ΓΙΑ ΕΙΚΟΝΕΣ (Web UI) ---
+        # 2. --- MASTRO INTERCEPTOR FOR IMAGES (Web UI) ---
         photo_match = re.search(r"\[SEND_PHOTO:\s*(.*?)\]", clean_ai)
         if photo_match:
             file_path = photo_match.group(1).strip()
             filename = os.path.basename(file_path)
             base_url = str(request.base_url).rstrip("/")
             
-            # Ελέγχουμε έξυπνα πού βρίσκεται η φωτογραφία
+            # We smartly check where the photo is located
             if "outputs" in file_path.lower():
                 img_url = f"{base_url}/outputs/{filename}"
             else:
@@ -963,11 +963,11 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 
             img_html = f'<br><br><img src="{img_url}" alt="Astakos Image" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">'
             
-            # Αντικαθιστούμε την ταμπέλα με την εικόνα
+            # We replace the label with the image
             clean_ai = re.sub(r"\[SEND_PHOTO:\s*(.*?)\]", img_html, clean_ai)
 
         if final_ai_response:
-            # Αποθηκεύουμε παντού τα ΚΑΘΑΡΑ strings (με το Link/Img αν υπάρχει)
+            # We store the CLEAN strings everywhere (including the Link/Img if it exists)
             _trace.mark_phase("final_response_build_ms", int((perf_counter() - t_build_0) * 1000))
             _trace.agent = handling_agent
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
@@ -996,7 +996,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         return JSONResponse({
             "agent":    handling_agent,
-            "response": clean_ai,  # Επιστρέφουμε την απάντηση στο Frontend
+            "response": clean_ai,  # Returning the response to the Frontend
             "user_rowid": current_history_rowid,
             "assistant_rowid": assistant_history_rowid if final_ai_response else None,
         })
@@ -1008,7 +1008,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
 @server.post("/voice")
 async def process_web_voice(file: UploadFile = File(...), _=Depends(require_token)):
-    """Δέχεται ηχητικό από το Web UI, το κάνει κείμενο με Gemini και το επιστρέφει."""
+    """Accepts audio from the Web UI, transcribes it to text using Gemini, and returns it."""
     try:
         audio_data = await file.read()
         debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "debug_voice.webm")
@@ -1150,7 +1150,7 @@ async def upload_file(
     message: str = Form(""),
     _=Depends(require_token),
 ):
-    """Endpoint για ανέβασμα αρχείων (φωτογραφίες & έγγραφα) από το Web UI."""
+    """Endpoint for uploading files (photos & documents) from the Web UI."""
     try:
         file_ext  = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
         if file_ext not in ALLOWED_EXTENSIONS:
@@ -1197,10 +1197,10 @@ async def upload_file(
             )
             user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
         elif file_ext in doc_exts:
-            # Διαβάζουμε το περιεχόμενο του εγγράφου
+            # We read the content of the document
             doc_text = _read_document_text_for_analysis(file_path, file_ext)
 
-            # Στέλνουμε στο LLM για περίληψη/ανάλυση
+            # We send to the LLM for summary/analysis
             from memory.conversation_history import build_asset_context_text
             conversation_context = build_asset_context_text("web")
 
@@ -1301,7 +1301,7 @@ async def upload_file(
 
 @server.get("/")
 async def read_index():
-    """Σερβίρει το Web UI (index.html)."""
+    """Serves the Web UI (index.html)."""
     from fastapi.responses import FileResponse
     return FileResponse('index.html')
 
@@ -1314,9 +1314,9 @@ async def health():
 @server.get("/messages/poll")
 async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends(require_token)):
     """
-    Polling endpoint για το Web UI.
-    Επιστρέφει μηνύματα με id > after_id (default: 0 = όλα).
-    Χρήση: GET /messages/poll?after_id=42&channel=telegram
+    Polling endpoint for the Web UI.
+    Returns messages with id > after_id (default: 0 = all).
+    Usage: GET /messages/poll?after_id=42&channel=telegram
     """
     try:
         from memory.conversation_history import load_messages_after_rowid, get_max_rowid
@@ -1329,14 +1329,14 @@ async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends
 
 @server.get("/history")
 async def get_history(_=Depends(require_token)):
-    """Δίνει το ιστορικό στο Web UI από τη shared SQLite."""
+    """Provides the history to the Web UI from the shared SQLite."""
     history = _load_shared_history_entries(limit=200)
     return {"history": history}
 
 
 @server.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket):
-    """Κρατάει το κανάλι ανοιχτό — στέλνει live print() output στο Web UI."""
+    """Keeps the channel open — sends live print() output to the Web UI."""
     await websocket.accept()
     active_websockets.append(websocket)
     try:
@@ -1404,8 +1404,8 @@ def _debug_condition_state_details(flag_name: str, effective_value, raw_states: 
 @server.get("/debug/runtime")
 async def debug_runtime(_=Depends(require_token)):
     """
-    Live runtime snapshot — διαβάζει από:
-      • runtime_snapshot.json   (scheduler jobs — γράφεται κάθε 10s από telegram_bot)
+    Live runtime snapshot — reads from:
+      • runtime_snapshot.json   (scheduler jobs — written every 10s by telegram_bot)
       • scheduler_state.json    (override state)
       • astakos_routines.db     (active routines, pending confirmations, cooldowns)
       • logs/events/YYYY-MM-DD.json  (event throughput, last errors)
@@ -1828,7 +1828,7 @@ async def debug_runtime(_=Depends(require_token)):
 
 
 def _get_pending_actions() -> list:
-    """Επιστρέφει CRITICAL tool calls που περιμένουν approve/reject."""
+    """Returns CRITICAL tool calls pending approve/reject."""
     try:
         from core.approval import list_pending
         actions = []
@@ -1862,7 +1862,7 @@ def _get_messenger_draft_debug() -> dict:
 
 @server.post("/debug/action/{tool_call_id}/approve")
 async def approve_action(tool_call_id: str, _=Depends(require_token)):
-    """Εγκρίνει και εκτελεί CRITICAL pending action — pop μόνο αν πετύχει."""
+    """Approves and executes CRITICAL pending action — pop only if successful."""
     try:
         from core.approval import execute_approved_pending
         from tools.system import all_tools
@@ -1881,7 +1881,7 @@ async def approve_action(tool_call_id: str, _=Depends(require_token)):
 
 @server.post("/debug/action/{tool_call_id}/reject")
 async def reject_action(tool_call_id: str, _=Depends(require_token)):
-    """Απορρίπτει CRITICAL pending action."""
+    """Rejects CRITICAL pending action."""
     try:
         from core.approval import pop_pending
         from tools.telegram import send_telegram_msg
@@ -1950,7 +1950,7 @@ async def debug_replay(days: int = 2, _=Depends(require_token)):
 
 @server.delete("/debug/routine/{routine_id}")
 async def delete_routine(routine_id: int, _=Depends(require_token)):
-    """Διαγράφει ρουτίνα από τη βάση."""
+    """Deletes a routine from the database."""
     import sqlite3 as _sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
     try:
@@ -1964,7 +1964,7 @@ async def delete_routine(routine_id: int, _=Depends(require_token)):
 
 @server.post("/debug/routine/{routine_id}/reset-cooldown")
 async def reset_routine_cooldown(routine_id: int, _=Depends(require_token)):
-    """Reset cooldown → ειδοποιεί αμέσως στον επόμενο cycle."""
+    """Reset cooldown → alerts immediately on the next cycle."""
     import sqlite3 as _sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
     try:
@@ -1981,7 +1981,7 @@ async def reset_routine_cooldown(routine_id: int, _=Depends(require_token)):
 
 @server.post("/debug/routine/{routine_id}/confirm")
 async def force_confirm_routine(routine_id: int, _=Depends(require_token)):
-    """Force-confirm μια stuck TRIGGER_PENDING ρουτίνα → ACTIVE."""
+    """Force-confirm a stuck TRIGGER_PENDING routine → ACTIVE."""
     try:
         from memory.routine_db import confirm_routine, mark_routine_responded, \
             remove_pending_confirmation, get_routine_state
@@ -1998,7 +1998,7 @@ async def force_confirm_routine(routine_id: int, _=Depends(require_token)):
 
 @server.patch("/debug/routine/{routine_id}/state")
 async def force_routine_state(routine_id: int, request: Request, _=Depends(require_token)):
-    """Force state αλλαγή για debug — π.χ. {\"state\": \"active\"}."""
+    """Force state change for debug — e.g. {\"state\": \"active\"}."""
     import sqlite3 as _sqlite3
     body = await request.json()
     new_state = body.get("state", "").strip().lower()
@@ -2021,7 +2021,7 @@ async def force_routine_state(routine_id: int, request: Request, _=Depends(requi
 
 @server.post("/debug/routine/{routine_id}/activate")
 async def activate_routine(routine_id: int, _=Depends(require_token)):
-    """Κάνει LEARNED → ACTIVE μια ρουτίνα."""
+    """Makes a routine LEARNED → ACTIVE."""
     import sqlite3 as _sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
     try:
@@ -2035,7 +2035,7 @@ async def activate_routine(routine_id: int, _=Depends(require_token)):
 
 @server.patch("/debug/routine/{routine_id}")
 async def edit_routine(routine_id: int, request: Request, _=Depends(require_token)):
-    """Επεξεργασία day/time/event_name μιας ρουτίνας."""
+    """Process day/time/event_name of a routine."""
     import sqlite3 as _sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
     try:
@@ -2064,7 +2064,7 @@ async def edit_routine(routine_id: int, request: Request, _=Depends(require_toke
 
 @server.get("/debug/reflections")
 async def get_reflections(_=Depends(require_token)):
-    """Επιστρέφει τα τελευταία 20 reflections από τη βάση."""
+    """Returns the last 20 reflections from the database."""
     import sqlite3 as _sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
     try:
@@ -2080,7 +2080,7 @@ async def get_reflections(_=Depends(require_token)):
 
 @server.post("/debug/reflection/{reflection_id}/apply")
 async def apply_reflection(reflection_id: int, _=Depends(require_token)):
-    """Εφαρμόζει χειροκίνητα ένα pending reflection."""
+    """Manually applies a pending reflection."""
     import sqlite3 as _sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
     try:
@@ -2108,7 +2108,7 @@ async def apply_reflection(reflection_id: int, _=Depends(require_token)):
 
 @server.post("/upload-to-drive")
 async def upload_to_drive_endpoint(request: Request, _=Depends(require_token)):
-    """Ανεβάζει τοπικό αρχείο στο Google Drive, επιστρέφει το shareable URL."""
+    """Uploads a local file to Google Drive, returns the shareable URL."""
     try:
         body     = await request.json()
         filepath = body.get("path", "").strip()
@@ -2125,7 +2125,7 @@ async def upload_to_drive_endpoint(request: Request, _=Depends(require_token)):
 
 @server.delete("/debug/reflection/{reflection_id}")
 async def delete_reflection(reflection_id: int, _=Depends(require_token)):
-    """Διαγράφει ένα reflection."""
+    """Deletes a reflection."""
     import sqlite3 as _sqlite3
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
     try:
@@ -2140,7 +2140,7 @@ async def delete_reflection(reflection_id: int, _=Depends(require_token)):
 
 @server.get("/debug/goals")
 async def debug_goals(_=Depends(require_token)):
-    """Επιστρέφει όλα τα long-term goals."""
+    """Returns all long-term goals."""
     try:
         from memory.vector_store import vector_store, vector_lock
         with vector_lock:
@@ -2167,7 +2167,7 @@ async def debug_goals(_=Depends(require_token)):
 
 @server.delete("/debug/goals/{project}")
 async def delete_goal(project: str, _=Depends(require_token)):
-    """Διαγράφει goal με βάση το project name."""
+    """Deletes a goal based on the project name."""
     try:
         from memory.vector_store import vector_store, vector_lock
         with vector_lock:
@@ -2184,8 +2184,8 @@ async def delete_goal(project: str, _=Depends(require_token)):
 @server.get("/debug/traces")
 async def debug_traces(date: str | None = None, limit: int = 50, _=Depends(require_token)):
     """
-    Επιστρέφει execution traces (agent routing + tool calls) για debugging.
-    ?date=YYYY-MM-DD  (default: σήμερα)
+    Returns execution traces (agent routing + tool calls) for debugging.
+    ?date=YYYY-MM-DD  (default: today)
     ?limit=N           (default: 50, max 200)
     """
     from memory.execution_trace import load_traces
@@ -2199,7 +2199,7 @@ async def debug_traces(date: str | None = None, limit: int = 50, _=Depends(requi
 
 @server.get("/debug/memory-audit")
 async def debug_memory_audit(days: int = 1, _=Depends(require_token)):
-    """Επιστρέφει το memory audit log (add/overwrite/skip/reflection) για N ημέρες."""
+    """Returns the memory audit log (add/overwrite/skip/reflection) for N days."""
     from config import MEMORY_AUDIT_DIR
     from datetime import date, timedelta
     import json as _json

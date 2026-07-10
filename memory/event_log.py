@@ -14,20 +14,20 @@ from datetime import datetime
 
 LOGS_DIR = os.path.join(os.path.dirname(__file__), "..", "logs", "events")
 
-# Lock για thread-safety: ο scheduler τρέχει πολλά jobs παράλληλα
-# και το log_event καλείται από πολλά threads ταυτόχρονα.
+# Lock for thread-safety: the scheduler runs multiple jobs in parallel
+# and log_event is called by multiple threads simultaneously.
 _log_lock = threading.Lock()
 
 # ────────────────────────────────────────────────────────────────
 # CROSS-PROCESS LOCK
-# Το _log_lock πιο πάνω προστατεύει μόνο threads ΜΕΣΑ στο ίδιο process.
-# Όμως ο web server (api/server.py, uvicorn) ΚΑΙ το telegram bot τρέχουν
-# ταυτόχρονα ως 2 ξεχωριστά OS processes και γράφουν στο ΙΔΙΟ daily JSON
-# αρχείο — χωρίς cross-process lock, το os.replace των δύο μπορεί να
-# τρακάρει (WinError 5) γιατί κανείς δεν βλέπει το lock του άλλου.
-# Λύση: msvcrt file lock σε ξεχωριστό sentinel αρχείο (ίδια τεχνική με
-# το run_telegram.lock) — σειριοποιεί τα log_event() calls μεταξύ
-# processes, χωρίς να μπλέκεται με το ίδιο το atomic-write αρχείο.
+# The _log_lock above only protects threads WITHIN the same process.
+# But the web server (api/server.py, uvicorn) AND the telegram bot are running
+# simultaneously as 2 separate OS processes and they write to the SAME daily JSON
+# file — without a cross-process lock, the os.replace of the two can
+# crashes (WinError 5) because no one sees each other's lock.
+# Solution: msvcrt file lock on a separate sentinel file (same technique as
+# the run_telegram.lock) — serializes log_event() calls between
+# processes, without interfering with the atomic-write file itself.
 # ────────────────────────────────────────────────────────────────
 
 def _acquire_cross_process_lock():
@@ -38,14 +38,14 @@ def _acquire_cross_process_lock():
         os.makedirs(LOGS_DIR, exist_ok=True)
         lock_path = os.path.join(LOGS_DIR, ".event_log.lock")
         f = open(lock_path, "w")
-        for _attempt in range(40):  # έως ~2s αναμονή σε βαριά αντιπαλότητα
+        for _attempt in range(40):  # up to ~2s wait under heavy contention
             try:
                 msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
                 return f
             except OSError:
                 time.sleep(0.05)
         f.close()
-        return None  # δεν καταφέραμε lock — προχωράμε χωρίς (το retry+fallback πιο κάτω παραμένει safety net)
+        return None  # failed to acquire lock — proceeding without it (the retry+fallback below remains a safety net)
     except Exception:
         return None
 
@@ -70,15 +70,15 @@ def _release_cross_process_lock(f):
 
 def log_event(job: str, action: str, **kwargs):
     """
-    Καταγράφει ένα event σε daily JSON file (logs/events/YYYY-MM-DD.json).
+    Logs an event to a daily JSON file (logs/events/YYYY-MM-DD.json).
 
-    Παράδειγμα:
+    Example:
         log_event("routine_scan", "triggered", routine_id=14, confidence=0.8)
-        log_event("reminder",     "sent",      task="Φάρμακο Αλέξανδρος")
+        log_event("reminder",     "sent",      task="Medicine Alexandros")
         log_event("proactive",    "skipped",   reason="quiet_hours")
 
-    Atomic write: γράφει πρώτα σε .tmp, fsync, μετά os.replace → αν
-    crashάρει στη μέση δεν μένει corrupted αρχείο (ούτε truncated JSON).
+    Atomic write: writes to .tmp first, fsync, then os.replace → if it
+    crashes in the middle, no corrupted file is left behind (nor truncated JSON).
     """
     try:
         os.makedirs(LOGS_DIR, exist_ok=True)
@@ -103,13 +103,13 @@ def log_event(job: str, action: str, **kwargs):
                         with open(log_file, "r", encoding="utf-8") as f:
                             entries = json.load(f)
                     except Exception:
-                        entries = []   # corrupted → ξεκινάμε φρέσκο για σήμερα
+                        entries = []   # corrupted → starting fresh for today
 
                 entries.append(entry)
 
                 # Atomic write: .tmp → fsync → os.replace
-                # Αν κοπεί το ρεύμα/crash πριν το replace: παλιό αρχείο ανέπαφο.
-                # Αν κοπεί μετά το replace: νέο αρχείο πλήρες.
+                # If a power outage/crash occurs before the replace: old file remains intact.
+                # If cut after replace: new complete file.
                 tmp_file = log_file + ".tmp"
                 with open(tmp_file, "w", encoding="utf-8") as f:
                     json.dump(entries, f, ensure_ascii=False, indent=2)
@@ -117,11 +117,11 @@ def log_event(job: str, action: str, **kwargs):
                     try:
                         os.fsync(f.fileno())
                     except OSError:
-                        pass  # fsync δεν υποστηρίζεται παντού — flush αρκεί
-                # Με το cross-process lock πιο πάνω, ο web server και το
-                # telegram bot δεν τρακάρουν πλέον στο ίδιο αρχείο — αυτό
-                # το retry+fallback παραμένει μόνο σαν safety net για
-                # antivirus locks ή lock acquisition που απέτυχε.
+                        pass  # fsync is not supported everywhere — flush is enough
+                # With the cross-process lock above, the web server and the
+                # telegram bots no longer crash on the same file — this
+                # retry+fallback remains only as a safety net for
+                # antivirus locks or failed lock acquisition.
                 for _attempt in range(5):
                     try:
                         os.replace(tmp_file, log_file)
@@ -130,8 +130,8 @@ def log_event(job: str, action: str, **kwargs):
                         if _attempt < 4:
                             time.sleep(0.05 * (_attempt + 1))
                         else:
-                            # Fallback: αναμένουμε 500ms και γράφουμε απευθείας.
-                            # Non-atomic αλλά το event δεν χάνεται σιωπηλά.
+                            # Fallback: we wait 500ms and write directly.
+                            # Non-atomic but the event is not silently lost.
                             time.sleep(0.5)
                             _written = False
                             try:
@@ -158,8 +158,8 @@ def log_event(job: str, action: str, **kwargs):
 
 def get_events(date_str: str = None, job: str = None, action: str = None) -> list:
     """
-    Επιστρέφει events από το daily log.
-    Χρήση: get_events("2026-05-22", job="routines", action="triggered")
+    Returns events from the daily log.
+    Usage: get_events("2026-05-22", job="routines", action="triggered")
     """
     try:
         target = date_str or datetime.now().strftime("%Y-%m-%d")
@@ -183,14 +183,14 @@ def get_events(date_str: str = None, job: str = None, action: str = None) -> lis
 
 _dedup_cache: dict = {}   # {msg_hash: sent_at_timestamp}
 _dedup_lock  = threading.Lock()
-DEDUP_COOLDOWN_DEFAULT = 300  # 5 λεπτά default cooldown
+DEDUP_COOLDOWN_DEFAULT = 300  # 5 minutes default cooldown
 
 
 def is_duplicate_routine(routine_id: int, cooldown_hours: float) -> bool:
     """
-    Per-routine dedup βασισμένο στο last_notified_ts από τη DB.
-    Πολύ πιο αξιόπιστο από text-hash dedup γιατί δεν εξαρτάται από το κείμενο.
-    Επιστρέφει True αν η ρουτίνα ειδοποιήθηκε πρόσφατα (εντός cooldown).
+    Per-routine dedup based on last_notified_ts from the DB.
+    Much more reliable than text-hash dedup because it does not depend on the text.
+    Returns True if the routine was notified recently (within cooldown).
     """
     try:
         from memory.routine_db import get_routine_notify_info
@@ -198,7 +198,7 @@ def is_duplicate_routine(routine_id: int, cooldown_hours: float) -> bool:
         info     = get_routine_notify_info(routine_id)
         last_ts  = info.get("last_notified_ts")
         if not last_ts:
-            return False  # Ποτέ δεν ειδοποιήθηκε → όχι duplicate
+            return False  # Never notified → not a duplicate
         last_dt       = _dt.fromisoformat(last_ts)
         elapsed       = (_dt.now() - last_dt).total_seconds()
         cooldown_secs = cooldown_hours * 3600
@@ -209,13 +209,13 @@ def is_duplicate_routine(routine_id: int, cooldown_hours: float) -> bool:
         return False
     except Exception as e:
         print(f"[event_log]: is_duplicate_routine error: {e}")
-        return False  # Graceful fallback — επιτρέπουμε αποστολή
+        return False  # Graceful fallback — we allow sending
 def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDOWN_DEFAULT) -> bool:
     """
-    Επιστρέφει True αν το ίδιο μήνυμα στάλθηκε πρόσφατα (εντός cooldown).
-    Χρήση: if is_duplicate_notification(msg): return
+    Returns True if the same message was sent recently (within cooldown).
+    Usage: if is_duplicate_notification(msg): return
 
-    Αυτόματα καθαρίζει παλιές εγγραφές (>1 ώρα).
+    Automatically clears old entries (>1 hour).
     """
     import time
     msg_hash = hashlib.md5(message.strip().encode("utf-8")).hexdigest()[:10]
@@ -241,8 +241,8 @@ def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDO
 
 def get_routine_timeline(routine_id: int = None, days: int = 3) -> list:
     """
-    Επιστρέφει χρονολογικό timeline events για μια ρουτίνα (ή όλες).
-    Ψάχνει στα τελευταία N days.
+    Returns a chronological timeline of events for a routine (or all).
+    Searches within the last N days.
     """
     from datetime import timedelta
     results = []
@@ -256,7 +256,7 @@ def get_routine_timeline(routine_id: int = None, days: int = 3) -> list:
                 entries = json.load(f)
             for e in entries:
                 if e.get("job") != "routines":
-                    continue  # αγνοούμε events από άλλα jobs (reminders, proactive κ.λπ.)
+                    continue  # ignore events from other jobs (reminders, proactive, etc.)
                 if routine_id is None or str(e.get("routine_id")) == str(routine_id):
                     if e.get("action") in (
                         "triggered", "sent", "confirmed", "timeout",
