@@ -27,6 +27,8 @@ TOOL_RISK: dict[str, str] = {
     # ── WARNING: writes / side-effects — log μόνο στο web UI ────
     "save_goal_tool":           "WARNING",
     "update_goal_status_tool":  "WARNING",
+    "update_goal_progress_tool": "WARNING",
+    "update_goal_milestones_tool": "WARNING",
     "delete_from_memory":       "WARNING",
     "control_vacuum":           "WARNING",
     "manage_list":              "WARNING",
@@ -52,6 +54,7 @@ TOOL_RISK: dict[str, str] = {
     "archive_file":             "WARNING",
     "scan_receipt":             "WARNING",
     "edit_project_file":        "WARNING",   # escalates to CRITICAL για core files (approval.py)
+    "run_officecli":            "WARNING",
     # ── SAFE: reads / queries / zero side-effects ────────────────
     "search_memory":            "SAFE",
     "retrieve_photo":           "SAFE",
@@ -84,6 +87,8 @@ TOOL_RISK: dict[str, str] = {
     "generate_word_doc":        "SAFE",
     "generate_pdf":             "SAFE",
     "generate_csv":             "SAFE",
+    "list_agent_skills":        "SAFE",
+    "read_agent_skill":         "SAFE",
 }
 
 def get_risk(tool_name: str) -> str:

@@ -23,7 +23,8 @@ def research_last30days(topic: str) -> str:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            cwd=BASE_DIR
+            cwd=BASE_DIR,
+            timeout=900,
         )
 
         if result.returncode != 0:

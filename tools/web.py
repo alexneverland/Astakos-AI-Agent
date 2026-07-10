@@ -829,14 +829,21 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
     import os
     import time
     import json
+    import unicodedata
     from config import GPS_STORAGE_FILE
     profile = _build_places_query_profile(query)
+
+    def _normalize_gr(text: str) -> str:
+        text = str(text or "").strip().lower()
+        text = unicodedata.normalize("NFKD", text)
+        return "".join(ch for ch in text if not unicodedata.combining(ch))
     
     # [MASTRO-GPS-INTERCEPTOR]
-    if "κοντά" in query.lower() or location == "current":
+    query_norm = _normalize_gr(query)
+    if "κοντα" in query_norm or location == "current":
         if os.path.exists(GPS_STORAGE_FILE):
             try:
-                with open(GPS_STORAGE_FILE, "r") as f:
+                with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
                     gps = json.load(f)
                     # Αν το στίγμα είναι φρέσκο (τελευταία 24ωρα)
                     if time.time() - gps['timestamp'] < 86400:
@@ -995,12 +1002,25 @@ def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE
     Το mode μπορεί να είναι "DRIVE" (οδήγηση, προεπιλογή) ή "WALK" (περπάτημα).
     """
     import os
+    import json
     import re
+    import time
     import urllib.parse
     import requests
+    from config import GPS_STORAGE_FILE
 
     home_base = "Piston 7, Thessaloniki"
     final_origin = origin if origin else home_base
+
+    if not origin:
+        try:
+            if os.path.exists(GPS_STORAGE_FILE):
+                with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
+                    gps = json.load(f)
+                if time.time() - float(gps.get("timestamp", 0)) < 86400:
+                    final_origin = f"{gps['lat']},{gps['lon']}"
+        except Exception as e:
+            print(f"⚠️ [Navigation GPS]: {e}")
 
     # Ensure mode is valid
     mode = mode.upper()

@@ -1,7 +1,46 @@
 import os
+import shlex
 import subprocess
+from pathlib import Path
 from langchain_core.tools import tool
 from config import BASE_DIR
+
+
+_OFFICE_OUTPUT_SUFFIXES = {".docx", ".xlsx", ".pptx", ".pdf", ".html", ".png", ".jpg", ".jpeg"}
+
+
+def _snapshot_outputs(outputs_dir: str) -> dict[str, float]:
+    """Capture output file mtimes before running OfficeCLI."""
+    root = Path(outputs_dir)
+    if not root.exists():
+        return {}
+    return {
+        str(path.resolve()): path.stat().st_mtime
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() in _OFFICE_OUTPUT_SUFFIXES
+    }
+
+
+def _created_file_tags(outputs_dir: str, before: dict[str, float]) -> str:
+    """Return CREATED_FILE tags for files created or modified by OfficeCLI."""
+    root = Path(outputs_dir)
+    changed: list[str] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in _OFFICE_OUTPUT_SUFFIXES:
+            continue
+        resolved = str(path.resolve())
+        previous_mtime = before.get(resolved)
+        current_mtime = path.stat().st_mtime
+        if previous_mtime is None or current_mtime > previous_mtime + 0.001:
+            changed.append(resolved)
+
+    if not changed:
+        return ""
+
+    tags = "\n".join(f"[CREATED_FILE: {path}]" for path in sorted(changed)[:5])
+    if len(changed) > 5:
+        tags += f"\n...και {len(changed) - 5} ακόμα αρχεία στο outputs."
+    return tags
 
 @tool
 def run_officecli(command: str) -> str:
@@ -33,21 +72,31 @@ def run_officecli(command: str) -> str:
     if command.startswith("officecli "):
         command = command[10:]
         
-    full_command = f'"{officecli_path}" {command}'
+    if any(token in command for token in ["&", "|", ";", ">", "<", "\n", "\r"]):
+        return "❌ Μη ασφαλής OfficeCLI εντολή: περιέχει shell metacharacters."
     
     try:
         # Εκτελούμε την εντολή μέσα στον φάκελο outputs για μεγαλύτερη ασφάλεια
+        before_outputs = _snapshot_outputs(outputs_dir)
+        args = shlex.split(command, posix=False)
+        args = [arg.strip('"') for arg in args]
         result = subprocess.run(
-            full_command, 
-            shell=True, 
+            [officecli_path, *args],
+            shell=False,
             cwd=outputs_dir, 
             capture_output=True, 
             text=True, 
             encoding='utf-8', 
-            errors='replace'
+            errors='replace',
+            timeout=120,
         )
         if result.returncode == 0:
-            return f"✅ OfficeCLI Εκτελέστηκε Επιτυχώς.\nΈξοδος:\n{result.stdout.strip()}"
+            file_tags = _created_file_tags(outputs_dir, before_outputs)
+            output = result.stdout.strip()
+            response = f"✅ OfficeCLI Εκτελέστηκε Επιτυχώς.\nΈξοδος:\n{output}"
+            if file_tags:
+                response += f"\n{file_tags}"
+            return response
         else:
             return f"❌ Σφάλμα OfficeCLI (Exit Code: {result.returncode}).\nΣφάλμα:\n{result.stderr.strip()}"
     except Exception as e:
