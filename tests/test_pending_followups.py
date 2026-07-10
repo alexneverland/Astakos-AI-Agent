@@ -1543,3 +1543,39 @@ def test_looks_like_operational_reminder_exchange_detects_alarm_pair():
         "θύμισε μου αύριο 5:30 να ξυπνήσω",
         "✅ Υπενθύμιση ρυθμίστηκε για τις 2026-07-06 05:30!",
     ) is True
+
+
+def test_followup_decision_returns_structural_skip_action(monkeypatch):
+    import clients.telegram_bot as bot
+    import services.gemini as gemini
+
+    class DummyResponse:
+        text = '{"decision":"skip","skip_action":"resolve","stage":"skip","message":"","reason":"already done"}'
+
+    monkeypatch.setattr(gemini, "safe_gemini_call", lambda prompt: DummyResponse())
+
+    result = bot._build_followup_decision_with_llm(
+        {"topic": "outing", "subject": "πάρκο", "source_user_text": "πήγαμε πάρκο"},
+        "",
+        {},
+    )
+
+    assert result["decision"] == "skip"
+    assert result["skip_action"] == "resolve"
+
+
+def test_next_day_window_never_targets_today_morning():
+    from datetime import datetime
+    from memory.pending_followups import FOLLOWUP_LOCAL_TZ, normalize_followup_delay
+
+    now = datetime(2026, 7, 6, 8, 0, tzinfo=FOLLOWUP_LOCAL_TZ)
+
+    delay = normalize_followup_delay(
+        topic="appointment",
+        suggested_minutes=720,
+        source_user_text="αύριο το πρωί",
+        target_window="next_day_morning",
+        now=now,
+    )
+
+    assert delay > 20 * 60

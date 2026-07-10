@@ -439,10 +439,10 @@ def _today_minus(days):
 
 
 def _due_routine():
-    """Ρουτίνα που πρέπει να πυροδοτηθεί σε ~2 λεπτά (μέσα στο 30' window)."""
+    """Ρουτίνα που πρέπει να πυροδοτηθεί σε ~10 λεπτά (μέσα στο 15' window)."""
     now      = _fixed_now()
-    # Η ρουτίνα είναι στο target_time = now+30min → time_str = (now+28min)
-    time_str = (now + timedelta(minutes=30)).strftime("%H:%M")
+    # Η ρουτίνα είναι στο target_time = now+10min → μέσα στο 15' window
+    time_str = (now + timedelta(minutes=10)).strftime("%H:%M")
     return {
         "id": 1, "event_name": "park_walk", "confidence": 0.9,
         "time_str": time_str, "day_of_week": "Everyday", "state": "active",
