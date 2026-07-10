@@ -392,6 +392,7 @@ def _normalize_followup_signal_text(text: str) -> str:
 
 def _should_force_light_outing_followup(item: dict) -> bool:
     from datetime import datetime
+    from memory.pending_followups import _coerce_local_dt, _local_now
 
     if str(item.get("topic") or "").strip().lower() != "outing":
         return False
@@ -417,11 +418,11 @@ def _should_force_light_outing_followup(item: dict) -> bool:
         return False
 
     try:
-        due_at = datetime.fromisoformat(due_at_raw.replace(" ", "T"))
+        due_at = _coerce_local_dt(datetime.fromisoformat(due_at_raw.replace(" ", "T")))
     except Exception:
         return False
 
-    elapsed_since_due = (datetime.now() - due_at).total_seconds() / 60.0
+    elapsed_since_due = (_local_now() - due_at).total_seconds() / 60.0
     return 0 <= elapsed_since_due <= 60
 
 
@@ -501,6 +502,9 @@ RECENT CONTEXT:
         stage = str(payload.get("stage", "")).strip().lower()
         message = clean_message(payload.get("message", "")).strip()
         reason = str(payload.get("reason", "")).strip()
+        skip_action = str(payload.get("skip_action") or "none").strip().lower()
+        if skip_action not in {"resolve", "defer", "none"}:
+            skip_action = "none"
 
         if decision not in {"send", "skip"}:
             decision = "skip"
@@ -518,6 +522,7 @@ RECENT CONTEXT:
 
         return {
             "decision": decision,
+            "skip_action": skip_action,
             "stage": stage,
             "message": message,
             "reason": reason,
@@ -527,6 +532,7 @@ RECENT CONTEXT:
         print(f"[FollowUpDecision Error]: {exc}")
         return {
             "decision": "send",
+            "skip_action": "none",
             "stage": "decision_pending",
             "message": _build_safe_followup_fallback(item, "decision_pending"),
             "reason": "fallback_non_assumptive",

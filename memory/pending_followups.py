@@ -346,12 +346,13 @@ def _next_occurrence_for_window(now: datetime, target_window: str, fallback_dela
     target_window = _coerce_text_scalar(target_window, "").lower()
     fallback_delay_minutes = max(15, int(fallback_delay_minutes or 60))
 
-    def _today_or_tomorrow(hour: int, minute: int = 0) -> datetime:
+    def _today_or_tomorrow(hour: int, minute: int = 0, *, force_tomorrow: bool = False) -> datetime:
         import random
         jitter_minutes = random.randint(-15, 30)
-        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(minutes=jitter_minutes)
+        base = now + timedelta(days=1) if force_tomorrow else now
+        target = base.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(minutes=jitter_minutes)
         target = _apply_weekend_window_adjustment(target)
-        if target <= now:
+        if not force_tomorrow and target <= now:
             target = target + timedelta(days=1)
             target = _apply_weekend_window_adjustment(target)
         return _apply_quiet_hours(target)
@@ -361,13 +362,13 @@ def _next_occurrence_for_window(now: datetime, target_window: str, fallback_dela
     if target_window == "same_day_evening":
         return _today_or_tomorrow(19, 30)
     if target_window == "next_day_morning":
-        return _today_or_tomorrow(9, 30)
+        return _today_or_tomorrow(9, 30, force_tomorrow=True)
     if target_window == "next_day_late_morning":
-        return _today_or_tomorrow(11, 30)
+        return _today_or_tomorrow(11, 30, force_tomorrow=True)
     if target_window == "next_day_afternoon":
-        return _today_or_tomorrow(14, 30)
+        return _today_or_tomorrow(14, 30, force_tomorrow=True)
     if target_window == "next_day_evening":
-        return _today_or_tomorrow(19, 30)
+        return _today_or_tomorrow(19, 30, force_tomorrow=True)
     if target_window == "after_likely_completion":
         return _apply_quiet_hours(now + timedelta(minutes=min(max(fallback_delay_minutes, 60), 300)))
     if target_window == "explicit_timer":
