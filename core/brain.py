@@ -18,9 +18,9 @@ warnings.filterwarnings("ignore")
 FAST_MODEL = "gemini-3.5-flash"
 HEAVY_MODEL = "gemini-3.1-pro-preview"
 
-# [MASTRO-SHIELD v2]: Κατεβάζουμε ΟΛΕΣ τις ασπίδες ασφαλείας (BLOCK_NONE)
-# Περιλαμβάνει τις νέες κατηγορίες: CIVIC_INTEGRITY, JAILBREAK, IMAGE_*
-# που δεν υπήρχαν στην αρχική έκδοση και έκοβαν αθώα μηνύματα (π.χ. στατιστικά).
+# [MASTRO-SHIELD v3]: Κρατάμε μόνο τις safety categories που δέχεται
+# το Gemini text generation endpoint. Extra categories όπως JAILBREAK/IMAGE_*
+# μπορεί να ρίξουν INVALID_ARGUMENT σε ορισμένα model paths.
 _BN = HarmBlockThreshold.BLOCK_NONE
 custom_safety = {
     HarmCategory.HARM_CATEGORY_HARASSMENT:         _BN,
@@ -28,11 +28,6 @@ custom_safety = {
     HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT:  _BN,
     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT:  _BN,
     HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY:    _BN,
-    HarmCategory.HARM_CATEGORY_JAILBREAK:          _BN,
-    HarmCategory.HARM_CATEGORY_IMAGE_DANGEROUS_CONTENT: _BN,
-    HarmCategory.HARM_CATEGORY_IMAGE_HARASSMENT:   _BN,
-    HarmCategory.HARM_CATEGORY_IMAGE_HATE:         _BN,
-    HarmCategory.HARM_CATEGORY_IMAGE_SEXUALLY_EXPLICIT: _BN,
 }
 
 # 2. Αρχιτέκτονας Μοντέλων (LangChain Objects)
