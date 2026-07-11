@@ -1,4 +1,5 @@
 import json
+from core.i18n import t
 from services.gemini import safe_gemini_call
 from core.utils import clean_message
 from memory.routine_db import set_context_state

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
+from core.i18n import t
 import os
 import re
 import unicodedata
@@ -45,101 +46,13 @@ class MemoryContext:
         )
 
 
-_TOOL_OUTPUT_MARKERS = (
-    "συντεταγμένες:",
-    "είναι εκτός σπιτιού",
-    "είναι σπιτι",
-    "τοποθεσία:",
-    "δες στον χάρτη",
-    "δεν υπάρχουν εκκρεμείς υπενθυμίσεις",
-    "δεν υπάρχουν ανοιχτά google tasks",
-    "δεν υπάρχουν tasks",
-    "αποθηκεύεται σε background",
-    "ρουτίνες για ",
-    "αποτελέσματα για ",
-    "περιεχόμενο από ",
-    "μνημες που βρεθηκαν",
-    "μνημεσ που βρεθηκαν",
-    "μνήμες που βρέθηκαν",
-    "μνήμες που βρέθηκαν",
-    "αποτελεσμα εργαλείου",
-    "αποτέλεσμα εργαλείου",
-    "πληροφορια απο αναζητηση",
-    "πληροφορία από αναζήτηση",
-    "καταγραφηκε επιτυχως",
-    "καταγράφηκε επιτυχώς",
-    "draft αποθηκευτηκε",
-    "draft αποθηκεύτηκε",
-    "ολοκληρωθηκε",
-    "ολοκληρώθηκε",
-    "σφαλμα:",
-    "σφάλμα:",
-    "δεν βρεθηκε προσχεδιο",
-    "δεν βρέθηκε προσχέδιο",
-    "η ρουτινα",
-    "η ρουτίνα",
-    "σιγαστηκε μεχρι",
-    "σιγάστηκε μέχρι",
-    "ξαναενεργοποιηθηκε κανονικα",
-    "ξαναενεργοποιήθηκε κανονικά",
-    "συναισθηματικα μηνυματα",
-    "συναισθηματικά μηνύματα",
-)
+_TOOL_OUTPUT_MARKERS = tuple(t("builder.tool_output_markers"))
 
-_TEMPORAL_MARKERS = (
-    "χτες",
-    "χθες",
-    "χθεσιν",
-    "yesterday",
-    "πρωι",
-    "πρωί",
-    "βραδυ",
-    "βράδυ",
-    "μεσημερι",
-    "μεσημέρι",
-    "απογευμα",
-    "απόγευμα",
-)
+_TEMPORAL_MARKERS = tuple(t("builder.temporal_markers"))
 
-_RECALL_MARKERS = (
-    "θυμασαι",
-    "θυμάσαι",
-    "ειχαμε πει",
-    "είχαμε πει",
-    "σου ειχα",
-    "σου είχα",
-    "ειχα ανεβασει",
-    "είχα ανεβάσει",
-    "σημειωσει",
-    "σημειώσει",
-    "γενεθλι",
-    "δωρο",
-    "δώρο",
-    "ρολοι",
-    "ρολόι",
-)
+_RECALL_MARKERS = tuple(t("builder.recall_markers"))
 
-_TOKEN_STOPWORDS = {
-    "και",
-    "που",
-    "τον",
-    "την",
-    "το",
-    "τα",
-    "τι",
-    "χτες",
-    "χθες",
-    "χθεσιν",
-    "πρωι",
-    "πρωί",
-    "ολοι",
-    "μαζι",
-    "κανε",
-    "εκανε",
-    "πηγαμε",
-    "yesterday",
-    "morning",
-}
+_TOKEN_STOPWORDS = set(t("builder.token_stopwords"))
 
 
 def _normalize_text(value: str) -> str:
@@ -171,42 +84,12 @@ def _clean_query_for_search(query: str) -> str:
     return cleaned if cleaned else query
 
 
-_SIMPLE_ACKS = {
-    "ναι", "nai", "yes",
-    "οκ", "ok", "okay",
-    "έγινε", "εγινε",
-    "καλά", "καλα",
-    "ευχαριστώ", "ευχαριστω",
-    "τέλεια", "τελεια",
-    "ωραία", "ωραια",
-    "σωστά", "σωστα",
-}
+_SIMPLE_ACKS = set(t("builder.simple_acks"))
 
 def looks_like_news_or_web_fact_query(text: str) -> bool:
     low = str(text).lower().strip()
 
-    opening_markers = (
-        "διάβασα μια είδηση",
-        "διαβασα μια ειδηση",
-        "διάβασα ότι",
-        "διαβασα οτι",
-        "είδα μια είδηση",
-        "ειδα μια ειδηση",
-        "είδα ότι",
-        "ειδα οτι",
-        "λένε ότι",
-        "λενε οτι",
-        "είδα στο ίντερνετ",
-        "ειδα στο ιντερνετ",
-        "διάβασα σε άρθρο",
-        "διαβασα σε αρθρο",
-        "είδα σε site",
-        "ειδα σε site",
-        "το είδα στο web",
-        "το ειδα στο web",
-        "μου έβγαλε είδηση",
-        "μου εβγαλε ειδηση",
-    )
+    opening_markers = tuple(t("builder.opening_markers"))
 
     return any(marker in low for marker in opening_markers)
 
@@ -216,45 +99,8 @@ def looks_like_tool_result_query(text: str) -> bool:
     low = raw.lower()
     normalized = _normalize_text(raw)
 
-    tool_prefixes = (
-        "✅",
-        "ℹ️",
-        "📍",
-        "📅",
-        "📄",
-        "📦",
-        "🗺️",
-        "⏳",
-        "⚙️",
-        "❌",
-        "📊",
-    )
-    tool_result_markers = (
-        "συντεταγμενες:",
-        "ειναι εκτος σπιτιου",
-        "ειναι σπιτι",
-        "τοποθεσια:",
-        "δες στον χαρτη",
-        "δεν υπαρχουν εκκρεμεις υπενθυμισεις",
-        "δεν υπαρχουν ανοιχτα google tasks",
-        "δεν υπαρχουν tasks",
-        "αποθηκευεται σε background",
-        "ρουτινες για ",
-        "αποτελεσματα για ",
-        "περιεχομενο απο ",
-        "προβολη στον χαρτη",
-        "η λιστα ",
-        "ειναι αδεια",
-        "αβ βασιλοπουλου:",
-        "μασουτης:",
-        "my market:",
-        "market in:",
-        "bazaar:",
-        "efresh:",
-        "συνοψη σημερα",
-        "αποθηκευτηκε",
-        "goal",
-    )
+    tool_prefixes = tuple(t("builder.tool_prefixes"))
+    tool_result_markers = tuple(t("builder.tool_result_markers"))
     return (
         low.startswith("τίτλος:")
         or low.startswith("title:")
@@ -298,34 +144,7 @@ def looks_like_web_followup_query(text: str) -> bool:
     if looks_like_news_or_web_fact_query(low):
         return False
 
-    followup_markers = (
-        "άρα",
-        "αρα",
-        "δηλαδή",
-        "δηλαδη",
-        "οπότε",
-        "οποτε",
-        "πώς",
-        "πως",
-        "γιατί",
-        "γιατι",
-        "σοβαρό",
-        "σοβαρο",
-        "δηλαδή τι σημαίνει",
-        "τι σημαίνει",
-        "τι σημαινει",
-        "πώς γίνεται",
-        "πως γινεται",
-        "πώς μπορούσαν",
-        "πως μπορουσαν",
-        "εξωτερικά",
-        "εξωτερικα",
-        "το software",
-        "το λογισμικό",
-        "το λογισμικο",
-        "πρακτικά",
-        "πρακτικα",
-    )
+    followup_markers = tuple(t("builder.followup_markers"))
 
     return any(marker in low for marker in followup_markers)
 
@@ -365,18 +184,7 @@ def looks_like_recent_context_followup_query(text: str) -> bool:
 
     word_count = len(low.split())
     
-    status_starts = (
-        "εφυγα",
-        "έφυγα",
-        "ηρθα",
-        "ήρθα",
-        "πηγα",
-        "πήγα",
-        "σχολασα",
-        "σχόλασα",
-        "γυρισα",
-        "γύρισα",
-    )
+    status_starts = tuple(t("builder.status_starts"))
 
     if low.startswith(status_starts) and word_count <= 8:
         return False
@@ -395,30 +203,13 @@ def looks_like_food_memory_query(text: str) -> bool:
     if re.search(r"\bτι\b.*\bφαγ[α-ω]*", clean):
         return True
 
-    strong_phrases = (
-        "τι πηρα για φαγητο",
-        "τι πηρα σημερα για φαγητο",
-        "τι φαγαμε",
-        "τι εφαγαμε",
-        "τι εφτιαξα",
-        "τι μαγειρεψα",
-        "τι ψαρια πηρα",
-        "τι ψαρι πηρα",
-        "τι κρεας πηρα",
-        "τι ειπα οτι θα βαλω στο φουρνο",
-        "τι ειχα πει για το φουρνο",
-    )
+    strong_phrases = tuple(t("builder.strong_phrases"))
 
     if any(phrase in clean for phrase in strong_phrases):
         return True
 
-    food_tokens = (
-        "φαγητ", "φαγ", "γευμα", "μαγειρ", "συνταγ", "φουρν", "τηγαν",
-        "ψαρ", "κρεας", "κοτοπ", "μπριζολ", "πατατ",
-    )
-    recall_tokens = (
-        "τι πηρα", "τι εφτιαξ", "τι ειπα", "τι ειχα πει", "θυμασαι", "θυμασαι τι",
-    )
+    food_tokens = tuple(t("builder.food_tokens"))
+    recall_tokens = tuple(t("builder.recall_tokens_2"))
 
     has_food = any(token in clean for token in food_tokens)
     has_recall = any(token in clean for token in recall_tokens)
@@ -431,29 +222,9 @@ def looks_like_reminder_or_task_request(text: str) -> bool:
     if not clean:
         return False
 
-    reminder_markers = (
-        "θυμισε μου",
-        "θυμισε με",
-        "υπενθυμισε μου",
-        "υπενθυμιση",
-        "βαλε υπενθυμιση",
-        "βαλε μου υπενθυμιση",
-        "να μου θυμησεις",
-        "να μου θυμισεις",
-        "μην ξεχασω",
-        "στις ",
-    )
+    reminder_markers = tuple(t("builder.reminder_markers"))
 
-    action_markers = (
-        "να παρω",
-        "να φυγω",
-        "να κανω",
-        "να στειλω",
-        "να περασω",
-        "πριν φυγω",
-        "πριν παω",
-        "οταν φυγω",
-    )
+    action_markers = tuple(t("builder.action_markers"))
 
     has_reminder_language = any(marker in clean for marker in reminder_markers)
     has_action_language = any(marker in clean for marker in action_markers)
@@ -474,28 +245,12 @@ def looks_like_action_command(text: str) -> bool:
     if not clean:
         return False
 
-    short_utility_starts = (
-        "ανοιξε τον",
-        "ανοιξε το",
-        "κλεισε τον",
-        "κλεισε το",
-        "παγωσε τη",
-        "παγωσε το",
-        "ξεπαγωσε τη",
-        "ξεπαγωσε το",
-        "θυμισε μου",
-        "υπενθυμισε μου",
-    )
+    short_utility_starts = tuple(t("builder.short_utility_starts"))
 
     if clean.startswith(short_utility_starts):
         return True
 
-    utility_markers = (
-        "στις ",
-        "σε ",
-        "μετα απο ",
-        "για υπενθυμιση",
-    )
+    utility_markers = tuple(t("builder.utility_markers"))
 
     if clean.startswith(("θυμισε μου", "υπενθυμισε μου")) and any(marker in clean for marker in utility_markers):
         return True
@@ -508,13 +263,7 @@ def looks_like_weather_utility_query(text: str) -> bool:
     if not clean:
         return False
     
-    utility_markers = (
-        "τι καιρο",
-        "καιρος",
-        "μεταφρασε",
-        "ποσο κανει",
-        "συνταγη για",
-    )
+    utility_markers = tuple(t("builder.weather_utility_markers"))
     return any(marker in clean for marker in utility_markers)
 
 
@@ -523,18 +272,7 @@ def looks_like_nostalgia_query(text: str) -> bool:
     if not clean:
         return False
         
-    nostalgia_markers = (
-        "περυσι",
-        "παλια",
-        "θυμασαι οταν",
-        "θυμασαι που",
-        "εκεινο το καλοκαιρι",
-        "περασαμε",
-        "διακοπες στο",
-        "διακοπες στην",
-        "τι καναμε",
-        "που πηγαμε",
-    )
+    nostalgia_markers = tuple(t("builder.nostalgia_markers"))
     return any(marker in clean for marker in nostalgia_markers)
 
 
@@ -543,17 +281,7 @@ def looks_like_file_creation_query(text: str) -> bool:
     if not clean:
         return False
         
-    creation_markers = (
-        "φτιαξε",
-        "κανε μου",
-        "δημιουργησε",
-        "ημερολογιο",
-        "ενα αρχειο",
-        "excel",
-        "docx",
-        "pdf",
-        "γραψε μου",
-    )
+    creation_markers = tuple(t("builder.creation_markers"))
     return any(marker in clean for marker in creation_markers)
 
 
@@ -563,14 +291,7 @@ def looks_like_explicit_memory_storage(text: str) -> bool:
     if not clean:
         return False
         
-    storage_markers = (
-        "να θυμασαι",
-        "σημειωσε",
-        "κρατα",
-        "κρατησε",
-        "μην ξεχασεις",
-        "αποθηκευσε",
-    )
+    storage_markers = tuple(t("builder.storage_markers"))
     return any(marker in clean for marker in storage_markers)
 
 
@@ -597,18 +318,7 @@ def _looks_low_complexity_query(query: str) -> bool:
         return True
 
     # Brief status / follow-up without a clear info request
-    low_signal_starts = (
-        "ναι ",
-        "οκ ",
-        "έγινε ",
-        "σε λίγο ",
-        "αργότερα ",
-        "μετά ",
-        "καλά είμαστε",
-        "ολα καλα",
-        "όλα καλά",
-        "ευχαριστώ ",
-    )
+    low_signal_starts = tuple(t("builder.low_signal_starts"))
     if q.startswith(low_signal_starts) and word_count <= 8 and not has_question:
         return True
 
@@ -671,32 +381,7 @@ def _must_keep_semantic(query: str) -> bool:
 
     q = query.strip().lower()
 
-    strong_tokens = (
-        "σοφία", "σοφια",
-        "αλέξανδρ", "αλεξανδρ",
-        "μαρία", "μαρια",
-        "δουλει", "βάρδια", "βαρδια",
-        "πάρκο", "παρκο",
-        "ποδόσφαιρ", "ποδοσφαιρ",
-        "κατασκήν", "κατασκην",
-        "σπίτι", "σπιτι",
-        "μήνυμα", "μηνυμα",
-        "υπνος", "ύπνος",
-        "μαγείρε", "μαγειρε",
-        "ψών", "ψων",
-        "λίστα", "λιστα",
-        "θυμά", "θυμα",
-        "remember",
-        "γιατί", "γιατι",
-        "πώς", "πως",
-        "τι ",
-        "ποιος", "ποια", "ποιο",
-        "πότε", "ποτε",
-        "πού", "που",
-        "στείλε", "στειλε",
-        "πάγωσε", "παγωσε",
-        "άλλαξε", "αλλαξε",
-    )
+    strong_tokens = tuple(t("builder.strong_tokens"))
 
     return any(token in q for token in strong_tokens)
 
@@ -741,7 +426,7 @@ def _date_marker(message_date: str, today: str, yesterday: str) -> str:
     if not message_date or message_date == today:
         return ""
     if message_date == yesterday:
-        return "χθες "
+        return t("builder.yesterday")
     try:
         year, month, day = message_date.split("-")
         return f"{day}/{month} "

@@ -8,6 +8,7 @@
 import os
 import re
 import json
+from core.i18n import t
 import sys
 import math
 import subprocess
@@ -110,7 +111,7 @@ def archive_file(filename: str, content_summary: str) -> str:
                 break
 
         if not full_path:
-            return f"❌ Error: Το αρχείο {filename} δεν βρέθηκε."
+            return t("tools.system.archive_not_found", filename=filename)
 
         ext = os.path.splitext(full_path)[1].lower()
         m_type = "photo" if ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"] else "document"
@@ -121,9 +122,9 @@ def archive_file(filename: str, content_summary: str) -> str:
             analysis=content_summary,
             caption=f"Αρχειοθέτηση ({m_type}): {filename}"
         )
-        return f"✅ Έγινε, Μάστορα! Το αρχείο {filename} ({m_type}) αρχειοθετήθηκε μόνιμα με τη σύνοψη που έδωσες."
+        return t("tools.system.archive_success", filename=filename, m_type=m_type)
     except Exception as e:
-        return f"❌ Error αρχειοθέτησης: {str(e)}"
+        return t("tools.system.archive_error", error=str(e))
 
 # Channel for Memory Provenance — defined by server.py/telegram_bot.py
 _CURRENT_CHANNEL: str = "unknown"
@@ -308,7 +309,7 @@ def search_memory(query: str, category: str = "") -> str:
         )
 
         if not results and not sql_lines and not latest and not profile_lines:
-            return "System: Δεν βρέθηκε σχετικό ιστορικό SQLite ή μνήμη Chroma. Απάντα με τις γενικές σου γνώσεις."
+            return t("tools.system.memory_no_results")
 
         # bump retrieval_count async — does not block the response
         if results:
@@ -338,7 +339,7 @@ def search_memory(query: str, category: str = "") -> str:
                 content += f" [PHOTO_PATH: {photo_path}]"
             by_cat.setdefault(cat, []).append(content)
 
-        output_parts = ["ΜΝΗΜΕΣ ΠΟΥ ΒΡΕΘΗΚΑΝ:"]
+        output_parts = [t("tools.system.memory_found")]
         
         # 1. Profile: Latest matching state (generic, query-driven)
         if latest and latest.get("fact"):
@@ -351,25 +352,23 @@ def search_memory(query: str, category: str = "") -> str:
             output_parts.extend(profile_lines)
 
         if sql_lines:
-            output_parts.append("\n[ΣΧΕΤΙΚΟ ΙΣΤΟΡΙΚΟ SQLITE]")
+            output_parts.append(t("tools.system.sqlite_history"))
             output_parts.extend(f"  • {line}" for line in sql_lines)
 
-        output_parts.append("\n[ΣΧΕΤΙΚΕΣ ΜΝΗΜΕΣ CHROMA]")
+        output_parts.append(t("tools.system.chroma_memory"))
         if by_cat:
             for cat, facts in by_cat.items():
                 output_parts.append(f"\n[{cat.upper()}]")
                 output_parts.extend(f"  • {f}" for f in facts)
         else:
-            output_parts.append("  • Δεν βρέθηκαν Chroma facts για αυτό το query.")
+            output_parts.append(t("tools.system.no_chroma"))
 
         output_parts.append(
-            "\n[ΟΔΗΓΙΑ]\n"
-            "  • Απάντησε τώρα με βάση τα παραπάνω. Μην καλέσεις ξανά search_memory "
-            "για το ίδιο ερώτημα στο ίδιο turn."
+            t("tools.system.instruction")
         )
         return "\n".join(output_parts).strip()
     except Exception as e:
-        return f"Error: Error ανάκλησης μνήμης: {str(e)}"
+        return t("tools.system.memory_error", error=str(e))
 @tool
 def run_terminal_command(command: str, already_approved: bool = False) -> str:
     """

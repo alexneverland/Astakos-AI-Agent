@@ -8,6 +8,7 @@
 import os
 import re
 import json
+from core.i18n import t
 import urllib.parse
 import unicodedata
 import requests
@@ -154,11 +155,7 @@ def _clean_news_description(raw: str, max_chars: int = 220) -> str:
     text = re.sub(r"<li>.*?</li>", " ", text, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
-    noise = [
-        "Full coverage",
-        "Πλήρης κάλυψη",
-        "View Full Coverage",
-    ]
+    noise = t("tools.web.news_noise")
     for marker in noise:
         text = text.replace(marker, "").strip()
     if len(text) > max_chars:
@@ -237,7 +234,7 @@ def _score_place_match(place: dict, profile: dict) -> float:
                 score -= 6.0
 
     if "seafood" in wanted:
-        if any(tok in blob_tokens for tok in {"ψαρι", "ψαρια", "θαλασσινα", "fish", "seafood"}):
+        if any(tok in blob_tokens for tok in set(t("tools.web.seafood_tokens"))):
             score += 8.0
         if any(tok in name for tok in ["grill", "burger", "pizza"]):
             score -= 10.0
@@ -251,13 +248,13 @@ def _score_place_match(place: dict, profile: dict) -> float:
         else:
             score -= 5.0
 
-    if "family" in wanted and any(tok in blob_tokens for tok in {"family", "kids", "παιδια", "παιδι"}):
+    if "family" in wanted and any(tok in blob_tokens for tok in set(t("tools.web.family_tokens"))):
         score += 6.0
 
-    if "romantic" in wanted and any(tok in blob_tokens for tok in {"view", "sunset", "ρομαντικο", "ησυχο"}):
+    if "romantic" in wanted and any(tok in blob_tokens for tok in set(t("tools.web.romantic_tokens"))):
         score += 6.0
 
-    if "restaurant" in primary_type or "εστιατορ" in primary_type:
+    if "restaurant" in primary_type or t("tools.web.restaurant_marker") in primary_type:
         score += 2.0
 
     return round(score, 3)
@@ -275,42 +272,38 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
 
     ok, reason = _messenger_target_status(target_entity)
     if not ok:
-        return (
-            "❌ Δεν αποθήκευσα Messenger draft.\n"
-            f"Λόγος: {reason}.\n"
-            "Δώσε ρητό παραλήπτη from τις επαφές, e.g. `Μαρία`, ή Messenger URL/ID."
-        )
+        return t("tools.web.msg_draft_err_reason", reason=reason)
     
     active, _, _ = active_draft_status()
     intent = classify_messenger_intent(payload_data or "", has_active_draft=active)
 
     if intent.intent in {"clarify_draft", "clear_draft"}:
-        return "❌ Δεν αποθήκευσα Messenger draft. Αυτό το message μοιάζει με διευκρίνιση ή κλείσιμο draft, όχι με νέο draft."
+        return t("tools.web.msg_draft_err_clarify")
 
     if not (payload_data or "").strip():
-        return "❌ Δεν αποθήκευσα Messenger draft. Δεν δόθηκε νέο κείμενο μηνύματος."
+        return t("tools.web.msg_draft_err_empty")
 
     # Validate image path if provided
     if image_path and not os.path.exists(image_path):
-        return f"❌ Δεν αποθήκευσα Messenger draft. Η εικόνα δεν βρέθηκε: {image_path}"
+        return t("tools.web.msg_draft_err_img", image_path=image_path)
 
     # ── Payload sanitization: removal of chatbot meta-text ─────────────
     # In plan mode, the LLM can include conversational prompts
     # or system feedback along with the actual message. We remove them.
     clean_payload = _sanitize_message_payload(payload_data)
     if not clean_payload:
-        return "❌ Δεν αποθήκευσα Messenger draft. Το message ήταν κενό μετά το sanitization."
+        return t("tools.web.msg_draft_err_sanitized")
 
     save_draft(target_entity, clean_payload, image_path=image_path)
 
     # We return clean output — the display instructions are in prompts.md
     img_info = f"\nimage: {image_path}" if image_path else ""
-    return f"✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: {clean_payload}{img_info}"
+    return t("tools.web.msg_draft_success", clean_payload=clean_payload, img_info=img_info)
 @tool
-def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
+def get_news(topic: str = "", limit: int = 10) -> str:
     """Fetches news from Google News with title, summary, source, and link."""
     try:
-        topic = (topic or "Γενικά").strip()
+        topic = (topic or t("tools.web.general_topic")).strip()
         limit = max(1, min(int(limit or 10), 20))
         print(f"\033[96m[Web]: Fetching news for: {topic}...\033[0m")
 
@@ -319,7 +312,7 @@ def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
 
         url = (
             f"https://news.google.com/rss?hl={locale}"
-            if topic.lower() in ["γενικά", "general", ""]
+            if topic.lower() in t("tools.web.general_topic_tokens")
             else f"https://news.google.com/rss/search?q={urllib.parse.quote(topic)}&hl={locale}"
         )
 
@@ -346,14 +339,14 @@ def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
             if time_str:
                 line += f" ({time_str})"
             if description:
-                line += f"\n   📝 {description}"
+                line += t("tools.web.news_format_desc", description=description)
             if link:
-                line += f"\n   🔗 {link}"
+                line += t("tools.web.news_format_link", link=link)
             if source_url:
-                line += f"\n   Πηγή: {source_url}"
+                line += t("tools.web.news_format_source", source_url=source_url)
             news.append(line)
 
-        return "\n\n".join(news) if news else "Δεν βρέθηκαν ειδήσεις."
+        return "\n\n".join(news) if news else t("tools.web.no_news")
     except Exception as e:
         return f"News Error: {str(e)}"
 
@@ -363,17 +356,17 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
     """Returns the detailed weather forecast for a region (up to 16 days)."""
 
     WMO_CODES = {
-        0: "☀️ Αίθριος", 1: "🌤 Σχεδόν αίθριος", 2: "⛅ Μερικώς συννεφιά",
-        3: "☁️ Συννεφιά", 45: "🌫 Ομίχλη", 48: "🌫 Παγετός",
-        51: "🌦 Ψιλόβροχο", 53: "🌦 Βροχή", 55: "🌧 Έντονο ψιλόβροχο",
-        61: "🌧 Ελαφριά βροχή", 63: "🌧 Μέτρια βροχή", 65: "🌧 Έντονη βροχή",
-        71: "🌨 Ελαφριά χιονόπτωση", 73: "🌨 Χιονόπτωση", 75: "❄️ Έντονη χιονόπτωση",
-        80: "🌦 Μπόρες", 81: "🌧 Μέτριες μπόρες", 82: "⛈ Έντονες μπόρες",
-        95: "⛈ Καταιγίδα", 96: "⛈ Καταιγίδα με χαλάζι", 99: "⛈ Έντονη καταιγίδα",
-    }
+    0: t('weather.code_0'), 1: t('weather.code_1'), 2: t('weather.code_2'),
+    3: t('weather.code_3'), 45: t('weather.code_45'), 48: t('weather.code_48'),
+    51: t('weather.code_51'), 53: t('weather.code_53'), 55: t('weather.code_55'),
+    61: t('weather.code_61'), 63: t('weather.code_63'), 65: t('weather.code_65'),
+    71: t('weather.code_71'), 73: t('weather.code_73'), 75: t('weather.code_75'),
+    80: t('weather.code_80'), 81: t('weather.code_81'), 82: t('weather.code_82'),
+    95: t('weather.code_95'), 96: t('weather.code_96'), 99: t('weather.code_99'),
+}
 
     try:
-        location = (location or "Θεσσαλονίκη").strip()
+        location = (location or t("tools.web.default_location")).strip()
         days = max(1, min(int(days or 14), 16))
 
         geo_url = (
@@ -383,7 +376,7 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
         geo_resp = requests.get(geo_url, timeout=10).json()
 
         if "results" not in geo_resp or not geo_resp["results"]:
-            return f"Δεν μπόρεσα να βρω την τοποθεσία: {location}"
+            return t("weather.no_location", location=location)
 
         lat = geo_resp["results"][0]["latitude"]
         lon = geo_resp["results"][0]["longitude"]
@@ -400,7 +393,7 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
 
         daily = weather_resp.get("daily", {})
         if not daily:
-            return "Δεν βρέθηκαν δεδομένα καιρού."
+            return t("weather.no_data")
 
         dates = daily.get("time", [])
         t_max = daily.get("temperature_2m_max", [])
@@ -410,16 +403,16 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
 
         count = min(len(dates), len(t_max), len(t_min), len(precip), len(wcodes), days)
         if count == 0:
-            return "Δεν βρέθηκαν πλήρη δεδομένα καιρού."
+            return t("weather.no_full_data")
 
         place_bits = [place_name]
         if admin and admin != place_name:
             place_bits.append(admin)
         if country:
             place_bits.append(country)
-        result = f"🌍 Πρόγνωση καιρού για {', '.join(place_bits)} ({count} ημέρες):\n"
+        result = t("weather.forecast_header", place=", ".join(place_bits), count=count)
         for i in range(count):
-            desc = WMO_CODES.get(wcodes[i], f"Κωδικός καιρού {wcodes[i]}")
+            desc = WMO_CODES.get(wcodes[i], t("tools.web.weather_code_prefix", code=wcodes[i]))
             rain_info = f"🌧 {precip[i]:.1f}mm" if precip[i] > 0 else ""
             line = f"• {dates[i]}: {desc}  {t_min[i]}°C – {t_max[i]}°C"
             if rain_info:
@@ -428,13 +421,13 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
 
         return result
     except Exception as e:
-        return f"Error καιρού: {str(e)}"
+        return t("weather.error", error=str(e))
 
 
 @tool
 def search_goldmall_offers(query: str) -> str:
     """Deep Scan of ALL Goldmall offers without limitation."""
-    search_term = "σινεμά" if any(x in query.lower() for x in ["σινεμά", "ταινία", "ταινιες", "ταινίες"]) else query
+    search_term = t("tools.web.cinema_default") if any(x in query.lower() for x in t("tools.web.cinema_tokens")) else query
 
     browser = None
     try:
@@ -450,7 +443,7 @@ def search_goldmall_offers(query: str) -> str:
             try:
                 page.wait_for_selector(".deal-tile", timeout=10000)
             except:
-                return f"Δεν βρέθηκαν αποτελέσματα για '{search_term}'."
+                return t("tools.web.no_results", search_term=search_term)
 
             deals = page.locator(".deal-tile").all()[:5]  # max 5 for performance
             results = []
@@ -478,18 +471,18 @@ def search_goldmall_offers(query: str) -> str:
                     if not raw_text:
                         raw_text = detail_page.locator("body").inner_text()
 
-                    noise_words = ["newsletter", "όρους και τις προϋποθέσεις", "T:2310", "info@", "ΠΩΣ ΛΕΙΤΟΥΡΓΕΙ", "ΤΡΟΠΟΙ ΑΓΟΡΑΣ"]
+                    noise_words = t("tools.web.goldmall_noise")
                     schedule_info = []
                     for line in raw_text.split('\n'):
                         clean_line = line.strip()
                         if len(clean_line) > 5 and not any(noise in clean_line for noise in noise_words):
                             if any(char.isdigit() for char in clean_line) or any(
-                                day in clean_line for day in ["Σάββατο", "Κυριακή", "Παρασκευή", "Πέμπτη"]
+                                day in clean_line for day in t("tools.web.goldmall_days")
                             ):
                                 schedule_info.append(clean_line)
 
                     description = " | ".join(schedule_info[:5])
-                    results.append(f"🎬 **{title_text}**\n📅 {description if description else 'Δείτε το link για ώρες.'}")
+                    results.append(t("tools.web.goldmall_format", title_text=title_text, description=description if description else t("tools.web.goldmall_see_link")))
 
                 except Exception as e:
                     print(f"\033[91m[DEBUG]: Error in offer {i}: {str(e)}\033[0m")
@@ -501,10 +494,10 @@ def search_goldmall_offers(query: str) -> str:
                         except:
                             pass
 
-            return "🛒 **Πλήρεις Λεπτομέρειες Goldmall (Θεσσαλονίκη):**\n\n" + "\n\n---\n\n".join(results)
+            return t("tools.web.goldmall_header") + "\n\n---\n\n".join(results)
 
     except Exception as e:
-        return f"Γενικό Error Goldmall: {str(e)}"
+        return t("tools.web.goldmall_error", error=str(e))
     finally:
         if browser:
             try:
@@ -587,7 +580,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
                     file_input.set_input_files(image_path)
                     # We wait for the image preview to appear (max 15s)
                     page.wait_for_selector(
-                        'img[src*="blob:"], div[aria-label*="εικόν"], div[aria-label*="photo"], '
+                        f'img[src*="blob:"], div[aria-label*="{t("tools.web.html_noise_selector_img")}"], div[aria-label*="photo"], '
                         'div[aria-label*="image"], div[class*="image"], div[class*="photo"]',
                         timeout=15000,
                     )
@@ -644,8 +637,8 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     except Exception as _ae:
         print(f"⚠️ [Messenger Auto-Confirm skipped]: {_ae}")
 
-    img_suffix = f" (με εικόνα: {os.path.basename(image_path)})" if image_path and os.path.exists(image_path) else ""
-    return f"✅ Το message sent στον/στη {target_name}!{img_suffix}"
+    img_suffix = t("tools.web.msg_send_img_suffix", filename=os.path.basename(image_path)) if image_path and os.path.exists(image_path) else ""
+    return t("tools.web.msg_send_success", target_name=target_name, img_suffix=img_suffix)
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 @tool
@@ -677,7 +670,7 @@ def browse_url(url: str) -> str:
                 page.wait_for_timeout(3000)
             except PlaywrightTimeoutError:
                 browser.close()
-                return f"[WEB_TOOL_ERROR][browse_url][reason=timeout] Η σελίδα '{url}' άργησε υπερβολικά."
+                return t("tools.web.browse_timeout", url=url)
 
             # We remove scripts/styles/banners
             text = page.evaluate("""() => {
@@ -694,12 +687,12 @@ def browse_url(url: str) -> str:
             # Cloudflare / Captcha Detector
             bot_keywords = ["just a moment", "checking if the site connection is secure", "cloudflare", "attention required"]
             if any(kw in clean_text.lower() for kw in bot_keywords) or len(clean_text) < 30:
-                return f"[WEB_TOOL_ERROR][browse_url][reason=cloudflare] Το site έχει προστασία και δεν με άφησε να το διαβάσω."
+                return t("tools.web.browse_cloudflare")
 
-            return f"📄 Περιεχόμενο from {url}:\n\n{clean_text}"
+            return t("tools.web.browse_success", url=url, clean_text=clean_text)
 
     except Exception as e:
-        return f"[WEB_TOOL_ERROR][browse_url][reason=generic] Γενικό σφάλμα στο browse_url: Το εργαλείο failed ({str(e)})" 
+        return t("tools.web.browse_error", error=str(e)) 
 @tool
 def duckduckgo_search(query: str) -> str:
     """Web search.
@@ -711,7 +704,7 @@ def duckduckgo_search(query: str) -> str:
     # something that in fail-cascades reached 20-30+ sec. per call. Pin to 2 fast ones,
     # verified backends (verified live: duckduckgo ~1s, google ~0.5s) with 1 fallback.
     backends_to_try = ["duckduckgo", "google"]
-    last_error = "άγνωστο σφάλμα"
+    last_error = t("tools.web.search_err_unknown")
 
     for backend in backends_to_try:
         try:
@@ -720,9 +713,9 @@ def duckduckgo_search(query: str) -> str:
             if results:
                 output = []
                 for r in results:
-                    output.append(f"Τίτλος: {r['title']}\nURL: {r['href']}\nΠερίληψη: {r['body']}\n")
+                    output.append(t("tools.web.search_format_result", title=r["title"], href=r["href"], body=r["body"]))
                 return "\n---\n".join(output)
-            last_error = "κενό αποτέλεσμα"
+            last_error = t("tools.web.search_err_empty")
         except RatelimitException:
             last_error = "rate limit"
         except TimeoutException:
@@ -732,13 +725,7 @@ def duckduckgo_search(query: str) -> str:
         except Exception as e:
             last_error = str(e)
 
-    return (
-        f"[WEB_TOOL_ERROR][duckduckgo_search]"
-        f"[reason={last_error}] "
-        f"Η αναζήτηση failed σε {len(backends_to_try)} backends. "
-        "ΜΗΝ ξαναδοκιμάσεις το ίδιο ή παρόμοιο ερώτημα αμέσως — "
-        "ενημέρωσε τον χρήστη ότι η web αναζήτηση είναι προσωρινά μη διαθέσιμη."
-    )
+    return t("tools.web.search_all_failed", last_error=last_error, count=len(backends_to_try))
 @tool
 def search_supermarket_prices(query: str) -> str:
     """Searches for product prices from all supermarkets (e-katanalotis.gov.gr).
@@ -764,7 +751,7 @@ def search_supermarket_prices(query: str) -> str:
                 matches.append(p)
 
         if not matches:
-            return f"❌ Δεν βρέθηκε '{query}' στο e-katanalotis."
+            return t("tools.web.ekat_not_found", query=query)
 
         # Keep the 5 most relevant
         matches = sorted(matches, key=lambda p: len(p['name']))[:5]
@@ -781,7 +768,7 @@ def search_supermarket_prices(query: str) -> str:
                 price_lines.append(f"  {shop}: {pr['price']:.2f}€")
             output.append(f"📦 {name}\n" + "\n".join(price_lines))
 
-        return "\n\n".join(output) if output else "❌ Δεν βρέθηκαν τιμές."
+        return "\n\n".join(output) if output else t("tools.web.ekat_no_prices")
 
     except Exception as e:
         return f"⚠️ Error: {str(e)}"
@@ -801,7 +788,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
 
     # [MASTRO-GPS-INTERCEPTOR]
     query_norm = remove_accents(query)
-    if re.search(r'\b(κοντα|near)\b', query_norm) or location == "current":
+    if re.search(t("tools.web.ekat_near_regex"), query_norm) or location == "current":
         if os.path.exists(GPS_STORAGE_FILE):
             try:
                 with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
@@ -815,7 +802,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             
     api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
     if not api_key:
-        return "❌ Λsaidι το GOOGLE_PLACES_API_KEY from το .env"
+        return t("tools.web.places_missing_api")
 
     search_url = "https://places.googleapis.com/v1/places:searchText"
 
@@ -877,7 +864,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
         places = data.get("places", [])
 
         if not places:
-            return f"❌ Δεν βρέθηκαν αποτελέσματα για '{query}' στην {location}."
+            return t("tools.web.places_no_results", query=query, location=location)
 
         ranked_places = sorted(
             places,
@@ -887,20 +874,20 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
 
         # ── Format results ─────────────────────────
         price_map = {
-            "PRICE_LEVEL_FREE": "Δωρεάν",
+            "PRICE_LEVEL_FREE": t("tools.web.places_price_free"),
             "PRICE_LEVEL_INEXPENSIVE": "€",
             "PRICE_LEVEL_MODERATE": "€€",
             "PRICE_LEVEL_EXPENSIVE": "€€€",
             "PRICE_LEVEL_VERY_EXPENSIVE": "€€€€"
         }
 
-        lines = [f"📍 Αποτελέσματα για '{query}' — {location}:\n"]
+        lines = [t("tools.web.places_header", query=query, location=location)]
 
         for i, place in enumerate(ranked_places, 1):
-            name = place.get("displayName", {}).get("text", "Άγνωστο")
+            name = place.get("displayName", {}).get("text", t("tools.web.places_unknown_name"))
             rating = place.get("rating", "—")
             votes = place.get("userRatingCount", 0)
-            address = place.get("formattedAddress", "Χωρίς διεύθυνση")
+            address = place.get("formattedAddress", t("tools.web.places_unknown_address"))
             ptype = place.get("primaryTypeDisplayName", {}).get("text", "")
             maps_url = place.get("googleMapsUri", "")
             price = price_map.get(place.get("priceLevel", ""), "")
@@ -924,29 +911,29 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
             hours_info = ""
             opening = place.get("regularOpeningHours", {})
             if opening.get("openNow") is True:
-                hours_info = " · ✅ Ανοιχτό"
+                hours_info = t("tools.web.places_open")
             elif opening.get("openNow") is False:
-                hours_info = " · 🔴 Κλειστό"
+                hours_info = t("tools.web.places_closed")
 
             price_str = f" · {price}" if price else ""
-            rating_str = f"⭐ {rating} ({votes} κριτικές)" if rating != "—" else "Χωρίς βαθμολογία"
+            rating_str = t("tools.web.places_rating", rating=rating, votes=votes) if rating != "—" else t("tools.web.places_no_rating")
             type_str = f" · {ptype}" if ptype else ""
             
             contact_str = ""
             if phone: contact_str += f"   📞 {phone}\n"
-            if website: contact_str += f"   🌐 <a href='{website}'>Website Μαγαζιού</a>\n"
+            if website: contact_str += t("tools.web.places_website", website=website)
             
             services_str = f"   🛵 [{', '.join(services)}]\n" if services else ""
             review_str = f"   💬 \"{review_text}\"\n" if review_text else ""
 
             lines.append(
-                f"{i}. <b>{name}</b>{price_str}\n"
-                f"   {rating_str}{type_str}{hours_info}\n"
-                f"   📌 {address}\n"
-                f"{contact_str}"
-                f"{services_str}"
-                f"{review_str}"
-                f"   🗺️ <a href='{maps_url}'>Άνοιγμα στο Google Maps</a>\n"
+                f"{i}. <b>{name}</b>{price_str}\n" +
+                f"   {rating_str}{type_str}{hours_info}\n" +
+                f"   📌 {address}\n" +
+                f"{contact_str}" +
+                f"{services_str}" +
+                f"{review_str}" +
+                t("tools.web.places_maps", maps_url=maps_url) +
                 f"   🧭 Match: {match_score}\n"
             )
 
@@ -1043,25 +1030,25 @@ def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE
                     stat_min = round(stat_s / 60)
 
                     mode_icon = "🚗" if mode == "DRIVE" else "🚶‍♂️"
-                    live_info = f"📏 <b>Απόσταση:</b> {dist_km} km\n"
+                    live_info = t("tools.web.dir_distance", dist_km=dist_km)
                     
                     if mode == "DRIVE":
-                        live_info += f"⏱️ <b>Κανονικός Χρόνος:</b> {stat_min} λεπτά\n"
-                        live_info += f"{mode_icon} <b>Χρόνος με τρέχουσα κίνηση:</b> {dur_min} λεπτά\n\n"
+                        live_info += t("tools.web.dir_normal_time", stat_min=stat_min)
+                        live_info += t("tools.web.dir_live_time", mode_icon=mode_icon, dur_min=dur_min)
                     else:
-                        live_info += f"{mode_icon} <b>Χρόνος με τα πόδια:</b> {dur_min} λεπτά\n\n"
+                        live_info += t("tools.web.dir_walk_time", mode_icon=mode_icon, dur_min=dur_min)
             else:
                 live_info = f"⚠️ Error Routes API ({response.status_code}): {response.text}\n\n"
         except Exception as e:
-            live_info = f"⚠️ Απέτυχε η άντληση Live Κίνησης: {str(e)}\n\n"
+            live_info = t("tools.web.dir_live_error", error=str(e))
     else:
-        live_info = "⚠️ Λsaidι το GOOGLE_PLACES_API_KEY.\n\n"
+        live_info = t("tools.web.dir_missing_api")
 
     return (
-        f"📍 <b>Προορισμός:</b> {destination}\n"
-        f"🏠 <b>Αφετηρία:</b> {final_origin}\n\n"
-        f"{live_info}"
-        f"🔗 <a href='{search_url}'>Προβολή στον Χάρτη</a>\n"
-        f"🛣️ <a href='{directions_url}'>Οδηγίες πλοήγησης</a>\n\n"
-        f"[SYSTEM_INSTRUCTION: ΠΡΕΠΕΙ ΥΠΟΧΡΕΩΤΙΚΑ να κάνεις copy-paste ΟΛΟ το παραπάνω μπλοκ κειμένου (from το 📍 μέχρι το 🛣️) ακριβώς όπως είναι, ΣΤΟ ΤΕΛΟΣ του μηνύματός σου προς τον χρήστη. Μην του δώσεις μόνο τη δική σου λεκτική απάντηση, αλλά επικόλλησε και το παραπάνω μπλοκ ως έχει.]"
+        t("tools.web.dir_dest", destination=destination) +
+        t("tools.web.dir_origin", final_origin=final_origin) +
+        f"{live_info}" +
+        t("tools.web.dir_link_map", search_url=search_url) +
+        t("tools.web.dir_link_nav", directions_url=directions_url) +
+        t("tools.web.dir_system_instruction")
     )
