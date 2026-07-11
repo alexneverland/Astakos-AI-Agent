@@ -16,7 +16,7 @@ def search_ferries(origin: str, destination: str, date: str) -> str:
     date: Travel date (e.g. '10 August 2026')
     """
     query = f"{origin} {destination} πλοίο ferry δρομολόγιο τιμή {date}"
-    print(f"\033[94m[Ferries]: Αναζήτηση: {query}\033[0m")
+    print(f"\033[94m[Ferries]: Search: {query}\033[0m")
     
     try:
         results = _search.run(query)
@@ -48,5 +48,5 @@ if __name__ == "__main__":
         )
         print(result)
     else:
-        print("Χρήση: python search_ferries.py [origin] [destination] [date]")
-        print("π.χ.: python search_ferries.py Θεσσαλονίκη Σκιάθος '10 Αυγούinυ 2026'")
+        print("Usage: python search_ferries.py [origin] [destination] [date]")
+        print("e.g.: python search_ferries.py Thessaloniki Skiathos '10 August 2026'")

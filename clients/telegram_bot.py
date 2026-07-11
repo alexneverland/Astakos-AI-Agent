@@ -819,7 +819,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
 
         with open(local_path, "wb") as f:
             f.write(doc_data)
-        print(f"\033[94m[Document]: Αποθηκεύτηκε in Telegram: {local_path}\033[0m")
+        print(f"\033[94m[Document]: Saved in Telegram: {local_path}\033[0m")
 
         # We send a message to the user that we received it
         send_telegram_msg(f"📄 Έγγραφο ελήφθη: `{file_name}`\nΠερίμενε, το κοιτάζω...")
@@ -1202,7 +1202,7 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
                         asyncio.run(send_telegram_photo(img_path))
                         time.sleep(1)
                     except Exception as img_e:
-                        print(f"⚠️ [StoryMaker] Αποτυχία αποinλής εικόνας: {img_e}")
+                        print(f"⚠️ [StoryMaker] Failed to send image: {img_e}")
         else:
             send_telegram_msg(t("clients.telegram_bot.msg_c594bf"))
 
@@ -1453,7 +1453,7 @@ def _llm_routine_judge(user_msg: str, events: list) -> str:
         print(f"\033[96m🤖 [Routine LLM Judge]: '{user_msg[:50]}' \u2192 {verdict}\033[0m")
         return verdict
     except Exception as e:
-        print(f"\033[93m[Routine LLM Judge]: Error, fallback σε UNCLEAR: {e}\033[0m")
+        print(f"\033[93m[Routine LLM Judge]: Error, fallback to UNCLEAR: {e}\033[0m")
         return "UNCLEAR"
 
 
@@ -2781,7 +2781,7 @@ def run_polling():
                     continue
 
                 if user_text.lower() == "/end":
-                    print(f"\033[94m[Telegram]: End session command from Λάζαρο.\033[0m")
+                    print(f"\033[94m[Telegram]: End session command from Lazaros.\033[0m")
                     threading.Thread(
                         target=handle_end_session,
                         args=(chat_id,),
@@ -4244,7 +4244,7 @@ def job_morning_fit_briefing():
         )
         with open(flag_file, "w") as f:
             f.write(today_str)
-        print(f"✅ [FitBriefing]: Πρωινό briefing sent.")
+        print(f"✅ [FitBriefing]: Morning briefing sent.")
     except Exception as e:
         print(f"⚠️ [FitBriefing]: {e}")
 

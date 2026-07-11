@@ -67,7 +67,7 @@ def send_telegram_msg(text: str, disable_notification: bool = False) -> int | No
     chat_id = TELEGRAM_CHAT_ID
 
     if not token or not chat_id:
-        print("❌ Error: Telegram credentials missing from το .env")
+        print("❌ Error: Telegram credentials missing from .env")
         return None
 
     safe_text = format_for_telegram(text)

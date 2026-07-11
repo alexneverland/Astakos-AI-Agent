@@ -34,8 +34,8 @@ def authenticate_google_drive():
             creds.refresh(Request())
         else:
             # This is where the OAuth flow would happen if run in a real user environment
-            print(f"Error αυθεντικοποίησης: Τα αρχεία 'token.json' ή 'credentials.json' δεν βρέθηκαν ή δεν is έγκυρα στις διαδρομές: {token_path}, {credentials_path}.")
-            print("Παρακαλώ βεβαιωθείτε ότι έχετε ρυθμίσει την αυθεντικοποίηση της Google API inν υπολογιστή σας.")
+            print(f"Authentication Error: The files 'token.json' or 'credentials.json' were not found or are invalid at paths: {token_path}, {credentials_path}.")
+            print("Please ensure you have configured Google API authentication on your computer.")
             return None
     # print("Credentials loaded successfully (or failed)...")
     return creds
@@ -53,7 +53,7 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
     for item_name in os.listdir(local_path):
         # 1. Check for names (folders like 'venv' or 'messenger_profile')
         if item_name in exclude_items:
-            print(f"  [Skip] Εξαιρείται βάσει ονόματος: {item_name}")
+            print(f"  [Skip] Excluded by name: {item_name}")
             continue
 
         current_local_path = os.path.join(local_path, item_name)
@@ -64,10 +64,10 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
             ext = os.path.splitext(item_name)[1].lower()
             
             if ext in exclude_exts:
-                print(f"  [Skip] Εξαιρείται βάσει τύπου ({ext}): {item_name}")
+                print(f"  [Skip] Excluded by type ({ext}): {item_name}")
                 continue
 
-            print(f"- Ανέβασμα αρχείου: {item_name} in Drive folder ID: {drive_parent_id}")
+            print(f"- Uploading file: {item_name} to Drive folder ID: {drive_parent_id}")
             file_metadata = {'name': item_name, 'parents': [drive_parent_id]}
             media = MediaFileUpload(current_local_path, resumable=True)
             
@@ -75,11 +75,11 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
                 file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
                 uploaded_items.append(f"Ανέβηκε '{item_name}' (ID: {file.get('id')})")
             except Exception as e:
-                print(f"❌ Error in ανέβασμα του {item_name}: {e}")
+                print(f"❌ Error uploading {item_name}: {e}")
 
         # 3. Case: Folder (Recursion)
         elif os.path.isdir(current_local_path):
-            print(f"- Creating φακέλου in Drive: {item_name} μέσα in Drive folder ID: {drive_parent_id}")
+            print(f"- Creating folder in Drive: {item_name} inside Drive folder ID: {drive_parent_id}")
             folder_metadata = {
                 'name': item_name,
                 'mimeType': 'application/vnd.google-apps.folder',
@@ -89,12 +89,12 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
             try:
                 folder = service.files().create(body=folder_metadata, fields='id').execute()
                 new_drive_folder_id = folder.get('id')
-                print(f"  Φάκελος '{item_name}' δημιουργήθηκε (ID: {new_drive_folder_id}).")
+                print(f"  Folder '{item_name}' created (ID: {new_drive_folder_id}).")
                 
                 # We make the recursive call to enter inside the folder
                 uploaded_items.extend(upload_folder_recursive(service, current_local_path, new_drive_folder_id, exclude_items))
             except Exception as e:
-                print(f"❌ Error στη δημιουργία φακέλου {item_name}: {e}")
+                print(f"❌ Error creating folder {item_name}: {e}")
 
     return uploaded_items
 
@@ -102,20 +102,20 @@ def daily_backup_to_drive():
     DRIVE_FOLDER_ID = "12YrIZ3uAQWmmwIlEkIkDf-4gcz2P8Ktv"
     ASTAKOS_V2_PATH = r"C:\astakos_v2" 
 
-    print("Έναρξη διαδικασίας backup...")
+    print("Starting backup process...")
     creds = authenticate_google_drive()
     if not creds:
-        print("Η αυθεντικοποίηση in Google Drive failed. The backup δεν θα εκτελεστεί.")
+        print("Google Drive authentication failed. Backup will not be executed.")
         return "Backup απέτυχε."
 
     try:
-        print("Σύνδεση με Drive...")
+        print("Connecting to Drive...")
         service = build('drive', 'v3', credentials=creds)
 
         # Create a folder with the date in Google Drive
         today = datetime.datetime.now().strftime("%Y-%m-%d")
         backup_folder_name = f"astakos_v2_backup_{today}"
-        print(f"Creating/Εύρεση φακέλου backup in Drive: {backup_folder_name}")
+        print(f"Creating/Finding backup folder in Drive: {backup_folder_name}")
 
         # Check if a folder with this name already exists
         query = f"name = '{backup_folder_name}' and mimeType = 'application/vnd.google-apps.folder' and '{DRIVE_FOLDER_ID}' in parents"
@@ -124,7 +124,7 @@ def daily_backup_to_drive():
 
         if files:
             backup_folder_id = files[0].get('id')
-            print(f"Ο φάκελος '{backup_folder_name}' υπάρχει ήδη (ID: {backup_folder_id}). Χρησιμοποιείται για το backup.")
+            print(f"Folder '{backup_folder_name}' already exists (ID: {backup_folder_id}). Using it for backup.")
         else:
             file_metadata = {
                 'name': backup_folder_name,
@@ -133,9 +133,9 @@ def daily_backup_to_drive():
             }
             backup_folder = service.files().create(body=file_metadata, fields='id').execute()
             backup_folder_id = backup_folder.get('id')
-            print(f"Ο φάκελος '{backup_folder_name}' δημιουργήθηκε με επιτυχία (ID: {backup_folder_id}).")
+            print(f"Folder '{backup_folder_name}' created successfully (ID: {backup_folder_id}).")
 
-        print(f"Ξεκινά το αναδρομικό backup from τον φάκελο '{ASTAKOS_V2_PATH}'...")
+        print(f"Starting recursive backup from folder '{ASTAKOS_V2_PATH}'...")
 
         # List of folders/files to exclude (only in the initial call)
         EXCLUDE_ITEMS = ['venv', '__pycache__', '.git', 'messenger_profile']

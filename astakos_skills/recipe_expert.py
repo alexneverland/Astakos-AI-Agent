@@ -94,7 +94,7 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
     ingredients: (Optional) Available ingredients.
     """
     recent = get_recent_meals()
-    print(f"\n[Tool Debug] 👨‍🍳 Ο Chef Αστακός ετοιμάζει προτάσεις...")
+    print(f"\n[Tool Debug] 👨‍🍳 Chef Astakos is preparing suggestions...")
     # The tool executes the call internally... (The rest of the code remains the same)
     prompt = f"""
     You are the family's Home Chef. Operate based on the following:
@@ -129,7 +129,7 @@ def log_meal(meal_name: str):
     Permanently records the selected food in food_history.json.
     """
     history = []
-    print(f"\n[Tool Debug] 📝 Καταγραφή γεύματος in JSON: {meal_name}")
+    print(f"\n[Tool Debug] 📝 Logging meal in JSON: {meal_name}")
     
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
@@ -150,7 +150,7 @@ def log_meal(meal_name: str):
         meal_date = meal.get("date", "").split(" ")[0] 
         existing_name = meal.get("name", "")
         if (meal_date == today_str and _is_same_meal(existing_name, meal_name)) or _is_recent_same_meal(meal, meal_name, now):
-            print("⚠️ Αποτροπή διπλοεγγραφής γεύματος!")
+            print("⚠️ Preventing duplicate meal entry!")
             return (
                 f"⚠️ Παρόμοιο γεύμα έχει ΗΔΗ καταγραφεί πρόσφατα: "
                 f"'{existing_name}'. Μην το ξαναγράφεις."

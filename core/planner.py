@@ -190,7 +190,7 @@ def _plan_summary(goal: str, tasks: list, results: list) -> dict:
     for i, (task, result) in enumerate(zip(tasks, results)):
         summary += f"**{i+1}. {task['description']}**\n{result[:500]}\n\n"
 
-    print(f"\033[92m[Planner]: Plan completed — {len(tasks)} stepτα\033[0m")
+    print(f"\033[92m[Planner]: Plan completed — {len(tasks)} steps\033[0m")
 
     # Post-plan reflection
     try:
@@ -262,7 +262,7 @@ def pre_check_node(state):
     if last_msg in _CONFIRM_WORDS or last_msg_norm in _CONFIRM_WORDS:
         try:
             clear_pending_plan(user_id=pending_user_key)
-            print(f"\033[95m[PreCheck]: ✅ Plan confirmed — {len(pending['tasks'])} stepτα\033[0m")
+            print(f"\033[95m[PreCheck]: ✅ Plan confirmed — {len(pending['tasks'])} steps\033[0m")
             return {
                 "plan_tasks":                  pending["tasks"],
                 "plan_index":                  0,
@@ -445,7 +445,7 @@ def end_check_node(state):
         skip_badge = " ⚠️ _παραλείφθηκε_" if i in skipped else ""
         summary   += f"**{i + 1}. {task['description']}**{skip_badge}\n{result[:500]}\n\n"
 
-    print(f"\033[92m[EndCheck]: Plan done — {success_count}/{total} stepτα successful\033[0m")
+    print(f"\033[92m[EndCheck]: Plan done — {success_count}/{total} steps successful\033[0m")
 
     # Post-plan reflection
     try:

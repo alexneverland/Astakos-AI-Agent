@@ -32,7 +32,7 @@ if os.name == "nt":
     try:
         msvcrt.locking(_lock_file.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:
-        print("\033[91m[Watchdog]: Τρέχει ήδη ένα instance του run_telegram.py — έξοδος.\033[0m")
+        print("\033[91m[Watchdog]: An instance of run_telegram.py is already running — exiting.\033[0m")
         sys.exit(1)
 
 
@@ -75,8 +75,8 @@ def run():
             py_changes = [c for c in changes if str(c[1]).endswith(".py") or str(c[1]).endswith("prompts.md")]
             if py_changes:
                 for _, path in py_changes:
-                    print(f"\033[93m[Watchdog]: Αλλαγή εντοπίστηκε → {path}\033[0m")
-                print(f"\033[93m[Watchdog]: Επανεκκίνηση...\033[0m")
+                    print(f"\033[93m[Watchdog]: Change detected → {path}\033[0m")
+                print(f"\033[93m[Watchdog]: Restarting...\033[0m")
                 start()
     except KeyboardInterrupt:
         stop_process(process)
