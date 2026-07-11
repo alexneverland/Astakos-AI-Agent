@@ -43,16 +43,16 @@ def safe_gemini_call(prompt: str, retries: int = 4, base_delay: float = 2.0):
             ))
 
             if attempt >= retries - 1:
-                print(f"\n\033[91m❌ [Gemini Fatal]: Κατέρρευσε μετά από {retries} προσπάθειες: {e}\033[0m")
+                print(f"\n\033[91m❌ [Gemini Fatal]: Crashed after {retries} attempts: {e}\033[0m")
                 raise e
 
             if is_quota:
                 wait = base_delay * (4 ** attempt)
-                print(f"\033[93m⚠️ [Gemini 429]: Quota limit! Αναμονή {wait:.1f}s πριν τη δοκιμή {attempt+2}/{retries}...\033[0m")
+                print(f"\033[93m⚠️ [Gemini 429]: Quota limit! Waiting {wait:.1f}s before attempt {attempt+2}/{retries}...\033[0m")
                 time.sleep(wait)
             elif is_server or is_timeout:
                 wait = base_delay * (2 ** attempt)
-                print(f"\033[93m⚠️ [Gemini Server/Timeout]: Αναμονή {wait:.1f}s πριν τη δοκιμή {attempt+2}/{retries}...\033[0m")
+                print(f"\033[93m⚠️ [Gemini Server/Timeout]: Waiting {wait:.1f}s before attempt {attempt+2}/{retries}...\033[0m")
                 time.sleep(wait)
             else:
                 raise e

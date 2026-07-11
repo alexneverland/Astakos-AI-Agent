@@ -31,7 +31,7 @@ def _generate_image(prompt: str, output_dir: str, index: int) -> str | None:
                 f.write(res.content)
             return fname
     except Exception as e:
-        print(f"⚠️ [StoryMaker] Εικόνα {index} απέτυχε: {e}")
+        print(f"⚠️ [StoryMaker] Image {index} failed: {e}")
     return None
 
 
@@ -106,16 +106,16 @@ def make_story(theme: str, characters: str = "") -> dict:
     output_dir = os.path.join(BASE_DIR, "outputs")
     os.makedirs(output_dir, exist_ok=True)
 
-    print(f"📖 [StoryMaker] Δημιουργία παραμυθιού: '{theme}'...")
+    print(f"📖 [StoryMaker] Creating story: '{theme}'...")
     result = _generate_story_and_prompts(theme, characters)
 
     if not result["story"]:
         return {"story": None, "images": [], "error": "Αποτυχία δημιουργίας παραμυθιού"}
 
-    print(f"🎨 [StoryMaker] Δημιουργία {len(result['scenes'])} εικόνων...")
+    print(f"🎨 [StoryMaker] Creating {len(result['scenes'])} images...")
     images = []
     for i, scene_prompt in enumerate(result["scenes"], start=1):
-        print(f"  → Εικόνα {i}: {scene_prompt[:60]}...")
+        print(f"  → Image {i}: {scene_prompt[:60]}...")
         path = _generate_image(scene_prompt, output_dir, i)
         if path:
             images.append(path)

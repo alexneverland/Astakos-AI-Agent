@@ -11,7 +11,7 @@ import re
 import unicodedata
 from datetime import datetime
 from langchain_core.tools import tool
-from config import BASE_DIR
+from config import BASE_DIR, RESPONSE_LANGUAGE
 
 # Mastro-Import: Bringing the brain into the tool!
 from core.brain import llm
@@ -109,7 +109,7 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
     - If a specific recipe is requested, provide detailed ingredients and steps, adapted to be kid-friendly (especially for Alexandros, who only eats lentils/beans when it comes to legumes).
     - If the request is generic, provide 3 options (The Safe Bet, The Quick One, The Different One).
     
-    IMPORTANT RULE: You MUST write your entire response in fluent Greek.
+    IMPORTANT RULE: You MUST write your entire response fluently EXCLUSIVELY in {RESPONSE_LANGUAGE}.
     """
     
     try:
@@ -117,7 +117,8 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
         response = llm.invoke(prompt)
         # [MASTRO-SHIELD]: clean_message instead of raw .content
         # so as to correctly handle parts lists from Gemini 3.x
-        return clean_message(response.content)
+        recipe_text = clean_message(response.content)
+        return f"[SYSTEM_INSTRUCTION: YOU MUST copy-paste the ENTIRE recipe/instruction below into your final answer to the user. DO NOT say 'I generated the recipe', WRITE IT! PASTE IT HERE:]\n\n{recipe_text}"
     except Exception as e:
         return f"❌ Σφάλμα κατά την παραγωγή της συνταγής από τον Chef: {str(e)}"
 
@@ -128,7 +129,7 @@ def log_meal(meal_name: str):
     Permanently records the selected food in food_history.json.
     """
     history = []
-    print(f"\n[Tool Debug] 📝 Καταγραφή γεύματος στο JSON: {meal_name}")
+    print(f"\n[Tool Debug] 📝 Καταγραφή γεύματος in JSON: {meal_name}")
     
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")

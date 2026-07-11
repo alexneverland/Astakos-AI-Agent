@@ -1098,7 +1098,7 @@ def _run_session_summary(channel: str = "web"):
 
     try:
         is_summarizing = True
-        print(f"\n\033[94m[Session/{channel}]: Έναρξη αρχειοθέτησης...\033[0m")
+        print(f"\n\033[94m[Session/{channel}]: Starting archiving...\033[0m")
         
         # 2. We empty it IMMEDIATELY so that no other worker grabs it again
         current_batch = list(current_log)
@@ -1138,9 +1138,9 @@ def _run_session_summary(channel: str = "web"):
             # If it fails, we put the messages back so we don't lose them
             if not using_persistent_log:
                 SESSION_LOGS[:0] = current_batch  # Reset to start
-                print("\033[91m[Session]: Μη έγκυρο format. Τα μηνύματα επεστράφησαν στο log.\033[0m")
+                print("\033[91m[Session]: Invalid format. Messages returned to log.\033[0m")
             else:
-                print("\033[91m[Session]: Μη έγκυρο format. Τα shared exchanges έμειναν unsummarized.\033[0m")
+                print("\033[91m[Session]: Invalid format. Shared exchanges left unsummarized.\033[0m")
             return
 
         # 4. Enrichment of the text for the Vector DB
@@ -1154,7 +1154,7 @@ def _run_session_summary(channel: str = "web"):
         memory.save(memory_type="session", summary=summary, session_text=session_text)
         if using_persistent_log:
             mark_exchanges_summarized([e["id"] for e in current_batch])
-        print(f"\033[92m[Session]: ✅ Αρχειοθετήθηκε επιτυχώς! Mood: {summary.get('mood', '?')}\033[0m")
+        print(f"\033[92m[Session]: ✅ Archived successfully! Mood: {summary.get('mood', '?')}\033[0m")
         bus.emit("session_ended", channel=summary_channel, mood=summary.get("mood", "unknown"), summary=summary.get("summary", ""))
 
     except Exception as e:
@@ -2038,9 +2038,9 @@ def run_memory_sifter_slow(
                 fixed_raw = re.sub(r',\s*\]', ']', raw_clean)
                 fixed_raw = re.sub(r',\s*\}', '}', fixed_raw)
                 memories = json.loads(fixed_raw)
-                print("\033[93m[Sifter Fixer]: ✅ Το JSON επισκευάστηκε αυτόματα!\033[0m")
+                print("\033[93m[Sifter Fixer]: ✅ JSON auto-repaired!\033[0m")
             except:
-                print("\033[91m⚠️ [Sifter Error]: Το LLM έβγαλε εντελώς κακογραμμένο JSON. Παράκαμψη εγγραφής.\033[0m")
+                print("\033[91m⚠️ [Sifter Error]: LLM generated completely malformed JSON. Skipping write.\033[0m")
                 return
 
         accepted_candidates: list[dict] = []
@@ -2159,7 +2159,7 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
         from datetime import date as _date
 
         if not os.path.exists(WORKING_MEMORY_FILE):
-            print("\033[90m[Startup]: Δεν βρέθηκε working memory file — παράκαμψη.\033[0m")
+            print("\033[90m[Startup]: Working memory file not found — skipping.\033[0m")
             return False
 
         # Check if the file has entries
@@ -2170,7 +2170,7 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
             tags = []
 
         if not tags:
-            print("\033[90m[Startup]: Working memory κενό — παράκαμψη.\033[0m")
+            print("\033[90m[Startup]: Working memory empty — skipping.\033[0m")
             return False
 
         # Check if the file was modified before today
@@ -2179,7 +2179,7 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
         today = _date.today()
 
         if file_date >= today:
-            print(f"\033[90m[Startup]: Working memory είναι από σήμερα ({file_date}) — παράκαμψη.\033[0m")
+            print(f"\033[90m[Startup]: Working memory is from today ({file_date}) — skipping.\033[0m")
             return False
 
         print(
@@ -2200,7 +2200,7 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
             )
             return True
         except Exception as e:
-            print(f"\033[91m[Startup]: ❌ Αποτυχία καθαρισμού working memory: {e}\033[0m")
+            print(f"\033[91m[Startup]: ❌ Failed to clear working memory: {e}\033[0m")
             return False
 
     except Exception as e:

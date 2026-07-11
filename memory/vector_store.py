@@ -534,7 +534,7 @@ class AstakosMemoryManager:
                 elif memory_type == "event":
                     return self._save_event(**kwargs)
                 else:
-                    print(f"⚠️ [MemoryManager]: Άγνωστος τύπος μνήμης '{memory_type}'")
+                    print(f"⚠️ [MemoryManager]: Unknown memory type '{memory_type}'")
             except Exception as e:
                 import traceback
                 print(f"\033[91m[MemoryManager Error]: {e}\033[0m")
@@ -878,13 +878,13 @@ class AstakosMemoryManager:
                     c.execute("SELECT id FROM profile_facts WHERE category=? AND fact=?", (category, replace_old_fact_text))
                     row = c.fetchone()
                     if row:
-                        print(f"\033[94m[DB Profile]: Αντικατάσταση παλιάς εγγραφής (ίδια απόφαση με Chroma)\033[0m")
+                        print(f"\033[94m[DB Profile]: Replacing old entry (same as Chroma)\033[0m")
                         c.execute("UPDATE profile_facts SET fact=?, photo_path=?, date=?, metadata_json=?, created_at=CURRENT_TIMESTAMP WHERE id=?", (fact, photo_path, date_str, profile_metadata_json, row[0]))
                     else:
-                        print(f"\033[93m[DB Profile]: Δεν βρέθηκε αντίστοιχη παλιά εγγραφή για αντικατάσταση — προσθήκη νέας.\033[0m")
+                        print(f"\033[93m[DB Profile]: No matching old record found for replacement — adding new.\033[0m")
                         c.execute("INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) VALUES (?, ?, ?, ?, ?)", (category, fact, photo_path, date_str, profile_metadata_json))
                 else:
-                    print(f"\033[92m[DB Profile]: Νέα εγγραφή προστέθηκε.\033[0m")
+                    print(f"\033[92m[DB Profile]: New record added.\033[0m")
                     c.execute("INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) VALUES (?, ?, ?, ?, ?)", (category, fact, photo_path, date_str, profile_metadata_json))
                 
                 conn.commit()
@@ -931,7 +931,7 @@ class AstakosMemoryManager:
             "last_accessed": datetime.now().timestamp(),
         }
         vector_store.add_texts([fact], metadatas=[metadata])
-        print(f"\033[92m[ChromaDB]: Φωτογραφία 'καρφώθηκε' ({os.path.basename(file_path)})\033[0m")
+        print(f"\033[92m[ChromaDB]: Photo 'pinned' ({os.path.basename(file_path)})\033[0m")
 
         entry = {
             "file_path": file_path, "analysis": analysis, "caption": caption,
@@ -959,7 +959,7 @@ class AstakosMemoryManager:
             "last_accessed": datetime.now().timestamp(),
         }
         vector_store.add_texts([fact], metadatas=[metadata])
-        print(f"\033[92m[ChromaDB]: Έγγραφο 'καρφώθηκε' ({os.path.basename(file_path)})\033[0m")
+        print(f"\033[92m[ChromaDB]: Document 'pinned' ({os.path.basename(file_path)})\033[0m")
 
         from config import DOCS_INDEX_FILE
         docs_index_file = DOCS_INDEX_FILE
@@ -1153,7 +1153,7 @@ def update_goal_progress(project: str, progress: int) -> bool:
             vector_store._collection.delete(ids=existing["ids"])
             new_meta = {**old_meta, "progress": max(0, min(100, progress)), "timestamp": datetime.now().timestamp()}
             vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
-            print(f"\033[92m[Goals]: '{project}' πρόοδος → {progress}%\033[0m")
+            print(f"\033[92m[Goals]: '{project}' progress → {progress}%\033[0m")
             return True
     except Exception as e:
         print(f"\033[91m[Goals Error]: {e}\033[0m")
@@ -1171,7 +1171,7 @@ def update_goal_milestones(project: str, milestones: str) -> bool:
             vector_store._collection.delete(ids=existing["ids"])
             new_meta = {**old_meta, "milestones": milestones, "timestamp": datetime.now().timestamp()}
             vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
-            print(f"\033[92m[Goals]: '{project}' milestones ενημερώθηκαν\033[0m")
+            print(f"\033[92m[Goals]: '{project}' milestones updated\033[0m")
             return True
     except Exception as e:
         print(f"\033[91m[Goals Error]: {e}\033[0m")

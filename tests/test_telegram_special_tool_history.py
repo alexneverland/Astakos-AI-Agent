@@ -9,7 +9,7 @@ def test_nutrition_result_is_sent_and_recorded(monkeypatch):
     recorded = []
 
     monkeypatch.setattr(bot, "send_telegram_msg", lambda msg: sent.append(msg) or 123)
-    monkeypatch.setattr(bot, "_append_to_analytics_log", lambda role, content: recorded.append((role, content)))
+    monkeypatch.setattr(bot, "_append_to_analytics_log", lambda role, content, **kwargs: recorded.append((role, content)))
     monkeypatch.setitem(
         sys.modules,
         "astakos_skills.nutrition_analyzer",
@@ -30,7 +30,7 @@ def test_receipt_result_is_sent_and_recorded(monkeypatch):
     fake_receipt_tool = SimpleNamespace(invoke=lambda payload: f"receipt:{payload['image_path']}")
 
     monkeypatch.setattr(bot, "send_telegram_msg", lambda msg: sent.append(msg) or 123)
-    monkeypatch.setattr(bot, "_append_to_analytics_log", lambda role, content: recorded.append((role, content)))
+    monkeypatch.setattr(bot, "_append_to_analytics_log", lambda role, content, **kwargs: recorded.append((role, content)))
     monkeypatch.setitem(
         sys.modules,
         "astakos_skills.scan_receipt",

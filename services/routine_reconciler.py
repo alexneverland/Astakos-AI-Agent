@@ -2,113 +2,13 @@ import re
 import json
 import os
 from datetime import datetime, timedelta
+from config import NLP_CONFIG
 
+_routines_nlp = NLP_CONFIG.get("routines", {})
+_tokens_data = _routines_nlp.get("tokens", {})
+_inline = _routines_nlp.get("inline", {})
+_regex_data = _routines_nlp.get("regex", {})
 
-
-_TOKENS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "data",
-    "routine_tokens.json",
-)
-
-_REQUIRED_TOKEN_KEYS = (
-    "_ABSENCE_TOKENS",
-    "_ALEXANDROS_TOKENS",
-    "_BASKETBALL_TOKENS",
-    "_CAMP_TOKENS",
-    "_CHILD_ACTIVITY_TOKENS",
-    "_DRAFT_CONTEXT_TOKENS",
-    "_FOOTBALL_TOKENS",
-    "_FUTURE_INTENT_TOKENS",
-    "_GRANDMA_TOKENS",
-    "_HOME_ONLY_ROUTINE_TOKENS",
-    "_HOME_RETURN_TOKENS",
-    "_LUNCH_TOKENS",
-    "_MESSENGER_EXCLUDE",
-    "_MORNING_TOKENS",
-    "_NOT_TOGETHER_TOKENS",
-    "_OUTING_PROGRESS_TOKENS",
-    "_OUTING_ROUTINE_TOKENS",
-    "_OUTING_TOKENS",
-    "_PAST_REFERENCE_TOKENS",
-    "_PRESENT_LIVE_TOKENS",
-    "_RETURN_TOKENS",
-    "_ROUTINE_EXCLUDE_TOKENS",
-    "_SCHOOL_BREAK_TOKENS",
-    "_SCHOOL_TOKENS",
-    "_SHIFT_AM_TOKENS",
-    "_SHIFT_PM_TOKENS",
-    "_SLEEP_TOKENS",
-    "_SOFIA_TOKENS",
-    "_STOP_TOKENS",
-    "_SUMMER_BREAK_TOKENS",
-    "_TOGETHER_TOKENS",
-    "_TRIP_TOKENS",
-    "_WEEK_TOKENS",
-    "_WORK_DEPARTURE_TOKENS",
-    "_WORK_TOKENS",
-)
-
-def _load_routine_tokens() -> dict:
-    with open(_TOKENS_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if not isinstance(data, dict):
-        raise ValueError("routine_tokens.json must contain a JSON object")
-
-    missing = [key for key in _REQUIRED_TOKEN_KEYS if key not in data]
-    if missing:
-        raise ValueError(f"routine_tokens.json missing required keys: {missing}")
-
-    for key in _REQUIRED_TOKEN_KEYS:
-        value = data[key]
-        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-            raise ValueError(f"{key} must be a list[str]")
-
-    return data
-
-try:
-    _tokens_data = _load_routine_tokens()
-except Exception as e:
-    print(f"[RoutineReconciler] Failed to load token config from {_TOKENS_PATH}: {e}")
-    # Controlled fallback for basic functionality if JSON is corrupt
-    _tokens_data = {
-        "_ABSENCE_TOKENS": ['λειπει', 'εφυγε', 'δεν ειναι εδω', 'απουσιαζει'],
-        "_ALEXANDROS_TOKENS": ['αλεξανδρ', 'μικρ', 'παιδι'],
-        "_BASKETBALL_TOKENS": ['μπασκετ', 'μπασκεμπολ'],
-        "_CAMP_TOKENS": ['κατασκην', 'camp'],
-        "_CHILD_ACTIVITY_TOKENS": ['ποδοσφαιρο', 'προπονηση', 'μπαλα', 'μπασκετ', 'μπασκεμπολ'],
-        "_DRAFT_CONTEXT_TOKENS": ['messenger', 'linkedin', 'draft', 'προσχεδιο', 'μηνυμα'],
-        "_FOOTBALL_TOKENS": ['ποδοσφαιρο', 'προπονηση', 'μπαλα'],
-        "_FUTURE_INTENT_TOKENS": ['θα ', 'να ', 'αν ', 'ισως', 'μπορει'],
-        "_GRANDMA_TOKENS": ['γιαγια'],
-        "_HOME_ONLY_ROUTINE_TOKENS": ['μαγειρ', 'φαγητ', 'γευμα', 'μεσημεριαν', 'κουζιν'],
-        "_HOME_RETURN_TOKENS": ['γυρισαμε σπιτι', 'γυρισαμε σπιτι', 'ειμαστε σπιτι', 'ηρθαμε σπιτι', 'επιστρεψαμε σπιτι'],
-        "_LUNCH_TOKENS": ['μεσημερ', 'φαγητ', 'γευμ'],
-        "_MESSENGER_EXCLUDE": ['σχολει', 'ποδοσφαιρ', 'μπασκετ', 'κατασκην'],
-        "_MORNING_TOKENS": ['πρωι', 'πρωιν', 'ξυπνημ', 'ετοιμασι'],
-        "_NOT_TOGETHER_TOKENS": ['δεν ειμαι με', 'δεν ειμαστε μαζι', 'δεν ειμαστε πια μαζι', 'δεν ειμαι πια με', 'χωρισ'],
-        "_OUTING_PROGRESS_TOKENS": ['ειμαστε', 'πηγαμε', 'παμε', 'φτασαμε', 'αραζ'],
-        "_OUTING_ROUTINE_TOKENS": ['παρκο', 'βολτα', 'παιχνιδ', 'κουνι', 'παιδικ'],
-        "_OUTING_TOKENS": ['πισιν', 'μπανι', 'θαλασσ', 'παραλι', 'εκδρομ', 'παρκο', 'βολτ', 'παιχνιδ', 'κουνι', 'παιδικ'],
-        "_PAST_REFERENCE_TOKENS": ['χθες', 'χτεσ', 'πριν', 'το βραδυ', 'περασα'],
-        "_PRESENT_LIVE_TOKENS": ['ειμαι', 'ειμαστε', 'βρισκομαι', 'βρισκομαστε', 'φτασαμε'],
-        "_RETURN_TOKENS": ['επιστρεφ', 'γυρισ', 'επεστρεψ', 'ηρθε πισω', 'ξαναγυρ'],
-        "_ROUTINE_EXCLUDE_TOKENS": ['messenger', 'μηνυμα'],
-        "_SCHOOL_BREAK_TOKENS": ['δεν εχει σχολει', 'τελειωσε το σχολει', 'διακοπ', 'καλοκαιρ'],
-        "_SCHOOL_TOKENS": ['σχολει', 'σχολικ'],
-        "_SHIFT_AM_TOKENS": ['πρωι', 'πρωιν'],
-        "_SHIFT_PM_TOKENS": ['απογευμα', 'βραδυ', 'βραδιν'],
-        "_SLEEP_TOKENS": ['υπνο', 'κοιμ', 'νυχτ'],
-        "_SOFIA_TOKENS": ['σοφια'],
-        "_STOP_TOKENS": ['σταματ', 'δεν εχει', 'δεν παει', 'δεν θα παει', 'τελειωσ'],
-        "_SUMMER_BREAK_TOKENS": ['καλοκαιρ', 'σταματ', 'ξαναρχ', 'σεπτεμβρ'],
-        "_TOGETHER_TOKENS": ['μαζι', 'ειμαι με', 'ειμαστε με', 'ειμαστε μαζι', 'ολοι μαζι'],
-        "_TRIP_TOKENS": ['διακοπ', 'ταξιδ', 'εκδρομ'],
-        "_WEEK_TOKENS": ['εβδομαδ', 'αυτη την εβδομαδ', 'αυτη εβδομαδ'],
-        "_WORK_DEPARTURE_TOKENS": ['αναχωρησ', 'φευγ', 'δουλεια', 'δουλειαν'],
-        "_WORK_TOKENS": ['δουλει', 'δουλευ', 'βαρδι', 'σεφτ'],
-    }
 
 _ABSENCE_TOKENS = _tokens_data['_ABSENCE_TOKENS']
 _ALEXANDROS_TOKENS = _tokens_data['_ALEXANDROS_TOKENS']
@@ -128,10 +28,6 @@ _NOT_TOGETHER_TOKENS = _tokens_data['_NOT_TOGETHER_TOKENS']
 _OUTING_PROGRESS_TOKENS = _tokens_data['_OUTING_PROGRESS_TOKENS']
 _OUTING_ROUTINE_TOKENS = _tokens_data['_OUTING_ROUTINE_TOKENS']
 _OUTING_TOKENS = _tokens_data['_OUTING_TOKENS']
-
-for _tok in ("παρκο", "βολτ", "παιχνιδ", "κουνι", "παιδικ"):
-    if _tok not in _OUTING_TOKENS:
-        _OUTING_TOKENS.append(_tok)
 _PAST_REFERENCE_TOKENS = _tokens_data['_PAST_REFERENCE_TOKENS']
 _PRESENT_LIVE_TOKENS = _tokens_data['_PRESENT_LIVE_TOKENS']
 _RETURN_TOKENS = _tokens_data['_RETURN_TOKENS']
@@ -200,7 +96,8 @@ def _extract_iso_dates(text: str) -> list[str]:
 
 
 def _infer_relative_until(normalized_fact: str, *, now: datetime) -> str | None:
-    match = re.search(r"(?:σε|για)\s+(\d{1,2})\s*(?:μερες|μερα|ημερες|ημερα)", normalized_fact)
+    in_days_pattern = _regex_data.get("in_days", r"(?:σε|για)\s+(\d{1,2})\s*(?:μερες|μερα|ημερες|ημερα)")
+    match = re.search(in_days_pattern, normalized_fact)
     if not match:
         return None
     try:
@@ -238,11 +135,11 @@ def _next_monday(dt: datetime) -> datetime:
 
 
 def _has_next_workweek_scope(normalized: str) -> bool:
-    if "απο δευτερα" in normalized or "απο εβδομαδα" in normalized:
+    if _contains_any(normalized, _inline.get("week_start", [])):
         return True
-    if "ερχομεν" in normalized or "επομεν" in normalized:
+    if _contains_any(normalized, _inline.get("week_start", [])):
         return True
-    if "δευτερα" in normalized and ("αυριο" in normalized or "απο " in normalized):
+    if (_contains_any(normalized, _inline.get("days", []))) and (_contains_any(normalized, _inline.get("week_start", [])) or _contains_any(normalized, _inline.get("tomorrow", []))):
         return True
     return False
 
@@ -254,10 +151,7 @@ def _has_this_workweek_scope(normalized: str) -> bool:
 def _has_explicit_weekday_reference(normalized: str) -> bool:
     return any(
         token in normalized
-        for token in (
-            "δευτερα", "τριτη", "τεταρτη", "πεμπτη", "παρασκευη",
-            "monday", "tuesday", "wednesday", "thursday", "friday",
-        )
+        for token in _inline.get("days", [])
     )
 
 
@@ -270,27 +164,16 @@ def _extract_relative_day_scope_dt(normalized: str, now: datetime) -> datetime |
 
     Does not apply to generic future plans of the "at some point" type, only to a clear day anchor.
     """
-    if "αυριο" in normalized or "αύριο" in normalized:
+    if _contains_any(normalized, _inline.get("tomorrow", [])):
         return now + timedelta(days=1)
 
-    if "μεθαυριο" in normalized or "μεθαύριο" in normalized:
+    if _contains_any(normalized, _inline.get("day_after_tomorrow", [])):
         return now + timedelta(days=2)
 
     return None
 
 def _extract_explicit_weekday_scope_dt(normalized: str, now: datetime) -> datetime | None:
-    weekday_aliases = {
-        "δευτερα": 0,
-        "τριτη": 1,
-        "τεταρτη": 2,
-        "πεμπτη": 3,
-        "παρασκευη": 4,
-        "monday": 0,
-        "tuesday": 1,
-        "wednesday": 2,
-        "thursday": 3,
-        "friday": 4,
-    }
+    weekday_aliases = _routines_nlp.get("days_of_week", {})
     for token, weekday_idx in weekday_aliases.items():
         if token not in normalized:
             continue
@@ -305,7 +188,7 @@ def _infer_september_resume(normalized_fact: str, *, now: datetime, explicit_dat
     for date_str in explicit_dates:
         if date_str[5:7] == "09":
             return date_str
-    if "σεπτεμβρ" not in normalized_fact:
+    if not _contains_any(normalized_fact, _inline.get("september", [])):
         return None
     year = now.year if now.strftime("%m-%d") <= "09-01" else now.year + 1
     return f"{year}-09-01"
@@ -473,7 +356,7 @@ def _rule_return_home(normalized: str) -> list[dict]:
     if not (
         _contains_any(normalized, _ALEXANDROS_TOKENS)
         and _contains_any(normalized, _RETURN_TOKENS)
-        and (_contains_any(normalized, _CAMP_TOKENS) or "σπιτι" in normalized)
+        and (_contains_any(normalized, _CAMP_TOKENS) or _contains_any(normalized, _inline.get("home", [])))
     ):
         return []
     
@@ -627,8 +510,8 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
       - state:alexandros:outing = done (for the rest of today)
     Only applies if there is already an active outing/out-of-home context.
     """
-    has_home = "σπιτι" in normalized
-    has_presence = _contains_any(normalized, _PRESENT_LIVE_TOKENS + _RETURN_TOKENS + ["εφτασα", "ηρθα", "μπηκα"])
+    has_home = _contains_any(normalized, _inline.get("home", []))
+    has_presence = _contains_any(normalized, _PRESENT_LIVE_TOKENS + _RETURN_TOKENS + _inline.get("home_presence", []))
     if not (has_home and has_presence):
         return []
 
@@ -659,7 +542,7 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
             "until_date": None,
             "reason": "returned_home_from_outing",
             "subject_tokens": [],
-            "include_tokens": ["σπιτι", "γυρισα", "ηρθα", "μπηκα", "επιστρεψα", "πισω", "ειμαστε", "εφτασα"],
+            "include_tokens": _inline.get("home", []) + _inline.get("home_presence", []),
             "exclude_tokens": [],
         }
     ]
@@ -672,7 +555,7 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
                 "value": "done",
                 "until_date": until,
                 "reason": "returned_home_from_outing",
-                "subject_tokens": _ALEXANDROS_TOKENS + ["ολοι", "εμεις", "μας", "γυρισαμε", "ηρθαμε", "επιστρεψαμε", "ειμαστε", "εφτασαμε"],
+                "subject_tokens": _ALEXANDROS_TOKENS + _inline.get("together_group", []),
                 "include_tokens": _OUTING_TOKENS,
                 "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
             }
@@ -791,9 +674,9 @@ def _rule_sofia_work_mode(normalized: str, dates: list[str], now: datetime) -> l
     Phase 3C.5 — sofia_work_mode:
     Facts: "Sofia is working from home tomorrow", "Sofia is teleworking"
     """
-    has_sofia = "σοφια" in normalized
+    has_sofia = _contains_any(normalized, _inline.get("sofia_aliases", []))
     has_work = _contains_any(normalized, _WORK_TOKENS)
-    has_remote = "σπιτι" in normalized or "τηλεργασια" in normalized or "remote" in normalized
+    has_remote = _contains_any(normalized, _inline.get("home", [])) or _contains_any(normalized, _inline.get("remote_work", []))
     
     if not (has_sofia and has_work and has_remote):
         return []
@@ -812,7 +695,7 @@ def _rule_sofia_work_mode(normalized: str, dates: list[str], now: datetime) -> l
         "value": "remote",
         "until_date": until,
         "reason": "sofia_remote_work",
-        "subject_tokens": ["σοφια"],
+        "subject_tokens": _inline.get("sofia_aliases", []),
         "include_tokens": _WORK_TOKENS,
         "exclude_tokens": [],
     }
@@ -824,9 +707,9 @@ def _rule_football_season(normalized: str, dates: list[str], now: datetime) -> l
     Phase 3C.5 — football_season:
     Facts: "football started", "practices started"
     """
-    has_football = "ποδοσφαιρ" in normalized or "μπαλα" in normalized or "προπονηση" in normalized
-    has_start = "ξεκινησ" in normalized or "αρχισ" in normalized
-    has_end = "τελειωσ" in normalized or "σταματησ" in normalized or "εκλεισ" in normalized
+    has_football = _contains_any(normalized, _CHILD_ACTIVITY_TOKENS)
+    has_start = _contains_any(normalized, _inline.get("start", []))
+    has_end = _contains_any(normalized, _inline.get("end", []))
     
     if not has_football:
         return []
@@ -846,7 +729,7 @@ def _rule_football_season(normalized: str, dates: list[str], now: datetime) -> l
         "until_date": until,
         "reason": "football_season_update",
         "subject_tokens": _ALEXANDROS_TOKENS,
-        "include_tokens": ["ποδοσφαιρ", "μπαλα", "προπονηση"],
+        "include_tokens": _CHILD_ACTIVITY_TOKENS,
         "exclude_tokens": [],
     }
     return [d_state]
@@ -859,7 +742,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     Target: conflicting departure / sleep routines
     Action: context_state_set for the week AND permanent condition_add directives.
     """
-    has_work  = _contains_any(normalized, _WORK_TOKENS) or "αναχωρηση" in normalized or "δουλει" in normalized
+    has_work  = _contains_any(normalized, _WORK_TOKENS) or _contains_any(normalized, _WORK_DEPARTURE_TOKENS)
     has_shift = _contains_any(normalized, _SHIFT_PM_TOKENS) or _contains_any(normalized, _SHIFT_AM_TOKENS)
     has_next_week = _has_next_workweek_scope(normalized)
     has_this_week = _has_this_workweek_scope(normalized)
@@ -896,6 +779,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
         else:
             effective_dt = now
 
+        stop_words = set(_inline.get("stop_words", []))
         until = _end_of_workweek(effective_dt)
         d_state = {
             "kind": "context_state_set",
@@ -904,7 +788,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
             "until_date": until,
             "reason": f"shift_{shift_val}_week",
             "subject_tokens": [],
-            "include_tokens": _WORK_TOKENS + ["αναχωρηση"] + _SHIFT_PM_TOKENS + _SHIFT_AM_TOKENS,
+            "include_tokens": _WORK_TOKENS + [] + _SHIFT_PM_TOKENS + _SHIFT_AM_TOKENS,
             "exclude_tokens": [],
         }
         directives.append(d_state)
@@ -918,17 +802,17 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     action_tokens = [w for w in normalized.split() if w not in stop_words and len(w) > 2]
 
     # Old logic for "morning/wakeup" routines if they are explicitly mentioned
-    if _contains_any(normalized, _MORNING_TOKENS) or "ξυπνημα" in normalized or "πρωινο" in normalized:
-        action_tokens.extend(["ξυπνημα", "πρωινο", "υπνος"] + _SLEEP_TOKENS)
+    if _contains_any(normalized, _MORNING_TOKENS) or _contains_any(normalized, _inline.get("morning_extra", [])):
+        action_tokens.extend(_inline.get("morning_extra", []) + _inline.get("sleep_extra", []) + _SLEEP_TOKENS)
         
     # Old logic for "departure" routines if they are explicitly mentioned
-    if "αναχωρηση" in normalized or "δουλει" in normalized or _contains_any(normalized, _WORK_DEPARTURE_TOKENS):
-        action_tokens.extend(["αναχωρηση", "δουλει", "φευγω"] + _WORK_DEPARTURE_TOKENS)
+    if _contains_any(normalized, _WORK_DEPARTURE_TOKENS) or _contains_any(normalized, _WORK_DEPARTURE_TOKENS):
+        action_tokens.extend(_WORK_DEPARTURE_TOKENS + _WORK_DEPARTURE_TOKENS)
         
     action_tokens = list(set(action_tokens))
 
     # If they said "applies/does not apply" and mentioned a shift, and we have an action token
-    if "ισχυει" in normalized and has_shift and action_tokens:
+    if _contains_any(normalized, _inline.get("general_noise", [])) and has_shift and action_tokens:
         d_cond_generic = _build_directive(
             "condition_add",
             subject_tokens=[],
@@ -945,7 +829,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
                 d_cond_generic["condition_payload"] = {"flag": "current_shift", "equals": "morning"}
                 
             # If it says "does not apply", suppress. Otherwise allow.
-            if "δεν " in normalized or "οχι" in normalized:
+            if _contains_any(normalized, _inline.get("negation", [])):
                 d_cond_generic["condition_mode"] = "suppress_when_true"
             else:
                 d_cond_generic["condition_mode"] = "allow_when_true"
@@ -974,7 +858,7 @@ def _rule_alexandros_with_sofia_without_user(normalized: str, dates: list[str], 
     has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
     has_child = _contains_any(normalized, _ALEXANDROS_TOKENS)
     has_outing = _contains_any(normalized, _OUTING_TOKENS + _OUTING_ROUTINE_TOKENS)
-    user_not_with_them = _contains_any(normalized, _NOT_TOGETHER_TOKENS) or "εγω σπιτι" in normalized or "ειμαι σπιτι" in normalized
+    user_not_with_them = _contains_any(normalized, _NOT_TOGETHER_TOKENS) or _contains_any(normalized, _inline.get("not_together_extra", []))
 
     if not (has_sofia and has_child and has_outing and user_not_with_them):
         return []
@@ -1024,11 +908,11 @@ def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> l
     has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
     has_together = _contains_any(normalized, _TOGETHER_TOKENS)
 
-    has_home_marker = _contains_any(normalized, ["σπιτι", "σπίτι", "στο σπιτι", "στο σπίτι"])
+    has_home_marker = _contains_any(normalized, _inline.get("home", []))
     has_alex = _contains_any(normalized, _ALEXANDROS_TOKENS)
     has_user_work_context = _contains_any(
         normalized,
-        _WORK_TOKENS + _SHIFT_AM_TOKENS + _SHIFT_PM_TOKENS + ["δουλεια", "δουλειά", "βαρδια", "βάρδια"]
+        _WORK_TOKENS + _SHIFT_AM_TOKENS + _SHIFT_PM_TOKENS + _WORK_TOKENS
     )
 
     if has_sofia and has_alex and has_home_marker and has_user_work_context:
@@ -1039,10 +923,7 @@ def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> l
             return []
 
     group_outing_tokens = [
-        "ηρθαμε", "ήρθαμε", "πηγαμε", "πήγαμε", "ειμαστε", "είμαστε",
-        "ολοι", "όλοι", "οικογενειακ", "μαζι", "μαζί",
-        "θαλασσα", "θάλασσα", "παραλια", "παραλία", "μπανιο", "μπάνιο",
-        "βγηκαμε", "βγήκαμε", "βολτα", "βόλτα", "εκδρομ"
+        *_inline.get("together_group", []), *_inline.get("outing_extra", []), *_inline.get("pool_sea", [])
     ]
     has_group_outing = _contains_any(normalized, group_outing_tokens)
 
@@ -1071,13 +952,13 @@ def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> l
         "until_date": until,
         "reason": "sofia_with_user",
         "subject_tokens": _SOFIA_TOKENS,
-        "include_tokens": ["σοφια", "messenger", "μηνυμα"],
+        "include_tokens": _inline.get("sofia_aliases", []) + _DRAFT_CONTEXT_TOKENS,
         "exclude_tokens": _MESSENGER_EXCLUDE,
     }
     
     cond = _build_condition_directive(
         subject_tokens=_SOFIA_TOKENS,
-        include_tokens=["σοφια", "messenger", "μηνυμα"],
+        include_tokens=_inline.get("sofia_aliases", []) + _DRAFT_CONTEXT_TOKENS,
         exclude_tokens=_MESSENGER_EXCLUDE,
         condition_type="context_flag",
         condition_payload={"flag": "sofia_with_user", "equals": True},
@@ -1121,7 +1002,7 @@ def _rule_sofia_not_with_user(normalized: str, dates: list[str], now: datetime) 
         "until_date": None,
         "reason": "sofia_not_with_user",
         "subject_tokens": _SOFIA_TOKENS,
-        "include_tokens": ["σοφια", "messenger", "μηνυμα"],
+        "include_tokens": _inline.get("sofia_aliases", []) + _DRAFT_CONTEXT_TOKENS,
         "exclude_tokens": _MESSENGER_EXCLUDE,
     }
     return [d_state]
@@ -1138,8 +1019,7 @@ def _rule_child_activity_pause(normalized: str, dates: list[str], now: datetime)
     """
     has_child    = (
         _contains_any(normalized, _ALEXANDROS_TOKENS)
-        or "παιδι" in normalized
-        or "μικρ" in normalized
+        or _contains_any(normalized, _inline.get("alexandros_kids", []))
     )
     has_activity = _contains_any(normalized, _CHILD_ACTIVITY_TOKENS)
     has_stop     = _contains_any(normalized, _STOP_TOKENS)
@@ -1202,7 +1082,7 @@ _P_CONSERVATIVE = -0.25   # rules that are by-design conservative (shift_week)
 # Rules that earn the +0.10 special bonus
 _SPECIAL_RULES = {"seasonal_football", "camp_absence", "return_home", "family_outing_in_progress", "return_home_from_outing"}
 # Rules that get the conservative penalty
-_CONSERVATIVE_RULES = {"shift_logic"}
+_CONSERVATIVE_RULES = set()
 # Rules where generic-token penalty applies if activity not found in fact
 _ACTIVITY_REQUIRED_RULES = {"school_break"}
 
@@ -1264,6 +1144,21 @@ def score_candidate_directive(
         score += _P_NO_SUBJECT
         _append_flag(ambiguity_flags, "missing_subject")
 
+    if matched_rule_name in {"shift_logic", "child_activity_pause", "notifications_unmute", "sofia_not_with_user"}:
+        if matched_rule_name == "shift_logic":
+            # If explicit day or tomorrow is specified, it is NOT conservative.
+            # Only week-level mentions ("this week") get the conservative penalty.
+            has_explicit_day = _extract_explicit_weekday_scope_dt(normalized_fact, datetime.now()) is not None
+            has_relative_day = _extract_relative_day_scope_dt(normalized_fact, datetime.now()) is not None
+            if has_explicit_day or has_relative_day:
+                _append_signal(signals, "explicit_shift_schedule")
+            else:
+                score += _P_CONSERVATIVE
+                _append_flag(ambiguity_flags, f"{matched_rule_name}_conservative")
+        else:
+            score += _P_CONSERVATIVE
+            _append_flag(ambiguity_flags, f"{matched_rule_name}_conservative")
+
     if has_activity:
         score += _W_ACTIVITY
         _append_signal(signals, f"activity:{include_tokens[0]}" if include_tokens else "activity")
@@ -1297,47 +1192,14 @@ def score_candidate_directive(
         _append_signal(signals, f"special_rule:{matched_rule_name}")
 
     has_relative_day_scope = (
-        "αυριο" in normalized_fact
-        or "αύριο" in normalized_fact
-        or "μεθαυριο" in normalized_fact
-        or "μεθαύριο" in normalized_fact
+        _contains_any(normalized_fact, _inline.get("tomorrow", []) + _inline.get("day_after_tomorrow", []))
     )
 
-    explicit_shift_schedule = (
-        matched_rule_name == "shift_logic"
-        and kind == "context_state_set"
-        and directive_key == "current_shift"
-        and has_activity
-        and has_state
-        and (
-            _has_explicit_weekday_reference(normalized_fact)
-            or has_relative_day_scope
-            or (
-                has_scope
-                and (
-                    "πρωιν" in normalized_fact
-                    or "απογευματ" in normalized_fact
-                    or "βάρδια" in normalized_fact
-                    or "βαρδια" in normalized_fact
-                    or "δουλει" in normalized_fact
-                )
-            )
-        )
-    )
+    # explicit_shift_schedule logic removed to keep shift_logic strictly conservative
 
-    if (
-        matched_rule_name in _CONSERVATIVE_RULES
-        and matched_rule_name != "shift_logic"
-        and not explicit_shift_schedule
-    ):
+    if matched_rule_name in _CONSERVATIVE_RULES:
         score += _P_CONSERVATIVE
         _append_flag(ambiguity_flags, f"{matched_rule_name}_conservative")
-    elif matched_rule_name == "shift_logic" and not explicit_shift_schedule:
-        score += _P_CONSERVATIVE
-        _append_flag(ambiguity_flags, "shift_logic_conservative")
-    elif explicit_shift_schedule:
-        score += 0.10
-        _append_signal(signals, "shift_logic:explicit_schedule")
 
     # Penalty: activity required by this rule but not found in fact
     if matched_rule_name in _ACTIVITY_REQUIRED_RULES and not has_activity:
@@ -1349,7 +1211,7 @@ def score_candidate_directive(
     has_sofia = _contains_any(normalized_fact, _SOFIA_TOKENS)
     if has_alex and has_sofia:
         # We relax the penalty if the text clearly shows that they act together
-        if _contains_any(normalized_fact, ["μαζι", "ολοι", "παρεα", "μας"]):
+        if _contains_any(normalized_fact, _inline.get("together_group", [])):
             _append_signal(signals, "multiple_people_together")
         else:
             score += _P_MULTI_PERSON
@@ -1409,13 +1271,10 @@ def _rule_user_at_work(normalized: str, dates: list[str], now) -> list[dict]:
     Facts: "Έχω πάει γραφείο" (I have gone to the office), "Δουλεύω στο γραφείο σήμερα" (I am working at the office today), "Είμαι δουλειά" (I am at work)
     Guard: does not cover shift/schedule declarations for future days.
     """
-    has_work = _contains_any(normalized, _WORK_TOKENS) or "γραφειο" in normalized
-    has_user = "ειμαι" in normalized or "εχω" in normalized or "δουλευω" in normalized
+    has_work = _contains_any(normalized, _WORK_TOKENS) or _contains_any(normalized, _inline.get("work_office", []))
+    has_user = _contains_any(normalized, _inline.get("work_user", []))
     has_presence_phrase = (
-        "ειμαι στη δουλεια" in normalized
-        or "ειμαι δουλεια" in normalized
-        or "δουλευω στο γραφειο" in normalized
-        or "εχω παει γραφειο" in normalized
+        _contains_any(normalized, _inline.get("work_extra", []))
     )
     has_schedule_phrase = _has_next_workweek_scope(normalized) or _contains_any(normalized, _SHIFT_PM_TOKENS + _SHIFT_AM_TOKENS)
 
@@ -1439,7 +1298,7 @@ def _rule_user_at_work(normalized: str, dates: list[str], now) -> list[dict]:
         "until_date": until,
         "reason": "user_at_office",
         "subject_tokens": [],
-        "include_tokens": _WORK_TOKENS + ["γραφειο"],
+        "include_tokens": _WORK_TOKENS + _inline.get("work_office", []),
         "exclude_tokens": [],
     }
     return [d_state]
@@ -1450,8 +1309,8 @@ def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
     Quiet hours / sleep:
     Facts: "The little one is sleeping", "Quiet now"
     """
-    has_sleep = "κοιμαται" in normalized or "υπνο" in normalized
-    has_quiet = "ησυχια" in normalized or "σιγα" in normalized
+    has_sleep = _contains_any(normalized, _inline.get("sleep_extra", []))
+    has_quiet = _contains_any(normalized, _inline.get("quiet", []))
     has_child = _contains_any(normalized, _ALEXANDROS_TOKENS)
     
     if not ((has_sleep and has_child) or has_quiet):
@@ -1467,7 +1326,7 @@ def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
         "until_date": until,
         "reason": "quiet_hours_requested",
         "subject_tokens": _ALEXANDROS_TOKENS if has_child else [],
-        "include_tokens": ["ησυχια", "υπνο", "κοιμαται", "σιγα"],
+        "include_tokens": _inline.get("quiet", []) + _inline.get("sleep_extra", []),
         "exclude_tokens": [],
     }
     return [d_state]
@@ -1549,11 +1408,11 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
         return []
 
     subject_tokens = []
-    if "αλεξανδρ" in entity or "alexand" in entity:
+    if _contains_any(entity, _inline.get("alexandros_aliases", [])):
         subject_tokens = _ALEXANDROS_TOKENS
-    elif "σοφ" in entity or "sofia" in entity:
+    elif _contains_any(entity, _inline.get("sofia_aliases", [])):
         subject_tokens = _SOFIA_TOKENS
-    elif entity in {"family", "οικογενεια", "εμεις", "user", "εγω", "null", "none", ""}:
+    elif entity in set(_inline.get("family_entities", [])):
         subject_tokens = []
     else:
         subject_tokens = [entity]
@@ -1708,31 +1567,31 @@ def _infer_llm_reconciliation_candidates(
             if val is not None:
                 ctx_str = f"- {k}: {val}"
                 if until:
-                    ctx_str += f" (έως {until})"
+                    ctx_str += f" (until {until})"
                 active_contexts.append(ctx_str)
     except Exception:
         pass
         
-    context_section = "\nΕνεργές Καταστάσεις (Context Flags) αυτή τη στιγμή:\n" + "\n".join(active_contexts) + "\nΛάβετες υπόψη για να καταλάβεις καλύτερα το νόημα.\n" if active_contexts else ""
+    context_section = "\nActive Context Flags right now:\n" + "\n".join(active_contexts) + "\nTake these into account to better understand the meaning.\n" if active_contexts else ""
 
     prompt = f"""
-Είσαι extractor για routine reconciliation.
+You are an extractor for routine reconciliation.
 {context_section}
 
-Σήμερα είναι {today}.
+Today is {today}.
 
-Θα σου δώσω ένα fact/μήνυμα χρήστη.
-Θέλω να βγάλεις ΜΟΝΟ JSON LIST.
-Καμία εξήγηση.
+I will give you a user fact/message.
+I want you to output ONLY a JSON LIST.
+No explanations.
 
-Στόχος:
-να καταλάβεις αν το fact επηρεάζει υπάρχουσες ρουτίνες ή προσωρινό context ζωής.
+Goal:
+Understand if the fact affects existing routines or temporary life context.
 
-Επέστρεψε λίστα από objects με fields:
-- entity: ποιο πρόσωπο/οντότητα αφορά ή null
-- activity: γενική δραστηριότητα/τομέας, π.χ. sports_training, outing, sleep, school, work_shift, home_presence ή null
-- aliases: λίστα λέξεων-κλειδιών που θα βοηθήσουν να ταιριάξουν routines
-- state_change: π.χ. active, inactive, in_progress, done, off_season, away ή null
+Return a list of objects with fields:
+- entity: which person/entity it concerns or null
+- activity: general activity/domain, e.g. sports_training, outing, sleep, school, work_shift, home_presence or null
+- aliases: list of keywords that will help match routines
+- state_change: e.g. active, inactive, in_progress, done, off_season, away or null
 - impact:
     - pause_matching_routines
     - mute_matching_notifications
@@ -1741,13 +1600,13 @@ def _infer_llm_reconciliation_candidates(
     - already_done
     - allow_only_when_active
     - live_context
-- context_key: canonical context flag ή null
+- context_key: canonical context flag or null
 - context_value: true | false | string | null
-- until_date: YYYY-MM-DD ή null
-- reason: σύντομο machine-friendly reason, π.χ. summer_break, camp, returned_home, live_context
+- until_date: YYYY-MM-DD or null
+- reason: short machine-friendly reason, e.g. summer_break, camp, returned_home, live_context
 
-Για γενικές τρέχουσες καταστάσεις ζωής, προτίμησε canonical context flags.
-Χρησιμοποίησε ΜΟΝΟ αυτά τα context_key όταν ταιριάζουν:
+For general current life states, prefer canonical context flags.
+Use ONLY these context_keys when they fit:
 - user_out_of_home
 - alexandros_away_from_home
 - family_at_home
@@ -1756,13 +1615,13 @@ def _infer_llm_reconciliation_candidates(
 - current_shift
 - football_season
 
-Κανόνες:
-- Μην εφευρίσκεις νέα context keys αν υπάρχει canonical key που καλύπτει το νόημα.
-- Μπορείς να επιστρέψεις περισσότερα από ένα objects αν ένα fact αλλάζει πολλά context flags.
-- Αν το fact αφορά live/temporary κατάσταση ζωής, προτίμησε context_key/context_value αντί για dynamic state:{{entity}}:{{activity}}.
-- Αν δεν υπάρχει καθαρό routine/context impact, γύρνα [].
+Rules:
+- Do not invent new context keys if a canonical key covers the meaning.
+- You can return more than one object if a fact changes multiple context flags.
+- If the fact concerns a live/temporary life situation, prefer context_key/context_value instead of dynamic state:{{entity}}:{{activity}}.
+- If there is no clear routine/context impact, return [].
 
-Παραδείγματα:
+Examples:
 
 Fact: "Το βράδυ θα πάω με τη Σοφία έξω και ο Αλέξανδρος θα είναι με τη Μαρία"
 Output:

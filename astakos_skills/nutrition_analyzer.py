@@ -8,7 +8,7 @@ import os
 import base64
 import requests
 from datetime import datetime
-from config import BASE_DIR
+from config import BASE_DIR, RESPONSE_LANGUAGE
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or ""
 
@@ -16,7 +16,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or ""
 def analyze_nutrition(image_path: str, product_hint: str = "") -> str:
     """
     Takes a photo path, sends it to the Vision LLM, and returns
-    a nutritional value / healthiness analysis in Greek.
+    a nutritional value / healthiness analysis in {RESPONSE_LANGUAGE}.
     """
     from core.brain import llm
     from core.agents import clean_message
@@ -41,7 +41,7 @@ Step 3: Evaluate on a scale of 1-10 based on the category:
   - Household: toxicity, environmental footprint
 Step 4: Add a comment for children (around 6 years old) if relevant.
 
-IMPORTANT RULE: You MUST answer EXCLUSIVELY in Greek, using EXACTLY the following format:
+IMPORTANT RULE: You MUST answer EXCLUSIVELY in {RESPONSE_LANGUAGE}, using EXACTLY the following format:
 
 🏷️ **[Όνομα προϊόντος] — [Κατηγορία]**
 

@@ -376,11 +376,11 @@ def run_analytics() -> dict:
     user_msgs, history_source = _load_user_messages_for_analytics(cutoff)
 
     if not user_msgs:
-        print("[Analytics]: Δεν υπάρχουν μηνύματα με date field (πρόσφατα).")
+        print("[Analytics]: No messages with date field (recent).")
         _write_log(stats, found_routines)
         return stats
 
-    print(f"[Analytics]: Ανάλυση {len(user_msgs)} μηνυμάτων ({LOOKBACK_DAYS} ημερών, {history_source})...")
+    print(f"[Analytics]: Analyzing {len(user_msgs)} messages ({LOOKBACK_DAYS} days, {history_source})...")
 
     activities = _extract_activities_batched(user_msgs, stats=stats)
     groups = _group_activities(user_msgs, activities)
@@ -388,7 +388,7 @@ def run_analytics() -> dict:
     final_groups = _promote_everyday_groups(merged)
     _promote_groups_to_routines(final_groups, stats=stats, found_routines=found_routines)
 
-    print(f"[Analytics]: Ολοκληρώθηκε → {stats}")
+    print(f"[Analytics]: Completed → {stats}")
     _write_log(stats, found_routines)
     return stats
 
@@ -467,7 +467,7 @@ def run_analytics_incremental(
         bootstrap_completed=progress["bootstrap_completed"] or bootstrap,
         **kwargs,
     )
-    print(f"[Analytics Incremental]: Ολοκληρώθηκε → {stats}")
+    print(f"[Analytics Incremental]: Completed → {stats}")
     _write_log(stats, promoted)
     return stats
 

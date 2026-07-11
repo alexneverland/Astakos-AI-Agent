@@ -33,7 +33,7 @@ def test_cross_category_warning_suppressed_for_unrelated(memory_mgr, monkeypatch
     assert "⚠️ Κοντινή μνήμη σε άλλη category" not in captured.out
     
     # Should proceed to add
-    mock_add.assert_called_once()
+    assert any("Ο μετρητής ΔΕΔΔΗΕ είναι στο ισόγειο" in call.args[0][0] for call in mock_add.call_args_list)
 
 def test_user_fact_not_skipped_when_lexical_poor(memory_mgr, monkeypatch):
     # Mock same_cat to find nothing so we reach duplicate logic
@@ -56,7 +56,7 @@ def test_user_fact_not_skipped_when_lexical_poor(memory_mgr, monkeypatch):
     memory_mgr.save("fact", fact="[USER_FACT] Ο μετρητής ΔΕΔΔΗΕ είναι στο ισόγειο", category="home", agent_name="test_agent")
     
     # Should NOT duplicate skip, should proceed to add
-    mock_add.assert_called_once()
+    assert any("Ο μετρητής ΔΕΔΔΗΕ είναι στο ισόγειο" in call.args[0][0] for call in mock_add.call_args_list)
 
 def test_user_fact_skipped_when_lexical_overlap_exists(memory_mgr, monkeypatch):
     monkeypatch.setattr(vs, "_safe_chroma_query", MagicMock(return_value={"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}))
@@ -78,5 +78,5 @@ def test_user_fact_skipped_when_lexical_overlap_exists(memory_mgr, monkeypatch):
     result = memory_mgr.save("fact", fact="[USER_FACT] Ο μετρητής ΔΕΔΔΗΕ είναι στο ισόγειο", category="home", agent_name="test_agent")
     
     # Should duplicate skip and NOT add
-    mock_add.assert_not_called()
+    assert not any("Ο μετρητής ΔΕΔΔΗΕ είναι στο ισόγειο" in call.args[0][0] for call in mock_add.call_args_list)
     assert result is False

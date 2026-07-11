@@ -13,33 +13,33 @@ errors = []
 # 1. Returns string
 result = tool_stats.invoke({"days": 7})
 assert isinstance(result, str), "Πρέπει να επιστρέφει string"
-print(f"✅ Επιστρέφει string ({len(result)} chars)")
+print(f"✅ Returns string ({len(result)} chars)")
 
 # 2. Contains header
 assert "📊" in result or "Tool Stats" in result or "traces" in result, \
     f"Αναμενόταν header στο αποτέλεσμα:\n{result[:200]}"
-print("✅ Header υπάρχει")
+print("✅ Header exists")
 
 # 3. days=0 → does not crash
 result0 = tool_stats.invoke({"days": 0})
 assert isinstance(result0, str)
-print("✅ days=0 δεν κρασάρει")
+print("✅ days=0 does not crash")
 
 # 4. days=1 → does not crash
 result1 = tool_stats.invoke({"days": 1})
 assert isinstance(result1, str)
-print("✅ days=1 δεν κρασάρει")
+print("✅ days=1 does not crash")
 
 # 5. Result contains error rate if traces exist
 if "κλήσεις" in result:
     assert "σφάλματα" in result, "Αν υπάρχουν tools, πρέπει να δείχνει σφάλματα"
-    print("✅ Format 'κλήσεις / σφάλματα' υπάρχει")
+    print("✅ Format 'calls / errors' exists")
 else:
-    print("ℹ️  Δεν βρέθηκαν traces — skip format check")
+    print("ℹ️  No traces found — skip format check")
 
 if errors:
-    print(f"\n❌ {len(errors)} αποτυχίες:")
+    print(f"\n❌ {len(errors)} failures:")
     for e in errors: print(f"  - {e}")
     sys.exit(1)
 else:
-    print("\n✅ Όλα τα tests πέρασαν!")
+    print("\n✅ All tests passed!")

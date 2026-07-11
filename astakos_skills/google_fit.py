@@ -414,7 +414,7 @@ if __name__ == "__main__":
     if cmd == "auth":
         print(authorize_google_fit())
     elif cmd == "steps":
-        print(f"Βήματα: {get_steps(days_ago)}")
+        print(f"Stepτα: {get_steps(days_ago)}")
     elif cmd == "sleep":
         print(get_sleep(days_ago))
     elif cmd == "heart":

@@ -49,4 +49,4 @@ if __name__ == "__main__":
         print(result)
     else:
         print("Χρήση: python search_ferries.py [origin] [destination] [date]")
-        print("π.χ.: python search_ferries.py Θεσσαλονίκη Σκιάθος '10 Αυγούστου 2026'")
+        print("π.χ.: python search_ferries.py Θεσσαλονίκη Σκιάθος '10 Αυγούinυ 2026'")

@@ -59,7 +59,7 @@ def test_slow_sifter_replay_guard_skips_same_exchange(isolated_state_db, monkeyp
     )
 
     assert len(saved) == 1
-    assert "ποδόσφαιρο του Αλέξανδρου" in saved[0]["fact"]
+    assert "Alexandros's football" in saved[0]["fact"]
 
     conn = sqlite3.connect(str(isolated_state_db))
     try:
@@ -140,8 +140,8 @@ def test_slow_sifter_allows_new_follow_up_not_replay(isolated_state_db, monkeypa
     )
 
     assert len(saved) == 2
-    assert "καλοκαίρι" in saved[0]["fact"]
-    assert "Σεπτέμβριο" in saved[1]["fact"]
+    assert "summer" in saved[0]["fact"]
+    assert "September" in saved[1]["fact"]
 
 
 def test_slow_sifter_skips_seed_duplicate(isolated_state_db, monkeypatch):
@@ -177,7 +177,7 @@ def test_slow_sifter_skips_seed_duplicate(isolated_state_db, monkeypatch):
         agent_name="Home_Agent",
         channel="telegram",
         deterministic_seed_facts=[
-            "[USER_FACT]: Στις 2026-06-21, ο Αλέξανδρος σταματάει το ποδόσφαιρο για το καλοκαίρι."
+            "[USER_FACT]: On 2026-06-21, Alexandros stops playing football for the summer."
         ],
     )
 
@@ -239,8 +239,8 @@ def test_slow_sifter_skips_same_day_family_near_duplicate(isolated_state_db, mon
     )
 
     assert len(saved) == 1
-    assert "Αλέξανδρος" in saved[0]["fact"]
-    assert "καλοκαίρι" in saved[0]["fact"]
+    assert "Alexandros" in saved[0]["fact"]
+    assert "summer" in saved[0]["fact"]
 
 def test_slow_sifter_no_mark_on_parse_error(isolated_state_db, monkeypatch):
     saved = []
@@ -260,7 +260,7 @@ def test_slow_sifter_no_mark_on_parse_error(isolated_state_db, monkeypatch):
         """
         [
           {
-            "fact": "[USER_FACT]: On 2026-06-21, valid fact.",
+            "fact": "[USER_FACT]: On 2026-06-21, this is a very valid and sufficiently long fact.",
             "category": "family",
             "topic": "test",
             "topic_detail": "test",
@@ -303,7 +303,7 @@ def test_slow_sifter_no_mark_on_parse_error(isolated_state_db, monkeypatch):
     )
 
     assert len(saved) == 1
-    assert "valid fact" in saved[0]["fact"]
+    assert "valid and sufficiently long fact" in saved[0]["fact"]
 
 def test_sifter_assistant_paraphrase_guard(monkeypatch):
     from memory import session_memory

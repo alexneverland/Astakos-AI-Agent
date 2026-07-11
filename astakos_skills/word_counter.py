@@ -61,11 +61,11 @@ def main() -> None:
     args = parser.parse_args()
     
     total_words = count_words(args.text)
-    print(f"Συνολικές λέξεις: {total_words}")
+    print(f"Total words: {total_words}")
     
     if args.freq:
         frequencies = get_word_frequencies(args.text)
-        print("\nΣυχνότητα Λέξεων:")
+        print("\nWord frequency:")
         # Sort in descending order of frequency
         for word, count in sorted(frequencies.items(), key=lambda item: item[1], reverse=True):
             print(f"{word}: {count}")

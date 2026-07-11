@@ -53,10 +53,7 @@ PROFILE_DB           = os.path.join(BASE_DIR, "astakos_profile.db")
 SESSIONS_FILE        = os.path.join(BASE_DIR, "astakos_sessions.json")
 CONVERSATION_DB_FILE = os.path.join(BASE_DIR, "astakos_conversation_history.db")
 # GPS: Home coordinates for location reminders (reminders now live in STATE_DB)
-HOME_COORDS   = (40.646558, 22.939036)   # Piston 7 — correct if necessary
-HOME_RADIUS_M = 150                   # trigger within 150 meters
-WORK_COORDS   = (40.690914, 22.929607)   # Industrial Area (Ind. Area) of Efkarpia
-WORK_RADIUS_M = 300                   # Slightly larger radius for industrial area
+# Coords moved to USER SETTINGS block
 CAPABILITIES_FILE    = os.path.join(BASE_DIR, "astakos_capabilities.json")
 MESSENGER_DRAFT_FILE = os.path.join(BASE_DIR, "messenger_draft.json")
 MESSENGER_DRAFT_TTL_SECONDS = int(os.getenv("MESSENGER_DRAFT_TTL_SECONDS", "1800"))
@@ -78,3 +75,37 @@ SIM_THRESHOLD          = 0.88
 # If the bot was offline and a routine was missed, it sends a deferred follow-up
 # only if the missed trigger is not older than X minutes.
 ROUTINE_MISS_GRACE_MINUTES = 90
+
+import json
+
+# ==========================================
+# 6. USER SETTINGS
+# ==========================================
+SETTINGS_FILE = os.path.join(BASE_DIR, "astakos_settings.json")
+RESPONSE_LANGUAGE = "Greek" # Default fallback
+SENTIMENTAL_OVERRIDE_KEYWORDS = ()
+if os.path.exists(SETTINGS_FILE):
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            _settings = json.load(f)
+            RESPONSE_LANGUAGE = _settings.get("response_language", "Greek")
+            SENTIMENTAL_OVERRIDE_KEYWORDS = tuple(_settings.get("sentimental_override_keywords", []))
+    except Exception as e:
+        print(f"⚠️ Error reading settings: {e}")
+
+HOME_COORDS = tuple(_settings.get("home_coords", [40.646558, 22.939036])) if "_settings" in locals() else (40.646558, 22.939036)
+HOME_RADIUS_M = _settings.get("home_radius_m", 150) if "_settings" in locals() else 150
+WORK_COORDS = tuple(_settings.get("work_coords", [40.690914, 22.929607])) if "_settings" in locals() else (40.690914, 22.929607)
+WORK_RADIUS_M = _settings.get("work_radius_m", 300) if "_settings" in locals() else 300
+
+# ==========================================
+# 7. NLP DICTIONARY (astakos_nlp.json)
+# ==========================================
+NLP_FILE = os.path.join(BASE_DIR, "astakos_nlp.json")
+NLP_CONFIG = {}
+if os.path.exists(NLP_FILE):
+    try:
+        with open(NLP_FILE, "r", encoding="utf-8") as f:
+            NLP_CONFIG = json.load(f)
+    except Exception as e:
+        print(f"⚠️ Error reading NLP config: {e}")

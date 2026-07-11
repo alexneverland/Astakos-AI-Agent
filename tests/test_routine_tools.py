@@ -105,7 +105,7 @@ def test_control_routine_cooldown_resets_matching_routine(monkeypatch):
             )
 
         mock_reset.assert_called_once_with(96, clear_last_notified=True)
-        assert "βγήκε από cooldown" in result
+        assert "removed from cooldown" in result
 
 
 def test_control_routine_cooldown_ignores_context_fact():

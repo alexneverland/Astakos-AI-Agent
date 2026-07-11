@@ -179,7 +179,7 @@ class ExecutionTrace:
                 os.replace(tmp_file, log_file)
 
         except Exception as e:
-            print(f"\033[93m[ExecutionTrace]: Σφάλμα αποθήκευσης: {e}\033[0m")
+            print(f"\033[93m[ExecutionTrace]: Save error: {e}\033[0m")
 
 
 # ── Convenience: read today's traces ────────────────────────────

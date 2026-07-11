@@ -79,7 +79,7 @@ def _get_or_create_token() -> str:
     t = secrets.token_hex(32)
     with open(_TOKEN_FILE, "w") as f:
         f.write(t)
-    print(f"\033[93m[Security]: Νέο local token δημιουργήθηκε → {_TOKEN_FILE}\033[0m")
+    print(f"\033[93m[Security]: New local token created → {_TOKEN_FILE}\033[0m")
     return t
 
 LOCAL_TOKEN = _get_or_create_token()
@@ -167,7 +167,7 @@ def append_to_chat_history(
             "content": content,
         })
     except Exception as e:
-        print(f"[ConversationHistory/web]: Σφάλμα shared write: {e}")
+        print(f"[ConversationHistory/web]: Error shared write: {e}")
     if return_saved:
         return {"id": shared_message_id, "rowid": shared_message_rowid}
     return shared_message_id
@@ -203,7 +203,7 @@ def notify_telegram_message(role: str, content: str, agent: str | None = None) -
         })
         return msg_id
     except Exception as e:
-        print(f"[ConversationHistory/telegram]: Σφάλμα write: {e}")
+        print(f"[ConversationHistory/telegram]: Error write: {e}")
         return None
 
 
@@ -213,7 +213,7 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
         from memory.conversation_history import load_recent_context
         entries = load_recent_context(channel=channel, global_limit=12, channel_limit=10, total_limit=20)
     except Exception as e:
-        print(f"[ConversationHistory/{channel}]: Σφάλμα shared read: {e}")
+        print(f"[ConversationHistory/{channel}]: Error shared read: {e}")
         return []
 
     context_msgs = []
@@ -263,7 +263,7 @@ def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -
         entries = load_messages(channel=channel, limit=limit)
     except Exception as e:
         label = channel or "all"
-        print(f"[ConversationHistory/{label}]: Σφάλμα shared history read: {e}")
+        print(f"[ConversationHistory/{label}]: Error shared history read: {e}")
         return []
 
     history = []
@@ -336,7 +336,7 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
                         candidate = clean_message(msgs[-1].content).strip()
                         if candidate and not candidate.startswith("[Κλήση Εργαλείου:"):
                             final_ai_response = candidate
-                            print(f"\033[90m[Web->Graph]: Agent '{handling_agent}' απάντησε ({len(candidate)} χαρ.)\033[0m")
+                            print(f"\033[90m[Web->Graph]: Agent '{handling_agent}' responded ({len(candidate)} chars)\033[0m")
 
                 trace.mark_phase(
                     "graph_result_extract_ms",
@@ -358,7 +358,7 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
 
 def fast_queue_worker():
     """Executes fast background tasks (e.g., UI updates, deterministic memory)."""
-    print("\033[90m[System]: Fast Queue Worker Ξεκίνησε!\033[0m")
+    print("\033[90m[System]: Fast Queue Worker Started!\033[0m")
     while not shutdown_event.is_set():
         try:
             task_func, args = fast_queue.get(timeout=2)
@@ -366,7 +366,7 @@ def fast_queue_worker():
                 print(f"\033[90m[FastQueue]: {task_func.__name__}\033[0m")
                 task_func(*args)
             except Exception as e:
-                print(f"\033[91m[Fast Queue Error στο {task_func.__name__}]: {e}\033[0m")
+                print(f"\033[91m[Fast Queue Error in {task_func.__name__}]: {e}\033[0m")
             finally:
                 fast_queue.task_done()
         except queue.Empty:
@@ -374,7 +374,7 @@ def fast_queue_worker():
 
 def slow_queue_worker():
     """Performs slow background tasks (e.g., LLM memory sifting)."""
-    print("\033[90m[System]: Slow Queue Worker Ξεκίνησε!\033[0m")
+    print("\033[90m[System]: Slow Queue Worker Started!\033[0m")
     while not shutdown_event.is_set():
         try:
             task_func, args = slow_queue.get(timeout=2)
@@ -382,7 +382,7 @@ def slow_queue_worker():
                 print(f"\033[90m[SlowQueue]: {task_func.__name__}\033[0m")
                 task_func(*args)
             except Exception as e:
-                print(f"\033[91m[Slow Queue Error στο {task_func.__name__}]: {e}\033[0m")
+                print(f"\033[91m[Slow Queue Error in {task_func.__name__}]: {e}\033[0m")
             finally:
                 slow_queue.task_done()
         except queue.Empty:
@@ -429,7 +429,7 @@ async def lifespan(app: FastAPI):
     for t in threads:
         t.start()
 
-    print("\n--- Αστακός API Server: Ξεκίνησε ---")
+    print("\n--- Astakos API Server: Started ---")
     try:
         from memory.pending_assets import init_pending_assets_table
         init_pending_assets_table()
@@ -438,7 +438,7 @@ async def lifespan(app: FastAPI):
         
     yield  # Server runs here
 
-    print("\n[Server]: Τερματισμός...")
+    print("\n[Server]: Terminating...")
 
     # Drain queue first (max 5s)
     try:
@@ -471,7 +471,7 @@ async def lifespan(app: FastAPI):
             timeout=10.0
         )
     except (asyncio.TimeoutError, Exception):
-        print("\033[93m[System]: Summary timeout — παράκαμψη.\033[0m")
+        print("\033[93m[System]: Summary timeout — skipping.\033[0m")
 # ────────────────────────────────────────────────────────────────
 # FASTAPI APP & MIDDLEWARE
 # ────────────────────────────────────────────────────────────────
@@ -789,14 +789,14 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             ext = os.path.splitext(filename)[1].lower()
             image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
             file_size = os.path.getsize(photo_path)
-            print(f"\033[92m[Upload]: Λήφθηκε αρχείο για ανάλυση: {filename} ({file_size} bytes)\033[0m")
+            print(f"\033[92m[Upload]: Received file for analysis: {filename} ({file_size} bytes)\033[0m")
 
             # We inject the isolated input into the enhanced string
             enhanced_user_input = f"[USER_UPLOADED_FILE]: {filename}\n{isolated_user_input}"
 
             # If it is an IMAGE, we convert it to Base64 and send it as image_url
             if ext in image_exts:
-                print(f"\033[94m[Vision]: Κωδικοποίηση εικόνας σε base64 ({ext})...\033[0m")
+                print(f"\033[94m[Vision]: Encoding image to base64 ({ext})...\033[0m")
                 with open(photo_path, "rb") as f:
                     img_b64 = base64.b64encode(f.read()).decode("utf-8")
 
@@ -807,13 +807,13 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     {"type": "text", "text": enhanced_user_input},
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_b64}"}}
                 ])
-                print(f"\033[92m[Chat]: Multimodal message (Εικόνα): {filename}\033[0m")
-                print(f"\033[94m[Vision]: Έτοιμο για ανάλυση από το LLM — μήνυμα: '{isolated_user_input[:120]}'\033[0m")
+                print(f"\033[92m[Chat]: Multimodal message (Image): {filename}\033[0m")
+                print(f"\033[94m[Vision]: Ready for analysis by LLM — message: '{isolated_user_input[:120]}'\033[0m")
 
             # If it is a DOCUMENT (PDF, Word, Excel), we send it only as text/name
             else:
                 human_msg = HumanMessage(content=enhanced_user_input)
-                print(f"\033[94m[Chat]: Text message με αναφορά εγγράφου: {filename}\033[0m")
+                print(f"\033[94m[Chat]: Text message with document reference: {filename}\033[0m")
 
         # ── Standard text message ────────────────────────────────
         else:
@@ -834,9 +834,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         # ── Running LangGraph ─────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "web"
         if photo_path and os.path.exists(photo_path):
-            print(f"\033[95m[Web->Graph]: Προώθηση multimodal μηνύματος στο γράφημα — '{isolated_user_input[:120]}'\033[0m")
+            print(f"\033[95m[Web->Graph]: Forwarding multimodal message to graph — '{isolated_user_input[:120]}'\033[0m")
         else:
-            print(f"\033[95m[Web->Graph]: Προώθηση μηνύματος στο γράφημα — '{isolated_user_input[:120]}'\033[0m")
+            print(f"\033[95m[Web->Graph]: Forwarding message to graph — '{isolated_user_input[:120]}'\033[0m")
         
         from memory.execution_trace import ExecutionTrace
         from time import perf_counter
@@ -870,7 +870,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             _trace.mark_phase("ultra_light_ack_used", 1)
             final_ai_response = get_ultra_light_ack_response()
             handling_agent = "UltraLightACK"
-            print(f"\033[92m[Web->UltraLightACK]: Ακαριαία απάντηση στο '{isolated_user_input}'\033[0m")
+            print(f"\033[92m[Web->UltraLightACK]: Instant reply in '{isolated_user_input}'\033[0m")
         else:
             medium_path_used = is_medium_web_chat_path_candidate(isolated_user_input)
             fast_path_used = (not medium_path_used) and is_simple_chat_fast_path_candidate(isolated_user_input)
@@ -1014,7 +1014,7 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
         debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "debug_voice.webm")
         with open(debug_path, "wb") as f:
             f.write(audio_data)
-        print(f"\033[96m[Web Voice]: Αποκωδικοποίηση ηχητικού ({len(audio_data)} bytes)...\033[0m")
+        print(f"\033[96m[Web Voice]: Decoding audio ({len(audio_data)} bytes)...\033[0m")
         client = vertex_client
         response = client.models.generate_content(
             model=FAST_MODEL,
@@ -1026,7 +1026,7 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
         transcription = response.text.strip() if response.text else ""
         if not transcription or "[ΣΙΩΠΗ]" in transcription:
             return JSONResponse({"error": "Δεν ακούστηκε τίποτα. Έλεγξε το μικρόφωνό σου!"})
-        print(f"\033[92m[Web Voice]: Ο Λάζαρος είπε -> {transcription}\033[0m")
+        print(f"\033[92m[Web Voice]: Lazarus said -> {transcription}\033[0m")
         return JSONResponse({"transcription": transcription})
     except Exception as e:
         import traceback
@@ -1058,7 +1058,7 @@ async def text_to_speech(request: Request, _=Depends(require_token)):
         audio_bytes = audio_buffer.read()
         if not audio_bytes:
             return JSONResponse({"error": "Αποτυχία δημιουργίας ήχου"}, status_code=500)
-        print(f"\033[95m[TTS]: Φωνή δημιουργήθηκε ({len(audio_bytes)} bytes)\033[0m")
+        print(f"\033[95m[TTS]: Voice generated ({len(audio_bytes)} bytes)\033[0m")
         from fastapi.responses import Response
         return Response(
             content=audio_bytes,
@@ -1172,7 +1172,7 @@ async def upload_file(
             return JSONResponse({"status": "error", "message": "Το αρχείο υπερβαίνει το όριο των 20 MB."}, status_code=413)
         with open(file_path, "wb") as buffer:
             buffer.write(content)
-        print(f"\033[92m[Upload]: Αποθηκεύτηκε → {filename}\033[0m")
+        print(f"\033[92m[Upload]: Saved → {filename}\033[0m")
         memory_analysis = ""
         detailed_analysis = ""
         if is_image:

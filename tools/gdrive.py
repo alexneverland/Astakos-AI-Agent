@@ -42,7 +42,7 @@ def upload_to_drive(file_path: str, folder_id: str = None) -> str:
 
         file_id = uploaded.get("id")
         if not file_id:
-            print("⚠️ [GDrive]: Δεν επεστράφη file_id")
+            print("⚠️ [GDrive]: Not returned file_id")
             return ""
 
         # Make the file viewable by anyone with a link
@@ -52,9 +52,9 @@ def upload_to_drive(file_path: str, folder_id: str = None) -> str:
         ).execute()
 
         share_url = f"https://drive.google.com/file/d/{file_id}/view"
-        print(f"✅ [GDrive]: '{filename}' ανέβηκε → {share_url}")
+        print(f"✅ [GDrive]: '{filename}' uploaded → {share_url}")
         return share_url
 
     except Exception as e:
-        print(f"⚠️ [GDrive]: Upload απέτυχε — {e}")
+        print(f"⚠️ [GDrive]: Upload failed — {e}")
         return ""

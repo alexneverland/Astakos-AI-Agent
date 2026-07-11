@@ -73,7 +73,7 @@ def _load_llm():
         from core.brain import llm_heavy
         return llm_heavy
     except Exception as e:
-        log(f"⚠️ Δεν φόρτωσε το llm_heavy: {e}", "warn")
+        log(f"⚠️ Failed to load llm_heavy: {e}", "warn")
         return None
 
 
@@ -116,7 +116,7 @@ def backup_file(path: str, enabled: bool = True) -> str:
     Returns the backup path or "" if it was not created.
     """
     if not enabled:
-        log("⏭️  Παράκαμψη backup (--no-backup)", "warn")
+        log("⏭️  Skipping backup (--no-backup)", "warn")
         return ""
     if not os.path.exists(path):
         return ""
@@ -131,28 +131,28 @@ def backup_file(path: str, enabled: bool = True) -> str:
 def safe_load_json(path: str):
     """Loads JSON with a fallback to None if it fails."""
     if not os.path.exists(path):
-        log(f"⚠️  Δεν υπάρχει: {os.path.basename(path)}", "warn")
+        log(f"⚠️  Does not exist: {os.path.basename(path)}", "warn")
         return None
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        log(f"❌ Σφάλμα ανάγνωσης {os.path.basename(path)}: {e}", "err")
+        log(f"❌ Read error {os.path.basename(path)}: {e}", "err")
         return None
 
 
 def safe_save_json(path: str, data, dry_run: bool = False) -> bool:
     """Writes JSON. In dry_run, it does not touch the file."""
     if dry_run:
-        log("🧪 DRY-RUN: δεν γράφτηκε τίποτα", "warn")
+        log("🧪 DRY-RUN: nothing written", "warn")
         return True
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        log(f"✅ Αποθηκεύτηκε: {os.path.basename(path)}", "ok")
+        log(f"✅ Saved: {os.path.basename(path)}", "ok")
         return True
     except Exception as e:
-        log(f"❌ Σφάλμα εγγραφής: {e}", "err")
+        log(f"❌ Write error: {e}", "err")
         return False
 
 
@@ -179,10 +179,10 @@ def consolidate_capabilities(dry_run: bool = False, backup: bool = True) -> bool
     except ImportError:
         STATE_DB = os.path.join(PROJECT_ROOT, "astakos_state.db")
         
-    header("Σύμπτυξη capabilities (can_do / cannot_do) σε STATE_DB")
+    header("Consolidating capabilities (can_do / cannot_do) in STATE_DB")
     
     if not os.path.exists(STATE_DB):
-        log("⚠️ Δεν βρέθηκε το STATE_DB.", "warn")
+        log("⚠️ STATE_DB not found.", "warn")
         return False
         
     conn = sqlite3.connect(STATE_DB, timeout=30)
@@ -201,37 +201,37 @@ def consolidate_capabilities(dry_run: bool = False, backup: bool = True) -> bool
     can_do = [r[1] for r in rows if r[0] in ("can_do", "can")]
     cannot_do = [r[1] for r in rows if r[0] in ("cannot_do", "cannot")]
     
-    log(f"📊 Πριν: {len(can_do)} can_do  |  {len(cannot_do)} cannot_do", "info")
+    log(f"📊 Before: {len(can_do)} can_do  |  {len(cannot_do)} cannot_do", "info")
 
     llm = _load_llm()
     if llm is None:
-        log("❌ Δεν φόρτωσε το LLM — παρακάμπτεται η σύμπτυξη.", "err")
+        log("❌ LLM failed to load — skipping consolidation.", "err")
         conn.close()
         return False
 
-    prompt = f"""Είσαι ο μηχανικός συντήρησης για τη μνήμη ενός AI agent.
+    prompt = f"""You are the memory maintenance engineer for an AI agent.
 
-Σου δίνω 2 λίστες:
-  - "can_do": πράγματα που μπορεί να κάνει
-  - "cannot_do": περιορισμοί και αδυναμίες
+I am providing you with 2 lists:
+  - "can_do": things the agent can do
+  - "cannot_do": limitations and weaknesses
 
-Δουλειά σου:
-  1. Συγχώνευσε διπλότυπα και πολύ παρόμοια entries σε ένα σαφές.
-  2. Αφαίρεσε αντιφάσεις (αν κάτι είναι ταυτόχρονα can_do και cannot_do, κρίνε με βάση την πιο πρόσφατη/συγκεκριμένη γραφή).
-  3. Δώσε γενικευμένη, καθαρή διατύπωση (όχι 5 παραλλαγές της ίδιας ιδέας).
-  4. Κράτα την αρχική γλώσσα (Ελληνικά).
+Your job:
+  1. Merge duplicates and very similar entries into a single clear one.
+  2. Remove contradictions (if something is both can_do and cannot_do, judge based on the most recent/specific wording).
+  3. Provide a generalized, clean formulation (not 5 variations of the same idea).
+  4. Keep the output strings in the original language of the entries (Greek).
 
-ΕΠΕΣΤΡΕΨΕ ΑΠΟΚΛΕΙΣΤΙΚΑ valid JSON με αυτή τη μορφή, χωρίς markdown:
+RETURN EXCLUSIVELY valid JSON in this format, without markdown:
 {{"can_do": [...], "cannot_do": [...]}}
 
-ΛΙΣΤΑ CAN_DO:
+CAN_DO LIST:
 {json.dumps(can_do, ensure_ascii=False, indent=2)}
 
-ΛΙΣΤΑ CANNOT_DO:
+CANNOT_DO LIST:
 {json.dumps(cannot_do, ensure_ascii=False, indent=2)}
 """
 
-    log("🤖 Κλήση LLM για consolidation...", "info")
+    log("🤖 Calling LLM for consolidation...", "info")
     try:
         response = llm.invoke(prompt)
         from core.utils import clean_message
@@ -239,22 +239,22 @@ def consolidate_capabilities(dry_run: bool = False, backup: bool = True) -> bool
         raw = strip_markdown_json(raw)
         new_data = json.loads(raw)
     except Exception as e:
-        log(f"❌ Σφάλμα κατά τη σύμπτυξη: {e}", "err")
+        log(f"❌ Error during consolidation: {e}", "err")
         conn.close()
         return False
 
     if not isinstance(new_data, dict) or "can_do" not in new_data or "cannot_do" not in new_data:
-        log("❌ Το LLM γύρισε άκυρο schema. Δεν γράφω.", "err")
+        log("❌ LLM returned invalid schema. Not writing.", "err")
         conn.close()
         return False
 
     new_can    = len(new_data["can_do"])
     new_cannot = len(new_data["cannot_do"])
     
-    log(f"📊 Μετά: {new_can} can_do | {new_cannot} cannot_do", "ok")
+    log(f"📊 After: {new_can} can_do | {new_cannot} cannot_do", "ok")
 
     if dry_run:
-        log("🧪 DRY-RUN — δες παρακάτω τι θα γραφόταν:", "warn")
+        log("🧪 DRY-RUN — see below what would be written:", "warn")
         print(json.dumps(new_data, ensure_ascii=False, indent=2))
         conn.close()
         return True
@@ -268,13 +268,13 @@ def consolidate_capabilities(dry_run: bool = False, backup: bool = True) -> bool
     
     conn.commit()
     conn.close()
-    log("✅ Αποθηκεύτηκαν στο STATE_DB (capabilities)", "ok")
+    log("✅ Saved to STATE_DB (capabilities)", "ok")
     return True
 
 def maintain_conversation_db(dry_run: bool = False, backup: bool = True) -> bool:
     header("Shared conversation SQLite maintenance")
     if not os.path.exists(CONVERSATION_DB_FILE):
-        log(f"Δεν υπάρχει ακόμα: {os.path.basename(CONVERSATION_DB_FILE)}", "warn")
+        log(f"Not yet existing: {os.path.basename(CONVERSATION_DB_FILE)}", "warn")
         return True
 
     try:
@@ -303,7 +303,7 @@ def maintain_conversation_db(dry_run: bool = False, backup: bool = True) -> bool
         log(f"session_exchanges: {total_exchanges}", "info")
 
         if dry_run:
-            log("DRY-RUN: δεν έγινε checkpoint/optimize/vacuum", "warn")
+            log("DRY-RUN: no checkpoint/optimize/vacuum performed", "warn")
             conn.close()
             return True
 
@@ -312,10 +312,10 @@ def maintain_conversation_db(dry_run: bool = False, backup: bool = True) -> bool
         conn.execute("PRAGMA optimize")
         conn.execute("VACUUM")
         conn.close()
-        log("SQLite checkpoint + optimize + vacuum ολοκληρώθηκαν", "ok")
+        log("SQLite checkpoint + optimize + vacuum completed", "ok")
         return True
     except Exception as e:
-        log(f"Σφάλμα conversation SQLite maintenance: {e}", "err")
+        log(f"Conversation SQLite maintenance error: {e}", "err")
         return False
 
 
@@ -330,10 +330,10 @@ def trim_sessions(keep: int = DEFAULT_SESSIONS_KEEP, dry_run: bool = False, back
     except ImportError:
         STATE_DB = os.path.join(PROJECT_ROOT, "astakos_state.db")
         
-    header(f"Trim sessions σε STATE_DB (κρατά τις {keep} πιο πρόσφατες)")
+    header(f"Trim sessions in STATE_DB (keeps {keep} most recent)")
     
     if not os.path.exists(STATE_DB):
-        log("⚠️ Δεν βρέθηκε το STATE_DB.", "warn")
+        log("⚠️ STATE_DB not found.", "warn")
         return False
         
     conn = sqlite3.connect(STATE_DB, timeout=30)
@@ -353,15 +353,15 @@ def trim_sessions(keep: int = DEFAULT_SESSIONS_KEEP, dry_run: bool = False, back
     c.execute("SELECT COUNT(*) FROM sessions")
     total = c.fetchone()[0]
 
-    log(f"📊 Πριν: {total} sessions", "info")
+    log(f"📊 Before: {total} sessions", "info")
 
     if total <= keep:
-        log(f"ℹ️  Δεν χρειάζεται trim (≤ {keep}).", "dim")
+        log(f"ℹ️  No trim needed (≤ {keep}).", "dim")
         conn.close()
         return True
 
     if dry_run:
-        log(f"🧪 DRY-RUN: Θα διεγράφοντο {total - keep} παλιές sessions.", "warn")
+        log(f"🧪 DRY-RUN: Would delete {total - keep} old sessions.", "warn")
         conn.close()
         return True
 
@@ -376,16 +376,16 @@ def trim_sessions(keep: int = DEFAULT_SESSIONS_KEEP, dry_run: bool = False, back
     conn.close()
     
     removed = total - keep
-    log(f"📊 Μετά: {keep} sessions (−{removed})", "ok")
+    log(f"📊 After: {keep} sessions (−{removed})", "ok")
     return True
 
 def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
     import sqlite3
     from config import PROFILE_DB
-    header("Σύμπτυξη astakos_profile.db (LLM consolidation ανά category)")
+    header("Consolidate astakos_profile.db (LLM consolidation by category)")
     
     if not os.path.exists(PROFILE_DB):
-        log("⚠️ Δεν βρέθηκε το PROFILE_DB.", "warn")
+        log("⚠️ PROFILE_DB not found.", "warn")
         return False
         
     conn = sqlite3.connect(PROFILE_DB)
@@ -404,11 +404,11 @@ def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
         row_mapping[category].append(r_id)
 
     total_before = len(rows)
-    log(f"📊 Πριν: {total_before} entries σε {len(data)} categories", "info")
+    log(f"📊 Before: {total_before} entries in {len(data)} categories", "info")
 
     llm = _load_llm()
     if llm is None:
-        log("❌ Δεν φόρτωσε το LLM — παρακάμπτεται.", "err")
+        log("❌ LLM failed to load — skipping.", "err")
         conn.close()
         return False
 
@@ -417,28 +417,28 @@ def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
 
     for category, items in data.items():
         if category in PROFILE_PROTECTED_CATEGORIES:
-            log(f"🔒 {category}: protected ({len(items)}) — αμετάβλητο", "dim")
+            log(f"🔒 {category}: protected ({len(items)}) — unchanged", "dim")
             continue
 
         if len(items) < PROFILE_MIN_ENTRIES_FOR_LLM:
-            log(f"⏭️  {category}: {len(items)} entries (< {PROFILE_MIN_ENTRIES_FOR_LLM}) — αμετάβλητο", "dim")
+            log(f"⏭️  {category}: {len(items)} entries (< {PROFILE_MIN_ENTRIES_FOR_LLM}) — unchanged", "dim")
             continue
 
         log(f"\n🔹 {category}: {len(items)} entries → LLM consolidation...", "info")
 
-        prompt = f"""Έχεις μια λίστα από facts/lessons/capabilities ενός AI agent στην κατηγορία "{category}".
+        prompt = f"""You have a list of facts/lessons/capabilities of an AI agent in the category "{category}".
 
-Δουλειά σου:
-1. Συγχώνευσε σαφή διπλότυπα και πολύ παρόμοιες διατυπώσεις σε ένα entry.
-2. Επίλυσε αντιφάσεις (π.χ. δύο διαφορετικές ηλικίες για το ίδιο πρόσωπο — κράτα την πιο πρόσφατη/σαφέστερη).
-3. Διατήρησε ΑΥΣΤΗΡΑ τα prefixes που υπάρχουν στην αρχή κάθε entry (π.χ. [USER_FACT], [CAPABILITY], [LESSON]).
-4. Κράτα την αρχική γλώσσα (Ελληνικά).
-5. Αν κάτι είναι εντελώς άσχετο/περίεργο, μπορείς να το αφαιρέσεις.
+Your job:
+1. Merge clear duplicates and very similar formulations into a single entry.
+2. Resolve contradictions (e.g. two different ages for the same person — keep the most recent/clearest one).
+3. STRICTLY preserve the prefixes present at the start of each entry (e.g. [USER_FACT], [CAPABILITY], [LESSON]).
+4. Keep the output strings in the original language of the entries (Greek).
+5. If something is completely irrelevant/weird, you may remove it.
 
-ΕΠΕΣΤΡΕΨΕ ΑΠΟΚΛΕΙΣΤΙΚΑ valid JSON array από strings, χωρίς markdown:
+RETURN EXCLUSIVELY a valid JSON array of strings, without markdown:
 ["[USER_FACT]: ...", "[CAPABILITY]: ...", ...]
 
-ΛΙΣΤΑ:
+LIST:
 {json.dumps(items, ensure_ascii=False, indent=2)}
 """
 
@@ -449,11 +449,11 @@ def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
             raw = strip_markdown_json(raw)
             new_items = json.loads(raw)
         except Exception as e:
-            log(f"   ⚠️  Σφάλμα LLM: {e} — κρατάω τα αρχικά", "warn")
+            log(f"   ⚠️  LLM error: {e} — keeping original", "warn")
             continue
 
         if not isinstance(new_items, list) or not all(isinstance(t, str) for t in new_items):
-            log(f"   ⚠️  Άκυρο format από LLM — κρατάω τα αρχικά", "warn")
+            log(f"   ⚠️  Invalid format from LLM — keeping original", "warn")
             continue
 
         saved = len(items) - len(new_items)
@@ -462,15 +462,15 @@ def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
             log(f"   📊 {len(items)} → {len(new_items)} (−{saved})", "ok")
             new_data[category] = new_items
         else:
-            log(f"   📊 {len(items)} → {len(new_items)} (καμία οικονομία)", "dim")
+            log(f"   📊 {len(items)} → {len(new_items)} (no savings)", "dim")
 
     if not any_change:
-        log("ℹ️  Καμία ουσιαστική αλλαγή — δεν χρειάζεται γράψιμο.", "dim")
+        log("ℹ️  No substantial changes — no write needed.", "dim")
         conn.close()
         return True
 
     if dry_run:
-        log("🧪 DRY-RUN — δες παρακάτω τι θα γραφόταν (truncated 3000 chars):", "warn")
+        log("🧪 DRY-RUN — see below what would be written (truncated 3000 chars):", "warn")
         preview = json.dumps(new_data, ensure_ascii=False, indent=2)
         if len(preview) > 3000:
             preview = preview[:3000] + "\n... [truncated]"
@@ -482,7 +482,7 @@ def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
         import shutil
         backup_file = PROFILE_DB + ".backup"
         shutil.copy2(PROFILE_DB, backup_file)
-        log(f"💾 Backup DB στο {backup_file}", "info")
+        log(f"💾 Backup DB to {backup_file}", "info")
 
     try:
         for category, new_items in new_data.items():
@@ -496,7 +496,7 @@ def consolidate_profile(dry_run: bool = False, backup: bool = True) -> bool:
     finally:
         conn.close()
     
-    log(f"\n📊 Συμπτύχθηκαν κατηγορίες και γράφτηκαν στη βάση.", "ok")
+    log(f"\n📊 Categories consolidated and written to DB.", "ok")
     return True
 
 
@@ -509,10 +509,10 @@ def clean_photos(dry_run: bool = False) -> bool:
     Reads astakos_photos_index.json, finds which .jpg files in telegram_photos/
     are not archived, and deletes them.
     """
-    header("Καθαρισμός αναρχειοθέτητων φωτογραφιών (telegram_photos/)")
+    header("Cleanup unarchived photos (telegram_photos/)")
 
     if not os.path.isdir(PHOTOS_DIR):
-        log(f"⚠️  Ο φάκελος {PHOTOS_DIR} δεν υπάρχει.", "warn")
+        log(f"⚠️  Folder {PHOTOS_DIR} does not exist.", "warn")
         return True
 
     # Load index
@@ -524,35 +524,35 @@ def clean_photos(dry_run: bool = False) -> bool:
             # Keep only the basename for comparison
             archived_paths.add(os.path.basename(fp).lower())
 
-    log(f"📚 Αρχειοθετημένες φωτό στο index: {len(archived_paths)}", "info")
+    log(f"📚 Archived photos in index: {len(archived_paths)}", "info")
 
     # Folder scan
     all_files = [f for f in os.listdir(PHOTOS_DIR) if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))]
-    log(f"📁 Φωτογραφίες στον φάκελο: {len(all_files)}", "info")
+    log(f"📁 Photos in folder: {len(all_files)}", "info")
 
     to_delete = [f for f in all_files if f.lower() not in archived_paths]
     to_keep   = [f for f in all_files if f.lower() in archived_paths]
 
-    log(f"✅ Αρχειοθετημένες (θα κρατηθούν): {len(to_keep)}", "ok")
-    log(f"🗑️  Temp / αναρχειοθέτητες (θα σβηστούν): {len(to_delete)}", "warn")
+    log(f"✅ Archived (will be kept): {len(to_keep)}", "ok")
+    log(f"🗑️  Temp / unarchived (will be deleted): {len(to_delete)}", "warn")
 
     if not to_delete:
-        log("ℹ️  Τίποτα να σβηστεί.", "dim")
+        log("ℹ️  Nothing to delete.", "dim")
         return True
 
     for fname in to_delete:
         fpath = os.path.join(PHOTOS_DIR, fname)
         if dry_run:
-            log(f"   🧪 DRY-RUN: θα σβηνόταν → {fname}", "warn")
+            log(f"   🧪 DRY-RUN: would be deleted → {fname}", "warn")
         else:
             try:
                 os.remove(fpath)
-                log(f"   🗑️  Σβήστηκε: {fname}", "ok")
+                log(f"   🗑️  Deleted: {fname}", "ok")
             except Exception as e:
-                log(f"   ❌ Σφάλμα διαγραφής {fname}: {e}", "err")
+                log(f"   ❌ Error deleting {fname}: {e}", "err")
 
     if not dry_run:
-        log(f"\n✅ Καθαρίστηκαν {len(to_delete)} αρχεία.", "ok")
+        log(f"\n✅ Cleaned up {len(to_delete)} files.", "ok")
 
     return True
 
@@ -563,12 +563,12 @@ def rotate_memory_audit_logs(
     audit_dir: str = MEMORY_AUDIT_DIR,
 ) -> bool:
     """Deletes old daily memory audit JSON files, keeping the last keep_days days."""
-    header(f"Memory audit retention (κρατά {keep_days} μέρες)")
+    header(f"Memory audit retention (keeps {keep_days} days)")
     if keep_days < 1:
-        log("❌ Το keep_days πρέπει να είναι >= 1.", "err")
+        log("❌ keep_days must be >= 1.", "err")
         return False
     if not os.path.isdir(audit_dir):
-        log(f"Δεν υπάρχει ακόμα memory audit dir: {audit_dir}", "dim")
+        log(f"Memory audit dir not found yet: {audit_dir}", "dim")
         return True
 
     cutoff = datetime.now().date().toordinal() - keep_days
@@ -587,18 +587,18 @@ def rotate_memory_audit_logs(
         if file_day.toordinal() < cutoff:
             removed += 1
             if dry_run:
-                log(f"   🧪 DRY-RUN: θα σβηνόταν → {fname}", "warn")
+                log(f"   🧪 DRY-RUN: would be deleted → {fname}", "warn")
             else:
                 try:
                     os.remove(path)
-                    log(f"   🗑️  Σβήστηκε: {fname}", "ok")
+                    log(f"   🗑️  Deleted: {fname}", "ok")
                 except Exception as e:
-                    log(f"   ❌ Σφάλμα διαγραφής {fname}: {e}", "err")
+                    log(f"   ❌ Error deleting {fname}: {e}", "err")
                     return False
         else:
             kept += 1
 
-    log(f"📊 Κρατήθηκαν: {kept} | Παλιά προς διαγραφή/σβησμένα: {removed}", "ok")
+    log(f"📊 Kept: {kept} | Old to delete/deleted: {removed}", "ok")
     return True
 
 
@@ -611,27 +611,27 @@ def main():
         description="🦞 Mastro-Cleaner — Maintenance script for Astakos memory files."
     )
     parser.add_argument("--all", action="store_true",
-                        help="Τρέξε όλα τα tasks (default αν δεν δοθεί άλλο)")
+                        help="Run all tasks (default)")
     parser.add_argument("--capabilities", action="store_true",
-                        help="Σύμπτυξη can_do / cannot_do με LLM")
+                        help="Consolidate can_do / cannot_do with LLM")
     parser.add_argument("--conversation-db", action="store_true",
-                        help="Έλεγχος/maintenance της shared SQLite conversation history")
+                        help="Check/maintain shared SQLite conversation history")
     parser.add_argument("--sessions", action="store_true",
-                        help="Trim παλιών sessions (κρατά τις πιο πρόσφατες)")
+                        help="Trim old sessions (keeps most recent)")
     parser.add_argument("--profile", action="store_true",
-                        help="Σύμπτυξη astakos_profile.json (LLM ανά category)")
+                        help="Consolidate astakos_profile.json (LLM by category)")
     parser.add_argument("--photos", action="store_true",
-                        help="Σβήσε αναρχειοθέτητες φωτογραφίες από telegram_photos/")
+                        help="Delete unarchived photos from telegram_photos/")
     parser.add_argument("--memory-audit", action="store_true",
-                        help="Rotation παλιών logs/memory_audit/*.json")
+                        help="Rotation of old logs/memory_audit/*.json")
     parser.add_argument("--sessions-keep", type=int, default=DEFAULT_SESSIONS_KEEP,
-                        help=f"Πόσες sessions να κρατήσει (default {DEFAULT_SESSIONS_KEEP})")
+                        help=f"How many sessions to keep (default {DEFAULT_SESSIONS_KEEP})")
     parser.add_argument("--memory-audit-keep", type=int, default=DEFAULT_MEMORY_AUDIT_KEEP_DAYS,
-                        help=f"Πόσες μέρες memory audit logs να κρατήσει (default {DEFAULT_MEMORY_AUDIT_KEEP_DAYS})")
+                        help=f"How many days of memory audit logs to keep (default {DEFAULT_MEMORY_AUDIT_KEEP_DAYS})")
     parser.add_argument("--dry-run", action="store_true",
-                        help="Δείξε τι θα γίνει χωρίς να αλλάξεις αρχεία")
+                        help="Show what would happen without altering files")
     parser.add_argument("--no-backup", action="store_true",
-                        help="Παράκαμψη backup (όχι recommended)")
+                        help="Skip backup (not recommended)")
 
     args = parser.parse_args()
 
@@ -684,10 +684,10 @@ def main():
 
     # Summary
     log("\n" + "─" * 60, "dim")
-    log("📋 ΣΥΝΟΨΗ", "header")
+    log("📋 SUMMARY", "header")
     log("─" * 60, "dim")
     for task, ok in results.items():
-        status = "✅ OK" if ok else "❌ ΑΠΟΤΥΧΙΑ"
+        status = "✅ OK" if ok else "❌ FAILED"
         color = "ok" if ok else "err"
         log(f"   {task}: {status}", color)
 

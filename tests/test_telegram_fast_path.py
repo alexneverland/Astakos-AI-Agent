@@ -62,9 +62,12 @@ from unittest.mock import patch
 @patch("tools.telegram.send_telegram_msg")
 @patch("clients.telegram_bot._append_to_analytics_log")
 @patch("clients.telegram_bot.graph.stream")
-def test_messenger_intent_clarify_does_not_create_draft(mock_stream, mock_append, mock_send, mock_active):
+@patch("clients.telegram_bot._safe_classify_messenger_intent")
+def test_messenger_intent_clarify_does_not_create_draft(mock_classify, mock_stream, mock_append, mock_send, mock_active):
     from clients.telegram_bot import handle_message
+    from services.messenger_intent import MessengerIntentResult
     
+    mock_classify.return_value = MessengerIntentResult(intent="clarify_draft", confidence=1.0)
     handle_message("Ποιο μήνυμα;", "user123")
     
     # Verify graph.stream was not called (meaning early intercept worked)
@@ -72,8 +75,8 @@ def test_messenger_intent_clarify_does_not_create_draft(mock_stream, mock_append
     
     # Verify response contains clarification that no draft exists
     args, _ = mock_send.call_args
-    sent_text = args[1]
-    assert "Δεν υπάρχει ενεργό draft αυτή τη στιγμή" in sent_text
+    sent_text = args[0]
+    assert "Δεν υπάρχει ενεργό draft αυτή τη στιγμή. Εννοούσα απλώς σαν ιδέα" in sent_text
 
 
 @patch("core.messenger_draft.active_draft_status", return_value=(True, "active", {"message": "hello"}))
@@ -81,9 +84,12 @@ def test_messenger_intent_clarify_does_not_create_draft(mock_stream, mock_append
 @patch("tools.telegram.send_telegram_msg")
 @patch("clients.telegram_bot._append_to_analytics_log")
 @patch("clients.telegram_bot.graph.stream")
-def test_messenger_intent_clear_closes_draft(mock_stream, mock_append, mock_send, mock_clear, mock_active):
+@patch("clients.telegram_bot._safe_classify_messenger_intent")
+def test_messenger_intent_clear_closes_draft(mock_classify, mock_stream, mock_append, mock_send, mock_clear, mock_active):
     from clients.telegram_bot import handle_message
+    from services.messenger_intent import MessengerIntentResult
     
+    mock_classify.return_value = MessengerIntentResult(intent="clear_draft", confidence=1.0)
     handle_message("Αυτό το έχουμε στείλει κλείστο", "user123")
     
     # Verify clear_draft was called
@@ -94,7 +100,7 @@ def test_messenger_intent_clear_closes_draft(mock_stream, mock_append, mock_send
     
     # Verify response confirms cleanup
     args, _ = mock_send.call_args
-    sent_text = args[1]
+    sent_text = args[0]
     assert "Το draft καθαρίστηκε" in sent_text
 
 

@@ -59,14 +59,14 @@ def enqueue_task(func, *args):
 # ────────────────────────────────────────────────────────────────
 
 def queue_worker():
-    print("\033[90m[System]: Queue Worker Ξεκίνησε!\033[0m")
+    print("\033[90m[System]: Queue Worker Started!\033[0m")
     while not shutdown_event.is_set():
         try:
             task_func, args = astakos_queue.get(timeout=2)
             try:
                 task_func(*args)
             except Exception as e:
-                print(f"\033[91m[Queue Task Error στο {task_func.__name__}]: {e}\033[0m")
+                print(f"\033[91m[Queue Task Error in {task_func.__name__}]: {e}\033[0m")
             finally:
                 astakos_queue.task_done()
         except queue.Empty:
@@ -87,8 +87,8 @@ def reminder_worker():
                 )
                 due = cursor.fetchall()
                 for rid, task in due:
-                    print(f"\n\033[93m[🔔 ΥΠΕΝΘΥΜΙΣΗ]: {task}\033[0m\nΛάζαρος: ", end="", flush=True)
-                    send_telegram_msg(f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {task}")
+                    print(f"\n\033[93m[🔔 REMINDER]: {task}\033[0m\nLazaros: ", end="", flush=True)
+                    send_telegram_msg(f"🔔 REMINDER: {task}")
                     cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
                 conn.commit()
             except Exception as e:
@@ -191,7 +191,7 @@ def _do_session_summary():
             timeout=5.0
         ))
     except (asyncio.TimeoutError, Exception):
-        print("\033[93m[System]: Summary timeout — παράκαμψη.\033[0m")
+        print("\033[93m[System]: Summary timeout — skipping.\033[0m")
 
 
 # ────────────────────────────────────────────────────────────────
@@ -207,8 +207,8 @@ def main():
     threading.Thread(target=queue_worker,     daemon=True).start()
 
     print("\n" + "━" * 52)
-    print("  🦞  Αστακός — CLI Mode")
-    print("  Γράψε 'exit' ή πάτα Ctrl+C για έξοδο.")
+    print("  🦞  Astakos — CLI Mode")
+    print("  Type 'exit' or press Ctrl+C to quit.")
     print("━" * 52 + "\n")
 
     try:
@@ -219,7 +219,7 @@ def main():
                 break
 
             if inp.strip().lower() in ("exit", "quit"):
-                print("\n[System]: Τερματισμός και αρχειοθέτηση...")
+                print("\n[System]: Terminating and archiving...")
                 shutdown_event.set()
                 break
 
@@ -245,7 +245,7 @@ def main():
                                 if candidate:
                                     final_ai_response = candidate
                                     console.print(
-                                        f"\n[bold green][Αστακός ({handling_agent})]:[/bold green] "
+                                        f"\n[bold green][Astakos ({handling_agent})]:[/bold green] "
                                         f"{final_ai_response}"
                                     )
 
@@ -261,13 +261,13 @@ def main():
                 print(f"\033[91m[Graph Error]: {e}\033[0m")
 
     except KeyboardInterrupt:
-        print("\n[System]: Ctrl+C — Τερματισμός...")
+        print("\n[System]: Ctrl+C — Terminating...")
         shutdown_event.set()
     finally:
         shutdown_event.set()
         _do_session_summary()
 
-    print("[System]: Αντίο, Μάστορη! 🦞")
+    print("[System]: Goodbye! 🦞")
 
 
 if __name__ == "__main__":

@@ -1380,73 +1380,72 @@ def extract_followup_candidate_with_llm(
     from services.gemini import safe_gemini_call
 
     prompt = f"""
-Ανάλυσε το παρακάτω exchange και αποφάσισε αν αξίζει να δημιουργηθεί ένα ΜΕΛΛΟΝΤΙΚΟ conversational follow-up.
+Analyze the following exchange and decide if it is worth creating a FUTURE conversational follow-up.
 
-Θέλουμε follow-up μόνο όταν:
-- υπάρχει φυσικό επόμενο βήμα ή outcome
-- αργότερα θα είχε νόημα να ρωτήσουμε πώς πήγε
-- το θέμα αφορά πράξη / γεγονός / αγορά / έξοδο / σχέδιο / οικογενειακή κίνηση / task progression
+We want a follow-up only when:
+- there is a natural next step or outcome
+- it would make sense to ask "how did it go?" later
+- the topic concerns an action / event / purchase / outing / plan / family movement / task progression
 
-Δεν θέλουμε follow-up όταν:
-- είναι απλό chit-chat
-- είναι καθαρά ενημέρωση χωρίς επόμενο βήμα
-- είναι pure tool result / operational reply
-- είναι πολύ αόριστο
+We do NOT want a follow-up when:
+- it is simple chit-chat
+- it is purely an update with no next step
+- it is a pure tool result / operational reply
+- it is too vague
 
-Απάντησε ΑΥΣΤΗΡΑ σε JSON:
+Respond STRICTLY in JSON:
 {{
   "should_follow_up": true,
   "topic": "food_purchase | outing | task_progress | family_plan | appointment | general_progress",
-  "subject": "σύντομο subject",
+  "subject": "short subject",
   "delay_minutes": 180,
   "target_window": "explicit_timer | same_day_short_checkin | same_day_evening | next_day_morning | next_day_late_morning | next_day_afternoon | next_day_evening | after_likely_completion",
   "confidence": 0.0,
   "reason": "short reason"
 }}
 
-ή
+or
 
 {{
   "should_follow_up": false,
   "reason": "short reason"
 }}
 
-Κανόνες:
-- Αν στο [Active Pending Follow-ups] δεις ένα θέμα που ταιριάζει απόλυτα με τη νέα συζήτηση (π.χ. συζητάνε ξανά για το ίδιο μπάνιο), ΜΗΝ βάλεις should_follow_up: true. Αντ' αυτού βάλε update_existing_id: <το id του> ώστε να ανανεωθεί ο χρόνος του υπάρχοντος!
-Κανόνες:
-- subject μέχρι 4 λέξεις
-- προτίμησε compact noun phrase, όχι πλήρη περιγραφή
-- απόφυγε "και", "για", "ώστε", "να"
-- delay_minutes integer (ο χρόνος σε λεπτά που πρέπει να περιμένουμε, πχ. 180, 480, 1440)
-- confidence 0.0 έως 1.0
-- μην επιστρέψεις τίποτα εκτός JSON
-- target_window πρέπει να περιγράφει ΠΟΤΕ έχει φυσικό νόημα να ξαναμιλήσουμε
-- Μην επιλέγεις target_window με βάση γενικά "αργότερα", αλλά με βάση το πραγματικό πιθανό outcome
+Rules:
+- If in [Active Pending Follow-ups] you see a topic that perfectly matches the new conversation (e.g. they are discussing the same bath again), DO NOT set should_follow_up: true. Instead, use update_existing_id: <its id> so the time of the existing one is refreshed!
+- subject up to 4 words
+- prefer compact noun phrase, not full description
+- avoid "and", "for", "so that", "to"
+- delay_minutes integer (the time in minutes we must wait, e.g. 180, 480, 1440)
+- confidence 0.0 to 1.0
+- do not return anything except JSON
+- target_window must describe WHEN it makes natural sense to speak again
+- Do not choose target_window based on a general "later", but based on the actual likely outcome
 
-Χρησιμοποίησε:
-- "explicit_timer" όταν ο χρήστης έχει δώσει ο ίδιος συγκεκριμένο χρόνο/διάστημα και πρέπει να σεβαστούμε το delay_minutes χωρίς semantic override
-- "same_day_short_checkin" όταν ο χρήστης μόλις ξεκίνησε κάτι και σύντομα θα υπάρχει εξέλιξη
-- "same_day_evening" όταν το θέμα λογικά θα κλείσει αργότερα μέσα στην ίδια μέρα
-- "next_day_morning" όταν το θέμα μεταφέρεται στην επόμενη μέρα και έχει νόημα νωρίς αλλά όχι χαράματα
-- "next_day_late_morning" όταν το θέμα σχετίζεται με φαγητό / έξοδο / οικογενειακή κίνηση που λογικά θα ξεκαθαρίσει πιο κοντά στο μεσημέρι
-- "next_day_afternoon" όταν το θέμα αναμένεται να ξεκαθαρίσει μετά το μεσημέρι
-- "next_day_evening" όταν είναι βραδινό σχέδιο / μεταγενέστερη εξέλιξη
-- "after_likely_completion" όταν το follow-up πρέπει να γίνει μετά το πιθανό τέλος του γεγονότος
+Use:
+- "explicit_timer" when the user has provided a specific time/interval themselves and we must respect delay_minutes without semantic override
+- "same_day_short_checkin" when the user just started something and there will be progress soon
+- "same_day_evening" when the topic will logically conclude later on the same day
+- "next_day_morning" when the topic moves to the next day and makes sense early but not at dawn
+- "next_day_late_morning" when the topic relates to food / outing / family movement that will logically clear up closer to noon
+- "next_day_afternoon" when the topic is expected to clear up after noon
+- "next_day_evening" when it's an evening plan / later development
+- "after_likely_completion" when the follow-up must happen after the probable end of the event
 
-Παραδείγματα:
-- "σε 2 ώρες ρώτα με αν το έκανα" -> target_window: "explicit_timer"
-- "θυμήσου να με ρωτήσεις αύριο στις 3" -> target_window: "explicit_timer"
-- "οι μπριζόλες αύριο" -> target_window: "next_day_late_morning"
-- "πάω τώρα να τους βρω στο πάρκο" -> target_window: "same_day_short_checkin"
-- "αύριο θα δούμε για το interview" -> target_window: "next_day_afternoon"
-- "το βράδυ θα βγούμε" -> target_window: "same_day_evening"
+Examples:
+- "in 2 hours ask me if I did it" -> target_window: "explicit_timer"
+- "remember to ask me tomorrow at 3" -> target_window: "explicit_timer"
+- "the steaks tomorrow" -> target_window: "next_day_late_morning"
+- "I'm going now to meet them at the park" -> target_window: "same_day_short_checkin"
+- "tomorrow we will see about the interview" -> target_window: "next_day_afternoon"
+- "tonight we will go out" -> target_window: "same_day_evening"
 
-Παραδείγματα καλού subject:
+Examples of a good subject:
 - "μπριζόλες λαιμού"
 - "συνάντηση με Σοφία"
 - "καθάρισμα κλουβιού"
 
-Παραδείγματα κακού subject:
+Examples of a bad subject:
 - "αγορά και ψήσιμο για τις μπριζόλες λαιμού"
 - "να δω πώς πήγε το πράγμα αργότερα"
 
@@ -1747,7 +1746,7 @@ def classify_followup_resolution_with_llm(
     from services.gemini import safe_gemini_call
 
     prompt = f"""
-Αποφάσισε αν το νέο μήνυμα του χρήστη λύνει/κλείνει ένα pending conversational follow-up.
+Decide if the new user message resolves/closes a pending conversational follow-up.
 
 Pending follow-up:
 - topic: {topic}
@@ -1757,7 +1756,7 @@ Pending follow-up:
 New user message:
 {user_text}
 
-Απάντησε ΑΥΣΤΗΡΑ σε JSON:
+Respond STRICTLY in JSON:
 {{
   "resolves": true,
   "resolution_type": "completed | canceled | postponed | superseded | irrelevant",
@@ -1765,7 +1764,7 @@ New user message:
   "reason": "short reason"
 }}
 
-ή
+or
 
 {{
   "resolves": false,
@@ -1773,13 +1772,11 @@ New user message:
   "reason": "short reason"
 }}
 
-Κανόνες:
-- Αν στο [Active Pending Follow-ups] δεις ένα θέμα που ταιριάζει απόλυτα με τη νέα συζήτηση (π.χ. συζητάνε ξανά για το ίδιο μπάνιο), ΜΗΝ βάλεις should_follow_up: true. Αντ' αυτού βάλε update_existing_id: <το id του> ώστε να ανανεωθεί ο χρόνος του υπάρχοντος!
-Κανόνες:
-- resolves=true αν ο χρήστης λέει ότι το έκανε, δεν το έκανε, πήγε για αύριο, βρήκε το πρόσωπο, γύρισε, ακυρώθηκε, μετατέθηκε
-- resolves=false αν είναι άσχετο ή δεν αρκεί
-- confidence 0.0 έως 1.0
-- μόνο JSON
+Rules:
+- resolves=true if the user says they did it, they didn't do it, it was pushed to tomorrow, they found the person, they returned, it was canceled, it was postponed
+- resolves=false if it is irrelevant or insufficient
+- confidence 0.0 to 1.0
+- ONLY JSON
 """
     try:
         response = safe_gemini_call(prompt)
@@ -1807,7 +1804,7 @@ def classify_followup_deferral_with_llm(
     from core.brain import llm
 
     prompt = f"""
-Είσαι classifier για conversational follow-ups.
+You are a classifier for conversational follow-ups.
 
 PENDING FOLLOWUP
 topic: {topic}
@@ -1817,7 +1814,7 @@ source_user_text: {source_user_text}
 NEW USER MESSAGE
 {current_user_text}
 
-Απάντησε ΜΟΝΟ με JSON:
+Respond ONLY with JSON:
 {{
   "should_defer": true/false,
   "delay_minutes": integer,
@@ -1826,18 +1823,16 @@ NEW USER MESSAGE
   "confidence": 0.0
 }}
 
-Κανόνες:
-- Αν στο [Active Pending Follow-ups] δεις ένα θέμα που ταιριάζει απόλυτα με τη νέα συζήτηση (π.χ. συζητάνε ξανά για το ίδιο μπάνιο), ΜΗΝ βάλεις should_follow_up: true. Αντ' αυτού βάλε update_existing_id: <το id του> ώστε να ανανεωθεί ο χρόνος του υπάρχοντος!
-Κανόνες:
-- should_defer=true μόνο αν ο χρήστης ΔΕΝ λέει ότι το έκανε, αλλά το μεταθέτει για μετά
-- παραδείγματα defer:
-  - "αύριο θα τις κάνω"
-  - "όχι σήμερα, αύριο"
-  - "μετά θα πάω"
-  - "αργότερα"
-  - "σε 2 ώρες"
-- αν ο χρήστης λέει ότι το έκανε ήδη ή έκλεισε το θέμα, τότε should_defer=false
-- αν δεν είσαι αρκετά σίγουρος, should_defer=false
+Rules:
+- should_defer=true only if the user does NOT say they did it, but postpones it for later
+- examples of defer:
+  - "I will do them tomorrow"
+  - "not today, tomorrow"
+  - "I will go later"
+  - "later"
+  - "in 2 hours"
+- if the user says they already did it or closed the topic, then should_defer=false
+- if you are not sure enough, should_defer=false
 """
     response = llm.invoke(prompt)
     raw = response.content if hasattr(response, "content") else str(response)

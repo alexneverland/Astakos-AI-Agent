@@ -64,7 +64,7 @@ def _load_registry():
         with open(_REGISTRY_PATH, "r", encoding="utf-8") as f:
             _registry = json.load(f)
     except Exception as e:
-        print(f"⚠️ [CapabilityRegistry] Αποτυχία φόρτωσης: {e}")
+        print(f"⚠️ [CapabilityRegistry] Failed to load: {e}")
         _registry = []
 
 def _normalize(text: str) -> str:

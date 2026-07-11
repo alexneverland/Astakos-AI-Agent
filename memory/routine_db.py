@@ -157,7 +157,7 @@ def setup_db():
                 ELSE 'active'
             END
         """)
-        print("[routine_db]: Backfill → state column από is_active/confidence")
+        print("[routine_db]: Backfill → state column from is_active/confidence")
 
     if "muted_until" not in existing_cols:
         cursor.execute("ALTER TABLE routines ADD COLUMN muted_until TEXT DEFAULT NULL")

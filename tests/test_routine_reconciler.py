@@ -420,7 +420,7 @@ def test_shift_logic_candidate_scores_debug_only():
 
     assert any(
         d["rule_name"] == "shift_logic"
-        and d["decision"] == "auto_apply"
+        and d["decision"] == "debug_only"
         for d in scored
     )
 
@@ -432,7 +432,7 @@ def test_shift_logic_candidate_scores_debug_only():
         reason="user_stated",
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
-    assert any(
+    assert not any(
         d.get("reason") == "shift_afternoon_week" for d in directives
     ), "infer_routine_reconciliation_directives returns auto_apply directives"
 

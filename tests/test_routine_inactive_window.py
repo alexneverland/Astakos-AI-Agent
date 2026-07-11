@@ -122,7 +122,7 @@ def test_missed_paused_routine_sends_no_message():
 
 def test_missed_paused_routine_logs_inactive_skip_with_reason():
     _, logged, _, _ = _run_missed([_missed_row()], _PAUSED_META)
-    inactive_events = [(cat, action, kw) for cat, action, kw in logged if action == "inactive_skip"]
+    inactive_events = [(cat, action, kw) for cat, action, kw in logged if action == "routine_inactive_skip"]
     assert len(inactive_events) == 1
     _, _, kw = inactive_events[0]
     assert kw["reason"] == "paused_until"
@@ -181,7 +181,7 @@ def test_missed_before_active_from_also_skips():
     assert sent == []
     assert mark_notified_calls == []
     assert save_pending_calls == []
-    assert any(action == "inactive_skip" and kw["reason"] == "before_active_from"
+    assert any(action == "routine_inactive_skip" and kw["reason"] == "before_active_from"
                for _, action, kw in logged)
 
 
@@ -193,7 +193,7 @@ def test_missed_active_routine_still_processed_normally_baseline():
     assert sent == ["Πάμε ποδόσφαιρο;"]
     assert mark_notified_calls == [13]
     assert len(save_pending_calls) == 1
-    assert not any(action == "inactive_skip" for _, action, _ in logged)
+    assert not any(action == "routine_inactive_skip" for _, action, _ in logged)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -231,6 +231,7 @@ def _run_job(db_rows, schedule_meta, cooldown=False):
             patch.object(bot, "send_telegram_msg",     side_effect=lambda m: sent.append(m)),
             patch.object(bot, "log_event",
                           side_effect=lambda cat, action, **kw: logged.append((cat, action, kw))),
+            patch.object(bot, "_should_log_routine_skip", return_value=True),
             patch.object(bot, "bus", MagicMock()),
             patch.object(bot, "pending_routine_confirmations", {}),
             patch.object(cfg, "BASE_DIR", tmp),
@@ -253,8 +254,8 @@ def _run_job(db_rows, schedule_meta, cooldown=False):
 
 
 def _due_row(**kw):
-    """Routine at target_time = _FIXED_NOW + 30min, i.e., time_str = '12:30'."""
-    target = _FIXED_NOW + timedelta(minutes=30)
+    """Routine at target_time = _FIXED_NOW + 10min, i.e., time_str = '12:10'."""
+    target = _FIXED_NOW + timedelta(minutes=10)
     defaults = dict(
         id=14, event_name="ποδόσφαιρο Αλέξανδρου", confidence=0.85,
         time_str=target.strftime("%H:%M"), day_of_week="Everyday",
@@ -271,7 +272,7 @@ def test_job_paused_routine_sends_no_message():
 
 def test_job_paused_routine_logs_inactive_skip():
     _, logged, _, _ = _run_job([_due_row()], _PAUSED_META)
-    inactive_events = [(cat, action, kw) for cat, action, kw in logged if action == "inactive_skip"]
+    inactive_events = [(cat, action, kw) for cat, action, kw in logged if action == "routine_inactive_skip"]
     assert len(inactive_events) == 1
     _, _, kw = inactive_events[0]
     assert kw["reason"] == "paused_until"
@@ -329,8 +330,8 @@ def test_job_active_routine_still_reaches_cooldown_check_baseline():
     simply to prove that the flow continued after is_routine_temporarily_inactive_meta).
     """
     _, logged, _, _ = _run_job([_due_row()], _ACTIVE_META, cooldown=True)
-    assert not any(action == "inactive_skip" for _, action, _ in logged)
-    assert any(action == "skipped" and kw.get("reason") == "cooldown" for _, action, kw in logged)
+    assert not any(action == "routine_inactive_skip" for _, action, _ in logged)
+    assert any(action == "routine_cooldown_skip" for _, action, kw in logged)
 
 
 if __name__ == "__main__":

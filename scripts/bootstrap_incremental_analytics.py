@@ -54,7 +54,7 @@ def main() -> int:
             print(f"{key}: {value}")
 
     if not args.apply:
-        print("\nΔεν γράφτηκε τίποτα. Τρέξε ξανά με --apply για να δημιουργηθεί η βάση.")
+        print("\nNothing written. Run again with --apply to create db.")
     return 0
 
 

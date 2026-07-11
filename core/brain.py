@@ -109,7 +109,7 @@ def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
                 raise
 
             if attempt >= retries - 1:
-                print(f"\033[91m[Brain]: LLM fatal μετά από {retries} προσπάθειες: {e}\033[0m")
+                print(f"\033[91m[Brain]: LLM fatal μετά from {retries} attempts: {e}\033[0m")
                 raise
 
             wait = base_delay * (2 ** attempt)

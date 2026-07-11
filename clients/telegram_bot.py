@@ -1,3 +1,4 @@
+
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Developer: Lazaros (Piston-7)
@@ -33,7 +34,7 @@ if ROOT_DIR not in sys.path:
 
 from langchain_core.messages import HumanMessage, AIMessage
 
-from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE, NLP_CONFIG
 
 def _normalize_gr(text: str) -> str:
     """Removes accents from Greek text for accent-insensitive comparison."""
@@ -226,7 +227,7 @@ def should_skip_proactive_for_recent_activity(
 ) -> bool:
     elapsed = _seconds_since_user_activity()
     if elapsed < max_age_seconds:
-        print(f"⏸️ [Proactive]: Recent user activity ({int(elapsed)}s ago) — παραλείπεται.")
+        print(f"⏸️ [Proactive]: Recent user activity ({int(elapsed)}s ago) — skipped.")
         log_event("proactive", "skipped", reason="recent_activity", elapsed_s=int(elapsed))
         return True
     return False
@@ -781,7 +782,7 @@ def _save_override_state():
 
 def fast_queue_worker():
     """Executes fast background tasks (e.g., UI updates, deterministic memory)."""
-    print("\033[90m[System]: Telegram Fast Queue Worker Ξεκίνησε!\033[0m")
+    print("\033[90m[System]: Telegram Fast Queue Worker Started!\033[0m")
     while not shutdown_event.is_set():
         try:
             task_func, args = fast_queue.get(timeout=2)
@@ -789,7 +790,7 @@ def fast_queue_worker():
                 print(f"\033[90m[FastQueue]: {task_func.__name__}\033[0m")
                 task_func(*args)
             except Exception as e:
-                print(f"\033[91m[Fast Queue Error στο {task_func.__name__}]: {e}\033[0m")
+                print(f"\033[91m[Fast Queue Error in {task_func.__name__}]: {e}\033[0m")
             finally:
                 fast_queue.task_done()
         except queue.Empty:
@@ -797,7 +798,7 @@ def fast_queue_worker():
 
 def slow_queue_worker():
     """Performs slow background tasks (e.g., LLM memory sifting)."""
-    print("\033[90m[System]: Telegram Slow Queue Worker Ξεκίνησε!\033[0m")
+    print("\033[90m[System]: Telegram Slow Queue Worker Started!\033[0m")
     while not shutdown_event.is_set():
         try:
             task_func, args = slow_queue.get(timeout=2)
@@ -805,7 +806,7 @@ def slow_queue_worker():
                 print(f"\033[90m[SlowQueue]: {task_func.__name__}\033[0m")
                 task_func(*args)
             except Exception as e:
-                print(f"\033[91m[Slow Queue Error στο {task_func.__name__}]: {e}\033[0m")
+                print(f"\033[91m[Slow Queue Error in {task_func.__name__}]: {e}\033[0m")
             finally:
                 slow_queue.task_done()
         except queue.Empty:
@@ -854,7 +855,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
 
         with open(local_path, "wb") as f:
             f.write(doc_data)
-        print(f"\033[94m[Document]: Αποθηκεύτηκε στο Telegram: {local_path}\033[0m")
+        print(f"\033[94m[Document]: Αποθηκεύτηκε in Telegram: {local_path}\033[0m")
 
         # We send a message to the user that we received it
         send_telegram_msg(f"📄 Έγγραφο ελήφθη: `{file_name}`\nΠερίμενε, το κοιτάζω...")
@@ -979,7 +980,7 @@ def handle_voice(voice_obj: dict, chat_id: str):
         with open(local_path, "wb") as f:
             f.write(audio_data)
 
-        print(f"\033[96m[Voice]: Ανάλυση ήχου...\033[0m")
+        print(f"\033[96m[Voice]: Analyzing audio...\033[0m")
 
         import base64 as _b64
         import vertexai
@@ -1010,7 +1011,7 @@ def send_telegram_document(file_path, chat_id=None):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
         with open(file_path, 'rb') as f:
             requests.post(url, data={'chat_id': chat_id}, files={'document': f})
-        print(f"\033[92m[Telegram]: Το αρχείο {os.path.basename(file_path)} στάλθηκε!\033[0m")
+        print(f"\033[92m[Telegram]: File {os.path.basename(file_path)} sent!\033[0m")
     except Exception as e:
         print(f"❌ Telegram File Error: {e}")         
 def handle_end_session(chat_id: str):
@@ -1028,7 +1029,7 @@ def handle_end_session(chat_id: str):
         with open(WORKING_MEMORY_FILE, "w", encoding="utf-8") as f:
             f.write("ΚΕΝΟ")
             
-        print("\033[92m[Telegram]: Η συνεδρία έκλεισε και αρχειοθετήθηκε επιτυχώς.\033[0m")
+        print("\033[92m[Telegram]: Session closed and archived successfully.\033[0m")
         send_telegram_msg("✅ **Έγινε!** Η συνεδρία αρχειοθετήθηκε. Τα λέμε στην επόμενη βάρδια, Μάστορα! 🦞")
 
     except Exception as e:
@@ -1064,7 +1065,7 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         local_path = os.path.join(PHOTOS_DIR, filename)
         with open(local_path, "wb") as f:
             f.write(img_data)
-        print(f"\033[92m[Photo]: Κατέβηκε: {filename}\033[0m")
+        print(f"\033[92m[Photo]: Downloaded: {filename}\033[0m")
 
         # 3. Vision LLM — objective pixel analysis
         img_b64 = base64.b64encode(img_data).decode("utf-8")
@@ -1073,7 +1074,7 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
             {"type": "text",      "text": vision_prompt},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
         ])
-        print(f"\033[94m[Vision]: Οπτική ανάλυση...\033[0m")
+        print(f"\033[94m[Vision]: Visual analysis...\033[0m")
         analysis_raw  = safe_llm_invoke(llm, [vision_msg])
         memory_analysis = clean_message(analysis_raw.content)
         print(f"\033[94m[Vision]: {memory_analysis[:120]}...\033[0m")
@@ -1252,11 +1253,11 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
                         asyncio.run(send_telegram_photo(img_path))
                         time.sleep(1)
                     except Exception as img_e:
-                        print(f"⚠️ [StoryMaker] Αποτυχία αποστολής εικόνας: {img_e}")
+                        print(f"⚠️ [StoryMaker] Αποτυχία αποinλής εικόνας: {img_e}")
         else:
             send_telegram_msg("⚠️ Οι εικόνες δεν δημιουργήθηκαν (Pollinations timeout).")
 
-        print(f"✅ [StoryMaker] Παραμύθι '{theme}' ολοκληρώθηκε.")
+        print(f"✅ [StoryMaker] Story '{theme}' completed.")
 
         # Update the agent with a SHORT note — so they know they wrote a fairy tale
         # and not to call search_memory if Lazaros asks about this
@@ -1315,7 +1316,7 @@ def _append_to_analytics_log(role: str, content: str, agent: str | None = None):
                 agent=agent,
             )
     except Exception as e:
-        print(f"[ConversationHistory/telegram]: Σφάλμα shared write: {e}")
+        print(f"[ConversationHistory/telegram]: Error shared write: {e}")
 
 
 def _send_and_record_assistant(
@@ -1467,7 +1468,7 @@ def _load_shared_context_messages(channel: str) -> list:
         from memory.conversation_history import load_recent_context
         entries = load_recent_context(channel=channel, global_limit=12, channel_limit=10, total_limit=20)
     except Exception as e:
-        print(f"[ConversationHistory/{channel}]: Σφάλμα shared read: {e}")
+        print(f"[ConversationHistory/{channel}]: Error shared read: {e}")
         return []
 
     context_msgs = []
@@ -1510,7 +1511,7 @@ def _llm_routine_judge(user_msg: str, events: list) -> str:
         print(f"\033[96m🤖 [Routine LLM Judge]: '{user_msg[:50]}' \u2192 {verdict}\033[0m")
         return verdict
     except Exception as e:
-        print(f"\033[93m[Routine LLM Judge]: Σφάλμα, fallback σε UNCLEAR: {e}\033[0m")
+        print(f"\033[93m[Routine LLM Judge]: Error, fallback σε UNCLEAR: {e}\033[0m")
         return "UNCLEAR"
 
 
@@ -1752,7 +1753,7 @@ def handle_message(user_text: str, chat_id: str):
     if pending_reflection_confirmations:
         text_check = _normalize_gr(clean_user_text)
         text_words = text_check.replace(",", "").replace(".", "").replace("!", "").split()
-        yes_words = [_normalize_gr(w) for w in ["ναι", "yes", "ok", "οκ"]]
+        yes_words = [_normalize_gr(w) for w in NLP_CONFIG.get("telegram", {}).get("confirm_tokens", [])]
         no_words  = [_normalize_gr(w) for w in ["όχι", "οχι", "no", "cancel", "άκυρο", "ακυρο"]]
         is_yes = any(w in text_words for w in yes_words)
         is_no  = any(w in text_words for w in no_words)
@@ -1783,7 +1784,7 @@ def handle_message(user_text: str, chat_id: str):
                             mark_reflection_applied(rid)
                         except Exception as e:
                             print(f"⚠️ [Reflection Confirm] DB update failed: {e}")
-                        lines.append(f"✅ Εφαρμόστηκε: {rdata.get('observation','')[:80]}")
+                        lines.append(f"✅ Applied: {rdata.get('observation','')[:80]}")
                         del pending_reflection_confirmations[rid]
                     else:
                         lines.append(f"⚠️ Αποτυχία εφαρμογής, μένει εκκρεμές: {rdata.get('observation','')[:80]}")
@@ -1808,7 +1809,7 @@ def handle_message(user_text: str, chat_id: str):
     global pending_exec_command
     if pending_exec_command:
         text_check = _normalize_gr(clean_user_text)
-        if any(w in text_check for w in [_normalize_gr(w) for w in ["ναι", "yes", "ok", "οκ"]]):
+        if any(w in text_check for w in [_normalize_gr(w) for w in NLP_CONFIG.get("telegram", {}).get("confirm_tokens", [])]):
             cmd = pending_exec_command
             pending_exec_command = None
             from memory.event_log import log_event
@@ -1828,7 +1829,7 @@ def handle_message(user_text: str, chat_id: str):
             except Exception as e:
                 send_telegram_msg(f"❌ Σφάλμα εκτέλεσης: {e}")
             return
-        elif any(w in text_check for w in [_normalize_gr(w) for w in ["όχι", "οχι", "no", "cancel"]]):
+        elif any(w in text_check for w in [_normalize_gr(w) for w in NLP_CONFIG.get("telegram", {}).get("cancel_tokens", [])]):
             pending_exec_command = None
             send_telegram_msg("❌ Ακυρώθηκε.")
             return
@@ -1843,7 +1844,7 @@ def handle_message(user_text: str, chat_id: str):
         if pending_photo and (time.time() - pending_photo["timestamp"]) < 30:
             p = pending_photo
             pending_photo = None
-            print(f"\033[94m[Photo+Msg]: Συνδυασμός pending φωτό + μήνυμα\033[0m")
+            print(f"\033[94m[Photo+Msg]: Combination of pending photo + message\033[0m")
             _process_photo_with_question(p["filename"], p["path"], p["analysis"], clean_user_text, chat_id)
             return  # The _process_photo_with_question sent the response
 
@@ -2030,7 +2031,7 @@ def handle_message(user_text: str, chat_id: str):
             _trace.mark_phase("ultra_light_ack_used", 1)
             handling_agent = "UltraLightACK"
             final_ai_response = get_ultra_light_ack_response()
-            print(f"\033[92m[Telegram->UltraLightACK]: Ακαριαία απάντηση στο '{clean_user_text}'\033[0m")
+            print(f"\033[92m[Telegram->UltraLightACK]: Instant reply in '{clean_user_text}'\033[0m")
             events = []
         else:
             medium_path_used = is_medium_web_chat_path_candidate(clean_user_text)
@@ -2245,7 +2246,7 @@ def _send_photo_to_telegram(photo_path: str, chat_id: str):
                 files={"photo": photo_file},
                 timeout=30
             )
-        print(f"\033[92m[TelegramBot]: Φωτογραφία στάλθηκε: {photo_path}\033[0m")
+        print(f"\033[92m[TelegramBot]: Photo sent: {photo_path}\033[0m")
     except Exception as e:
         print(f"\033[91m[TelegramBot Photo Send Error]: {e}\033[0m")
         send_telegram_msg(f"❌ Αδύνατη η αποστολή φωτογραφίας: {str(e)}")
@@ -2514,7 +2515,7 @@ def _handle_message_reaction(reaction: dict) -> None:
 
         # Save to long-term memory`of`
         preview = bot_text[:80].replace("\n", " ")
-        print(f"\033[92m[Reaction ❤️]: Αποθήκευση: {preview}...\033[0m")
+        print(f"\033[92m[Reaction ❤️]: Saving: {preview}...\033[0m")
         threading.Thread(
             target=_save_reaction_to_memory,
             args=(bot_text,),
@@ -2550,11 +2551,11 @@ def run_polling():
     """Long-polling loop — reads updates from the Telegram API."""
     global voice_mode_enabled
     if not TELEGRAM_TOKEN:
-        print("\033[91m[TelegramBot]: Λείπει το TELEGRAM_TOKEN!\033[0m")
+        print("\033[91m[TelegramBot]: Missing TELEGRAM_TOKEN!\033[0m")
         return
 
     if not TELEGRAM_CHAT_ID:
-        print("\033[91m[TelegramBot]: Λείπει το TELEGRAM_CHAT_ID!\033[0m")
+        print("\033[91m[TelegramBot]: Missing TELEGRAM_CHAT_ID!\033[0m")
         return
 
     # ── Definition of commands in the Telegram menu (the "/" autocomplete) ──────────────
@@ -2580,9 +2581,9 @@ def run_polling():
             json={"commands": _bot_commands},
             timeout=10,
         )
-        print("\033[92m[TelegramBot]: Bot commands menu ενημερώθηκε ✓\033[0m")
+        print("\033[92m[TelegramBot]: Bot commands menu updated ✓\033[0m")
     except Exception as _e:
-        print(f"\033[93m[TelegramBot]: setMyCommands απέτυχε: {_e}\033[0m")
+        print(f"\033[93m[TelegramBot]: setMyCommands failed: {_e}\033[0m")
 
     offset = 0
     print(f"\033[92m[TelegramBot]: Polling ξεκίνησε (allowed chat: {TELEGRAM_CHAT_ID})\033[0m")
@@ -2626,7 +2627,7 @@ def run_polling():
 
                 # Security: only Lazaros
                 if chat_id != str(TELEGRAM_CHAT_ID):
-                    print(f"\033[93m[TelegramBot]: Μη εξουσιοδοτημένο chat: {chat_id}\033[0m")
+                    print(f"\033[93m[TelegramBot]: Unauthorized chat: {chat_id}\033[0m")
                     continue
 
                 # 1. Location (GPS) - Only once, in a thread, passing the entire msg
@@ -2842,7 +2843,7 @@ def run_polling():
                     continue
 
                 if user_text.lower() == "/end":
-                    print(f"\033[94m[Telegram]: Εντολή τερματισμού συνεδρίας από Λάζαρο.\033[0m")
+                    print(f"\033[94m[Telegram]: End session command from Λάζαρο.\033[0m")
                     threading.Thread(
                         target=handle_end_session,
                         args=(chat_id,),
@@ -2869,7 +2870,7 @@ def run_polling():
                     continue
 
                 # Regular message to the Lobster
-                print(f"\n\033[96m[Telegram] Λάζαρος: {user_text}\033[0m")
+                print(f"\n\033[96m[Telegram] Lazaros: {user_text}\033[0m")
                 threading.Thread(
                     target=handle_message,
                     args=(user_text, chat_id),
@@ -3293,15 +3294,8 @@ def _get_env_context() -> str:
             precip = curr.get("precipitation", "")
             wcode = curr.get("weather_code", 0)
 
-            WMO_CODES = {
-                0: "☀️ Αίθριος", 1: "🌤 Σχεδόν αίθριος", 2: "⛅ Μερικώς συννεφιά",
-                3: "☁️ Συννεφιά", 45: "🌫 Ομίχλη", 48: "🌫 Παγετός",
-                51: "🌦 Ψιλόβροχο", 53: "🌦 Βροχή", 55: "🌧 Έντονο ψιλόβροχο",
-                61: "🌧 Ελαφριά βροχή", 63: "🌧 Μέτρια βροχή", 65: "🌧 Έντονη βροχή",
-                71: "🌨 Ελαφριά χιονόπτωση", 73: "🌨 Χιονόπτωση", 75: "❄️ Έντονη χιονόπτωση",
-                80: "🌦 Μπόρες", 81: "🌧 Μέτριες μπόρες", 82: "⛈ Έντονες μπόρες",
-                95: "⛈ Καταιγίδα", 96: "⛈ Καταιγίδα με χαλάζι", 99: "⛈ Έντονη καταιγίδα",
-            }
+            _wmo_dict = NLP_CONFIG.get('telegram', {}).get('wmo_codes', {})
+            WMO_CODES = {int(k): v for k, v in _wmo_dict.items()}
             w_desc = WMO_CODES.get(wcode, "Άγνωστος")
 
             env_str = (
@@ -3515,25 +3509,13 @@ def _should_allow_sentimental_override(event_name: str, cond_result: dict) -> bo
             str(item.get("reason", "")) for item in results if isinstance(item, dict)
         ).lower()
 
+        from config import SENTIMENTAL_OVERRIDE_KEYWORDS
+        
         if any(token in reason_blob for token in ("shift_mode", "user_at_work", "sofia_work_mode")):
             return False
 
         event_norm = _normalize_gr(event_name)
-        sentimental_hints = (
-            "αλεξανδρ",
-            "σοφια",
-            "σοφία",
-            "παιδ",
-            "κουνελ",
-            "παρκο",
-            "σπιτι",
-            "θαλασσ",
-            "βολτ",
-            "οικογεν",
-            "family",
-            "home",
-        )
-        return any(token in event_norm for token in sentimental_hints)
+        return any(token in event_norm for token in SENTIMENTAL_OVERRIDE_KEYWORDS)
     except Exception:
         return False
 
@@ -3720,10 +3702,10 @@ def startup_check_missed_routines():
         conn.close()
 
         if not missed:
-            print("\033[90m[MissedRoutines]: Καμία χαμένη ρουτίνα εντός grace window.\033[0m")
+            print("\033[90m[MissedRoutines]: No missed routines within grace window.\033[0m")
             return
 
-        print(f"\033[93m[MissedRoutines]: {len(missed)} χαμένη/ες ρουτίνα/ες — deferred follow-up.\033[0m")
+        print(f"\033[93m[MissedRoutines]: {len(missed)} missed routine(s) — deferred follow-up.\033[0m")
 
         from memory.routine_db import (
             get_routine_notify_info, mark_routine_notified, save_pending_confirmation,
@@ -3738,7 +3720,8 @@ def startup_check_missed_routines():
             inactive, inactive_reason = is_routine_temporarily_inactive_meta(schedule_meta, now=now)
             if inactive:
                 log_event("routines", "routine_inactive_skip", routine_id=r_id, event=event_name,
-                          reason=inactive_reason, paused_until=schedule_meta.get("paused_until", debug_type="scheduler_decision", debug_source="scheduler", debug_effect="inactive_skip"),
+                          reason=inactive_reason, paused_until=schedule_meta.get("paused_until"),
+                          debug_type="scheduler_decision", debug_source="scheduler", debug_effect="inactive_skip",
                           active_from=schedule_meta.get("active_from"), active_until=schedule_meta.get("active_until"))
                 print(f"\033[90m[MissedRoutines]: #{r_id} '{event_name}' — inactive ({inactive_reason}), skip.\033[0m")
                 continue
@@ -3778,7 +3761,7 @@ def startup_check_missed_routines():
                           deferred=True, muted_until=muted_until, debug_type="proactive_policy", debug_source="scheduler", debug_effect="silent_skip")
                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name,
                          deferred=True, channel="telegram")
-                print(f"\033[90m[MissedRoutines]: SILENT_SKIP '{event_name}' ({missed_min} λεπτά αργά)\033[0m")
+                print(f"\033[90m[MissedRoutines]: SILENT_SKIP '{event_name}' ({missed_min} minutes late)\033[0m")
                 continue
 
             is_context_skip = "[CONTEXT_SKIP]" in msg
@@ -3797,7 +3780,7 @@ def startup_check_missed_routines():
                           muted_until=muted_until, preview=(context_skip_preview or msg)[:160], debug_type="proactive_policy", debug_source="scheduler", debug_effect="context_skip")
                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name,
                          deferred=True, channel="telegram")
-                print(f"\033[90m[MissedRoutines]: CONTEXT_SKIP '{event_name}' ({missed_min} λεπτά αργά) → '{msg[:80]}'\033[0m")
+                print(f"\033[90m[MissedRoutines]: CONTEXT_SKIP '{event_name}' ({missed_min} minutes late) → '{msg[:80]}'\033[0m")
                 continue
 
             _send_and_record_assistant(msg, agent="Routine_Agent")
@@ -3811,7 +3794,7 @@ def startup_check_missed_routines():
                       missed_minutes=missed_min, preview=msg[:160])
             bus.emit("routine_triggered", routine_id=r_id, event=event_name,
                      confidence=confidence, deferred=True, channel="telegram")
-            print(f"\033[92m[MissedRoutines]: ✅ Deferred '{event_name}' ({missed_min} λεπτά αργά) → '{msg[:80]}'\033[0m")
+            print(f"\033[92m[MissedRoutines]: ✅ Deferred '{event_name}' ({missed_min} minutes late) → '{msg[:80]}'\033[0m")
 
             if len(missed) > 1:
                 _time.sleep(300)  # 5-minute pause — to allow a response to the first one
@@ -4310,15 +4293,15 @@ def job_proactive_scan():
     if is_proactive_muted():
         return
     if is_quiet_hours():
-        print("🌙 [job_proactive_scan]: Quiet hours — παραλείπεται.")
+        print("🌙 [job_proactive_scan]: Quiet hours — skipped.")
         return
     if should_skip_proactive_for_recent_activity():
         return
     if not can_send_proactive():
-        print("⏸️ [job_proactive_scan]: Rate limit reached — παραλείπεται.")
+        print("⏸️ [job_proactive_scan]: Rate limit reached — skipped.")
         return
 
-    print("🦞 [Proactive]: Ξεκινάω αθόρυβο σκανάρισμα συστήματος...")
+    print("🦞 [Proactive]: Starting silent system scan...")
     try:
         os.makedirs(WATCH_DIR, exist_ok=True)
         files_to_scan = os.listdir(WATCH_DIR)
@@ -4351,7 +4334,7 @@ def job_proactive_scan():
                 print(f"⚠️ [Proactive Alert Sent]: {reply[:50]}...")
         else:
             log_event("proactive", "all_clear")
-            print("✔️ [Proactive]: Όλα καθαρά.")
+            print("✔️ [Proactive]: All clear.")
     except Exception as e:
         print(f"⚠️ [job_proactive_scan]: {e}")
 
@@ -4408,7 +4391,7 @@ def job_morning_fit_briefing():
         )
         with open(flag_file, "w") as f:
             f.write(today_str)
-        print(f"✅ [FitBriefing]: Πρωινό briefing στάλθηκε.")
+        print(f"✅ [FitBriefing]: Πρωινό briefing sent.")
     except Exception as e:
         print(f"⚠️ [FitBriefing]: {e}")
 
@@ -4447,7 +4430,7 @@ def job_morning_calendar_briefing():
         _send_and_record_assistant(msg, agent="Calendar_Briefing")
         with open(flag_file, "w") as f:
             f.write(today_str)
-        print("✅ [CalendarBriefing]: Πρωινό briefing στάλθηκε.")
+        print("✅ [CalendarBriefing]: Πρωινό briefing sent.")
     except Exception as e:
         print(f"⚠️ [CalendarBriefing]: {e}")
 
@@ -4532,7 +4515,7 @@ def job_goal_followup():
             _send_and_record_assistant(f"🎯 {msg}", agent="Goal_Followup")
             with open(flag_file, "w") as f:
                 f.write(today_str)
-            print(f"✅ [GoalFollowup]: Στάλθηκε για {len(stale_goals)} goals.")
+            print(f"✅ [GoalFollowup]: Sent for {len(stale_goals)} goals.")
 
     except Exception as e:
         print(f"⚠️ [GoalFollowup]: {e}")
@@ -4798,4 +4781,4 @@ if __name__ == "__main__":
             handle_end_session(TELEGRAM_CHAT_ID)
         except Exception:
             pass
-        print('[TelegramBot]: Τερματίστηκε.')
+        print('[TelegramBot]: Terminated.')

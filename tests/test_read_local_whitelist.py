@@ -41,15 +41,15 @@ db_path = os.path.join(cfg.BASE_DIR, "astakos_embeddings_cache.db")
 if os.path.exists(db_path):
     check(".db file (blocked)", invoke(db_path),                  expect_ok=False)
 else:
-    print("ℹ️  .db αρχείο δεν υπάρχει — skip")
+    print("ℹ️  .db file does not exist — skip")
 
 # --- Files not in whitelist: must be blocked ---
 check("C:/Windows/system32/drivers/etc/hosts (blocked)",
       invoke("C:/Windows/system32/drivers/etc/hosts"),            expect_ok=False)
 
 if errors:
-    print(f"\n❌ {len(errors)} αποτυχίες:")
+    print(f"\n❌ {len(errors)} failures:")
     for e in errors: print(f"  - {e}")
     sys.exit(1)
 else:
-    print("\n✅ Όλα τα tests πέρασαν!")
+    print("\n✅ All tests passed!")

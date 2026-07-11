@@ -24,7 +24,7 @@ def research_last30days(topic: str) -> str:
             text=True,
             encoding="utf-8",
             cwd=BASE_DIR,
-            timeout=900,
+            timeout=120,
         )
 
         if result.returncode != 0:
@@ -34,5 +34,7 @@ def research_last30days(topic: str) -> str:
         # stdout may contain warnings etc., but usually the output is markdown text.
         return result.stdout.strip()
         
+    except subprocess.TimeoutExpired:
+        return "Σφάλμα: Η έρευνα καθυστέρησε υπερβολικά και διακόπηκε (Timeout 120s)."
     except Exception as e:
         return f"Απρόσμενο σφάλμα κατά την έρευνα (last30days-skill): {str(e)}"

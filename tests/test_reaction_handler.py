@@ -150,9 +150,9 @@ check("Reaction ❤️: SQLite fallback βρίσκει σωστό κείμενο
 # ── Results ─────────────────────────────────────────────────────────
 print()
 if errors:
-    print(f"❌ {len(errors)} αποτυχίες:")
+    print(f"❌ {len(errors)} failures:")
     for e in errors:
         print(f"  - {e}")
     sys.exit(1)
 else:
-    print("✅ Όλα τα tests πέρασαν!")
+    print("✅ All tests passed!")

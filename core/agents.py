@@ -16,7 +16,7 @@ from tools.system import archive_file
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AIMessage
 from core.utils import load_agent_prompt
 # CONFIG & BRAIN
-from config import PHOTOS_DIR, WORKING_MEMORY_FILE
+from config import PHOTOS_DIR, WORKING_MEMORY_FILE, RESPONSE_LANGUAGE
 from core.brain import llm, llm_heavy, safe_llm_invoke
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 # UTILS & STATE
@@ -89,12 +89,12 @@ def _ensure_text_response(response, llm_instance, system_prompt: str, safe_histo
         return response  # All OK
 
     suffixes = [
-        "\n\n[ΑΠΑΡΑΙΤΗΤΟ]: Πρέπει να απαντήσεις με κείμενο στον χρήστη. Ενημέρωσέ τον για ό,τι έγινε.",
-        "\n\n[ΚΡΙΣΙΜΟ]: Γράψε ΑΜΕΣΩΣ μια σύνοψη των αποτελεσμάτων που βρήκες. Μην κάνεις άλλα tool calls.",
-        "\n\n[ΤΕΛΙΚΟ]: Δώσε μια σύντομη απάντηση έστω 1 πρότασης στον χρήστη τώρα.",
+        f"\n\n[MANDATORY]: You must reply with text to the user. Inform them about what happened. IMPORTANT: Respond EXCLUSIVELY in {RESPONSE_LANGUAGE}.",
+        f"\n\n[CRITICAL]: Write IMMEDIATELY a summary of the results you found. Do not make any more tool calls. IMPORTANT: Respond EXCLUSIVELY in {RESPONSE_LANGUAGE}.",
+        f"\n\n[FINAL]: Give a short answer, even 1 sentence, to the user right now. IMPORTANT: Respond EXCLUSIVELY in {RESPONSE_LANGUAGE}.",
     ]
     for attempt, suffix in enumerate(suffixes, 1):
-        print(f"\033[93m[Gemini-Fix]: Κενό response — retry {attempt}/3...\033[0m")
+        print(f"\033[93m[Gemini-Fix]: Empty response — retry {attempt}/3...\033[0m")
         retry_started = perf_counter()
         retry_count += 1
         retry_response = llm_instance.invoke([
@@ -209,17 +209,17 @@ def supervisor_node(state):
     # We use regex because the server prepends a timestamp [HH:MM] to the message
     import re as _re
     if _re.search(r'(?:^|\])\s*/plan', last_content.strip()):
-        print(f"\033[95m[Τροχονόμος]: -> planner (/plan command)\033[0m")
+        print(f"\033[95m[Router]: -> planner (/plan command)\033[0m")
         return {"next_agent": "planner"}
 
     # ── Capability Registry: first filter before the LLM ───────────
     registry_agent = lookup_agent(str(last_content))
     if registry_agent:
-        print(f"\033[95m[Τροχονόμος]: -> {registry_agent} (registry)\033[0m")
+        print(f"\033[95m[Router]: -> {registry_agent} (registry)\033[0m")
         return {"next_agent": registry_agent}
 
     # ── LLM fallback: normal Supervisor decision ─────────────────
-    system_base = load_agent_prompt("supervisor", "Είσαι ο Εργοδηγός του Αστακού.")
+    system_base = load_agent_prompt("supervisor", "You are the Astakos Supervisor.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
 
     recent_msgs = state['messages'][-5:-1]
@@ -233,12 +233,12 @@ def supervisor_node(state):
     context_str = "\n".join(context_lines) if context_lines else ""
 
     if context_str:
-        full_prompt = f"{system_base}\n\n[ΠΡΟΗΓΟΥΜΕΝΗ ΣΥΝΟΜΙΛΙΑ - για context]\n{context_str}\n\nΝΕΑ ΕΝΤΟΛΗ: '{str(last_content)[:500]}'"
+        full_prompt = f"{system_base}\n\n[PREVIOUS CONVERSATION - for context]\n{context_str}\n\nNEW COMMAND: '{str(last_content)[:500]}'\n\nIMPORTANT: Respond EXCLUSIVELY in {RESPONSE_LANGUAGE}."
     else:
-        full_prompt = f"{system_base}\n\nΧρήστης: '{str(last_content)[:500]}'"
+        full_prompt = f"{system_base}\n\nUser: '{str(last_content)[:500]}'\n\nIMPORTANT: Respond EXCLUSIVELY in {RESPONSE_LANGUAGE}."
 
     decision = safe_llm_invoke(router_llm, full_prompt)
-    print(f"\033[95m[Τροχονόμος]: -> {decision.next_agent} (llm)\033[0m")
+    print(f"\033[95m[Router]: -> {decision.next_agent} (llm)\033[0m")
     return {"next_agent": decision.next_agent}
 
 
@@ -253,7 +253,7 @@ def dev_agent_node(state):
     # [MASTRO-SHIELD]: Cleanup of orphan tool_calls — same for all agents
     history = clean_orphan_tool_calls(state["messages"], k=40)
     
-    system_base = load_agent_prompt("Dev_Agent", "Είσαι ο Dev_Agent, ο Αρχιμηχανικός Προγραμματιστής του Αστακού.")
+    system_base = load_agent_prompt("Dev_Agent", "You are the Dev_Agent, Astakos' Chief Developer.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     prompt_content = build_prompt(history, system_base, channel=state.get("channel"))
 
@@ -320,15 +320,15 @@ def chat_agent_node(state: AgentState):
                     }
                 print(f"\033[92m[Vision]: Pixels loaded for re-analysis: {filename}\033[0m")
             elif os.path.exists(file_path):
-                print(f"\033[94m[Agent Logic]: Το {filename} είναι έγγραφο. Παρακάμπτεται το Vision.\033[0m")
+                print(f"\033[94m[Agent Logic]: The {filename} is a document. Bypassing Vision.\033[0m")
         except Exception as e:
             print(f"⚠️ [Vision/File Error]: {e}")
 
     vision_context = ""
     if pre_baked_analysis:
-        vision_context = f"\n[CONTEXT ΑΡΧΕΙΟΥ/ΦΩΤΟΓΡΑΦΙΑΣ]: Έχεις ήδη αυτή την περιγραφή/πληροφορία: '{pre_baked_analysis}'.\n"
+        vision_context = f"\n[FILE/PHOTO CONTEXT]: You already have this description/information: '{pre_baked_analysis}'.\n"
 
-    json_base = load_agent_prompt("Chat_Agent", "Είσαι ο Αστακός, το έμπιστο φιλαράκι του Λάζαρου.")
+    json_base = load_agent_prompt("Chat_Agent", "You are Astakos, Lazaros' trusted buddy.")
     json_base = json_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt_text = f"{json_base}{vision_context}"
     system_prompt = build_prompt(history, system_prompt_text, channel=state.get("channel"))
@@ -404,7 +404,7 @@ def home_agent_node(state):
         get_fit_summary
     ]
 
-    system_base = load_agent_prompt("Home_Agent", "Είσαι ο Home_Agent του Piston-7.")
+    system_base = load_agent_prompt("Home_Agent", "You are Piston-7's Home_Agent.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
@@ -496,7 +496,7 @@ def web_agent_node(state: AgentState):
             "current_agent": "Web_Agent",
         }
 
-    system_base = load_agent_prompt("Web_Agent", "Είσαι ο Web_Agent.")
+    system_base = load_agent_prompt("Web_Agent", "You are the Web_Agent.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
     
@@ -541,7 +541,7 @@ def web_agent_node(state: AgentState):
     if not content and not has_tool_calls:
         tool_results = [m for m in history if getattr(m, "type", "") == "tool"]
         if tool_results:
-            print(f"\033[93m[Web_Agent]: ⚠️ Κενή σύνθεση — fallback σε raw tool results.\033[0m")
+            print(f"\033[93m[Web_Agent]: ⚠️ Empty synthesis — fallback to raw tool results.\033[0m")
             parts = []
             for tm in tool_results[-3:]:
                 raw = clean_message(tm.content).strip()[:900]
@@ -594,12 +594,12 @@ def tech_agent_node(state: AgentState):
                     }
                 print(f"\033[94m[Tech-Vision]: Pixels loaded for technical analysis: {filename}\033[0m")
             elif os.path.exists(file_path):
-                print(f"\033[94m[Agent Logic]: Το {filename} είναι έγγραφο. Παρακάμπτεται το Vision.\033[0m")
+                print(f"\033[94m[Agent Logic]: The {filename} is a document. Bypassing Vision.\033[0m")
         except Exception as e:
             print(f"⚠️ Tech Vision Error: {e}")
 
-    vision_info = f"\n[CONTEXT ΑΡΧΕΙΟΥ/ΦΩΤΟ]: Έχεις ήδη αυτή την ανάλυση: '{pre_baked_analysis}'.\n" if pre_baked_analysis else ""
-    json_base = load_agent_prompt("Tech_Agent", "Είσαι ο Tech_Agent, ο τεχνικός εμπειρογνώμονας του Λάζαρου.")
+    vision_info = f"\n[FILE/PHOTO CONTEXT]: You already have this analysis: '{pre_baked_analysis}'.\n" if pre_baked_analysis else ""
+    json_base = load_agent_prompt("Tech_Agent", "You are the Tech_Agent, Lazaros' technical expert.")
     json_base = json_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt_text = f"{json_base}{vision_info}"
     system_prompt = build_prompt(history, system_prompt_text, channel=state.get("channel"))
@@ -649,7 +649,7 @@ def git_agent_node(state):
     history = clean_orphan_tool_calls(state["messages"], k=40)
     safe_history = sanitize_history_for_gemini(history)
 
-    system_base = load_agent_prompt("Git_Agent", "Είσαι ο Git_Agent. Διαχειρίζεσαι GitHub repos.")
+    system_base = load_agent_prompt("Git_Agent", "You are the Git_Agent. You manage GitHub repos.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
@@ -669,7 +669,7 @@ def mail_agent_node(state):
     # [MASTRO-SHIELD]: Cleanup of orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
     
-    system_base = load_agent_prompt("Mail_Agent", "Είσαι ο Mail_Agent. Διαχειρίζεσαι το Gmail.")
+    system_base = load_agent_prompt("Mail_Agent", "You are the Mail_Agent. You manage Gmail.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
@@ -687,10 +687,10 @@ def mail_agent_node(state):
     if _known_ids:
         _top_id = _known_ids[0]
         _id_str = ', '.join("'" + e + "'" for e in _known_ids[:5])
-        system_prompt = system_prompt + ('\n\n[EMAIL IDs APO ANAZHTHSH]: '
-            + _id_str + '. An thelei na diavazeis email, kalese AMESA '
-            'mail_manager(action="read_full" ή "read_thread" για όλη τη συνομιλία, email_id=' + _top_id + '). '
-            'MHN kaneis search xana.')
+        system_prompt = system_prompt + ('\n\n[EMAIL IDs FROM SEARCH]: '
+            + _id_str + '. If the user wants to read an email, IMMEDIATELY call '
+            'mail_manager(action="read_full" or "read_thread" for the entire conversation, email_id=' + _top_id + '). '
+            'DO NOT search again.')
 
     # [MASTRO-FIX v3]: Elegxos MONO tool results apo to trexon turn
     # (meta to teleutaio human message) — apofigee cross-turn triggering
@@ -771,11 +771,11 @@ def mail_agent_node(state):
         )
         synthesis_prompt = (
             f"{system_base}\n\n"
-            "ΑΠΟΤΕΛΕΣΜΑΤΑ ΑΝΑΖΗΤΗΣΗΣ EMAIL (από mail_manager):\\n"
+            "EMAIL SEARCH RESULTS (from mail_manager):\\n"
             f"{joined_results}\n\n"
-            "Με βάση τα παραπάνω, δώσε σύντομη καθαρή απάντηση στον Λάζαρο. "
-            "ΜΗΝ καλέσεις εργαλεία. Απλή περίληψη στα Ελληνικά, με 2-4 πρακτικά "
-            "next steps αν το email ζητά ενέργεια."
+            "Based on the above, provide a short, clear answer to Lazaros. "
+            f"DO NOT call tools. Simple summary EXCLUSIVELY in {RESPONSE_LANGUAGE}, with 2-4 practical "
+            "next steps if the email requires action."
         )
         response = safe_llm_invoke(llm, [
             SystemMessage(content=synthesis_prompt),

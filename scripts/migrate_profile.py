@@ -9,14 +9,14 @@ DB_FILE = os.path.join(BASE_DIR, "astakos_profile.db")
 
 def migrate():
     if not os.path.exists(JSON_FILE):
-        print(f"Δεν βρέθηκε το {JSON_FILE}. Τίποτα για migration.")
+        print(f"Not found: {JSON_FILE}. Nothing to migrate.")
         return
 
     with open(JSON_FILE, "r", encoding="utf-8") as f:
         try:
             data = json.load(f)
         except Exception as e:
-            print(f"Σφάλμα ανάγνωσης JSON: {e}")
+            print(f"JSON read error: {e}")
             return
 
     conn = sqlite3.connect(DB_FILE)
@@ -68,8 +68,8 @@ def migrate():
     # Rename the old json for backup
     backup_file = JSON_FILE + ".backup"
     os.replace(JSON_FILE, backup_file)
-    print(f"Το migration ολοκληρώθηκε! Μεταφέρθηκαν {count} εγγραφές.")
-    print(f"Το παλιό αρχείο μετονομάστηκε σε {backup_file}")
+    print(f"Migration completed! Transferred {count} records.")
+    print(f"Old file renamed to {backup_file}")
 
 if __name__ == "__main__":
     migrate()

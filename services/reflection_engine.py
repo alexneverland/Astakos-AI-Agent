@@ -461,7 +461,7 @@ def run_reflection() -> dict:
     """
     from tools.telegram import send_telegram_msg
 
-    print("[Reflection]: Ξεκινάω self-evaluation...")
+    print("[Reflection]: Starting self-evaluation...")
     _ensure_table()
 
     events        = _load_today_events(days_back=1)
@@ -471,13 +471,13 @@ def run_reflection() -> dict:
     print(f"[Reflection]: events={len(events)}, routines={len(routine_stats)}, traces={len(traces)}")
 
     if not events and not routine_stats and not traces:
-        print("[Reflection]: Δεν υπάρχουν δεδομένα για ανάλυση.")
+        print("[Reflection]: No data for analysis.")
         return {"analyzed": 0, "applied": 0, "pending": 0, "skipped": 0}
 
     reflections = _analyze_with_llm(events, routine_stats, traces)
 
     if not reflections:
-        print("[Reflection]: Δεν βρέθηκαν observations.")
+        print("[Reflection]: No observations found.")
         return {"analyzed": 0, "applied": 0, "pending": 0, "skipped": 0}
 
     applied = pending = skipped = 0
@@ -528,7 +528,7 @@ def run_reflection() -> dict:
                               routine_id=routine_id, action_value=action_value)
             if success:
                 applied += 1
-                telegram_lines.append(f"✅ *{obs}*\n→ Εφαρμόστηκε: `{action}`\n💡 _{lesson}_")
+                telegram_lines.append(f"✅ *{obs}*\n→ Applied: `{action}`\n💡 _{lesson}_")
             else:
                 skipped += 1
 

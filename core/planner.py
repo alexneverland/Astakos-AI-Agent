@@ -45,7 +45,7 @@ def planner_node(state):
     goal = re.sub(r'^\[\d{1,2}:\d{2}\]\s*', '', last_msg).strip()
     goal = re.sub(r'^/plan\b\s*', '', goal).strip()
 
-    print(f"\033[95m[Planner]: Αναλύω goal: {goal[:80]}\033[0m")
+    print(f"\033[95m[Planner]: Analyzing goal: {goal[:80]}\033[0m")
 
     prompt = f"""Είσαι ο Αστακός, AI βοηθός. Ο χρήστης θέλει να εκτελέσεις το εξής:
 
@@ -68,7 +68,7 @@ GOAL: {goal}
         tasks = json.loads(raw)
         if not isinstance(tasks, list) or not tasks:
             raise ValueError("Empty task list")
-        print(f"\033[95m[Planner]: {len(tasks)} βήματα δημιουργήθηκαν\033[0m")
+        print(f"\033[95m[Planner]: {len(tasks)} steps created\033[0m")
     except Exception as e:
         print(f"\033[91m[Planner Error]: {e}\033[0m")
         tasks = [{"step": 1, "description": goal, "instruction": goal}]
@@ -84,7 +84,7 @@ GOAL: {goal}
         from memory.pending_plans import save_pending_plan
         pending_user_key = _planner_pending_user_key(state)
         save_pending_plan(goal, tasks, user_id=pending_user_key)
-        print(f"\033[95m[Planner]: Plan saved to SQLite pending_plans — αναμένω επιβεβαίωση\033[0m")
+        print(f"\033[95m[Planner]: Plan saved to SQLite pending_plans — awaiting confirmation\033[0m")
     except Exception as e:
         print(f"\033[91m[Planner]: Error saving pending plan: {e}\033[0m")
 
@@ -114,7 +114,7 @@ def task_executor_node(state):
         return {"plan_active": False}
 
     task = tasks[idx]
-    print(f"\033[95m[TaskExecutor]: Βήμα {idx+1}/{len(tasks)}: {task['description']}\033[0m")
+    print(f"\033[95m[TaskExecutor]: Step {idx+1}/{len(tasks)}: {task['description']}\033[0m")
 
     # We build context from previous results
     context = ""
@@ -137,7 +137,7 @@ def task_executor_node(state):
     except Exception:
         agent = "Dev_Agent"
 
-    print(f"[95m[TaskExecutor]: Routing βήμα {idx+1} → {agent}[0m")
+    print(f"[95m[TaskExecutor]: Routing step {idx+1} → {agent}[0m")
 
     # Progress indicator
     progress_msg = f"⏳ **Βήμα {idx+1}/{len(tasks)}:** {task['description']}"
@@ -174,7 +174,7 @@ def capture_result_node(state):
     results.append(last_result[:800] if last_result else "(χωρίς αποτέλεσμα)")
     new_idx = idx + 1
 
-    print(f"\033[95m[TaskExecutor]: ✅ Βήμα {idx+1} ολοκληρώθηκε ({len(results)}/{len(tasks)})\033[0m")
+    print(f"\033[95m[TaskExecutor]: ✅ Step {idx+1} completed ({len(results)}/{len(tasks)})\033[0m")
 
     plan_active = new_idx < len(tasks)
     return {
@@ -190,7 +190,7 @@ def _plan_summary(goal: str, tasks: list, results: list) -> dict:
     for i, (task, result) in enumerate(zip(tasks, results)):
         summary += f"**{i+1}. {task['description']}**\n{result[:500]}\n\n"
 
-    print(f"\033[92m[Planner]: Plan ολοκληρώθηκε — {len(tasks)} βήματα\033[0m")
+    print(f"\033[92m[Planner]: Plan completed — {len(tasks)} stepτα\033[0m")
 
     # Post-plan reflection
     try:
@@ -262,7 +262,7 @@ def pre_check_node(state):
     if last_msg in _CONFIRM_WORDS or last_msg_norm in _CONFIRM_WORDS:
         try:
             clear_pending_plan(user_id=pending_user_key)
-            print(f"\033[95m[PreCheck]: ✅ Plan επιβεβαιώθηκε — {len(pending['tasks'])} βήματα\033[0m")
+            print(f"\033[95m[PreCheck]: ✅ Plan confirmed — {len(pending['tasks'])} stepτα\033[0m")
             return {
                 "plan_tasks":                  pending["tasks"],
                 "plan_index":                  0,
@@ -281,7 +281,7 @@ def pre_check_node(state):
             clear_pending_plan(user_id=pending_user_key)
         except Exception:
             pass
-        print(f"\033[95m[PreCheck]: ❌ Plan ακυρώθηκε από τον χρήστη\033[0m")
+        print(f"\033[95m[PreCheck]: ❌ Plan cancelled from the user\033[0m")
         return {
             "plan_awaiting_confirmation": False,
             "next_agent": "__plan_cancelled__",
@@ -362,13 +362,13 @@ def validate_step_node(state):
             f"⚠️ **Βήμα {idx + 1}/{len(tasks)}** ({task['description']}): "
             f"Εντοπίστηκε πιθανό πρόβλημα στην απάντηση. Συνεχίζω με το επόμενο βήμα..."
         )
-        print(f"\033[93m[ValidateStep]: Βήμα {idx+1} — failure signal detected\033[0m")
+        print(f"\033[93m[ValidateStep]: Step {idx+1} — failure signal detected\033[0m")
         return {
             "messages":         [AIMessage(content=warning)],
             "plan_step_failed": True,
         }
 
-    print(f"\033[92m[ValidateStep]: Βήμα {idx+1} — OK\033[0m")
+    print(f"\033[92m[ValidateStep]: Step {idx+1} — OK\033[0m")
     return {"plan_step_failed": False}
 
 
@@ -402,7 +402,7 @@ def replan_node(state):
     else:
         action_msg += " Τελείωσαν όλα τα βήματα."
 
-    print(f"\033[93m[Replan]: Βήμα {idx+1} skipped → {'task_executor' if plan_active else 'end_check'}\033[0m")
+    print(f"\033[93m[Replan]: Step {idx+1} skipped → {'task_executor' if plan_active else 'end_check'}\033[0m")
 
     return {
         "messages":             [AIMessage(content=action_msg)],
@@ -445,7 +445,7 @@ def end_check_node(state):
         skip_badge = " ⚠️ _παραλείφθηκε_" if i in skipped else ""
         summary   += f"**{i + 1}. {task['description']}**{skip_badge}\n{result[:500]}\n\n"
 
-    print(f"\033[92m[EndCheck]: Plan done — {success_count}/{total} βήματα επιτυχή\033[0m")
+    print(f"\033[92m[EndCheck]: Plan done — {success_count}/{total} stepτα successful\033[0m")
 
     # Post-plan reflection
     try:

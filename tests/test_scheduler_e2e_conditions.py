@@ -30,7 +30,7 @@ _FIXED_NOW = datetime(2026, 6, 17, 12, 0, 0)
 def _due_row(rid=14, name="ρουτίνα", priority=0, ctype=None):
     return {
         "id": rid, "event_name": name, "confidence": 0.85,
-        "time_str": "12:30", "day_of_week": "Everyday", "state": "active",
+        "time_str": "12:00", "day_of_week": "Everyday", "state": "active",
         "last_triggered": None, "priority": priority, "condition_type": ctype
     }
 

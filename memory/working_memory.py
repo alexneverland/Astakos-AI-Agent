@@ -22,7 +22,7 @@ from core.utils import clean_message
 def update_working_memory(user_text, ai_text):
     """Instantly extracts context tags from the dialogue."""
     try:
-        print("\033[90m[System]: Ξεκίνησε η ανάλυση Προσκηνίου...\033[0m")
+        print("\033[90m[System]: Started Foreground analysis...\033[0m")
         from core.brain import llm, safe_llm_invoke
 
         # We put on the "glasses" (Smart Parser) before cutting the characters
@@ -57,20 +57,20 @@ def update_working_memory(user_text, ai_text):
         # No more "isinstance(list)" and loops.
         new_tags = clean_message(response.content)
 
-        print(f"\n\033[94m[DEBUG Προσκήνιο]: '{new_tags}'\033[0m")
+        print(f"\n\033[94m[DEBUG Foreground]: '{new_tags}'\033[0m")
 
         if "ΚΕΝΟ" in new_tags.upper() or not new_tags:
-            print("Λάζαρος: ", end="", flush=True)
+            print("Lazaros: ", end="", flush=True)
             return
 
         from memory.vector_store import memory # Make sure this import exists
         memory.save(memory_type="working", new_tags=new_tags)
-        print(f"\033[92m[Προσκήνιο JSON]: ΓΡΑΦΤΗΚΕ -> {new_tags}\033[0m")
-        print("Λάζαρος: ", end="", flush=True)
+        print(f"\033[92m[Foreground JSON]: WRITTEN -> {new_tags}\033[0m")
+        print("Lazaros: ", end="", flush=True)
 
     except Exception as e:
         print(f"\n\033[91m[Working Memory Error]: {e}\033[0m")
-        print("Λάζαρος: ", end="", flush=True)
+        print("Lazaros: ", end="", flush=True)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -231,23 +231,23 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
 
         if data.get("can_do") and str(data["can_do"]).lower() != "null":
             if _looks_like_user_fact_not_capability(data["can_do"]):
-                print(f"\033[90m[Αυτογνωσία]: skip user fact, not can_do: {data['can_do']}\033[0m")
+                print(f"\033[90m[Self-awareness]: skip user fact, not can_do: {data['can_do']}\033[0m")
             else:
                 result = _save_capability("can", data["can_do"])
                 if result == "inserted":
-                    print(f"\033[96m[Αυτογνωσία]: ✅ can_do: {data['can_do']}\033[0m")
+                    print(f"\033[96m[Self-awareness]: ✅ can_do: {data['can_do']}\033[0m")
                 elif result == "duplicate":
-                    print(f"\033[90m[Αυτογνωσία]: skip duplicate can_do: {data['can_do']}\033[0m")
+                    print(f"\033[90m[Self-awareness]: skip duplicate can_do: {data['can_do']}\033[0m")
             
         if data.get("cannot_do") and str(data["cannot_do"]).lower() != "null":
             if _looks_like_user_fact_not_capability(data["cannot_do"]):
-                print(f"\033[90m[Αυτογνωσία]: skip user fact, not cannot_do: {data['cannot_do']}\033[0m")
+                print(f"\033[90m[Self-awareness]: skip user fact, not cannot_do: {data['cannot_do']}\033[0m")
             else:
                 result = _save_capability("cannot", data["cannot_do"])
                 if result == "inserted":
-                    print(f"\033[91m[Αυτογνωσία]: ❌ cannot_do: {data['cannot_do']}\033[0m")
+                    print(f"\033[91m[Self-awareness]: ❌ cannot_do: {data['cannot_do']}\033[0m")
                 elif result == "duplicate":
-                    print(f"\033[90m[Αυτογνωσία]: skip duplicate cannot_do: {data['cannot_do']}\033[0m")
+                    print(f"\033[90m[Self-awareness]: skip duplicate cannot_do: {data['cannot_do']}\033[0m")
             
     except Exception as e:
-        print(f"\033[90m[Αυτογνωσία Error]: {e}\033[0m")
+        print(f"\033[90m[Self-awareness Error]: {e}\033[0m")

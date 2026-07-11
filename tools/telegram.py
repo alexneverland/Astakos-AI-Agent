@@ -67,7 +67,7 @@ def send_telegram_msg(text: str, disable_notification: bool = False) -> int | No
     chat_id = TELEGRAM_CHAT_ID
 
     if not token or not chat_id:
-        print("❌ Σφάλμα: Λείπουν τα Telegram credentials από το .env")
+        print("❌ Error: Telegram credentials missing from το .env")
         return None
 
     safe_text = format_for_telegram(text)
@@ -104,7 +104,7 @@ async def send_telegram_photo(image_path: str, caption: str = ""):
     token   = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
     if not token or not chat_id or not os.path.exists(image_path):
-        print(f"⚠️ send_telegram_photo: αρχείο δεν βρέθηκε ή credentials λείπουν ({image_path})")
+        print(f"⚠️ send_telegram_photo: file not found or credentials missing ({image_path})")
         return
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
     try:
@@ -116,7 +116,7 @@ async def send_telegram_photo(image_path: str, caption: str = ""):
                 timeout=30
             )
         if response.status_code == 200:
-            print(f"✅ [Telegram Photo]: Εικόνα στάλθηκε ({os.path.basename(image_path)})")
+            print(f"✅ [Telegram Photo]: Image sent ({os.path.basename(image_path)})")
         else:
             print(f"⚠️ [Telegram Photo]: {response.status_code} — {response.text[:120]}")
     except Exception as e:
@@ -132,7 +132,7 @@ def send_telegram_document(file_path: str, caption: str = "", drive_url: str = "
     token   = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
     if not token or not chat_id:
-        print("⚠️ send_telegram_document: λείπουν credentials")
+        print("⚠️ send_telegram_document: credentials missing")
         return
     if not os.path.exists(file_path):
         send_telegram_msg(f"⚠️ Αρχείο δεν βρέθηκε: <code>{file_path}</code>")
@@ -164,7 +164,7 @@ def send_telegram_document(file_path: str, caption: str = "", drive_url: str = "
                 timeout=60
             )
         if resp.status_code == 200:
-            print(f"✅ [Telegram Doc]: {filename} στάλθηκε" + (" + Drive link" if drive_url else ""))
+            print(f"✅ [Telegram Doc]: {filename} sent" + (" + Drive link" if drive_url else ""))
         else:
             print(f"⚠️ [Telegram Doc]: {resp.status_code} — {resp.text[:120]}")
     except Exception as e:
@@ -200,7 +200,7 @@ async def send_telegram_voice(text: str):
         if not clean_text.strip():
             clean_text = "Μάστορα, σου έστειλα κάτι τεχνικό στο τσατ, δες το εκεί."
 
-        print(f"\033[95m[TTS Telegram]: Δημιουργία φωνής για: {clean_text[:50]}...\033[0m")
+        print(f"\033[95m[TTS Telegram]: Creating voice for: {clean_text[:50]}...\033[0m")
 
         # edge-tts — same voice as the Web UI
         voice = "el-GR-NestorasNeural"
@@ -215,7 +215,7 @@ async def send_telegram_voice(text: str):
         audio_bytes = audio_buffer.read()
         
         if not audio_bytes:
-            print("❌ edge-tts: Δεν παράχθηκε ήχος.")
+            print("❌ edge-tts: No audio produced.")
             return
 
         # Send to Telegram as voice
@@ -228,7 +228,7 @@ async def send_telegram_voice(text: str):
         )
         
         if response.status_code == 200:
-            print(f"\033[92m[TTS Telegram]: ✅ Φωνητικό στάλθηκε ({len(audio_bytes)} bytes)\033[0m")
+            print(f"\033[92m[TTS Telegram]: ✅ Voice sent ({len(audio_bytes)} bytes)\033[0m")
         else:
             print(f"⚠️ Telegram Voice Error: {response.status_code} - {response.text}")
             

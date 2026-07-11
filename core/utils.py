@@ -630,7 +630,7 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
         except Exception as e:
             print(f"\033[91m⚠️ Memory Context Error: {e}\033[0m")
     elif has_skip_keyword:
-        print("\033[93m[Mastro-Radar]: ⚡ Παράκαμψη Semantic Search λόγω Skip Keyword! (Live Data Mode)\033[0m")
+        print("\033[93m[Mastro-Radar]: ⚡ Skipping Semantic Search due to Skip Keyword! (Live Data Mode)\033[0m")
 
     prompt = f"{identity}\n"
     days_gr = ["Δευτέρα","Τρίτη","Τετάρτη","Πέμπτη","Παρασκευή","Σάββατο","Κυριακή"]

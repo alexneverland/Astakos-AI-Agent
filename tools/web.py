@@ -25,7 +25,7 @@ except ImportError:
     try:
         from playwright_stealth import stealth as stealth_sync
     except ImportError:
-        print("⚠️ [Web Tool]: Δεν βρέθηκε το stealth_sync. Θα συνεχίσω χωρίς stealth mode.")
+        print("⚠️ [Web Tool]: Not found: stealth_sync. Will continue without stealth mode.")
         stealth_sync = None
 
 def remove_accents(input_str: str) -> str:
@@ -51,10 +51,9 @@ def _greek_to_latin(s: str) -> str:
     return ''.join(_MAP.get(c, c) for c in s.lower())
 
 
-_AMBIGUOUS_MESSENGER_TARGETS = {
-    "friend", "friends", "φιλε", "φιλος", "φιλους", "μαστορα", "mastora",
-    "user", "χρηστη", "αυτον", "αυτην", "καποιον", "καποια", "unknown",
-}
+from config import NLP_CONFIG
+
+_AMBIGUOUS_MESSENGER_TARGETS = set(NLP_CONFIG.get("web", {}).get("ambiguous_messenger_targets", []))
 
 
 def _load_messenger_contacts() -> dict[str, str]:
@@ -70,6 +69,18 @@ def _load_messenger_contacts() -> dict[str, str]:
             if ":" in fact_str:
                 k, v = fact_str.split(":", 1)
                 contacts[k.strip()] = v.strip()
+        
+        # Load additional manual contacts from astakos_settings.json
+        try:
+            import json, os
+            from config import SETTINGS_FILE
+            if os.path.exists(SETTINGS_FILE):
+                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    _set = json.load(f)
+                    for k, v in _set.get("messenger_contacts", {}).items():
+                        contacts[k.strip()] = str(v).strip()
+        except Exception as e:
+            print(f"⚠️ Failed to load manual messenger contacts: {e}")
                 
         return {remove_accents(str(k).strip()): str(v) for k, v in contacts.items()}
     except Exception:
@@ -113,21 +124,7 @@ def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
     return False, f"unknown Messenger contact '{target_entity}'"
 
 
-_CHATBOT_NOISE_PATTERNS = [
-    # Chatbot meta-text that must not be sent
-    r"θέλεις αλλαγές[^.]*\?",
-    r"θελεις αλλαγεσ[^.]*\?",
-    r"να το στείλω[^.]*\?",
-    r"να το στειλω[^.]*\?",
-    r"το αποθήκευσα[^.]*\.",
-    r"το αποθηκευσα[^.]*\.",
-    r"αποθήκευσα[^.]*\.",
-    r"αποθηκευσα[^.]*\.",
-    r"ετοιμάζω[^.]*\.",
-    r"ετοιμαζω[^.]*\.",
-    r"μήνυμα(?:\s+προς\s+\S+)?\s*:\s*",  # "Message to Sophia:"
-    r"(?:στέλνω|στελνω|στέλνουμε|στελνουμε)\s+(?:το\s+)?μήνυμα[^.]*\.",
-]
+_CHATBOT_NOISE_PATTERNS = NLP_CONFIG.get("web", {}).get("chatbot_noise_patterns", [])
 
 def _sanitize_message_payload(text: str) -> str:
     """
@@ -187,29 +184,8 @@ def _places_tokenize(text: str) -> set[str]:
     return {tok for tok in re.findall(r"[a-zA-Zα-ωΑ-Ω0-9]+", normalized) if len(tok) >= 2}
 
 
-_PLACES_INTENT_SYNONYMS = {
-    "seafood": {
-        "ψαροταβερνα", "ψαροταβερνες", "ψαρι", "ψαρια", "θαλασσινα", "seafood", "fish", "taverna",
-    },
-    "meat": {
-        "μπριζολαδικο", "μπριζολα", "κρεας", "σουβλακια", "ψησταρια", "grill", "steak", "burger",
-    },
-    "coffee": {
-        "καφε", "καφεδες", "cafe", "coffee", "brunch", "espresso", "barista",
-    },
-    "dessert": {
-        "γλυκο", "παγωτο", "waffle", "crepe", "dessert", "ζαχαροπλαστειο",
-    },
-    "family": {
-        "παιδια", "παιδι", "οικογενεια", "family", "kid", "kids",
-    },
-    "romantic": {
-        "ρομαντικο", "ησυχο", "quiet", "romantic", "sunset", "view",
-    },
-    "delivery": {
-        "delivery", "takeout", "πακετο", "ντελιβερι", "take away",
-    },
-}
+_PLACES_INTENT_SYNONYMS_JSON = NLP_CONFIG.get("web", {}).get("places_intent_synonyms", {})
+_PLACES_INTENT_SYNONYMS = {k: set(v) for k, v in _PLACES_INTENT_SYNONYMS_JSON.items()}
 
 
 def _build_places_query_profile(query: str) -> dict:
@@ -302,14 +278,14 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
         return (
             "❌ Δεν αποθήκευσα Messenger draft.\n"
             f"Λόγος: {reason}.\n"
-            "Δώσε ρητό παραλήπτη από τις επαφές, π.χ. `Σοφία`, ή Messenger URL/ID."
+            "Δώσε ρητό παραλήπτη from τις επαφές, e.g. `Μαρία`, ή Messenger URL/ID."
         )
     
     active, _, _ = active_draft_status()
     intent = classify_messenger_intent(payload_data or "", has_active_draft=active)
 
     if intent.intent in {"clarify_draft", "clear_draft"}:
-        return "❌ Δεν αποθήκευσα Messenger draft. Αυτό το μήνυμα μοιάζει με διευκρίνιση ή κλείσιμο draft, όχι με νέο draft."
+        return "❌ Δεν αποθήκευσα Messenger draft. Αυτό το message μοιάζει με διευκρίνιση ή κλείσιμο draft, όχι με νέο draft."
 
     if not (payload_data or "").strip():
         return "❌ Δεν αποθήκευσα Messenger draft. Δεν δόθηκε νέο κείμενο μηνύματος."
@@ -323,7 +299,7 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
     # or system feedback along with the actual message. We remove them.
     clean_payload = _sanitize_message_payload(payload_data)
     if not clean_payload:
-        return "❌ Δεν αποθήκευσα Messenger draft. Το μήνυμα ήταν κενό μετά το sanitization."
+        return "❌ Δεν αποθήκευσα Messenger draft. Το message ήταν κενό μετά το sanitization."
 
     save_draft(target_entity, clean_payload, image_path=image_path)
 
@@ -336,7 +312,7 @@ def get_news(topic: str = "Γενικά", limit: int = 10) -> str:
     try:
         topic = (topic or "Γενικά").strip()
         limit = max(1, min(int(limit or 10), 20))
-        print(f"\033[96m[Web]: Ανάκτηση ειδήσεων για: {topic}...\033[0m")
+        print(f"\033[96m[Web]: Fetching news for: {topic}...\033[0m")
 
         has_greek = any('\u0370' <= c <= '\u03ff' or '\u1f00' <= c <= '\u1fff' for c in topic)
         locale = "el&gl=GR&ceid=GR:el" if has_greek else "en&gl=US&ceid=US:en"
@@ -452,7 +428,7 @@ def get_weather_forecast(location: str, days: int = 14) -> str:
 
         return result
     except Exception as e:
-        return f"Σφάλμα καιρού: {str(e)}"
+        return f"Error καιρού: {str(e)}"
 
 
 @tool
@@ -516,7 +492,7 @@ def search_goldmall_offers(query: str) -> str:
                     results.append(f"🎬 **{title_text}**\n📅 {description if description else 'Δείτε το link για ώρες.'}")
 
                 except Exception as e:
-                    print(f"\033[91m[DEBUG]: Σφάλμα στην προσφορά {i}: {str(e)}\033[0m")
+                    print(f"\033[91m[DEBUG]: Error in offer {i}: {str(e)}\033[0m")
                     continue
                 finally:
                     if detail_page:
@@ -528,7 +504,7 @@ def search_goldmall_offers(query: str) -> str:
             return "🛒 **Πλήρεις Λεπτομέρειες Goldmall (Θεσσαλονίκη):**\n\n" + "\n\n---\n\n".join(results)
 
     except Exception as e:
-        return f"Γενικό Σφάλμα Goldmall: {str(e)}"
+        return f"Γενικό Error Goldmall: {str(e)}"
     finally:
         if browser:
             try:
@@ -560,21 +536,11 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
         target_name = target_name or draft.get("target_name", "")
         message = message or draft.get("message", "")
         image_path = draft.get("image_path", "")
-        print(f"\033[93m[Messenger]: Βρέθηκε draft για {target_name}. Εκτέλεση...\033[0m")
+        print(f"\033[93m[Messenger]: Found draft for {target_name}. Executing...\033[0m")
 
     # 2. [MASTRO-ALIAS]: Convert Name to ID
-    from memory.vector_store import get_profile_facts
-    aliases = {}
-    try:
-        docs = get_profile_facts(category="contacts", limit=200)
-        for d in docs:
-            fact = d["fact"]
-            if ":" in fact:
-                k, v = fact.split(":", 1)
-                aliases[k.strip()] = v.strip()
-    except Exception as e:
-            print(f"⚠️ [Messenger Error]: {e}")
-
+    aliases = _load_messenger_contacts()
+    
     aliases_lower = {k.lower(): v for k, v in aliases.items()}
     target_lower = target_name.strip().lower()
 
@@ -608,13 +574,13 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
             else:
                 chat_url = f"https://www.messenger.com/t/{final_id}"
 
-            print(f"🚀 Απευθείας πλοήγηση στο chat: {chat_url}")
+            print(f"🚀 Direct navigation to chat: {chat_url}")
             page.goto(chat_url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(5.0)
 
             # 4a. [IMAGE ATTACHMENT]: Attach image if it exists
             if image_path and os.path.exists(image_path):
-                print(f"\033[96m[Messenger]: Επισύναψη εικόνας: {image_path}\033[0m")
+                print(f"\033[96m[Messenger]: Attaching image: {image_path}\033[0m")
                 try:
                     # Messenger has a hidden file input — we find it and upload the file
                     file_input = page.locator('input[type="file"]').first
@@ -625,11 +591,11 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
                         'div[aria-label*="image"], div[class*="image"], div[class*="photo"]',
                         timeout=15000,
                     )
-                    print("\033[92m[Messenger]: Εικόνα επισυνάφθηκε ✓\033[0m")
+                    print("\033[92m[Messenger]: Image attached ✓\033[0m")
                     time.sleep(1.0)
                 except Exception as img_err:
-                    print(f"\033[93m[Messenger]: ⚠️ Αποτυχία επισύναψης εικόνας: {img_err}\033[0m")
-                    print("\033[93m[Messenger]: Συνεχίζω με αποστολή μόνο κειμένου.\033[0m")
+                    print(f"\033[93m[Messenger]: ⚠️ Failed to attach image: {img_err}\033[0m")
+                    print("\033[93m[Messenger]: Continuing with text-only message.\033[0m")
 
             # 4b. [SEND TEXT]: Typing + Enterof_thought
             # Timeout increased to 25s — Messenger SPA is sometimes slow
@@ -644,7 +610,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
             _sent_ok = True
 
     except Exception as e:
-        return f"❌ Σφάλμα Messenger: {str(e)}"
+        return f"❌ Error Messenger: {str(e)}"
     finally:
         try:
             browser.close()
@@ -679,7 +645,7 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
         print(f"⚠️ [Messenger Auto-Confirm skipped]: {_ae}")
 
     img_suffix = f" (με εικόνα: {os.path.basename(image_path)})" if image_path and os.path.exists(image_path) else ""
-    return f"✅ Το μήνυμα στάλθηκε στον/στη {target_name}!{img_suffix}"
+    return f"✅ Το message sent στον/στη {target_name}!{img_suffix}"
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 @tool
@@ -704,7 +670,7 @@ def browse_url(url: str) -> str:
                     elif hasattr(stealth_sync, 'stealth_sync'):
                         stealth_sync.stealth_sync(page)  # If it is a module
                 except Exception as e:
-                    print(f"⚠️ [Web Tool]: Το stealth mode απέτυχε, συνεχίζω κανονικά. ({e})")
+                    print(f"⚠️ [Web Tool]: Stealth mode failed, continuing normally. ({e})")
 
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=20000)
@@ -730,10 +696,10 @@ def browse_url(url: str) -> str:
             if any(kw in clean_text.lower() for kw in bot_keywords) or len(clean_text) < 30:
                 return f"[WEB_TOOL_ERROR][browse_url][reason=cloudflare] Το site έχει προστασία και δεν με άφησε να το διαβάσω."
 
-            return f"📄 Περιεχόμενο από {url}:\n\n{clean_text}"
+            return f"📄 Περιεχόμενο from {url}:\n\n{clean_text}"
 
     except Exception as e:
-        return f"[WEB_TOOL_ERROR][browse_url][reason=generic] Γενικό σφάλμα στο browse_url: Το εργαλείο απέτυχε ({str(e)})" 
+        return f"[WEB_TOOL_ERROR][browse_url][reason=generic] Γενικό σφάλμα στο browse_url: Το εργαλείο failed ({str(e)})" 
 @tool
 def duckduckgo_search(query: str) -> str:
     """Web search.
@@ -769,7 +735,7 @@ def duckduckgo_search(query: str) -> str:
     return (
         f"[WEB_TOOL_ERROR][duckduckgo_search]"
         f"[reason={last_error}] "
-        f"Η αναζήτηση απέτυχε σε {len(backends_to_try)} backends. "
+        f"Η αναζήτηση failed σε {len(backends_to_try)} backends. "
         "ΜΗΝ ξαναδοκιμάσεις το ίδιο ή παρόμοιο ερώτημα αμέσως — "
         "ενημέρωσε τον χρήστη ότι η web αναζήτηση είναι προσωρινά μη διαθέσιμη."
     )
@@ -818,7 +784,7 @@ def search_supermarket_prices(query: str) -> str:
         return "\n\n".join(output) if output else "❌ Δεν βρέθηκαν τιμές."
 
     except Exception as e:
-        return f"⚠️ Σφάλμα: {str(e)}"
+        return f"⚠️ Error: {str(e)}"
 @tool
 def search_google_places(query: str, location: str = "Thessaloniki") -> str:
     """
@@ -833,14 +799,9 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
     from config import GPS_STORAGE_FILE
     profile = _build_places_query_profile(query)
 
-    def _normalize_gr(text: str) -> str:
-        text = str(text or "").strip().lower()
-        text = unicodedata.normalize("NFKD", text)
-        return "".join(ch for ch in text if not unicodedata.combining(ch))
-    
     # [MASTRO-GPS-INTERCEPTOR]
-    query_norm = _normalize_gr(query)
-    if "κοντα" in query_norm or location == "current":
+    query_norm = remove_accents(query)
+    if re.search(r'\b(κοντα|near)\b', query_norm) or location == "current":
         if os.path.exists(GPS_STORAGE_FILE):
             try:
                 with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
@@ -848,13 +809,13 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
                     # If the ping/location is fresh (last 24 hours)
                     if time.time() - gps['timestamp'] < 86400:
                         location = f"{gps['lat']},{gps['lon']}"
-                        print(f"📍 [Web Tool]: Χρήση Live GPS στίγματος: {location}")
+                        print(f"📍 [Web Tool]: Usage Live GPS fix: {location}")
             except Exception as e:
                 print(f"⚠️ [Places GPS]: {e}")
             
     api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
     if not api_key:
-        return "❌ Λείπει το GOOGLE_PLACES_API_KEY από το .env"
+        return "❌ Λsaidι το GOOGLE_PLACES_API_KEY from το .env"
 
     search_url = "https://places.googleapis.com/v1/places:searchText"
 
@@ -992,7 +953,7 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
         return "\n".join(lines)
 
     except Exception as e:
-        return f"❌ Σφάλμα: {str(e)}"
+        return f"❌ Error: {str(e)}"
 
 @tool
 def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE") -> str:
@@ -1090,11 +1051,11 @@ def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE
                     else:
                         live_info += f"{mode_icon} <b>Χρόνος με τα πόδια:</b> {dur_min} λεπτά\n\n"
             else:
-                live_info = f"⚠️ Σφάλμα Routes API ({response.status_code}): {response.text}\n\n"
+                live_info = f"⚠️ Error Routes API ({response.status_code}): {response.text}\n\n"
         except Exception as e:
             live_info = f"⚠️ Απέτυχε η άντληση Live Κίνησης: {str(e)}\n\n"
     else:
-        live_info = "⚠️ Λείπει το GOOGLE_PLACES_API_KEY.\n\n"
+        live_info = "⚠️ Λsaidι το GOOGLE_PLACES_API_KEY.\n\n"
 
     return (
         f"📍 <b>Προορισμός:</b> {destination}\n"
@@ -1102,5 +1063,5 @@ def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE
         f"{live_info}"
         f"🔗 <a href='{search_url}'>Προβολή στον Χάρτη</a>\n"
         f"🛣️ <a href='{directions_url}'>Οδηγίες πλοήγησης</a>\n\n"
-        f"[SYSTEM_INSTRUCTION: ΠΡΕΠΕΙ ΥΠΟΧΡΕΩΤΙΚΑ να κάνεις copy-paste ΟΛΟ το παραπάνω μπλοκ κειμένου (από το 📍 μέχρι το 🛣️) ακριβώς όπως είναι, ΣΤΟ ΤΕΛΟΣ του μηνύματός σου προς τον χρήστη. Μην του δώσεις μόνο τη δική σου λεκτική απάντηση, αλλά επικόλλησε και το παραπάνω μπλοκ ως έχει.]"
+        f"[SYSTEM_INSTRUCTION: ΠΡΕΠΕΙ ΥΠΟΧΡΕΩΤΙΚΑ να κάνεις copy-paste ΟΛΟ το παραπάνω μπλοκ κειμένου (from το 📍 μέχρι το 🛣️) ακριβώς όπως είναι, ΣΤΟ ΤΕΛΟΣ του μηνύματός σου προς τον χρήστη. Μην του δώσεις μόνο τη δική σου λεκτική απάντηση, αλλά επικόλλησε και το παραπάνω μπλοκ ως έχει.]"
     )

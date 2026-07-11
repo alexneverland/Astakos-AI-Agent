@@ -110,7 +110,7 @@ def archive_file(filename: str, content_summary: str) -> str:
                 break
 
         if not full_path:
-            return f"❌ Σφάλμα: Το αρχείο {filename} δεν βρέθηκε."
+            return f"❌ Error: Το αρχείο {filename} δεν βρέθηκε."
 
         ext = os.path.splitext(full_path)[1].lower()
         m_type = "photo" if ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"] else "document"
@@ -123,7 +123,7 @@ def archive_file(filename: str, content_summary: str) -> str:
         )
         return f"✅ Έγινε, Μάστορα! Το αρχείο {filename} ({m_type}) αρχειοθετήθηκε μόνιμα με τη σύνοψη που έδωσες."
     except Exception as e:
-        return f"❌ Σφάλμα αρχειοθέτησης: {str(e)}"
+        return f"❌ Error αρχειοθέτησης: {str(e)}"
 
 # Channel for Memory Provenance — defined by server.py/telegram_bot.py
 _CURRENT_CHANNEL: str = "unknown"
@@ -369,7 +369,7 @@ def search_memory(query: str, category: str = "") -> str:
         )
         return "\n".join(output_parts).strip()
     except Exception as e:
-        return f"Error: Σφάλμα ανάκλησης μνήμης: {str(e)}"
+        return f"Error: Error ανάκλησης μνήμης: {str(e)}"
 @tool
 def run_terminal_command(command: str, already_approved: bool = False) -> str:
     """
@@ -516,13 +516,13 @@ def delete_from_memory(query: str) -> str:
             target_id, content = literal_hits[0]
             with vector_lock:
                 collection.delete(ids=[target_id])
-            print(f"\n🔥 [DATABASE ACTION]: ΔΙΕΓΡΑΦΗΚΕ (exact match): {content}")
+            print(f"\n🔥 [DATABASE ACTION]: DELETED (exact match): {content}")
             return f"Η μνήμη '{content}' διαγράφηκε επιτυχώς."
 
         if len(literal_hits) > 1:
             previews = "\n".join(f"  • {str(c).strip()[:140]}" for _, c in literal_hits[:6])
             return (
-                f"⚠️ Βρήκα {len(literal_hits)} εγγραφές που ταιριάζουν με '{query}'. "
+                f"⚠️ Βρήκα {len(literal_hits)} records που ταιριάζουν με '{query}'. "
                 f"Πες μου πιο συγκεκριμένα ποια να σβήσω:\n{previews}"
             )
 
@@ -547,10 +547,10 @@ def delete_from_memory(query: str) -> str:
             target_id = results['ids'][0][0]
             collection.delete(ids=[target_id])
 
-        print(f"\n🔥 [DATABASE ACTION]: ΔΙΕΓΡΑΦΗΚΕ (Dist: {distance:.2f}): {content}")
+        print(f"\n🔥 [DATABASE ACTION]: DELETED (Dist: {distance:.2f}): {content}")
         return f"Η μνήμη '{content}' διαγράφηκε επιτυχώς."
     except Exception as e:
-        return f"Σφάλμα διαγραφής: {e}"
+        return f"Error διαγραφής: {e}"
 
 
 @tool
@@ -606,14 +606,14 @@ def retrieve_photo(query: str) -> str:
 
                     if fp and os.path.exists(fp):
                         return (
-                            f"Βρήκα φωτογραφία από {best_entry.get('date', 'άγνωστη ημερομηνία')}{note}\n"
+                            f"Βρήκα φωτογραφία from {best_entry.get('date', 'άγνωστη ημερομηνία')}{note}\n"
                             f"[SEND_PHOTO: {fp}]"
                         )
 
         return "System: Δεν βρέθηκε φωτογραφία."
 
     except Exception as e:
-        return f"Error: Σφάλμα ανάκτησης φωτογραφίας: {str(e)}"
+        return f"Error: Error ανάκτησης φωτογραφίας: {str(e)}"
 
 
 # ────────────────────────────────────────────────────────────────
@@ -630,11 +630,11 @@ def _normalize_reminder_text(text: str) -> str:
         "θυμησε μου": "",
         "να πάρεις": "",
         "να παρεις": "",
-        "πριν φύγεις από τη δουλειά": "",
+        "πριν φύγεις from τη δουλειά": "",
         "πριν φυγεις απο τη δουλεια": "",
-        "από τη δουλειά": "",
+        "from τη δουλειά": "",
         "απο τη δουλεια": "",
-        "όταν φύγω από τη δουλειά": "",
+        "όταν φύγω from τη δουλειά": "",
         "οταν φυγω απο τη δουλεια": "",
     }
 
@@ -714,7 +714,7 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
                 
             cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (found_id,))
             conn.commit()
-            return f"✅ Η υπενθύμιση '{task}' ολοκληρώθηκε."
+            return f"✅ Η υπενθύμιση '{task}' completed."
 
         # ── ADD: New reminder ─────────────────────────────────
         else:
@@ -732,11 +732,11 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
                         datetime.strptime(exact_time, "%Y-%m-%d %H:%M")
                         target_time = exact_time
                     except ValueError:
-                        return "Σφάλμα: Η ακριβής ώρα (exact_time) πρέπει να είναι ΜΟΝΟ ώρα (HH:MM) ή πλήρης ημερομηνία (YYYY-MM-DD HH:MM)."
+                        return "Error: Η ακριβής ώρα (exact_time) πρέπει να είναι ΜΟΝΟ ώρα (HH:MM) ή πλήρης ημερομηνία (YYYY-MM-DD HH:MM)."
             elif location:
                 target_time = f"loc:{location}"
             else:
-                return "Σφάλμα: Πρέπει να δώσεις λεπτά, ακριβή ώρα, ή τοποθεσία (π.χ. location='home')."
+                return "Error: Πρέπει να δώσεις λεπτά, ακριβή ώρα, ή τοποθεσία (e.g. location='home')."
 
             cursor.execute("SELECT id, task, time FROM reminders WHERE status='pending'")
             pending_rows = cursor.fetchall()
@@ -756,7 +756,7 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             return f"✅ Υπενθύμιση ρυθμίστηκε για τις {target_time}!"
 
     except Exception as e:
-        return f"Σφάλμα υπενθύμισης: {e}"
+        return f"Error υπενθύμισης: {e}"
     finally:
         if conn:
             conn.close()
@@ -786,7 +786,7 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
     VALID_TYPES = {"family", "work", "hobby", "general"}
 
     if day_of_week not in VALID_DAYS:
-        return f"❌ Μη έγκυρη μέρα: '{day_of_week}'. Χρησιμοποίησε αγγλικό όνομα (π.χ. 'Friday') ή 'Everyday'."
+        return f"❌ Μη έγκυρη μέρα: '{day_of_week}'. Χρησιμοποίησε αγγλικό όνομα (e.g. 'Friday') ή 'Everyday'."
 
     try:
         datetime.strptime(time_str, "%H:%M")
@@ -803,13 +803,13 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
         res = upsert_routine(day_of_week, time_str, event_name, event_type, confidence_boost=0.3)
 
         if res == "created":
-            return f"✅ Ρουτίνα '{event_name}' καταγράφηκε (θα ενεργοποιηθεί μετά από 2η επιβεβαίωση)."
+            return f"✅ Ρουτίνα '{event_name}' καταγράφηκε (θα ενεργοποιηθεί μετά from 2η επιβεβαίωση)."
         elif res == "merged":
             return f"✅ Ρουτίνα '{event_name}' αναγνωρίστηκε ως παρόμοια με υπάρχουσα και ενοποιήθηκε."
         else:
             return f"✅ Ρουτίνα '{event_name}' ενισχύθηκε! (Confidence Boosted)."
     except Exception as e:
-        return f"❌ Σφάλμα αποθήκευσης ρουτίνας: {e}"
+        return f"❌ Error αποθήκευσης ρουτίνας: {e}"
 
 
 @tool
@@ -842,9 +842,9 @@ def delete_routine(event_name: str, day_of_week: str = "", time_str: str = "") -
         success = delete_routine_db(r_id)
         if success:
             return f"✅ Η ρουτίνα '{routines[0]['event']}' διαγράφηκε οριστικά."
-        return "❌ Η διαγραφή απέτυχε."
+        return "❌ Η διαγραφή failed."
     except Exception as e:
-        return f"❌ Σφάλμα κατά τη διαγραφή ρουτίνας: {e}"
+        return f"❌ Error κατά τη διαγραφή ρουτίνας: {e}"
 
 
 @tool
@@ -894,10 +894,10 @@ def edit_routine(
 
         success = update_routine_db(r_id, new_time=new_time_str, new_day=new_day_of_week)
         if success:
-            return f"✅ Η ρουτίνα '{routines[0]['event']}' ενημερώθηκε επιτυχώς (νέα ώρα: {new_time_str or 'ίδια'}, νέα μέρα: {new_day_of_week or 'ίδια'})."
-        return "❌ Η ενημέρωση απέτυχε."
+            return f"✅ Η ρουτίνα '{routines[0]['event']}' updated επιτυχώς (νέα ώρα: {new_time_str or 'ίδια'}, νέα μέρα: {new_day_of_week or 'ίδια'})."
+        return "❌ Η ενημέρωση failed."
     except Exception as e:
-        return f"❌ Σφάλμα κατά την επεξεργασία ρουτίνας: {e}"
+        return f"❌ Error κατά την επεξεργασία ρουτίνας: {e}"
 @tool
 def get_routines(day_of_week: str) -> str:
     """
@@ -918,7 +918,7 @@ def get_routines(day_of_week: str) -> str:
             lines.append(f"  • {r['time']} — {r['event']} ({r['type']}, {conf_pct}% conf, {mentions}x αναφ.)")
         return "\n".join(lines)
     except Exception as e:
-        return f"❌ Σφάλμα ανάκτησης ρουτινών: {e}"
+        return f"❌ Error ανάκτησης ρουτινών: {e}"
 
 
 def _get_routine_names_for_intent_classification() -> list[str]:
@@ -1024,7 +1024,7 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
     try:
         routines = find_routines_for_schedule_control(event_name)
     except Exception as e:
-        return f"❌ Σφάλμα αναζήτησης ρουτίνας: {e}"
+        return f"❌ Error αναζήτησης ρουτίνας: {e}"
 
     if not routines:
         return f"ℹ️ Δεν βρέθηκε σαφής ρουτίνα για: {event_name}"
@@ -1035,7 +1035,7 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
         if action == "mute":
             until_date = (until_date or "").strip()
             if not until_date:
-                return "❌ Χρειάζομαι until_date (YYYY-MM-DD) — υπολόγισέ το από τα συμφραζόμενα της κουβέντας."
+                return "❌ Χρειάζομαι until_date (YYYY-MM-DD) — υπολόγισέ το from τα συμφραζόμενα της κουβέντας."
             try:
                 datetime.strptime(until_date, "%Y-%m-%d")
             except ValueError:
@@ -1078,11 +1078,11 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
                 day = routine.get("day") or "?"
                 info = get_sentimental_info(r_id)
                 if not info["muted_until"]:
-                    results.append(f"⚠️ [{day}] Η ρουτίνα '{label}' δεν είναι σε σίγαση αυτή τη στιγμή — δεν υπάρχει κάτι να σιγάσω.")
+                    results.append(f"⚠️ [{day}] Η ρουτίνα '{label}' δεν είναι σε σίγαση αυτή τη στιγμή — δεν exists κάτι να σιγάσω.")
                     already_ok += 1
                     continue
                 set_sentimental_silenced(r_id, True)
-                results.append(f"🤫 [{day}] Εντάξει, δεν θα στείλω τίποτα (ούτε συναισθηματικό μήνυμα) για '{label}' μέχρι να λήξει η σίγαση.")
+                results.append(f"🤫 [{day}] Εντάξει, δεν θα στείλω τίποτα (ούτε συναισθηματικό message) για '{label}' μέχρι να λήξει η σίγαση.")
                 changed += 1
             if changed == 0 and already_ok > 0:
                 return f"ℹ️ Οι ρουτίνες ήταν ήδη στην επιθυμητή κατάσταση για: {event_name}"
@@ -1096,13 +1096,13 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
                 label = routine["event"]
                 day = routine.get("day") or "?"
                 set_sentimental_silenced(r_id, False)
-                results.append(f"💬 [{day}] Εντάξει, θα ξαναστέλνω περιστασιακά ένα ζεστό μήνυμα για '{label}' όσο διαρκεί η σίγαση.")
+                results.append(f"💬 [{day}] Εντάξει, θα ξαναστέλνω περιστασιακά ένα ζεστό message για '{label}' όσο διαρκεί η σίγαση.")
                 changed += 1
             if changed == 0:
                 return f"ℹ️ Δεν έγινε καμία αλλαγή ρουτίνας για: {event_name}"
             return "\n".join(results)
     except Exception as e:
-        return f"❌ Σφάλμα ενημέρωσης ρουτίνας: {e}"
+        return f"❌ Error ενημέρωσης ρουτίνας: {e}"
 
     return "❌ Άγνωστο σφάλμα."
 
@@ -1196,7 +1196,7 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
                 conn = get_connection(write=True)
                 conn.execute("UPDATE routines SET conditions_json = NULL WHERE id = ?", (r_id,))
                 conn.commit()
-            results.append(f"🧹 Η ρουτίνα '{label}' καθαρίστηκε από conditions.")
+            results.append(f"🧹 Η ρουτίνα '{label}' καθαρίστηκε from conditions.")
             changed += 1
 
     if changed == 0:
@@ -1282,7 +1282,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
     try:
         routines = find_routines_for_schedule_control(event_name)
     except Exception as e:
-        return f"❌ Σφάλμα αναζήτησης ρουτίνας: {e}"
+        return f"❌ Error αναζήτησης ρουτίνας: {e}"
 
     if not routines:
         return f"ℹ️ Δεν βρέθηκε σαφής ρουτίνα για: {event_name}"
@@ -1293,7 +1293,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
         if action == "pause":
             until_date = (until_date or "").strip()
             if not until_date:
-                return "❌ Χρειάζομαι until_date (YYYY-MM-DD) — υπολόγισέ το από τα συμφραζόμενα της κουβέντας."
+                return "❌ Χρειάζομαι until_date (YYYY-MM-DD) — υπολόγισέ το from τα συμφραζόμενα της κουβέντας."
             if not _valid_date(until_date):
                 return f"❌ Λάθος format ημερομηνίας: '{until_date}'. Χρησιμοποίησε YYYY-MM-DD."
             reason_clean = reason.strip() or None
@@ -1345,7 +1345,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
                 label = routine["event"]
                 day = routine.get("day") or "?"
                 set_routine_active_window(r_id, active_from=active_from_clean, active_until=active_until_clean, reason=reason_clean)
-                results.append(f"📅 [{day}] Η ρουτίνα '{label}' έχει πλέον παράθυρο ισχύος: από={active_from_clean or '—'}, μέχρι={active_until_clean or '—'}.")
+                results.append(f"📅 [{day}] Η ρουτίνα '{label}' έχει πλέον παράθυρο ισχύος: from={active_from_clean or '—'}, μέχρι={active_until_clean or '—'}.")
             return "\n".join(results)
 
         if action == "clear_window":
@@ -1357,7 +1357,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
                 results.append(f"📅 [{day}] Το παράθυρο ισχύος της ρουτίνας '{label}' αφαιρέθηκε — ισχύει πάντα πλέον.")
             return "\n".join(results)
     except Exception as e:
-        return f"❌ Σφάλμα ενημέρωσης χρονοδιαγράμματος ρουτίνας: {e}"
+        return f"❌ Error ενημέρωσης χρονοδιαγράμματος ρουτίνας: {e}"
 
     return "❌ Άγνωστο σφάλμα."
 
@@ -1430,7 +1430,7 @@ def control_routine_cooldown(
 
         after = get_routine_notify_info(r_id)
         results.append(
-            f"🔄 [{r_day} {r_time}] Η ρουτίνα '{label}' βγήκε από cooldown "
+            f"🔄 [{r_day} {r_time}] Routine '{label}' removed from cooldown "
             f"({before['cooldown_hours']}h -> {after['cooldown_hours']}h)."
         )
         changed += 1
@@ -1580,9 +1580,9 @@ def manage_list(action: str, list_name: str, item: str = "") -> str:
         conn.commit()
 
         added_str = ", ".join(to_process) if to_process else "κανένα"
-        return f"System: Η ενέργεια '{action}' ολοκληρώθηκε (Αντικείμενα: {added_str})."
+        return f"System: Η ενέργεια '{action}' completed (Αντικείμενα: {added_str})."
     except Exception as e:
-        return f"Error: Σφάλμα λίστας: {str(e)}"
+        return f"Error: Error λίστας: {str(e)}"
     finally:
         if conn:
             conn.close()
@@ -1629,7 +1629,7 @@ def google_tasks_tool(
     try:
         action = (action or "list").strip().lower()
         tasklist_id = tasklist_id or "@default"
-        print(f"\033[93m[Tasks]: Ενέργεια '{action}'...\033[0m")
+        print(f"\033[93m[Tasks]: Action '{action}'...\033[0m")
         creds = Credentials.from_authorized_user_file(TOKEN_PATH, ['https://www.googleapis.com/auth/tasks'])
         service = build('tasks', 'v1', credentials=creds)
 
@@ -1669,7 +1669,7 @@ def google_tasks_tool(
                 task=task_id,
                 body={"status": "completed"},
             ).execute()
-            return f"✅ Το Google Task `{task_id}` ολοκληρώθηκε."
+            return f"✅ Το Google Task `{task_id}` completed."
 
         if action == "update":
             if not task_id:
@@ -1685,7 +1685,7 @@ def google_tasks_tool(
             if not body:
                 return "❌ Για update δώσε title, due ή notes."
             updated = service.tasks().patch(tasklist=tasklist_id, task=task_id, body=body).execute()
-            return f"✅ Το Google Task ενημερώθηκε: {updated.get('title', task_id)}"
+            return f"✅ Το Google Task updated: {updated.get('title', task_id)}"
 
         if action == "delete":
             if not task_id:
@@ -1716,10 +1716,10 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
     # [SECURITY]: basename + resolve check — prevents path traversal (e.g., ../config.py)
     safe_filename = os.path.basename(filename)
     if not safe_filename:
-        return "❌ Σφάλμα: Μη έγκυρο όνομα αρχείου."
+        return "❌ Error: Μη έγκυρο όνομα αρχείου."
     full_path = os.path.realpath(os.path.join(output_dir, safe_filename))
     if not full_path.startswith(output_dir + os.sep) and full_path != output_dir:
-        return "❌ Σφάλμα: Το path εκτός outputs δεν επιτρέπεται."
+        return "❌ Error: Το path εκτός outputs δεν επιτρέπεται."
     file_type = file_type.lower()
 
     try:
@@ -1758,12 +1758,12 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
                 f.write(data)
 
         else:
-            return f"❌ Σφάλμα: Ο τύπος '{file_type}' δεν υποστηρίζεται."
+            return f"❌ Error: Ο τύπος '{file_type}' δεν υποστηρίζεται."
 
-        return f"✅ Έτοιμο Μάστορα! Το αρχείο δημιουργήθηκε επιτυχώς.\n[CREATED_FILE: {full_path}]"
+        return f"✅ Έτοιμο Μάστορα! Το αρχείο created επιτυχώς.\n[CREATED_FILE: {full_path}]"
 
     except Exception as e:
-        return f"❌ Σφάλμα κατά τη δημιουργία: {str(e)}"
+        return f"❌ Error κατά τη δημιουργία: {str(e)}"
 @tool
 def generate_image_tool(prompt: str) -> str:
     """
@@ -1799,10 +1799,10 @@ def generate_image_tool(prompt: str) -> str:
         if not response.images:
             return "❌ Το Vertex AI Imagen δεν επέστρεψε εικόνα."
         response.images[0].save(location=full_path, include_generation_parameters=False)
-        return f"✅ Έτοιμο! Η εικόνα δημιουργήθηκε.\n[SEND_PHOTO: {full_path}]"
+        return f"✅ Έτοιμο! Η εικόνα created.\n[SEND_PHOTO: {full_path}]"
 
     except Exception as e:
-        return f"❌ Σφάλμα Vertex AI Imagen: {str(e)}"
+        return f"❌ Error Vertex AI Imagen: {str(e)}"
 def _escape_drive_query_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
@@ -1838,7 +1838,7 @@ def drive_manager(
         import io
 
         action = (action or "list_files").strip().lower()
-        print(f"\033[93m[Drive]: Ενέργεια '{action}'...\033[0m")
+        print(f"\033[93m[Drive]: Action '{action}'...\033[0m")
         creds   = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
         service = build('drive', 'v3', credentials=creds)
 
@@ -1916,7 +1916,7 @@ def drive_manager(
             if local_path:
                 _lp_real = os.path.realpath(local_path)
                 if not _lp_real.startswith(_outputs_dir + os.sep):
-                    return f"❌ Απαγορευμένο download path: επιτρέπεται μόνο εντός outputs/."
+                    return f"❌ Απαγορευμένο download path: επιτρέπεται μόνο within outputs/."
                 save_target = _lp_real
             else:
                 save_target = os.path.join(_outputs_dir, os.path.basename(file_name))
@@ -1944,11 +1944,11 @@ def drive_manager(
             ]
             _lp_real = os.path.realpath(local_path)
             if not any(_lp_real.startswith(d + os.sep) or _lp_real == d for d in _upload_allowed):
-                return f"❌ Απαγορευμένο upload path: επιτρέπεται μόνο από outputs/, telegram_uploads/, telegram_photos/, watch_folder/."
+                return f"❌ Απαγορευμένο upload path: επιτρέπεται μόνο from outputs/, telegram_uploads/, telegram_photos/, watch_folder/."
             file_metadata = {'name': os.path.basename(local_path), 'parents': [folder_id]}
             media = MediaFileUpload(local_path, resumable=True)
             file = service.files().create(body=file_metadata, media_body=media, fields='id,name').execute()
-            return f"✅ '{file.get('name')}' ανέβηκε! (ID: {file.get('id')})"
+            return f"✅ '{file.get('name')}' uploaded! (ID: {file.get('id')})"
 
         # ── DELETE ───────────────────────────────────────────────
         elif action == "delete":
@@ -1999,7 +1999,7 @@ def drive_manager(
                 "parents": [folder_id]
             }
             folder = service.files().create(body=metadata, fields="id, name").execute()
-            return f"📁 Φάκελος '{folder.get('name')}' δημιουργήθηκε (ID: {folder.get('id')})."
+            return f"📁 Folder '{folder.get('name')}' created (ID: {folder.get('id')})."
 
         # ── INFO ─────────────────────────────────────────────────
         elif action == "info":
@@ -2088,13 +2088,13 @@ def read_local_file(file_path: str) -> str:
         return any(real == f for f in _allowed_files)
 
     full_path = None
-    print(f"\033[93m[Tool Debug]: Ψάχνω το αρχείο: {filename}\033[0m")
+    print(f"\033[93m[Tool Debug]: Searching for file: {filename}\033[0m")
 
     # If an absolute path was provided, check that it is within the allowed dirs
     if os.path.isabs(file_path):
         if os.path.exists(file_path) and os.path.isfile(file_path) and (_in_allowed(file_path) or _is_allowed_file(file_path)):
             full_path = file_path
-            print(f"\033[92m[Tool Debug]: ✅ Absolute path εντός allowed -> {full_path}\033[0m")
+            print(f"\033[92m[Tool Debug]: ✅ Absolute path within allowed -> {full_path}\033[0m")
         elif os.path.exists(file_path):
             return f"❌ Απαγορευμένο path: {os.path.basename(file_path)} βρίσκεται εκτός εγκεκριμένων φακέλων."
 
@@ -2112,7 +2112,7 @@ def read_local_file(file_path: str) -> str:
             test_path = os.path.join(d, filename)
             if os.path.exists(test_path) and os.path.isfile(test_path) and _in_allowed(test_path):
                 full_path = test_path
-                print(f"\033[92m[Tool Debug]: ✅ Το βρήκα στο -> {full_path}\033[0m")
+                print(f"\033[92m[Tool Debug]: ✅ Found at -> {full_path}\033[0m")
                 break
 
     if not full_path:
@@ -2191,7 +2191,7 @@ def write_code(filename: str, code: str) -> str:
     file_path = os.path.join(WORKSPACE_DIR, safe_filename)
 
     try:
-        print(f"\033[93m[Dev]: Αποθήκευση στο {file_path}...\033[0m")
+        print(f"\033[93m[Dev]: Saving in {file_path}...\033[0m")
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(code)
         return f"System: Ο κώδικας γράφτηκε στο {file_path}."
@@ -2215,7 +2215,7 @@ def run_code(filename: str, script_args: str = "") -> str:
     file_path = os.path.join(WORKSPACE_DIR, safe_filename)
 
     if not os.path.exists(file_path):
-        return f"Error: Το αρχείο {file_path} δεν υπάρχει στο Sandbox."
+        return f"Error: Το αρχείο {file_path} δεν exists στο Sandbox."
 
     # ── SafeExec check ───────────────────────────────────────────
     cmd_str = f"python {safe_filename} {script_args}".strip()
@@ -2231,7 +2231,7 @@ def run_code(filename: str, script_args: str = "") -> str:
         if script_args:
             cmd.extend(script_args.split())
 
-        print(f"\033[93m[Dev]: Εκτέλεση του {safe_filename} με ορίσματα: {script_args}\033[0m")
+        print(f"\033[93m[Dev]: Executing {safe_filename} with arguments: {script_args}\033[0m")
 
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         output = res.stdout if res.stdout else ""
@@ -2397,7 +2397,7 @@ if __name__ == "__main__":
 
         if "TEST_FAIL" in stdout or (res.returncode != 0 and not stdout):
             error_detail = stdout or stderr
-            return f"❌ Tool '{tool_name}' ΔΕΝ πέρασε το test.\nΣφάλμα: {error_detail[:600]}"
+            return f"❌ Tool '{tool_name}' ΔΕΝ πέρασε το test.\nError: {error_detail[:600]}"
 
         sep = "═" * 62
         code_body = re.sub(
@@ -2411,12 +2411,12 @@ if __name__ == "__main__":
             f.write(paste_code.rstrip() + "\n")
 
         print(f"\n\033[92m{sep}")
-        print(f"  ✅  TOOL ΓΡΑΦΤΗΚΕ: {tool_name}")
+        print(f"  ✅  TOOL WRITTEN: {tool_name}")
         print(f"  🧪  Test: {stdout}")
         print(sep)
         print(paste_code)
         print(f"{sep}\033[0m\n")
-        print("Λάζαρος: ", end="", flush=True)
+        print("Lazaros: ", end="", flush=True)
 
         return f"✅ Tool '{tool_name}' γράφτηκε στο astakos_skills/{tool_name}.py και πέρασε το test ({stdout})."
 
@@ -2425,7 +2425,7 @@ if __name__ == "__main__":
             os.remove(temp_path)
         except:
             pass
-        return "❌ Timeout: το test script κόλλησε πάνω από 15 δευτερόλεπτα."
+        return "❌ Timeout: το test script κόλλησε πάνω from 15 δευτερόλεπτα."
     except Exception as e:
         return f"Error: {str(e)}"
 
@@ -2455,7 +2455,7 @@ def get_gmail_service():
 
     if not creds or not creds.valid:
         if not os.path.exists(CREDS_PATH):
-            raise Exception("Λείπει το αρχείο credentials.json! Κατέβασέ το από το Google Cloud.")
+            raise Exception("Λsaidι το αρχείο credentials.json! Κατέβασέ το from το Google Cloud.")
 
         if creds and creds.expired and creds.refresh_token:
             from google.auth.transport.requests import Request
@@ -2566,7 +2566,7 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         if not action:
             return "❌ Δώσε action: search, read_full, read_thread, send, reply ή delete."
 
-        print(f"\033[94m[Mail API]: Εκτέλεση ενέργειας '{action}'...\033[0m")
+        print(f"\033[94m[Mail API]: Executing action '{action}'...\033[0m")
         action = action.lower()
         if action == "read" and email_id:
             action = "read_full"
@@ -2582,7 +2582,7 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
                 return "❌ Για send χρειάζονται: to_email, subject, body."
             raw = _encode_gmail_message(_build_plain_email(to_email, subject, body))
             service.users().messages().send(userId="me", body={"raw": raw}).execute()
-            return "✅ Email στάλθηκε κανονικά."
+            return "✅ Email sent κανονικά."
 
         # =========================
         # REPLY
@@ -2621,7 +2621,7 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
                 userId="me",
                 body=send_body
             ).execute()
-            return f"✅ Reply στάλθηκε στον {orig_from}."
+            return f"✅ Reply sent στον {orig_from}."
 
         # =========================
         # SEARCH
@@ -2803,22 +2803,22 @@ def control_vacuum(action: str) -> str:
     token = VACUUM_TOKEN
 
     if not ip or not token:
-        return "Σφάλμα: Δεν βρέθηκαν VACUUM_IP ή VACUUM_TOKEN."
+        return "Error: Δεν βρέθηκαν VACUUM_IP ή VACUUM_TOKEN."
 
     try:
         vac = Device(ip, token)
 
         if action == "start":
             vac.send("action", {"did": "astakos", "siid": 2, "aiid": 1, "in": []})
-            return "Ο Αστακός έδωσε εντολή: Η X20+ ξεκίνησε το σκούπισμα! 🧹"
+            return "Ο Astakos έδωσε εντολή: Η X20+ started το σκούπισμα! 🧹"
 
         elif action == "stop":
             vac.send("action", {"did": "astakos", "siid": 2, "aiid": 2, "in": []})
-            return "Ο Αστακός έδωσε εντολή: Η σκούπα σταμάτησε."
+            return "Ο Astakos έδωσε εντολή: Η σκούπα σταμάτησε."
 
         elif action == "home":
             vac.send("action", {"did": "astakos", "siid": 3, "aiid": 1, "in": []})
-            return "Ο Αστακός έδωσε εντολή: Η σκούπα επιστρέφει στη βάση. 🏠"
+            return "Ο Astakos έδωσε εντολή: Η σκούπα επιστρέφει στη βάση. 🏠"
 
         elif action.startswith("room:"):
             room_name = action.split(":", 1)[1].strip()
@@ -2836,7 +2836,7 @@ def control_vacuum(action: str) -> str:
             room_id = room_map.get(room_name)
             if room_id is None:
                 available = ", ".join(room_map.keys())
-                return f"Σφάλμα: Δεν βρέθηκε το δωμάτιο '{room_name}'. Διαθέσιμα δωμάτια: {available}"
+                return f"Error: Not found: δωμάτιο '{room_name}'. Διαθέσιμα δωμάτια: {available}"
 
             vac.send("action", {
                 "did": "astakos", 
@@ -2847,13 +2847,13 @@ def control_vacuum(action: str) -> str:
                     {"piid": 10, "value": f'{{"selects":[[{room_id},1,2,1,1]]}}'}
                 ]
             })
-            return f"Ο Αστακός έδωσε εντολή: Η X20+ πάει για σκούπισμα στο δωμάτιο: {room_name}! 🧹"
+            return f"Ο Astakos έδωσε εντολή: Η X20+ πάει για σκούπισμα στο δωμάτιο: {room_name}! 🧹"
 
         else:
             return f"Άγνωστη εντολή: {action}."
 
     except Exception as e:
-        return f"Σφάλμα επικοινωνίας με τη σκούπα: {str(e)}"
+        return f"Error επικοινωνίας με τη σκούπα: {str(e)}"
 @tool
 def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str = None) -> str:
     """
@@ -2880,10 +2880,10 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
                         image_paths = data.get("image_paths")
                         image_path = data.get("image_path")
             except Exception as e:
-                print(f"⚠️ Σφάλμα ανάγνωσης draft: {e}")
+                print(f"⚠️ Error reading draft: {e}")
 
     if not text:
-        return "❌ Σφάλμα: Δεν βρέθηκε κείμενο (ούτε στο draft, ούτε στα ορίσματα)."
+        return "❌ Error: Δεν βρέθηκε κείμενο (ούτε στο draft, ούτε στα ορίσματα)."
 
     # Gathering of all paths into a list
     all_paths = []
@@ -2895,12 +2895,12 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
     # Validate paths
     for p in all_paths:
         if not os.path.exists(p):
-            return f"❌ Εικόνα δεν βρέθηκε: {p}"
+            return f"❌ Image δεν βρέθηκε: {p}"
 
     # --- LinkedIn API Logic ---
     load_dotenv(find_dotenv(), override=True)
     token = os.getenv("LINKEDIN_TOKEN")
-    if not token: return "❌ Λείπει το LINKEDIN_TOKEN."
+    if not token: return "❌ Λsaidι το LINKEDIN_TOKEN."
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -2955,12 +2955,12 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
                     json.dump({}, f)
             img_count = len(asset_urns)
             img_msg = f" με {img_count} εικόν{'α' if img_count == 1 else 'ες'}" if img_count else ""
-            return f"✅ Το LinkedIn post ανέβηκε{img_msg} και το draft καθαρίστηκε!"
+            return f"✅ Το LinkedIn post uploaded{img_msg} και το draft καθαρίστηκε!"
 
         return f"❌ Αποτυχία: {res.text}"
 
     except Exception as e:
-        return f"❌ Κρίσιμο Σφάλμα: {str(e)}"
+        return f"❌ Κρίσιμο Error: {str(e)}"
 import math
 
 def _is_home(lat: float, lon: float, home_lat: float = 40.646537, home_lon: float = 22.939025, radius_m: float = 150) -> bool:
@@ -2985,7 +2985,7 @@ def get_current_location() -> str:
     from config import GPS_STORAGE_FILE
 
     if not os.path.exists(GPS_STORAGE_FILE):
-        return "📍 Δεν υπάρχει καταγεγραμμένο στίγμα ακόμα. Ζήτα από τον Λάζαρο να στείλει Live Location."
+        return "📍 Δεν exists καταγεγραμμένο στίγμα remaining. Ζήτα from τον Λάζαρο να στείλει Live Location."
 
     try:
         with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
@@ -3012,7 +3012,7 @@ def get_current_location() -> str:
             )
 
     except Exception as e:
-        return f"❌ Σφάλμα κατά την ανάγνωση του GPS: {str(e)}"
+        return f"❌ Error κατά την ανάγνωση του GPS: {str(e)}"
 
 @tool
 def control_spotify(
@@ -3064,7 +3064,7 @@ def control_spotify(
 
         elif action == "play":
             sp.start_playback()
-            return "▶️ Η μουσική ξεκίνησε ξανά!"
+            return "▶️ Η μουσική started ξανά!"
 
         return "❌ Άγνωστη εντολή. Δοκίμασε: play, pause, next, now_playing, top_tracks, search."
 
@@ -3126,7 +3126,7 @@ def update_goal_progress_tool(project: str, progress: int) -> str:
     from memory.vector_store import update_goal_progress
     ok = update_goal_progress(project=project, progress=progress)
     if ok:
-        return f"✅ Goal '{project}' πρόοδος → {progress}%."
+        return f"✅ Goal '{project}' progress → {progress}%."
     return f"❌ Δεν βρέθηκε goal '{project}'."
 
 
@@ -3140,7 +3140,7 @@ def update_goal_milestones_tool(project: str, milestones: str) -> str:
     from memory.vector_store import update_goal_milestones
     ok = update_goal_milestones(project=project, milestones=milestones)
     if ok:
-        return f"✅ Goal '{project}' milestones ενημερώθηκαν."
+        return f"✅ Goal '{project}' milestones updated."
     return f"❌ Δεν βρέθηκε goal '{project}'."
 
 
@@ -3185,7 +3185,7 @@ def tool_stats(days: int = 7) -> str:
                     stats[name]["durations"].append(dur)
 
     if not stats:
-        return f"📊 Δεν βρέθηκαν traces για τις τελευταίες {days} μέρες."
+        return f"📊 No traces found για τις τελευταίες {days} μέρες."
 
     # Sorting: first those with errors, then alphabetically
     rows = []
@@ -3624,7 +3624,7 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
         if category:
             filters.append(f"category={category}")
         filter_text = f" με φίλτρα ({', '.join(filters)})" if filters else ""
-        return f"📋 Memory Review: {period.lower()}{filter_text} δεν υπάρχουν εγγραφές."
+        return f"📋 Memory Review: {period.lower()}{filter_text} δεν υπάρχουν records."
 
     # Grouping by operation
     adds        = [e for e in entries if e.get("op") == "add"]
