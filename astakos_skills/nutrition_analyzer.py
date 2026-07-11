@@ -30,18 +30,18 @@ def analyze_nutrition(image_path: str, product_hint: str = "") -> str:
 
     hint_line = f"Το προϊόν είναι: {product_hint}." if product_hint else ""
 
-    prompt = f"""Είσαι ειδικός ανάλυσης συστατικών και ασφάλειας προϊόντων. Αναλύεις ετικέτες από οποιοδήποτε προϊόν.
+    prompt = f"""You are an expert in ingredient analysis and product safety. You analyze labels from any product.
 {hint_line}
 
-Βήμα 1: Προσδιόρισε την κατηγορία: ΤΡΟΦΙΜΟ / ΚΑΛΛΥΝΤΙΚΟ / ΟΙΚΙΑΚΟ / ΦΑΡΜΑΚΟ / ΑΛΛΟ
-Βήμα 2: Αναγνώρισε τα συστατικά που βλέπεις.
-Βήμα 3: Αξιολόγησε 1-10 ανάλογα με κατηγορία:
-  - Τρόφιμο: υγιεινότητα, additives, ζάχαρη, αλάτι
-  - Καλλυντικό: ασφάλεια δέρματος, παραβένες, αρώματα, allergens
-  - Οικιακό: τοξικότητα, περιβαλλοντικό αποτύπωμα
-Βήμα 4: Σχόλιο για παιδιά (6 ετών) αν είναι σχετικό.
+Step 1: Identify the category: FOOD / COSMETIC / HOUSEHOLD / MEDICINE / OTHER
+Step 2: Identify the ingredients you see.
+Step 3: Evaluate on a scale of 1-10 based on the category:
+  - Food: healthiness, additives, sugar, salt
+  - Cosmetic: skin safety, parabens, fragrances, allergens
+  - Household: toxicity, environmental footprint
+Step 4: Add a comment for children (around 6 years old) if relevant.
 
-Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με αυτή τη μορφή (Ελληνικά):
+IMPORTANT RULE: You MUST answer EXCLUSIVELY in Greek, using EXACTLY the following format:
 
 🏷️ **[Όνομα προϊόντος] — [Κατηγορία]**
 

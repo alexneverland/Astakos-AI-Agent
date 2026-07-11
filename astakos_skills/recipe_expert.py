@@ -97,17 +97,19 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
     print(f"\n[Tool Debug] 👨‍🍳 Ο Chef Αστακός ετοιμάζει προτάσεις...")
     # The tool executes the call internally... (The rest of the code remains the same)
     prompt = f"""
-    Είσαι ο Chef του σπιτιού. Λειτούργησε βάσει των εξής:
+    You are the family's Home Chef. Operate based on the following:
     
-    1. ΠΕΡΙΟΡΙΣΜΟΙ/ΠΡΟΤΙΜΗΣΕΙΣ (Από Μνήμη): {user_context}
-    2. ΠΡΟΣΦΑΤΑ ΓΕΥΜΑΤΑ (Απόφυγέ τα αυστηρά): {', '.join(recent)}
-    3. ΔΙΑΘΕΣΙΜΑ ΥΛΙΚΑ: {ingredients if ingredients else 'Δεν ορίστηκαν'}
-    4. ΑΙΤΗΜΑ: {query if query else 'Πρόταση 3 γευμάτων'}
+    1. CONSTRAINTS/PREFERENCES (From Memory): {user_context}
+    2. RECENT MEALS (Strictly avoid these): {', '.join(recent)}
+    3. AVAILABLE INGREDIENTS: {ingredients if ingredients else 'Not specified'}
+    4. USER REQUEST: {query if query else 'Suggest 3 meals'}
     
-    ΟΔΗΓΙΕΣ ΕΚΤΕΛΕΣΗΣ:
-    - Αν υπάρχουν υλικά, πρότεινε συνταγές που τα χρησιμοποιούν.
-    - Αν ζητήθηκε συγκεκριμένη συνταγή, δώσε αναλυτικά υλικά και εκτέλεση, προσαρμοσμένα ώστε να τα τρώνε τα παιδιά (ειδικά ο Αλέξανδρος που τρώει μόνο φακές/φασόλια από όσπρια).
-    - Αν το αίτημα είναι γενικό, δώσε 3 επιλογές (Το Σίγουρο, Το Γρήγορο, Το Διαφορετικό).
+    EXECUTION INSTRUCTIONS:
+    - If ingredients are provided, suggest recipes that use them.
+    - If a specific recipe is requested, provide detailed ingredients and steps, adapted to be kid-friendly (especially for Alexandros, who only eats lentils/beans when it comes to legumes).
+    - If the request is generic, provide 3 options (The Safe Bet, The Quick One, The Different One).
+    
+    IMPORTANT RULE: You MUST write your entire response in fluent Greek.
     """
     
     try:
