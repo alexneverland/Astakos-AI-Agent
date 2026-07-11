@@ -1,1 +1,0 @@
-[GPS_UPDATE] Ο [USER_NOMINATIVE] μοιράστηκε τοποθεσία: lat={lat}, lon={lon}. Χρησιμοποίησε το web tool για reverse geocoding και απάντησε σύντομα στα Ελληνικά πού βρίσκεται, με Google Maps link και οδηγίες από Piston 7.

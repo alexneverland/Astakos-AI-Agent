@@ -23,6 +23,7 @@ import re
 from core.utils import clean_message, looks_like_operational_assistant_text
 from core.event_bus import bus
 import sqlite3
+import config
 from config import PHOTOS_INDEX_FILE, PHOTOS_DIR, STATE_DB
 from memory.conversation_history import (
     append_exchange,
@@ -1114,6 +1115,10 @@ def _run_session_summary(channel: str = "web"):
 
         # 3. The prompt with a strict date format (to match your old logs)
         summary_prompt = load_prompt("session_summary.md").replace(
+            "{language}", config.RESPONSE_LANGUAGE
+        ).replace(
+            "{user_name}", config.USER_NAME
+        ).replace(
             "{date}", datetime.now().strftime('%Y-%m-%d %H:%M')
         ).replace(
             "{channel}", summary_channel
@@ -1936,6 +1941,10 @@ def run_memory_sifter_slow(
             recent_context_block = ""
 
         sifter_prompt = load_prompt("memory_sifter.md").replace(
+            "{language}", config.RESPONSE_LANGUAGE
+        ).replace(
+            "{user_name}", config.USER_NAME
+        ).replace(
             "{cats_desc}", cats_desc
         ).replace(
             "{today_date}", datetime.now().strftime('%Y-%m-%d')

@@ -61,7 +61,7 @@ def run():
             nonlocal process
             if process:
                 stop_process(process)
-            print("\033[92m[Watchdog]: Εκκίνηση Telegram Bot...\033[0m")
+            print("\033[92m[Watchdog]: Starting Telegram Bot...\033[0m")
             creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
             process = subprocess.Popen(
                 [sys.executable, "clients/telegram_bot.py"],

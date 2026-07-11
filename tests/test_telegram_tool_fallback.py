@@ -15,7 +15,7 @@ def test_tool_results_fallback_uses_no_tools_synthesis(monkeypatch):
     result = bot._tool_results_fallback_response("τι βρήκες;", ["snippet 1", "snippet 2"])
 
     assert result == "Σύνθεση από εργαλεία"
-    assert "Μην καλέσεις εργαλεία" in captured[0]
+    assert "Do not call tools" in captured[0]
     assert "snippet 1" in captured[0]
 
 

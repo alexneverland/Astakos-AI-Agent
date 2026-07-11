@@ -35,6 +35,9 @@ if ROOT_DIR not in sys.path:
 from langchain_core.messages import HumanMessage, AIMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE, NLP_CONFIG
+import config
+import core.i18n
+from core.i18n import t
 
 def _normalize_gr(text: str) -> str:
     """Removes accents from Greek text for accent-insensitive comparison."""
@@ -445,7 +448,7 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
     now_dt = datetime.now()
     state_block = _render_followup_state_snapshot(state_snapshot)
 
-    prompt = core.i18n.load_prompt("telegram_bot_followup_decision.md").format(
+    prompt = core.i18n.load_prompt("telegram_bot_followup_decision.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, 
         local_time=now_dt.strftime("%Y-%m-%d %H:%M"),
         hour=now_dt.hour,
         state_block=state_block,
@@ -846,7 +849,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         from memory.conversation_history import build_asset_context_text
         conversation_context = build_asset_context_text("telegram")
 
-        sum_prompt = core.i18n.load_prompt("telegram_bot_document_analysis.md").format(
+        sum_prompt = core.i18n.load_prompt("telegram_bot_document_analysis.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, 
             conversation_context=conversation_context or t("clients.telegram_bot.msg_98937a"),
             caption=caption or t("clients.telegram_bot.msg_05a606"),
             file_name=file_name,
@@ -1361,7 +1364,7 @@ def _tool_results_fallback_response(user_text: str, tool_results: list[str]) -> 
         return ""
 
     joined_results = "\n\n---\n\n".join(clean_results[-5:])[:6000]
-    prompt = core.i18n.load_prompt("telegram_bot_tools_synthesis.md").format(user_text=user_text, joined_results=joined_results)
+    prompt = core.i18n.load_prompt("telegram_bot_tools_synthesis.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, user_text=user_text, joined_results=joined_results)
     try:
         response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
         content = clean_message(getattr(response, "content", "")).strip()
@@ -2253,7 +2256,7 @@ def handle_location(msg, live_update=False):
 
     from core.graph import graph
     from langchain_core.messages import HumanMessage
-    location_prompt = core.i18n.load_prompt("telegram_bot_location_update.md").format(lat=lat, lon=lon)
+    location_prompt = core.i18n.load_prompt("telegram_bot_location_update.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, lat=lat, lon=lon)
     try:
         final = ""
         for event in graph.stream({"messages": [HumanMessage(content=location_prompt)]}):
@@ -2521,7 +2524,7 @@ def run_polling():
         print(f"\033[93m[TelegramBot]: setMyCommands failed: {_e}\033[0m")
 
     offset = 0
-    print(f"\033[92m[TelegramBot]: Polling ξεκίνησε (allowed chat: {TELEGRAM_CHAT_ID})\033[0m")
+    print(f"\033[92m[TelegramBot]: Polling started (allowed chat: {TELEGRAM_CHAT_ID})\033[0m")
 
     while not shutdown_event.is_set():
         try:
@@ -3295,56 +3298,12 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
     env_context = _get_env_context()
     env_block = f"\n{env_context}\n" if env_context else ""
 
-    prompt = (
-        f"{context}\n\n"
-        f"{memory_block}"
-        f"{env_block}"
-        "Είσαι ο Αστακός, ο προσωπικός AI του Λάζαρου (42 χρονών, μάστορας, "
-        "γιος Αλέξανδρος 6 ετών, κόρη Μαρία 15 ετών, γυναίκα Σοφία). "
-        "Στείλε ΕΝΑ φυσικό μήνυμα κολλημένο στην καθημερινότητα — με χιούμορ, σαν παλιός φίλος.\n"
-        "Πριν γράψεις, διάβασε το πρόσφατο ιστορικό. Αν υπάρχει ζωντανό context "
-        "(π.χ. παίζουν επιτραπέζιο, είναι σε ποδόσφαιρο, δουλεύει, είναι έξω), "
-        "δέσε την ατάκα φυσικά με αυτό. Αν το ιστορικό δεν σχετίζεται, αγνόησέ το.\n"
-        "Επίσης, αν βλέπεις ΠΕΡΙΒΑΛΛΟΝΤΙΚΑ ΔΕΔΟΜΕΝΑ (καιρός, τοποθεσία) και σχετίζονται "
-        "άμεσα με τη ρουτίνα (π.χ. βροχή και εξωτερική δραστηριότητα), προσάρμοσε την ατάκα σου!\n"
-        "ΚΡΙΣΙΜΟ: Το μήνυμα ΠΡΕΠΕΙ να υπηρετεί τη συγκεκριμένη ρουτίνα/event. "
-        "Μπορείς και πρέπει να το δένεις με το πρόσφατο ιστορικό όταν ταιριάζει "
-        "(π.χ. ποδόσφαιρο, επιτραπέζιο, δουλειά, χαλάρωση με τον Αλέξανδρο), "
-        "αλλά μην αλλάζεις αποστολή και μην κάνεις status για άσχετα tools/debug/Google Fit.\n"
-        "Αν το event αφορά σύνταξη/αποστολή μηνύματος στη Σοφία, φτιάξε ατάκα για τη Σοφία "
-        "χρησιμοποιώντας φυσικά το πρόσφατο context, και ρώτα διακριτικά αν θέλει να ετοιμάσετε/στείλετε το μήνυμα.\n"
-        "ΜΗΝ ισχυρίζεσαι ποτέ ότι υπάρχει έτοιμο draft, εκκρεμές μήνυμα ή δυνατότητα άμεσης αποστολής αν αυτό δεν έχει επιβεβαιωθεί από πραγματικό ενεργό draft state του συστήματος.\n"
-        "Χρησιμοποίησε τις ώρες στα πρόσφατα μηνύματα: μην παρουσιάζεις σαν τελειωμένο "
-        "κάτι που ξεκίνησε πριν λίγα λεπτά ή δεν δηλώθηκε ότι ολοκληρώθηκε. "
-        "Αν ο Λάζαρος είπε μόλις 'μαγειρεύω', 'παίζουμε', 'φεύγουμε' ή 'πάμε', "
-        "μίλα σαν να είναι σε εξέλιξη, όχι σαν να έγινε ήδη.\n"
-        "Αν το context λέει ότι ο Αλέξανδρος λείπει/είναι κατασκήνωση, ΜΗΝ προτείνεις "
-        "δραστηριότητα μαζί του (πάρκο, παιχνίδι, ύπνο). Χρησιμοποίησε [CONTEXT_SKIP] "
-        "ή στείλε μόνο τρυφερό σχόλιο για την απουσία αν ταιριάζει.\n"
-        "Αν το event ακυρώνεται λόγω 'shift_mode_blocked', σημαίνει ότι ο χρήστης ΔΟΥΛΕΥΕΙ σε άλλη βάρδια, "
-        "ΕΠΟΜΕΝΩΣ ΜΗΝ πεις ότι έχει ρεπό ή ότι 'γλίτωσε τη δουλειά'. Σχολίασε την τρέχουσα βάρδια του!\n"
-        "Όμως αν το event είναι καθαρά λειτουργικό (π.χ. ξύπνημα, ώρα αναχώρησης, routine που δεν ισχύει "
-        "σήμερα λόγω βάρδιας), μην στείλεις παρηγορητικό ή συναισθηματικό fallback μόνο και μόνο επειδή "
-        "υπάρχει άλλο active context. Εκεί προτίμησε [SILENT_SKIP].\n"
-        "ΑΠΑΓΟΡΕΥΕΤΑΙ: 'δεν είναι η ώρα για', 'υπενθύμιση', 'θυμίζω', το event name κυριολεκτικά.\n"
-        "ΣΗΜΑΝΤΙΚΟ — ΕΠΙΛΕΞΕ ΑΚΡΙΒΩΣ ΕΝΑ ΑΠΟ ΤΑ ΤΡΙΑ:\n"
-        "1. ΚΑΝΟΝΙΚΟ ΜΗΝΥΜΑ: 1-2 προτάσεις χωρίς tag.\n"
-        "2. [CONTEXT_SKIP]: Χρησιμοποίησέ το ΜΟΝΟ όταν η βασική ρουτίνα δεν πρέπει να γίνει, "
-        "ΑΛΛΑ υπάρχει νόημα να σταλεί ένα σύντομο ανθρώπινο/συναισθηματικό σχόλιο που ταιριάζει "
-        "στη στιγμή. Παράδειγμα: λείπει ο Αλέξανδρος, άρα δεν γίνεται πάρκο/ύπνος, αλλά ταιριάζει "
-        "μια τρυφερή αναφορά στην απουσία του. Ξεκίνα ΤΟ ΜΗΝΥΜΑ ΣΟΥ με [CONTEXT_SKIP].\n"
-        "3. [SILENT_SKIP]: Χρησιμοποίησέ το όταν η ρουτίνα ακυρώνεται καθαρά λειτουργικά "
-        "και δεν υπάρχει κανένας λόγος να σταλεί μήνυμα. Αυτό ισχύει ιδιαίτερα όταν το event "
-        "δεν ισχύει σήμερα λόγω βάρδιας, ωραρίου, δουλειάς, μετακίνησης, επειδή έγινε ήδη, "
-        "ή επειδή ο χρήστης βρίσκεται ήδη σε άλλη ξεκάθαρη κατάσταση. Σε τέτοιες περιπτώσεις "
-        "γράψε ΜΟΝΟ [SILENT_SKIP] χωρίς τίποτε άλλο.\n"
-        "Αν η ρουτίνα είναι wake-up / ξύπνημα / αναχώρηση για δουλειά και ακυρώνεται επειδή ο χρήστης "
-        "έχει άλλη βάρδια ή διαφορετικό ωράριο σήμερα, προτίμησε [SILENT_SKIP], όχι [CONTEXT_SKIP].\n"
-        "Παραδείγματα:\n"
-        "- 'Μάστορα, ο μικρός θα σε κυνηγάει αν δεν τον πας για ύπνο σε λίγο 😄'\n"
-        "- '[CONTEXT_SKIP] Κανονικά τέτοια ώρα θα πάλευες να κοιμίσεις τον μικρό, αλλά απόψε σε βλέπω να ξεραίνεσαι εσύ!'\n"
-        "- '[SILENT_SKIP]'  ← μόνο αυτό, όταν το event δηλώθηκε ότι ήδη έγινε\n"
-        "Ελληνικά."
+    prompt = core.i18n.load_prompt("telegram_bot_craft_proactive.md").format(
+        context=context,
+        memory_block=memory_block,
+        env_block=env_block,
+        language=config.RESPONSE_LANGUAGE,
+        user_name=config.USER_NAME
     )
 
     try:
@@ -3522,7 +3481,7 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
     env_context = _get_env_context()
     env_block = f"\n{env_context}\n" if env_context else ""
 
-    prompt = core.i18n.load_prompt("telegram_bot_craft_deferred.md").format(
+    prompt = core.i18n.load_prompt("telegram_bot_craft_deferred.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, 
         certainty=certainty,
         missed_minutes=missed_minutes,
         memory_block=memory_block,
@@ -4217,7 +4176,7 @@ def job_proactive_scan():
                 content = read_local_file.invoke({"file_path": filepath})
             collected_data += f"\n--- ΑΡΧΕΙΟ: {file} ---\n{str(content)[:2000]}\n"
 
-        prompt = core.i18n.load_prompt("telegram_bot_proactive_scan.md")
+        prompt = core.i18n.load_prompt("telegram_bot_proactive_scan.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME)
         response = safe_gemini_call(f"{prompt}\n\n[ΔΕΔΟΜΕΝΑ]:\n{collected_data}")
         reply = response.text.strip()
 
@@ -4348,7 +4307,7 @@ def job_goal_followup():
     try:
         from memory.vector_store import get_active_goals
         from config import BASE_DIR
-        import json as _json
+        import json
 
         goals = get_active_goals()
         if not goals:
@@ -4394,7 +4353,7 @@ def job_goal_followup():
             goals_text_lines.append(line)
         goals_text = "\n".join(goals_text_lines)
 
-        prompt = core.i18n.load_prompt("telegram_bot_goal_followup.md").format(goals_text=goals_text)
+        prompt = core.i18n.load_prompt("telegram_bot_goal_followup.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, goals_text=goals_text)
 
         response = safe_gemini_call(prompt)
         msg = response.text.strip() if hasattr(response, "text") else str(response).strip()
@@ -4449,7 +4408,7 @@ class AstakosScheduler:
         """Writes runtime_snapshot.json on every heartbeat — read by /debug/runtime."""
         try:
             from config import BASE_DIR
-            import json as _json
+            import json
             now = time.time()
             memory_context_path = os.path.join(BASE_DIR, "runtime_memory_context.json")
             try:
@@ -4484,7 +4443,7 @@ class AstakosScheduler:
                 snapshot["proactive_this_hour"] = _proactive_count["count"]
             path = os.path.join(BASE_DIR, "runtime_snapshot.json")
             with open(path, "w", encoding="utf-8") as f:
-                _json.dump(snapshot, f, ensure_ascii=False)
+                json.dump(snapshot, f, ensure_ascii=False)
         except Exception as e:
             print(f"[Scheduler]: snapshot write error: {e}")
 

@@ -516,7 +516,7 @@ async def manual_session_save(_=Depends(require_token)):
     
     # Execution in a separate thread to prevent the API from freezing
     threading.Thread(target=_run_session_summary, args=("web",), daemon=True).start()
-    return JSONResponse({"status": "Η αρχειοθέτηση ξεκίνησε!"})
+    return JSONResponse({"status": "Archiving started!"})
 @server.post("/chat")
 async def chat_endpoint(request: Request, _=Depends(require_token)):
     global last_interaction_time

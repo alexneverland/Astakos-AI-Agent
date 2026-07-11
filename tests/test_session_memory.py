@@ -375,12 +375,12 @@ def test_memory_sifter_includes_recent_session_context_in_prompt(monkeypatch):
     assert "ΜΗΝ εξάγεις facts από αυτό το τμήμα" in prompt
     assert "Πάμε για ΛΕΓΚΟ;" in prompt
     assert "Τι θα φτιάξουμε;" in prompt
-    assert "ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ" in prompt
+    assert "CURRENT EXCHANGE" in prompt
     assert "Ωραία τα φτιάξαμε" in prompt
     # Order: old frame -> current index -> current exchange
     assert (
         prompt.index("ΠΡΟΗΓΟΥΜΕΝΟ ΠΛΑΙΣΙΟ")
-        < prompt.index("ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ")
+        < prompt.index("CURRENT EXCHANGE")
         < prompt.index("Ωραία τα φτιάξαμε")
     )
     session_memory.SESSION_LOGS.clear()
@@ -412,7 +412,7 @@ def test_memory_sifter_omits_context_block_when_session_logs_empty(monkeypatch):
 
     prompt = captured["prompt"]
     assert "ΠΡΟΗΓΟΥΜΕΝΟ ΠΛΑΙΣΙΟ" not in prompt
-    assert "ΤΡΕΧΟΥΣΑ ΑΝΤΑΛΛΑΓΗ" in prompt
+    assert "CURRENT EXCHANGE" in prompt
 
 
 def test_memory_sifter_skips_operational_mail_image_request(monkeypatch):

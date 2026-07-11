@@ -83,12 +83,14 @@ import json
 # ==========================================
 SETTINGS_FILE = os.path.join(BASE_DIR, "astakos_settings.json")
 RESPONSE_LANGUAGE = "Greek" # Default fallback
+USER_NAME = "User" # Default fallback
 SENTIMENTAL_OVERRIDE_KEYWORDS = ()
 if os.path.exists(SETTINGS_FILE):
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
             _settings = json.load(f)
             RESPONSE_LANGUAGE = _settings.get("response_language", "Greek")
+            USER_NAME = _settings.get("user_name", "User")
             SENTIMENTAL_OVERRIDE_KEYWORDS = tuple(_settings.get("sentimental_override_keywords", []))
     except Exception as e:
         print(f"⚠️ Error reading settings: {e}")

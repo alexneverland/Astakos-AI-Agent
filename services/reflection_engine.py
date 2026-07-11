@@ -555,7 +555,7 @@ def run_reflection() -> dict:
 
     # Telegram Send
     if telegram_lines:
-        header = "🧠 *Astakos Self-Reflection — Νυχτερινή Ανάλυση*\n\n"
+        header = "🧠 *Astakos Self-Reflection — Nightly Analysis*\n\n"
         msg    = header + "\n\n---\n\n".join(telegram_lines)
         if len(msg) > 4000:
             msg = msg[:3990] + "..."
