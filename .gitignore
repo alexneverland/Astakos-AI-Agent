@@ -85,3 +85,9 @@ tmp/
 
 # OfficeCLI binary
 vendor/officecli/*.exe
+
+# Ignore personal prompts and translations
+prompts/*.md
+!prompts/*.example.md
+locales/*.json
+!locales/*.example.json
