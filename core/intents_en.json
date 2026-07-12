@@ -136,13 +136,7 @@
                 "lights",
                 "lights",
                 "alarm clock",
-                "alarm clock",
-                "child",
-                "child",
-                "alexander",
-                "alexander",
-                "school",
-                "school"
+                "alarm clock"
             ],
             "WEB_KEYWORDS": [
                 "water break",
@@ -329,29 +323,6 @@
             "remind",
             "message",
             "message",
-            "slavery",
-            "slavery",
-            "shift",
-            "shifts",
-            "morning",
-            "in the afternoon",
-            "in the evening",
-            "sophia",
-            "sophia",
-            "alexander",
-            "alexander",
-            "mary",
-            "mary",
-            "camp",
-            "camp",
-            "park",
-            "park",
-            "football",
-            "football",
-            "cook",
-            "cook",
-            "lie",
-            "shopping",
             "photo",
             "photo",
             "receipt",
@@ -500,12 +471,6 @@
             "morning",
             "morning"
         ],
-        "soccer_words": [
-            "football",
-            "struggle",
-            "final",
-            "metal"
-        ],
         "utility_markers": [
             "break",
             "hurt",
@@ -546,26 +511,6 @@
         "reminder_starts": [
             "remind me",
             "remind me"
-        ],
-        "partner_gift_words": [
-            "gift",
-            "sophia",
-            "clock",
-            "watch",
-            "link",
-            "link"
-        ],
-        "partner_gift_context": [
-            "rosefield",
-            "bangle",
-            "mother of pearl",
-            "white gold",
-            "dial",
-            "clock",
-            "future gifts"
-        ],
-        "kid1_words": [
-            "alexander"
         ]
     },
     "context_extractor": {
@@ -597,16 +542,6 @@
             "we leave to",
             "we leave to"
         ],
-        "park_words": [
-            "in the park",
-            "in the park",
-            "park",
-            "park",
-            "playground",
-            "playground",
-            "swings",
-            "swings"
-        ],
         "now_sitting_words": [
             "now",
             "now",
@@ -627,9 +562,7 @@
             "i found them",
             "i found them",
             "i went and found them",
-            "i went and found them",
-            "now in the park and i found them",
-            "now in the park and found them"
+            "i went and found them"
         ],
         "all_together_words": [
             "all together",
@@ -813,7 +746,6 @@
             "applies",
             "afternoon",
             "morning",
-            "shifts",
             "she",
             "her",
             "week",
@@ -832,14 +764,6 @@
         "in_days_regex": "(?:in|for)\\s+(\\d{1,2})\\s*(?:days|days|days|days)"
     },
     "system_tool": {
-        "family_markers": [
-            "sophia",
-            "alexander",
-            "mary",
-            "small",
-            "child",
-            "birthday"
-        ],
         "project_markers": [
             "astakos",
             "lobster",
@@ -870,7 +794,6 @@
             "must"
         ],
         "shopping_markers": [
-            "gift",
             "birthday",
             "market",
             "product",
