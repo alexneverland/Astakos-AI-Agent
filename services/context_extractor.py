@@ -35,10 +35,10 @@ Rules:
 - If the user says they are all out together now, then user_out_of_home=true and partner_with_user=true may apply.
 - If the user is at work, then usually user_at_work=true and user_out_of_home=true.
 
-- If the user says they are with Alexandros now, then kid1_with_user=true may apply.
-- If the user says The kid1 is with the partner now, then kid1_with_partner=true may apply.
-- If the user says The partner and kid1 are out somewhere and they themselves are not with them, then partner_with_user=false.
-- If the user clearly says Alexandros is with Sofia without them, then kid1_away_from_home=true.
+- If the user says they are with {kid1_name} now, then kid1_with_user=true may apply.
+- If the user says {kid1_name} is with {partner_name} now, then kid1_with_partner=true may apply.
+- If the user says {partner_name} and {kid1_name} are out somewhere and they themselves are not with them, then partner_with_user=false.
+- If the user clearly says {kid1_name} is with {partner_name} without them, then kid1_away_from_home=true.
 - If the user says they will go to meet them later, this DOES NOT mean they are already with them now.
 
 Example 1:
@@ -132,6 +132,8 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         prompt = _CONTEXT_EXTRACTION_PROMPT.format(
             bot_name=config.BOT_NAME,
             user_name=config.USER_NAME,
+            partner_name=config.PARTNER_NAME,
+            kid1_name=config.KID1_NAME,
             user_text=user_text,
             ai_text=ai_text,
         )

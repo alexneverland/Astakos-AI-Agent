@@ -12,6 +12,8 @@ def test_context_extractor_prompt_format_safety():
         prompt = _CONTEXT_EXTRACTION_PROMPT.format(
             bot_name="TestBot",
             user_name="TestUser",
+            partner_name="Partner",
+            kid1_name="Kid1",
             user_text="dummy message",
             ai_text="dummy response"
         )

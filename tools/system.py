@@ -676,12 +676,12 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             if not pending:
                 return t("tools.system.reminders_read_empty")
             lines = []
-            for t, tm in pending:
+            for rtask, tm in pending:
                 if tm and tm.startswith("loc:"):
                     loc = tm.split(":", 1)[1]
-                    lines.append(f"• [📍 {loc}] {t}")
+                    lines.append(f"• [📍 {loc}] {rtask}")
                 else:
-                    lines.append(f"• [{tm}] {t}")
+                    lines.append(f"• [{tm}] {rtask}")
             return t("tools.system.reminders_read_header") + "\n".join(lines)
 
         # ── DONE: Closes reminder with keyword ────────────────

@@ -103,6 +103,7 @@ BOT_NAME = "Astakos"
 DEVELOPER_NAME = "Piston-7"
 DEFAULT_CITY = "Thessaloniki"
 SENTIMENTAL_OVERRIDE_KEYWORDS = ()
+BACKUP_DRIVE_FOLDER_ID = ""
 if os.path.exists(SETTINGS_FILE):
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:

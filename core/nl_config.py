@@ -46,12 +46,10 @@ def load_intents() -> dict:
     return _intents
 
 def get_intent_list(module: str, key: str) -> list:
-    t("prompts.ext_list_keywords_module_key")
     intents = load_intents()
     return intents.get(module, {}).get(key, [])
 
 def get_intent_dict(module: str, key: str) -> dict:
-    t("prompts.ext_dict_module_key")
     intents = load_intents()
     return intents.get(module, {}).get(key, {})
 
@@ -71,8 +69,6 @@ UTILS_QTY_INTENTS = tuple(get_intent_list('utils', 'qty_intents'))
 
 
 # Agent keywords
-AGENT_TECH_KEYWORDS = get_intent_list("utils", "agent_keywords").get("TECH_KEYWORDS", []) if isinstance(get_intent_dict("utils", "agent_keywords"), dict) else []
-# Actually, the JSON structure has them inside "agent_keywords" which is a dict. Let's fix that wrapper.
 def _get_agent_keywords(agent_key):
     return get_intent_dict("utils", "agent_keywords").get(agent_key, [])
 
@@ -118,7 +114,6 @@ CE_NOW_SITTING = tuple(get_intent_list('context_extractor', 'now_sitting_words')
 CE_FOUND_THEM = tuple(get_intent_list('context_extractor', 'found_them_words'))
 CE_ALL_TOGETHER = tuple(get_intent_list('context_extractor', 'all_together_words'))
 CE_HOME = tuple(get_intent_list('context_extractor', 'home_words'))
-import config
 CE_PARTNER_NAMES = (config.PARTNER_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'partner_names'))
 CE_KID1_NAMES = (config.KID1_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'kid1_names'))
 

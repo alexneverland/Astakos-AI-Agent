@@ -4,7 +4,7 @@ import config
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCALES_DIR = os.path.join(BASE_DIR, "locales")
-LANG = "el"
+LANG = "el" if config.RESPONSE_LANGUAGE.lower() == "greek" else "en"
 _translations = {}
 
 def load_locale(lang: str):

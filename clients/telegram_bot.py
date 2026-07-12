@@ -1864,7 +1864,7 @@ def handle_message(user_text: str, chat_id: str):
         cleared = _safe_clear_draft()
         now_ts = datetime.now().strftime("%H:%M")
         final_ai_response = (
-            f"[{now_ts}] Done, master. The draft is cleared and we close it here."
+            t("clients.telegram_bot.msg_draft_clear_done", now_ts=now_ts)
             if cleared
             else t("clients.telegram_bot.msg_draft_clear_none", now_ts=now_ts)
         )
