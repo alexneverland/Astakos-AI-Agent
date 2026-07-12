@@ -1,19 +1,48 @@
 from core.i18n import t
 import os
 import json
+import config
 
 _intents = None
+
+def _deep_merge_dicts(base: dict, custom: dict) -> dict:
+    """Deep merges custom dict into base dict. For lists, extends the base list."""
+    merged = base.copy()
+    for key, value in custom.items():
+        if key in merged:
+            if isinstance(merged[key], dict) and isinstance(value, dict):
+                merged[key] = _deep_merge_dicts(merged[key], value)
+            elif isinstance(merged[key], list) and isinstance(value, list):
+                # Using a set to avoid exact duplicates while preserving order via list
+                merged[key] = list(dict.fromkeys(merged[key] + value))
+            else:
+                merged[key] = value
+        else:
+            merged[key] = value
+    return merged
 
 def load_intents() -> dict:
     global _intents
     if _intents is None:
-        intents_path = os.path.join(os.path.dirname(__file__), "intents.json")
+        lang_code = "el" if config.RESPONSE_LANGUAGE.lower() == "greek" else "en"
+        base_intents_path = os.path.join(os.path.dirname(__file__), f"intents_{lang_code}.json")
+        custom_intents_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "astakos_custom_intents.json")
+        
         try:
-            with open(intents_path, "r", encoding="utf-8") as f:
+            with open(base_intents_path, "r", encoding="utf-8") as f:
                 _intents = json.load(f)
         except Exception as e:
             print(t("core.nl_config.error_loading", e=e))
             _intents = {}
+            
+        if os.path.exists(custom_intents_path):
+            try:
+                with open(custom_intents_path, "r", encoding="utf-8") as f:
+                    custom_intents = json.load(f)
+                _intents = _deep_merge_dicts(_intents, custom_intents)
+            except Exception as e:
+                print(f"Error loading custom intents: {e}")
+                
     return _intents
 
 def get_intent_list(module: str, key: str) -> list:
