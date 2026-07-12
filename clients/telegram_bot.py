@@ -3244,13 +3244,13 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
     from core.brain import llm
 
     if count > 1:
-        context = f"{config.USER_NAME} has {count} routines in ~30 mins: {event_name}."
+        context = t("clients.telegram_bot.bot_msg_has_routines_mins", user_name=config.USER_NAME, count=count, event_name=event_name)
     elif confidence >= 0.8:
-        context = f"{config.USER_NAME} almost always does '{event_name}' at this time (high confidence)."
+        context = t("clients.telegram_bot.bot_msg_almost_always_does", user_name=config.USER_NAME, event_name=event_name)
     elif confidence >= 0.5:
-        context = f"{config.USER_NAME} usually does '{event_name}' at this time."
+        context = t("clients.telegram_bot.bot_msg_usually_does", user_name=config.USER_NAME, event_name=event_name)
     else:
-        context = f"Previously {config.USER_NAME} did '{event_name}' at this time, we are no longer sure."
+        context = t("clients.telegram_bot.bot_msg_previously_did", user_name=config.USER_NAME, event_name=event_name)
 
     memory_context = _build_proactive_memory_context(event_name)
     memory_block = f"\n\n{memory_context}\n" if memory_context else ""

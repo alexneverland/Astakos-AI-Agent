@@ -3737,5 +3737,9 @@
             "next_days": "επόμενες {days} μέρες",
             "unknown_action": "❌ Άγνωστο action: '{action}'. Χρησιμοποίησε: list, today, week, create, update, delete, search."
         }
-    }
+    },
+    "bot_msg_has_routines_mins": "Ο χρήστης {user_name} έχει {count} ρουτίνες σε ~30 λεπτά: {event_name}.",
+    "bot_msg_almost_always_does": "Ο χρήστης {user_name} σχεδόν πάντα κάνει '{event_name}' αυτή την ώρα (υψηλή βεβαιότητα).",
+    "bot_msg_usually_does": "Ο χρήστης {user_name} συνήθως κάνει '{event_name}' αυτή την ώρα.",
+    "bot_msg_previously_did": "Στο παρελθόν ο {user_name} έκανε '{event_name}' αυτή την ώρα, δεν είμαστε πλέον σίγουροι."
 }
