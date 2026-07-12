@@ -2165,8 +2165,6 @@ def handle_message(user_text: str, chat_id: str):
 
     except Exception as e:
         _typing_active["on"] = False  # We stop typing even on error
-        import traceback
-        traceback.print_exc()
         send_telegram_msg(t("clients.telegram_bot.bot_msg_error", e=str(e)))
 
 def _send_photo_to_telegram(photo_path: str, chat_id: str):
@@ -2220,7 +2218,6 @@ def handle_location(msg, live_update=False):
                  math.sin((lon2-lon1)*p/2)**2)
             return 2 * R * math.asin(math.sqrt(a))
 
-        print("handle_location STATE_DB:", STATE_DB)
         if os.path.exists(STATE_DB):
             conn = sqlite3.connect(STATE_DB)
             try:
@@ -2229,7 +2226,8 @@ def handle_location(msg, live_update=False):
                     "SELECT id, task, time FROM reminders WHERE status='pending' AND time LIKE 'loc:%'"
                 )
                 pending = cursor.fetchall()
-                print("HANDLE_LOCATION PENDING:", pending)
+                if pending:
+                    print("HANDLE_LOCATION PENDING:", pending)
                 for rid, task, tm in pending:
                     target = tm.split(":", 1)[1] if tm and ":" in tm else "home"
                     if target == "home":
@@ -2665,7 +2663,7 @@ def run_polling():
                 if cmd == "/help":
                     voice_status = "🔊 ON" if voice_mode_enabled else "✍️ OFF"
                     send_telegram_msg(
-                        f"🦞 <b>{config.BOT_NAME} — Commands</b>\n\n" +
+                        t("clients.telegram_bot.bot_msg_commands_title", bot_name=config.BOT_NAME) +
                         t("clients.telegram_bot.bot_msg_help_menu", voice_status=voice_status)
                     )
                     continue
@@ -3437,9 +3435,9 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
     from core.brain import llm
 
     if confidence >= 0.8:
-        certainty = f"{config.USER_NAME} almost always does '{event_name}' at this time."
+        certainty = t("clients.telegram_bot.bot_msg_almost_always_does", user_name=config.USER_NAME, event_name=event_name)
     else:
-        certainty = f"Usually at this time {config.USER_NAME} does '{event_name}'."
+        certainty = t("clients.telegram_bot.bot_msg_usually_does", user_name=config.USER_NAME, event_name=event_name)
 
     try:
         from memory.context_builder import build_memory_context
@@ -3577,7 +3575,7 @@ def startup_check_missed_routines():
 
             msg = _craft_deferred_msg(event_name, confidence, missed_min)
             ctx = ""
-            if msg.strip() == "[SILENT_SKIP]" or "[CONTEXT_SKIP]" in msg:
+            if msg.strip().startswith("[SILENT_SKIP]") or "[CONTEXT_SKIP]" in msg:
                 try:
                     ctx = _build_proactive_memory_context(event_name)
                 except Exception:
@@ -3590,7 +3588,7 @@ def startup_check_missed_routines():
             conn2.commit()
             conn2.close()
 
-            if msg.strip() == "[SILENT_SKIP]":
+            if msg.strip().startswith("[SILENT_SKIP]"):
                 _clear_routine_pending_confirmation(r_id)
                 muted_until = _apply_context_mute(r_id, event_name, ctx)
                 log_event("routines", "routine_silent_skip", routine_id=r_id, event=event_name,
@@ -3960,7 +3958,7 @@ def job_check_routines():
                     names = ", ".join(f"'{e}'" for _, e, _ in due_routines)
                     msg = _craft_proactive_msg(names, 0.9, count=len(due_routines))
 
-                    if msg.strip() == "[SILENT_SKIP]":
+                    if msg.strip().startswith("[SILENT_SKIP]"):
                         # First time SILENT_SKIP — estimate muted_until for each routine
                         try:
                             ctx = _build_proactive_memory_context(names)
@@ -4039,7 +4037,7 @@ def job_check_routines():
                     r_id, event_name, confidence = due_routines[0]
                     msg = _craft_proactive_msg(event_name, confidence)
 
-                    if msg.strip() == "[SILENT_SKIP]":
+                    if msg.strip().startswith("[SILENT_SKIP]"):
                         # First time SILENT_SKIP — estimate muted_until
                         try:
                             ctx = _build_proactive_memory_context(event_name)
@@ -4226,6 +4224,28 @@ def job_morning_fit_briefing():
     except Exception as e:
         print(f"⚠️ [FitBriefing]: {e}")
 
+def job_daily_backup():
+    """Daily Backup to Google Drive — runs at 04:00 AM, once."""
+    now_hour = datetime.now().hour
+    if now_hour != 4:
+        return
+    
+    flag_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".daily_backup_sent")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if os.path.exists(flag_file):
+        with open(flag_file, "r") as f:
+            if f.read().strip() == today_str:
+                return
+
+    try:
+        from astakos_skills.daily_backup import daily_backup_to_drive
+        result = daily_backup_to_drive()
+        with open(flag_file, "w") as f:
+            f.write(today_str)
+        print(f"✅ [DailyBackup]: Backup completed.")
+    except Exception as e:
+        print(f"⚠️ [DailyBackup]: {e}")
+
 def job_morning_calendar_briefing():
     """Morning Google Calendar briefing — runs only 08:00–09:00, once."""
     now_hour = datetime.now().hour
@@ -4247,16 +4267,9 @@ def job_morning_calendar_briefing():
 
         # If there are no events today, we only send a weekly summaryof
         if t("clients.telegram_bot.bot_msg_908de1") in today_events:
-            msg = (
-                f"🌅 *Good morning {config.USER_NAME}!*\n\n"
-                f"📅 You have nothing scheduled today.\n\n"
-                f"*Next 7 days:*\n{week_events}"
-            )
+            msg = t("clients.telegram_bot.bot_msg_morning_lazaros_empty", user_name=config.USER_NAME, week_events=week_events)
         else:
-            msg = (
-                f"🌅 *Good morning {config.USER_NAME}!*\n\n"
-                f"*Today's schedule:*\n{today_events}"
-            )
+            msg = t("clients.telegram_bot.bot_msg_morning_lazaros_events", user_name=config.USER_NAME, today_events=today_events)
 
         _send_and_record_assistant(msg, agent="Calendar_Briefing")
         with open(flag_file, "w") as f:
@@ -4555,6 +4568,7 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_morning_fit_briefing,       interval_seconds=3600, name="fit_briefing",      verbose=True)
     astakos_scheduler.register(job_morning_calendar_briefing,  interval_seconds=3600, name="cal_briefing",      verbose=True)
     astakos_scheduler.register(job_goal_followup,              interval_seconds=3600, name="goal_followup",     verbose=True)
+    # astakos_scheduler.register(job_daily_backup,               interval_seconds=3600, name="daily_backup",      verbose=True) # User runs this from Windows Scheduler
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()
 
     # Startup check for lost routines (10s delay for full initialization)

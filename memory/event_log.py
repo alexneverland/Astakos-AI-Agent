@@ -204,7 +204,7 @@ def is_duplicate_routine(routine_id: int, cooldown_hours: float) -> bool:
         cooldown_secs = cooldown_hours * 3600
         if elapsed < cooldown_secs:
             remaining = int((cooldown_secs - elapsed) / 3600)
-            print(f"[event_log]: 🚫 Routine #{routine_id} on cooldown — {remaining}h remaining")
+            # print(f"[event_log]: 🚫 Routine #{routine_id} on cooldown — {remaining}h remaining")
             return True
         return False
     except Exception as e:

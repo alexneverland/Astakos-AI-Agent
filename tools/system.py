@@ -2771,15 +2771,15 @@ def control_vacuum(action: str) -> str:
 
         if action == "start":
             vac.send("action", {"did": "astakos", "siid": 2, "aiid": 1, "in": []})
-            return f"{config.BOT_NAME} command: X20+ started vacuuming! 🧹"
+            return t("tools.system.msg_vacuum_start", bot_name=config.BOT_NAME)
 
         elif action == "stop":
             vac.send("action", {"did": "astakos", "siid": 2, "aiid": 2, "in": []})
-            return f"{config.BOT_NAME} command: Vacuum stopped."
+            return t("tools.system.msg_vacuum_stop", bot_name=config.BOT_NAME)
 
         elif action == "home":
             vac.send("action", {"did": "astakos", "siid": 3, "aiid": 1, "in": []})
-            return f"{config.BOT_NAME} command: Vacuum returning to base. 🏠"
+            return t("tools.system.msg_vacuum_return", bot_name=config.BOT_NAME)
 
         elif action.startswith("room:"):
             room_name = action.split(":", 1)[1].strip()
@@ -2808,7 +2808,7 @@ def control_vacuum(action: str) -> str:
                     {"piid": 10, "value": f'{{"selects":[[{room_id},1,2,1,1]]}}'}
                 ]
             })
-            return f"{config.BOT_NAME} command: X20+ going to vacuum room: {room_name}! 🧹"
+            return t("tools.system.msg_vacuum_room", bot_name=config.BOT_NAME, room_name=room_name)
 
         else:
             return f"Unknown command: {action}."
@@ -3364,12 +3364,12 @@ def system_doctor(days: int = 1) -> str:
         cond_routines = "error reading conditions"
 
     status = _doctor_status_label(warnings=warnings, pending_actions=pending_actions, logs=logs)
-    lines.append(f"🩺 {config.BOT_NAME} Doctor: {status}")
-    lines.append(f"• Logs ({logs['days']}d): events {logs['events']} / errors {logs['event_errors']}, traces {logs['traces']} / issues {logs['trace_issues']}")
-    lines.append(f"• Loop guards: {logs['loop_guards']} | Slow turns: {logs['slow_traces']}")
-    lines.append(f"• Pending approvals: {len(pending_actions)}" + (f" ({', '.join(a.get('tool_name', '?') for a in pending_actions[:3])})" if pending_actions else ""))
-    lines.append(f"• Messenger draft: {'active' if draft.get('active') else 'no'}" + (f" → {draft.get('target_name')}" if draft.get("active") and draft.get("target_name") else ""))
-    lines.append(f"• Session backlog: {unsummarized}/{threshold} unsummarized ({_doctor_compact_map(conv.get('unsummarized_by_channel'))})")
+    lines.append(t("tools.system.msg_doctor_status", bot_name=config.BOT_NAME, status=status))
+    lines.append(t("tools.system.msg_doctor_logs", days=logs['days'], events=logs['events'], event_errors=logs['event_errors'], traces=logs['traces'], trace_issues=logs['trace_issues']))
+    lines.append(t("tools.system.msg_doctor_loops", loop_guards=logs['loop_guards'], slow_traces=logs['slow_traces']))
+    lines.append(t("tools.system.msg_doctor_approvals", count=len(pending_actions), tools=", ".join(a.get('tool_name', '?') for a in pending_actions[:3]) if pending_actions else ""))
+    lines.append(t("tools.system.msg_doctor_draft", active=draft.get('active'), target=draft.get('target_name') if draft.get("active") and draft.get("target_name") else ""))
+    lines.append(t("tools.system.msg_doctor_backlog", unsummarized=unsummarized, threshold=threshold, channels=_doctor_compact_map(conv.get('unsummarized_by_channel'))))
     lines.append(f"• Memory ops: {_format_memory_ops_summary(memory_ops)}")
     lines.append(f"• Pending routine confirmations: {_format_pending_routines(pending_routines)}")
 

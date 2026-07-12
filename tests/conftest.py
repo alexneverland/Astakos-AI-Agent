@@ -56,3 +56,19 @@ def pytest_unconfigure(config):
         shutil.move(BACKUP_PATH, TEST_CUSTOM_INTENTS_PATH)
     elif os.path.exists(TEST_CUSTOM_INTENTS_PATH):
         os.remove(TEST_CUSTOM_INTENTS_PATH)
+
+@pytest.fixture(autouse=True)
+def mock_dbs(monkeypatch, tmp_path):
+    # Mock all database paths to a temporary directory so tests don't pollute production data
+    monkeypatch.setattr('config.STATE_DB', str(tmp_path / 'test_state.db'))
+    monkeypatch.setattr('config.PROFILE_DB', str(tmp_path / 'test_profile.db'))
+    monkeypatch.setattr('config.EMBEDDINGS_CACHE_DB', str(tmp_path / 'test_embeddings.db'))
+    monkeypatch.setattr('config.VECTOR_DB_DIR', str(tmp_path / 'chroma_db'))
+    monkeypatch.setattr('config.HISTORY_DB', str(tmp_path / 'test_history.db'))
+    monkeypatch.setattr('config.ROUTINES_DB', str(tmp_path / 'test_routines.db'))
+    monkeypatch.setattr('config.MEMORY_AUDIT_DIR', str(tmp_path / 'memory_audit'))
+    
+    # Reload vector_store modules to pick up new config if needed
+    import sys
+    if 'memory.vector_store' in sys.modules:
+        pass # We might need to re-initialize the store, or it uses config lazily
