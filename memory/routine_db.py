@@ -408,7 +408,7 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
             conn.commit()
     except sqlite3.IntegrityError as e:
         raise RoutineConflictError(
-            f"Fingerprint conflict για '{c_event}' @ {c_day} {c_time}",
+            f"Fingerprint conflict for '{c_event}' @ {c_day} {c_time}",
             context={"fingerprint": fp, "error": str(e)}
         ) from e
     except sqlite3.Error as e:

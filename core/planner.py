@@ -11,16 +11,7 @@ from datetime import datetime
 from langchain_core.messages import HumanMessage, AIMessage
 
 
-# Confirmation / cancellation words
-_CONFIRM_WORDS = {
-    "ναι", "ναι!", "yes", "εντάξει", "εντάξει!", "εντοξει", "ok", "οκ", "οκ!",
-    "ξεκίνα", "ξεκινα", "ξεκίνα!", "ξεκινα!", "go", "proceed",
-    "ναι παμε", "ναι πάμε", "παμε", "πάμε",
-}
-_CANCEL_WORDS = {
-    "όχι", "οχι", "no", "cancel", "ακύρωσε", "ακυρωσε", "ακύρωση", "ακυρωση",
-    "σταμάτα", "σταματα", "άκυρο", "ακυρο",
-}
+import config
 
 def _planner_pending_user_key(state) -> str:
     channel = str(state.get("channel") or "unknown").strip().lower()
@@ -47,19 +38,9 @@ def planner_node(state):
 
     print(f"\033[95m[Planner]: Analyzing goal: {goal[:80]}\033[0m")
 
-    prompt = f"""Είσαι ο Αστακός, AI βοηθός. Ο χρήστης θέλει να εκτελέσεις το εξής:
-
-GOAL: {goal}
-
-Σπάσε το σε συγκεκριμένα, εκτελέσιμα βήματα. Κάθε βήμα πρέπει να είναι μια απλή εντολή που μπορεί να εκτελέσει ένας agent.
-
-Απάντησε ΜΟΝΟ με JSON array, χωρίς markdown:
-[
-  {{"step": 1, "description": "Σύντομη περιγραφή", "instruction": "Ακριβής εντολή προς τον agent"}},
-  {{"step": 2, "description": "...", "instruction": "..."}}
-]
-
-Μέγιστο 7 βήματα. Κάθε instruction να είναι σαφής και αυτόνομη."""
+    from core.utils import load_agent_prompt
+    base_prompt = load_agent_prompt("planner_main")
+    prompt = base_prompt.format(goal=goal)
 
     try:
         response = safe_llm_invoke(llm_heavy, [HumanMessage(content=prompt)])
@@ -198,14 +179,9 @@ def _plan_summary(goal: str, tasks: list, results: list) -> dict:
         from services.reflection_engine import _save_reflection
 
         steps_text = "\n".join(f"{i+1}. {t['description']}: {r[:200]}" for i,(t,r) in enumerate(zip(tasks, results)))
-        reflect_prompt = f"""Ανέλυσε αυτό το ολοκληρωμένο plan και δώσε σύντομη αξιολόγηση.
-Goal: {goal}
-Steps:
-{steps_text}
-
-Απάντησε με JSON:
-{{"observation": "τι παρατήρησες", "action": "τι θα βελτίωνες στο μέλλον", "confidence": 0.7, "lesson": "το lesson learned"}}
-Μόνο JSON, χωρίς markdown."""
+        from core.utils import load_agent_prompt
+        base_prompt = load_agent_prompt("planner_reflect")
+        reflect_prompt = base_prompt.format(goal=goal, steps_text=steps_text)
 
         resp = safe_gemini_call(reflect_prompt)
         import json, re
@@ -259,7 +235,7 @@ def pre_check_node(state):
         return {}
 
     # ── Confirmation ──────────────────────────────────────────────
-    if last_msg in _CONFIRM_WORDS or last_msg_norm in _CONFIRM_WORDS:
+    if last_msg in config.NLP_CONFIG.get("intents", {}).get("confirm_words", []) or last_msg_norm in config.NLP_CONFIG.get("intents", {}).get("confirm_words", []):
         try:
             clear_pending_plan(user_id=pending_user_key)
             print(f"\033[95m[PreCheck]: ✅ Plan confirmed — {len(pending['tasks'])} steps\033[0m")
@@ -276,7 +252,7 @@ def pre_check_node(state):
             print(f"\033[91m[PreCheck]: Error loading pending plan: {e}\033[0m")
 
     # ── Cancel ───────────────────────────────────────────────────
-    elif last_msg in _CANCEL_WORDS or last_msg_norm in _CANCEL_WORDS:
+    elif last_msg in config.NLP_CONFIG.get("intents", {}).get("cancel_words", []) or last_msg_norm in config.NLP_CONFIG.get("intents", {}).get("cancel_words", []):
         try:
             clear_pending_plan(user_id=pending_user_key)
         except Exception:
@@ -301,19 +277,8 @@ def cancel_plan_node(state):
 # Validate Step Node — checks if the last step succeeded
 # ────────────────────────────────────────────────────────────────
 
-_FAILURE_SIGNALS = [
-    "αποτυχία", "αποτύχηκε", "αποτυχηκε", "αποτυχε", "αποτύχε",
-    "δεν μπόρεσα", "δεν μπορεσα", "δεν μπόρεσε", "δεν μπορεσε",
-    "σφάλμα", "σφαλμα", "αδύνατο", "αδυνατο",
-    "δεν βρήκα", "δεν βρηκα", "δεν βρέθηκε", "δεν βρεθηκε",
-    "δεν εντοπίστηκε", "δεν εντοπιστηκε",
-    "δεν υπάρχει", "δεν υπαρχει",
-    "δεν είναι δυνατό", "δεν ειναι δυνατο",
-    "cannot find", "cannot access",
-    "error", "failed", "failure", "exception", "traceback",
-    "could not", "unable to", "not found", "does not exist",
-    "access denied", "permission denied",
-]
+from core.nl_config import PLANNER_FAILURE_WORDS
+_FAILURE_SIGNALS = PLANNER_FAILURE_WORDS
 
 
 def validate_step_node(state):
@@ -456,14 +421,9 @@ def end_check_node(state):
             f"{i+1}. {t['description']}: {(results[i] if i < len(results) else '')[:200]}"
             for i, t in enumerate(tasks)
         )
-        reflect_prompt = (
-            f"Ανέλυσε αυτό το ολοκληρωμένο plan και δώσε σύντομη αξιολόγηση.\n"
-            f"Goal: {goal}\nSteps:\n{steps_text}\n\n"
-            "Απάντησε με JSON:\n"
-            '{"observation": "τι παρατήρησες", "action": "τι θα βελτίωνες στο μέλλον", '
-            '"confidence": 0.7, "lesson": "το lesson learned"}\n'
-            "Μόνο JSON, χωρίς markdown."
-        )
+        from core.utils import load_agent_prompt
+        base_prompt = load_agent_prompt("planner_reflect")
+        reflect_prompt = base_prompt.format(goal=goal, steps_text=steps_text)
         resp = safe_gemini_call(reflect_prompt)
         raw  = re.sub(r"```json|```", "", resp.text.strip()).strip()
         data = json.loads(raw)

@@ -11,6 +11,7 @@ from langchain_core.tools import tool
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+from core.i18n import t
 
 TIMEZONE = "Europe/Athens"
 CALENDAR_ID = "primary"
@@ -30,8 +31,7 @@ def _get_service():
             creds.refresh(Request())
         else:
             raise Exception(
-                "Google Calendar: δεν υπάρχει έγκυρο token. "
-                "Διέγραψε credentials/token.json και κάνε νέο login (OAuth)."
+                t("skills.gcalendar.msg_no_token") + " Delete credentials/token.json and login again (OAuth)."
             )
     return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
@@ -94,12 +94,12 @@ def _parse_dt(dt_str: str, tz: ZoneInfo) -> datetime:
         except ValueError:
             continue
 
-    raise ValueError(f"Δεν μπόρεσα να παρσάρω ημερομηνία: '{dt_str}'")
+    raise ValueError(t("skills.gcalendar.msg_parse_error", dt=dt_str))
 
 
 def _format_event(e: dict) -> str:
     """Formats an event for display."""
-    title = e.get("summary", "(χωρίς τίτλο)")
+    title = e.get("summary", t("skills.gcalendar.msg_no_title"))
     start = e.get("start", {})
     end   = e.get("end", {})
     loc   = e.get("location", "")
@@ -182,7 +182,7 @@ def google_calendar_tool(
 
             events = events_result.get("items", [])
             if not events:
-                return f"📅 Δεν υπάρχουν events ({label})."
+                return t("skills.gcalendar.msg_no_events", label=label)
 
             lines = [f"📅 **{len(events)} events {label}:**\n"]
             for e in events:
@@ -193,7 +193,7 @@ def google_calendar_tool(
         # ── SEARCH ──────────────────────────────────────────────────
         if action == "search":
             if not title:
-                return "❌ Δώσε λέξη αναζήτησης στο πεδίο title."
+                return t("skills.gcalendar.missing_search")
             now = datetime.now(tz)
             events_result = svc.events().list(
                 calendarId=CALENDAR_ID,
@@ -206,8 +206,8 @@ def google_calendar_tool(
             ).execute()
             events = events_result.get("items", [])
             if not events:
-                return f"🔍 Δεν βρέθηκαν events για '{title}'."
-            lines = [f"🔍 **{len(events)} αποτελέσματα για '{title}':**\n"]
+                return t("skills.gcalendar.msg_no_results", title=title)
+            lines = [t("skills.gcalendar.msg_results_found", count=len(events), title=title)]
             for e in events:
                 lines.append(_format_event(e))
                 lines.append("")
@@ -216,9 +216,9 @@ def google_calendar_tool(
         # ── CREATE ──────────────────────────────────────────────────
         if action == "create":
             if not title:
-                return "❌ Λείπει ο τίτλος (title)."
+                return t("skills.gcalendar.missing_title")
             if not start_time:
-                return "❌ Λείπει η ώρα έναρξης (start_time)."
+                return t("skills.gcalendar.missing_start")
 
             try:
                 dt_start = _parse_dt(start_time, tz)
@@ -246,15 +246,15 @@ def google_calendar_tool(
             created = svc.events().insert(calendarId=CALENDAR_ID, body=body).execute()
             start_fmt = dt_start.strftime("%d/%m/%Y %H:%M")
             return (
-                f"✅ Event δημιουργήθηκε!\n"
-                f"📅 **{title}** — {start_fmt}\n"
+                t("skills.gcalendar.msg_event_created") + 
+                f"📅 **{title}** — {start_fmt}\n" + 
                 f"🆔 `{created['id']}`"
             )
 
         # ── UPDATE ──────────────────────────────────────────────────
         if action == "update":
             if not event_id:
-                return "❌ Λείπει το event_id."
+                return t("skills.gcalendar.missing_id")
             existing = svc.events().get(calendarId=CALENDAR_ID, eventId=event_id).execute()
 
             if title:
@@ -279,21 +279,21 @@ def google_calendar_tool(
             updated = svc.events().update(
                 calendarId=CALENDAR_ID, eventId=event_id, body=existing
             ).execute()
-            return f"✅ Event ενημερώθηκε: **{updated.get('summary')}**\n🆔 `{event_id}`"
+            return t("skills.gcalendar.msg_event_updated", title=updated.get("summary"), id=event_id)
 
         # ── DELETE ──────────────────────────────────────────────────
         if action == "delete":
             if not event_id:
-                return "❌ Λείπει το event_id."
+                return t("skills.gcalendar.missing_id")
             try:
                 evt = svc.events().get(calendarId=CALENDAR_ID, eventId=event_id).execute()
-                evt_title = evt.get("summary", "(χωρίς τίτλο)")
+                evt_title = evt.get("summary", t("skills.gcalendar.msg_no_title"))
             except Exception:
                 evt_title = event_id
             svc.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
-            return f"🗑️ Event διαγράφηκε: **{evt_title}**"
+            return t("skills.gcalendar.msg_event_deleted", title=evt_title)
 
         return f"❌ Άγνωστο action: '{action}'. Χρησιμοποίησε: list, today, week, create, update, delete, search."
 
     except Exception as e:
-        return f"❌ Google Calendar σφάλμα: {str(e)}"
+        return t("skills.gcalendar.msg_error", e=str(e))

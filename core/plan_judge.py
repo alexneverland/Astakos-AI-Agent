@@ -11,12 +11,8 @@
 import re
 
 # ── Heuristic: markers indicating multi-step intent ──────
-_MULTI_STEP_MARKERS = [
-    "πρώτα", "αρχικά", "αρχικα", "στη συνέχεια", "στη συνεχεια",
-    "κατόπιν", "κατοπιν", "έπειτα", "επειτα", "τέλος", "τελος",
-    "επίσης", "επισης", "βήμα", "βημα", "step", "και μετά", "και μετα",
-    "first", "then", "finally", "after that",
-]
+from core.nl_config import PLAN_JUDGE_SEQUENCE_WORDS
+_MULTI_STEP_MARKERS = PLAN_JUDGE_SEQUENCE_WORDS
 
 # Word threshold: above this → LLM evaluation is worthwhile regardless of markers
 _WORD_COUNT_THRESHOLD = 20

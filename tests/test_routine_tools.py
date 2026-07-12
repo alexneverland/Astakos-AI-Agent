@@ -142,7 +142,7 @@ def test_control_pending_followup_deletes_matching_row(monkeypatch):
         )
 
         mock_delete.assert_called_once_with(4, reason="manual_delete")
-        assert "Διαγράφηκε" in result
+        assert "Deleted" in result
 
 
 def test_control_pending_followup_repairs_legacy_rows(monkeypatch):

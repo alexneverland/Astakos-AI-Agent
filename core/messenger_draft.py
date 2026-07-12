@@ -85,7 +85,8 @@ def has_active_draft() -> bool:
 
 def inactive_draft_message(reason: str) -> str:
     if reason == "expired":
-        return "❌ Σφάλμα: Το προσχέδιο έχει λήξει. Φτιάξε νέο draft πριν στείλω."
+        from core.i18n import t
+        return t("core.messenger_draft.draft_expired")
     if reason == "incomplete":
         return "❌ Σφάλμα: Το προσχέδιο είναι ελλιπές."
     if reason == "not_pending":

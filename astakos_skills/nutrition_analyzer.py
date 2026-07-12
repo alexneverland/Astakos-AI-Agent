@@ -23,12 +23,12 @@ def analyze_nutrition(image_path: str, product_hint: str = "") -> str:
     from langchain_core.messages import HumanMessage
 
     if not os.path.exists(image_path):
-        return f"❌ Δεν βρέθηκε η φωτογραφία: {image_path}"
+        return t("skills.nutrition_analyzer.msg_photo_not_found", path=image_path)
 
     with open(image_path, "rb") as f:
         img_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-    hint_line = f"Το προϊόν είναι: {product_hint}." if product_hint else ""
+    hint_line = f"The product is: {product_hint}." if product_hint else ""
 
     prompt = f"""You are an expert in ingredient analysis and product safety. You analyze labels from any product.
 {hint_line}
@@ -43,21 +43,21 @@ Step 4: Add a comment for children (around 6 years old) if relevant.
 
 IMPORTANT RULE: You MUST answer EXCLUSIVELY in {RESPONSE_LANGUAGE}, using EXACTLY the following format:
 
-🏷️ **[Όνομα προϊόντος] — [Κατηγορία]**
+🏷️ **[Product Name] — [Category]**
 
-📋 **Συστατικά που εντόπισα:** [λίστα]
+📋 **Detected Ingredients:** [list]
 
-⭐ **Βαθμολογία:** X/10 [🟢≥7 / 🟡4-6 / 🔴≤3]
+⭐ **Rating:** X/10 [🟢≥7 / 🟡4-6 / 🔴≤3]
 
-✅ **Καλό:**
+✅ **Good:**
 - ...
 
-⚠️ **Πρόσεξε:**
+⚠️ **Watch out:**
 - ...
 
-👶 **Για παιδιά:** [σχόλιο ή "Δεν εφαρμόζεται"]
+👶 **For kids:** [comment or "N/A"]
 
-💡 **Σύσταση:** [1 πρόταση]"""
+💡 **Recommendation:** [1 sentence]"""
 
     vision_msg = HumanMessage(content=[
         {"type": "text",      "text": prompt},
@@ -68,4 +68,4 @@ IMPORTANT RULE: You MUST answer EXCLUSIVELY in {RESPONSE_LANGUAGE}, using EXACTL
         response = llm.invoke([vision_msg])
         return clean_message(response.content)
     except Exception as e:
-        return f"❌ Σφάλμα ανάλυσης: {e}"
+        return t("skills.nutrition_analyzer.msg_analysis_error", e=e)

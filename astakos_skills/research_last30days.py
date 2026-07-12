@@ -2,6 +2,7 @@ import os
 import subprocess
 from langchain_core.tools import tool
 from config import BASE_DIR
+from core.i18n import t
 
 
 @tool
@@ -14,7 +15,7 @@ def research_last30days(topic: str) -> str:
     script_path = os.path.join(BASE_DIR, "vendor", "last30days-skill", "skills", "last30days", "scripts", "last30days.py")
     
     if not os.path.exists(script_path):
-        return f"Σφάλμα: Δεν βρέθηκε το script στο '{script_path}'. Εγκαταστήστε το στο vendor directory."
+        return t("skills.research_last30days.msg_missing_script_2", path=script_path)
 
     try:
         # We run the command and return the stdout in compact md format for easier parsing by the Agent.
@@ -28,13 +29,13 @@ def research_last30days(topic: str) -> str:
         )
 
         if result.returncode != 0:
-            return f"Σφάλμα κατά την εκτέλεση του last30days-skill:\n{result.stderr}"
+            return t("skills.research_last30days.msg_exec_error", err=result.stderr)
         
         # If the execution succeeded, we return the result.
         # stdout may contain warnings etc., but usually the output is markdown text.
         return result.stdout.strip()
         
     except subprocess.TimeoutExpired:
-        return "Σφάλμα: Η έρευνα καθυστέρησε υπερβολικά και διακόπηκε (Timeout 120s)."
+        return t("skills.research_last30days.timeout")
     except Exception as e:
-        return f"Απρόσμενο σφάλμα κατά την έρευνα (last30days-skill): {str(e)}"
+        return t("skills.research_last30days.msg_unexpected_error", e=str(e))

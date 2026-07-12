@@ -824,7 +824,7 @@ def test_job_check_pending_followups_forces_light_outing_send_when_due(monkeypat
 
     bot.job_check_pending_followups()
 
-    assert sent == [("Τους βρήκες τελικά για βόλτα στο πάρκο;", "FollowUp_Agent")]
+    assert sent == [("Did you find them for βόλτα στο πάρκο?", "FollowUp_Agent")]
     assert marked == [(11, "followup_sent:light_outing_checkin")]
     assert outcomes == [(11, 0.1, "followup_sent:light_outing_checkin")]
 

@@ -35,6 +35,7 @@ from core.brain import llm, safe_llm_invoke
 from core.graph import graph
 from core.agents import clean_message
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
+from core.utils import load_agent_prompt
 from memory.session_memory import trigger_memory_sifter, log_exchange, _run_session_summary
 from tools.telegram import send_telegram_msg
 
@@ -120,17 +121,14 @@ def proactive_worker():
                     last_interaction_time = time.time()
 
                 if current_hour < 12:
-                    time_context = "Πρωινό: Μάστορη καλημέρα, κώδικας για Mastroapp/Αστακό;"
+                    time_context = "Morning: Good morning Master, coding for Mastroapp/Astakos?"
                 elif current_hour < 17:
-                    time_context = "Μεσημέρι: Πλάκα για Αλέξανδρο/LEGO/φακές."
+                    time_context = "Noon: Joking about Alexandros/LEGO/lentils."
                 else:
-                    time_context = "Βράδυ: Χαλάρωση, Netflix ή το κουνέλι."
+                    time_context = "Evening: Relaxation, Netflix or the rabbit."
 
-                poke_prompt = (
-                    f"Είσαι ο Αστακός. Πέρασαν 2.5 ώρες σιωπής. Κάνε ένα σύντομο poke στον Λάζαρο. "
-                    f"CONTEXT: {time_context} "
-                    f"ΚΑΝΟΝΕΣ: ΜΟΝΟ Ελληνικά, 1-2 προτάσεις, Mastro-style χιούμορ, κλείσε με ερώτηση."
-                )
+                base_poke_prompt = load_agent_prompt("main_poke", "You are Astakos. 2.5 hours of silence have passed. Poke Lazaros briefly.")
+                poke_prompt = f"{base_poke_prompt}\nCONTEXT: {time_context}"
 
                 if shutdown_event.is_set():
                     break
@@ -214,7 +212,7 @@ def main():
     try:
         while not shutdown_event.is_set():
             try:
-                inp = input("Λάζαρος: ")
+                inp = input("Lazaros: ")
             except EOFError:
                 break
 

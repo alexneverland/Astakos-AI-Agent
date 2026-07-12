@@ -2,6 +2,7 @@ import os
 import ctypes
 import requests
 from dotenv import load_dotenv
+from core.i18n import t
 
 def check_flights():
     load_dotenv()
@@ -37,15 +38,15 @@ def check_flights():
                     price = flight.get("price")
                     if price and isinstance(price, (int, float)) and price < 100:
                         flights_info = flight.get("flights", [{}])[0]
-                        airline = flights_info.get("airline", "Άγνωστη")
-                        alerts.append(f"{date}: {airline} με {price}€")
+                        airline = flights_info.get("airline", t("skills.flight_monitor.airline_unknown"))
+                        alerts.append(f"{date}: {airline} at {price}€")
                         break
         except Exception:
             pass
             
     if alerts:
-        msg = "Βρέθηκαν φθηνές πτήσεις SKG-KUT κάτω από 100€!\n\n" + "\n".join(alerts)
-        ctypes.windll.user32.MessageBoxW(0, msg, "Ειδοποίηση Πτήσεων", 0x40 | 0x1)
+        msg = t("skills.flight_monitor.cheap_found") + "\n".join(alerts)
+        ctypes.windll.user32.MessageBoxW(0, msg, t("skills.flight_monitor.msg_alert_title"), 0x40 | 0x1)
 
 if __name__ == "__main__":
     check_flights()

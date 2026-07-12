@@ -32,11 +32,11 @@ try:
         docs = data.get('documents', [])
         
         if not docs:
-            print('  [Î†Î´ÎµÎ¹Î± ÏƒÏ…Î»Î»Î¿Î³Î®]')
+            print('  [Empty collection]')
             continue
             
         for i, doc in enumerate(docs):
-            print(f'\n[Î•Î“Î“Î¡Î‘Î¦Î— {i+1}]:\n{doc}')
+            print(f'\n[RECORD {i+1}]:\n{doc}')
             print('-' * 50)
 except Exception as e:
-    print(f'\nÎ£Ï†Î¬Î»Î¼Î± Î±Î½Î¬Î³Î½Ï‰ÏƒÎ·Ï‚: {e}')
+    print(f'\nRead error: {e}')

@@ -2,6 +2,7 @@ import json
 import os
 from langchain_core.tools import tool
 from config import LINKEDIN_DRAFT_FILE
+from core.i18n import t
 
 MEMORY_FILE = LINKEDIN_DRAFT_FILE
 
@@ -38,7 +39,7 @@ def update_pending_linkedin_post(draft_text: str, photo_path: str = "") -> str:
 def process_and_clear_linkedin_post() -> str:
     """Reads the pending post, publishes it to LinkedIn, and clears the memory."""
     if not os.path.exists(MEMORY_FILE):
-        return "Σφάλμα: Δεν υπάρχει αρχείο μνήμης."
+        return t("skills.linkedin_state_manager.no_memory")
 
     with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -46,7 +47,7 @@ def process_and_clear_linkedin_post() -> str:
     post_data = data.get('pending_linkedin_post')
     
     if not post_data:
-        return "Δεν υπάρχει εκκρεμές post για δημοσίευση."
+        return t("skills.linkedin_state_manager.no_pending")
 
     try:
         # [MASTRO-FIX 1]: Correct import of the tool from system.py!
@@ -60,7 +61,7 @@ def process_and_clear_linkedin_post() -> str:
         if isinstance(result, str) and result.strip().startswith("❌"):
             return result
     except Exception as e:
-        return f"Σφάλμα κατά τη δημοσίευση: {e}"
+        return t("skills.linkedin_state_manager.msg_publish_error", e=e)
     
     # Cleanup
     data.pop('pending_linkedin_post', None)
@@ -71,4 +72,4 @@ def process_and_clear_linkedin_post() -> str:
     with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
     
-    return "Το post δημοσιεύτηκε επιτυχώς και η μνήμη καθαρίστηκε."
+    return t("skills.linkedin_state_manager.success")

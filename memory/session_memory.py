@@ -2139,8 +2139,8 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
             return False
 
         print(
-            f"\033[93m[Startup]: ⚠️  Βρέθηκαν {len(tags)} stale tags από {file_date} "
-            f"(hard restart εντοπίστηκε). Εκτέλεση session summary πριν τον καθαρισμό...\033[0m"
+            f"\033[93m[Startup]: ⚠️  Found {len(tags)} stale tags from {file_date} "
+            f"(hard restart detected). Running session summary before cleanup...\033[0m"
         )
 
         # 1. Run the session summary first (stores unsummarized exchanges)_
@@ -2152,7 +2152,7 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
                 json.dump([], f, ensure_ascii=False, indent=2)
             print(
                 f"\033[92m[Startup]: ✅ Working memory cleared — {len(tags)} stale tags "
-                f"από {file_date} επεξεργάστηκαν και αφαιρέθηκαν.\033[0m"
+                f"from {file_date} processed and removed.\033[0m"
             )
             return True
         except Exception as e:

@@ -653,9 +653,9 @@ class AstakosMemoryManager:
                     
                     if memory_has_meaningful_overlap(fact, c_doc):
                         print(
-                            f"\033[93m[MemoryManager]: ⚠️ Κοντινή μνήμη σε άλλη category "
+                            f"\033[93m[MemoryManager]: ⚠️ Close memory in another category "
                             f"({c_meta.get('category', '?')}, dist={cross_distances[0][0]:.3f}): "
-                            f"{c_doc[:80]} — δεν την πειράζω (άλλη κατηγορία).\033[0m"
+                            f"{c_doc[:80]} — skipping it (different category).\033[0m"
                         )
 
             if old_id is not None:
@@ -682,9 +682,9 @@ class AstakosMemoryManager:
 
                 if storage["action"] == "keep_old":
                     print(
-                        f"\033[90m[MemoryManager]: Keep richer! Παλιά (richness={decision['old_richness']:.1f}, "
-                        f"{len(old_content)} χαρ.) > Νέα (richness={decision['new_richness']:.1f}, {len(str(fact))} χαρ.) "
-                        f"— παραμένει η λεπτομερής, η νέα ΔΕΝ αποθηκεύεται (αποφυγή διπλοεγγραφής).\033[0m"
+                        f"\033[90m[MemoryManager]: Keep richer! Old (richness={decision['old_richness']:.1f}, "
+                        f"{len(old_content)} char) > New (richness={decision['new_richness']:.1f}, {len(str(fact))} char) "
+                        f"— keeping the detailed one, the new one is NOT saved (avoiding duplication).\033[0m"
                     )
                     # [MASTRO-FIX]: keep_old until now only meant "do not delete the
                     # old" — but the code proceeded to save anyway

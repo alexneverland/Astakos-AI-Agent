@@ -12,6 +12,7 @@ Uses the unofficial Google Translate API
 from __future__ import annotations
 import io
 import requests
+from core.i18n import t
 
 # ── Georgian alphabet (Mkhedruli) → Latin phonetics ──────────────────────
 _KA_PHONETICS: dict[str, str] = {
@@ -103,55 +104,18 @@ def tts_audio(text: str, lang: str = "ka") -> bytes:
 
 
 # ── Quick phrases (pre-translated) ─────────────────────────────────────────
-QUICK_PHRASES: dict[str, list[dict[str, str]]] = {
-    "💕 Αγάπη": [
-        {"el": "Σ'αγαπώ",              "ka": "გიყვარხარ",                    "ph": "giq'varxar"},
-        {"el": "Μου λείπεις",           "ka": "მენატრები",                    "ph": "menat'rebi"},
-        {"el": "Είσαι όμορφη",          "ka": "ლამაზი ხარ",                   "ph": "lamazi xar"},
-        {"el": "Καλημέρα αγάπη μου",    "ka": "დილა მშვიდობისა სიყვარულო",   "ph": "dila mshvidobisa siq'varulo"},
-        {"el": "Καληνύχτα αγάπη μου",   "ka": "ღამე მშვიდობისა სიყვარულო",   "ph": "ghame mshvidobisa siq'varulo"},
-        {"el": "Σε χρειάζομαι",         "ka": "მჭირდები",                     "ph": "mch'irdbi"},
-        {"el": "Σκέφτομαι εσένα",       "ka": "შენზე ვფიქრობ",               "ph": "shenze vpik'rob"},
-    ],
-    "🏠 Σπίτι": [
-        {"el": "Φαΐ έτοιμο",            "ka": "საჭმელი მზადაა",               "ph": "sachmeli mzadaa"},
-        {"el": "Έλα να φάμε",           "ka": "მოდი ვიჭამოთ",                "ph": "modi vichamot'"},
-        {"el": "Πού είσαι;",            "ka": "სად ხარ?",                     "ph": "sad xar?"},
-        {"el": "Έρχομαι σπίτι",         "ka": "სახლში მოვდივარ",              "ph": "saxlshi movdivar"},
-        {"el": "Τηλεφώνησέ μου",        "ka": "დამირეკე",                     "ph": "damireke"},
-        {"el": "Θα αργήσω",             "ka": "დავაგვიანდები",                "ph": "davagviandebi"},
-        {"el": "Κρύωσε, κλείσε παράθυρο","ka": "ცივა, დახურე ფანჯარა",       "ph": "tsiva, daxure panjara"},
-    ],
-    "👶 Αλέξανδρος": [
-        {"el": "Πάμε για ύπνο",         "ka": "წავიძინოთ",                    "ph": "ts'avidzinot'"},
-        {"el": "Φάε το φαγητό σου",     "ka": "შეჭამე საჭმელი",              "ph": "shechame sachmeli"},
-        {"el": "Μπράβο!",               "ka": "კარგი ბიჭი!",                  "ph": "k'argi bichi!"},
-        {"el": "Σταμάτα!",              "ka": "გაჩერდი!",                     "ph": "gacherdi!"},
-        {"el": "Έλα εδώ",               "ka": "მოდი აქ",                      "ph": "modi ak'"},
-        {"el": "Ησύχασε",               "ka": "დამშვიდდი",                    "ph": "damshviddi"},
-        {"el": "Πλύνε τα χέρια σου",    "ka": "ხელები დაიბანე",              "ph": "xelebi daibane"},
-    ],
-    "😄 Καθημερινά": [
-        {"el": "Ναι",                   "ka": "კი",                           "ph": "k'i"},
-        {"el": "Όχι",                   "ka": "არა",                          "ph": "ara"},
-        {"el": "Ευχαριστώ",             "ka": "მადლობა",                      "ph": "madloba"},
-        {"el": "Συγγνώμη",              "ka": "ბოდიში",                       "ph": "bodishi"},
-        {"el": "Εντάξει",               "ka": "კარგი",                        "ph": "k'argi"},
-        {"el": "Δεν ξέρω",              "ka": "არ ვიცი",                      "ph": "ar vitsi"},
-        {"el": "Κουράστηκα",            "ka": "დავიღალე",                     "ph": "davighale"},
-        {"el": "Πεινάω",                "ka": "მშია",                         "ph": "mshia"},
-    ],
-}
+import ast
+QUICK_PHRASES: dict[str, list[dict[str, str]]] = ast.literal_eval(t("tools.georgian.quick_phrases"))
 
 
 def phrases_message() -> str:
     """Returns a Telegram-ready text with all the quick phrases."""
-    lines = ["🇬🇪 <b>Γρήγορες Φράσεις Ελληνικά → Γεωργιανά</b>\n"]
+    lines = [t("tools.georgian.header")]
     for cat, phrases in QUICK_PHRASES.items():
         lines.append(f"<b>{cat}</b>")
         for p in phrases:
             lines.append(f"• {p['el']} → <code>{p['ka']}</code>")
             lines.append(f"  <i>📢 {p['ph']}</i>")
         lines.append("")
-    lines.append("Tip: <code>/g &lt;κείμενο&gt;</code> για ελεύθερη μετάφραση + ήχο")
+    lines.append(t("tools.georgian.tip"))
     return "\n".join(lines)

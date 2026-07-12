@@ -17,6 +17,7 @@
 # ================================================================
 
 import os
+from core.i18n import t
 import ast
 import json
 import fnmatch
@@ -70,11 +71,11 @@ def _check_permission(file_path: str, need_edit: bool = False) -> tuple[bool, st
         norm_folder = _normalize(folder)
         if real.startswith(norm_folder + os.sep) or real == norm_folder:
             if not perms.get("read", False):
-                return False, f"❌ Το project '{perms.get('label', folder)}' δεν έχει read permission."
+                return False, t("tools.project_tools.no_read_perm", label=perms.get('label', folder))
             if need_edit and not perms.get("edit", False):
-                return False, f"❌ Το project '{perms.get('label', folder)}' έχει μόνο read — δεν επιτρέπεται edit."
+                return False, t("tools.project_tools.no_edit_perm", label=perms.get('label', folder))
             return True, ""
-    return False, f"❌ Το path δεν ανήκει σε κανένα εγκεκριμένο project. Ζήτα από τον Λάζαρο να τρέξει grant_project_access."
+    return False, t("tools.project_tools.no_project")
 
 
 def _syntax_check(content: str, filename: str) -> tuple[bool, str]:
@@ -98,11 +99,11 @@ def _mini_diff(old: str, new: str, filename: str) -> str:
         lineterm="", n=2
     ))
     if not diff:
-        return "(χωρίς αλλαγές)"
+        return t("tools.project_tools.no_changes")
     # Keep up to 40 diff lines to avoid overwhelming the context
     summary = "\n".join(diff[:40])
     if len(diff) > 40:
-        summary += f"\n... (+{len(diff)-40} γραμμές)"
+        summary += t("tools.project_tools.more_lines", count=len(diff)-40)
     return summary
 
 
@@ -120,11 +121,11 @@ def grant_project_access(folder_path: str, mode: str = "read") -> str:
     """
     mode = mode.strip().lower()
     if mode not in ("read", "edit", "revoke"):
-        return "❌ Μη έγκυρο mode. Χρησιμοποίησε: read | edit | revoke"
+        return t("tools.project_tools.invalid_mode")
 
     folder_path = folder_path.strip().strip("'\"")
     if mode != "revoke" and not os.path.isdir(folder_path):
-        return f"❌ Ο φάκελος '{folder_path}' δεν υπάρχει."
+        return t("tools.project_tools.folder_not_found", folder_path=folder_path)
 
     label = os.path.basename(folder_path.rstrip("/\\")) or folder_path
     norm = os.path.normcase(os.path.realpath(folder_path))
@@ -136,11 +137,11 @@ def grant_project_access(folder_path: str, mode: str = "read") -> str:
             # We find and remove (case-insensitive)
             to_del = [k for k in access if _normalize(k) == norm]
             if not to_del:
-                return f"⚠️ Δεν βρέθηκε εγγραφή για '{folder_path}'."
+                return t("tools.project_tools.no_record", folder_path=folder_path)
             for k in to_del:
                 del access[k]
             _save_access(access)
-            return f"✅ Αφαιρέθηκε η πρόσβαση για '{label}'."
+            return t("tools.project_tools.access_removed", label=label)
 
         # read or edit
         access[folder_path] = {
@@ -151,7 +152,7 @@ def grant_project_access(folder_path: str, mode: str = "read") -> str:
         }
         _save_access(access)
         mode_str = "read+edit" if mode == "edit" else "read-only"
-        return f"✅ Πρόσβαση '{mode_str}' δόθηκε για '{label}' ({folder_path})."
+        return t("tools.project_tools.access_granted", mode_str=mode_str, label=label, folder_path=folder_path)
 
 
 @tool
@@ -174,7 +175,7 @@ def list_project_files(folder_path: str, pattern: str = "**/*.py") -> str:
             return err
 
     if not os.path.isdir(folder_path):
-        return f"❌ Ο φάκελος '{folder_path}' δεν υπάρχει."
+        return t("tools.project_tools.folder_not_found", folder_path=folder_path)
 
     _SKIP_DIRS = {
         "venv", ".venv", "__pycache__", ".git", "node_modules",
@@ -197,10 +198,10 @@ def list_project_files(folder_path: str, pattern: str = "**/*.py") -> str:
                 matches.append((rel, size))
 
     if not matches:
-        return f"⚠️ Δεν βρέθηκαν αρχεία με pattern '{pattern}' στο '{folder_path}'."
+        return t("tools.project_tools.no_files_pattern", pattern=pattern, folder_path=folder_path)
 
     matches.sort(key=lambda x: x[0])
-    lines = [f"📁 {folder_path} — {len(matches)} αρχεία (pattern: {pattern})\n"]
+    lines = [t("tools.project_tools.list_header", folder_path=folder_path, count=len(matches), pattern=pattern)]
     for rel, size in matches:
         kb = size / 1024
         lines.append(f"  {rel}  ({kb:.1f} KB)")
@@ -224,17 +225,17 @@ def read_project_file(file_path: str, start_line: int = 1, end_line: int = 0) ->
         return err
 
     if not os.path.isfile(file_path):
-        return f"❌ Το αρχείο δεν υπάρχει: {file_path}"
+        return t("tools.project_tools.file_not_found", file_path=file_path)
 
     size = os.path.getsize(file_path)
     if size > 500_000:  # 500 KB limit
-        return f"❌ Το αρχείο είναι πολύ μεγάλο ({size/1024:.0f} KB). Χρησιμοποίησε start_line/end_line."
+        return t("tools.project_tools.file_too_large", size=f"{size/1024:.0f}")
 
     try:
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
             all_lines = f.readlines()
     except Exception as e:
-        return f"❌ Σφάλμα ανάγνωσης: {e}"
+        return t("tools.project_tools.read_error", e=str(e))
 
     total = len(all_lines)
     s = max(1, start_line) - 1
@@ -246,7 +247,7 @@ def read_project_file(file_path: str, start_line: int = 1, end_line: int = 0) ->
     numbered = "".join(f"{s+i+1:4d}\t{line}" for i, line in enumerate(selected))
 
     fname = os.path.basename(file_path)
-    header = f"📄 {fname} — γραμμές {s+1}–{s+len(selected)} / {total} total\n"
+    header = t("tools.project_tools.read_header", fname=fname, start=s+1, end=s+len(selected), total=total)
     return header + numbered
 
 
@@ -272,7 +273,7 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
         return err
 
     if not os.path.isfile(file_path):
-        return f"❌ Το αρχείο δεν υπάρχει: {file_path}"
+        return t("tools.project_tools.file_not_found", file_path=file_path)
 
     fname = os.path.basename(file_path)
 
@@ -280,23 +281,21 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
         with open(file_path, "r", encoding="utf-8") as f:
             original = f.read()
     except Exception as e:
-        return f"❌ Σφάλμα ανάγνωσης: {e}"
+        return t("tools.project_tools.read_error", e=str(e))
 
     # No-op guard
     if old_str == new_str:
-        return "⚠️ old_str και new_str είναι πανομοιότυπα — καμία αλλαγή έγινε."
+        return t("tools.project_tools.no_change_made")
 
     # Count occurrences
     count = original.count(old_str)
     if count == 0:
         return (
-            f"❌ old_str δεν βρέθηκε στο {fname}.\n"
-            f"Tip: Χρησιμοποίησε read_project_file για να δεις το ακριβές κείμενο."
+            t("tools.project_tools.old_str_not_found", fname=fname)
         )
     if count > 1:
         return (
-            f"❌ old_str βρέθηκε {count} φορές στο {fname} — ambiguous.\n"
-            f"Δώσε πιο πολύ context στο old_str ώστε να είναι μοναδικό."
+            t("tools.project_tools.old_str_ambiguous", count=count, fname=fname)
         )
 
     # Apply replace
@@ -306,9 +305,7 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
     ok_syn, syn_err = _syntax_check(patched, fname)
     if not ok_syn:
         return (
-            f"❌ Syntax error στο patched αρχείο — ΤΙΠΟΤΑ ΔΕΝ ΓΡΑΦΤΗΚΕ.\n"
-            f"{syn_err}\n"
-            f"Διόρθωσε το new_str και ξαναπροσπάθησε."
+            t("tools.project_tools.syntax_error_patch", syn_err=syn_err)
         )
 
     # Writing
@@ -316,7 +313,7 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(patched)
     except Exception as e:
-        return f"❌ Σφάλμα γραψίματος: {e}"
+        return t("tools.project_tools.write_error", e=str(e))
 
     diff = _mini_diff(original, patched, fname)
     old_lines = len(original.splitlines())
@@ -335,14 +332,7 @@ def edit_project_file(file_path: str, old_str: str, new_str: str) -> str:
     syn_msg = f"✅ Syntax check: OK" if fname.endswith(".py") else "➖ Syntax check: N/A (non-python)"
 
     return (
-        f"✅ **{fname}** ενημερώθηκε επιτυχώς.\n\n"
-        f"📋 **Σύνοψη αλλαγών:**\n"
-        f"• Αρχείο: `{file_path}`\n"
-        f"• Γραμμές: {old_lines} → {new_lines} ({delta_str})\n"
-        f"• Περιοχή αλλαγής: ~γραμμή {change_line}\n"
-        f"• Εμφανίσεις old_str: 1 (μοναδικό ✅)\n"
-        f"• {syn_msg}\n\n"
-        f"```diff\n{diff}\n```"
+        t("tools.project_tools.edit_success", fname=fname, file_path=file_path, old_lines=old_lines, new_lines=new_lines, delta_str=delta_str, change_line=change_line, syn_msg=syn_msg, diff=diff)
     )
 
 
@@ -368,7 +358,7 @@ def grep_project_files(folder_path: str, pattern: str, file_pattern: str = "*.py
             return err
 
     if not os.path.isdir(folder_path):
-        return f"❌ Ο φάκελος '{folder_path}' δεν υπάρχει."
+        return t("tools.project_tools.folder_not_found", folder_path=folder_path)
 
     context_lines = max(0, min(context_lines, 5))
 
@@ -382,7 +372,7 @@ def grep_project_files(folder_path: str, pattern: str, file_pattern: str = "*.py
     try:
         regex = re.compile(pattern, re.IGNORECASE)
     except re.error as e:
-        return f"❌ Μη έγκυρο regex pattern: {e}"
+        return t("tools.project_tools.invalid_regex", e=str(e))
 
     flat_pattern = file_pattern.replace("**/", "").replace("**\\", "")
     matches_by_file: list[tuple[str, list]] = []
@@ -423,14 +413,11 @@ def grep_project_files(folder_path: str, pattern: str, file_pattern: str = "*.py
 
     if not matches_by_file:
         return (
-            f"🔍 Κανένα αποτέλεσμα για `{pattern}` "
-            f"(pattern: {file_pattern}) στο '{folder_path}'."
+            t("tools.project_tools.grep_no_results", pattern=pattern, file_pattern=file_pattern, folder_path=folder_path)
         )
 
     lines_out = [
-        f"🔍 **grep** `{pattern}` — {total_matches} αποτελέσματα "
-        f"σε {len(matches_by_file)} αρχεία (folder: {os.path.basename(folder_path)}/)",
-        ""
+        t("tools.project_tools.grep_header", pattern=pattern, total_matches=total_matches, files_count=len(matches_by_file), folder_name=os.path.basename(folder_path)), ""
     ]
 
     for rel, file_matches in matches_by_file:
@@ -443,7 +430,7 @@ def grep_project_files(folder_path: str, pattern: str, file_pattern: str = "*.py
             lines_out.append("")
 
     if total_matches >= 200:
-        lines_out.append("⚠️ Αποτελέσματα περικόπηκαν στα 200. Χρησιμοποίησε πιο συγκεκριμένο pattern.")
+        lines_out.append(t("tools.project_tools.grep_truncated"))
 
     return "\n".join(lines_out)
 
@@ -496,7 +483,7 @@ def list_recent_files(folder_path: str = "", top_n: int = 15) -> str:
                 return err
 
     if not os.path.isdir(target):
-        return f"❌ Ο φάκελος '{target}' δεν υπάρχει."
+        return t("tools.project_tools.target_folder_not_found", target=target)
 
     entries: list[tuple[float, str]] = []
     scanned = 0
@@ -522,29 +509,28 @@ def list_recent_files(folder_path: str = "", top_n: int = 15) -> str:
             break
 
     if not entries:
-        return f"⚠️ Δεν βρέθηκαν αρχεία στο '{target}'."
+        return t("tools.project_tools.no_recent_files", target=target)
 
     entries.sort(key=lambda x: x[0], reverse=True)
     top = entries[:top_n]
 
     label = "Astakos repo (C:\\astakos_v2)" if is_internal else (os.path.basename(target.rstrip("/\\")) or target)
-    lines = [f"🕒 {label} — {len(top)}/{len(entries)} πιο πρόσφατα τροποποιημένα αρχεία:\n"]
+    lines = [t("tools.project_tools.recent_header", label=label, top_count=len(top), total_count=len(entries))]
     now = datetime.now()
     for mtime, rel in top:
         dt = datetime.fromtimestamp(mtime)
         delta = now - dt
         if delta.days > 0:
-            age = f"{delta.days}d πριν"
+            age = t("tools.project_tools.days_ago", days=delta.days)
         elif delta.seconds >= 3600:
-            age = f"{delta.seconds // 3600}h πριν"
+            age = t("tools.project_tools.hours_ago", hours=delta.seconds // 3600)
         else:
-            age = f"{max(1, delta.seconds // 60)}m πριν"
+            age = t("tools.project_tools.mins_ago", mins=max(1, delta.seconds // 60))
         lines.append(f"  {rel}  ({dt.strftime('%Y-%m-%d %H:%M')}, {age})")
 
     if stopped_early:
         lines.append(
-            f"\n⚠️ Σταμάτησα στα {SAFETY_CAP} αρχεία για ταχύτητα (partial scan) — "
-            f"δώσε πιο συγκεκριμένο subfolder αν θέλεις πληρότητα."
+            t("tools.project_tools.recent_truncated", safety_cap=SAFETY_CAP)
         )
 
     return "\n".join(lines)
@@ -572,8 +558,7 @@ def write_project_file(file_path: str, content: str) -> str:
     ok_syn, syn_err = _syntax_check(content, fname)
     if not ok_syn:
         return (
-            f"❌ Syntax error στο περιεχόμενο — ΤΙΠΟΤΑ ΔΕΝ ΓΡΑΦΤΗΚΕ.\n"
-            f"{syn_err}"
+            t("tools.project_tools.syntax_error_content", syn_err=syn_err)
         )
 
     is_new = not os.path.exists(file_path)
@@ -583,8 +568,8 @@ def write_project_file(file_path: str, content: str) -> str:
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)
     except Exception as e:
-        return f"❌ Σφάλμα γραψίματος: {e}"
+        return t("tools.project_tools.write_error", e=str(e))
 
     lines = len(content.splitlines())
-    action = "δημιουργήθηκε" if is_new else "αντικαταστάθηκε"
-    return f"✅ {fname} {action} ({lines} γραμμές, {len(content.encode())/1024:.1f} KB)."
+    action = t("tools.project_tools.created") if is_new else t("tools.project_tools.replaced")
+    return t("tools.project_tools.write_success", fname=fname, action=action, lines=lines, size=f"{len(content.encode())/1024:.1f}")

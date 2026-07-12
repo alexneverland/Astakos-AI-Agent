@@ -101,8 +101,8 @@ def test_build_memory_context_combines_recent_and_semantic():
     )
     rendered = context.render()
 
-    assert "[ΠΡΟΣΦΑΤΟ ΙΣΤΟΡΙΚΟ WEB+TELEGRAM]" in rendered
-    assert "[ΣΧΕΤΙΚΕΣ ΜΝΗΜΕΣ CHROMA]" in rendered
+    assert "[RECENT WEB+TELEGRAM HISTORY]" in rendered
+    assert "[RELEVANT CHROMA MEMORIES]" in rendered
     assert "Πάμε πάρκο" in rendered
     assert "Ο Αλέξανδρος θέλει πάρκο" in rendered
 

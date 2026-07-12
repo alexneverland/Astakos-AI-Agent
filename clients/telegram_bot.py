@@ -366,31 +366,31 @@ def _build_safe_followup_fallback(item: dict, stage: str = "") -> str:
 
     if stage == "before_prerequisite":
         if subject:
-            return f"Τι έγινε τελικά με {subject};"
+            return t("clients.telegram_bot.proactive_followup", subject=subject)
         return t("clients.telegram_bot.msg_b8a2cc")
 
     if stage == "decision_pending":
         if subject:
-            return f"Τελικά τι θα γίνει με {subject};"
+            return f"What will finally happen with {subject}?"
         return t("clients.telegram_bot.msg_7ffced")
 
     if stage == "after_likely_completion":
         if subject:
-            return f"Πώς πήγε τελικά με {subject};"
+            return f"How did it go with {subject}?"
         return t("clients.telegram_bot.msg_b427bf")
 
     if stage == "light_outing_checkin":
         if subject:
-            return f"Τους βρήκες τελικά για {subject};"
+            return f"Did you find them for {subject}?"
         return t("clients.telegram_bot.msg_62dd6f")
 
     if topic == "outing":
-        return f"Τελικά τι έγινε με {subject};" if subject else t("clients.telegram_bot.msg_111e41")
+        return t("clients.telegram_bot.proactive_followup_alt", subject=subject) if subject else t("clients.telegram_bot.msg_111e41")
     if topic == "food_purchase":
-        return f"Τελικά τι έγινε με {subject};" if subject else t("clients.telegram_bot.msg_e98f02")
+        return t("clients.telegram_bot.proactive_followup_alt", subject=subject) if subject else t("clients.telegram_bot.msg_e98f02")
     if topic == "task_progress":
-        return f"Τελικά προχώρησε το {subject};" if subject else t("clients.telegram_bot.msg_9fef07")
-    return f"Τι έγινε τελικά με {subject};" if subject else t("clients.telegram_bot.msg_4f0f04")
+        return f"Did {subject} proceed?" if subject else t("clients.telegram_bot.msg_9fef07")
+    return t("clients.telegram_bot.proactive_followup", subject=subject) if subject else t("clients.telegram_bot.msg_4f0f04")
 
 
 def _normalize_followup_signal_text(text: str) -> str:
@@ -822,7 +822,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         print(f"\033[94m[Document]: Saved in Telegram: {local_path}\033[0m")
 
         # We send a message to the user that we received it
-        send_telegram_msg(f"📄 Έγγραφο ελήφθη: `{file_name}`\nΠερίμενε, το κοιτάζω...")
+        send_telegram_msg(f"📄 Document received: `{file_name}`\nWait, I'm looking at it...")
 
         file_ext = os.path.splitext(file_name)[1].lower()
         doc_text = ""
@@ -842,9 +842,9 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
                 df_data = pd.read_excel(local_path)
                 doc_text = df_data.to_string(index=False)[:8000]
             else:
-                doc_text = f"Μη υποστηριζόμενος τύπος εγγράφου: {file_ext}"
+                doc_text = f"Unsupported document type: {file_ext}"
         except Exception as read_err:
-            doc_text = f"[Δεν μπόρεσα να διαβάσω το περιεχόμενο: {read_err}]"
+            doc_text = f"[Could not read content: {read_err}]"
 
         from memory.conversation_history import build_asset_context_text
         conversation_context = build_asset_context_text("telegram")
@@ -861,15 +861,15 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         memory_analysis = detailed_analysis[:500]
 
         chat_ai_msg = (
-            f"📄 **Έγγραφο:** `{file_name}`\n\n"
+            f"📄 **Document:** `{file_name}`\n\n"
             f"{detailed_analysis}\n\n"
-            "**Να το αποθηκεύσω μόνιμα στη μνήμη μου;**\n"
-            "Απάντησέ μου μόνο με: ναι ή όχι."
+            "**Should I save it to memory permanently?**\n"
+            "Answer only with: yes or no."
         )
         
         send_telegram_msg(chat_ai_msg)
 
-        user_log_msg = f"[USER_UPLOADED_FILE]: {file_name}\n[FILE PATH]: {local_path}\n[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]: {memory_analysis}\n[USER_CAPTION]: {caption or ''}\n[CONTENT_SOURCE]: uploaded_document"
+        user_log_msg = f"[USER_UPLOADED_FILE]: {file_name}\n[FILE PATH]: {local_path}\n[VISUAL ANALYSIS]: {memory_analysis}\n[USER_CAPTION]: {caption or ''}\n[CONTENT_SOURCE]: uploaded_document"
         
         # Record in history
         try:
@@ -901,7 +901,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
 
     except Exception as e:
         print(f"\033[91m[Document Error]: {e}\033[0m")
-        send_telegram_msg(f"❌ Σφάλμα λήψης εγγράφου: {str(e)}")
+        send_telegram_msg(f"❌ Document download error: {str(e)}")
 # ────────────────────────────────────────────────────────────────
 # VOICE HANDLER (CONSOLIDATED)
 # ────────────────────────────────────────────────────────────────
@@ -943,9 +943,9 @@ def handle_voice(voice_obj: dict, chat_id: str):
         ai_reply = stt_response.text.strip() if stt_response and stt_response.text else t("clients.telegram_bot.msg_dacaa2")
 
         print(f"\033[92m[Voice AI]: {ai_reply}\033[0m")
-        # We send the flag [ΦΩΝΗΤΙΚΟ] + [VOICE_INPUT] so that handle_message knows to reply with audio
+        # We send the flag [VOICE] + [VOICE_INPUT] so that handle_message knows to reply with audio
         # and the Lobster that the message came from voice (to reply more briefly and colloquially)
-        handle_message(f"[ΦΩΝΗΤΙΚΟ]: [VOICE_INPUT] {ai_reply}", chat_id)
+        handle_message(f"[VOICE]: [VOICE_INPUT] {ai_reply}", chat_id)
 
     except Exception as e:
         print(f"\033[91m[Voice Error]: {e}\033[0m")
@@ -983,7 +983,7 @@ def handle_end_session(chat_id: str):
 
     except Exception as e:
         print(f"\033[91m[End Session Error]: {e}\033[0m")
-        send_telegram_msg(f"❌ Κάτι στράβωσε στο κλείσιμο: {str(e)}")       
+        send_telegram_msg(f"❌ Something went wrong on close: {str(e)}")       
 # ────────────────────────────────────────────────────────────────
 # PHOTO HANDLER
 # ────────────────────────────────────────────────────────────────
@@ -1054,7 +1054,7 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        send_telegram_msg(f"Μάστορα, σκάλωσε η φωτό. Σφάλμα: {e}")
+        send_telegram_msg(f"Master, photo stalled. Error: {e}")
 
 
 def _process_photo_with_question(filename: str, local_path: str, analysis: str, question: str, chat_id: str):
@@ -1071,8 +1071,8 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         f"[{now_ts}] "
         f"[USER_UPLOADED_PHOTO]: {filename}\n"
         f"[PHOTO PATH]: {local_path}\n"
-        f"[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]: {analysis}\n"
-        f"Ερώτηση: {question}"
+        f"[VISUAL ANALYSIS]: {analysis}\n"
+        f"Question: {question}"
     )
     print(f"\033[94m[Photo->Graph]: {user_log_msg[:200]}\033[0m")
 
@@ -1095,7 +1095,7 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         _ptrace.finalize(response=final_response or None)
         _ptrace.save()
     except Exception as e:
-        send_telegram_msg(f"❌ Σφάλμα επεξεργασίας φωτό: {e}")
+        send_telegram_msg(f"❌ Photo processing error: {e}")
         return
 
     if not final_response:
@@ -1158,7 +1158,7 @@ def _run_nutrition(image_path: str, chat_id: str):
         result = analyze_nutrition(image_path)
         _send_and_record_assistant(result, chat_id)
     except Exception as e:
-        _send_and_record_assistant(f"❌ Σφάλμα nutrition analysis: {e}", chat_id)
+        _send_and_record_assistant(f"❌ Nutrition analysis error: {e}", chat_id)
 
 
 def _run_receipt(image_path: str, chat_id: str):
@@ -1168,7 +1168,7 @@ def _run_receipt(image_path: str, chat_id: str):
         result = scan_receipt.invoke({"image_path": image_path})
         _send_and_record_assistant(result, chat_id)
     except Exception as e:
-        _send_and_record_assistant(f"❌ Σφάλμα receipt scan: {e}", chat_id)
+        _send_and_record_assistant(f"❌ Receipt scan error: {e}", chat_id)
 
 
 def _run_story_maker(theme: str, characters: str, chat_id: str):
@@ -1183,7 +1183,7 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
             return
 
         # We first send the text (in chunks if it is large)
-        story_text = f"📖 *Παραμύθι: {theme}*\n\n{result['story']}"
+        story_text = f"📖 *Story: {theme}*\n\n{result['story']}"
         # Telegram limit: 4096 chars
         max_len = 4000
         chunks = [story_text[i:i+max_len] for i in range(0, len(story_text), max_len)]
@@ -1194,7 +1194,7 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
         # We send the images
         images = result.get("images", [])
         if images:
-            send_telegram_msg(f"🎨 *{len(images)} εικόνες από το παραμύθι:*")
+            send_telegram_msg(f"🎨 *{len(images)} images from the story:*")
             for img_path in images:
                 if os.path.exists(img_path):
                     try:
@@ -1210,16 +1210,16 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
 
         # Update the agent with a SHORT note — so they know they wrote a fairy tale
         # and not to call search_memory if Lazaros asks about this
-        char_note = f" με χαρακτήρες: {characters}" if characters else ""
-        img_note = f"{len(images)} εικόνες στάλθηκαν" if images else t("clients.telegram_bot.msg_496a96")
+        char_note = f" with characters: {characters}" if characters else ""
+        img_note = f"{len(images)} images sent" if images else t("clients.telegram_bot.msg_496a96")
         agent_note = (
-            f"[SYSTEM]: Μόλις έγραψα και έστειλα παραμύθι με θέμα '{theme}'{char_note}. "
-            f"{img_note}. Ο Λάζαρος το έχει ήδη στο Telegram."
+            f"[SYSTEM]: Just wrote and sent a story about '{theme}'{char_note}. "
+            f"{img_note}. Lazaros already has it on Telegram."
         )
         _append_to_analytics_log("ai", agent_note, agent="StoryMaker")
         enqueue_fast_task(update_working_memory, f"/story {theme}", agent_note)
     except Exception as e:
-        send_telegram_msg(f"❌ Σφάλμα story maker: {e}")
+        send_telegram_msg(f"❌ Story maker error: {e}")
         print(f"❌ [StoryMaker] {e}")
 
 
@@ -1244,7 +1244,7 @@ def send_voice_reply(text, chat_id):
             
     except Exception as e:
         print(f"❌ TTS Error: {e}")
-        send_telegram_msg(f"Μάστορα, μου κόπηκε η φωνή... (Error: {e})")
+        send_telegram_msg(f"Master, I lost my voice... (Error: {e})")
 def _append_to_analytics_log(role: str, content: str, agent: str | None = None):
     """Logging of a message in the shared SQLite conversation history (telegram channel)."""
     try:
@@ -1332,7 +1332,7 @@ def _send_georgian_translation(text: str, *, force_src: str = "auto"):
     try:
         result = translate(text, src=force_src)
     except Exception as e:
-        send_telegram_msg(f"❌ Σφάλμα μετάφρασης: {e}")
+        send_telegram_msg(f"❌ Translation error: {e}")
         return
 
     flag = "🇬🇪" if result["tgt"] == "ka" else "🇬🇷"
@@ -1471,8 +1471,8 @@ def _send_pending_reflections_summary() -> None:
         conf = rdata.get("confidence")
         conf_txt = f" (confidence: {conf:.0%})" if isinstance(conf, (int, float)) else ""
         blocks.append(
-            f"🤔 *#{i} Παρατήρηση:* {rdata.get('observation','')}\n"
-            f"→ Προτείνω: `{rdata.get('action','')}`{conf_txt}"
+            f"🤔 *#{i} Observation:* {rdata.get('observation','')}\n"
+            f"→ I suggest: `{rdata.get('action','')}`{conf_txt}"
         )
     msg = (
         t("clients.telegram_bot.msg_8fdaa9")
@@ -1517,7 +1517,7 @@ def handle_message(user_text: str, chat_id: str):
     # If it is a voice input, we keep the hint for Lobster but remove the tag
     if is_voice_input:
         clean_user_text = clean_user_text.replace("[VOICE_INPUT]", "").strip()
-        clean_user_text = f"[Φωνητικό μήνυμα — απάντησε σύντομα και καθομιλούμενα]: {clean_user_text}"
+        clean_user_text = f"[Voice message — reply short and casually]: {clean_user_text}"
     if not clean_user_text: 
         clean_user_text = t("clients.telegram_bot.msg_630052")
     # ── ROUTINE FEEDBACK LOOP ──
@@ -1729,7 +1729,7 @@ def handle_message(user_text: str, chat_id: str):
                         lines.append(f"✅ Applied: {rdata.get('observation','')[:80]}")
                         del pending_reflection_confirmations[rid]
                     else:
-                        lines.append(f"⚠️ Αποτυχία εφαρμογής, μένει εκκρεμές: {rdata.get('observation','')[:80]}")
+                        lines.append(f"⚠️ Application failure, remains pending: {rdata.get('observation','')[:80]}")
                 send_telegram_msg("\n".join(lines) if lines else t("clients.telegram_bot.msg_59dadd"))
                 if pending_reflection_confirmations:
                     _send_pending_reflections_summary()
@@ -1769,7 +1769,7 @@ def handle_message(user_text: str, chat_id: str):
                 else:
                     send_telegram_msg(t("clients.telegram_bot.msg_67bac7"))
             except Exception as e:
-                send_telegram_msg(f"❌ Σφάλμα εκτέλεσης: {e}")
+                send_telegram_msg(f"❌ Execution error: {e}")
             return
         elif any(w in text_check for w in [_normalize_gr(w) for w in NLP_CONFIG.get("telegram", {}).get("cancel_tokens", [])]):
             pending_exec_command = None
@@ -1864,9 +1864,9 @@ def handle_message(user_text: str, chat_id: str):
         cleared = _safe_clear_draft()
         now_ts = datetime.now().strftime("%H:%M")
         final_ai_response = (
-            f"[{now_ts}] Έγινε, μάστορα. Το draft καθαρίστηκε και το κλείνουμε εδώ."
+            f"[{now_ts}] Done, master. The draft is cleared and we close it here."
             if cleared
-            else f"[{now_ts}] Δεν υπάρχει ενεργό draft αυτή τη στιγμή για να καθαρίσω."
+            else t("clients.telegram_bot.msg_draft_clear_none", now_ts=now_ts)
         )
 
         try:
@@ -1891,16 +1891,9 @@ def handle_message(user_text: str, chat_id: str):
         now_ts = datetime.now().strftime("%H:%M")
         if draft_active and draft_data and draft_data.get("message"):
             draft_message = str(draft_data.get("message") or "").strip()
-            final_ai_response = (
-                f"[{now_ts}] Εννοούσα αυτό το draft:\n\n"
-                f"{draft_message}\n\n"
-                f"Θέλεις αλλαγές, να το σβήσω ή να το στείλω;"
-            )
+            final_ai_response = t("clients.telegram_bot.msg_draft_ask_action", now_ts=now_ts, draft=draft_message)
         else:
-            final_ai_response = (
-                f"[{now_ts}] Δεν υπάρχει ενεργό draft αυτή τη στιγμή. "
-                f"Εννοούσα απλώς σαν ιδέα να ετοιμάσουμε μήνυμα, όχι ότι υπάρχει ήδη έτοιμο."
-            )
+            final_ai_response = t("clients.telegram_bot.msg_draft_empty_idea", now_ts=now_ts)
 
         try:
             send_telegram_msg(final_ai_response)
@@ -2126,7 +2119,7 @@ def handle_message(user_text: str, chat_id: str):
                     send_telegram_document(file_path_to_send, caption=f"📎 <b>{_fname}</b>")
                 except Exception as _de:
                     print(f"❌ [Doc send error]: {_de}")
-                    send_telegram_msg(f"📎 Αρχείο: <code>{file_path_to_send}</code>")
+                    send_telegram_msg(t("clients.telegram_bot.msg_file", file=file_path_to_send))
             else:
                 # Normal Flow (No Documents)
                 if is_voice_mode:
@@ -2172,12 +2165,12 @@ def handle_message(user_text: str, chat_id: str):
         _typing_active["on"] = False  # We stop typing even on error
         import traceback
         traceback.print_exc()
-        send_telegram_msg(f"❌ Σφάλμα: {str(e)}")
+        send_telegram_msg(t("clients.telegram_bot.msg_error", e=str(e)))
 
 def _send_photo_to_telegram(photo_path: str, chat_id: str):
     """Sends a photo file to the Telegram chat."""
     if not os.path.exists(photo_path):
-        send_telegram_msg(f"⚠️ Η φωτογραφία δεν βρέθηκε στο δίσκο: `{photo_path}`")
+        send_telegram_msg(t("clients.telegram_bot.msg_photo_not_found", path=photo_path))
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
@@ -2191,7 +2184,7 @@ def _send_photo_to_telegram(photo_path: str, chat_id: str):
         print(f"\033[92m[TelegramBot]: Photo sent: {photo_path}\033[0m")
     except Exception as e:
         print(f"\033[91m[TelegramBot Photo Send Error]: {e}\033[0m")
-        send_telegram_msg(f"❌ Αδύνατη η αποστολή φωτογραφίας: {str(e)}")
+        send_telegram_msg(t("clients.telegram_bot.msg_photo_send_fail", e=str(e)))
 def handle_location(msg, live_update=False):
     """Receives live location and checks for location-based reminders."""
     import math
@@ -2239,7 +2232,7 @@ def handle_location(msg, live_update=False):
                         dist = haversine(lat, lon, HOME_COORDS[0], HOME_COORDS[1])
                         if dist <= HOME_RADIUS_M:
                             _send_and_record_assistant(
-                                f"📍 ΥΠΕΝΘΥΜΙΣΗ (Έφτασες σπίτι!): {task}",
+                                f"📍 REMINDER (You reached home!): {task}",
                                 agent="Reminder_Agent",
                             )
                             print(f"\033[93m[Location Reminder]: {task} fired ({dist:.0f}m)\033[0m")
@@ -2275,7 +2268,7 @@ def handle_location(msg, live_update=False):
             send_telegram_msg(clean_message(final))
     except Exception as e:
         print(f"\033[91m[Location Handler Error]: {e}\033[0m")
-        send_telegram_msg(f"📍 Τοποθεσία: {lat}, {lon}")
+        send_telegram_msg(t("clients.telegram_bot.msg_location", lat=lat, lon=lon))
 
 # ────────────────────────────────────────────────────────────────
 # POLLING LOOP
@@ -2328,13 +2321,13 @@ def _handle_approval_callback(cq: dict):
             )
 
             if tool_name != "execute_local_pipeline":
-                send_telegram_msg(f"⚙️ Εκτελώ `{tool_name}`...")
+                send_telegram_msg(t("clients.telegram_bot.msg_tool_exec", tool=tool_name))
 
             execution = execute_approved_pending(tool_call_id, all_tools)
             
             if origin_channel == "web":
                 if execution["ok"]:
-                    send_telegram_msg(f"✅ Το `{tool_name}` εκτελέστηκε.\nΗ απάντηση θα σταλεί στο Web UI.")
+                    send_telegram_msg(t("clients.telegram_bot.msg_tool_success_web", tool=tool_name))
                     
                     try:
                         from api.server import append_to_chat_history
@@ -2348,19 +2341,19 @@ def _handle_approval_callback(cq: dict):
                         print(f"[ApprovalCallback Web Resume Error]: {e}")
 
                 elif execution["status"] == "tool_not_found":
-                    send_telegram_msg(f"❌ Tool `{tool_name}` δεν βρέθηκε (Web flow).")
+                    send_telegram_msg(t("clients.telegram_bot.msg_tool_not_found_web", tool=tool_name))
                     try:
                         from api.server import append_to_chat_history
-                        append_to_chat_history("assistant", f"❌ Δεν βρέθηκε το tool `{tool_name}` για να εκτελεστεί η ενέργεια.", agent="Web_Agent")
+                        append_to_chat_history("assistant", t("clients.telegram_bot.msg_tool_not_found_web_hist", tool=tool_name), agent="Web_Agent")
                     except Exception as e:
                         print(f"[ApprovalCallback Web Error Notify]: {e}")
                 else:
-                    send_telegram_msg(f"❌ `{tool_name}` απέτυχε (Web flow): {execution['error']}")
+                    send_telegram_msg(t("clients.telegram_bot.msg_tool_fail_web", tool=tool_name, e=execution["error"]))
                     try:
                         from api.server import append_to_chat_history
                         append_to_chat_history(
                             "assistant",
-                            f"❌ Η ενέργεια `{tool_name}` απέτυχε να εκτελεστεί.\n\nΛεπτομέρεια: {execution['error']}",
+                            t("clients.telegram_bot.msg_tool_fail_web_hist", tool=tool_name, e=execution["error"]),
                             agent="Web_Agent",
                         )
                     except Exception as e:
@@ -2375,9 +2368,9 @@ def _handle_approval_callback(cq: dict):
                             prefix="✅ `" + tool_name + t("clients.telegram_bot.msg_3fadfb"),
                         )
                 elif execution["status"] == "tool_not_found":
-                    send_telegram_msg(f"❌ Tool `{tool_name}` δεν βρέθηκε.")
+                    send_telegram_msg(t("clients.telegram_bot.msg_tool_not_found", tool=tool_name))
                 else:
-                    send_telegram_msg(f"❌ `{tool_name}` απέτυχε: {execution['error']}")
+                    send_telegram_msg(t("clients.telegram_bot.msg_tool_fail", tool=tool_name, e=execution["error"]))
         elif action == "reject":
             item = get_pending(tool_call_id)
             origin_channel = (item or {}).get("channel", "telegram")
@@ -2394,7 +2387,7 @@ def _handle_approval_callback(cq: dict):
                     from api.server import append_to_chat_history
                     append_to_chat_history(
                         "assistant",
-                        f"❌ Η ενέργεια `{tool_name}` ακυρώθηκε και δεν εκτελέστηκε.",
+                        t("clients.telegram_bot.msg_tool_cancel", tool=tool_name),
                         agent="Web_Agent",
                     )
                 except Exception as e:
@@ -2480,7 +2473,7 @@ def _save_reaction_to_memory(text: str) -> None:
             "entities": t("clients.telegram_bot.msg_eb0632"),
             "category": "saved_by_user",
         })
-        send_telegram_msg(f"❤️ Αποθηκεύτηκε στη μνήμη μου:\n_\"{preview}…\"_")
+        send_telegram_msg(t("clients.telegram_bot.msg_memory_saved", preview=preview))
     except Exception as e:
         print(f"⚠️ [Reaction Save]: {e}")
 
@@ -2646,7 +2639,7 @@ def run_polling():
                     with _override_lock:
                         _override_state["sleep_until"] = _time.time() + hours * 3600
                     _save_override_state()
-                    send_telegram_msg(f"😴 Sleep mode για {hours:.0f} ώρες. Ησυχία!")
+                    send_telegram_msg(t("clients.telegram_bot.msg_sleep_mode", hours=f"{hours:.0f}"))
                     continue
 
                 if cmd == "/resume":
@@ -2662,34 +2655,14 @@ def run_polling():
                         continue
                     pending_exec_command = cmd_to_confirm
                     send_telegram_msg(
-                        f"⚠️ *Επιβεβαίωση απαιτείται:*\n`{cmd_to_confirm}`\n\nΘέλεις να εκτελεστεί; (ναι/όχι)"
+                        t("clients.telegram_bot.msg_confirm_req", cmd=cmd_to_confirm)
                     )
                     continue
                 if cmd == "/help":
                     voice_status = "🔊 ON" if voice_mode_enabled else "✍️ OFF"
                     send_telegram_msg(
-                        "🦞 <b>Αστακός — Εντολές</b>\n\n"
-                        "<b>Καθημερινά</b>\n"
-                        "<code>/nutrition</code> — Ανάλυση προϊόντος (στείλε φωτό πρώτα)\n"
-                        "<code>/receipt</code> — Ανάλυση απόδειξης (στείλε φωτό πρώτα)\n"
-                        "<code>/g κείμενο</code> — Μετάφραση + ήχος Ελληνικά→Γεωργιανά\n"
-                        "<code>/gr κείμενο</code> — Γεωργιανά→Ελληνικά (translate to Greek)\n"
-                        "<code>/g phrases</code> — Γρήγορες γεωργιανές φράσεις\n"
-                        "<code>/story θέμα</code> — Παραμύθι για Αλέξανδρο + εικόνες\n\n"
-                        "<b>Έλεγχος</b>\n"
-                        "<code>/doctor</code> — Health status Αστακού\n"
-                        "<code>/status</code> — Scheduler & ενεργά jobs\n"
-                        f"<code>/voice</code> — Φωνητικές απαντήσεις ON/OFF (τώρα: {voice_status})\n"
-                        "<code>/help</code> — Λίστα εντολών\n\n"
-                        "<b>Ησυχία / session</b>\n"
-                        "<code>/mute</code> — Σίγαση proactive μηνυμάτων\n"
-                        "<code>/pause</code> — Παύση υπενθυμίσεων\n"
-                        "<code>/sleep 8</code> — Ησυχία για Χ ώρες\n"
-                        "<code>/resume</code> — Επαναφορά όλων\n"
-                        "<code>/end</code> — Τέλος session & περίληψη\n\n"
-                        "<b>Προχωρημένα</b>\n"
-                        "<code>/confirm εντολή</code> — Εκτέλεση με επιβεβαίωση\n"
-                        "<code>/plan στόχος</code> — Multi-step εκτέλεση"
+                        "🦞 <b>Astakos — Commands</b>\n\n" +
+                        t("clients.telegram_bot.msg_help_menu", voice_status=voice_status)
                     )
                     continue
 
@@ -2698,7 +2671,7 @@ def run_polling():
                         from tools.system import system_doctor
                         send_telegram_msg(system_doctor(days=1))
                     except Exception as e:
-                        send_telegram_msg(f"❌ Σφάλμα doctor: {e}")
+                        send_telegram_msg(t("clients.telegram_bot.msg_doctor_error", e=e))
                     continue
 
                 if cmd == "/status":
@@ -2799,7 +2772,7 @@ def run_polling():
                     else:
                         story_theme = rest or t("clients.telegram_bot.msg_9e64ca")
                         story_chars = ""
-                    send_telegram_msg(f"📖 Φτιάχνω παραμύθι για *{story_theme}*\\.\\.\\. \\(30\\-60\"\\)")
+                    send_telegram_msg(t("clients.telegram_bot.msg_creating_story", story_theme=story_theme))
                     threading.Thread(
                         target=_run_story_maker,
                         args=(story_theme, story_chars, chat_id),
@@ -2844,7 +2817,7 @@ def job_check_reminders():
         )
         due = cursor.fetchall()
         for rid, task in due:
-            msg = f"🔔 ΥΠΕΝΘΥΜΙΣΗ: {task}"
+            msg = f"🔔 REMINDER: {task}"
             if is_duplicate_notification(msg, cooldown_seconds=60):
                 continue
             _send_and_record_assistant(msg, agent="Routine_Agent")
@@ -2881,10 +2854,10 @@ def _build_proactive_memory_context(event_name: str) -> str:
         from memory.context_builder import build_memory_context
 
         recall_query = (
-            f"θυμάσαι {event_name}; πρόσφατο context για το αν ισχύει ακόμα η ρουτίνα, "
-            f"αν ήδη έγινε, αν είναι σε εξέλιξη, αν ακυρώθηκε, "
-            f"αν το σχετικό πρόσωπο λείπει, αν έχει γυρίσει σπίτι, "
-            f"ή αν υπάρχει προσωρινή αλλαγή προγράμματος"
+            f"do you remember {event_name}; recent context regarding if the routine is still valid, "
+            f"if it already happened, if it is in progress, if it was cancelled, "
+            f"if the relevant person is missing or has returned home, "
+            f"or if there is a temporary schedule change"
         )
         context = build_memory_context(
             recall_query,
@@ -3237,9 +3210,9 @@ def _get_env_context() -> str:
             w_desc = WMO_CODES.get(wcode, t("clients.telegram_bot.msg_e8006a"))
 
             env_str = (
-                f"[ΠΕΡΙΒΑΛΛΟΝΤΙΚΑ ΔΕΔΟΜΕΝΑ ΧΡΗΣΤΗ]\n"
-                f"- Τοποθεσία: {location_status} (GPS: lat={lat:.4f}, lon={lon:.4f})\n"
-                f"- Καιρός εκεί: {w_desc}, {temp}°C, υετός {precip}mm\n"
+                f"[USER ENVIRONMENTAL DATA]\n"
+                f"- Location: {location_status} (GPS: lat={lat:.4f}, lon={lon:.4f})\n"
+                f"- Weather there: {w_desc}, {temp}°C, precip {precip}mm\n"
             )
             _ENV_CONTEXT_CACHE["ts"] = now_ts
             _ENV_CONTEXT_CACHE["gps_key"] = gps_key
@@ -3248,8 +3221,8 @@ def _get_env_context() -> str:
         except Exception as e:
             print(f"\033[93m[EnvContext]: Weather fetch failed: {e}\033[0m")
             env_str = (
-                f"[ΠΕΡΙΒΑΛΛΟΝΤΙΚΑ ΔΕΔΟΜΕΝΑ ΧΡΗΣΤΗ]\n"
-                f"- Τοποθεσία: {location_status} (GPS: lat={lat:.4f}, lon={lon:.4f})\n"
+                f"[USER ENVIRONMENTAL DATA]\n"
+                f"- Location: {location_status} (GPS: lat={lat:.4f}, lon={lon:.4f})\n"
             )
             _ENV_CONTEXT_CACHE["ts"] = now_ts
             _ENV_CONTEXT_CACHE["gps_key"] = gps_key
@@ -3267,13 +3240,13 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
     from core.brain import llm
 
     if count > 1:
-        context = f"Ο Λάζαρος έχει {count} ρουτίνες σε ~30 λεπτά: {event_name}."
+        context = f"Lazaros has {count} routines in ~30 mins: {event_name}."
     elif confidence >= 0.8:
-        context = f"Ο Λάζαρος κάνει σχεδόν πάντα '{event_name}' αυτή την ώρα (υψηλή βεβαιότητα)."
+        context = f"Lazaros almost always does '{event_name}' at this time (high confidence)."
     elif confidence >= 0.5:
-        context = f"Ο Λάζαρος συνήθως κάνει '{event_name}' αυτή την ώρα."
+        context = f"Lazaros usually does '{event_name}' at this time."
     else:
-        context = f"Παλιότερα ο Λάζαρος έκανε '{event_name}' αυτή την ώρα, δεν είμαστε σίγουροι πια."
+        context = f"Previously Lazaros did '{event_name}' at this time, we are no longer sure."
 
     memory_context = _build_proactive_memory_context(event_name)
     memory_block = f"\n\n{memory_context}\n" if memory_context else ""
@@ -3317,7 +3290,7 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
         return content.strip()
     except Exception as e:
         print(f"[Proactive Craft Error]: {e}")
-        return f"Ουπς, μόλις θυμήθηκα: {event_name}!"
+        return t("clients.telegram_bot.msg_oops_remembered", event_name=event_name)
 
 
 def _infer_muted_until(event_name: str, memory_context: str) -> str | None:
@@ -3332,13 +3305,13 @@ def _infer_muted_until(event_name: str, memory_context: str) -> str | None:
 
     today = date.today().isoformat()
     prompt = (
-        f"Σήμερα είναι {today}.\n"
-        f"Η ρουτίνα '{event_name}' κρίθηκε ότι δεν ισχύει αυτή τη στιγμή λόγω context.\n\n"
+        f"Today is {today}.\n"
+        f"Routine '{event_name}' is deemed invalid right now due to context.\n\n"
         f"Context:\n{memory_context}\n\n"
-        "Βάσει του context, μέχρι ποια ημερομηνία (YYYY-MM-DD) πρέπει να σιγαστεί αυτή η ρουτίνα; "
-        "Αν μπορείς να εκτιμήσεις, απάντησε ΜΟΝΟ με την ημερομηνία σε μορφή YYYY-MM-DD. "
-        "Αν δεν μπορείς να εκτιμήσεις, απάντησε ΜΟΝΟ με NULL. "
-        "Καμία άλλη λέξη."
+        "Based on context, until what date (YYYY-MM-DD) should this routine be muted? "
+        "If you can estimate, answer ONLY with the date in YYYY-MM-DD format. "
+        "If you cannot estimate, answer ONLY with NULL. "
+        "No other words."
     )
     try:
         response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
@@ -3373,11 +3346,11 @@ def _infer_sentimental(event_name: str, memory_context: str) -> bool:
     from core.brain import llm
 
     prompt = (
-        f"Η ρουτίνα: '{event_name}'.\n\n"
+        f"Routine: '{event_name}'.\n\n"
         f"Context:\n{memory_context}\n\n"
-        "Αυτή η ρουτίνα αφορά οικογένεια, παιδί, κοινές εμπειρίες ή έχει "
-        "συναισθηματική αξία (π.χ. βόλτα με παιδί, παιχνίδι, ύπνος παιδιού); "
-        "Απάντησε ΜΟΝΟ: YES ή NO."
+        "Does this routine involve family, child, shared experiences or have "
+        "emotional value (e.g. walk with child, playing, child sleeping)? "
+        "Answer ONLY: YES or NO."
     )
     try:
         response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
@@ -3427,14 +3400,14 @@ def _craft_sentimental_absent_msg(
 
     today = date.today().isoformat()
     prompt = (
-        f"Σήμερα: {today}. Η ρουτίνα '{event_name}' δεν μπορεί να γίνει "
-        f"από {muted_from} έως {muted_until}.\n\n"
+        f"Today: {today}. Routine '{event_name}' cannot be done "
+        f"from {muted_from} to {muted_until}.\n\n"
         f"Context:\n{memory_context}\n\n"
-        "Γράψε ΕΝΑ σύντομο μήνυμα (1-2 προτάσεις) που:\n"
-        "- ΔΕΝ λέει 'θυμήσου να...' ή 'ώρα για...' — δεν υπενθυμίζει\n"
-        "- Αναγνωρίζει συναισθηματικά (νοσταλγία, αντίστροφη μέτρηση, χιούμορ)\n"
-        "- Είναι σαν μήνυμα από φίλο που ξέρει την κατάσταση\n"
-        "Ελληνικά. Χωρίς tag. Χωρίς εισαγωγικά."
+        "Write ONE short message (1-2 sentences) that:\n"
+        "- DOES NOT say 'remember to...' or 'time for...' — no reminders\n"
+        "- Acknowledges emotionally (nostalgia, countdown, humor)\n"
+        "- Reads like a message from a friend who knows the situation\n"
+        "Language MUST BE GREEK. No tags. No quotes."
     )
     try:
         response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
@@ -3460,9 +3433,9 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
     from core.brain import llm
 
     if confidence >= 0.8:
-        certainty = f"Ο Λάζαρος κάνει σχεδόν πάντα '{event_name}' αυτή την ώρα."
+        certainty = f"Lazaros almost always does '{event_name}' at this time."
     else:
-        certainty = f"Συνήθως αυτή την ώρα ο Λάζαρος κάνει '{event_name}'."
+        certainty = f"Usually at this time Lazaros does '{event_name}'."
 
     try:
         from memory.context_builder import build_memory_context
@@ -3908,7 +3881,7 @@ def job_check_routines():
                             # 30% chance for a Sentimental Override (approx 2 times a week for a daily routine)
                             if random.random() < 0.30 and _should_allow_sentimental_override(event_name, cond_result):
                                 blocked_reason_text = ", ".join(str(r.get("reason", "blocked")) for r in cond_result.get("results", []) if not r.get("allowed"))
-                                override_name = f"{event_name} [ΑΚΥΡΩΝΕΤΑΙ ΣΗΜΕΡΑ ΛΟΓΩ: {blocked_reason_text}]"
+                                override_name = f"{event_name} [CANCELLED TODAY DUE TO: {blocked_reason_text}]"
                                 if should_log:
                                     print(f"\U0001f496 [job_check_routines]: #{r_id} '{event_name}' blocked but triggering sentimental override!")
                                 # Fall through to due_routines to let the LLM generate a [CONTEXT_SKIP]
@@ -4174,10 +4147,10 @@ def job_proactive_scan():
                 content = read_local_file.invoke(filepath)
             except TypeError:
                 content = read_local_file.invoke({"file_path": filepath})
-            collected_data += f"\n--- ΑΡΧΕΙΟ: {file} ---\n{str(content)[:2000]}\n"
+            collected_data += f"\n--- FILE: {file} ---\n{str(content)[:2000]}\n"
 
         prompt = core.i18n.load_prompt("telegram_bot_proactive_scan.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME)
-        response = safe_gemini_call(f"{prompt}\n\n[ΔΕΔΟΜΕΝΑ]:\n{collected_data}")
+        response = safe_gemini_call(f"{prompt}\n\n[DATA]:\n{collected_data}")
         reply = response.text.strip()
 
         if reply and t("clients.telegram_bot.msg_841230") not in reply:
@@ -4201,9 +4174,9 @@ def job_analytics_engine():
         stats = run_analytics()
         if stats.get("created", 0) + stats.get("merged", 0) > 0:
             send_telegram_msg(
-                f"🧠 [Analytics]: Εντόπισα νέες ρουτίνες!\n"
-                f"✅ Νέες: {stats['created']} | 🔗 Merged: {stats['merged']} | "
-                f"📊 Ανιχνεύθηκαν: {stats['detected']}"
+                f"🧠 [Analytics]: Detected new routines!\n"
+                f"✅ New: {stats['created']} | 🔗 Merged: {stats['merged']} | "
+                f"📊 Detected: {stats['detected']}"
             )
     except Exception as e:
         print(f"[Analytics Job Error]: {e}")
@@ -4239,7 +4212,7 @@ def job_morning_fit_briefing():
         from astakos_skills.google_fit import get_morning_summary
         summary = get_morning_summary()
         _send_and_record_assistant(
-            f"🌅 *Καλημέρα Μάστορα!*\n\n{summary}",
+            t("clients.telegram_bot.msg_morning_master_summary", summary=summary),
             agent="Fit_Briefing",
         )
         with open(flag_file, "w") as f:
@@ -4270,14 +4243,14 @@ def job_morning_calendar_briefing():
         # If there are no events today, we only send a weekly summaryof
         if t("clients.telegram_bot.msg_908de1") in today_events:
             msg = (
-                f"🌅 *Καλημέρα Λάζαρε!*\n\n"
-                f"📅 Σήμερα δεν έχεις τίποτα προγραμματισμένο.\n\n"
-                f"*Επόμενες 7 μέρες:*\n{week_events}"
+                f"🌅 *Good morning Lazaros!*\n\n"
+                f"📅 You have nothing scheduled today.\n\n"
+                f"*Next 7 days:*\n{week_events}"
             )
         else:
             msg = (
-                f"🌅 *Καλημέρα Λάζαρε!*\n\n"
-                f"*Σημερινό πρόγραμμα:*\n{today_events}"
+                f"🌅 *Good morning Lazaros!*\n\n"
+                f"*Today's schedule:*\n{today_events}"
             )
 
         _send_and_record_assistant(msg, agent="Calendar_Briefing")
@@ -4347,7 +4320,7 @@ def job_goal_followup():
         for g in stale_goals[:3]:
             line = f"- {g['project']}: {g['description']}"
             if g.get('progress'):
-                line += f" (Πρόοδος: {g['progress']}%)"
+                line += t("clients.telegram_bot.msg_progress_percent", progress=g["progress"])
             if g.get('milestones'):
                 line += f"\n  Milestones: {g['milestones']}"
             goals_text_lines.append(line)

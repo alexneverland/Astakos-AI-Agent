@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime, timedelta
 from config import NLP_CONFIG
-
+from core import nl_config
 _routines_nlp = NLP_CONFIG.get("routines", {})
 _tokens_data = _routines_nlp.get("tokens", {})
 _inline = _routines_nlp.get("inline", {})
@@ -96,7 +96,7 @@ def _extract_iso_dates(text: str) -> list[str]:
 
 
 def _infer_relative_until(normalized_fact: str, *, now: datetime) -> str | None:
-    in_days_pattern = _regex_data.get("in_days", r"(?:σε|για)\s+(\d{1,2})\s*(?:μερες|μερα|ημερες|ημερα)")
+    in_days_pattern = nl_config.RR_IN_DAYS_REGEX
     match = re.search(in_days_pattern, normalized_fact)
     if not match:
         return None
@@ -794,11 +794,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
         directives.append(d_state)
     # 2. Dynamic Generic Condition for specific activities mentioned (e.g. "running", "gym")
     # Instead of hardcoding morning/afternoon targets, we extract the action.
-    stop_words = {
-        "το", "η", "ο", "τα", "τις", "τους", "εχω", "ειμαι", "οταν", "μονο", "δεν", 
-        "ισχυει", "απογευμα", "πρωι", "βαρδια", "αυτη", "την", "εβδομαδα", "και", 
-        "αλλα", "οτι", "για", "να", "ξερεις", "μου", "ειναι", "θα", "παω", "οτι", "πως", "σου"
-    }
+    stop_words = nl_config.RR_STOPWORDS
     action_tokens = [w for w in normalized.split() if w not in stop_words and len(w) > 2]
 
     # Old logic for "morning/wakeup" routines if they are explicitly mentioned

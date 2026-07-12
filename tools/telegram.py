@@ -135,7 +135,7 @@ def send_telegram_document(file_path: str, caption: str = "", drive_url: str = "
         print("⚠️ send_telegram_document: credentials missing")
         return
     if not os.path.exists(file_path):
-        send_telegram_msg(f"⚠️ Αρχείο δεν βρέθηκε: <code>{file_path}</code>")
+        send_telegram_msg(f"⚠️ File not found: <code>{file_path}</code>")
         return
 
     filename = os.path.basename(file_path)
@@ -149,7 +149,7 @@ def send_telegram_document(file_path: str, caption: str = "", drive_url: str = "
     if drive_url:
         payload["reply_markup"] = json.dumps({
             "inline_keyboard": [[{
-                "text": "📂 Άνοιγμα στο Google Drive",
+                "text": "📂 Open in Google Drive",
                 "url":  drive_url
             }]]
         })
@@ -169,7 +169,7 @@ def send_telegram_document(file_path: str, caption: str = "", drive_url: str = "
             print(f"⚠️ [Telegram Doc]: {resp.status_code} — {resp.text[:120]}")
     except Exception as e:
         print(f"❌ [Telegram Doc Error]: {e}")
-        send_telegram_msg(f"❌ Αποτυχία αποστολής αρχείου: {str(e)}")
+        send_telegram_msg(f"❌ Failed to send file: {str(e)}")
 
 
 async def send_telegram_voice(text: str):
@@ -198,7 +198,7 @@ async def send_telegram_voice(text: str):
         clean_text = " ".join(clean_text.split())
         
         if not clean_text.strip():
-            clean_text = "Μάστορα, σου έστειλα κάτι τεχνικό στο τσατ, δες το εκεί."
+            clean_text = "Boss, I sent you something technical in the chat, check it there."
 
         print(f"\033[95m[TTS Telegram]: Creating voice for: {clean_text[:50]}...\033[0m")
 

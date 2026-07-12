@@ -9,6 +9,7 @@ import re
 import difflib
 import ast
 from langchain_core.tools import tool
+from core.i18n import t
 
 
 def _unified_diff(label: str, before: str, after: str) -> str:
@@ -110,14 +111,14 @@ def register_tool(
         return "System Error: invalid tool_name. Use a Python identifier, e.g. my_tool."
 
     if risk not in ("SAFE", "WARNING", "NOTIFY", "CRITICAL"):
-        return f"❌ Μη έγκυρο risk: '{risk}'. Επίτρεπτα: SAFE, WARNING, NOTIFY, CRITICAL."
+        return t("skills.register_tool.msg_invalid_risk", risk=risk)
 
     skills_dir = os.path.realpath(os.path.join(BASE_DIR, "astakos_skills"))
     skill_path = os.path.realpath(os.path.join(skills_dir, f"{tool_name}.py"))
     if not skill_path.startswith(skills_dir + os.sep):
         return "System Error: invalid skill path."
     if not os.path.exists(skill_path):
-        return f"❌ Δεν βρέθηκε το αρχείο: astakos_skills/{tool_name}.py"
+        return t("skills.register_tool.msg_file_not_found", tool=tool_name)
 
     validation_error = _validate_skill_tool(skill_path, tool_name)
     if validation_error:
@@ -140,7 +141,7 @@ def register_tool(
     import_line = f"from astakos_skills.{tool_name} import {tool_name}"
 
     if import_line in sys_content:
-        results.append(f"⚠️  system.py: import ήδη υπάρχει")
+        results.append(f"⚠️  system.py: import already exists")
     else:
         # Import after the last astakos_skills import
         last_import = "from astakos_skills.register_tool import register_tool"
@@ -153,14 +154,14 @@ def register_tool(
             results.append(
                 f"DRY RUN system.py: would add import {import_line}"
                 if dry_run else
-                f"✅ system.py: import προστέθηκε"
+                f"✅ system.py: import added"
             )
         else:
             errors.append(f"system.py: missing import anchor `{last_import}`")
-            results.append(f"⚠️  system.py: δεν βρέθηκε anchor για import — πρόσθεσε χειροκίνητα: {import_line}")
+            results.append(f"⚠️  system.py: import anchor not found — add manually: {import_line}")
 
     if f"    {tool_name}," in sys_content or f", {tool_name}," in sys_content:
-        results.append(f"⚠️  system.py: all_tools ήδη περιέχει {tool_name}")
+        results.append(f"⚠️  system.py: all_tools already contains {tool_name}")
     else:
         # Insert before the closing ]
         all_tools_anchor = "    register_tool,\n]"
@@ -173,11 +174,11 @@ def register_tool(
             results.append(
                 f"DRY RUN system.py: would add {tool_name} to all_tools"
                 if dry_run else
-                f"✅ system.py: προστέθηκε στο all_tools"
+                f"✅ system.py: added to all_tools"
             )
         else:
             errors.append(f"system.py: missing all_tools anchor `{all_tools_anchor}`")
-            results.append(f"⚠️  system.py: δεν βρέθηκε anchor για all_tools — πρόσθεσε χειροκίνητα: {tool_name}")
+            results.append(f"⚠️  system.py: all_tools anchor not found — add manually: {tool_name}")
 
     # system.py will be written LAST after registry
 
@@ -189,7 +190,7 @@ def register_tool(
 
     risk_line = f'    "{tool_name}":'
     if risk_line in risk_content:
-        results.append(f"⚠️  tool_risk.py: {tool_name} ήδη υπάρχει")
+        results.append(f"⚠️  tool_risk.py: {tool_name} already exists")
     else:
         insert_before = '}\n\ndef get_risk'
         new_entry = f'    "{tool_name}":{" " * max(1, 24 - len(tool_name))}"{risk}",\n'
@@ -206,7 +207,7 @@ def register_tool(
             )
         else:
             errors.append(f"tool_risk.py: missing risk insert anchor `{insert_before}`")
-            results.append(f"⚠️  tool_risk.py: δεν βρέθηκε anchor για risk insert")
+            results.append(f"⚠️  tool_risk.py: risk insert anchor not found")
 
     # ── 3. core/capability_registry.json ────────────────────────
     registry_path = os.path.join(BASE_DIR, "core", "capability_registry.json")
@@ -218,7 +219,7 @@ def register_tool(
             registry = json.loads(registry_content)
 
         if any(e["name"] == tool_name for e in registry):
-            results.append(f"⚠️  capability_registry: {tool_name} ήδη υπάρχει")
+            results.append(f"⚠️  capability_registry: {tool_name} already exists")
             registry_new_content = registry_content
         else:
             trigger_list = [t.strip() for t in triggers.split(",") if t.strip()] if triggers else [tool_name.replace("_", " ")]
@@ -254,10 +255,10 @@ def register_tool(
         summary = "\n".join(results)
         error_text = "\n".join(f"- {e}" for e in errors)
         return (
-            f"🔧 register_tool: '{tool_name}'\n"
-            f"{summary}\n\n"
-            f"❌ Δεν εφαρμόστηκε τίποτα γιατί λείπουν απαραίτητα anchors/δεδομένα:\n"
-            f"{error_text}\n\n"
+            f"🔧 register_tool: '{tool_name}'\n" +
+            f"{summary}\n\n" +
+            t("skills.register_tool.msg_nothing_applied") +
+            f"{error_text}\n\n" +
             f"No files were changed."
         )
 
@@ -279,7 +280,7 @@ def register_tool(
     footer = (
         "No files were changed. Run again with dry_run=False to apply."
         if dry_run else
-        "⚡ Ο server θα κάνει auto-restart για να φορτώσει το νέο tool."
+        t("skills.register_tool.restart_notice")
     )
     return (
         f"🔧 {mode}register_tool: '{tool_name}'\n"

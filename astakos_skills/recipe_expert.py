@@ -16,6 +16,7 @@ from config import BASE_DIR, RESPONSE_LANGUAGE
 # Mastro-Import: Bringing the brain into the tool!
 from core.brain import llm
 from core.utils import clean_message 
+from core.i18n import t
 
 HISTORY_FILE = os.path.join(BASE_DIR, "astakos_skills", "food_history.json")
 
@@ -120,7 +121,7 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
         recipe_text = clean_message(response.content)
         return f"[SYSTEM_INSTRUCTION: YOU MUST copy-paste the ENTIRE recipe/instruction below into your final answer to the user. DO NOT say 'I generated the recipe', WRITE IT! PASTE IT HERE:]\n\n{recipe_text}"
     except Exception as e:
-        return f"❌ Σφάλμα κατά την παραγωγή της συνταγής από τον Chef: {str(e)}"
+        return t("skills.recipe_expert.msg_chef_error", e=str(e))
 
 
 @tool
@@ -142,7 +143,7 @@ def log_meal(meal_name: str):
         
     meal_name = meal_name.strip()
     if not meal_name:
-        return "⚠️ Δεν δόθηκε όνομα γεύματος για καταγραφή."
+        return t("skills.recipe_expert.no_name")
 
     # [MASTRO-FIX]: Check if a similar meal has already been logged TODAY
     for meal in history:
@@ -152,8 +153,7 @@ def log_meal(meal_name: str):
         if (meal_date == today_str and _is_same_meal(existing_name, meal_name)) or _is_recent_same_meal(meal, meal_name, now):
             print("⚠️ Preventing duplicate meal entry!")
             return (
-                f"⚠️ Παρόμοιο γεύμα έχει ΗΔΗ καταγραφεί πρόσφατα: "
-                f"'{existing_name}'. Μην το ξαναγράφεις."
+                t("skills.recipe_expert.msg_duplicate", name=existing_name)
             )
         
     history.append({
@@ -164,4 +164,4 @@ def log_meal(meal_name: str):
     with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
         json.dump(history[-30:], f, ensure_ascii=False, indent=4)
         
-    return f"✅ Το γεύμα '{meal_name}' καταγράφηκε επιτυχώς."
+    return t("skills.recipe_expert.msg_recorded", name=meal_name)

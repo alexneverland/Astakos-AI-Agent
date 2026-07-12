@@ -16,6 +16,7 @@ import csv as _csv_module
 from datetime import datetime
 
 from langchain_core.tools import tool
+from core.i18n import t
 
 
 # ── Default output folder ────────────────────────────────────────
@@ -52,15 +53,15 @@ def generate_excel(output_path: str, data_json: str, sheet_name: str = "Sheet1",
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     except ImportError:
-        return "❌ Λείπει η βιβλιοθήκη openpyxl. Τρέξε: pip install openpyxl"
+        return t("skills.file_generator.missing_openpyxl")
 
     try:
         data = json.loads(data_json)
     except json.JSONDecodeError as e:
-        return f"❌ Μη έγκυρο JSON: {e}"
+        return t("skills.file_generator.msg_invalid_json", e=e)
 
     if not data:
-        return "❌ Τα δεδομένα είναι κενά."
+        return t("skills.file_generator.empty_data")
 
     output_path = _resolve_path(output_path, ".xlsx")
 
@@ -128,9 +129,9 @@ def generate_excel(output_path: str, data_json: str, sheet_name: str = "Sheet1",
         ws.freeze_panes = ws.cell(row=row_offset + 1, column=1)
 
         wb.save(output_path)
-        return f"✅ Excel δημιουργήθηκε: {output_path}\n📊 {len(data)} γραμμές · {len(headers)} στήλες"
+        return t("skills.file_generator.excel_success", output_path=output_path, rows=len(data), cols=len(headers))
     except Exception as e:
-        return f"❌ Σφάλμα δημιουργίας Excel: {e}"
+        return t("skills.file_generator.msg_excel_error", e=e)
 
 
 # ── Word ─────────────────────────────────────────────────────────
@@ -156,7 +157,7 @@ def generate_word_doc(output_path: str, content: str, title: str = "", subtitle:
         from docx.shared import Pt, RGBColor, Inches
         from docx.enum.text import WD_ALIGN_PARAGRAPH
     except ImportError:
-        return "❌ Λείπει η βιβλιοθήκη python-docx. Τρέξε: pip install python-docx"
+        return t("skills.file_generator.missing_docx")
 
     output_path = _resolve_path(output_path, ".docx")
 
@@ -193,15 +194,15 @@ def generate_word_doc(output_path: str, content: str, title: str = "", subtitle:
 
         doc.save(output_path)
         lines = len(content.split("\n"))
-        return f"✅ Word αρχείο δημιουργήθηκε: {output_path}\n📄 ~{lines} γραμμές"
+        return t("skills.file_generator.msg_word_success", path=output_path, lines=lines)
     except Exception as e:
-        return f"❌ Σφάλμα δημιουργίας Word: {e}"
+        return t("skills.file_generator.msg_word_error", e=e)
 
 
 # ── PDF ──────────────────────────────────────────────────────────
 
 @tool
-def generate_pdf(output_path: str, content: str, title: str = "", author: str = "Αστακός") -> str:
+def generate_pdf(output_path: str, content: str, title: str = "", author: str = "Astakos") -> str:
     """
     Creates a PDF file from text.
 
@@ -223,7 +224,7 @@ def generate_pdf(output_path: str, content: str, title: str = "", author: str = 
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
     except ImportError:
-        return "❌ Λείπει η βιβλιοθήκη reportlab. Τρέξε: pip install reportlab"
+        return t("skills.file_generator.missing_reportlab")
 
     output_path = _resolve_path(output_path, ".pdf")
 
@@ -233,7 +234,7 @@ def generate_pdf(output_path: str, content: str, title: str = "", author: str = 
             pagesize=A4,
             rightMargin=2*cm, leftMargin=2*cm,
             topMargin=2.5*cm, bottomMargin=2*cm,
-            title=title or "Αστακός Document",
+            title=title or "Astakos Document",
             author=author,
         )
 
@@ -294,9 +295,9 @@ def generate_pdf(output_path: str, content: str, title: str = "", author: str = 
                 story.append(Paragraph(safe, body_style))
 
         doc.build(story)
-        return f"✅ PDF δημιουργήθηκε: {output_path}"
+        return t("skills.file_generator.msg_pdf_success", path=output_path)
     except Exception as e:
-        return f"❌ Σφάλμα δημιουργίας PDF: {e}"
+        return t("skills.file_generator.msg_pdf_error", e=e)
 
 
 # ── CSV ──────────────────────────────────────────────────────────
@@ -315,10 +316,10 @@ def generate_csv(output_path: str, data_json: str, delimiter: str = ",") -> str:
     try:
         data = json.loads(data_json)
     except json.JSONDecodeError as e:
-        return f"❌ Μη έγκυρο JSON: {e}"
+        return t("skills.file_generator.msg_invalid_json", e=e)
 
     if not data:
-        return "❌ Τα δεδομένα είναι κενά."
+        return t("skills.file_generator.empty_data")
 
     output_path = _resolve_path(output_path, ".csv")
 
@@ -328,6 +329,6 @@ def generate_csv(output_path: str, data_json: str, delimiter: str = ",") -> str:
             writer = _csv_module.DictWriter(f, fieldnames=headers, delimiter=delimiter)
             writer.writeheader()
             writer.writerows(data)
-        return f"✅ CSV δημιουργήθηκε: {output_path}\n📋 {len(data)} γραμμές · {len(headers)} στήλες"
+        return t("skills.file_generator.msg_csv_success", path=output_path, rows=len(data), cols=len(headers))
     except Exception as e:
-        return f"❌ Σφάλμα δημιουργίας CSV: {e}"
+        return t("skills.file_generator.msg_csv_error", e=e)

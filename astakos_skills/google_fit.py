@@ -16,6 +16,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from core.i18n import t
 
 TOKEN_PATH       = r"C:\astakos_v2\credentials\token.json"
 CREDENTIALS_PATH = r"C:\astakos_v2\credentials\credentials.json"
@@ -72,14 +73,11 @@ def _ensure_fit_token_scopes() -> None:
     has_google_health = any("googlehealth." in scope for scope in token_scopes)
     if has_google_health:
         raise GoogleFitAuthError(
-            "Το Google token έχει μείνει με Google Health/Health Connect scopes "
-            "από παλιότερη δοκιμή, όχι με τα κλασικά Google Fit scopes. "
-            "Χρειάζεται νέο OAuth consent με fitness.activity.read, "
-            "fitness.sleep.read και fitness.heart_rate.read."
+            t("skills.google_fit.msg_auth_warning_1") + " " + t("skills.google_fit.msg_auth_warning_2")
         )
 
     raise GoogleFitAuthError(
-        "Το Google token δεν έχει όλα τα απαιτούμενα Google Fit scopes: "
+        t("skills.google_fit.missing_scopes")
         + ", ".join(missing)
     )
 
@@ -91,12 +89,12 @@ def _save_credentials(creds: Credentials) -> None:
 
 def authorize_google_fit() -> str:
     if not os.path.exists(CREDENTIALS_PATH):
-        raise GoogleFitAuthError("Λείπει το credentials.json για νέο Google OAuth consent.")
+        raise GoogleFitAuthError(t("skills.google_fit.missing_creds"))
 
     flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
     creds = flow.run_local_server(port=0, prompt="consent", access_type="offline")
     _save_credentials(creds)
-    return "✅ Google OAuth token ενημερώθηκε με τα Google Fit scopes."
+    return t("skills.google_fit.token_updated")
 
 
 def _get_credentials():
@@ -112,12 +110,11 @@ def _get_credentials():
             except RefreshError as e:
                 if "invalid_scope" in str(e).lower():
                     raise GoogleFitAuthError(
-                        "Το Google token απορρίφθηκε με invalid_scope. "
-                        "Κάνε νέο OAuth consent με τα Google Fit scopes."
+                        t("skills.google_fit.msg_auth_rejected")
                     ) from e
                 raise
         else:
-            raise Exception("Token λήξε ή δεν υπάρχει. Διέγραψε token.json και κάνε νέο login.")
+            raise Exception(t("skills.google_fit.token_expired"))
     return creds
 
 
@@ -129,7 +126,7 @@ def _fit_auth_summary(title: str) -> str | None:
             title,
             "",
             f"⚠️ Google Fit auth: {e}",
-            "Τα υπόλοιπα Google εργαλεία μπορεί να δουλεύουν κανονικά, αλλά το Fit θέλει token με Fit scopes.",
+            t("skills.google_fit.msg_auth_other_tools_2"),
         ])
     return None
 
@@ -320,11 +317,11 @@ def get_morning_summary() -> str:
         steps = get_steps(1)
         if steps > 0:
             emoji = "🔥" if steps >= 10000 else "👣" if steps >= 5000 else "🐌"
-            lines.append(f"{emoji} Βήματα χθες: *{steps:,}*")
+            lines.append(f"{emoji} " + t("skills.google_fit.msg_steps_yest", steps=f"{steps:,}"))
         else:
-            lines.append("👣 Βήματα χθες: δεν βρέθηκαν δεδομένα")
+            lines.append(t("skills.google_fit.msg_steps_yest_none"))
     except Exception as e:
-        lines.append(f"👣 Βήματα χθες: σφάλμα ({e})")
+        lines.append(t("skills.google_fit.msg_steps_yest_err", e=e))
 
     try:
         sleep = get_sleep(1)
@@ -334,33 +331,33 @@ def get_morning_summary() -> str:
             emoji = "😴" if h >= 7 else "😐" if h >= 5 else "😵"
             detail = []
             if sleep["deep_minutes"] > 0:
-                detail.append(f"βαθύς {sleep['deep_minutes']}′")
+                detail.append(t("skills.google_fit.detail_deep", m=sleep["deep_minutes"]))
             if sleep["rem_minutes"] > 0:
                 detail.append(f"REM {sleep['rem_minutes']}′")
             detail_str = f" ({', '.join(detail)})" if detail else ""
-            lines.append(f"{emoji} Ύπνος: *{h}ω {m}′*{detail_str}")
+            lines.append(f"{emoji} " + t("skills.google_fit.msg_sleep_yest", h=h, m=m, detail=detail_str))
         else:
-            lines.append("😴 Ύπνος: δεν βρέθηκαν δεδομένα")
+            lines.append(t("skills.google_fit.msg_sleep_yest_none"))
     except Exception as e:
-        lines.append(f"😴 Ύπνος: σφάλμα ({e})")
+        lines.append(t("skills.google_fit.msg_sleep_yest_err", e=e))
 
     try:
         hr = get_heart_rate(1)
         if hr["avg_bpm"] == 0:
             hr = get_heart_rate(0)
         if hr["avg_bpm"] > 0:
-            lines.append(f"❤️ Καρδιά: avg *{hr['avg_bpm']} bpm* / max {hr['max_bpm']} bpm")
+            lines.append(t("skills.google_fit.msg_hr_yest", avg=hr["avg_bpm"], max=hr["max_bpm"]))
         else:
-            lines.append("❤️ Καρδιά: δεν βρέθηκαν δεδομένα")
+            lines.append(t("skills.google_fit.msg_hr_yest_none"))
     except Exception as e:
-        lines.append(f"❤️ Καρδιά: σφάλμα ({e})")
+        lines.append(t("skills.google_fit.msg_hr_yest_err", e=e))
 
     return "\n".join(lines)
 
 
 def get_daily_summary(days_ago: int = 1) -> str:
-    label = "σήμερα" if days_ago == 0 else "χθες"
-    title = f"📊 *Σύνοψη {label}:*"
+    label = t("skills.google_fit.label_today") if days_ago == 0 else t("skills.google_fit.label_yest")
+    title = t("skills.google_fit.msg_summary_title", label=label)
     auth_problem = _fit_auth_summary(title)
     if auth_problem:
         return auth_problem
@@ -371,11 +368,11 @@ def get_daily_summary(days_ago: int = 1) -> str:
         steps = get_steps(days_ago)
         if steps > 0:
             emoji = "🔥" if steps >= 10000 else "👣" if steps >= 5000 else "🐌"
-            lines.append(f"{emoji} Βήματα: *{steps:,}*")
+            lines.append(f"{emoji} " + t("skills.google_fit.msg_steps_today", steps=f"{steps:,}"))
         else:
-            lines.append("👣 Βήματα: δεν βρέθηκαν δεδομένα")
+            lines.append(t("skills.google_fit.msg_steps_today_none"))
     except Exception as e:
-        lines.append(f"👣 Βήματα: σφάλμα ({e})")
+        lines.append(t("skills.google_fit.msg_steps_today_err", e=e))
 
     try:
         sleep = get_sleep(days_ago if days_ago > 0 else 1)
@@ -385,24 +382,24 @@ def get_daily_summary(days_ago: int = 1) -> str:
             emoji = "😴" if h >= 7 else "😐" if h >= 5 else "😵"
             detail = []
             if sleep["deep_minutes"] > 0:
-                detail.append(f"βαθύς {sleep['deep_minutes']}′")
+                detail.append(t("skills.google_fit.detail_deep", m=sleep["deep_minutes"]))
             if sleep["rem_minutes"] > 0:
                 detail.append(f"REM {sleep['rem_minutes']}′")
             detail_str = f" ({', '.join(detail)})" if detail else ""
-            lines.append(f"{emoji} Ύπνος: *{h}ω {m}′*{detail_str}")
+            lines.append(f"{emoji} " + t("skills.google_fit.msg_sleep_yest", h=h, m=m, detail=detail_str))
         else:
-            lines.append("😴 Ύπνος: δεν βρέθηκαν δεδομένα")
+            lines.append(t("skills.google_fit.msg_sleep_yest_none"))
     except Exception as e:
-        lines.append(f"😴 Ύπνος: σφάλμα ({e})")
+        lines.append(t("skills.google_fit.msg_sleep_yest_err", e=e))
 
     try:
         hr = get_heart_rate(days_ago)
         if hr["avg_bpm"] > 0:
-            lines.append(f"❤️ Καρδιά: μέσος *{hr['avg_bpm']} bpm* / max {hr['max_bpm']} bpm")
+            lines.append(t("skills.google_fit.msg_hr_today", avg=hr["avg_bpm"], max=hr["max_bpm"]))
         else:
-            lines.append("❤️ Καρδιά: δεν βρέθηκαν δεδομένα")
+            lines.append(t("skills.google_fit.msg_hr_yest_none"))
     except Exception as e:
-        lines.append(f"❤️ Καρδιά: σφάλμα ({e})")
+        lines.append(t("skills.google_fit.msg_hr_yest_err", e=e))
 
     return "\n".join(lines)
 

@@ -9,51 +9,19 @@
 import os
 import json
 import re
+import config
 
 _REGISTRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "capability_registry.json")
 _registry: list[dict] = []
 
-_GIT_TRIGGERS = [
-    "git commit",
-    "git push",
-    "git pull",
-    "git log",
-    "git status",
-    "git diff",
-    "git show",
-    "git branch",
-    "origin/main",
-    "δες commit",
-    "τελευταία commit",
-    "τελευταία commits",
-    "ιστορικό commit",
-]
-
-_LINKEDIN_CREATION = [
-    "φτιάξε", "γράψε", "ανέβασε", "post", "ποστ",
-    "δημιούργησε", "σκέψου", "βάλε", "φτιαξε",
-]
-
-_PLACE_SEARCH_ACTIONS = {
-    "βρες", "βρεισ", "ψαξε", "ψάξε", "προτεινε", "πρότεινε", "δωσε", "δώσε",
-}
-
-_PLACE_SEARCH_NOUNS = {
-    "μερος", "μέρος", "μαγαζι", "μαγαζί", "εστιατοριο", "εστιατόριο", "ταβερνα", "ταβέρνα",
-    "ψαροταβερνα", "ψαροταβέρνα", "καφε", "καφέ", "μπαρ", "bar", "cafe", "restaurant",
-}
-
-_PLACE_SEARCH_QUALIFIERS = {
-    "κοντα", "κοντά", "χαρτη", "χάρτη", "maps", "rating", "review", "reviews",
-    "ησυχο", "ήσυχο", "παιδια", "παιδιά", "οικογενεια", "οικογένεια", "ρομαντικο", "ρομαντικό",
-}
 
 
 def _looks_like_place_search(msg: str) -> bool:
     tokens = set(re.findall(r"[^\W_]+", msg.lower(), flags=re.UNICODE))
-    has_action = bool(tokens & _PLACE_SEARCH_ACTIONS)
-    has_place_noun = bool(tokens & _PLACE_SEARCH_NOUNS)
-    has_qualifier = bool(tokens & _PLACE_SEARCH_QUALIFIERS)
+    caps = config.NLP_CONFIG.get("capabilities", {})
+    has_action = bool(tokens & set(caps.get("place_search_actions", [])))
+    has_place_noun = bool(tokens & set(caps.get("place_search_nouns", [])))
+    has_qualifier = bool(tokens & set(caps.get("place_search_qualifiers", [])))
     return has_action and (has_place_noun or has_qualifier)
 
 def _load_registry():
@@ -91,7 +59,7 @@ def lookup_agent(user_message: str) -> str | None:
 
     # LinkedIn check FIRST — override everything else
     if _matches_trigger(msg, "linkedin"):
-        for ct in _LINKEDIN_CREATION:
+        for ct in config.NLP_CONFIG.get("capabilities", {}).get("linkedin_creation", []):
             if _matches_trigger(msg, ct):
                 print(f"🎯 [CapabilityRegistry]: 'linkedin+{ct}' → Web_Agent (linkedin_post)")
                 return "Web_Agent"
@@ -101,7 +69,7 @@ def lookup_agent(user_message: str) -> str | None:
         print("🎯 [CapabilityRegistry]: place-search heuristic → Web_Agent (maps_places)")
         return "Web_Agent"
 
-    for trigger in _GIT_TRIGGERS:
+    for trigger in config.NLP_CONFIG.get("capabilities", {}).get("git_triggers", []):
         if _matches_trigger(msg, trigger):
             print(f"🎯 [CapabilityRegistry]: '{trigger}' → Git_Agent (git_ops)")
             return "Git_Agent"

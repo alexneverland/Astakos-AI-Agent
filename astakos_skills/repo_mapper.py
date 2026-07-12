@@ -7,6 +7,7 @@ import os
 import ast
 import json
 from langchain_core.tools import tool
+from core.i18n import t
 
 # ── Ignored folders/files ────────────────────────────────────
 _SKIP_DIRS = {
@@ -198,7 +199,7 @@ def repo_mapper(folder_path: str, max_depth: int = 4) -> str:
     max_depth   = max(1, min(int(max_depth), 6))
 
     if not os.path.isdir(folder_path):
-        return f"❌ Ο φάκελος '{folder_path}' δεν υπάρχει."
+        return t("skills.repo_mapper.msg_folder_missing", path=folder_path)
 
     abs_path = os.path.realpath(folder_path)
     folder_name = os.path.basename(abs_path) or abs_path
@@ -225,7 +226,7 @@ def repo_mapper(folder_path: str, max_depth: int = 4) -> str:
     total_f = count_files(tree)
     total_py = count_py(tree)
     lines.append("")
-    lines.append(f"📊 {total_f} αρχεία ({total_py} .py) | depth={max_depth}")
+    lines.append(t("skills.repo_mapper.msg_stats", f=total_f, py=total_py, d=max_depth))
 
     # ── JSON summary (compact) ───────────────────────────────
     def _compact_json(node):
@@ -257,7 +258,7 @@ def repo_mapper(folder_path: str, max_depth: int = 4) -> str:
 
     # Limit to avoid overwhelming the context
     if len(output) > 18000:
-        output = output[:18000] + "\n\n... [αποκοπή — χρησιμοποίησε μικρότερο max_depth ή πιο συγκεκριμένο subfolder]"
+        output = output[:18000] + t("skills.repo_mapper.msg_truncated_2")
 
     return output
 

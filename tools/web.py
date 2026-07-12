@@ -14,6 +14,7 @@ import unicodedata
 import requests
 import html
 import xml.etree.ElementTree as ET
+from config import NLP_CONFIG
 from langchain_core.tools import tool
 from typing import Annotated
 from playwright.sync_api import sync_playwright
@@ -40,19 +41,12 @@ def remove_accents(input_str: str) -> str:
 def _greek_to_latin(s: str) -> str:
     """
     Basic Greek→Latin transliteration for contact matching.
-    e.g., "σοφια" → "sofia", "αλεξανδρος" → "alexandros"
+    e.g., "sofia" -> "sofia"
     Used as a fallback when the query is in Latin characters.
     """
-    _MAP = {
-        'α':'a','β':'v','γ':'g','δ':'d','ε':'e','ζ':'z','η':'i',
-        'θ':'th','ι':'i','κ':'k','λ':'l','μ':'m','ν':'n','ξ':'x',
-        'ο':'o','π':'p','ρ':'r','σ':'s','ς':'s','τ':'t','υ':'i',
-        'φ':'f','χ':'h','ψ':'ps','ω':'o',
-    }
+    _MAP = NLP_CONFIG.get("general", {}).get("greek_to_latin_map", {})
     return ''.join(_MAP.get(c, c) for c in s.lower())
 
-
-from config import NLP_CONFIG
 
 _AMBIGUOUS_MESSENGER_TARGETS = set(NLP_CONFIG.get("web", {}).get("ambiguous_messenger_targets", []))
 
@@ -112,7 +106,7 @@ def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
     if _is_latin_query:
         # phonetic variants: ph→f, ck→k, c→k (before a/o/u/l/r)
         def _phonetic(s: str) -> str:
-            s = s.replace("ph", "f").replace("ck", "k").replace("th", "θ")
+            s = s.replace("ph", "f").replace("ck", "k").replace("th", "th")
             return s
         normalized_ph = _phonetic(normalized)
         for alias in contacts:
@@ -178,7 +172,7 @@ def _format_rss_pub_date(pub_date: str) -> str:
 
 def _places_tokenize(text: str) -> set[str]:
     normalized = remove_accents(text or "")
-    return {tok for tok in re.findall(r"[a-zA-Zα-ωΑ-Ω0-9]+", normalized) if len(tok) >= 2}
+    return {tok for tok in re.findall(t("tools.web.places_regex"), normalized) if len(tok) >= 2}
 
 
 _PLACES_INTENT_SYNONYMS_JSON = NLP_CONFIG.get("web", {}).get("places_intent_synonyms", {})

@@ -309,40 +309,15 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
                 f"mentions={r['mention_count']}, cooldown={r['cooldown_hours']}h"
             )
 
-        prompt = f"""Είσαι ο Αστακός, ένας AI agent που κάνει νυχτερινό self-reflection.
-Αναλύεις τις συνομιλίες και τις ρουτίνες της χθεσινής μέρας.
-Σκοπός: να βρεις patterns, λάθη ή βελτιώσεις — και να τα καταγράψεις ως lessons.
-
-ΣΥΝΟΜΙΛΙΕΣ ΧΘΕΣ ({len(traces)} συνολικά):
-{chr(10).join(trace_summary) if trace_summary else "Δεν υπάρχουν."}
-
-ΣΤΑΤΙΣΤΙΚΑ ΡΟΥΤΙΝΩΝ:
-{chr(10).join(routine_summary) if routine_summary else "Δεν υπάρχουν ρουτίνες."}
-
-Γράψε ένα JSON array με observations. Κάθε observation:
-{{
-  "source": "conversation" | "routine" | "general",
-  "routine_id": <int or null>,
-  "observation": "<1 sentence>",
-  "action": "increase_cooldown" | "reduce_frequency" | "change_time" | "save_to_memory",
-  "action_value": <number or null>,
-  "confidence": <0.0-1.0>,
-  "severity": "low" | "medium" | "high",
-  "confidence_reason": "<short reason>",
-  "source_events": ["<short event 1>", "<short event 2>"],
-  "lesson": "<1 sentence>"
-}}
-
-ΚΑΝΟΝΕΣ:
-- Μην επιστρέφεις 2 observations που λένε ουσιαστικά το ίδιο πράγμα με άλλο wording.
-- Για action="save_to_memory", πρότεινέ το μόνο αν το lesson είναι σταθερό και γενικεύσιμο, όχι στιγμιαίο noise.
-- Αν 2 observations είναι κοντινά, κράτα μόνο το πιο δυνατό.
-- Για ρουτίνες: αν ignore_count >= 2 → πρότεινε αλλαγή
-- Για συνομιλίες: αν βλέπεις επαναλαμβανόμενα errors, loops, ή patterns → καταγράψτο ως lesson με action="save_to_memory"
-- confidence > 0.75 μόνο αν είσαι σίγουρος
-- Μέγιστο 5 observations
-- Αν δεν υπάρχει τίποτα αξιοσημείωτο: επέστρεψε []
-- Απάντησε ΜΟΝΟ με JSON, χωρίς εξήγηση"""
+        from core.utils import load_agent_prompt
+        trace_summary_text = chr(10).join(trace_summary) if trace_summary else "Δεν υπάρχουν."
+        routine_summary_text = chr(10).join(routine_summary) if routine_summary else "Δεν υπάρχουν ρουτίνες."
+        base_prompt = load_agent_prompt("reflection_nightly")
+        prompt = base_prompt.format(
+            traces_len=len(traces),
+            trace_summary_text=trace_summary_text,
+            routine_summary_text=routine_summary_text
+        )
 
         response = model.generate_content(prompt)
         text = response.text.strip()

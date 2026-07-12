@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from langchain_core.tools import tool
 from config import BASE_DIR
+from core.i18n import t
 
 
 _OFFICE_OUTPUT_SUFFIXES = {".docx", ".xlsx", ".pptx", ".pdf", ".html", ".png", ".jpg", ".jpeg"}
@@ -39,7 +40,7 @@ def _created_file_tags(outputs_dir: str, before: dict[str, float]) -> str:
 
     tags = "\n".join(f"[CREATED_FILE: {path}]" for path in sorted(changed)[:5])
     if len(changed) > 5:
-        tags += f"\n...και {len(changed) - 5} ακόμα αρχεία στο outputs."
+        tags += t("skills.officecli_skill.msg_more_files", count=len(changed) - 5)
     return tags
 
 @tool
@@ -66,14 +67,14 @@ def run_officecli(command: str) -> str:
     os.makedirs(outputs_dir, exist_ok=True)
     
     if not os.path.exists(officecli_path):
-        return f"❌ Το OfficeCLI δεν βρέθηκε στο {officecli_path}. Παρακαλώ κατεβάστε το πρώτα."
+        return t("skills.officecli_skill.msg_not_found_2", path=officecli_path)
     
     # Remove 'officecli ' from the beginning if it exists, in order to insert our own path
     if command.startswith("officecli "):
         command = command[10:]
         
     if any(token in command for token in ["&", "|", ";", ">", "<", "\n", "\r"]):
-        return "❌ Μη ασφαλής OfficeCLI εντολή: περιέχει shell metacharacters."
+        return t("skills.officecli_skill.unsafe")
     
     try:
         # We execute the command inside the outputs folder for greater security
@@ -93,11 +94,11 @@ def run_officecli(command: str) -> str:
         if result.returncode == 0:
             file_tags = _created_file_tags(outputs_dir, before_outputs)
             output = result.stdout.strip()
-            response = f"✅ OfficeCLI Εκτελέστηκε Επιτυχώς.\nΈξοδος:\n{output}"
+            response = t("skills.officecli_skill.msg_success", out=output)
             if file_tags:
                 response += f"\n{file_tags}"
             return response
         else:
-            return f"❌ Σφάλμα OfficeCLI (Exit Code: {result.returncode}).\nΣφάλμα:\n{result.stderr.strip()}"
+            return t("skills.officecli_skill.msg_exit_error_2", code=result.returncode, err=result.stderr.strip())
     except Exception as e:
-        return f"❌ Exception κατά την εκτέλεση του OfficeCLI: {str(e)}"
+        return t("skills.officecli_skill.msg_exec_error", e=str(e))

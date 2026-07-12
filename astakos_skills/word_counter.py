@@ -54,9 +54,9 @@ def main() -> None:
     """
     Main function for executing the script via CLI.
     """
-    parser = argparse.ArgumentParser(description="Επαγγελματικό script καταμέτρησης λέξεων.")
-    parser.add_argument("text", type=str, help="Το κείμενο που θέλετε να αναλύσετε")
-    parser.add_argument("--freq", action="store_true", help="Εμφάνιση συχνότητας λέξεων")
+    parser = argparse.ArgumentParser(description="Professional word counting script.")
+    parser.add_argument("text", type=str, help=t("skills.word_counter.msg_help_text"))
+    parser.add_argument("--freq", action="store_true", help="Show word frequency")
     
     args = parser.parse_args()
     

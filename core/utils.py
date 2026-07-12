@@ -81,38 +81,8 @@ def is_simple_chat_fast_path_candidate(user_text: str) -> bool:
         return False
 
     # Tool / action / control intent -> normal path
-    blocked_tokens = (
-        "στείλε", "στειλε",
-        "θυμά", "θυμα",
-        "δες", "κοιτα",
-        "δείξε", "δειξε",
-        "διάβασε", "διαβασε",
-        "ψάξε", "ψαξε",
-        "πάγωσε", "παγωσε",
-        "άλλαξε", "αλλαξε",
-        "σβήσε", "σβησε",
-        "γράψε", "γραψε",
-        "φτιάξε", "φτιαξε",
-        "ρύθμισε", "ρυθμισε",
-        "λίστα", "λιστα",
-        "routine", "ρουτίν", "ρουτιν",
-        "υπενθύμι", "υπενθυμι",
-        "μήνυμα", "μηνυμα",
-        "δουλειά", "δουλεια",
-        "βάρδια", "βαρδια",
-        "πρωιν", "απογευματιν", "βραδιν",
-        "σοφία", "σοφια",
-        "αλέξανδρ", "αλεξανδρ",
-        "μαρία", "μαρια",
-        "κατασκήν", "κατασκην",
-        "πάρκο", "παρκο",
-        "ποδόσφαιρ", "ποδοσφαιρ",
-        "μαγείρ", "μαγειρ",
-        "ψών", "ψων",
-        "φωτο", "photo",
-        "receipt", "nutrition",
-    )
-    if any(token in q for token in blocked_tokens):
+    from core.nl_config import UTILS_FAST_PATH_BLOCKED_TOKENS
+    if any(token in q for token in UTILS_FAST_PATH_BLOCKED_TOKENS):
         return False
 
     # Simple short conversational turns
@@ -120,28 +90,18 @@ def is_simple_chat_fast_path_candidate(user_text: str) -> bool:
     if word_count <= 8:
         return True
 
-    low_signal_starts = (
-        "ναι ", "οκ ", "ok ", "έγινε ", "εγινε ", "καλά ", "καλα ",
-        "σε λίγο ", "σε λιγο ", "αργότερα ", "αργοτερα ", "μετά ", "μετα ",
-        "ευχαριστώ ", "ευχαριστω ", "όχι εντάξει", "οχι ενταξει",
-        "βαριέμαι ", "βαριεμαι ",
-    )
-    if q.startswith(low_signal_starts) and word_count <= 12:
+    from core.nl_config import UTILS_LOW_SIGNAL_STARTS
+    if q.startswith(UTILS_LOW_SIGNAL_STARTS) and word_count <= 12:
         return True
 
     return False
 
-_ULTRA_LIGHT_ACKS = {
-    "ναι", "οκ", "ok", "έγινε", "εγινε", "καλά", "καλα",
-    "τέλεια", "τελεια", "σωστά", "σωστα", "εντάξει", "ενταξει",
-    "ναι οκ", "οκ ναι", "εγινε οκ", "οκ εγινε"
-}
-
 def is_ultra_light_ack(text: str) -> bool:
     """Detect whether the message is a tiny ACK that can bypass the LLM entirely."""
     import string
+    from core.nl_config import UTILS_ULTRA_LIGHT_ACKS
     clean_text = text.lower().translate(str.maketrans('', '', string.punctuation)).strip()
-    return clean_text in _ULTRA_LIGHT_ACKS
+    return clean_text in UTILS_ULTRA_LIGHT_ACKS
 
 def get_ultra_light_ack_response() -> str:
     """Return a short neutral confirmation for ultra-light ACK replies."""
@@ -323,10 +283,10 @@ def build_messenger_draft_ready_reply(tool_results: list[str]) -> str:
         return (
             f"Έτοιμο το προσχέδιο, μάστορα:\n\n"
             f"«{draft_message}»\n\n"
-            f"Το αποθήκευσα. Θέλεις αλλαγές ή να το στείλω;"
+            f"Saved. Do you want changes or should I send it?"
         )
 
-    return "Το αποθήκευσα. Θέλεις αλλαγές ή να το στείλω;"
+    return "Saved. Do you want changes or should I send it?"
 
 
 def is_medium_web_chat_path_candidate(user_text: str) -> bool:
@@ -345,53 +305,22 @@ def is_medium_web_chat_path_candidate(user_text: str) -> bool:
     if q.startswith("/"):
         return False
 
-    strong_control_tokens = (
-        "στειλε", "στείλε",
-        "θυμα", "θυμά",
-        "δες", "κοιτα",
-        "δείξε", "δειξε",
-        "διάβασε", "διαβασε",
-        "ψάξε", "ψαξε",
-        "πάγωσε", "παγωσε",
-        "άλλαξε", "αλλαξε",
-        "σβησε", "σβήσε",
-        "γράψε", "γραψε",
-        "φτιάξε", "φτιαξε",
-        "ρύθμισε", "ρυθμισε",
-        "λίστα", "λιστα",
-        "ρουτίν", "ρουτιν", "routine",
-        "υπενθύμι", "υπενθυμι",
-        "φωτο", "photo", "audio", "voice",
-        "pdf", "docx", "επισυναπ", "attachment",
-    )
-    if any(token in q for token in strong_control_tokens):
+    from core.nl_config import UTILS_MEDIUM_PATH_BLOCKED_TOKENS
+    if any(token in q for token in UTILS_MEDIUM_PATH_BLOCKED_TOKENS):
         return False
 
     word_count = len(q.split())
     if word_count < 4 or word_count > 28:
         return False
 
-    low_signal_starts = (
-        "ναι ", "οκ ", "ok ", "έγινε ", "εγινε ", "καλά ", "καλα ",
-        "σε λίγο ", "σε λιγο ", "αργότερα ", "αργοτερα ", "μετά ", "μετα ",
-        "ευχαριστώ ", "ευχαριστω ", "όχι εντάξει", "οχι ενταξει",
-        "βαριέμαι ", "βαριεμαι ",
-    )
-    if q in {"ναι", "οκ", "ok", "έγινε", "εγινε", "καλά", "καλα"}:
+    from core.nl_config import UTILS_LOW_SIGNAL_STARTS, UTILS_ULTRA_LIGHT_ACKS
+    if q in UTILS_ULTRA_LIGHT_ACKS:
         return False
-    if q.startswith(low_signal_starts) and word_count <= 12:
+    if q.startswith(UTILS_LOW_SIGNAL_STARTS) and word_count <= 12:
         return False
 
-    reflective_starts = (
-        "εκλεισα ", "έκλεισα ",
-        "δυσκολα ", "δύσκολα ",
-        "νομιζω ", "νομίζω ",
-        "αγχωνομαι ", "αγχώνομαι ",
-        "φοβαμαι ", "φοβάμαι ",
-        "σκεφτομαι ", "σκέφτομαι ",
-        "μαλλον ", "μάλλον ",
-    )
-    if q.startswith(reflective_starts):
+    from core.nl_config import UTILS_REFLECTIVE_STARTS
+    if q.startswith(UTILS_REFLECTIVE_STARTS):
         return True
 
     # Short-to-medium conversational questions can also use the middle budget
@@ -429,14 +358,8 @@ def extract_list_selection_index(text: str) -> int | None:
         if match:
             return int(match.group(1)) - 1
 
-    ordinal_words = {
-        "πρωτο": 0,
-        "δευτερο": 1,
-        "τριτο": 2,
-        "τεταρτο": 3,
-        "πεμπτο": 4,
-    }
-    for word, idx in ordinal_words.items():
+    from core.nl_config import UTILS_ORDINAL_WORDS
+    for word, idx in UTILS_ORDINAL_WORDS.items():
         if re.search(rf"\bτο\s+{word}\b", normalized):
             return idx
 
@@ -485,7 +408,7 @@ def filter_messages(messages: list, k: int = 40) -> list:
             # Use of Smart Parser instead of simple str()
             if not msg.content or clean_message(msg.content) == "":
                 msg = ToolMessage(
-                    content="System Error: Το εργαλείο δεν επέστρεψε δεδομένα.",
+                    content="System Error: The tool returned no data.",
                     tool_call_id=msg.tool_call_id,
                     name=getattr(msg, "name", "unknown")
                 )
@@ -563,18 +486,17 @@ def load_agent_prompt(agent_name: str, default_fallback: str = "") -> str:
 # 4. SKIP SEMANTIC SEARCH — Keywords that require a tool/live data
 # ────────────────────────────────────────────────────────────────
 
-SKIP_SEMANTIC_KEYWORDS = [
-    "λίστα", "λιστα", "ψώνια", "ψωνια", "shopping", "αγορές", "αγορες",
-    "εργασίες", "εργασιες", "προσθεσε", "πρόσθεσε", "αφαιρεσε", "αφαίρεσε",
-    "διαγραψε", "διάγραψε", "καθαρισε τη λίστα",
-    "διακοπή νερού", "διακοπη νερου", "διακοπή ρεύματος", "διακοπη ρευματος",
-    "ευαθ", "δεδδηε", "blackout", "βλάβη", "βλαβη",
-    "καιρός", "καιρος", "θερμοκρασία", "θερμοκρασια", "πρόγνωση",
-    "τιμή βενζίνης", "τιμη βενζινης", "τιμές καυσίμων",
-    "δρομολόγια", "δρομολογια", "πλοίο", "πλοιο", "ferry", "ακτοπλοϊκά",
-    "πτήση", "πτηση", "εισιτήρια", "εισιτηρια", "αεροπορικά",
-    "υπενθύμιση", "υπενθυμιση", "reminder", "θύμισέ", "θυμισε",
-]
+from core.nl_config import (
+    AGENT_HOME_KEYWORDS, AGENT_WEB_KEYWORDS, AGENT_TECH_KEYWORDS, 
+    AGENT_MAIL_KEYWORDS, AGENT_GIT_KEYWORDS, AGENT_DEV_KEYWORDS, 
+    UTILS_QTY_INTENTS, UTILS_SYSTEM_RESETS, MESSENGER_WORKFLOW_TOKENS, CB_SOFIA_GIFT_WORDS
+)
+
+SKIP_SEMANTIC_KEYWORDS = (
+    AGENT_HOME_KEYWORDS + AGENT_WEB_KEYWORDS + AGENT_TECH_KEYWORDS + 
+    AGENT_MAIL_KEYWORDS + AGENT_GIT_KEYWORDS + AGENT_DEV_KEYWORDS + 
+    list(UTILS_QTY_INTENTS)
+)
 
 # ────────────────────────────────────────────────────────────────
 # 5. THE BRAIN (Build Prompt)
@@ -591,18 +513,14 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
 
     # clean_message already did its job correctly here, we leave it as is.
     last_msg = clean_message(state_messages[-1].content) if state_messages else ""
-    is_vision = "[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]" in last_msg or "[CURRENT_PHOTO_PATH]" in last_msg
+    is_vision = "[VISUAL ANALYSIS]" in last_msg or "[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]" in last_msg or "[CURRENT_PHOTO_PATH]" in last_msg
     has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
     
     memory_context_str = ""
     clean_text = last_msg.lower()
     
-    ignore_words = [
-        "ναι", "όχι", "οχι", "οκ", "ok", "έγινε", "εγινε", "καλά", "τέλεια", 
-        "ευχαριστώ", "γεια", "σωστά", "ναι αρχειοθέτησε", "αρχειοθέτησέ το", 
-        "ναι σώστο", "σώστο", "αποθήκευσέ το", "ναι αποθήκευσε", "προχωράμε",
-        "αρχειοθέτηση", "σώσε το"
-    ]
+    from core.nl_config import UTILS_IGNORE_WORDS
+    ignore_words = UTILS_IGNORE_WORDS
 
     k_value = 0 if has_current_photo else (3 if is_vision else 8)
     is_routine_command = clean_text in ignore_words or clean_text.startswith(("ναι ", "οχι ", "όχι "))
@@ -624,32 +542,32 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
             )
             rendered_context = context.render()
             if rendered_context:
-                memory_context_str = "\n🧠 ═══ ΕΝΙΑΙΟ ΠΛΑΙΣΙΟ ΜΝΗΜΗΣ ═══\n"
+                memory_context_str = "\n🧠 ═══ UNIFIED MEMORY CONTEXT ═══\n"
                 memory_context_str += rendered_context + "\n"
-                memory_context_str += "⚠️ Μην πεις 'σύμφωνα με τη μνήμη μου', απλά πράξε με βάση αυτά.\n"
+                memory_context_str += "⚠️ Do not say 'according to my memory', just act based on it.\n"
         except Exception as e:
             print(f"\033[91m⚠️ Memory Context Error: {e}\033[0m")
     elif has_skip_keyword:
         print("\033[93m[Mastro-Radar]: ⚡ Skipping Semantic Search due to Skip Keyword! (Live Data Mode)\033[0m")
 
     prompt = f"{identity}\n"
-    days_gr = ["Δευτέρα","Τρίτη","Τετάρτη","Πέμπτη","Παρασκευή","Σάββατο","Κυριακή"]
+    days_en = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
     now = datetime.now()
-    day_gr = days_gr[now.weekday()]
+    day_en = days_en[now.weekday()]
     now_str = now.strftime("%Y-%m-%d %H:%M")
-    prompt += f"Σήμερα: {day_gr} {now_str}.\n"
-    prompt += f"ΡΟΛΟΣ ΤΩΡΑ: {agent_role}\n\n"
+    prompt += f"Today: {day_en} {now_str}.\n"
+    prompt += f"CURRENT ROLE: {agent_role}\n\n"
 
     if is_vision:
         prompt += (
-            "🚨 ΚΑΝΟΝΑΣ ΠΡΑΓΜΑΤΙΚΟΤΗΤΑΣ (CRITICAL):\n"
-            "Αυτή τη στιγμή έχεις μπροστά σου μια ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ. Αυτή είναι η ΤΩΡΙΝΗ πραγματικότητα.\n"
-            "Αν οι παλιές μνήμες έρχονται σε σύγκρουση με αυτό που βλέπεις, αγνόησε το ιστορικό.\n\n"
+            "🚨 REALITY RULE (CRITICAL):\n"
+            "Right now you have a VISUAL ANALYSIS in front of you. This is the CURRENT reality.\n"
+            "If past memories conflict with what you see, ignore the history.\n\n"
         )
 
     session_hint = load_last_session_hint()
     if session_hint:
-        prompt += f"[ΣΥΝΕΧΕΙΑ ΑΠΟ ΠΡΟΗΓΟΥΜΕΝΗ SESSION]\n{session_hint}\n\n"
+        prompt += f"[CONTINUED FROM PREVIOUS SESSION]\n{session_hint}\n\n"
 
     # ── Long-Term Goals ──────────────────────────────────────────
     # Contextual Injection: We only set the goals if the conversation seems to have substance (not in routines)
@@ -670,37 +588,37 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
             from memory.vector_store import get_active_goals
             active_goals = get_active_goals()
             if active_goals:
-                prompt += "═══ ΣΤΟΧΟΙ ΣΕ ΕΞΕΛΙΞΗ ═══\n"
+                prompt += "═══ GOALS IN PROGRESS ═══\n"
                 for g in active_goals:
                     status_icon = "🎯" if g["status"] == "active" else "⏸"
-                    prog_str = f" | Πρόοδος: {g.get('progress', 0)}%" if g.get('progress') else ""
-                    prompt += " " + status_icon + " [" + g['project'] + "] " + g['description'] + " (από " + g['date'] + ")" + prog_str + "\n"
+                    prog_str = f" | Progress: {g.get('progress', 0)}%" if g.get('progress') else ""
+                    prompt += " " + status_icon + " [" + g['project'] + "] " + g['description'] + " (since " + g['date'] + ")" + prog_str + "\n"
                     if g.get('milestones'):
                         prompt += f"    Milestones: {g['milestones']}\n"
-                prompt += "💡 Αν η συζητηση αφορά κάποιον από αυτούς, ανέφερε τη συνέχεια φυσικά.\n"
+                prompt += "💡 If the conversation is about one of these, mention the continuation naturally.\n"
                 prompt += "══════════════════════════\n\n"
         except Exception as _e:
             print(f"⚠️ [Goals Context Error]: {_e}")
 
     cap_context = get_capability_context()
     if cap_context:
-        prompt += f"[ΑΥΤΟΓΝΩΣΙΑ]\n{cap_context}\n\n"
+        prompt += f"[SELF-AWARENESS]\n{cap_context}\n\n"
 
     if os.path.exists(WORKING_MEMORY_FILE):
         try:
             with open(WORKING_MEMORY_FILE, "r", encoding="utf-8") as f:
                 work_mem = json.load(f)
                 if work_mem:
-                    prompt += "═══ ΤΡΕΧΟΝ CONTEXT (Προσκήνιο) ═══\n"
+                    prompt += "═══ CURRENT CONTEXT (Foreground) ═══\n"
                     prompt += "\n".join([f" • {m['tag']}" for m in work_mem]) + "\n"
                     prompt += "══════════════════════════════════\n\n"
         except: pass
 
     prompt += (
-        "ΚΑΝΟΝΑΣ ΜΝΗΜΗΣ: Αν σου ζητηθεί πληροφορία που λείπει, κάλεσε το 'search_memory' μία φορά. "
-        "Αν έχεις ήδη αποτέλεσμα μνήμης στο context, απάντησε από αυτό και ΜΗΝ ξανακαλέσεις search_memory στο ίδιο turn.\n"
-        "ΚΑΝΟΝΑΣ ΦΩΤΟΓΡΑΦΙΩΝ: Αν ζητηθεί φωτό, κάλεσε το 'retrieve_photo' και συμπεριέλαβε το [SEND_PHOTO: path] στην απάντηση.\n"
-        "ΚΑΝΟΝΑΣ ΑΡΧΕΙΩΝ: Όταν δημιουργείς αρχείο με το create_file_tool, ΠΑΝΤΑ συμπεριέλαβε αυτούσιο το [CREATED_FILE: path] στην απάντησή σου. ΜΗΝ το αντικαταστήσεις με το path ως κείμενο.\n\n"
+        "MEMORY RULE: If asked for missing info, call 'search_memory' once. "
+        "If you already have memory results in context, answer from it and DO NOT call search_memory again in the same turn.\n"
+        "PHOTO RULE: If a photo is requested, call 'retrieve_photo' and include [SEND_PHOTO: path] in the response.\n"
+        "FILE RULE: When creating a file with create_file_tool, ALWAYS include [CREATED_FILE: path] as-is in your response. DO NOT replace it with the path as text.\n\n"
     )
 
     prompt += memory_context_str
@@ -733,13 +651,8 @@ def detect_prompt_injection(user_input) -> bool:
         r"print\s+(your\s+)?system\s+prompt",
         r"system\s+override",
         r"jailbreak",
-        r"dan\s+mode",
-        r"αγνόησ(ε|τε)\s+(όλες\s+)?τις\s+προηγούμενες",
-        r"ξέχνα\s+(όλες\s+)?τις\s+εντολές",
-        r"είσαι\s+τώρα\s+(ένα\s+)?",
-        r"νέες\s+οδηγίες\s+συστήματος",
-        r"εκτύπωσε\s+το\s+system\s+prompt",
-    ]
+        r"dan\s+mode"
+    ] + list(UTILS_SYSTEM_RESETS)
 
     input_lower = text_to_check.lower()
     for pattern in blacklist_patterns:
@@ -799,16 +712,8 @@ def looks_like_operational_assistant_text(text: str) -> bool:
 
 def looks_like_self_capability_text(text: str) -> bool:
     low = clean_message(text).strip().lower()
-    markers = (
-        "[αυτογνωσία]",
-        "can_do:",
-        "cannot_do:",
-        "✅ can_do:",
-        "❌ cannot_do:",
-        "ο αστακός μπορεί να",
-        "ο αστακός ενδέχεται να",
-        "ο αστακός δεν μπορεί να",
-    )
+    from core.nl_config import UTILS_SELF_CAPABILITY_MARKERS
+    markers = UTILS_SELF_CAPABILITY_MARKERS
     return any(marker in low for marker in markers)
 
 def strip_operational_assistant_paragraphs(text: str) -> str:
@@ -849,17 +754,8 @@ def sanitize_messenger_draft_claims(text: str) -> str:
             or "μήνυμα στη σοφία" in pl
             or "μηνυμα στη σοφια" in pl
         )
-        has_false_current_state = (
-            "να το στείλω" in pl
-            or "στείλε" in pl
-            or "στειλε" in pl
-            or "είναι έτοιμο" in pl
-            or "ετοιμο σε draft" in pl
-            or "γράψε απλά" in pl
-            or "το μήνυμα στη σοφία να το στείλω τώρα" in pl
-            or "να το στείλω τώρα που σχόλασες" in pl
-            or "αν θες να το φύγουμε" in pl
-        )
+        from core.nl_config import MESSENGER_WORKFLOW_TOKENS
+        has_false_current_state = any(token in pl for token in MESSENGER_WORKFLOW_TOKENS)
         return has_messenger_topic and has_false_current_state
 
     cleaned = [p for p in paragraphs if not is_draft_paragraph(p)]
@@ -907,7 +803,7 @@ def filter_recent_web_tool_results(messages: list) -> list:
     return results
 
 def build_web_failure_reply(user_text: str, tool_results: list) -> str:
-    qty_intents = ['πόσο', 'τιμή', 'χωράει', 'απόσταση', 'ώρα']
+    qty_intents = list(UTILS_QTY_INTENTS)
     is_qty = any(w in user_text.lower() for w in qty_intents)
     kind = 'νούμερο/στοιχείο' if is_qty else 'πληροφορία'
     return f'Μάστορα, προσπάθησα να το επιβεβαιώσω από web sources, αλλά αυτή τη στιγμή δεν πήρα αξιόπιστο αποτέλεσμα από τα εργαλεία μου, οπότε δεν θέλω να σου πω {kind} στον αέρα. Αν θέλεις, δώσε μου συγκεκριμένο link ή το ξαναπιάνουμε αργότερα.'
@@ -973,7 +869,7 @@ def build_linkedin_draft_ready_reply(tool_results: list[str]) -> str:
         except Exception:
             pass
 
-    lines = ["Ορίστε το LinkedIn post που ετοίμασα:"]
+    lines = ["Here is the LinkedIn post I prepared:"]
 
     if draft_text:
         lines.extend([
@@ -988,13 +884,13 @@ def build_linkedin_draft_ready_reply(tool_results: list[str]) -> str:
     if photo_path:
         lines.extend([
             "",
-            "Εικόνα που ετοίμασα:",
+            "Image I prepared:",
             f"[CREATED_FILE: {photo_path}]",
         ])
 
     lines.extend([
         "",
-        "Το αποθήκευσα. Θέλεις αλλαγές ή να το ανεβάσω;",
+        "Saved. Do you want changes or should I upload it?",
     ])
 
     return "\n".join(lines)

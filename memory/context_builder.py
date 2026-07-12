@@ -25,24 +25,24 @@ class MemoryContext:
         sections = []
         if self.recent_lines:
             sections.append(
-                "[ΠΡΟΣΦΑΤΟ ΙΣΤΟΡΙΚΟ WEB+TELEGRAM]\n"
+                "[RECENT WEB+TELEGRAM HISTORY]\n"
                 + "\n".join(self.recent_lines)
             )
         if self.historical_lines:
             sections.append(
-                "[ΣΧΕΤΙΚΟ ΙΣΤΟΡΙΚΟ SQLITE]\n"
+                "[RELEVANT SQLITE HISTORY]\n"
                 + "\n".join(self.historical_lines)
             )
         if self.semantic_facts:
             sections.append(
-                "[ΣΧΕΤΙΚΕΣ ΜΝΗΜΕΣ CHROMA]\n"
+                "[RELEVANT CHROMA MEMORIES]\n"
                 + "\n".join(f"• {fact}" for fact in self.semantic_facts)
             )
         if not sections:
             return ""
         return (
             "\n\n".join(sections)
-            + "\n\nΧρησιμοποίησε αυτά ως φόντο. Αν συγκρούονται με το τρέχον μήνυμα, προτίμησε το τρέχον μήνυμα."
+            + "\n\nUse these as background. If they conflict with the current message, prefer the current message."
         )
 
 
@@ -71,7 +71,7 @@ def looks_like_tool_output(query: str) -> bool:
 # user text, not with filenames/system tags.
 _SYSTEM_PREFIX_RE = re.compile(
     r"^\s*\["
-    r"(?:USER_UPLOADED_FILE|CURRENT_PHOTO_PATH|ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ|SYSTEM|TOOL_RESULT)"
+    r"(?:USER_UPLOADED_FILE|CURRENT_PHOTO_PATH|VISUAL ANALYSIS|SYSTEM|TOOL_RESULT)"
     r"\][:\s]*\S+\s*",
     re.IGNORECASE,
 )
@@ -200,7 +200,7 @@ def looks_like_food_memory_query(text: str) -> bool:
     if not clean:
         return False
 
-    if re.search(r"\bτι\b.*\bφαγ[α-ω]*", clean):
+    if re.search(t("builder.cb_food_regex"), clean):
         return True
 
     strong_phrases = tuple(t("builder.strong_phrases"))
@@ -233,7 +233,8 @@ def looks_like_reminder_or_task_request(text: str) -> bool:
         return True
 
     # fallback for very typical "remind me at 19:00 ..."
-    if ("θυμ" in clean or "υπενθυμ" in clean) and re.search(r"\b\d{1,2}:\d{2}\b", clean):
+    reminder_contains = tuple(t("builder.cb_reminder_contains"))
+    if any(r in clean for r in reminder_contains) and re.search(r"\b\d{1,2}:\d{2}\b", clean):
         return True
 
     return False
@@ -251,8 +252,9 @@ def looks_like_action_command(text: str) -> bool:
         return True
 
     utility_markers = tuple(t("builder.utility_markers"))
+    reminder_starts = tuple(t("builder.cb_reminder_starts"))
 
-    if clean.startswith(("θυμισε μου", "υπενθυμισε μου")) and any(marker in clean for marker in utility_markers):
+    if clean.startswith(reminder_starts) and any(marker in clean for marker in utility_markers):
         return True
 
     return False
@@ -448,7 +450,7 @@ def format_recent_messages(
     lines = []
     for message in list(messages)[-limit:]:
         role = message.get("role", "")
-        speaker = "Λάζαρος" if role == "user" else "Αστακός"
+        speaker = t("bot.speaker_user") if role == "user" else t("bot.speaker_bot")
         channel = message.get("channel", "?")
         time_label = message.get("time") or str(message.get("timestamp", ""))[-8:-3]
         date_label = _date_marker(str(message.get("date") or ""), today_str, yesterday_str)
@@ -494,7 +496,8 @@ def temporal_history_for_query(
 
     current = now or datetime.now()
     target_date = None
-    if any(marker in clean_query for marker in ("χτες", "χθες", "χθεσιν", "yesterday")):
+    from core.nl_config import CB_YESTERDAY_WORDS
+    if any(marker in clean_query for marker in CB_YESTERDAY_WORDS):
         target_date = (current - timedelta(days=1)).strftime("%Y-%m-%d")
     since_date = target_date or (current - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
@@ -509,7 +512,8 @@ def temporal_history_for_query(
         return []
 
     filtered = []
-    wants_morning = any(marker in clean_query for marker in ("πρωι", "πρωί", "morning"))
+    from core.nl_config import CB_MORNING_WORDS
+    wants_morning = any(marker in clean_query for marker in CB_MORNING_WORDS)
     for message in messages:
         if target_date and message.get("date") != target_date:
             continue
@@ -530,21 +534,16 @@ def temporal_history_for_query(
     def score(message: dict[str, Any]) -> int:
         content = _normalize_text(message.get("content", ""))
         value = sum(1 for token in tokens if _stem_token(token) in content)
-        if "αλεξανδρ" in clean_query and any(
-            marker in content for marker in ("ποδοσφ", "αγων", "τελικο", "μεταλλ")
+        
+        from core.nl_config import CB_ALEXANDROS_WORDS, CB_SOCCER_WORDS
+        if any(w in clean_query for w in CB_ALEXANDROS_WORDS) and any(
+            marker in content for marker in CB_SOCCER_WORDS
         ):
             value += 3
-        if any(marker in clean_query for marker in ("δωρο", "σοφια", "ρολοι", "watch", "λινκ", "link")) and any(
-            marker in content
-            for marker in (
-                "rosefield",
-                "bangle",
-                "mother of pearl",
-                "white gold",
-                "καντραν",
-                "ρολοι",
-                "μελλοντικα δωρα",
-            )
+            
+        from core.nl_config import CB_SOFIA_GIFT_WORDS, CB_SOFIA_GIFT_CONTEXT
+        if any(marker in clean_query for marker in CB_SOFIA_GIFT_WORDS) and any(
+            marker in content for marker in CB_SOFIA_GIFT_CONTEXT
         ):
             value += 4
         return value
@@ -563,26 +562,10 @@ def _looks_like_memory_correction_chatter(text: str) -> bool:
     clean = _normalize_text(text)
     if not clean:
         return False
-    has_memory_marker = any(marker in clean for marker in (
-        "μνημη",
-        "memory",
-        "διαγραφ",
-        "διορθω",
-        "σωστη διευθυνση",
-        "παλιο λαθος",
-        "το ειχαμε σβησει",
-        "κεκτημενη ταχυτητα",
-    ))
-    has_fixup_marker = any(marker in clean for marker in (
-        "σβησ",
-        "διεγραψ",
-        "διαγραφ",
-        "διορθω",
-        "σωστη",
-        "λαθος",
-        "ξαναπεταχτηκε",
-        "κεκτημενη ταχυτητα",
-    ))
+        
+    from core.nl_config import CB_MEMORY_MARKERS, CB_FIXUP_MARKERS
+    has_memory_marker = any(marker in clean for marker in CB_MEMORY_MARKERS)
+    has_fixup_marker = any(marker in clean for marker in CB_FIXUP_MARKERS)
     return has_memory_marker and has_fixup_marker
 
 
@@ -806,8 +789,8 @@ def _record_memory_context_debug(
         # memory searches. We clearly show WHY recent/sqlite/semantic=0,
         # instead of printing the garbage string as if it were a real query.
         print(
-            f"\033[90m[MemoryContext]: channel={channel} — tool-output εντοπίστηκε "
-            f"('{payload['query_preview'][:60]}...'), παράλειψη αναζήτησης μνήμης "
+            f"\033[90m[MemoryContext]: channel={channel} — tool-output detected "
+            f"('{payload['query_preview'][:60]}...'), skipping memory search "
             f"(recent=0 sqlite=0 semantic=0)\033[0m"
         )
     else:

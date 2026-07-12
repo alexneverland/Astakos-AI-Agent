@@ -160,8 +160,8 @@ def test_linkedin_terminal_reply_builder():
         "SUCCESS: Το draft είναι έτοιμο και παρκαρισμένο. STOP calling tools and report to the user that the draft is ready for their approval."
     ])
     assert "LinkedIn" in reply
-    assert "αποθήκευσα" in reply
-    assert "Θέλεις αλλαγές ή να το ανεβάσω;" in reply
+    assert "Saved" in reply
+    assert "upload it" in reply
 
 
 def test_web_agent_node_short_circuits_after_linkedin_draft_success(monkeypatch):
@@ -192,7 +192,7 @@ def test_web_agent_node_short_circuits_after_linkedin_draft_success(monkeypatch)
     reply = result["messages"][-1].content
 
     assert "LinkedIn" in reply
-    assert "αποθήκευσα" in reply
+    assert "Saved" in reply
 
 
 def test_web_agent_node_does_not_short_circuit_linkedin_reply_for_messenger_request(monkeypatch):
@@ -260,8 +260,8 @@ def test_messenger_terminal_reply_builder():
     reply = build_messenger_draft_ready_reply([
         "✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: Καλημέρα αγάπη μου"
     ])
-    assert "Το αποθήκευσα." in reply
-    assert "να το στείλω" in reply
+    assert "Saved" in reply
+    assert "send it" in reply
     assert "Καλημέρα αγάπη μου" in reply
 
 def test_build_linkedin_draft_ready_reply_uses_real_draft_payload():
@@ -278,7 +278,8 @@ def test_build_linkedin_draft_ready_reply_uses_real_draft_payload():
     reply = build_linkedin_draft_ready_reply([raw])
 
     assert "Hello LinkedIn from Astakos" in reply
-    assert "Το αποθήκευσα. Θέλεις αλλαγές ή να το ανεβάσω;" in reply
+    assert "Saved" in reply
+    assert "upload it" in reply
     assert "[CREATED_FILE: C:/astakos_v2/outputs/test_image.jpg]" in reply
 
 def test_parse_linkedin_draft_result_detects_json_payload():

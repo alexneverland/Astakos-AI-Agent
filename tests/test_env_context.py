@@ -54,7 +54,7 @@ def test_recent_home_coords(monkeypatch, setup_teardown_cache):
         json.dump({"lat": 40.0001, "lon": 22.0001, "timestamp": time.time()}, f)
         
     result = _get_env_context()
-    assert "ΠΕΡΙΒΑΛΛΟΝΤΙΚΑ ΔΕΔΟΜΕΝΑ ΧΡΗΣΤΗ" in result
+    assert "[USER ENVIRONMENTAL DATA]" in result
     assert "ΣΤΟ ΣΠΙΤΙ" in result
     assert "25.0°C" in result
 
@@ -66,7 +66,7 @@ def test_recent_work_coords(monkeypatch, setup_teardown_cache):
         json.dump({"lat": 41.0001, "lon": 23.0001, "timestamp": time.time()}, f)
         
     result = _get_env_context()
-    assert "ΠΕΡΙΒΑΛΛΟΝΤΙΚΑ ΔΕΔΟΜΕΝΑ ΧΡΗΣΤΗ" in result
+    assert "[USER ENVIRONMENTAL DATA]" in result
     assert "ΣΤΗ ΔΟΥΛΕΙΑ" in result
 
 def test_stale_timestamp(monkeypatch, setup_teardown_cache):
@@ -88,7 +88,7 @@ def test_weather_fail_fallback(monkeypatch, setup_teardown_cache):
         json.dump({"lat": 45.0, "lon": 25.0, "timestamp": time.time()}, f)
         
     result = _get_env_context()
-    assert "ΠΕΡΙΒΑΛΛΟΝΤΙΚΑ ΔΕΔΟΜΕΝΑ ΧΡΗΣΤΗ" in result
-    assert "Τοποθεσία:" in result
+    assert "[USER ENVIRONMENTAL DATA]" in result
+    assert "Location:" in result
     assert "ΕΚΤΟΣ ΣΠΙΤΙΟΥ" in result
     assert "25.0°C" not in result

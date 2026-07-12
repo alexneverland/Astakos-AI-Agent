@@ -9,6 +9,7 @@ import re
 import time
 import json
 import requests
+from core.i18n import t
 
 # ── Pollinations image generator ────────────────────────────────
 def _generate_image(prompt: str, output_dir: str, index: int) -> str | None:
@@ -49,20 +50,13 @@ def _generate_story_and_prompts(theme: str, characters: str = "") -> dict:
         )
         model = GenerativeModel(MAIN_MODEL)
 
-        char_hint = f" Κύριοι χαρακτήρες: {characters}." if characters else ""
-        system_prompt = f"""Είσαι ένας δημιουργικός συγγραφέας παιδικών παραμυθιών.
-Γράφεις ΓΙΑ παιδί 6 ετών που λέγεται Αλέξανδρος.
-Χρησιμοποιείς απλή γλώσσα, χαρούμενο τόνο, ηθικό μάθημα στο τέλος.
-Το παραμύθι να έχει αρχή-μέση-τέλος, ~500 λέξεις.{char_hint}
-
-ΣΗΜΑΝΤΙΚΟ: Στο τέλος, γράψε ακριβώς 3 γραμμές με prefixes:
-SCENE1: [σύντομη αγγλική περιγραφή σκηνής για εικόνα]
-SCENE2: [σύντομη αγγλική περιγραφή σκηνής για εικόνα]
-SCENE3: [σύντομη αγγλική περιγραφή σκηνής για εικόνα]
-Κάθε SCENE να είναι μία πρόταση στα αγγλικά, συγκεκριμένη και ζωντανή."""
+        char_hint = t("skills.story_maker.msg_char_hint", chars=characters) if characters else ""
+        from core.utils import load_agent_prompt
+        base_prompt = load_agent_prompt("story_maker")
+        system_prompt = base_prompt.format(char_hint=char_hint)
 
         response = model.generate_content(
-            f"Θέμα παραμυθιού: {theme}\n\n{system_prompt}"
+            f"Story theme: {theme}\n\n{system_prompt}"
         )
         raw = response.text.strip()
 
@@ -110,7 +104,7 @@ def make_story(theme: str, characters: str = "") -> dict:
     result = _generate_story_and_prompts(theme, characters)
 
     if not result["story"]:
-        return {"story": None, "images": [], "error": "Αποτυχία δημιουργίας παραμυθιού"}
+        return {"story": None, "images": [], "error": t("skills.story_maker.fail")}
 
     print(f"🎨 [StoryMaker] Creating {len(result['scenes'])} images...")
     images = []

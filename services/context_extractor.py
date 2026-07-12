@@ -1,4 +1,5 @@
 import json
+from core import nl_config
 from core.i18n import t
 from services.gemini import safe_gemini_call
 from core.utils import clean_message
@@ -76,32 +77,7 @@ AI Answer (recent/current): "{ai_text}"
 
 def _looks_like_future_departure(text: str) -> bool:
     t = clean_message(text or "").strip().lower()
-    future_markers = (
-        "σε λιγο",
-        "σε λίγο",
-        "σε κανα",
-        "σε κάνα",
-        "σε λιγα λεπτα",
-        "σε λίγα λεπτά",
-        "σε 10 λεπτα",
-        "σε 10 λεπτά",
-        "σε 15 λεπτα",
-        "σε 15 λεπτά",
-        "σε μιση ωρα",
-        "σε μισή ώρα",
-        "σε μια ωρα",
-        "σε μία ώρα",
-        "θα παω",
-        "θα πάω",
-        "θα παμε",
-        "θα πάμε",
-        "θα φυγω",
-        "θα φύγω",
-        "θα φυγουμε",
-        "θα φύγουμε",
-        "φευγουμε σε",
-        "φεύγουμε σε",
-    )
+    future_markers = nl_config.CE_IN_A_WHILE
     return any(marker in t for marker in future_markers)
 
 def _normalize_live_text(text: str) -> str:
@@ -110,58 +86,20 @@ def _normalize_live_text(text: str) -> str:
 
 def _has_park_live_presence(text: str) -> bool:
     t = _normalize_live_text(text)
-    park_tokens = (
-        "στο παρκο",
-        "στο πάρκο",
-        "παρκο",
-        "πάρκο",
-        "παιδικη χαρα",
-        "παιδική χαρά",
-        "κουνιες",
-        "κούνιες",
-    )
-    live_tokens = (
-        "τωρα",
-        "τώρα",
-        "ειμαστε",
-        "είμαστε",
-        "καθομαστε",
-        "καθόμαστε",
-        "κατσαμε",
-        "κάτσαμε",
-        "θα κατσουμε",
-        "θα κάτσουμε",
-        "ακομα",
-        "ακόμα",
-        "εδω",
-        "εδώ",
-    )
+    park_tokens = nl_config.CE_PARK
+    live_tokens = nl_config.CE_NOW_SITTING
     return any(p in t for p in park_tokens) and any(l in t for l in live_tokens)
 
 
 def _looks_like_found_them_reply(text: str) -> bool:
     t = _normalize_live_text(text)
-    markers = (
-        "τους βρηκα",
-        "τους βρήκα",
-        "πηγα και τους βρηκα",
-        "πήγα και τους βρήκα",
-        "τωρα στο παρκο και τους βρηκα",
-        "τώρα στο πάρκο και τους βρήκα",
-    )
+    markers = nl_config.CE_FOUND_THEM
     return any(m in t for m in markers)
 
 
 def _looks_like_everyone_together(text: str) -> bool:
     t = _normalize_live_text(text)
-    markers = (
-        "ολοι μαζι",
-        "όλοι μαζί",
-        "ειμαστε ολοι μαζι",
-        "είμαστε όλοι μαζί",
-        "μαζι ολοι",
-        "μαζί όλοι",
-    )
+    markers = nl_config.CE_ALL_TOGETHER
     return any(m in t for m in markers)
 
 
@@ -229,14 +167,7 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         normalized_user = _normalize_live_text(user_text)
         has_home_presence = any(
             marker in normalized_user
-            for marker in (
-                "σπιτι",
-                "σπίτι",
-                "στο σπιτι",
-                "στο σπίτι",
-                "ειναι στο σπιτι",
-                "είναι στο σπίτι",
-            )
+            for marker in nl_config.CE_HOME
         )
 
         if payload.get("alexandros_with_user") is True:
@@ -269,13 +200,12 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
 
             recent_hint = _recent_family_context_hint(channel=channel)
             has_recent_sofia = (
-                "σοφια" in normalized_user or "σοφία" in normalized_user
-                or "σοφια" in recent_hint or "σοφία" in recent_hint
+                any(w in normalized_user for w in nl_config.CE_SOFIA_NAMES)
+                or any(w in recent_hint for w in nl_config.CE_SOFIA_NAMES)
             )
             has_recent_alexandros = (
-                "αλεξανδρ" in normalized_user or "αλέξανδρ" in normalized_user
-                or "αλεξανδρ" in recent_hint or "αλέξανδρ" in recent_hint
-                or "μικρο" in recent_hint or "μικρό" in recent_hint
+                any(w in normalized_user for w in nl_config.CE_ALEXANDROS_NAMES)
+                or any(w in recent_hint for w in nl_config.CE_ALEXANDROS_NAMES)
             )
 
             if has_recent_sofia:

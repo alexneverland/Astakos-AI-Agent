@@ -13,6 +13,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from core.i18n import t
 
 
 
@@ -73,7 +74,7 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
             
             try:
                 file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-                uploaded_items.append(f"Ανέβηκε '{item_name}' (ID: {file.get('id')})")
+                uploaded_items.append(t("skills.daily_backup.msg_upload_success", item=item_name, id=file.get("id")))
             except Exception as e:
                 print(f"❌ Error uploading {item_name}: {e}")
 
@@ -106,7 +107,7 @@ def daily_backup_to_drive():
     creds = authenticate_google_drive()
     if not creds:
         print("Google Drive authentication failed. Backup will not be executed.")
-        return "Backup απέτυχε."
+        return t("skills.daily_backup.fail")
 
     try:
         print("Connecting to Drive...")
@@ -143,12 +144,12 @@ def daily_backup_to_drive():
         uploaded_items = upload_folder_recursive(service, ASTAKOS_V2_PATH, backup_folder_id, EXCLUDE_ITEMS)
 
         if not uploaded_items:
-            return f"Δεν βρέθηκαν αρχεία ή φάκελοι για ανέβασμα στον φάκελο '{ASTAKOS_V2_PATH}' (εξαιρουμένων των: {', '.join(EXCLUDE_ITEMS)})."
+            return t("skills.daily_backup.msg_no_files_exc", path=ASTAKOS_V2_PATH, exc=', '.join(EXCLUDE_ITEMS))
         else:
-            return f"Backup ολοκληρώθηκε επιτυχώς στον φάκελο '{backup_folder_name}' (ID: {backup_folder_id}).\nΑρχεία και φάκελοι που ανέβηκαν:\n" + "\n".join(uploaded_items)
+            return t("skills.daily_backup.msg_backup_success_list", folder=backup_folder_name, id=backup_folder_id, items="\n".join(uploaded_items))
 
     except Exception as e:
-        return f"Προέκυψε σφάλμα κατά το backup στο Google Drive: {e}"
+        return t("skills.daily_backup.msg_backup_error", e=e)
 
 if __name__ == "__main__":
     print(daily_backup_to_drive())

@@ -367,16 +367,12 @@ def _notify_telegram(tool_call: dict):
         call_id   = tool_call["id"]
         args_prev = _args_preview(tool_call.get("args", {}))
 
-        text = (
-            f"🚨 <b>Απαιτείται Έγκριση</b>\n\n"
-            f"Tool: <code>{tool_name}</code>\n"
-            f"Args: <code>{args_prev}</code>\n\n"
-            f"Εκτελώ;"
-        )
+        from core.i18n import t
+        text = t("core.approval.req_approval", tool_name=tool_name, args_prev=args_prev)
         keyboard = {
             "inline_keyboard": [[
-                {"text": "✅ Ναι", "callback_data": f"approve:{call_id}"},
-                {"text": "❌ Όχι", "callback_data": f"reject:{call_id}"},
+                {"text": t("clients.telegram_bot.btn_yes"), "callback_data": f"approve:{call_id}"},
+                {"text": t("clients.telegram_bot.btn_no"), "callback_data": f"reject:{call_id}"},
             ]]
         }
         resp = requests.post(

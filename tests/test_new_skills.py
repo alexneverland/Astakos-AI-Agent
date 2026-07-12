@@ -402,7 +402,7 @@ def test_register_tool_idempotent(tmp_path):
         register_tool.func(tool_name="my_tool", risk="WARNING")
         result2 = register_tool.func(tool_name="my_tool", risk="WARNING")
 
-    assert "ήδη υπάρχει" in result2
+    assert "already exists" in result2
 
     # Verify no duplicates in registry
     registry = json.loads((proj / "core" / "capability_registry.json").read_text(encoding="utf-8"))

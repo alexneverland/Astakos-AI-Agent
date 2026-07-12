@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import re
 import unicodedata
-
+from core import nl_config
 
 @dataclass
 class RoutineIntentResult:
@@ -13,80 +13,19 @@ class RoutineIntentResult:
     matched_routine_hint: str | None = None
 
 
-_MANUAL_VERB_PATTERNS = (
-    "βαλε",
-    "βγαλε",
-    "αλλαξε",
-    "σβησε",
-    "παγωσε",
-    "ξεπαγωσε",
-    "σιγασε",
-    "ενεργοποιησε",
-    "απενεργοποιησε",
-    "προσθεσε",
-    "αφαιρεσε",
-    "ρυθμισε",
-    "κανε",
-    "στειλ",
-    "στελν",
-    "μηδενισ",
-    "reset",
-)
+_MANUAL_VERB_PATTERNS = nl_config.RI_CONTROL_VERBS
 
 _MANUAL_CONTROL_HINTS = (
-    "ρουτιν",
-    "υπενθυμι",
-    "ειδοποιησ",
     "condition",
     "schedule",
-    "ωρα",
-    "μεχρι",
-    "απο ",
-    "να μην ενεργοποι",
-    "να ενεργοποι",
-    "οταν ",
-    "μονο οταν",
-    "καθε ",
     "cooldown",
-    "να ξανασταλει",
-    "να ξαναστειλει",
-    "βγαλτο απο cooldown",
-    "βγαλτο από cooldown",
-)
+) + nl_config.RI_ROUTINE_NOUNS + nl_config.RI_TIME_CONDITION_WORDS + nl_config.RI_COOLDOWN_RESET_WORDS
 
-_CONTEXT_PATTERNS = (
-    "ειμαι",
-    "ειμαστε",
-    "ειναι",
-    "θα ειμαι",
-    "θα ειμαστε",
-    "γυρισαμε",
-    "γυρισε",
-    "επεστρεψε",
-    "φυγαμε",
-    "εφυγε",
-    "λειπει",
-    "δεν εχει",
-    "σταματησε",
-    "ειναι καλοκαιρι",
-    "ειμαστε εξω",
-    "ειμαστε σπιτι",
-    "θα παει",
-    "δεν θα παει",
-    "θα παμε",
-    "δεν θα παμε",
-    "απο αυριο",
-    "αυτη την εβδομαδα",
-)
+_CONTEXT_PATTERNS = nl_config.RI_CONTEXT_UPDATE_PHRASES
 
-_GENERAL_CHAT_SHORT = {
-    "ναι", "οχι", "οκ", "οκευ", "εγινε", "καλα", "τελεια", "σωστα", "μμ", "χαχα"
-}
+_GENERAL_CHAT_SHORT = set(nl_config.RI_FILLER_ACKS)
 
-_STOPWORDS = {
-    "το", "τη", "την", "τα", "τον", "στη", "στο", "στις", "στην",
-    "με", "και", "να", "σε", "για", "απο", "ως", "μια", "ενα",
-}
+_STOPWORDS = nl_config.RI_STOP_WORDS
 
 
 def _normalize(text: str) -> str:

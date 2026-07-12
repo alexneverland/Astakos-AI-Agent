@@ -15,27 +15,27 @@ def search_ferries(origin: str, destination: str, date: str) -> str:
     destination: Destination (e.g. 'Skiathos', 'Mykonos')
     date: Travel date (e.g. '10 August 2026')
     """
-    query = f"{origin} {destination} πλοίο ferry δρομολόγιο τιμή {date}"
+    query = f"{origin} {destination} ferry schedule price {date}"
     print(f"\033[94m[Ferries]: Search: {query}\033[0m")
     
     try:
         results = _search.run(query)
         if not results:
-            return f"❌ Δεν βρέθηκαν αποτελέσματα για {origin} → {destination} στις {date}."
+            return t("skills.search_ferries.msg_no_results", org=origin, dest=destination, date=date)
         
         # Second search for official sites
         query2 = f"site:ferries.gr OR site:openseas.gr OR site:gtp.gr {origin} {destination} {date}"
         results2 = _search.run(query2)
         
-        output = f"🚢 Αποτελέσματα για {origin} → {destination} ({date}):\n\n"
+        output = t("skills.search_ferries.msg_results_title", org=origin, dest=destination, date=date)
         output += results[:2000]
         if results2:
-            output += f"\n\n📌 Από επίσημα sites:\n{results2[:1000]}"
+            output += t("skills.search_ferries.msg_official_sites", res=results2[:1000])
         
         return output
         
     except Exception as e:
-        return f"❌ Σφάλμα αναζήτησης πλοίων: {str(e)}"
+        return t("skills.search_ferries.msg_error", e=str(e))
 
 
 if __name__ == "__main__":

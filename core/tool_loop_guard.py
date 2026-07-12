@@ -33,10 +33,8 @@ def _slice_messages_since_last_human(messages: list) -> list:
 
 def _looks_like_factual_update(text: str) -> bool:
     t = str(text or "").lower()
-    markers = (
-        "ηρθε", "ήρθε", "τωρα", "τώρα", "μηνυμα 112", "112",
-        "μολις", "μόλις", "νεο", "νέο", "μου ηρθε", "μου ήρθε",
-    )
+    from core.nl_config import LOOP_GUARD_INSTANT_WORDS
+    markers = LOOP_GUARD_INSTANT_WORDS
     return any(m in t for m in markers)
 
 

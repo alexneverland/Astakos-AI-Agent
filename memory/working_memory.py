@@ -33,23 +33,9 @@ def update_working_memory(user_text, ai_text):
         user_context = safe_user[-400:] if len(safe_user) > 400 else safe_user
         ai_context = safe_ai[-400:] if len(safe_ai) > 400 else safe_ai
 
-        prompt = f"""
-Είσαι ο μηχανισμός μνήμης (Memory Sifter) του συστήματος.
-Ανάλυσε τον παρακάτω διάλογο και εξήγαγε 1 έως 3 σύντομα tags (ετικέτες) που αφορούν αποκλειστικά:
-
-1. Τι κάνει/θέλει ο Λάζαρος ΤΩΡΑ (π.χ. "Refactoring", "Αναζήτηση συνταγής").
-2. Αποφάσεις / Συμφωνίες (π.χ. "Ασφάλεια: Ολοκληρώθηκε", "MastroApp: Παγωμένο").
-3. Κόκκινες γραμμές / Τι ΔΕΝ θέλει να ξανακούσει (π.χ. "Όχι άλλη θεωρία").
-
-ΑΥΣΤΗΡΟΙ ΚΑΝΟΝΕΣ ΕΞΟΔΟΥ:
-- Απάντησε ΑΥΣΤΗΡΑ ΚΑΙ ΜΟΝΟ με τα tags χωρισμένα με κόμμα (π.χ. Tag1, Tag2, Tag3).
-- ΑΠΑΓΟΡΕΥΕΤΑΙ οποιαδήποτε άλλη λέξη, εισαγωγή ή επεξήγηση.
-- Αν ο Λάζαρος λέει απλώς λέξεις επιβεβαίωσης όπως "ΟΚ", "Ναι", "Έγινε", "Τέλεια", ή "Ευχαριστώ" χωρίς νέα πληροφορία, απάντησε ΜΟΝΟ με τη λέξη: ΚΕΝΟ.
-
-ΔΙΑΛΟΓΟΣ ΓΙΑ ΑΝΑΛΥΣΗ:
-Λάζαρος: {user_context}
-Αστακός: {ai_context}
-"""
+        from core.utils import load_agent_prompt
+        base_prompt = load_agent_prompt("memory_sifter")
+        prompt = base_prompt.format(user_context=user_context, ai_context=ai_context)
 
         response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
         
@@ -189,28 +175,9 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
     import re
     import json
     try:
-        cap_prompt = f"""
-Ανάλυσε τη συνομιλία και εντόπισε ΝΕΕΣ ικανότητες ΤΟΥ ΑΣΤΑΚΟΥ (can_do) ή συγκεκριμένες αποτυχίες ΤΟΥ ΑΣΤΑΚΟΥ (cannot_do).
-Απάντησε ΜΟΝΟ με JSON:
-{{
-  "can_do": "Σύντομη περιγραφή",
-  "cannot_do": "Σύντομη περιγραφή"
-}}
-Αν δεν υπάρχει νέα πληροφορία, βάλε null.
-ΠΡΟΣΟΧΗ: Γράψε τις προτάσεις γενικά, όχι για τη συγκεκριμένη στιγμή.
-ΑΠΑΓΟΡΕΥΕΤΑΙ να γράψεις ως can_do/cannot_do πράγματα που κάνει, μπορεί ή έζησε ο Λάζαρος, η Σοφία, ο Αλέξανδρος ή η οικογένεια. Αυτά είναι USER_FACT, όχι αυτογνωσία.
-Παραδείγματα που ΠΡΕΠΕΙ να είναι null:
-- "Ο Λάζαρος μπορεί να πηγαίνει τον γιο του στο σχολείο"
-- "Ο Αλέξανδρος ξεκινάει δημοτικό"
-- "Η Σοφία είναι σπίτι"
-Παραδείγματα έγκυρου can_do:
-- "Ο Αστακός μπορεί να στέλνει μήνυμα Messenger μετά από approval"
-- "Ο Αστακός μπορεί να αναζητά shared SQLite history και Chroma memories"
-
-[Agent: {agent}]
-Λάζαρος: {user_text[:500]}
-Αστακός: {ai_text[:500]}
-"""
+        from core.utils import load_agent_prompt
+        base_prompt = load_agent_prompt("memory_awareness")
+        cap_prompt = base_prompt.format(agent=agent, user_text=user_text[:500], ai_text=ai_text[:500])
         from services.gemini import safe_gemini_call
         response = safe_gemini_call(cap_prompt)
         

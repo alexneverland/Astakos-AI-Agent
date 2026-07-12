@@ -301,7 +301,7 @@ def chat_agent_node(state: AgentState):
     pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
     image_part = None
 
-    detailed_keywords = ["τι", "ποιος", "ποια", "δες", "ανάλυσε", "λεπτομέρεια", "διάβασε", "χρώμα"]
+    detailed_keywords = config.NLP_CONFIG.get("tools", {}).get("detailed_keywords", [])
     needs_pixels = any(word in last_msg_text.lower() for word in detailed_keywords)
 
     if path_match and (not pre_baked_analysis or needs_pixels):
@@ -347,10 +347,7 @@ def chat_agent_node(state: AgentState):
 
     # [FAREWELL GUARD]: If the user says goodbye, we remove archive_file
     # so that the LLM does not automatically archive files that are in the context.
-    _FAREWELL_WORDS = (
-        "καληνύχτα", "καλη νύχτα", "gn ", "good night", "αντίο", "bye",
-        "ta leme", "τα λέμε", "γεια σου", "γεια χαρα", "ciao", "adio",
-    )
+    _FAREWELL_WORDS = tuple(config.NLP_CONFIG.get("tools", {}).get("greetings", []))
     _is_farewell = any(w in last_msg_text.lower() for w in _FAREWELL_WORDS)
 
     chat_tools = [
@@ -575,7 +572,7 @@ def tech_agent_node(state: AgentState):
     pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
     image_part = None
 
-    tech_keywords = ["κώδικας", "σφάλμα", "διάβασε", "τι γράφει", "error", "logs", "σχέδιο"]
+    tech_keywords = config.NLP_CONFIG.get("tools", {}).get("tech_keywords", [])
     needs_pixels = any(word in last_msg_text.lower() for word in tech_keywords)
 
     if path_match and (not pre_baked_analysis or needs_pixels):
@@ -729,11 +726,11 @@ def mail_agent_node(state):
              if getattr(m, "type", "") == "human"),
             ""
         )
-        user_wants_read = any(kw in user_q.lower() for kw in ["διάβασ", "διαβασ", "άνοιξ", "ανοιξ", "τι λέει", "τι λεει", "περισσότερα", "δες το", "λεπτομέρεια"])
+        user_wants_read = any(kw in user_q.lower() for kw in config.NLP_CONFIG.get("intents", {}).get("read_words", []))
         selected_idx = extract_list_selection_index(user_q)
 
         if _search_hits and not _read_hits and not _read_dispatched and user_wants_read:
-            user_wants_thread = any(kw in user_q.lower() for kw in ["όλη τη", "ολη τη", "συνομιλία", "συζήτηση", "thread", "όλα τα", "ολα τα"])
+            user_wants_thread = any(kw in user_q.lower() for kw in config.NLP_CONFIG.get("intents", {}).get("thread_words", []))
             action_to_use = "read_thread" if user_wants_thread else "read_full"
             chosen_hit = _search_hits[selected_idx] if selected_idx is not None and 0 <= selected_idx < len(_search_hits) else _search_hits[0]
 
@@ -750,7 +747,7 @@ def mail_agent_node(state):
                 )
                 return {'current_agent': 'Mail_Agent', 'messages': [_auto_msg]}
         elif not _read_hits and not _read_dispatched and user_wants_read and _known_ids:
-            user_wants_thread = any(kw in user_q.lower() for kw in ["όλη τη", "ολη τη", "συνομιλία", "συζήτηση", "thread", "όλα τα", "ολα τα"])
+            user_wants_thread = any(kw in user_q.lower() for kw in config.NLP_CONFIG.get("intents", {}).get("thread_words", []))
             action_to_use = "read_thread" if user_wants_thread else "read_full"
             _ar_eid = _known_ids[selected_idx] if selected_idx is not None and 0 <= selected_idx < len(_known_ids) else _known_ids[0]
             _auto_msg = AIMessage(

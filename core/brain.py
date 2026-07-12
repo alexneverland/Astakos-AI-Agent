@@ -114,5 +114,5 @@ def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
 
             wait = base_delay * (2 ** attempt)
             print(f"\033[93m[Brain]: Network error (attempt {attempt+1}/{retries}), "
-                  f"retry σε {wait:.0f}s — {type(e).__name__}\033[0m")
+                  f"retrying in {wait:.0f}s — {type(e).__name__}\033[0m")
             time.sleep(wait)

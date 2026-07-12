@@ -1,8 +1,11 @@
 import json
 import sqlite3
 
-OUTING_ROUTINE_TOKENS = ["παρκο", "βολτα", "παιχνιδ", "κουνι", "παιδικ"]
-HOME_ONLY_ROUTINE_TOKENS = ["μαγειρ", "φαγητ", "γευμα", "μεσημεριαν", "κουζιν"]
+from config import NLP_CONFIG
+routines = NLP_CONFIG.get("routines", {})
+tokens = routines.get("tokens", {})
+OUTING_ROUTINE_TOKENS = tokens.get("_OUTING_ROUTINE_TOKENS", ["παρκο", "βολτα", "παιχνιδ", "κουνι", "παιδικ"])
+HOME_ONLY_ROUTINE_TOKENS = tokens.get("_HOME_ONLY_ROUTINE_TOKENS", ["μαγειρ", "φαγητ", "γευμα", "μεσημεριαν", "κουζιν"])
 
 conn = sqlite3.connect("astakos_routines.db")
 cur = conn.cursor()
