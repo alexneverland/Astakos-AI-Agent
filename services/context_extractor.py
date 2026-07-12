@@ -71,8 +71,8 @@ Message: "We are going to the park now with Kid1."
 Answer:
 {{"user_out_of_home": true, "kid1_with_user": true, "kid1_away_from_home": false}}
 
-User Message: "{user_text}"
-AI Answer (recent/current): "{ai_text}"
+User Message: "{{user_text}}"
+AI Answer (recent/current): "{{ai_text}}"
 """
 
 
