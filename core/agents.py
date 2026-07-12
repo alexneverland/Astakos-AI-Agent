@@ -7,6 +7,7 @@
 
 from core.i18n import t
 import os
+import config
 import re
 import base64
 from datetime import datetime
