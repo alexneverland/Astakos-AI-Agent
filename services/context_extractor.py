@@ -12,8 +12,8 @@ from services.routine_reconciler import (
     apply_routine_reconciliation_directives,
 )
 
-_CONTEXT_EXTRACTION_PROMPT = f"""
-You are {config.BOT_NAME}, an AI assistant. The user ({config.USER_NAME}) sends you a message.
+_CONTEXT_EXTRACTION_PROMPT = """
+You are {bot_name}, an AI assistant. The user ({user_name}) sends you a message.
 You need to understand from the context if any of the following states (context flags) are changing.
 
 Available flags:
@@ -71,8 +71,8 @@ Message: "We are going to the park now with Kid1."
 Answer:
 {{"user_out_of_home": true, "kid1_with_user": true, "kid1_away_from_home": false}}
 
-User Message: "{{user_text}}"
-AI Answer (recent/current): "{{ai_text}}"
+User Message: "{user_text}"
+AI Answer (recent/current): "{ai_text}"
 """
 
 
@@ -130,6 +130,8 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
 
     try:
         prompt = _CONTEXT_EXTRACTION_PROMPT.format(
+            bot_name=config.BOT_NAME,
+            user_name=config.USER_NAME,
             user_text=user_text,
             ai_text=ai_text,
         )
