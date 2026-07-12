@@ -66,7 +66,7 @@ LOOP_GUARD_INSTANT_WORDS = tuple(get_intent_list("tool_loop_guard", "instant_not
 # Context Builder
 CB_YESTERDAY_WORDS = tuple(get_intent_list("context_builder", "yesterday_words"))
 CB_MORNING_WORDS = tuple(get_intent_list("context_builder", "morning_words"))
-CB_ALEXANDROS_WORDS = tuple(get_intent_list("context_builder", "alexandros_words"))
+CB_KID1_WORDS = tuple(get_intent_list("context_builder", "kid1_words"))
 CB_SOCCER_WORDS = tuple(get_intent_list("context_builder", "soccer_words"))
 CB_PARTNER_GIFT_WORDS = tuple(get_intent_list("context_builder", "partner_gift_words"))
 CB_PARTNER_GIFT_CONTEXT = tuple(get_intent_list("context_builder", "partner_gift_context"))

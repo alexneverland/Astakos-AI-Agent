@@ -530,15 +530,15 @@ def temporal_history_for_query(
         content = _normalize_text(message.get("content", ""))
         value = sum(1 for token in tokens if _stem_token(token) in content)
         
-        from core.nl_config import CB_ALEXANDROS_WORDS, CB_SOCCER_WORDS
-        if any(w in clean_query for w in CB_ALEXANDROS_WORDS) and any(
+        from core.nl_config import CB_KID1_WORDS, CB_SOCCER_WORDS
+        if any(w in clean_query for w in CB_KID1_WORDS) and any(
             marker in content for marker in CB_SOCCER_WORDS
         ):
             value += 3
             
-        from core.nl_config import CB_SOFIA_GIFT_WORDS, CB_SOFIA_GIFT_CONTEXT
-        if any(marker in clean_query for marker in CB_SOFIA_GIFT_WORDS) and any(
-            marker in content for marker in CB_SOFIA_GIFT_CONTEXT
+        from core.nl_config import CB_PARTNER_GIFT_WORDS, CB_PARTNER_GIFT_CONTEXT
+        if any(marker in clean_query for marker in CB_PARTNER_GIFT_WORDS) and any(
+            marker in content for marker in CB_PARTNER_GIFT_CONTEXT
         ):
             value += 4
         return value
