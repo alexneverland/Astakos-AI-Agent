@@ -1,0 +1,24 @@
+{
+    "context_extractor": {
+        "park_words": [
+            "park",
+            "playground"
+        ],
+        "home_words": [
+            "home",
+            "house",
+            "apartment"
+        ],
+        "work_words": [
+            "work",
+            "office"
+        ]
+    },
+    "messenger_intent": {
+        "cancel_words": [
+            "cancel",
+            "stop",
+            "abort"
+        ]
+    }
+}
