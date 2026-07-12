@@ -5,6 +5,7 @@
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
 
+from core.i18n import t
 import re
 import json
 import os
@@ -107,36 +108,36 @@ def get_ultra_light_ack_response() -> str:
     """Return a short neutral confirmation for ultra-light ACK replies."""
     import random
     return random.choice([
-        "Έγινε.",
-        "ΟΚ.",
-        "Λήφθη.",
-        "Τέλεια.",
+        t("prompts.ext_str_484"),
+        t("prompts.ext_str_781"),
+        t("prompts.ext_str_521"),
+        t("prompts.ext_str_347"),
         "✅"
     ])
 
 def is_reply_to_recent_mail_prompt(messages: list, limit: int = 4) -> bool:
     mail_markers = (
-        "θέλεις να προχωρήσω",
-        "θέλεις να διαβάσω",
-        "να διαβάσω το πλήρες",
-        "να διαβάσω όλη τη συνομιλία",
-        "να ανοίξω το email",
-        "να ανοίξω όλη τη συνομιλία",
-        "να σου πω τι ζητάει",
-        "να σου πω τι λέει",
-        "τι να απαντήσω",
-        "τελευταίο email",
-        "πλήρες περιεχόμενο",
-        "ολόκληρη η συνομιλία",
-        "ολόκληρο το thread",
+        t("prompts.ext_str_72"),
+        t("prompts.ext_str_98"),
+        t("prompts.ext_str_64"),
+        t("prompts.ext_str_26"),
+        t("prompts.ext_email"),
+        t("prompts.ext_str_33"),
+        t("prompts.ext_str_83"),
+        t("prompts.ext_str_91"),
+        t("prompts.ext_str_142"),
+        t("prompts.ext_email_1"),
+        t("prompts.ext_str_87"),
+        t("prompts.ext_str_68"),
+        t("prompts.ext_thread"),
     )
 
     mail_tool_markers = (
-        "📩 περιεχόμενο:",
-        "📩 ολόκληρη η συνομιλία",
+        t("prompts.ext_str_132"),
+        t("prompts.ext_str_54"),
         "id: ",
-        "θέμα:",
-        "από:",
+        t("prompts.ext_str_633"),
+        t("prompts.ext_str_725"),
     )
 
     checked = 0
@@ -171,11 +172,11 @@ def looks_like_linkedin_request(text: str) -> bool:
     positive_markers = (
         "linkedin",
         "post",
-        "αναρτηση",
-        "δημοσιευ",
+        t("prompts.ext_str_335"),
+        t("prompts.ext_str_311"),
         "publish",
-        "postαρισ",
-        "draft του linkedin",
+        t("prompts.ext_post"),
+        t("prompts.ext_draft_linkedin_1"),
     )
     return any(marker in normalized for marker in positive_markers)
 
@@ -186,23 +187,23 @@ def looks_like_messenger_request(text: str) -> bool:
         return False
     positive_markers = (
         "messenger",
-        "σοφια",
+        t("prompts.ext_str_604"),
         "sofia",
-        "μηνυμα",
+        t("prompts.ext_str_478"),
         "draft",
-        "προσχεδιο",
-        "στειλε το μηνυμα",
+        t("prompts.ext_str_264"),
+        t("prompts.ext_str_113"),
     )
     return any(marker in normalized for marker in positive_markers)
 
 
 def is_reply_to_recent_linkedin_prompt(messages: list, limit: int = 4) -> bool:
     linkedin_markers = (
-        "draft του linkedin",
-        "draft του linkedin",
-        "το draft του linkedin ειναι ετοιμο",
-        "να το δειχνω η το δημοσιευω",
-        "να το δειξω η το δημοσιευω",
+        t("prompts.ext_draft_linkedin_1"),
+        t("prompts.ext_draft_linkedin_1"),
+        t("prompts.ext_draft_linkedin"),
+        t("prompts.ext_str_24"),
+        t("prompts.ext_str_31"),
         "publish",
         "linkedin",
     )
@@ -234,7 +235,7 @@ def should_attach_linkedin_draft_reply(
     normalized_user = _normalize_intent_text(user_text)
     linkedin_explicitly_rejected = any(
         marker in normalized_user
-        for marker in ("οχι linkedin", "oxi linkedin", "not linkedin")
+        for marker in (t("prompts.ext_linkedin"), "oxi linkedin", "not linkedin")
     )
 
     if linkedin_explicitly_rejected:
@@ -254,7 +255,7 @@ def _normalize_tool_text(text: str) -> str:
 
 def looks_like_terminal_messenger_draft_result(text: str) -> bool:
     content = _normalize_tool_text(text)
-    return content.startswith("✅ draft αποθηκευτηκε.") or content.startswith("draft αποθηκευτηκε.")
+    return content.startswith(t("prompts.ext_draft_2")) or content.startswith(t("prompts.ext_draft_6"))
 
 
 def build_messenger_draft_ready_reply(tool_results: list[str]) -> str:
@@ -281,7 +282,7 @@ def build_messenger_draft_ready_reply(tool_results: list[str]) -> str:
 
     if draft_message:
         return (
-            f"Έτοιμο το προσχέδιο, μάστορα:\n\n"
+            t("core.utils.draft_ready") +
             f"«{draft_message}»\n\n"
             f"Saved. Do you want changes or should I send it?"
         )
@@ -343,15 +344,15 @@ def extract_list_selection_index(text: str) -> int | None:
         return None
 
     normalized = clean_message(text).strip().lower()
-    normalized = normalized.replace("δεύτερο", "δευτερο")
-    normalized = normalized.replace("τρίτο", "τριτο")
-    normalized = normalized.replace("τέταρτο", "τεταρτο")
-    normalized = normalized.replace("πέμπτο", "πεμπτο")
+    normalized = normalized.replace(t("prompts.ext_str_426"), t("prompts.ext_str_365"))
+    normalized = normalized.replace(t("prompts.ext_str_573"), t("prompts.ext_str_637"))
+    normalized = normalized.replace(t("prompts.ext_str_391"), t("prompts.ext_str_382"))
+    normalized = normalized.replace(t("prompts.ext_str_515"), t("prompts.ext_str_448"))
 
     for pattern in (
-        r"\bτο\s+([1-9])\b",
-        r"\bτο\s+([1-9])ο\b",
-        r"\bνούμερο\s+([1-9])\b",
+        t("prompts.ext_b_s_1_9_b_2"),
+        t("prompts.ext_b_s_1_9_b_1"),
+        t("prompts.ext_b_s_1_9_b"),
         r"\b#\s*([1-9])\b",
     ):
         match = re.search(pattern, normalized)
@@ -360,7 +361,7 @@ def extract_list_selection_index(text: str) -> int | None:
 
     from core.nl_config import UTILS_ORDINAL_WORDS
     for word, idx in UTILS_ORDINAL_WORDS.items():
-        if re.search(rf"\bτο\s+{word}\b", normalized):
+        if re.search(rf"\b{t('core.utils.article_the')}\s+{word}\b", normalized):
             return idx
 
     return None
@@ -378,13 +379,13 @@ def sanitize_history_for_gemini(messages: list) -> list:
         if msg.type == "tool":
             # Convert the tool's output into a simple System/Human context
             # so that the next Agent does not get confused
-            sanitized.append(HumanMessage(content=f"[Αποτέλεσμα Εργαλείου {msg.name}]: {clean_message(msg.content)}"))
+            sanitized.append(HumanMessage(content=t("core.utils.tool_result", name=msg.name, content=clean_message(msg.content))))
         
         elif msg.type == "ai" and hasattr(msg, "tool_calls") and msg.tool_calls:
             # If the AI made a tool_call, we only keep its reasoning (if it exists)
             text_content = clean_message(msg.content)
             if not text_content:
-                text_content = f"[Κλήση Εργαλείου: {msg.tool_calls[0]['name']}]"
+                text_content = t("core.utils.tool_call", name=msg.tool_calls[0]['name'])
             sanitized.append(AIMessage(content=text_content))
             
         else:
@@ -475,6 +476,15 @@ def load_agent_prompt(agent_name: str, default_fallback: str = "") -> str:
             parts = section.split('\n', 1)
             key = parts[0].strip()
             value = parts[1].strip() if len(parts) > 1 else ""
+            
+            # Inject dynamic configuration
+            import config
+            value = value.replace("{USER_PERSONA}", config.USER_PERSONA)
+            value = value.replace("{USER_NAME}", config.USER_NAME)
+            value = value.replace("{BOT_NAME}", config.BOT_NAME)
+            value = value.replace("{RESPONSE_LANGUAGE}", config.RESPONSE_LANGUAGE)
+            value = value.replace("{DEFAULT_CITY}", config.DEFAULT_CITY)
+            
             prompts_dict[key] = value
             
         return prompts_dict.get(agent_name, default_fallback)
@@ -508,12 +518,12 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
     from memory.working_memory import get_capability_context
     from memory.session_memory import load_last_session_hint
 
-    identity = load_agent_prompt("identity_block", "Είσαι ο Αστακός, ο AI συνεργάτης του Λάζαρου.")
+    identity = load_agent_prompt("identity_block", t("prompts.ext_ai"))
     identity = identity.replace("{BASE_DIR}", BASE_DIR)
 
     # clean_message already did its job correctly here, we leave it as is.
     last_msg = clean_message(state_messages[-1].content) if state_messages else ""
-    is_vision = "[VISUAL ANALYSIS]" in last_msg or "[ΟΠΤΙΚΗ ΑΝΑΛΥΣΗ]" in last_msg or "[CURRENT_PHOTO_PATH]" in last_msg
+    is_vision = "[VISUAL ANALYSIS]" in last_msg or t("prompts.ext_str_116") in last_msg or "[CURRENT_PHOTO_PATH]" in last_msg
     has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
     
     memory_context_str = ""
@@ -523,7 +533,7 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
     ignore_words = UTILS_IGNORE_WORDS
 
     k_value = 0 if has_current_photo else (3 if is_vision else 8)
-    is_routine_command = clean_text in ignore_words or clean_text.startswith(("ναι ", "οχι ", "όχι "))
+    is_routine_command = clean_text in ignore_words or clean_text.startswith((t("prompts.ext_str_764"), t("prompts.ext_str_706"), t("prompts.ext_str_711")))
     has_skip_keyword = any(kw in clean_text for kw in SKIP_SEMANTIC_KEYWORDS)
 
     semantic_k = k_value if len(clean_text) > 10 and not is_routine_command and not has_skip_keyword else 0
@@ -572,7 +582,7 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
     # ── Long-Term Goals ──────────────────────────────────────────
     # Contextual Injection: We only set the goals if the conversation seems to have substance (not in routines)
     # or if it has related keywords, or if it is the Planner/Proactive.
-    goal_keywords = ["στόχ", "goal", "δουλει", "project", "plan", "πλάνο", "πρόοδ", "εξέλιξη", "επόμεν", "δουλέψ", "φτιάξ", "συνεχίσ", "τι κάνουμε", "task"]
+    goal_keywords = [t("prompts.ext_str_726"), "goal", t("prompts.ext_str_496"), "project", "plan", t("prompts.ext_str_658"), t("prompts.ext_str_670"), t("prompts.ext_str_366"), t("prompts.ext_str_490"), t("prompts.ext_str_518"), t("prompts.ext_str_576"), t("prompts.ext_str_380"), t("prompts.ext_str_201"), "task"]
     is_goal_related = any(kw in clean_text for kw in goal_keywords)
     
     should_inject_goals = False
@@ -686,29 +696,29 @@ Answer:"""
 
 
 def looks_like_operational_assistant_text(text: str) -> bool:
-    t = clean_message(text).strip().lower()
-    if not t:
+    txt = clean_message(text).strip().lower()
+    if not txt:
         return False
 
     markers = [
-        "το ετοίμασα, να το στείλω",
-        "το αποθήκευσα. θέλεις αλλαγές ή να το στείλω",
-        "είναι έτοιμο σε draft",
-        "γράψε απλά «στείλε»",
-        "γράψε απλά \"στείλε\"",
+        t("prompts.ext_str_34"),
+        t("prompts.ext_str_6"),
+        t("prompts.ext_draft_3"),
+        t("prompts.ext_str_74"),
+        t("prompts.ext_str_79"),
         "action approval required",
-        "αναμονή έγκρισης",
-        "εκτελώ `execute_local_pipeline`",
-        "το μήνυμα στάλθηκε στον/στη",
-        "σου έστειλα telegram για επιβεβαίωση",
-        "μήνυμα στη σοφία",
+        t("prompts.ext_str_107"),
+        t("prompts.ext_execute_local_pipeline"),
+        t("prompts.ext_str_28"),
+        t("prompts.ext_telegram_1"),
+        t("prompts.ext_str_117"),
         "messenger draft",
-        "δεν βρέθηκε προσχέδιο",
-        "δεν υπάρχει ενεργό προσχέδιο",
-        "το προσχέδιο έχει λήξει",
-        "το προσχέδιο είναι ελλιπές",
+        t("prompts.ext_str_56"),
+        t("prompts.ext_str_23"),
+        t("prompts.ext_str_45"),
+        t("prompts.ext_str_29"),
     ]
-    return any(m in t for m in markers)
+    return any(m in txt for m in markers)
 
 def looks_like_self_capability_text(text: str) -> bool:
     low = clean_message(text).strip().lower()
@@ -750,9 +760,9 @@ def sanitize_messenger_draft_claims(text: str) -> str:
         has_messenger_topic = (
             "draft" in pl
             or "messenger" in pl
-            or "σοφ" in pl
-            or "μήνυμα στη σοφία" in pl
-            or "μηνυμα στη σοφια" in pl
+            or t("prompts.ext_str_775") in pl
+            or t("prompts.ext_str_117") in pl
+            or t("prompts.ext_str_111") in pl
         )
         from core.nl_config import MESSENGER_WORKFLOW_TOKENS
         has_false_current_state = any(token in pl for token in MESSENGER_WORKFLOW_TOKENS)
@@ -764,7 +774,7 @@ def sanitize_messenger_draft_claims(text: str) -> str:
 def looks_like_web_tool_error(text: str) -> bool:
     if '[WEB_TOOL_ERROR]' in text:
         return True
-    legacy_prefixes = ['⚠️ Η αναζήτηση απέτυχε', '❌ Γενικό Σφάλμα στο browse_url', 'Cloudflare', 'Bot Protection', 'temporarily unavailable', '🛑 Προστασία Bot', '⚠️ Σφάλμα Timeout']
+    legacy_prefixes = [t("prompts.ext_str_53"), t("prompts.ext_browse_url"), 'Cloudflare', 'Bot Protection', 'temporarily unavailable', t("prompts.ext_bot"), t("prompts.ext_timeout")]
     for p in legacy_prefixes:
         if p.lower() in text.lower():
             return True
@@ -805,8 +815,8 @@ def filter_recent_web_tool_results(messages: list) -> list:
 def build_web_failure_reply(user_text: str, tool_results: list) -> str:
     qty_intents = list(UTILS_QTY_INTENTS)
     is_qty = any(w in user_text.lower() for w in qty_intents)
-    kind = 'νούμερο/στοιχείο' if is_qty else 'πληροφορία'
-    return f'Μάστορα, προσπάθησα να το επιβεβαιώσω από web sources, αλλά αυτή τη στιγμή δεν πήρα αξιόπιστο αποτέλεσμα από τα εργαλεία μου, οπότε δεν θέλω να σου πω {kind} στον αέρα. Αν θέλεις, δώσε μου συγκεκριμένο link ή το ξαναπιάνουμε αργότερα.'
+    kind = t("prompts.ext_str_115") if is_qty else t("prompts.ext_str_243")
+    return t("core.utils.web_failure_reply", kind=kind)
 
 def parse_linkedin_draft_result(text: str) -> dict | None:
     content = clean_message(text).strip()
@@ -894,3 +904,4 @@ def build_linkedin_draft_ready_reply(tool_results: list[str]) -> str:
     ])
 
     return "\n".join(lines)
+

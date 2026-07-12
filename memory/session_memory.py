@@ -142,16 +142,16 @@ def _normalize_text(value: str) -> str:
 def _strip_leading_ack_prefix(text: str) -> str:
     normalized = _normalize_text(text)
     prefixes = (
-        "ναι ",
-        "ναι, ",
-        "οκ ",
+        t("prompts.ext_str_764"),
+        t("prompts.ext_str_564"),
+        t("prompts.ext_str_813"),
         "ok ",
-        "ωραια ",
-        "ωραία ",
-        "λοιπον ",
-        "λοιπόν ",
-        "ε ",
-        "ε και ",
+        t("prompts.ext_str_475"),
+        t("prompts.ext_str_493"),
+        t("prompts.ext_str_388"),
+        t("prompts.ext_str_413"),
+        t("prompts.ext_str_838"),
+        t("prompts.ext_str_542"),
     )
     changed = True
     while changed:
@@ -166,7 +166,7 @@ def _strip_leading_ack_prefix(text: str) -> str:
 
 def _strip_user_fact_scaffold(text: str) -> str:
     body = re.sub(r"^\[[A-Z_]+\]:\s*", "", str(text or ""), flags=re.IGNORECASE).strip()
-    body = re.sub(r"^στις\s+20\d{2}-\d{2}-\d{2},?\s*", "", body, flags=re.IGNORECASE).strip()
+    body = re.sub(t("prompts.ext_s_20_d_2_d_2_d_2_s"), "", body, flags=re.IGNORECASE).strip()
     return body
 
 
@@ -174,20 +174,20 @@ def _looks_like_question_fact(text: str) -> bool:
     body = _strip_user_fact_scaffold(text)
     normalized = _strip_leading_ack_prefix(body)
     question_starters = (
-        "τι ",
-        "πώς ",
-        "πως ",
-        "γιατί ",
-        "γιατι ",
-        "πού ",
-        "που ",
-        "ποιος ",
-        "ποια ",
-        "ποιο ",
-        "πόσο ",
-        "ποσο ",
-        "πότε ",
-        "ποτε ",
+        t("prompts.ext_str_789"),
+        t("prompts.ext_str_761"),
+        t("prompts.ext_str_753"),
+        t("prompts.ext_str_502"),
+        t("prompts.ext_str_506"),
+        t("prompts.ext_str_710"),
+        t("prompts.ext_str_695"),
+        t("prompts.ext_str_548"),
+        t("prompts.ext_str_570"),
+        t("prompts.ext_str_631"),
+        t("prompts.ext_str_622"),
+        t("prompts.ext_str_665"),
+        t("prompts.ext_str_669"),
+        t("prompts.ext_str_587"),
     )
     return (
         body.endswith("?")
@@ -210,34 +210,34 @@ def _looks_like_operational_user_request(user_text: str, ai_text: str = "") -> b
         return True
 
     imperative_starts = (
-        "διαβασε",
-        "βρες",
-        "ψαξε",
-        "φτιαξε",
-        "γραψε",
-        "στειλε",
-        "μπες",
-        "ανοιξε",
-        "δες",
-        "τσεκαρε",
-        "κοιτα",
-        "θελω να βρεις",
-        "θελω να διαβασεις",
-        "θελω να φτιαξεις",
-        "θελω να μπεις",
+        t("prompts.ext_str_416"),
+        t("prompts.ext_str_705"),
+        t("prompts.ext_str_765"),
+        t("prompts.ext_str_494"),
+        t("prompts.ext_str_581"),
+        t("prompts.ext_str_509"),
+        t("prompts.ext_str_758"),
+        t("prompts.ext_str_525"),
+        t("prompts.ext_str_770"),
+        t("prompts.ext_str_407"),
+        t("prompts.ext_str_580"),
+        t("prompts.ext_str_150"),
+        t("prompts.ext_str_99"),
+        t("prompts.ext_str_114"),
+        t("prompts.ext_str_161"),
     )
     tool_targets = (
         "mail",
         "email",
         "thread",
-        "συνομιλι",
-        "εικονα",
-        "φωτο",
+        t("prompts.ext_str_305"),
+        t("prompts.ext_str_482"),
+        t("prompts.ext_str_728"),
         "photo",
         "site",
         "link",
         "url",
-        "αρχει",
+        t("prompts.ext_str_609"),
         "file",
         "pdf",
         "trip.com",
@@ -246,7 +246,7 @@ def _looks_like_operational_user_request(user_text: str, ai_text: str = "") -> b
     if any(normalized.startswith(prefix) for prefix in imperative_starts) and any(token in normalized for token in tool_targets):
         return True
 
-    if "📋 **plan για:" in ai_normalized and any(token in normalized for token in tool_targets):
+    if t("prompts.ext_plan_4") in ai_normalized and any(token in normalized for token in tool_targets):
         return True
 
     return False
@@ -255,18 +255,18 @@ def _looks_like_operational_asset_confirmation(text: str) -> bool:
     txt = (text or "").strip().lower()
 
     markers = (
-        "την αποθηκευσα στη μνημη μου",
-        "την αποθήκευσα στη μνήμη μου",
-        "δεν την αποθηκευω μονιμα",
-        "δεν την αποθηκεύω μόνιμα",
-        "δεν την αρχειοθετω μονιμα",
-        "δεν την αρχειοθετώ μόνιμα",
-        "την αρχειοθετησα",
-        "την αρχειοθέτησα",
-        "αρχειοθετηθηκε",
-        "αρχειοθετήθηκε",
-        "δεν την κραταω",
-        "δεν την κρατάω",
+        t("prompts.ext_str_21"),
+        t("prompts.ext_str_19"),
+        t("prompts.ext_str_41"),
+        t("prompts.ext_str_44"),
+        t("prompts.ext_str_39"),
+        t("prompts.ext_str_36"),
+        t("prompts.ext_str_106"),
+        t("prompts.ext_str_119"),
+        t("prompts.ext_str_143"),
+        t("prompts.ext_str_139"),
+        t("prompts.ext_str_134"),
+        t("prompts.ext_str_135"),
     )
 
     return any(m in txt for m in markers)
@@ -287,15 +287,15 @@ def _looks_like_operational_memory_noise(fact: str, ai_text: str = "") -> bool:
     low_ai = ai_norm.lower()
 
     direct_markers = (
-        "αναμονή έγκρισης",
+        t("prompts.ext_str_107"),
         "action approval required",
-        "εκτελώ `execute_local_pipeline`",
-        "εκτελώ `",
-        "στάλθηκε, μάστορα",
-        "το draft καθαρίστηκε",
-        "δεν υπάρχει ενεργό draft",
-        "εννοούσα αυτό το draft",
-        "θέλεις αλλαγές, να το σβήσω ή να το στείλω",
+        t("prompts.ext_execute_local_pipeline"),
+        t("prompts.ext_str_304"),
+        t("prompts.ext_str_101"),
+        t("prompts.ext_draft_4"),
+        t("prompts.ext_draft"),
+        t("prompts.ext_draft_1"),
+        t("prompts.ext_str_7"),
     )
 
     return any(marker in low_fact or marker in low_ai for marker in direct_markers)
@@ -442,13 +442,13 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
 
 
 _LOW_SIGNAL_ENTITY_TOKENS = {
-    "στις", "στο", "στη", "στην", "στον", "στα", "στους", "στις",
-    "και", "για", "απο", "από", "με", "θα", "να", "την", "τον", "του",
-    "της", "τους", "μας", "σας", "τους", "ολοι", "όλοι", "ολη", "όλη",
-    "οικογενεια", "οικογένεια", "γυρω", "γύρω", "περιπου", "περίπου",
-    "κιλο", "κιλό", "κιλα", "κιλά", "γραμμαρια", "γραμμάρια", "φουρνο",
-    "φούρνο", "τηγανιες", "τηγανιές", "παρει", "πήρε", "πηρα", "πήρα",
-    "πηραμε", "πήραμε", "αγορασα", "αγόρασα", "αγορασε", "αγόρασε",
+    t("prompts.ext_str_730"), t("prompts.ext_str_772"), t("prompts.ext_str_804"), t("prompts.ext_str_724"), t("prompts.ext_str_685"), t("prompts.ext_str_791"), t("prompts.ext_str_617"), t("prompts.ext_str_730"),
+    t("prompts.ext_str_776"), t("prompts.ext_str_806"), t("prompts.ext_str_800"), t("prompts.ext_str_827"), t("prompts.ext_str_835"), t("prompts.ext_str_844"), t("prompts.ext_str_841"), t("prompts.ext_str_786"), t("prompts.ext_str_807"), t("prompts.ext_str_809"),
+    t("prompts.ext_str_801"), t("prompts.ext_str_729"), t("prompts.ext_str_788"), t("prompts.ext_str_828"), t("prompts.ext_str_729"), t("prompts.ext_str_735"), t("prompts.ext_str_677"), t("prompts.ext_str_808"), t("prompts.ext_str_815"),
+    t("prompts.ext_str_225"), t("prompts.ext_str_227"), t("prompts.ext_str_716"), t("prompts.ext_str_718"), t("prompts.ext_str_356"), t("prompts.ext_str_402"),
+    t("prompts.ext_str_714"), t("prompts.ext_str_683"), t("prompts.ext_str_712"), t("prompts.ext_str_755"), t("prompts.ext_str_265"), t("prompts.ext_str_248"), t("prompts.ext_str_520"),
+    t("prompts.ext_str_513"), t("prompts.ext_str_294"), t("prompts.ext_str_301"), t("prompts.ext_str_641"), t("prompts.ext_str_739"), t("prompts.ext_str_722"), t("prompts.ext_str_741"),
+    t("prompts.ext_str_540"), t("prompts.ext_str_468"), t("prompts.ext_str_355"), t("prompts.ext_str_386"), t("prompts.ext_str_370"), t("prompts.ext_str_400"),
 }
 
 
@@ -458,14 +458,14 @@ def _extract_food_subject_tokens(text: str) -> list[str]:
         return []
 
     compact = " ".join(clean_message(cleaned_text).lower().split())
-    tokens = re.findall(r"[a-zA-Zα-ωάέήίόύώϊϋΐΰ]{4,}", compact)
+    tokens = re.findall(r"\w{4,}", compact, flags=re.UNICODE)
     out: list[str] = []
     for token in tokens:
         if token in _LOW_SIGNAL_ENTITY_TOKENS:
             continue
-        if token.endswith(("ουμε", "ουνε", "ουν", "εις", "ωσει", "ώσει", "ει", "οντας")):
+        if token.endswith((t("prompts.ext_str_769"), t("prompts.ext_str_732"), t("prompts.ext_str_773"), t("prompts.ext_str_810"), t("prompts.ext_str_721"), t("prompts.ext_str_752"), t("prompts.ext_str_837"), t("prompts.ext_str_594"))):
             continue
-        if token.endswith(("μενος", "μένη", "μενη", "μενο", "ητες", "ητές", "ητος", "ητή", "ητό")):
+        if token.endswith((t("prompts.ext_str_586"), t("prompts.ext_str_746"), t("prompts.ext_str_709"), t("prompts.ext_str_734"), t("prompts.ext_str_699"), t("prompts.ext_str_742"), t("prompts.ext_str_678"), t("prompts.ext_str_817"), t("prompts.ext_str_794"))):
             continue
         out.append(token)
     return _dedupe_preserve_order(out[:6])
@@ -478,7 +478,7 @@ def _extract_entities_from_text(text: str) -> list[str]:
         return []
 
     found = []
-    for match in re.finditer(r"\b[Α-ΩA-Z][Α-ΩA-Za-zΆ-Ώά-ώϊϋΐΰ]+(?:\s+[Α-ΩA-Z][Α-ΩA-Za-zΆ-Ώά-ώϊϋΐΰ]+)?", compact):
+    for match in re.finditer(t("prompts.ext_b_a_z_a_za_z_s_a_z_a_za_z"), compact):
         entity = match.group(0).strip(" .,;:!?")
         if len(entity) >= 3:
             found.append(entity)
@@ -499,29 +499,29 @@ def _looks_like_food_context(text: str) -> bool:
     compact = " ".join(clean_message(text).lower().split())
 
     direct_food_markers = (
-        "φαγητ", "φακες", "ψαρ", "μπριζολ", "φαγα", "εφαγε",
-        "κρεας", "κοτοπ", "μακαρον", "ρυζ", "φασολ", "σουπα",
-        "σαλατ", "τυρι", "πιτα", "πιτσ", "μπιφτεκ", "ψην",
+        t("prompts.ext_str_662"), t("prompts.ext_str_645"), t("prompts.ext_str_830"), t("prompts.ext_str_395"), t("prompts.ext_str_687"), t("prompts.ext_str_628"),
+        t("prompts.ext_str_593"), t("prompts.ext_str_614"), t("prompts.ext_str_440"), t("prompts.ext_str_825"), t("prompts.ext_str_610"), t("prompts.ext_str_605"),
+        t("prompts.ext_str_601"), t("prompts.ext_str_686"), t("prompts.ext_str_675"), t("prompts.ext_str_723"), t("prompts.ext_str_422"), t("prompts.ext_str_814"),
     )
     prep_markers = (
-        "φουρν", "τηγαν", "ψησ", "μαγειρ", "συνταγ", "αντιστασ",
-        "αερα", "βρασ", "κατσαρολ", "σχαρ", "ριγαν", "λεμον",
+        t("prompts.ext_str_647"), t("prompts.ext_str_555"), t("prompts.ext_str_774"), t("prompts.ext_str_441"), t("prompts.ext_str_485"), t("prompts.ext_str_307"),
+        t("prompts.ext_str_682"), t("prompts.ext_str_707"), t("prompts.ext_str_314"), t("prompts.ext_str_763"), t("prompts.ext_str_642"), t("prompts.ext_str_598"),
     )
     meal_context_markers = (
-        "πατατ", "οικογεν", "τραπεζ", "μεσημερ", "βραδιν", "γευμα",
-        "φαμε", "φαω", "πιατο",
+        t("prompts.ext_str_549"), t("prompts.ext_str_362"), t("prompts.ext_str_449"), t("prompts.ext_str_404"), t("prompts.ext_str_545"), t("prompts.ext_str_620"),
+        t("prompts.ext_str_767"), t("prompts.ext_str_812"), t("prompts.ext_str_618"),
     )
     purchase_markers = (
-        "αγορασ", "πηρα", "πηραμε", "κιλο", "κιλα", "γραμμαρ",
-        "τεμαχ", "κομματ",
+        t("prompts.ext_str_507"), t("prompts.ext_str_722"), t("prompts.ext_str_540"), t("prompts.ext_str_714"), t("prompts.ext_str_712"), t("prompts.ext_str_376"),
+        t("prompts.ext_str_607"), t("prompts.ext_str_472"),
     )
 
     if any(marker in normalized for marker in direct_food_markers):
         return True
 
     has_weight_or_count = bool(
-        re.search(r"\b\d+(?:[.,]\d+)?\s*(?:κιλ(?:ο|ά)?|κιλα|γρ|γραμμ?)\b", compact)
-        or re.search(r"\b\d+\s*(?:τεμαχ|κομματ)\b", compact)
+        re.search(t("prompts.ext_b_d_d_s_b"), compact)
+        or re.search(t("prompts.ext_b_d_s_b"), compact)
     )
     has_prep = any(marker in normalized for marker in prep_markers)
     has_meal_context = any(marker in normalized for marker in meal_context_markers)
@@ -532,25 +532,25 @@ def _looks_like_food_context(text: str) -> bool:
 
 def _infer_topic_from_text(text: str, category: str) -> str:
     normalized = _normalize_text(text)
-    if any(marker in normalized for marker in ("ποδοσφ", "μπασκετ", "κολυμβ", "σκακι", "χορο", "δραστηριοτ", "προπονησ")):
+    if any(marker in normalized for marker in (t("prompts.ext_str_535"), t("prompts.ext_str_420"), t("prompts.ext_str_531"), t("prompts.ext_str_661"), t("prompts.ext_str_731"), t("prompts.ext_str_217"), t("prompts.ext_str_338"))):
         return "activity"
-    if any(marker in normalized for marker in ("σχολει", "δημοτικ", "φροντιστ", "κατασκην")):
-        return "school" if "σχολει" in normalized or "δημοτικ" in normalized or "φροντιστ" in normalized else "trip"
-    if any(marker in normalized for marker in ("υπν", "πυρετ", "γιατρ", "αρρωστ", "πονα", "κουρασ", "ηρεμησ", "τσιμπουρ")):
+    if any(marker in normalized for marker in (t("prompts.ext_str_460"), t("prompts.ext_str_385"), t("prompts.ext_str_302"), t("prompts.ext_str_292"))):
+        return "school" if t("prompts.ext_str_460") in normalized or t("prompts.ext_str_385") in normalized or t("prompts.ext_str_302") in normalized else "trip"
+    if any(marker in normalized for marker in (t("prompts.ext_str_785"), t("prompts.ext_str_592"), t("prompts.ext_str_583"), t("prompts.ext_str_498"), t("prompts.ext_str_694"), t("prompts.ext_str_523"), t("prompts.ext_str_445"), t("prompts.ext_str_306"))):
         return "health"
-    if any(marker in normalized for marker in ("στεναχωρ", "χαρ", "αγχω", "φοβ", "ηρεμησ", "πιεστηκ")):
+    if any(marker in normalized for marker in (t("prompts.ext_str_283"), t("prompts.ext_str_803"), t("prompts.ext_str_700"), t("prompts.ext_str_811"), t("prompts.ext_str_445"), t("prompts.ext_str_373"))):
         return "emotion"
-    if any(marker in normalized for marker in ("κουνελ", "σκυλ", "γατ", "ζωακ", "κατοικιδ")):
+    if any(marker in normalized for marker in (t("prompts.ext_str_489"), t("prompts.ext_str_704"), t("prompts.ext_str_782"), t("prompts.ext_str_701"), t("prompts.ext_str_318"))):
         return "pet"
     if _looks_like_food_context(text):
         return "food"
-    if any(marker in normalized for marker in ("σπιτι", "κουζιν", "καθαρισ", "αφυγραντηρ", "σκουπ", "λαικ", "ψων")):
+    if any(marker in normalized for marker in (t("prompts.ext_str_589"), t("prompts.ext_str_547"), t("prompts.ext_str_417"), t("prompts.ext_str_223"), t("prompts.ext_str_612"), t("prompts.ext_str_697"), t("prompts.ext_str_805"))):
         return "home"
-    if any(marker in normalized for marker in ("δουλει", "βαρδια", "εργοστασ", "πασσια", "συναδελφ")):
+    if any(marker in normalized for marker in (t("prompts.ext_str_496"), t("prompts.ext_str_479"), t("prompts.ext_str_341"), t("prompts.ext_str_505"), t("prompts.ext_str_300"))):
         return "work"
-    if any(marker in normalized for marker in ("δωρο", "γενεθλ", "ρολοι", "γλαστρ")):
+    if any(marker in normalized for marker in (t("prompts.ext_str_702"), t("prompts.ext_str_476"), t("prompts.ext_str_668"), t("prompts.ext_str_467"))):
         return "gift"
-    if any(marker in normalized for marker in ("ταξιδ", "εκδρομ", "διακοπ", "πηγαμε", "γυρισ", "επιστρ")):
+    if any(marker in normalized for marker in (t("prompts.ext_str_562"), t("prompts.ext_str_499"), t("prompts.ext_str_477"), t("prompts.ext_str_486"), t("prompts.ext_str_623"), t("prompts.ext_str_470"))):
         return "trip"
     if category == "projects":
         return "project"
@@ -564,17 +564,17 @@ def _infer_topic_from_text(text: str, category: str) -> str:
 def _infer_topic_detail_from_text(text: str) -> str:
     normalized = _normalize_text(text)
     detail_markers = {
-        "football": ("ποδοσφ",),
-        "camp": ("κατασκην",),
-        "park": ("παρκο", "βολτ"),
-        "school": ("σχολει", "δημοτικ"),
-        "tutoring": ("φροντιστ",),
-        "sleep": ("υπν",),
-        "gift_watch": ("ρολοι",),
-        "gift_plant": ("γλαστρ", "φυτο"),
-        "fish_market": ("λαϊκ", "λαικ", "ψαρ"),
-        "rabbit": ("κουνελ",),
-        "dog": ("σκυλ",),
+        "football": (t("prompts.ext_str_535"),),
+        "camp": (t("prompts.ext_str_292"),),
+        "park": (t("prompts.ext_str_574"), t("prompts.ext_str_760")),
+        "school": (t("prompts.ext_str_460"), t("prompts.ext_str_385")),
+        "tutoring": (t("prompts.ext_str_302"),),
+        "sleep": (t("prompts.ext_str_785"),),
+        "gift_watch": (t("prompts.ext_str_668"),),
+        "gift_plant": (t("prompts.ext_str_467"), t("prompts.ext_str_708")),
+        "fish_market": (t("prompts.ext_str_688"), t("prompts.ext_str_697"), t("prompts.ext_str_830")),
+        "rabbit": (t("prompts.ext_str_489"),),
+        "dog": (t("prompts.ext_str_704"),),
     }
     for detail, markers in detail_markers.items():
         if any(marker in normalized for marker in markers):
@@ -588,22 +588,22 @@ def _infer_state_markers_from_text(text: str) -> list[str]:
     normalized = _normalize_text(text)
     states: list[str] = []
     rules = {
-        "started": ("ξεκινα", "ξεκινησ", "αρχισ"),
-        "stopped": ("σταματ", "τελος", "δεν εχει πια"),
-        "paused": ("παγωσ", "παυση", "σταματαει για"),
-        "resumed": ("ξαναρχ", "συνεχιζ", "επανηλθ"),
-        "away": ("λειπ", "εκτος σπιτιου", "δεν ειναι σπιτι", "κατασκην", "ταξιδ", "διακοπ"),
-        "returned": ("γυρισ", "επιστρ", "ηρθε σπιτι", "γυρναει σπιτι"),
-        "scheduled": ("θα παει", "θα παμε", "ειναι για", "προγραμματισ"),
-        "cancelled": ("ακυρω", "δεν θα γινει"),
-        "confirmed": ("επιβεβαι", "οκ", "κλειστ"),
-        "tired": ("κουρασ",),
-        "better": ("καλυτερ", "συνηλθ", "ηρεμησ"),
-        "sick": ("αρρωστ", "πυρετ", "πονα"),
-        "emotional": ("στεναχωρ", "αγχω", "φοβ", "πιεστηκ"),
-        "completed": ("ολοκληρ", "τελειωσ", "εγινε"),
-        "ongoing": ("συνεχιζ", "ακομα", "παραμεν"),
-        "seasonal_break": ("καλοκαιρ", "σεπτεμβρ", "το χειμωνα", "για το καλοκαιρι"),
+        "started": (t("prompts.ext_str_474"), t("prompts.ext_str_387"), t("prompts.ext_str_597")),
+        "stopped": (t("prompts.ext_str_501"), t("prompts.ext_str_667"), t("prompts.ext_str_169")),
+        "paused": (t("prompts.ext_str_652"), t("prompts.ext_str_599"), t("prompts.ext_str_162")),
+        "resumed": (t("prompts.ext_str_532"), t("prompts.ext_str_434"), t("prompts.ext_str_435")),
+        "away": (t("prompts.ext_str_676"), t("prompts.ext_str_154"), t("prompts.ext_str_127"), t("prompts.ext_str_292"), t("prompts.ext_str_562"), t("prompts.ext_str_477")),
+        "returned": (t("prompts.ext_str_623"), t("prompts.ext_str_470"), t("prompts.ext_str_211"), t("prompts.ext_str_159")),
+        "scheduled": (t("prompts.ext_str_368"), t("prompts.ext_str_389"), t("prompts.ext_str_246"), t("prompts.ext_str_176")),
+        "cancelled": (t("prompts.ext_str_619"), t("prompts.ext_str_175")),
+        "confirmed": (t("prompts.ext_str_287"), t("prompts.ext_str_833"), t("prompts.ext_str_526")),
+        "tired": (t("prompts.ext_str_523"),),
+        "better": (t("prompts.ext_str_367"), t("prompts.ext_str_465"), t("prompts.ext_str_445")),
+        "sick": (t("prompts.ext_str_498"), t("prompts.ext_str_592"), t("prompts.ext_str_694")),
+        "emotional": (t("prompts.ext_str_283"), t("prompts.ext_str_700"), t("prompts.ext_str_811"), t("prompts.ext_str_373")),
+        "completed": (t("prompts.ext_str_346"), t("prompts.ext_str_432"), t("prompts.ext_str_558")),
+        "ongoing": (t("prompts.ext_str_434"), t("prompts.ext_str_663"), t("prompts.ext_str_409")),
+        "seasonal_break": (t("prompts.ext_str_288"), t("prompts.ext_str_293"), t("prompts.ext_str_226"), t("prompts.ext_str_105")),
     }
     for state, markers in rules.items():
         if any(marker in normalized for marker in markers):
@@ -615,7 +615,7 @@ def _infer_time_scope_from_text(text: str, *, now: datetime | None = None) -> st
     normalized = _normalize_text(text)
     ts = now or datetime.now()
 
-    range_match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\s*(?:to|-|εως|έως|μεχρι|μέχρι)\s*(20\d{2}-\d{2}-\d{2})\b", text)
+    range_match = re.search(t("prompts.ext_b_20_d_2_d_2_d_2_s_to_s_20_d_2"), text)
     if range_match:
         return f"{range_match.group(1)}_to_{range_match.group(2)}"
 
@@ -623,10 +623,10 @@ def _infer_time_scope_from_text(text: str, *, now: datetime | None = None) -> st
     if exact_match:
         return exact_match.group(0)
 
-    if "σεπτεμβρ" in normalized and ("καλοκαιρ" in normalized or "μεχρι" in normalized or "μέχρι" in normalized):
+    if t("prompts.ext_str_293") in normalized and (t("prompts.ext_str_288") in normalized or t("prompts.ext_str_666") in normalized or t("prompts.ext_str_636") in normalized):
         return f"{ts.strftime('%Y-%m-%d')}_to_{ts.year}-09-01"
 
-    if any(marker in normalized for marker in ("μεχρι", "μέχρι", "εως", "έως", "αυριο", "αύριο", "μεθαυριο", "μεθαύριο")):
+    if any(marker in normalized for marker in (t("prompts.ext_str_666"), t("prompts.ext_str_636"), t("prompts.ext_str_819"), t("prompts.ext_str_780"), t("prompts.ext_str_588"), t("prompts.ext_str_655"), t("prompts.ext_str_309"), t("prompts.ext_str_279"))):
         return "ongoing"
 
     return ts.strftime('%Y-%m-%d')
@@ -634,13 +634,13 @@ def _infer_time_scope_from_text(text: str, *, now: datetime | None = None) -> st
 
 def _infer_relation_type_from_text(text: str, state_markers: list[str]) -> str:
     normalized = _normalize_text(text)
-    if any(marker in normalized for marker in ("διορθ", "οχι αυτο", "τελικα", "update", "correction")):
+    if any(marker in normalized for marker in (t("prompts.ext_str_638"), t("prompts.ext_str_286"), t("prompts.ext_str_543"), "update", "correction")):
         return "correction"
     if any(state in state_markers for state in ("away", "returned", "tired", "better", "sick", "seasonal_break")):
         return "state_update"
     if any(state in state_markers for state in ("started", "stopped", "paused", "resumed", "completed")):
         return "follow_up"
-    if any(marker in normalized for marker in ("ρουτιν", "καθε", "κάθε", "θυμιζ", "υπενθυμ")):
+    if any(marker in normalized for marker in (t("prompts.ext_str_471"), t("prompts.ext_str_749"), t("prompts.ext_str_762"), t("prompts.ext_str_654"), t("prompts.ext_str_344"))):
         return "routine_hint"
     return "new_fact"
 
@@ -752,73 +752,73 @@ def _extract_event_memory_candidate(
     safe_ai = clean_message(ai_text)
     combined = f"{safe_user} {safe_ai}".lower()
 
-    family_markers = ("αλέξανδρ", "αλεξανδρ", "σοφία", "σοφια", "μικρό", "μικρο", "μικρός", "μικρος")
+    family_markers = (t("prompts.ext_str_323"), t("prompts.ext_str_334"), t("prompts.ext_str_561"), t("prompts.ext_str_604"), t("prompts.ext_str_643"), t("prompts.ext_str_648"), t("prompts.ext_str_546"), t("prompts.ext_str_528"))
     personal_markers = (
-        "εγώ",
-        "εγω",
-        "εμένα",
-        "εμενα",
-        "μου",
-        "δουλειά",
-        "δουλεια",
-        "συνέντευξη",
-        "συνεντευξη",
-        "υγεία",
-        "υγεια",
-        "ύπνο",
-        "υπνο",
+        t("prompts.ext_str_778"),
+        t("prompts.ext_str_771"),
+        t("prompts.ext_str_615"),
+        t("prompts.ext_str_571"),
+        t("prompts.ext_str_822"),
+        t("prompts.ext_str_352"),
+        t("prompts.ext_str_342"),
+        t("prompts.ext_str_218"),
+        t("prompts.ext_str_228"),
+        t("prompts.ext_str_553"),
+        t("prompts.ext_str_557"),
+        t("prompts.ext_str_748"),
+        t("prompts.ext_str_750"),
     )
     event_markers = (
-        "ποδόσφ",
-        "ποδοσφ",
-        "αγών",
-        "αγων",
-        "τελικό",
-        "τελικο",
-        "μετάλλ",
-        "μεταλλ",
-        "πάρκο",
-        "παρκο",
-        "βόλτα",
-        "βολτα",
-        "σχολείο",
-        "σχολειο",
-        "δουλειά",
-        "δουλεια",
-        "συνέντευξη",
-        "συνεντευξη",
-        "γιατρό",
-        "γιατρο",
-        "υγεία",
-        "υγεια",
-        "ύπνο",
-        "υπνο",
-        "γυμναστήριο",
-        "γυμναστηριο",
-        "δουλεύω",
-        "δουλευω",
+        t("prompts.ext_str_464"),
+        t("prompts.ext_str_535"),
+        t("prompts.ext_str_720"),
+        t("prompts.ext_str_696"),
+        t("prompts.ext_str_510"),
+        t("prompts.ext_str_514"),
+        t("prompts.ext_str_456"),
+        t("prompts.ext_str_497"),
+        t("prompts.ext_str_634"),
+        t("prompts.ext_str_574"),
+        t("prompts.ext_str_616"),
+        t("prompts.ext_str_569"),
+        t("prompts.ext_str_406"),
+        t("prompts.ext_str_371"),
+        t("prompts.ext_str_352"),
+        t("prompts.ext_str_342"),
+        t("prompts.ext_str_218"),
+        t("prompts.ext_str_228"),
+        t("prompts.ext_str_539"),
+        t("prompts.ext_str_483"),
+        t("prompts.ext_str_553"),
+        t("prompts.ext_str_557"),
+        t("prompts.ext_str_748"),
+        t("prompts.ext_str_750"),
+        t("prompts.ext_str_185"),
+        t("prompts.ext_str_189"),
+        t("prompts.ext_str_429"),
+        t("prompts.ext_str_372"),
     )
     statement_markers = (
-        "είμαστε",
-        "ειμαστε",
-        "πήγαμε",
-        "πηγαμε",
-        "πήγε",
-        "πηγε",
-        "είχα",
-        "ειχα",
-        "πήρε",
-        "πηρε",
-        "τέλος",
-        "τελος",
-        "γυρνάμε",
-        "γυρναμε",
-        "φεύγουμε",
-        "φευγουμε",
-        "πάμε",
-        "παμε",
-        "είναι στη",
-        "ειναι στη",
+        t("prompts.ext_str_433"),
+        t("prompts.ext_str_377"),
+        t("prompts.ext_str_459"),
+        t("prompts.ext_str_486"),
+        t("prompts.ext_str_743"),
+        t("prompts.ext_str_744"),
+        t("prompts.ext_str_736"),
+        t("prompts.ext_str_684"),
+        t("prompts.ext_str_739"),
+        t("prompts.ext_str_768"),
+        t("prompts.ext_str_556"),
+        t("prompts.ext_str_667"),
+        t("prompts.ext_str_418"),
+        t("prompts.ext_str_378"),
+        t("prompts.ext_str_337"),
+        t("prompts.ext_str_340"),
+        t("prompts.ext_str_715"),
+        t("prompts.ext_str_691"),
+        t("prompts.ext_str_271"),
+        t("prompts.ext_str_251"),
     )
 
     has_family_marker = any(marker in combined for marker in family_markers)
@@ -840,7 +840,7 @@ def _extract_event_memory_candidate(
         return None
 
     ts = now or datetime.now()
-    fact = f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, {source_text}"
+    fact = t("memory.session_memory.user_fact", date=ts.strftime('%Y-%m-%d'), text=source_text)
     return _normalize_memory_candidate({
         "memory_type": "fact",
         "fact": fact,
@@ -874,80 +874,80 @@ def _extract_temporary_family_memory_candidate(
         return None
 
     question_starters = (
-        "τι ",
-        "πως ",
-        "πώς ",
-        "γιατι ",
-        "γιατί ",
-        "που ",
-        "πού ",
-        "ποιος ",
-        "ποια ",
-        "ποιο ",
-        "ποσο ",
-        "πόσο ",
-        "ποτε ",
-        "πότε ",
+        t("prompts.ext_str_789"),
+        t("prompts.ext_str_753"),
+        t("prompts.ext_str_761"),
+        t("prompts.ext_str_506"),
+        t("prompts.ext_str_502"),
+        t("prompts.ext_str_695"),
+        t("prompts.ext_str_710"),
+        t("prompts.ext_str_548"),
+        t("prompts.ext_str_570"),
+        t("prompts.ext_str_631"),
+        t("prompts.ext_str_665"),
+        t("prompts.ext_str_622"),
+        t("prompts.ext_str_587"),
+        t("prompts.ext_str_669"),
     )
     if lowered_source.startswith(question_starters):
         return None
 
     family_markers = (
-        "αλεξανδρ",
-        "σοφια",
-        "μικρο",
-        "μικρος",
-        "μικρη",
-        "γιος",
-        "κορη",
-        "παιδι",
-        "μαμα",
-        "μπαμπας",
+        t("prompts.ext_str_334"),
+        t("prompts.ext_str_604"),
+        t("prompts.ext_str_648"),
+        t("prompts.ext_str_528"),
+        t("prompts.ext_str_582"),
+        t("prompts.ext_str_673"),
+        t("prompts.ext_str_693"),
+        t("prompts.ext_str_657"),
+        t("prompts.ext_str_766"),
+        t("prompts.ext_str_343"),
     )
     absence_markers = (
-        "κατασκην",
-        "λειπ",
-        "δεν ειναι σπιτι",
-        "δεν ειναι μαζι",
-        "ταξιδ",
-        "εκδρομ",
-        "διακοπ",
-        "φιλοξεν",
-        "μενει στη",
-        "μενει στον",
-        "μενει στην",
-        "κοιμαται στη",
-        "κοιμαται στον",
-        "κοιμαται στην",
+        t("prompts.ext_str_292"),
+        t("prompts.ext_str_676"),
+        t("prompts.ext_str_127"),
+        t("prompts.ext_str_144"),
+        t("prompts.ext_str_562"),
+        t("prompts.ext_str_499"),
+        t("prompts.ext_str_477"),
+        t("prompts.ext_str_431"),
+        t("prompts.ext_str_272"),
+        t("prompts.ext_str_236"),
+        t("prompts.ext_str_208"),
+        t("prompts.ext_str_167"),
+        t("prompts.ext_str_158"),
+        t("prompts.ext_str_153"),
     )
     window_markers = (
-        "μεχρι",
-        "μέχρι",
-        "επιστρ",
-        "γυρν",
-        "γυρνα",
-        "επιστρο",
-        "αυριο",
-        "μεθαυριο",
-        "σε 2 μερες",
-        "σε 3 μερες",
-        "σε 4 μερες",
-        "σε 5 μερες",
-        "σε 6 μερες",
-        "σε 7 μερες",
-        "την αλλη εβδομαδα",
-        "την άλλη εβδομάδα",
-        "το σαββατο",
-        "το σάββατο",
-        "την κυριακη",
-        "την κυριακή",
-        "δευτερα",
-        "τριτη",
-        "τεταρτη",
-        "πεμπτη",
-        "παρασκευη",
-        "σαββατο",
-        "κυριακη",
+        t("prompts.ext_str_666"),
+        t("prompts.ext_str_636"),
+        t("prompts.ext_str_470"),
+        t("prompts.ext_str_733"),
+        t("prompts.ext_str_560"),
+        t("prompts.ext_str_436"),
+        t("prompts.ext_str_588"),
+        t("prompts.ext_str_309"),
+        t("prompts.ext_2"),
+        t("prompts.ext_3"),
+        t("prompts.ext_4"),
+        t("prompts.ext_5"),
+        t("prompts.ext_6"),
+        t("prompts.ext_7_1"),
+        t("prompts.ext_str_103"),
+        t("prompts.ext_str_102"),
+        t("prompts.ext_str_235"),
+        t("prompts.ext_str_232"),
+        t("prompts.ext_str_181"),
+        t("prompts.ext_str_184"),
+        t("prompts.ext_str_357"),
+        t("prompts.ext_str_554"),
+        t("prompts.ext_str_396"),
+        t("prompts.ext_str_457"),
+        t("prompts.ext_str_258"),
+        t("prompts.ext_str_383"),
+        t("prompts.ext_str_415"),
     )
 
     if not any(marker in normalized for marker in family_markers):
@@ -961,7 +961,7 @@ def _extract_temporary_family_memory_candidate(
         source_text = source_text[:317].rstrip() + "..."
 
     ts = now or datetime.now()
-    fact = f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, {source_text}"
+    fact = t("memory.session_memory.user_fact", date=ts.strftime('%Y-%m-%d'), text=source_text)
     return _normalize_memory_candidate({
         "memory_type": "fact",
         "fact": fact,
@@ -976,13 +976,13 @@ def _extract_temporary_family_memory_candidate(
 
 def _infer_memory_category(text: str) -> str:
     clean = _normalize_text(text)
-    if any(marker in clean for marker in ("σοφια", "αλεξανδρ", "μαρια", "μικρο", "παιδι", "γενεθλια", "δωρο")):
+    if any(marker in clean for marker in (t("prompts.ext_str_604"), t("prompts.ext_str_334"), t("prompts.ext_str_552"), t("prompts.ext_str_648"), t("prompts.ext_str_657"), t("prompts.ext_str_315"), t("prompts.ext_str_702"))):
         return "family"
-    if any(marker in clean for marker in ("mastroapp", "praxis", "astakos", "αστακο", "github", "project", "repo")):
+    if any(marker in clean for marker in ("mastroapp", "praxis", "astakos", t("prompts.ext_str_533"), "github", "project", "repo")):
         return "projects"
-    if any(marker in clean for marker in ("σπιτι", "κουζινα", "ψυγειο", "αφυγραντηρ", "σκουπα", "ρολοι", "συσκευ")):
+    if any(marker in clean for marker in (t("prompts.ext_str_589"), t("prompts.ext_str_401"), t("prompts.ext_str_452"), t("prompts.ext_str_223"), t("prompts.ext_str_495"), t("prompts.ext_str_668"), t("prompts.ext_str_527"))):
         return "home"
-    if any(marker in clean for marker in ("κανόνας", "κανονας", "bug", "tool", "prompt", "lesson", "μαθημα")):
+    if any(marker in clean for marker in (t("prompts.ext_str_379"), t("prompts.ext_str_423"), "bug", "tool", "prompt", "lesson", t("prompts.ext_str_458"))):
         return "lesson"
     return "lazaros"
 
@@ -994,8 +994,8 @@ def _extract_explicit_memory_payload(text: str) -> str | None:
         return None
 
     patterns = (
-        r"(?:κράτα|κρατα|αποθήκευσε|αποθηκευσε|σημείωσε|σημειωσε)\s+(?:στη\s+)?(?:μνήμη|μνημη)\s+(?:ότι|οτι)\s+(.+)",
-        r"(?:κράτα|κρατα|αποθήκευσε|αποθηκευσε|σημείωσε|σημειωσε)\s+(?:ότι|οτι)\s+(.+)",
+        t("prompts.ext_s_s_s_s"),
+        t("prompts.ext_s_s"),
     )
     for pattern in patterns:
         match = re.search(pattern, compact, flags=re.IGNORECASE)
@@ -1008,15 +1008,15 @@ def _extract_explicit_memory_payload(text: str) -> str | None:
 def _looks_like_generic_memory_confirmation(text: str) -> bool:
     clean = _normalize_text(text)
     generic_markers = (
-        "το αποθηκευσα στη μνημη",
-        "αποθηκευσα στη μνημη",
-        "το αποθηκευσα",
-        "αποθηκευσα",
-        "το σημειωσα",
-        "σημειωσα",
-        "το σημείωσα",
-        "κρατηθηκε στη μνημη",
-        "κρατήθηκε στη μνήμη",
+        t("prompts.ext_str_46"),
+        t("prompts.ext_str_61"),
+        t("prompts.ext_str_156"),
+        t("prompts.ext_str_216"),
+        t("prompts.ext_str_187"),
+        t("prompts.ext_str_320"),
+        t("prompts.ext_str_192"),
+        t("prompts.ext_str_77"),
+        t("prompts.ext_str_82"),
     )
     return any(marker in clean for marker in generic_markers) and len(clean) < 80
 
@@ -1034,9 +1034,9 @@ def _extract_confirmed_memory_candidate(
     safe_ai = clean_message(ai_text)
     combined = _normalize_text(f"{safe_user} {safe_ai}")
 
-    if not any(marker in combined for marker in ("αποθηκευ", "μνημη", "σημειω", "υποψιν", "κρατα")):
+    if not any(marker in combined for marker in (t("prompts.ext_str_327"), t("prompts.ext_str_639"), t("prompts.ext_str_536"), t("prompts.ext_str_463"), t("prompts.ext_str_603"))):
         return None
-    if any(marker in combined for marker in ("draft", "προσχεδιο", "προσχεδια", "να το στειλω", "να το στείλω")):
+    if any(marker in combined for marker in ("draft", t("prompts.ext_str_264"), t("prompts.ext_str_257"), t("prompts.ext_str_168"), t("prompts.ext_str_179"))):
         return None
 
     source_text = " ".join(safe_user.split())
@@ -1053,7 +1053,7 @@ def _extract_confirmed_memory_candidate(
     explicit_payload = _extract_explicit_memory_payload(source_text)
     if confirmation_text:
         memory_match = re.search(
-            r"(?:αποθηκεύτηκε|αποθηκευτηκε|αποθήκευσα|αποθηκευσα|σημειώθηκε|σημειωθηκε|σημείωσα|σημειωσα|κρατήθηκε|κρατηθηκε)[^\n]{0,220}",
+            t("prompts.ext_n_0_220"),
             confirmation_text,
             flags=re.IGNORECASE,
         )
@@ -1070,7 +1070,7 @@ def _extract_confirmed_memory_candidate(
     category = _infer_memory_category(f"{safe_user} {safe_ai}")
 
     ts = now or datetime.now()
-    fact = f"[USER_FACT]: Στις {ts.strftime('%Y-%m-%d')}, {detail}"
+    fact = t("memory.session_memory.user_fact", date=ts.strftime('%Y-%m-%d'), text=detail)
     return _normalize_memory_candidate({
         "memory_type": "fact",
         "fact": fact,
@@ -1109,7 +1109,7 @@ def _run_session_summary(channel: str = "web"):
         summary_channel = channels[0] if len(channels) == 1 else "mixed"
 
         dialogue_text = "\n".join([
-            f"[{e['time']} / {e.get('channel', channel)} / {e['agent']}] Λάζαρος: {e['user']} | Αστακός: {e['ai']}"
+            t("memory.session_memory.conversation_log", time=e['time'], channel=e.get('channel', channel), agent=e['agent'], user=e['user'], ai=e['ai'])
             for e in current_batch
         ])
 
@@ -1141,8 +1141,8 @@ def _run_session_summary(channel: str = "web"):
 
         # 4. Enrichment of the text for the Vector DB
         session_text = (
-            f"[SESSION {summary.get('date', '')}] {summary.get('summary', '')} "
-            f"Εκκρεμότητες: {', '.join(summary.get('pending', [])) if summary.get('pending') else 'καμία'}. "
+            f"[SESSION {summary.get('date', '')}] {summary.get('summary', '')} " +
+            t("memory.session_memory.pending_tasks", pending=', '.join(summary.get('pending', [])) if summary.get('pending') else t("memory.session_memory.none")) +
             f"Hint: {summary.get('next_session_hint', '')}"
         )
 
@@ -1207,13 +1207,13 @@ def _fact_token_set(text: str) -> set[str]:
     clean = re.sub(r"^\[user_fact\]:\s*", "", clean, flags=re.IGNORECASE)
 
     stopwords = {
-        "ο", "η", "το", "οι", "τα", "του", "της", "των",
-        "και", "να", "που", "στο", "στη", "στην", "στον",
-        "με", "σε", "απο", "από", "για", "πια", "πιο",
-        "μια", "μία", "ενα", "ένα", "ειναι", "ήταν",
-        "τον", "την", "τις", "τους", "μας", "σας",
-        "χτες", "χθες", "σημερα", "σήμερα", "αυριο", "αύριο",
-        "στις", "στη", "στο", "ως", "μεχρι", "μέχρι",
+        t("prompts.ext_str_846"), t("prompts.ext_str_847"), t("prompts.ext_str_839"), t("prompts.ext_str_831"), t("prompts.ext_str_843"), t("prompts.ext_str_809"), t("prompts.ext_str_801"), t("prompts.ext_str_795"),
+        t("prompts.ext_str_776"), t("prompts.ext_str_841"), t("prompts.ext_str_824"), t("prompts.ext_str_772"), t("prompts.ext_str_804"), t("prompts.ext_str_724"), t("prompts.ext_str_685"),
+        t("prompts.ext_str_835"), t("prompts.ext_str_840"), t("prompts.ext_str_800"), t("prompts.ext_str_827"), t("prompts.ext_str_806"), t("prompts.ext_str_797"), t("prompts.ext_str_818"),
+        t("prompts.ext_str_796"), t("prompts.ext_str_777"), t("prompts.ext_str_783"), t("prompts.ext_str_823"), t("prompts.ext_str_656"), t("prompts.ext_str_703"),
+        t("prompts.ext_str_807"), t("prompts.ext_str_786"), t("prompts.ext_str_793"), t("prompts.ext_str_729"), t("prompts.ext_str_788"), t("prompts.ext_str_828"),
+        t("prompts.ext_str_679"), t("prompts.ext_str_727"), t("prompts.ext_str_530"), t("prompts.ext_str_524"), t("prompts.ext_str_588"), t("prompts.ext_str_655"),
+        t("prompts.ext_str_730"), t("prompts.ext_str_804"), t("prompts.ext_str_772"), t("prompts.ext_str_834"), t("prompts.ext_str_666"), t("prompts.ext_str_636"),
     }
 
     tokens = set()
@@ -1502,12 +1502,12 @@ def _looks_low_signal_family_fact(fact: str) -> bool:
         return True
 
     low_signal_starts = (
-        "ναι ",
-        "ε ναι ",
-        "κατω ",
-        "οκ ",
-        "ενταξει ",
-        "ωραια ",
+        t("prompts.ext_str_764"),
+        t("prompts.ext_str_487"),
+        t("prompts.ext_str_577"),
+        t("prompts.ext_str_813"),
+        t("prompts.ext_str_328"),
+        t("prompts.ext_str_475"),
     )
     if norm.startswith(low_signal_starts):
         return True
@@ -1522,65 +1522,65 @@ def _looks_like_ephemeral_conversational_source(text: str) -> bool:
         return False
 
     ack_prefixes = (
-        "ναι ",
-        "ε ναι ",
-        "οκ ",
+        t("prompts.ext_str_764"),
+        t("prompts.ext_str_487"),
+        t("prompts.ext_str_813"),
         "ok ",
-        "ωραια ",
-        "ωραία ",
-        "καλα ",
-        "καλά ",
+        t("prompts.ext_str_475"),
+        t("prompts.ext_str_493"),
+        t("prompts.ext_str_626"),
+        t("prompts.ext_str_630"),
     )
 
     immediate_markers = (
-        "σε λιγο",
-        "σε λίγο",
-        "σε 5 λεπτ",
-        "σε 10 λεπτ",
-        "σε 15 λεπτ",
-        "σε 20 λεπτ",
-        "τωρα",
-        "τώρα",
-        "μολις",
-        "μόλις",
-        "μετα",
-        "μετά",
-        "παμε για",
-        "πάμε για",
-        "παω για",
-        "πάω για",
-        "γυρναμε",
-        "γυρνάμε",
-        "φευγουμε",
-        "φεύγουμε",
+        t("prompts.ext_str_353"),
+        t("prompts.ext_str_421"),
+        t("prompts.ext_5_1"),
+        t("prompts.ext_10"),
+        t("prompts.ext_15"),
+        t("prompts.ext_20"),
+        t("prompts.ext_str_740"),
+        t("prompts.ext_str_690"),
+        t("prompts.ext_str_600"),
+        t("prompts.ext_str_584"),
+        t("prompts.ext_str_689"),
+        t("prompts.ext_str_681"),
+        t("prompts.ext_str_295"),
+        t("prompts.ext_str_325"),
+        t("prompts.ext_str_364"),
+        t("prompts.ext_str_412"),
+        t("prompts.ext_str_378"),
+        t("prompts.ext_str_418"),
+        t("prompts.ext_str_340"),
+        t("prompts.ext_str_337"),
     )
 
     durable_markers = (
-        "του αρεσε",
-        "του άρεσε",
-        "ενθουσιαστ",
-        "προτιμα",
-        "προτιμά",
-        "σταματησ",
-        "σταμάτησ",
-        "ξεκινα",
-        "ξεκινά",
-        "γυρισε",
-        "γύρισε",
-        "επεστρε",
-        "επέστρε",
-        "αγορασ",
-        "αγόρασ",
-        "εκλεισ",
-        "έκλεισ",
-        "βελτιωθ",
-        "καλυτερ",
-        "κουρασ",
-        "αρρωστ",
-        "βαρδια",
-        "δουλευ",
-        "κατασκην",
-        "διακοπ",
+        t("prompts.ext_str_249"),
+        t("prompts.ext_str_255"),
+        t("prompts.ext_str_240"),
+        t("prompts.ext_str_410"),
+        t("prompts.ext_str_438"),
+        t("prompts.ext_str_339"),
+        t("prompts.ext_str_329"),
+        t("prompts.ext_str_474"),
+        t("prompts.ext_str_453"),
+        t("prompts.ext_str_537"),
+        t("prompts.ext_str_473"),
+        t("prompts.ext_str_361"),
+        t("prompts.ext_str_394"),
+        t("prompts.ext_str_507"),
+        t("prompts.ext_str_511"),
+        t("prompts.ext_str_504"),
+        t("prompts.ext_str_481"),
+        t("prompts.ext_str_398"),
+        t("prompts.ext_str_367"),
+        t("prompts.ext_str_523"),
+        t("prompts.ext_str_498"),
+        t("prompts.ext_str_479"),
+        t("prompts.ext_str_442"),
+        t("prompts.ext_str_292"),
+        t("prompts.ext_str_477"),
     )
 
     has_ack_prefix = norm.startswith(ack_prefixes)
@@ -1609,7 +1609,7 @@ def _should_skip_ephemeral_candidate(candidate: dict, source_text: str) -> bool:
     # Food/family outcomes of the type "liked it", "was thrilled", etc. should not be lost.
     if topic == "food":
         norm = _normalize_text(source_text)
-        if any(marker in norm for marker in ("του αρεσε", "του άρεσε", "ενθουσιαστ", "ξανατρω", "τρωει", "τρώει")):
+        if any(marker in norm for marker in (t("prompts.ext_str_249"), t("prompts.ext_str_255"), t("prompts.ext_str_240"), t("prompts.ext_str_439"), t("prompts.ext_str_579"), t("prompts.ext_str_624"))):
             return False
 
     return _looks_like_ephemeral_conversational_source(source_text)
@@ -1623,13 +1623,13 @@ def _looks_like_operational_reminder_exchange(user_text: str, ai_text: str) -> b
         return False
 
     user_has_reminder_request = (
-        ("θυμ" in user_norm or "υπενθυμ" in user_norm)
+        (t("prompts.ext_str_790") in user_norm or t("prompts.ext_str_344") in user_norm)
         and bool(re.search(r"\b\d{1,2}:\d{2}\b", user_norm))
     )
 
     ai_has_reminder_confirmation = (
-        "υπενθυμιση ρυθμιστηκε" in ai_norm
-        or "υπενθυμιση ρυθμιστηκε για τις" in ai_norm
+        t("prompts.ext_str_58") in ai_norm
+        or t("prompts.ext_str_17") in ai_norm
     )
 
     return user_has_reminder_request and ai_has_reminder_confirmation
@@ -1643,13 +1643,13 @@ def _looks_like_operational_message_exchange(user_text: str, ai_text: str) -> bo
     if user_norm.startswith("[system]:") or user_norm.startswith("[story_sent]"):
         return True
 
-    short_send = user_norm in {"στείλε", "στειλε", "send", "ναι", "οκ", "ok"}
+    short_send = user_norm in {t("prompts.ext_str_522"), t("prompts.ext_str_509"), "send", t("prompts.ext_str_802"), t("prompts.ext_str_833"), "ok"}
     draft_or_error = any(marker in ai_norm for marker in (
-        "δεν βρέθηκε προσχέδιο",
-        "δεν βρεθηκε προσχεδιο",
+        t("prompts.ext_str_56"),
+        t("prompts.ext_str_59"),
         "messenger_draft.json",
-        "προσχέδιο messenger",
-        "προσχεδιο messenger",
+        t("prompts.ext_messenger"),
+        t("prompts.ext_messenger_1"),
     ))
 
     return short_send and draft_or_error
@@ -1665,27 +1665,27 @@ def _looks_like_recent_followup_resolution_reply(user_text: str, within_seconds:
         return False
 
     resolution_markers = (
-        "τελικα",
-        "ήδη",
-        "ηδη",
-        "εδω ειμαστε",
-        "εδώ είμαστε",
-        "γυρισαμε",
-        "γυρίσαμε",
-        "βρηκα",
-        "βρήκα",
-        "τους βρηκα",
-        "τους βρήκα",
-        "πηγα",
-        "πήγα",
-        "παω",
-        "πάω",
-        "εφυγα",
-        "έφυγα",
-        "δεν εγινε",
-        "δεν έγινε",
-        "αυριο",
-        "αύριο",
+        t("prompts.ext_str_543"),
+        t("prompts.ext_str_821"),
+        t("prompts.ext_str_779"),
+        t("prompts.ext_str_196"),
+        t("prompts.ext_str_195"),
+        t("prompts.ext_str_298"),
+        t("prompts.ext_str_278"),
+        t("prompts.ext_str_572"),
+        t("prompts.ext_str_551"),
+        t("prompts.ext_str_239"),
+        t("prompts.ext_str_198"),
+        t("prompts.ext_str_738"),
+        t("prompts.ext_str_713"),
+        t("prompts.ext_str_792"),
+        t("prompts.ext_str_787"),
+        t("prompts.ext_str_649"),
+        t("prompts.ext_str_608"),
+        t("prompts.ext_str_254"),
+        t("prompts.ext_str_253"),
+        t("prompts.ext_str_588"),
+        t("prompts.ext_str_655"),
     )
 
     if not any(marker in text for marker in resolution_markers):
@@ -1733,10 +1733,10 @@ def _looks_like_recent_followup_resolution_reply(user_text: str, within_seconds:
         topic = str(topic or "").strip().lower()
         reason = _normalize_text(resolution_reason or "")
 
-        if topic == "outing" and any(marker in text for marker in ("εδω ειμαστε", "εδώ είμαστε", "γυρισαμε", "γυρίσαμε", "βρηκα", "βρήκα", "παω", "πάω")):
+        if topic == "outing" and any(marker in text for marker in (t("prompts.ext_str_196"), t("prompts.ext_str_195"), t("prompts.ext_str_298"), t("prompts.ext_str_278"), t("prompts.ext_str_572"), t("prompts.ext_str_551"), t("prompts.ext_str_792"), t("prompts.ext_str_787"))):
             return True
 
-        if topic == "food_purchase" and any(marker in text for marker in ("τις πηρα", "τις πήρα", "το πηρα", "το πήρα", "δεν πηρα", "δεν πήρα")):
+        if topic == "food_purchase" and any(marker in text for marker in (t("prompts.ext_str_313"), t("prompts.ext_str_285"), t("prompts.ext_str_403"), t("prompts.ext_str_369"), t("prompts.ext_str_308"), t("prompts.ext_str_316"))):
             return True
 
         if "resolved_by_user_message" in reason:
@@ -1853,12 +1853,12 @@ def run_memory_sifter_fast(user_text: str, ai_text: str, agent_name: str = "Unkn
         return []
 
 _ASSISTANT_STYLE_FACT_PATTERNS = (
-    "σημειώθηκε ότι",
-    "καταγράφηκε ότι",
-    "όπως είπες",
-    "καλή αρχή από",
-    "το κατέγραψα",
-    "σημείωσα ότι",
+    t("prompts.ext_str_140"),
+    t("prompts.ext_str_123"),
+    t("prompts.ext_str_241"),
+    t("prompts.ext_str_149"),
+    t("prompts.ext_str_174"),
+    t("prompts.ext_str_172"),
 )
 
 def _looks_like_assistant_paraphrase_fact(text: str) -> bool:
@@ -1908,12 +1908,12 @@ def run_memory_sifter_slow(
         print("\033[90m[MemorySifterSlow]: replay-skip (already processed)\033[0m")
         return
     MEMORY_CATS = {
-        "lazaros":  "Προτιμήσεις, συνήθειες, τρόπος σκέψης, δουλειά του Λάζαρου",
-        "family":   "Πληροφορίες για Σοφία, Αλέξανδρο, Μαρία, κατοικίδια",
-        "projects": "Mastroapp, PraxisERP, Αστακός, Paletes, Shiftmaster",
-        "home":     "Σπίτι, εξοπλισμός, συσκευές, Piston-7",
-        "lesson":   "Τεχνικά μαθήματα, λύσεις bugs, κανόνες για τον Αστακό",
-        "photos":   "Φωτογραφίες, περιγραφή και paths",
+        "lazaros":  t("prompts.ext_str_3"),
+        "family":   t("prompts.ext_str_5"),
+        "projects": t("prompts.ext_mastroapp_praxiserp_paletes_sh"),
+        "home":     t("prompts.ext_piston_7"),
+        "lesson":   t("prompts.ext_bugs"),
+        "photos":   t("prompts.ext_paths"),
     }
 
     try:
@@ -1929,12 +1929,11 @@ def run_memory_sifter_slow(
             recent_entries = SESSION_LOGS[-4:]
             if recent_entries:
                 ctx_lines = "\n".join(
-                    f"Λάζαρος: {e['user']} | Αστακός: {e['ai']}"
+                    t("memory.session_memory.conversation_log_short", user=e['user'], ai=e['ai'])
                     for e in recent_entries
                 )
                 recent_context_block = (
-                    "\n[ΠΡΟΗΓΟΥΜΕΝΟ ΠΛΑΙΣΙΟ — μόνο για να καταλάβεις τη ροή της "
-                    "συζήτησης, ΜΗΝ εξάγεις facts από αυτό το τμήμα]\n"
+                    f"{t('memory.session_memory.context_warning')}\n"
                     f"{ctx_lines}\n"
                 )
         except Exception:
@@ -1964,7 +1963,7 @@ def run_memory_sifter_slow(
         response = safe_gemini_call(sifter_prompt)
         raw_text = response.text.strip()
         
-        if "ΚΕΝΟ" in raw_text or not raw_text:
+        if t("prompts.ext_str_680") in raw_text or not raw_text:
             _mark_memory_sifter_processed(
                 fingerprint=fingerprint,
                 user_text=user_text,
@@ -2162,3 +2161,4 @@ def startup_stale_cleanup(channel: str = "telegram") -> bool:
     except Exception as e:
         print(f"\033[91m[Startup Cleanup Error]: {e}\033[0m")
         return False
+

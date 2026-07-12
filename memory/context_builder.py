@@ -102,7 +102,7 @@ def looks_like_tool_result_query(text: str) -> bool:
     tool_prefixes = tuple(t("builder.tool_prefixes"))
     tool_result_markers = tuple(t("builder.tool_result_markers"))
     return (
-        low.startswith("τίτλος:")
+        low.startswith(t("prompts.ext_str_408"))
         or low.startswith("title:")
         or low.startswith("[web_tool_error]")
         or " url: " in low
@@ -118,11 +118,11 @@ def looks_like_recent_web_result_text(text: str) -> bool:
         return False
 
     return (
-        low.startswith("τίτλος:")
+        low.startswith(t("prompts.ext_str_408"))
         or low.startswith("title:")
-        or low.startswith("📄 περιεχόμενο από ")
+        or low.startswith(t("prompts.ext_str_85"))
         or low.startswith("[web_tool_error]")
-        or (" url: " in low and " περίληψη: " in low)
+        or (" url: " in low and t("prompts.ext_str_197") in low)
     )
 
 def has_fresh_web_results_in_recent_context(messages: Iterable[dict[str, Any]]) -> bool:
@@ -399,17 +399,12 @@ def _has_recall_marker(query: str) -> bool:
 
 
 def _query_tokens(query: str) -> list[str]:
-    tokens = re.findall(r"[a-zA-Zα-ωΑ-Ωάέήίόύώϊϋΐΰ]+", _normalize_text(query))
+    tokens = re.findall(r"\w+", _normalize_text(query), flags=re.UNICODE)
     return [token for token in tokens if len(token) >= 4 and token not in _TOKEN_STOPWORDS]
 
 
 def _stem_token(token: str) -> str:
-    """Rough Greek stemming: cuts off the most common inflectional endings
-    (cases/number: -ος/-ου/-ο/-οι/-ων/-ους, -α/-ας/-ες etc.) so that
-    'γενεθλια' matches 'γενεθλιων' and 'αλεξανδρος' with 'αλεξανδρου'.
-    Always keeps a stem of >= 4 characters (same limit as tokens) to
-    prevent noise from very short stems.
-    """
+    t("prompts.ext_rough_greek_stemming_cuts_off_")
     if len(token) >= 7:
         return token[:-2]
     if len(token) >= 5:
@@ -815,3 +810,4 @@ def load_memory_context_debug() -> dict[str, Any]:
             return json.load(f)
     except Exception:
         return {}
+

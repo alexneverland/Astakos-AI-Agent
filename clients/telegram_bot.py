@@ -935,7 +935,7 @@ def handle_voice(voice_obj: dict, chat_id: str):
         import vertexai
         from vertexai.generative_models import GenerativeModel, Part
         from core.brain import FAST_MODEL
-        vertexai.init(project=os.getenv("PROJECT_ID", "astakos-finall"), location=os.getenv("LOCATION", "global"))
+        vertexai.init(project=config.PROJECT_ID, location=os.getenv("LOCATION", "global"))
         stt_model = GenerativeModel(FAST_MODEL)
         prompt = t("clients.telegram_bot.msg_32a4bf")
         audio_part = Part.from_data(data=audio_data, mime_type="audio/ogg")
@@ -2399,7 +2399,7 @@ def _handle_approval_callback(cq: dict):
 
 def _handle_message_reaction(reaction: dict) -> None:
     """
-    When Lazaros reacts with ❤️ to a message from Astakos,
+    When {config.USER_NAME} reacts with ❤️ to a message from {config.BOT_NAME},
     it saves the content of the message to the long-term memory.
     """
     try:
@@ -2661,7 +2661,7 @@ def run_polling():
                 if cmd == "/help":
                     voice_status = "🔊 ON" if voice_mode_enabled else "✍️ OFF"
                     send_telegram_msg(
-                        "🦞 <b>Astakos — Commands</b>\n\n" +
+                        f"🦞 <b>{config.BOT_NAME} — Commands</b>\n\n" +
                         t("clients.telegram_bot.msg_help_menu", voice_status=voice_status)
                     )
                     continue
@@ -3240,13 +3240,13 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
     from core.brain import llm
 
     if count > 1:
-        context = f"Lazaros has {count} routines in ~30 mins: {event_name}."
+        context = f"{config.USER_NAME} has {count} routines in ~30 mins: {event_name}."
     elif confidence >= 0.8:
-        context = f"Lazaros almost always does '{event_name}' at this time (high confidence)."
+        context = f"{config.USER_NAME} almost always does '{event_name}' at this time (high confidence)."
     elif confidence >= 0.5:
-        context = f"Lazaros usually does '{event_name}' at this time."
+        context = f"{config.USER_NAME} usually does '{event_name}' at this time."
     else:
-        context = f"Previously Lazaros did '{event_name}' at this time, we are no longer sure."
+        context = f"Previously {config.USER_NAME} did '{event_name}' at this time, we are no longer sure."
 
     memory_context = _build_proactive_memory_context(event_name)
     memory_block = f"\n\n{memory_context}\n" if memory_context else ""
@@ -3433,9 +3433,9 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
     from core.brain import llm
 
     if confidence >= 0.8:
-        certainty = f"Lazaros almost always does '{event_name}' at this time."
+        certainty = f"{config.USER_NAME} almost always does '{event_name}' at this time."
     else:
-        certainty = f"Usually at this time Lazaros does '{event_name}'."
+        certainty = f"Usually at this time {config.USER_NAME} does '{event_name}'."
 
     try:
         from memory.context_builder import build_memory_context
@@ -4120,7 +4120,8 @@ def job_proactive_scan():
     The 'Nightwatchman' — scans the watch_folder and if it finds an issue, sends an alert.
     """
     from tools.system import read_local_file
-    WATCH_DIR = "C:\\astakos_v2\\watch_folder"
+    import config
+    WATCH_DIR = config.WATCH_DIR
 
     if is_proactive_muted():
         return
@@ -4243,13 +4244,13 @@ def job_morning_calendar_briefing():
         # If there are no events today, we only send a weekly summaryof
         if t("clients.telegram_bot.msg_908de1") in today_events:
             msg = (
-                f"🌅 *Good morning Lazaros!*\n\n"
+                f"🌅 *Good morning {config.USER_NAME}!*\n\n"
                 f"📅 You have nothing scheduled today.\n\n"
                 f"*Next 7 days:*\n{week_events}"
             )
         else:
             msg = (
-                f"🌅 *Good morning Lazaros!*\n\n"
+                f"🌅 *Good morning {config.USER_NAME}!*\n\n"
                 f"*Today's schedule:*\n{today_events}"
             )
 

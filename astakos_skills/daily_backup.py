@@ -100,8 +100,9 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
     return uploaded_items
 
 def daily_backup_to_drive():
-    DRIVE_FOLDER_ID = "12YrIZ3uAQWmmwIlEkIkDf-4gcz2P8Ktv"
-    ASTAKOS_V2_PATH = r"C:\astakos_v2" 
+    import config
+    DRIVE_FOLDER_ID = config.BACKUP_DRIVE_FOLDER_ID
+    ASTAKOS_V2_PATH = config.BASE_DIR 
 
     print("Starting backup process...")
     creds = authenticate_google_drive()

@@ -9,7 +9,7 @@ def test_control_routine_schedule_ignores_context_fact():
             "event_name": "ποδόσφαιρο Αλέξανδρου",
             "action": "pause",
             "until_date": "2026-09-01",
-            "source_text": "Είναι καλοκαίρι ο Αλέξανδρος δεν έχει ποδόσφαιρο ξανά τον Σεπτέμβριο"
+            "source_text": "Είναι καλοκαίρι ο Kid1 δεν έχει ποδόσφαιρο ξανά τον Σεπτέμβριο"
         }
     )
     normalized = result.lower()
@@ -22,7 +22,7 @@ def test_control_routine_notifications_ignores_context_fact():
             "event_name": "εκτός σπιτιού",
             "action": "mute",
             "until_date": "2026-09-01",
-            "source_text": "Ο Αλέξανδρος γύρισε σπίτι και δεν είναι πια εκτός σπιτιού"
+            "source_text": "Ο Kid1 γύρισε σπίτι και δεν είναι πια εκτός σπιτιού"
         }
     )
     normalized = result.lower()

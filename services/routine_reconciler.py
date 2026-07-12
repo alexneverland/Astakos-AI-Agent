@@ -1,3 +1,4 @@
+from core.i18n import t
 import re
 import json
 import os
@@ -271,7 +272,7 @@ def _append_flag(flags: list[str], label: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _rule_seasonal_football(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """Alexandros' football stopped for summer → schedule_pause until September."""
+    """Kid1' football stopped for summer → schedule_pause until September."""
     if not (
         _contains_any(normalized, _ALEXANDROS_TOKENS)
         and _contains_any(normalized, _FOOTBALL_TOKENS)
@@ -307,7 +308,7 @@ def _rule_seasonal_football(normalized: str, dates: list[str], now: datetime) ->
 
 
 def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """Alexandros is away / camping → notifications_mute."""
+    """Kid1 is away / camping → notifications_mute."""
     if not _contains_any(normalized, _ALEXANDROS_TOKENS):
         return []
     if not (_contains_any(normalized, _CAMP_TOKENS) or _contains_any(normalized, _ABSENCE_TOKENS)):
@@ -320,7 +321,7 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
     # 3C.2: Global state AND routine condition
     d_state_home = {
         "kind": "context_state_set",
-        "key": "alexandros_away_from_home",
+        "key": "kid1_away_from_home",
         "value": "true",
         "until_date": until,
         "reason": reason,
@@ -343,7 +344,7 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
         include_tokens=[],
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         condition_type="context_flag",
-        condition_payload={"flag": "alexandros_away_from_home", "equals": True},
+        condition_payload={"flag": "kid1_away_from_home", "equals": True},
         condition_mode="suppress_when_true",
         reason="camp_absence_condition",
     )
@@ -352,7 +353,7 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
 
 
 def _rule_return_home(normalized: str) -> list[dict]:
-    """Alexandros returned → context_state_set (alexandros_away_from_home = false)."""
+    """Kid1 returned → context_state_set (kid1_away_from_home = false)."""
     if not (
         _contains_any(normalized, _ALEXANDROS_TOKENS)
         and _contains_any(normalized, _RETURN_TOKENS)
@@ -362,7 +363,7 @@ def _rule_return_home(normalized: str) -> list[dict]:
     
     d_state_home = {
         "kind": "context_state_set",
-        "key": "alexandros_away_from_home",
+        "key": "kid1_away_from_home",
         "value": "false",
         "until_date": None,
         "reason": "returned_home",
@@ -383,15 +384,7 @@ def _rule_return_home(normalized: str) -> list[dict]:
     return [d_state_home, d_state_reason]
 
 def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """
-    Family outing / already outside:
-    Facts: "πάμε πισίνα" (going to the pool), "είμαστε θάλασσα" (we are at the sea), "φτάσαμε πάρκο" (we arrived at the park), "όλοι μαζί για μπάνιο" (everyone together for a swim/bath)
-    Effect:
-      - state:alexandros:outing = in_progress
-      - user_out_of_home = true
-      - suppress park-like child routines while outing is in progress
-      - suppress home-only routines (e.g. cooking) while user is out of home
-    """
+    t("prompts.ext_family_outing_already_outside_")
     has_child = _contains_any(normalized, _ALEXANDROS_TOKENS)
 
     has_outing = _contains_any(normalized, _OUTING_TOKENS)
@@ -450,7 +443,7 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
     if has_child:
         d_child_outing = {
             "kind": "context_state_set",
-            "key": "state:alexandros:outing",
+            "key": "state:kid1:outing",
             "value": "in_progress",
             "until_date": until,
             "reason": "family_outing_in_progress",
@@ -465,7 +458,7 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
         include_tokens=_OUTING_ROUTINE_TOKENS,
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         condition_type="context_flag",
-        condition_payload={"flag": "state:alexandros:outing", "equals": "in_progress"},
+        condition_payload={"flag": "state:kid1:outing", "equals": "in_progress"},
         condition_mode="suppress_when_true",
         reason="outing_in_progress_condition",
     )
@@ -507,7 +500,7 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
     Facts: "we returned home", "we came home", "we are home now"
     Effect:
       - user_out_of_home = false
-      - state:alexandros:outing = done (for the rest of today)
+      - state:kid1:outing = done (for the rest of today)
     Only applies if there is already an active outing/out-of-home context.
     """
     has_home = _contains_any(normalized, _inline.get("home", []))
@@ -518,15 +511,15 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
     from memory.routine_db import get_context_state
 
     user_out_state = get_context_state("user_out_of_home")
-    alex_outing_state = get_context_state("state:alexandros:outing")
+    kid1_outing_state = get_context_state("state:kid1:outing")
 
     user_out_active = False
     if user_out_state:
         user_out_active = str(user_out_state.get("value", "")).lower() == "true"
 
     alex_outing_active = False
-    if alex_outing_state:
-        alex_outing_active = str(alex_outing_state.get("value", "")).lower() == "in_progress"
+    if kid1_outing_state:
+        alex_outing_active = str(kid1_outing_state.get("value", "")).lower() == "in_progress"
 
     # Do nothing unless we already know the family/child is out.
     if not (user_out_active or alex_outing_active):
@@ -551,7 +544,7 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
         directives.append(
             {
                 "kind": "context_state_set",
-                "key": "state:alexandros:outing",
+                "key": "state:kid1:outing",
                 "value": "done",
                 "until_date": until,
                 "reason": "returned_home_from_outing",
@@ -564,7 +557,7 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
     return directives
 
 def _rule_alexandros_away_general(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """General rule for Alexandros's absence (e.g., vacation, with grandmother)."""
+    """General rule for Kid1's absence (e.g., vacation, with grandmother)."""
     if not _contains_any(normalized, _ALEXANDROS_TOKENS):
         return []
         
@@ -592,7 +585,7 @@ def _rule_alexandros_away_general(normalized: str, dates: list[str], now: dateti
         
     d_state_home = {
         "kind": "context_state_set",
-        "key": "alexandros_away_from_home",
+        "key": "kid1_away_from_home",
         "value": "true",
         "until_date": until,
         "reason": away_reason,
@@ -615,7 +608,7 @@ def _rule_alexandros_away_general(normalized: str, dates: list[str], now: dateti
         include_tokens=[],
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         condition_type="context_flag",
-        condition_payload={"flag": "alexandros_away_from_home", "equals": True},
+        condition_payload={"flag": "kid1_away_from_home", "equals": True},
         condition_mode="suppress_when_true",
         reason="away_general_condition",
     )
@@ -624,12 +617,7 @@ def _rule_alexandros_away_general(normalized: str, dates: list[str], now: dateti
 
 
 def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """
-    Phase 3A — school_break:
-    Facts: "δεν έχει σχολείο" (no school), "τελείωσε το σχολείο" (school is over), "από αύριο διακοπές" (holidays starting tomorrow)
-    Target: Alexandros' school + morning routines
-    Action: schedule_pause — requires a clear scope.
-    """
+    t("prompts.ext_phase_3a_school_break_facts_no")
     has_school_break = _contains_any(normalized, _SCHOOL_BREAK_TOKENS)
     has_school_ref   = _contains_any(normalized, _SCHOOL_TOKENS)
     has_child_ref    = _contains_any(normalized, _ALEXANDROS_TOKENS)
@@ -672,7 +660,7 @@ def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list
 def _rule_sofia_work_mode(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3C.5 — sofia_work_mode:
-    Facts: "Sofia is working from home tomorrow", "Sofia is teleworking"
+    Facts: "Partner is working from home tomorrow", "Partner is teleworking"
     """
     has_sofia = _contains_any(normalized, _inline.get("sofia_aliases", []))
     has_work = _contains_any(normalized, _WORK_TOKENS)
@@ -838,7 +826,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
 def _sofia_state_is_active(now: datetime) -> bool:
     from memory.routine_db import get_context_state
 
-    state_data = get_context_state("sofia_with_user")
+    state_data = get_context_state("partner_with_user")
     if not state_data:
         return False
 
@@ -864,7 +852,7 @@ def _rule_alexandros_with_sofia_without_user(normalized: str, dates: list[str], 
     return [
         {
             "kind": "context_state_set",
-            "key": "sofia_with_user",
+            "key": "partner_with_user",
             "value": "false",
             "until_date": until,
             "reason": "sofia_with_child_without_user",
@@ -884,7 +872,7 @@ def _rule_alexandros_with_sofia_without_user(normalized: str, dates: list[str], 
         },
         {
             "kind": "context_state_set",
-            "key": "alexandros_away_from_home",
+            "key": "kid1_away_from_home",
             "value": "true",
             "until_date": until,
             "reason": "child_out_with_sofia",
@@ -894,13 +882,8 @@ def _rule_alexandros_with_sofia_without_user(normalized: str, dates: list[str], 
         },
     ]
 
-def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """
-    Phase 3A — sofia_with_user:
-    Facts: "είμαι με τη Σοφία" (I am with Sofia), "είμαστε μαζί με τη Σοφία" (we are together with Sofia), "η Σοφία είναι μαζί μου" (Sofia is with me)
-    Target: Messenger/Sofia proactive routines
-    Action: State + Condition (sofia_with_user = true)
-    """
+def _rule_partner_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+    t("prompts.ext_phase_3a_partner_with_user_facts")
     has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
     has_together = _contains_any(normalized, _TOGETHER_TOKENS)
 
@@ -923,10 +906,10 @@ def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> l
     ]
     has_group_outing = _contains_any(normalized, group_outing_tokens)
 
-    # Strong path: explicit Sofia + together
+    # Strong path: explicit Partner + together
     if has_sofia and has_together:
         pass
-    # Softer path: group outing wording can reinforce an already-active Sofia context
+    # Softer path: group outing wording can reinforce an already-active Partner context
     elif has_group_outing and _sofia_state_is_active(now) and _looks_like_live_presence_statement(normalized):
         pass
     else:
@@ -943,10 +926,10 @@ def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> l
         
     d_state = {
         "kind": "context_state_set",
-        "key": "sofia_with_user",
+        "key": "partner_with_user",
         "value": "true",
         "until_date": until,
-        "reason": "sofia_with_user",
+        "reason": "partner_with_user",
         "subject_tokens": _SOFIA_TOKENS,
         "include_tokens": _inline.get("sofia_aliases", []) + _DRAFT_CONTEXT_TOKENS,
         "exclude_tokens": _MESSENGER_EXCLUDE,
@@ -957,20 +940,20 @@ def _rule_sofia_with_user(normalized: str, dates: list[str], now: datetime) -> l
         include_tokens=_inline.get("sofia_aliases", []) + _DRAFT_CONTEXT_TOKENS,
         exclude_tokens=_MESSENGER_EXCLUDE,
         condition_type="context_flag",
-        condition_payload={"flag": "sofia_with_user", "equals": True},
+        condition_payload={"flag": "partner_with_user", "equals": True},
         condition_mode="suppress_when_true",
-        reason="sofia_with_user_condition",
+        reason="partner_with_user_condition",
     )
     
     return [d_state] + ([cond] if cond else [])
 
 
-def _rule_sofia_not_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+def _rule_partner_not_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
-    Phase 3A — sofia_not_with_user:
-    Facts: "Sofia left", "Sofia is not here", "we are not together now"
-    Target: clear Messenger/Sofia suppress context immediately
-    Action: State only (sofia_with_user = false)
+    Phase 3A — partner_not_with_user:
+    Facts: "Partner left", "Partner is not here", "we are not together now"
+    Target: clear Messenger/Partner suppress context immediately
+    Action: State only (partner_with_user = false)
     """
     has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
     has_absence = has_sofia and _contains_any(normalized, _ABSENCE_TOKENS)
@@ -981,7 +964,7 @@ def _rule_sofia_not_with_user(normalized: str, dates: list[str], now: datetime) 
 
     if has_not_together and not has_sofia:
         from memory.routine_db import get_context_state
-        state_data = get_context_state("sofia_with_user")
+        state_data = get_context_state("partner_with_user")
         is_active = False
         if state_data:
             expires_at = state_data.get("expires_at")
@@ -993,10 +976,10 @@ def _rule_sofia_not_with_user(normalized: str, dates: list[str], now: datetime) 
 
     d_state = {
         "kind": "context_state_set",
-        "key": "sofia_with_user",
+        "key": "partner_with_user",
         "value": "false",
         "until_date": None,
-        "reason": "sofia_not_with_user",
+        "reason": "partner_not_with_user",
         "subject_tokens": _SOFIA_TOKENS,
         "include_tokens": _inline.get("sofia_aliases", []) + _DRAFT_CONTEXT_TOKENS,
         "exclude_tokens": _MESSENGER_EXCLUDE,
@@ -1140,7 +1123,7 @@ def score_candidate_directive(
         score += _P_NO_SUBJECT
         _append_flag(ambiguity_flags, "missing_subject")
 
-    if matched_rule_name in {"shift_logic", "child_activity_pause", "notifications_unmute", "sofia_not_with_user"}:
+    if matched_rule_name in {"shift_logic", "child_activity_pause", "notifications_unmute", "partner_not_with_user"}:
         if matched_rule_name == "shift_logic":
             # If explicit day or tomorrow is specified, it is NOT conservative.
             # Only week-level mentions ("this week") get the conservative penalty.
@@ -1262,11 +1245,7 @@ def filter_directives_for_auto_apply(
 
 
 def _rule_user_at_work(normalized: str, dates: list[str], now) -> list[dict]:
-    """
-    User at work:
-    Facts: "Έχω πάει γραφείο" (I have gone to the office), "Δουλεύω στο γραφείο σήμερα" (I am working at the office today), "Είμαι δουλειά" (I am at work)
-    Guard: does not cover shift/schedule declarations for future days.
-    """
+    t("prompts.ext_user_at_work_facts_i_have_gone")
     has_work = _contains_any(normalized, _WORK_TOKENS) or _contains_any(normalized, _inline.get("work_office", []))
     has_user = _contains_any(normalized, _inline.get("work_user", []))
     has_presence_phrase = (
@@ -1339,10 +1318,10 @@ def _safe_json_list(raw: str) -> list[dict]:
 
 _CANONICAL_CONTEXT_KEYS = {
     "user_out_of_home",
-    "alexandros_away_from_home",
+    "kid1_away_from_home",
     "family_at_home",
 
-    "sofia_with_user",
+    "partner_with_user",
     "current_shift",
     "football_season",
 }
@@ -1353,11 +1332,11 @@ def _normalize_context_key(raw: str) -> str:
         "user_out_of_home": "user_out_of_home",
         "out_of_home": "user_out_of_home",
 
-        "alexandros_present": "alexandros_away_from_home",
-        "child_present": "alexandros_away_from_home",
+        "alexandros_present": "kid1_away_from_home",
+        "child_present": "kid1_away_from_home",
         
-        "alexandros_away_from_home": "alexandros_away_from_home",
-        "child_away": "alexandros_away_from_home",
+        "kid1_away_from_home": "kid1_away_from_home",
+        "child_away": "kid1_away_from_home",
 
         "family_at_home": "family_at_home",
         "at_home": "family_at_home",
@@ -1365,7 +1344,7 @@ def _normalize_context_key(raw: str) -> str:
         "family_outside_activity": "user_out_of_home",
         "outside_activity": "user_out_of_home",
 
-        "sofia_with_user": "sofia_with_user",
+        "partner_with_user": "partner_with_user",
         "current_shift": "current_shift",
         "football_season": "football_season",
     }
@@ -1417,9 +1396,9 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
     exclude_tokens = _ROUTINE_EXCLUDE_TOKENS[:]
 
     if context_key:
-        if context_key == "alexandros_away_from_home":
+        if context_key == "kid1_away_from_home":
             subject_tokens = _ALEXANDROS_TOKENS
-        elif context_key == "sofia_with_user":
+        elif context_key == "partner_with_user":
             subject_tokens = _SOFIA_TOKENS
         elif context_key in {"user_out_of_home", "family_at_home"}:
             subject_tokens = []
@@ -1604,10 +1583,10 @@ Return a list of objects with fields:
 For general current life states, prefer canonical context flags.
 Use ONLY these context_keys when they fit:
 - user_out_of_home
-- alexandros_away_from_home
+- kid1_away_from_home
 - family_at_home
 
-- sofia_with_user
+- partner_with_user
 - current_shift
 - football_season
 
@@ -1619,26 +1598,26 @@ Rules:
 
 Examples:
 
-Fact: "Το βράδυ θα πάω με τη Σοφία έξω και ο Αλέξανδρος θα είναι με τη Μαρία"
+{t("services.routine_reconciler.prompt_fact_1")}
 Output:
 [
-  {{"entity":"Λάζαρος","activity":"outing","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"user_out_of_home","context_value":true,"until_date":"{today}","reason":"user_out_evening"}},
-  {{"entity":"Αλέξανδρος","activity":"home_presence","aliases":["με τη μαρια"],"state_change":null,"impact":"live_context","context_key":"alexandros_away_from_home","context_value":true,"until_date":"{today}","reason":"child_with_caregiver"}},
-  {{"entity":"family","activity":"home_presence","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"family_at_home","context_value":false,"until_date":"{today}","reason":"family_out_evening"}},
-  {{"entity":"family","activity":"outing","aliases":["εξω","βραδυ"],"state_change":null,"impact":"live_context","context_key":"user_out_of_home","context_value":true,"until_date":"{today}","reason":"family_out_evening"}}
+  {t("services.routine_reconciler.prompt_out_1", today=today)}
+  {t("services.routine_reconciler.prompt_out_2", today=today)}
+  {t("services.routine_reconciler.prompt_out_3", today=today)}
+  {t("services.routine_reconciler.prompt_out_4", today=today)}
 ]
 
-Fact: "Γυρίσαμε σπίτι"
+{t("services.routine_reconciler.prompt_fact_2")}
 Output:
 [
-  {{"entity":"family","activity":"outing","aliases":["γυρισαμε σπιτι"],"state_change":null,"impact":"live_context","context_key":"user_out_of_home","context_value":false,"until_date":null,"reason":"returned_home"}}
+  {t("services.routine_reconciler.prompt_out_5")}
 ]
 
-Fact: "Ο Αλέξανδρος είναι μαζί μας"
+{t("services.routine_reconciler.prompt_fact_3")}
 Output:
 [
-  {{"entity":"Αλέξανδρος","activity":"home_presence","aliases":["μαζι μας"],"state_change":null,"impact":"live_context","context_key":"alexandros_away_from_home","context_value":false,"until_date":null,"reason":"child_present_again"}},
-  {{"entity":"family","activity":"home_presence","aliases":["μαζι μας"],"state_change":null,"impact":"live_context","context_key":"family_at_home","context_value":true,"until_date":null,"reason":"family_home_again"}}
+  {t("services.routine_reconciler.prompt_out_6")}
+  {t("services.routine_reconciler.prompt_out_7")}
 ]
 
 Fact:
@@ -1697,13 +1676,13 @@ def infer_routine_reconciliation_candidates(
     each tagged with rule_name. No scoring yet.
 
     Rule groups:
-    1. seasonal_football              — Alexandros' summer football
-    2. camp_absence                   — Alexandros' camp / absence
-    3. return_home                    — Alexandros' return
+    1. seasonal_football              — Kid1' summer football
+    2. camp_absence                   — Kid1' camp / absence
+    3. return_home                    — Kid1' return
     4. school_break                   — school holidays
     5. child_activity_pause           — child activity pause
-    6. sofia_with_user               — we are together with Sofia
-    7. sofia_not_with_user           — we are no longer together with Sofia
+    6. partner_with_user               — we are together with Partner
+    7. partner_not_with_user           — we are no longer together with Partner
     8. shift_week                     — weekly shift change
     """
     current         = now or datetime.now()
@@ -1734,8 +1713,8 @@ def infer_routine_reconciliation_candidates(
         ("school_break",                   _rule_school_break,                   (normalized_fact, dates, current)),
         ("child_activity_pause",           _rule_child_activity_pause,           (normalized_fact, dates, current)),
         ("alexandros_with_sofia_without_user", _rule_alexandros_with_sofia_without_user, (normalized_fact, dates, current)),
-        ("sofia_with_user",                _rule_sofia_with_user,                (normalized_fact, dates, current)),
-        ("sofia_not_with_user",            _rule_sofia_not_with_user,            (normalized_fact, dates, current)),
+        ("partner_with_user",                _rule_partner_with_user,                (normalized_fact, dates, current)),
+        ("partner_not_with_user",            _rule_partner_not_with_user,            (normalized_fact, dates, current)),
         ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, dates, current)),
         ("sofia_work_mode",                _rule_sofia_work_mode,                (normalized_fact, dates, current)),
         ("user_at_work",                   _rule_user_at_work,                   (normalized_fact, dates, current)),
@@ -2043,4 +2022,5 @@ def reconcile_fact_to_routines(
         "scored_directives":        scored_directives,
     })
     return apply_stats
+
 

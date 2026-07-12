@@ -508,7 +508,7 @@ Shutdown behavior:
 - [x] Category-Safe Memory Overwrite — same-category Chroma matches use helper-tested correction, staleness, richness, and length tie-break rules before replacing old facts.
 - [x] Deterministic Memory Priority Guard — temporary family-state memories (camp, absence, return-home windows) now win over generic day-event capture, and near-identical confirmed saves are skipped before they can double-write in the same turn.
 - [x] Routine Context Flags — routines now read resolved context_state such as `alexandros_away_from_home`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, and `quiet_hours` instead of relying only on blunt mute/pause windows.
-- [x] Context-State Reconciliation — facts like “Αλέξανδρος γύρισε σπίτι” now flip context state (`alexandros_away_from_home=false`) through the reconciler instead of only unmuting routines by name.
+- [x] Context-State Reconciliation — facts like “Kid1 γύρισε σπίτι” now flip context state (`alexandros_away_from_home=false`) through the reconciler instead of only unmuting routines by name.
 - [x] Smart Weekend Filter — automatically skip applying `shift_mode` conditions to weekend-only routines unless explicitly requested, preventing work-shift rules from breaking weekend habits.
 - [x] Debug Dashboard Condition UX — evaluate and display actual state (`actual_value`) for each condition individually, and prominently show a PAUSED badge instead of ACTIVE for routines paused until a specific date.
 
@@ -550,7 +550,7 @@ Shutdown behavior:
 - [ ] Planner v3 — parallel step execution and per-step Telegram inline approve/reject (today's confirmation gate is chat-based, not inline-keyboard).
 - [ ] Behavior Analytics Engine — auto-shift routine triggers based on ignore patterns.
 - [ ] Memory cleanup — prune low-score memories (`compute_score() < threshold`) after 6+ months of real data.
-- [ ] Personal Knowledge Graph — structured entity relations such as `Λάζαρος → project → Astakos` in SQLite, parallel to ChromaDB, after 6+ months of usage.
+- [ ] Personal Knowledge Graph — structured entity relations such as `User → project → Astakos` in SQLite, parallel to ChromaDB, after 6+ months of usage.
 - [ ] Tool Execution Journal — aggregate `tool_stats` data to SQLite for long-term trend analysis (currently read from daily trace files).
 
 ---

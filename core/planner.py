@@ -4,6 +4,7 @@
 # Takes goal → outputs structured task list → executes step-by-step
 # ================================================================
 
+from core.i18n import t
 import json
 import os
 import re
@@ -55,10 +56,10 @@ def planner_node(state):
         tasks = [{"step": 1, "description": goal, "instruction": goal}]
 
     # Display the plan to the user — do not start execution yet
-    plan_text = f"📋 **Plan για:** _{goal}_\n\n"
+    plan_text = t("core.planner.plan_for", goal=goal)
     for t in tasks:
         plan_text += f"{t['step']}. {t['description']}\n"
-    plan_text += f"\n▶️ Ξεκινάω; (ναι / όχι)"
+    plan_text += t("core.planner.start_prompt")
 
     # Save the plan to the SQLite state db — the pre_check_node will load itturn_thought
     try:
@@ -100,15 +101,15 @@ def task_executor_node(state):
     # We build context from previous results
     context = ""
     if results:
-        context = "\n\n[ΑΠΟΤΕΛΕΣΜΑΤΑ ΠΡΟΗΓΟΥΜΕΝΩΝ ΒΗΜΑΤΩΝ]\n"
+        context = t("prompts.ext_str_9")
         for i, r in enumerate(results[-3:]):  # last 3 only
-            context += f"Βήμα {i+1}: {r[:300]}\n"
-        context += "[/ΑΠΟΤΕΛΕΣΜΑΤΑ]\n\n"
+            context += t("core.planner.step_prefix", step=i+1, result=r[:300])
+        context += t("prompts.ext_str_97")
 
     instruction = (
         f"{context}"
-        f"[PLAN ΒΗΜΑ {idx+1}/{len(tasks)}]: {task['instruction']}\n\n"
-        f"⚠️ Εκτέλεσε ΜΟΝΟ αυτό το βήμα. Μη προχωρήσεις στο επόμενο βήμα."
+        f"[PLAN STEP {idx+1}/{len(tasks)}]: {task['instruction']}\n\n" +
+        t("core.planner.execute_only")
     )
 
     # Routing: we use capability_lookup to find the correct agent
@@ -121,7 +122,7 @@ def task_executor_node(state):
     print(f"[95m[TaskExecutor]: Routing step {idx+1} → {agent}[0m")
 
     # Progress indicator
-    progress_msg = f"⏳ **Βήμα {idx+1}/{len(tasks)}:** {task['description']}"
+    progress_msg = t("core.planner.step_progress", step=idx+1, total=len(tasks), desc=task['description'])
 
     return {
         "messages":   [AIMessage(content=progress_msg), HumanMessage(content=instruction)],
@@ -152,7 +153,7 @@ def capture_result_node(state):
             last_result = content
             break
 
-    results.append(last_result[:800] if last_result else "(χωρίς αποτέλεσμα)")
+    results.append(last_result[:800] if last_result else t("prompts.ext_str_84"))
     new_idx = idx + 1
 
     print(f"\033[95m[TaskExecutor]: ✅ Step {idx+1} completed ({len(results)}/{len(tasks)})\033[0m")
@@ -167,7 +168,7 @@ def capture_result_node(state):
 
 def _plan_summary(goal: str, tasks: list, results: list) -> dict:
     """Creates a summary and stores the post-plan reflection."""
-    summary = f"✅ **Plan ολοκληρώθηκε:** _{goal}_\n\n"
+    summary = t("core.planner.plan_completed", goal=goal)
     for i, (task, result) in enumerate(zip(tasks, results)):
         summary += f"**{i+1}. {task['description']}**\n{result[:500]}\n\n"
 
@@ -270,7 +271,7 @@ def pre_check_node(state):
 
 def cancel_plan_node(state):
     """Returns a plan cancellation message."""
-    return {"messages": [AIMessage(content="❌ Plan ακυρώθηκε.")], "plan_awaiting_confirmation": False}
+    return {"messages": [AIMessage(content=t("prompts.ext_plan_2"))], "plan_awaiting_confirmation": False}
 
 
 # ────────────────────────────────────────────────────────────────
@@ -324,8 +325,7 @@ def validate_step_node(state):
 
     if detected_failure:
         warning = (
-            f"⚠️ **Βήμα {idx + 1}/{len(tasks)}** ({task['description']}): "
-            f"Εντοπίστηκε πιθανό πρόβλημα στην απάντηση. Συνεχίζω με το επόμενο βήμα..."
+            t("core.planner.problem_detected", step=idx+1, total=len(tasks), desc=task["description"])
         )
         print(f"\033[93m[ValidateStep]: Step {idx+1} — failure signal detected\033[0m")
         return {
@@ -352,20 +352,20 @@ def replan_node(state):
     results = list(state.get("plan_results", []))
     skipped = list(state.get("replan_skipped_steps", []))
 
-    task_desc = tasks[idx]["description"] if idx < len(tasks) else f"Βήμα {idx + 1}"
+    task_desc = tasks[idx]["description"] if idx < len(tasks) else t("core.planner.step_name", step=idx+1)
 
     # Record skip
     skipped.append(idx)
-    results.append(f"⚠️ Παραλείφθηκε: {task_desc}")
+    results.append(t("core.planner.skipped", desc=task_desc))
 
     new_idx    = idx + 1
     plan_active = new_idx < len(tasks)
 
-    action_msg = f"⚠️ Βήμα {idx + 1} ({task_desc}) παραλείφθηκε."
+    action_msg = ""
     if plan_active:
-        action_msg += f" Συνεχίζω στο Βήμα {new_idx + 1}..."
+        action_msg = t("core.planner.skipped_msg", step=idx+1, desc=task_desc, next_step=new_idx+1)
     else:
-        action_msg += " Τελείωσαν όλα τα βήματα."
+        action_msg += t("prompts.ext_str_37")
 
     print(f"\033[93m[Replan]: Step {idx+1} skipped → {'task_executor' if plan_active else 'end_check'}\033[0m")
 
@@ -398,16 +398,16 @@ def end_check_node(state):
     success_count = total - skipped_count
 
     if skipped_count == 0:
-        header = f"✅ **Plan ολοκληρώθηκε:** _{goal}_\n\n"
+        header = t("core.planner.plan_completed", goal=goal)
     else:
         header = (
-            f"⚠️ **Plan ολοκληρώθηκε** ({success_count}/{total} βήματα επιτυχή): _{goal}_\n\n"
+            t("core.planner.plan_completed_stats", success=success_count, total=total, goal=goal)
         )
 
     summary = header
     for i, task in enumerate(tasks):
-        result     = results[i] if i < len(results) else "(χωρίς αποτέλεσμα)"
-        skip_badge = " ⚠️ _παραλείφθηκε_" if i in skipped else ""
+        result     = results[i] if i < len(results) else t("prompts.ext_str_84")
+        skip_badge = t("prompts.ext_str_89") if i in skipped else ""
         summary   += f"**{i + 1}. {task['description']}**{skip_badge}\n{result[:500]}\n\n"
 
     print(f"\033[92m[EndCheck]: Plan done — {success_count}/{total} steps successful\033[0m")
@@ -446,3 +446,4 @@ def end_check_node(state):
         "plan_results":         [],
         "replan_skipped_steps": [],
     }
+

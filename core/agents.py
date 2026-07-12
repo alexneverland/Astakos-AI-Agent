@@ -5,6 +5,7 @@
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
 
+from core.i18n import t
 import os
 import re
 import base64
@@ -194,7 +195,7 @@ class Router(BaseModel):
     next_agent: Literal[
         "Home_Agent", "Web_Agent", "Tech_Agent", "Git_Agent",
         "Mail_Agent", "Chat_Agent", "Dev_Agent"
-    ] = Field(description="Ποιος θα αναλάβει;")
+    ] = Field(description=t("prompts.ext_str_86"))
 
 
 def supervisor_node(state):
@@ -219,13 +220,13 @@ def supervisor_node(state):
         return {"next_agent": registry_agent}
 
     # ── LLM fallback: normal Supervisor decision ─────────────────
-    system_base = load_agent_prompt("supervisor", "You are the Astakos Supervisor.")
+    system_base = load_agent_prompt("supervisor", f"You are the {config.BOT_NAME} Supervisor.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
 
     recent_msgs = state['messages'][-5:-1]
     context_lines = []
     for m in recent_msgs:
-        role = "Λάζαρος" if getattr(m, "type", "") == "human" else "Αστακός"
+        role = t("prompts.ext_str_437") if getattr(m, "type", "") == "human" else t("prompts.ext_str_350")
         text = clean_message(m.content)[:150]
         if text:
             context_lines.append(f"{role}: {text}")
@@ -253,7 +254,7 @@ def dev_agent_node(state):
     # [MASTRO-SHIELD]: Cleanup of orphan tool_calls — same for all agents
     history = clean_orphan_tool_calls(state["messages"], k=40)
     
-    system_base = load_agent_prompt("Dev_Agent", "You are the Dev_Agent, Astakos' Chief Developer.")
+    system_base = load_agent_prompt("Dev_Agent", f"You are the Dev_Agent, {config.BOT_NAME}' Chief Developer.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     prompt_content = build_prompt(history, system_base, channel=state.get("channel"))
 
@@ -328,7 +329,7 @@ def chat_agent_node(state: AgentState):
     if pre_baked_analysis:
         vision_context = f"\n[FILE/PHOTO CONTEXT]: You already have this description/information: '{pre_baked_analysis}'.\n"
 
-    json_base = load_agent_prompt("Chat_Agent", "You are Astakos, Lazaros' trusted buddy.")
+    json_base = load_agent_prompt("Chat_Agent", f"You are {config.BOT_NAME}, {config.USER_NAME}'s trusted buddy.")
     json_base = json_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt_text = f"{json_base}{vision_context}"
     system_prompt = build_prompt(history, system_prompt_text, channel=state.get("channel"))
@@ -401,7 +402,7 @@ def home_agent_node(state):
         get_fit_summary
     ]
 
-    system_base = load_agent_prompt("Home_Agent", "You are Piston-7's Home_Agent.")
+    system_base = load_agent_prompt("Home_Agent", f"You are {config.DEVELOPER_NAME}'s Home_Agent.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
@@ -596,7 +597,7 @@ def tech_agent_node(state: AgentState):
             print(f"⚠️ Tech Vision Error: {e}")
 
     vision_info = f"\n[FILE/PHOTO CONTEXT]: You already have this analysis: '{pre_baked_analysis}'.\n" if pre_baked_analysis else ""
-    json_base = load_agent_prompt("Tech_Agent", "You are the Tech_Agent, Lazaros' technical expert.")
+    json_base = load_agent_prompt("Tech_Agent", f"You are the Tech_Agent, {config.USER_NAME}'s technical expert.")
     json_base = json_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt_text = f"{json_base}{vision_info}"
     system_prompt = build_prompt(history, system_prompt_text, channel=state.get("channel"))
@@ -701,7 +702,7 @@ def mail_agent_node(state):
     for msg in history[last_human_idx:]:
         if getattr(msg, "type", "") == "tool":
             content = clean_message(getattr(msg, "content", "")).strip()
-            if content.startswith("ID: ") or content.startswith("📩 Περιεχόμενο:") or content.startswith("📩 Ολόκληρη η"):
+            if content.startswith("ID: ") or content.startswith(t("prompts.ext_str_147")) or content.startswith(t("prompts.ext_str_165")):
                 mail_tool_results.append(content)
 
     if mail_tool_results:
@@ -712,7 +713,7 @@ def mail_agent_node(state):
         import re as _re_ar
         _search_hits = [r for r in mail_tool_results if r.startswith('ID: ')]
         _read_hits = [r for r in mail_tool_results
-                      if 'Περιεχόμενο:' in r or 'Ολόκληρη η συνομιλία' in r]
+                      if t("prompts.ext_str_173") in r or t("prompts.ext_str_62") in r]
         # Guard: if read_full already dispatched this turn, skip auto-read
         _read_dispatched = any(
             any(tc.get('args', {}).get('action') in ['read_full', 'read_thread']
@@ -764,13 +765,13 @@ def mail_agent_node(state):
         user_q = next(
             (clean_message(m.content) for m in reversed(history)
              if getattr(m, "type", "") == "human"),
-            "Τι βρήκες;"
+            t("prompts.ext_str_233")
         )
         synthesis_prompt = (
             f"{system_base}\n\n"
             "EMAIL SEARCH RESULTS (from mail_manager):\\n"
             f"{joined_results}\n\n"
-            "Based on the above, provide a short, clear answer to Lazaros. "
+            f"Based on the above, provide a short, clear answer to {config.USER_NAME}. "
             f"DO NOT call tools. Simple summary EXCLUSIVELY in {RESPONSE_LANGUAGE}, with 2-4 practical "
             "next steps if the email requires action."
         )
@@ -780,7 +781,7 @@ def mail_agent_node(state):
         ])
         resp_text = clean_message(getattr(response, "content", "")).strip()
         # An to LLM epistrefei tool-call string, xrisimopoioume ta raw results
-        if not resp_text or resp_text.startswith("[Κλήση Εργαλείου:"):
+        if not resp_text or resp_text.startswith(t("prompts.ext_str_100")):
             resp_text = "📩 " + "\n\n".join(mail_tool_results[:3])[:1500]
             response = AIMessage(content=resp_text)
         return {"current_agent": "Mail_Agent", "messages": [response]}
@@ -830,3 +831,4 @@ all_tools = [
     recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url,
     duckduckgo_search, search_supermarket_prices, tool_stats, system_doctor, run_officecli
 ]
+

@@ -5,6 +5,7 @@
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
 
+from core.i18n import t
 import os
 import json
 import threading
@@ -255,22 +256,22 @@ def is_semantically_duplicate(new_text: str, existing_list: list, threshold: flo
 
 
 CORRECTION_MARKERS = (
-    "διορθω", "διόρθω", "λάθος", "λαθος", "όχι αυτό", "οχι αυτο",
-    "το σωστό ε", "σωστό είναι", "σωστό:", "τελικά", "τελικα",
-    "δεν ισχύει", "δεν ισχυει", "άλλαξε", "αλλαξε", "ενημερωμέν",
-    "πλέον είναι", "ξαναλέω", "ξαναλεω",
+    t("prompts.ext_str_541"), t("prompts.ext_str_451"), t("prompts.ext_str_602"), t("prompts.ext_str_640"), t("prompts.ext_str_291"), t("prompts.ext_str_286"),
+    t("prompts.ext_str_210"), t("prompts.ext_str_188"), t("prompts.ext_str_512"), t("prompts.ext_str_534"), t("prompts.ext_str_543"),
+    t("prompts.ext_str_205"), t("prompts.ext_str_215"), t("prompts.ext_str_491"), t("prompts.ext_str_519"), t("prompts.ext_str_229"),
+    t("prompts.ext_str_191"), t("prompts.ext_str_414"), t("prompts.ext_str_384"),
     "correction", "update", "actually",
 )
 
 MEMORY_ENTITY_MARKERS = (
-    "σοφια", "σοφία", "αλεξανδρ", "αλέξανδρ", "μαρια", "μαρία",
-    "mastroapp", "praxis", "shiftmaster", "paletes", "astakos", "αστακο",
+    t("prompts.ext_str_604"), t("prompts.ext_str_561"), t("prompts.ext_str_334"), t("prompts.ext_str_323"), t("prompts.ext_str_552"), t("prompts.ext_str_559"),
+    "mastroapp", "praxis", "shiftmaster", "paletes", "astakos", t("prompts.ext_str_533"),
 )
 MEMORY_LINK_MARKERS = ("http", "https", "/", "\\", ".py", ".json", ".md", ".db")
 MEMORY_EVENT_MARKERS = (
-    "πηγαμε", "πήγαμε", "εκανε", "έκανε", "εγινε", "έγινε",
-    "πηρε", "πήρε", "εφαγε", "έφαγε", "βρηκαμε", "βρήκαμε",
-    "αγορασ", "αγόρασ", "διαβασ", "διάβασ",
+    t("prompts.ext_str_486"), t("prompts.ext_str_459"), t("prompts.ext_str_625"), t("prompts.ext_str_567"), t("prompts.ext_str_558"), t("prompts.ext_str_644"),
+    t("prompts.ext_str_768"), t("prompts.ext_str_739"), t("prompts.ext_str_628"), t("prompts.ext_str_595"), t("prompts.ext_str_358"), t("prompts.ext_str_375"),
+    t("prompts.ext_str_507"), t("prompts.ext_str_511"), t("prompts.ext_str_462"), t("prompts.ext_str_447"),
 )
 
 
@@ -293,7 +294,7 @@ def memory_has_date(text: str) -> bool:
     import re
     text_str = str(text)
     low = text_str.lower()
-    if "στις" in low:
+    if t("prompts.ext_str_730") in low:
         return True
     
     # We are looking for years e.g. 2024, 1998
@@ -305,7 +306,7 @@ def memory_has_date(text: str) -> bool:
         return True
         
     # Keywords
-    if any(word in low for word in ["σήμερα", "αυριο", "αύριο", "χθες", "χτες", "φετος", "φέτος", "περσι", "πέρυσι"]):
+    if any(word in low for word in [t("prompts.ext_str_524"), t("prompts.ext_str_588"), t("prompts.ext_str_655"), t("prompts.ext_str_727"), t("prompts.ext_str_679"), t("prompts.ext_str_565"), t("prompts.ext_str_606"), t("prompts.ext_str_627"), t("prompts.ext_str_443")]):
         return True
         
     return False
@@ -330,10 +331,10 @@ def memory_richness(text: str, metadata: dict | None) -> float:
 
 
 MEMORY_TOKEN_STOPWORDS = {
-    "user_fact", "lesson", "στις", "στην", "στον", "στο", "στη", "και", "που",
-    "για", "τον", "την", "του", "της", "των", "ένα", "μια", "είναι", "ήταν",
-    "lazaros", "λαζαρος", "λάζαρος", "alexandros", "αλεξανδρος", "αλέξανδρος",
-    "sofia", "σοφια", "σοφία",
+    "user_fact", "lesson", t("prompts.ext_str_730"), t("prompts.ext_str_724"), t("prompts.ext_str_685"), t("prompts.ext_str_772"), t("prompts.ext_str_804"), t("prompts.ext_str_776"), t("prompts.ext_str_824"),
+    t("prompts.ext_str_806"), t("prompts.ext_str_807"), t("prompts.ext_str_786"), t("prompts.ext_str_809"), t("prompts.ext_str_801"), t("prompts.ext_str_795"), t("prompts.ext_str_823"), t("prompts.ext_str_796"), t("prompts.ext_str_568"), t("prompts.ext_str_703"),
+    "lazaros", t("prompts.ext_str_351"), t("prompts.ext_str_411"), "alexandros", t("prompts.ext_str_213"), t("prompts.ext_str_214"),
+    "sofia", t("prompts.ext_str_604"), t("prompts.ext_str_561"),
 }
 
 
@@ -722,9 +723,9 @@ class AstakosMemoryManager:
                         )
                     reason_tag = []
                     if decision["looks_like_correction"]:
-                        reason_tag.append("ρητή διόρθωση")
+                        reason_tag.append(t("prompts.ext_str_157"))
                     if decision["stale"]:
-                        reason_tag.append(f"παλιά εγγραφή ({decision['old_age_days']}d)")
+                        reason_tag.append(t("memory.vector_store.old_record", days=decision['old_age_days']))
                     if not decision["looks_like_correction"] and not decision["stale"]:
                         reason_tag.append(f"richness {decision['new_richness']:.1f}≥{decision['old_richness']:.1f}")
                     tag_str = f" [{', '.join(reason_tag)}]" if reason_tag else ""
@@ -922,7 +923,7 @@ class AstakosMemoryManager:
         return True
 
     def _save_photo(self, file_path: str, analysis: str, caption: str):
-        fact = f"[PHOTO]: {caption or 'Φωτογραφία'} | {analysis[:350]}..."
+        fact = t("memory.vector_store.photo_fact", caption=caption or t("memory.vector_store.photo_default"), analysis=analysis[:350])
         metadata = {
             "category": "photos", "agent": "Direct_Index", "photo_path": file_path,
             "timestamp": datetime.now().timestamp(), "date": datetime.now().strftime("%Y-%m-%d"),
@@ -950,7 +951,7 @@ class AstakosMemoryManager:
         return True
 
     def _save_document(self, file_path: str, analysis: str, caption: str):
-        fact = f"[DOCUMENT]: {caption or 'Έγγραφο'} | {analysis[:1000]}..."
+        fact = t("memory.vector_store.doc_fact", caption=caption or t("memory.vector_store.doc_default"), analysis=analysis[:1000])
         metadata = {
             "category": "documents", "agent": "Direct_Index", "file_path": file_path,
             "timestamp": datetime.now().timestamp(), "date": datetime.now().strftime("%Y-%m-%d"),
@@ -1524,3 +1525,4 @@ def build_profile_memory_summary(query: str, category: str | None = None, limit:
         lines.append(f"  • {fact}{meta_suffix}")
 
     return lines
+

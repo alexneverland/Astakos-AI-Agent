@@ -45,7 +45,7 @@ def test_search_memory_returns_sqlite_and_chroma_sections(monkeypatch):
         context_builder,
         "temporal_history_for_query",
         lambda query, channel="telegram", limit=8: [
-            "- [telegram 11:17] Λάζαρος: Είμαστε στο τελικό ποδόσφαιρο με τον Αλέξανδρο."
+            "- [telegram 11:17] User: Είμαστε στο τελικό ποδόσφαιρο με τον Αλέξανδρο."
         ],
     )
     monkeypatch.setattr(system, "vector_lock", _Lock())
@@ -53,16 +53,16 @@ def test_search_memory_returns_sqlite_and_chroma_sections(monkeypatch):
         system,
         "vector_store",
         _VectorStore([
-            _Doc("[USER_FACT]: Ο Αλέξανδρος έχει ποδόσφαιρο.", {"category": "family"})
+            _Doc("[USER_FACT]: Ο Kid1 έχει ποδόσφαιρο.", {"category": "family"})
         ]),
     )
 
-    result = system.search_memory.func("Αλέξανδρος ποδόσφαιρο")
+    result = system.search_memory.func("Kid1 ποδόσφαιρο")
 
     assert "[ΣΧΕΤΙΚΟ ΙΣΤΟΡΙΚΟ SQLITE]" in result
     assert "[ΣΧΕΤΙΚΕΣ ΜΝΗΜΕΣ CHROMA]" in result
     assert "τελικό ποδόσφαιρο" in result
-    assert "Ο Αλέξανδρος έχει ποδόσφαιρο" in result
+    assert "Ο Kid1 έχει ποδόσφαιρο" in result
 
 
 def test_search_memory_can_return_sqlite_when_chroma_empty(monkeypatch):
@@ -73,14 +73,14 @@ def test_search_memory_can_return_sqlite_when_chroma_empty(monkeypatch):
         context_builder,
         "temporal_history_for_query",
         lambda query, channel="telegram", limit=8: [
-            "- [web 12:30] Λάζαρος: Ετοιμαζόμαστε για πάρκο με τη Σοφία."
+            "- [web 12:30] User: Ετοιμαζόμαστε για πάρκο με τη Partner."
         ],
     )
     monkeypatch.setattr(system, "vector_lock", _Lock())
     monkeypatch.setattr(system, "vector_store", _VectorStore([]))
     system._lexical_cache.clear()
 
-    result = system.search_memory.func("πάρκο Σοφία")
+    result = system.search_memory.func("πάρκο Partner")
 
     assert "[ΣΧΕΤΙΚΟ ΙΣΤΟΡΙΚΟ SQLITE]" in result
     assert "Ετοιμαζόμαστε για πάρκο" in result

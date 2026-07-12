@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from core.i18n import t
 import argparse
 import json
 import re
@@ -42,13 +43,13 @@ def compact_text(value: str, limit: int = 320) -> str:
 
 def infer_category(text: str) -> str:
     clean = normalize_text(text)
-    if any(marker in clean for marker in ("σοφια", "αλεξανδρ", "μαρια", "μικρο", "παιδι", "γενεθλια", "δωρο")):
+    if any(marker in clean for marker in (t("prompts.ext_str_604"), t("prompts.ext_str_334"), t("prompts.ext_str_552"), t("prompts.ext_str_648"), t("prompts.ext_str_657"), t("prompts.ext_str_315"), t("prompts.ext_str_702"))):
         return "family"
-    if any(marker in clean for marker in ("mastroapp", "praxis", "astakos", "αστακο", "github", "project", "repo", "tool", "skill")):
+    if any(marker in clean for marker in ("mastroapp", "praxis", "astakos", t("prompts.ext_str_533"), "github", "project", "repo", "tool", "skill")):
         return "projects"
-    if any(marker in clean for marker in ("σπιτι", "κουζινα", "ψυγειο", "αφυγραντηρ", "σκουπα", "συσκευ", "ψωνια")):
+    if any(marker in clean for marker in (t("prompts.ext_str_589"), t("prompts.ext_str_401"), t("prompts.ext_str_452"), t("prompts.ext_str_223"), t("prompts.ext_str_495"), t("prompts.ext_str_527"), t("prompts.ext_str_621"))):
         return "home"
-    if any(marker in clean for marker in ("κανονας", "bug", "prompt", "lesson", "μαθημα", "διορθωσ", "λαθος")):
+    if any(marker in clean for marker in (t("prompts.ext_str_423"), "bug", "prompt", "lesson", t("prompts.ext_str_458"), t("prompts.ext_str_345"), t("prompts.ext_str_640"))):
         return "lesson"
     return "lazaros"
 
@@ -57,25 +58,25 @@ def looks_like_noise(text: str) -> bool:
     clean = normalize_text(text)
     noise_markers = (
         "action approval required",
-        "εκτελω;",
-        "αναμονη εγκρισης",
+        t("prompts.ext_str_374"),
+        t("prompts.ext_str_121"),
         "tool loop stopped",
         "terminal execution",
-        "προσχεδιο αποθηκευτηκε",
-        "οριστε το προσχεδιο",
-        "θελεις αλλαγες η να το στειλω",
-        "θελεις αλλαγες ή να το στειλω",
-        "το αποθηκευσα. θελεις αλλαγες",
-        "δεν κραταω τιποτα",
+        t("prompts.ext_str_50"),
+        t("prompts.ext_str_75"),
+        t("prompts.ext_str_16"),
+        t("prompts.ext_str_18"),
+        t("prompts.ext_str_15"),
+        t("prompts.ext_str_94"),
         "send_photo:",
-        "δεν μου βγαζει κατι η μνημη",
-        "δεν εχω συνδεδεμενο",
-        "αν θελεις να",
-        "στειλτης",
-        "στειλε ενα μηνυμα",
-        "στειλε κανενα",
-        "να στειλουμε",
-        "οριστε ο χαρτης",
+        t("prompts.ext_str_27"),
+        t("prompts.ext_str_81"),
+        t("prompts.ext_str_163"),
+        t("prompts.ext_str_299"),
+        t("prompts.ext_str_93"),
+        t("prompts.ext_str_152"),
+        t("prompts.ext_str_180"),
+        t("prompts.ext_str_128"),
     )
     return any(marker in clean for marker in noise_markers)
 
@@ -86,16 +87,16 @@ def looks_like_question_or_command(text: str) -> bool:
     if stripped.endswith(("?", ";")):
         return True
     question_markers = (
-        "τι λες",
-        "πως",
-        "γιατι",
-        "δωσε πληροφοριες",
-        "δωσε καμια ιδεα",
-        "καμια ιδεα",
-        "να κανουμε",
-        "φτιαξε",
-        "σβησε",
-        "ξεκιναμε",
+        t("prompts.ext_str_446"),
+        t("prompts.ext_str_798"),
+        t("prompts.ext_str_632"),
+        t("prompts.ext_str_110"),
+        t("prompts.ext_str_129"),
+        t("prompts.ext_str_199"),
+        t("prompts.ext_str_204"),
+        t("prompts.ext_str_494"),
+        t("prompts.ext_str_585"),
+        t("prompts.ext_str_333"),
     )
     return any(marker in clean for marker in question_markers)
 
@@ -105,22 +106,22 @@ def is_important_memory(text: str, role: str) -> bool:
     if looks_like_noise(text):
         return False
 
-    user_explicit_save = ("αποθηκευ", "μνημη", "σημειω", "κρατα", "υποψιν")
+    user_explicit_save = (t("prompts.ext_str_327"), t("prompts.ext_str_639"), t("prompts.ext_str_536"), t("prompts.ext_str_603"), t("prompts.ext_str_463"))
     assistant_confirmed_save = (
-        "αποθηκευτηκε",
-        "το αποθηκευσα",
-        "σημειωθηκε",
-        "κρατηθηκε",
-        "κατεγραψα ηδη",
-        "περαστηκε στη μνημη",
+        t("prompts.ext_str_177"),
+        t("prompts.ext_str_156"),
+        t("prompts.ext_str_220"),
+        t("prompts.ext_str_273"),
+        t("prompts.ext_str_155"),
+        t("prompts.ext_str_78"),
     )
-    family_terms = ("σοφια", "αλεξανδρ", "γενεθλια", "δωρο", "παρκο", "σχολειο", "ποδοσφ", "αγων", "μεταλλ")
-    personal_terms = ("δουλεια", "συνεντευξ", "υγεια", "υπνο", "προτιμ", "δεν θελω", "μου αρεσει", "στοχος")
-    project_terms = ("mastroapp", "astakos", "αστακο", "tool", "skill", "bug", "prompt", "github", "commit", "sql", "chroma")
-    home_terms = ("σπιτι", "αφυγραντηρ", "συσκευ", "ψωνια", "google fit", "ρολοι", "receipt")
-    event_terms = ("πηγαμε", "ειμαστε", "ειναι στη", "εχει", "εκανε", "καθαρισα", "δουλευει", "θα παμε", "κρατα", "βρηκαμε")
-    durable_home_terms = ("καθαρισα", "χαλασε", "επισκευασ", "αγορασα", "συντηρησ", "αλλαξα")
-    durable_work_terms = ("ωραριο", "πρωινος", "βραδινος", "συνεντευξ", "αιτηση", "δουλευω")
+    family_terms = (t("prompts.ext_str_604"), t("prompts.ext_str_334"), t("prompts.ext_str_315"), t("prompts.ext_str_702"), t("prompts.ext_str_574"), t("prompts.ext_str_371"), t("prompts.ext_str_535"), t("prompts.ext_str_696"), t("prompts.ext_str_497"))
+    personal_terms = (t("prompts.ext_str_342"), t("prompts.ext_str_261"), t("prompts.ext_str_557"), t("prompts.ext_str_750"), t("prompts.ext_str_538"), t("prompts.ext_str_326"), t("prompts.ext_str_245"), t("prompts.ext_str_503"))
+    project_terms = ("mastroapp", "astakos", t("prompts.ext_str_533"), "tool", "skill", "bug", "prompt", "github", "commit", "sql", "chroma")
+    home_terms = (t("prompts.ext_str_589"), t("prompts.ext_str_223"), t("prompts.ext_str_527"), t("prompts.ext_str_621"), "google fit", t("prompts.ext_str_668"), "receipt")
+    event_terms = (t("prompts.ext_str_486"), t("prompts.ext_str_377"), t("prompts.ext_str_251"), t("prompts.ext_str_671"), t("prompts.ext_str_625"), t("prompts.ext_str_312"), t("prompts.ext_str_322"), t("prompts.ext_str_389"), t("prompts.ext_str_603"), t("prompts.ext_str_358"))
+    durable_home_terms = (t("prompts.ext_str_312"), t("prompts.ext_str_517"), t("prompts.ext_str_270"), t("prompts.ext_str_355"), t("prompts.ext_str_289"), t("prompts.ext_str_466"))
+    durable_work_terms = (t("prompts.ext_str_480"), t("prompts.ext_str_348"), t("prompts.ext_str_324"), t("prompts.ext_str_261"), t("prompts.ext_str_544"), t("prompts.ext_str_372"))
 
     has_user_explicit_save = any(marker in clean for marker in user_explicit_save)
     has_assistant_confirmed_save = any(marker in clean for marker in assistant_confirmed_save)
@@ -136,7 +137,7 @@ def is_important_memory(text: str, role: str) -> bool:
         return True
     if any(marker in clean for marker in personal_terms) and any(marker in clean for marker in durable_work_terms):
         return True
-    if any(marker in clean for marker in project_terms) and any(marker in clean for marker in ("διορθω", "πρεπει", "bug", "κανόνα", "κανονα")):
+    if any(marker in clean for marker in project_terms) and any(marker in clean for marker in (t("prompts.ext_str_541"), t("prompts.ext_str_500"), "bug", t("prompts.ext_str_488"), t("prompts.ext_str_454"))):
         return True
     if any(marker in clean for marker in home_terms) and any(marker in clean for marker in durable_home_terms):
         return True
@@ -156,7 +157,7 @@ def candidate_from_message(message: dict[str, Any]) -> MemoryCandidate | None:
     category = infer_category(content)
     date = message.get("date") or str(message.get("timestamp", ""))[:10] or datetime.now().strftime("%Y-%m-%d")
     tag = tag_for_category(category)
-    fact = f"{tag}: Στις {date}, {content}"
+    fact = t("scripts.chroma_memory_maintainer.fact_format", tag=tag, date=date, content=content)
     return MemoryCandidate(
         fact=fact,
         category=category,
@@ -309,3 +310,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

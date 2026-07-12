@@ -57,7 +57,6 @@ interview_copilot/
 # Local development files
 venv/
 .venv/
-prompts.md
 
 # Local-only private extensions
 local_only/
@@ -91,3 +90,7 @@ prompts/*.md
 !prompts/*.example.md
 locales/*.json
 !locales/*.example.json
+
+# Personal configuration files
+persona.md
+astakos_settings.json

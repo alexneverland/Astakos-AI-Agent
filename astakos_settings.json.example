@@ -1,0 +1,28 @@
+{
+    "user_name": "YourName",
+    "bot_name": "YourBotName",
+    "developer_name": "YourDevAlias",
+    "default_city": "London",
+    "response_language": "English",
+    "sentimental_override_keywords": [
+        "family",
+        "home"
+    ],
+    "home_coords": [
+        0.0,
+        0.0
+    ],
+    "home_radius_m": 150,
+    "work_coords": [
+        0.0,
+        0.0
+    ],
+    "work_radius_m": 300,
+    "messenger_contacts": {
+        "example_contact": "000000000000"
+    },
+    "backup_drive_folder_id": "your-google-drive-folder-id",
+    "partner_name": "YourPartnerName",
+    "kid1_name": "YourKid1Name",
+    "kid2_name": "YourKid2Name"
+}

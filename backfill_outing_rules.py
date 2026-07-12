@@ -1,11 +1,12 @@
+from core.i18n import t
 import json
 import sqlite3
 
 from config import NLP_CONFIG
 routines = NLP_CONFIG.get("routines", {})
 tokens = routines.get("tokens", {})
-OUTING_ROUTINE_TOKENS = tokens.get("_OUTING_ROUTINE_TOKENS", ["παρκο", "βολτα", "παιχνιδ", "κουνι", "παιδικ"])
-HOME_ONLY_ROUTINE_TOKENS = tokens.get("_HOME_ONLY_ROUTINE_TOKENS", ["μαγειρ", "φαγητ", "γευμα", "μεσημεριαν", "κουζιν"])
+OUTING_ROUTINE_TOKENS = tokens.get("_OUTING_ROUTINE_TOKENS", [t("prompts.ext_str_574"), t("prompts.ext_str_569"), t("prompts.ext_str_390"), t("prompts.ext_str_651"), t("prompts.ext_str_444")])
+HOME_ONLY_ROUTINE_TOKENS = tokens.get("_HOME_ONLY_ROUTINE_TOKENS", [t("prompts.ext_str_441"), t("prompts.ext_str_662"), t("prompts.ext_str_620"), t("prompts.ext_str_221"), t("prompts.ext_str_547")])
 
 conn = sqlite3.connect("astakos_routines.db")
 cur = conn.cursor()
@@ -72,3 +73,4 @@ for rid, event_name, conditions_json in rows:
 conn.commit()
 conn.close()
 print(f"done, updated={updated}")
+

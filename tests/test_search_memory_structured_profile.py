@@ -20,17 +20,17 @@ def test_search_memory_includes_structured_profile_block(monkeypatch):
 
     import memory.vector_store as vs
     monkeypatch.setattr(vs, "get_latest_state_for_query", lambda query, category=None: {
-        "fact": "[USER_FACT]: Ο Αλέξανδρος γύρισε σπίτι"
+        "fact": "[USER_FACT]: Ο Kid1 γύρισε σπίτι"
     })
     monkeypatch.setattr(vs, "build_profile_memory_summary", lambda query, category=None, limit=5: [
-        "  • [USER_FACT]: Ο Αλέξανδρος γύρισε σπίτι [entities=Αλέξανδρος | topic=trip | rel=state_update | states=returned]"
+        "  • [USER_FACT]: Ο Kid1 γύρισε σπίτι [entities=Kid1 | topic=trip | rel=state_update | states=returned]"
     ])
 
     import memory.context_builder as cb
     monkeypatch.setattr(cb, "temporal_history_for_query", lambda *a, **k: [])
 
-    result = system.search_memory.func("Αλέξανδρος γύρισε σπίτι", "family")
+    result = system.search_memory.func("Kid1 γύρισε σπίτι", "family")
 
     assert "[LATEST MATCHING STATE]" in result
     assert "[STRUCTURED PROFILE MEMORY]" in result
-    assert "Αλέξανδρος γύρισε σπίτι" in result
+    assert "Kid1 γύρισε σπίτι" in result

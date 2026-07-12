@@ -71,7 +71,7 @@ Headline: **Follow-up intelligence, cleaner memory hygiene, and a much more insp
 ### 🆕 Features
 
 #### Routine Reconciler — Phase 3A/3B (deterministic scoring + auto-apply guardrails)
-- **Automatic fact-to-routine reconciliation** — stated facts ("Αλέξανδρος γύρισε σπίτι", "αυτή την εβδομάδα δουλεύω απόγευμα") are matched against deterministic rules and turned into routine directives instead of requiring a manual mute/unmute.
+- **Automatic fact-to-routine reconciliation** — stated facts ("Kid1 γύρισε σπίτι", "αυτή την εβδομάδα δουλεύω απόγευμα") are matched against deterministic rules and turned into routine directives instead of requiring a manual mute/unmute.
 - **Phase 3A — 4 new rule groups**: `school_break`, `shift_week`, `temporary_absence_other_person`, `child_activity_pause`, built on a shared `_build_directive()` helper that enforces subject + time-scope guards on every directive. Smoke tests cover false-positive cases (11/11).
 - **Phase 3B — deterministic scoring layer** (`services/routine_reconciler.py`): weighted score (subject 0.30 / activity 0.20 / state 0.20 / scope 0.20 / special 0.10) against two thresholds — `_AUTO_APPLY_THRESHOLD = 0.80`, `_DEBUG_ONLY_THRESHOLD = 0.55`. `score_candidate_directive()` returns `auto_apply` / `debug_only` / `rejected`; `filter_directives_for_auto_apply()` buckets candidates; `reconcile_fact_to_routines()` runs the full pipeline with stats and per-candidate event logs (`reconcile_candidate_applied` / `_debug_only` / `_rejected`). `infer_routine_reconciliation_directives()` stays as a backward-compatible wrapper that only returns the `auto_apply` bucket.
 - **Deliberately conservative by design** — `shift_logic` carries a `-0.25` penalty so a stated shift change can never silently auto-apply (it lands in `debug_only`, logged but not acted on, by design — confirmed behavior, not a bug). `return_home` was tuned the other way: a complete fact like "γύρισε σπίτι τώρα" needs no `until_date`, so it now scores into `auto_apply`.
@@ -85,7 +85,7 @@ Headline: **Follow-up intelligence, cleaner memory hygiene, and a much more insp
 - **Debug dashboard fixes** — routines with conditions no longer show a false "No meta"; `shift_mode` conditions now show their resolved `Now:` value.
 
 #### Memory & Proactive Routines
-- **Deterministic family-absence extractor** — temporary absence statements ("ο Αλέξανδρος είναι σε κατασκήνωση") are parsed without an LLM sifter call.
+- **Deterministic family-absence extractor** — temporary absence statements ("ο Kid1 είναι σε κατασκήνωση") are parsed without an LLM sifter call.
 - **Seasonal Routine Inactivity Controls** — pause/resume a routine for a date range (e.g. football paused over summer) without deleting or permanently muting it.
 - Fixed proactive mute loops and duplicate routine control; fixed a `recall_query`/temporal date-marker collision that leaked unrelated 30-day SQL history lookback into proactive routine context; hardened the muted + sentimental proactive routine flow.
 

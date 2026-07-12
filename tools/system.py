@@ -66,9 +66,9 @@ from astakos_skills.read_agent_skill import list_agent_skills, read_agent_skill
 # ────────────────────────────────────────────────────────────────
 # CREDENTIALS PATHS
 # ────────────────────────────────────────────────────────────────
-_BASE = os.path.dirname(os.path.abspath(__file__))
-TOKEN_PATH = os.path.join(_BASE, '..', 'credentials', 'token.json')
-CREDS_PATH = os.path.join(_BASE, '..', 'credentials', 'credentials.json')
+import config
+TOKEN_PATH = config.TOKEN_PATH
+CREDS_PATH = config.CREDENTIALS_PATH
 
 # ────────────────────────────────────────────────────────────────
 # PROTECTED SANDBOX
@@ -245,7 +245,7 @@ def _lexical_memory_matches(query: str, category: str = "", limit: int = 4) -> l
 @tool
 def search_memory(query: str, category: str = "") -> str:
     """Search in long-term memory. Call this ONCE ONLY. If you already have [Information from search] in the context DO NOT call it again. Use it before answering:
-    1. Questions about Lazaros, family, home, habits, or projects.
+    1. Questions about {config.USER_NAME}, family, home, habits, or projects.
     2. Issues that require suggestions, advice, or solutions.
     3. References to the past or to existing equipment.
 
@@ -369,7 +369,7 @@ def search_memory(query: str, category: str = "") -> str:
 @tool
 def run_terminal_command(command: str, already_approved: bool = False) -> str:
     """
-    Executes PowerShell commands on Lazaros's PC (Piston-7) and returns the result.
+    Executes PowerShell commands on {config.USER_NAME}'s PC ({config.DEVELOPER_NAME}) and returns the result.
     Ideal for:
     - Reading logs (e.g., 'Get-Content C:\\path\\to\\mastroapp\\logs\\error.log -Tail 50').
     - Checking ports (e.g., 'netstat -ano | findstr 8000').
@@ -661,7 +661,7 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
     action: 'add' (new), 'read' (read pending ONLY), 'done' (completion)
     task: For 'add' → description. For 'done' → keyword of the reminder being completed.
     location: ONLY for location-based reminders. Use 'home' when
-              Lazaros says 'when I get home', 'as soon as I go home' etc.
+              {config.USER_NAME} says 'when I get home', 'as soon as I go home' etc.
               When location is provided, DO NOT provide minutes_from_now or exact_time.
     """
     conn = None
@@ -751,7 +751,7 @@ from memory.routine_db import upsert_routine
 @tool
 def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: str = "general") -> str:
     """
-    [CRITICAL]: Use this WHEN Lazaros mentions a habit,
+    [CRITICAL]: Use this WHEN {config.USER_NAME} mentions a habit,
     a routine, or something that is repeated (e.g., "Every Friday at 13:00 I go to the farmers market").
 
     RULES FOR ARGUMENTS:
@@ -842,7 +842,7 @@ def edit_routine(
 ) -> str:
     """
     [ACTION]: Changes the time and/or day of an existing routine in the scheduler.
-    Use this instead of learn_routine when Lazaros asks to CHANGE the time 
+    Use this instead of learn_routine when {config.USER_NAME} asks to CHANGE the time 
     or day of something that already exists!
     - event_name: The name (or part) of the existing routine.
     - new_time_str: The new time (e.g., "23:00"). Leave empty if it does not change.
@@ -887,7 +887,7 @@ def edit_routine(
 def get_routines(day_of_week: str) -> str:
     """
     [QUERY]: Returns the recorded routines for a specific day.
-    Use this when Lazaros asks "what do I have on Friday?" or "which routines do you know?".
+    Use this when {config.USER_NAME} asks "what do I have on Friday?" or "which routines do you know?".
     - day_of_week: e.g. "Monday", "Friday", "Everyday"
     """
     try:
@@ -931,7 +931,7 @@ def _looks_like_manual_followup_control(text: str) -> bool:
 def control_routine_notifications(event_name: str, action: str, until_date: str = "", source_text: str = "") -> str:
     """
     [OVERRIDE]: Manual control of a routine's proactive reminders, ONLY when
-    Lazaros EXPLICITLY requests it within the conversation (not automatically by you or by the
+    {config.USER_NAME} EXPLICITLY requests it within the conversation (not automatically by you or by the
     scheduled job — this is a separate channel, the user takes control).
 
     VERY IMPORTANT — NEVER call this just because the user told you a piece of INFORMATION
@@ -1172,7 +1172,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
     """
     [OVERRIDE]: Manual control of the SEASONAL/TEMPORARY inactivity of a routine
     (not notifications — that's what control_routine_notifications is for). Use
-    it ONLY when Lazaros EXPLICITLY asks to "freeze" / "stop" / "resume" a
+    it ONLY when {config.USER_NAME} EXPLICITLY asks to "freeze" / "stop" / "resume" a
     routine due to summer break, camp, season change, etc.
 
     DIFFERENCE FROM control_routine_notifications:
@@ -1181,7 +1181,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
     - control_routine_schedule = "this routine DOES NOT APPLY now" (business-logic layer —
       it does not enter missed/failed logic, confidence does not drop, it simply "freezes").
     For a summer break of a school/seasonal activity (e.g., football, school)
-    ALWAYS use this tool, NOT mute, unless Lazaros explicitly asks for "mute"/
+    ALWAYS use this tool, NOT mute, unless {config.USER_NAME} explicitly asks for "mute"/
     "mute notifications".
 
     VERY IMPORTANT — DO NOT call it just because the user gave you an INFORMATION (e.g.,
@@ -1748,7 +1748,7 @@ def generate_image_tool(prompt: str) -> str:
         from vertexai.preview.vision_models import ImageGenerationModel
 
         vertexai.init(
-            project=os.getenv("PROJECT_ID", "astakos-finall"),
+            project=config.PROJECT_ID,
             location="us-central1"  # Imagen does not support "global"
         )
         model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
@@ -1780,7 +1780,7 @@ def drive_manager(
     share_email: str = None,
     share_role: str = "reader",
 ) -> str:
-    """Manages Lazaros's Google Drive.
+    """Manages {config.USER_NAME}'s Google Drive.
 
     Actions:
       'list_files'   — List files in folder (default: root astakos folder)
@@ -2377,7 +2377,7 @@ if __name__ == "__main__":
         print(sep)
         print(paste_code)
         print(f"{sep}\033[0m\n")
-        print("Lazaros: ", end="", flush=True)
+        print(f"{config.USER_NAME}: ", end="", flush=True)
 
         return f"✅ Tool '{tool_name}' written to astakos_skills/{tool_name}.py and passed the test ({stdout})."
 
@@ -2394,9 +2394,9 @@ if __name__ == "__main__":
 # ────────────────────────────────────────────────────────────────
 # EMAIL
 # ────────────────────────────────────────────────────────────────
-_BASE = os.path.dirname(os.path.abspath(__file__))
-TOKEN_PATH = os.path.join(_BASE, '..', 'credentials', 'token.json')
-CREDS_PATH = os.path.join(_BASE, '..', 'credentials', 'credentials.json')
+import config
+TOKEN_PATH = config.TOKEN_PATH
+CREDS_PATH = config.CREDENTIALS_PATH
 
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
@@ -2771,15 +2771,15 @@ def control_vacuum(action: str) -> str:
 
         if action == "start":
             vac.send("action", {"did": "astakos", "siid": 2, "aiid": 1, "in": []})
-            return "Astakos command: X20+ started vacuuming! 🧹"
+            return f"{config.BOT_NAME} command: X20+ started vacuuming! 🧹"
 
         elif action == "stop":
             vac.send("action", {"did": "astakos", "siid": 2, "aiid": 2, "in": []})
-            return "Astakos command: Vacuum stopped."
+            return f"{config.BOT_NAME} command: Vacuum stopped."
 
         elif action == "home":
             vac.send("action", {"did": "astakos", "siid": 3, "aiid": 1, "in": []})
-            return "Astakos command: Vacuum returning to base. 🏠"
+            return f"{config.BOT_NAME} command: Vacuum returning to base. 🏠"
 
         elif action.startswith("room:"):
             room_name = action.split(":", 1)[1].strip()
@@ -2808,7 +2808,7 @@ def control_vacuum(action: str) -> str:
                     {"piid": 10, "value": f'{{"selects":[[{room_id},1,2,1,1]]}}'}
                 ]
             })
-            return f"Astakos command: X20+ going to vacuum room: {room_name}! 🧹"
+            return f"{config.BOT_NAME} command: X20+ going to vacuum room: {room_name}! 🧹"
 
         else:
             return f"Unknown command: {action}."
@@ -2924,8 +2924,8 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
         return f"❌ Critical Error: {str(e)}"
 import math
 
-def _is_home(lat: float, lon: float, home_lat: float = 40.646537, home_lon: float = 22.939025, radius_m: float = 150) -> bool:
-    """Checks if the coordinates are within 150 meters of Piston 7."""
+def _is_home(lat: float, lon: float, home_lat: float = 0.0, home_lon: float = 0.0, radius_m: float = 150) -> bool:
+    """Checks if the coordinates are within 150 meters of {config.DEVELOPER_NAME}."""
     R = 6371000
     dlat = math.radians(lat - home_lat)
     dlon = math.radians(lon - home_lon)
@@ -2936,7 +2936,7 @@ def _is_home(lat: float, lon: float, home_lat: float = 40.646537, home_lon: floa
 @tool
 def get_current_location() -> str:
     """
-    Returns the last recorded GPS coordinate of Lazaros from last_location.json.
+    Returns the last recorded GPS coordinate of {config.USER_NAME} from last_location.json.
     Used to know where the user is in real-time.
     """
     import json
@@ -2946,7 +2946,7 @@ def get_current_location() -> str:
     from config import GPS_STORAGE_FILE
 
     if not os.path.exists(GPS_STORAGE_FILE):
-        return "📍 No recorded location found. Ask Lazaros to send Live Location."
+        return "📍 No recorded location found. Ask {config.USER_NAME} to send Live Location."
 
     try:
         with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
@@ -3035,7 +3035,7 @@ def control_spotify(
 @tool
 def get_fit_summary(days_ago: int = 1) -> str:
     """
-    Returns a Google Fit summary for Lazaros.
+    Returns a Google Fit summary for {config.USER_NAME}.
     days_ago=0 → today, days_ago=1 → yesterday (default).
     Includes: steps, sleep (hours + deep/REM), heart rate.
     """
@@ -3049,7 +3049,7 @@ def get_fit_summary(days_ago: int = 1) -> str:
 @tool
 def save_goal_tool(project: str, description: str, status: str = "active", progress: int = 0, milestones: str = "") -> str:
     """
-    Saves or updates a long-term goal for Lazaros.
+    Saves or updates a long-term goal for {config.USER_NAME}.
     project: Short project name (e.g., 'ShiftMaster', 'Astakos', 'PraxisERP').
     description: What he wants to achieve (e.g., 'To finish the licensing module').
     status: 'active' (in progress) | 'paused' (shelved) | 'done' (completed).
@@ -3364,7 +3364,7 @@ def system_doctor(days: int = 1) -> str:
         cond_routines = "error reading conditions"
 
     status = _doctor_status_label(warnings=warnings, pending_actions=pending_actions, logs=logs)
-    lines.append(f"🩺 Astakos Doctor: {status}")
+    lines.append(f"🩺 {config.BOT_NAME} Doctor: {status}")
     lines.append(f"• Logs ({logs['days']}d): events {logs['events']} / errors {logs['event_errors']}, traces {logs['traces']} / issues {logs['trace_issues']}")
     lines.append(f"• Loop guards: {logs['loop_guards']} | Slow turns: {logs['slow_traces']}")
     lines.append(f"• Pending approvals: {len(pending_actions)}" + (f" ({', '.join(a.get('tool_name', '?') for a in pending_actions[:3])})" if pending_actions else ""))

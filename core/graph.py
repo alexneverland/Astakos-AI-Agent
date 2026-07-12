@@ -1,3 +1,4 @@
+from core.i18n import t
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Developer: Lazaros (Piston-7)
@@ -168,9 +169,9 @@ def tool_loop_block_node(state: AgentState):
 
     _, reason = inspect_tool_loop(state.get("messages", []))
     text = (
-        "Σταματάω εδώ γιατί ανίχνευσα επαναλαμβανόμενες κλήσεις εργαλείων "
-        f"({reason or 'tool loop guard'}). "
-        "Δεν εκτελώ άλλες εντολές. Θέλει έλεγχο του τελευταίου tool/result πριν συνεχίσω."
+        t("core.graph.stop_loop_1") +
+        f"({reason or 'tool loop guard'}). " +
+        t("core.graph.stop_loop_2")
     )
     return {"messages": [AIMessage(content=text)]}
 

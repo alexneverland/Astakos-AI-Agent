@@ -1,5 +1,6 @@
 import os
 import json
+import config
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCALES_DIR = os.path.join(BASE_DIR, "locales")
@@ -28,7 +29,14 @@ def t(key: str, **kwargs) -> str:
         for p in parts:
             val = val[p]
         if isinstance(val, str):
-            return val.format(**kwargs)
+            if kwargs:
+                val = val.format(**kwargs)
+            if '{' in val:
+                val = val.replace('{user_name}', config.USER_NAME)
+                val = val.replace('{partner_name}', getattr(config, 'PARTNER_NAME', 'Partner'))
+                val = val.replace('{kid1_name}', getattr(config, 'KID1_NAME', 'Kid1'))
+                val = val.replace('{kid2_name}', getattr(config, 'KID2_NAME', 'Kid2'))
+            return val
         elif isinstance(val, list):
             return val
     except KeyError:

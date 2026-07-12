@@ -88,10 +88,10 @@ def inactive_draft_message(reason: str) -> str:
         from core.i18n import t
         return t("core.messenger_draft.draft_expired")
     if reason == "incomplete":
-        return "❌ Σφάλμα: Το προσχέδιο είναι ελλιπές."
+        return t("prompts.ext_str_11")
     if reason == "not_pending":
-        return "❌ Σφάλμα: Δεν υπάρχει ενεργό προσχέδιο για αποστολή."
-    return "❌ Σφάλμα: Δεν βρέθηκε προσχέδιο!"
+        return t("prompts.ext_str_4")
+    return t("prompts.ext_str_14")
 
 
 def _seconds_between(start: datetime | None, end: datetime | None) -> int | None:
@@ -147,3 +147,4 @@ def clear_draft() -> bool:
         return True
     except Exception:
         return False
+

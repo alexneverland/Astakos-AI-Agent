@@ -46,12 +46,12 @@ def test_search_memory_expands_gift_queries_without_hardcoded_product(monkeypatc
     def fake_history(query, channel="telegram", limit=8):
         seen_sql_queries.append(query)
         return [
-            "- [telegram 19:30] Αστακός: Αποθηκεύτηκε στη μνήμη στα μελλοντικά δώρα για τη Σοφία (Rosefield Bangle S - White Gold)."
+            "- [telegram 19:30] Αστακός: Αποθηκεύτηκε στη μνήμη στα μελλοντικά δώρα για τη Partner (Rosefield Bangle S - White Gold)."
         ]
 
     store = _VectorStore([
         _Doc(
-            "Ιδέα για δώρο στη Σοφία: Ρολόι Rosefield Bangle S (White Gold) από το link: https://eu.rosefieldwatches.com/products/bangle-s-white-gold",
+            "Ιδέα για δώρο στη Partner: Ρολόι Rosefield Bangle S (White Gold) από το link: https://eu.rosefieldwatches.com/products/bangle-s-white-gold",
             {"category": "family"},
         )
     ])
@@ -60,7 +60,7 @@ def test_search_memory_expands_gift_queries_without_hardcoded_product(monkeypatc
     monkeypatch.setattr(system, "vector_lock", _Lock())
     monkeypatch.setattr(system, "vector_store", store)
 
-    result = system.search_memory.func("Θυμάσαι δώρο για τα γενέθλια της Σοφίας;")
+    result = system.search_memory.func("Θυμάσαι δώρο για τα γενέθλια της Partnerς;")
 
     assert "Rosefield Bangle S" in result
     assert "eu.rosefieldwatches.com" in result

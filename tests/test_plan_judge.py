@@ -82,7 +82,7 @@ def test_judge_returns_true_on_plan():
     """Gemini returns PLAN → should_auto_plan = True."""
     judge, _ = _import_judge()
     mock_fn = _make_gemini_mock("PLAN")
-    long_msg = "θέλω να αναλύσεις τα έξοδα του Ιουνίου, να φτιάξεις ένα Excel report και μετά να το στείλεις με email στη Σοφία"
+    long_msg = "θέλω να αναλύσεις τα έξοδα του Ιουνίου, να φτιάξεις ένα Excel report και μετά να το στείλεις με email στη Partner"
     with patch("services.gemini.safe_gemini_call", mock_fn, create=True):
         assert judge(long_msg) is True
 

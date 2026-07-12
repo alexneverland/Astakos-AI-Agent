@@ -79,10 +79,10 @@ class TestJobCheckReminders:
         return sent, db_path
 
     def test_due_reminder_fires_and_marked_done(self):
-        sent, db_path = self._run([{"task": "Φάρμακο Αλέξανδρος", "time": PAST_TIME}])
+        sent, db_path = self._run([{"task": "Φάρμακο Kid1", "time": PAST_TIME}])
         assert len(sent) == 1
-        assert "Φάρμακο Αλέξανδρος" in sent[0]
-        assert _row_status(db_path, "Φάρμακο Αλέξανδρος") == "done"
+        assert "Φάρμακο Kid1" in sent[0]
+        assert _row_status(db_path, "Φάρμακο Kid1") == "done"
 
     def test_future_reminder_does_not_fire(self):
         sent, db_path = self._run([{"task": "Ραντεβού γιατρού", "time": FUTURE_TIME}])
@@ -132,7 +132,7 @@ class TestJobCheckReminders:
 
 class TestLocationReminders:
 
-    HOME = (40.646558, 22.939036)
+    HOME = (0.0, 0.0)
 
     def _run(self, db_rows, lat, lon, radius_m=150):
         import clients.telegram_bot as bot

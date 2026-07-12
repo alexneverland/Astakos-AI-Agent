@@ -4,6 +4,7 @@
 # Description: Modular LLM-agnostic multi-agent framework
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
+import config
 import warnings
 import os
 import time
@@ -37,7 +38,7 @@ llm = ChatGoogleGenerativeAI(
     temperature=0.7,
     safety_settings=custom_safety,
     vertexai=True,
-    project=os.getenv("PROJECT_ID", "astakos-finall"),
+    project=config.PROJECT_ID,
     location=os.getenv("LOCATION", "global"),
 )
 
@@ -47,7 +48,7 @@ llm_heavy = ChatGoogleGenerativeAI(
     temperature=0.1,
     safety_settings=custom_safety,
     vertexai=True,
-    project=os.getenv("PROJECT_ID", "astakos-finall"),
+    project=config.PROJECT_ID,
     location=os.getenv("LOCATION", "global"),
 )
 
@@ -55,7 +56,7 @@ llm_heavy = ChatGoogleGenerativeAI(
 # The entire codebase pulls from here — a single point of initialization.
 vertex_client = genai.Client(
     vertexai=True,
-    project=os.getenv("PROJECT_ID", "astakos-finall"),
+    project=config.PROJECT_ID,
     location=os.getenv("LOCATION", "global"),
 )
 

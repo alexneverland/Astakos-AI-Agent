@@ -5,6 +5,8 @@
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
 
+import config
+from core.i18n import t
 import os
 import json
 import threading
@@ -45,18 +47,18 @@ def update_working_memory(user_text, ai_text):
 
         print(f"\n\033[94m[DEBUG Foreground]: '{new_tags}'\033[0m")
 
-        if "ΚΕΝΟ" in new_tags.upper() or not new_tags:
-            print("Lazaros: ", end="", flush=True)
+        if t("prompts.ext_str_680") in new_tags.upper() or not new_tags:
+            print(f"{config.USER_NAME}: ", end="", flush=True)
             return
 
         from memory.vector_store import memory # Make sure this import exists
         memory.save(memory_type="working", new_tags=new_tags)
         print(f"\033[92m[Foreground JSON]: WRITTEN -> {new_tags}\033[0m")
-        print("Lazaros: ", end="", flush=True)
+        print(f"{config.USER_NAME}: ", end="", flush=True)
 
     except Exception as e:
         print(f"\n\033[91m[Working Memory Error]: {e}\033[0m")
-        print("Lazaros: ", end="", flush=True)
+        print(f"{config.USER_NAME}: ", end="", flush=True)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -137,15 +139,15 @@ def _save_capability(capability_type: str, description: str) -> str:
 
 
 _USER_SUBJECT_MARKERS = (
-    "ο λάζαρος", "ο λαζαρος", "η σοφία", "η σοφια", "ο αλέξανδρος", "ο αλεξανδρος",
-    "του λάζαρου", "του λαζαρου", "της σοφίας", "της σοφιας", "του αλέξανδρου", "του αλεξανδρου",
-    "τον γιο του", "το παιδί του", "το παιδι του", "την οικογένεια", "την οικογενεια",
+    t("prompts.ext_str_252"), t("prompts.ext_str_250"), t("prompts.ext_str_424"), t("prompts.ext_str_381"), t("prompts.ext_str_171"), t("prompts.ext_str_170"),
+    t("prompts.ext_str_186"), t("prompts.ext_str_190"), t("prompts.ext_str_224"), t("prompts.ext_str_203"), t("prompts.ext_str_145"), t("prompts.ext_str_137"),
+    t("prompts.ext_str_193"), t("prompts.ext_str_178"), t("prompts.ext_str_164"), t("prompts.ext_str_146"), t("prompts.ext_str_136"),
 )
 
 _ASSISTANT_SUBJECT_MARKERS = (
-    "ο αστακός", "ο αστακος", "το σύστημα", "το συστημα", "ο assistant",
-    "δυνατότητα", "δυνατοτητα",
-    "εργαλείο", "εργαλειο", "api", "tool", "pipeline",
+    t("prompts.ext_str_247"), t("prompts.ext_str_276"), t("prompts.ext_str_244"), t("prompts.ext_str_237"), t("prompts.ext_assistant"),
+    t("prompts.ext_str_219"), t("prompts.ext_str_242"),
+    t("prompts.ext_str_332"), t("prompts.ext_str_303"), "api", "tool", "pipeline",
 )
 
 
@@ -164,10 +166,10 @@ def get_capability_context() -> str:
     parts = []
     if data.get("can_do"):
         can = [str(c) for c in data["can_do"][-5:]]
-        parts.append("Γνωστές δυνατότητές μου: " + " | ".join(can))
+        parts.append(t("prompts.ext_str_40") + " | ".join(can))
     if data.get("cannot_do"):
         cannot = [str(c) for c in data["cannot_do"][-3:]]
-        parts.append("Γνωστοί περιορισμοί μου: " + " | ".join(cannot))
+        parts.append(t("prompts.ext_str_35") + " | ".join(cannot))
     return "\n".join(parts) if parts else ""
 
 
@@ -218,3 +220,4 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
             
     except Exception as e:
         print(f"\033[90m[Self-awareness Error]: {e}\033[0m")
+

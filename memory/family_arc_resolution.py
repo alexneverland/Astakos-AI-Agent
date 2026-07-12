@@ -1,3 +1,4 @@
+from core.i18n import t
 import re
 
 
@@ -118,8 +119,8 @@ def _candidate_adds_new_stage(existing_candidate: dict, new_candidate: dict) -> 
 
     new_fact = str(new_candidate.get("fact") or "").lower()
     stage_keywords = (
-        "γυρισε", "γυρισαμε", "επιστροφη", "επεστρεψε", "ηρθε",
-        "σπιτι", "κουρασμ", "εφυγε", "μεχρι", "κατασκηνωση",
+        t("prompts.ext_str_537"), t("prompts.ext_str_298"), t("prompts.ext_str_263"), t("prompts.ext_str_268"), t("prompts.ext_str_698"),
+        t("prompts.ext_str_589"), t("prompts.ext_str_397"), t("prompts.ext_str_650"), t("prompts.ext_str_666"), t("prompts.ext_str_194"),
         "returned", "return", "home", "tired", "left", "until", "camp"
     )
     if any(k in new_fact for k in stage_keywords):
@@ -153,7 +154,7 @@ def _fact_information_score(candidate: dict) -> int:
     if re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", fact):
         score += 20
 
-    if any(token in fact.lower() for token in ("γυρισε", "για ", "μερα", "μερες", "ωρες", "μεχρι", "for ", "days", "home", "tired", "until")):
+    if any(token in fact.lower() for token in (t("prompts.ext_str_537"), t("prompts.ext_str_745"), t("prompts.ext_str_754"), t("prompts.ext_str_575"), t("prompts.ext_str_737"), t("prompts.ext_str_666"), "for ", "days", "home", "tired", "until")):
         score += 20
 
     return score
@@ -179,8 +180,8 @@ def _facts_are_near_exact(a: dict, b: dict) -> bool:
 
     enrich_indicators = (
         " for ", " days", " day", " hours", " until", " because ",
-        " για ", " μερες", " μερα", " ωρα", " ωρες", " μεχρι ",
-        "returned", "home", "tired", " επειδη", " γυρισε", " κουρασμ"
+        t("prompts.ext_str_629"), t("prompts.ext_str_450"), t("prompts.ext_str_611"), t("prompts.ext_str_719"), t("prompts.ext_str_566"), t("prompts.ext_str_393"),
+        "returned", "home", "tired", t("prompts.ext_str_405"), t("prompts.ext_str_419"), t("prompts.ext_str_336")
     )
     if shorter and shorter in longer:
         extra = longer.replace(shorter, "", 1)
@@ -207,3 +208,4 @@ def _decide_family_arc_resolution(existing_candidate: dict, new_candidate: dict)
         return "merge_enrich_existing"
 
     return "skip_exact_duplicate"
+

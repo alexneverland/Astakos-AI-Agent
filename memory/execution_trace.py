@@ -13,6 +13,7 @@
 #   - error / loop_guard if it exists
 # ================================================================
 
+from core.i18n import t
 import os
 import json
 import time
@@ -136,7 +137,7 @@ class ExecutionTrace:
         """Closes the trace with a final response and error."""
         if response:
             self.response = _truncate(response, _MAX_MSG)
-            if "Tool loop stopped" in response or "Repeated tool call" in response or "επαναλαμβανόμενες κλήσεις εργαλείων" in response:
+            if "Tool loop stopped" in response or "Repeated tool call" in response or t("prompts.ext_str_12") in response:
                 self.loop_guard = True
         if error:
             self.error = _truncate(str(error), 200)
@@ -196,3 +197,4 @@ def load_traces(date: str | None = None, limit: int = 50) -> list:
         return entries[-limit:]
     except Exception:
         return []
+

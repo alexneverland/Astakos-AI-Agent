@@ -3,8 +3,8 @@ from memory.working_memory import _looks_like_user_fact_not_capability
 
 def test_user_family_fact_is_not_capability():
     assert _looks_like_user_fact_not_capability("Μπορεί να πηγαίνει τον γιο του στο σχολείο") is True
-    assert _looks_like_user_fact_not_capability("Ο Αλέξανδρος ξεκινάει δημοτικό") is True
-    assert _looks_like_user_fact_not_capability("Η Σοφία είναι σπίτι") is True
+    assert _looks_like_user_fact_not_capability("Ο Kid1 ξεκινάει δημοτικό") is True
+    assert _looks_like_user_fact_not_capability("Η Partner είναι σπίτι") is True
 
 
 def test_astakos_tool_capability_is_allowed():

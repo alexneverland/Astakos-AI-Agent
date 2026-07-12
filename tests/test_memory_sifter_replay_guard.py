@@ -39,7 +39,7 @@ def test_slow_sifter_replay_guard_skips_same_exchange(isolated_state_db, monkeyp
 
     monkeypatch.setattr(session_memory, "safe_gemini_call", lambda prompt: DummyResponse())
 
-    user_text = "Είναι καλοκαίρι ο Αλέξανδρος δεν έχει ποδόσφαιρο ξανά τον Σεπτέμβριο"
+    user_text = "Είναι καλοκαίρι ο Kid1 δεν έχει ποδόσφαιρο ξανά τον Σεπτέμβριο"
     ai_text = "Έγινε μάστορα, το κρατάω ότι οι προπονήσεις σταματούν για το καλοκαίρι."
 
     session_memory.run_memory_sifter_slow(
@@ -124,7 +124,7 @@ def test_slow_sifter_allows_new_follow_up_not_replay(isolated_state_db, monkeypa
     monkeypatch.setattr(session_memory, "safe_gemini_call", fake_gemini)
 
     session_memory.run_memory_sifter_slow(
-        user_text="Είναι καλοκαίρι ο Αλέξανδρος δεν έχει ποδόσφαιρο",
+        user_text="Είναι καλοκαίρι ο Kid1 δεν έχει ποδόσφαιρο",
         ai_text="Το κράτησα.",
         agent_name="Home_Agent",
         channel="telegram",
@@ -172,7 +172,7 @@ def test_slow_sifter_skips_seed_duplicate(isolated_state_db, monkeypatch):
     monkeypatch.setattr(session_memory, "safe_gemini_call", lambda prompt: DummyResponse())
 
     session_memory.run_memory_sifter_slow(
-        user_text="Είναι καλοκαίρι ο Αλέξανδρος δεν έχει ποδόσφαιρο",
+        user_text="Είναι καλοκαίρι ο Kid1 δεν έχει ποδόσφαιρο",
         ai_text="Το κράτησα.",
         agent_name="Home_Agent",
         channel="telegram",
@@ -198,7 +198,7 @@ def test_slow_sifter_skips_same_day_family_near_duplicate(isolated_state_db, mon
           {
             "fact": "[USER_FACT]: On 2026-06-21, Alexandros stops playing football for the summer.",
             "category": "family",
-            "entities": ["Αλέξανδρος", "ποδόσφαιρο"],
+            "entities": ["Kid1", "ποδόσφαιρο"],
             "topic": "activity",
             "topic_detail": "football season",
             "relation_type": "state_update",
@@ -209,7 +209,7 @@ def test_slow_sifter_skips_same_day_family_near_duplicate(isolated_state_db, mon
           {
             "fact": "[USER_FACT]: On 2026-06-21, Alexandros's football activities are paused for the summer.",
             "category": "family",
-            "entities": ["Αλέξανδρος", "ποδόσφαιρο"],
+            "entities": ["Kid1", "ποδόσφαιρο"],
             "topic": "activity",
             "topic_detail": "football season",
             "relation_type": "state_update",
@@ -231,7 +231,7 @@ def test_slow_sifter_skips_same_day_family_near_duplicate(isolated_state_db, mon
     monkeypatch.setattr(session_memory, "safe_gemini_call", fake_gemini)
 
     session_memory.run_memory_sifter_slow(
-        user_text="Είναι καλοκαίρι ο Αλέξανδρος δεν έχει ποδόσφαιρο. Το ποδόσφαιρο του Αλέξανδρου παγώνει για το καλοκαίρι",
+        user_text="Είναι καλοκαίρι ο Kid1 δεν έχει ποδόσφαιρο. Το ποδόσφαιρο του Αλέξανδρου παγώνει για το καλοκαίρι",
         ai_text="Το κράτησα. Οκ, το σημείωσα.",
         agent_name="Home_Agent",
         channel="telegram",
@@ -335,7 +335,7 @@ def test_sifter_assistant_paraphrase_guard(monkeypatch):
     assert len(saved) == 0
 
     # 2. Accept pure user fact
-    monkeypatch.setattr(session_memory, "safe_gemini_call", lambda _: type("Resp", (), {"text": "[\n{\"fact\": \"[USER_FACT]: Ο Λάζαρος ενημέρωσε ότι από τη Δευτέρα 2026-06-22 είναι πρωινή βάρδια\", \"category\": \"lazaros\", \"analysis\": \"None\"}\n]"})())
+    monkeypatch.setattr(session_memory, "safe_gemini_call", lambda _: type("Resp", (), {"text": "[\n{\"fact\": \"[USER_FACT]: Ο User ενημέρωσε ότι από τη Δευτέρα 2026-06-22 είναι πρωινή βάρδια\", \"category\": \"lazaros\", \"analysis\": \"None\"}\n]"})())
     
     session_memory.run_memory_sifter_slow(
         user_text="Από Δευτέρα είμαι πρωινός, θα πάω δουλειά νωρίς UNIQUE_TEST_2",
@@ -397,7 +397,7 @@ def test_family_duplicate_tool_and_sifter_variants_are_collapsed(isolated_state_
     monkeypatch.setattr(session_memory.memory, 'save', fake_save)
 
     tool_candidate = session_memory.build_canonical_memory_candidate(
-        fact='[USER_FACT]: Στις 2026-06-25, ο Λάζαρος έκλεισε εισιτήρια για τη Γεωργία τον Αύγουστο.',
+        fact='[USER_FACT]: Στις 2026-06-25, ο User έκλεισε εισιτήρια για τη Γεωργία τον Αύγουστο.',
         category='family',
         entities=['Γεωργία', 'Εισιτήρια', 'Ταξίδι', 'Διακοπές'],
         source='telegram',
@@ -409,7 +409,7 @@ def test_family_duplicate_tool_and_sifter_variants_are_collapsed(isolated_state_
     saved.append(tool_candidate)
 
     sifter_candidate = session_memory.build_canonical_memory_candidate(
-        fact='[USER_FACT]: Στις 2026-06-25, ο Λάζαρος έκλεισε εισιτήρια για τη Γεωργία για τον Αύγουστο.',
+        fact='[USER_FACT]: Στις 2026-06-25, ο User έκλεισε εισιτήρια για τη Γεωργία για τον Αύγουστο.',
         category='family',
         source='telegram',
         agent_name='Dev_Agent',

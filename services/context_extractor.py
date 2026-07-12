@@ -1,4 +1,5 @@
 import json
+import config
 from core import nl_config
 from core.i18n import t
 from services.gemini import safe_gemini_call
@@ -11,18 +12,18 @@ from services.routine_reconciler import (
     apply_routine_reconciliation_directives,
 )
 
-_CONTEXT_EXTRACTION_PROMPT = """
-You are Astakos, an AI assistant. The user (Lazaros) sends you a message.
+_CONTEXT_EXTRACTION_PROMPT = f"""
+You are {config.BOT_NAME}, an AI assistant. The user ({config.USER_NAME}) sends you a message.
 You need to understand from the context if any of the following states (context flags) are changing.
 
 Available flags:
 1. "user_out_of_home": (boolean) The user is out of the house now (e.g., walk, shopping, trip, swimming).
 2. "family_at_home": (boolean) The family is at home now.
-3. "sofia_with_user": (boolean) Sofia is with the user now.
-4. "alexandros_away_from_home": (boolean) Alexandros is away from home without being with the user.
+3. "partner_with_user": (boolean) The partner is with the user now.
+4. "kid1_away_from_home": (boolean) The kid1 is away from home without being with the user.
 5. "user_at_work": (boolean) The user is at work now.
-6. "alexandros_with_user": (boolean) Alexandros is with the user now.
-7. "alexandros_with_sofia": (boolean) Alexandros is with Sofia now, without necessarily meaning that the user is also with them.
+6. "kid1_with_user": (boolean) The kid1 is with the user now.
+7. "kid1_with_partner": (boolean) The kid1 is with the partner now, without necessarily meaning that the user is also with them.
 
 Rules:
 - Return ONLY a JSON object.
@@ -31,24 +32,24 @@ Rules:
 - DO NOT convert future intention into a current state.
 - If the user says they will leave in a bit, that they will go somewhere later, or that they are planning to go, this DOES NOT mean they are already out of the house.
 - If the user is talking about a draft message, a plan, an idea, or what to write, this DOES NOT necessarily mean that the state is currently true.
-- If the user says they are all out together now, then user_out_of_home=true and sofia_with_user=true may apply.
+- If the user says they are all out together now, then user_out_of_home=true and partner_with_user=true may apply.
 - If the user is at work, then usually user_at_work=true and user_out_of_home=true.
 
-- If the user says they are with Alexandros now, then alexandros_with_user=true may apply.
-- If the user says Alexandros is with Sofia now, then alexandros_with_sofia=true may apply.
-- If the user says Sofia and Alexandros are out somewhere and they themselves are not with them, then sofia_with_user=false.
-- If the user clearly says Alexandros is with Sofia without them, then alexandros_away_from_home=true.
+- If the user says they are with Alexandros now, then kid1_with_user=true may apply.
+- If the user says The kid1 is with the partner now, then kid1_with_partner=true may apply.
+- If the user says The partner and kid1 are out somewhere and they themselves are not with them, then partner_with_user=false.
+- If the user clearly says Alexandros is with Sofia without them, then kid1_away_from_home=true.
 - If the user says they will go to meet them later, this DOES NOT mean they are already with them now.
 
 Example 1:
 Message: "Good morning, we started, we are on the road, we are going swimming all together."
 Answer:
-{{"user_out_of_home": true, "sofia_with_user": true, "family_at_home": false}}
+{{"user_out_of_home": true, "partner_with_user": true, "family_at_home": false}}
 
 Example 2:
 Message: "I arrived at the office, talk to you later."
 Answer:
-{{"user_at_work": true, "user_out_of_home": true, "sofia_with_user": false}}
+{{"user_at_work": true, "user_out_of_home": true, "partner_with_user": false}}
 
 Example 3:
 Message: "In about 15 minutes we are leaving for the park."
@@ -58,17 +59,17 @@ Answer:
 Example 4:
 Message: "We are all together at the beach now."
 Answer:
-{{"user_out_of_home": true, "sofia_with_user": true, "family_at_home": false}}
+{{"user_out_of_home": true, "partner_with_user": true, "family_at_home": false}}
 
 Example 5:
-Message: "I am at home, Sofia and Alexandros are at the park."
+Message: "I am at home, Partner and Kid1 are at the park."
 Answer:
-{{"user_out_of_home": false, "sofia_with_user": false, "alexandros_with_sofia": true, "alexandros_away_from_home": true}}
+{{"user_out_of_home": false, "partner_with_user": false, "kid1_with_partner": true, "kid1_away_from_home": true}}
 
 Example 6:
-Message: "We are going to the park now with Alexandros."
+Message: "We are going to the park now with Kid1."
 Answer:
-{{"user_out_of_home": true, "alexandros_with_user": true, "alexandros_away_from_home": false}}
+{{"user_out_of_home": true, "kid1_with_user": true, "kid1_away_from_home": false}}
 
 User Message: "{user_text}"
 AI Answer (recent/current): "{ai_text}"
@@ -147,11 +148,11 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         valid_keys = {
             "user_out_of_home",
             "family_at_home",
-            "sofia_with_user",
-            "alexandros_away_from_home",
+            "partner_with_user",
+            "kid1_away_from_home",
             "user_at_work",
-            "alexandros_with_user",
-            "alexandros_with_sofia",
+            "kid1_with_user",
+            "kid1_with_partner",
         }
         
         # Only update if the payload is a dictionary
@@ -170,14 +171,14 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             for marker in nl_config.CE_HOME
         )
 
-        if payload.get("alexandros_with_user") is True:
-            payload["alexandros_away_from_home"] = False
+        if payload.get("kid1_with_user") is True:
+            payload["kid1_away_from_home"] = False
             
         if payload.get("family_at_home") is True:
-            payload["alexandros_away_from_home"] = False
+            payload["kid1_away_from_home"] = False
 
-        if payload.get("alexandros_with_user") is True and payload.get("sofia_with_user") is True:
-            payload["alexandros_with_sofia"] = True
+        if payload.get("kid1_with_user") is True and payload.get("partner_with_user") is True:
+            payload["kid1_with_partner"] = True
 
         # Context-aware enrichment for short live follow-up replies like:
         # "I found them", "we are all together", "we are still at the park"
@@ -188,31 +189,31 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
 
         if _looks_like_everyone_together(user_text):
             payload["user_out_of_home"] = True
-            payload["sofia_with_user"] = True
-            payload["alexandros_with_user"] = True
-            payload["alexandros_with_sofia"] = True
-            payload["alexandros_away_from_home"] = False
+            payload["partner_with_user"] = True
+            payload["kid1_with_user"] = True
+            payload["kid1_with_partner"] = True
+            payload["kid1_away_from_home"] = False
 
         elif _looks_like_found_them_reply(user_text) and _has_park_live_presence(user_text):
             payload["user_out_of_home"] = True
-            payload["alexandros_with_user"] = True
-            payload["alexandros_away_from_home"] = False
+            payload["kid1_with_user"] = True
+            payload["kid1_away_from_home"] = False
 
             recent_hint = _recent_family_context_hint(channel=channel)
             has_recent_sofia = (
-                any(w in normalized_user for w in nl_config.CE_SOFIA_NAMES)
-                or any(w in recent_hint for w in nl_config.CE_SOFIA_NAMES)
+                any(w in normalized_user for w in nl_config.CE_PARTNER_NAMES)
+                or any(w in recent_hint for w in nl_config.CE_PARTNER_NAMES)
             )
             has_recent_alexandros = (
-                any(w in normalized_user for w in nl_config.CE_ALEXANDROS_NAMES)
-                or any(w in recent_hint for w in nl_config.CE_ALEXANDROS_NAMES)
+                any(w in normalized_user for w in nl_config.CE_KID1_NAMES)
+                or any(w in recent_hint for w in nl_config.CE_KID1_NAMES)
             )
 
             if has_recent_sofia:
-                payload["sofia_with_user"] = True
+                payload["partner_with_user"] = True
 
             if has_recent_sofia and has_recent_alexandros:
-                payload["alexandros_with_sofia"] = True
+                payload["kid1_with_partner"] = True
 
 
         for key, value in payload.items():

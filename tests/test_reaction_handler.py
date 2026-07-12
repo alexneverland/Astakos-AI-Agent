@@ -148,11 +148,12 @@ check("Reaction ❤️: SQLite fallback βρίσκει σωστό κείμενο
 
 
 # ── Results ─────────────────────────────────────────────────────────
-print()
-if errors:
-    print(f"❌ {len(errors)} failures:")
-    for e in errors:
-        print(f"  - {e}")
-    sys.exit(1)
-else:
-    print("✅ All tests passed!")
+if __name__ == "__main__":
+    print()
+    if errors:
+        print(f"❌ {len(errors)} failures:")
+        for e in errors:
+            print(f"  - {e}")
+        sys.exit(1)
+    else:
+        print("✅ All tests passed!")

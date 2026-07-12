@@ -20,8 +20,8 @@ from astakos_skills.file_generator import (
 )
 
 SAMPLE_DATA = json.dumps([
-    {"Όνομα": "Λάζαρος", "Ηλικία": 42, "Πόλη": "Θεσσαλονίκη"},
-    {"Όνομα": "Αλέξανδρος", "Ηλικία": 6, "Πόλη": "Θεσσαλονίκη"},
+    {"Όνομα": "User", "Ηλικία": 42, "Πόλη": "Θεσσαλονίκη"},
+    {"Όνομα": "Kid1", "Ηλικία": 6, "Πόλη": "Θεσσαλονίκη"},
 ])
 
 def _tmp():
@@ -57,7 +57,7 @@ def test_generate_excel_file_is_valid_xlsx():
         ws = wb.active
         flat = [cell.value for row in ws.iter_rows() for cell in row if cell.value]
         assert "Όνομα" in flat
-        assert "Λάζαρος" in flat
+        assert "User" in flat
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -177,7 +177,7 @@ def test_generate_pdf_with_author():
     try:
         out = os.path.join(d, "authored.pdf")
         result = generate_pdf.func(output_path=out, content="Περιεχόμενο",
-                                   title="Τίτλος", author="Λάζαρος")
+                                   title="Τίτλος", author="User")
         assert "✅" in result
         assert os.path.exists(out)
     finally:
@@ -206,8 +206,8 @@ def test_generate_csv_has_correct_content():
         with open(out, encoding="utf-8-sig") as f:
             rows = list(csv.DictReader(f))
         assert len(rows) == 2
-        assert rows[0]["Όνομα"] == "Λάζαρος"
-        assert rows[1]["Όνομα"] == "Αλέξανδρος"
+        assert rows[0]["Όνομα"] == "User"
+        assert rows[1]["Όνομα"] == "Kid1"
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

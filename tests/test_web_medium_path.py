@@ -7,7 +7,7 @@ def test_medium_web_path_candidate_for_reflective_update():
 
 
 def test_medium_web_path_rejects_control_intent():
-    assert is_medium_web_chat_path_candidate("στείλε μήνυμα στη Σοφία") is False
+    assert is_medium_web_chat_path_candidate("στείλε μήνυμα στη Partner") is False
     assert is_medium_web_chat_path_candidate("βάλε ρουτίνα για το πάρκο") is False
 
 

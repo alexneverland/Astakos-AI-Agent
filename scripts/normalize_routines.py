@@ -1,3 +1,4 @@
+from core.i18n import t
 import json
 import os
 import sqlite3
@@ -26,7 +27,7 @@ def _normalize_text(text: str) -> str:
 
 def _is_football_routine(event_name: str) -> bool:
     event = _normalize_text(event_name)
-    return any(token in event for token in ("ποδοσφαιρ", "προπονησ", "μπαλα"))
+    return any(token in event for token in (t("prompts.ext_str_275"), t("prompts.ext_str_338"), t("prompts.ext_str_550")))
 
 
 def normalize_db():
@@ -115,3 +116,4 @@ def normalize_db():
 if __name__ == "__main__":
     normalize_db()
     print("Done")
+

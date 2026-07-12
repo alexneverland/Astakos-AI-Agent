@@ -5,6 +5,7 @@
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
 
+import config
 import os
 import re
 import json
@@ -301,7 +302,7 @@ def get_news(topic: str = "", limit: int = 10) -> str:
         limit = max(1, min(int(limit or 10), 20))
         print(f"\033[96m[Web]: Fetching news for: {topic}...\033[0m")
 
-        has_greek = any('\u0370' <= c <= '\u03ff' or '\u1f00' <= c <= '\u1fff' for c in topic)
+        has_greek = any(t("prompts.ext_str_848") <= c <= t("prompts.ext_str_850") or t("prompts.ext_str_845") <= c <= t("prompts.ext_str_849") for c in topic)
         locale = "el&gl=GR&ceid=GR:el" if has_greek else "en&gl=US&ceid=US:en"
 
         url = (
@@ -503,7 +504,7 @@ def search_goldmall_offers(query: str) -> str:
 @tool
 def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     """Sends a message on Facebook Messenger by reading the saved draft.
-    CALL IT ONLY after Lazaros confirms with 'yes/send'. WITHOUT ANY ARGUMENTS."""
+    CALL IT ONLY after {config.USER_NAME} confirms with 'yes/send'. WITHOUT ANY ARGUMENTS."""
     import time
     import json
     import os
@@ -767,7 +768,7 @@ def search_supermarket_prices(query: str) -> str:
     except Exception as e:
         return f"⚠️ Error: {str(e)}"
 @tool
-def search_google_places(query: str, location: str = "Thessaloniki") -> str:
+def search_google_places(query: str, location: str = config.DEFAULT_CITY) -> str:
     """
     Searches for restaurants, cafes, and nightlife venues via the Google Places API (New).
     Returns name, rating, address, type, phone, website, delivery, and reviews.
@@ -939,8 +940,8 @@ def search_google_places(query: str, location: str = "Thessaloniki") -> str:
 @tool
 def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE") -> str:
     """Provides time, distance (with live traffic) and navigation links.
-    If no origin is provided, it defaults to the headquarters (Piston 7, Thessaloniki).
-    You can pass the result of get_current_location to the origin (e.g., '40.67,22.93').
+    If no origin is provided, it defaults to the headquarters ({config.DEVELOPER_NAME}, Thessaloniki).
+    You can pass the result of get_current_location to the origin (e.g., '0.0,0.0').
     The mode can be "DRIVE" (driving, default) or "WALK" (walking).
     """
     import os
@@ -951,7 +952,7 @@ def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE
     import requests
     from config import GPS_STORAGE_FILE
 
-    home_base = "Piston 7, Thessaloniki"
+    home_base = f"{config.DEVELOPER_NAME}, Thessaloniki"
     final_origin = origin if origin else home_base
 
     if not origin:
@@ -1046,3 +1047,4 @@ def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE
         t("tools.web.dir_link_nav", directions_url=directions_url) +
         t("tools.web.dir_system_instruction")
     )
+

@@ -214,12 +214,12 @@ def test_doctor_status_label_escalates_by_severity():
 
 def test_format_pending_routines_includes_event_names():
     result = _format_pending_routines({
-        12: {"event": "Σύνταξη μηνύματος στη Σοφία", "sent_at": object()},
+        12: {"event": "Σύνταξη μηνύματος στη Partner", "sent_at": object()},
         13: {"event": "Πάρκο με Αλέξανδρο", "sent_at": object()},
     })
 
     assert result.startswith("2 — ")
-    assert "Σύνταξη μηνύματος στη Σοφία" in result
+    assert "Σύνταξη μηνύματος στη Partner" in result
     assert "Πάρκο με Αλέξανδρο" in result
 
 

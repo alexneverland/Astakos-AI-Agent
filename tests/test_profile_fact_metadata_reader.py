@@ -22,7 +22,7 @@ def test_safe_load_metadata_json_handles_invalid():
 def test_safe_load_metadata_json_handles_valid_dict():
     raw = json.dumps({
         "tags": ["alexandros", "camp"],
-        "entities": ["Αλέξανδρος"],
+        "entities": ["Kid1"],
         "topic": "trip",
         "relation_type": "temporary_state",
     }, ensure_ascii=False)
@@ -35,13 +35,13 @@ def test_profile_row_to_memory_doc_extracts_metadata():
     row = {
         "id": 1,
         "category": "family",
-        "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση",
+        "fact": "[USER_FACT]: Ο Kid1 είναι στην κατασκήνωση",
         "photo_path": None,
         "date": "2026-06-17",
         "created_at": "2026-06-17 12:00:00",
         "metadata_json": json.dumps({
             "tags": ["alexandros", "camp", "away"],
-            "entities": ["Αλέξανδρος"],
+            "entities": ["Kid1"],
             "topic": "trip",
             "topic_detail": "camp",
             "state_markers": ["away"],
@@ -58,24 +58,24 @@ def test_profile_row_to_memory_doc_extracts_metadata():
     assert doc["topic"] == "trip"
     assert doc["topic_detail"] == "camp"
     assert doc["relation_type"] == "temporary_state"
-    assert "Αλέξανδρος" in doc["entities"]
+    assert "Kid1" in doc["entities"]
     assert "away" in doc["state_markers"]
 
 
 def test_filter_profile_docs_by_entity():
     docs = [
-        {"entities": ["Αλέξανδρος"], "topic": "trip", "relation_type": "temporary_state"},
-        {"entities": ["Σοφία"], "topic": "gift", "relation_type": "confirmed"},
+        {"entities": ["Kid1"], "topic": "trip", "relation_type": "temporary_state"},
+        {"entities": ["Partner"], "topic": "gift", "relation_type": "confirmed"},
     ]
-    out = filter_profile_docs_by_entity(docs, "Αλέξανδρος")
+    out = filter_profile_docs_by_entity(docs, "Kid1")
     assert len(out) == 1
     assert out[0]["topic"] == "trip"
 
 
 def test_filter_profile_docs_by_topic():
     docs = [
-        {"entities": ["Αλέξανδρος"], "topic": "trip", "relation_type": "temporary_state"},
-        {"entities": ["Σοφία"], "topic": "gift", "relation_type": "confirmed"},
+        {"entities": ["Kid1"], "topic": "trip", "relation_type": "temporary_state"},
+        {"entities": ["Partner"], "topic": "gift", "relation_type": "confirmed"},
     ]
     out = filter_profile_docs_by_topic(docs, "gift")
     assert len(out) == 1
@@ -84,8 +84,8 @@ def test_filter_profile_docs_by_topic():
 
 def test_filter_profile_docs_by_relation_type():
     docs = [
-        {"entities": ["Αλέξανδρος"], "topic": "trip", "relation_type": "temporary_state"},
-        {"entities": ["Σοφία"], "topic": "gift", "relation_type": "confirmed"},
+        {"entities": ["Kid1"], "topic": "trip", "relation_type": "temporary_state"},
+        {"entities": ["Partner"], "topic": "gift", "relation_type": "confirmed"},
     ]
     out = filter_profile_docs_by_relation_type(docs, "confirmed")
     assert len(out) == 1
@@ -115,11 +115,11 @@ def test_get_profile_facts_returns_normalized_docs(monkeypatch, tmp_path):
         "INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) VALUES (?, ?, ?, ?, ?)",
         (
             "family",
-            "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση",
+            "[USER_FACT]: Ο Kid1 είναι στην κατασκήνωση",
             "",
             "2026-06-17",
             json.dumps({
-                "entities": ["Αλέξανδρος"],
+                "entities": ["Kid1"],
                 "topic": "trip",
                 "topic_detail": "camp",
                 "state_markers": ["away"],
@@ -147,8 +147,8 @@ def test_get_latest_entity_state_prefers_newer_state(monkeypatch):
         {
             "id": 1,
             "category": "family",
-            "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση",
-            "entities": ["Αλέξανδρος"],
+            "fact": "[USER_FACT]: Ο Kid1 είναι στην κατασκήνωση",
+            "entities": ["Kid1"],
             "topic": "trip",
             "topic_detail": "camp",
             "state_markers": ["away"],
@@ -159,8 +159,8 @@ def test_get_latest_entity_state_prefers_newer_state(monkeypatch):
         {
             "id": 2,
             "category": "family",
-            "fact": "[USER_FACT]: Ο Αλέξανδρος γύρισε σπίτι",
-            "entities": ["Αλέξανδρος"],
+            "fact": "[USER_FACT]: Ο Kid1 γύρισε σπίτι",
+            "entities": ["Kid1"],
             "topic": "trip",
             "topic_detail": "camp",
             "state_markers": ["returned"],
@@ -172,7 +172,7 @@ def test_get_latest_entity_state_prefers_newer_state(monkeypatch):
 
     monkeypatch.setattr(vs, "get_profile_facts", lambda category=None, limit=300: docs)
 
-    latest = vs.get_latest_entity_state("Αλέξανδρος", "trip", category="family")
+    latest = vs.get_latest_entity_state("Kid1", "trip", category="family")
     assert latest is not None
     assert "γύρισε σπίτι" in latest["fact"]
     assert "returned" in latest["state_markers"]
@@ -185,8 +185,8 @@ def test_search_profile_facts_scores_generic_query(monkeypatch):
         {
             "id": 1,
             "category": "family",
-            "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση.",
-            "entities": ["Αλέξανδρος"],
+            "fact": "[USER_FACT]: Ο Kid1 είναι στην κατασκήνωση.",
+            "entities": ["Kid1"],
             "tags": ["alexandros", "camp", "away"],
             "topic": "trip",
             "topic_detail": "camp",
@@ -198,8 +198,8 @@ def test_search_profile_facts_scores_generic_query(monkeypatch):
         {
             "id": 2,
             "category": "family",
-            "fact": "[USER_FACT]: Η Σοφία πήγε δουλειά",
-            "entities": ["Σοφία"],
+            "fact": "[USER_FACT]: Η Partner πήγε δουλειά",
+            "entities": ["Partner"],
             "tags": ["sofia", "work"],
             "topic": "work",
             "topic_detail": "",
@@ -212,9 +212,9 @@ def test_search_profile_facts_scores_generic_query(monkeypatch):
 
     monkeypatch.setattr(vs, "get_profile_facts", lambda category=None, limit=300: docs)
 
-    results = search_profile_facts("Αλέξανδρος κατασκήνωση", category="family", limit=5)
+    results = search_profile_facts("Kid1 κατασκήνωση", category="family", limit=5)
     assert len(results) == 1
-    assert "Αλέξανδρος" in results[0]["fact"]
+    assert "Kid1" in results[0]["fact"]
 
 
 
@@ -225,8 +225,8 @@ def test_get_latest_state_for_query_uses_query_not_hardcoded(monkeypatch):
         {
             "id": 1,
             "category": "family",
-            "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση.",
-            "entities": ["Αλέξανδρος"],
+            "fact": "[USER_FACT]: Ο Kid1 είναι στην κατασκήνωση.",
+            "entities": ["Kid1"],
             "tags": ["alexandros", "camp", "away"],
             "topic": "trip",
             "topic_detail": "camp",
@@ -238,8 +238,8 @@ def test_get_latest_state_for_query_uses_query_not_hardcoded(monkeypatch):
         {
             "id": 2,
             "category": "family",
-            "fact": "[USER_FACT]: Η Σοφία πήγε δουλειά",
-            "entities": ["Σοφία"],
+            "fact": "[USER_FACT]: Η Partner πήγε δουλειά",
+            "entities": ["Partner"],
             "tags": ["sofia", "work"],
             "topic": "work",
             "topic_detail": "",
@@ -252,6 +252,6 @@ def test_get_latest_state_for_query_uses_query_not_hardcoded(monkeypatch):
 
     monkeypatch.setattr(vs, "get_profile_facts", lambda category=None, limit=300: docs)
 
-    latest = get_latest_state_for_query("Σοφία δουλειά", category="family")
+    latest = get_latest_state_for_query("Partner δουλειά", category="family")
     assert latest is not None
-    assert "Σοφία" in latest["fact"]
+    assert "Partner" in latest["fact"]

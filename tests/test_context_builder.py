@@ -23,7 +23,7 @@ def test_format_recent_messages_keeps_order_and_speaker_labels():
     )
 
     assert lines == [
-        "- [web 10:00] Λάζαρος: Καλημέρα",
+        "- [web 10:00] User: Καλημέρα",
         "- [telegram 10:01] Αστακός: Καλημέρα φίλε",
     ]
 
@@ -63,24 +63,24 @@ def test_format_recent_messages_marks_yesterday_so_it_is_not_confused_with_today
         now=dt.datetime(2026, 6, 7, 21, 0),
     )
 
-    assert lines[0] == "- [telegram χθες 20:48] Λάζαρος: Έφτιαξα μπριζόλες απόψε."
-    assert lines[1] == "- [telegram 20:53] Λάζαρος: Σήμερα έκανα φακές."
-    assert lines[2] == "- [web 10:00] Λάζαρος: Μήνυμα χωρίς date -- πρέπει να μείνει όπως πριν."
+    assert lines[0] == "- [telegram χθες 20:48] User: Έφτιαξα μπριζόλες απόψε."
+    assert lines[1] == "- [telegram 20:53] User: Σήμερα έκανα φακές."
+    assert lines[2] == "- [web 10:00] User: Μήνυμα χωρίς date -- πρέπει να μείνει όπως πριν."
 
 
 def test_semantic_facts_dedupes_and_strips_tags():
     def fake_search(query, k):
         return [
-            _Doc("[USER_FACT] Ο Αλέξανδρος αγαπά LEGO. [Tags: family]"),
-            _Doc("[USER_FACT] Ο Αλέξανδρος αγαπά LEGO. [Tags: duplicate]"),
-            _Doc("[USER_FACT] Η Σοφία δουλεύει σήμερα."),
+            _Doc("[USER_FACT] Ο Kid1 αγαπά LEGO. [Tags: family]"),
+            _Doc("[USER_FACT] Ο Kid1 αγαπά LEGO. [Tags: duplicate]"),
+            _Doc("[USER_FACT] Η Partner δουλεύει σήμερα."),
         ]
 
-    facts = semantic_facts_for_query("Αλέξανδρος δραστηριότητα", search_fn=fake_search)
+    facts = semantic_facts_for_query("Kid1 δραστηριότητα", search_fn=fake_search)
 
     assert facts == [
-        "[USER_FACT] Ο Αλέξανδρος αγαπά LEGO.",
-        "[USER_FACT] Η Σοφία δουλεύει σήμερα.",
+        "[USER_FACT] Ο Kid1 αγαπά LEGO.",
+        "[USER_FACT] Η Partner δουλεύει σήμερα.",
     ]
 
 
@@ -92,7 +92,7 @@ def test_build_memory_context_combines_recent_and_semantic():
         ]
 
     def fake_search(query, k):
-        return [_Doc("[USER_FACT] Ο Αλέξανδρος θέλει πάρκο και παιχνίδι.")]
+        return [_Doc("[USER_FACT] Ο Kid1 θέλει πάρκο και παιχνίδι.")]
 
     context = build_memory_context(
         "τι να κάνω με τον Αλέξανδρο",
@@ -104,7 +104,7 @@ def test_build_memory_context_combines_recent_and_semantic():
     assert "[RECENT WEB+TELEGRAM HISTORY]" in rendered
     assert "[RELEVANT CHROMA MEMORIES]" in rendered
     assert "Πάμε πάρκο" in rendered
-    assert "Ο Αλέξανδρος θέλει πάρκο" in rendered
+    assert "Ο Kid1 θέλει πάρκο" in rendered
 
 
 def test_temporal_history_for_yesterday_morning_uses_sqlite_messages():
@@ -134,7 +134,7 @@ def test_temporal_history_for_yesterday_morning_uses_sqlite_messages():
         ]
 
     lines = temporal_history_for_query(
-        "ο Αλέξανδρος τι έκανε χτες το πρωί που πήγαμε όλοι μαζί;",
+        "ο Kid1 τι έκανε χτες το πρωί που πήγαμε όλοι μαζί;",
         channel="telegram",
         history_loader=fake_history_loader,
         now=__import__("datetime").datetime(2026, 6, 7, 15, 0),
@@ -155,7 +155,7 @@ def test_history_lookup_uses_sqlite_even_without_date_words():
                 "date": "2026-06-01",
                 "time": "18:00",
                 "role": "user",
-                "content": "Μιλήσαμε για το πάρκο με τη Σοφία και τον Αλέξανδρο.",
+                "content": "Μιλήσαμε για το πάρκο με τη Partner και τον Αλέξανδρο.",
             },
             {
                 "channel": "telegram",
@@ -167,13 +167,13 @@ def test_history_lookup_uses_sqlite_even_without_date_words():
         ]
 
     lines = temporal_history_for_query(
-        "θυμάσαι τι λέγαμε για πάρκο Σοφία;",
+        "θυμάσαι τι λέγαμε για πάρκο Partner;",
         channel="web",
         history_loader=fake_history_loader,
         now=__import__("datetime").datetime(2026, 6, 7, 15, 0),
     )
 
-    assert any("πάρκο με τη Σοφία" in line for line in lines)
+    assert any("πάρκο με τη Partner" in line for line in lines)
     assert all("μαγείρεμα" not in line for line in lines)
 
 
@@ -215,14 +215,14 @@ def test_history_lookup_boosts_sofia_watch_gift_context():
                 "date": "2026-06-05",
                 "time": "19:27",
                 "role": "assistant",
-                "content": "Πολύ κομψό κομμάτι, το Rosefield Bangle S, χρυσό με λευκό καντράν Mother of Pearl. Ψήνεις δωράκι για τη Σοφία;",
+                "content": "Πολύ κομψό κομμάτι, το Rosefield Bangle S, χρυσό με λευκό καντράν Mother of Pearl. Ψήνεις δωράκι για τη Partner;",
             },
             {
                 "channel": "telegram",
                 "date": "2026-06-05",
                 "time": "19:30",
                 "role": "assistant",
-                "content": "Αποθηκεύτηκε στη μνήμη στα μελλοντικά δώρα για τη Σοφία (Rosefield Bangle S - White Gold).",
+                "content": "Αποθηκεύτηκε στη μνήμη στα μελλοντικά δώρα για τη Partner (Rosefield Bangle S - White Gold).",
             },
             {
                 "channel": "telegram",
@@ -241,7 +241,7 @@ def test_history_lookup_boosts_sofia_watch_gift_context():
     )
 
     assert any("Rosefield Bangle S" in line for line in lines)
-    assert any("μελλοντικά δώρα για τη Σοφία" in line for line in lines)
+    assert any("μελλοντικά δώρα για τη Partner" in line for line in lines)
 
 
 def test_tool_output_query_disables_memory_lookup():
@@ -256,7 +256,7 @@ def test_tool_output_query_disables_memory_lookup():
         return [_Doc("[USER_FACT] stale")]
 
     context = build_memory_context(
-        "ΜΝΗΜΕΣ ΠΟΥ ΒΡΕΘΗΚΑΝ: [FAMILY] • Ο Αλέξανδρος έφαγε μπριζόλα",
+        "ΜΝΗΜΕΣ ΠΟΥ ΒΡΕΘΗΚΑΝ: [FAMILY] • Ο Kid1 έφαγε μπριζόλα",
         recent_loader=fake_recent_loader,
         semantic_search=fake_search,
     )
@@ -271,11 +271,11 @@ def test_meal_log_tool_output_disables_memory_lookup():
 
     def fake_recent_loader(**kwargs):
         calls["recent"] += 1
-        return [{"channel": "telegram", "time": "10:32", "role": "user", "content": "Στείλε μήνυμα στη Σοφία"}]
+        return [{"channel": "telegram", "time": "10:32", "role": "user", "content": "Στείλε μήνυμα στη Partner"}]
 
     def fake_search(query, k):
         calls["semantic"] += 1
-        return [_Doc("[USER_FACT] Σοφία")]
+        return [_Doc("[USER_FACT] Partner")]
 
     query = "✅ Το γεύμα 'φακές' καταγράφηκε επιτυχώς."
     context = build_memory_context(
@@ -405,7 +405,7 @@ def test_tool_result_location_outputs_skip_semantic():
         calls["semantic"] += 1
         return [_Doc("[USER_FACT] location")] if k > 0 else []
 
-    query = "📍 Συντεταγμένες: 40.648339, 22.935704 🚶 Είναι ΕΚΤΟΣ σπιτιού"
+    query = "📍 Συντεταγμένες: 0.0, 0.0 🚶 Είναι ΕΚΤΟΣ σπιτιού"
     context = build_memory_context(
         query,
         recent_loader=lambda **kwargs: [],
@@ -445,7 +445,7 @@ def test_tool_result_background_save_confirmation_skips_semantic():
         calls["semantic"] += 1
         return [_Doc("[USER_FACT] background save")] if k > 0 else []
 
-    query = "✅ Αποθηκεύεται σε background: [Ξηροκρήνη, Σοφία, Αλέξανδρος]"
+    query = "✅ Αποθηκεύεται σε background: [Ξηροκρήνη, Partner, Kid1]"
     context = build_memory_context(
         query,
         recent_loader=lambda **kwargs: [],
@@ -509,7 +509,7 @@ def test_semantic_skip_short_important_kept():
         return [_Doc("[USER_FACT] αλέξανδρος info")] if k > 0 else []
 
     # Short message, but mentions "Alexandros" -> kept
-    query = "[10:24] ο Αλέξανδρος γύρισε"
+    query = "[10:24] ο Kid1 γύρισε"
     context = build_memory_context(
         query,
         recent_loader=fake_recent_loader,

@@ -118,7 +118,7 @@ def test_infer_summer_break_pause_directive():
 
 
 def test_infer_camp_absence_mute_directive():
-    fact = "[USER_FACT]: Ο Αλέξανδρος λείπει σε κατασκήνωση από τις 16/06/2026 και επιστρέφει στις 25/06/2026."
+    fact = "[USER_FACT]: Ο Kid1 λείπει σε κατασκήνωση από τις 16/06/2026 και επιστρέφει στις 25/06/2026."
     directives = infer_routine_reconciliation_directives(
         fact,
         category="family",
@@ -131,7 +131,7 @@ def test_infer_camp_absence_mute_directive():
     assert any(d["kind"] == "condition_add" for d in directives)
 
 def test_infer_return_home_unmute_directive():
-    fact = "[USER_FACT]: Ο Αλέξανδρος γύρισε από την κατασκήνωση και είναι πάλι σπίτι."
+    fact = "[USER_FACT]: Ο Kid1 γύρισε από την κατασκήνωση και είναι πάλι σπίτι."
     directives = infer_routine_reconciliation_directives(
         fact,
         category="family",
@@ -156,7 +156,7 @@ def test_infer_school_break_requires_child_subject():
 
 
 def test_infer_school_break_with_child_subject_creates_pause():
-    fact = "[USER_FACT]: Ο Αλέξανδρος τελείωσε το σχολείο και από αύριο έχει διακοπές μέχρι τον Σεπτέμβριο."
+    fact = "[USER_FACT]: Ο Kid1 τελείωσε το σχολείο και από αύριο έχει διακοπές μέχρι τον Σεπτέμβριο."
     directives = infer_routine_reconciliation_directives(
         fact,
         category="family",
@@ -224,7 +224,7 @@ def test_apply_notifications_mute_hits_alexandros_routines_only(tmp_path):
         [
             _routine(2, "Ύπνος Αλέξανδρου", time_str="22:20"),
             _routine(3, "Πάρκο με Αλέξανδρο", time_str="18:30"),
-            _routine(4, "Σύνταξη μηνύματος στη Σοφία στο Messenger", time_str="11:00"),
+            _routine(4, "Σύνταξη μηνύματος στη Partner στο Messenger", time_str="11:00"),
         ],
     )
 
@@ -265,7 +265,7 @@ def test_apply_shift_week_mute_matches_include_only_routines(tmp_path):
             _routine(20, "Αναχώρηση για δουλειά", time_str="10:00"),
             _routine(21, "Μεσημεριανό φαγητό", time_str="15:00"),
             _routine(22, "Ύπνος Αλέξανδρου", time_str="22:20"),
-            _routine(23, "Μήνυμα στη Σοφία στο Messenger", time_str="11:00"),
+            _routine(23, "Μήνυμα στη Partner στο Messenger", time_str="11:00"),
         ],
     )
 
@@ -298,7 +298,7 @@ def test_apply_shift_week_mute_matches_include_only_routines(tmp_path):
 
 
 def test_sofia_work_does_not_suppress_messenger_routine():
-    fact = "[USER_FACT]: Η Σοφία δουλεύει σήμερα από το σπίτι."
+    fact = "[USER_FACT]: Η Partner δουλεύει σήμερα από το σπίτι."
 
     directives = infer_routine_reconciliation_directives(
         fact,
@@ -314,7 +314,7 @@ def test_sofia_work_does_not_suppress_messenger_routine():
 
 
 def test_sofia_together_suppresses_messenger_routine():
-    fact = "[USER_FACT]: Είμαι μαζί με τη Σοφία τώρα."
+    fact = "[USER_FACT]: Είμαι μαζί με τη Partner τώρα."
 
     directives = infer_routine_reconciliation_candidates(
         fact,
@@ -338,7 +338,7 @@ def test_sofia_together_suppresses_messenger_routine():
 
 
 def test_sofia_left_clears_together_flag():
-    fact = "[USER_FACT]: Η Σοφία έφυγε και δεν είναι εδώ τώρα."
+    fact = "[USER_FACT]: Η Partner έφυγε και δεν είναι εδώ τώρα."
 
     directives = infer_routine_reconciliation_candidates(
         fact,
@@ -524,7 +524,7 @@ def test_save_fact_triggers_reconciler_after_successful_save(tmp_path):
 def test_save_fact_does_not_trigger_reconciler_when_save_is_aborted(tmp_path):
     profile_path = str(tmp_path / "astakos_profile.db")
     manager = AstakosMemoryManager()
-    old_content = "[USER_FACT]: Στις 2026-05-20 ο Αλέξανδρος πήγε στο πάρκο με τη Σοφία"
+    old_content = "[USER_FACT]: Στις 2026-05-20 ο Kid1 πήγε στο πάρκο με τη Partner"
     same_cat = _make_same_cat_result("old-id-1", old_content, 0.10)
 
     mock_collection = MagicMock()
@@ -555,7 +555,7 @@ def test_save_fact_does_not_trigger_reconciler_when_save_is_aborted(tmp_path):
         mock_vs.add_texts = MagicMock()
 
         result = manager._save_fact(
-            fact="[USER_FACT]: Ο Αλέξανδρος πάει συχνά βόλτα",
+            fact="[USER_FACT]: Ο Kid1 πάει συχνά βόλτα",
             category="family",
             agent_name="Chat_Agent",
             source="telegram",
@@ -709,7 +709,7 @@ def test_llm_candidates_merge_with_rule_candidates_without_duplicates(monkeypatc
     monkeypatch.setattr(rr, "_infer_llm_reconciliation_candidates", lambda *a, **k: fake_llm)
 
     directives = rr.infer_routine_reconciliation_candidates(
-        "[USER_FACT] Είναι καλοκαίρι ο Αλέξανδρος δεν έχει ποδόσφαιρο μέχρι Σεπτέμβριο",
+        "[USER_FACT] Είναι καλοκαίρι ο Kid1 δεν έχει ποδόσφαιρο μέχρι Σεπτέμβριο",
         category="family",
         reason="user_stated",
         now=datetime(2026, 6, 20, 12, 0, 0),
@@ -1004,7 +1004,7 @@ def test_sofia_with_alexandros_at_home_while_user_at_work_does_not_set_sofia_wit
     from services.routine_reconciler import infer_routine_reconciliation_candidates
     from datetime import datetime
 
-    text = "Εγώ είμαι πρωινή βάρδια αυτή την εβδομάδα και η Σοφία σήμερα είναι με τον Αλέξανδρο στο σπίτι"
+    text = "Εγώ είμαι πρωινή βάρδια αυτή την εβδομάδα και η Partner σήμερα είναι με τον Αλέξανδρο στο σπίτι"
     now = datetime(2026, 7, 6, 8, 30)
 
     candidates = infer_routine_reconciliation_candidates(

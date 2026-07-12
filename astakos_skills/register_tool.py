@@ -105,7 +105,7 @@ def register_tool(
     agent       = agent.strip()
     description = description.strip()
     if isinstance(dry_run, str):
-        dry_run = dry_run.strip().lower() in ("1", "true", "yes", "y", "nai", "ναι")
+        dry_run = dry_run.strip().lower() in ("1", "true", "yes", "y", "nai", t("prompts.ext_str_802"))
 
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tool_name):
         return "System Error: invalid tool_name. Use a Python identifier, e.g. my_tool."
@@ -300,3 +300,4 @@ if __name__ == "__main__":
     trg     = sys.argv[4] if len(sys.argv) > 4 else ""
     dry     = sys.argv[5] if len(sys.argv) > 5 else False
     print(register_tool.func(tool_name=name, agent=ag, risk=rk, triggers=trg, dry_run=dry))
+

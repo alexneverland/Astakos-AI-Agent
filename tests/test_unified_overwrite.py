@@ -123,8 +123,8 @@ def _run_save_fact(tmp_path, fact, category, decision, same_cat_result,
 # ──────────────────────────────────────────────────────────────────
 
 def test_keep_old_returns_false_and_writes_nothing(tmp_path):
-    old_content = "[USER_FACT]: Στις 2026-05-20 ο Αλέξανδρος πήγε στο πάρκο με τη Σοφία"
-    new_fact = "[USER_FACT]: Ο Αλέξανδρος πάει συχνά βόλτα"
+    old_content = "[USER_FACT]: Στις 2026-05-20 ο Kid1 πήγε στο πάρκο με τη Partner"
+    new_fact = "[USER_FACT]: Ο Kid1 πάει συχνά βόλτα"
 
     decision = {
         "keep_old": True, "looks_like_correction": False, "stale": False,
@@ -206,7 +206,7 @@ def test_overwrite_appends_when_no_matching_json_entry_found(tmp_path):
 # ──────────────────────────────────────────────────────────────────
 
 def test_general_fact_with_no_close_match_appends_to_both_stores(tmp_path):
-    new_fact = "Ο Λάζαρος δοκίμασε νέα συνταγή με φακές το Σαββατοκύριακο"
+    new_fact = "Ο User δοκίμασε νέα συνταγή με φακές το Σαββατοκύριακο"
 
     decision = {
         "keep_old": False, "looks_like_correction": False, "stale": False,
@@ -271,8 +271,8 @@ def test_close_unrelated_family_fact_adds_alongside_instead_of_overwrite(tmp_pat
 # ──────────────────────────────────────────────────────────────────
 
 def test_high_overlap_with_differing_literal_dates_adds_alongside(tmp_path):
-    old_content = "[USER_FACT]: Στις 2026-05-20 ο Αλέξανδρος πήγε βόλτα στο πάρκο."
-    new_fact = "[USER_FACT]: Στις 2026-06-17 ο Αλέξανδρος πήγε βόλτα στο πάρκο."
+    old_content = "[USER_FACT]: Στις 2026-05-20 ο Kid1 πήγε βόλτα στο πάρκο."
+    new_fact = "[USER_FACT]: Στις 2026-06-17 ο Kid1 πήγε βόλτα στο πάρκο."
 
     decision = {
         "keep_old": True, "looks_like_correction": False, "stale": False,
@@ -306,8 +306,8 @@ def test_high_overlap_with_differing_literal_dates_adds_alongside(tmp_path):
 # ──────────────────────────────────────────────────────────────────
 
 def test_high_overlap_static_preference_still_keeps_old(tmp_path):
-    old_content = "[USER_FACT]: Ο Αλέξανδρος αγαπάει τις φακές για φαγητό."
-    new_fact = "[USER_FACT]: Ο Αλέξανδρος αγαπάει πολύ τις φακές."
+    old_content = "[USER_FACT]: Ο Kid1 αγαπάει τις φακές για φαγητό."
+    new_fact = "[USER_FACT]: Ο Kid1 αγαπάει πολύ τις φακές."
 
     decision = {
         "keep_old": True, "looks_like_correction": False, "stale": False,

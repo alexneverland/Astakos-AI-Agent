@@ -16,8 +16,9 @@ from core.i18n import t
 TIMEZONE = "Europe/Athens"
 CALENDAR_ID = "primary"
 
-TOKEN_PATH       = r"C:\astakos_v2\credentials\token.json"
-CREDENTIALS_PATH = r"C:\astakos_v2\credentials\credentials.json"
+import config
+TOKEN_PATH       = config.TOKEN_PATH
+CREDENTIALS_PATH = config.CREDENTIALS_PATH
 _CALENDAR_SCOPE  = "https://www.googleapis.com/auth/calendar"
 
 
@@ -52,23 +53,23 @@ def _parse_dt(dt_str: str, tz: ZoneInfo) -> datetime:
     day_offset = None
     time_part = None
 
-    if low.startswith("αύριο") or low.startswith("αυριο"):
+    if low.startswith(t("prompts.ext_str_655")) or low.startswith(t("prompts.ext_str_588")):
         day_offset = 1
         rest = s[5:].strip()
         time_part = rest if rest else "09:00"
-    elif low.startswith("σήμερα") or low.startswith("σημερα"):
+    elif low.startswith(t("prompts.ext_str_524")) or low.startswith(t("prompts.ext_str_530")):
         day_offset = 0
         rest = s[6:].strip()
         time_part = rest if rest else "09:00"
     else:
         _DAYS_EL = {
-            "δευτέρα": 0, "δευτερα": 0,
-            "τρίτη": 1,   "τριτη": 1,
-            "τετάρτη": 2, "τεταρτη": 2,
-            "πέμπτη": 3,  "πεμπτη": 3,
-            "παρασκευή": 4, "παρασκευη": 4,
-            "σάββατο": 5, "σαββατο": 5,
-            "κυριακή": 6, "κυριακη": 6,
+            t("prompts.ext_str_354"): 0, t("prompts.ext_str_357"): 0,
+            t("prompts.ext_str_578"): 1,   t("prompts.ext_str_554"): 1,
+            t("prompts.ext_str_427"): 2, t("prompts.ext_str_396"): 2,
+            t("prompts.ext_str_461"): 3,  t("prompts.ext_str_457"): 3,
+            t("prompts.ext_str_274"): 4, t("prompts.ext_str_258"): 4,
+            t("prompts.ext_str_425"): 5, t("prompts.ext_str_383"): 5,
+            t("prompts.ext_str_359"): 6, t("prompts.ext_str_415"): 6,
         }
         for day_name, weekday in _DAYS_EL.items():
             if low.startswith(day_name):
@@ -161,15 +162,15 @@ def google_calendar_tool(
             if action == "today":
                 time_min = now.replace(hour=0, minute=0, second=0, microsecond=0)
                 time_max = now.replace(hour=23, minute=59, second=59)
-                label = "σήμερα"
+                label = t("prompts.ext_str_524")
             elif action == "week":
                 time_min = now
                 time_max = now + timedelta(days=7)
-                label = "επόμενες 7 μέρες"
+                label = t("prompts.ext_7")
             else:
                 time_min = now
                 time_max = now + timedelta(days=max(1, days_ahead))
-                label = f"επόμενες {days_ahead} μέρες"
+                label = t("astakos_skills.gcalendar.next_days", days=days_ahead)
 
             events_result = svc.events().list(
                 calendarId=CALENDAR_ID,
@@ -293,7 +294,8 @@ def google_calendar_tool(
             svc.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
             return t("skills.gcalendar.msg_event_deleted", title=evt_title)
 
-        return f"❌ Άγνωστο action: '{action}'. Χρησιμοποίησε: list, today, week, create, update, delete, search."
+        return t("astakos_skills.gcalendar.unknown_action", action=action)
 
     except Exception as e:
         return t("skills.gcalendar.msg_error", e=str(e))
+

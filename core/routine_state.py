@@ -5,6 +5,7 @@
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
 
+from core.i18n import t
 from enum import Enum
 from core.exceptions import RoutineConflictError
 
@@ -73,7 +74,7 @@ def validate_transition(from_state: RoutineState, to_state: RoutineState) -> Non
     allowed = VALID_TRANSITIONS.get(from_state, [])
     if to_state not in allowed:
         raise RoutineConflictError(
-            f"Μη έγκυρη μετάβαση: {from_state.value} → {to_state.value}",
+            t("core.routine_state.invalid_transition", from_state=from_state.value, to_state=to_state.value),
             context={
                 "from":    from_state.value,
                 "to":      to_state.value,

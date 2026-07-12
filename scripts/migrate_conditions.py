@@ -1,3 +1,4 @@
+from core.i18n import t
 import json
 import os
 import sys
@@ -17,7 +18,7 @@ def normalize_text(text: str) -> str:
 
 def is_football_routine(event_name: str) -> bool:
     event_name_norm = normalize_text(event_name)
-    keywords = ("ποδοσφαιρ", "προπονησ", "μπαλα")
+    keywords = (t("prompts.ext_str_275"), t("prompts.ext_str_338"), t("prompts.ext_str_550"))
     return any(keyword in event_name_norm for keyword in keywords)
 
 
@@ -150,3 +151,4 @@ def migrate_legacy_conditions():
 
 if __name__ == "__main__":
     migrate_legacy_conditions()
+

@@ -24,7 +24,7 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "")
 VACUUM_IP = os.getenv("VACUUM_IP", "")
 VACUUM_TOKEN = os.getenv("VACUUM_TOKEN", "")
 LINKEDIN_TOKEN = os.getenv("LINKEDIN_TOKEN")
-PROJECT_ID = os.getenv("PROJECT_ID", "astakos-finall")
+PROJECT_ID = os.getenv("PROJECT_ID", "your-gcp-project-id")
 LOCATION = os.getenv("LOCATION", "us-central1")
 
 # ==========================================
@@ -35,8 +35,12 @@ PHOTOS_DIR        = os.path.join(BASE_DIR, "telegram_photos")
 CHROMA_DB_DIR     = os.path.join(BASE_DIR, "chroma_db")
 UPLOADS_DIR       = os.path.join(BASE_DIR, "telegram_uploads")  # ← main uploads folder
 MEMORY_AUDIT_DIR  = os.path.join(BASE_DIR, "logs", "memory_audit")
+WATCH_DIR         = os.path.join(BASE_DIR, "watch_folder")
+CREDENTIALS_DIR   = os.path.join(BASE_DIR, "credentials")
+TOKEN_PATH        = os.path.join(CREDENTIALS_DIR, "token.json")
+CREDENTIALS_PATH  = os.path.join(CREDENTIALS_DIR, "credentials.json")
 
-for directory in [WORKSPACE_DIR, PHOTOS_DIR, CHROMA_DB_DIR, UPLOADS_DIR, MEMORY_AUDIT_DIR]:
+for directory in [WORKSPACE_DIR, PHOTOS_DIR, CHROMA_DB_DIR, UPLOADS_DIR, MEMORY_AUDIT_DIR, WATCH_DIR, CREDENTIALS_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # ==========================================
@@ -77,13 +81,27 @@ SIM_THRESHOLD          = 0.88
 ROUTINE_MISS_GRACE_MINUTES = 90
 
 import json
+import logging
 
 # ==========================================
 # 6. USER SETTINGS
 # ==========================================
-SETTINGS_FILE = os.path.join(BASE_DIR, "astakos_settings.json")
+
+PERSONA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "persona.md")
+USER_PERSONA = "• User"
+if os.path.exists(PERSONA_FILE):
+    with open(PERSONA_FILE, "r", encoding="utf-8") as f:
+        USER_PERSONA = f.read().strip()
+
+SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "astakos_settings.json")
 RESPONSE_LANGUAGE = "Greek" # Default fallback
 USER_NAME = "User" # Default fallback
+PARTNER_NAME = "Partner"
+KID1_NAME = "Kid1"
+KID2_NAME = "Kid2"
+BOT_NAME = "Astakos"
+DEVELOPER_NAME = "Piston-7"
+DEFAULT_CITY = "Thessaloniki"
 SENTIMENTAL_OVERRIDE_KEYWORDS = ()
 if os.path.exists(SETTINGS_FILE):
     try:
@@ -91,13 +109,20 @@ if os.path.exists(SETTINGS_FILE):
             _settings = json.load(f)
             RESPONSE_LANGUAGE = _settings.get("response_language", "Greek")
             USER_NAME = _settings.get("user_name", "User")
+            PARTNER_NAME = _settings.get("partner_name", "Partner")
+            KID1_NAME = _settings.get("kid1_name", "Kid1")
+            KID2_NAME = _settings.get("kid2_name", "Kid2")
+            BOT_NAME = _settings.get("bot_name", "Astakos")
+            DEVELOPER_NAME = _settings.get("developer_name", "Piston-7")
+            DEFAULT_CITY = _settings.get("default_city", "Thessaloniki")
+            BACKUP_DRIVE_FOLDER_ID = _settings.get("backup_drive_folder_id", "")
             SENTIMENTAL_OVERRIDE_KEYWORDS = tuple(_settings.get("sentimental_override_keywords", []))
     except Exception as e:
         print(f"⚠️ Error reading settings: {e}")
 
-HOME_COORDS = tuple(_settings.get("home_coords", [40.646558, 22.939036])) if "_settings" in locals() else (40.646558, 22.939036)
+HOME_COORDS = tuple(_settings.get("home_coords", [0.0, 0.0])) if "_settings" in locals() else (0.0, 0.0)
 HOME_RADIUS_M = _settings.get("home_radius_m", 150) if "_settings" in locals() else 150
-WORK_COORDS = tuple(_settings.get("work_coords", [40.690914, 22.929607])) if "_settings" in locals() else (40.690914, 22.929607)
+WORK_COORDS = tuple(_settings.get("work_coords", [0.0, 0.0])) if "_settings" in locals() else (0.0, 0.0)
 WORK_RADIUS_M = _settings.get("work_radius_m", 300) if "_settings" in locals() else 300
 
 # ==========================================

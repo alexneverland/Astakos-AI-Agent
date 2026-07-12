@@ -1,3 +1,4 @@
+from core.i18n import t
 import re
 from enum import Enum
 
@@ -112,13 +113,13 @@ def _register_tool_terminal_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
     if "register_tool.py" in lowered:
         if "--help" in lowered or re.search(r"(?:^|\s)-h(?:\s|$)", lowered):
             return ExecPolicy.SAFE, "register_tool.py help"
-        if re.search(r"(?:true|1|yes|y|nai|ναι)\s*['\"]?\s*$", lowered):
+        if re.search(t("prompts.ext_true_1_yes_y_nai_s_s"), lowered):
             return ExecPolicy.WARNING, "register_tool.py dry-run via terminal"
         return ExecPolicy.REQUIRE_CONFIRMATION, "register_tool.py apply via terminal"
 
     if re.search(r"register_tool\s*(?:\.func)?\s*\(", cmd, re.IGNORECASE):
         if re.search(
-            r"dry_run\s*=\s*(?:true|1|['\"](?:true|yes|y|nai|ναι)['\"])",
+            t("prompts.ext_dry_run_s_s_true_1_true_yes_y_"),
             cmd,
             re.IGNORECASE,
         ):
@@ -168,7 +169,7 @@ def safe_execute(cmd: str, executor_func, confirm_callback=None) -> dict:
     if policy == ExecPolicy.BLOCKED:
         from memory.event_log import log_event
         log_event("safe_executor", "blocked", cmd=cmd[:80], pattern=matched)
-        return {"status": "blocked", "reason": f"Απαγορευμένη εντολή: `{matched}`"}
+        return {"status": "blocked", "reason": t("core.safe_executor.forbidden_command", matched=matched)}
 
     if policy == ExecPolicy.REQUIRE_CONFIRMATION:
         from memory.event_log import log_event
@@ -176,9 +177,9 @@ def safe_execute(cmd: str, executor_func, confirm_callback=None) -> dict:
         if confirm_callback:
             confirmed = confirm_callback(cmd)  # sends Telegram, waits
             if not confirmed:
-                return {"status": "cancelled", "reason": "Ο χρήστης δεν επιβεβαίωσε."}
+                return {"status": "cancelled", "reason": t("prompts.ext_str_32")}
         else:
-            return {"status": "blocked", "reason": "Απαιτεί επιβεβαίωση αλλά δεν υπάρχει callback."}
+            return {"status": "blocked", "reason": t("prompts.ext_callback")}
 
     if policy == ExecPolicy.WARNING:
         from memory.event_log import log_event
@@ -188,3 +189,4 @@ def safe_execute(cmd: str, executor_func, confirm_callback=None) -> dict:
 
     # SAFE or WARNING approved → execution
     return executor_func(cmd)
+

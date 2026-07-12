@@ -6,6 +6,8 @@
 # automatic changes (confidence > 0.75) or asks (0.5-0.75).
 # ================================================================
 
+import config
+from core.i18n import t
 import os
 import json
 import sqlite3
@@ -30,7 +32,7 @@ DB_PATH  = os.path.join(_BASE, "..", "astakos_routines.db")
 LOG_DIR  = os.path.join(_BASE, "..", "logs", "events")
 
 AUTO_APPLY_THRESHOLD = 0.75   # above this → automatic application
-ASK_THRESHOLD        = 0.50   # above this → asks Lazaros
+ASK_THRESHOLD        = 0.50   # above this → asks {config.USER_NAME}
 REFLECTION_PENDING   = 0
 REFLECTION_APPLIED   = 1
 REFLECTION_REJECTED  = -1
@@ -279,7 +281,7 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
         from core.brain import HEAVY_MODEL as MAIN_MODEL
 
         vertexai.init(
-            project=os.getenv("PROJECT_ID", "astakos-finall"),
+            project=config.PROJECT_ID,
             location=os.getenv("LOCATION", "global")
         )
         model = GenerativeModel(MAIN_MODEL)
@@ -310,8 +312,8 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
             )
 
         from core.utils import load_agent_prompt
-        trace_summary_text = chr(10).join(trace_summary) if trace_summary else "Δεν υπάρχουν."
-        routine_summary_text = chr(10).join(routine_summary) if routine_summary else "Δεν υπάρχουν ρουτίνες."
+        trace_summary_text = chr(10).join(trace_summary) if trace_summary else t("prompts.ext_str_148")
+        routine_summary_text = chr(10).join(routine_summary) if routine_summary else t("prompts.ext_str_47")
         base_prompt = load_agent_prompt("reflection_nightly")
         prompt = base_prompt.format(
             traces_len=len(traces),
@@ -322,7 +324,7 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
         response = model.generate_content(prompt)
         text = response.text.strip()
 
-        # Markdown cleaning Regardless of whether you need to translate "Καθαρισμός markdown" to "Markdown cleaning" or "Markdown cleanup", here is the direct translation:
+        # Markdown cleanup
 
 # Markdown cleanup_
         if text.startswith("```"):
@@ -508,7 +510,7 @@ def run_reflection() -> dict:
                 skipped += 1
 
         elif confidence >= ASK_THRESHOLD:
-            # Asks Lazaros — we keep the id so that a "yes" on Telegram can
+            # Asks {USER_NAME} — we keep the id so that a "yes" on Telegram can
             # to apply THIS reflection specifically (see clients/telegram_bot.py)
             new_id = _save_reflection(source, obs, action, confidence, lesson, applied=False,
                                        routine_id=routine_id, action_value=action_value)
@@ -546,3 +548,4 @@ def run_reflection() -> dict:
 
 if __name__ == "__main__":
     print(run_reflection())
+

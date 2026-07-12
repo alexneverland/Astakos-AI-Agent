@@ -19,7 +19,7 @@ def test_fast_path_short_idle_chat():
 
 
 def test_fast_path_family_mention():
-    assert is_simple_chat_fast_path_candidate("Ο Αλέξανδρος γύρισε") is False
+    assert is_simple_chat_fast_path_candidate("Ο Kid1 γύρισε") is False
 
 
 def test_fast_path_work_shift_update():
@@ -27,11 +27,11 @@ def test_fast_path_work_shift_update():
 
 
 def test_fast_path_action_request():
-    assert is_simple_chat_fast_path_candidate("στείλε μήνυμα στη Σοφία") is False
+    assert is_simple_chat_fast_path_candidate("στείλε μήνυμα στη Partner") is False
 
 
 def test_fast_path_question():
-    assert is_simple_chat_fast_path_candidate("τι κάνει ο Αλέξανδρος;") is False
+    assert is_simple_chat_fast_path_candidate("τι κάνει ο Kid1;") is False
 
 
 def test_ultra_light_ack_basic_cases():
@@ -47,7 +47,7 @@ def test_ultra_light_ack_rejects_plain_no():
 
 def test_ultra_light_ack_rejects_real_updates():
     assert is_ultra_light_ack("από αύριο είμαι πρωινός") is False
-    assert is_ultra_light_ack("στείλε μήνυμα στη Σοφία") is False
+    assert is_ultra_light_ack("στείλε μήνυμα στη Partner") is False
 
 
 def test_ultra_light_ack_response_is_neutral_confirmation():

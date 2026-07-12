@@ -211,7 +211,7 @@ def test_web_agent_node_does_not_short_circuit_linkedin_reply_for_messenger_requ
 
     state = {
         "messages": [
-            HumanMessage(content="Φτιάξε νέο Messenger draft για τη Σοφία. Μόνο Messenger μήνυμα, όχι LinkedIn post."),
+            HumanMessage(content="Φτιάξε νέο Messenger draft για τη Partner. Μόνο Messenger μήνυμα, όχι LinkedIn post."),
             AIMessage(content="", tool_calls=[{"name": "update_pending_linkedin_post", "args": {}, "id": "t1"}]),
             ToolMessage(
                 tool_call_id="t1",
@@ -234,7 +234,7 @@ def test_should_attach_linkedin_reply_skips_messenger_turn():
         "SUCCESS: draft ready and parked. STOP calling tools and report to the user that the draft is ready for approval."
     ]
     assert should_attach_linkedin_draft_reply(
-        "Messenger μηνύματα για τη Σοφία ετοίμασε όχι linkedin",
+        "Messenger μηνύματα για τη Partner ετοίμασε όχι linkedin",
         tool_results,
         recent_linkedin_prompt_active=False,
     ) is False

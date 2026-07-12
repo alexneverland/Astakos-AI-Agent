@@ -18,8 +18,9 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from core.i18n import t
 
-TOKEN_PATH       = r"C:\astakos_v2\credentials\token.json"
-CREDENTIALS_PATH = r"C:\astakos_v2\credentials\credentials.json"
+import config
+TOKEN_PATH       = config.TOKEN_PATH
+CREDENTIALS_PATH = config.CREDENTIALS_PATH
 
 SHARED_GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",

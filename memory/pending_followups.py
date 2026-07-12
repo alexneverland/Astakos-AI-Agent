@@ -1,3 +1,4 @@
+from core.i18n import t
 import json
 import sqlite3
 import unicodedata
@@ -160,10 +161,10 @@ def _build_followup_theme_tokens(
                 tokens.add(tok)
 
     generic = {
-        "σημερα", "αυριο", "τελικα", "μετα", "αργοτερα",
-        "κανε", "κανω", "κανεις", "παμε", "πηγα", "παω",
-        "λεω", "ειπα", "δουμε", "δω", "σου", "μου",
-        "follow", "check", "later", "update", "πηρα", "παρω",
+        t("prompts.ext_str_530"), t("prompts.ext_str_588"), t("prompts.ext_str_543"), t("prompts.ext_str_689"), t("prompts.ext_str_290"),
+        t("prompts.ext_str_674"), t("prompts.ext_str_751"), t("prompts.ext_str_469"), t("prompts.ext_str_691"), t("prompts.ext_str_738"), t("prompts.ext_str_792"),
+        t("prompts.ext_str_829"), t("prompts.ext_str_672"), t("prompts.ext_str_591"), t("prompts.ext_str_836"), t("prompts.ext_str_784"), t("prompts.ext_str_822"),
+        "follow", "check", "later", "update", t("prompts.ext_str_722"), t("prompts.ext_str_759"),
     }
     return {tok for tok in tokens if tok not in generic}
 
@@ -315,10 +316,10 @@ def _infer_legacy_target_window(
     text = _normalize_match_text(f"{source_user_text} {reason}")
     topic = _coerce_text_scalar(topic, "").lower()
 
-    if "σε " in text and "ωρ" in text:
+    if t("prompts.ext_str_820") in text and t("prompts.ext_str_842") in text:
         return "explicit_timer"
 
-    if any(marker in text for marker in ("αυριο", "tomorrow")):
+    if any(marker in text for marker in (t("prompts.ext_str_588"), "tomorrow")):
         if topic == "food_purchase":
             return "next_day_late_morning"
         if topic == "outing":
@@ -327,7 +328,7 @@ def _infer_legacy_target_window(
             return "next_day_afternoon"
         return "next_day_morning"
 
-    if any(marker in text for marker in ("αποψε", "βραδ", "tonight", "evening")):
+    if any(marker in text for marker in (t("prompts.ext_str_646"), t("prompts.ext_str_747"), "tonight", "evening")):
         return "same_day_evening"
 
     if topic == "outing":
@@ -445,12 +446,12 @@ def normalize_followup_delay(
         return max(15, final_minutes)
 
     if topic == "food_purchase":
-        if "αυριο" in text or "αύριο" in text:
+        if t("prompts.ext_str_588") in text or t("prompts.ext_str_655") in text:
             target_time = _next_occurrence_for_window(now, "next_day_late_morning", value)
             final_minutes = int((target_time - now).total_seconds() / 60.0)
             return max(15, final_minutes)
 
-        if "αποψε" in text or "απόψε" in text or "βραδ" in text:
+        if t("prompts.ext_str_646") in text or t("prompts.ext_str_653") in text or t("prompts.ext_str_747") in text:
             fallback_delay = max(45, min(value, 240))
             target_time = _apply_quiet_hours(now + timedelta(minutes=fallback_delay))
             final_minutes = int((target_time - now).total_seconds() / 60.0)
@@ -1322,32 +1323,32 @@ def looks_like_followup_resolution_update(user_text: str) -> bool:
         return False
 
     resolution_markers = (
-        "τελικά",
-        "ήδη",
-        "το έκανα",
-        "το εκανα",
-        "το πήρα",
-        "το πηρα",
-        "τις πήρα",
-        "τις πηρα",
-        "γύρισα",
-        "γυρισα",
-        "βρήκα",
-        "βρηκα",
-        "πήγα",
-        "πηγα",
-        "έφυγα",
-        "εφυγα",
-        "φεύγω",
-        "φευγω",
-        "πάω",
-        "παω",
-        "δεν πήρα",
-        "δεν πηρα",
-        "δεν έγινε",
-        "δεν εγινε",
-        "αύριο",
-        "αυριο",
+        t("prompts.ext_str_534"),
+        t("prompts.ext_str_821"),
+        t("prompts.ext_str_319"),
+        t("prompts.ext_str_281"),
+        t("prompts.ext_str_369"),
+        t("prompts.ext_str_403"),
+        t("prompts.ext_str_285"),
+        t("prompts.ext_str_313"),
+        t("prompts.ext_str_516"),
+        t("prompts.ext_str_529"),
+        t("prompts.ext_str_551"),
+        t("prompts.ext_str_572"),
+        t("prompts.ext_str_713"),
+        t("prompts.ext_str_738"),
+        t("prompts.ext_str_608"),
+        t("prompts.ext_str_649"),
+        t("prompts.ext_str_563"),
+        t("prompts.ext_str_660"),
+        t("prompts.ext_str_787"),
+        t("prompts.ext_str_792"),
+        t("prompts.ext_str_316"),
+        t("prompts.ext_str_308"),
+        t("prompts.ext_str_253"),
+        t("prompts.ext_str_254"),
+        t("prompts.ext_str_655"),
+        t("prompts.ext_str_588"),
     )
     return any(marker in text for marker in resolution_markers)
 
@@ -1441,13 +1442,13 @@ Examples:
 - "tonight we will go out" -> target_window: "same_day_evening"
 
 Examples of a good subject:
-- "μπριζόλες λαιμού"
-- "συνάντηση με Σοφία"
-- "καθάρισμα κλουβιού"
+{t("memory.pending_followups.prompt_example_1")}
+{t("memory.pending_followups.prompt_example_2")}
+{t("memory.pending_followups.prompt_example_3")}
 
 Examples of a bad subject:
-- "αγορά και ψήσιμο για τις μπριζόλες λαιμού"
-- "να δω πώς πήγε το πράγμα αργότερα"
+{t("memory.pending_followups.prompt_example_4")}
+{t("memory.pending_followups.prompt_example_5")}
 
 {active_followups_text}
 
@@ -1488,18 +1489,18 @@ def looks_like_messenger_draft_exchange(user_text: str, ai_text: str = "") -> bo
 
     operational_markers = (
         "draft",
-        "προσχεδιο",
-        "μηνυμα",
+        t("prompts.ext_str_264"),
+        t("prompts.ext_str_478"),
         "messenger",
-        "στειλε το μηνυμα",
-        "στειλε.",
-        "στειλε ",
-        "στειλτο",
-        "να το στειλω",
-        "θελεις αλλαγες",
-        "δεν βρεθηκε προσχεδιο",
-        "το draft καθαριστηκε",
-        "σταλθηκε μαστορα",
+        t("prompts.ext_str_113"),
+        t("prompts.ext_str_430"),
+        t("prompts.ext_str_392"),
+        t("prompts.ext_str_399"),
+        t("prompts.ext_str_168"),
+        t("prompts.ext_str_133"),
+        t("prompts.ext_str_59"),
+        t("prompts.ext_draft_5"),
+        t("prompts.ext_str_120"),
     )
     return any(marker in text for marker in operational_markers)
 
@@ -1524,14 +1525,14 @@ def looks_like_linkedin_post_exchange(user_text: str, ai_text: str = "") -> bool
 
     operational_markers = (
         "linkedin",
-        "αναρτηση",
+        t("prompts.ext_str_335"),
         "post",
         "publish",
-        "draft του linkedin",
+        t("prompts.ext_draft_linkedin_1"),
         "linkedin post",
-        "post για το linkedin",
-        "το linkedin post που ετοιμασα",
-        "οριστε το linkedin post",
+        t("prompts.ext_post_linkedin"),
+        t("prompts.ext_linkedin_post"),
+        t("prompts.ext_linkedin_post_1"),
     )
     return any(marker in text for marker in operational_markers)
 
@@ -1542,32 +1543,32 @@ def looks_like_negative_plan_update(user_text: str) -> bool:
         return False
 
     negative_markers = (
-        "δεν θα",
-        "δε θα",
-        "οχι σημερα",
-        "δεν εγινε",
-        "ακυρω",
-        "μετατιθε",
-        "αργοτερα",
-        "αυριο",
+        t("prompts.ext_str_508"),
+        t("prompts.ext_str_596"),
+        t("prompts.ext_str_212"),
+        t("prompts.ext_str_254"),
+        t("prompts.ext_str_619"),
+        t("prompts.ext_str_296"),
+        t("prompts.ext_str_290"),
+        t("prompts.ext_str_588"),
     )
     future_context_markers = (
-        "θα ",
-        "σημερα",
-        "αυριο",
-        "μετα",
-        "αργοτερα",
-        "παμε",
-        "γινει",
-        "κανουμε",
+        t("prompts.ext_str_826"),
+        t("prompts.ext_str_530"),
+        t("prompts.ext_str_588"),
+        t("prompts.ext_str_689"),
+        t("prompts.ext_str_290"),
+        t("prompts.ext_str_691"),
+        t("prompts.ext_str_613"),
+        t("prompts.ext_str_363"),
     )
     completion_markers = (
-        "το εκανα",
-        "πηγα",
-        "πηρα",
-        "γυρισα",
-        "βρηκα",
-        "σταλθηκε",
+        t("prompts.ext_str_281"),
+        t("prompts.ext_str_738"),
+        t("prompts.ext_str_722"),
+        t("prompts.ext_str_529"),
+        t("prompts.ext_str_572"),
+        t("prompts.ext_str_310"),
     )
 
     has_negative = any(marker in text for marker in negative_markers)
@@ -1586,37 +1587,37 @@ def looks_like_operational_reminder_exchange(user_text: str, ai_text: str = "") 
         return False
 
     reminder_request_markers = (
-        "θυμισε μου",
-        "υπενθυμισε μου",
-        "βαλε υπενθυμιση",
-        "βαλτο υπενθυμιση",
-        "να μου το θυμισεις",
-        "ξυπνημα",
-        "ξυπνητηρι",
+        t("prompts.ext_str_200"),
+        t("prompts.ext_str_141"),
+        t("prompts.ext_str_124"),
+        t("prompts.ext_str_118"),
+        t("prompts.ext_str_90"),
+        t("prompts.ext_str_360"),
+        t("prompts.ext_str_256"),
         "alarm",
-        "αφυπνιση",
+        t("prompts.ext_str_331"),
     )
 
     reminder_confirmation_markers = (
-        "υπενθυμιση ρυθμιστηκε",
-        "υπενθυμιση οριστηκε",
-        "ξυπνητηρι ρυθμιστηκε",
+        t("prompts.ext_str_58"),
+        t("prompts.ext_str_70"),
+        t("prompts.ext_str_65"),
         "alarm set",
     )
 
     has_time_reference = (
         ":" in user_norm
-        or "πρωι" in user_norm
-        or "βραδυ" in user_norm
-        or "αυριο" in user_norm
-        or "σε " in user_norm
+        or t("prompts.ext_str_717") in user_norm
+        or t("prompts.ext_str_590") in user_norm
+        or t("prompts.ext_str_588") in user_norm
+        or t("prompts.ext_str_820") in user_norm
     )
 
     user_looks_like_reminder = (
         any(marker in user_norm for marker in reminder_request_markers)
         or (
             has_time_reference
-            and any(marker in user_norm for marker in ("ξυπνημα", "ξυπνητηρι", "θυμισε", "υπενθυμιση"))
+            and any(marker in user_norm for marker in (t("prompts.ext_str_360"), t("prompts.ext_str_256"), t("prompts.ext_str_455"), t("prompts.ext_str_238")))
         )
     )
 
@@ -1632,7 +1633,7 @@ def looks_like_operational_reminder_exchange(user_text: str, ai_text: str = "") 
     # Even if there is no confirmation string, just wake-up/alarm setup
     # we do not want it to become a follow-up candidate
     if user_looks_like_reminder and any(
-        marker in user_norm for marker in ("ξυπνημα", "ξυπνητηρι", "05:30", "5:30")
+        marker in user_norm for marker in (t("prompts.ext_str_360"), t("prompts.ext_str_256"), "05:30", "5:30")
     ):
         return True
 
@@ -1666,22 +1667,22 @@ def maybe_create_followup_from_exchange(
     # Skip followups if the exchange is just tool output or routine system messages
     if "routine" in agent_name.lower():
         return None
-    if "σύστημα:" in clean_user.lower() or "[system]" in clean_user.lower():
+    if t("prompts.ext_str_317") in clean_user.lower() or "[system]" in clean_user.lower():
         return None
-    if "αποτέλεσμα εργαλείου" in clean_user.lower() or "αποτέλεσμα ρουτίνας" in clean_user.lower():
+    if t("prompts.ext_str_67") in clean_user.lower() or t("prompts.ext_str_69") in clean_user.lower():
         return None
 
     low_user = clean_user.lower()
 
     skip_markers = (
         "ok",
-        "οκ",
-        "ναι",
-        "όχι",
+        t("prompts.ext_str_833"),
+        t("prompts.ext_str_802"),
+        t("prompts.ext_str_799"),
         "thanks",
-        "ευχαριστ",
-        "υπενθύμιση ρυθμίστηκε",
-        "αποθηκεύεται σε background",
+        t("prompts.ext_str_280"),
+        t("prompts.ext_str_55"),
+        t("prompts.ext_background"),
     )
     if len(clean_user.split()) <= 3 and any(m in low_user for m in skip_markers):
         return None
@@ -1882,36 +1883,36 @@ def maybe_resolve_followups_from_user_message(user_text: str) -> int:
         ).fetchall()
 
         resolution_markers = (
-            "τελικά",
-            "ήδη",
-            "το έκανα",
-            "το εκανα",
-            "το πήρα",
-            "το πηρα",
-            "τις πήρα",
-            "τις πηρα",
-            "γύρισα",
-            "γυρισα",
-            "βρήκα",
-            "βρηκα",
-            "πήγα",
-            "πηγα",
-            "φεύγω",
-            "φευγω",
-            "πάω",
-            "παω",
-            "έγινε",
-            "εγινε",
-            "αύριο",
-            "αυριο",
-            "δεν πήρα",
-            "δεν πηρα",
-            "δεν έγινε",
-            "δεν εγινε",
-            "μετά",
-            "μετα",
-            "αργότερα",
-            "αργοτερα",
+            t("prompts.ext_str_534"),
+            t("prompts.ext_str_821"),
+            t("prompts.ext_str_319"),
+            t("prompts.ext_str_281"),
+            t("prompts.ext_str_369"),
+            t("prompts.ext_str_403"),
+            t("prompts.ext_str_285"),
+            t("prompts.ext_str_313"),
+            t("prompts.ext_str_516"),
+            t("prompts.ext_str_529"),
+            t("prompts.ext_str_551"),
+            t("prompts.ext_str_572"),
+            t("prompts.ext_str_713"),
+            t("prompts.ext_str_738"),
+            t("prompts.ext_str_563"),
+            t("prompts.ext_str_660"),
+            t("prompts.ext_str_787"),
+            t("prompts.ext_str_792"),
+            t("prompts.ext_str_644"),
+            t("prompts.ext_str_558"),
+            t("prompts.ext_str_655"),
+            t("prompts.ext_str_588"),
+            t("prompts.ext_str_316"),
+            t("prompts.ext_str_308"),
+            t("prompts.ext_str_253"),
+            t("prompts.ext_str_254"),
+            t("prompts.ext_str_681"),
+            t("prompts.ext_str_689"),
+            t("prompts.ext_str_282"),
+            t("prompts.ext_str_290"),
         )
 
         if not any(m in text for m in resolution_markers):
@@ -1929,7 +1930,7 @@ def maybe_resolve_followups_from_user_message(user_text: str) -> int:
             ]
 
             lexical_hint = bool(shared_tokens) or (
-                topic == "outing" and any(x in text for x in ("βρηκα", "τους βρηκα", "πηγα", "γυρισα"))
+                topic == "outing" and any(x in text for x in (t("prompts.ext_str_572"), t("prompts.ext_str_239"), t("prompts.ext_str_738"), t("prompts.ext_str_529")))
             )
 
             if not lexical_hint and len(text.split()) < 4:
@@ -1997,3 +1998,4 @@ def maybe_resolve_followups_from_user_message(user_text: str) -> int:
         return resolved_count
     finally:
         conn.close()
+

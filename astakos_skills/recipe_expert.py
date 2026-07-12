@@ -21,8 +21,8 @@ from core.i18n import t
 HISTORY_FILE = os.path.join(BASE_DIR, "astakos_skills", "food_history.json")
 
 _MEAL_STOPWORDS = {
-    "με", "και", "στο", "στον", "στη", "στην", "το", "τη", "την", "τα", "ο", "η",
-    "οι", "σε", "για", "απο", "από", "μεσημερι", "βραδυ", "σημερα", "αυριο"
+    t("prompts.ext_str_835"), t("prompts.ext_str_776"), t("prompts.ext_str_772"), t("prompts.ext_str_685"), t("prompts.ext_str_804"), t("prompts.ext_str_724"), t("prompts.ext_str_839"), t("prompts.ext_str_832"), t("prompts.ext_str_786"), t("prompts.ext_str_843"), t("prompts.ext_str_846"), t("prompts.ext_str_847"),
+    t("prompts.ext_str_831"), t("prompts.ext_str_840"), t("prompts.ext_str_806"), t("prompts.ext_str_800"), t("prompts.ext_str_827"), t("prompts.ext_str_297"), t("prompts.ext_str_590"), t("prompts.ext_str_530"), t("prompts.ext_str_588")
 }
 
 
@@ -32,7 +32,7 @@ def _normalize_meal_name(meal_name: str) -> set[str]:
         char for char in unicodedata.normalize("NFD", text)
         if unicodedata.category(char) != "Mn"
     )
-    text = re.sub(r"[^a-zα-ω0-9]+", " ", text)
+    text = re.sub(r"[^\w]+", " ", text)
     return {
         token for token in text.split()
         if len(token) > 1 and token not in _MEAL_STOPWORDS
@@ -165,3 +165,4 @@ def log_meal(meal_name: str):
         json.dump(history[-30:], f, ensure_ascii=False, indent=4)
         
     return t("skills.recipe_expert.msg_recorded", name=meal_name)
+

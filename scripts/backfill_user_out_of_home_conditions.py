@@ -1,3 +1,4 @@
+from core.i18n import t
 import json
 import os
 import sqlite3
@@ -73,9 +74,9 @@ def append_user_out_of_home_suppress_if_missing(conds: list[dict]) -> list[dict]
 def normalize_routine_conditions(routine_id: int, event_name: str, conds: list[dict]) -> list[dict]:
     event_l = (event_name or "").lower()
 
-    is_sleep = "υπν" in event_l or "sleep" in event_l
-    is_park_like = "παρκ" in event_l or "βολτ" in event_l or "παιχν" in event_l
-    is_home_only = "μαγειρ" in event_l or "φαγητ" in event_l or "γευμ" in event_l or "κουζιν" in event_l
+    is_sleep = t("prompts.ext_str_785") in event_l or "sleep" in event_l
+    is_park_like = t("prompts.ext_str_756") in event_l or t("prompts.ext_str_760") in event_l or t("prompts.ext_str_635") in event_l
+    is_home_only = t("prompts.ext_str_441") in event_l or t("prompts.ext_str_662") in event_l or t("prompts.ext_str_757") in event_l or t("prompts.ext_str_547") in event_l
 
     if routine_id == 2 or is_sleep:
         conds = remove_context_flag(conds, "family_outside_activity")
@@ -141,3 +142,4 @@ def run_backfill() -> dict:
 if __name__ == "__main__":
     result = run_backfill()
     print(json.dumps(result, ensure_ascii=False, indent=2))
+

@@ -5,6 +5,7 @@
 # recurring patterns and calls upsert_routine automatically.
 # ================================================================
 
+from core.i18n import t
 import json
 import os
 import re
@@ -64,18 +65,7 @@ def _extract_activities_llm(msgs: list) -> list:
 
     lines = [f"{i}: {m.get('content', '').strip()[:200]}" for i, m in enumerate(msgs)]
 
-    prompt = f"""Ανάλυσε τα παρακάτω μηνύματα χρήστη (Ελληνικά/Αγγλικά).
-Για κάθε μήνυμα βρες ΑΝ υπάρχει σαφής δραστηριότητα της καθημερινότητας.
-
-Κανόνες:
-- Επέστρεψε ΜΟΝΟ JSON array, τίποτε άλλο
-- Ένα αντικείμενο ανά μήνυμα (ίδιο idx)
-- Χωρίς δραστηριότητα → {{"idx": N, "event": null}}
-- Με δραστηριότητα → {{"idx": N, "event": "σύντομο όνομα", "type": "κατηγορία"}}
-- Κατηγορίες: general, work, family, hobby, home
-- Συντηρητικός — μόνο ξεκάθαρες δραστηριότητες, όχι ερωτήσεις/συζητήσεις
-
-Μηνύματα:
+    prompt = f"""{t("services.analytics_engine.prompt")}
 {chr(10).join(lines)}
 
 JSON:"""

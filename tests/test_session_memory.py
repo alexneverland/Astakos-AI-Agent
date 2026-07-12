@@ -132,7 +132,7 @@ def test_event_memory_candidate_ignores_plain_question():
     import memory.session_memory as session_memory
 
     candidate = session_memory._extract_event_memory_candidate(
-        "Ο Αλέξανδρος τι έκανε χτες το πρωί;",
+        "Ο Kid1 τι έκανε χτες το πρωί;",
         "Δεν ξέρω ακόμα.",
         agent_name="Chat_Agent",
         channel="web",
@@ -165,7 +165,7 @@ def test_temporary_family_memory_candidate_captures_absence_window():
     import memory.session_memory as session_memory
 
     candidate = session_memory._extract_temporary_family_memory_candidate(
-        "Ο Αλέξανδρος είναι κατασκήνωση και θα γυρίσει την άλλη εβδομάδα",
+        "Ο Kid1 είναι κατασκήνωση και θα γυρίσει την άλλη εβδομάδα",
         "Οκ, το κρατάω υπόψη μου.",
         agent_name="Chat_Agent",
         channel="telegram",
@@ -185,7 +185,7 @@ def test_temporary_family_memory_candidate_ignores_question():
     import memory.session_memory as session_memory
 
     candidate = session_memory._extract_temporary_family_memory_candidate(
-        "Ο Αλέξανδρος είναι ακόμα κατασκήνωση ή γύρισε;",
+        "Ο Kid1 είναι ακόμα κατασκήνωση ή γύρισε;",
         "Δεν ξέρω ακόμα.",
         agent_name="Chat_Agent",
         channel="web",
@@ -241,7 +241,7 @@ def test_memory_sifter_saves_temporary_family_memory_even_if_llm_returns_empty(m
     session_memory.SESSION_LOGS.clear()
 
     session_memory.run_memory_sifter_fast(
-        "Ο Αλέξανδρος είναι κατασκήνωση μέχρι την Κυριακή και μετά γυρνάει σπίτι",
+        "Ο Kid1 είναι κατασκήνωση μέχρι την Κυριακή και μετά γυρνάει σπίτι",
         "Το κρατάω στο νου μου.",
         agent_name="Chat_Agent",
         channel="telegram",
@@ -258,8 +258,8 @@ def test_confirmed_memory_candidate_captures_family_watch():
     import memory.session_memory as session_memory
 
     candidate = session_memory._extract_confirmed_memory_candidate(
-        "Ναι κράτα το για δώρο στη Σοφία",
-        "Αποθηκεύτηκε στη μνήμη στα μελλοντικά δώρα για τη Σοφία (Rosefield Bangle S - White Gold).",
+        "Ναι κράτα το για δώρο στη Partner",
+        "Αποθηκεύτηκε στη μνήμη στα μελλοντικά δώρα για τη Partner (Rosefield Bangle S - White Gold).",
         agent_name="Chat_Agent",
         channel="telegram",
         now=datetime.datetime(2026, 6, 5, 19, 30),
@@ -271,7 +271,7 @@ def test_confirmed_memory_candidate_captures_family_watch():
     assert candidate["confidence"] == 0.9
     assert "2026-06-05" in candidate["fact"]
     assert "Rosefield Bangle S - White Gold" in candidate["fact"]
-    assert "Σοφία" in candidate["fact"]
+    assert "Partner" in candidate["fact"]
 
 
 def test_confirmed_memory_candidate_infers_project_category():
@@ -294,7 +294,7 @@ def test_confirmed_memory_candidate_ignores_message_drafts():
     import memory.session_memory as session_memory
 
     candidate = session_memory._extract_confirmed_memory_candidate(
-        "Στείλε ένα μήνυμα στη Σοφία",
+        "Στείλε ένα μήνυμα στη Partner",
         "Το προσχέδιο αποθηκεύτηκε. Θέλεις αλλαγές ή να το στείλω;",
         agent_name="Chat_Agent",
         channel="telegram",
@@ -308,7 +308,7 @@ def test_build_canonical_memory_candidate_infers_food_from_cooking_context():
     import memory.session_memory as session_memory
 
     candidate = session_memory.build_canonical_memory_candidate(
-        fact="[USER_FACT]: Στις 2026-06-27, ο Λάζαρος πήρε 3 φαγκριά γύρω στο 1,5 κιλό και θα τα βάλει φούρνο με τηγανητές πατάτες για την οικογένεια.",
+        fact="[USER_FACT]: Στις 2026-06-27, ο User πήρε 3 φαγκριά γύρω στο 1,5 κιλό και θα τα βάλει φούρνο με τηγανητές πατάτες για την οικογένεια.",
         category="family",
         source="telegram",
         agent_name="Home_Agent",
@@ -504,7 +504,7 @@ def test_food_family_outcome_still_saves(monkeypatch):
     monkeypatch.setattr(sm.memory, "save", lambda **kwargs: saved.append(kwargs))
 
     sm.run_memory_sifter_slow(
-        "Τρελάθηκε ο Αλέξανδρος με τους γίγαντες",
+        "Τρελάθηκε ο Kid1 με τους γίγαντες",
         "[22:21] Μεγάλη νίκη αυτή, μάστορα!",
         agent_name="Home_Agent",
         channel="telegram",

@@ -34,8 +34,8 @@ def test_save_to_memory_async():
 
         t0 = time.time()
         result = save_to_memory.invoke({
-            "fact": "Ο Αλέξανδρος αγαπάει τα LEGO",
-            "entities": "Αλέξανδρος, LEGO",
+            "fact": "Ο Kid1 αγαπάει τα LEGO",
+            "entities": "Kid1, LEGO",
             "category": "family",
         })
         elapsed = time.time() - t0
@@ -67,8 +67,8 @@ def test_save_to_memory_async():
     with patch("memory.vector_store.embeddings", mock_emb2), \
          patch("memory.vector_store.vector_store", mock_vs2):
         save_to_memory.invoke({
-            "fact": "Η Σοφία γεννήθηκε στις 17/07/1989",
-            "entities": "Σοφία",
+            "fact": "Η Partner γεννήθηκε στις 17/07/1989",
+            "entities": "Partner",
             "category": "family",
         })
         written_in_time = written.wait(timeout=5)
@@ -81,7 +81,7 @@ def test_save_to_memory_async():
     mock_emb3.embed_query.return_value = [0.0] * 768
     # distance < 0.10 → duplicate
     mock_doc = MagicMock()
-    mock_doc.page_content = "Ο Αλέξανδρος αγαπάει τα LEGO"
+    mock_doc.page_content = "Ο Kid1 αγαπάει τα LEGO"
     mock_doc.metadata = {"category": "family"}
     mock_vs3.similarity_search_with_score.return_value = [(mock_doc, 0.05)]
     mock_vs3._collection.query.return_value = {"ids": [["existing-id"]], "distances": [[0.05]]}
@@ -90,8 +90,8 @@ def test_save_to_memory_async():
     with patch("memory.vector_store.embeddings", mock_emb3), \
          patch("memory.vector_store.vector_store", mock_vs3):
         save_to_memory.invoke({
-            "fact": "Ο Αλέξανδρος αγαπάει τα LEGO",
-            "entities": "Αλέξανδρος, LEGO",
+            "fact": "Ο Kid1 αγαπάει τα LEGO",
+            "entities": "Kid1, LEGO",
             "category": "family",
         })
         time.sleep(3)  # we give time to the background

@@ -32,7 +32,7 @@ def test_operational_memory_noise_is_skipped():
 def test_normal_family_fact_is_not_operational_noise():
     from memory.session_memory import _looks_like_operational_memory_noise
 
-    fact = "[USER_FACT]: Στις 2026-07-01, η Σοφία σήμερα είναι σπίτι με τα παιδιά."
+    fact = "[USER_FACT]: Στις 2026-07-01, η Partner σήμερα είναι σπίτι με τα παιδιά."
     ai = "Ωραία, το κρατάω."
 
     assert _looks_like_operational_memory_noise(fact, ai) is False

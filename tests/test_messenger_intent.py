@@ -24,7 +24,7 @@ def test_send_without_active_draft_is_not_confirm():
 
 def test_long_create_message_with_active_draft_stays_create_draft():
     result = classify_messenger_intent(
-        "Φτιάξε ένα ωραίο messenger μήνυμα για τη Σοφία να της δώσουμε δύναμη στη δουλειά",
+        "Φτιάξε ένα ωραίο messenger μήνυμα για τη Partner να της δώσουμε δύναμη στη δουλειά",
         has_active_draft=True,
     )
     assert result.intent == "create_draft"

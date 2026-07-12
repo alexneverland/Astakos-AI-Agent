@@ -8,7 +8,7 @@ def test_candidate_from_message_classifies_family_gift():
         "id": "m1",
         "channel": "telegram",
         "role": "user",
-        "content": "Κράτα αυτό το link για δώρο στη Σοφία στα γενέθλια",
+        "content": "Κράτα αυτό το link για δώρο στη Partner στα γενέθλια",
         "date": "2026-06-05",
         "timestamp": "2026-06-05T19:30:00",
     })
@@ -18,7 +18,7 @@ def test_candidate_from_message_classifies_family_gift():
     assert candidate.source == "telegram"
     assert candidate.reason == "sql_backfill"
     assert candidate.fact.startswith("[USER_FACT]: Στις 2026-06-05")
-    assert "Σοφία" in candidate.fact
+    assert "Partner" in candidate.fact
 
 
 def test_candidate_from_message_classifies_project_lesson():

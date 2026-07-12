@@ -767,7 +767,7 @@ def test_timeout_decay_ignores_stale_pending():
 
 def test_telegram_bot_contextual_dismiss_skips_decay_for_sofia():
     bot.pending_routine_confirmations = {
-        999: {"event": "Στείλε μήνυμα στη Σοφία (messenger)", "sent_at": _fixed_now()}
+        999: {"event": "Στείλε μήνυμα στη Partner (messenger)", "sent_at": _fixed_now()}
     }
     
     rdb = sys.modules["memory.routine_db"]
@@ -786,7 +786,7 @@ def test_telegram_bot_contextual_dismiss_skips_decay_for_sofia():
         "routines",
         "routine_context_skip",
         routine_id=999,
-        event="Στείλε μήνυμα στη Σοφία (messenger)",
+        event="Στείλε μήνυμα στη Partner (messenger)",
         reason="user_already_with_sofia",
         debug_type="manual_control",
         debug_source="user_message",
@@ -796,7 +796,7 @@ def test_telegram_bot_contextual_dismiss_skips_decay_for_sofia():
 
 def test_contextual_not_needed_reply_detects_sofia_presence_phrase():
     assert bot._looks_like_contextual_not_needed_reply(
-        "Καλά βρε όλοι μαζι δεν ήρθαμε θάλασσα δίπλα μου είναι η Σοφία"
+        "Καλά βρε όλοι μαζι δεν ήρθαμε θάλασσα δίπλα μου είναι η Partner"
     ) is True
 
 # ─────────────────────────────────────────────────────────────
@@ -843,7 +843,7 @@ def test_park_routine_skips_when_alexandros_is_with_sofia_without_user():
     result = bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap)
     assert result is not None
     assert result.startswith("[CONTEXT_SKIP]")
-    assert "Σοφία" in result or "σοφία" in result
+    assert "Partner" in result or "σοφία" in result
 
 def test_force_context_skip_from_state_sleep_does_not_skip_when_all_at_home():
     snap = {
@@ -858,40 +858,40 @@ def test_force_context_skip_from_state_sleep_skips_when_user_out_of_home():
     snap = {
         "user_out_of_home": {"value": "true", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith("[CONTEXT_SKIP] ο Λάζαρος λείπει")
+    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith("[CONTEXT_SKIP] ο User λείπει")
 
 def test_force_context_skip_from_state_sleep_skips_when_user_at_work():
     snap = {
         "user_at_work": {"value": "true", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith("[CONTEXT_SKIP] ο Λάζαρος λείπει")
+    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith("[CONTEXT_SKIP] ο User λείπει")
 
 def test_force_context_skip_from_state_message_to_sofia_skips_when_together():
     snap = {
         "sofia_with_user": {"value": "true", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("Σύνταξη πρωινού μηνύματος στη Σοφία στο Messenger", snap).startswith("[CONTEXT_SKIP]")
+    assert bot._force_proactive_skip_from_state("Σύνταξη πρωινού μηνύματος στη Partner στο Messenger", snap).startswith("[CONTEXT_SKIP]")
 
 def test_force_context_skip_from_state_message_to_sofia_does_not_skip_when_apart():
     snap = {
         "sofia_with_user": {"value": "false", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("Σύνταξη πρωινού μηνύματος στη Σοφία στο Messenger", snap) is None
+    assert bot._force_proactive_skip_from_state("Σύνταξη πρωινού μηνύματος στη Partner στο Messenger", snap) is None
 
 def test_force_context_skip_from_state_wake_up_skips_when_at_work():
     snap = {
         "user_at_work": {"value": "true", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("ξύπνημα Λάζαρου", snap).startswith("[CONTEXT_SKIP] ο Λάζαρος είναι ήδη στη δουλειά (βάρδια)")
+    assert bot._force_proactive_skip_from_state("ξύπνημα Λάζαρου", snap).startswith("[CONTEXT_SKIP] ο User είναι ήδη στη δουλειά (βάρδια)")
 
 def test_force_context_skip_from_state_wake_up_skips_when_out_of_home():
     snap = {
         "user_out_of_home": {"value": "true", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("ξύπνημα Λάζαρου", snap).startswith("[CONTEXT_SKIP] ο Λάζαρος είναι ήδη εκτός σπιτιού")
+    assert bot._force_proactive_skip_from_state("ξύπνημα Λάζαρου", snap).startswith("[CONTEXT_SKIP] ο User είναι ήδη εκτός σπιτιού")
 
 def test_force_context_skip_from_state_work_departure_skips_when_at_work():
     snap = {
         "user_at_work": {"value": "true", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("αναχώρηση για δουλειά", snap).startswith("[CONTEXT_SKIP] ο Λάζαρος βρίσκεται ήδη στη δουλειά (βάρδια)")
+    assert bot._force_proactive_skip_from_state("αναχώρηση για δουλειά", snap).startswith("[CONTEXT_SKIP] ο User βρίσκεται ήδη στη δουλειά (βάρδια)")

@@ -215,7 +215,7 @@ def test_recall_query_with_overlap_keeps_full_semantic(monkeypatch):
     )
 
     build_memory_context(
-        "θυμάσαι πώς το ονόμασε ο Αλέξανδρος τελικά;",
+        "θυμάσαι πώς το ονόμασε ο Kid1 τελικά;",
         channel="telegram",
         semantic_k=8,
         recent_loader=fake_recent_loader,

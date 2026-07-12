@@ -1,3 +1,4 @@
+from core.i18n import t
 import sqlite3
 import os
 import hashlib
@@ -16,14 +17,14 @@ db_write_lock = threading.Lock()  # Serializes writes — lock-free reads (WAL m
 # ────────────────────────────────────────────────────────────────
 
 _DAY_MAP = {
-    "δευτέρα": "Monday",   "δευτερα": "Monday",   "monday": "Monday",
-    "τρίτη": "Tuesday",    "τριτη": "Tuesday",     "tuesday": "Tuesday",
-    "τετάρτη": "Wednesday","τεταρτη": "Wednesday", "wednesday": "Wednesday",
-    "πέμπτη": "Thursday",  "πεμπτη": "Thursday",   "thursday": "Thursday",
-    "παρασκευή": "Friday", "παρασκευη": "Friday",  "friday": "Friday",
-    "σάββατο": "Saturday", "σαββατο": "Saturday",  "saturday": "Saturday",
-    "κυριακή": "Sunday",   "κυριακη": "Sunday",    "sunday": "Sunday",
-    "καθημερινά": "Everyday", "καθημερινα": "Everyday", "everyday": "Everyday",
+    t("prompts.ext_str_354"): "Monday",   t("prompts.ext_str_357"): "Monday",   "monday": "Monday",
+    t("prompts.ext_str_578"): "Tuesday",    t("prompts.ext_str_554"): "Tuesday",     "tuesday": "Tuesday",
+    t("prompts.ext_str_427"): "Wednesday",t("prompts.ext_str_396"): "Wednesday", "wednesday": "Wednesday",
+    t("prompts.ext_str_461"): "Thursday",  t("prompts.ext_str_457"): "Thursday",   "thursday": "Thursday",
+    t("prompts.ext_str_274"): "Friday", t("prompts.ext_str_258"): "Friday",  "friday": "Friday",
+    t("prompts.ext_str_425"): "Saturday", t("prompts.ext_str_383"): "Saturday",  "saturday": "Saturday",
+    t("prompts.ext_str_359"): "Sunday",   t("prompts.ext_str_415"): "Sunday",    "sunday": "Sunday",
+    t("prompts.ext_str_234"): "Everyday", t("prompts.ext_str_207"): "Everyday", "everyday": "Everyday",
 }
 
 def normalize_day(day: str) -> str:
@@ -526,8 +527,8 @@ def decay_routine(routine_id: int):
         everyday_like_days = {
             "everyday",
             "weekdays",
-            "εργάσιμες",
-            "καθημερινές",
+            t("prompts.ext_str_269"),
+            t("prompts.ext_str_182"),
         }
         is_everyday_like = day_value in everyday_like_days
 
@@ -1664,3 +1665,4 @@ def reset_routine_state_for_debug(routine_id: int):
     finally:
         conn.close()
     print(f"[routine_db]: #{routine_id} debug-reset to ACTIVE (conf=1.00)")
+

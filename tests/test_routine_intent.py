@@ -11,7 +11,7 @@ def test_manual_command_pause():
 
 def test_context_update_offseason():
     result = classify_routine_intent(
-        "Είναι καλοκαίρι ο Αλέξανδρος δεν έχει ποδόσφαιρο ξανά τον Σεπτέμβριο",
+        "Είναι καλοκαίρι ο Kid1 δεν έχει ποδόσφαιρο ξανά τον Σεπτέμβριο",
         routine_names=["ποδόσφαιρο Αλέξανδρου"],
     )
     assert result.intent == "context_update"

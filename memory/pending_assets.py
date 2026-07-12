@@ -1,3 +1,4 @@
+from core.i18n import t
 import sqlite3
 import json
 import unicodedata
@@ -16,29 +17,29 @@ def classify_pending_asset_reply(text: str) -> str | None:
     txt = _normalize_gr(text)
     words = txt.replace(",", " ").replace(".", " ").replace("!", " ").replace(";", " ").split()
 
-    yes_exact = {"ναι", "nai", "yes", "ok", "οκ"}
-    no_exact = {"όχι", "οχι", "oxi", "no"}
+    yes_exact = {t("prompts.ext_str_802"), "nai", "yes", "ok", t("prompts.ext_str_833")}
+    no_exact = {t("prompts.ext_str_799"), t("prompts.ext_str_816"), "oxi", "no"}
 
     no_phrases = (
-        "μην το αποθηκευσεις",
-        "μην την αποθηκευσεις",
-        "μην αποθηκευσεις",
-        "μην το αρχειοθετησεις",
-        "μην την αρχειοθετησεις",
-        "δεν θελω να το αποθηκευσεις",
-        "δεν θελω να την αποθηκευσεις",
-        "αστο",
-        "αφησε το",
-        "μην το κρατησεις",
-        "μην την κρατησεις",
+        t("prompts.ext_str_80"),
+        t("prompts.ext_str_66"),
+        t("prompts.ext_str_109"),
+        t("prompts.ext_str_57"),
+        t("prompts.ext_str_48"),
+        t("prompts.ext_str_25"),
+        t("prompts.ext_str_20"),
+        t("prompts.ext_str_692"),
+        t("prompts.ext_str_321"),
+        t("prompts.ext_str_104"),
+        t("prompts.ext_str_92"),
     )
     yes_phrases = (
-        "αποθηκευσε το",
-        "αποθηκευσε την",
-        "αρχειοθετησε το",
-        "αρχειοθετησε την",
-        "κρατα το",
-        "κρατα την",
+        t("prompts.ext_str_160"),
+        t("prompts.ext_str_138"),
+        t("prompts.ext_str_131"),
+        t("prompts.ext_str_122"),
+        t("prompts.ext_str_330"),
+        t("prompts.ext_str_266"),
         "save it",
     )
 
@@ -59,18 +60,18 @@ def classify_pending_asset_reply(text: str) -> str | None:
 def looks_like_asset_confirmation_prompt(text: str) -> bool:
     txt = _normalize_gr(text)
     markers = (
-        "να την αποθηκευσω μονιμα στη μνημη μου",
-        "να το αποθηκευσω μονιμα στη μνημη μου",
-        "να την αρχειοθετησω μονιμα",
-        "να το αρχειοθετησω μονιμα",
-        "απαντησε μου μονο με",
-        "ναι η οχι",
-        "ναι ή οχι",
-        "να την αποθηκευσω",
-        "να το αποθηκευσω",
-        "να τη σωσω",
-        "να το σωσω",
-        "να την αρχειοθετησω",
+        t("prompts.ext_str_8"),
+        t("prompts.ext_str_10"),
+        t("prompts.ext_str_30"),
+        t("prompts.ext_str_38"),
+        t("prompts.ext_str_60"),
+        t("prompts.ext_str_260"),
+        t("prompts.ext_str_262"),
+        t("prompts.ext_str_96"),
+        t("prompts.ext_str_112"),
+        t("prompts.ext_str_202"),
+        t("prompts.ext_str_206"),
+        t("prompts.ext_str_76"),
     )
     return any(m in txt for m in markers)
 
@@ -269,3 +270,4 @@ def is_reply_to_recent_asset_prompt(channel: str, limit: int = 3) -> bool:
         return looks_like_asset_confirmation_prompt(content)
 
     return False
+

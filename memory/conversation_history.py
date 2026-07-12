@@ -7,6 +7,7 @@ without clobbering each other's writes.
 
 from __future__ import annotations
 
+from core.i18n import t
 import json
 import os
 import re
@@ -147,7 +148,7 @@ _CODE_MARKERS = (
     "terminal output",
     "💻 terminal",
     "grep_project_files",
-    "── γραμμές",
+    t("prompts.ext_str_230"),
     "read_project_file",
     "edit_project_file",
     "▶ ",   # grep match marker
@@ -178,7 +179,7 @@ def _truncate_code_content(role: str, text: str) -> str:
     if cut == -1 or cut > 400:
         cut = 400
     truncated = text[:cut].rstrip()
-    return truncated + "  \n[...αποκόπηκε — code session content]"
+    return truncated + t("prompts.ext_code_session_content")
 
 
 def append_message(
@@ -863,7 +864,8 @@ def build_asset_context_text(channel: str, limit: int = 8) -> str:
         if content.startswith(("[USER_UPLOADED_FILE]", "[USER_UPLOADED_PHOTO]")):
             continue
 
-        speaker = "Λάζαρος" if entry.get("role") == "user" else "Αστακός"
+        speaker = t("prompts.ext_str_437") if entry.get("role") == "user" else t("prompts.ext_str_350")
         lines.append(f"{speaker}: {content[:700]}")
 
     return "\n".join(lines[-limit:])
+

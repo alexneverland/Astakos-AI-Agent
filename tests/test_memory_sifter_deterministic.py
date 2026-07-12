@@ -7,7 +7,7 @@ def test_temporary_and_event_both_saved_when_event_progresses_state():
         "memory_type": "fact",
         "fact": "[USER_FACT]: Στις 2026-06-17, πήγαμε να πάρουμε τον Αλέξανδρο από την κατασκήνωση",
         "category": "family",
-        "entities": ["Αλέξανδρος"],
+        "entities": ["Kid1"],
         "topic": "trip",
         "topic_detail": "camp",
         "state_markers": ["returned"],
@@ -16,9 +16,9 @@ def test_temporary_and_event_both_saved_when_event_progresses_state():
     }
     temporary_candidate = {
         "memory_type": "fact",
-        "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος είναι στην κατασκήνωση",
+        "fact": "[USER_FACT]: Στις 2026-06-17, ο Kid1 είναι στην κατασκήνωση",
         "category": "family",
-        "entities": ["Αλέξανδρος"],
+        "entities": ["Kid1"],
         "topic": "trip",
         "topic_detail": "camp",
         "state_markers": ["away"],
@@ -39,8 +39,8 @@ def test_temporary_and_event_both_saved_when_event_progresses_state():
 
 
 def test_confirmed_candidate_not_saved_twice_when_same_as_temporary():
-    temporary_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος γυρνάει από την κατασκήνωση", "category": "family"}
-    confirmed_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος γυρνάει από την κατασκήνωση", "category": "family"}
+    temporary_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Kid1 γυρνάει από την κατασκήνωση", "category": "family"}
+    confirmed_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Kid1 γυρνάει από την κατασκήνωση", "category": "family"}
 
     with patch.object(sm, "_extract_event_memory_candidate", return_value=None), \
          patch.object(sm, "_extract_temporary_family_memory_candidate", return_value=temporary_candidate), \
@@ -57,8 +57,8 @@ def test_confirmed_candidate_not_saved_twice_when_same_as_temporary():
 
 
 def test_confirmed_candidate_not_saved_twice_with_slight_overlap():
-    temporary_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος γυρνάει από την κατασκήνωση", "category": "family"}
-    confirmed_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος επιστρέφει σπίτι από την κατασκήνωση", "category": "family"}
+    temporary_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Kid1 γυρνάει από την κατασκήνωση", "category": "family"}
+    confirmed_candidate = {"memory_type": "fact", "fact": "[USER_FACT]: Στις 2026-06-17, ο Kid1 επιστρέφει σπίτι από την κατασκήνωση", "category": "family"}
 
     with patch.object(sm, "_extract_event_memory_candidate", return_value=None), \
          patch.object(sm, "_extract_temporary_family_memory_candidate", return_value=temporary_candidate), \
@@ -93,7 +93,7 @@ def test_collect_deterministic_candidates_keeps_both_when_temporary_and_event_di
         "memory_type": "fact",
         "fact": "[USER_FACT]: Στις 2026-06-17, πήγαμε να πάρουμε τον Αλέξανδρο από την κατασκήνωση",
         "category": "family",
-        "entities": ["Αλέξανδρος"],
+        "entities": ["Kid1"],
         "topic": "trip",
         "topic_detail": "camp",
         "time_scope": "2026-06-17",
@@ -102,9 +102,9 @@ def test_collect_deterministic_candidates_keeps_both_when_temporary_and_event_di
     }
     temporary_candidate = {
         "memory_type": "fact",
-        "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος είναι στην κατασκήνωση",
+        "fact": "[USER_FACT]: Στις 2026-06-17, ο Kid1 είναι στην κατασκήνωση",
         "category": "family",
-        "entities": ["Αλέξανδρος"],
+        "entities": ["Kid1"],
         "topic": "trip",
         "topic_detail": "camp",
         "time_scope": "2026-06-17",
@@ -123,7 +123,7 @@ def test_collect_deterministic_candidates_keeps_both_when_temporary_and_event_di
 def test_normalize_memory_candidate_builds_structured_fields():
     candidate = sm._normalize_memory_candidate({
         "memory_type": "fact",
-        "fact": "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος γύρισε σπίτι πολύ κουρασμένος από την κατασκήνωση",
+        "fact": "[USER_FACT]: Στις 2026-06-17, ο Kid1 γύρισε σπίτι πολύ κουρασμένος από την κατασκήνωση",
         "category": "family",
         "source": "telegram",
         "agent_name": "Chat_Agent",
@@ -137,8 +137,8 @@ def test_normalize_memory_candidate_builds_structured_fields():
 
 
 def test_fact_matches_any_detects_contained_fact():
-    fact = "[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος γυρνάει σπίτι από την κατασκήνωση"
-    seeds = ["[USER_FACT]: Στις 2026-06-17, ο Αλέξανδρος γυρνάει σπίτι"]
+    fact = "[USER_FACT]: Στις 2026-06-17, ο Kid1 γυρνάει σπίτι από την κατασκήνωση"
+    seeds = ["[USER_FACT]: Στις 2026-06-17, ο Kid1 γυρνάει σπίτι"]
     assert sm._fact_matches_any(fact, seeds) is True
 
 
@@ -161,9 +161,9 @@ def test_slow_sifter_skips_seed_duplicates():
 def test_same_identity_same_state_near_duplicate_skips_second():
     a = {
         "memory_type": "fact",
-        "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση",
+        "fact": "[USER_FACT]: Ο Kid1 είναι στην κατασκήνωση",
         "category": "family",
-        "entities": ["Αλέξανδρος"],
+        "entities": ["Kid1"],
         "topic": "trip",
         "topic_detail": "camp",
         "state_markers": ["away"],
@@ -173,9 +173,9 @@ def test_same_identity_same_state_near_duplicate_skips_second():
     }
     b = {
         "memory_type": "fact",
-        "fact": "[USER_FACT]: Ο Αλέξανδρος βρίσκεται στην κατασκήνωση",
+        "fact": "[USER_FACT]: Ο Kid1 βρίσκεται στην κατασκήνωση",
         "category": "family",
-        "entities": ["Αλέξανδρος"],
+        "entities": ["Kid1"],
         "topic": "trip",
         "topic_detail": "camp",
         "state_markers": ["away"],
@@ -194,9 +194,9 @@ def test_same_identity_same_state_near_duplicate_skips_second():
 def test_same_identity_new_state_keeps_both():
     a = {
         "memory_type": "fact",
-        "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση",
+        "fact": "[USER_FACT]: Ο Kid1 είναι στην κατασκήνωση",
         "category": "family",
-        "entities": ["Αλέξανδρος"],
+        "entities": ["Kid1"],
         "topic": "trip",
         "topic_detail": "camp",
         "state_markers": ["away"],
@@ -206,9 +206,9 @@ def test_same_identity_new_state_keeps_both():
     }
     b = {
         "memory_type": "fact",
-        "fact": "[USER_FACT]: Ο Αλέξανδρος γύρισε σπίτι από την κατασκήνωση",
+        "fact": "[USER_FACT]: Ο Kid1 γύρισε σπίτι από την κατασκήνωση",
         "category": "family",
-        "entities": ["Αλέξανδρος"],
+        "entities": ["Kid1"],
         "topic": "trip",
         "topic_detail": "camp",
         "state_markers": ["returned"],
@@ -227,9 +227,9 @@ def test_same_identity_new_state_keeps_both():
 def test_same_day_same_topic_same_state_reword_skips_duplicate():
     a = {
         "memory_type": "fact",
-        "fact": "[USER_FACT]: Η Σοφία έχει ρεπό σήμερα",
+        "fact": "[USER_FACT]: Η Partner έχει ρεπό σήμερα",
         "category": "family",
-        "entities": ["Σοφία"],
+        "entities": ["Partner"],
         "topic": "work",
         "topic_detail": "",
         "state_markers": ["confirmed"],
@@ -239,9 +239,9 @@ def test_same_day_same_topic_same_state_reword_skips_duplicate():
     }
     b = {
         "memory_type": "fact",
-        "fact": "[USER_FACT]: Η Σοφία σήμερα έχει ρεπό",
+        "fact": "[USER_FACT]: Η Partner σήμερα έχει ρεπό",
         "category": "family",
-        "entities": ["Σοφία"],
+        "entities": ["Partner"],
         "topic": "work",
         "topic_detail": "",
         "state_markers": ["confirmed"],
@@ -259,9 +259,9 @@ def test_same_day_same_topic_same_state_reword_skips_duplicate():
 
 def test_more_informative_relation_type_counts_as_new_information():
     old = {
-        "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση",
+        "fact": "[USER_FACT]: Ο Kid1 είναι στην κατασκήνωση",
         "category": "family",
-        "entities": ["Αλέξανδρος"],
+        "entities": ["Kid1"],
         "topic": "trip",
         "topic_detail": "camp",
         "state_markers": ["away"],
@@ -270,9 +270,9 @@ def test_more_informative_relation_type_counts_as_new_information():
         "tags": ["alexandros", "camp"],
     }
     new = {
-        "fact": "[USER_FACT]: Ο Αλέξανδρος είναι στην κατασκήνωση",
+        "fact": "[USER_FACT]: Ο Kid1 είναι στην κατασκήνωση",
         "category": "family",
-        "entities": ["Αλέξανδρος"],
+        "entities": ["Kid1"],
         "topic": "trip",
         "topic_detail": "camp",
         "state_markers": ["away"],

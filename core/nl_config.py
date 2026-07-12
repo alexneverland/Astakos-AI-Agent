@@ -1,3 +1,4 @@
+from core.i18n import t
 import os
 import json
 
@@ -11,25 +12,23 @@ def load_intents() -> dict:
             with open(intents_path, "r", encoding="utf-8") as f:
                 _intents = json.load(f)
         except Exception as e:
-            print(f"⚠️ Σφάλμα φόρτωσης intents.json: {e}")
+            print(t("core.nl_config.error_loading", e=e))
             _intents = {}
     return _intents
 
 def get_intent_list(module: str, key: str) -> list:
-    """Επιστρέφει λίστα (list) keywords για το δοθέν module και key."""
+    t("prompts.ext_list_keywords_module_key")
     intents = load_intents()
     return intents.get(module, {}).get(key, [])
 
 def get_intent_dict(module: str, key: str) -> dict:
-    """Επιστρέφει λεξικό (dict) για το δοθέν module και key."""
+    t("prompts.ext_dict_module_key")
     intents = load_intents()
     return intents.get(module, {}).get(key, {})
 
-# Άμεσες μεταβλητές για το core/utils.py
 def get_utils_intents():
     return load_intents().get("utils", {})
 
-# Σταθερές για εύκολο import αν προτιμάται:
 UTILS_FAST_PATH_BLOCKED_TOKENS = tuple(get_intent_list("utils", "fast_path_blocked_tokens"))
 UTILS_MEDIUM_PATH_BLOCKED_TOKENS = tuple(get_intent_list("utils", "medium_path_blocked_tokens"))
 UTILS_LOW_SIGNAL_STARTS = tuple(get_intent_list("utils", "low_signal_starts"))
@@ -60,7 +59,6 @@ MESSENGER_WORKFLOW_TOKENS = get_intent_dict("utils", "messenger_draft").get("is_
 LINKEDIN_MARKERS = get_intent_dict("utils", "linkedin_draft").get("markers", [])
 LINKEDIN_NEGATIONS = get_intent_dict("utils", "linkedin_draft").get("negations", [])
 
-# Γρήγορη πρόσβαση για άλλα modules
 PLAN_JUDGE_SEQUENCE_WORDS = tuple(get_intent_list("plan_judge", "sequence_words"))
 PLANNER_FAILURE_WORDS = tuple(get_intent_list("planner", "failure_words"))
 LOOP_GUARD_INSTANT_WORDS = tuple(get_intent_list("tool_loop_guard", "instant_notification_words"))
@@ -70,12 +68,12 @@ CB_YESTERDAY_WORDS = tuple(get_intent_list("context_builder", "yesterday_words")
 CB_MORNING_WORDS = tuple(get_intent_list("context_builder", "morning_words"))
 CB_ALEXANDROS_WORDS = tuple(get_intent_list("context_builder", "alexandros_words"))
 CB_SOCCER_WORDS = tuple(get_intent_list("context_builder", "soccer_words"))
-CB_SOFIA_GIFT_WORDS = tuple(get_intent_list("context_builder", "sofia_gift_words"))
-CB_SOFIA_GIFT_CONTEXT = tuple(get_intent_list("context_builder", "sofia_gift_context"))
+CB_PARTNER_GIFT_WORDS = tuple(get_intent_list("context_builder", "partner_gift_words"))
+CB_PARTNER_GIFT_CONTEXT = tuple(get_intent_list("context_builder", "partner_gift_context"))
 CB_UTILITY_MARKERS = tuple(get_intent_list("context_builder", "utility_markers"))
 CB_MEMORY_MARKERS = tuple(load_intents().get("context_builder", {}).get("memory_correction", {}).get("memory_markers", []))
 CB_FIXUP_MARKERS = tuple(load_intents().get("context_builder", {}).get("memory_correction", {}).get("fixup_markers", []))
-CB_FOOD_REGEX = load_intents().get('context_builder', {}).get('food_regex', r'\bτι\b.*\bφαγ[α-ω]*')
+CB_FOOD_REGEX = load_intents().get('context_builder', {}).get('food_regex', rf'\b{t("core.nl_config.food_regex_ti")}\b.*\b{t("core.nl_config.food_regex_fag")}[\w]*')
 CB_REMINDER_CONTAINS = tuple(get_intent_list('context_builder', 'reminder_contains'))
 CB_REMINDER_STARTS = tuple(get_intent_list('context_builder', 'reminder_starts'))
 
@@ -91,8 +89,9 @@ CE_NOW_SITTING = tuple(get_intent_list('context_extractor', 'now_sitting_words')
 CE_FOUND_THEM = tuple(get_intent_list('context_extractor', 'found_them_words'))
 CE_ALL_TOGETHER = tuple(get_intent_list('context_extractor', 'all_together_words'))
 CE_HOME = tuple(get_intent_list('context_extractor', 'home_words'))
-CE_SOFIA_NAMES = tuple(get_intent_list('context_extractor', 'sofia_names'))
-CE_ALEXANDROS_NAMES = tuple(get_intent_list('context_extractor', 'alexandros_names'))
+import config
+CE_PARTNER_NAMES = (config.PARTNER_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'partner_names'))
+CE_KID1_NAMES = (config.KID1_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'kid1_names'))
 
 # Routine Intents
 RI_CONTROL_VERBS = tuple(get_intent_list('routine_intent', 'control_verbs'))
@@ -112,7 +111,7 @@ MI_GENERAL_CHAT_SHORT = set(get_intent_list('messenger_intent', 'general_chat_sh
 
 # Routine Reconciler Intents
 RR_STOPWORDS = set(get_intent_list('routine_reconciler', 'stopwords'))
-RR_IN_DAYS_REGEX = load_intents().get('routine_reconciler', {}).get('in_days_regex', r'(?:σε|για)\s+(\d{1,2})\s*(?:μερες|μέρες|ημερες|ημέρες)')
+RR_IN_DAYS_REGEX = load_intents().get('routine_reconciler', {}).get('in_days_regex', t("prompts.ext_s_d_1_2_s"))
 
 # System Tool Intents
 ST_FAMILY_MARKERS = tuple(get_intent_list('system_tool', 'family_markers'))
@@ -123,3 +122,4 @@ ST_SHOPPING_MARKERS = tuple(get_intent_list('system_tool', 'shopping_markers'))
 ST_MEMORY_STOP_WORDS = set(get_intent_list('system_tool', 'memory_stop_words'))
 ST_REGEX_CLEANUP_PATTERNS = load_intents().get('system_tool', {}).get('regex_cleanup_patterns', {})
 ST_ROUTINE_MANAGEMENT_TOKENS = tuple(get_intent_list('system_tool', 'routine_management_tokens'))
+

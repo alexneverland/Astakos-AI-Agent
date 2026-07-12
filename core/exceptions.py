@@ -1,3 +1,4 @@
+from core.i18n import t
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Developer: Lazaros (Piston-7)
@@ -35,7 +36,7 @@ class DuplicateEventError(AstakosError):
     """
     def __init__(self, routine_id: int, cooldown_hours: float, remaining_hours: float):
         super().__init__(
-            f"Routine #{routine_id} σε cooldown",
+            t("core.exceptions.routine_cooldown", id=routine_id),
             context={"cooldown_h": cooldown_hours, "remaining_h": round(remaining_hours, 1)}
         )
         self.routine_id    = routine_id
@@ -50,7 +51,7 @@ class PendingTimeoutError(AstakosError):
     """
     def __init__(self, routine_id: int, event_name: str, elapsed_seconds: float):
         super().__init__(
-            f"Timeout για '{event_name}' χωρίς απάντηση",
+            t("core.exceptions.timeout", event=event_name),
             context={"routine_id": routine_id, "elapsed_s": int(elapsed_seconds)}
         )
         self.routine_id   = routine_id
@@ -65,7 +66,7 @@ class SchedulerCrashError(AstakosError):
     """
     def __init__(self, job_name: str, fail_count: int, last_error: str):
         super().__init__(
-            f"Job '{job_name}' disabled μετά από {fail_count} αποτυχίες",
+            t("core.exceptions.job_disabled", job=job_name, fails=fail_count),
             context={"job": job_name, "fails": fail_count, "last_error": last_error[:100]}
         )
         self.job_name   = job_name
@@ -80,7 +81,7 @@ class DBWriteError(AstakosError):
     """
     def __init__(self, operation: str, original: Exception):
         super().__init__(
-            f"DB write απέτυχε κατά '{operation}'",
+            t("core.exceptions.db_write_fail", op=operation),
             context={"error": str(original)[:120]}
         )
         self.operation = operation

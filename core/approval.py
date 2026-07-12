@@ -267,7 +267,7 @@ def approval_check_node(state):
         for tc in blocked_calls:
             print(f"\033[91m[Approval]: 🛡️ BLOCKED — {tc['name']} rejected by safe executor\033[0m")
             tool_messages.append(ToolMessage(
-                content=f"🛡️ Η εντολή `{tc['name']}` μπλοκαρίστηκε από τον safe executor και δεν μπορεί να εγκριθεί.",
+                content=t("core.approval.blocked", name=tc["name"]),
                 tool_call_id=tc["id"],
                 name=tc["name"],
             ))
@@ -321,7 +321,7 @@ def approval_check_node(state):
 
         # We return a ToolMessage so that the graph does not get stuck
         tool_messages.append(ToolMessage(
-            content=f"⏳ Αναμονή έγκρισης για `{tc['name']}`. Σου έστειλα Telegram για επιβεβαίωση.",
+            content=t("core.approval.waiting", name=tc["name"]),
             tool_call_id=tc["id"],
             name=tc["name"],
         ))

@@ -128,7 +128,7 @@ def test_home_with_sofia_does_not_mark_alexandros_away_from_home(monkeypatch):
     monkeypatch.setattr(ce, "reconcile_fact_to_routines", lambda *a, **k: {"scored_directives": []})
 
     ce.extract_and_update_context_flags(
-        "Εγώ είμαι πρωινή βάρδια αυτή την εβδομάδα και η Σοφία σήμερα είναι με τον Αλέξανδρο στο σπίτι",
+        "Εγώ είμαι πρωινή βάρδια αυτή την εβδομάδα και η Partner σήμερα είναι με τον Αλέξανδρο στο σπίτι",
         "",
         "telegram",
     )
