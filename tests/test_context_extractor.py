@@ -8,6 +8,7 @@ from services.context_extractor import (
     _looks_like_found_them_reply,
     _looks_like_everyone_together,
 )
+import config
 
 @pytest.fixture
 def mock_gemini():
@@ -46,15 +47,15 @@ def test_context_extractor_everyone_together_sets_family_flags(mock_gemini, mock
     calls = {call[0][0]: call[0][1] for call in mock_db.call_args_list}
     
     assert calls.get("user_out_of_home") == "true"
-    assert calls.get("sofia_with_user") == "true"
-    assert calls.get("alexandros_with_user") == "true"
-    assert calls.get("alexandros_with_sofia") == "true"
-    assert calls.get("alexandros_away_from_home") == "false"
+    assert calls.get("partner_with_user") == "true"
+    assert calls.get("kid1_with_user") == "true"
+    assert calls.get("kid1_with_partner") == "true"
+    assert calls.get("kid1_away_from_home") == "false"
 
 def test_context_extractor_found_them_at_park_uses_recent_family_context(mock_gemini, mock_db, mock_reconciler, mock_history):
-    # recent context has Sofia/Alexandros/park
+    # recent context has partner/kid1/park
     mock_history.return_value = [
-        {"content": "η σοφία πήγε το μικρό στο πάρκο"}
+        {"content": f"η {config.PARTNER_NAME} πήγε τον {config.KID1_NAME} στο πάρκο"}
     ]
     
     user_text = "τώρα στο πάρκο και τους βρήκα"
@@ -63,10 +64,10 @@ def test_context_extractor_found_them_at_park_uses_recent_family_context(mock_ge
     calls = {call[0][0]: call[0][1] for call in mock_db.call_args_list}
     
     assert calls.get("user_out_of_home") == "true"
-    assert calls.get("alexandros_with_user") == "true"
-    assert calls.get("alexandros_away_from_home") == "false"
-    assert calls.get("sofia_with_user") == "true"
-    assert calls.get("alexandros_with_sofia") == "true"
+    assert calls.get("kid1_with_user") == "true"
+    assert calls.get("kid1_away_from_home") == "false"
+    assert calls.get("partner_with_user") == "true"
+    assert calls.get("kid1_with_partner") == "true"
 
 def test_context_extractor_future_departure_still_does_not_set_live_presence(mock_gemini, mock_db, mock_reconciler, mock_history):
     user_text = "σε 15 λεπτά φεύγουμε για πάρκο"
@@ -82,7 +83,7 @@ def test_context_extractor_future_departure_still_does_not_set_live_presence(moc
     
     # Because _looks_like_future_departure is true, "user_out_of_home" should NOT be set
     assert "user_out_of_home" not in calls
-    assert "alexandros_with_user" not in calls
+    assert "kid1_with_user" not in calls
 
 def test_context_extractor_still_here_at_park(mock_gemini, mock_db, mock_reconciler, mock_history):
     user_text = "είμαστε ακόμα εδώ στο πάρκο"
@@ -95,9 +96,9 @@ def test_context_extractor_still_here_at_park(mock_gemini, mock_db, mock_reconci
 
 
 def test_context_extractor_found_them_and_staying(mock_gemini, mock_db, mock_reconciler, mock_history):
-    # recent context has Sofia/Alexandros
+    # recent context has partner/kid1
     mock_history.return_value = [
-        {"content": "η σοφία είναι στο πάρκο με τον αλέξανδρο"}
+        {"content": f"η {config.PARTNER_NAME} είναι στο πάρκο με τον {config.KID1_NAME}"}
     ]
     
     user_text = "στο πάρκο, τους βρήκα και θα κάτσουμε κι άλλο"
@@ -106,13 +107,13 @@ def test_context_extractor_found_them_and_staying(mock_gemini, mock_db, mock_rec
     calls = {call[0][0]: call[0][1] for call in mock_db.call_args_list}
     
     assert calls.get("user_out_of_home") == "true"
-    assert calls.get("alexandros_with_user") == "true"
-    assert calls.get("alexandros_away_from_home") == "false"
-    assert calls.get("sofia_with_user") == "true"
-    assert calls.get("alexandros_with_sofia") == "true"
+    assert calls.get("kid1_with_user") == "true"
+    assert calls.get("kid1_away_from_home") == "false"
+    assert calls.get("partner_with_user") == "true"
+    assert calls.get("kid1_with_partner") == "true"
 
 
-def test_home_with_sofia_does_not_mark_alexandros_away_from_home(monkeypatch):
+def test_home_with_partner_does_not_mark_kid1_away_from_home(monkeypatch):
     import services.context_extractor as ce
 
     calls = {}
@@ -121,17 +122,17 @@ def test_home_with_sofia_does_not_mark_alexandros_away_from_home(monkeypatch):
         calls[key] = value
 
     class DummyResp:
-        text = '{"user_at_work": true, "user_out_of_home": true, "family_at_home": true, "sofia_with_user": false, "alexandros_with_sofia": true}'
+        text = '{"user_at_work": true, "user_out_of_home": true, "family_at_home": true, "partner_with_user": false, "kid1_with_partner": true}'
 
     monkeypatch.setattr(ce, "set_context_state", fake_set_context_state)
     monkeypatch.setattr(ce, "safe_gemini_call", lambda prompt: DummyResp())
     monkeypatch.setattr(ce, "reconcile_fact_to_routines", lambda *a, **k: {"scored_directives": []})
 
     ce.extract_and_update_context_flags(
-        "Εγώ είμαι πρωινή βάρδια αυτή την εβδομάδα και η Partner σήμερα είναι με τον Αλέξανδρο στο σπίτι",
+        f"Εγώ είμαι πρωινή βάρδια αυτή την εβδομάδα και η {config.PARTNER_NAME} σήμερα είναι με τον {config.KID1_NAME} στο σπίτι",
         "",
         "telegram",
     )
 
-    assert calls.get("alexandros_with_sofia") == "true"
-    assert calls.get("alexandros_away_from_home") == "false"
+    assert calls.get("kid1_with_partner") == "true"
+    assert calls.get("kid1_away_from_home") == "false"
