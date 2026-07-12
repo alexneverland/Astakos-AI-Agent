@@ -83,7 +83,18 @@ def is_simple_chat_fast_path_candidate(user_text: str) -> bool:
 
     # Tool / action / control intent -> normal path
     from core.nl_config import UTILS_FAST_PATH_BLOCKED_TOKENS
-    if any(token in q for token in UTILS_FAST_PATH_BLOCKED_TOKENS):
+    import config
+    
+    dynamic_blocked = [
+        config.PARTNER_NAME.lower(),
+        config.KID1_NAME.lower()
+    ]
+    if hasattr(config, "KID2_NAME") and config.KID2_NAME:
+        dynamic_blocked.append(config.KID2_NAME.lower())
+
+    all_blocked = tuple(UTILS_FAST_PATH_BLOCKED_TOKENS) + tuple(dynamic_blocked)
+    
+    if any(token in q for token in all_blocked):
         return False
 
     # Simple short conversational turns

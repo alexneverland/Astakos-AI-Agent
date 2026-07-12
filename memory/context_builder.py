@@ -383,7 +383,8 @@ def _must_keep_semantic(query: str) -> bool:
 
     q = query.strip().lower()
 
-    strong_tokens = tuple(t("builder.strong_tokens"))
+    from core.nl_config import ST_FAMILY_MARKERS
+    strong_tokens = tuple(t("builder.strong_tokens")) + ST_FAMILY_MARKERS
 
     return any(token in q for token in strong_tokens)
 

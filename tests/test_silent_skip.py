@@ -39,9 +39,9 @@ _STUB_MODULE_NAMES = [
     "memory", "memory.event_log", "memory.vector_store",
     "memory.working_memory", "memory.session_memory", "memory.pending_followups",
     "memory.context_builder", "memory.routine_db",
-    "core", "core.brain", "core.graph", "core.agents",
+    "core.brain", "core.graph", "core.agents",
     "core.exceptions", "core.event_bus",
-    "core.routine_state", "core.prompts", "core.utils",
+    "core.routine_state", "core.prompts", "core.utils", "core.i18n", "core.nl_config",
     "services", "services.gemini", "services.embeddings", "services.context_extractor", "services.messenger_intent", "services.routine_context",
     "services.routine_conditions",
     "tools", "tools.telegram",
@@ -62,6 +62,13 @@ def _stub_modules():
     cfg.ROUTINES_DB                      = os.path.join(_TMP_BASE, "routines.db")
     cfg.ROUTINE_MISS_GRACE_MINUTES       = 90
     cfg.PROACTIVE_ROUTINE_WINDOW_MINUTES = 30
+    cfg.NLP_CONFIG = {}
+    cfg.RESPONSE_LANGUAGE = "Greek"
+    cfg.OWNER_NAME = "User"
+    cfg.PARTNER_NAME = "Partner"
+    cfg.KID1_NAME = "Kid1"
+    cfg.KID2_NAME = "Kid2"
+    cfg.BOT_NAME = "Astakos"
     sys.modules["config"] = cfg
 
     # ── langchain_core ────────────────────────────────────────
@@ -173,7 +180,7 @@ def _stub_modules():
 
     # ── core.* ────────────────────────────────────────────────
     for mod in [
-        "core", "core.brain", "core.graph", "core.agents",
+        "core.brain", "core.graph", "core.agents",
         "core.exceptions", "core.event_bus",
         "core.routine_state", "core.prompts", "core.utils",
     ]:
@@ -217,7 +224,7 @@ def _stub_modules():
 
     sys.modules["services.routine_context"].build_runtime_routine_context = MagicMock(return_value={
         "today": "2026-06-17",
-        "alexandros_away_from_home": False,
+        "kid1_away_from_home": False,
         "football_season": True,
         "school_open": True,
         "current_shift": None,
@@ -256,6 +263,12 @@ def setup_module(module):
     global bot
     _ORIGINAL_MODULES.update({name: sys.modules.get(name) for name in _STUB_MODULE_NAMES})
     _stub_modules()
+    # Force reload of core.i18n and clients.telegram_bot so they pick up the stubbed config
+    if "core.i18n" in sys.modules:
+        _ORIGINAL_MODULES["core.i18n"] = sys.modules.pop("core.i18n")
+    if "clients.telegram_bot" in sys.modules:
+        _ORIGINAL_MODULES["clients.telegram_bot"] = sys.modules.pop("clients.telegram_bot")
+        
     import clients.telegram_bot as _bot_module
     bot = _bot_module
 
@@ -673,43 +686,43 @@ def test_deferred_context_skip_does_not_create_pending_confirmation():
 
 def test_force_silent_skip_from_state_when_park_already_in_progress():
     snap = {
-        "state:alexandros:outing": {"value": "in_progress", "expires_at": None}
+        "state:kid1:outing": {"value": "in_progress", "expires_at": None}
     }
     assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap).startswith("[SILENT_SKIP]")
 
 def test_force_silent_skip_from_state_when_football_off_season():
     snap = {
         "football_season": {"value": "false", "expires_at": "2026-09-01"},
-        "state:alexandros:sports_training": {"value": "off_season", "expires_at": "2026-09-01"},
+        "state:kid1:sports_training": {"value": "off_season", "expires_at": "2026-09-01"},
     }
     assert bot._force_proactive_skip_from_state("ποδόσφαιρο Αλέξανδρου", snap).startswith("[SILENT_SKIP]")
 
 def test_force_context_skip_from_state_when_child_away_from_home():
     snap = {
-        "alexandros_away_from_home": {"value": "true", "expires_at": "2026-06-25"},
+        "kid1_away_from_home": {"value": "true", "expires_at": "2026-06-25"},
         "alexandros_away_reason": {"value": "camp", "expires_at": "2026-06-25"},
     }
     assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap).startswith("[CONTEXT_SKIP]")
 
 def test_force_context_skip_from_state_when_child_is_out_with_sofia_for_sleep():
     snap = {
-        "alexandros_with_sofia": {"value": "true", "expires_at": "2026-07-05"},
-        "alexandros_away_from_home": {"value": "true", "expires_at": "2026-07-05"},
+        "kid1_with_partner": {"value": "true", "expires_at": "2026-07-05"},
+        "kid1_away_from_home": {"value": "true", "expires_at": "2026-07-05"},
     }
     assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith("[CONTEXT_SKIP]")
 
 def test_force_proactive_skip_from_state_does_not_skip_park_when_only_out_of_home():
     snap = {
         "user_out_of_home": {"value": "true", "expires_at": None},
-        "state:alexandros:outing": {"value": "", "expires_at": None},
-        "alexandros_away_from_home": {"value": "false", "expires_at": None},
+        "state:kid1:outing": {"value": "", "expires_at": None},
+        "kid1_away_from_home": {"value": "false", "expires_at": None},
         "user_at_work": {"value": "false", "expires_at": None},
     }
     assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) is None
 
 def test_force_proactive_skip_from_state_returns_silent_skip_for_done_park():
     snap = {
-        "state:alexandros:outing": {"value": "done", "expires_at": None}
+        "state:kid1:outing": {"value": "done", "expires_at": None}
     }
     assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap).startswith("[SILENT_SKIP]")
 
@@ -823,75 +836,89 @@ if __name__ == "__main__":
 def test_park_routine_not_skipped_just_because_alexandros_is_with_user():
     import clients.telegram_bot as bot
     snap = {
-        "alexandros_away_from_home": {"value": "false"},
-        "alexandros_with_user": {"value": "true"},
-        "alexandros_with_sofia": {"value": "false"},
+        "kid1_away_from_home": {"value": "false"},
+        "kid1_with_user": {"value": "true"},
+        "kid1_with_partner": {"value": "false"},
         "user_at_work": {"value": "false"},
-        "state:alexandros:outing": {"value": ""},
+        "state:kid1:outing": {"value": ""},
     }
     assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap) is None
 
 def test_park_routine_skips_when_alexandros_is_with_sofia_without_user():
     import clients.telegram_bot as bot
+    import config
     snap = {
-        "alexandros_away_from_home": {"value": "false"},
-        "alexandros_with_user": {"value": "false"},
-        "alexandros_with_sofia": {"value": "true"},
+        "kid1_away_from_home": {"value": "false"},
+        "kid1_with_user": {"value": "false"},
+        "kid1_with_partner": {"value": "true"},
         "user_at_work": {"value": "false"},
-        "state:alexandros:outing": {"value": ""},
+        "state:kid1:outing": {"value": ""},
     }
     result = bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap)
     assert result is not None
     assert result.startswith("[CONTEXT_SKIP]")
-    assert "Partner" in result or "σοφία" in result
+    assert config.PARTNER_NAME in result
 
 def test_force_context_skip_from_state_sleep_does_not_skip_when_all_at_home():
+    import clients.telegram_bot as bot
     snap = {
-        "alexandros_with_user": {"value": "true", "expires_at": "2026-07-05"},
-        "alexandros_with_sofia": {"value": "true", "expires_at": "2026-07-05"},
+        "kid1_with_user": {"value": "true", "expires_at": "2026-07-05"},
+        "kid1_with_partner": {"value": "true", "expires_at": "2026-07-05"},
         "user_out_of_home": {"value": "false", "expires_at": "2026-07-05"},
-        "alexandros_away_from_home": {"value": "false", "expires_at": "2026-07-05"},
+        "kid1_away_from_home": {"value": "false", "expires_at": "2026-07-05"},
     }
     assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap) is None
 
 def test_force_context_skip_from_state_sleep_skips_when_user_out_of_home():
+    import clients.telegram_bot as bot
+    import config
     snap = {
         "user_out_of_home": {"value": "true", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith("[CONTEXT_SKIP] ο User λείπει")
+    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith(f"[CONTEXT_SKIP] ο {config.OWNER_NAME} λείπει")
 
 def test_force_context_skip_from_state_sleep_skips_when_user_at_work():
+    import clients.telegram_bot as bot
+    import config
     snap = {
         "user_at_work": {"value": "true", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith("[CONTEXT_SKIP] ο User λείπει")
+    assert bot._force_proactive_skip_from_state("Ύπνος Αλέξανδρου", snap).startswith(f"[CONTEXT_SKIP] ο {config.OWNER_NAME} λείπει")
 
 def test_force_context_skip_from_state_message_to_sofia_skips_when_together():
+    import clients.telegram_bot as bot
     snap = {
-        "sofia_with_user": {"value": "true", "expires_at": "2026-07-05"},
+        "partner_with_user": {"value": "true", "expires_at": "2026-07-05"},
     }
     assert bot._force_proactive_skip_from_state("Σύνταξη πρωινού μηνύματος στη Partner στο Messenger", snap).startswith("[CONTEXT_SKIP]")
 
 def test_force_context_skip_from_state_message_to_sofia_does_not_skip_when_apart():
+    import clients.telegram_bot as bot
     snap = {
-        "sofia_with_user": {"value": "false", "expires_at": "2026-07-05"},
+        "partner_with_user": {"value": "false", "expires_at": "2026-07-05"},
     }
     assert bot._force_proactive_skip_from_state("Σύνταξη πρωινού μηνύματος στη Partner στο Messenger", snap) is None
 
 def test_force_context_skip_from_state_wake_up_skips_when_at_work():
+    import clients.telegram_bot as bot
+    import config
     snap = {
         "user_at_work": {"value": "true", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("ξύπνημα Λάζαρου", snap).startswith("[CONTEXT_SKIP] ο User είναι ήδη στη δουλειά (βάρδια)")
+    assert bot._force_proactive_skip_from_state("ξύπνημα Λάζαρου", snap).startswith(f"[CONTEXT_SKIP] ο {config.OWNER_NAME} είναι ήδη στη δουλειά")
 
 def test_force_context_skip_from_state_wake_up_skips_when_out_of_home():
+    import clients.telegram_bot as bot
+    import config
     snap = {
         "user_out_of_home": {"value": "true", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("ξύπνημα Λάζαρου", snap).startswith("[CONTEXT_SKIP] ο User είναι ήδη εκτός σπιτιού")
+    assert bot._force_proactive_skip_from_state("ξύπνημα Λάζαρου", snap).startswith(f"[CONTEXT_SKIP] ο {config.OWNER_NAME} είναι ήδη εκτός σπιτιού")
 
 def test_force_context_skip_from_state_work_departure_skips_when_at_work():
+    import clients.telegram_bot as bot
+    import config
     snap = {
         "user_at_work": {"value": "true", "expires_at": "2026-07-05"},
     }
-    assert bot._force_proactive_skip_from_state("αναχώρηση για δουλειά", snap).startswith("[CONTEXT_SKIP] ο User βρίσκεται ήδη στη δουλειά (βάρδια)")
+    assert bot._force_proactive_skip_from_state("αναχώρηση για δουλειά", snap).startswith(f"[CONTEXT_SKIP] ο {config.OWNER_NAME} βρίσκεται ήδη στη δουλειά")

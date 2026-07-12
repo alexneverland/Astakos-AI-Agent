@@ -12,7 +12,7 @@ _regex_data = _routines_nlp.get("regex", {})
 
 
 _ABSENCE_TOKENS = _tokens_data['_ABSENCE_TOKENS']
-_ALEXANDROS_TOKENS = _tokens_data['_ALEXANDROS_TOKENS']
+_KID1_TOKENS = _tokens_data['_KID1_TOKENS']
 _BASKETBALL_TOKENS = _tokens_data['_BASKETBALL_TOKENS']
 _CAMP_TOKENS = _tokens_data['_CAMP_TOKENS']
 _CHILD_ACTIVITY_TOKENS = _tokens_data['_CHILD_ACTIVITY_TOKENS']
@@ -38,7 +38,7 @@ _SCHOOL_TOKENS = _tokens_data['_SCHOOL_TOKENS']
 _SHIFT_AM_TOKENS = _tokens_data['_SHIFT_AM_TOKENS']
 _SHIFT_PM_TOKENS = _tokens_data['_SHIFT_PM_TOKENS']
 _SLEEP_TOKENS = _tokens_data['_SLEEP_TOKENS']
-_SOFIA_TOKENS = _tokens_data['_SOFIA_TOKENS']
+_PARTNER_TOKENS = _tokens_data['_PARTNER_TOKENS']
 _STOP_TOKENS = _tokens_data['_STOP_TOKENS']
 _SUMMER_BREAK_TOKENS = _tokens_data['_SUMMER_BREAK_TOKENS']
 _TOGETHER_TOKENS = _tokens_data['_TOGETHER_TOKENS']
@@ -274,7 +274,7 @@ def _append_flag(flags: list[str], label: str) -> None:
 def _rule_seasonal_football(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """Kid1' football stopped for summer → schedule_pause until September."""
     if not (
-        _contains_any(normalized, _ALEXANDROS_TOKENS)
+        _contains_any(normalized, _KID1_TOKENS)
         and _contains_any(normalized, _FOOTBALL_TOKENS)
         and _contains_any(normalized, _SUMMER_BREAK_TOKENS)
     ):
@@ -289,13 +289,13 @@ def _rule_seasonal_football(normalized: str, dates: list[str], now: datetime) ->
         "value": "false",
         "until_date": until,
         "reason": "summer_break",
-        "subject_tokens": _ALEXANDROS_TOKENS,
+        "subject_tokens": _KID1_TOKENS,
         "include_tokens": _FOOTBALL_TOKENS,
         "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
     }
     
     cond = _build_condition_directive(
-        subject_tokens=_ALEXANDROS_TOKENS,
+        subject_tokens=_KID1_TOKENS,
         include_tokens=_FOOTBALL_TOKENS,
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         condition_type="context_flag",
@@ -309,7 +309,7 @@ def _rule_seasonal_football(normalized: str, dates: list[str], now: datetime) ->
 
 def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """Kid1 is away / camping → notifications_mute."""
-    if not _contains_any(normalized, _ALEXANDROS_TOKENS):
+    if not _contains_any(normalized, _KID1_TOKENS):
         return []
     if not (_contains_any(normalized, _CAMP_TOKENS) or _contains_any(normalized, _ABSENCE_TOKENS)):
         return []
@@ -325,22 +325,22 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
         "value": "true",
         "until_date": until,
         "reason": reason,
-        "subject_tokens": _ALEXANDROS_TOKENS,
+        "subject_tokens": _KID1_TOKENS,
         "include_tokens": [],
         "exclude_tokens": [],
     }
     d_state_reason = {
         "kind": "context_state_set",
-        "key": "alexandros_away_reason",
+        "key": "kid1_away_reason",
         "value": "camp",
         "until_date": until,
         "reason": reason,
-        "subject_tokens": _ALEXANDROS_TOKENS,
+        "subject_tokens": _KID1_TOKENS,
         "include_tokens": [],
         "exclude_tokens": [],
     }
     cond = _build_condition_directive(
-        subject_tokens=_ALEXANDROS_TOKENS,
+        subject_tokens=_KID1_TOKENS,
         include_tokens=[],
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         condition_type="context_flag",
@@ -355,7 +355,7 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
 def _rule_return_home(normalized: str) -> list[dict]:
     """Kid1 returned → context_state_set (kid1_away_from_home = false)."""
     if not (
-        _contains_any(normalized, _ALEXANDROS_TOKENS)
+        _contains_any(normalized, _KID1_TOKENS)
         and _contains_any(normalized, _RETURN_TOKENS)
         and (_contains_any(normalized, _CAMP_TOKENS) or _contains_any(normalized, _inline.get("home", [])))
     ):
@@ -367,17 +367,17 @@ def _rule_return_home(normalized: str) -> list[dict]:
         "value": "false",
         "until_date": None,
         "reason": "returned_home",
-        "subject_tokens": _ALEXANDROS_TOKENS,
+        "subject_tokens": _KID1_TOKENS,
         "include_tokens": [],
         "exclude_tokens": [],
     }
     d_state_reason = {
         "kind": "context_state_set",
-        "key": "alexandros_away_reason",
+        "key": "kid1_away_reason",
         "value": "",
         "until_date": None,
         "reason": "returned_home",
-        "subject_tokens": _ALEXANDROS_TOKENS,
+        "subject_tokens": _KID1_TOKENS,
         "include_tokens": [],
         "exclude_tokens": [],
     }
@@ -385,7 +385,7 @@ def _rule_return_home(normalized: str) -> list[dict]:
 
 def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     t("prompts.ext_family_outing_already_outside_")
-    has_child = _contains_any(normalized, _ALEXANDROS_TOKENS)
+    has_child = _contains_any(normalized, _KID1_TOKENS)
 
     has_outing = _contains_any(normalized, _OUTING_TOKENS)
     has_progress = _contains_any(normalized, _OUTING_PROGRESS_TOKENS)
@@ -400,7 +400,7 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
     until = max(dates) if dates else now.strftime("%Y-%m-%d")
 
     out = []
-    has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
+    has_sofia = _contains_any(normalized, _PARTNER_TOKENS)
 
     # Always set generic out-of-home state
     d_user_out = {
@@ -418,11 +418,11 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
     if has_child:
         out.append({
             "kind": "context_state_set",
-            "key": "alexandros_with_user",
+            "key": "kid1_with_user",
             "value": "true",
             "until_date": until,
             "reason": "family_outing_in_progress",
-            "subject_tokens": _ALEXANDROS_TOKENS,
+            "subject_tokens": _KID1_TOKENS,
             "include_tokens": _OUTING_TOKENS,
             "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
         })
@@ -430,11 +430,11 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
     if has_child and has_sofia:
         out.append({
             "kind": "context_state_set",
-            "key": "alexandros_with_sofia",
+            "key": "kid1_with_partner",
             "value": "true",
             "until_date": until,
             "reason": "family_outing_in_progress",
-            "subject_tokens": _ALEXANDROS_TOKENS + _SOFIA_TOKENS,
+            "subject_tokens": _KID1_TOKENS + _PARTNER_TOKENS,
             "include_tokens": _OUTING_TOKENS,
             "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
         })
@@ -447,7 +447,7 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
             "value": "in_progress",
             "until_date": until,
             "reason": "family_outing_in_progress",
-            "subject_tokens": _ALEXANDROS_TOKENS,
+            "subject_tokens": _KID1_TOKENS,
             "include_tokens": _OUTING_TOKENS,
             "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
         }
@@ -548,7 +548,7 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
                 "value": "done",
                 "until_date": until,
                 "reason": "returned_home_from_outing",
-                "subject_tokens": _ALEXANDROS_TOKENS + _inline.get("together_group", []),
+                "subject_tokens": _KID1_TOKENS + _inline.get("together_group", []),
                 "include_tokens": _OUTING_TOKENS,
                 "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
             }
@@ -556,9 +556,9 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
 
     return directives
 
-def _rule_alexandros_away_general(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+def _rule_kid1_away_general(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """General rule for Kid1's absence (e.g., vacation, with grandmother)."""
-    if not _contains_any(normalized, _ALEXANDROS_TOKENS):
+    if not _contains_any(normalized, _KID1_TOKENS):
         return []
         
     # Guard: if it's camp, _rule_camp_absence handles it.
@@ -589,22 +589,22 @@ def _rule_alexandros_away_general(normalized: str, dates: list[str], now: dateti
         "value": "true",
         "until_date": until,
         "reason": away_reason,
-        "subject_tokens": _ALEXANDROS_TOKENS,
+        "subject_tokens": _KID1_TOKENS,
         "include_tokens": [],
         "exclude_tokens": [],
     }
     d_state_reason = {
         "kind": "context_state_set",
-        "key": "alexandros_away_reason",
+        "key": "kid1_away_reason",
         "value": away_reason,
         "until_date": until,
         "reason": away_reason,
-        "subject_tokens": _ALEXANDROS_TOKENS,
+        "subject_tokens": _KID1_TOKENS,
         "include_tokens": [],
         "exclude_tokens": [],
     }
     cond = _build_condition_directive(
-        subject_tokens=_ALEXANDROS_TOKENS,
+        subject_tokens=_KID1_TOKENS,
         include_tokens=[],
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         condition_type="context_flag",
@@ -620,7 +620,7 @@ def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list
     t("prompts.ext_phase_3a_school_break_facts_no")
     has_school_break = _contains_any(normalized, _SCHOOL_BREAK_TOKENS)
     has_school_ref   = _contains_any(normalized, _SCHOOL_TOKENS)
-    has_child_ref    = _contains_any(normalized, _ALEXANDROS_TOKENS)
+    has_child_ref    = _contains_any(normalized, _KID1_TOKENS)
     if not (has_school_ref and has_child_ref and has_school_break):
         return []
     until = None
@@ -639,13 +639,13 @@ def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list
         "value": "false",
         "until_date": until,
         "reason": "school_break",
-        "subject_tokens": _ALEXANDROS_TOKENS,
+        "subject_tokens": _KID1_TOKENS,
         "include_tokens": _SCHOOL_TOKENS + _MORNING_TOKENS,
         "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
     }
     
     cond = _build_condition_directive(
-        subject_tokens=_ALEXANDROS_TOKENS,
+        subject_tokens=_KID1_TOKENS,
         include_tokens=_SCHOOL_TOKENS + _MORNING_TOKENS,
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         condition_type="context_flag",
@@ -662,7 +662,7 @@ def _rule_sofia_work_mode(normalized: str, dates: list[str], now: datetime) -> l
     Phase 3C.5 — sofia_work_mode:
     Facts: "Partner is working from home tomorrow", "Partner is teleworking"
     """
-    has_sofia = _contains_any(normalized, _inline.get("sofia_aliases", []))
+    has_sofia = _contains_any(normalized, _inline.get("partner_aliases", []))
     has_work = _contains_any(normalized, _WORK_TOKENS)
     has_remote = _contains_any(normalized, _inline.get("home", [])) or _contains_any(normalized, _inline.get("remote_work", []))
     
@@ -683,7 +683,7 @@ def _rule_sofia_work_mode(normalized: str, dates: list[str], now: datetime) -> l
         "value": "remote",
         "until_date": until,
         "reason": "sofia_remote_work",
-        "subject_tokens": _inline.get("sofia_aliases", []),
+        "subject_tokens": _inline.get("partner_aliases", []),
         "include_tokens": _WORK_TOKENS,
         "exclude_tokens": [],
     }
@@ -716,7 +716,7 @@ def _rule_football_season(normalized: str, dates: list[str], now: datetime) -> l
         "value": val,
         "until_date": until,
         "reason": "football_season_update",
-        "subject_tokens": _ALEXANDROS_TOKENS,
+        "subject_tokens": _KID1_TOKENS,
         "include_tokens": _CHILD_ACTIVITY_TOKENS,
         "exclude_tokens": [],
     }
@@ -801,7 +801,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
             "condition_add",
             subject_tokens=[],
             include_tokens=action_tokens,
-            exclude_tokens=_ALEXANDROS_TOKENS + _SOFIA_TOKENS,
+            exclude_tokens=_KID1_TOKENS + _PARTNER_TOKENS,
             reason="shift_generic_rule",
         )
         if d_cond_generic:
@@ -823,7 +823,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     return directives
 
 
-def _sofia_state_is_active(now: datetime) -> bool:
+def _partner_state_is_active(now: datetime) -> bool:
     from memory.routine_db import get_context_state
 
     state_data = get_context_state("partner_with_user")
@@ -838,9 +838,9 @@ def _sofia_state_is_active(now: datetime) -> bool:
     return str(state_data.get("value", "")).lower() == "true"
 
 
-def _rule_alexandros_with_sofia_without_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
-    has_child = _contains_any(normalized, _ALEXANDROS_TOKENS)
+def _rule_kid1_with_partner_without_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+    has_sofia = _contains_any(normalized, _PARTNER_TOKENS)
+    has_child = _contains_any(normalized, _KID1_TOKENS)
     has_outing = _contains_any(normalized, _OUTING_TOKENS + _OUTING_ROUTINE_TOKENS)
     user_not_with_them = _contains_any(normalized, _NOT_TOGETHER_TOKENS) or _contains_any(normalized, _inline.get("not_together_extra", []))
 
@@ -856,17 +856,17 @@ def _rule_alexandros_with_sofia_without_user(normalized: str, dates: list[str], 
             "value": "false",
             "until_date": until,
             "reason": "sofia_with_child_without_user",
-            "subject_tokens": _SOFIA_TOKENS,
-            "include_tokens": _ALEXANDROS_TOKENS + _OUTING_TOKENS,
+            "subject_tokens": _PARTNER_TOKENS,
+            "include_tokens": _KID1_TOKENS + _OUTING_TOKENS,
             "exclude_tokens": [],
         },
         {
             "kind": "context_state_set",
-            "key": "alexandros_with_sofia",
+            "key": "kid1_with_partner",
             "value": "true",
             "until_date": until,
             "reason": "sofia_with_child_without_user",
-            "subject_tokens": _ALEXANDROS_TOKENS + _SOFIA_TOKENS,
+            "subject_tokens": _KID1_TOKENS + _PARTNER_TOKENS,
             "include_tokens": _OUTING_TOKENS,
             "exclude_tokens": [],
         },
@@ -876,25 +876,25 @@ def _rule_alexandros_with_sofia_without_user(normalized: str, dates: list[str], 
             "value": "true",
             "until_date": until,
             "reason": "child_out_with_sofia",
-            "subject_tokens": _ALEXANDROS_TOKENS,
-            "include_tokens": _SOFIA_TOKENS + _OUTING_TOKENS,
+            "subject_tokens": _KID1_TOKENS,
+            "include_tokens": _PARTNER_TOKENS + _OUTING_TOKENS,
             "exclude_tokens": [],
         },
     ]
 
 def _rule_partner_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     t("prompts.ext_phase_3a_partner_with_user_facts")
-    has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
+    has_sofia = _contains_any(normalized, _PARTNER_TOKENS)
     has_together = _contains_any(normalized, _TOGETHER_TOKENS)
 
     has_home_marker = _contains_any(normalized, _inline.get("home", []))
-    has_alex = _contains_any(normalized, _ALEXANDROS_TOKENS)
+    has_kid1 = _contains_any(normalized, _KID1_TOKENS)
     has_user_work_context = _contains_any(
         normalized,
         _WORK_TOKENS + _SHIFT_AM_TOKENS + _SHIFT_PM_TOKENS + _WORK_TOKENS
     )
 
-    if has_sofia and has_alex and has_home_marker and has_user_work_context:
+    if has_sofia and has_kid1 and has_home_marker and has_user_work_context:
         return []
 
     if has_sofia and has_together:
@@ -910,7 +910,7 @@ def _rule_partner_with_user(normalized: str, dates: list[str], now: datetime) ->
     if has_sofia and has_together:
         pass
     # Softer path: group outing wording can reinforce an already-active Partner context
-    elif has_group_outing and _sofia_state_is_active(now) and _looks_like_live_presence_statement(normalized):
+    elif has_group_outing and _partner_state_is_active(now) and _looks_like_live_presence_statement(normalized):
         pass
     else:
         return []
@@ -930,14 +930,14 @@ def _rule_partner_with_user(normalized: str, dates: list[str], now: datetime) ->
         "value": "true",
         "until_date": until,
         "reason": "partner_with_user",
-        "subject_tokens": _SOFIA_TOKENS,
-        "include_tokens": _inline.get("sofia_aliases", []) + _DRAFT_CONTEXT_TOKENS,
+        "subject_tokens": _PARTNER_TOKENS,
+        "include_tokens": _inline.get("partner_aliases", []) + _DRAFT_CONTEXT_TOKENS,
         "exclude_tokens": _MESSENGER_EXCLUDE,
     }
     
     cond = _build_condition_directive(
-        subject_tokens=_SOFIA_TOKENS,
-        include_tokens=_inline.get("sofia_aliases", []) + _DRAFT_CONTEXT_TOKENS,
+        subject_tokens=_PARTNER_TOKENS,
+        include_tokens=_inline.get("partner_aliases", []) + _DRAFT_CONTEXT_TOKENS,
         exclude_tokens=_MESSENGER_EXCLUDE,
         condition_type="context_flag",
         condition_payload={"flag": "partner_with_user", "equals": True},
@@ -955,7 +955,7 @@ def _rule_partner_not_with_user(normalized: str, dates: list[str], now: datetime
     Target: clear Messenger/Partner suppress context immediately
     Action: State only (partner_with_user = false)
     """
-    has_sofia = _contains_any(normalized, _SOFIA_TOKENS)
+    has_sofia = _contains_any(normalized, _PARTNER_TOKENS)
     has_absence = has_sofia and _contains_any(normalized, _ABSENCE_TOKENS)
     has_not_together = _contains_any(normalized, _NOT_TOGETHER_TOKENS)
 
@@ -980,8 +980,8 @@ def _rule_partner_not_with_user(normalized: str, dates: list[str], now: datetime
         "value": "false",
         "until_date": None,
         "reason": "partner_not_with_user",
-        "subject_tokens": _SOFIA_TOKENS,
-        "include_tokens": _inline.get("sofia_aliases", []) + _DRAFT_CONTEXT_TOKENS,
+        "subject_tokens": _PARTNER_TOKENS,
+        "include_tokens": _inline.get("partner_aliases", []) + _DRAFT_CONTEXT_TOKENS,
         "exclude_tokens": _MESSENGER_EXCLUDE,
     }
     return [d_state]
@@ -997,8 +997,8 @@ def _rule_child_activity_pause(normalized: str, dates: list[str], now: datetime)
     Guard: stop + activity + child subject — all three.
     """
     has_child    = (
-        _contains_any(normalized, _ALEXANDROS_TOKENS)
-        or _contains_any(normalized, _inline.get("alexandros_kids", []))
+        _contains_any(normalized, _KID1_TOKENS)
+        or _contains_any(normalized, _inline.get("kid1_aliases", []))
     )
     has_activity = _contains_any(normalized, _CHILD_ACTIVITY_TOKENS)
     has_stop     = _contains_any(normalized, _STOP_TOKENS)
@@ -1030,7 +1030,7 @@ def _rule_child_activity_pause(normalized: str, dates: list[str], now: datetime)
         reason  = "child_activity_pause"
     d = _build_directive(
         "schedule_pause",
-        subject_tokens=_ALEXANDROS_TOKENS,
+        subject_tokens=_KID1_TOKENS,
         include_tokens=include,
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         until_date=until,
@@ -1186,9 +1186,9 @@ def score_candidate_directive(
         _append_flag(ambiguity_flags, "generic_school_reference")
 
     # Penalty: multiple persons in same fact → ambiguous
-    has_alex  = _contains_any(normalized_fact, _ALEXANDROS_TOKENS)
-    has_sofia = _contains_any(normalized_fact, _SOFIA_TOKENS)
-    if has_alex and has_sofia:
+    has_kid1  = _contains_any(normalized_fact, _KID1_TOKENS)
+    has_sofia = _contains_any(normalized_fact, _PARTNER_TOKENS)
+    if has_kid1 and has_sofia:
         # We relax the penalty if the text clearly shows that they act together
         if _contains_any(normalized_fact, _inline.get("together_group", [])):
             _append_signal(signals, "multiple_people_together")
@@ -1286,7 +1286,7 @@ def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
     """
     has_sleep = _contains_any(normalized, _inline.get("sleep_extra", []))
     has_quiet = _contains_any(normalized, _inline.get("quiet", []))
-    has_child = _contains_any(normalized, _ALEXANDROS_TOKENS)
+    has_child = _contains_any(normalized, _KID1_TOKENS)
     
     if not ((has_sleep and has_child) or has_quiet):
         return []
@@ -1300,7 +1300,7 @@ def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
         "value": "true",
         "until_date": until,
         "reason": "quiet_hours_requested",
-        "subject_tokens": _ALEXANDROS_TOKENS if has_child else [],
+        "subject_tokens": _KID1_TOKENS if has_child else [],
         "include_tokens": _inline.get("quiet", []) + _inline.get("sleep_extra", []),
         "exclude_tokens": [],
     }
@@ -1332,7 +1332,7 @@ def _normalize_context_key(raw: str) -> str:
         "user_out_of_home": "user_out_of_home",
         "out_of_home": "user_out_of_home",
 
-        "alexandros_present": "kid1_away_from_home",
+        "kid1_present": "kid1_away_from_home",
         "child_present": "kid1_away_from_home",
         
         "kid1_away_from_home": "kid1_away_from_home",
@@ -1376,17 +1376,17 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
         elif cv == "null":
             context_value = None
 
-    if raw_context_key in {"alexandros_present", "child_present"} and isinstance(context_value, bool):
+    if raw_context_key in {"kid1_present", "child_present"} and isinstance(context_value, bool):
         context_value = not context_value
 
     if not context_key and (not entity or not activity or not impact_type):
         return []
 
     subject_tokens = []
-    if _contains_any(entity, _inline.get("alexandros_aliases", [])):
-        subject_tokens = _ALEXANDROS_TOKENS
-    elif _contains_any(entity, _inline.get("sofia_aliases", [])):
-        subject_tokens = _SOFIA_TOKENS
+    if _contains_any(entity, _inline.get("kid1_aliases", [])):
+        subject_tokens = _KID1_TOKENS
+    elif _contains_any(entity, _inline.get("partner_aliases", [])):
+        subject_tokens = _PARTNER_TOKENS
     elif entity in set(_inline.get("family_entities", [])):
         subject_tokens = []
     else:
@@ -1397,9 +1397,9 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
 
     if context_key:
         if context_key == "kid1_away_from_home":
-            subject_tokens = _ALEXANDROS_TOKENS
+            subject_tokens = _KID1_TOKENS
         elif context_key == "partner_with_user":
-            subject_tokens = _SOFIA_TOKENS
+            subject_tokens = _PARTNER_TOKENS
         elif context_key in {"user_out_of_home", "family_at_home"}:
             subject_tokens = []
 
@@ -1709,10 +1709,10 @@ def infer_routine_reconciliation_candidates(
         ("family_outing_in_progress",      _rule_family_outing_in_progress,      (normalized_fact, dates, current)),
         ("return_home",                    _rule_return_home,                    (normalized_fact,)),
         ("return_home_from_outing",        _rule_return_home_from_outing,        (normalized_fact, dates, current)),
-        ("alexandros_away_general",        _rule_alexandros_away_general,        (normalized_fact, dates, current)),
+        ("kid1_away_general",        _rule_kid1_away_general,        (normalized_fact, dates, current)),
         ("school_break",                   _rule_school_break,                   (normalized_fact, dates, current)),
         ("child_activity_pause",           _rule_child_activity_pause,           (normalized_fact, dates, current)),
-        ("alexandros_with_sofia_without_user", _rule_alexandros_with_sofia_without_user, (normalized_fact, dates, current)),
+        ("kid1_with_partner_without_user", _rule_kid1_with_partner_without_user, (normalized_fact, dates, current)),
         ("partner_with_user",                _rule_partner_with_user,                (normalized_fact, dates, current)),
         ("partner_not_with_user",            _rule_partner_not_with_user,            (normalized_fact, dates, current)),
         ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, dates, current)),

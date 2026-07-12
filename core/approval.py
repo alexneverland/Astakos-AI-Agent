@@ -254,6 +254,7 @@ def approval_check_node(state):
     - CRITICAL       → saves pending, sends Telegram, sets "pending"
     """
     from langchain_core.messages import AIMessage, ToolMessage
+    from core.i18n import t
 
     last_msg = state["messages"][-1]
     tool_calls = getattr(last_msg, "tool_calls", [])

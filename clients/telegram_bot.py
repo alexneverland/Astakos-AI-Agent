@@ -240,35 +240,37 @@ def _looks_like_contextual_not_needed_reply(text: str) -> bool:
     normalized = _normalize_gr(text or "")
 
     strong_not_needed_markers = (
-        t("clients.telegram_bot.msg_43adbb"),
-        t("clients.telegram_bot.msg_3b5a96"),
-        t("clients.telegram_bot.msg_096f99"),
-        t("clients.telegram_bot.msg_a54877"),
-        t("clients.telegram_bot.msg_5adac4"),
-        t("clients.telegram_bot.msg_c4476f"),
-        t("clients.telegram_bot.msg_eb512e"),
+        t("clients.telegram_bot.bot_msg_43adbb"),
+        t("clients.telegram_bot.bot_msg_3b5a96"),
+        t("clients.telegram_bot.bot_msg_096f99"),
+        t("clients.telegram_bot.bot_msg_a54877"),
+        t("clients.telegram_bot.bot_msg_5adac4"),
+        t("clients.telegram_bot.bot_msg_c4476f"),
+        t("clients.telegram_bot.bot_msg_eb512e"),
     )
     if any(m in normalized for m in strong_not_needed_markers):
         return True
 
     phrase_markers = (
-        t("clients.telegram_bot.msg_ce4288"),
-        t("clients.telegram_bot.msg_cf3cd8"),
-        t("clients.telegram_bot.msg_02921b"),
-        t("clients.telegram_bot.msg_864cf3"),
-        t("clients.telegram_bot.msg_487948"),
-        t("clients.telegram_bot.msg_e385db"),
-        t("clients.telegram_bot.msg_df2521"),
-        t("clients.telegram_bot.msg_a7161a"),
-        t("clients.telegram_bot.msg_f3ebcb"),
-        t("clients.telegram_bot.msg_1dc463"),
-        t("clients.telegram_bot.msg_db9bf6"),
-        t("clients.telegram_bot.msg_d2e073"),
-        t("clients.telegram_bot.msg_8a0cd2"),
+        t("clients.telegram_bot.bot_msg_ce4288"),
+        t("clients.telegram_bot.bot_msg_cf3cd8"),
+        t("clients.telegram_bot.bot_msg_02921b"),
+        t("clients.telegram_bot.bot_msg_864cf3"),
+        t("clients.telegram_bot.bot_msg_487948"),
+        t("clients.telegram_bot.bot_msg_e385db"),
+        t("clients.telegram_bot.bot_msg_df2521"),
+        t("clients.telegram_bot.bot_msg_a7161a"),
+        t("clients.telegram_bot.bot_msg_f3ebcb"),
+        t("clients.telegram_bot.bot_msg_1dc463"),
+        t("clients.telegram_bot.bot_msg_db9bf6"),
+        t("clients.telegram_bot.bot_msg_d2e073"),
+        t("clients.telegram_bot.bot_msg_8a0cd2"),
     )
 
     signal_count = sum(1 for marker in phrase_markers if marker in normalized)
-    has_sofia_ref = (t("clients.telegram_bot.msg_2e67ed") in normalized) or ("sofia" in normalized)
+    partner_name_lower = _normalize_gr(config.PARTNER_NAME)
+    partner_prefix = partner_name_lower[:3] if len(partner_name_lower) >= 3 else partner_name_lower
+    has_sofia_ref = (partner_prefix in normalized) or (config.PARTNER_NAME.lower() in normalized)
 
     return signal_count >= 2 or (has_sofia_ref and signal_count >= 1)
 
@@ -367,30 +369,30 @@ def _build_safe_followup_fallback(item: dict, stage: str = "") -> str:
     if stage == "before_prerequisite":
         if subject:
             return t("clients.telegram_bot.proactive_followup", subject=subject)
-        return t("clients.telegram_bot.msg_b8a2cc")
+        return t("clients.telegram_bot.bot_msg_b8a2cc")
 
     if stage == "decision_pending":
         if subject:
             return f"What will finally happen with {subject}?"
-        return t("clients.telegram_bot.msg_7ffced")
+        return t("clients.telegram_bot.bot_msg_7ffced")
 
     if stage == "after_likely_completion":
         if subject:
             return f"How did it go with {subject}?"
-        return t("clients.telegram_bot.msg_b427bf")
+        return t("clients.telegram_bot.bot_msg_b427bf")
 
     if stage == "light_outing_checkin":
         if subject:
             return f"Did you find them for {subject}?"
-        return t("clients.telegram_bot.msg_62dd6f")
+        return t("clients.telegram_bot.bot_msg_62dd6f")
 
     if topic == "outing":
-        return t("clients.telegram_bot.proactive_followup_alt", subject=subject) if subject else t("clients.telegram_bot.msg_111e41")
+        return t("clients.telegram_bot.proactive_followup_alt", subject=subject) if subject else t("clients.telegram_bot.bot_msg_111e41")
     if topic == "food_purchase":
-        return t("clients.telegram_bot.proactive_followup_alt", subject=subject) if subject else t("clients.telegram_bot.msg_e98f02")
+        return t("clients.telegram_bot.proactive_followup_alt", subject=subject) if subject else t("clients.telegram_bot.bot_msg_e98f02")
     if topic == "task_progress":
-        return f"Did {subject} proceed?" if subject else t("clients.telegram_bot.msg_9fef07")
-    return t("clients.telegram_bot.proactive_followup", subject=subject) if subject else t("clients.telegram_bot.msg_4f0f04")
+        return f"Did {subject} proceed?" if subject else t("clients.telegram_bot.bot_msg_9fef07")
+    return t("clients.telegram_bot.proactive_followup", subject=subject) if subject else t("clients.telegram_bot.bot_msg_4f0f04")
 
 
 def _normalize_followup_signal_text(text: str) -> str:
@@ -415,13 +417,13 @@ def _should_force_light_outing_followup(item: dict) -> bool:
         return False
 
     markers = (
-        t("clients.telegram_bot.msg_9f2131"),
-        t("clients.telegram_bot.msg_6272d2"),
-        t("clients.telegram_bot.msg_150aee"),
-        t("clients.telegram_bot.msg_b660c9"),
-        t("clients.telegram_bot.msg_572193"),
-        t("clients.telegram_bot.msg_069ca1"),
-        t("clients.telegram_bot.msg_3b2403"),
+        t("clients.telegram_bot.bot_msg_9f2131"),
+        t("clients.telegram_bot.bot_msg_6272d2"),
+        t("clients.telegram_bot.bot_msg_150aee"),
+        t("clients.telegram_bot.bot_msg_b660c9"),
+        t("clients.telegram_bot.bot_msg_572193"),
+        t("clients.telegram_bot.bot_msg_069ca1"),
+        t("clients.telegram_bot.bot_msg_3b2403"),
     )
     if not any(marker in text for marker in markers):
         return False
@@ -533,14 +535,14 @@ def _short_followup_reason(reason: str, limit: int = 220) -> str:
 def _followup_skip_means_defer(reason: str) -> bool:
     text = _normalize_followup_signal_text(reason)
     markers = (
-        t("clients.telegram_bot.msg_395694"),
-        t("clients.telegram_bot.msg_28b202"),
-        t("clients.telegram_bot.msg_117791"),
-        t("clients.telegram_bot.msg_082854"),
-        t("clients.telegram_bot.msg_437093"),
-        t("clients.telegram_bot.msg_4f17de"),
-        t("clients.telegram_bot.msg_a77d19"),
-        t("clients.telegram_bot.msg_251e4d"),
+        t("clients.telegram_bot.bot_msg_395694"),
+        t("clients.telegram_bot.bot_msg_28b202"),
+        t("clients.telegram_bot.bot_msg_117791"),
+        t("clients.telegram_bot.bot_msg_082854"),
+        t("clients.telegram_bot.bot_msg_437093"),
+        t("clients.telegram_bot.bot_msg_4f17de"),
+        t("clients.telegram_bot.bot_msg_a77d19"),
+        t("clients.telegram_bot.bot_msg_251e4d"),
         "before",
         "not yet",
         "later",
@@ -551,37 +553,37 @@ def _followup_skip_means_defer(reason: str) -> bool:
 def _followup_skip_means_resolved(reason: str) -> bool:
     text = _normalize_followup_signal_text(reason)
     markers = (
-        t("clients.telegram_bot.msg_39b4e9"),
-        t("clients.telegram_bot.msg_48da5a"),
-        t("clients.telegram_bot.msg_12e8b7"),
-        t("clients.telegram_bot.msg_77d021"),
-        t("clients.telegram_bot.msg_451cec"),
-        t("clients.telegram_bot.msg_6e8d10"),
-        t("clients.telegram_bot.msg_770c84"),
-        t("clients.telegram_bot.msg_1b3dde"),
-        t("clients.telegram_bot.msg_ef62c0"),
-        t("clients.telegram_bot.msg_7755d1"),
-        t("clients.telegram_bot.msg_9f7078"),
+        t("clients.telegram_bot.bot_msg_39b4e9"),
+        t("clients.telegram_bot.bot_msg_48da5a"),
+        t("clients.telegram_bot.bot_msg_12e8b7"),
+        t("clients.telegram_bot.bot_msg_77d021"),
+        t("clients.telegram_bot.bot_msg_451cec"),
+        t("clients.telegram_bot.bot_msg_6e8d10"),
+        t("clients.telegram_bot.bot_msg_770c84"),
+        t("clients.telegram_bot.bot_msg_1b3dde"),
+        t("clients.telegram_bot.bot_msg_ef62c0"),
+        t("clients.telegram_bot.bot_msg_7755d1"),
+        t("clients.telegram_bot.bot_msg_9f7078"),
         "already completed",
         "already discussed",
         "no further follow-up",
-        t("clients.telegram_bot.msg_1bbc61"),
-        t("clients.telegram_bot.msg_aaa6cf"),
-        t("clients.telegram_bot.msg_b1aca8"),
+        t("clients.telegram_bot.bot_msg_1bbc61"),
+        t("clients.telegram_bot.bot_msg_aaa6cf"),
+        t("clients.telegram_bot.bot_msg_b1aca8"),
     )
     return any(marker in text for marker in markers)
 
 def _looks_terminal_followup_skip_reason(reason: str) -> bool:
     text = _normalize_gr(reason or "")
     markers = [
-        t("clients.telegram_bot.msg_cdf440"),
-        t("clients.telegram_bot.msg_055f83"),
-        t("clients.telegram_bot.msg_f6a7ce"),
-        t("clients.telegram_bot.msg_12a43d"),
-        t("clients.telegram_bot.msg_a0f7e2"),
-        t("clients.telegram_bot.msg_3ee579"),
-        t("clients.telegram_bot.msg_27ae12"),
-        t("clients.telegram_bot.msg_062ecf"),
+        t("clients.telegram_bot.bot_msg_cdf440"),
+        t("clients.telegram_bot.bot_msg_055f83"),
+        t("clients.telegram_bot.bot_msg_f6a7ce"),
+        t("clients.telegram_bot.bot_msg_12a43d"),
+        t("clients.telegram_bot.bot_msg_a0f7e2"),
+        t("clients.telegram_bot.bot_msg_3ee579"),
+        t("clients.telegram_bot.bot_msg_27ae12"),
+        t("clients.telegram_bot.bot_msg_062ecf"),
     ]
     return any(m in text for m in markers)
 
@@ -652,10 +654,10 @@ def job_check_pending_followups():
 
             if item.get("topic") == "food_purchase":
                 premature_markers = (
-                    t("clients.telegram_bot.msg_eb4038"),
-                    t("clients.telegram_bot.msg_0e8630"),
-                    t("clients.telegram_bot.msg_1398b3"),
-                    t("clients.telegram_bot.msg_2c9984"),
+                    t("clients.telegram_bot.bot_msg_eb4038"),
+                    t("clients.telegram_bot.bot_msg_0e8630"),
+                    t("clients.telegram_bot.bot_msg_1398b3"),
+                    t("clients.telegram_bot.bot_msg_2c9984"),
                 )
                 if any(marker in lower_ctx for marker in premature_markers):
                     print(f"[FollowUp]: keep pre-completion stage for #{item['id']} due to work-context")
@@ -850,14 +852,14 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         conversation_context = build_asset_context_text("telegram")
 
         sum_prompt = core.i18n.load_prompt("telegram_bot_document_analysis.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, 
-            conversation_context=conversation_context or t("clients.telegram_bot.msg_98937a"),
-            caption=caption or t("clients.telegram_bot.msg_05a606"),
+            conversation_context=conversation_context or t("clients.telegram_bot.bot_msg_98937a"),
+            caption=caption or t("clients.telegram_bot.bot_msg_05a606"),
             file_name=file_name,
             doc_text=doc_text
         )
         from langchain_core.messages import HumanMessage as _HM
         sum_resp = safe_llm_invoke(llm, [_HM(content=sum_prompt)])
-        detailed_analysis = clean_message(sum_resp.content).strip() if sum_resp and sum_resp.content else t("clients.telegram_bot.msg_33d466")
+        detailed_analysis = clean_message(sum_resp.content).strip() if sum_resp and sum_resp.content else t("clients.telegram_bot.bot_msg_33d466")
         memory_analysis = detailed_analysis[:500]
 
         chat_ai_msg = (
@@ -937,10 +939,10 @@ def handle_voice(voice_obj: dict, chat_id: str):
         from core.brain import FAST_MODEL
         vertexai.init(project=config.PROJECT_ID, location=os.getenv("LOCATION", "global"))
         stt_model = GenerativeModel(FAST_MODEL)
-        prompt = t("clients.telegram_bot.msg_32a4bf")
+        prompt = t("clients.telegram_bot.bot_msg_32a4bf")
         audio_part = Part.from_data(data=audio_data, mime_type="audio/ogg")
         stt_response = stt_model.generate_content([prompt, audio_part])
-        ai_reply = stt_response.text.strip() if stt_response and stt_response.text else t("clients.telegram_bot.msg_dacaa2")
+        ai_reply = stt_response.text.strip() if stt_response and stt_response.text else t("clients.telegram_bot.bot_msg_dacaa2")
 
         print(f"\033[92m[Voice AI]: {ai_reply}\033[0m")
         # We send the flag [VOICE] + [VOICE_INPUT] so that handle_message knows to reply with audio
@@ -950,7 +952,7 @@ def handle_voice(voice_obj: dict, chat_id: str):
     except Exception as e:
         print(f"\033[91m[Voice Error]: {e}\033[0m")
         # [FIX]: HERE WAS THE ERROR - Only one argument
-        send_telegram_msg(t("clients.telegram_bot.msg_37da1a")) 
+        send_telegram_msg(t("clients.telegram_bot.bot_msg_37da1a")) 
     finally:
         if local_path and os.path.exists(local_path):
             os.remove(local_path)
@@ -969,17 +971,17 @@ def handle_end_session(chat_id: str):
         from memory.session_memory import _run_session_summary
         from config import WORKING_MEMORY_FILE
         
-        send_telegram_msg(t("clients.telegram_bot.msg_139ed4"))
+        send_telegram_msg(t("clients.telegram_bot.bot_msg_139ed4"))
         
         # 1. We run the main summary (as in server.py)
         _run_session_summary(channel="telegram")
         
         # 2. Clear the Post-it (Working Memory)
         with open(WORKING_MEMORY_FILE, "w", encoding="utf-8") as f:
-            f.write(t("clients.telegram_bot.msg_4cd007"))
+            f.write(t("clients.telegram_bot.bot_msg_4cd007"))
             
         print("\033[92m[Telegram]: Session closed and archived successfully.\033[0m")
-        send_telegram_msg(t("clients.telegram_bot.msg_bfe08b"))
+        send_telegram_msg(t("clients.telegram_bot.bot_msg_bfe08b"))
 
     except Exception as e:
         print(f"\033[91m[End Session Error]: {e}\033[0m")
@@ -1018,7 +1020,7 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
 
         # 3. Vision LLM — objective pixel analysis
         img_b64 = base64.b64encode(img_data).decode("utf-8")
-        vision_prompt = t("clients.telegram_bot.msg_dec305")
+        vision_prompt = t("clients.telegram_bot.bot_msg_dec305")
         vision_msg = HumanMessage(content=[
             {"type": "text",      "text": vision_prompt},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
@@ -1032,10 +1034,10 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         if caption:
             caption_cmd = caption.strip().lower()
             if caption_cmd == "/nutrition":
-                send_telegram_msg(t("clients.telegram_bot.msg_0e0401"))
+                send_telegram_msg(t("clients.telegram_bot.bot_msg_0e0401"))
                 threading.Thread(target=_run_nutrition, args=(local_path, chat_id), daemon=True).start()
             elif caption_cmd == "/receipt":
-                send_telegram_msg(t("clients.telegram_bot.msg_b2c62a"))
+                send_telegram_msg(t("clients.telegram_bot.bot_msg_b2c62a"))
                 threading.Thread(target=_run_receipt, args=(local_path, chat_id), daemon=True).start()
             else:
                 _process_photo_with_question(filename, local_path, memory_analysis, caption, chat_id)
@@ -1049,7 +1051,7 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
                     "path":      local_path,
                     "timestamp": time.time()
                 }
-            send_telegram_msg(t("clients.telegram_bot.msg_477e48"))
+            send_telegram_msg(t("clients.telegram_bot.bot_msg_477e48"))
 
     except Exception as e:
         import traceback
@@ -1099,12 +1101,12 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         return
 
     if not final_response:
-        send_telegram_msg(t("clients.telegram_bot.msg_226c6b"))
+        send_telegram_msg(t("clients.telegram_bot.bot_msg_226c6b"))
         return
 
     from memory.pending_assets import looks_like_asset_confirmation_prompt
     if not looks_like_asset_confirmation_prompt(final_response):
-        final_response += t("clients.telegram_bot.msg_2d5d94")
+        final_response += t("clients.telegram_bot.bot_msg_2d5d94")
 
     # ── Photo persistence / Pending asset ──
     try:
@@ -1179,7 +1181,7 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
         result = make_story(theme, characters)
 
         if result.get("error") or not result.get("story"):
-            send_telegram_msg(f"❌ {result.get('error', t("clients.telegram_bot.msg_cf83ee"))}")
+            send_telegram_msg(f"❌ {result.get('error', t("clients.telegram_bot.bot_msg_cf83ee"))}")
             return
 
         # We first send the text (in chunks if it is large)
@@ -1204,14 +1206,14 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
                     except Exception as img_e:
                         print(f"⚠️ [StoryMaker] Failed to send image: {img_e}")
         else:
-            send_telegram_msg(t("clients.telegram_bot.msg_c594bf"))
+            send_telegram_msg(t("clients.telegram_bot.bot_msg_c594bf"))
 
         print(f"✅ [StoryMaker] Story '{theme}' completed.")
 
         # Update the agent with a SHORT note — so they know they wrote a fairy tale
         # and not to call search_memory if Lazaros asks about this
         char_note = f" with characters: {characters}" if characters else ""
-        img_note = f"{len(images)} images sent" if images else t("clients.telegram_bot.msg_496a96")
+        img_note = f"{len(images)} images sent" if images else t("clients.telegram_bot.bot_msg_496a96")
         agent_note = (
             f"[SYSTEM]: Just wrote and sent a story about '{theme}'{char_note}. "
             f"{img_note}. Lazaros already has it on Telegram."
@@ -1368,12 +1370,12 @@ def _tool_results_fallback_response(user_text: str, tool_results: list[str]) -> 
     try:
         response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
         content = clean_message(getattr(response, "content", "")).strip()
-        if content and not content.startswith(t("clients.telegram_bot.msg_78c917")):
+        if content and not content.startswith(t("clients.telegram_bot.bot_msg_78c917")):
             return content
     except Exception as e:
         print(f"\033[93m[ToolFallback]: synthesis failed — {e}\033[0m")
 
-    return t("clients.telegram_bot.msg_6dd772") + joined_results[:1800]
+    return t("clients.telegram_bot.bot_msg_6dd772") + joined_results[:1800]
 
 
 def _build_web_approval_result_message(tool_name: str, execution_result) -> str:
@@ -1387,11 +1389,11 @@ def _build_web_approval_result_message(tool_name: str, execution_result) -> str:
     )
 
     if tool_name == "execute_local_pipeline":
-        return t("clients.telegram_bot.msg_0295de")
+        return t("clients.telegram_bot.bot_msg_0295de")
 
     raw = clean_message(str(execution_result or "")).strip()
     if not raw:
-        return t("clients.telegram_bot.msg_d901d5")
+        return t("clients.telegram_bot.bot_msg_d901d5")
 
     tool_results = [raw]
 
@@ -1475,9 +1477,9 @@ def _send_pending_reflections_summary() -> None:
             f"→ I suggest: `{rdata.get('action','')}`{conf_txt}"
         )
     msg = (
-        t("clients.telegram_bot.msg_8fdaa9")
+        t("clients.telegram_bot.bot_msg_8fdaa9")
         + "\n\n---\n\n".join(blocks)
-        + t("clients.telegram_bot.msg_94ab69")
+        + t("clients.telegram_bot.bot_msg_94ab69")
     )
     if len(msg) > 4000:
         msg = msg[:3990] + "..."
@@ -1508,18 +1510,18 @@ def handle_message(user_text: str, chat_id: str):
     import re
 
     # 1. Check if voice was requested (from audio, /voice command, or global toggle)
-    is_voice_mode = t("clients.telegram_bot.msg_ad207c") in user_text or "[VOICE_MESSAGE]" in user_text or voice_mode_enabled
+    is_voice_mode = t("clients.telegram_bot.bot_msg_ad207c") in user_text or "[VOICE_MESSAGE]" in user_text or voice_mode_enabled
     is_voice_input = "[VOICE_INPUT]" in user_text  # the message came from voice
 
     # 2. We clean the tags before they go to the brain
-    clean_user_text = user_text.replace("/voice", "").replace(t("clients.telegram_bot.msg_d42a74"), "").replace("[VOICE_MESSAGE]:", "").strip()
+    clean_user_text = user_text.replace("/voice", "").replace(t("clients.telegram_bot.bot_msg_d42a74"), "").replace("[VOICE_MESSAGE]:", "").strip()
     # /plan is maintained so that the graph router can recognize it
     # If it is a voice input, we keep the hint for Lobster but remove the tag
     if is_voice_input:
         clean_user_text = clean_user_text.replace("[VOICE_INPUT]", "").strip()
         clean_user_text = f"[Voice message — reply short and casually]: {clean_user_text}"
     if not clean_user_text: 
-        clean_user_text = t("clients.telegram_bot.msg_630052")
+        clean_user_text = t("clients.telegram_bot.bot_msg_630052")
     # ── ROUTINE FEEDBACK LOOP ──
     if pending_routine_confirmations:
         text_check = _normalize_gr(clean_user_text)
@@ -1531,10 +1533,10 @@ def handle_message(user_text: str, chat_id: str):
         ]
         has_pending_sofia_messenger = any(
             (
-                t("clients.telegram_bot.msg_2e67ed") in _normalize_gr(str((pdata or {}).get("event", "")))
+                t("clients.telegram_bot.bot_msg_2e67ed") in _normalize_gr(str((pdata or {}).get("event", "")))
                 or "sofia" in _normalize_gr(str((pdata or {}).get("event", "")))
                 or "messenger" in _normalize_gr(str((pdata or {}).get("event", "")))
-                or t("clients.telegram_bot.msg_500d81") in _normalize_gr(str((pdata or {}).get("event", "")))
+                or t("clients.telegram_bot.bot_msg_500d81") in _normalize_gr(str((pdata or {}).get("event", "")))
             )
             for _, pdata in pending_items
         )
@@ -1547,10 +1549,10 @@ def handle_message(user_text: str, chat_id: str):
                 ev = (pdata or {}).get("event", "?")
                 event_l = _normalize_gr(str(ev))
                 is_sofia_messenger = (
-                    t("clients.telegram_bot.msg_2e67ed") in event_l
+                    t("clients.telegram_bot.bot_msg_2e67ed") in event_l
                     or "sofia" in event_l
                     or "messenger" in event_l
-                    or t("clients.telegram_bot.msg_500d81") in event_l
+                    or t("clients.telegram_bot.bot_msg_500d81") in event_l
                 )
                 if not is_sofia_messenger:
                     continue
@@ -1570,17 +1572,17 @@ def handle_message(user_text: str, chat_id: str):
                 bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
                 pending_routine_confirmations.pop(rid, None)
 
-        yes_words = [_normalize_gr(w) for w in [t("clients.telegram_bot.msg_f4e83b"), "yes", t("clients.telegram_bot.msg_337d7a"), "ok", t("clients.telegram_bot.msg_255bcd"), t("clients.telegram_bot.msg_9e152e"), t("clients.telegram_bot.msg_252996")]]
-        no_words  = [_normalize_gr(w) for w in [t("clients.telegram_bot.msg_e0413c"), t("clients.telegram_bot.msg_3e60e0"), "no", t("clients.telegram_bot.msg_b1bd66"), t("clients.telegram_bot.msg_d9175f"), t("clients.telegram_bot.msg_3605b2"), t("clients.telegram_bot.msg_0b4ad0"), t("clients.telegram_bot.msg_3381ac")]]
+        yes_words = [_normalize_gr(w) for w in [t("clients.telegram_bot.bot_msg_f4e83b"), "yes", t("clients.telegram_bot.bot_msg_337d7a"), "ok", t("clients.telegram_bot.bot_msg_255bcd"), t("clients.telegram_bot.bot_msg_9e152e"), t("clients.telegram_bot.bot_msg_252996")]]
+        no_words  = [_normalize_gr(w) for w in [t("clients.telegram_bot.bot_msg_e0413c"), t("clients.telegram_bot.bot_msg_3e60e0"), "no", t("clients.telegram_bot.bot_msg_b1bd66"), t("clients.telegram_bot.bot_msg_d9175f"), t("clients.telegram_bot.bot_msg_3605b2"), t("clients.telegram_bot.bot_msg_0b4ad0"), t("clients.telegram_bot.bot_msg_3381ac")]]
         question_words = [_normalize_gr(w) for w in [
-            t("clients.telegram_bot.msg_0ab538"), t("clients.telegram_bot.msg_03a47d"), t("clients.telegram_bot.msg_0c4b0a"), t("clients.telegram_bot.msg_2053f3"), t("clients.telegram_bot.msg_4126e1"), t("clients.telegram_bot.msg_00308a"), t("clients.telegram_bot.msg_f3dbb1"), t("clients.telegram_bot.msg_d5aba6"),
-            t("clients.telegram_bot.msg_12cede"), t("clients.telegram_bot.msg_a7c975"), t("clients.telegram_bot.msg_42541a"), t("clients.telegram_bot.msg_4c18a3"), t("clients.telegram_bot.msg_cd673a"), "show", "check", "why"
+            t("clients.telegram_bot.bot_msg_0ab538"), t("clients.telegram_bot.bot_msg_03a47d"), t("clients.telegram_bot.bot_msg_0c4b0a"), t("clients.telegram_bot.bot_msg_2053f3"), t("clients.telegram_bot.bot_msg_4126e1"), t("clients.telegram_bot.bot_msg_00308a"), t("clients.telegram_bot.bot_msg_f3dbb1"), t("clients.telegram_bot.bot_msg_d5aba6"),
+            t("clients.telegram_bot.bot_msg_12cede"), t("clients.telegram_bot.bot_msg_a7c975"), t("clients.telegram_bot.bot_msg_42541a"), t("clients.telegram_bot.bot_msg_4c18a3"), t("clients.telegram_bot.bot_msg_cd673a"), "show", "check", "why"
         ]]
 
         action_words = [_normalize_gr(w) for w in [
-            t("clients.telegram_bot.msg_cada71"), t("clients.telegram_bot.msg_f41f82"), t("clients.telegram_bot.msg_78e601"), t("clients.telegram_bot.msg_0e436a"), t("clients.telegram_bot.msg_4ebe60"), t("clients.telegram_bot.msg_648c67"),
-            t("clients.telegram_bot.msg_6e2acb"), t("clients.telegram_bot.msg_705d25"), t("clients.telegram_bot.msg_d5a67f"), t("clients.telegram_bot.msg_3ede59"), t("clients.telegram_bot.msg_70e4d0"), t("clients.telegram_bot.msg_1813ca"),
-            t("clients.telegram_bot.msg_8821ce"), t("clients.telegram_bot.msg_1053ee"), t("clients.telegram_bot.msg_8ce38d"), t("clients.telegram_bot.msg_f3dee4"), t("clients.telegram_bot.msg_2f0a33"), "went",
+            t("clients.telegram_bot.bot_msg_cada71"), t("clients.telegram_bot.bot_msg_f41f82"), t("clients.telegram_bot.bot_msg_78e601"), t("clients.telegram_bot.bot_msg_0e436a"), t("clients.telegram_bot.bot_msg_4ebe60"), t("clients.telegram_bot.bot_msg_648c67"),
+            t("clients.telegram_bot.bot_msg_6e2acb"), t("clients.telegram_bot.bot_msg_705d25"), t("clients.telegram_bot.bot_msg_d5a67f"), t("clients.telegram_bot.bot_msg_3ede59"), t("clients.telegram_bot.bot_msg_70e4d0"), t("clients.telegram_bot.bot_msg_1813ca"),
+            t("clients.telegram_bot.bot_msg_8821ce"), t("clients.telegram_bot.bot_msg_1053ee"), t("clients.telegram_bot.bot_msg_8ce38d"), t("clients.telegram_bot.bot_msg_f3dee4"), t("clients.telegram_bot.bot_msg_2f0a33"), "went",
             "going", "done", "finished", "started"
         ]]
         is_question_like = any(w in text_words for w in question_words) or "?" in clean_user_text
@@ -1649,10 +1651,10 @@ def handle_message(user_text: str, chat_id: str):
 
                 event_l = (ev or "").lower()
                 is_sofia_messenger = (
-                    t("clients.telegram_bot.msg_2e67ed") in event_l or
+                    t("clients.telegram_bot.bot_msg_2e67ed") in event_l or
                     "sofia" in event_l or
                     "messenger" in event_l or
-                    t("clients.telegram_bot.msg_500d81") in event_l
+                    t("clients.telegram_bot.bot_msg_500d81") in event_l
                 )
 
                 if is_sofia_messenger and _looks_like_contextual_not_needed_reply(clean_user_text):
@@ -1696,7 +1698,7 @@ def handle_message(user_text: str, chat_id: str):
         text_check = _normalize_gr(clean_user_text)
         text_words = text_check.replace(",", "").replace(".", "").replace("!", "").split()
         yes_words = [_normalize_gr(w) for w in NLP_CONFIG.get("telegram", {}).get("confirm_tokens", [])]
-        no_words  = [_normalize_gr(w) for w in [t("clients.telegram_bot.msg_e0413c"), t("clients.telegram_bot.msg_3e60e0"), "no", "cancel", t("clients.telegram_bot.msg_5acd9c"), t("clients.telegram_bot.msg_a7cf69")]]
+        no_words  = [_normalize_gr(w) for w in [t("clients.telegram_bot.bot_msg_e0413c"), t("clients.telegram_bot.bot_msg_3e60e0"), "no", "cancel", t("clients.telegram_bot.bot_msg_5acd9c"), t("clients.telegram_bot.bot_msg_a7cf69")]]
         is_yes = any(w in text_words for w in yes_words)
         is_no  = any(w in text_words for w in no_words)
 
@@ -1712,7 +1714,7 @@ def handle_message(user_text: str, chat_id: str):
                 targets = ordered_ids  # without a number → all together (old behavior)
 
             if not targets:
-                send_telegram_msg(t("clients.telegram_bot.msg_fe2716"))
+                send_telegram_msg(t("clients.telegram_bot.bot_msg_fe2716"))
                 return
 
             if is_yes:
@@ -1730,7 +1732,7 @@ def handle_message(user_text: str, chat_id: str):
                         del pending_reflection_confirmations[rid]
                     else:
                         lines.append(f"⚠️ Application failure, remains pending: {rdata.get('observation','')[:80]}")
-                send_telegram_msg("\n".join(lines) if lines else t("clients.telegram_bot.msg_59dadd"))
+                send_telegram_msg("\n".join(lines) if lines else t("clients.telegram_bot.bot_msg_59dadd"))
                 if pending_reflection_confirmations:
                     _send_pending_reflections_summary()
                 return
@@ -1742,7 +1744,7 @@ def handle_message(user_text: str, chat_id: str):
                     except Exception as e:
                         print(f"⚠️ [Reflection Reject] DB update failed: {e}")
                     del pending_reflection_confirmations[rid]
-                send_telegram_msg(t("clients.telegram_bot.msg_4467b9"))
+                send_telegram_msg(t("clients.telegram_bot.bot_msg_4467b9"))
                 if pending_reflection_confirmations:
                     _send_pending_reflections_summary()
                 return
@@ -1765,15 +1767,15 @@ def handle_message(user_text: str, chat_id: str):
                 )
                 output = result.stdout if result.returncode == 0 else f"ERROR:\n{result.stderr}"
                 if output.strip():
-                    send_telegram_msg_full(output, prefix=t("clients.telegram_bot.msg_0324c2"))
+                    send_telegram_msg_full(output, prefix=t("clients.telegram_bot.bot_msg_0324c2"))
                 else:
-                    send_telegram_msg(t("clients.telegram_bot.msg_67bac7"))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_67bac7"))
             except Exception as e:
                 send_telegram_msg(f"❌ Execution error: {e}")
             return
         elif any(w in text_check for w in [_normalize_gr(w) for w in NLP_CONFIG.get("telegram", {}).get("cancel_tokens", [])]):
             pending_exec_command = None
-            send_telegram_msg(t("clients.telegram_bot.msg_7f065e"))
+            send_telegram_msg(t("clients.telegram_bot.bot_msg_7f065e"))
             return
 
     with memory_lock:
@@ -1831,7 +1833,7 @@ def handle_message(user_text: str, chat_id: str):
             )
             
         mark_pending_asset_confirmed(pending_asset["id"])
-        confirm_reply = t("clients.telegram_bot.msg_7e53ac")
+        confirm_reply = t("clients.telegram_bot.bot_msg_7e53ac")
         _send_and_record_assistant(confirm_reply, chat_id)
         enqueue_fast_task(log_exchange, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
         enqueue_fast_task(update_working_memory, clean_user_text, confirm_reply)
@@ -1843,7 +1845,7 @@ def handle_message(user_text: str, chat_id: str):
 
     if pending_asset and reply_kind == "no" and asset_prompt_active:
         mark_pending_asset_cancelled(pending_asset["id"])
-        cancel_reply = t("clients.telegram_bot.msg_b026c8")
+        cancel_reply = t("clients.telegram_bot.bot_msg_b026c8")
         _send_and_record_assistant(cancel_reply, chat_id)
         enqueue_fast_task(log_exchange, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
         enqueue_fast_task(update_working_memory, clean_user_text, cancel_reply)
@@ -1864,9 +1866,9 @@ def handle_message(user_text: str, chat_id: str):
         cleared = _safe_clear_draft()
         now_ts = datetime.now().strftime("%H:%M")
         final_ai_response = (
-            t("clients.telegram_bot.msg_draft_clear_done", now_ts=now_ts)
+            t("clients.telegram_bot.bot_msg_draft_clear_done", now_ts=now_ts)
             if cleared
-            else t("clients.telegram_bot.msg_draft_clear_none", now_ts=now_ts)
+            else t("clients.telegram_bot.bot_msg_draft_clear_none", now_ts=now_ts)
         )
 
         try:
@@ -1891,9 +1893,9 @@ def handle_message(user_text: str, chat_id: str):
         now_ts = datetime.now().strftime("%H:%M")
         if draft_active and draft_data and draft_data.get("message"):
             draft_message = str(draft_data.get("message") or "").strip()
-            final_ai_response = t("clients.telegram_bot.msg_draft_ask_action", now_ts=now_ts, draft=draft_message)
+            final_ai_response = t("clients.telegram_bot.bot_msg_draft_ask_action", now_ts=now_ts, draft=draft_message)
         else:
-            final_ai_response = t("clients.telegram_bot.msg_draft_empty_idea", now_ts=now_ts)
+            final_ai_response = t("clients.telegram_bot.bot_msg_draft_empty_idea", now_ts=now_ts)
 
         try:
             send_telegram_msg(final_ai_response)
@@ -2023,7 +2025,7 @@ def handle_message(user_text: str, chat_id: str):
                         from core.utils import clean_message
                         candidate_raw = clean_message(last_msg.content)
                         # Skip tool-call announcement strings (internal debug output)
-                        if candidate_raw and not candidate_raw.startswith(t("clients.telegram_bot.msg_78c917")):
+                        if candidate_raw and not candidate_raw.startswith(t("clients.telegram_bot.bot_msg_78c917")):
                             final_ai_response = candidate_raw
         graph_result_extract_ms = int((perf_counter() - extract_started) * 1000)
         _trace.mark_phase("graph_result_extract_ms", graph_result_extract_ms)
@@ -2077,7 +2079,7 @@ def handle_message(user_text: str, chat_id: str):
 
         if not final_ai_response:
             # [MASTRO-FIX]: Fallback when the agent did not generate text (e.g., loop/recursion)
-            send_telegram_msg(t("clients.telegram_bot.msg_125f2d"))
+            send_telegram_msg(t("clients.telegram_bot.bot_msg_125f2d"))
             return
 
         file_path_to_send = None
@@ -2119,7 +2121,7 @@ def handle_message(user_text: str, chat_id: str):
                     send_telegram_document(file_path_to_send, caption=f"📎 <b>{_fname}</b>")
                 except Exception as _de:
                     print(f"❌ [Doc send error]: {_de}")
-                    send_telegram_msg(t("clients.telegram_bot.msg_file", file=file_path_to_send))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_file", file=file_path_to_send))
             else:
                 # Normal Flow (No Documents)
                 if is_voice_mode:
@@ -2165,12 +2167,12 @@ def handle_message(user_text: str, chat_id: str):
         _typing_active["on"] = False  # We stop typing even on error
         import traceback
         traceback.print_exc()
-        send_telegram_msg(t("clients.telegram_bot.msg_error", e=str(e)))
+        send_telegram_msg(t("clients.telegram_bot.bot_msg_error", e=str(e)))
 
 def _send_photo_to_telegram(photo_path: str, chat_id: str):
     """Sends a photo file to the Telegram chat."""
     if not os.path.exists(photo_path):
-        send_telegram_msg(t("clients.telegram_bot.msg_photo_not_found", path=photo_path))
+        send_telegram_msg(t("clients.telegram_bot.bot_msg_photo_not_found", path=photo_path))
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
@@ -2184,7 +2186,7 @@ def _send_photo_to_telegram(photo_path: str, chat_id: str):
         print(f"\033[92m[TelegramBot]: Photo sent: {photo_path}\033[0m")
     except Exception as e:
         print(f"\033[91m[TelegramBot Photo Send Error]: {e}\033[0m")
-        send_telegram_msg(t("clients.telegram_bot.msg_photo_send_fail", e=str(e)))
+        send_telegram_msg(t("clients.telegram_bot.bot_msg_photo_send_fail", e=str(e)))
 def handle_location(msg, live_update=False):
     """Receives live location and checks for location-based reminders."""
     import math
@@ -2193,7 +2195,7 @@ def handle_location(msg, live_update=False):
     loc     = msg.get("location", {})
     lat     = loc.get("latitude")
     lon     = loc.get("longitude")
-    if not lat or not lon:
+    if lat is None or lon is None:
         return
     # Save location to JSON
     try:
@@ -2218,6 +2220,7 @@ def handle_location(msg, live_update=False):
                  math.sin((lon2-lon1)*p/2)**2)
             return 2 * R * math.asin(math.sqrt(a))
 
+        print("handle_location STATE_DB:", STATE_DB)
         if os.path.exists(STATE_DB):
             conn = sqlite3.connect(STATE_DB)
             try:
@@ -2226,6 +2229,7 @@ def handle_location(msg, live_update=False):
                     "SELECT id, task, time FROM reminders WHERE status='pending' AND time LIKE 'loc:%'"
                 )
                 pending = cursor.fetchall()
+                print("HANDLE_LOCATION PENDING:", pending)
                 for rid, task, tm in pending:
                     target = tm.split(":", 1)[1] if tm and ":" in tm else "home"
                     if target == "home":
@@ -2268,7 +2272,7 @@ def handle_location(msg, live_update=False):
             send_telegram_msg(clean_message(final))
     except Exception as e:
         print(f"\033[91m[Location Handler Error]: {e}\033[0m")
-        send_telegram_msg(t("clients.telegram_bot.msg_location", lat=lat, lon=lon))
+        send_telegram_msg(t("clients.telegram_bot.bot_msg_location", lat=lat, lon=lon))
 
 # ────────────────────────────────────────────────────────────────
 # POLLING LOOP
@@ -2321,13 +2325,13 @@ def _handle_approval_callback(cq: dict):
             )
 
             if tool_name != "execute_local_pipeline":
-                send_telegram_msg(t("clients.telegram_bot.msg_tool_exec", tool=tool_name))
+                send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_exec", tool=tool_name))
 
             execution = execute_approved_pending(tool_call_id, all_tools)
             
             if origin_channel == "web":
                 if execution["ok"]:
-                    send_telegram_msg(t("clients.telegram_bot.msg_tool_success_web", tool=tool_name))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_success_web", tool=tool_name))
                     
                     try:
                         from api.server import append_to_chat_history
@@ -2341,19 +2345,19 @@ def _handle_approval_callback(cq: dict):
                         print(f"[ApprovalCallback Web Resume Error]: {e}")
 
                 elif execution["status"] == "tool_not_found":
-                    send_telegram_msg(t("clients.telegram_bot.msg_tool_not_found_web", tool=tool_name))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_not_found_web", tool=tool_name))
                     try:
                         from api.server import append_to_chat_history
-                        append_to_chat_history("assistant", t("clients.telegram_bot.msg_tool_not_found_web_hist", tool=tool_name), agent="Web_Agent")
+                        append_to_chat_history("assistant", t("clients.telegram_bot.bot_msg_tool_not_found_web_hist", tool=tool_name), agent="Web_Agent")
                     except Exception as e:
                         print(f"[ApprovalCallback Web Error Notify]: {e}")
                 else:
-                    send_telegram_msg(t("clients.telegram_bot.msg_tool_fail_web", tool=tool_name, e=execution["error"]))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_fail_web", tool=tool_name, e=execution["error"]))
                     try:
                         from api.server import append_to_chat_history
                         append_to_chat_history(
                             "assistant",
-                            t("clients.telegram_bot.msg_tool_fail_web_hist", tool=tool_name, e=execution["error"]),
+                            t("clients.telegram_bot.bot_msg_tool_fail_web_hist", tool=tool_name, e=execution["error"]),
                             agent="Web_Agent",
                         )
                     except Exception as e:
@@ -2361,33 +2365,33 @@ def _handle_approval_callback(cq: dict):
             else:
                 if execution["ok"]:
                     if tool_name == "execute_local_pipeline":
-                        send_telegram_msg(t("clients.telegram_bot.msg_df3588"))
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_df3588"))
                     else:
                         send_telegram_msg_full(
                             str(execution["result"]),
-                            prefix="✅ `" + tool_name + t("clients.telegram_bot.msg_3fadfb"),
+                            prefix="✅ `" + tool_name + t("clients.telegram_bot.bot_msg_3fadfb"),
                         )
                 elif execution["status"] == "tool_not_found":
-                    send_telegram_msg(t("clients.telegram_bot.msg_tool_not_found", tool=tool_name))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_not_found", tool=tool_name))
                 else:
-                    send_telegram_msg(t("clients.telegram_bot.msg_tool_fail", tool=tool_name, e=execution["error"]))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_fail", tool=tool_name, e=execution["error"]))
         elif action == "reject":
             item = get_pending(tool_call_id)
             origin_channel = (item or {}).get("channel", "telegram")
-            tool_name = (item or {}).get("tool_name", t("clients.telegram_bot.msg_596fbf"))
+            tool_name = (item or {}).get("tool_name", t("clients.telegram_bot.bot_msg_596fbf"))
             pop_pending(tool_call_id)
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageReplyMarkup",
                 json={"chat_id": chat_id, "message_id": msg_id, "reply_markup": {"inline_keyboard": []}},
                 timeout=5,
             )
-            send_telegram_msg(t("clients.telegram_bot.msg_b2a34d"))
+            send_telegram_msg(t("clients.telegram_bot.bot_msg_b2a34d"))
             if origin_channel == "web":
                 try:
                     from api.server import append_to_chat_history
                     append_to_chat_history(
                         "assistant",
-                        t("clients.telegram_bot.msg_tool_cancel", tool=tool_name),
+                        t("clients.telegram_bot.bot_msg_tool_cancel", tool=tool_name),
                         agent="Web_Agent",
                     )
                 except Exception as e:
@@ -2434,14 +2438,14 @@ def _handle_message_reaction(reaction: dict) -> None:
                 print(f"⚠️ [Reaction]: history lookup failed: {e}")
 
         if not bot_text:
-            send_telegram_msg(t("clients.telegram_bot.msg_3d8488"))
+            send_telegram_msg(t("clients.telegram_bot.bot_msg_3d8488"))
             return
 
         from core.utils import looks_like_operational_assistant_text
 
         if looks_like_operational_assistant_text(bot_text):
             print("\033[90m[Reaction ❤️]: operational assistant text skip\033[0m")
-            send_telegram_msg(t("clients.telegram_bot.msg_4379e1"))
+            send_telegram_msg(t("clients.telegram_bot.bot_msg_4379e1"))
             return
 
         # Save to long-term memory`of`
@@ -2470,10 +2474,10 @@ def _save_reaction_to_memory(text: str) -> None:
         preview = text[:60].replace("\n", " ")
         result = save_to_memory.invoke({
             "fact": text,
-            "entities": t("clients.telegram_bot.msg_eb0632"),
+            "entities": t("clients.telegram_bot.bot_msg_eb0632"),
             "category": "saved_by_user",
         })
-        send_telegram_msg(t("clients.telegram_bot.msg_memory_saved", preview=preview))
+        send_telegram_msg(t("clients.telegram_bot.bot_msg_memory_saved", preview=preview))
     except Exception as e:
         print(f"⚠️ [Reaction Save]: {e}")
 
@@ -2491,20 +2495,20 @@ def run_polling():
 
     # ── Definition of commands in the Telegram menu (the "/" autocomplete) ──────────────
     _bot_commands = [
-        {"command": "g",                "description": t("clients.telegram_bot.msg_8023cc")},
-        {"command": "gr",               "description": t("clients.telegram_bot.msg_29b0b6")},
-        {"command": "g_phrases",        "description": t("clients.telegram_bot.msg_e6b247")},
-        {"command": "nutrition",        "description": t("clients.telegram_bot.msg_c88847")},
-        {"command": "receipt",          "description": t("clients.telegram_bot.msg_cfa8e2")},
-        {"command": "story",            "description": t("clients.telegram_bot.msg_0a3ea6")},
-        {"command": "voice",            "description": t("clients.telegram_bot.msg_7c1625")},
-        {"command": "status",           "description": t("clients.telegram_bot.msg_12478c")},
-        {"command": "doctor",           "description": t("clients.telegram_bot.msg_cde5a6")},
-        {"command": "mute",             "description": t("clients.telegram_bot.msg_664071")},
-        {"command": "pause",            "description": t("clients.telegram_bot.msg_06c029")},
-        {"command": "resume",           "description": t("clients.telegram_bot.msg_23b7f3")},
-        {"command": "end",              "description": t("clients.telegram_bot.msg_f27666")},
-        {"command": "help",             "description": t("clients.telegram_bot.msg_6c8aa9")},
+        {"command": "g",                "description": t("clients.telegram_bot.bot_msg_8023cc")},
+        {"command": "gr",               "description": t("clients.telegram_bot.bot_msg_29b0b6")},
+        {"command": "g_phrases",        "description": t("clients.telegram_bot.bot_msg_e6b247")},
+        {"command": "nutrition",        "description": t("clients.telegram_bot.bot_msg_c88847")},
+        {"command": "receipt",          "description": t("clients.telegram_bot.bot_msg_cfa8e2")},
+        {"command": "story",            "description": t("clients.telegram_bot.bot_msg_0a3ea6")},
+        {"command": "voice",            "description": t("clients.telegram_bot.bot_msg_7c1625")},
+        {"command": "status",           "description": t("clients.telegram_bot.bot_msg_12478c")},
+        {"command": "doctor",           "description": t("clients.telegram_bot.bot_msg_cde5a6")},
+        {"command": "mute",             "description": t("clients.telegram_bot.bot_msg_664071")},
+        {"command": "pause",            "description": t("clients.telegram_bot.bot_msg_06c029")},
+        {"command": "resume",           "description": t("clients.telegram_bot.bot_msg_23b7f3")},
+        {"command": "end",              "description": t("clients.telegram_bot.bot_msg_f27666")},
+        {"command": "help",             "description": t("clients.telegram_bot.bot_msg_6c8aa9")},
     ]
     try:
         requests.post(
@@ -2623,14 +2627,14 @@ def run_polling():
                     with _override_lock:
                         _override_state["pause_reminders"] = True
                     _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.msg_4c769a"))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_4c769a"))
                     continue
 
                 if cmd == "/mute":
                     with _override_lock:
                         _override_state["mute_proactive"] = True
                     _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.msg_c9478b"))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_c9478b"))
                     continue
 
                 if cmd.startswith("/sleep"):
@@ -2639,30 +2643,30 @@ def run_polling():
                     with _override_lock:
                         _override_state["sleep_until"] = _time.time() + hours * 3600
                     _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.msg_sleep_mode", hours=f"{hours:.0f}"))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_sleep_mode", hours=f"{hours:.0f}"))
                     continue
 
                 if cmd == "/resume":
                     with _override_lock:
                         _override_state.update({"pause_reminders": False, "mute_proactive": False, "sleep_until": None})
                     _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.msg_b33ab5"))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_b33ab5"))
                     continue
                 if user_text.lower().startswith("/confirm"):
                     cmd_to_confirm = user_text[len("/confirm"):].strip()
                     if not cmd_to_confirm:
-                        send_telegram_msg(t("clients.telegram_bot.msg_359906"))
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_359906"))
                         continue
                     pending_exec_command = cmd_to_confirm
                     send_telegram_msg(
-                        t("clients.telegram_bot.msg_confirm_req", cmd=cmd_to_confirm)
+                        t("clients.telegram_bot.bot_msg_confirm_req", cmd=cmd_to_confirm)
                     )
                     continue
                 if cmd == "/help":
                     voice_status = "🔊 ON" if voice_mode_enabled else "✍️ OFF"
                     send_telegram_msg(
                         f"🦞 <b>{config.BOT_NAME} — Commands</b>\n\n" +
-                        t("clients.telegram_bot.msg_help_menu", voice_status=voice_status)
+                        t("clients.telegram_bot.bot_msg_help_menu", voice_status=voice_status)
                     )
                     continue
 
@@ -2671,22 +2675,22 @@ def run_polling():
                         from tools.system import system_doctor
                         send_telegram_msg(system_doctor(days=1))
                     except Exception as e:
-                        send_telegram_msg(t("clients.telegram_bot.msg_doctor_error", e=e))
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_doctor_error", e=e))
                     continue
 
                 if cmd == "/status":
                     if astakos_scheduler:
                         send_telegram_msg(astakos_scheduler.status())
                     else:
-                        send_telegram_msg(t("clients.telegram_bot.msg_8c16dd"))
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_8c16dd"))
                     continue
 
                 if cmd == "/voice":
                     voice_mode_enabled = not voice_mode_enabled
                     if voice_mode_enabled:
-                        send_telegram_msg(t("clients.telegram_bot.msg_c19e9a"))
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_c19e9a"))
                     else:
-                        send_telegram_msg(t("clients.telegram_bot.msg_adde11"))
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_adde11"))
                     continue
 
                 if cmd in ("/georgian", "/geo", "/g", "/georgian_phrases"):
@@ -2702,7 +2706,7 @@ def run_polling():
                     if not rest:
                         _arm_pending_georgian()
                         send_telegram_msg(
-                            t("clients.telegram_bot.msg_42fbb6")
+                            t("clients.telegram_bot.bot_msg_42fbb6")
                         )
                         continue
 
@@ -2717,7 +2721,7 @@ def run_polling():
                     else:
                         # Pending mode: next message is considered Georgian
                         _arm_pending_sofia()
-                        send_telegram_msg(t("clients.telegram_bot.msg_bdc64e"))
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_bdc64e"))
                     continue
 
                 if user_text.lower() == "/nutrition":
@@ -2727,14 +2731,14 @@ def run_polling():
                         if p:
                             pending_photo = None
                     if p:
-                        send_telegram_msg(t("clients.telegram_bot.msg_0e0401"))
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_0e0401"))
                         threading.Thread(
                             target=_run_nutrition,
                             args=(p["path"], chat_id),
                             daemon=True
                         ).start()
                     else:
-                        send_telegram_msg(t("clients.telegram_bot.msg_28166e"))
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_28166e"))
                     continue
 
                 if user_text.lower() == "/receipt":
@@ -2743,14 +2747,14 @@ def run_polling():
                         if p:
                             pending_photo = None
                     if p:
-                        send_telegram_msg(t("clients.telegram_bot.msg_b2c62a"))
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_b2c62a"))
                         threading.Thread(
                             target=_run_receipt,
                             args=(p["path"], chat_id),
                             daemon=True
                         ).start()
                     else:
-                        send_telegram_msg(t("clients.telegram_bot.msg_f4f189"))
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_f4f189"))
                     continue
 
                 if user_text.lower() == "/end":
@@ -2770,9 +2774,9 @@ def run_polling():
                         story_theme = theme_part.strip()
                         story_chars = chars_part.strip()
                     else:
-                        story_theme = rest or t("clients.telegram_bot.msg_9e64ca")
+                        story_theme = rest or t("clients.telegram_bot.bot_msg_9e64ca")
                         story_chars = ""
-                    send_telegram_msg(t("clients.telegram_bot.msg_creating_story", story_theme=story_theme))
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_creating_story", story_theme=story_theme))
                     threading.Thread(
                         target=_run_story_maker,
                         args=(story_theme, story_chars, chat_id),
@@ -2880,10 +2884,10 @@ def _proactive_state_keys_for_event(event_name: str) -> list[str]:
 
     # Generic away/home flags
     keys.extend([
-        "alexandros_away_from_home",
-        "alexandros_away_reason",
-        "alexandros_with_user",
-        "alexandros_with_sofia",
+        "kid1_away_from_home",
+        "kid1_away_reason",
+        "kid1_with_user",
+        "kid1_with_partner",
         "football_season",
         "school_open",
         "user_at_work",
@@ -2892,18 +2896,18 @@ def _proactive_state_keys_for_event(event_name: str) -> list[str]:
     ])
 
     # Generic namespaced states from reconciler Phase 1
-    if t("clients.telegram_bot.msg_18ce09") in event_l or "alexand" in event_l or t("clients.telegram_bot.msg_258767") in event_l:
+    if t("clients.telegram_bot.bot_msg_18ce09") in event_l or "kid1" in event_l or t("clients.telegram_bot.bot_msg_258767") in event_l:
         keys.extend([
-            "state:alexandros:outing",
-            "state:alexandros:sleep",
-            "state:alexandros:sports_training",
-            "state:alexandros:school",
+            "state:kid1:outing",
+            "state:kid1:sleep",
+            "state:kid1:sports_training",
+            "state:kid1:school",
         ])
 
-    if t("clients.telegram_bot.msg_2e67ed") in event_l or "messenger" in event_l:
+    if t("clients.telegram_bot.bot_msg_2e67ed") in event_l or "messenger" in event_l:
         keys.extend([
-            "sofia_with_user",
-            "sofia_work_mode",
+            "partner_with_user",
+            "partner_work_mode",
         ])
 
     # de-dup preserve order
@@ -2949,90 +2953,90 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
         return str(item.get("value", "")).strip().lower()
 
     # Shared state
-    away = state_value("alexandros_away_from_home") == "true"
-    away_reason = state_value("alexandros_away_reason")
+    away = state_value("kid1_away_from_home") == "true"
+    away_reason = state_value("kid1_away_reason")
     football_season = state_value("football_season")
     school_open = state_value("school_open")
     user_at_work = state_value("user_at_work") == "true"
     user_out_of_home = state_value("user_out_of_home") == "true"
     quiet_hours = state_value("quiet_hours") == "true"
-    alexandros_with_user = state_value("alexandros_with_user") == "true"
-    alexandros_with_sofia = state_value("alexandros_with_sofia") == "true"
-    sofia_with_user = state_value("sofia_with_user") == "true"
+    kid1_with_user = state_value("kid1_with_user") == "true"
+    kid1_with_partner = state_value("kid1_with_partner") == "true"
+    partner_with_user = state_value("partner_with_user") == "true"
 
     # Namespaced generic states
-    outing_state = state_value("state:alexandros:outing")
-    sleep_state = state_value("state:alexandros:sleep")
-    sports_state = state_value("state:alexandros:sports_training")
+    outing_state = state_value("state:kid1:outing")
+    sleep_state = state_value("state:kid1:sleep")
+    sports_state = state_value("state:kid1:sports_training")
 
     # PARK / OUTING
-    if t("clients.telegram_bot.msg_48ded7") in event_l or "park" in event_l or t("clients.telegram_bot.msg_09fd55") in event_l:
+    if t("clients.telegram_bot.bot_msg_48ded7") in event_l or "park" in event_l or t("clients.telegram_bot.bot_msg_09fd55") in event_l:
         if outing_state in {"in_progress", "done"}:
             return "[SILENT_SKIP] outing already handled"
         if away:
-            return t("clients.telegram_bot.msg_9b132d")
-        if alexandros_with_sofia and not alexandros_with_user:
-            return t("clients.telegram_bot.msg_00c825")
+            return t("clients.telegram_bot.bot_msg_9b132d")
+        if kid1_with_partner and not kid1_with_user:
+            return t("clients.telegram_bot.bot_msg_00c825")
         if user_at_work:
-            return t("clients.telegram_bot.msg_869876") 
+            return t("clients.telegram_bot.bot_msg_869876") 
 
     # COOKING / HOME MEAL
     if (
-        t("clients.telegram_bot.msg_19c623") in event_l
-        or t("clients.telegram_bot.msg_ae103d") in event_l
-        or t("clients.telegram_bot.msg_51c012") in event_l
-        or t("clients.telegram_bot.msg_46c594") in event_l
+        t("clients.telegram_bot.bot_msg_19c623") in event_l
+        or t("clients.telegram_bot.bot_msg_ae103d") in event_l
+        or t("clients.telegram_bot.bot_msg_51c012") in event_l
+        or t("clients.telegram_bot.bot_msg_46c594") in event_l
     ):
         if user_out_of_home:
-            return t("clients.telegram_bot.msg_026b01")
+            return t("clients.telegram_bot.bot_msg_026b01")
         if user_at_work:
-            return t("clients.telegram_bot.msg_c4f7f2")
+            return t("clients.telegram_bot.bot_msg_c4f7f2")
 
     # SLEEP
-    if (t("clients.telegram_bot.msg_ebba28") in event_l or t("clients.telegram_bot.msg_c11689") in event_l or "sleep" in event_l) and t("clients.telegram_bot.msg_560d13") not in event_l and t("clients.telegram_bot.msg_0b50a2") not in event_l:
+    if (t("clients.telegram_bot.bot_msg_ebba28") in event_l or t("clients.telegram_bot.bot_msg_c11689") in event_l or "sleep" in event_l) and t("clients.telegram_bot.bot_msg_560d13") not in event_l and t("clients.telegram_bot.bot_msg_0b50a2") not in event_l:
         if sleep_state in {"in_progress", "done"}:
             return "[SILENT_SKIP] sleep already handled"
         if away:
-            return t("clients.telegram_bot.msg_06027b")
-        if alexandros_with_sofia and not alexandros_with_user:
-            return t("clients.telegram_bot.msg_00c825")
+            return t("clients.telegram_bot.bot_msg_06027b")
+        if kid1_with_partner and not kid1_with_user:
+            return t("clients.telegram_bot.bot_msg_00c825")
         if user_out_of_home or user_at_work:
-            return t("clients.telegram_bot.msg_026b01")
+            return t("clients.telegram_bot.bot_msg_026b01")
         if quiet_hours:
-            return t("clients.telegram_bot.msg_6b827c")
+            return t("clients.telegram_bot.bot_msg_6b827c")
 
     # FOOTBALL / TRAINING
-    if t("clients.telegram_bot.msg_7dfa6d") in event_l or t("clients.telegram_bot.msg_c93336") in event_l or "training" in event_l or t("clients.telegram_bot.msg_f32e25") in event_l:
+    if t("clients.telegram_bot.bot_msg_7dfa6d") in event_l or t("clients.telegram_bot.bot_msg_c93336") in event_l or "training" in event_l or t("clients.telegram_bot.bot_msg_f32e25") in event_l:
         if sports_state in {"off_season", "paused", "done"}:
             return "[SILENT_SKIP] sports training already handled or paused"
         if football_season == "false":
             return "[SILENT_SKIP] not football season"
         if away:
-            return t("clients.telegram_bot.msg_9fbd6e")
-        if alexandros_with_sofia and not alexandros_with_user:
-            return t("clients.telegram_bot.msg_9ba3e7")
+            return t("clients.telegram_bot.bot_msg_9fbd6e")
+        if kid1_with_partner and not kid1_with_user:
+            return t("clients.telegram_bot.bot_msg_9ba3e7")
 
     # SCHOOL
-    if t("clients.telegram_bot.msg_712f3e") in event_l:
+    if t("clients.telegram_bot.bot_msg_712f3e") in event_l:
         if school_open == "false":
-            return t("clients.telegram_bot.msg_802883")
+            return t("clients.telegram_bot.bot_msg_802883")
         if away:
-            return t("clients.telegram_bot.msg_9fbd6e")
-    # MESSAGE TO SOFIA
-    if t("clients.telegram_bot.msg_c0bef1") in event_l or t("clients.telegram_bot.msg_487b00") in event_l or t("clients.telegram_bot.msg_f907f3") in event_l:
-        if sofia_with_user:
-            return t("clients.telegram_bot.msg_7c45b3")
+            return t("clients.telegram_bot.bot_msg_9fbd6e")
+    # MESSAGE TO PARTNER
+    if "messenger" in event_l or config.PARTNER_NAME.lower() in event_l:
+        if partner_with_user:
+            return "[CONTEXT_SKIP] together"
     # WAKE UP
-    if t("clients.telegram_bot.msg_288e54") in event_l or t("clients.telegram_bot.msg_d02a5b") in event_l:
+    if t("clients.telegram_bot.bot_msg_288e54") in event_l or t("clients.telegram_bot.bot_msg_d02a5b") in event_l:
         if user_at_work:
-            return t("clients.telegram_bot.msg_b31806")
+            return t("clients.telegram_bot.bot_msg_b31806")
         if user_out_of_home:
-            return t("clients.telegram_bot.msg_7a69ca")
+            return t("clients.telegram_bot.bot_msg_7a69ca")
 
     # WORK DEPARTURE
-    if t("clients.telegram_bot.msg_a633eb") in event_l and t("clients.telegram_bot.msg_b561c6") in event_l:
+    if t("clients.telegram_bot.bot_msg_a633eb") in event_l and t("clients.telegram_bot.bot_msg_b561c6") in event_l:
         if user_at_work:
-            return t("clients.telegram_bot.msg_0e63c1")
+            return t("clients.telegram_bot.bot_msg_0e63c1")
 
     return None
 
@@ -3067,14 +3071,14 @@ def _force_proactive_skip_from_context(event_name: str, memory_context: str) -> 
         return None
 
     progress_markers = (
-        t("clients.telegram_bot.msg_84f17a"), t("clients.telegram_bot.msg_3255a7"), t("clients.telegram_bot.msg_b16788"), t("clients.telegram_bot.msg_b1be10"),
-        t("clients.telegram_bot.msg_cbaccd"), t("clients.telegram_bot.msg_537f33"), t("clients.telegram_bot.msg_70e4d0"), t("clients.telegram_bot.msg_39bf18"),
-        t("clients.telegram_bot.msg_705d25"), t("clients.telegram_bot.msg_f353a5"), t("clients.telegram_bot.msg_3ede59"), t("clients.telegram_bot.msg_842e23"),
-        t("clients.telegram_bot.msg_78e601"), t("clients.telegram_bot.msg_634f1c"), t("clients.telegram_bot.msg_8821ce"), t("clients.telegram_bot.msg_973ea6"),
-        t("clients.telegram_bot.msg_62ecf0"), t("clients.telegram_bot.msg_b734f3"), t("clients.telegram_bot.msg_42e1e6"), t("clients.telegram_bot.msg_ee48c0"),
-        t("clients.telegram_bot.msg_ee788d"), t("clients.telegram_bot.msg_5b2c0d"), t("clients.telegram_bot.msg_9246ee"), t("clients.telegram_bot.msg_4d80a4"),
-        t("clients.telegram_bot.msg_2e807b"), t("clients.telegram_bot.msg_7783c5"), t("clients.telegram_bot.msg_8ce38d"), t("clients.telegram_bot.msg_ab1381"),
-        t("clients.telegram_bot.msg_8be33f"), t("clients.telegram_bot.msg_808148"), t("clients.telegram_bot.msg_552a15"), t("clients.telegram_bot.msg_d24745"),
+        t("clients.telegram_bot.bot_msg_84f17a"), t("clients.telegram_bot.bot_msg_3255a7"), t("clients.telegram_bot.bot_msg_b16788"), t("clients.telegram_bot.bot_msg_b1be10"),
+        t("clients.telegram_bot.bot_msg_cbaccd"), t("clients.telegram_bot.bot_msg_537f33"), t("clients.telegram_bot.bot_msg_70e4d0"), t("clients.telegram_bot.bot_msg_39bf18"),
+        t("clients.telegram_bot.bot_msg_705d25"), t("clients.telegram_bot.bot_msg_f353a5"), t("clients.telegram_bot.bot_msg_3ede59"), t("clients.telegram_bot.bot_msg_842e23"),
+        t("clients.telegram_bot.bot_msg_78e601"), t("clients.telegram_bot.bot_msg_634f1c"), t("clients.telegram_bot.bot_msg_8821ce"), t("clients.telegram_bot.bot_msg_973ea6"),
+        t("clients.telegram_bot.bot_msg_62ecf0"), t("clients.telegram_bot.bot_msg_b734f3"), t("clients.telegram_bot.bot_msg_42e1e6"), t("clients.telegram_bot.bot_msg_ee48c0"),
+        t("clients.telegram_bot.bot_msg_ee788d"), t("clients.telegram_bot.bot_msg_5b2c0d"), t("clients.telegram_bot.bot_msg_9246ee"), t("clients.telegram_bot.bot_msg_4d80a4"),
+        t("clients.telegram_bot.bot_msg_2e807b"), t("clients.telegram_bot.bot_msg_7783c5"), t("clients.telegram_bot.bot_msg_8ce38d"), t("clients.telegram_bot.bot_msg_ab1381"),
+        t("clients.telegram_bot.bot_msg_8be33f"), t("clients.telegram_bot.bot_msg_808148"), t("clients.telegram_bot.bot_msg_552a15"), t("clients.telegram_bot.bot_msg_d24745"),
     )
     if any(marker in ctx_l for marker in progress_markers):
         return "[SILENT_SKIP]"
@@ -3188,11 +3192,11 @@ def _get_env_context() -> str:
             dist_work = float('inf')
             
         if dist_home <= HOME_RADIUS_M:
-            location_status = t("clients.telegram_bot.msg_be27d8")
+            location_status = t("clients.telegram_bot.bot_msg_be27d8")
         elif dist_work <= WORK_RADIUS_M:
-            location_status = t("clients.telegram_bot.msg_664997")
+            location_status = t("clients.telegram_bot.bot_msg_664997")
         else:
-            location_status = t("clients.telegram_bot.msg_43b33d")
+            location_status = t("clients.telegram_bot.bot_msg_43b33d")
 
         weather_url = (
             f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
@@ -3207,7 +3211,7 @@ def _get_env_context() -> str:
 
             _wmo_dict = NLP_CONFIG.get('telegram', {}).get('wmo_codes', {})
             WMO_CODES = {int(k): v for k, v in _wmo_dict.items()}
-            w_desc = WMO_CODES.get(wcode, t("clients.telegram_bot.msg_e8006a"))
+            w_desc = WMO_CODES.get(wcode, t("clients.telegram_bot.bot_msg_e8006a"))
 
             env_str = (
                 f"[USER ENVIRONMENTAL DATA]\n"
@@ -3290,7 +3294,7 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
         return content.strip()
     except Exception as e:
         print(f"[Proactive Craft Error]: {e}")
-        return t("clients.telegram_bot.msg_oops_remembered", event_name=event_name)
+        return t("clients.telegram_bot.bot_msg_oops_remembered", event_name=event_name)
 
 
 def _infer_muted_until(event_name: str, memory_context: str) -> str | None:
@@ -3472,7 +3476,7 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
         return content.strip()
     except Exception as e:
         print(f"[Deferred Craft Error]: {e}")
-        return t("clients.telegram_bot.msg_917edc")
+        return t("clients.telegram_bot.bot_msg_917edc")
 
 
 def startup_check_missed_routines():
@@ -3495,13 +3499,13 @@ def startup_check_missed_routines():
         return
 
     DAYS_MAP = {
-        "Monday":    ["Monday", t("clients.telegram_bot.msg_33602e")],
-        "Tuesday":   ["Tuesday", t("clients.telegram_bot.msg_fbed5e")],
-        "Wednesday": ["Wednesday", t("clients.telegram_bot.msg_6d29a3")],
-        "Thursday":  ["Thursday", t("clients.telegram_bot.msg_400527")],
-        "Friday":    ["Friday", t("clients.telegram_bot.msg_032239")],
-        "Saturday":  ["Saturday", t("clients.telegram_bot.msg_078afa")],
-        "Sunday":    ["Sunday", t("clients.telegram_bot.msg_1a9537")],
+        "Monday":    ["Monday", t("clients.telegram_bot.bot_msg_33602e")],
+        "Tuesday":   ["Tuesday", t("clients.telegram_bot.bot_msg_fbed5e")],
+        "Wednesday": ["Wednesday", t("clients.telegram_bot.bot_msg_6d29a3")],
+        "Thursday":  ["Thursday", t("clients.telegram_bot.bot_msg_400527")],
+        "Friday":    ["Friday", t("clients.telegram_bot.bot_msg_032239")],
+        "Saturday":  ["Saturday", t("clients.telegram_bot.bot_msg_078afa")],
+        "Sunday":    ["Sunday", t("clients.telegram_bot.bot_msg_1a9537")],
     }
 
     try:
@@ -3514,9 +3518,9 @@ def startup_check_missed_routines():
 
         group_cond = ""
         if day_en in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday"):
-            group_cond = t("clients.telegram_bot.msg_27bbe4")
+            group_cond = t("clients.telegram_bot.bot_msg_27bbe4")
         elif day_en in ("Saturday", "Sunday"):
-            group_cond = t("clients.telegram_bot.msg_2cbc37")
+            group_cond = t("clients.telegram_bot.bot_msg_2cbc37")
 
         placeholders  = ",".join("?" * len(possible_days))
 
@@ -3646,13 +3650,13 @@ def job_check_routines():
 
     DB_PATH = os.path.join(BASE_DIR, "astakos_routines.db")
     DAYS_MAP = {
-        "Monday":    ["Monday", t("clients.telegram_bot.msg_33602e")],
-        "Tuesday":   ["Tuesday", t("clients.telegram_bot.msg_fbed5e")],
-        "Wednesday": ["Wednesday", t("clients.telegram_bot.msg_6d29a3")],
-        "Thursday":  ["Thursday", t("clients.telegram_bot.msg_400527")],
-        "Friday":    ["Friday", t("clients.telegram_bot.msg_032239")],
-        "Saturday":  ["Saturday", t("clients.telegram_bot.msg_078afa")],
-        "Sunday":    ["Sunday", t("clients.telegram_bot.msg_1a9537")],
+        "Monday":    ["Monday", t("clients.telegram_bot.bot_msg_33602e")],
+        "Tuesday":   ["Tuesday", t("clients.telegram_bot.bot_msg_fbed5e")],
+        "Wednesday": ["Wednesday", t("clients.telegram_bot.bot_msg_6d29a3")],
+        "Thursday":  ["Thursday", t("clients.telegram_bot.bot_msg_400527")],
+        "Friday":    ["Friday", t("clients.telegram_bot.bot_msg_032239")],
+        "Saturday":  ["Saturday", t("clients.telegram_bot.bot_msg_078afa")],
+        "Sunday":    ["Sunday", t("clients.telegram_bot.bot_msg_1a9537")],
     }
 
     if pending_routine_confirmations:
@@ -3788,9 +3792,9 @@ def job_check_routines():
 
                 group_cond = ""
                 if day_en in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday"):
-                    group_cond = t("clients.telegram_bot.msg_27bbe4")
+                    group_cond = t("clients.telegram_bot.bot_msg_27bbe4")
                 elif day_en in ("Saturday", "Sunday"):
-                    group_cond = t("clients.telegram_bot.msg_2cbc37")
+                    group_cond = t("clients.telegram_bot.bot_msg_2cbc37")
 
                 placeholders = ",".join("?" * len(possible_days))
                 cursor.execute(f"""
@@ -4154,7 +4158,7 @@ def job_proactive_scan():
         response = safe_gemini_call(f"{prompt}\n\n[DATA]:\n{collected_data}")
         reply = response.text.strip()
 
-        if reply and t("clients.telegram_bot.msg_841230") not in reply:
+        if reply and t("clients.telegram_bot.bot_msg_841230") not in reply:
             if not is_duplicate_notification(reply, cooldown_seconds=3600):
                 _send_and_record_assistant(reply, agent="Proactive_Agent")
                 log_event("proactive", "alert_sent", preview=reply[:80])
@@ -4213,7 +4217,7 @@ def job_morning_fit_briefing():
         from astakos_skills.google_fit import get_morning_summary
         summary = get_morning_summary()
         _send_and_record_assistant(
-            t("clients.telegram_bot.msg_morning_master_summary", summary=summary),
+            t("clients.telegram_bot.bot_msg_morning_master_summary", summary=summary),
             agent="Fit_Briefing",
         )
         with open(flag_file, "w") as f:
@@ -4242,7 +4246,7 @@ def job_morning_calendar_briefing():
         week_events  = google_calendar_tool.invoke({"action": "week"})
 
         # If there are no events today, we only send a weekly summaryof
-        if t("clients.telegram_bot.msg_908de1") in today_events:
+        if t("clients.telegram_bot.bot_msg_908de1") in today_events:
             msg = (
                 f"🌅 *Good morning {config.USER_NAME}!*\n\n"
                 f"📅 You have nothing scheduled today.\n\n"
@@ -4257,7 +4261,7 @@ def job_morning_calendar_briefing():
         _send_and_record_assistant(msg, agent="Calendar_Briefing")
         with open(flag_file, "w") as f:
             f.write(today_str)
-        print(t("clients.telegram_bot.msg_941efd"))
+        print(t("clients.telegram_bot.bot_msg_941efd"))
     except Exception as e:
         print(f"⚠️ [CalendarBriefing]: {e}")
 
@@ -4321,7 +4325,7 @@ def job_goal_followup():
         for g in stale_goals[:3]:
             line = f"- {g['project']}: {g['description']}"
             if g.get('progress'):
-                line += t("clients.telegram_bot.msg_progress_percent", progress=g["progress"])
+                line += t("clients.telegram_bot.bot_msg_progress_percent", progress=g["progress"])
             if g.get('milestones'):
                 line += f"\n  Milestones: {g['milestones']}"
             goals_text_lines.append(line)
@@ -4422,7 +4426,7 @@ class AstakosScheduler:
             print(f"[Scheduler]: snapshot write error: {e}")
 
     def run(self):
-        print(t("clients.telegram_bot.msg_338d22"))
+        print(t("clients.telegram_bot.bot_msg_338d22"))
         while not shutdown_event.is_set():
             now = time.time()
             for job in self._jobs:
@@ -4479,7 +4483,7 @@ class AstakosScheduler:
                 next_str  = f"{next_secs}s"
             else:
                 last_str = "\u2014"
-                next_str = t("clients.telegram_bot.msg_8f25d1")
+                next_str = t("clients.telegram_bot.bot_msg_8f25d1")
             lines.append(
                 f"{icon} `{job['name']}` | last: {last_str} | next: {next_str} "
                 f"| {job['last_duration']:.1f}s | fails: {job['fail_count']}"
@@ -4491,7 +4495,7 @@ class AstakosScheduler:
         lines.append(f"\u23f3 Pending confirmations: {len(pending_routine_confirmations)}")
         lines.append(f"\U0001f4ec Fast Queue: {fast_queue.qsize()} | Slow Queue: {slow_queue.qsize()}")
         quiet = is_quiet_hours()
-        quiet_label = t("clients.telegram_bot.msg_1e9be7") if quiet else t("clients.telegram_bot.msg_4e73eb")
+        quiet_label = t("clients.telegram_bot.bot_msg_1e9be7") if quiet else t("clients.telegram_bot.bot_msg_4e73eb")
         lines.append(f"\U0001f319 Quiet hours: {quiet_label} ({QUIET_HOURS[0]:02d}:00\u2013{QUIET_HOURS[1]:02d}:00)")
         with _proactive_lock:
             lines.append(f"\U0001f4e3 Proactive this hour: {_proactive_count['count']}/{MAX_PROACTIVE_PER_HOUR}")
@@ -4517,7 +4521,7 @@ if __name__ == "__main__":
     import signal as _signal
 
     def _handle_exit(*args):
-        print(t("clients.telegram_bot.msg_35e7e8"))
+        print(t("clients.telegram_bot.bot_msg_35e7e8"))
         shutdown_event.set()
 
     _signal.signal(_signal.SIGTERM, _handle_exit)
@@ -4568,10 +4572,10 @@ if __name__ == "__main__":
 
 
     print("\u2501" * 50)
-    print(t("clients.telegram_bot.msg_58a238"))
+    print(t("clients.telegram_bot.bot_msg_58a238"))
     print("\u2501" * 50)
     
-    send_telegram_msg(t("clients.telegram_bot.msg_2cf679"))
+    send_telegram_msg(t("clients.telegram_bot.bot_msg_2cf679"))
     try:
         run_polling()
     except KeyboardInterrupt:

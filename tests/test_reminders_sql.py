@@ -153,6 +153,7 @@ class TestLocationReminders:
             patch.object(cfg, "HOME_RADIUS_M", radius_m),
             patch.object(bot, "send_telegram_msg", side_effect=lambda m: sent.append(m)),
         ):
+            print("STATE_DB path:", cfg.STATE_DB, "Exists:", os.path.exists(cfg.STATE_DB))
             bot.handle_location(msg, live_update=True)
 
         return sent, db_path

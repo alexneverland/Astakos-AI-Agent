@@ -84,8 +84,8 @@ def has_active_draft() -> bool:
 
 
 def inactive_draft_message(reason: str) -> str:
+    from core.i18n import t
     if reason == "expired":
-        from core.i18n import t
         return t("core.messenger_draft.draft_expired")
     if reason == "incomplete":
         return t("prompts.ext_str_11")

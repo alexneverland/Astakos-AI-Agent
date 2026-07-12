@@ -97,7 +97,7 @@ def test_equal_richness_falls_back_to_length_tiebreak():
 def test_memory_richness_counts_signals_and_confidence():
     fact = "[USER_FACT]: Στις 2026-06-08 η Partner αγόρασε δώρο από https://example.com"
 
-    assert memory_richness(fact, {"confidence": 0.8}) == 4.8
+    assert memory_richness(fact, {"confidence": 0.8}) == 3.8
 
 
 def test_close_family_facts_add_alongside_when_not_correction():

@@ -142,6 +142,7 @@ _USER_SUBJECT_MARKERS = (
     t("prompts.ext_str_252"), t("prompts.ext_str_250"), t("prompts.ext_str_424"), t("prompts.ext_str_381"), t("prompts.ext_str_171"), t("prompts.ext_str_170"),
     t("prompts.ext_str_186"), t("prompts.ext_str_190"), t("prompts.ext_str_224"), t("prompts.ext_str_203"), t("prompts.ext_str_145"), t("prompts.ext_str_137"),
     t("prompts.ext_str_193"), t("prompts.ext_str_178"), t("prompts.ext_str_164"), t("prompts.ext_str_146"), t("prompts.ext_str_136"),
+    "kid1", "partner", "owner"
 )
 
 _ASSISTANT_SUBJECT_MARKERS = (

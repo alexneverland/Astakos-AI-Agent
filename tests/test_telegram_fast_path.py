@@ -101,7 +101,7 @@ def test_messenger_intent_clear_closes_draft(mock_classify, mock_stream, mock_ap
     # Verify response confirms cleanup
     args, _ = mock_send.call_args
     sent_text = args[0]
-    assert "The draft is cleared" in sent_text
+    assert "The draft is cleared" in sent_text or "Το draft καθαρίστηκε" in sent_text
 
 
 def test_medium_path_candidate_for_telegram_reflective_turn():

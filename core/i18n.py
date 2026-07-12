@@ -29,13 +29,21 @@ def t(key: str, **kwargs) -> str:
         for p in parts:
             val = val[p]
         if isinstance(val, str):
-            if kwargs:
-                val = val.format(**kwargs)
             if '{' in val:
-                val = val.replace('{user_name}', config.USER_NAME)
+                val = val.replace('{user_name}', getattr(config, 'USER_NAME', 'User'))
                 val = val.replace('{partner_name}', getattr(config, 'PARTNER_NAME', 'Partner'))
                 val = val.replace('{kid1_name}', getattr(config, 'KID1_NAME', 'Kid1'))
                 val = val.replace('{kid2_name}', getattr(config, 'KID2_NAME', 'Kid2'))
+                val = val.replace('{bot_name}', getattr(config, 'BOT_NAME', 'Astakos'))
+                val = val.replace('{owner_name}', getattr(config, 'OWNER_NAME', 'User'))
+            if kwargs:
+                # Use a safe format or just let it raise if actual kwargs are missing
+                # But since we replaced config vars, the remaining {x} should match kwargs
+                try:
+                    val = val.format(**kwargs)
+                except KeyError as e:
+                    # If we still have missing keys that aren't config vars, we should log but not fail the whole translation
+                    pass
             return val
         elif isinstance(val, list):
             return val

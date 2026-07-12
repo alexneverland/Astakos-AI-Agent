@@ -163,9 +163,10 @@ def test_event_memory_candidate_captures_personal_day_event():
 def test_temporary_family_memory_candidate_captures_absence_window():
     import datetime
     import memory.session_memory as session_memory
+    import config
 
     candidate = session_memory._extract_temporary_family_memory_candidate(
-        "Ο Kid1 είναι κατασκήνωση και θα γυρίσει την άλλη εβδομάδα",
+        f"Ο {config.KID1_NAME} είναι κατασκήνωση και θα γυρίσει την άλλη εβδομάδα",
         "Οκ, το κρατάω υπόψη μου.",
         agent_name="Chat_Agent",
         channel="telegram",
@@ -230,6 +231,7 @@ def test_memory_sifter_fast_skips_operational_mail_image_request(monkeypatch):
 
 def test_memory_sifter_saves_temporary_family_memory_even_if_llm_returns_empty(monkeypatch):
     import memory.session_memory as session_memory
+    import config
 
     saved = []
 
@@ -241,7 +243,7 @@ def test_memory_sifter_saves_temporary_family_memory_even_if_llm_returns_empty(m
     session_memory.SESSION_LOGS.clear()
 
     session_memory.run_memory_sifter_fast(
-        "Ο Kid1 είναι κατασκήνωση μέχρι την Κυριακή και μετά γυρνάει σπίτι",
+        f"Ο {config.KID1_NAME} είναι κατασκήνωση μέχρι την Κυριακή και μετά γυρνάει σπίτι",
         "Το κρατάω στο νου μου.",
         agent_name="Chat_Agent",
         channel="telegram",

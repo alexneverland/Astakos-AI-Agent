@@ -116,6 +116,7 @@ def test_lexical_memory_matches_finds_doc_despite_different_grammatical_case(mon
     )
     monkeypatch.setattr(system, "vector_lock", _Lock())
     monkeypatch.setattr(system, "vector_store", _VectorStore([doc]))
+    system._lexical_cache.clear()
 
     matches = system._lexical_memory_matches("τι θέλει για τα γενεθλιών του Αλεξάνδρου;")
 

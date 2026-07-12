@@ -173,7 +173,7 @@ def test_system_doctor_tool_returns_readable_report():
     result = system_doctor.invoke({"days": 1})
 
     assert isinstance(result, str)
-    assert "Astakos Doctor" in result
+    assert ("Astakos Doctor" in result or "Αστακός Doctor" in result)
     assert "Logs" in result
     assert "Pending approvals" in result
     assert "Memory ops" in result

@@ -126,8 +126,8 @@ def test_infer_camp_absence_mute_directive():
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
 
-    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_away_from_home" and d["value"] == "true" and d["until_date"] == "2026-06-25" for d in directives)
-    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_away_reason" and d["value"] == "camp" and d["until_date"] == "2026-06-25" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_from_home" and d["value"] == "true" and d["until_date"] == "2026-06-25" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_reason" and d["value"] == "camp" and d["until_date"] == "2026-06-25" for d in directives)
     assert any(d["kind"] == "condition_add" for d in directives)
 
 def test_infer_return_home_unmute_directive():
@@ -139,8 +139,8 @@ def test_infer_return_home_unmute_directive():
         now=datetime(2026, 6, 25, 18, 0, 0),
     )
 
-    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_away_from_home" and d["value"] == "false" for d in directives)
-    assert any(d["kind"] == "context_state_set" and d["key"] == "alexandros_away_reason" and d["value"] == "" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_from_home" and d["value"] == "false" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_reason" and d["value"] == "" for d in directives)
 
 
 def test_infer_school_break_requires_child_subject():
@@ -215,7 +215,7 @@ def test_apply_schedule_pause_hits_all_football_routines(tmp_path):
     assert rows[2][1:] == (None, None, None)
 
 
-def test_apply_notifications_mute_hits_alexandros_routines_only(tmp_path):
+def test_apply_notifications_mute_hits_kid1_routines_only(tmp_path):
     import memory.routine_db as rdb
 
     db_path = tmp_path / "routines.db"
@@ -308,7 +308,7 @@ def test_sofia_work_does_not_suppress_messenger_routine():
     )
 
     assert not any(
-        d.get("condition_payload", {}).get("flag") == "sofia_with_user"
+        d.get("condition_payload", {}).get("flag") == "partner_with_user"
         for d in directives
     )
 
@@ -325,13 +325,13 @@ def test_sofia_together_suppresses_messenger_routine():
 
     assert any(
         d["kind"] == "context_state_set"
-        and d["key"] == "sofia_with_user"
+        and d["key"] == "partner_with_user"
         and d["value"] == "true"
         for d in directives
     )
     assert any(
         d["kind"] == "condition_add"
-        and d["condition_payload"]["flag"] == "sofia_with_user"
+        and d["condition_payload"]["flag"] == "partner_with_user"
         and d["condition_mode"] == "suppress_when_true"
         for d in directives
     )
@@ -349,7 +349,7 @@ def test_sofia_left_clears_together_flag():
 
     assert any(
         d["kind"] == "context_state_set"
-        and d["key"] == "sofia_with_user"
+        and d["key"] == "partner_with_user"
         and d["value"] == "false"
         for d in directives
     )
@@ -368,7 +368,7 @@ def test_not_together_phrase_clears_only_when_sofia_context_is_active():
 
     assert any(
         d["kind"] == "context_state_set"
-        and d["key"] == "sofia_with_user"
+        and d["key"] == "partner_with_user"
         and d["value"] == "false"
         for d in directives
     )
@@ -385,7 +385,7 @@ def test_not_together_phrase_without_active_sofia_context_does_nothing():
             now=datetime(2026, 6, 24, 12, 0, 0),
         )
 
-    assert not any(d.get("key") == "sofia_with_user" for d in directives)
+    assert not any(d.get("key") == "partner_with_user" for d in directives)
 
 
 def test_shift_logic_candidate_scores_debug_only():
@@ -742,7 +742,7 @@ def test_return_home_from_outing_clears_out_of_home_and_marks_outing_done():
     def fake_get_context_state(key):
         if key == "user_out_of_home":
             return {"value": "true", "expires_at": "2026-06-21"}
-        if key == "state:alexandros:outing":
+        if key == "state:kid1:outing":
             return {"value": "in_progress", "expires_at": "2026-06-21"}
         return None
 
@@ -756,7 +756,7 @@ def test_return_home_from_outing_clears_out_of_home_and_marks_outing_done():
     assert len(directives) == 2
 
     user_out = next(d for d in directives if d["key"] == "user_out_of_home")
-    alex_outing = next(d for d in directives if d["key"] == "state:alexandros:outing")
+    alex_outing = next(d for d in directives if d["key"] == "state:kid1:outing")
 
     assert user_out["value"] == "false"
     assert user_out["until_date"] is None
@@ -781,7 +781,7 @@ def test_family_outing_in_progress_adds_outing_and_home_conditions():
     condition_directives = [d for d in directives if d.get("kind") == "condition_add"]
 
     assert any(
-        d.get("condition_payload") == {"flag": "state:alexandros:outing", "equals": "in_progress"}
+        d.get("condition_payload") == {"flag": "state:kid1:outing", "equals": "in_progress"}
         for d in condition_directives
     )
 
@@ -832,7 +832,7 @@ def test_llm_context_key_does_not_require_entity_and_activity():
     from services.routine_reconciler import _llm_impact_to_directives
 
     impact = {
-        "context_key": "alexandros_present",
+        "context_key": "kid1_present",
         "context_value": False,
         "impact": "live_context",
         "reason": "child_with_caregiver",
@@ -840,7 +840,7 @@ def test_llm_context_key_does_not_require_entity_and_activity():
 
     directives = _llm_impact_to_directives(impact)
     assert len(directives) == 1
-    assert directives[0]["key"] == "alexandros_away_from_home"
+    assert directives[0]["key"] == "kid1_away_from_home"
     assert directives[0]["value"] is True
 
 def test_llm_context_key_rejects_non_canonical_keys():
@@ -856,15 +856,15 @@ def test_llm_context_key_rejects_non_canonical_keys():
     directives = _llm_impact_to_directives(impact)
     assert directives == []
 
-def test_sofia_with_user_group_outing_reinforces_existing_state(monkeypatch):
+def test_partner_with_user_group_outing_reinforces_existing_state(monkeypatch):
     from services import routine_reconciler as rr
 
-    monkeypatch.setattr(rr, "_sofia_state_is_active", lambda now: True)
+    monkeypatch.setattr(rr, "_partner_state_is_active", lambda now: True)
 
-    out = rr._rule_sofia_with_user("ηρθαμε θαλασσα ολοι μαζι", [], datetime(2026, 6, 28))
+    out = rr._rule_partner_with_user("ηρθαμε θαλασσα ολοι μαζι", [], datetime(2026, 6, 28))
 
     assert out
-    assert any(d.get("kind") == "context_state_set" and d.get("key") == "sofia_with_user" for d in out)
+    assert any(d.get("kind") == "context_state_set" and d.get("key") == "partner_with_user" for d in out)
 
 
 def test_family_outing_without_child_still_sets_user_out_of_home():
@@ -887,7 +887,7 @@ def test_family_outing_without_child_still_sets_user_out_of_home():
 
     assert not any(
         d.get("kind") == "context_state_set"
-        and d.get("key") == "state:alexandros:outing"
+        and d.get("key") == "state:kid1:outing"
         for d in directives
     )
 
@@ -1000,7 +1000,7 @@ def test_shift_logic_relative_day_schedule_is_not_conservative():
     assert "shift_logic_conservative" not in scored.get("ambiguity_flags", [])
     assert scored.get("score", 0) >= 0.75
 
-def test_sofia_with_alexandros_at_home_while_user_at_work_does_not_set_sofia_with_user():
+def test_sofia_with_kid1_at_home_while_user_at_work_does_not_set_partner_with_user():
     from services.routine_reconciler import infer_routine_reconciliation_candidates
     from datetime import datetime
 
@@ -1016,7 +1016,7 @@ def test_sofia_with_alexandros_at_home_while_user_at_work_does_not_set_sofia_wit
 
     sofia_true = [
         c for c in candidates
-        if c.get("key") == "sofia_with_user" and str(c.get("value")).lower() == "true"
+        if c.get("key") == "partner_with_user" and str(c.get("value")).lower() == "true"
     ]
 
     assert sofia_true == []
