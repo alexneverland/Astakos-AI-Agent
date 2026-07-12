@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Αστακός — Κέντρο Ελέγχου</title>
+    <title>Astakos — Control Center</title>
     <style>
         /* ══════════════════════════════════════════════════════
            RESET & BASE
@@ -624,8 +624,8 @@
     <div id="header-left">
         <span id="header-logo">🦞</span>
         <div>
-            <div id="header-title">ΑΣΤΑΚΟΣ</div>
-            <div id="header-subtitle">ΚΕΝΤΡΟ ΕΛΕΓΧΟΥ · PISTON-7</div>
+            <div id="header-title">ASTAKOS</div>
+            <div id="header-subtitle">CONTROL CENTER · PISTON-7</div>
         </div>
     </div>
 
@@ -637,7 +637,7 @@
     <div id="header-buttons">
         <button class="hbtn" id="toggle-logs-btn">🖥️ Logs</button>
         <button class="hbtn" id="debug-btn" onclick="window.open('http://127.0.0.1:8000/debug','_blank')">🐛 Debug</button>
-        <button class="hbtn" id="end-session-btn">🛑 Λήξη</button>
+        <button class="hbtn" id="end-session-btn">🛑 End</button>
     </div>
 </div>
 
@@ -649,7 +649,7 @@
         <div id="chat-box"></div>
 
         <div id="input-container">
-            <!-- Συρτάρι Αστακού -->
+            <!-- Astakos Drawer -->
             <div id="astakos-drawer">
                 <svg id="lobster-svg" class="idle" width="280" height="360" viewBox="0 0 280 360" xmlns="http://www.w3.org/2000/svg">
                     <defs>
@@ -844,16 +844,16 @@
                         <path class="sw3" d="M 258 190 Q 280 228 258 266" fill="none" stroke="#f05020" stroke-width="1.5" stroke-linecap="round"/>
                     </g>
                 </svg>
-                <button id="voice-btn-large" title="Πάτα για να μιλήσεις">🎙️</button>
+                <button id="voice-btn-large" title="Press to speak">🎙️</button>
             </div>
 
             <!-- Input row -->
             <div id="input-area">
                 <input type="file" id="file-input" style="display:none">
-                <button class="input-btn" id="attach-btn"        title="Επισύναψη αρχείου">📎</button>
-                <button class="input-btn" id="trigger-voice-btn" title="Άνοιξε τον Αστακό">🎙️</button>
-                <textarea id="user-input" placeholder="Δώσε εντολή ή στείλε αρχείο…" autocomplete="off" rows="1"></textarea>
-                <button id="send-btn">▶ Αποστολή</button>
+                <button class="input-btn" id="attach-btn"        title="Attach file">📎</button>
+                <button class="input-btn" id="trigger-voice-btn" title="Open Astakos">🎙️</button>
+                <textarea id="user-input" placeholder="Give command or send file..." autocomplete="off" rows="1"></textarea>
+                <button id="send-btn">▶ Send</button>
             </div>
             <div id="file-label"></div>
         </div>
@@ -888,19 +888,19 @@
     toggleBtn.addEventListener('click', () => { terminalPanel.classList.toggle('hidden-panel'); });
 
     endSessionBtn.addEventListener('click', async () => {
-        if (!confirm("Θα αρχειοθετηθούν όλα και θα καθαρίσει το UI. Είσαι σίγουρος Μάστορα;")) return;
+        if (!confirm("Everything will be archived and the UI will be cleared. Are you sure?")) return;
         try {
             await fetch('http://127.0.0.1:8000/end_session', { method: 'POST' });
             chatBox.innerHTML = '';
-            appendMessage("✅ Η συνεδρία αρχειοθετήθηκε. Ξεκινάμε νέα σελίδα!", "ai", "System");
+            appendMessage("✅ Session archived. Starting a new page!", "ai", "System");
             currentPhotoPath = null;
-        } catch (error) { alert("Σφάλμα σύνδεσης."); }
+        } catch (error) { alert("Connection error."); }
     });
 
     attachBtn.addEventListener('click', () => { fileInput.click(); });
     fileInput.addEventListener('change', (e) => {
         pastedVirtualFile = null;
-        fileLabel.innerText = e.target.files.length > 0 ? "📎 Επιλέχθηκε: " + e.target.files[0].name : "";
+        fileLabel.innerText = e.target.files.length > 0 ? "📎 Selected: " + e.target.files[0].name : "";
     });
 
     function escapeHtml(value) {
@@ -942,13 +942,13 @@
 
         const copyBtn = document.createElement('button');
         copyBtn.className = 'copy-btn';
-        copyBtn.title = "Αντιγραφή μηνύματος";
+        copyBtn.title = "Copy message";
         copyBtn.innerHTML = '📋';
         copyBtn.onclick = () => {
             navigator.clipboard.writeText(text).then(() => {
                 copyBtn.innerHTML = '✅';
                 setTimeout(() => { copyBtn.innerHTML = '📋'; }, 2000);
-            }).catch(err => console.error("Αποτυχία αντιγραφής:", err));
+            }).catch(err => console.error("Failed to copy:", err));
         };
         div.appendChild(copyBtn);
         chatBox.appendChild(div);
@@ -1064,7 +1064,7 @@
         }
 
         const sender = (msg.role === 'user' || msg.role === 'Human') ? 'user' : 'ai';
-        const defaultName = sender === 'user' ? 'Λάζαρος' : 'Αστακός';
+        const defaultName = sender === 'user' ? 'User' : 'Astakos';
         const channelName = msg.channel ? `${msg.channel.charAt(0).toUpperCase()}${msg.channel.slice(1)}` : '';
         const label = channelName ? `${channelName} / ${msg.agent || defaultName}` : (msg.agent || defaultName);
 
@@ -1107,9 +1107,9 @@
                 const historyMaxRowId = Math.max(0, ...data.history.map(msg => Number(msg.rowid) || 0));
                 if (historyMaxRowId > lastKnownMsgId) lastKnownMsgId = historyMaxRowId;
             } else {
-                appendMessage("Καλημέρα Μάστορα! Έτοιμος για μερεμέτια;", "ai", "System");
+                appendMessage("Good morning! Ready for work?", "ai", "System");
             }
-            // Φόρτωσε max_id ώστε το polling να ξεκινά από εδώ
+            // Load max_id so polling starts from here
             if (!lastKnownMsgId) {
                 try {
                     const pr = await fetch(`http://127.0.0.1:8000/messages/poll?after_id=0`);
@@ -1151,7 +1151,7 @@
 
     function setVirtualPasteFile(file, originalLength) {
         pastedVirtualFile = file;
-        fileLabel.innerText = `📎 Paste έγινε αρχείο: ${file.name} (${originalLength} chars, auto-attachment)`;
+        fileLabel.innerText = `📎 Paste converted to file: ${file.name} (${originalLength} chars, auto-attachment)`;
     }
 
     function clearPendingAttachmentUI() {
@@ -1175,7 +1175,7 @@
         setVirtualPasteFile(virtualFile, pastedText.length);
 
         if (!userInput.value.trim()) {
-            userInput.value = "Δες το συνημμένο κείμενο και κάνε ανάλυση.";
+            userInput.value = "See the attached text and analyze it.";
             userInput.style.height = 'auto';
             userInput.style.height = Math.min(userInput.scrollHeight, 200) + 'px';
         }
@@ -1187,8 +1187,8 @@
         if (!text && !file) return;
 
         let displayUserMsg = text;
-        if (file && !text) displayUserMsg = `[Απεστάλη αρχείο: ${file.name}]`;
-        if (file && text)  displayUserMsg = `[Αρχείο: ${file.name}]<br>${text}`;
+        if (file && !text) displayUserMsg = `[File sent: ${file.name}]`;
+        if (file && text)  displayUserMsg = `[File: ${file.name}]<br>${text}`;
 
         appendUserMessageOnce(displayUserMsg);
         userInput.value = '';
@@ -1197,16 +1197,16 @@
 
         const loadingDiv = document.createElement('div');
         loadingDiv.className = 'loading';
-        loadingDiv.innerText = 'Ο Αστακός επεξεργάζεται…';
+        loadingDiv.innerText = 'Astakos is processing...';
         chatBox.appendChild(loadingDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
         setAvatar('thinking');
 
-        let isVoice = text.startsWith("[Φωνητικό Μήνυμα]:");
+        let isVoice = text.startsWith("[Voice Message]:");
         let apiText = text;
         if (isVoice) {
-            let cleanMsg = text.replace("[Φωνητικό Μήνυμα]:", "").trim();
-            apiText = "🔊 [ΚΡΥΦΗ ΟΔΗΓΙΑ: Ο χρήστης σου μιλάει με φωνή. Το σύστημα διαβάζει τις απαντήσεις σου φωναχτά. ΕΧΕΙΣ ΦΩΝΗ! ΑΠΑΓΟΡΕΥΕΤΑΙ ΡΗΤΑ να πεις ότι δεν έχεις αυτιά, ή ότι είσαι μοντέλο κειμένου. Απάντα 100% φυσικά και προφορικά σαν άνθρωπος.]\n\nΜήνυμα: " + cleanMsg;
+            let cleanMsg = text.replace("[Voice Message]:", "").trim();
+            apiText = "🔊 [HIDDEN INSTRUCTION: The user is speaking to you. The system reads your answers aloud. YOU HAVE A VOICE! IT IS STRICTLY FORBIDDEN to say you do not have ears, or that you are a text model. Answer 100% naturally and verbally like a human.]\n\nMessage: " + cleanMsg;
         }
 
         try {
@@ -1240,7 +1240,7 @@
             setTimeout(() => setAvatar('idle'), 4000);
         } catch (error) {
             if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
-            appendMessage("Σφάλμα σύνδεσης με τον Server.", 'ai', 'System');
+            appendMessage("Error connecting to Server.", 'ai', 'System');
             setAvatar('idle');
         }
     }
@@ -1299,13 +1299,13 @@
                 mediaRecorder.onstop = async () => {
                     const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
                     if (audioBlob.size < 800) {
-                        alert("❌ Σφάλμα: Το μικρόφωνο δεν έστειλε καθόλου ήχο! (" + audioBlob.size + " bytes). Έλεγξε τις ρυθμίσεις των Windows.");
+                        alert("❌ Error: The microphone sent no audio! (" + audioBlob.size + " bytes). Check Windows settings.");
                         setAvatar('idle'); return;
                     }
                     setAvatar('thinking');
                     const loadingDiv = document.createElement('div');
                     loadingDiv.className = 'loading';
-                    loadingDiv.innerText = '🎙️ Μετατροπή φωνής σε κείμενο…';
+                    loadingDiv.innerText = '🎙️ Converting voice to text...';
                     chatBox.appendChild(loadingDiv);
                     chatBox.scrollTop = chatBox.scrollHeight;
                     const formData = new FormData();
@@ -1315,15 +1315,15 @@
                         const data = await res.json();
                         chatBox.removeChild(loadingDiv);
                         if (data.transcription) {
-                            userInput.value = "[Φωνητικό Μήνυμα]: " + data.transcription;
+                            userInput.value = "[Voice Message]: " + data.transcription;
                             sendMessage();
                         } else {
-                            appendMessage("❌ Σφάλμα: " + data.error, 'ai', 'System');
+                            appendMessage("❌ Error: " + data.error, 'ai', 'System');
                             setAvatar('idle');
                         }
                     } catch (err) {
                         if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
-                        appendMessage("❌ Αποτυχία σύνδεσης για το φωνητικό.", 'ai', 'System');
+                        appendMessage("❌ Connection failure for voice.", 'ai', 'System');
                         setAvatar('idle');
                     }
                 };
@@ -1332,7 +1332,7 @@
                 voiceBtnLarge.classList.add('recording-pulse');
                 voiceBtnLarge.innerHTML = "⏹️";
                 setAvatar('listening');
-            } catch (err) { alert("❌ Πρόβλημα με το μικρόφωνο!"); }
+            } catch (err) { alert("❌ Microphone problem!"); }
         } else {
             if (mediaRecorder && mediaRecorder.state === 'recording') {
                 mediaRecorder.stop();
@@ -1377,7 +1377,7 @@
     }
 
     ws.onmessage = function(event) {
-        // Δοκιμή: αν είναι JSON event από _broadcast_ws, χειρίσου ανάλογα
+        // Test: if it is a JSON event from _broadcast_ws, handle accordingly
         try {
             const evt = JSON.parse(event.data);
             if (evt.type === 'new_message' && (evt.channel === 'telegram' || evt.channel === 'web')) {
@@ -1388,16 +1388,16 @@
                 }
                 return;
             }
-        } catch(e) { /* plain text log line, συνέχισε κανονικά */ }
+        } catch(e) { /* plain text log line, continue normally */ }
 
         const span = document.createElement('span');
         span.innerHTML = parseANSI(event.data);
         logBox.appendChild(span);
         logBox.scrollTop = logBox.scrollHeight;
         const logLine = event.data;
-        if (logLine.includes("[Vision]: Ανάλυση εικόνας") ||
-            logLine.includes("Εκτελείται το LangGraph") ||
-            logLine.includes("[Dev]: Εκτέλεση του") ||
+        if (logLine.includes("[Vision]: Image analysis") ||
+            logLine.includes("LangGraph is executing") ||
+            logLine.includes("[Dev]: Executing") ||
             logLine.includes("[LinkedIn]:")) {
             setAvatar('thinking');
         }
@@ -1442,7 +1442,7 @@
         const path = btn.getAttribute('data-path');
         if (!path) return;
         btn.disabled = true;
-        btn.textContent = '⏳ Ανέβασμα...';
+        btn.textContent = '⏳ Uploading...';
         try {
             const r = await fetch('/upload-to-drive', {
                 method: 'POST',
@@ -1451,13 +1451,13 @@
             });
             const d = await r.json();
             if (d.ok) {
-                // Κουμπί → Άνοιγμα
-                btn.textContent = '📂 Άνοιγμα';
+                // Button -> Open
+                btn.textContent = '📂 Open';
                 btn.style.background = '#0f5132';
                 btn.disabled = false;
                 btn.onclick = () => window.open(d.url, '_blank');
 
-                // Preview iframe κάτω από το card
+                // Preview iframe under the card
                 const card = btn.closest('div');
                 if (card) {
                     const fileId = d.url.match(/\/d\/([^/]+)\//)?.[1];
@@ -1472,11 +1472,11 @@
                     }
                 }
             } else {
-                btn.textContent = '❌ ' + (d.error || 'Σφάλμα');
+                btn.textContent = '❌ ' + (d.error || 'Error');
                 btn.style.background = '#dc3545';
             }
         } catch (e) {
-            btn.textContent = '❌ Σφάλμα';
+            btn.textContent = '❌ Error';
             btn.style.background = '#dc3545';
         }
     }

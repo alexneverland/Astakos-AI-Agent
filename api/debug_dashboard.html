@@ -253,7 +253,7 @@
 <body>
 <div id="refresh-bar" style="width:0%"></div>
 <h1>Astakos Runtime Dashboard</h1>
-<div class="ts" id="ts">Φόρτωση...</div>
+<div class="ts" id="ts">Loading...</div>
 <div id="status-strip" class="status-strip">
   <div class="status-item"><div class="label">System</div><div class="value off">Loading</div></div>
 </div>
@@ -275,7 +275,7 @@
   <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;max-width:900px;margin:0 auto;padding:20px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-size:16px;color:#e6edf3;">📊 Analytics</h2>
-      <button onclick="closeCharts()" style="background:#3a0d0d;color:#f85149;border:none;padding:4px 12px;border-radius:5px;cursor:pointer;font-size:14px;">✕ Κλείσιμο</button>
+      <button onclick="closeCharts()" style="background:#3a0d0d;color:#f85149;border:none;padding:4px 12px;border-radius:5px;cursor:pointer;font-size:14px;">✕ Close</button>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
       <div class="card"><h2>🗓️ Routine States</h2><div style="height:220px;position:relative"><canvas id="chart-routines"></canvas></div></div>
@@ -607,7 +607,7 @@ function logRow(e) {
 }
 function cleanEventName(raw){
   if(!raw) return '-';
-  // Legacy format: str({'event': 'Foo', 'sent_at': datetime(...)}) → εξάγω μόνο το όνομα
+  // Legacy format: str({'event': 'Foo', 'sent_at': datetime(...)}) → extract only the name
   const m = raw.match(/['\"]event['\"]\s*:\s*['\"]([^'"]+)['"]/);
   if(m) return m[1];
   return raw;
@@ -974,7 +974,7 @@ function render(d) {
     ? `(snapshot ${d.snapshot_age_s}s ago${stale?' ⚠️ STALE':''})` : '(telegram_bot offline?)';
 
   document.getElementById('ts').innerHTML =
-    `Τελευταία ανανέωση: <b>${new Date().toLocaleTimeString('el-GR')}</b> &nbsp;${age}`;
+    `Last refresh: <b>${new Date().toLocaleTimeString('el-GR')}</b> &nbsp;${age}`;
   renderStatusStrip(d);
 
   const flags = [];
@@ -1188,7 +1188,7 @@ function render(d) {
   }
   if (acts.length > 0) {
     html += `<div class="card"><h2>Pending Actions (${acts.length})</h2>
-      <table><tr><th>Tool</th><th>Args</th><th>Requested</th><th>Age</th><th>Ενέργειες</th></tr>
+      <table><tr><th>Tool</th><th>Args</th><th>Requested</th><th>Age</th><th>Actions</th></tr>
       ${acts.map(a=>`<tr>
         <td><b>${a.tool_name}</b></td>
         <td class="off" style="font-size:11px;max-width:420px;white-space:normal;word-break:break-word">${JSON.stringify(a.tool_args||{})}</td>
@@ -1203,7 +1203,7 @@ function render(d) {
 
   if ((rout.active||[]).length > 0) {
     html += `<div class="card" style="grid-column:1/-1"><h2>Active Routines (${rout.active.length})</h2>
-      <div class="table-wrap"><table class="routines-table"><tr><th class="cell-tight">ID</th><th class="cell-tight">Schedule</th><th>Event</th><th>Rules</th><th class="cell-tight">Status</th><th class="cell-tight" style="text-align:right">Ενέργειες</th></tr>
+      <div class="table-wrap"><table class="routines-table"><tr><th class="cell-tight">ID</th><th class="cell-tight">Schedule</th><th>Event</th><th>Rules</th><th class="cell-tight">Status</th><th class="cell-tight" style="text-align:right">Actions</th></tr>
       ${rout.active.map(r=>`<tr>
         <td class="off cell-tight" style="font-size:11px; vertical-align:middle">#${r.id}</td>
         <td class="cell-tight" style="vertical-align:middle"><div style="font-size:11px;color:var(--text-muted)">${r.day}</div><div style="font-weight:600;font-size:13px">${r.time}</div></td>
@@ -1252,7 +1252,7 @@ function render(d) {
 
   if ((rout.non_active||[]).length > 0) {
     html += `<div class="card" style="grid-column:1/-1"><h2>Non-Active Routines (${rout.non_active.length})</h2>
-      <div class="table-wrap"><table class="routines-table"><tr><th class="cell-tight">ID</th><th class="cell-tight">Schedule</th><th>Event</th><th>Rules</th><th class="cell-tight">Status</th><th class="cell-tight" style="text-align:right">Ενέργειες</th></tr>
+      <div class="table-wrap"><table class="routines-table"><tr><th class="cell-tight">ID</th><th class="cell-tight">Schedule</th><th>Event</th><th>Rules</th><th class="cell-tight">Status</th><th class="cell-tight" style="text-align:right">Actions</th></tr>
       ${rout.non_active.map(r=>`<tr>
         <td class="off cell-tight" style="font-size:11px;vertical-align:middle">#${r.id}</td>
         <td class="cell-tight" style="vertical-align:middle"><div style="font-size:11px;color:var(--text-muted)">${r.day||'-'}</div><div style="font-weight:600;font-size:13px">${r.time||'-'}</div></td>
@@ -1314,20 +1314,20 @@ function render(d) {
   }
   document.getElementById('grid').innerHTML = html;
   enhanceRenderedDashboard(document.getElementById('grid'));
-  // Live Log - ξεχωριστό section στο κάτω μέρος
+  // Live Log - separate section at the bottom
   const recentLogs = [...(evts.recent_logs||[])].reverse();
   const logContainer = document.getElementById('log-section');
   if (recentLogs.length > 0) {
     logContainer.innerHTML = `<div class="card" style="grid-column:1/-1">
       <h2 style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'">
-        📋 Live Log <span style="color:var(--muted);font-size:12px;font-weight:400">(σήμερα - ${recentLogs.length} entries) ▾</span>
+        📋 Live Log <span style="color:var(--muted);font-size:12px;font-weight:400">(today - ${recentLogs.length} entries) ▾</span>
       </h2>
       <div>
         <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
-          <input id="log-filter" placeholder="Φίλτρο: job, action..." oninput="filterLogs()"
+          <input id="log-filter" placeholder="Filter: job, action..." oninput="filterLogs()"
             style="background:#21262d;border:1px solid var(--border);color:var(--text);
                   padding:4px 10px;border-radius:4px;width:220px;font-size:12px">
-          <span class="off" style="font-size:11px">τελευταίων 100</span>
+          <span class="off" style="font-size:11px">last 100</span>
         </div>
         <div style="max-height:200px;overflow-y:auto">
           <table><tr><th>Time</th><th>Job</th><th>Action</th><th>Details</th></tr>
@@ -1354,7 +1354,7 @@ async function fetchTraces() {
     const traces = d.traces || [];
     renderLatencyPanel(traces);
     if (!traces.length) {
-      container.innerHTML = '<div class="card" style="border-left:3px solid var(--blue)"><h2>🔍 Execution Traces</h2><p style="color:var(--muted);margin-top:8px">Δεν υπάρχουν traces για σήμερα ακόμα. Στείλε ένα μήνυμα στον Αστακό.</p></div>';
+      container.innerHTML = '<div class="card" style="border-left:3px solid var(--blue)"><h2>🔍 Execution Traces</h2><p style="color:var(--muted);margin-top:8px">No traces for today yet. Send a message to Astakos.</p></div>';
       enhanceRenderedDashboard(container);
       return;
     }
@@ -1400,7 +1400,7 @@ async function fetchTraces() {
         <td style="font-size:11px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${resp}">${resp}</td>
         <td style="white-space:nowrap">${badges.join(' ')} ${dur}</td>
       </tr>`;
-    }).join('') || `<tr><td colspan="7" style="color:var(--muted);padding:12px">Δεν υπάρχουν traces για το τρέχον φίλτρο.</td></tr>`;
+    }).join('') || `<tr><td colspan="7" style="color:var(--muted);padding:12px">No traces for the current filter.</td></tr>`;
     const btn = (id, label) =>
       `<button onclick="window._traceMode='${id}';fetchTraces()"
         style="background:${mode===id?'#0d2240':'#161b22'};color:${mode===id?'var(--blue)':'var(--muted)'};
@@ -1421,11 +1421,11 @@ async function fetchTraces() {
       </div>
       <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
       <table style="width:100%"><tr>
-        <th>Ώρα</th><th>Ch</th><th>Agent</th><th>Μήνυμα</th><th>Tools</th><th>Απάντηση</th><th>Info</th>
+        <th>Time</th><th>Ch</th><th>Agent</th><th>Message</th><th>Tools</th><th>Response</th><th>Info</th>
       </tr>${rows}</table></div></div>`;
     enhanceRenderedDashboard(container);
   } catch(e) {
-    container.innerHTML = '<div class="card" style="border-left:3px solid #f66"><h2>🔍 Execution Traces</h2><p style="color:#f66">Σφάλμα φόρτωσης: ' + e + '</p></div>';
+    container.innerHTML = '<div class="card" style="border-left:3px solid #f66"><h2>🔍 Execution Traces</h2><p style="color:#f66">Load error: ' + e + '</p></div>';
   }
 }
 
@@ -1436,14 +1436,14 @@ async function fetchData() {
     render(data);
     renderCharts(data);
   } catch(e) {
-    document.getElementById('ts').innerHTML = `<span class="err">Σφάλμα φόρτωσης: ${e}</span>`;
+    document.getElementById('ts').innerHTML = `<span class="err">Load error: ${e}</span>`;
   }
-  // Φόρτωση goals
+  // Load goals
   try {
     const gr = await fetch('/debug/goals');
     renderGoals((await gr.json()).goals || []);
   } catch(e) {}
-  // Φόρτωση reflections
+  // Load reflections
   try {
     const rr = await fetch('/debug/reflections');
     const rj = await rr.json();
@@ -1457,7 +1457,7 @@ function renderGoals(goals) {
   const icon = s => s==='active'?'🎯':s==='paused'?'⏸':'✅';
   const color = s => s==='active'?'#22c55e':s==='paused'?'#f59e0b':'#6b7280';
   if (!goals.length) {
-    container.innerHTML = '<div class="card" style="grid-column:span 2"><h2>🎯 LONG-TERM GOALS</h2><p style="color:var(--muted)">Δεν υπάρχουν goals ακόμα.</p></div>';
+    container.innerHTML = '<div class="card" style="grid-column:span 2"><h2>🎯 LONG-TERM GOALS</h2><p style="color:var(--muted)">No goals yet.</p></div>';
     return;
   }
   const rows = goals.map(g =>
@@ -1476,7 +1476,7 @@ function renderGoals(goals) {
   enhanceRenderedDashboard(container);
 }
 async function deleteGoal(project) {
-  if (!confirm('Διαγραφή goal "' + project + '";')) return;
+  if (!confirm('Delete goal "' + project + '";')) return;
   let token = localStorage.getItem('astakos_token') || prompt('Bearer token:');
   if (!token) return;
   localStorage.setItem('astakos_token', token);
@@ -1485,7 +1485,7 @@ async function deleteGoal(project) {
   });
   const j = await res.json();
   if (j.ok) { renderGoals((await (await fetch('/debug/goals')).json()).goals || []); }
-  else { alert('Σφάλμα: ' + (j.error||'unknown')); }
+  else { alert('Error: ' + (j.error||'unknown')); }
 }
 function toggleAppliedReflections() {
   window._showApplied = !window._showApplied;
@@ -1517,12 +1517,12 @@ function renderReflections(reflections, showApplied = false) {
     <div class="card" style="grid-column:span 2">
       <h2>🧠 Reflections (${visible.length}/${reflections.length})
         <button onclick="toggleAppliedReflections()" style="margin-left:10px;font-size:12px;padding:2px 8px;border-radius:4px;border:1px solid var(--muted);background:transparent;color:var(--muted);cursor:pointer">
-          ${showApplied ? 'Κρύψε applied' : 'Δείξε όλα'}
+          ${showApplied ? 'Hide applied' : 'Show all'}
         </button>
       </h2>
       <table>
-        <tr><th>ID</th><th>Ημερομηνία</th><th>Πηγή</th><th>Observation</th><th>Action</th><th>Conf</th><th>Lesson</th><th>Status</th></tr>
-        ${rows || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">Δεν υπάρχουν εκκρεμή reflections</td></tr>'}
+        <tr><th>ID</th><th>Date</th><th>Source</th><th>Observation</th><th>Action</th><th>Conf</th><th>Lesson</th><th>Status</th></tr>
+        ${rows || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">No pending reflections</td></tr>'}
       </table>
     </div>`;
   enhanceRenderedDashboard(container);
@@ -1531,19 +1531,19 @@ function renderReflections(reflections, showApplied = false) {
 }
 
 async function applyReflection(id) {
-  if (!confirm(`Εφαρμογή reflection #${id};`)) return;
+  if (!confirm(`Apply reflection #${id};`)) return;
   const r = await fetch(`/debug/reflection/${id}/apply`, {method:'POST'});
   const j = await r.json();
-  if (j.ok) alert('✅ Εφαρμόστηκε!');
-  else alert(`Σφάλμα: ${j.error || 'Αποτυχία εφαρμογής'}`);
+  if (j.ok) alert('✅ Applied!');
+  else alert(`Error: ${j.error || 'Failed to apply'}`);
   fetchData();
 }
 
 async function deleteReflection(id) {
-  if (!confirm(`Διαγραφή reflection #${id};`)) return;
+  if (!confirm(`Delete reflection #${id};`)) return;
   const r = await fetch(`/debug/reflection/${id}`, {method:'DELETE'});
   const j = await r.json();
-  if (!j.ok) alert(`Σφάλμα: ${j.error || 'Αποτυχία διαγραφής'}`);
+  if (!j.ok) alert(`Error: ${j.error || 'Failed to delete'}`);
   fetchData();
 }
 
@@ -1553,27 +1553,27 @@ async function resetCooldown(id) {
 }
 
 async function deleteRoutine(id) {
-  if (!confirm(`Διαγραφή ρουτίνας #${id};`)) return;
+  if (!confirm(`Delete routine #${id};`)) return;
   await fetch(`/debug/routine/${id}`, {method:'DELETE'});
   fetchData();
 }
 
 async function confirmRoutine(id) {
-  if (!confirm(`Force-confirm ρουτίνα #${id} → ACTIVE;`)) return;
+  if (!confirm(`Force-confirm routine #${id} → ACTIVE;`)) return;
   const r = await fetch(`/debug/routine/${id}/confirm`, {method:'POST'});
   const j = await r.json();
-  if (!j.ok) alert(`Σφάλμα: ${j.error}`);
+  if (!j.ok) alert(`Error: ${j.error}`);
   fetchData();
 }
 
 async function activateRoutine(id) {
-  if (!confirm(`Ενεργοποίηση ρουτίνας #${id};`)) return;
+  if (!confirm(`Activate routine #${id};`)) return;
   await fetch(`/debug/routine/${id}/state`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({state:'active'})});
   fetchData();
 }
 
 async function resolveAction(toolCallId, decision) {
-  const label = decision === 'approve' ? 'Έγκριση' : 'Απόρριψη';
+  const label = decision === 'approve' ? 'Approve' : 'Reject';
   if (!confirm(`${label} action ${toolCallId}?`)) return;
   await fetch(`/debug/action/${toolCallId}/${decision}`, {method:'POST'});
   fetchData();
@@ -1590,7 +1590,7 @@ function openCharts() {
 function closeCharts() {
   document.getElementById('charts-modal').style.display = 'none';
 }
-// Κλείσιμο με Escape
+// Close with Escape
 document.addEventListener('keydown', e => { if(e.key==='Escape') closeCharts(); });
 
 function renderCharts(d) {
@@ -1651,7 +1651,7 @@ function renderCharts(d) {
     borderRadius: 4
   }], { indexAxis: 'y' });
 
-  // 4. Routine confirmations today - από event log
+  // 4. Routine confirmations today - from event log
   const events = d.events_1h?.recent_logs || [];
   const confByHour = {};
   events.forEach(ev => {
@@ -1689,7 +1689,7 @@ async function saveEdit(id) {
   });
   const data = await res.json();
   if (data.ok) { fetchData(); }
-  else { alert(`Σφάλμα: ${data.error}`); }
+  else { alert(`Error: ${data.error}`); }
 }
 
 function startCountdown() {
@@ -1761,13 +1761,13 @@ async function fetchMemoryAudit() {
     }).join('');
 
     container.innerHTML = `<div class="card" style="border-left:3px solid #a78bfa">
-      <h2>🧠 Memory Audit - σήμερα (${total} ops)</h2>
-      <div style="margin:8px 0 12px">${summary || '<span style="color:var(--muted)">Δεν υπάρχουν εγγραφές ακόμα.</span>'}</div>
+      <h2>🧠 Memory Audit - today (${total} ops)</h2>
+      <div style="margin:8px 0 12px">${summary || '<span style="color:var(--muted)">No entries yet.</span>'}</div>
       ${rows ? `<div style="max-height:260px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="color:var(--muted);text-align:left;border-bottom:1px solid #333">
-          <th style="padding:4px 8px;min-width:60px">Ώρα</th>
+          <th style="padding:4px 8px;min-width:60px">Time</th>
           <th style="padding:4px 8px;min-width:130px">Op</th>
-          <th style="padding:4px 8px">Περιεχόμενο</th>
+          <th style="padding:4px 8px">Content</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>` : ''}
@@ -1775,7 +1775,7 @@ async function fetchMemoryAudit() {
     enhanceRenderedDashboard(container);
   } catch(e) {
     document.getElementById('memory-audit-section').innerHTML =
-      '<div class="card" style="border-left:3px solid #f66"><h2>🧠 Memory Audit</h2><p style="color:#f66">Σφάλμα: ' + escapeHtml(e) + '</p></div>';
+      '<div class="card" style="border-left:3px solid #f66"><h2>🧠 Memory Audit</h2><p style="color:#f66">Error: ' + escapeHtml(e) + '</p></div>';
   }
 }
 
