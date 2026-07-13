@@ -28,7 +28,6 @@ from memory.routine_db import (
 )
 
 _BASE    = os.path.dirname(os.path.abspath(__file__))
-DB_PATH  = config.ROUTINES_DB
 LOG_DIR  = os.path.join(_BASE, "..", "logs", "events")
 
 AUTO_APPLY_THRESHOLD = 0.75   # above this → automatic application
@@ -40,7 +39,7 @@ REFLECTION_REJECTED  = -1
 # ── DB Setup ─────────────────────────────────────────────────────
 
 def _ensure_table():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(config.ROUTINES_DB)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS reflections (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,7 +77,7 @@ def _already_reflected(observation: str, action: str, routine_id=None, action_va
     This prevents us from rewriting ask-tier duplicates every night.
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(config.ROUTINES_DB)
         row = conn.execute(
             """
             SELECT id
@@ -129,7 +128,7 @@ def _build_lesson_key(lesson: str) -> str:
 def _save_reflection(source, observation, action, confidence, lesson, applied=False,
                       routine_id=None, action_value=None) -> int:
     """Returns the ID of the record (needed for the Telegram yes/no follow-up)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(config.ROUTINES_DB)
     now  = datetime.now().isoformat(timespec="seconds")
     cursor = conn.execute(
         "INSERT INTO reflections (created_at, source, observation, action, confidence, lesson, applied, applied_at, routine_id, action_value) "
@@ -160,7 +159,7 @@ def load_pending_reflections() -> dict[int, dict]:
     """Loads unapplied ask-tier reflections so that they survive a restart."""
     _ensure_table()
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(config.ROUTINES_DB)
         rows = conn.execute(
             """
             SELECT id, observation, action, lesson, source, confidence, routine_id, action_value
@@ -191,7 +190,7 @@ def load_pending_reflections() -> dict[int, dict]:
 
 
 def mark_reflection_applied(reflection_id: int) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(config.ROUTINES_DB)
     conn.execute(
         "UPDATE reflections SET applied=?, applied_at=? WHERE id=?",
         (REFLECTION_APPLIED, datetime.now().isoformat(timespec="seconds"), reflection_id)
@@ -201,7 +200,7 @@ def mark_reflection_applied(reflection_id: int) -> None:
 
 
 def mark_reflection_rejected(reflection_id: int) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(config.ROUTINES_DB)
     conn.execute(
         "UPDATE reflections SET applied=?, applied_at=? WHERE id=?",
         (REFLECTION_REJECTED, datetime.now().isoformat(timespec="seconds"), reflection_id)
@@ -242,7 +241,7 @@ def _load_conversation_traces(days_back=1) -> list[dict]:
 def _get_routine_stats() -> list[dict]:
     """Routine statistics — ignore_count, mention_count, state, cooldown."""
     try:
-        conn   = sqlite3.connect(DB_PATH)
+        conn   = sqlite3.connect(config.ROUTINES_DB)
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, event_name, day_of_week, time_str, state,
@@ -376,7 +375,7 @@ def _apply_action(reflection: dict) -> bool:
             return False
 
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(config.ROUTINES_DB)
 
         if action == "increase_cooldown" and value:
             new_cd = clamp_cooldown_hours(value)

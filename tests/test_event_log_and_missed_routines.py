@@ -61,6 +61,7 @@ def _run_missed(db_rows, fixed_now, grace=90, quiet=False, muted=False, cooldown
             patch.object(bot, "bus", MagicMock()),
             patch.object(bot, "pending_routine_confirmations", {}),
             patch.object(cfg, "BASE_DIR",                   tmp),
+            patch.object(cfg, "ROUTINES_DB", db_path),
             patch.object(cfg, "ROUTINE_MISS_GRACE_MINUTES", grace),
             patch("clients.telegram_bot.datetime", FakeDT),
             patch("memory.routine_db.get_routine_notify_info",

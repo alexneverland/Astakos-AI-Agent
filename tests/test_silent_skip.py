@@ -365,6 +365,7 @@ def _run_job(
 
         # Update config.BASE_DIR so that the job can find the correct DB
         sys.modules["config"].BASE_DIR = tmp
+        sys.modules["config"].ROUTINES_DB = db_path
 
         mock_bus = MagicMock()
         mock_bus.emit.side_effect = lambda ev, **kw: bus_events.append(ev)
@@ -414,6 +415,7 @@ def _run_missed_job(db_rows, craft_return="Ε, πήγε καλά; 😊", muted_u
         db_path = os.path.join(tmp, "astakos_routines.db")
         _make_routines_db(db_path, db_rows)
         sys.modules["config"].BASE_DIR = tmp
+        sys.modules["config"].ROUTINES_DB = db_path
         sys.modules["config"].ROUTINE_MISS_GRACE_MINUTES = 60
 
         mock_bus = MagicMock()
@@ -498,6 +500,7 @@ def test_silent_skip_updates_last_triggered():
         db_path = os.path.join(tmp, "astakos_routines.db")
         _make_routines_db(db_path, [row])
         sys.modules["config"].BASE_DIR = tmp
+        sys.modules["config"].ROUTINES_DB = db_path
 
         mock_bus = MagicMock()
         with (

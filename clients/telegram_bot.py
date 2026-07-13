@@ -3444,7 +3444,7 @@ def startup_check_missed_routines():
         print("\033[90m[MissedRoutines]: Quiet hours / muted — skip startup check.\033[0m")
         return
 
-    DB_PATH = os.path.join(BASE_DIR, "astakos_routines.db")
+    DB_PATH = config.ROUTINES_DB
     if not os.path.exists(DB_PATH):
         return
 
@@ -3598,7 +3598,7 @@ def job_check_routines():
     from datetime import timedelta
     from config import BASE_DIR
 
-    DB_PATH = os.path.join(BASE_DIR, "astakos_routines.db")
+    DB_PATH = config.ROUTINES_DB
     DAYS_MAP = {
         "Monday":    ["Monday", t("clients.telegram_bot.bot_msg_33602e")],
         "Tuesday":   ["Tuesday", t("clients.telegram_bot.bot_msg_fbed5e")],

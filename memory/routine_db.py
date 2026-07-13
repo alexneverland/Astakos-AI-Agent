@@ -9,7 +9,9 @@ from datetime import datetime
 from core.exceptions import RoutineConflictError, DBWriteError
 from core.routine_state import RoutineState, validate_transition, is_notifiable, state_from_str
 
-DB_PATH      = os.path.join(os.path.dirname(__file__), "..", "astakos_routines.db")
+import config
+
+DB_PATH      = config.ROUTINES_DB
 db_write_lock = threading.Lock()  # Serializes writes — lock-free reads (WAL mode)
 
 # ────────────────────────────────────────────────────────────────

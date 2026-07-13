@@ -1405,7 +1405,8 @@ async def debug_runtime(_=Depends(require_token)):
 
     # ── 2. DB: routines + pending confirmations ──────────────────
     import sqlite3 as _sqlite3
-    db_path      = os.path.join(base, "astakos_routines.db")
+    import config
+    db_path      = config.ROUTINES_DB
     active_routines   = []
     pending_from_db   = []
     cooldown_info     = []
@@ -1938,7 +1939,7 @@ async def debug_replay(days: int = 2, _=Depends(require_token)):
 async def delete_routine(routine_id: int, _=Depends(require_token)):
     """Deletes a routine from the database."""
     import sqlite3 as _sqlite3
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    import config; db_path = config.ROUTINES_DB
     try:
         conn = _sqlite3.connect(db_path)
         conn.execute("DELETE FROM routines WHERE id=?", (routine_id,))
@@ -1952,7 +1953,7 @@ async def delete_routine(routine_id: int, _=Depends(require_token)):
 async def reset_routine_cooldown(routine_id: int, _=Depends(require_token)):
     """Reset cooldown → alerts immediately on the next cycle."""
     import sqlite3 as _sqlite3
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    import config; db_path = config.ROUTINES_DB
     try:
         conn = _sqlite3.connect(db_path)
         conn.execute(
@@ -1991,7 +1992,7 @@ async def force_routine_state(routine_id: int, request: Request, _=Depends(requi
     allowed = {"active", "learned", "decayed", "archived"}
     if new_state not in allowed:
         return {"ok": False, "error": f"Allowed states: {allowed}"}
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    import config; db_path = config.ROUTINES_DB
     try:
         conn = _sqlite3.connect(db_path)
         is_active = 1 if new_state == "active" else 0
@@ -2009,7 +2010,7 @@ async def force_routine_state(routine_id: int, request: Request, _=Depends(requi
 async def activate_routine(routine_id: int, _=Depends(require_token)):
     """Makes a routine LEARNED → ACTIVE."""
     import sqlite3 as _sqlite3
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    import config; db_path = config.ROUTINES_DB
     try:
         conn = _sqlite3.connect(db_path)
         conn.execute("UPDATE routines SET state='active' WHERE id=?", (routine_id,))
@@ -2023,7 +2024,7 @@ async def activate_routine(routine_id: int, _=Depends(require_token)):
 async def edit_routine(routine_id: int, request: Request, _=Depends(require_token)):
     """Process day/time/event_name of a routine."""
     import sqlite3 as _sqlite3
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    import config; db_path = config.ROUTINES_DB
     try:
         body = await request.json()
         day   = body.get("day")
@@ -2052,7 +2053,7 @@ async def edit_routine(routine_id: int, request: Request, _=Depends(require_toke
 async def get_reflections(_=Depends(require_token)):
     """Returns the last 20 reflections from the database."""
     import sqlite3 as _sqlite3
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    import config; db_path = config.ROUTINES_DB
     try:
         conn = _sqlite3.connect(db_path)
         conn.row_factory = _sqlite3.Row
@@ -2068,7 +2069,7 @@ async def get_reflections(_=Depends(require_token)):
 async def apply_reflection(reflection_id: int, _=Depends(require_token)):
     """Manually applies a pending reflection."""
     import sqlite3 as _sqlite3
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    import config; db_path = config.ROUTINES_DB
     try:
         conn   = _sqlite3.connect(db_path)
         conn.row_factory = _sqlite3.Row
@@ -2113,7 +2114,7 @@ async def upload_to_drive_endpoint(request: Request, _=Depends(require_token)):
 async def delete_reflection(reflection_id: int, _=Depends(require_token)):
     """Deletes a reflection."""
     import sqlite3 as _sqlite3
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "astakos_routines.db")
+    import config; db_path = config.ROUTINES_DB
     try:
         conn = _sqlite3.connect(db_path)
         conn.execute("DELETE FROM reflections WHERE id=?", (reflection_id,))

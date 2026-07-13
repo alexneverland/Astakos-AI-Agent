@@ -78,6 +78,7 @@ def _run_job(db_rows, routine_conditions=None, context_state=None, craft_return=
             stack.enter_context(patch.object(bot, "bus", MagicMock()))
             stack.enter_context(patch.object(bot, "pending_routine_confirmations", {}))
             stack.enter_context(patch.object(cfg, "BASE_DIR", tmp))
+            stack.enter_context(patch.object(cfg, "ROUTINES_DB", db_path))
             stack.enter_context(patch("clients.telegram_bot.datetime", FakeDT))
             stack.enter_context(patch("memory.routine_db.get_routine_notify_info", return_value={"cooldown_hours": 4}))
             stack.enter_context(patch("memory.routine_db.mark_routine_notified"))
