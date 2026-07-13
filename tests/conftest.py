@@ -2,6 +2,11 @@ import pytest
 import json
 import os
 import shutil
+import sys
+
+# Ensure root is in path for config import
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import config
 
 TEST_CUSTOM_INTENTS_PATH = os.path.join(os.path.dirname(__file__), '..', 'astakos_custom_intents.json')
 BACKUP_PATH = os.path.join(os.path.dirname(__file__), '..', 'astakos_custom_intents.json.bak')
@@ -60,13 +65,13 @@ def pytest_unconfigure(config):
 @pytest.fixture(autouse=True)
 def mock_dbs(monkeypatch, tmp_path):
     # Mock all database paths to a temporary directory so tests don't pollute production data
-    monkeypatch.setattr('config.STATE_DB', str(tmp_path / 'test_state.db'))
-    monkeypatch.setattr('config.PROFILE_DB', str(tmp_path / 'test_profile.db'))
-    monkeypatch.setattr('config.EMBEDDINGS_CACHE_DB', str(tmp_path / 'test_embeddings.db'))
-    monkeypatch.setattr('config.CHROMA_DB_DIR', str(tmp_path / 'chroma_db'))
-    monkeypatch.setattr('config.CONVERSATION_DB_FILE', str(tmp_path / 'test_history.db'))
-    monkeypatch.setattr('config.ROUTINES_DB', str(tmp_path / 'test_routines.db'))
-    monkeypatch.setattr('config.MEMORY_AUDIT_DIR', str(tmp_path / 'memory_audit'))
+    monkeypatch.setattr('config.STATE_DB', str(tmp_path / 'test_state.db'), raising=False)
+    monkeypatch.setattr('config.PROFILE_DB', str(tmp_path / 'test_profile.db'), raising=False)
+    monkeypatch.setattr('config.EMBEDDINGS_CACHE_DB', str(tmp_path / 'test_embeddings.db'), raising=False)
+    monkeypatch.setattr('config.CHROMA_DB_DIR', str(tmp_path / 'chroma_db'), raising=False)
+    monkeypatch.setattr('config.CONVERSATION_DB_FILE', str(tmp_path / 'test_history.db'), raising=False)
+    monkeypatch.setattr('config.ROUTINES_DB', str(tmp_path / 'test_routines.db'), raising=False)
+    monkeypatch.setattr('config.MEMORY_AUDIT_DIR', str(tmp_path / 'memory_audit'), raising=False)
     
     # Reload vector_store modules to pick up new config if needed
     import sys

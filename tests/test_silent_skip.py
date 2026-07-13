@@ -726,14 +726,6 @@ def test_force_proactive_skip_from_state_returns_silent_skip_for_done_park():
     }
     assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap).startswith("[SILENT_SKIP]")
 
-def test_force_proactive_skip_from_context_uses_generic_overlap_and_progress_markers():
-    ctx = "Μόλις φτάσαμε στο πάρκο και είμαστε ήδη εκεί με τον μικρό."
-    assert bot._force_proactive_skip_from_context("Πάρκο με Αλέξανδρο", ctx) == "[SILENT_SKIP]"
-
-
-def test_force_proactive_skip_from_context_does_not_skip_without_progress_signal():
-    ctx = "Σκεφτόμαστε αργότερα για πάρκο με τον μικρό αν προλάβουμε."
-    assert bot._force_proactive_skip_from_context("Πάρκο με Αλέξανδρο", ctx) is None
 
 def test_normal_msg_is_sent():
     """Regular message → sent as is."""

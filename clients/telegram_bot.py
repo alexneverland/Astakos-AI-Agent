@@ -3038,50 +3038,6 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
 
     return None
 
-# Temporary generic fallback until proactive skip is driven primarily by structured state.
-def _force_proactive_skip_from_context(event_name: str, memory_context: str) -> str | None:
-    """
-    Generic guard for obvious "already happening / already happened" cases.
-    Uses light token overlap with the event name plus neutral progress/completion
-    markers, instead of hardcoded routine-specific phrases.
-    """
-    if not event_name or not memory_context:
-        return None
-
-    import re
-
-    def _tokens(value: str) -> list[str]:
-        parts = re.findall(r"[^\W\d_]+", (value or "").lower(), flags=re.UNICODE)
-        stop = {
-            "everyday", "monday", "tuesday", "wednesday", "thursday", "friday",
-            "saturday", "sunday",
-        }
-        return [p for p in parts if len(p) >= 4 and p not in stop]
-
-    event_l = event_name.lower()
-    ctx_l = memory_context.lower()
-    event_tokens = _tokens(event_l)
-    if not event_tokens:
-        return None
-
-    overlap = sum(1 for token in set(event_tokens) if token in ctx_l)
-    if overlap == 0:
-        return None
-
-    progress_markers = (
-        t("clients.telegram_bot.bot_msg_84f17a"), t("clients.telegram_bot.bot_msg_3255a7"), t("clients.telegram_bot.bot_msg_b16788"), t("clients.telegram_bot.bot_msg_b1be10"),
-        t("clients.telegram_bot.bot_msg_cbaccd"), t("clients.telegram_bot.bot_msg_537f33"), t("clients.telegram_bot.bot_msg_70e4d0"), t("clients.telegram_bot.bot_msg_39bf18"),
-        t("clients.telegram_bot.bot_msg_705d25"), t("clients.telegram_bot.bot_msg_f353a5"), t("clients.telegram_bot.bot_msg_3ede59"), t("clients.telegram_bot.bot_msg_842e23"),
-        t("clients.telegram_bot.bot_msg_78e601"), t("clients.telegram_bot.bot_msg_634f1c"), t("clients.telegram_bot.bot_msg_8821ce"), t("clients.telegram_bot.bot_msg_973ea6"),
-        t("clients.telegram_bot.bot_msg_62ecf0"), t("clients.telegram_bot.bot_msg_b734f3"), t("clients.telegram_bot.bot_msg_42e1e6"), t("clients.telegram_bot.bot_msg_ee48c0"),
-        t("clients.telegram_bot.bot_msg_ee788d"), t("clients.telegram_bot.bot_msg_5b2c0d"), t("clients.telegram_bot.bot_msg_9246ee"), t("clients.telegram_bot.bot_msg_4d80a4"),
-        t("clients.telegram_bot.bot_msg_2e807b"), t("clients.telegram_bot.bot_msg_7783c5"), t("clients.telegram_bot.bot_msg_8ce38d"), t("clients.telegram_bot.bot_msg_ab1381"),
-        t("clients.telegram_bot.bot_msg_8be33f"), t("clients.telegram_bot.bot_msg_808148"), t("clients.telegram_bot.bot_msg_552a15"), t("clients.telegram_bot.bot_msg_d24745"),
-    )
-    if any(marker in ctx_l for marker in progress_markers):
-        return "[SILENT_SKIP]"
-
-    return None
 
 def _clear_routine_pending_confirmation(routine_id: int) -> None:
     """Best-effort cleanup for stale pending confirmations on context-driven skips."""
@@ -3263,10 +3219,6 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
             pass
 
     forced_skip = _force_proactive_skip_from_state(event_name, state_snapshot)
-    if forced_skip:
-        return forced_skip
-
-    forced_skip = _force_proactive_skip_from_context(event_name, memory_context)
     if forced_skip:
         return forced_skip
 
