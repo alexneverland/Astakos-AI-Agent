@@ -698,6 +698,18 @@ class AstakosMemoryManager:
                                new_richness=round(decision["new_richness"], 1),
                                distance=round(float(dist), 3) if dist is not None else None,
                                overlap=round(float(storage["overlap"]), 3))
+                    try:
+                        from services.routine_reconciler import reconcile_fact_to_routines
+                        reconcile_stats = reconcile_fact_to_routines(
+                            fact, category=category, reason=reason
+                        )
+                        if reconcile_stats.get("applied"):
+                            print(
+                                "\033[95m[RoutineReconciler] (from skipped duplicate): "
+                                f"{reconcile_stats['directives']} directive(s)\033[0m"
+                            )
+                    except Exception as reconcile_err:
+                        print(f"\033[91m[RoutineReconciler] Error on skipped duplicate: {reconcile_err}\033[0m")
                     return False
                 elif storage["action"] == "add_alongside":
                     add_alongside_old_text = old_content

@@ -63,8 +63,8 @@ def mock_dbs(monkeypatch, tmp_path):
     monkeypatch.setattr('config.STATE_DB', str(tmp_path / 'test_state.db'))
     monkeypatch.setattr('config.PROFILE_DB', str(tmp_path / 'test_profile.db'))
     monkeypatch.setattr('config.EMBEDDINGS_CACHE_DB', str(tmp_path / 'test_embeddings.db'))
-    monkeypatch.setattr('config.VECTOR_DB_DIR', str(tmp_path / 'chroma_db'))
-    monkeypatch.setattr('config.HISTORY_DB', str(tmp_path / 'test_history.db'))
+    monkeypatch.setattr('config.CHROMA_DB_DIR', str(tmp_path / 'chroma_db'))
+    monkeypatch.setattr('config.CONVERSATION_DB_FILE', str(tmp_path / 'test_history.db'))
     monkeypatch.setattr('config.ROUTINES_DB', str(tmp_path / 'test_routines.db'))
     monkeypatch.setattr('config.MEMORY_AUDIT_DIR', str(tmp_path / 'memory_audit'))
     

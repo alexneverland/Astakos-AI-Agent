@@ -935,8 +935,8 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
     scheduled job — this is a separate channel, the user takes control).
 
     VERY IMPORTANT — NEVER call this just because the user told you a piece of INFORMATION
-    (e.g., "Alexandros is away at camp", "he returns in 9 days"). A piece of information IS
-    NOT a request. Call this ONLY when there is an explicit request to check notifications — words/
+    (e.g., "Alexandros is away at camp", "he returns in 9 days", "we went to the beach today").
+    A piece of information IS NOT a request. DO NOT use this for daily context changes or daily presence updates (like "Sofia is home today" or "we are together now"). The system handles daily presence automatically via dynamic context flags (Suppress). Call this ONLY when there is an explicit request to check notifications (or for explicit multi-day vacation/away blocks) — words/
     meaning like "don't send me", "mute", "leave alone", "stop notifications",
     "reactivate". If the user is simply informing you about something, reply normally in the
     conversation — DO NOT guess that they want to mute and DO NOT scan other routines "just in case".

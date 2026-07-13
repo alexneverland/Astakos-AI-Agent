@@ -1129,7 +1129,7 @@ def score_candidate_directive(
             # Only week-level mentions ("this week") get the conservative penalty.
             has_explicit_day = _extract_explicit_weekday_scope_dt(normalized_fact, datetime.now()) is not None
             has_relative_day = _extract_relative_day_scope_dt(normalized_fact, datetime.now()) is not None
-            if has_explicit_day or has_relative_day:
+            if has_explicit_day or has_relative_day or kind == "context_state_set":
                 _append_signal(signals, "explicit_shift_schedule")
             else:
                 score += _P_CONSERVATIVE
@@ -1690,7 +1690,7 @@ def infer_routine_reconciliation_candidates(
     dates           = _extract_iso_dates(str(fact))
     rule_candidates: list[dict] = []
 
-    if "[user_fact]" not in normalized_fact and reason not in {"user_stated", "agent_inferred"}:
+    if "[user_fact]" not in normalized_fact and reason not in {"user_stated", "agent_inferred", "live_message_context"}:
         return rule_candidates
 
     llm_candidates = _infer_llm_reconciliation_candidates(
