@@ -76,11 +76,17 @@ _SYSTEM_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
+_TIME_PREFIX_RE = re.compile(
+    r"^\s*\[[0-2][0-9]:[0-5][0-9]\]\s*",
+    re.IGNORECASE,
+)
+
 
 def _clean_query_for_search(query: str) -> str:
-    """Removes system prefixes (e.g., [USER_UPLOADED_FILE]: web_xxx.txt) from the query.
+    """Removes system prefixes (e.g., [USER_UPLOADED_FILE]: web_xxx.txt) and time prefixes ([12:56]) from the query.
     Keeps only the user's actual text for semantic search."""
-    cleaned = _SYSTEM_PREFIX_RE.sub("", query).strip()
+    cleaned = _SYSTEM_PREFIX_RE.sub("", query)
+    cleaned = _TIME_PREFIX_RE.sub("", cleaned).strip()
     return cleaned if cleaned else query
 
 

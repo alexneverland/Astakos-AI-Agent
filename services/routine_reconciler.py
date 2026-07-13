@@ -1129,7 +1129,7 @@ def score_candidate_directive(
             # Only week-level mentions ("this week") get the conservative penalty.
             has_explicit_day = _extract_explicit_weekday_scope_dt(normalized_fact, datetime.now()) is not None
             has_relative_day = _extract_relative_day_scope_dt(normalized_fact, datetime.now()) is not None
-            if has_explicit_day or has_relative_day or kind == "context_state_set":
+            if has_explicit_day or has_relative_day:
                 _append_signal(signals, "explicit_shift_schedule")
             else:
                 score += _P_CONSERVATIVE

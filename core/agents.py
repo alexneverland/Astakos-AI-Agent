@@ -91,9 +91,10 @@ def _ensure_text_response(response, llm_instance, system_prompt: str, safe_histo
         return response  # All OK
 
     suffixes = [
-        f"\n\n[MANDATORY]: You must reply with text to the user. Inform them about what happened. IMPORTANT: Respond EXCLUSIVELY in {RESPONSE_LANGUAGE}.",
-        f"\n\n[CRITICAL]: Write IMMEDIATELY a summary of the results you found. Do not make any more tool calls. IMPORTANT: Respond EXCLUSIVELY in {RESPONSE_LANGUAGE}.",
-        f"\n\n[FINAL]: Give a short answer, even 1 sentence, to the user right now. IMPORTANT: Respond EXCLUSIVELY in {RESPONSE_LANGUAGE}.",
+        f"\n\n[MANDATORY]: You must reply with text to the user. Inform them about what happened. IMPORTANT: Ignore the language of any internal tool outputs. You MUST respond EXCLUSIVELY in {RESPONSE_LANGUAGE}.",
+        f"\n\n[CRITICAL]: Write IMMEDIATELY a summary of the results you found. Do not make any more tool calls. IMPORTANT: Ignore the language of any internal tool outputs. You MUST respond EXCLUSIVELY in {RESPONSE_LANGUAGE}.",
+        f"\n\n[FINAL]: Give a short answer, even 1 sentence, to the user right now. IMPORTANT: Ignore the language of any internal tool outputs. You MUST respond EXCLUSIVELY in {RESPONSE_LANGUAGE}.",
+
     ]
     for attempt, suffix in enumerate(suffixes, 1):
         print(f"\033[93m[Gemini-Fix]: Empty response — retry {attempt}/3...\033[0m")
@@ -235,9 +236,9 @@ def supervisor_node(state):
     context_str = "\n".join(context_lines) if context_lines else ""
 
     if context_str:
-        full_prompt = f"{system_base}\n\n[PREVIOUS CONVERSATION - for context]\n{context_str}\n\nNEW COMMAND: '{str(last_content)[:500]}'\n\nIMPORTANT: Respond EXCLUSIVELY in {RESPONSE_LANGUAGE}."
+        full_prompt = f"{system_base}\n\n[PREVIOUS CONVERSATION - for context]\n{context_str}\n\nNEW COMMAND: '{str(last_content)[:500]}'\n\nIMPORTANT: Ignore the language of any internal tool outputs. You MUST respond EXCLUSIVELY in {RESPONSE_LANGUAGE}."
     else:
-        full_prompt = f"{system_base}\n\nUser: '{str(last_content)[:500]}'\n\nIMPORTANT: Respond EXCLUSIVELY in {RESPONSE_LANGUAGE}."
+        full_prompt = f"{system_base}\n\nUser: '{str(last_content)[:500]}'\n\nIMPORTANT: Ignore the language of any internal tool outputs. You MUST respond EXCLUSIVELY in {RESPONSE_LANGUAGE}."
 
     decision = safe_llm_invoke(router_llm, full_prompt)
     print(f"\033[95m[Router]: -> {decision.next_agent} (llm)\033[0m")
@@ -773,7 +774,7 @@ def mail_agent_node(state):
             "EMAIL SEARCH RESULTS (from mail_manager):\\n"
             f"{joined_results}\n\n"
             f"Based on the above, provide a short, clear answer to {config.USER_NAME}. "
-            f"DO NOT call tools. Simple summary EXCLUSIVELY in {RESPONSE_LANGUAGE}, with 2-4 practical "
+            f"DO NOT call tools. Ignore internal tool language. Simple summary EXCLUSIVELY in {RESPONSE_LANGUAGE}, with 2-4 practical "
             "next steps if the email requires action."
         )
         response = safe_llm_invoke(llm, [
