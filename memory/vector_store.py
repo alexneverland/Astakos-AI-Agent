@@ -698,6 +698,7 @@ class AstakosMemoryManager:
                                new_richness=round(decision["new_richness"], 1),
                                distance=round(float(dist), 3) if dist is not None else None,
                                overlap=round(float(storage["overlap"]), 3))
+                    self._trigger_routine_reconciler(fact, category, reason)
                     return False
                 elif storage["action"] == "add_alongside":
                     add_alongside_old_text = old_content
@@ -793,6 +794,7 @@ class AstakosMemoryManager:
                 existing=doc.page_content[:100],
                 distance=round(float(score), 3),
             )
+            self._trigger_routine_reconciler(fact, category, reason)
             return False
 
         # 3. Chroma Storage
@@ -895,10 +897,13 @@ class AstakosMemoryManager:
                 if conn:
                     conn.close()
 
-        # 5. Automatic fact -> routine reconciliation (conservative)
-        # Runs AFTER successful saving so that it relies only on facts that
-        # indeed "sat" in memory. Intentionally fail-open: if something goes wrong here,
-        # the memory remains stored and the auto-adjust is simply skipped.
+        # 5. Automatic fact -> routine reconciliation
+        self._trigger_routine_reconciler(fact, category, reason)
+        return True
+
+    def _trigger_routine_reconciler(self, fact: str, category: str, reason: str):
+        # Runs to evaluate facts against routines, EVEN IF the memory wasn't saved 
+        # (e.g. because it was already known/duplicate). We still want to act on the fact today.
         try:
             from services.routine_reconciler import reconcile_fact_to_routines
 
@@ -919,8 +924,6 @@ class AstakosMemoryManager:
                 )
         except Exception as reconcile_err:
             print(f"\033[90m[RoutineReconciler]: skip ({reconcile_err})\033[0m")
-
-        return True
 
     def _save_photo(self, file_path: str, analysis: str, caption: str):
         fact = t("memory.vector_store.photo_fact", caption=caption or t("memory.vector_store.photo_default"), analysis=analysis[:350])

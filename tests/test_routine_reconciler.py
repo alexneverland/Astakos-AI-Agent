@@ -521,7 +521,7 @@ def test_save_fact_triggers_reconciler_after_successful_save(tmp_path):
     mock_reconcile.assert_called_once()
 
 
-def test_save_fact_does_not_trigger_reconciler_when_save_is_aborted(tmp_path):
+def test_save_fact_triggers_reconciler_even_when_save_is_aborted(tmp_path):
     profile_path = str(tmp_path / "astakos_profile.db")
     manager = AstakosMemoryManager()
     old_content = "[USER_FACT]: Στις 2026-05-20 ο Kid1 πήγε στο πάρκο με τη Partner"
@@ -563,7 +563,7 @@ def test_save_fact_does_not_trigger_reconciler_when_save_is_aborted(tmp_path):
         )
 
     assert result is False
-    mock_reconcile.assert_not_called()
+    mock_reconcile.assert_called_once()
 
 
 def test_apply_condition_add_hits_correct_routines_without_error(tmp_path):

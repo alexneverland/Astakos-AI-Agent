@@ -76,4 +76,4 @@ def mock_dbs(monkeypatch, tmp_path):
     # Reload vector_store modules to pick up new config if needed
     import sys
     if 'memory.vector_store' in sys.modules:
-        pass # We might need to re-initialize the store, or it uses config lazily
+        monkeypatch.setattr('memory.vector_store.MEMORY_AUDIT_DIR', str(tmp_path / 'memory_audit'), raising=False)

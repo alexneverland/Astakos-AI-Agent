@@ -28,7 +28,7 @@ from memory.routine_db import (
 )
 
 _BASE    = os.path.dirname(os.path.abspath(__file__))
-DB_PATH  = os.path.join(_BASE, "..", "astakos_routines.db")
+DB_PATH  = config.ROUTINES_DB
 LOG_DIR  = os.path.join(_BASE, "..", "logs", "events")
 
 AUTO_APPLY_THRESHOLD = 0.75   # above this → automatic application
