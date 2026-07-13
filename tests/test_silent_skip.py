@@ -228,7 +228,7 @@ def _stub_modules():
         "football_season": True,
         "school_open": True,
         "current_shift": None,
-        "sofia_work_mode": "office"
+        "partner_work_mode": "office"
     })
     sys.modules["services.gemini"].safe_gemini_call = MagicMock(return_value="ok")
     sys.modules["services.embeddings"].embeddings   = MagicMock()
@@ -703,7 +703,7 @@ def test_force_silent_skip_from_state_when_football_off_season():
 def test_force_context_skip_from_state_when_child_away_from_home():
     snap = {
         "kid1_away_from_home": {"value": "true", "expires_at": "2026-06-25"},
-        "alexandros_away_reason": {"value": "camp", "expires_at": "2026-06-25"},
+        "kid1_away_reason": {"value": "camp", "expires_at": "2026-06-25"},
     }
     assert bot._force_proactive_skip_from_state("Πάρκο με Αλέξανδρο", snap).startswith("[CONTEXT_SKIP]")
 
@@ -795,7 +795,7 @@ def test_telegram_bot_contextual_dismiss_skips_decay_for_sofia():
         "routine_context_skip",
         routine_id=999,
         event="Στείλε μήνυμα στη Partner (messenger)",
-        reason="user_already_with_sofia",
+        reason="user_already_with_partner",
         debug_type="manual_control",
         debug_source="user_message",
         debug_effect="no_decay"

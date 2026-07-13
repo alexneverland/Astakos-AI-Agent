@@ -1,0 +1,28 @@
+{
+  "flags": [
+    {
+      "key": "user_out_of_home",
+      "description": "User is out of the house."
+    },
+    {
+      "key": "kid1_away_from_home",
+      "description": "{kid1_name} is not at home."
+    },
+    {
+      "key": "family_at_home",
+      "description": "The entire family is currently at home."
+    },
+    {
+      "key": "partner_with_user",
+      "description": "{partner_name} is currently with the user."
+    },
+    {
+      "key": "current_shift",
+      "description": "The user's current work shift (e.g. morning, afternoon, night, none)."
+    },
+    {
+      "key": "football_season",
+      "description": "True when the football training season is active."
+    }
+  ]
+}

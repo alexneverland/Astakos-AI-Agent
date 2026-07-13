@@ -600,7 +600,11 @@
             "do",
             "send",
             "sterling",
-            "zero"
+            "zero",
+            "we play",
+            "we run",
+            "put it",
+            "apply"
         ],
         "routine_nouns": [
             "routine",
@@ -615,7 +619,10 @@
             "to activate",
             "when",
             "only when",
-            "each"
+            "each",
+            "only if",
+            "provided that",
+            "as long as"
         ],
         "cooldown_reset_words": [
             "to be sent again",

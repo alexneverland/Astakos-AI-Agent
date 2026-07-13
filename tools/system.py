@@ -58,6 +58,7 @@ from astakos_skills.file_generator import (
     generate_excel, generate_word_doc, generate_pdf, generate_csv,
 )
 from astakos_skills.register_tool import register_tool
+from astakos_skills.manage_context_flag import manage_context_flag
 from astakos_skills.text_stats import text_stats
 from astakos_skills.scan_receipt import scan_receipt
 from astakos_skills.officecli_skill import run_officecli
@@ -78,6 +79,7 @@ DANGEROUS_WORDS = [
     "os.remove", "os.rmdir", "shutil.rmtree", "format c:",
     "exec(", "eval(", "compile(", "__import__", "subprocess.run",
     "subprocess.call", "subprocess.Popen", "os.system"
+    manage_context_flag,
 ]
 
 
@@ -754,8 +756,11 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
     [CRITICAL]: Use this WHEN {config.USER_NAME} mentions a habit,
     a routine, or something that is repeated (e.g., "Every Friday at 13:00 I go to the farmers market").
 
+    [OSMANI RULE - SEARCH BEFORE EDIT]:
+    ALWAYS call `get_routines` BEFORE using this tool to ensure a similar routine doesn't already exist. If it does, use `edit_routine` instead!
+
     RULES FOR ARGUMENTS:
-    - day_of_week: English canonical ("Monday"…"Sunday") or "Everyday" for a daily routine.
+    - day_of_week: English canonical ("Monday"…"Sunday") or "Everyday" or "Weekdays".
     - time_str: Time in HH:MM (e.g., "13:00"). If no time is mentioned, DO NOT call the tool.
     - event_name: BRIEF canonical description in 2-4 words (e.g., "message Kostas", "farmers market",
       "gym"). DO NOT include "Every day", "Every morning", or time phrases — these belong
@@ -767,7 +772,7 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
     """
     from datetime import datetime
 
-    VALID_DAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Everyday"}
+    VALID_DAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Everyday", "Weekdays"}
     VALID_TYPES = {"family", "work", "hobby", "general"}
 
     if day_of_week not in VALID_DAYS:
@@ -846,7 +851,7 @@ def edit_routine(
     or day of something that already exists!
     - event_name: The name (or part) of the existing routine.
     - new_time_str: The new time (e.g., "23:00"). Leave empty if it does not change.
-    - new_day_of_week: The new day (e.g., "Everyday", "Monday"). Leave empty if it does not change.
+    - new_day_of_week: The new day (e.g., "Everyday", "Weekdays", "Monday"). Leave empty if it does not change.
     - day_of_week: (Optional) Day of the existing routine for clarification.
     - time_str: (Optional) Time of the existing routine for clarification.
     """
@@ -905,6 +910,26 @@ def get_routines(day_of_week: str) -> str:
     except Exception as e:
         return t("tools.system.routine_fetch_err", e=str(e))
 
+
+@tool
+def search_routines(event_name: str) -> str:
+    """
+    [QUERY]: Searches for existing routines across ALL days by keyword or name.
+    [OSMANI RULE]: Use this BEFORE calling `learn_routine` to verify if the routine already exists on a different day/time!
+    - event_name: The name or part of the name of the routine (e.g. 'Roblox', 'park').
+    """
+    try:
+        from memory.routine_db import find_routines_for_schedule_control
+        routines = find_routines_for_schedule_control(event_name)
+        if not routines:
+            return f"No existing routines found matching '{event_name}'."
+        
+        lines = [f"Found {len(routines)} matching routines:"]
+        for r in routines:
+            lines.append(f"- ID: {r['id']} | Event: {r['event']} | Day: {r['day']} | Time: {r['time']}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error searching routines: {str(e)}"
 
 def _get_routine_names_for_intent_classification() -> list[str]:
     try:
@@ -973,9 +998,7 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
     routine_names = _get_routine_names_for_intent_classification()
     intent_result = classify_routine_intent(source_text, routine_names=routine_names)
     if intent_result.intent == "context_update":
-        return (
-            t("tools.system.context_update_not_notif")
-        )
+        return t("tools.system.context_update_not_notif")
 
     VALID_ACTIONS = {"mute", "unmute", "silence_emotional", "allow_emotional"}
     if action not in VALID_ACTIONS:
@@ -1081,7 +1104,9 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
     - event_name: The name of the target routine as spoken by the user — fuzzy matched.
     - action: "add" (to add a condition) or "remove" (to clear the condition).
     - condition_type: e.g., "shift_mode" (shift dependency), "context_flag" (dependency on a general flag like school_open).
-    - payload_json: JSON string with the parameters (e.g., '{"flag": "current_shift", "equals": "afternoon"}').
+    - payload_json: JSON string with the parameters (e.g., '{"flag": "user_out_of_home", "equals": false}').
+      VALID context_flag KEYS: 'user_out_of_home', 'family_at_home', 'partner_with_user', 'kid1_away_from_home', 'user_at_work', 'kid1_with_user', 'kid1_with_partner', 'current_shift', 'football_season', 'school_open'.
+      DO NOT INVENT NEW FLAG NAMES. For "at home", use {"flag": "user_out_of_home", "equals": false}.
     - condition_mode: "allow_when_true" (allowed ONLY if true) or "suppress_when_true" (CANCELLED when true).
     - source_text: The exact original message/sentence of the user (ALWAYS MANDATORY).
     - day_of_week: (Optional) If the user specified a day (e.g., "Sunday", "Monday").
@@ -1103,9 +1128,7 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
     routine_names = _get_routine_names_for_intent_classification()
     intent_result = classify_routine_intent(source_text, routine_names=routine_names)
     if intent_result.intent == "context_update":
-        return (
-            t("tools.system.context_update_not_cond")
-        )
+        return t("tools.system.context_update_not_cond")
 
     VALID_ACTIONS = {"add", "remove"}
     if action not in VALID_ACTIONS:
@@ -1217,13 +1240,10 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
         set_routine_active_window, set_routine_resume_rule, get_routine_schedule_meta,
         normalize_event
     )
-
     routine_names = _get_routine_names_for_intent_classification()
     intent_result = classify_routine_intent(source_text, routine_names=routine_names)
     if intent_result.intent == "context_update":
-        return (
-            t("tools.system.context_update_not_sched")
-        )
+        return t("tools.system.context_update_not_sched")
 
     VALID_ACTIONS = {"pause", "resume", "set_window", "clear_window"}
     if action not in VALID_ACTIONS:
@@ -1356,14 +1376,10 @@ def control_routine_cooldown(
         reset_routine_cooldown,
         get_routine_notify_info,
     )
-
     routine_names = _get_routine_names_for_intent_classification()
     intent_result = classify_routine_intent(source_text, routine_names=routine_names)
     if intent_result.intent == "context_update":
-        return (
-            "ℹ️ This looks like a context/fact update, not a manual routine cooldown override command. "
-            "Cooldown not reset."
-        )
+        return "ℹ️ This looks like a context/fact update, not a manual routine cooldown override command. Cooldown not reset."
 
     VALID_ACTIONS = {"reset"}
     if action not in VALID_ACTIONS:
@@ -3643,7 +3659,7 @@ all_tools = [
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, search_flights, search_google_places,
     log_meal, create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
-    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url,
+    search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url,
     duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, update_goal_progress_tool, update_goal_milestones_tool, tool_stats, system_doctor, memory_review,
     repo_mapper,
     scan_receipt,

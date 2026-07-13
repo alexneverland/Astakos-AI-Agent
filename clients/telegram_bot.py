@@ -179,8 +179,8 @@ pending_photo      = None   # {analysis, filename, path, timestamp}
 pending_georgian_lock = threading.Lock()
 pending_georgian_until = 0.0
 PENDING_GEORGIAN_TTL_SECONDS = 120
-pending_sofia_lock = threading.Lock()
-pending_sofia_until = 0.0   # ka→el mode (Sophia writes Georgian)
+pending_partner_lock = threading.Lock()
+pending_partner_until = 0.0   # ka→el mode (Sophia writes Georgian)
 # Voice mode toggle: when True, ALL responses are vocal even if you are typing
 voice_mode_enabled = False
 # Scheduler reference (set in __main__, used by /status command)
@@ -270,9 +270,9 @@ def _looks_like_contextual_not_needed_reply(text: str) -> bool:
     signal_count = sum(1 for marker in phrase_markers if marker in normalized)
     partner_name_lower = _normalize_gr(config.PARTNER_NAME)
     partner_prefix = partner_name_lower[:3] if len(partner_name_lower) >= 3 else partner_name_lower
-    has_sofia_ref = (partner_prefix in normalized) or (config.PARTNER_NAME.lower() in normalized)
+    has_partner_ref = (partner_prefix in normalized) or (config.PARTNER_NAME.lower() in normalized)
 
-    return signal_count >= 2 or (has_sofia_ref and signal_count >= 1)
+    return signal_count >= 2 or (has_partner_ref and signal_count >= 1)
 
 def enqueue_fast_task(func, *args):
     fast_queue.put((func, args))
@@ -329,14 +329,14 @@ def _build_followup_state_snapshot() -> dict:
         "user_at_work",
         "user_out_of_home",
         "family_at_home",
-        "alexandros_away_from_home",
-        "alexandros_away_reason",
-        "alexandros_with_user",
-        "alexandros_with_sofia",
+        "kid1_away_from_home",
+        "kid1_away_reason",
+        "kid1_with_user",
+        "kid1_with_partner",
         "quiet_hours",
         "current_shift",
-        "state:alexandros:outing",
-        "state:alexandros:sleep",
+        "state:kid1:outing",
+        "state:kid1:sleep",
     ]
     try:
         return get_context_states(keys)
@@ -1306,25 +1306,25 @@ def _consume_pending_georgian() -> bool:
         return False
 
 
-def _arm_pending_sofia():
-    global pending_sofia_until
-    with pending_sofia_lock:
-        pending_sofia_until = time.time() + PENDING_GEORGIAN_TTL_SECONDS
+def _arm_pending_partner():
+    global pending_partner_until
+    with pending_partner_lock:
+        pending_partner_until = time.time() + PENDING_GEORGIAN_TTL_SECONDS
 
 
-def _clear_pending_sofia():
-    global pending_sofia_until
-    with pending_sofia_lock:
-        pending_sofia_until = 0.0
+def _clear_pending_partner():
+    global pending_partner_until
+    with pending_partner_lock:
+        pending_partner_until = 0.0
 
 
-def _consume_pending_sofia() -> bool:
-    global pending_sofia_until
-    with pending_sofia_lock:
-        if pending_sofia_until and time.time() <= pending_sofia_until:
-            pending_sofia_until = 0.0
+def _consume_pending_partner() -> bool:
+    global pending_partner_until
+    with pending_partner_lock:
+        if pending_partner_until and time.time() <= pending_partner_until:
+            pending_partner_until = 0.0
             return True
-        pending_sofia_until = 0.0
+        pending_partner_until = 0.0
         return False
 
 
@@ -1531,7 +1531,7 @@ def handle_message(user_text: str, chat_id: str):
             (rid, pending_routine_confirmations.get(rid, {}))
             for rid in list(pending_routine_confirmations.keys())
         ]
-        has_pending_sofia_messenger = any(
+        has_pending_partner_messenger = any(
             (
                 t("clients.telegram_bot.bot_msg_2e67ed") in _normalize_gr(str((pdata or {}).get("event", "")))
                 or "sofia" in _normalize_gr(str((pdata or {}).get("event", "")))
@@ -1541,20 +1541,20 @@ def handle_message(user_text: str, chat_id: str):
             for _, pdata in pending_items
         )
 
-        if has_pending_sofia_messenger and _looks_like_contextual_not_needed_reply(clean_user_text):
+        if has_pending_partner_messenger and _looks_like_contextual_not_needed_reply(clean_user_text):
             from memory.routine_db import remove_pending_confirmation
             from memory.event_log import log_event
 
             for rid, pdata in pending_items:
                 ev = (pdata or {}).get("event", "?")
                 event_l = _normalize_gr(str(ev))
-                is_sofia_messenger = (
+                is_partner_messenger = (
                     t("clients.telegram_bot.bot_msg_2e67ed") in event_l
                     or "sofia" in event_l
                     or "messenger" in event_l
                     or t("clients.telegram_bot.bot_msg_500d81") in event_l
                 )
-                if not is_sofia_messenger:
+                if not is_partner_messenger:
                     continue
 
                 print(f"📉 [Routine Dismissed - Contextual, No Decay]: {pdata}")
@@ -1563,7 +1563,7 @@ def handle_message(user_text: str, chat_id: str):
                     "routine_context_skip",
                     routine_id=rid,
                     event=ev,
-                    reason="user_already_with_sofia",
+                    reason="user_already_with_partner",
                     debug_type="manual_control",
                     debug_source="user_message",
                     debug_effect="no_decay"
@@ -1650,15 +1650,15 @@ def handle_message(user_text: str, chat_id: str):
                 _decay = True
 
                 event_l = (ev or "").lower()
-                is_sofia_messenger = (
+                is_partner_messenger = (
                     t("clients.telegram_bot.bot_msg_2e67ed") in event_l or
                     "sofia" in event_l or
                     "messenger" in event_l or
                     t("clients.telegram_bot.bot_msg_500d81") in event_l
                 )
 
-                if is_sofia_messenger and _looks_like_contextual_not_needed_reply(clean_user_text):
-                    _reason = "user_already_with_sofia"
+                if is_partner_messenger and _looks_like_contextual_not_needed_reply(clean_user_text):
+                    _reason = "user_already_with_partner"
                     _decay = False
 
                 if _decay:
@@ -2614,12 +2614,12 @@ def run_polling():
                 if not cmd.startswith("/") and _consume_pending_georgian():
                     _send_georgian_translation(user_text)
                     continue
-                if not cmd.startswith("/") and _consume_pending_sofia():
+                if not cmd.startswith("/") and _consume_pending_partner():
                     _send_georgian_translation(user_text, force_src="ka")
                     continue
                 if cmd.startswith("/") and cmd not in ("/georgian", "/geo", "/g", "/georgian_phrases", "/gr", "/greek"):
                     _clear_pending_georgian()
-                    _clear_pending_sofia()
+                    _clear_pending_partner()
 
                 if cmd == "/pause":
                     with _override_lock:
@@ -2718,7 +2718,7 @@ def run_polling():
                         _send_georgian_translation(rest, force_src="ka")
                     else:
                         # Pending mode: next message is considered Georgian
-                        _arm_pending_sofia()
+                        _arm_pending_partner()
                         send_telegram_msg(t("clients.telegram_bot.bot_msg_bdc64e"))
                     continue
 
@@ -3332,7 +3332,7 @@ def _should_allow_sentimental_override(event_name: str, cond_result: dict) -> bo
 
         from config import SENTIMENTAL_OVERRIDE_KEYWORDS
         
-        if any(token in reason_blob for token in ("shift_mode", "user_at_work", "sofia_work_mode")):
+        if any(token in reason_blob for token in ("shift_mode", "user_at_work", "partner_work_mode")):
             return False
 
         event_norm = _normalize_gr(event_name)

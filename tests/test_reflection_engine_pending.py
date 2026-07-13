@@ -1,16 +1,17 @@
 import os
 import sys
 import sqlite3
+import config
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _set_temp_db(monkeypatch, tmp_path):
     import services.reflection_engine as ref_eng
-    import sqlite3
+    import config
 
     db_path = tmp_path / "reflections_test.db"
-    monkeypatch.setattr(ref_eng, "DB_PATH", str(db_path))
+    monkeypatch.setattr(config, "ROUTINES_DB", str(db_path))
     ref_eng._ensure_table()
     
     conn = sqlite3.connect(str(db_path))
@@ -141,7 +142,7 @@ def test_run_reflection_dedupes_same_run_duplicates(monkeypatch, tmp_path):
 def test_reflection_increase_cooldown_clamps_to_min(monkeypatch, tmp_path):
     re = _set_temp_db(monkeypatch, tmp_path)
 
-    conn = sqlite3.connect(re.DB_PATH)
+    conn = sqlite3.connect(config.ROUTINES_DB)
     conn.execute(
         """
         INSERT INTO routines (
@@ -167,7 +168,7 @@ def test_reflection_increase_cooldown_clamps_to_min(monkeypatch, tmp_path):
 
     assert ok is True
 
-    conn = sqlite3.connect(re.DB_PATH)
+    conn = sqlite3.connect(config.ROUTINES_DB)
     row = conn.execute(
         "SELECT notify_cooldown_hours FROM routines WHERE id=1"
     ).fetchone()
@@ -178,7 +179,7 @@ def test_reflection_increase_cooldown_clamps_to_min(monkeypatch, tmp_path):
 def test_reflection_reduce_frequency_clamps_to_max(monkeypatch, tmp_path):
     re = _set_temp_db(monkeypatch, tmp_path)
 
-    conn = sqlite3.connect(re.DB_PATH)
+    conn = sqlite3.connect(config.ROUTINES_DB)
     conn.execute(
         """
         INSERT INTO routines (
@@ -204,7 +205,7 @@ def test_reflection_reduce_frequency_clamps_to_max(monkeypatch, tmp_path):
 
     assert ok is True
 
-    conn = sqlite3.connect(re.DB_PATH)
+    conn = sqlite3.connect(config.ROUTINES_DB)
     row = conn.execute(
         "SELECT notify_cooldown_hours FROM routines WHERE id=2"
     ).fetchone()

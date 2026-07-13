@@ -78,4 +78,5 @@ def mock_dbs(monkeypatch, tmp_path):
     if 'memory.vector_store' in sys.modules:
         monkeypatch.setattr(sys.modules['memory.vector_store'], 'MEMORY_AUDIT_DIR', str(tmp_path / 'memory_audit'), raising=False)
         
-    monkeypatch.setattr('memory.event_log.LOGS_DIR', str(tmp_path / 'events'), raising=False)
+    import memory.event_log as event_log
+    monkeypatch.setattr(event_log, 'LOGS_DIR', str(tmp_path / 'events'), raising=False)

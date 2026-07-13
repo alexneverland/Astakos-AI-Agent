@@ -5,10 +5,10 @@ from services.routine_conditions import evaluate_routine_condition
 def test_context_flag_allow_when_true():
     routine = {
         "condition_type": "context_flag",
-        "condition_payload": '{"flag":"alexandros_away_from_home","equals":true}',
+        "condition_payload": '{"flag":"kid1_away_from_home","equals":true}',
         "condition_mode": "allow_when_true",
     }
-    context = {"alexandros_away_from_home": True}
+    context = {"kid1_away_from_home": True}
 
     result = evaluate_routine_condition(routine, context, now=datetime(2026, 6, 17))
     assert result["allowed"] is True
@@ -17,10 +17,10 @@ def test_context_flag_allow_when_true():
 def test_context_flag_suppress_when_true():
     routine = {
         "condition_type": "context_flag",
-        "condition_payload": '{"flag":"alexandros_away_from_home","equals":true}',
+        "condition_payload": '{"flag":"kid1_away_from_home","equals":true}',
         "condition_mode": "suppress_when_true",
     }
-    context = {"alexandros_away_from_home": True}
+    context = {"kid1_away_from_home": True}
 
     result = evaluate_routine_condition(routine, context, now=datetime(2026, 6, 17))
     assert result["allowed"] is False
@@ -81,11 +81,11 @@ def test_legacy_location_suppresses_when_user_out_of_home():
 def test_context_flag_multi_key_allow_when_all_match():
     routine = {
         "condition_type": "context_flag",
-        "condition_payload": '{"alexandros_present": true, "family_at_home": true}',
+        "condition_payload": '{"kid1_present": true, "family_at_home": true}',
         "condition_mode": "allow_when_true",
     }
     context = {
-        "alexandros_present": True,
+        "kid1_present": True,
         "family_at_home": True,
     }
 
@@ -98,11 +98,11 @@ def test_context_flag_multi_key_allow_when_all_match():
 def test_context_flag_multi_key_allow_blocks_on_first_mismatch():
     routine = {
         "condition_type": "context_flag",
-        "condition_payload": '{"alexandros_present": true, "family_at_home": true}',
+        "condition_payload": '{"kid1_present": true, "family_at_home": true}',
         "condition_mode": "allow_when_true",
     }
     context = {
-        "alexandros_present": True,
+        "kid1_present": True,
         "family_at_home": False,
     }
 

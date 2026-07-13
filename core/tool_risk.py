@@ -25,6 +25,7 @@ TOOL_RISK: dict[str, str] = {
     "google_calendar_tool":     "SAFE",      # per-action risk handled by _effective_risk() in approval.py
 
     # ── WARNING: writes / side-effects — log only in the web UI ────
+    "search_routines":          "WARNING",
     "save_goal_tool":           "WARNING",
     "update_goal_status_tool":  "WARNING",
     "update_goal_progress_tool": "WARNING",
@@ -90,6 +91,7 @@ TOOL_RISK: dict[str, str] = {
     "generate_csv":             "SAFE",
     "list_agent_skills":        "SAFE",
     "read_agent_skill":         "SAFE",
+    "manage_context_flag":     "SAFE",
 }
 
 def get_risk(tool_name: str) -> str:

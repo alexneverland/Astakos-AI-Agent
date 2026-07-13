@@ -36,6 +36,12 @@ def t(key: str, **kwargs) -> str:
                 val = val.replace('{kid2_name}', getattr(config, 'KID2_NAME', 'Kid2'))
                 val = val.replace('{bot_name}', getattr(config, 'BOT_NAME', 'Astakos'))
                 val = val.replace('{owner_name}', getattr(config, 'OWNER_NAME', 'User'))
+                if '{allowed_context_flags_list}' in val:
+                    flags_str = ""
+                    for f in getattr(config, 'CONTEXT_SCHEMA', {}).get("flags", []):
+                        if "key" in f:
+                            flags_str += f"- {f['key']}\n"
+                    val = val.replace('{allowed_context_flags_list}', flags_str.strip())
             if kwargs:
                 # Use a safe format or just let it raise if actual kwargs are missing
                 # But since we replaced config vars, the remaining {x} should match kwargs

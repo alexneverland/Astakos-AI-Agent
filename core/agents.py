@@ -36,7 +36,7 @@ from tools.system import (
     set_local_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool, register_tool,
-    mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
+    mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
     save_goal_tool, update_goal_status_tool, tool_stats, system_doctor, memory_review,
 )
 from tools.web import (
@@ -50,6 +50,7 @@ from tools.project_tools import (
 )
 from astakos_skills.read_agent_skill import list_agent_skills, read_agent_skill
 from astakos_skills.officecli_skill import run_officecli
+from astakos_skills.manage_context_flag import manage_context_flag
 from time import perf_counter
 
 def _attach_phase_timing(message, key: str, duration_ms: int):
@@ -265,13 +266,13 @@ def dev_agent_node(state):
         delete_from_memory, search_memory, save_to_memory,
         execute_local_pipeline, control_spotify, control_vacuum, 
         get_navigation_info, recipe_expert, log_meal, 
-        generate_image_tool, search_flights, run_terminal_command, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup,
+        generate_image_tool, search_flights, run_terminal_command, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup,
         save_goal_tool, update_goal_status_tool,
         duckduckgo_search,
         # Project tools — code navigation & editing
         grant_project_access, list_project_files, read_project_file,
         edit_project_file, write_project_file, grep_project_files, repo_mapper,
-        list_recent_files, list_agent_skills, read_agent_skill, run_officecli,
+        list_recent_files, list_agent_skills, read_agent_skill, run_officecli, manage_context_flag,
     ]
     
     safe_history = sanitize_history_for_gemini(history)
@@ -356,7 +357,7 @@ def chat_agent_node(state: AgentState):
     chat_tools = [
         get_current_location, control_spotify,
         search_memory, save_to_memory, delete_from_memory, retrieve_photo, duckduckgo_search,
-        recipe_expert, log_meal, relay_local_payload, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
+        recipe_expert, log_meal, relay_local_payload, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
         read_local_file, generate_image_tool, get_fit_summary,
         *([archive_file] if not _is_farewell else []),
     ]
@@ -387,7 +388,9 @@ def home_agent_node(state):
     
     from tools.system import (
         manage_list, set_local_reminder, delete_from_memory,
-        search_memory, control_spotify, control_vacuum, get_current_location
+        search_memory, control_spotify, control_vacuum, get_current_location,
+        learn_routine, edit_routine, delete_routine, get_routines, search_routines,
+        control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup
     )
     from tools.web import get_navigation_info, search_goldmall_offers
     from astakos_skills.recipe_expert import recipe_expert, log_meal
@@ -400,8 +403,8 @@ def home_agent_node(state):
         manage_list, set_local_reminder, delete_from_memory, search_memory,
         control_spotify, control_vacuum,
         search_goldmall_offers, get_navigation_info,
-        google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
-        get_fit_summary
+        google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
+        get_fit_summary, manage_context_flag
     ]
 
     system_base = load_agent_prompt("Home_Agent", f"You are {config.DEVELOPER_NAME}'s Home_Agent.")
@@ -830,7 +833,6 @@ all_tools = [
     search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info,
     control_spotify, search_goldmall_offers, execute_local_pipeline, get_current_location,
-    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, edit_routine, delete_routine, get_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url,
-    duckduckgo_search, search_supermarket_prices, tool_stats, system_doctor, run_officecli
+    recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url, duckduckgo_search, manage_context_flag,
+    search_supermarket_prices, tool_stats, system_doctor, run_officecli
 ]
-

@@ -42,7 +42,7 @@ def _recent_gps_status(now: datetime | None = None) -> str | None:
 def build_runtime_routine_context(now: datetime | None = None) -> dict:
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
-    away_state = resolve_alexandros_away_state(current)
+    away_state = resolve_kid1_away_state(current)
 
     ctx = {}
     try:
@@ -64,22 +64,24 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
     except Exception as e:
         print(f"Error loading dynamic context flags: {e}")
 
+    
+
     ctx.update({
         "today": today,
-        "alexandros_away_from_home": away_state,
-        "alexandros_away_reason": resolve_alexandros_away_reason(current),
-        "alexandros_with_user": resolve_context_bool("alexandros_with_user", current),
-        "alexandros_with_sofia": resolve_context_bool("alexandros_with_sofia", current),
-        "sofia_with_user": resolve_context_bool("sofia_with_user", current),
+        "kid1_away_from_home": away_state,
+        "kid1_away_reason": resolve_kid1_away_reason(current),
+        "kid1_with_user": resolve_context_bool("kid1_with_user", current),
+        "kid1_with_partner": resolve_context_bool("kid1_with_partner", current),
+        "partner_with_user": resolve_context_bool("partner_with_user", current),
         "football_season": resolve_football_season(current),
         "school_open": resolve_school_open(current),
         "current_shift": resolve_current_shift(current),
-        "sofia_work_mode": resolve_sofia_work_mode(current),
+        "partner_work_mode": resolve_partner_work_mode(current),
         "user_at_work": resolve_user_at_work(current),
         "user_out_of_home": resolve_user_out_of_home(current),
         "quiet_hours": resolve_quiet_hours(current),
     })
-    ctx["alexandros_present"] = not bool(away_state)
+    ctx["kid1_present"] = not bool(away_state)
     return ctx
 
 def resolve_context_bool(key: str, now: datetime | None = None) -> bool | None:
@@ -99,11 +101,11 @@ def resolve_context_bool(key: str, now: datetime | None = None) -> bool | None:
         return False
     return None
 
-def resolve_alexandros_away_state(now: datetime | None = None) -> bool | None:
+def resolve_kid1_away_state(now: datetime | None = None) -> bool | None:
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
     from memory.routine_db import get_context_state
-    state_data = get_context_state("alexandros_away_from_home")
+    state_data = get_context_state("kid1_away_from_home")
     if not state_data:
         return False
     expires_at = state_data.get("expires_at")
@@ -111,11 +113,11 @@ def resolve_alexandros_away_state(now: datetime | None = None) -> bool | None:
         return False
     return str(state_data.get("value")).lower() == "true"
 
-def resolve_alexandros_away_reason(now: datetime | None = None) -> str | None:
+def resolve_kid1_away_reason(now: datetime | None = None) -> str | None:
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
     from memory.routine_db import get_context_state
-    state_data = get_context_state("alexandros_away_reason")
+    state_data = get_context_state("kid1_away_reason")
     if not state_data:
         return None
     expires_at = state_data.get("expires_at")
@@ -123,11 +125,11 @@ def resolve_alexandros_away_reason(now: datetime | None = None) -> str | None:
         return None
     return str(state_data.get("value"))
 
-def resolve_sofia_work_mode(now: datetime | None = None) -> str | None:
+def resolve_partner_work_mode(now: datetime | None = None) -> str | None:
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
     from memory.routine_db import get_context_state
-    state_data = get_context_state("sofia_work_mode")
+    state_data = get_context_state("partner_work_mode")
     if not state_data:
         return "office"  # Default
     expires_at = state_data.get("expires_at")

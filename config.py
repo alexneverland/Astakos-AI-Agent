@@ -138,3 +138,31 @@ if os.path.exists(NLP_FILE):
             NLP_CONFIG = json.load(f)
     except Exception as e:
         print(f"⚠️ Error reading NLP config: {e}")
+# ==========================================
+# 7. CONTEXT SCHEMA
+# ==========================================
+CONTEXT_SCHEMA_FILE = os.path.join(BASE_DIR, "astakos_context_schema.json")
+CONTEXT_SCHEMA = {}
+CANONICAL_CONTEXT_KEYS = set()
+
+if os.path.exists(CONTEXT_SCHEMA_FILE):
+    try:
+        with open(CONTEXT_SCHEMA_FILE, "r", encoding="utf-8") as f:
+            CONTEXT_SCHEMA = json.load(f)
+            flags = CONTEXT_SCHEMA.get("flags", [])
+            for flag in flags:
+                if "key" in flag:
+                    CANONICAL_CONTEXT_KEYS.add(flag["key"])
+    except Exception as e:
+        logging.error(f"Failed to load {CONTEXT_SCHEMA_FILE}: {e}")
+        
+if not CANONICAL_CONTEXT_KEYS:
+    # Fallback default canonical keys if file is missing
+    CANONICAL_CONTEXT_KEYS = {
+        "user_out_of_home",
+        "kid1_away_from_home",
+        "family_at_home",
+        "partner_with_user",
+        "current_shift",
+        "football_season"
+    }

@@ -1,5 +1,18 @@
 [
   {
+    "name": "manage_context_flag",
+    "description": "Tool: manage_context_flag",
+    "agent": "Dev_Agent",
+    "risk_level": "SAFE",
+    "priority": 9,
+    "triggers": [
+      "create flag",
+      "add flag",
+      "edit flag",
+      "delete flag"
+    ]
+  },
+  {
     "name": "tool_stats",
     "description": "Εμφανίζει στατιστικά απόδοσης tools: κλήσεις, σφάλματα, error rate, avg duration για τις τελευταίες N μέρες.",
     "agent": "Tech_Agent",

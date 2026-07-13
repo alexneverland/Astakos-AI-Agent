@@ -3,6 +3,7 @@ import re
 import json
 import os
 from datetime import datetime, timedelta
+import config
 from config import NLP_CONFIG
 from core import nl_config
 _routines_nlp = NLP_CONFIG.get("routines", {})
@@ -400,7 +401,7 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
     until = max(dates) if dates else now.strftime("%Y-%m-%d")
 
     out = []
-    has_sofia = _contains_any(normalized, _PARTNER_TOKENS)
+    has_partner = _contains_any(normalized, _PARTNER_TOKENS)
 
     # Always set generic out-of-home state
     d_user_out = {
@@ -427,7 +428,7 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
             "exclude_tokens": _ROUTINE_EXCLUDE_TOKENS,
         })
 
-    if has_child and has_sofia:
+    if has_child and has_partner:
         out.append({
             "kind": "context_state_set",
             "key": "kid1_with_partner",
@@ -657,16 +658,16 @@ def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list
     return [d_state] + ([cond] if cond else [])
 
 
-def _rule_sofia_work_mode(normalized: str, dates: list[str], now: datetime) -> list[dict]:
+def _rule_partner_work_mode(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3C.5 — sofia_work_mode:
     Facts: "Partner is working from home tomorrow", "Partner is teleworking"
     """
-    has_sofia = _contains_any(normalized, _inline.get("partner_aliases", []))
+    has_partner = _contains_any(normalized, _inline.get("partner_aliases", []))
     has_work = _contains_any(normalized, _WORK_TOKENS)
     has_remote = _contains_any(normalized, _inline.get("home", [])) or _contains_any(normalized, _inline.get("remote_work", []))
     
-    if not (has_sofia and has_work and has_remote):
+    if not (has_partner and has_work and has_remote):
         return []
         
     until = None
@@ -679,10 +680,10 @@ def _rule_sofia_work_mode(normalized: str, dates: list[str], now: datetime) -> l
             
     d_state = {
         "kind": "context_state_set",
-        "key": "sofia_work_mode",
+        "key": "partner_work_mode",
         "value": "remote",
         "until_date": until,
-        "reason": "sofia_remote_work",
+        "reason": "partner_remote_work",
         "subject_tokens": _inline.get("partner_aliases", []),
         "include_tokens": _WORK_TOKENS,
         "exclude_tokens": [],
@@ -839,12 +840,12 @@ def _partner_state_is_active(now: datetime) -> bool:
 
 
 def _rule_kid1_with_partner_without_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    has_sofia = _contains_any(normalized, _PARTNER_TOKENS)
+    has_partner = _contains_any(normalized, _PARTNER_TOKENS)
     has_child = _contains_any(normalized, _KID1_TOKENS)
     has_outing = _contains_any(normalized, _OUTING_TOKENS + _OUTING_ROUTINE_TOKENS)
     user_not_with_them = _contains_any(normalized, _NOT_TOGETHER_TOKENS) or _contains_any(normalized, _inline.get("not_together_extra", []))
 
-    if not (has_sofia and has_child and has_outing and user_not_with_them):
+    if not (has_partner and has_child and has_outing and user_not_with_them):
         return []
 
     until = max(dates) if dates else now.strftime("%Y-%m-%d")
@@ -855,7 +856,7 @@ def _rule_kid1_with_partner_without_user(normalized: str, dates: list[str], now:
             "key": "partner_with_user",
             "value": "false",
             "until_date": until,
-            "reason": "sofia_with_child_without_user",
+            "reason": "partner_with_child_without_user",
             "subject_tokens": _PARTNER_TOKENS,
             "include_tokens": _KID1_TOKENS + _OUTING_TOKENS,
             "exclude_tokens": [],
@@ -865,7 +866,7 @@ def _rule_kid1_with_partner_without_user(normalized: str, dates: list[str], now:
             "key": "kid1_with_partner",
             "value": "true",
             "until_date": until,
-            "reason": "sofia_with_child_without_user",
+            "reason": "partner_with_child_without_user",
             "subject_tokens": _KID1_TOKENS + _PARTNER_TOKENS,
             "include_tokens": _OUTING_TOKENS,
             "exclude_tokens": [],
@@ -875,7 +876,7 @@ def _rule_kid1_with_partner_without_user(normalized: str, dates: list[str], now:
             "key": "kid1_away_from_home",
             "value": "true",
             "until_date": until,
-            "reason": "child_out_with_sofia",
+            "reason": "child_out_with_partner",
             "subject_tokens": _KID1_TOKENS,
             "include_tokens": _PARTNER_TOKENS + _OUTING_TOKENS,
             "exclude_tokens": [],
@@ -884,7 +885,7 @@ def _rule_kid1_with_partner_without_user(normalized: str, dates: list[str], now:
 
 def _rule_partner_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     t("prompts.ext_phase_3a_partner_with_user_facts")
-    has_sofia = _contains_any(normalized, _PARTNER_TOKENS)
+    has_partner = _contains_any(normalized, _PARTNER_TOKENS)
     has_together = _contains_any(normalized, _TOGETHER_TOKENS)
 
     has_home_marker = _contains_any(normalized, _inline.get("home", []))
@@ -894,10 +895,10 @@ def _rule_partner_with_user(normalized: str, dates: list[str], now: datetime) ->
         _WORK_TOKENS + _SHIFT_AM_TOKENS + _SHIFT_PM_TOKENS + _WORK_TOKENS
     )
 
-    if has_sofia and has_kid1 and has_home_marker and has_user_work_context:
+    if has_partner and has_kid1 and has_home_marker and has_user_work_context:
         return []
 
-    if has_sofia and has_together:
+    if has_partner and has_together:
         if _is_draft_or_past_reference_context(normalized) and not _looks_like_live_presence_statement(normalized):
             return []
 
@@ -907,7 +908,7 @@ def _rule_partner_with_user(normalized: str, dates: list[str], now: datetime) ->
     has_group_outing = _contains_any(normalized, group_outing_tokens)
 
     # Strong path: explicit Partner + together
-    if has_sofia and has_together:
+    if has_partner and has_together:
         pass
     # Softer path: group outing wording can reinforce an already-active Partner context
     elif has_group_outing and _partner_state_is_active(now) and _looks_like_live_presence_statement(normalized):
@@ -955,14 +956,14 @@ def _rule_partner_not_with_user(normalized: str, dates: list[str], now: datetime
     Target: clear Messenger/Partner suppress context immediately
     Action: State only (partner_with_user = false)
     """
-    has_sofia = _contains_any(normalized, _PARTNER_TOKENS)
-    has_absence = has_sofia and _contains_any(normalized, _ABSENCE_TOKENS)
+    has_partner = _contains_any(normalized, _PARTNER_TOKENS)
+    has_absence = has_partner and _contains_any(normalized, _ABSENCE_TOKENS)
     has_not_together = _contains_any(normalized, _NOT_TOGETHER_TOKENS)
 
     if not (has_absence or has_not_together):
         return []
 
-    if has_not_together and not has_sofia:
+    if has_not_together and not has_partner:
         from memory.routine_db import get_context_state
         state_data = get_context_state("partner_with_user")
         is_active = False
@@ -1143,7 +1144,7 @@ def score_candidate_directive(
         _append_signal(signals, f"activity:{include_tokens[0]}" if include_tokens else "activity")
 
     if matched_rule_name == "llm_extracted" and kind == "context_state_set":
-        if directive_key in _CANONICAL_CONTEXT_KEYS:
+        if directive_key in config.CANONICAL_CONTEXT_KEYS:
             score += 0.15
             _append_signal(signals, "llm:canonical_context")
 
@@ -1187,8 +1188,8 @@ def score_candidate_directive(
 
     # Penalty: multiple persons in same fact → ambiguous
     has_kid1  = _contains_any(normalized_fact, _KID1_TOKENS)
-    has_sofia = _contains_any(normalized_fact, _PARTNER_TOKENS)
-    if has_kid1 and has_sofia:
+    has_partner = _contains_any(normalized_fact, _PARTNER_TOKENS)
+    if has_kid1 and has_partner:
         # We relax the penalty if the text clearly shows that they act together
         if _contains_any(normalized_fact, _inline.get("together_group", [])):
             _append_signal(signals, "multiple_people_together")
@@ -1316,16 +1317,6 @@ def _safe_json_list(raw: str) -> list[dict]:
     except Exception:
         return []
 
-_CANONICAL_CONTEXT_KEYS = {
-    "user_out_of_home",
-    "kid1_away_from_home",
-    "family_at_home",
-
-    "partner_with_user",
-    "current_shift",
-    "football_season",
-}
-
 def _normalize_context_key(raw: str) -> str:
     key = _normalize(raw or "")
     aliases = {
@@ -1403,7 +1394,7 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
         elif context_key in {"user_out_of_home", "family_at_home"}:
             subject_tokens = []
 
-        if context_key not in _CANONICAL_CONTEXT_KEYS:
+        if context_key not in config.CANONICAL_CONTEXT_KEYS:
             return []
 
         return [{
@@ -1535,7 +1526,7 @@ def _infer_llm_reconciliation_candidates(
     # Fetch active contexts to give the LLM situational awareness
     active_contexts = []
     try:
-        states = get_context_states(list(_CANONICAL_CONTEXT_KEYS))
+        states = get_context_states(list(config.CANONICAL_CONTEXT_KEYS))
         for k, v in states.items():
             val = v.get("value")
             until = v.get("expires_at")
@@ -1716,7 +1707,7 @@ def infer_routine_reconciliation_candidates(
         ("partner_with_user",                _rule_partner_with_user,                (normalized_fact, dates, current)),
         ("partner_not_with_user",            _rule_partner_not_with_user,            (normalized_fact, dates, current)),
         ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, dates, current)),
-        ("sofia_work_mode",                _rule_sofia_work_mode,                (normalized_fact, dates, current)),
+        ("partner_work_mode",                _rule_partner_work_mode,                (normalized_fact, dates, current)),
         ("user_at_work",                   _rule_user_at_work,                   (normalized_fact, dates, current)),
         ("quiet_hours",                    _rule_quiet_hours,                    (normalized_fact, dates, current)),
     ]

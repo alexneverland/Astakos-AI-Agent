@@ -3,23 +3,23 @@ import services.routine_context as rc
 
 
 def test_build_runtime_routine_context_returns_expected_keys(monkeypatch):
-    monkeypatch.setattr(rc, "resolve_alexandros_away_state", lambda now=None: True)
-    monkeypatch.setattr(rc, "resolve_alexandros_away_reason", lambda now=None: "camp")
+    monkeypatch.setattr(rc, "resolve_kid1_away_state", lambda now=None: True)
+    monkeypatch.setattr(rc, "resolve_kid1_away_reason", lambda now=None: "camp")
     monkeypatch.setattr(rc, "resolve_football_season", lambda now=None: False)
     monkeypatch.setattr(rc, "resolve_school_open", lambda now=None: False)
     monkeypatch.setattr(rc, "resolve_current_shift", lambda now=None: "afternoon")
-    monkeypatch.setattr(rc, "resolve_sofia_work_mode", lambda now=None: "home")
+    monkeypatch.setattr(rc, "resolve_partner_work_mode", lambda now=None: "home")
     monkeypatch.setattr(rc, "resolve_user_at_work", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_quiet_hours", lambda now=None: False)
 
     result = rc.build_runtime_routine_context(datetime(2026, 6, 17))
 
-    assert result["alexandros_away_from_home"] is True
-    assert result["alexandros_away_reason"] == "camp"
+    assert result["kid1_away_from_home"] is True
+    assert result["kid1_away_reason"] == "camp"
     assert result["football_season"] is False
     assert result["school_open"] is False
     assert result["current_shift"] == "afternoon"
-    assert result["sofia_work_mode"] == "home"
+    assert result["partner_work_mode"] == "home"
     assert result["user_at_work"] is True
     assert result["quiet_hours"] is False
 
@@ -100,12 +100,12 @@ def test_build_runtime_routine_context_includes_user_out_of_home(monkeypatch):
     import services.routine_context as rc
     from datetime import datetime
 
-    monkeypatch.setattr(rc, "resolve_alexandros_away_state", lambda now=None: False)
-    monkeypatch.setattr(rc, "resolve_alexandros_away_reason", lambda now=None: None)
+    monkeypatch.setattr(rc, "resolve_kid1_away_state", lambda now=None: False)
+    monkeypatch.setattr(rc, "resolve_kid1_away_reason", lambda now=None: None)
     monkeypatch.setattr(rc, "resolve_football_season", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_school_open", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_current_shift", lambda now=None: None)
-    monkeypatch.setattr(rc, "resolve_sofia_work_mode", lambda now=None: None)
+    monkeypatch.setattr(rc, "resolve_partner_work_mode", lambda now=None: None)
     monkeypatch.setattr(rc, "resolve_user_at_work", lambda now=None: False)
     monkeypatch.setattr(rc, "resolve_user_out_of_home", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_quiet_hours", lambda now=None: False)
@@ -120,26 +120,26 @@ def test_build_runtime_routine_context_includes_family_presence_flags(monkeypatc
     import services.routine_context as rc
     from datetime import datetime
 
-    monkeypatch.setattr(rc, "resolve_alexandros_away_state", lambda now=None: False)
-    monkeypatch.setattr(rc, "resolve_alexandros_away_reason", lambda now=None: None)
+    monkeypatch.setattr(rc, "resolve_kid1_away_state", lambda now=None: False)
+    monkeypatch.setattr(rc, "resolve_kid1_away_reason", lambda now=None: None)
     monkeypatch.setattr(rc, "resolve_context_bool", lambda key, now=None: {
-        "alexandros_with_user": True,
-        "alexandros_with_sofia": False,
-        "sofia_with_user": True,
+        "kid1_with_user": True,
+        "kid1_with_partner": False,
+        "partner_with_user": True,
     }.get(key))
     monkeypatch.setattr(rc, "resolve_football_season", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_school_open", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_current_shift", lambda now=None: None)
-    monkeypatch.setattr(rc, "resolve_sofia_work_mode", lambda now=None: None)
+    monkeypatch.setattr(rc, "resolve_partner_work_mode", lambda now=None: None)
     monkeypatch.setattr(rc, "resolve_user_at_work", lambda now=None: False)
     monkeypatch.setattr(rc, "resolve_user_out_of_home", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_quiet_hours", lambda now=None: False)
 
     result = rc.build_runtime_routine_context(datetime(2026, 7, 5, 20, 0))
 
-    assert result["alexandros_with_user"] is True
-    assert result["alexandros_with_sofia"] is False
-    assert result["sofia_with_user"] is True
+    assert result["kid1_with_user"] is True
+    assert result["kid1_with_partner"] is False
+    assert result["partner_with_user"] is True
 
 
 def test_resolve_user_out_of_home_prefers_recent_home_gps_over_stale_true_state(monkeypatch, tmp_path):
@@ -207,7 +207,7 @@ def test_apply_canonical_context_directives_updates_runtime_context(tmp_path, mo
         },
         {
             "kind": "context_state_set",
-            "key": "alexandros_away_from_home",
+            "key": "kid1_away_from_home",
             "value": True,
             "until_date": "2030-01-01",
             "reason": "child_with_caregiver",
@@ -222,5 +222,5 @@ def test_apply_canonical_context_directives_updates_runtime_context(tmp_path, mo
 
     assert stats["context_states_set"] >= 2
     assert ctx.get("user_out_of_home") is True
-    assert ctx.get("alexandros_away_from_home") is True
-    assert ctx.get("alexandros_present") is False
+    assert ctx.get("kid1_away_from_home") is True
+    assert ctx.get("kid1_present") is False

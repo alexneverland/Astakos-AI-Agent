@@ -1375,7 +1375,7 @@ def _debug_condition_state_details(flag_name: str, effective_value, raw_states: 
     elif flag_name == "current_shift":
         if now_dt.weekday() >= 5 and str(raw_value or "").lower() in {"morning", "afternoon", "night"} and effective_value == "off":
             reason = "weekend override"
-    elif flag_name == "state:alexandros:outing":
+    elif flag_name == "state:kid1:outing":
         if raw_value and effective_value is None and raw_expires and raw_expires < today:
             reason = f"expired outing state from {raw_expires}"
 
@@ -1425,15 +1425,15 @@ async def debug_runtime(_=Depends(require_token)):
     try:
         from memory.routine_db import get_context_states
         raw_context_states = get_context_states([
-            "alexandros_away_from_home",
-            "alexandros_with_user",
-            "alexandros_with_sofia",
+            "kid1_away_from_home",
+            "kid1_with_user",
+            "kid1_with_partner",
             "current_shift",
             "user_out_of_home",
-            "state:alexandros:outing",
+            "state:kid1:outing",
             "user_at_work",
             "family_at_home",
-            "sofia_with_user",
+            "partner_with_user",
         ])
     except Exception:
         raw_context_states = {}

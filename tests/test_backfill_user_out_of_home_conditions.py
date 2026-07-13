@@ -25,7 +25,7 @@ def _make_db(path: Path):
                 [
                     {
                         "condition_type": "context_flag",
-                        "condition_payload": {"flag": "alexandros_away_from_home", "equals": False},
+                        "condition_payload": {"flag": "kid1_away_from_home", "equals": False},
                         "condition_mode": "allow_when_true",
                         "source_memory_ref": "manual_cleanup",
                     },
@@ -46,7 +46,7 @@ def _make_db(path: Path):
                 [
                     {
                         "condition_type": "context_flag",
-                        "condition_payload": {"flag": "alexandros_away_from_home", "equals": True},
+                        "condition_payload": {"flag": "kid1_away_from_home", "equals": True},
                         "condition_mode": "suppress_when_true",
                     }
                 ],
@@ -60,7 +60,7 @@ def _make_db(path: Path):
                 [
                     {
                         "condition_type": "context_flag",
-                        "condition_payload": {"flag": "state:alexandros:outing", "equals": "in_progress"},
+                        "condition_payload": {"flag": "state:kid1:outing", "equals": "in_progress"},
                         "condition_mode": "suppress_when_true",
                     }
                 ],
@@ -130,7 +130,7 @@ def test_backfill_user_out_of_home_conditions(tmp_path, monkeypatch):
     # #10: generalized out-of-home suppress added
     conds10 = by_id[10]
     assert any(
-        (c.get("condition_payload") or {}).get("flag") == "state:alexandros:outing"
+        (c.get("condition_payload") or {}).get("flag") == "state:kid1:outing"
         for c in conds10
     )
     assert any(
