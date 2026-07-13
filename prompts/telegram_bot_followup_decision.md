@@ -27,10 +27,10 @@ RECENT CONTEXT:
 
 REPLY ONLY WITH VALID JSON using the following structure:
 ```json
-{
+{{
   "decision": "send", // or "skip"
   "stage": "decision_pending", // or appropriate stage like "after_likely_completion"
   "message": "...", // The follow-up message text in {language} (empty if skip)
   "reason": "..." // Your reasoning based on the context
-}
+}}
 ```

@@ -1377,89 +1377,31 @@ def extract_followup_candidate_with_llm(
     active_followups_text: str = "",
 ) -> dict | None:
     import json
-    import re
+    from core.i18n import load_prompt, t
     from services.gemini import safe_gemini_call
 
-    prompt = f"""
-Analyze the following exchange and decide if it is worth creating a FUTURE conversational follow-up.
+    prompt_template = load_prompt("telegram_bot_followup_extract.md")
+    prompt = prompt_template.format(
+        example_1=t("memory.pending_followups.prompt_example_1"),
+        example_2=t("memory.pending_followups.prompt_example_2"),
+        example_3=t("memory.pending_followups.prompt_example_3"),
+        example_4=t("memory.pending_followups.prompt_example_4"),
+        example_5=t("memory.pending_followups.prompt_example_5"),
+        active_followups_text=active_followups_text,
+        agent_name=agent_name,
+        user_text=user_text[:800],
+        ai_text=ai_text[:800],
+    )
 
-We want a follow-up only when:
-- there is a natural next step or outcome
-- it would make sense to ask "how did it go?" later
-- the topic concerns an action / event / purchase / outing / plan / family movement / task progression
-
-We do NOT want a follow-up when:
-- it is simple chit-chat
-- it is purely an update with no next step
-- it is a pure tool result / operational reply
-- it is too vague
-
-Respond STRICTLY in JSON:
-{{
-  "should_follow_up": true,
-  "topic": "food_purchase | outing | task_progress | family_plan | appointment | general_progress",
-  "subject": "short subject",
-  "delay_minutes": 180,
-  "target_window": "explicit_timer | same_day_short_checkin | same_day_evening | next_day_morning | next_day_late_morning | next_day_afternoon | next_day_evening | after_likely_completion",
-  "confidence": 0.0,
-  "reason": "short reason"
-}}
-
-or
-
-{{
-  "should_follow_up": false,
-  "reason": "short reason"
-}}
-
-Rules:
-- If in [Active Pending Follow-ups] you see a topic that perfectly matches the new conversation (e.g. they are discussing the same bath again), DO NOT set should_follow_up: true. Instead, use update_existing_id: <its id> so the time of the existing one is refreshed!
-- subject up to 4 words
-- prefer compact noun phrase, not full description
-- avoid "and", "for", "so that", "to"
-- delay_minutes integer (the time in minutes we must wait, e.g. 180, 480, 1440)
-- confidence 0.0 to 1.0
-- do not return anything except JSON
-- target_window must describe WHEN it makes natural sense to speak again
-- Do not choose target_window based on a general "later", but based on the actual likely outcome
-
-Use:
-- "explicit_timer" when the user has provided a specific time/interval themselves and we must respect delay_minutes without semantic override
-- "same_day_short_checkin" when the user just started something and there will be progress soon
-- "same_day_evening" when the topic will logically conclude later on the same day
-- "next_day_morning" when the topic moves to the next day and makes sense early but not at dawn
-- "next_day_late_morning" when the topic relates to food / outing / family movement that will logically clear up closer to noon
-- "next_day_afternoon" when the topic is expected to clear up after noon
-- "next_day_evening" when it's an evening plan / later development
-- "after_likely_completion" when the follow-up must happen after the probable end of the event
-
-Examples:
-- "in 2 hours ask me if I did it" -> target_window: "explicit_timer"
-- "remember to ask me tomorrow at 3" -> target_window: "explicit_timer"
-- "the steaks tomorrow" -> target_window: "next_day_late_morning"
-- "I'm going now to meet them at the park" -> target_window: "same_day_short_checkin"
-- "tomorrow we will see about the interview" -> target_window: "next_day_afternoon"
-- "tonight we will go out" -> target_window: "same_day_evening"
-
-Examples of a good subject:
-{t("memory.pending_followups.prompt_example_1")}
-{t("memory.pending_followups.prompt_example_2")}
-{t("memory.pending_followups.prompt_example_3")}
-
-Examples of a bad subject:
-{t("memory.pending_followups.prompt_example_4")}
-{t("memory.pending_followups.prompt_example_5")}
-
-{active_followups_text}
-
-[Agent]: {agent_name}
-[User]: {user_text[:800]}
-[Assistant]: {ai_text[:800]}
-"""
     try:
         response = safe_gemini_call(prompt)
         raw = response.text if hasattr(response, "text") else str(response)
-        raw = re.sub(r"```json|```", "", raw.strip()).strip()
+        
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            raw = raw[start:end+1]
+            
         data = json.loads(raw)
         if not isinstance(data, dict):
             return None
@@ -1684,7 +1626,7 @@ def maybe_create_followup_from_exchange(
         t("prompts.ext_str_55"),
         t("prompts.ext_background"),
     )
-    if len(clean_user.split()) <= 3 and any(m in low_user for m in skip_markers):
+    if len(clean_user.split()) <= 1 and any(m in low_user for m in skip_markers):
         return None
 
     active_followups = find_pending_followups(limit=10, active_only=True)
@@ -1743,49 +1685,23 @@ def classify_followup_resolution_with_llm(
     source_user_text: str,
 ) -> dict | None:
     import json
-    import re
+    from core.i18n import load_prompt
     from services.gemini import safe_gemini_call
 
-    prompt = f"""
-Decide if the new user message resolves/closes a pending conversational follow-up.
+    prompt_template = load_prompt("telegram_bot_followup_resolve.md")
+    prompt = prompt_template.format(
+        topic=topic,
+        subject=subject,
+        source_user_text=source_user_text,
+        user_text=user_text,
+    )
 
-Pending follow-up:
-- topic: {topic}
-- subject: {subject}
-- original source message: {source_user_text}
-
-New user message:
-{user_text}
-
-Respond STRICTLY in JSON:
-{{
-  "resolves": true,
-  "resolution_type": "completed | canceled | postponed | superseded | irrelevant",
-  "confidence": 0.0,
-  "reason": "short reason"
-}}
-
-or
-
-{{
-  "resolves": false,
-  "confidence": 0.0,
-  "reason": "short reason"
-}}
-
-Rules:
-- resolves=true if the user says they did it, they didn't do it, it was pushed to tomorrow, they found the person, they returned, it was canceled, it was postponed
-- resolves=false if it is irrelevant or insufficient
-- confidence 0.0 to 1.0
-- ONLY JSON
-"""
     try:
         response = safe_gemini_call(prompt)
         raw = response.text if hasattr(response, "text") else str(response)
-        raw = re.sub(r"```json|```", "", raw.strip()).strip()
         start = raw.find('{')
         end = raw.rfind('}')
-        if start != -1 and end != -1:
+        if start != -1 and end != -1 and end > start:
             raw = raw[start:end+1]
         data = json.loads(raw)
         return data if isinstance(data, dict) else None
@@ -1801,47 +1717,24 @@ def classify_followup_deferral_with_llm(
     source_user_text: str,
     current_user_text: str,
 ) -> dict:
-    import re
+    import json
+    from core.i18n import load_prompt
     from core.brain import llm
 
-    prompt = f"""
-You are a classifier for conversational follow-ups.
+    prompt_template = load_prompt("telegram_bot_followup_defer.md")
+    prompt = prompt_template.format(
+        topic=topic,
+        subject=subject,
+        source_user_text=source_user_text,
+        current_user_text=current_user_text,
+    )
 
-PENDING FOLLOWUP
-topic: {topic}
-subject: {subject}
-source_user_text: {source_user_text}
-
-NEW USER MESSAGE
-{current_user_text}
-
-Respond ONLY with JSON:
-{{
-  "should_defer": true/false,
-  "delay_minutes": integer,
-  "target_window": "explicit_timer | same_day_short_checkin | same_day_evening | next_day_morning | next_day_late_morning | next_day_afternoon | next_day_evening | after_likely_completion",
-  "reason": "short reason",
-  "confidence": 0.0
-}}
-
-Rules:
-- should_defer=true only if the user does NOT say they did it, but postpones it for later
-- examples of defer:
-  - "I will do them tomorrow"
-  - "not today, tomorrow"
-  - "I will go later"
-  - "later"
-  - "in 2 hours"
-- if the user says they already did it or closed the topic, then should_defer=false
-- if you are not sure enough, should_defer=false
-"""
     response = llm.invoke(prompt)
     raw = response.content if hasattr(response, "content") else str(response)
-    raw = _coerce_text_scalar(raw, "").strip()
-    raw = re.sub(r"```json|```", "", raw).strip()
+    
     start = raw.find('{')
     end = raw.rfind('}')
-    if start != -1 and end != -1:
+    if start != -1 and end != -1 and end > start:
         raw = raw[start:end+1]
 
     try:
@@ -1857,10 +1750,10 @@ Rules:
 
     return {
         "should_defer": bool(data.get("should_defer")),
-        "delay_minutes": _coerce_int_scalar(data.get("delay_minutes"), 0),
-        "target_window": _coerce_text_scalar(data.get("target_window"), ""),
-        "reason": _coerce_text_scalar(data.get("reason"), ""),
-        "confidence": _coerce_float_scalar(data.get("confidence"), 0.0),
+        "delay_minutes": int(data.get("delay_minutes", 0)),
+        "target_window": str(data.get("target_window", "")),
+        "reason": str(data.get("reason", "")),
+        "confidence": float(data.get("confidence", 0.0)),
     }
 
 
