@@ -544,7 +544,9 @@ Shutdown behavior:
 - [x] Proactive Debug Labels - runtime event logs and `/debug` traces now distinguish `manual_control`, `pending_cleanup`, `condition_eval`, `proactive_decision`, and `reconciler_applied`, making diagnosis much easier when a routine is skipped, muted, resumed, or silently suppressed.
 - [x] Deterministic Family-Absence Extractor — temporary absence statements parsed without an LLM sifter call.
 - [x] Seasonal Routine Inactivity Controls — pause/resume a routine for a date range (e.g. a sports routine paused over summer) without deleting or permanently muting it.
-
+- [x] I18n Refactoring — Removed hardcoded English strings from Telegram bot follow-up logic and migrated them to the local `locales/en.json` and `locales/el.json` files.
+- [x] Prompt JSON Output — Fixed `telegram_bot_followup_decision.md` to mandate structured JSON output instead of raw text, preventing parser fallback errors.
+- [x] Gitignore Security — Cleaned up `.gitignore` to ensure system prompts are correctly versioned without exposing personal data, databases, or credentials.
 ### Planned
 
 - [ ] Planner v3 — parallel step execution and per-step Telegram inline approve/reject (today's confirmation gate is chat-based, not inline-keyboard).
