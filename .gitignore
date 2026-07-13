@@ -78,9 +78,6 @@ tmp/
 !data/routine_tokens.json
 # OfficeCLI binary
 vendor/officecli/*.exe
-# Ignore personal prompts and translations
-prompts/*.md
-!prompts/*.example.md
 # Personal configuration files
 persona.md
 astakos_settings.json
