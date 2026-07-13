@@ -170,51 +170,61 @@ Legacy empty `.db` leftovers are not part of the active runtime layout.
    Telegram Bot          Web UI             CLI
  [channel=telegram]  [channel=web]   [channel=terminal]
          │                  │                  │
-         └──────────────────┼──────────────────┘
-                            ▼
-                   ┌──────────────────┐
-                   │   pre_check_node │  ← pending plan? ναι/όχι?
-                   └────────┬─────────┘
-                            │
-              ┌─────────────┼─────────────┐
-              ▼             ▼             ▼
-        task_executor   Supervisor   cancel_plan
-              │             │
-              │    ┌────────┴────────────────────────────┐
-              │    │ Chat · Home · Web · Tech · Git ·    │
-              │    │ Mail · Dev  ←── auto-plan judge      │
-              │    └────────┬────────────────────────────┘
-              │             │ (or → Planner → plan_pending.json → END)
-              │             ▼
-              └──────► Agent Node
-                            │
-                   ┌────────▼────────┐
-                   │ Approval Check  │  SAFE / WARN / CRITICAL
-                   └────────┬────────┘
-                            │
-                   ┌────────▼────────┐
-                   │   Tool Node     │
-                   └────────┬────────┘
-                            │
-                   ┌────────▼──────────┐
-                   │ validate_step_node│  failure? → replan_node → skip
-                   └────────┬──────────┘           → task_executor (next)
-                            │ OK
-                   ┌────────▼──────────┐
-                   │ capture_result    │  plan_active? → task_executor
-                   └────────┬──────────┘            → end_check
-                            ▼
-                   ┌──────────────────┐
-                   │  end_check_node  │  ✅ / ⚠️ summary + reflection
-                   └──────────────────┘
-                            │
-          ┌─────────────────▼───────────────────────────┐
-          │ Memory Layer                                 │
-          │ - ChromaDB: facts, photos, sessions, goals   │
-          │ - SQLite: conversations, sessions, routines  │
-          │ - Hybrid recall: SQLite history + Chroma     │
-          │ - JSON: working memory and profile state     │
-          └──────────────────────────────────────────────┘
+         └────────┬─────────┴─────────┬────────┘
+                  │                   │
+           [ I18n Locales ]           │
+           (el.json / en.json)        │
+                  │                   │
+                  ▼                   ▼
+           ┌──────────────┐     ┌──────────────┐
+           │  Fast Queue  │     │  Slow Queue  │
+           │ (Direct Msg) │     │ (Follow-ups) │
+           └──────┬───────┘     └──────┬───────┘
+                  │                    │
+                  ▼                    │
+         ┌──────────────────┐          │
+         │   pre_check_node │ ◄────────┘
+         └────────┬─────────┘
+                  │
+     ┌────────────┼────────────┐
+     ▼            ▼            ▼
+task_executor Supervisor   cancel_plan
+     │            │
+     │   ┌────────┴────────────────────────────┐
+     │   │ Chat · Home · Web · Tech · Git ·    │
+     │   │ Mail · Dev  ←── auto-plan judge      │
+     │   └────────┬────────────────────────────┘
+     │            │ (or → Planner → plan_pending.json → END)
+     │            ▼
+     └─────► Agent Node
+                  │
+         ┌────────▼────────┐
+         │ Approval Check  │  SAFE / WARN / CRITICAL
+         └────────┬────────┘
+                  │
+         ┌────────▼────────┐
+         │   Tool Node     │
+         └────────┬────────┘
+                  │
+         ┌────────▼──────────┐
+         │ validate_step_node│  failure? → replan_node → skip
+         └────────┬──────────┘           → task_executor (next)
+                  │ OK
+         ┌────────▼──────────┐
+         │ capture_result    │  plan_active? → task_executor
+         └────────┬──────────┘            → end_check
+                  ▼
+         ┌──────────────────┐
+         │  end_check_node  │  ✅ / ⚠️ summary + reflection
+         └──────────────────┘
+                  │
+┌─────────────────▼───────────────────────────┐
+│ Memory Layer                                 │
+│ - ChromaDB: facts, photos, sessions, goals   │
+│ - SQLite: conversations, sessions, routines  │
+│ - Hybrid recall: SQLite history + Chroma     │
+│ - JSON: working memory and profile state     │
+└──────────────────────────────────────────────┘
 ```
 
 Background jobs run through `AstakosScheduler`:
@@ -319,6 +329,9 @@ astakos/
 │   ├── safe_executor.py      # Terminal command classifier
 │   ├── tool_risk.py          # Tool risk registry
 │   └── utils.py              # Shared utilities and AgentState
+├── locales/
+│   ├── el.json               # Greek localization strings
+│   └── en.json               # English localization strings
 ├── memory/
 │   ├── event_log.py          # Event logging and dedup protection
 │   ├── routine_db.py         # SQLite routines, dedup, cooldowns
@@ -326,6 +339,9 @@ astakos/
 │   ├── vector_store.py       # ChromaDB long-term memory
 │   ├── conversation_history.py # Shared SQLite conversation store; load_messages_after_rowid + get_max_rowid for polling
 │   └── working_memory.py     # Real-time foreground context
+├── prompts/
+│   ├── telegram_bot_followup_decision.md # Core followup prompts
+│   └── *.md                  # System prompts for agents
 ├── services/
 │   ├── analytics_engine.py   # Nightly LLM routine detection
 │   ├── embeddings.py         # Embeddings + MD5 disk cache
@@ -392,31 +408,36 @@ Scheduler override state is persisted to `scheduler_state.json` and restored on 
 
 ## Setup
 
+> **Note:** Astakos currently runs directly via native Python scripts for deep local access to files and hardware. A Dockerized deployment option for easier remote hosting is planned for the future. For now, please follow these steps to run the agent locally.
+
 ### 1. Clone and Install
+
+First, clone the repository and set up your Python virtual environment (Python 3.11+ is recommended):
 
 ```bash
 git clone https://github.com/alexneverland/Astakos-AI-Agent.git
 cd Astakos-AI-Agent
 python -m venv venv
-venv\Scripts\activate
+venv\Scripts\activate   # On Windows
+# source venv/bin/activate  # On Linux/Mac
 pip install -r requirements.txt
 ```
 
 ### 2. Environment Variables
 
-Create a local `.env` file:
+Astakos requires a `.env` file in the root directory. Copy the structure below and fill in your API keys (Gemini is required for core agent functions, Telegram for the bot, the rest are optional plugins):
 
 ```env
-# AI Engine
+# AI Engine (Required)
 GEMINI_API_KEY=your_gemini_api_key
 PROJECT_ID=your_gcp_project_id
 LOCATION=us-central1
 
-# Telegram Bot
+# Telegram Bot (Required if using Telegram)
 TELEGRAM_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 
-# Gmail / Google OAuth
+# Gmail / Google OAuth (Optional)
 GMAIL_CREDENTIALS_FILE=credentials.json
 
 # Optional integrations
@@ -429,24 +450,28 @@ VACUUM_TOKEN=your_vacuum_token
 LINKEDIN_TOKEN=your_linkedin_token
 ```
 
-### 3. Run
+### 3. Run the Agent
+
+You can start the system using the interactive CLI launcher:
 
 ```bash
 python main.py
-# Choose: [1] Web Server  [2] Telegram Bot  [3] Both
+# The launcher will prompt you: [1] Web Server  [2] Telegram Bot  [3] Both
 ```
 
-Direct commands:
+Alternatively, you can run the components directly:
 
+**Telegram Bot:**
 ```bash
 python run_telegram.py
 ```
 
+**Web UI & API Server (with auto-reload on code changes):**
 ```bash
-uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients --reload-include prompts.md
+uvicorn api.server:server --reload --reload-dir api --reload-dir core --reload-dir tools --reload-dir memory --reload-dir services --reload-dir clients --reload-include "*.md" --reload-include "*.json"
 ```
 
-Observability:
+Observability Dashboard (when the API is running):
 
 ```bash
 open http://localhost:8000/debug/runtime
