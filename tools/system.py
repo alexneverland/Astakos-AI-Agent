@@ -79,7 +79,6 @@ DANGEROUS_WORDS = [
     "os.remove", "os.rmdir", "shutil.rmtree", "format c:",
     "exec(", "eval(", "compile(", "__import__", "subprocess.run",
     "subprocess.call", "subprocess.Popen", "os.system"
-    manage_context_flag,
 ]
 
 
@@ -3672,5 +3671,5 @@ all_tools = [
     list_recent_files,
     # File generator
     generate_excel, generate_word_doc, generate_pdf, generate_csv,
-    list_agent_skills, read_agent_skill, run_officecli,
+    list_agent_skills, read_agent_skill, run_officecli, manage_context_flag
 ]

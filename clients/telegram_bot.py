@@ -373,17 +373,17 @@ def _build_safe_followup_fallback(item: dict, stage: str = "") -> str:
 
     if stage == "decision_pending":
         if subject:
-            return f"What will finally happen with {subject}?"
+            return t("clients.telegram_bot.followup_decision_pending", subject=subject)
         return t("clients.telegram_bot.bot_msg_7ffced")
 
     if stage == "after_likely_completion":
         if subject:
-            return f"How did it go with {subject}?"
+            return t("clients.telegram_bot.followup_after_completion", subject=subject)
         return t("clients.telegram_bot.bot_msg_b427bf")
 
     if stage == "light_outing_checkin":
         if subject:
-            return f"Did you find them for {subject}?"
+            return t("clients.telegram_bot.followup_light_outing", subject=subject)
         return t("clients.telegram_bot.bot_msg_62dd6f")
 
     if topic == "outing":
@@ -391,7 +391,7 @@ def _build_safe_followup_fallback(item: dict, stage: str = "") -> str:
     if topic == "food_purchase":
         return t("clients.telegram_bot.proactive_followup_alt", subject=subject) if subject else t("clients.telegram_bot.bot_msg_e98f02")
     if topic == "task_progress":
-        return f"Did {subject} proceed?" if subject else t("clients.telegram_bot.bot_msg_9fef07")
+        return t("clients.telegram_bot.followup_task_progress", subject=subject) if subject else t("clients.telegram_bot.bot_msg_9fef07")
     return t("clients.telegram_bot.proactive_followup", subject=subject) if subject else t("clients.telegram_bot.bot_msg_4f0f04")
 
 
