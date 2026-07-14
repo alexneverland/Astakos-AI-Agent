@@ -76,6 +76,7 @@ def translate(text: str, *, src: str = "auto", tgt: str = "ka") -> dict[str, str
 _EDGE_VOICES: dict[str, str] = {
     "ka": "ka-GE-EkaNeural",   # Georgian female neural voice
     "el": "el-GR-NestorasNeural",
+    "en": "en-US-ChristopherNeural",
 }
 
 

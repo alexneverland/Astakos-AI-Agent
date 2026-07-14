@@ -1061,7 +1061,8 @@ async def text_to_speech(request: Request, _=Depends(require_token)):
         text = re.sub(r'\[.*?\]\(.*?\)', '', text)
         text = re.sub(r'\[SEND_PHOTO:.*?\]', '', text)
         text = text.strip()
-        voice = "el-GR-NestorasNeural"
+        from core.i18n import CURRENT_LOCALE
+        voice = "el-GR-NestorasNeural" if CURRENT_LOCALE == "el" else "en-US-ChristopherNeural"
         communicate = edge_tts.Communicate(text, voice, rate="-10%", volume="+10%")
         audio_buffer = io.BytesIO()
         async for chunk in communicate.stream():

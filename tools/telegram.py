@@ -202,8 +202,9 @@ async def send_telegram_voice(text: str):
 
         print(f"\033[95m[TTS Telegram]: Creating voice for: {clean_text[:50]}...\033[0m")
 
-        # edge-tts — same voice as the Web UI
-        voice = "el-GR-NestorasNeural"
+        # edge-tts — voice based on locale
+        from core.i18n import CURRENT_LOCALE
+        voice = "el-GR-NestorasNeural" if CURRENT_LOCALE == "el" else "en-US-ChristopherNeural"
         communicate = edge_tts.Communicate(clean_text, voice, rate="+15%", volume="+10%")
         
         audio_buffer = io.BytesIO()
