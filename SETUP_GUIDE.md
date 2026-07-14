@@ -36,73 +36,29 @@ In order for Astakos to think (via Gemini models), we must grant it access to yo
 
 ---
 
-## ⚙️ Step 4: Configuration Files (Renaming)
+## ⚙️ Step 4: Run the Web Setup Wizard
 
-Inside the Astakos folder you will see some files ending in `.example`. You need to remove this extension and adapt them to your preferences:
+You **do not** need to manually create configuration files or `.env` secrets! Astakos comes with an automated Web Setup Wizard.
 
-1. **`astakos_settings.json.example` ➡️ `astakos_settings.json`**
-   - Open it with a simple Notepad.
-   - Change the names (e.g., `USER_NAME`, `KID1_NAME`) so Astakos knows how to call you.
-2. **`astakos_custom_intents.json.example` ➡️ `astakos_custom_intents.json`**
-   - Simply rename it. It contains rules on how Astakos understands messages.
-3. **`persona.md.example` ➡️ `persona.md`**
-   - The personality of Astakos is described here. You can read it or add your own behavioral instructions.
-
----
-
-## 🔐 Step 5: The .env File (Secret Keys)
-
-Create a new, entirely empty file named **`.env`** (pay attention to the dot in front) inside the main Astakos folder.
-Open it with Notepad and paste the following, replacing the placeholders with your own details:
-
-```env
-# --- Core Settings (Google Cloud & Telegram) ---
-PROJECT_ID=your-gcp-project-id
-LOCATION=us-central1
-TELEGRAM_TOKEN=your-telegram-bot-token
-TELEGRAM_CHAT_ID=your-chat-id
-
-# --- LLM Provider Selection ---
-# Choose your AI brain: vertex, gemini, openai, or anthropic
-LLM_PROVIDER=vertex
-
-# --- API Keys (Depending on your LLM_PROVIDER) ---
-# If using 'openai'
-OPENAI_API_KEY=sk-...
-# If using 'anthropic' (Note: Claude needs OPENAI_API_KEY too for memory embeddings)
-ANTHROPIC_API_KEY=sk-ant-...
-# If using 'gemini' (or as fallback for vertex)
-GEMINI_API_KEY=your-gemini-api-key
-
-# GitHub (For the Tech Agent)
-GITHUB_TOKEN=your-github-token
-
-# Email (For the Mail Agent)
-EMAIL_ADDRESS=your-email@example.com
-EMAIL_PASSWORD=your-app-password
-
-# Smart Home (Vacuum)
-VACUUM_IP=192.168.1.100
-VACUUM_TOKEN=your-vacuum-token
-
-# LinkedIn (For posting)
-LINKEDIN_TOKEN=your-linkedin-token
-```
-*(The only **absolutely necessary** variables to start Astakos are `PROJECT_ID`, `LOCATION`, and the two Telegram variables. If you don't know how to create a Bot on Telegram, search for `@BotFather`, send `/newbot` and get your `TELEGRAM_TOKEN`).*
-
----
-
-## 🚀 Step 6: Start Astakos!
-
-You are ready! To start your personal assistant:
-- If you are on **Windows**, double click the file **`start_astakos.bat`**. (Which we'll create or just use `boot.py`)
+- If you are on **Windows**, double click the file **`start_astakos.bat`**.
 - Alternatively, run from the terminal:
   ```bash
   python boot.py
   ```
 
-Once you run `boot.py`:
-1. If this is your first time, it will launch the **Web Setup Wizard**. Open your browser to `http://localhost:8000` and follow the beautiful on-screen instructions to set up your API keys and Persona.
-2. If you are already configured, Astakos will start automatically!
+Because it's your first time running it, Astakos will detect that your settings are missing and will automatically launch the **Web Setup Wizard**. 
 
-Open Telegram, find your Bot and send it a "Hello!" message. 🦞
+1. Open your browser to `http://localhost:8000` (or the URL shown in your terminal).
+2. Follow the on-screen instructions to set up your API keys, your name, and your assistant's Persona.
+3. The wizard will automatically create all the necessary files (`.env`, `astakos_settings.json`, etc.) safely on your machine!
+
+---
+
+## 🚀 Step 5: Start Chatting!
+
+Once the wizard completes, Astakos will start automatically with your new settings.
+
+1. Open Telegram.
+2. Find your Bot (which you configured in the wizard) and send it a "Hello!" message. 🦞
+
+*(If you ever want to re-run the wizard in the future, you can start Astakos with `python boot.py --setup` or simply delete your `.env` file).*

@@ -1982,8 +1982,14 @@ def run_memory_sifter_slow(
         from core.utils import extract_json_from_text
         memories = extract_json_from_text(raw_text)
         
+        if isinstance(memories, dict):
+            for val in memories.values():
+                if isinstance(val, list):
+                    memories = val
+                    break
+        
         if not isinstance(memories, list):
-            print("\033[91m⚠️ [Sifter Error]: LLM generated completely malformed JSON. Skipping write.\033[0m")
+            print(f"\033[91m⚠️ [Sifter Error]: LLM generated malformed JSON (expected list). Raw output:\n{raw_text}\033[0m")
             return
         accepted_candidates: list[dict] = []
         accepted_facts: list[str] = list(deterministic_seed_facts)
