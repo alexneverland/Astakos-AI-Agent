@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  astakos:
+    build: .
+    container_name: astakos_agent
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Map the current directory to /app inside the container
+      # This ensures live-reloading of code and persistence of SQLite DBs, ChromaDB, and logs
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1

@@ -51,6 +51,8 @@ def t(key: str, **kwargs) -> str:
                     # If we still have missing keys that aren't config vars, we should log but not fail the whole translation
                     pass
             return val
+        elif isinstance(val, dict):
+            return val
         elif isinstance(val, list):
             return val
     except KeyError:

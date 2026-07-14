@@ -23,7 +23,7 @@ if "%choice%"=="3" goto both
 :web
 echo.
 echo  Starting Web Server...
-cd /d C:\astakos_v2
+cd /d %~dp0
 call venv\Scripts\activate
 uvicorn api.server:server %SERVER_ARGS% %RELOAD_ARGS%
 goto end
@@ -31,7 +31,7 @@ goto end
 :telegram
 echo.
 echo  Starting Telegram Bot...
-cd /d C:\astakos_v2
+cd /d %~dp0
 call venv\Scripts\activate
 python run_telegram.py
 goto end
@@ -39,9 +39,9 @@ goto end
 :both
 echo.
 echo  Starting both services...
-cd /d C:\astakos_v2
+cd /d %~dp0
 call venv\Scripts\activate
-start "Astakos Web Server" cmd /k "cd /d C:\astakos_v2 && call venv\Scripts\activate && uvicorn api.server:server --host 0.0.0.0 %SERVER_ARGS% %RELOAD_ARGS%"
+start "Astakos Web Server" cmd /k "cd /d %~dp0 && call venv\Scripts\activate && uvicorn api.server:server --host 0.0.0.0 %SERVER_ARGS% %RELOAD_ARGS%"
 timeout /t 3 /nobreak >nul
 python run_telegram.py
 goto end

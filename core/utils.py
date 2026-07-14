@@ -545,6 +545,7 @@ def load_agent_prompt(agent_name: str, default_fallback: str = "") -> str:
             value = value.replace("{BOT_NAME}", config.BOT_NAME)
             value = value.replace("{RESPONSE_LANGUAGE}", config.RESPONSE_LANGUAGE)
             value = value.replace("{DEFAULT_CITY}", config.DEFAULT_CITY)
+            value = value.replace("{BASE_DIR}", config.BASE_DIR)
             
             prompts_dict[key] = value
             

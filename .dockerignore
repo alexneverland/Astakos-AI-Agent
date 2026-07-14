@@ -1,0 +1,29 @@
+# Git and python cache
+.git/
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Environment files
+.env
+credentials/
+
+# Avoid copying local DBs during the build phase (they will be mounted via volume at runtime)
+*.db
+*.db-shm
+*.db-wal
+chroma_db/
+logs/
+telegram_photos/
+telegram_uploads/
+watch_folder/
+
+# MacOS
+.DS_Store

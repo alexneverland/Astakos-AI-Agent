@@ -27,8 +27,8 @@ def authenticate_google_drive():
     # print("Loading credentials...") # Keep prints concise to avoid cluttering the log
     creds = None
     # We use the absolute paths that were indicated
-    token_path = r"C:\astakos_v2\credentials\token.json"
-    credentials_path = r"C:\astakos_v2\credentials\credentials.json"
+    token_path = os.path.join(config.BASE_DIR, "credentials", "token.json")
+    credentials_path = os.path.join(config.BASE_DIR, "credentials", "credentials.json")
 
     if os.path.exists(token_path):
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)

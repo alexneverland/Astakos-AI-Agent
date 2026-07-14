@@ -33,6 +33,14 @@ Astakos is built to feel less like a disposable chatbot and more like a personal
 
 New to Astakos? Check out our **[Beginner's Setup Guide](SETUP_GUIDE.md)** for step-by-step instructions on how to install and run the agent locally using your preferred LLM provider (Vertex, Gemini API, OpenAI, or Anthropic).
 
+### 🐳 Quick Start with Docker (Recommended)
+If you have Docker installed, you can skip the manual setup and start Astakos immediately:
+```bash
+docker compose up --build -d
+```
+This will automatically install dependencies, download Playwright, and start the Web Setup Wizard at `http://localhost:8000`. 
+Your data (SQLite databases, ChromaDB, config files) remains safely persisted in your local folder thanks to volume mapping.
+
 ---
 
 ## Why Astakos Exists

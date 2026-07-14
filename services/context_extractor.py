@@ -29,6 +29,7 @@ Rules:
 - Return ONLY a JSON object.
 - Include only flags that are clearly confirmed by the message.
 - If you are not sure enough, do not include the flag at all.
+- DO NOT deduce unstated whereabouts. For example, if the user says the kids are alone, DO NOT deduce that the partner is with the user. Only update states explicitly stated.
 - DO NOT convert future intention into a current state.
 - If the user says they will leave in a bit, that they will go somewhere later, or that they are planning to go, this DOES NOT mean they are already out of the house.
 - If the user is talking about a draft message, a plan, an idea, or what to write, this DOES NOT necessarily mean that the state is currently true.
