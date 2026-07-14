@@ -344,11 +344,11 @@ def build_messenger_draft_ready_reply(tool_results: list[str]) -> str:
     if draft_message:
         return (
             t("core.utils.draft_ready") +
-            f"«{draft_message}»\n\n"
-            f"Saved. Do you want changes or should I send it?"
+            f"«{draft_message}»\n\n" +
+            t("prompts.ext_draft_ask_send")
         )
 
-    return "Saved. Do you want changes or should I send it?"
+    return t("prompts.ext_draft_ask_send")
 
 
 def is_medium_web_chat_path_candidate(user_text: str) -> bool:
@@ -952,12 +952,12 @@ def build_linkedin_draft_ready_reply(tool_results: list[str]) -> str:
         lines.extend([
             "",
             "Image I prepared:",
-            f"[CREATED_FILE: {photo_path}]",
+            f"[SEND_PHOTO: {photo_path}]",
         ])
 
     lines.extend([
         "",
-        "Saved. Do you want changes or should I upload it?",
+        t("prompts.ext_draft_ask_upload"),
     ])
 
     return "\n".join(lines)
