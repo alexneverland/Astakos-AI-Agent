@@ -41,15 +41,15 @@
                             <div>
                                 <label class="block text-sm font-medium text-gray-400 mb-2">LLM Provider</label>
                                 <select id="llm_provider" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="updateApiLabel()">
+                                    <option value="vertex" selected>Google Cloud Vertex AI</option>
+                                    <option value="gemini">Google Gemini</option>
                                     <option value="openai">OpenAI (ChatGPT)</option>
                                     <option value="anthropic">Anthropic (Claude)</option>
-                                    <option value="gemini">Google Gemini</option>
-                                    <option value="vertex">Google Cloud Vertex AI</option>
                                 </select>
                             </div>
                             <div>
-                                <label id="api_key_label" class="block text-sm font-medium text-gray-400 mb-2">API Key</label>
-                                <input type="password" id="api_key" placeholder="sk-..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <label id="api_key_label" class="block text-sm font-medium text-gray-400 mb-2">API Key (or JSON Path for Vertex)</label>
+                                <input type="password" id="api_key" placeholder="..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -72,7 +72,17 @@
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                             <div><label class="block text-sm text-gray-400 mb-1">Your Name</label><input type="text" id="user_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
                             <div><label class="block text-sm text-gray-400 mb-1">Bot Name</label><input type="text" id="bot_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
-                            <div><label class="block text-sm text-gray-400 mb-1">Response Language</label><input type="text" id="response_language" placeholder="English" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1">Response Language</label>
+                                <select id="response_language" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white focus:outline-none">
+                                    <option value="Greek">Greek</option>
+                                    <option value="English">English</option>
+                                    <option value="Spanish">Spanish</option>
+                                    <option value="French">French</option>
+                                    <option value="German">German</option>
+                                    <option value="Italian">Italian</option>
+                                </select>
+                            </div>
                             <div><label class="block text-sm text-gray-400 mb-1">Default City</label><input type="text" id="default_city" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
                             <div><label class="block text-sm text-gray-400 mb-1">Partner Name</label><input type="text" id="partner_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
                             <div><label class="block text-sm text-gray-400 mb-1">Kids Names (Comma separated)</label><input type="text" id="kids_names" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
