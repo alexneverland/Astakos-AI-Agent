@@ -464,8 +464,8 @@ LINKEDIN_TOKEN=your_linkedin_token
 You can start the system using the interactive CLI launcher:
 
 ```bash
-python main.py
-# The launcher will prompt you: [1] Web Server  [2] Telegram Bot  [3] Both
+# Start the system (this will launch the Web Setup Wizard on port 8000 if unconfigured, or start the bot if configured)
+python boot.py
 ```
 
 Alternatively, you can run the components directly:

@@ -95,10 +95,14 @@ LINKEDIN_TOKEN=your-linkedin-token
 ## 🚀 Step 6: Start Astakos!
 
 You are ready! To start your personal assistant:
-- If you are on **Windows**, double click the file **`start_astakos.bat`**.
+- If you are on **Windows**, double click the file **`start_astakos.bat`**. (Which we'll create or just use `boot.py`)
 - Alternatively, run from the terminal:
   ```bash
-  python run_telegram.py
+  python boot.py
   ```
 
-Once you see in the terminal that Astakos has started, open Telegram, find your Bot and send it a "Hello!" message. 🦞
+Once you run `boot.py`:
+1. If this is your first time, it will launch the **Web Setup Wizard**. Open your browser to `http://localhost:8000` and follow the beautiful on-screen instructions to set up your API keys and Persona.
+2. If you are already configured, Astakos will start automatically!
+
+Open Telegram, find your Bot and send it a "Hello!" message. 🦞
