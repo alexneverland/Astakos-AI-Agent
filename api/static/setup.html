@@ -13,12 +13,17 @@
         }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-200 min-h-screen flex flex-col items-center justify-center font-sans antialiased py-10">
+<body class="bg-gray-900 text-gray-200 min-h-screen flex flex-col items-center justify-center font-sans antialiased py-10 relative">
     <div class="max-w-5xl w-full mx-auto px-6 relative z-10">
         
-        <div class="text-center mb-10">
+        <div class="text-center mb-10 relative">
             <h1 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 mb-2">Astakos AI Agent</h1>
             <p class="text-gray-400 text-lg">Welcome! Let's get your local-first agent configured.</p>
+            
+            <button type="button" onclick="openInstructions()" class="mt-4 inline-flex items-center text-sm bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 px-4 py-2 rounded-lg transition-all border border-blue-500/30">
+                <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                Read Full Instructions
+            </button>
         </div>
 
         <div class="glass-panel rounded-2xl shadow-2xl p-8">
@@ -39,7 +44,13 @@
                         <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-blue-500/20 text-blue-400 p-2 rounded-lg mr-3">🧠</span> 1. AI Brain & APIs</h2>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                             <div>
-                                <label class="block text-sm font-medium text-gray-400 mb-2">LLM Provider</label>
+                                <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
+                                    LLM Provider
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
+                                        Choose the AI engine that powers Astakos. Vertex AI is free up to limits on GCP.
+                                    </div>
+                                </label>
                                 <select id="llm_provider" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="updateApiLabel()">
                                     <option value="vertex" selected>Google Cloud Vertex AI</option>
                                     <option value="gemini">Google Gemini</option>
@@ -48,17 +59,35 @@
                                 </select>
                             </div>
                             <div>
-                                <label id="api_key_label" class="block text-sm font-medium text-gray-400 mb-2">API Key (or JSON Path for Vertex)</label>
+                                <label id="api_key_label" class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
+                                    API Key (or JSON Path for Vertex)
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
+                                        Your secret key for the selected AI. Never shared with anyone. Stored securely in .env.
+                                    </div>
+                                </label>
                                 <input type="password" id="api_key" placeholder="..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
-                                <label class="block text-sm font-medium text-gray-400 mb-2">Telegram Token</label>
+                                <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
+                                    Telegram Token
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
+                                        Create a bot via @BotFather on Telegram and paste the HTTP API Token here.
+                                    </div>
+                                </label>
                                 <input type="password" id="telegram_token" placeholder="123456789:ABCdefGHI..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-400 mb-2">Your Telegram Chat ID</label>
+                                <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
+                                    Your Telegram Chat ID
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
+                                        Your personal Telegram User ID, so the bot only talks to you.
+                                    </div>
+                                </label>
                                 <input type="text" id="telegram_chat_id" placeholder="12345678" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
                             </div>
                         </div>
@@ -70,18 +99,57 @@
                     <div>
                         <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-green-500/20 text-green-400 p-2 rounded-lg mr-3">👤</span> 2. Personalization</h2>
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                            <div><label class="block text-sm text-gray-400 mb-1">Your Name</label><input type="text" id="user_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
-                            <div><label class="block text-sm text-gray-400 mb-1">Bot Name</label><input type="text" id="bot_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
                             <div>
-                                <label class="block text-sm text-gray-400 mb-1">Response Language</label>
+                                <label class="block text-sm text-gray-400 mb-1 flex items-center group relative cursor-help">
+                                    Your Name
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-48 p-2 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">What the bot calls you.</div>
+                                </label>
+                                <input type="text" id="user_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1 flex items-center group relative cursor-help">
+                                    Bot Name
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-48 p-2 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">How the bot identifies itself.</div>
+                                </label>
+                                <input type="text" id="bot_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1 flex items-center group relative cursor-help">
+                                    Response Language
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-48 p-2 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">The primary language for responses (text and speech).</div>
+                                </label>
                                 <select id="response_language" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white focus:outline-none">
                                     <option value="Greek">Greek</option>
                                     <option value="English">English</option>
                                 </select>
                             </div>
-                            <div><label class="block text-sm text-gray-400 mb-1">Default City</label><input type="text" id="default_city" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
-                            <div><label class="block text-sm text-gray-400 mb-1">Partner Name</label><input type="text" id="partner_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
-                            <div><label class="block text-sm text-gray-400 mb-1">Kids Names (Comma separated)</label><input type="text" id="kids_names" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1 flex items-center group relative cursor-help">
+                                    Default City
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-48 p-2 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">Used for local weather and info.</div>
+                                </label>
+                                <input type="text" id="default_city" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1 flex items-center group relative cursor-help">
+                                    Partner Name
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-48 p-2 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">Name of significant other (optional).</div>
+                                </label>
+                                <input type="text" id="partner_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400 mb-1 flex items-center group relative cursor-help">
+                                    Kids Names
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-48 p-2 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">Comma separated (optional).</div>
+                                </label>
+                                <input type="text" id="kids_names" placeholder="e.g. Maria, John" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
+                            </div>
                         </div>
                     </div>
 
@@ -92,15 +160,33 @@
                         <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-orange-500/20 text-orange-400 p-2 rounded-lg mr-3">⚙️</span> 3. Core Config Files</h2>
                         <div class="space-y-6">
                             <div>
-                                <label class="block text-sm font-medium text-blue-400 mb-2">persona.md (Define the agent's core personality)</label>
+                                <label class="block text-sm font-medium text-blue-400 mb-2 flex items-center group relative cursor-help">
+                                    persona.md 
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
+                                        The most important file. Defines the agent's core personality, tone, and backstory.
+                                    </div>
+                                </label>
                                 <textarea id="persona_content" rows="6" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-gray-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-purple-400 mb-2">astakos_custom_intents.json (Define custom triggers/wake words)</label>
+                                <label class="block text-sm font-medium text-purple-400 mb-2 flex items-center group relative cursor-help">
+                                    astakos_custom_intents.json
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
+                                        Define your own custom wake words and specific triggers for quick scripts/routines.
+                                    </div>
+                                </label>
                                 <textarea id="intents_content" rows="6" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-gray-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"></textarea>
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-green-400 mb-2">.env (Raw environment variables)</label>
+                                <label class="block text-sm font-medium text-green-400 mb-2 flex items-center group relative cursor-help">
+                                    .env (Raw)
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
+                                        All environment variables. Modify this if you need to add custom API keys for 3rd party tools (like Spotify or Weather).
+                                    </div>
+                                </label>
                                 <textarea id="env_content" rows="6" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-gray-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-green-500"></textarea>
                             </div>
                         </div>
@@ -115,7 +201,13 @@
                         <p class="text-gray-400 text-sm mb-4">Select any prompt file from the system to customize the agent's specific behaviors.</p>
                         
                         <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-400 mb-2">Select Prompt File</label>
+                            <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
+                                Select Prompt File
+                                <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
+                                    Changes made here directly alter the AI's logic paths and instructions.
+                                </div>
+                            </label>
                             <select id="prompt_selector" onchange="loadPrompt()" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-red-500">
                                 <!-- Options populated via JS -->
                             </select>
@@ -146,6 +238,22 @@
         </div>
     </div>
 
+    <!-- Modal for Setup Guide -->
+    <div id="instructionsModal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex items-center justify-center z-50">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl relative">
+            <button type="button" onclick="closeInstructions()" class="absolute top-4 right-4 text-gray-400 hover:text-white">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+            <h2 class="text-2xl font-bold text-white mb-4">Detailed Setup Instructions</h2>
+            <div class="overflow-y-auto flex-1 bg-gray-800 p-4 rounded-lg text-gray-300 text-sm font-mono whitespace-pre-wrap" id="instructionsContent">
+                Loading instructions...
+            </div>
+            <div class="mt-4 flex justify-end">
+                <button type="button" onclick="closeInstructions()" class="bg-gray-700 hover:bg-gray-600 text-white py-2 px-6 rounded-lg transition-colors">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Background Decorative Elements -->
     <div class="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
         <div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-600/10 blur-[100px]"></div>
@@ -155,6 +263,15 @@
     <script>
         let promptsData = {};
         let currentPromptFile = "";
+        let setupGuideRaw = "";
+
+        function openInstructions() {
+            document.getElementById('instructionsModal').classList.remove('hidden');
+        }
+
+        function closeInstructions() {
+            document.getElementById('instructionsModal').classList.add('hidden');
+        }
 
         function switchTab(tab) {
             if(tab === 'basic') {
@@ -176,11 +293,11 @@
 
         function updateApiLabel() {
             const provider = document.getElementById('llm_provider').value;
-            const label = document.getElementById('api_key_label');
-            if(provider === 'openai') label.innerText = 'OpenAI API Key';
-            else if(provider === 'anthropic') label.innerText = 'Anthropic API Key';
-            else if(provider === 'gemini') label.innerText = 'Gemini API Key';
-            else if(provider === 'vertex') label.innerText = 'Vertex AI (Usually GCP Credentials)';
+            const label = document.getElementById('api_key_label').childNodes[0];
+            if(provider === 'openai') label.nodeValue = 'OpenAI API Key ';
+            else if(provider === 'anthropic') label.nodeValue = 'Anthropic API Key ';
+            else if(provider === 'gemini') label.nodeValue = 'Gemini API Key ';
+            else if(provider === 'vertex') label.nodeValue = 'Vertex AI (Usually GCP Credentials JSON) ';
         }
 
         async function fetchInitialData() {
@@ -188,6 +305,12 @@
                 const res = await fetch('/api/raw_files');
                 const data = await res.json();
                 
+                // Load setup guide
+                if(data.setup_guide) {
+                    setupGuideRaw = data.setup_guide;
+                    document.getElementById('instructionsContent').textContent = setupGuideRaw;
+                }
+
                 // Populate Text Areas
                 document.getElementById('persona_content').value = data.persona || '';
                 document.getElementById('intents_content').value = data.intents || '';

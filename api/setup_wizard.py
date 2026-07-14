@@ -90,7 +90,8 @@ TELEGRAM_CHAT_ID=
         "intents": get_file_content(INTENTS_FILE, INTENTS_EXAMPLE),
         "env": env_content,
         "settings": settings_json,
-        "prompts": prompts_data
+        "prompts": prompts_data,
+        "setup_guide": get_file_content(SETUP_GUIDE_FILE)
     }
 
 @app.post("/api/setup")
