@@ -1126,11 +1126,10 @@ def _run_session_summary(channel: str = "web"):
             "{dialogue_text}", dialogue_text
         )
         response = safe_gemini_call(summary_prompt)
-        raw = re.sub(r"```json|```", "", response.text.strip()).strip()
+        from core.utils import extract_json_from_text
+        summary = extract_json_from_text(response.text)
 
-        try:
-            summary = json.loads(raw)
-        except json.JSONDecodeError:
+        if not isinstance(summary, dict):
             # If it fails, we put the messages back so we don't lose them
             if not using_persistent_log:
                 SESSION_LOGS[:0] = current_batch  # Reset to start
@@ -1980,24 +1979,12 @@ def run_memory_sifter_slow(
             )
             return
 
-        raw_clean = re.sub(r"```json|```", "", raw_text).strip()
-        if not raw_clean.startswith("["):
+        from core.utils import extract_json_from_text
+        memories = extract_json_from_text(raw_text)
+        
+        if not isinstance(memories, list):
+            print("\033[91m⚠️ [Sifter Error]: LLM generated completely malformed JSON. Skipping write.\033[0m")
             return
-            
-        # --- [MASTRO-JSON-SHIELD]: Automatic correction for LLM's forgotten commas ---
-        try:
-            memories = json.loads(raw_clean)
-        except json.JSONDecodeError:
-            try:
-                # We clean trailing commas before closing a list or object
-                fixed_raw = re.sub(r',\s*\]', ']', raw_clean)
-                fixed_raw = re.sub(r',\s*\}', '}', fixed_raw)
-                memories = json.loads(fixed_raw)
-                print("\033[93m[Sifter Fixer]: ✅ JSON auto-repaired!\033[0m")
-            except:
-                print("\033[91m⚠️ [Sifter Error]: LLM generated completely malformed JSON. Skipping write.\033[0m")
-                return
-
         accepted_candidates: list[dict] = []
         accepted_facts: list[str] = list(deterministic_seed_facts)
 

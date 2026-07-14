@@ -45,9 +45,9 @@ def planner_node(state):
 
     try:
         response = safe_llm_invoke(llm_heavy, [HumanMessage(content=prompt)])
+        from core.utils import clean_message, extract_json_from_text
         raw = clean_message(response.content)
-        raw = re.sub(r"```json|```", "", raw).strip()
-        tasks = json.loads(raw)
+        tasks = extract_json_from_text(raw)
         if not isinstance(tasks, list) or not tasks:
             raise ValueError("Empty task list")
         print(f"\033[95m[Planner]: {len(tasks)} steps created\033[0m")
@@ -185,9 +185,10 @@ def _plan_summary(goal: str, tasks: list, results: list) -> dict:
         reflect_prompt = base_prompt.format(goal=goal, steps_text=steps_text)
 
         resp = safe_gemini_call(reflect_prompt)
-        import json, re
-        raw = re.sub(r"```json|```", "", resp.text.strip()).strip()
-        data = json.loads(raw)
+        from core.utils import extract_json_from_text
+        data = extract_json_from_text(resp.text)
+        if not isinstance(data, dict):
+            data = {}
         _save_reflection(
             source="planner",
             observation=data.get("observation", ""),

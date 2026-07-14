@@ -1310,7 +1310,8 @@ def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
 
 def _safe_json_list(raw: str) -> list[dict]:
     try:
-        data = json.loads(raw)
+        from core.utils import extract_json_from_text
+        data = extract_json_from_text(raw)
         if isinstance(data, list):
             return [x for x in data if isinstance(x, dict)]
         return []
@@ -1540,80 +1541,22 @@ def _infer_llm_reconciliation_candidates(
         
     context_section = "\nActive Context Flags right now:\n" + "\n".join(active_contexts) + "\nTake these into account to better understand the meaning.\n" if active_contexts else ""
 
-    prompt = f"""
-You are an extractor for routine reconciliation.
-{context_section}
-
-Today is {today}.
-
-I will give you a user fact/message.
-I want you to output ONLY a JSON LIST.
-No explanations.
-
-Goal:
-Understand if the fact affects existing routines or temporary life context.
-
-Return a list of objects with fields:
-- entity: which person/entity it concerns or null
-- activity: general activity/domain, e.g. sports_training, outing, sleep, school, work_shift, home_presence or null
-- aliases: list of keywords that will help match routines
-- state_change: e.g. active, inactive, in_progress, done, off_season, away or null
-- impact:
-    - pause_matching_routines
-    - mute_matching_notifications
-    - resume_matching_routines
-    - already_happening
-    - already_done
-    - allow_only_when_active
-    - live_context
-- context_key: canonical context flag or null
-- context_value: true | false | string | null
-- until_date: YYYY-MM-DD or null
-- reason: short machine-friendly reason, e.g. summer_break, camp, returned_home, live_context
-
-For general current life states, prefer canonical context flags.
-Use ONLY these context_keys when they fit:
-- user_out_of_home
-- kid1_away_from_home
-- family_at_home
-
-- partner_with_user
-- current_shift
-- football_season
-
-Rules:
-- Do not invent new context keys if a canonical key covers the meaning.
-- You can return more than one object if a fact changes multiple context flags.
-- If the fact concerns a live/temporary life situation, prefer context_key/context_value instead of dynamic state:{{entity}}:{{activity}}.
-- If there is no clear routine/context impact, return [].
-
-Examples:
-
-{t("services.routine_reconciler.prompt_fact_1")}
-Output:
-[
-  {t("services.routine_reconciler.prompt_out_1", today=today)}
-  {t("services.routine_reconciler.prompt_out_2", today=today)}
-  {t("services.routine_reconciler.prompt_out_3", today=today)}
-  {t("services.routine_reconciler.prompt_out_4", today=today)}
-]
-
-{t("services.routine_reconciler.prompt_fact_2")}
-Output:
-[
-  {t("services.routine_reconciler.prompt_out_5")}
-]
-
-{t("services.routine_reconciler.prompt_fact_3")}
-Output:
-[
-  {t("services.routine_reconciler.prompt_out_6")}
-  {t("services.routine_reconciler.prompt_out_7")}
-]
-
-Fact:
-{fact}
-"""
+    from core.i18n import load_prompt
+    prompt = load_prompt("routine_reconciler_impact.md").format(
+        context_section=context_section,
+        today=today,
+        fact_1=t("services.routine_reconciler.prompt_fact_1"),
+        out_1=t("services.routine_reconciler.prompt_out_1", today=today),
+        out_2=t("services.routine_reconciler.prompt_out_2", today=today),
+        out_3=t("services.routine_reconciler.prompt_out_3", today=today),
+        out_4=t("services.routine_reconciler.prompt_out_4", today=today),
+        fact_2=t("services.routine_reconciler.prompt_fact_2"),
+        out_5=t("services.routine_reconciler.prompt_out_5"),
+        fact_3=t("services.routine_reconciler.prompt_fact_3"),
+        out_6=t("services.routine_reconciler.prompt_out_6"),
+        out_7=t("services.routine_reconciler.prompt_out_7"),
+        fact=fact
+    )
 
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])

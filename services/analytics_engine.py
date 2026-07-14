@@ -79,9 +79,10 @@ JSON:"""
                 for part in content
             )
         raw = content.strip()
-        raw = re.sub(r'^```(?:json)?\s*', '', raw)
-        raw = re.sub(r'\s*```$', '', raw)
-        data = json.loads(raw)
+        from core.utils import extract_json_from_text
+        data = extract_json_from_text(raw)
+        if not isinstance(data, list):
+            data = []
 
         result = [None] * len(msgs)
         for item in data:

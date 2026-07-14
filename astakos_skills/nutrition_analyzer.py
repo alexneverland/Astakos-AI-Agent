@@ -30,34 +30,11 @@ def analyze_nutrition(image_path: str, product_hint: str = "") -> str:
 
     hint_line = f"The product is: {product_hint}." if product_hint else ""
 
-    prompt = f"""You are an expert in ingredient analysis and product safety. You analyze labels from any product.
-{hint_line}
-
-Step 1: Identify the category: FOOD / COSMETIC / HOUSEHOLD / MEDICINE / OTHER
-Step 2: Identify the ingredients you see.
-Step 3: Evaluate on a scale of 1-10 based on the category:
-  - Food: healthiness, additives, sugar, salt
-  - Cosmetic: skin safety, parabens, fragrances, allergens
-  - Household: toxicity, environmental footprint
-Step 4: Add a comment for children (around 6 years old) if relevant.
-
-IMPORTANT RULE: You MUST answer EXCLUSIVELY in {RESPONSE_LANGUAGE}, using EXACTLY the following format:
-
-🏷️ **[Product Name] — [Category]**
-
-📋 **Detected Ingredients:** [list]
-
-⭐ **Rating:** X/10 [🟢≥7 / 🟡4-6 / 🔴≤3]
-
-✅ **Good:**
-- ...
-
-⚠️ **Watch out:**
-- ...
-
-👶 **For kids:** [comment or "N/A"]
-
-💡 **Recommendation:** [1 sentence]"""
+    from core.i18n import load_prompt
+    prompt = load_prompt("nutrition_analyzer.md").format(
+        hint_line=hint_line,
+        RESPONSE_LANGUAGE=RESPONSE_LANGUAGE
+    )
 
     vision_msg = HumanMessage(content=[
         {"type": "text",      "text": prompt},

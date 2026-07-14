@@ -323,16 +323,9 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
         response = model.generate_content(prompt)
         text = response.text.strip()
 
-        # Markdown cleanup
-
-# Markdown cleanup_
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        text = text.strip().rstrip("```").strip()
-
-        return json.loads(text) if text else []
+        from core.utils import extract_json_from_text
+        data = extract_json_from_text(text)
+        return data if isinstance(data, list) else []
 
     except Exception as e:
         print(f"⚠️ [ReflectionEngine] LLM error: {e}")

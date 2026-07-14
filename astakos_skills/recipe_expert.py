@@ -97,21 +97,14 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
     recent = get_recent_meals()
     print(f"\n[Tool Debug] 👨‍🍳 Chef Astakos is preparing suggestions...")
     # The tool executes the call internally... (The rest of the code remains the same)
-    prompt = f"""
-    You are the family's Home Chef. Operate based on the following:
-    
-    1. CONSTRAINTS/PREFERENCES (From Memory): {user_context}
-    2. RECENT MEALS (Strictly avoid these): {', '.join(recent)}
-    3. AVAILABLE INGREDIENTS: {ingredients if ingredients else 'Not specified'}
-    4. USER REQUEST: {query if query else 'Suggest 3 meals'}
-    
-    EXECUTION INSTRUCTIONS:
-    - If ingredients are provided, suggest recipes that use them.
-    - If a specific recipe is requested, provide detailed ingredients and steps, adapted to be kid-friendly (especially for Alexandros, who only eats lentils/beans when it comes to legumes).
-    - If the request is generic, provide 3 options (The Safe Bet, The Quick One, The Different One).
-    
-    IMPORTANT RULE: You MUST write your entire response fluently EXCLUSIVELY in {RESPONSE_LANGUAGE}.
-    """
+    from core.i18n import load_prompt
+    prompt = load_prompt("recipe_expert.md").format(
+        user_context=user_context,
+        recent_meals=', '.join(recent),
+        ingredients=ingredients if ingredients else 'Not specified',
+        query=query if query else 'Suggest 3 meals',
+        RESPONSE_LANGUAGE=RESPONSE_LANGUAGE
+    )
     
     try:
         # The tool makes its own call to Gemini!

@@ -15,21 +15,8 @@ def scan_receipt(image_path: str) -> str:
             ensure_ascii=False,
         )
 
-    prompt = """
-Analyze this shopping receipt image.
-Return only valid JSON, without markdown fences or extra commentary.
-Schema:
-{
-  "store": "store name or null",
-  "date": "receipt date or null",
-  "total": "numeric total amount or null",
-  "currency": "currency symbol/code or null",
-  "items": [
-    {"name": "item name", "quantity": "quantity or null", "price": "numeric price or null"}
-  ]
-}
-Use null when a field is not visible.
-"""
+    from core.i18n import load_prompt
+    prompt = load_prompt("scan_receipt.md")
 
     try:
         from core.brain import vertex_client
@@ -42,17 +29,12 @@ Use null when a field is not visible.
         )
 
         result_text = (response.text or "").strip()
-        if result_text.startswith("```json"):
-            result_text = result_text[len("```json"):].strip()
-        elif result_text.startswith("```"):
-            result_text = result_text[len("```"):].strip()
-        if result_text.endswith("```"):
-            result_text = result_text[:-len("```")].strip()
-
-        try:
-            parsed = json.loads(result_text)
+        from core.utils import extract_json_from_text
+        parsed = extract_json_from_text(result_text)
+        
+        if isinstance(parsed, dict):
             return json.dumps(parsed, ensure_ascii=False)
-        except json.JSONDecodeError:
+        else:
             return json.dumps(
                 {"error": "Model did not return valid JSON.", "raw": result_text},
                 ensure_ascii=False,

@@ -26,6 +26,12 @@ Astakos is built to feel less like a disposable chatbot and more like a personal
 
 ---
 
+## 🚀 Getting Started
+
+New to Astakos? Check out our **[Beginner's Setup Guide](SETUP_GUIDE.md)** for step-by-step instructions on how to install and run the agent locally using Google Cloud Vertex AI.
+
+---
+
 ## Why Astakos Exists
 
 Most AI assistants forget everything after the conversation ends.
