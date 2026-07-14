@@ -1759,22 +1759,32 @@ def generate_image_tool(prompt: str) -> str:
 
     # ── Vertex AI Imagen ──────────────────────────────────────────
     try:
-        import vertexai
-        from vertexai.preview.vision_models import ImageGenerationModel
+        from google import genai
+        from google.genai import types
 
-        vertexai.init(
-            project=config.PROJECT_ID,
-            location="us-central1"  # Imagen does not support "global"
-        )
-        model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
-        response = model.generate_images(
+        api_key = config.GEMINI_API_KEY
+        if api_key:
+            client = genai.Client(api_key=api_key)
+        else:
+            client = genai.Client(
+                vertexai=True,
+                project=config.PROJECT_ID,
+                location=config.LOCATION or "us-central1"
+            )
+            
+        response = client.models.generate_images(
+            model='imagen-3.0-generate-001',
             prompt=prompt,
-            number_of_images=1,
-            aspect_ratio="1:1",
+            config=types.GenerateImagesConfig(
+                number_of_images=1,
+                aspect_ratio="1:1"
+            )
         )
-        if not response.images:
+        
+        if not response.generated_images:
             return "❌ Vertex AI Imagen returned no image."
-        response.images[0].save(location=full_path, include_generation_parameters=False)
+            
+        response.generated_images[0].image.save(full_path)
         return f"✅ Ready! Image created.\n[SEND_PHOTO: {full_path}]"
 
     except Exception as e:
