@@ -41,6 +41,7 @@ Rules:
 - If the user says {partner_name} and {kid1_name} are out somewhere and they themselves are not with them, then partner_with_user=false.
 - If the user clearly says {kid1_name} is with {partner_name} without them, then kid1_away_from_home=true.
 - If the user says they will go to meet them later, this DOES NOT mean they are already with them now.
+- If the user says they returned home, or are engaged in non-work activities (e.g., shopping, playing with kids, cooking, park), then they are definitely NOT at work, so user_at_work=false.
 
 Example 1:
 Message: "Good morning, we started, we are on the road, we are going swimming all together."
@@ -71,6 +72,16 @@ Example 6:
 Message: "We are going to the park now with Kid1."
 Answer:
 {{"user_out_of_home": true, "kid1_with_user": true, "kid1_away_from_home": false}}
+
+Example 7:
+Message: "I finished work and I am at the supermarket now."
+Answer:
+{{"user_at_work": false, "user_out_of_home": true}}
+
+Example 8:
+Message: "I came back home after shopping and we are playing with the kid."
+Answer:
+{{"user_out_of_home": false, "user_at_work": false, "kid1_with_user": true}}
 
 User Message: "{user_text}"
 AI Answer (recent/current): "{ai_text}"
