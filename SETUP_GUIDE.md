@@ -56,12 +56,31 @@ Create a new, entirely empty file named **`.env`** (pay attention to the dot in 
 Open it with Notepad and paste the following, replacing the placeholders with your own details:
 
 ```env
+# --- Core Settings (Google Cloud & Telegram) ---
 PROJECT_ID=your-gcp-project-id
 LOCATION=us-central1
-TELEGRAM_TOKEN=your-token-from-botfather-in-telegram
+TELEGRAM_TOKEN=your-telegram-bot-token
 TELEGRAM_CHAT_ID=your-chat-id
+
+# --- Optional Settings (For extra features) ---
+# If you DO NOT use gcloud auth (Step 3), put your API key here:
+GEMINI_API_KEY=your-gemini-api-key
+
+# GitHub (For the Tech Agent)
+GITHUB_TOKEN=your-github-token
+
+# Email (For the Mail Agent)
+EMAIL_ADDRESS=your-email@example.com
+EMAIL_PASSWORD=your-app-password
+
+# Smart Home (Vacuum)
+VACUUM_IP=192.168.1.100
+VACUUM_TOKEN=your-vacuum-token
+
+# LinkedIn (For posting)
+LINKEDIN_TOKEN=your-linkedin-token
 ```
-*(If you don't know how to create a Bot on Telegram, search Telegram for the user `@BotFather`, send them `/newbot` and they will give you the `TELEGRAM_TOKEN`)*.
+*(The only **absolutely necessary** variables to start Astakos are `PROJECT_ID`, `LOCATION`, and the two Telegram variables. If you don't know how to create a Bot on Telegram, search for `@BotFather`, send `/newbot` and get your `TELEGRAM_TOKEN`).*
 
 ---
 
