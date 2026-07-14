@@ -57,8 +57,8 @@ def planner_node(state):
 
     # Display the plan to the user — do not start execution yet
     plan_text = t("core.planner.plan_for", goal=goal)
-    for t in tasks:
-        plan_text += f"{t['step']}. {t['description']}\n"
+    for tsk in tasks:
+        plan_text += f"{tsk['step']}. {tsk['description']}\n"
     plan_text += t("core.planner.start_prompt")
 
     # Save the plan to the SQLite state db — the pre_check_node will load itturn_thought
