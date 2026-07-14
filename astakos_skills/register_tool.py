@@ -163,20 +163,22 @@ def register_tool(
     if f"    {tool_name}," in sys_content or f", {tool_name}," in sys_content:
         results.append(f"⚠️  system.py: all_tools already contains {tool_name}")
     else:
-        if "\n]" in sys_content:
-            sys_content = sys_content.replace(
-                "\n]",
-                f"\n    {tool_name},\n]",
-                1
-            )
-            results.append(
-                f"DRY RUN system.py: would add {tool_name} to all_tools"
-                if dry_run else
-                f"✅ system.py: added to all_tools"
-            )
+        idx = sys_content.rfind("all_tools = [")
+        if idx != -1:
+            end_idx = sys_content.find("\n]", idx)
+            if end_idx != -1:
+                sys_content = sys_content[:end_idx] + f"\n    {tool_name}," + sys_content[end_idx:]
+                results.append(
+                    f"DRY RUN system.py: would add {tool_name} to all_tools"
+                    if dry_run else
+                    f"✅ system.py: added to all_tools"
+                )
+            else:
+                errors.append(f"system.py: missing all_tools anchor `\\n]` after `all_tools = [`")
+                results.append(f"⚠️  system.py: all_tools anchor not found — add manually: {tool_name}")
         else:
-            errors.append(f"system.py: missing all_tools anchor `\\n]`")
-            results.append(f"⚠️  system.py: all_tools anchor not found — add manually: {tool_name}")
+            errors.append(f"system.py: missing `all_tools = [` declaration")
+            results.append(f"⚠️  system.py: all_tools not found — add manually: {tool_name}")
 
     # system.py will be written LAST after registry
 
