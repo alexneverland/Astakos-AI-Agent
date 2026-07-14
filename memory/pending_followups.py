@@ -1719,7 +1719,7 @@ def classify_followup_deferral_with_llm(
 ) -> dict:
     import json
     from core.i18n import load_prompt
-    from core.brain import llm
+    from services.gemini import safe_gemini_call
 
     prompt_template = load_prompt("telegram_bot_followup_defer.md")
     prompt = prompt_template.format(
@@ -1729,8 +1729,8 @@ def classify_followup_deferral_with_llm(
         current_user_text=current_user_text,
     )
 
-    response = llm.invoke(prompt)
-    raw = response.content if hasattr(response, "content") else str(response)
+    response = safe_gemini_call(prompt)
+    raw = response.text if hasattr(response, "text") else str(response)
     
     start = raw.find('{')
     end = raw.rfind('}')

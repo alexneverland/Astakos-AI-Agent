@@ -36,7 +36,8 @@ def scan_receipt(image_path: str) -> str:
             ]
         )
         response = llm.invoke([message])
-        result_text = (response.content or "").strip()
+        from core.utils import clean_message
+        result_text = clean_message(response.content)
         from core.utils import extract_json_from_text
         parsed = extract_json_from_text(result_text)
         

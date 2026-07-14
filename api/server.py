@@ -1206,7 +1206,8 @@ async def upload_file(
                     ]
                 )
                 resp = llm.invoke([msg])
-                return resp.content.strip() if resp and resp.content else ""
+                from core.utils import clean_message
+                return clean_message(resp.content) if resp and resp.content else ""
                 
             memory_analysis = analyze_img("Describe what you see in Greek, concisely, 1-2 sentences.")
             if not memory_analysis:
