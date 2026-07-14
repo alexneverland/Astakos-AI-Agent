@@ -163,8 +163,7 @@ def register_tool(
     if f"    {tool_name}," in sys_content or f", {tool_name}," in sys_content:
         results.append(f"⚠️  system.py: all_tools already contains {tool_name}")
     else:
-        # Insert before the closing ]
-        if "]" in sys_content:
+        if "\n]" in sys_content:
             sys_content = sys_content.replace(
                 "\n]",
                 f"\n    {tool_name},\n]",
@@ -176,7 +175,7 @@ def register_tool(
                 f"✅ system.py: added to all_tools"
             )
         else:
-            errors.append(f"system.py: missing all_tools anchor `]`")
+            errors.append(f"system.py: missing all_tools anchor `\\n]`")
             results.append(f"⚠️  system.py: all_tools anchor not found — add manually: {tool_name}")
 
     # system.py will be written LAST after registry

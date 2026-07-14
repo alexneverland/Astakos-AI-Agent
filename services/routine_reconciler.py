@@ -1634,6 +1634,22 @@ def infer_routine_reconciliation_candidates(
         now=current,
     )
 
+    filtered_llm = []
+    for d in llm_candidates:
+        if d.get("kind") == "context_state_set" and d.get("key") == "partner_with_user" and (d.get("value") is False or str(d.get("value")).lower() == "false"):
+            from memory.routine_db import get_context_state
+            state_data = get_context_state("partner_with_user")
+            is_active = False
+            if state_data:
+                expires_at = state_data.get("expires_at")
+                today = current.strftime("%Y-%m-%d")
+                if not expires_at or expires_at >= today:
+                    is_active = str(state_data.get("value")).lower() == "true"
+            if not is_active:
+                continue
+        filtered_llm.append(d)
+    llm_candidates = filtered_llm
+
     # llm_candidates is the primary semantic path
     # the rule candidates are conservative fallback heuristics
     rules = [
