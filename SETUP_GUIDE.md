@@ -62,8 +62,16 @@ LOCATION=us-central1
 TELEGRAM_TOKEN=your-telegram-bot-token
 TELEGRAM_CHAT_ID=your-chat-id
 
-# --- Optional Settings (For extra features) ---
-# If you DO NOT use gcloud auth (Step 3), put your API key here:
+# --- LLM Provider Selection ---
+# Choose your AI brain: vertex, gemini, openai, or anthropic
+LLM_PROVIDER=vertex
+
+# --- API Keys (Depending on your LLM_PROVIDER) ---
+# If using 'openai'
+OPENAI_API_KEY=sk-...
+# If using 'anthropic' (Note: Claude needs OPENAI_API_KEY too for memory embeddings)
+ANTHROPIC_API_KEY=sk-ant-...
+# If using 'gemini' (or as fallback for vertex)
 GEMINI_API_KEY=your-gemini-api-key
 
 # GitHub (For the Tech Agent)

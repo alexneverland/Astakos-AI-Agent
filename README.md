@@ -12,11 +12,14 @@ Astakos is built to feel less like a disposable chatbot and more like a personal
 ✅ Builds long-term memory about your projects, family, photos, documents, and goals  
 ✅ Runs from your own machine with local memory and state  
 ✅ Works across Telegram, Web UI, and terminal sessions  
+✅ 100% LLM-Agnostic: Run with Vertex AI, Gemini API, OpenAI (ChatGPT) or Anthropic (Claude)  
 ✅ Uses tools, approvals, schedulers, and analytics to act when useful
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-FF6B6B?style=for-the-badge&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
-[![Gemini](https://img.shields.io/badge/Gemini-Vertex_AI-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://deepmind.google/gemini/)
+[![Gemini](https://img.shields.io/badge/Gemini-Google-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://deepmind.google/gemini/)
+[![OpenAI](https://img.shields.io/badge/OpenAI-ChatGPT-412991?style=for-the-badge&logo=openai&logoColor=white)](https://openai.com/)
+[![Anthropic](https://img.shields.io/badge/Anthropic-Claude-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://www.anthropic.com/)
 [![ChromaDB](https://img.shields.io/badge/ChromaDB-Vector_Store-FF6B35?style=for-the-badge)](https://www.trychroma.com/)
 [![SQLite](https://img.shields.io/badge/SQLite-WAL_Mode-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
@@ -28,7 +31,7 @@ Astakos is built to feel less like a disposable chatbot and more like a personal
 
 ## 🚀 Getting Started
 
-New to Astakos? Check out our **[Beginner's Setup Guide](SETUP_GUIDE.md)** for step-by-step instructions on how to install and run the agent locally using Google Cloud Vertex AI.
+New to Astakos? Check out our **[Beginner's Setup Guide](SETUP_GUIDE.md)** for step-by-step instructions on how to install and run the agent locally using your preferred LLM provider (Vertex, Gemini API, OpenAI, or Anthropic).
 
 ---
 
@@ -66,7 +69,7 @@ Astakos is local-first:
 - Runtime data, credentials, uploads, caches, databases, logs, and private JSON files are gitignored.
 - You control the machine, the credentials, and the integrations.
 
-Important note: Astakos uses configured external APIs for model calls and integrations, including Gemini / Vertex AI, Telegram, Google APIs, GitHub, Spotify, LinkedIn, and others when those features are enabled. Local-first means the memory and runtime state live on your machine; prompts, uploaded media, or tool payloads may be sent to the external service required by the feature you use.
+Important note: Astakos uses configured external APIs for model calls and integrations, including Gemini / OpenAI / Anthropic, Telegram, Google APIs, GitHub, Spotify, LinkedIn, and others when those features are enabled. Local-first means the memory and runtime state live on your machine; prompts, uploaded media, or tool payloads may be sent to the external service required by the feature you use.
 
 ### Active Local Storage
 
@@ -139,7 +142,7 @@ Legacy empty `.db` leftovers are not part of the active runtime layout.
 | Telegram Bot | Polling bot with text, voice, photo, document, location, routine confirmation, and inline approval handlers. |
 | Web UI | FastAPI server with chat endpoint, upload handling, voice processing, local static assets, and chat history. |
 | Runtime Dashboard | `/debug/runtime` and `/debug` expose scheduler health, jobs, event throughput, routines, goals, pending confirmations, pending follow-ups, pending actions, memory-context previews, shared SQLite stats, session backlog, and a memory-audit panel. Routine tables summarize condition payloads and metadata instead of dumping raw JSON. |
-| Voice I/O | STT via Vertex AI Gemini + TTS via `edge-tts` using `el-GR-NestorasNeural`; mirror mode supports voice in → voice out. |
+| Voice I/O | STT via OpenAI Whisper or Gemini + TTS via `edge-tts` using `el-GR-NestorasNeural`; mirror mode supports voice in → voice out. |
 | Product Analyzer | `/nutrition` scans food, cosmetics, and household product labels with a score from 1-10 and a kids note. |
 | Receipt Scanner | `/receipt` scans the last Telegram photo as a shopping receipt and returns structured JSON with store, date, total, currency, and items. |
 | Smart Photo Pending | Send a photo and Astakos waits 30 seconds for a caption, `/nutrition`, or `/receipt`, avoiding duplicate responses. |
@@ -324,7 +327,7 @@ astakos/
 ├── core/
 │   ├── agents.py             # Agent nodes and supervisor router
 │   ├── approval.py           # CRITICAL action approval gate
-│   ├── brain.py              # Gemini / Vertex AI model initialization
+│   ├── brain.py              # Dynamic LLM initialization (Vertex, Gemini, OpenAI, Anthropic)
 │   ├── capability_lookup.py  # Keyword-based pre-routing registry
 │   ├── event_bus.py          # Pub/sub Event Bus singleton
 │   ├── exceptions.py         # Structured exception hierarchy
@@ -499,7 +502,7 @@ Shutdown behavior:
 
 - [x] Voice I/O — STT + TTS with Greek Neural voice, mirror mode, and `/voice` toggle.
 - [x] Universal product analyzer (`/nutrition`) via Vision LLM.
-- [x] Receipt scanner (`/receipt`) for Telegram photos, returning store/date/total/items JSON through the shared Vertex AI client.
+- [x] Receipt scanner (`/receipt`) for Telegram photos, returning store/date/total/items JSON through the multimodal LLM.
 - [x] Smart photo pending system with a 30s caption window, history context, and no double messages.
 - [x] Document reading on upload with instant summary and optional save to memory.
 - [x] Google Fit integration — steps, sleep phases, heart rate, and morning briefing with correct day/night windows.
