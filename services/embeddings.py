@@ -12,8 +12,7 @@ import threading
 from datetime import datetime
 
 from langchain_core.embeddings import Embeddings
-from langchain_google_vertexai import VertexAIEmbeddings
-
+import config
 from config import PROJECT_ID, LOCATION, EMBEDDINGS_CACHE_DB
 
 
@@ -40,13 +39,28 @@ def _init_db() -> int:
     return count
 
 
-# -- Base Vertex model -------------------------------------------
+# -- Base Embeddings Model -------------------------------------------
+_provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
 
-base_embeddings = VertexAIEmbeddings(
-    model_name="text-embedding-004",
-    project=PROJECT_ID,
-    location=LOCATION,
-)
+if _provider in ["openai", "anthropic"]:
+    from langchain_openai import OpenAIEmbeddings
+    base_embeddings = OpenAIEmbeddings(
+        model="text-embedding-3-small", 
+        api_key=config.OPENAI_API_KEY
+    )
+elif _provider == "gemini":
+    from langchain_google_genai import GoogleGenerativeAIEmbeddings
+    base_embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004", 
+        google_api_key=config.GEMINI_API_KEY
+    )
+else:
+    from langchain_google_vertexai import VertexAIEmbeddings
+    base_embeddings = VertexAIEmbeddings(
+        model_name="text-embedding-004",
+        project=PROJECT_ID,
+        location=LOCATION,
+    )
 
 
 # -- Cache class -------------------------------------------------

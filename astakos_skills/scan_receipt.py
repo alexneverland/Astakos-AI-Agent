@@ -19,16 +19,24 @@ def scan_receipt(image_path: str) -> str:
     prompt = load_prompt("scan_receipt.md")
 
     try:
-        from core.brain import vertex_client
-
-        image = Image.open(image_path)
-        response = vertex_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[prompt, image],
-            config=types.GenerateContentConfig(temperature=0.1),
+        from core.brain import llm
+        import base64
+        from langchain_core.messages import HumanMessage
+        
+        with open(image_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode("utf-8")
+        
+        message = HumanMessage(
+            content=[
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+                },
+            ]
         )
-
-        result_text = (response.text or "").strip()
+        response = llm.invoke([message])
+        result_text = (response.content or "").strip()
         from core.utils import extract_json_from_text
         parsed = extract_json_from_text(result_text)
         

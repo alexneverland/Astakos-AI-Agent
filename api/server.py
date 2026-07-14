@@ -1007,17 +1007,38 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
         with open(debug_path, "wb") as f:
             f.write(audio_data)
         print(f"\033[96m[Web Voice]: Decoding audio ({len(audio_data)} bytes)...\033[0m")
-        client = vertex_client
-        response = client.models.generate_content(
-            model=FAST_MODEL,
-            contents=[
-                {"inline_data": {"mime_type": "audio/webm", "data": audio_data}},
-                t("prompts.ext_speech_to_text")
-            ]
-        )
-        transcription = response.text.strip() if response.text else ""
-        if not transcription or "[SILENCE]" in transcription:
-            return JSONResponse({"error": t("api.server.no_audio_heard")})
+        import config
+        _provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
+        
+        if _provider in ["vertex", "gemini"]:
+            from core.brain import vertex_client
+            client = vertex_client
+            response = client.models.generate_content(
+                model=FAST_MODEL,
+                contents=[
+                    {"inline_data": {"mime_type": "audio/webm", "data": audio_data}},
+                    t("prompts.ext_speech_to_text")
+                ]
+            )
+            transcription = response.text.strip() if response.text else ""
+            if not transcription or "[SILENCE]" in transcription:
+                return JSONResponse({"error": t("api.server.no_audio_heard")})
+                
+        elif _provider == "openai":
+            import requests
+            headers = {"Authorization": f"Bearer {config.OPENAI_API_KEY}"}
+            files = {"file": ("audio.webm", audio_data, "audio/webm")}
+            data = {"model": "whisper-1"}
+            resp = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files=files, data=data)
+            resp_json = resp.json()
+            if "error" in resp_json:
+                return JSONResponse({"error": str(resp_json["error"])}, status_code=500)
+            transcription = resp_json.get("text", "").strip()
+            if not transcription:
+                return JSONResponse({"error": t("api.server.no_audio_heard")})
+                
+        else:
+            return JSONResponse({"error": "Voice input is not supported for this LLM Provider (Anthropic). Please use Text."})
         print(f"\033[92m[Web Voice]: Lazarus said -> {transcription}\033[0m")
         return JSONResponse({"transcription": transcription})
     except Exception as e:
@@ -1162,19 +1183,37 @@ async def upload_file(
         memory_analysis = ""
         detailed_analysis = ""
         if is_image:
-            client = vertex_client
+            from core.brain import llm
+            from langchain_core.messages import HumanMessage
+            import base64
+            import io
+            
             img = Image.open(file_path)
+            if img.mode == 'RGBA':
+                img = img.convert('RGB')
             img.thumbnail((1024, 1024))
-            mem_resp = client.models.generate_content(
-                model=FAST_MODEL,
-                contents=[img, "Describe what you see in Greek, concisely, 1-2 sentences."]
-            )
-            memory_analysis = mem_resp.text.strip() if mem_resp.text else "No analysis available."
-            chat_resp = client.models.generate_content(
-                model=FAST_MODEL,
-                contents=[img, "Analyze the photo in detail in Greek, with humor and liveliness."]
-            )
-            detailed_analysis = chat_resp.text.strip() if chat_resp.text else memory_analysis
+            
+            img_byte_arr = io.BytesIO()
+            img.save(img_byte_arr, format='JPEG')
+            img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
+            
+            def analyze_img(prompt_text):
+                msg = HumanMessage(
+                    content=[
+                        {"type": "text", "text": prompt_text},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
+                    ]
+                )
+                resp = llm.invoke([msg])
+                return resp.content.strip() if resp and resp.content else ""
+                
+            memory_analysis = analyze_img("Describe what you see in Greek, concisely, 1-2 sentences.")
+            if not memory_analysis:
+                memory_analysis = "No analysis available."
+                
+            detailed_analysis = analyze_img("Analyze the photo in detail in Greek, with humor and liveliness.")
+            if not detailed_analysis:
+                detailed_analysis = memory_analysis
             chat_ai_msg = (
                 t("api.server.photo_received", filename=filename) +
                 f"{detailed_analysis}\n\n" +

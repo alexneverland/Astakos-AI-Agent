@@ -15,13 +15,10 @@ from google import genai
 # Ignore warnings to keep the terminal clean
 warnings.filterwarnings("ignore")
 
-# 1. Central Model Definition (Strings)
-FAST_MODEL = "gemini-3.5-flash"
-HEAVY_MODEL = "gemini-3.1-pro-preview"
+# 1. Base Model Definitions
+_provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
 
-# [MASTRO-SHIELD v3]: We keep only the safety categories it accepts
-# the Gemini text generation endpoint. Extra categories such as JAILBREAK/IMAGE_*
-# may raise INVALID_ARGUMENT on certain model paths.
+# [MASTRO-SHIELD v3]: Safety for Google models
 _BN = HarmBlockThreshold.BLOCK_NONE
 custom_safety = {
     HarmCategory.HARM_CATEGORY_HARASSMENT:         _BN,
@@ -31,37 +28,54 @@ custom_safety = {
     HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY:    _BN,
 }
 
-# 2. Model Architect (LangChain Objects)
-# Main LLM (For fast responses, Telegram chat, simple validations)
-llm = ChatGoogleGenerativeAI(
-    model=FAST_MODEL,
-    temperature=0.7,
-    safety_settings=custom_safety,
-    vertexai=True,
-    project=config.PROJECT_ID,
-    location=os.getenv("LOCATION", "global"),
-)
-
-# Heavy LLM (For ChromaDB scanning, complex Tool Use, JSON memory parsing, API design)
-llm_heavy = ChatGoogleGenerativeAI(
-    model=HEAVY_MODEL,
-    temperature=0.1,
-    safety_settings=custom_safety,
-    vertexai=True,
-    project=config.PROJECT_ID,
-    location=os.getenv("LOCATION", "global"),
-)
-
-# 3. Shared Vertex AI raw client (for multimodal: images, audio, documents)
-# The entire codebase pulls from here — a single point of initialization.
-vertex_client = genai.Client(
-    vertexai=True,
-    project=config.PROJECT_ID,
-    location=os.getenv("LOCATION", "global"),
-)
-
+vertex_client = None
 console = Console()
-print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI via GenAI SDK)\033[0m")
+
+if _provider == "openai":
+    from langchain_openai import ChatOpenAI
+    FAST_MODEL = "gpt-4o-mini"
+    HEAVY_MODEL = "gpt-4o"
+    llm = ChatOpenAI(model=FAST_MODEL, temperature=0.7, api_key=config.OPENAI_API_KEY)
+    llm_heavy = ChatOpenAI(model=HEAVY_MODEL, temperature=0.1, api_key=config.OPENAI_API_KEY)
+    print("\033[92m[Brain]: OpenAI Engines Loaded\033[0m")
+
+elif _provider == "anthropic":
+    from langchain_anthropic import ChatAnthropic
+    FAST_MODEL = "claude-3-5-haiku-latest"
+    HEAVY_MODEL = "claude-3-5-sonnet-latest"
+    llm = ChatAnthropic(model=FAST_MODEL, temperature=0.7, api_key=config.ANTHROPIC_API_KEY)
+    llm_heavy = ChatAnthropic(model=HEAVY_MODEL, temperature=0.1, api_key=config.ANTHROPIC_API_KEY)
+    print("\033[92m[Brain]: Anthropic Engines Loaded\033[0m")
+
+elif _provider == "gemini":
+    FAST_MODEL = "gemini-2.5-flash"
+    HEAVY_MODEL = "gemini-2.5-pro"
+    llm = ChatGoogleGenerativeAI(
+        model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety, api_key=config.GEMINI_API_KEY
+    )
+    llm_heavy = ChatGoogleGenerativeAI(
+        model=HEAVY_MODEL, temperature=0.1, safety_settings=custom_safety, api_key=config.GEMINI_API_KEY
+    )
+    # Temporary fallback for un-refactored scripts
+    vertex_client = genai.Client(api_key=config.GEMINI_API_KEY)
+    print("\033[92m[Brain]: Gemini Engines Loaded (API Key)\033[0m")
+
+else:  # default to vertex
+    FAST_MODEL = "gemini-2.5-flash"
+    HEAVY_MODEL = "gemini-2.5-pro"
+    llm = ChatGoogleGenerativeAI(
+        model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety,
+        vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
+    )
+    llm_heavy = ChatGoogleGenerativeAI(
+        model=HEAVY_MODEL, temperature=0.1, safety_settings=custom_safety,
+        vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
+    )
+    vertex_client = genai.Client(
+        vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
+    )
+    print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI)\033[0m")
+
 
 
 def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
