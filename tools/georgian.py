@@ -106,8 +106,11 @@ def tts_audio(text: str, lang: str = "ka") -> bytes:
 
 # ── Quick phrases (pre-translated) ─────────────────────────────────────────
 import ast
-QUICK_PHRASES: dict[str, list[dict[str, str]]] = ast.literal_eval(t("tools.georgian.quick_phrases"))
-
+_raw_phrases = t("tools.georgian.quick_phrases")
+if isinstance(_raw_phrases, dict):
+    QUICK_PHRASES: dict[str, list[dict[str, str]]] = _raw_phrases
+else:
+    QUICK_PHRASES: dict[str, list[dict[str, str]]] = ast.literal_eval(_raw_phrases)
 
 def phrases_message() -> str:
     """Returns a Telegram-ready text with all the quick phrases."""
