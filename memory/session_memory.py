@@ -1962,7 +1962,7 @@ def run_memory_sifter_slow(
         response = safe_gemini_call(sifter_prompt)
         raw_text = response.text.strip()
         
-        if t("prompts.ext_str_680") in raw_text or not raw_text:
+        if t("prompts.ext_str_680") in raw_text or "EMPTY" in raw_text or not raw_text:
             _mark_memory_sifter_processed(
                 fingerprint=fingerprint,
                 user_text=user_text,
