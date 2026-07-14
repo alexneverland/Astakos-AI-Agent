@@ -21,9 +21,14 @@ INTENTS_FILE = os.path.join(BASE_DIR, "astakos_custom_intents.json")
 INTENTS_EXAMPLE = os.path.join(BASE_DIR, "astakos_custom_intents.json.example")
 SETUP_GUIDE_FILE = os.path.join(BASE_DIR, "SETUP_GUIDE.md")
 
+SETTINGS_FILE = os.path.join(BASE_DIR, "astakos_settings.json")
+SETTINGS_EXAMPLE = os.path.join(BASE_DIR, "astakos_settings.json.example")
+PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")
+
 class SetupPayload(BaseModel):
     basic: dict
     advanced: dict
+    prompts: dict
 
 def get_file_content(filepath, fallback_filepath=None):
     if os.path.exists(filepath):
@@ -48,7 +53,6 @@ async def serve_setup_page():
 
 @app.get("/api/raw_files")
 async def get_raw_files():
-    # If .env does not exist, extract the template from SETUP_GUIDE.md or return basic template
     env_content = get_file_content(ENV_FILE)
     if not env_content:
         env_content = """# --- LLM Provider Selection ---
@@ -66,21 +70,38 @@ TELEGRAM_TOKEN=
 TELEGRAM_CHAT_ID=
 """
     
+    prompts_data = {}
+    if os.path.exists(PROMPTS_DIR):
+        for fname in os.listdir(PROMPTS_DIR):
+            if fname.endswith(".md"):
+                fpath = os.path.join(PROMPTS_DIR, fname)
+                with open(fpath, "r", encoding="utf-8") as f:
+                    prompts_data[f"prompts/{fname}"] = f.read()
+                    
+    import json
+    try:
+        settings_raw = get_file_content(SETTINGS_FILE, SETTINGS_EXAMPLE)
+        settings_json = json.loads(settings_raw) if settings_raw else {}
+    except Exception:
+        settings_json = {}
+    
     return {
         "persona": get_file_content(PERSONA_FILE, PERSONA_EXAMPLE),
         "intents": get_file_content(INTENTS_FILE, INTENTS_EXAMPLE),
-        "env": env_content
+        "env": env_content,
+        "settings": settings_json,
+        "prompts": prompts_data
     }
 
 @app.post("/api/setup")
 async def save_setup(payload: SetupPayload):
     adv = payload.advanced
     basic = payload.basic
+    prompts = payload.prompts
     
     # Process ENV
-    new_env = adv.get("env", "").strip()
+    new_env = basic.get("env", "").strip()
     if basic.get("llm_provider") or basic.get("telegram_token"):
-        # We need to parse new_env and inject basic overrides if they were filled out
         env_lines = new_env.split('\n') if new_env else []
         env_map = {}
         for line in env_lines:
@@ -90,7 +111,6 @@ async def save_setup(payload: SetupPayload):
         
         if basic.get("llm_provider"):
             env_map["LLM_PROVIDER"] = basic["llm_provider"]
-            
             provider = basic["llm_provider"]
             if provider == "openai":
                 env_map["OPENAI_API_KEY"] = basic.get("api_key", "")
@@ -104,22 +124,31 @@ async def save_setup(payload: SetupPayload):
         if basic.get("telegram_chat_id"):
             env_map["TELEGRAM_CHAT_ID"] = basic["telegram_chat_id"]
             
-        # Reconstruct env content
         output_env = ""
         for k, v in env_map.items():
             output_env += f"{k}={v}\n"
-        # If user didn't have an env, just write the mapped version.
         new_env = output_env
 
     write_file_content(ENV_FILE, new_env)
     
-    # Write others
-    if adv.get("persona"):
-        write_file_content(PERSONA_FILE, adv["persona"])
-    if adv.get("intents"):
-        write_file_content(INTENTS_FILE, adv["intents"])
+    # Write Settings
+    import json
+    if basic.get("settings"):
+        write_file_content(SETTINGS_FILE, json.dumps(basic["settings"], indent=4))
+    
+    # Write other basics
+    if basic.get("persona"):
+        write_file_content(PERSONA_FILE, basic["persona"])
+    if basic.get("intents"):
+        write_file_content(INTENTS_FILE, basic["intents"])
+        
+    # Write prompts
+    for p_path, content in prompts.items():
+        if p_path.startswith("prompts/") and p_path.endswith(".md"):
+            fname = p_path.replace("prompts/", "")
+            full_path = os.path.join(PROMPTS_DIR, fname)
+            write_file_content(full_path, content)
 
-    # Trigger shutdown so boot.py can continue
     def shutdown():
         time.sleep(2)
         os._exit(0)

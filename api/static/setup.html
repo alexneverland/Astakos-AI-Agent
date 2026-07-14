@@ -13,8 +13,8 @@
         }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-200 min-h-screen flex flex-col items-center justify-center font-sans antialiased">
-    <div class="max-w-4xl w-full mx-auto p-6 relative z-10">
+<body class="bg-gray-900 text-gray-200 min-h-screen flex flex-col items-center justify-center font-sans antialiased py-10">
+    <div class="max-w-5xl w-full mx-auto px-6 relative z-10">
         
         <div class="text-center mb-10">
             <h1 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 mb-2">Astakos AI Agent</h1>
@@ -24,8 +24,8 @@
         <div class="glass-panel rounded-2xl shadow-2xl p-8">
             <!-- Tabs -->
             <div class="flex space-x-4 mb-8 border-b border-gray-700 pb-4">
-                <button onclick="switchTab('basic')" id="tab-basic" class="text-blue-400 font-semibold border-b-2 border-blue-400 pb-2 px-4 transition-all">Basic Setup (Recommended)</button>
-                <button onclick="switchTab('advanced')" id="tab-advanced" class="text-gray-500 font-medium hover:text-gray-300 pb-2 px-4 transition-all">Advanced (Raw Files)</button>
+                <button type="button" onclick="switchTab('basic')" id="tab-basic" class="text-blue-400 font-semibold border-b-2 border-blue-400 pb-2 px-4 transition-all">Basic Settings</button>
+                <button type="button" onclick="switchTab('advanced')" id="tab-advanced" class="text-gray-500 font-medium hover:text-gray-300 pb-2 px-4 transition-all">Advanced Prompts</button>
             </div>
 
             <!-- Form -->
@@ -33,13 +33,14 @@
                 
                 <!-- Basic Tab -->
                 <div id="content-basic" class="space-y-8">
-                    <!-- LLM Configuration -->
+                    
+                    <!-- 1. AI Brain -->
                     <div>
-                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-blue-500/20 text-blue-400 p-2 rounded-lg mr-3">🧠</span> 1. AI Brain</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-blue-500/20 text-blue-400 p-2 rounded-lg mr-3">🧠</span> 1. AI Brain & APIs</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                             <div>
                                 <label class="block text-sm font-medium text-gray-400 mb-2">LLM Provider</label>
-                                <select id="llm_provider" name="llm_provider" onchange="updateApiLabel()" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <select id="llm_provider" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="updateApiLabel()">
                                     <option value="openai">OpenAI (ChatGPT)</option>
                                     <option value="anthropic">Anthropic (Claude)</option>
                                     <option value="gemini">Google Gemini</option>
@@ -48,54 +49,79 @@
                             </div>
                             <div>
                                 <label id="api_key_label" class="block text-sm font-medium text-gray-400 mb-2">API Key</label>
-                                <input type="password" id="api_key" name="api_key" placeholder="sk-..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <p id="api_key_help" class="text-xs text-gray-500 mt-2">Your API key is saved locally in .env and never shared.</p>
+                                <input type="password" id="api_key" placeholder="sk-..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-2">Telegram Token</label>
+                                <input type="password" id="telegram_token" placeholder="123456789:ABCdefGHI..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-2">Your Telegram Chat ID</label>
+                                <input type="text" id="telegram_chat_id" placeholder="12345678" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
                             </div>
                         </div>
                     </div>
 
                     <hr class="border-gray-700">
 
-                    <!-- Telegram Configuration -->
+                    <!-- 2. Personalization -->
                     <div>
-                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-purple-500/20 text-purple-400 p-2 rounded-lg mr-3">📱</span> 2. Telegram Bot</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-green-500/20 text-green-400 p-2 rounded-lg mr-3">👤</span> 2. Personalization</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <div><label class="block text-sm text-gray-400 mb-1">Your Name</label><input type="text" id="user_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
+                            <div><label class="block text-sm text-gray-400 mb-1">Bot Name</label><input type="text" id="bot_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
+                            <div><label class="block text-sm text-gray-400 mb-1">Response Language</label><input type="text" id="response_language" placeholder="English" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
+                            <div><label class="block text-sm text-gray-400 mb-1">Default City</label><input type="text" id="default_city" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
+                            <div><label class="block text-sm text-gray-400 mb-1">Partner Name</label><input type="text" id="partner_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
+                            <div><label class="block text-sm text-gray-400 mb-1">Kids Names (Comma separated)</label><input type="text" id="kids_names" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white"></div>
+                        </div>
+                    </div>
+
+                    <hr class="border-gray-700">
+
+                    <!-- 3. Core Files -->
+                    <div>
+                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-orange-500/20 text-orange-400 p-2 rounded-lg mr-3">⚙️</span> 3. Core Config Files</h2>
+                        <div class="space-y-6">
                             <div>
-                                <label class="block text-sm font-medium text-gray-400 mb-2">Telegram Token</label>
-                                <input type="password" id="telegram_token" name="telegram_token" placeholder="123456789:ABCdefGHI..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                <p class="text-xs text-gray-500 mt-2">Get this from @BotFather on Telegram.</p>
+                                <label class="block text-sm font-medium text-blue-400 mb-2">persona.md (Define the agent's core personality)</label>
+                                <textarea id="persona_content" rows="6" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-gray-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-400 mb-2">Your Chat ID</label>
-                                <input type="text" id="telegram_chat_id" name="telegram_chat_id" placeholder="12345678" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                <p class="text-xs text-gray-500 mt-2">Your personal Telegram Chat ID.</p>
+                                <label class="block text-sm font-medium text-purple-400 mb-2">astakos_custom_intents.json (Define custom triggers/wake words)</label>
+                                <textarea id="intents_content" rows="6" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-gray-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"></textarea>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-green-400 mb-2">.env (Raw environment variables)</label>
+                                <textarea id="env_content" rows="6" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-gray-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-green-500"></textarea>
                             </div>
                         </div>
                     </div>
+
                 </div>
 
                 <!-- Advanced Tab -->
                 <div id="content-advanced" class="hidden space-y-6">
-                    <p class="text-gray-400 text-sm mb-4">Edit the raw configuration files directly. These will be saved to your local disk.</p>
-                    
                     <div>
-                        <label class="block text-sm font-medium text-blue-400 mb-2">persona.md</label>
-                        <textarea id="persona_content" name="persona_content" rows="6" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-gray-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-purple-400 mb-2">astakos_custom_intents.json</label>
-                        <textarea id="intents_content" name="intents_content" rows="8" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-gray-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"></textarea>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-green-400 mb-2">.env (Raw view)</label>
-                        <textarea id="env_content" name="env_content" rows="6" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-gray-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-green-500"></textarea>
-                        <p class="text-xs text-gray-500 mt-2">Any manual edits here will override the basic tab.</p>
+                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-red-500/20 text-red-400 p-2 rounded-lg mr-3">🔥</span> Prompt Editor</h2>
+                        <p class="text-gray-400 text-sm mb-4">Select any prompt file from the system to customize the agent's specific behaviors.</p>
+                        
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-400 mb-2">Select Prompt File</label>
+                            <select id="prompt_selector" onchange="loadPrompt()" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-red-500">
+                                <!-- Options populated via JS -->
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <textarea id="prompt_editor" rows="20" oninput="saveCurrentPrompt()" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-gray-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-red-500"></textarea>
+                        </div>
                     </div>
                 </div>
 
-                <div class="mt-10 flex justify-end">
+                <div class="mt-10 flex justify-end sticky bottom-4">
                     <button type="submit" id="saveBtn" class="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-bold py-3 px-8 rounded-lg shadow-lg transform transition hover:scale-105 flex items-center">
                         <span>Save & Boot Astakos</span>
                         <svg class="w-5 h-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
@@ -121,23 +147,22 @@
     </div>
 
     <script>
+        let promptsData = {};
+        let currentPromptFile = "";
+
         function switchTab(tab) {
             if(tab === 'basic') {
                 document.getElementById('content-basic').classList.remove('hidden');
                 document.getElementById('content-advanced').classList.add('hidden');
-                
                 document.getElementById('tab-basic').classList.add('text-blue-400', 'border-b-2', 'border-blue-400');
                 document.getElementById('tab-basic').classList.remove('text-gray-500', 'hover:text-gray-300');
-                
                 document.getElementById('tab-advanced').classList.remove('text-blue-400', 'border-b-2', 'border-blue-400');
                 document.getElementById('tab-advanced').classList.add('text-gray-500', 'hover:text-gray-300');
             } else {
                 document.getElementById('content-basic').classList.add('hidden');
                 document.getElementById('content-advanced').classList.remove('hidden');
-                
                 document.getElementById('tab-advanced').classList.add('text-blue-400', 'border-b-2', 'border-blue-400');
                 document.getElementById('tab-advanced').classList.remove('text-gray-500', 'hover:text-gray-300');
-                
                 document.getElementById('tab-basic').classList.remove('text-blue-400', 'border-b-2', 'border-blue-400');
                 document.getElementById('tab-basic').classList.add('text-gray-500', 'hover:text-gray-300');
             }
@@ -156,13 +181,16 @@
             try {
                 const res = await fetch('/api/raw_files');
                 const data = await res.json();
+                
+                // Populate Text Areas
                 document.getElementById('persona_content').value = data.persona || '';
                 document.getElementById('intents_content').value = data.intents || '';
                 document.getElementById('env_content').value = data.env || '';
                 
+                // Populate ENV basics
                 if (data.env) {
                     const envMap = {};
-                    data.env.split('\\n').forEach(line => {
+                    data.env.split('\n').forEach(line => {
                         const parts = line.split('=');
                         if (parts.length >= 2) envMap[parts[0].trim()] = parts.slice(1).join('=').trim();
                     });
@@ -179,8 +207,49 @@
                     if (envMap['TELEGRAM_TOKEN']) document.getElementById('telegram_token').value = envMap['TELEGRAM_TOKEN'];
                     if (envMap['TELEGRAM_CHAT_ID']) document.getElementById('telegram_chat_id').value = envMap['TELEGRAM_CHAT_ID'];
                 }
+                
+                // Populate Settings basics
+                const s = data.settings || {};
+                if(s.user_name) document.getElementById('user_name').value = s.user_name;
+                if(s.bot_name) document.getElementById('bot_name').value = s.bot_name;
+                if(s.default_city) document.getElementById('default_city').value = s.default_city;
+                if(s.response_language) document.getElementById('response_language').value = s.response_language;
+                if(s.partner_name) document.getElementById('partner_name').value = s.partner_name;
+                
+                let kids = [];
+                if(s.kid1_name) kids.push(s.kid1_name);
+                if(s.kid2_name) kids.push(s.kid2_name);
+                document.getElementById('kids_names').value = kids.join(', ');
+
+                // Populate Prompts
+                promptsData = data.prompts || {};
+                const selector = document.getElementById('prompt_selector');
+                Object.keys(promptsData).sort().forEach(key => {
+                    const opt = document.createElement('option');
+                    opt.value = key;
+                    opt.innerHTML = key;
+                    selector.appendChild(opt);
+                });
+                if(Object.keys(promptsData).length > 0) {
+                    loadPrompt();
+                }
+                
             } catch (err) {
                 console.error("Failed to load initial data", err);
+            }
+        }
+
+        function loadPrompt() {
+            const selector = document.getElementById('prompt_selector');
+            currentPromptFile = selector.value;
+            if(currentPromptFile && promptsData[currentPromptFile] !== undefined) {
+                document.getElementById('prompt_editor').value = promptsData[currentPromptFile];
+            }
+        }
+
+        function saveCurrentPrompt() {
+            if(currentPromptFile) {
+                promptsData[currentPromptFile] = document.getElementById('prompt_editor').value;
             }
         }
 
@@ -190,19 +259,33 @@
             btn.innerHTML = '<span class="animate-pulse">Saving...</span>';
             btn.disabled = true;
             
-            // Only send basic variables if they were filled out, else rely on advanced textareas
+            // Build Settings JSON
+            const kidsStr = document.getElementById('kids_names').value;
+            const kids = kidsStr.split(',').map(k => k.trim()).filter(k => k);
+            
+            const settingsObj = {
+                user_name: document.getElementById('user_name').value,
+                bot_name: document.getElementById('bot_name').value,
+                default_city: document.getElementById('default_city').value,
+                response_language: document.getElementById('response_language').value,
+                partner_name: document.getElementById('partner_name').value
+            };
+            if(kids.length > 0) settingsObj.kid1_name = kids[0];
+            if(kids.length > 1) settingsObj.kid2_name = kids[1];
+
             const payload = {
                 basic: {
                     llm_provider: document.getElementById('llm_provider').value,
                     api_key: document.getElementById('api_key').value,
                     telegram_token: document.getElementById('telegram_token').value,
-                    telegram_chat_id: document.getElementById('telegram_chat_id').value
-                },
-                advanced: {
+                    telegram_chat_id: document.getElementById('telegram_chat_id').value,
                     persona: document.getElementById('persona_content').value,
                     intents: document.getElementById('intents_content').value,
-                    env: document.getElementById('env_content').value
-                }
+                    env: document.getElementById('env_content').value,
+                    settings: settingsObj
+                },
+                advanced: {}, // Not used anymore directly
+                prompts: promptsData
             };
 
             try {
