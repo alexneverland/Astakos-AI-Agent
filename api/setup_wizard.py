@@ -159,7 +159,10 @@ async def save_setup(payload: SetupPayload):
     return {"status": "success"}
 
 def run_wizard():
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="error")
+    host = os.getenv("ASTAKOS_SETUP_HOST", "127.0.0.1")
+    port = int(os.getenv("ASTAKOS_SETUP_PORT", "8000"))
+    print(f"Setup Wizard: http://{host}:{port}")
+    uvicorn.run(app, host=host, port=port, log_level="error")
 
 if __name__ == "__main__":
     run_wizard()

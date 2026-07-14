@@ -133,14 +133,36 @@ WORK_RADIUS_M = _settings.get("work_radius_m", 300) if "_settings" in locals() e
 # ==========================================
 # 7. NLP DICTIONARY (astakos_nlp.json)
 # ==========================================
-NLP_FILE = os.path.join(BASE_DIR, "astakos_nlp.json")
-NLP_CONFIG = {}
-if os.path.exists(NLP_FILE):
-    try:
-        with open(NLP_FILE, "r", encoding="utf-8") as f:
-            NLP_CONFIG = json.load(f)
-    except Exception as e:
-        print(f"⚠️ Error reading NLP config: {e}")
+def _deep_merge_dicts(base: dict, custom: dict) -> dict:
+    merged = dict(base)
+    for key, value in custom.items():
+        if isinstance(merged.get(key), dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        elif isinstance(merged.get(key), list) and isinstance(value, list):
+            merged[key] = list(dict.fromkeys(merged[key] + value))
+        else:
+            merged[key] = value
+    return merged
+
+def _load_nlp_config() -> dict:
+    lang_code = "el" if RESPONSE_LANGUAGE.lower() == "greek" else "en"
+    base_path = os.path.join(BASE_DIR, "core", f"intents_{lang_code}.json")
+    custom_path = os.path.join(BASE_DIR, "astakos_custom_intents.json")
+    legacy_path = os.path.join(BASE_DIR, "astakos_nlp.json")
+
+    data = {}
+    for path in (base_path, legacy_path, custom_path):
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            data = _deep_merge_dicts(data, loaded)
+        except Exception as e:
+            print(f"⚠️ Error reading NLP config {path}: {e}")
+    return data
+
+NLP_CONFIG = _load_nlp_config()
 # ==========================================
 # 7. CONTEXT SCHEMA
 # ==========================================

@@ -6,7 +6,6 @@ import sys
 
 # Ensure root is in path for config import
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import config
 
 TEST_CUSTOM_INTENTS_PATH = os.path.join(os.path.dirname(__file__), '..', 'astakos_custom_intents.json')
 BACKUP_PATH = os.path.join(os.path.dirname(__file__), '..', 'astakos_custom_intents.json.bak')
