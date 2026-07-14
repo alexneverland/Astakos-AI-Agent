@@ -48,8 +48,8 @@ elif _provider == "anthropic":
     print("\033[92m[Brain]: Anthropic Engines Loaded\033[0m")
 
 elif _provider == "gemini":
-    FAST_MODEL = "gemini-2.5-flash"
-    HEAVY_MODEL = "gemini-2.5-pro"
+    FAST_MODEL = "gemini-3.5-flash"
+    HEAVY_MODEL = "gemini-3.1-pro-preview"
     llm = ChatGoogleGenerativeAI(
         model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety, api_key=config.GEMINI_API_KEY
     )
@@ -61,8 +61,8 @@ elif _provider == "gemini":
     print("\033[92m[Brain]: Gemini Engines Loaded (API Key)\033[0m")
 
 else:  # default to vertex
-    FAST_MODEL = "gemini-2.5-flash"
-    HEAVY_MODEL = "gemini-2.5-pro"
+    FAST_MODEL = "gemini-3.5-flash"
+    HEAVY_MODEL = "gemini-3.1-pro-preview"
     llm = ChatGoogleGenerativeAI(
         model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety,
         vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
