@@ -2227,7 +2227,7 @@ def handle_location(msg, live_update=False):
                 )
                 pending = cursor.fetchall()
                 if pending:
-                    print("HANDLE_LOCATION PENDING:", pending)
+                    pass # print("HANDLE_LOCATION PENDING:", pending)
                 for rid, task, tm in pending:
                     target = tm.split(":", 1)[1] if tm and ":" in tm else "home"
                     if target == "home":
@@ -3795,7 +3795,7 @@ def job_check_routines():
                     conflict_group = db_conflict_group if db_conflict_group else _get_conflict_group(event_name)
                 
                     if conflict_group in triggered_conflict_groups:
-                        print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' skipped due to conflict with higher priority routine in group '{conflict_group}'")
+                        # print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' skipped due to conflict with higher priority routine in group '{conflict_group}'")
                         continue
 
                     # ── Seasonal/temporary inactivity check (paused_until / active window) ──
