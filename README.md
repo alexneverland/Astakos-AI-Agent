@@ -13,7 +13,7 @@ Astakos remembers useful context, learns recurring routines, follows up naturall
 [![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-FF6B6B?style=for-the-badge&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
 
-[Beginner Setup Guide](SETUP_GUIDE.md) · [Screenshots](#screenshots) · [Features](#what-astakos-can-do) · [Architecture](#architecture) · [Roadmap](#roadmap)
+[Download v2.0.0](https://github.com/alexneverland/Astakos-AI-Agent/archive/refs/tags/v2.0.0.zip) · [Beginner Setup Guide](SETUP_GUIDE.md) · [Screenshots](#screenshots) · [Features](#what-astakos-can-do) · [Architecture](#architecture) · [Roadmap](#roadmap)
 
 </div>
 
@@ -39,7 +39,11 @@ The Web Setup Wizard guides you through provider selection and configuration.
 
 **No manual Python environment. No dependency hunting. No Playwright setup. Docker handles the runtime.**
 
-Prefer not to use Git? Download the repository as a ZIP, extract it, open a terminal in the folder, and run:
+Prefer not to use Git?
+
+[**Download Astakos v2.0.0 as ZIP**](https://github.com/alexneverland/Astakos-AI-Agent/archive/refs/tags/v2.0.0.zip)
+
+Extract the ZIP, open a terminal inside the extracted folder, and run:
 
 ```bash
 docker compose up --build -d
