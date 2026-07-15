@@ -4,7 +4,7 @@ from core import nl_config
 from core.i18n import t
 from services.gemini import safe_gemini_call
 from core.utils import clean_message
-from memory.routine_db import set_context_state
+from memory.routine_db import set_context_state, get_context_state
 from memory.conversation_history import load_recent_context
 from datetime import datetime
 from services.routine_reconciler import (
@@ -87,6 +87,26 @@ User Message: "{user_text}"
 AI Answer (recent/current): "{ai_text}"
 """
 
+
+def _has_communication_verb(text: str) -> bool:
+    t = _normalize_live_text(text)
+    comms = [
+        "μίλησα μαζί", "μιλησα μαζι", "μίλησα με", "μιλησα με",
+        "μίλησα στο τηλέφωνο", "μιλησα στο τηλεφωνο", "πήρα τηλέφωνο",
+        "πηρα τηλεφωνο", "με πήρε", "με πηρε", "μου είπε", "μου ειπε",
+        "μου έστειλε", "μου εστειλε", "στείλαμε", "στειλαμε", "chat", "μήνυμα", "μηνυμα"
+    ]
+    return any(c in t for c in comms)
+
+def _has_strong_presence(text: str) -> bool:
+    t = _normalize_live_text(text)
+    strong = [
+        "είμαι με", "ειμαι με", "είμαστε μαζί", "ειμαστε μαζι",
+        "είναι μαζί μου", "ειναι μαζι μου", "είμαστε εδώ μαζί",
+        "ειμαστε εδω μαζι", "είμαστε σπίτι μαζί", "ειμαστε σπιτι μαζι",
+        "είμαστε έξω μαζί", "ειμαστε εξω μαζι"
+    ]
+    return any(s in t for s in strong)
 
 def _looks_like_future_departure(text: str) -> bool:
     t = clean_message(text or "").strip().lower()
@@ -231,6 +251,43 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             if has_recent_sofia and has_recent_alexandros:
                 payload["kid1_with_partner"] = True
 
+
+        # 1. Hard negative rule for communication
+        has_comm = _has_communication_verb(user_text)
+        has_strong = _has_strong_presence(user_text)
+        is_explicit_family = _looks_like_everyone_together(user_text)
+
+        if has_comm and not has_strong:
+            if payload.get("partner_with_user"): payload["partner_with_user"] = False
+            if payload.get("kid1_with_user"): payload["kid1_with_user"] = False
+            if payload.get("kid1_with_partner"): payload["kid1_with_partner"] = False
+
+        # 2. Precedence guard: user_at_work beats weak presence
+        current_work = get_context_state("user_at_work")
+        is_at_work = current_work and current_work.get("value") == "true"
+        if is_at_work and not has_strong:
+            if payload.get("partner_with_user"):
+                print("[ContextExtractor] Ignored partner_with_user=true due to existing user_at_work=true and weak presence")
+                payload["partner_with_user"] = False
+
+        # 3. Subject propagation logic cutoff for kid1
+        kid1_names = nl_config.CE_KID1_NAMES
+        recent_hint_str = _recent_family_context_hint(channel=channel)
+        has_kid_in_recent = any(k in recent_hint_str for k in kid1_names)
+        
+        has_kid_explicit = (
+            any(k in normalized_user for k in kid1_names) or 
+            is_explicit_family or 
+            (_looks_like_found_them_reply(user_text) and has_kid_in_recent)
+        )
+        
+        if not has_kid_explicit:
+            if payload.get("kid1_with_user"):
+                print("[ContextExtractor] Ignored kid1_with_user cascade due to lack of explicit mention")
+                payload["kid1_with_user"] = False
+            if payload.get("kid1_with_partner"):
+                print("[ContextExtractor] Ignored kid1_with_partner cascade due to lack of explicit mention")
+                payload["kid1_with_partner"] = False
 
         for key, value in payload.items():
             if key in valid_keys and isinstance(value, bool):

@@ -22,8 +22,10 @@ def mock_gemini():
 
 @pytest.fixture
 def mock_db():
-    with patch("services.context_extractor.set_context_state") as m:
-        yield m
+    with patch("services.context_extractor.set_context_state") as m_set, \
+         patch("services.context_extractor.get_context_state") as m_get:
+        m_get.return_value = None
+        yield m_set
 
 @pytest.fixture
 def mock_reconciler():
