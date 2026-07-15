@@ -42,7 +42,7 @@ def generate_excel(output_path: str, data_json: str, sheet_name: str = "Sheet1",
     Creates an Excel file (.xlsx) from data.
 
     Args:
-        output_path: Full file path, e.g., 'C:\\Users\\PC\\Desktop\\report.xlsx'.
+        output_path: Full file path, e.g., 'outputs/report.xlsx'.
                      If only a name is provided, it is saved to the Desktop.
         data_json:   JSON string with a list of dicts.
                      Example: '[{"Name":"Person1","Age":30},{"Name":"Person2","Age":25}]'
@@ -143,7 +143,7 @@ def generate_word_doc(output_path: str, content: str, title: str = "", subtitle:
     Creates a Word file (.docx) from text.
 
     Args:
-        output_path: Full path, e.g., 'C:\\Users\\PC\\Desktop\\report.docx'.
+        output_path: Full path, e.g., 'outputs/report.docx'.
         content:     Document text. Supports:
                      - Empty line = new paragraph
                      - Lines starting with '## ' = Heading 2
@@ -207,7 +207,7 @@ def generate_pdf(output_path: str, content: str, title: str = "", author: str = 
     Creates a PDF file from text.
 
     Args:
-        output_path: Full path, e.g., 'C:\\Users\\PC\\Desktop\\report.pdf'.
+        output_path: Full path, e.g., 'outputs/report.pdf'.
         content:     Text. Supports:
                      - Lines starting with '## ' = section header
                      - Lines starting with '- ' = bullet
@@ -308,7 +308,7 @@ def generate_csv(output_path: str, data_json: str, delimiter: str = ",") -> str:
     Creates a CSV file from data.
 
     Args:
-        output_path: Full path, e.g. 'C:\\Users\\PC\\Desktop\\data.csv'.
+        output_path: Full path, e.g. 'outputs/data.csv'.
         data_json:   JSON string with a list of dicts.
                      Example: '[{"Code":"001","Price":9.99}]'
         delimiter:   Delimiter (default: ',').

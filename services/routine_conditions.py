@@ -110,7 +110,7 @@ def _evaluate_context_flag(payload: dict, mode: str, context: dict) -> dict:
     expected = payload.get("equals")
 
     # Handle direct key-value payload if "flag" is missing
-    # Example: {"alexandros_present": True, "family_at_home": True}
+    # Example: {"kid1_present": True, "family_at_home": True}
     if not flag:
         direct_pairs = {k: v for k, v in payload.items() if k not in ("flag", "equals")}
         if not direct_pairs:

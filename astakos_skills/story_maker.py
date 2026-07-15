@@ -1,6 +1,6 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Skill: Story Maker for Alexander
+# Skill: Story Maker for children
 # Generates a fairy tale + 3 scene images via Pollinations.ai
 # ================================================================
 

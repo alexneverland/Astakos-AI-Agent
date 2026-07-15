@@ -104,14 +104,14 @@ Legacy empty `.db` leftovers are not part of the active runtime layout.
 | Multi-Agent Orchestration | LangGraph Supervisor routes to Chat, Home, Web, Tech, Git, Mail, and Dev agents. |
 | Hybrid Memory | ChromaDB vector store + shared SQLite history + SQLite profile/session state for semantic, temporal, and structured memory. |
 | Routine State Machine | `LEARNED → ACTIVE → TRIGGER_PENDING → CONFIRMED / IGNORED / DISMISSED → DECAYED → ARCHIVED`. |
-| Context-Aware Proactive Routines | Routine context flags (`alexandros_away_from_home`, `alexandros_away_reason`, `state:alexandros:outing`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, `user_out_of_home`, `quiet_hours`) are resolved from `context_state` before trigger time, and routines can be condition-gated instead of hard-paused. |
+| Context-Aware Proactive Routines | Routine context flags (`kid1_away_from_home`, `kid1_away_reason`, `state:kid1:outing`, `school_open`, `football_season`, `current_shift`, `partner_work_mode`, `user_at_work`, `user_out_of_home`, `quiet_hours`) are resolved from `context_state` before trigger time, and routines can be condition-gated instead of hard-paused. |
 | Conversational Follow-up Engine | Astakos can create delayed follow-up threads from natural conversation (for example food purchases, outings, or task progress), dedupe them by topic/arc, resolve them later from user replies, and send a natural Telegram follow-up only when it still makes sense. |
 | Nightly Analytics Engine | LLM batch-analyzes the last 30 days of shared SQLite conversation history to detect recurring patterns automatically. |
 | LLM-Crafted Proactive Messages | Reminder text is generated naturally by the LLM instead of static templates, with recent Telegram/Web history and timestamps injected so messages feel contextual instead of random. |
 | Central Scheduler | `AstakosScheduler` runs a single background scheduler with watchdogs, rate limits, and quiet hours. |
 | Anti-Spam Intelligence | Adaptive cooldown: 20h → 40h → 72h on repeated ignores, plus batching for simultaneous routines. |
 | Capability Registry | Keyword-based pre-routing before the LLM Supervisor for faster dispatch and fewer wasted tokens. 37 capabilities with `name`, `agent`, `risk_level`, `priority`, and `triggers` fields. |
-| LLM Routine Judge | Routine confirmation uses a fast Gemini call to interpret natural-language replies ("θα πάω να τους βρω") instead of keyword-only matching. Falls back to UNCLEAR on failure. |
+| LLM Routine Judge | Routine confirmation uses a fast Gemini call to interpret natural-language replies ("I'll go find them") instead of keyword-only matching. Falls back to UNCLEAR on failure. |
 | File Generator Tools | `generate_excel`, `generate_word_doc`, `generate_pdf`, `generate_csv` — create formatted files from agent-supplied data and save to any path (defaults to Desktop). Risk: SAFE. |
 | File Delivery | When a file is created, the Web UI shows a file card with a **📂 Google Drive** button (upload-on-click + inline preview iframe). Telegram receives the actual file via `sendDocument`. |
 | Google Drive Upload | `tools/gdrive.py` — uploads any local file to Google Drive via ADC, sets public read permissions, and returns a shareable view URL. Used by the Web UI `/upload-to-drive` endpoint. |
@@ -173,7 +173,7 @@ Legacy empty `.db` leftovers are not part of the active runtime layout.
 | Tool Risk Registry | `core/tool_risk.py` defines SAFE / WARNING / CRITICAL behavior per tool. |
 | Latency Controls | Web and Telegram use context-aware fast paths, medium paths, semantic downshifts, and tool-output detection to avoid paying full retrieval cost on simple acknowledgements, reminder requests, recent web follow-ups, and other lightweight turns. |
 | Skill Creation Flow | New skills are created with `write_custom_tool`, validated for `@tool`, previewed with `register_tool(dry_run=True)`, and applied only after approval. Skills that need Gemini/vision use shared `core.brain` clients instead of raw API keys. |
-| Planner v2 | `/plan` decomposes a goal into tasks with a **confirmation gate** before execution. Auto-plan LLM judge detects multi-step intent without needing `/plan`. Progress UI shows `⏳ Βήμα X/N` per step. `validate_step_node` detects failures via AI response + tool output heuristics. `replan_node` auto-skips failed steps and continues. `end_check_node` generates a final summary (`✅` / `⚠️ X/N βήματα επιτυχή`) and saves a post-plan reflection. |
+| Planner v2 | `/plan` decomposes a goal into tasks with a **confirmation gate** before execution. Auto-plan LLM judge detects multi-step intent without needing `/plan`. Progress UI shows `⏳ Step X/N` per step. `validate_step_node` detects failures via AI response + tool output heuristics. `replan_node` auto-skips failed steps and continues. `end_check_node` generates a final summary (`✅` / `⚠️ X/N stepτα επιτυχή`) and saves a post-plan reflection. |
 | Execution Trace System | Every agent turn records agent name, tools called, duration, errors, and loop events to `logs/traces/YYYY-MM-DD.json`. Viewable at `/debug/traces` and the runtime dashboard with colored tool names, response preview, issue-only/clean filters, and optional hiding of old resolved issues. |
 | Tool Performance Stats | `tool_stats(days=N)` reads execution traces and returns per-tool call count, error count, error rate, and average duration — sorted by errors descending. Ask Astakos "tool stats last 7 days" for an instant health report. |
 | System Doctor | `system_doctor(days=N)` gives a read-only runtime health summary from logs, traces, pending approvals, Messenger drafts, session backlog, memory audit ops, routine confirmations, conditioned routines, proactive skip reasons, and the resolved runtime context. Default is today (`days=1`). Ask `/doctor` or "check system health" without opening the debug dashboard. |
@@ -252,6 +252,7 @@ Background jobs run through `AstakosScheduler`:
 | `job_check_routines` | 60s | Adaptive routine reminders and anti-spam cooldowns. |
 | `job_check_pending_followups` | 10m | Sends delayed conversational follow-ups only when they are still due, unsolved, and not blocked by anti-spam guards. |
 | `job_proactive_scan` | 12h | Watch-folder analysis and proactive scan. |
+| `job_morning_hn_briefing` | 1h | Fires in the morning and sends a Hacker News technology briefing once per day. |
 | `job_morning_fit_briefing` | 1h | Fires at 08:00 for the Google Fit morning summary: yesterday's steps, last night's sleep, and heart rate. |
 | `job_goal_followup` | 1h | Fires at 10:00 for stale-goal semantic checks. |
 | `run_analytics` | Nightly 03:00 | Incremental LLM routine detection after bootstrap; falls back to 30-day scan until `analytics_state.db` is initialized. |
@@ -277,7 +278,7 @@ How it works:
 2. **Incremental Nightly Analytics** — after bootstrap, every 03:00 run reads only new shared SQLite messages after the last processed `rowid`, instead of re-reading the full 30-day window.
 3. **Pattern Detection** — candidate activities are grouped by day/time bucket (±15 min), merged if similar, and promoted only after they meet the routine threshold.
 4. **Threshold** — a routine is saved only if it appears 3+ times across 2+ different weeks. Final writes always go through `upsert_routine`, preserving fingerprint/fuzzy/embedding dedupe.
-5. **Runtime Context Resolution** - before a routine fires, Astakos resolves live flags such as `current_shift`, `alexandros_away_from_home`, `state:alexandros:outing`, and `user_out_of_home` from `context_state`.
+5. **Runtime Context Resolution** - before a routine fires, Astakos resolves live flags such as `current_shift`, `kid1_away_from_home`, `state:kid1:outing`, and `user_out_of_home` from `context_state`.
 6. **Condition Evaluation** - outing-like routines, child routines, and home-only routines can be condition-blocked instead of deleted or blindly muted; for example, a park reminder can be skipped if the family is already out, and cooking can be skipped if everyone is away from home.
 7. **Proactive Message** - when a routine is due in about 30 minutes, the LLM writes a natural message using the routine context plus recent shared Telegram/Web history with timestamps.
 
@@ -509,6 +510,8 @@ Shutdown behavior:
 
 ### Implemented
 
+- [x] Hacker News Briefing — native `hn_briefing` tool with scheduler support, Web_Agent registration, and deterministic fallback formatting.
+
 - [x] Voice I/O — STT + TTS with Greek Neural voice, mirror mode, and `/voice` toggle.
 - [x] Universal product analyzer (`/nutrition`) via Vision LLM.
 - [x] Receipt scanner (`/receipt`) for Telegram photos, returning store/date/total/items JSON through the multimodal LLM.
@@ -550,8 +553,8 @@ Shutdown behavior:
 - [x] Memory Context Debugging — `/debug` shows recent, SQLite, and Chroma context counts/previews for the last prompt build.
 - [x] Category-Safe Memory Overwrite — same-category Chroma matches use helper-tested correction, staleness, richness, and length tie-break rules before replacing old facts.
 - [x] Deterministic Memory Priority Guard — temporary family-state memories (camp, absence, return-home windows) now win over generic day-event capture, and near-identical confirmed saves are skipped before they can double-write in the same turn.
-- [x] Routine Context Flags — routines now read resolved context_state such as `alexandros_away_from_home`, `school_open`, `football_season`, `current_shift`, `sofia_work_mode`, `user_at_work`, and `quiet_hours` instead of relying only on blunt mute/pause windows.
-- [x] Context-State Reconciliation — facts like “Kid1 γύρισε σπίτι” now flip context state (`alexandros_away_from_home=false`) through the reconciler instead of only unmuting routines by name.
+- [x] Routine Context Flags — routines now read resolved context_state such as `kid1_away_from_home`, `school_open`, `football_season`, `current_shift`, `partner_work_mode`, `user_at_work`, and `quiet_hours` instead of relying only on blunt mute/pause windows.
+- [x] Context-State Reconciliation — facts like “Kid1 came back home” now flip context state (`kid1_away_from_home=false`) through the reconciler instead of only unmuting routines by name.
 - [x] Smart Weekend Filter — automatically skip applying `shift_mode` conditions to weekend-only routines unless explicitly requested, preventing work-shift rules from breaking weekend habits.
 - [x] Debug Dashboard Condition UX — evaluate and display actual state (`actual_value`) for each condition individually, and prominently show a PAUSED badge instead of ACTIVE for routines paused until a specific date.
 
@@ -560,7 +563,7 @@ Shutdown behavior:
 - [x] File Delivery — when a file is created (`[CREATED_FILE:]` tag), the Web UI renders a file card with a **📂 Google Drive** button; clicking uploads to Drive via ADC and opens an inline preview iframe. Telegram sends the actual file via `sendDocument` with an optional inline Drive link button.
 - [x] Tool Risk Rationalization — file creation tools (`create_file_tool`, `generate_excel`, `generate_word_doc`, `generate_pdf`, `generate_csv`), `save_to_memory`, and mail read actions (`search`, `read`, `read_full`) demoted from WARNING to SAFE to eliminate notification noise.
 - [x] Project Code Tools — `read_project_file`, `edit_project_file` (old→new patch + syntax check + rollback), `write_project_file`, `grep_project_files`, `list_project_files` with a JSON permission model (`project_access.json`). Core files escalate to CRITICAL; other edits are WARNING.
-- [x] LLM Routine Judge — implicit routine confirmation replaced with a fast Gemini call that returns YES / NO / UNCLEAR. Natural phrases like "θα πάω να τους βρω" now correctly confirm a pending park routine without requiring event keywords. Fallback to UNCLEAR on LLM error.
+- [x] LLM Routine Judge — implicit routine confirmation replaced with a fast Gemini call that returns YES / NO / UNCLEAR. Natural phrases like "I'll go find them" now correctly confirm a pending park routine without requiring event keywords. Fallback to UNCLEAR on LLM error.
 - [x] WARNING Telegram Notifications — WARNING-tier tool calls (e.g. `git push`) send an informational Telegram message without blocking execution; only CRITICAL actions require approval.
 - [x] Tool Performance Stats — `tool_stats(days=N)` aggregates execution traces and reports per-tool calls, errors, error rate, and avg duration sorted by error count. Registered in Capability Registry under Tech_Agent.
 - [x] System Doctor — `system_doctor(days=N)` summarizes runtime health from event logs, execution traces, pending approvals, Messenger draft state, shared SQLite session backlog, and pending routine confirmations. Registered in Capability Registry under Tech_Agent and triggerable with `/doctor`.
@@ -582,7 +585,7 @@ Shutdown behavior:
 - [x] Memory Search Performance — `search_memory` lexical L1 cache + single `similarity_search` call; `save_to_memory` fire-and-forget background thread (~11s faster per call).
 - [x] Routine Reconciler Phase 3 — deterministic scoring engine for automatic fact-to-routine reconciliation (`services/routine_reconciler.py`): weighted subject/activity/state/scope/special score against `_AUTO_APPLY_THRESHOLD = 0.80` and `_DEBUG_ONLY_THRESHOLD = 0.55`, with a deliberate conservative penalty so ambiguous rules like `shift_logic` log to `debug_only` instead of silently auto-applying. Covers seasonal football, camp absence, school break, child-activity pause, temporary absence of another person, return-home, and shift-week detection.
 - [x] Routine Conditions — routines evaluate conditions against live `context_state` (e.g. `shift_mode`), with a `control_routine_condition` tool for natural-language constraint changes, a smart weekend filter so shift conditions don't leak into weekend-only routines, and dashboard fixes for condition display.
-- [x] Generalized Outing Context - family outing facts can now set `state:alexandros:outing=in_progress` plus `user_out_of_home=true`, so outing-like routines (e.g. park) and home-only routines (e.g. cooking) can self-suppress from runtime context instead of relying on hardcoded one-off patches.
+- [x] Generalized Outing Context - family outing facts can now set `state:kid1:outing=in_progress` plus `user_out_of_home=true`, so outing-like routines (e.g. park) and home-only routines (e.g. cooking) can self-suppress from runtime context instead of relying on hardcoded one-off patches.
 - [x] Stricter Return-Home Reconciliation - a "returned home" fact only closes outing context when an active outing / out-of-home state already exists, preventing unrelated home-return phrases from mutating routine state.
 - [x] Proactive Debug Labels - runtime event logs and `/debug` traces now distinguish `manual_control`, `pending_cleanup`, `condition_eval`, `proactive_decision`, and `reconciler_applied`, making diagnosis much easier when a routine is skipped, muted, resumed, or silently suppressed.
 - [x] Deterministic Family-Absence Extractor — temporary absence statements parsed without an LLM sifter call.

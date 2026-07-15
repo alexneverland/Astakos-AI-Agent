@@ -112,7 +112,9 @@ def hn_briefing(limit: int = 6) -> str:
     try:
         response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
         content = getattr(response, "content", "") or ""
-        if content.strip():
+        if isinstance(content, list):
+            content = "".join([str(c.get("text", "")) if isinstance(c, dict) else str(c) for c in content])
+        if isinstance(content, str) and content.strip():
             return content
     except Exception as exc:
         print(f"[HNBriefing]: LLM error - {exc}")

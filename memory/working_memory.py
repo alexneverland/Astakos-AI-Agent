@@ -1,6 +1,5 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: Lazaros (Piston-7)
 # Description: Modular LLM-agnostic multi-agent framework
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
@@ -18,7 +17,7 @@ from memory.vector_store import memory, is_semantically_duplicate, memory_lock  
 from core.utils import clean_message
 
 # ════════════════════════════════════════════════════════════════
-# WORKING MEMORY — "Foreground" (what Lazarus is doing NOW)
+# WORKING MEMORY — "Foreground" (what the user is doing now)
 # ════════════════════════════════════════════════════════════════
 
 def update_working_memory(user_text, ai_text):

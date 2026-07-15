@@ -1,7 +1,6 @@
 from core.i18n import t
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: Lazaros (Piston-7)
 # Description: Structured Exception Classes
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================

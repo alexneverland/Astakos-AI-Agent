@@ -807,7 +807,7 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
 def delete_routine(event_name: str, day_of_week: str = "", time_str: str = "") -> str:
     """
     [ACTION]: Permanently deletes a routine from the scheduler (routine database).
-    Use this WHEN Lazarus explicitly asks to delete / cancel / abolish 
+    Use this when the user explicitly asks to delete, cancel, or abolish something.
     a recurring routine (not a calendar event, not a simple memory, but a routine!).
     - event_name: The name or part of the name of the routine.
     - day_of_week: (Optional) Day for a more precise search.

@@ -1,6 +1,5 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: Lazaros (Piston-7)
 # Description: Modular LLM-agnostic multi-agent framework
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
@@ -333,8 +332,8 @@ def memory_richness(text: str, metadata: dict | None) -> float:
 MEMORY_TOKEN_STOPWORDS = {
     "user_fact", "lesson", t("prompts.ext_str_730"), t("prompts.ext_str_724"), t("prompts.ext_str_685"), t("prompts.ext_str_772"), t("prompts.ext_str_804"), t("prompts.ext_str_776"), t("prompts.ext_str_824"),
     t("prompts.ext_str_806"), t("prompts.ext_str_807"), t("prompts.ext_str_786"), t("prompts.ext_str_809"), t("prompts.ext_str_801"), t("prompts.ext_str_795"), t("prompts.ext_str_823"), t("prompts.ext_str_796"), t("prompts.ext_str_568"), t("prompts.ext_str_703"),
-    "lazaros", t("prompts.ext_str_351"), t("prompts.ext_str_411"), "alexandros", t("prompts.ext_str_213"), t("prompts.ext_str_214"),
-    "sofia", t("prompts.ext_str_604"), t("prompts.ext_str_561"),
+    "user_name", t("prompts.ext_str_351"), t("prompts.ext_str_411"), "kid1_name", t("prompts.ext_str_213"), t("prompts.ext_str_214"),
+    "partner_name", t("prompts.ext_str_604"), t("prompts.ext_str_561"),
 }
 
 

@@ -1,6 +1,5 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: Lazaros (Piston-7)
 # Description: Gemini Service Handler (Multimodal Optimized)
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================

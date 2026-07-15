@@ -1,6 +1,5 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: Lazaros (Piston-7)
 # Description: Event Logging & Dedup Protection
 # ================================================================
 

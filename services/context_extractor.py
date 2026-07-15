@@ -236,19 +236,19 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             payload["kid1_away_from_home"] = False
 
             recent_hint = _recent_family_context_hint(channel=channel)
-            has_recent_sofia = (
+            has_recent_partner = (
                 any(w in normalized_user for w in nl_config.CE_PARTNER_NAMES)
                 or any(w in recent_hint for w in nl_config.CE_PARTNER_NAMES)
             )
-            has_recent_alexandros = (
+            has_recent_kid1 = (
                 any(w in normalized_user for w in nl_config.CE_KID1_NAMES)
                 or any(w in recent_hint for w in nl_config.CE_KID1_NAMES)
             )
 
-            if has_recent_sofia:
+            if has_recent_partner:
                 payload["partner_with_user"] = True
 
-            if has_recent_sofia and has_recent_alexandros:
+            if has_recent_partner and has_recent_kid1:
                 payload["kid1_with_partner"] = True
 
 

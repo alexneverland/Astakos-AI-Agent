@@ -1,6 +1,5 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: Lazaros (Piston-7)
 # astakos_skills/search_ferries.py ← Ferry route search
 # ================================================================
 

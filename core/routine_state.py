@@ -1,6 +1,5 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: Lazaros (Piston-7)
 # Description: Explicit Routine Lifecycle State Machine
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================

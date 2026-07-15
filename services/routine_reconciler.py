@@ -660,7 +660,7 @@ def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list
 
 def _rule_partner_work_mode(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
-    Phase 3C.5 — sofia_work_mode:
+    Phase 3C.5 — partner_work_mode:
     Facts: "Partner is working from home tomorrow", "Partner is teleworking"
     """
     has_partner = _contains_any(normalized, _inline.get("partner_aliases", []))

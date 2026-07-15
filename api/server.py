@@ -1,6 +1,5 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: Lazaros (Piston-7)
 # Description: Modular LLM-agnostic multi-agent framework
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
@@ -540,7 +539,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         })
 
     # 2. --- XML CONTEXT ISOLATION ---
-    # The web/telegram is a trusted channel (local server, Lazarus only).
+    # Web/Telegram are trusted local user channels.
     # We do NOT wrap in isolated_data — otherwise the user's commands
     # are blocked by the security prompt itself.
     isolated_user_input = user_input
