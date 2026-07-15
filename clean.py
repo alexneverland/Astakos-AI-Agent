@@ -1,6 +1,5 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: Lazaros (Piston-7)
 # Description: Mastro-Cleaner — Standalone maintenance script for
 #              the Astakos JSON memory files. Run periodically to
 #              compact and de-duplicate memory state.

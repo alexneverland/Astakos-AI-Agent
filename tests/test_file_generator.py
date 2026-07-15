@@ -234,15 +234,15 @@ def test_generate_csv_utf8_bom():
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
-def test_relative_path_goes_to_desktop():
+def test_relative_path_goes_to_outputs():
     d = _tmp()
     try:
         import astakos_skills.file_generator as fg
-        old_desktop = fg._DESKTOP
-        fg._DESKTOP = d
+        old_outputs = fg._OUTPUTS_DIR
+        fg._OUTPUTS_DIR = d
         result = fg.generate_csv.func(output_path="myfile.csv", data_json=SAMPLE_DATA)
         assert "✅" in result
         assert os.path.exists(os.path.join(d, "myfile.csv"))
     finally:
-        fg._DESKTOP = old_desktop
+        fg._OUTPUTS_DIR = old_outputs
         shutil.rmtree(d, ignore_errors=True)

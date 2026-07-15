@@ -20,14 +20,14 @@ from core.i18n import t
 
 
 # ── Default output folder ────────────────────────────────────────
-# Uses the user's Desktop if a full path is not provided.
-_DESKTOP = os.path.join(os.path.expanduser("~"), "Desktop")
+# Uses a local 'outputs' folder if a full path is not provided.
+_OUTPUTS_DIR = os.path.join(os.getcwd(), "outputs")
 
 
 def _resolve_path(output_path: str, default_ext: str) -> str:
-    """If output_path is only a filename (without a directory), it places it on the Desktop."""
+    """If output_path is only a filename (without a directory), it places it in the outputs folder."""
     if not os.path.isabs(output_path):
-        output_path = os.path.join(_DESKTOP, output_path)
+        output_path = os.path.join(_OUTPUTS_DIR, output_path)
     if not output_path.lower().endswith(default_ext):
         output_path += default_ext
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
@@ -43,7 +43,7 @@ def generate_excel(output_path: str, data_json: str, sheet_name: str = "Sheet1",
 
     Args:
         output_path: Full file path, e.g., 'outputs/report.xlsx'.
-                     If only a name is provided, it is saved to the Desktop.
+                     If only a name is provided, it is saved to the outputs folder.
         data_json:   JSON string with a list of dicts.
                      Example: '[{"Name":"Person1","Age":30},{"Name":"Person2","Age":25}]'
         sheet_name:  Sheet name (default: Sheet1).
