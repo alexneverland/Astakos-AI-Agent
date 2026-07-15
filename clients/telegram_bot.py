@@ -4296,6 +4296,31 @@ def job_morning_ai_briefing():
         print(f"⚠️ [News_Briefing]: {e}")
 
 
+def job_morning_hn_briefing():
+    """Morning Hacker News briefing — runs only 09:00–10:00, once."""
+    now_hour = datetime.now().hour
+    if now_hour != 9:
+        return
+
+    flag_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".hn_briefing_sent")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if os.path.exists(flag_file):
+        with open(flag_file, "r") as f:
+            if f.read().strip() == today_str:
+                return
+
+    try:
+        from astakos_skills.hn_briefing import get_hn_briefing
+
+        msg = get_hn_briefing(limit=6)
+        _send_and_record_assistant(msg, agent="HN_Briefing")
+
+        with open(flag_file, "w") as f:
+            f.write(today_str)
+        print("✅ [HN_Briefing]: Morning HN briefing sent.")
+    except Exception as e:
+        print(f"⚠️ [HN_Briefing]: {e}")
+
 def job_goal_followup():
     """
     Checks active goals that have not been reported in the last 7 days.
@@ -4585,6 +4610,7 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_morning_fit_briefing,       interval_seconds=3600, name="fit_briefing",      verbose=True)
     astakos_scheduler.register(job_morning_calendar_briefing,  interval_seconds=3600, name="cal_briefing",      verbose=True)
     astakos_scheduler.register(job_morning_ai_briefing,        interval_seconds=3600, name="ai_briefing",       verbose=True)
+    astakos_scheduler.register(job_morning_hn_briefing,        interval_seconds=3600, name="hn_briefing",       verbose=True)
     astakos_scheduler.register(job_goal_followup,              interval_seconds=3600, name="goal_followup",     verbose=True)
     # astakos_scheduler.register(job_daily_backup,               interval_seconds=3600, name="daily_backup",      verbose=True) # User runs this from Windows Scheduler
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()

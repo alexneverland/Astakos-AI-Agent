@@ -47,6 +47,7 @@ from tools.web import (
     relay_local_payload, search_google_places, browse_url, duckduckgo_search
 )
 from astakos_skills.morning_briefing import morning_briefing
+from astakos_skills.hn_briefing import hn_briefing
 from astakos_skills.search_flights import search_flights
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 from astakos_skills.repo_mapper import repo_mapper
@@ -3676,6 +3677,7 @@ all_tools = [
     text_stats,
     register_tool,
     research_last30days, morning_briefing,
+    hn_briefing,
     # Project tools
     grant_project_access, list_project_files, read_project_file,
     edit_project_file, write_project_file, grep_project_files,

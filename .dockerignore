@@ -49,3 +49,4 @@ __pycache__/
 
 # MacOS
 .DS_Store
+.hn_briefing_sent

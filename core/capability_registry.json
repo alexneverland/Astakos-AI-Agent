@@ -783,5 +783,19 @@
       "φτιάξε pptx",
       "παρουσίαση"
     ]
+  },
+  {
+    "name": "hn_briefing",
+    "description": "Creates a Hacker News morning briefing from top HN stories.",
+    "agent": "Web_Agent",
+    "risk_level": "SAFE",
+    "priority": 8,
+    "triggers": [
+      "hacker news",
+      "hn briefing",
+      "tech briefing",
+      "developer briefing",
+      "news for developers"
+    ]
   }
 ]
