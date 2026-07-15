@@ -30,7 +30,7 @@ from zoneinfo import ZoneInfo
 from langchain_core.messages import HumanMessage, AIMessage
 from rich.console import Console
 
-from config import STATE_DB
+from config import STATE_DB, USER_NAME
 from core.brain import llm, safe_llm_invoke
 from core.graph import graph
 from core.agents import clean_message
@@ -88,7 +88,7 @@ def reminder_worker():
                 )
                 due = cursor.fetchall()
                 for rid, task in due:
-                    print(f"\n\033[93m[🔔 REMINDER]: {task}\033[0m\nLazaros: ", end="", flush=True)
+                    print(f"\n\033[93m[🔔 REMINDER]: {task}\033[0m\n{USER_NAME}: ", end="", flush=True)
                     send_telegram_msg(f"🔔 REMINDER: {task}")
                     cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
                 conn.commit()

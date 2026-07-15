@@ -104,8 +104,8 @@ PARTNER_NAME = "Partner"
 KID1_NAME = "Kid1"
 KID2_NAME = "Kid2"
 BOT_NAME = "Astakos"
-DEVELOPER_NAME = "Piston-7"
-DEFAULT_CITY = "Thessaloniki"
+DEVELOPER_NAME = "LocalUser"
+DEFAULT_CITY = "London"
 SENTIMENTAL_OVERRIDE_KEYWORDS = ()
 BACKUP_DRIVE_FOLDER_ID = ""
 if os.path.exists(SETTINGS_FILE):
@@ -118,8 +118,8 @@ if os.path.exists(SETTINGS_FILE):
             KID1_NAME = _settings.get("kid1_name", "Kid1")
             KID2_NAME = _settings.get("kid2_name", "Kid2")
             BOT_NAME = _settings.get("bot_name", "Astakos")
-            DEVELOPER_NAME = _settings.get("developer_name", "Piston-7")
-            DEFAULT_CITY = _settings.get("default_city", "Thessaloniki")
+            DEVELOPER_NAME = _settings.get("developer_name", "LocalUser")
+            DEFAULT_CITY = _settings.get("default_city", "London")
             BACKUP_DRIVE_FOLDER_ID = _settings.get("backup_drive_folder_id", "")
             SENTIMENTAL_OVERRIDE_KEYWORDS = tuple(_settings.get("sentimental_override_keywords", []))
     except Exception as e:

@@ -548,12 +548,20 @@ def load_agent_prompt(agent_name: str, default_fallback: str = "") -> str:
             
             # Inject dynamic configuration
             import config
-            value = value.replace("{USER_PERSONA}", config.USER_PERSONA)
-            value = value.replace("{USER_NAME}", config.USER_NAME)
-            value = value.replace("{BOT_NAME}", config.BOT_NAME)
-            value = value.replace("{RESPONSE_LANGUAGE}", config.RESPONSE_LANGUAGE)
-            value = value.replace("{DEFAULT_CITY}", config.DEFAULT_CITY)
-            value = value.replace("{BASE_DIR}", config.BASE_DIR)
+            replacements = {
+                "{USER_PERSONA}": config.USER_PERSONA,
+                "{USER_NAME}": config.USER_NAME,
+                "{BOT_NAME}": config.BOT_NAME,
+                "{RESPONSE_LANGUAGE}": config.RESPONSE_LANGUAGE,
+                "{DEFAULT_CITY}": config.DEFAULT_CITY,
+                "{BASE_DIR}": config.BASE_DIR,
+                "{PARTNER_NAME}": config.PARTNER_NAME,
+                "{KID1_NAME}": config.KID1_NAME,
+                "{KID2_NAME}": config.KID2_NAME,
+                "{DEVELOPER_NAME}": config.DEVELOPER_NAME,
+            }
+            for placeholder, replacement in replacements.items():
+                value = value.replace(placeholder, str(replacement))
             
             prompts_dict[key] = value
             

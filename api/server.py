@@ -1039,7 +1039,7 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
                 
         else:
             return JSONResponse({"error": "Voice input is not supported for this LLM Provider (Anthropic). Please use Text."})
-        print(f"\033[92m[Web Voice]: Lazarus said -> {transcription}\033[0m")
+        print(f"\033[92m[Web Voice]: {config.USER_NAME} said -> {transcription}\033[0m")
         return JSONResponse({"transcription": transcription})
     except Exception as e:
         import traceback

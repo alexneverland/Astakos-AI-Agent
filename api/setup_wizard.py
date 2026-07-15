@@ -146,7 +146,9 @@ async def save_setup(payload: SetupPayload):
     # Write prompts
     for p_path, content in prompts.items():
         if p_path.startswith("prompts/") and p_path.endswith(".md"):
-            fname = p_path.replace("prompts/", "")
+            fname = os.path.basename(p_path)
+            if fname in ("", ".", "..") or fname != p_path.removeprefix("prompts/"):
+                continue
             full_path = os.path.join(PROMPTS_DIR, fname)
             write_file_content(full_path, content)
 

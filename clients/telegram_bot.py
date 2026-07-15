@@ -46,6 +46,17 @@ def _normalize_gr(text: str) -> str:
     normalized = unicodedata.normalize("NFD", raw)
     return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
+def _partner_match_terms() -> list[str]:
+    return [
+        term for term in {
+            _normalize_gr(getattr(config, "PARTNER_NAME", "")),
+            _normalize_gr(getattr(config, "PARTNER_ALIAS", "")),
+            "partner",
+            "messenger",
+        }
+        if term
+    ]
+
 def _safe_classify_messenger_intent(text: str, *, has_active_draft: bool):
     """Lazy/fail-soft import so tests that stub `services` don't crash telegram_bot import."""
     try:
@@ -1216,7 +1227,7 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
         img_note = f"{len(images)} images sent" if images else t("clients.telegram_bot.bot_msg_496a96")
         agent_note = (
             f"[SYSTEM]: Just wrote and sent a story about '{theme}'{char_note}. "
-            f"{img_note}. Lazaros already has it on Telegram."
+            f"{img_note}. {config.USER_NAME} already has it on Telegram."
         )
         _append_to_analytics_log("ai", agent_note, agent="StoryMaker")
         enqueue_fast_task(update_working_memory, f"/story {theme}", agent_note)
@@ -1534,7 +1545,7 @@ def handle_message(user_text: str, chat_id: str):
         has_pending_partner_messenger = any(
             (
                 t("clients.telegram_bot.bot_msg_2e67ed") in _normalize_gr(str((pdata or {}).get("event", "")))
-                or "sofia" in _normalize_gr(str((pdata or {}).get("event", "")))
+                or any(term in _normalize_gr(str((pdata or {}).get("event", ""))) for term in _partner_match_terms())
                 or "messenger" in _normalize_gr(str((pdata or {}).get("event", "")))
                 or t("clients.telegram_bot.bot_msg_500d81") in _normalize_gr(str((pdata or {}).get("event", "")))
             )
@@ -1550,7 +1561,7 @@ def handle_message(user_text: str, chat_id: str):
                 event_l = _normalize_gr(str(ev))
                 is_partner_messenger = (
                     t("clients.telegram_bot.bot_msg_2e67ed") in event_l
-                    or "sofia" in event_l
+                    or any(term in event_l for term in _partner_match_terms())
                     or "messenger" in event_l
                     or t("clients.telegram_bot.bot_msg_500d81") in event_l
                 )
@@ -1652,7 +1663,7 @@ def handle_message(user_text: str, chat_id: str):
                 event_l = (ev or "").lower()
                 is_partner_messenger = (
                     t("clients.telegram_bot.bot_msg_2e67ed") in event_l or
-                    "sofia" in event_l or
+                    any(term in event_l for term in _partner_match_terms()) or
                     "messenger" in event_l or
                     t("clients.telegram_bot.bot_msg_500d81") in event_l
                 )
@@ -2756,7 +2767,7 @@ def run_polling():
                     continue
 
                 if user_text.lower() == "/end":
-                    print(f"\033[94m[Telegram]: End session command from Lazaros.\033[0m")
+                    print(f"\033[94m[Telegram]: End session command from {config.USER_NAME}.\033[0m")
                     threading.Thread(
                         target=handle_end_session,
                         args=(chat_id,),
@@ -2783,7 +2794,7 @@ def run_polling():
                     continue
 
                 # Regular message to the Lobster
-                print(f"\n\033[96m[Telegram] Lazaros: {user_text}\033[0m")
+                print(f"\n\033[96m[Telegram] {config.USER_NAME}: {user_text}\033[0m")
                 threading.Thread(
                     target=handle_message,
                     args=(user_text, chat_id),
@@ -4230,6 +4241,31 @@ def job_morning_calendar_briefing():
     except Exception as e:
         print(f"⚠️ [CalendarBriefing]: {e}")
 
+def job_morning_ai_briefing():
+    """Morning AI/Tech/Roblox briefing — runs only 08:00–09:00, once."""
+    now_hour = datetime.now().hour
+    if now_hour != 8:
+        return
+
+    flag_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".ai_briefing_sent")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if os.path.exists(flag_file):
+        with open(flag_file, "r") as f:
+            if f.read().strip() == today_str:
+                return
+
+    try:
+        from astakos_skills.morning_briefing import get_morning_briefing
+        msg = get_morning_briefing()
+
+        _send_and_record_assistant(msg, agent="News_Briefing")
+
+        with open(flag_file, "w") as f:
+            f.write(today_str)
+        print("✅ [News_Briefing]: Morning AI briefing sent.")
+    except Exception as e:
+        print(f"⚠️ [News_Briefing]: {e}")
+
 
 def job_goal_followup():
     """
@@ -4519,6 +4555,7 @@ if __name__ == "__main__":
     astakos_scheduler.register(job_check_pending_followups, interval_seconds=600, name="pending_followups", verbose=False)
     astakos_scheduler.register(job_morning_fit_briefing,       interval_seconds=3600, name="fit_briefing",      verbose=True)
     astakos_scheduler.register(job_morning_calendar_briefing,  interval_seconds=3600, name="cal_briefing",      verbose=True)
+    astakos_scheduler.register(job_morning_ai_briefing,        interval_seconds=3600, name="ai_briefing",       verbose=True)
     astakos_scheduler.register(job_goal_followup,              interval_seconds=3600, name="goal_followup",     verbose=True)
     # astakos_scheduler.register(job_daily_backup,               interval_seconds=3600, name="daily_backup",      verbose=True) # User runs this from Windows Scheduler
     threading.Thread(target=astakos_scheduler.run, daemon=True).start()

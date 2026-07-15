@@ -940,7 +940,7 @@ def search_google_places(query: str, location: str = config.DEFAULT_CITY) -> str
 @tool
 def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE") -> str:
     """Provides time, distance (with live traffic) and navigation links.
-    If no origin is provided, it defaults to the headquarters ({config.DEVELOPER_NAME}, Thessaloniki).
+    If no origin is provided, it defaults to the configured default city.
     You can pass the result of get_current_location to the origin (e.g., '0.0,0.0').
     The mode can be "DRIVE" (driving, default) or "WALK" (walking).
     """
@@ -952,7 +952,7 @@ def get_navigation_info(destination: str, origin: str = None, mode: str = "DRIVE
     import requests
     from config import GPS_STORAGE_FILE
 
-    home_base = f"{config.DEVELOPER_NAME}, Thessaloniki"
+    home_base = config.DEFAULT_CITY
     final_origin = origin if origin else home_base
 
     if not origin:

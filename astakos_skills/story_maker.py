@@ -40,12 +40,13 @@ def _generate_image(prompt: str, output_dir: str, index: int) -> str | None:
 def _generate_story_and_prompts(theme: str, characters: str = "") -> dict:
     """Calls Gemini for a fairy tale + 3 image prompts."""
     try:
+        import config
         import vertexai
         from vertexai.generative_models import GenerativeModel
         from core.brain import FAST_MODEL as MAIN_MODEL
 
         vertexai.init(
-            project=os.getenv("PROJECT_ID", "astakos-finall"),
+            project=os.getenv("PROJECT_ID", config.PROJECT_ID),
             location=os.getenv("LOCATION", "global")
         )
         model = GenerativeModel(MAIN_MODEL)

@@ -1,5 +1,21 @@
 [
   {
+    "name": "morning_briefing",
+    "description": "Creates a daily morning briefing from live local, technology, AI, and kids-friendly Roblox news.",
+    "agent": "Web_Agent",
+    "risk_level": "SAFE",
+    "priority": 8,
+    "triggers": [
+      "morning briefing",
+      "daily briefing",
+      "news briefing",
+      "start my day",
+      "?????? briefing",
+      "?????? ?????????",
+      "??? ??????"
+    ]
+  },
+  {
     "name": "manage_context_flag",
     "description": "Tool: manage_context_flag",
     "agent": "Dev_Agent",
@@ -170,8 +186,8 @@
       "/story",
       "παραμύθι",
       "παραμυθάκι",
-      "ιστορία για τον αλέξανδρο",
-      "story for alexandros"
+      "ιστορία για το παιδί",
+      "story for kids"
     ]
   },
   {
@@ -184,9 +200,9 @@
       "messenger",
       "facebook",
       "στείλε μήνυμα",
-      "γράψε στη σοφία",
-      "γράψε στη μαρία",
-      "στείλε στη σοφία",
+      "γράψε στην",
+      "γράψε στον",
+      "στείλε στην",
       "πρωινό μήνυμα",
       "στείλε στον",
       "γράψε στον"

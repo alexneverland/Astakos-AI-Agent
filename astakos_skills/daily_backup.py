@@ -11,6 +11,7 @@ import sys
 # Προσθήκη του root directory (C:\astakos_v2) στο sys.path για να μπορεί να τρέχει αυτόνομα
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import config
 import io
 import datetime
 from googleapiclient.discovery import build
