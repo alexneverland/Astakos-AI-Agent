@@ -3,20 +3,23 @@ import sys
 import subprocess
 from dotenv import load_dotenv
 
+from core.version_check import check_for_updates
+
+
 def is_configured(run_mode="cli"):
     """Check if the necessary configuration exists to start Astakos."""
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if not os.path.exists(env_path):
         return False
-        
+
     # Load env temporarily to check keys
     load_dotenv(env_path)
-    
+
     # We need a Telegram Token for server mode
     if run_mode == "server":
         if not os.getenv("TELEGRAM_TOKEN"):
             return False
-        
+
     # We need an API Key for the chosen provider
     provider = os.getenv("LLM_PROVIDER", "vertex").lower()
     if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
@@ -27,10 +30,14 @@ def is_configured(run_mode="cli"):
         return False
     if provider == "vertex" and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
         return False
-        
+
     return True
 
+
 if __name__ == "__main__":
+    # Read-only and non-blocking: failures never prevent Astakos from starting.
+    check_for_updates()
+
     force_setup = "--setup" in sys.argv
     run_mode = "server" if "--server" in sys.argv else "cli"
     if force_setup or not is_configured(run_mode=run_mode):
@@ -39,10 +46,10 @@ if __name__ == "__main__":
         print("Starting Setup Wizard...")
         print("Please open: http://localhost:8000 in your browser.")
         print("="*60 + "\033[0m\n")
-        
+
         # Run setup_wizard as a subprocess so when it exits, boot.py continues
         subprocess.run([sys.executable, "-m", "api.setup_wizard"])
-        
+
         print("\n\033[92mConfiguration completed. Checking again...\033[0m\n")
 
     # Double check if configured now
