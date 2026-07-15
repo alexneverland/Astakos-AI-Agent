@@ -348,8 +348,8 @@ astakos/
 │   ├── tool_risk.py          # Tool risk registry
 │   └── utils.py              # Shared utilities and AgentState
 ├── locales/
-│   ├── el.json               # Greek localization strings
-│   └── en.json               # English localization strings
+│   ├── el.json               # Greek locale + runtime NLP/scraping resources
+│   └── en.json               # English locale + runtime NLP/scraping resources
 ├── memory/
 │   ├── event_log.py          # Event logging and dedup protection
 │   ├── routine_db.py         # SQLite routines, dedup, cooldowns
@@ -358,6 +358,8 @@ astakos/
 │   ├── conversation_history.py # Shared SQLite conversation store; load_messages_after_rowid + get_max_rowid for polling
 │   └── working_memory.py     # Real-time foreground context
 ├── prompts/
+
+Note: `locales/el.json` and `locales/en.json` are hybrid runtime resources, not display-only translation catalogs. Besides user-facing strings, they intentionally contain language-specific NLP tokens, regex patterns, classifier examples, and scraping markers that may remain in Greek even in `en.json` when runtime matching depends on Greek user input or Greek websites.
 │   ├── telegram_bot_followup_decision.md # Core followup prompts
 │   └── *.md                  # System prompts for agents
 ├── services/
