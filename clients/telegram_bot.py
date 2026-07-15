@@ -1926,6 +1926,33 @@ def handle_message(user_text: str, chat_id: str):
 
         return
 
+    if draft_intent and draft_intent.intent == "confirm_send":
+        if draft_active and draft_data and draft_data.get("message") and draft_data.get("target_name"):
+            import uuid
+            from core.approval import save_pending, _notify_telegram
+            
+            call_id = f"call_{uuid.uuid4().hex[:12]}"
+            
+            save_pending("execute_local_pipeline", {}, call_id, channel="telegram")
+            
+            tool_call_fake = {
+                "name": "execute_local_pipeline",
+                "id": call_id,
+                "args": {}
+            }
+            _notify_telegram(tool_call_fake)
+            
+            try:
+                _append_to_analytics_log("user", clean_user_text)
+                from memory.execution_trace import ExecutionTrace
+                _trace = ExecutionTrace(channel="telegram", user_message=clean_user_text)
+                _trace.mark_phase("messenger_intent_confirm_intercept_pending", 1)
+                _trace.save()
+            except Exception:
+                pass
+
+            return
+
     # ── Typing indicator — shows "Lobster is typing..." ──
     _typing_active = {"on": True}
     def _typing_loop():
@@ -2080,7 +2107,9 @@ def handle_message(user_text: str, chat_id: str):
             final_ai_response = build_linkedin_draft_ready_reply(tool_result_fallbacks)
 
         if any(looks_like_terminal_messenger_draft_result(r) for r in tool_result_fallbacks):
-            final_ai_response = build_messenger_draft_ready_reply(tool_result_fallbacks)
+            is_confirm = draft_intent and draft_intent.intent == 'confirm_send'
+            if not is_confirm:
+                final_ai_response = build_messenger_draft_ready_reply(tool_result_fallbacks)
 
         if not final_ai_response:
             t_fallback_0 = perf_counter()
