@@ -879,11 +879,21 @@ class AstakosMemoryManager:
                 if replace_old_fact_text is not None:
                     c.execute("SELECT id FROM profile_facts WHERE category=? AND fact=?", (category, replace_old_fact_text))
                     row = c.fetchone()
+                    
+                    if not row:
+                        # Fallback normalized match
+                        trimmed_old = replace_old_fact_text.strip().lower()
+                        c.execute("SELECT id, fact FROM profile_facts WHERE category=?", (category,))
+                        for r in c.fetchall():
+                            if r[1].strip().lower() == trimmed_old:
+                                row = (r[0],)
+                                break
+
                     if row:
                         print(f"\033[94m[DB Profile]: Replacing old entry (same as Chroma)\033[0m")
                         c.execute("UPDATE profile_facts SET fact=?, photo_path=?, date=?, metadata_json=?, created_at=CURRENT_TIMESTAMP WHERE id=?", (fact, photo_path, date_str, profile_metadata_json, row[0]))
                     else:
-                        print(f"\033[93m[DB Profile]: No matching old record found for replacement — adding new.\033[0m")
+                        print(f"\033[93m[DB Profile]: No matching old record found for replacement '{replace_old_fact_text}' — adding new to avoid silent loss.\033[0m")
                         c.execute("INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) VALUES (?, ?, ?, ?, ?)", (category, fact, photo_path, date_str, profile_metadata_json))
                 else:
                     print(f"\033[92m[DB Profile]: New record added.\033[0m")

@@ -10,7 +10,7 @@ import re
 import unicodedata
 from datetime import datetime
 from langchain_core.tools import tool
-from config import BASE_DIR, RESPONSE_LANGUAGE
+from config import BASE_DIR, RESPONSE_LANGUAGE, KID1_NAME
 
 # Mastro-Import: Bringing the brain into the tool!
 from core.brain import llm
@@ -102,7 +102,8 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
         recent_meals=', '.join(recent),
         ingredients=ingredients if ingredients else 'Not specified',
         query=query if query else 'Suggest 3 meals',
-        RESPONSE_LANGUAGE=RESPONSE_LANGUAGE
+        RESPONSE_LANGUAGE=RESPONSE_LANGUAGE,
+        KID1_NAME=KID1_NAME,
     )
     
     try:
