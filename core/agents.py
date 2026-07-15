@@ -522,12 +522,13 @@ def web_agent_node(state: AgentState):
     )
     
     from tools.web import execute_local_pipeline
+    from astakos_skills.morning_briefing import morning_briefing
     web_tools = [
         get_current_location,
         get_news, get_weather_forecast, duckduckgo_search, 
         search_memory, get_navigation_info, retrieve_photo, read_local_file, 
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
-        process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices, relay_local_payload
+        process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices, relay_local_payload, morning_briefing
     ]
 
     result = llm.bind_tools(web_tools).invoke(final_messages)

@@ -24,11 +24,14 @@ def is_configured():
         return False
     if provider == "gemini" and not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
         return False
+    if provider == "vertex" and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        return False
         
     return True
 
 if __name__ == "__main__":
-    if not is_configured():
+    force_setup = "--setup" in sys.argv
+    if force_setup or not is_configured():
         print("\n\033[93m" + "="*60)
         print("🦞 Astakos AI Agent is unconfigured or missing critical keys.")
         print("Starting Setup Wizard...")
@@ -43,8 +46,19 @@ if __name__ == "__main__":
     # Double check if configured now
     if is_configured():
         print("\033[92m[Boot]: Starting Astakos Systems...\033[0m")
-        # Start main.py using subprocess to replace current process
-        subprocess.run([sys.executable, "main.py"])
+        if "--server" in sys.argv:
+            # Start API and Telegram Bot concurrently for headless/Docker environments
+            api_proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "api.server:server", "--host", "0.0.0.0", "--port", "8000"])
+            bot_proc = subprocess.Popen([sys.executable, "clients/telegram_bot.py"])
+            try:
+                api_proc.wait()
+                bot_proc.wait()
+            except KeyboardInterrupt:
+                api_proc.terminate()
+                bot_proc.terminate()
+        else:
+            # Start main.py CLI
+            subprocess.run([sys.executable, "main.py"])
     else:
         print("\033[91m[Boot]: Setup aborted or incomplete. Exiting.\033[0m")
         sys.exit(1)

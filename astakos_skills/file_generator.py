@@ -45,7 +45,7 @@ def generate_excel(output_path: str, data_json: str, sheet_name: str = "Sheet1",
         output_path: Full file path, e.g., 'C:\\Users\\PC\\Desktop\\report.xlsx'.
                      If only a name is provided, it is saved to the Desktop.
         data_json:   JSON string with a list of dicts.
-                     Example: '[{"Name":"John","Age":30},{"Name":"Maria","Age":25}]'
+                     Example: '[{"Name":"Person1","Age":30},{"Name":"Person2","Age":25}]'
         sheet_name:  Sheet name (default: Sheet1).
         title:       Optional title displayed at the top.
     """

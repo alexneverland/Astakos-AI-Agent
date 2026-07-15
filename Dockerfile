@@ -24,4 +24,4 @@ COPY . .
 EXPOSE 8000
 
 # Start Astakos using the bootstrap script
-CMD ["python", "boot.py"]
+CMD ["python", "boot.py", "--server"]

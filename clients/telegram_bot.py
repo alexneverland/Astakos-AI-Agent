@@ -10,7 +10,7 @@
 clients/telegram_bot.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 The Lobster Telegram Bot.
-Receives messages/photos from Lazaros and
+Receives messages/photos from the user and
 responds via the graph (LangGraph pipeline).
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
@@ -1222,7 +1222,7 @@ def _run_story_maker(theme: str, characters: str, chat_id: str):
         print(f"✅ [StoryMaker] Story '{theme}' completed.")
 
         # Update the agent with a SHORT note — so they know they wrote a fairy tale
-        # and not to call search_memory if Lazaros asks about this
+        # and not to call search_memory if the user asks about this
         char_note = f" with characters: {characters}" if characters else ""
         img_note = f"{len(images)} images sent" if images else t("clients.telegram_bot.bot_msg_496a96")
         agent_note = (
@@ -2569,7 +2569,7 @@ def run_polling():
                 
                 chat_id = str(msg["chat"]["id"])
 
-                # Security: only Lazaros
+                # Security: only the configured user
                 if chat_id != str(TELEGRAM_CHAT_ID):
                     print(f"\033[93m[TelegramBot]: Unauthorized chat: {chat_id}\033[0m")
                     continue

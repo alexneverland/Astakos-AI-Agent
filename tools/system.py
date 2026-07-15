@@ -1,5 +1,5 @@
-﻿# ================================================================
-# Project: Astakos AI Agent ðŸ¦ž
+# ================================================================
+# Project: Astakos AI Agent 🦞
 # Developer: User
 # Description: Modular LLM-agnostic multi-agent framework
 # Copyright (c) 2026 - All Rights Reserved
@@ -39,13 +39,14 @@ from config import (
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 from astakos_skills.research_last30days import research_last30days
 from memory.vector_store import vector_store, vector_lock, memory
-_lexical_cache: dict = {}  # {cache_key: (timestamp, data)} â€” TTL 60s
+_lexical_cache: dict = {}  # {cache_key: (timestamp, data)} — TTL 60s
 from services.embeddings import embeddings
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_prices,
     search_goldmall_offers, execute_local_pipeline, get_navigation_info,
     relay_local_payload, search_google_places, browse_url, duckduckgo_search
 )
+from astakos_skills.morning_briefing import morning_briefing
 from astakos_skills.search_flights import search_flights
 from astakos_skills.recipe_expert import recipe_expert, log_meal
 from astakos_skills.repo_mapper import repo_mapper
@@ -59,22 +60,21 @@ from astakos_skills.file_generator import (
 )
 from astakos_skills.register_tool import register_tool
 from astakos_skills.manage_context_flag import manage_context_flag
-from astakos_skills.morning_briefing import morning_briefing
 from astakos_skills.text_stats import text_stats
 from astakos_skills.scan_receipt import scan_receipt
 from astakos_skills.officecli_skill import run_officecli
 from astakos_skills.read_agent_skill import list_agent_skills, read_agent_skill
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 # CREDENTIALS PATHS
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 import config
 TOKEN_PATH = config.TOKEN_PATH
 CREDS_PATH = config.CREDENTIALS_PATH
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 # PROTECTED SANDBOX
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 PROTECTED_FILES = ["main.py", "telegram_bot.py", "update.py", ".env"]
 DANGEROUS_WORDS = [
     "os.remove", "os.rmdir", "shutil.rmtree", "format c:",
@@ -83,9 +83,9 @@ DANGEROUS_WORDS = [
 ]
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 # MEMORY TOOLS
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 @tool
 def archive_file(filename: str, content_summary: str) -> str:
     """
@@ -129,7 +129,7 @@ def archive_file(filename: str, content_summary: str) -> str:
     except Exception as e:
         return t("tools.system.archive_error", error=str(e))
 
-# Channel for Memory Provenance â€” defined by server.py/telegram_bot.py
+# Channel for Memory Provenance — defined by server.py/telegram_bot.py
 _CURRENT_CHANNEL: str = "unknown"
 
 
@@ -252,7 +252,7 @@ def search_memory(query: str, category: str = "") -> str:
     3. References to the past or to existing equipment.
 
     Args:
-        query: Keywords (e.g., 'Alexandros food', 'Mastroapp backend')
+        query: Keywords (e.g., 'kid food', 'project backend')
         category: Optional filter: 'lazaros', 'family', 'projects', 'home', 'lesson', 'photos'
     """
     VALID_CATS = {"lazaros", "family", "projects", "home", "lesson", "session", "photos"}
@@ -282,7 +282,7 @@ def search_memory(query: str, category: str = "") -> str:
                     continue
                 seen_docs.add(key)
                 merged_results.append(doc)
-            # [PERF]: 1 similarity_search instead of 3 â€” primary_query is sufficient (expanded queries do not improve significantly)
+            # [PERF]: 1 similarity_search instead of 3 — primary_query is sufficient (expanded queries do not improve significantly)
             for search_query in search_queries[:1]:
                 if effective_category:
                     batch = vector_store.similarity_search(search_query, k=6, filter={"category": effective_category})
@@ -310,7 +310,7 @@ def search_memory(query: str, category: str = "") -> str:
         if not results and not sql_lines and not latest and not profile_lines:
             return t("tools.system.memory_no_results")
 
-        # bump retrieval_count async â€” does not block the response
+        # bump retrieval_count async — does not block the response
         if results:
             import threading as _thr
             def _bump_async():
@@ -343,7 +343,7 @@ def search_memory(query: str, category: str = "") -> str:
         # 1. Profile: Latest matching state (generic, query-driven)
         if latest and latest.get("fact"):
             output_parts.append("\n[LATEST MATCHING STATE]")
-            output_parts.append(f"  â€¢ {latest['fact']}")
+            output_parts.append(f"  • {latest['fact']}")
 
         # 2. Structured profile memory summary
         if profile_lines:
@@ -352,13 +352,13 @@ def search_memory(query: str, category: str = "") -> str:
 
         if sql_lines:
             output_parts.append(t("tools.system.sqlite_history"))
-            output_parts.extend(f"  â€¢ {line}" for line in sql_lines)
+            output_parts.extend(f"  • {line}" for line in sql_lines)
 
         output_parts.append(t("tools.system.chroma_memory"))
         if by_cat:
             for cat, facts in by_cat.items():
                 output_parts.append(f"\n[{cat.upper()}]")
-                output_parts.extend(f"  â€¢ {f}" for f in facts)
+                output_parts.extend(f"  • {f}" for f in facts)
         else:
             output_parts.append(t("tools.system.no_chroma"))
 
@@ -401,11 +401,11 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
             if len(output) > 10000:
                 output = output[:10000] + "\n... [output truncated]"
 
-            return {"status": "ok", "output": f"ðŸ’» Terminal Output:\n{output}"}
+            return {"status": "ok", "output": f"💻 Terminal Output:\n{output}"}
         except subprocess.TimeoutExpired:
-            return {"status": "ok", "output": "âŒ Timeout: >30 seconds."}
+            return {"status": "ok", "output": "❌ Timeout: >30 seconds."}
         except Exception as e:
-            return {"status": "ok", "output": f"âŒ Terminal Error: {str(e)}"}
+            return {"status": "ok", "output": f"❌ Terminal Error: {str(e)}"}
 
     # Even after approval, hard-blocked commands are never executed.
     if already_approved:
@@ -418,21 +418,21 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
         result = safe_execute(command, _executor)
 
     if result.get("status") == "blocked":
-        return f"ðŸ›¡ï¸ [SAFE EXECUTOR - BLOCKED]: {result['reason']}"
+        return f"🛡️ [SAFE EXECUTOR - BLOCKED]: {result['reason']}"
     if result.get("status") == "cancelled":
-        return f"âš ï¸ [SAFE EXECUTOR]: Command requires confirmation. Send again with `/confirm {command}`"
+        return f"⚠️ [SAFE EXECUTOR]: Command requires confirmation. Send again with `/confirm {command}`"
     return result.get("output", "")
 
 @tool
 def save_to_memory(fact: str, entities: str = "", category: str = "other", reason: str = "agent_inferred") -> str:
     """
     Saves information SEMANTICALLY.
-    fact: The fact (e.g., "Alexandros only eats lentils").
-    entities: Keywords separated by commas (e.g., "Alexandros, Food, Preference").
+    fact: The fact (e.g., "Kid1 only eats lentils").
+    entities: Keywords separated by commas (e.g., "Kid1, Food, Preference").
     category: The category (e.g., 'family', 'home', 'lazaros', 'tech', 'work').
-    reason: Why it is being saved â€” 'user_stated' if explicitly said by the user, 'agent_inferred' otherwise.
+    reason: Why it is being saved — 'user_stated' if explicitly said by the user, 'agent_inferred' otherwise.
 
-    âš¡ Fire-and-forget: ChromaDB/Vertex AI work is done in a background thread.
+    ⚡ Fire-and-forget: ChromaDB/Vertex AI work is done in a background thread.
     Returns immediately so that the agent does not block the user for ~11s.
     """
     import datetime
@@ -469,10 +469,10 @@ def save_to_memory(fact: str, entities: str = "", category: str = "other", reaso
             if saved:
                 _lexical_cache.clear()
         except Exception as e:
-            print(f"âš ï¸ [save_to_memory bg]: {e}")
+            print(f"⚠️ [save_to_memory bg]: {e}")
 
     threading.Thread(target=_do_save, daemon=True).start()
-    return f"âœ… Saving in background: [{entities}]"
+    return f"✅ Saving in background: [{entities}]"
 
 
 @tool
@@ -481,10 +481,10 @@ def delete_from_memory(query: str) -> str:
 
     USE THIS TOOL (not save_to_memory) whenever the user explicitly requests
     to erase/delete/remove already stored information because it is
-    incorrect, outdated, or irrelevant â€” e.g., "erase the memory that says X", "delete this
+    incorrect, outdated, or irrelevant — e.g., "erase the memory that says X", "delete this
     about Y", "what I said about X is wrong, remove it" etc.
     The save_to_memory tool ONLY adds new entries; upon a deletion/correction request,
-    it leaves the incorrect entry in place â€” which is why in such cases you should always
+    it leaves the incorrect entry in place — which is why in such cases you should always
     prefer delete_from_memory (if needed, you can subsequently call
     save_to_memory with the correct content in a separate step).
 
@@ -502,7 +502,7 @@ def delete_from_memory(query: str) -> str:
             collection = vector_store._collection
             data = collection.get(include=["documents", "metadatas"])
 
-        # 1) Exact substring match FIRST â€” more reliable than embeddings when_
+        # 1) Exact substring match FIRST — more reliable than embeddings when_
         # the phrases are close/similar (e.g. old incorrect vs correct address:
         # the embeddings see them as almost identical and a wrong record might be deleted).
         literal_hits = [
@@ -514,13 +514,13 @@ def delete_from_memory(query: str) -> str:
             target_id, content = literal_hits[0]
             with vector_lock:
                 collection.delete(ids=[target_id])
-            print(f"\nðŸ”¥ [DATABASE ACTION]: DELETED (exact match): {content}")
+            print(f"\n🔥 [DATABASE ACTION]: DELETED (exact match): {content}")
             return f"Memory '{content}' deleted successfully."
 
         if len(literal_hits) > 1:
-            previews = "\n".join(f"  â€¢ {str(c).strip()[:140]}" for _, c in literal_hits[:6])
+            previews = "\n".join(f"  • {str(c).strip()[:140]}" for _, c in literal_hits[:6])
             return (
-                f"âš ï¸ Found {len(literal_hits)} records matching '{query}'. "
+                f"⚠️ Found {len(literal_hits)} records matching '{query}'. "
                 f"Be more specific about which to delete:\n{previews}"
             )
 
@@ -538,14 +538,14 @@ def delete_from_memory(query: str) -> str:
 
             if distance > 0.40:
                 return (
-                    f"âš ï¸ Not deleted. Closest match (Distance: {distance:.2f}): "
+                    f"⚠️ Not deleted. Closest match (Distance: {distance:.2f}): "
                     f"'{content}'. Please be more specific."
                 )
 
             target_id = results['ids'][0][0]
             collection.delete(ids=[target_id])
 
-        print(f"\nðŸ”¥ [DATABASE ACTION]: DELETED (Dist: {distance:.2f}): {content}")
+        print(f"\n🔥 [DATABASE ACTION]: DELETED (Dist: {distance:.2f}): {content}")
         return f"Memory '{content}' deleted successfully."
     except Exception as e:
         return f"Deletion error: {e}"
@@ -596,7 +596,7 @@ def retrieve_photo(query: str) -> str:
 
                 if best_entry:
                     fp = best_entry.get("file_path", "")
-                    note = "" if best_score >= 0.5 else " (No exact match found â€” providing the closest one.)"
+                    note = "" if best_score >= 0.5 else " (No exact match found — providing the closest one.)"
                     if not fp:
                         best_entry = index[-1]
                         fp = best_entry.get("file_path", "")
@@ -614,9 +614,9 @@ def retrieve_photo(query: str) -> str:
         return f"Error: Failed to retrieve photo: {str(e)}"
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 # REMINDERS & LISTS
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 
 def _normalize_reminder_text(text: str) -> str:
     import re
@@ -661,7 +661,7 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
     """
     Manages local reminders.
     action: 'add' (new), 'read' (read pending ONLY), 'done' (completion)
-    task: For 'add' â†’ description. For 'done' â†’ keyword of the reminder being completed.
+    task: For 'add' → description. For 'done' → keyword of the reminder being completed.
     location: ONLY for location-based reminders. Use 'home' when
               {config.USER_NAME} says 'when I get home', 'as soon as I go home' etc.
               When location is provided, DO NOT provide minutes_from_now or exact_time.
@@ -671,7 +671,7 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
         conn = sqlite3.connect(STATE_DB)
         cursor = conn.cursor()
 
-        # â”€â”€ READ: Returns ONLY pending â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── READ: Returns ONLY pending ──────────────────────
         if action == "read":
             cursor.execute("SELECT task, time FROM reminders WHERE status='pending'")
             pending = cursor.fetchall()
@@ -681,12 +681,12 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             for rtask, tm in pending:
                 if tm and tm.startswith("loc:"):
                     loc = tm.split(":", 1)[1]
-                    lines.append(f"â€¢ [ðŸ“ {loc}] {rtask}")
+                    lines.append(f"• [📍 {loc}] {rtask}")
                 else:
-                    lines.append(f"â€¢ [{tm}] {rtask}")
+                    lines.append(f"• [{tm}] {rtask}")
             return t("tools.system.reminders_read_header") + "\n".join(lines)
 
-        # â”€â”€ DONE: Closes reminder with keyword â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── DONE: Closes reminder with keyword ────────────────
         elif action == "done":
             cursor.execute("SELECT id, task FROM reminders WHERE status='pending'")
             pending = cursor.fetchall()
@@ -703,7 +703,7 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             conn.commit()
             return t("tools.system.reminders_done_success", task=task)
 
-        # â”€â”€ ADD: New reminder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── ADD: New reminder ─────────────────────────────────
         else:
             from datetime import datetime, timedelta
 
@@ -760,15 +760,15 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
     ALWAYS call `get_routines` BEFORE using this tool to ensure a similar routine doesn't already exist. If it does, use `edit_routine` instead!
 
     RULES FOR ARGUMENTS:
-    - day_of_week: English canonical ("Monday"â€¦"Sunday") or "Everyday" or "Weekdays".
+    - day_of_week: English canonical ("Monday"…"Sunday") or "Everyday" or "Weekdays".
     - time_str: Time in HH:MM (e.g., "13:00"). If no time is mentioned, DO NOT call the tool.
     - event_name: BRIEF canonical description in 2-4 words (e.g., "message Kostas", "farmers market",
-      "gym"). DO NOT include "Every day", "Every morning", or time phrases â€” these belong
+      "gym"). DO NOT include "Every day", "Every morning", or time phrases — these belong
       to day_of_week/time_str. The event_name must be CONSISTENT for the same activity.
     - event_type: "family", "work", "hobby", "general".
 
     ATTENTION: Call this ONLY for recurring activities. Ignore one-off events
-    ("today I wentâ€¦", "tomorrow I haveâ€¦").
+    ("today I went…", "tomorrow I have…").
     """
     from datetime import datetime
 
@@ -806,7 +806,7 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
 def delete_routine(event_name: str, day_of_week: str = "", time_str: str = "") -> str:
     """
     [ACTION]: Permanently deletes a routine from the scheduler (routine database).
-    Use this WHEN the user explicitly asks to delete / cancel / abolish
+    Use this WHEN Lazarus explicitly asks to delete / cancel / abolish 
     a recurring routine (not a calendar event, not a simple memory, but a routine!).
     - event_name: The name or part of the name of the routine.
     - day_of_week: (Optional) Day for a more precise search.
@@ -957,34 +957,34 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
     """
     [OVERRIDE]: Manual control of a routine's proactive reminders, ONLY when
     {config.USER_NAME} EXPLICITLY requests it within the conversation (not automatically by you or by the
-    scheduled job â€” this is a separate channel, the user takes control).
+    scheduled job — this is a separate channel, the user takes control).
 
-    VERY IMPORTANT â€” NEVER call this just because the user told you a piece of INFORMATION
-    (e.g., "Alexandros is away at camp", "he returns in 9 days", "we went to the beach today").
-    A piece of information IS NOT a request. DO NOT use this for daily context changes or daily presence updates (like "Sofia is home today" or "we are together now"). The system handles daily presence automatically via dynamic context flags (Suppress). Call this ONLY when there is an explicit request to check notifications (or for explicit multi-day vacation/away blocks) â€” words/
+    VERY IMPORTANT — NEVER call this just because the user told you a piece of INFORMATION
+    (e.g., "Kid1 is away at camp", "he returns in 9 days", "we went to the beach today").
+    A piece of information IS NOT a request. DO NOT use this for daily context changes or daily presence updates (like "Partner is home today" or "we are together now"). The system handles daily presence automatically via dynamic context flags (Suppress). Call this ONLY when there is an explicit request to check notifications (or for explicit multi-day vacation/away blocks) — words/
     meaning like "don't send me", "mute", "leave alone", "stop notifications",
     "reactivate". If the user is simply informing you about something, reply normally in the
-    conversation â€” DO NOT guess that they want to mute and DO NOT scan other routines "just in case".
-    One call per routine explicitly requested â€” no repetition of the same call in the same turn.
+    conversation — DO NOT guess that they want to mute and DO NOT scan other routines "just in case".
+    One call per routine explicitly requested — no repetition of the same call in the same turn.
 
     EXAMPLES OF EXPLICIT REQUESTS (only these patterns, do not generalize to every routine):
-    - "No need to send me about the park until Alexandros returns on 26/6"
-      â†’ action="mute", until_date="2026-06-26"
+    - "No need to send me about the park until Kid1 returns on 26/6"
+      → action="mute", until_date="2026-06-26"
     - "Leave the alarm alone all week, I'm on afternoon shift at work"
-      â†’ action="mute", until_date=<calculate it YOURSELF from the context, e.g., next Sunday>
-    - "Reactivate the notifications for the park" or "Alexandros is back"
-      â†’ action="unmute"
+      → action="mute", until_date=<calculate it YOURSELF from the context, e.g., next Sunday>
+    - "Reactivate the notifications for the park" or "Kid1 is back"
+      → action="unmute"
     - "Don't send ANYTHING, not even a warm message, for the park until he returns"
-      â†’ action="silence_emotional"
+      → action="silence_emotional"
     - "You can send some message for the park again while he is away"
-      â†’ action="allow_emotional"
+      → action="allow_emotional"
 
     ARGUMENTS:
     - event_name: the name of the routine as spoken by the user (e.g., "park", "work
-      alarm") â€” DOES NOT need to be exact, a fuzzy match is performed in memory.
+      alarm") — DOES NOT need to be exact, a fuzzy match is performed in memory.
     - action: one of "mute", "unmute", "silence_emotional", "allow_emotional".
     - until_date: ONLY for action="mute". Format YYYY-MM-DD. Calculate it YOURSELF from the
-      context (today + X days, "this week" etc) â€” DO NOT ask the
+      context (today + X days, "this week" etc) — DO NOT ask the
       user to explicitly state it in ISO format.
     - source_text: The exact original message/sentence of the user that led to
       this call (ALWAYS MANDATORY).
@@ -1090,7 +1090,7 @@ def control_routine_notifications(event_name: str, action: str, until_date: str 
     except Exception as e:
         return t("tools.system.routine_update_err2", e=str(e))
 
-    return "âŒ Unknown error."
+    return "❌ Unknown error."
 
 
 @tool
@@ -1101,7 +1101,7 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
     (e.g., shift, weather, location) or when they state that something "does not apply when..."
 
     ARGUMENTS:
-    - event_name: The name of the target routine as spoken by the user â€” fuzzy matched.
+    - event_name: The name of the target routine as spoken by the user — fuzzy matched.
     - action: "add" (to add a condition) or "remove" (to clear the condition).
     - condition_type: e.g., "shift_mode" (shift dependency), "context_flag" (dependency on a general flag like school_open).
     - payload_json: JSON string with the parameters (e.g., '{"flag": "user_out_of_home", "equals": false}').
@@ -1114,7 +1114,7 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
 
 
     EXAMPLES:
-    "When I have an afternoon shift, Sofia takes the park" (meaning the park for me does NOT apply in the afternoon)
+    "When I have an afternoon shift, my partner takes the park" (meaning the park for me does NOT apply in the afternoon)
     -> action="add", condition_type="shift_mode", payload_json='{"flag": "current_shift", "equals": "afternoon"}', condition_mode="suppress_when_true"
 
     "Training only applies when I have a morning shift"
@@ -1136,7 +1136,7 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
 
     routines = find_routines_for_schedule_control(event_name, day_of_week=day_of_week if day_of_week else None, time_str=time_str if time_str else None)
     if not routines:
-        return f"âŒ No routine found matching '{event_name}'."
+        return f"❌ No routine found matching '{event_name}'."
 
     results = []
     changed = 0
@@ -1194,44 +1194,44 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
                               resume_rule: str = "", reason: str = "", source_text: str = "") -> str:
     """
     [OVERRIDE]: Manual control of the SEASONAL/TEMPORARY inactivity of a routine
-    (not notifications â€” that's what control_routine_notifications is for). Use
+    (not notifications — that's what control_routine_notifications is for). Use
     it ONLY when {config.USER_NAME} EXPLICITLY asks to "freeze" / "stop" / "resume" a
     routine due to summer break, camp, season change, etc.
 
     DIFFERENCE FROM control_routine_notifications:
     - control_routine_notifications = "do not SEND me" (notification layer, the routine
       remains active in terms of confidence/missed-tracking).
-    - control_routine_schedule = "this routine DOES NOT APPLY now" (business-logic layer â€”
+    - control_routine_schedule = "this routine DOES NOT APPLY now" (business-logic layer —
       it does not enter missed/failed logic, confidence does not drop, it simply "freezes").
     For a summer break of a school/seasonal activity (e.g., football, school)
     ALWAYS use this tool, NOT mute, unless {config.USER_NAME} explicitly asks for "mute"/
     "mute notifications".
 
-    VERY IMPORTANT â€” DO NOT call it just because the user gave you an INFORMATION (e.g.,
-    "Alexandros is away at camp for 2 weeks"). An information IS NOT a request. Call
+    VERY IMPORTANT — DO NOT call it just because the user gave you an INFORMATION (e.g.,
+    "Kid1 is away at camp for 2 weeks"). An information IS NOT a request. Call
     it ONLY when there is an explicit request to pause/resume a routine.
 
     ARGUMENTS:
-    - event_name: the name of the routine as spoken by the user â€” fuzzy match in memory.
+    - event_name: the name of the routine as spoken by the user — fuzzy match in memory.
     - action: one of "pause", "resume", "set_window", "clear_window".
-      â€¢ pause â†’ freezes the routine until until_date (YYYY-MM-DD), optional reason
+      • pause → freezes the routine until until_date (YYYY-MM-DD), optional reason
         (e.g., "summer_break", "camp", "shift_change") and optional resume_rule
         (e.g., "every_september", "next_school_year", "manual_only").
-      â€¢ resume â†’ removes the pause, the routine immediately returns to normal operation.
-      â€¢ set_window â†’ sets active_from and/or active_until (YYYY-MM-DD) â€” the routine
+      • resume → removes the pause, the routine immediately returns to normal operation.
+      • set_window → sets active_from and/or active_until (YYYY-MM-DD) — the routine
         applies ONLY within this date window.
-      â€¢ clear_window â†’ removes the active_from/active_until window.
+      • clear_window → removes the active_from/active_until window.
     - until_date: ONLY for action="pause". Calculate it YOURSELF from the context.
     - active_from / active_until: ONLY for action="set_window" (YYYY-MM-DD, only
       one of the two can be provided).
-    - resume_rule: optional, along with action="pause" â€” how/when it will resume.
+    - resume_rule: optional, along with action="pause" — how/when it will resume.
     - reason: optional, human description of the reason (e.g., "summer_break").
     - source_text: The exact original message/sentence of the user that led to
       this call (ALWAYS MANDATORY).
 
     EXAMPLE:
-    "Alexandros' football stops until September for the summer"
-      â†’ action="pause", until_date="2026-09-01", reason="summer_break",
+    "Kid1's football stops until September for the summer"
+      → action="pause", until_date="2026-09-01", reason="summer_break",
         resume_rule="every_september"
     """
     from datetime import datetime
@@ -1326,7 +1326,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
                 label = routine["event"]
                 day = routine.get("day") or "?"
                 set_routine_active_window(r_id, active_from=active_from_clean, active_until=active_until_clean, reason=reason_clean)
-                results.append(t("tools.system.routine_validity_window", day=day, label=label, active_from=active_from_clean or "â€”", active_until=active_until_clean or "â€”"))
+                results.append(t("tools.system.routine_validity_window", day=day, label=label, active_from=active_from_clean or "—", active_until=active_until_clean or "—"))
             return "\n".join(results)
 
         if action == "clear_window":
@@ -1340,7 +1340,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
     except Exception as e:
         return t("tools.system.routine_sched_err", e=str(e))
 
-    return "âŒ Unknown error."
+    return "❌ Unknown error."
 
 
 @tool
@@ -1379,11 +1379,11 @@ def control_routine_cooldown(
     routine_names = _get_routine_names_for_intent_classification()
     intent_result = classify_routine_intent(source_text, routine_names=routine_names)
     if intent_result.intent == "context_update":
-        return "â„¹ï¸ This looks like a context/fact update, not a manual routine cooldown override command. Cooldown not reset."
+        return "ℹ️ This looks like a context/fact update, not a manual routine cooldown override command. Cooldown not reset."
 
     VALID_ACTIONS = {"reset"}
     if action not in VALID_ACTIONS:
-        return f"âŒ Invalid action: '{action}'. Allowed: reset."
+        return f"❌ Invalid action: '{action}'. Allowed: reset."
 
     routines = find_routines_for_schedule_control(
         event_name,
@@ -1391,7 +1391,7 @@ def control_routine_cooldown(
         time_str=time_str if time_str else None,
     )
     if not routines:
-        return f"âŒ No routine found matching '{event_name}'."
+        return f"❌ No routine found matching '{event_name}'."
 
     results = []
     changed = 0
@@ -1407,13 +1407,13 @@ def control_routine_cooldown(
 
         after = get_routine_notify_info(r_id)
         results.append(
-            f"ðŸ”„ [{r_day} {r_time}] Routine '{label}' removed from cooldown "
+            f"🔄 [{r_day} {r_time}] Routine '{label}' removed from cooldown "
             f"({before['cooldown_hours']}h -> {after['cooldown_hours']}h)."
         )
         changed += 1
 
     if changed == 0:
-        return f"â„¹ï¸ No cooldown change for: {event_name}"
+        return f"ℹ️ No cooldown change for: {event_name}"
 
     return "\n".join(results)
 
@@ -1453,12 +1453,12 @@ def control_pending_followup(
 
     action = (action or "").strip().lower()
     if action not in {"delete", "defer", "repair_legacy"}:
-        return "âŒ Invalid action. Allowed: delete, defer, repair_legacy."
+        return "❌ Invalid action. Allowed: delete, defer, repair_legacy."
 
     if action != "repair_legacy":
         if not _looks_like_manual_followup_control(source_text):
             return (
-                "â„¹ï¸ This looks more like a context update rather than a manual "
+                "ℹ️ This looks more like a context update rather than a manual "
                 "pending follow-up override command. No changes made."
             )
 
@@ -1466,35 +1466,35 @@ def control_pending_followup(
         repaired = backfill_legacy_followups(force_retime=True)
         rows = find_pending_followups(limit=10)
         if not repaired:
-            return "â„¹ï¸ No legacy pending followups needed repair."
+            return "ℹ️ No legacy pending followups needed repair."
         preview = []
         for row in rows[:5]:
             preview.append(
                 f"- #{row['id']} {row['subject']} -> {row['followup_after_ts']}"
             )
         body = "\n".join(preview)
-        return f"ðŸ› ï¸ Repaired {repaired} legacy pending followups.\n{body}"
+        return f"🛠️ Repaired {repaired} legacy pending followups.\n{body}"
 
     matches = find_followups_for_control(subject_query, topic=topic)
     if not matches:
-        return f"â„¹ï¸ No pending/sent follow-up found matching '{subject_query}'."
+        return f"ℹ️ No pending/sent follow-up found matching '{subject_query}'."
 
     if len(matches) > 1:
         opts = "\n".join(
             f"- #{m['id']} {m['subject']} ({m['topic']}, {m['status']})"
             for m in matches[:5]
         )
-        return f"âš ï¸ Found multiple pending followups. Please specify:\n{opts}"
+        return f"⚠️ Found multiple pending followups. Please specify:\n{opts}"
 
     item = matches[0]
     if action == "delete":
         ok = delete_followup(item["id"], reason="manual_delete")
         if not ok:
-            return f"âŒ Failed to delete pending follow-up #{item['id']}."
-        return f"âœ… Deleted pending follow-up #{item['id']} for '{item['subject']}'."
+            return f"❌ Failed to delete pending follow-up #{item['id']}."
+        return f"✅ Deleted pending follow-up #{item['id']} for '{item['subject']}'."
 
     if delay_minutes <= 0 and not target_window.strip():
-        return "âŒ Defer requires delay_minutes and/or target_window."
+        return "❌ Defer requires delay_minutes and/or target_window."
 
     defer_followup(
         item["id"],
@@ -1506,9 +1506,9 @@ def control_pending_followup(
     updated = find_pending_followups(limit=20)
     refreshed = next((row for row in updated if row["id"] == item["id"]), None)
     if not refreshed:
-        return f"âœ… Pending follow-up #{item['id']} deferred."
+        return f"✅ Pending follow-up #{item['id']} deferred."
     return (
-        f"âœ… Pending follow-up #{item['id']} for '{refreshed['subject']}' deferred.\n"
+        f"✅ Pending follow-up #{item['id']} for '{refreshed['subject']}' deferred.\n"
         f"New due: {refreshed['followup_after_ts']}\n"
         f"New expiry: {refreshed['expires_at']}"
     )
@@ -1565,9 +1565,9 @@ def manage_list(action: str, list_name: str, item: str = "") -> str:
             conn.close()
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 # GOOGLE SERVICES
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 
 from astakos_skills.gcalendar import google_calendar_tool
 
@@ -1594,12 +1594,12 @@ def google_tasks_tool(
     """
     Manages Google Tasks.
     Actions:
-      'create'   â€” new task (requires title, optionally due/notes)
-      'list'     â€” list of open tasks
-      'complete' â€” complete a task (requires task_id)
-      'update'   â€” modify title/due/notes (requires task_id and at least one field)
-      'delete'   â€” delete a task (requires task_id, CRITICAL approval)
-    ðŸš¨ [MASTER-RULE FOR TITLE]: The 'title' parameter MUST clearly describe the task (e.g., 'Rose bush care').
+      'create'   — new task (requires title, optionally due/notes)
+      'list'     — list of open tasks
+      'complete' — complete a task (requires task_id)
+      'update'   — modify title/due/notes (requires task_id and at least one field)
+      'delete'   — delete a task (requires task_id, CRITICAL approval)
+    🚨 [MASTER-RULE FOR TITLE]: The 'title' parameter MUST clearly describe the task (e.g., 'Rose bush care').
     It is STRICTLY FORBIDDEN to use command verbs (e.g., 'put', 'do', 'remind me', 'reminder') as a title.
     If the user simply says 'add a reminder' without specifying the topic, DO NOT call this tool. Ask them first what they want you to write!
     """
@@ -1618,17 +1618,17 @@ def google_tasks_tool(
             ).execute()
             items = result.get("items", [])
             if not items:
-                return "âœ… No open Google Tasks."
-            lines = ["ðŸ“‹ Open Google Tasks:"]
+                return "✅ No open Google Tasks."
+            lines = ["📋 Open Google Tasks:"]
             for task in items:
                 due_text = task.get("due", "")[:10]
                 due_part = f" | due: {due_text}" if due_text else ""
-                lines.append(f"â€¢ {task.get("title", t("tools.system.task_no_title"))} | ID: `{task.get('id')}`{due_part}")
+                lines.append(f"• {task.get("title", t("tools.system.task_no_title"))} | ID: `{task.get('id')}`{due_part}")
             return "\n".join(lines)
 
         if action == "create":
             if not title:
-                return "âŒ Create requires a title."
+                return "❌ Create requires a title."
             task = {"title": title}
             normalized_due = _normalize_google_task_due(due)
             if normalized_due:
@@ -1636,21 +1636,21 @@ def google_tasks_tool(
             if notes:
                 task["notes"] = notes
             created = service.tasks().insert(tasklist=tasklist_id, body=task).execute()
-            return f"âœ… Task '{created.get('title', title)}' added to Google Tasks! ID: `{created.get('id')}`"
+            return f"✅ Task '{created.get('title', title)}' added to Google Tasks! ID: `{created.get('id')}`"
 
         if action == "complete":
             if not task_id:
-                return "âŒ Complete requires a task_id."
+                return "❌ Complete requires a task_id."
             service.tasks().patch(
                 tasklist=tasklist_id,
                 task=task_id,
                 body={"status": "completed"},
             ).execute()
-            return f"âœ… Google Task `{task_id}` completed."
+            return f"✅ Google Task `{task_id}` completed."
 
         if action == "update":
             if not task_id:
-                return "âŒ Update requires a task_id."
+                return "❌ Update requires a task_id."
             body = {}
             if title:
                 body["title"] = title
@@ -1660,17 +1660,17 @@ def google_tasks_tool(
             if notes:
                 body["notes"] = notes
             if not body:
-                return "âŒ Update requires title, due, or notes."
+                return "❌ Update requires title, due, or notes."
             updated = service.tasks().patch(tasklist=tasklist_id, task=task_id, body=body).execute()
-            return f"âœ… Google Task updated: {updated.get('title', task_id)}"
+            return f"✅ Google Task updated: {updated.get('title', task_id)}"
 
         if action == "delete":
             if not task_id:
-                return "âŒ Delete requires a task_id."
+                return "❌ Delete requires a task_id."
             service.tasks().delete(tasklist=tasklist_id, task=task_id).execute()
-            return f"ðŸ—‘ï¸ Google Task `{task_id}` deleted."
+            return f"🗑️ Google Task `{task_id}` deleted."
 
-        return "âŒ Unknown action. Try: list, create, complete, update, delete."
+        return "❌ Unknown action. Try: list, create, complete, update, delete."
     except Exception as e:
         return f"Tasks Error: {str(e)}"
 
@@ -1690,13 +1690,13 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
     output_dir = os.path.realpath(os.path.join(BASE_DIR, "outputs"))
     os.makedirs(output_dir, exist_ok=True)
 
-    # [SECURITY]: basename + resolve check â€” prevents path traversal (e.g., ../config.py)
+    # [SECURITY]: basename + resolve check — prevents path traversal (e.g., ../config.py)
     safe_filename = os.path.basename(filename)
     if not safe_filename:
-        return "âŒ Error: Invalid filename."
+        return "❌ Error: Invalid filename."
     full_path = os.path.realpath(os.path.join(output_dir, safe_filename))
     if not full_path.startswith(output_dir + os.sep) and full_path != output_dir:
-        return "âŒ Error: Path outside outputs is not allowed."
+        return "❌ Error: Path outside outputs is not allowed."
     file_type = file_type.lower()
 
     try:
@@ -1735,12 +1735,12 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
                 f.write(data)
 
         else:
-            return f"âŒ Error: Type '{file_type}' not supported."
+            return f"❌ Error: Type '{file_type}' not supported."
 
-        return f"âœ… Ready Boss! File created successfully.\n[CREATED_FILE: {full_path}]"
+        return f"✅ Ready Boss! File created successfully.\n[CREATED_FILE: {full_path}]"
 
     except Exception as e:
-        return f"âŒ Error during creation: {str(e)}"
+        return f"❌ Error during creation: {str(e)}"
 @tool
 def generate_image_tool(prompt: str) -> str:
     """
@@ -1758,7 +1758,7 @@ def generate_image_tool(prompt: str) -> str:
     filename = f"{safe_filename}_{int(time.time())}.jpg"
     full_path = os.path.join(output_dir, filename)
 
-    # â”€â”€ Vertex AI Imagen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Vertex AI Imagen ──────────────────────────────────────────
     try:
         from google import genai
         from google.genai import types
@@ -1783,13 +1783,13 @@ def generate_image_tool(prompt: str) -> str:
         )
         
         if not response.generated_images:
-            return "âŒ Vertex AI Imagen returned no image."
+            return "❌ Vertex AI Imagen returned no image."
             
         response.generated_images[0].image.save(full_path)
-        return f"âœ… Ready! Image created.\n[SEND_PHOTO: {full_path}]"
+        return f"✅ Ready! Image created.\n[SEND_PHOTO: {full_path}]"
 
     except Exception as e:
-        return f"âŒ Error Vertex AI Imagen: {str(e)}"
+        return f"❌ Error Vertex AI Imagen: {str(e)}"
 def _escape_drive_query_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
@@ -1809,16 +1809,16 @@ def drive_manager(
     """Manages {config.USER_NAME}'s Google Drive.
 
     Actions:
-      'list_files'   â€” List files in folder (default: root astakos folder)
-      'search'       â€” Search by name or keyword (requires query=)
-      'download'     â€” Download file (requires file_id=)
-      'upload'       â€” Upload file (requires local_path=)
-      'delete'       â€” Delete file (requires file_id=)
-      'rename'       â€” Rename (requires file_id= + new_name=)
-      'move'         â€” Move to another folder (requires file_id= + target_folder_id=)
-      'share'        â€” Share (requires file_id= + share_email= + share_role='reader'/'writer')
-      'create_folder'â€” Create folder (requires new_name=, optionally folder_id= for parent)
-      'info'         â€” File information (requires file_id=)
+      'list_files'   — List files in folder (default: root astakos folder)
+      'search'       — Search by name or keyword (requires query=)
+      'download'     — Download file (requires file_id=)
+      'upload'       — Upload file (requires local_path=)
+      'delete'       — Delete file (requires file_id=)
+      'rename'       — Rename (requires file_id= + new_name=)
+      'move'         — Move to another folder (requires file_id= + target_folder_id=)
+      'share'        — Share (requires file_id= + share_email= + share_role='reader'/'writer')
+      'create_folder'— Create folder (requires new_name=, optionally folder_id= for parent)
+      'info'         — File information (requires file_id=)
     """
     try:
         from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
@@ -1829,7 +1829,7 @@ def drive_manager(
         creds   = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
         service = build('drive', 'v3', credentials=creds)
 
-        # â”€â”€ LIST FILES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── LIST FILES ───────────────────────────────────────────
         if action == "list_files":
             results = service.files().list(
                 q=f"'{folder_id}' in parents and trashed=false",
@@ -1839,18 +1839,18 @@ def drive_manager(
             ).execute()
             items = results.get('files', [])
             if not items:
-                return "ðŸ“ The folder is empty."
-            lines = ["ðŸ“ Files in Drive:\n"]
+                return "📁 The folder is empty."
+            lines = ["📁 Files in Drive:\n"]
             for i in items:
-                size_kb = round(int(i.get('size', 0)) / 1024, 1) if i.get('size') else "â€”"
+                size_kb = round(int(i.get('size', 0)) / 1024, 1) if i.get('size') else "—"
                 mod = i.get('modifiedTime', '')[:10]
-                lines.append(f"â€¢ {i['name']} | ID: `{i['id']}` | {size_kb} KB | {mod}")
+                lines.append(f"• {i['name']} | ID: `{i['id']}` | {size_kb} KB | {mod}")
             return "\n".join(lines)
 
-        # â”€â”€ SEARCH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── SEARCH ───────────────────────────────────────────────
         elif action == "search":
             if not query:
-                return "âŒ Requires query= for search."
+                return "❌ Requires query= for search."
             q_str = f"name contains '{_escape_drive_query_value(query)}' and trashed=false"
             results = service.files().list(
                 q=q_str,
@@ -1860,23 +1860,23 @@ def drive_manager(
             ).execute()
             items = results.get('files', [])
             if not items:
-                return f"ðŸ” No files found for '{query}'."
-            lines = [f"ðŸ” Results for '{query}':\n"]
+                return f"🔍 No files found for '{query}'."
+            lines = [f"🔍 Results for '{query}':\n"]
             for i in items:
-                size_kb = round(int(i.get('size', 0)) / 1024, 1) if i.get('size') else "â€”"
+                size_kb = round(int(i.get('size', 0)) / 1024, 1) if i.get('size') else "—"
                 mod = i.get('modifiedTime', '')[:10]
-                lines.append(f"â€¢ {i['name']} | ID: `{i['id']}` | {size_kb} KB | {mod}")
+                lines.append(f"• {i['name']} | ID: `{i['id']}` | {size_kb} KB | {mod}")
             return "\n".join(lines)
 
-        # â”€â”€ DOWNLOAD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── DOWNLOAD ─────────────────────────────────────────────
         elif action == "download":
             if not file_id:
-                return "âŒ Requires file_id=."
+                return "❌ Requires file_id=."
             file_metadata = service.files().get(fileId=file_id, fields="name,mimeType").execute()
             mime_type = file_metadata.get('mimeType', '')
             file_name = file_metadata.get('name', 'downloaded_file')
 
-            # Google Docs/Sheets/Slides â†’ export as text/xlsx/pptx
+            # Google Docs/Sheets/Slides → export as text/xlsx/pptx
             export_map = {
                 'application/vnd.google-apps.document':     ('text/plain', '.txt'),
                 'application/vnd.google-apps.spreadsheet':  ('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xlsx'),
@@ -1896,14 +1896,14 @@ def drive_manager(
             while not done:
                 _, done = downloader.next_chunk()
 
-            # [SECURITY]: always download to outputs â€” local_path is ignored if it is outside
+            # [SECURITY]: always download to outputs — local_path is ignored if it is outside
             from config import BASE_DIR as _BASE_DIR
             _outputs_dir = os.path.realpath(os.path.join(_BASE_DIR, "outputs"))
             os.makedirs(_outputs_dir, exist_ok=True)
             if local_path:
                 _lp_real = os.path.realpath(local_path)
                 if not _lp_real.startswith(_outputs_dir + os.sep):
-                    return f"âŒ Forbidden download path: only within outputs/ allowed."
+                    return f"❌ Forbidden download path: only within outputs/ allowed."
                 save_target = _lp_real
             else:
                 save_target = os.path.join(_outputs_dir, os.path.basename(file_name))
@@ -1914,14 +1914,14 @@ def drive_manager(
             # If it is text, also return the content
             if mime_type == 'application/vnd.google-apps.document' or file_name.endswith('.txt'):
                 content = fh.getvalue().decode('utf-8', errors='ignore')[:6000]
-                return f"âœ… '{file_name}' downloaded â†’ {save_target}\n\n{content}"
-            return f"âœ… '{file_name}' downloaded â†’ {save_target}"
+                return f"✅ '{file_name}' downloaded → {save_target}\n\n{content}"
+            return f"✅ '{file_name}' downloaded → {save_target}"
 
-        # â”€â”€ UPLOAD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── UPLOAD ───────────────────────────────────────────────
         elif action == "upload":
             if not local_path or not os.path.exists(local_path):
-                return f"âŒ File not found: {local_path}"
-            # [SECURITY]: upload only from allowed dirs â€” prevents uploading credentials/config
+                return f"❌ File not found: {local_path}"
+            # [SECURITY]: upload only from allowed dirs — prevents uploading credentials/config
             from config import BASE_DIR as _BASE_DIR
             _upload_allowed = [
                 os.path.realpath(os.path.join(_BASE_DIR, "outputs")),
@@ -1931,31 +1931,31 @@ def drive_manager(
             ]
             _lp_real = os.path.realpath(local_path)
             if not any(_lp_real.startswith(d + os.sep) or _lp_real == d for d in _upload_allowed):
-                return f"âŒ Forbidden upload path: only from outputs/, telegram_uploads/, telegram_photos/, watch_folder/ allowed."
+                return f"❌ Forbidden upload path: only from outputs/, telegram_uploads/, telegram_photos/, watch_folder/ allowed."
             file_metadata = {'name': os.path.basename(local_path), 'parents': [folder_id]}
             media = MediaFileUpload(local_path, resumable=True)
             file = service.files().create(body=file_metadata, media_body=media, fields='id,name').execute()
-            return f"âœ… '{file.get('name')}' uploaded! (ID: {file.get('id')})"
+            return f"✅ '{file.get('name')}' uploaded! (ID: {file.get('id')})"
 
-        # â”€â”€ DELETE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── DELETE ───────────────────────────────────────────────
         elif action == "delete":
             if not file_id:
-                return "âŒ Requires file_id=."
+                return "❌ Requires file_id=."
             meta = service.files().get(fileId=file_id, fields="name").execute()
             service.files().update(fileId=file_id, body={"trashed": True}).execute()
-            return f"ðŸ—‘ï¸ '{meta.get('name')}' moved to trash."
+            return f"🗑️ '{meta.get('name')}' moved to trash."
 
-        # â”€â”€ RENAME â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── RENAME ───────────────────────────────────────────────
         elif action == "rename":
             if not file_id or not new_name:
-                return "âŒ Requires file_id= and new_name=."
+                return "❌ Requires file_id= and new_name=."
             service.files().update(fileId=file_id, body={"name": new_name}).execute()
-            return f"âœï¸ Renamed to '{new_name}'."
+            return f"✏️ Renamed to '{new_name}'."
 
-        # â”€â”€ MOVE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── MOVE ─────────────────────────────────────────────────
         elif action == "move":
             if not file_id or not target_folder_id:
-                return "âŒ Requires file_id= and target_folder_id=."
+                return "❌ Requires file_id= and target_folder_id=."
             file = service.files().get(fileId=file_id, fields="parents").execute()
             old_parents = ",".join(file.get('parents', []))
             service.files().update(
@@ -1964,59 +1964,59 @@ def drive_manager(
                 removeParents=old_parents,
                 fields="id, parents"
             ).execute()
-            return f"ðŸ“¦ File moved to folder {target_folder_id}."
+            return f"📦 File moved to folder {target_folder_id}."
 
-        # â”€â”€ SHARE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── SHARE ────────────────────────────────────────────────
         elif action == "share":
             if not file_id or not share_email:
-                return "âŒ Requires file_id= and share_email=."
+                return "❌ Requires file_id= and share_email=."
             if share_role not in {"reader", "writer", "commenter"}:
-                return "âŒ share_role must be reader, writer, or commenter."
+                return "❌ share_role must be reader, writer, or commenter."
             permission = {"type": "user", "role": share_role, "emailAddress": share_email}
             service.permissions().create(fileId=file_id, body=permission, sendNotificationEmail=False).execute()
-            return f"ðŸ”— Shared with {share_email} as {share_role}."
+            return f"🔗 Shared with {share_email} as {share_role}."
 
-        # â”€â”€ CREATE FOLDER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── CREATE FOLDER ─────────────────────────────────────────
         elif action == "create_folder":
             if not new_name:
-                return "âŒ Requires new_name= for folder name."
+                return "❌ Requires new_name= for folder name."
             metadata = {
                 "name": new_name,
                 "mimeType": "application/vnd.google-apps.folder",
                 "parents": [folder_id]
             }
             folder = service.files().create(body=metadata, fields="id, name").execute()
-            return f"ðŸ“ Folder '{folder.get('name')}' created (ID: {folder.get('id')})."
+            return f"📁 Folder '{folder.get('name')}' created (ID: {folder.get('id')})."
 
-        # â”€â”€ INFO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── INFO ─────────────────────────────────────────────────
         elif action == "info":
             if not file_id:
-                return "âŒ Requires file_id=."
+                return "❌ Requires file_id=."
             meta = service.files().get(
                 fileId=file_id,
                 fields="name,mimeType,size,modifiedTime,createdTime,parents,webViewLink,owners"
             ).execute()
-            size_kb = round(int(meta.get('size', 0)) / 1024, 1) if meta.get('size') else "â€”"
+            size_kb = round(int(meta.get('size', 0)) / 1024, 1) if meta.get('size') else "—"
             owners = ", ".join(o.get('emailAddress','') for o in meta.get('owners', []))
             return (
-                f"ðŸ“„ *{meta.get('name')}*\n"
+                f"📄 *{meta.get('name')}*\n"
                 f"Type: {meta.get('mimeType')}\n"
                 f"Size: {size_kb} KB\n"
                 f"Created: {meta.get('createdTime','')[:10]}\n"
                 f"Modified: {meta.get('modifiedTime','')[:10]}\n"
                 f"Owner: {owners}\n"
-                f"Link: {meta.get('webViewLink','â€”')}"
+                f"Link: {meta.get('webViewLink','—')}"
             )
 
-        return "âŒ Unknown action. See docstring for options."
+        return "❌ Unknown action. See docstring for options."
 
     except Exception as e:
-        return f"âŒ Drive Error: {str(e)}"
+        return f"❌ Drive Error: {str(e)}"
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 # FILE & DEV TOOLS
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 
 @tool
 def read_local_file(file_path: str) -> str:
@@ -2037,7 +2037,7 @@ def read_local_file(file_path: str) -> str:
         os.path.realpath(os.path.join(base_dir, "uploads")),
         os.path.realpath(os.path.join(base_dir, "outputs")),
         os.path.realpath(os.path.join(base_dir, "watch_folder")),
-        # [SELF-DIAGNOSIS]: Source code folders â€” Lobster can read
+        # [SELF-DIAGNOSIS]: Source code folders — Lobster can read
         # its code for self-debugging (e.g., why a tool failed).
         os.path.realpath(os.path.join(base_dir, "tools")),
         os.path.realpath(os.path.join(base_dir, "core")),
@@ -2081,16 +2081,16 @@ def read_local_file(file_path: str) -> str:
     if os.path.isabs(file_path):
         if os.path.exists(file_path) and os.path.isfile(file_path) and (_in_allowed(file_path) or _is_allowed_file(file_path)):
             full_path = file_path
-            print(f"\033[92m[Tool Debug]: âœ… Absolute path within allowed -> {full_path}\033[0m")
+            print(f"\033[92m[Tool Debug]: ✅ Absolute path within allowed -> {full_path}\033[0m")
         elif os.path.exists(file_path):
-            return f"âŒ Forbidden path: {os.path.basename(file_path)} is outside approved folders."
+            return f"❌ Forbidden path: {os.path.basename(file_path)} is outside approved folders."
 
     # Exact allowlist for root-level runtime files such as the Messenger draft.
     if not full_path:
         for allowed_file in _allowed_files:
             if filename == os.path.basename(allowed_file) and os.path.exists(allowed_file) and os.path.isfile(allowed_file):
                 full_path = allowed_file
-                print(f"\033[92m[Tool Debug]: âœ… Exact allowed file -> {full_path}\033[0m")
+                print(f"\033[92m[Tool Debug]: ✅ Exact allowed file -> {full_path}\033[0m")
                 break
 
     # Search by basename in the allowed dirs_
@@ -2099,11 +2099,11 @@ def read_local_file(file_path: str) -> str:
             test_path = os.path.join(d, filename)
             if os.path.exists(test_path) and os.path.isfile(test_path) and _in_allowed(test_path):
                 full_path = test_path
-                print(f"\033[92m[Tool Debug]: âœ… Found at -> {full_path}\033[0m")
+                print(f"\033[92m[Tool Debug]: ✅ Found at -> {full_path}\033[0m")
                 break
 
     if not full_path:
-        return f"âŒ Error: File {filename} not found in search folders."
+        return f"❌ Error: File {filename} not found in search folders."
 
     ext = os.path.splitext(full_path)[1].lower()
 
@@ -2125,17 +2125,17 @@ def read_local_file(file_path: str) -> str:
                     break
             
             if not text.strip():
-                return f"âš ï¸ The PDF ({filename}) seems to be scanned (image). Requires OCR to read."
+                return f"⚠️ The PDF ({filename}) seems to be scanned (image). Requires OCR to read."
                 
-            return f"ðŸ“„ PDF ({filename}):\n{text[:12000]}"
+            return f"📄 PDF ({filename}):\n{text[:12000]}"
 
         elif ext in [".xlsx", ".xls"]:
             import pandas as pd
             excel_file = pd.ExcelFile(full_path)
-            output_text = f"ðŸ“Š Excel ({filename}) - Sheets: {', '.join(excel_file.sheet_names)}\n\n"
+            output_text = f"📊 Excel ({filename}) - Sheets: {', '.join(excel_file.sheet_names)}\n\n"
             for sheet in excel_file.sheet_names:
                 df = pd.read_excel(full_path, sheet_name=sheet).fillna("-")
-                output_text += f"â•â•â• Sheet: {sheet} â•â•â•\n"
+                output_text += f"═══ Sheet: {sheet} ═══\n"
                 output_text += df.head(50).to_string(index=False) + "\n\n"
                 if len(output_text) > 12000: break
             return output_text[:12000]
@@ -2143,20 +2143,20 @@ def read_local_file(file_path: str) -> str:
         elif ext == ".csv":
             import pandas as pd
             df = pd.read_csv(full_path).fillna("-")
-            return f"ðŸ“Š CSV ({filename}):\n{df.head(100).to_string(index=False)}"
+            return f"📊 CSV ({filename}):\n{df.head(100).to_string(index=False)}"
 
         elif ext == ".docx":
             import docx
             doc = docx.Document(full_path)
             text = "\n".join([p.text for p in doc.paragraphs])
-            return f"ðŸ“ Word ({filename}):\n{text[:12000]}"
+            return f"📝 Word ({filename}):\n{text[:12000]}"
 
         else: # TXT, PY, JS, etc.
             with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
-                return f"ðŸ“„ File ({filename}):\n{f.read(12000)}"
+                return f"📄 File ({filename}):\n{f.read(12000)}"
 
     except Exception as e:
-        return f"âŒ Read error {filename}: {str(e)}"
+        return f"❌ Read error {filename}: {str(e)}"
 
 @tool
 def write_code(filename: str, code: str) -> str:
@@ -2204,14 +2204,14 @@ def run_code(filename: str, script_args: str = "") -> str:
     if not os.path.exists(file_path):
         return f"Error: File {file_path} does not exist in Sandbox."
 
-    # â”€â”€ SafeExec check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── SafeExec check ───────────────────────────────────────────
     cmd_str = f"python {safe_filename} {script_args}".strip()
     check = safe_execute(cmd_str, lambda c: {"status": "ok"})
     if check.get("status") == "blocked":
-        return f"ðŸ›¡ï¸ [SAFE EXECUTOR - BLOCKED]: {check['reason']}"
+        return f"🛡️ [SAFE EXECUTOR - BLOCKED]: {check['reason']}"
     if check.get("status") == "cancelled":
-        return f"âš ï¸ [SAFE EXECUTOR]: Execution requires confirmation. Send again with `/confirm {cmd_str}`"
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        return f"⚠️ [SAFE EXECUTOR]: Execution requires confirmation. Send again with `/confirm {cmd_str}`"
+    # ────────────────────────────────────────────────────────────
 
     try:
         cmd = [sys.executable, file_path]
@@ -2236,7 +2236,7 @@ def run_code(filename: str, script_args: str = "") -> str:
 @tool
 def write_custom_tool(tool_name: str, tool_code: str) -> str:
     """Writes and tests a new tool in astakos_skills/.
-    It does not register it automatically in system/risk/registry â€” this is done with register_tool."""
+    It does not register it automatically in system/risk/registry — this is done with register_tool."""
     import ast
 
     clean_code = re.sub(r"```(?:python)?", "", tool_code).replace("```", "").strip()
@@ -2257,7 +2257,7 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
     def _has_tool_decorator(function_node):
         return any(_decorator_name(dec).split(".")[-1] == "tool" for dec in function_node.decorator_list)
 
-    # [SECURITY]: Blocklist for generated tool code â€” filesystem, network, execution
+    # [SECURITY]: Blocklist for generated tool code — filesystem, network, execution
     _dangerous_patterns = [
         r"subprocess",
         r"os\s*\.\s*system",
@@ -2295,18 +2295,18 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
     ]
     for _dp in _dangerous_patterns:
         if re.search(_dp, clean_code, re.IGNORECASE):
-            return f"System Error: Rejected â€” detected forbidden pattern: `{_dp}`."
-    dangerous_pattern = None  # legacy â€” replaced by _dangerous_patterns
+            return f"System Error: Rejected — detected forbidden pattern: `{_dp}`."
+    dangerous_pattern = None  # legacy — replaced by _dangerous_patterns
     # (legacy check replaced by the _dangerous_patterns loop above)
 
     try:
         tree = ast.parse(clean_code)
     except SyntaxError as se:
-        return f"âŒ Syntax error (line {se.lineno}): {se.msg}\nLook: {se.text}"
+        return f"❌ Syntax error (line {se.lineno}): {se.msg}\nLook: {se.text}"
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "open":
-            return "System Error: Rejected â€” detected forbidden built-in open() call."
+            return "System Error: Rejected — detected forbidden built-in open() call."
 
     top_level_functions = [
         node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -2384,9 +2384,9 @@ if __name__ == "__main__":
 
         if "TEST_FAIL" in stdout or (res.returncode != 0 and not stdout):
             error_detail = stdout or stderr
-            return f"âŒ Tool '{tool_name}' FAILED the test.\nError: {error_detail[:600]}"
+            return f"❌ Tool '{tool_name}' FAILED the test.\nError: {error_detail[:600]}"
 
-        sep = "â•" * 62
+        sep = "═" * 62
         code_body = re.sub(
             r"^\s*from\s+langchain_core\.tools\s+import\s+tool\s*\n",
             "",
@@ -2398,28 +2398,28 @@ if __name__ == "__main__":
             f.write(paste_code.rstrip() + "\n")
 
         print(f"\n\033[92m{sep}")
-        print(f"  âœ…  TOOL WRITTEN: {tool_name}")
-        print(f"  ðŸ§ª  Test: {stdout}")
+        print(f"  ✅  TOOL WRITTEN: {tool_name}")
+        print(f"  🧪  Test: {stdout}")
         print(sep)
         print(paste_code)
         print(f"{sep}\033[0m\n")
         print(f"{config.USER_NAME}: ", end="", flush=True)
 
-        return f"âœ… Tool '{tool_name}' written to astakos_skills/{tool_name}.py and passed the test ({stdout})."
+        return f"✅ Tool '{tool_name}' written to astakos_skills/{tool_name}.py and passed the test ({stdout})."
 
     except subprocess.TimeoutExpired:
         try:
             os.remove(temp_path)
         except:
             pass
-        return "âŒ Timeout: the test script hung for more than 15 seconds."
+        return "❌ Timeout: the test script hung for more than 15 seconds."
     except Exception as e:
         return f"Error: {str(e)}"
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 # EMAIL
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 import config
 TOKEN_PATH = config.TOKEN_PATH
 CREDS_PATH = config.CREDENTIALS_PATH
@@ -2469,7 +2469,7 @@ def decode_base64(data):
 
 
 def extract_body(payload):
-    """Extracts body with fallback: plain text â†’ HTML â†’ nested parts."""
+    """Extracts body with fallback: plain text → HTML → nested parts."""
     import html
 
     def _parse_part(part):
@@ -2497,7 +2497,7 @@ def extract_body(payload):
         return ""
 
     def _html_to_text(raw_html):
-        # <br> and </p> â†’ newlines for readable text
+        # <br> and </p> → newlines for readable text
         raw_html = re.sub(r'<br\s*/?>', '\n', raw_html, flags=re.IGNORECASE)
         raw_html = re.sub(r'</p>', '\n', raw_html, flags=re.IGNORECASE)
         text = re.sub(r'<[^>]+>', ' ', raw_html)
@@ -2551,7 +2551,7 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
     """
     try:
         if not action:
-            return "âŒ Provide action: search, read_full, read_thread, send, reply or delete."
+            return "❌ Provide action: search, read_full, read_thread, send, reply or delete."
 
         print(f"\033[94m[Mail API]: Executing action '{action}'...\033[0m")
         action = action.lower()
@@ -2566,17 +2566,17 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         # =========================
         if action == "send":
             if not to_email or not subject or not body:
-                return "âŒ Send requires: to_email, subject, body."
+                return "❌ Send requires: to_email, subject, body."
             raw = _encode_gmail_message(_build_plain_email(to_email, subject, body))
             service.users().messages().send(userId="me", body={"raw": raw}).execute()
-            return "âœ… Email sent successfully."
+            return "✅ Email sent successfully."
 
         # =========================
         # REPLY
         # =========================
         elif action == "reply":
             if not email_id or not body:
-                return "âŒ Reply requires email_id and body."
+                return "❌ Reply requires email_id and body."
             
             original = service.users().messages().get(
                 userId="me", id=email_id, format="metadata",
@@ -2608,7 +2608,7 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
                 userId="me",
                 body=send_body
             ).execute()
-            return f"âœ… Reply sent to {orig_from}."
+            return f"✅ Reply sent to {orig_from}."
 
         # =========================
         # SEARCH
@@ -2640,17 +2640,17 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         # =========================
         elif action == "read_full":
             if not email_id:
-                return "âŒ Read_full requires email_id."
+                return "❌ Read_full requires email_id."
             data = service.users().messages().get(userId="me", id=email_id, format="full").execute()
             body_text = extract_body(data['payload'])
-            return f"ðŸ“© Content:\n{clean_text(body_text)[:5000]}"
+            return f"📩 Content:\n{clean_text(body_text)[:5000]}"
 
         # =========================
         # READ THREAD (Full Conversation)
         # =========================
         elif action == "read_thread":
             if not email_id:
-                return "âŒ Read_thread requires email_id (of a message in the thread)."
+                return "❌ Read_thread requires email_id (of a message in the thread)."
             # Get the message to find its threadId
             msg_meta = service.users().messages().get(userId="me", id=email_id, format="minimal").execute()
             thread_id = msg_meta.get("threadId", email_id)
@@ -2668,25 +2668,25 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
                 output.append(f"--- Message {i+1} | From: {from_val} ({date_val}) ---\n{clean_text(body_text)[:2000]}")
             
             full_text = "\n\n".join(output)
-            return f"ðŸ“© Entire thread ({len(messages_in_thread)} messages):\n{full_text[:8000]}"
+            return f"📩 Entire thread ({len(messages_in_thread)} messages):\n{full_text[:8000]}"
 
         # =========================
         # DELETE
         # =========================
         elif action == "delete":
             if not email_id:
-                return "âŒ Delete requires email_id."
+                return "❌ Delete requires email_id."
             service.users().messages().trash(userId="me", id=email_id).execute()
-            return f"ðŸ—‘ï¸ Email {email_id} moved to trash."
+            return f"🗑️ Email {email_id} moved to trash."
 
-        return f"âŒ Unknown command: {action}"
+        return f"❌ Unknown command: {action}"
 
     except Exception as e:
         return f"Mail API Error: {str(e)}"
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 # GITHUB
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 
 import subprocess
 import shlex
@@ -2712,21 +2712,21 @@ def github_manager(action: str, repo_name: str = "", target_files: str = "",
         return "Error: Missing GITHUB_TOKEN."
 
     try:
-        # â”€â”€â”€ 1. LOCAL GIT CLI OPERATIONS (Mastro-Shielded) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── 1. LOCAL GIT CLI OPERATIONS (Mastro-Shielded) ──────────────
         if action == "push_local_commits":
             if not target_files or target_files.strip() in [".", "*", "all"]:
-                return "ðŸ›¡ï¸ [GIT OVERRIDE]: Blind sweeps are forbidden. Specify exact file paths."
+                return "🛡️ [GIT OVERRIDE]: Blind sweeps are forbidden. Specify exact file paths."
             if not commit_message:
                 return "Error: Commit message is required."
 
-            # â”€â”€ SafeExec check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # ── SafeExec check ───────────────────────────────────────────
             from core.safe_executor import safe_execute
             push_check = safe_execute("git push origin main", lambda c: {"status": "ok"})
             if push_check.get("status") == "blocked":
-                return f"ðŸ›¡ï¸ [SAFE EXECUTOR - BLOCKED]: {push_check['reason']}"
+                return f"🛡️ [SAFE EXECUTOR - BLOCKED]: {push_check['reason']}"
             if push_check.get("status") == "cancelled":
-                return "âš ï¸ [SAFE EXECUTOR]: Git push requires confirmation. Send again with `/confirm`"
-            # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                return "⚠️ [SAFE EXECUTOR]: Git push requires confirmation. Send again with `/confirm`"
+            # ────────────────────────────────────────────────────────────
 
             files = [f.strip() for f in target_files.split(",") if f.strip()]
 
@@ -2744,7 +2744,7 @@ def github_manager(action: str, repo_name: str = "", target_files: str = "",
 
             return f"System: Local changes successfully pushed!\nFiles: {files}\nMessage: {commit_message}"
 
-        # â”€â”€â”€ 2. GITHUB CLOUD API OPERATIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ─── 2. GITHUB CLOUD API OPERATIONS ─────────────────────────────
         g = Github(token)
         user = g.get_user()
 
@@ -2759,7 +2759,7 @@ def github_manager(action: str, repo_name: str = "", target_files: str = "",
 
         elif action in ["create_file", "update_file"]:
             if not content.strip():
-                return "ðŸ›¡ï¸ [GIT OVERRIDE]: Content is empty. Refusing to overwrite file with empty data."
+                return "🛡️ [GIT OVERRIDE]: Content is empty. Refusing to overwrite file with empty data."
             repo = g.get_repo(f"{user.login}/{repo_name}")
             try:
                 file_info = repo.get_contents(target_files)
@@ -2778,9 +2778,9 @@ def github_manager(action: str, repo_name: str = "", target_files: str = "",
         return f"GitHub API Error: {str(e)}"
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 # HARDWARE CONTROL
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 
 @tool
 def control_vacuum(action: str) -> str:
@@ -2867,10 +2867,10 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
                         image_paths = data.get("image_paths")
                         image_path = data.get("image_path")
             except Exception as e:
-                print(f"âš ï¸ Error reading draft: {e}")
+                print(f"⚠️ Error reading draft: {e}")
 
     if not text:
-        return "âŒ Error: No text found (neither in draft nor in arguments)."
+        return "❌ Error: No text found (neither in draft nor in arguments)."
 
     # Gathering of all paths into a list
     all_paths = []
@@ -2882,12 +2882,12 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
     # Validate paths
     for p in all_paths:
         if not os.path.exists(p):
-            return f"âŒ Image not found: {p}"
+            return f"❌ Image not found: {p}"
 
     # --- LinkedIn API Logic ---
     load_dotenv(find_dotenv(), override=True)
     token = os.getenv("LINKEDIN_TOKEN")
-    if not token: return "âŒ Missing LINKEDIN_TOKEN."
+    if not token: return "❌ Missing LINKEDIN_TOKEN."
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -2898,7 +2898,7 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
     try:
         # 1. Identification
         user_res = requests.get("https://api.linkedin.com/v2/userinfo", headers=headers)
-        if user_res.status_code != 200: return f"âŒ Auth Error: {user_res.text}"
+        if user_res.status_code != 200: return f"❌ Auth Error: {user_res.text}"
         person_urn = f"urn:li:person:{user_res.json().get('sub')}"
 
         # 2. Upload Images (single or multiple)
@@ -2942,12 +2942,12 @@ def post_to_linkedin(text: str = None, image_path: str = None, image_paths: str 
                     json.dump({}, f)
             img_count = len(asset_urns)
             img_msg = f" with {img_count} image{'s' if img_count != 1 else ''}" if img_count else ""
-            return f"âœ… LinkedIn post uploaded{img_msg} and draft cleared!"
+            return f"✅ LinkedIn post uploaded{img_msg} and draft cleared!"
 
-        return f"âŒ Failure: {res.text}"
+        return f"❌ Failure: {res.text}"
 
     except Exception as e:
-        return f"âŒ Critical Error: {str(e)}"
+        return f"❌ Critical Error: {str(e)}"
 import math
 
 def _is_home(lat: float, lon: float, home_lat: float = 0.0, home_lon: float = 0.0, radius_m: float = 150) -> bool:
@@ -2972,7 +2972,7 @@ def get_current_location() -> str:
     from config import GPS_STORAGE_FILE
 
     if not os.path.exists(GPS_STORAGE_FILE):
-        return "ðŸ“ No recorded location found. Ask {config.USER_NAME} to send Live Location."
+        return "📍 No recorded location found. Ask {config.USER_NAME} to send Live Location."
 
     try:
         with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
@@ -2986,20 +2986,20 @@ def get_current_location() -> str:
             last_seen = datetime.fromtimestamp(ts).strftime('%H:%M:%S')
 
             if diff_minutes > 1440:
-                return f"ðŸ“ Location is very old ({diff_minutes // 60}h old, last updated {last_seen})."
+                return f"📍 Location is very old ({diff_minutes // 60}h old, last updated {last_seen})."
 
             maps_link = f"https://maps.google.com/?q={lat},{lon}"
-            home_status = "ðŸ  Is HOME" if _is_home(float(lat), float(lon)) else "ðŸš¶ Is OUT of home"
+            home_status = "🏠 Is HOME" if _is_home(float(lat), float(lon)) else "🚶 Is OUT of home"
 
             return (
-                f"ðŸ“ Coordinates: {lat}, {lon}\n"
+                f"📍 Coordinates: {lat}, {lon}\n"
                 f"{home_status}\n"
-                f"ðŸ—ºï¸ <a href='{maps_link}'>View on Map</a>\n"
-                f"â±ï¸ Updated {diff_minutes} minutes ago (at {last_seen})."
+                f"🗺️ <a href='{maps_link}'>View on Map</a>\n"
+                f"⏱️ Updated {diff_minutes} minutes ago (at {last_seen})."
             )
 
     except Exception as e:
-        return f"âŒ Error reading GPS: {str(e)}"
+        return f"❌ Error reading GPS: {str(e)}"
 
 @tool
 def control_spotify(
@@ -3018,15 +3018,15 @@ def control_spotify(
             if not results['items']:
                 return "No top tracks data found."
             tracks = [f"{i+1}. {t['name']} - {t['artists'][0]['name']}" for i, t in enumerate(results['items'])]
-            return "ðŸŽµ Your Top 5 tracks:\n" + "\n".join(tracks)
+            return "🎵 Your Top 5 tracks:\n" + "\n".join(tracks)
 
         elif action == "pause":
             sp.pause_playback()
-            return "â¸ï¸ Music paused."
+            return "⏸️ Music paused."
 
         elif action == "next":
             sp.next_track()
-            return "â­ï¸ Skipped to next track!"
+            return "⏭️ Skipped to next track!"
 
         elif action == "now_playing":
             current = sp.current_playback()
@@ -3035,41 +3035,41 @@ def control_spotify(
             track = current["item"]
             artist = track["artists"][0]["name"]
             name = track["name"]
-            playing = "â–¶ï¸" if current["is_playing"] else "â¸ï¸"
-            return f"{playing} {name} â€” {artist}"
+            playing = "▶️" if current["is_playing"] else "⏸️"
+            return f"{playing} {name} — {artist}"
 
         elif action == "search":
             if not query:
-                return "âŒ Provide title or artist to search."
+                return "❌ Provide title or artist to search."
             res = sp.search(q=query, type='track', limit=1)
             if not res['tracks']['items']:
-                return f"âŒ Could not find '{query}'."
+                return f"❌ Could not find '{query}'."
             track_uri = res['tracks']['items'][0]['uri']
             track_name = res['tracks']['items'][0]['name']
             sp.start_playback(uris=[track_uri])
-            return f"â–¶ï¸ Now playing: {track_name} ðŸŽµ"
+            return f"▶️ Now playing: {track_name} 🎵"
 
         elif action == "play":
             sp.start_playback()
-            return "â–¶ï¸ Music resumed!"
+            return "▶️ Music resumed!"
 
-        return "âŒ Unknown command. Try: play, pause, next, now_playing, top_tracks, search."
+        return "❌ Unknown command. Try: play, pause, next, now_playing, top_tracks, search."
 
     except Exception as e:
-        return f"âš ï¸ Spotify Error: {str(e)}. (Is the app open?)"
+        return f"⚠️ Spotify Error: {str(e)}. (Is the app open?)"
 
 @tool
 def get_fit_summary(days_ago: int = 1) -> str:
     """
     Returns a Google Fit summary for {config.USER_NAME}.
-    days_ago=0 â†’ today, days_ago=1 â†’ yesterday (default).
+    days_ago=0 → today, days_ago=1 → yesterday (default).
     Includes: steps, sleep (hours + deep/REM), heart rate.
     """
     try:
         from astakos_skills.google_fit import get_daily_summary
         return get_daily_summary(days_ago=days_ago)
     except Exception as e:
-        return f"âŒ Google Fit error: {e}"
+        return f"❌ Google Fit error: {e}"
 
 
 @tool
@@ -3085,8 +3085,8 @@ def save_goal_tool(project: str, description: str, status: str = "active", progr
     from memory.vector_store import save_goal
     ok = save_goal(project=project, description=description, status=status, progress=progress, milestones=milestones)
     if ok:
-        return f"âœ… Goal '{project}' saved ({status}, {progress}%)."
-    return f"âŒ Failed to save goal '{project}'."
+        return f"✅ Goal '{project}' saved ({status}, {progress}%)."
+    return f"❌ Failed to save goal '{project}'."
 
 
 @tool
@@ -3099,8 +3099,8 @@ def update_goal_status_tool(project: str, status: str) -> str:
     from memory.vector_store import update_goal_status
     ok = update_goal_status(project=project, status=status)
     if ok:
-        return f"âœ… Goal '{project}' â†’ {status}."
-    return f"âŒ Goal '{project}' not found."
+        return f"✅ Goal '{project}' → {status}."
+    return f"❌ Goal '{project}' not found."
 
 
 @tool
@@ -3113,8 +3113,8 @@ def update_goal_progress_tool(project: str, progress: int) -> str:
     from memory.vector_store import update_goal_progress
     ok = update_goal_progress(project=project, progress=progress)
     if ok:
-        return f"âœ… Goal '{project}' progress â†’ {progress}%."
-    return f"âŒ Goal '{project}' not found."
+        return f"✅ Goal '{project}' progress → {progress}%."
+    return f"❌ Goal '{project}' not found."
 
 
 @tool
@@ -3127,8 +3127,8 @@ def update_goal_milestones_tool(project: str, milestones: str) -> str:
     from memory.vector_store import update_goal_milestones
     ok = update_goal_milestones(project=project, milestones=milestones)
     if ok:
-        return f"âœ… Goal '{project}' milestones updated."
-    return f"âŒ Goal '{project}' not found."
+        return f"✅ Goal '{project}' milestones updated."
+    return f"❌ Goal '{project}' not found."
 
 
 @tool
@@ -3144,7 +3144,7 @@ def tool_stats(days: int = 7) -> str:
 
     traces_dir = os.path.join(os.path.dirname(__file__), "..", "logs", "traces")
     if not os.path.isdir(traces_dir):
-        return "âŒ Traces folder not found."
+        return "❌ Traces folder not found."
 
     stats: dict[str, dict] = defaultdict(lambda: {"calls": 0, "errors": 0, "durations": []})
 
@@ -3172,19 +3172,19 @@ def tool_stats(days: int = 7) -> str:
                     stats[name]["durations"].append(dur)
 
     if not stats:
-        return f"ðŸ“Š No traces found for the last {days} days."
+        return f"📊 No traces found for the last {days} days."
 
     # Sorting: first those with errors, then alphabetically
     rows = []
     for name, s in sorted(stats.items(), key=lambda x: (-x[1]["errors"], x[0])):
         calls = s["calls"]
         errors = s["errors"]
-        rate = f"{errors/calls*100:.0f}%" if calls else "â€”"
-        avg_dur = f"{sum(s['durations'])//len(s['durations'])}ms" if s["durations"] else "â€”"
-        err_icon = "ðŸ”´" if errors > 0 else "âœ…"
+        rate = f"{errors/calls*100:.0f}%" if calls else "—"
+        avg_dur = f"{sum(s['durations'])//len(s['durations'])}ms" if s["durations"] else "—"
+        err_icon = "🔴" if errors > 0 else "✅"
         rows.append(f"{err_icon} {name}: {calls} calls, {errors} errors ({rate}), avg {avg_dur}")
 
-    header = f"ðŸ“Š Tool Stats â€” last {days} days ({loaded_days} trace files)\n"
+    header = f"📊 Tool Stats — last {days} days ({loaded_days} trace files)\n"
     return header + "\n".join(rows)
 
 
@@ -3315,7 +3315,7 @@ def _format_pending_routines(pending_routines: dict) -> str:
     suffix = ", ".join(names)
     if len(pending_routines) > 3:
         suffix += f", +{len(pending_routines) - 3}"
-    return f"{len(pending_routines)} â€” {suffix}"
+    return f"{len(pending_routines)} — {suffix}"
 
 
 def _doctor_status_label(*, warnings: list[str], pending_actions: list, logs: dict) -> str:
@@ -3396,31 +3396,31 @@ def system_doctor(days: int = 1) -> str:
     lines.append(t("tools.system.msg_doctor_approvals", count=len(pending_actions), tools=", ".join(a.get('tool_name', '?') for a in pending_actions[:3]) if pending_actions else ""))
     lines.append(t("tools.system.msg_doctor_draft", active=draft.get('active'), target=draft.get('target_name') if draft.get("active") and draft.get("target_name") else ""))
     lines.append(t("tools.system.msg_doctor_backlog", unsummarized=unsummarized, threshold=threshold, channels=_doctor_compact_map(conv.get('unsummarized_by_channel'))))
-    lines.append(f"â€¢ Memory ops: {_format_memory_ops_summary(memory_ops)}")
-    lines.append(f"â€¢ Pending routine confirmations: {_format_pending_routines(pending_routines)}")
+    lines.append(f"• Memory ops: {_format_memory_ops_summary(memory_ops)}")
+    lines.append(f"• Pending routine confirmations: {_format_pending_routines(pending_routines)}")
 
     if cond_routines and cond_routines != "None":
-        lines.append("â€¢ Conditioned routines:")
+        lines.append("• Conditioned routines:")
         lines.append(cond_routines)
 
     try:
         ctx_panel = _doctor_runtime_context()
         if ctx_panel and ctx_panel != "None":
-            lines.append("â€¢ Runtime Context:")
+            lines.append("• Runtime Context:")
             for c_line in ctx_panel.splitlines():
                 lines.append(f"  {c_line}")
     except Exception:
         pass
 
     if logs["last_issues"]:
-        lines.append("â€¢ Recent things to inspect:")
+        lines.append("• Recent things to inspect:")
         for item in logs["last_issues"][-3:]:
             lines.append(f"  - {item['timestamp']} [{item['label']}] {item['agent']}: {item['message']}")
 
     if warnings:
-        lines.append("â€¢ Note: " + ", ".join(warnings[:5]))
+        lines.append("• Note: " + ", ".join(warnings[:5]))
     else:
-        lines.append("â€¢ Everything looks quiet.")
+        lines.append("• Everything looks quiet.")
 
     return "\n".join(lines)
 
@@ -3501,9 +3501,9 @@ def _doctor_conditioned_routines() -> str:
     except Exception as e:
         return f"error: {str(e)}"
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 # MEMORY REVIEW
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ────────────────────────────────────────────────────────────────
 
 def _load_audit_log(days: int = 1) -> list[dict]:
     """Loads entries from the memory audit log for the last X days."""
@@ -3590,7 +3590,7 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
         if category:
             filters.append(f"category={category}")
         filter_text = f" with filters ({', '.join(filters)})" if filters else ""
-        return f"ðŸ“‹ Memory Review: {period.lower()}{filter_text} no records exist."
+        return f"📋 Memory Review: {period.lower()}{filter_text} no records exist."
 
     # Grouping by operation
     adds        = [e for e in entries if e.get("op") == "add"]
@@ -3607,11 +3607,11 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
         filters.append(f"category={category}")
     filter_text = f" ({', '.join(filters)})" if filters else ""
     has_filter = _memory_review_has_filter(op=op, category=category)
-    lines = [f"ðŸ“‹ *Memory Review â€” {period}{filter_text}: {len(entries)} memory actions*\n"]
+    lines = [f"📋 *Memory Review — {period}{filter_text}: {len(entries)} memory actions*\n"]
 
     _append_memory_review_section(
         lines,
-        title="âœ… *Learned / kept new*",
+        title="✅ *Learned / kept new*",
         entries=adds,
         has_filter=has_filter,
         limit=5,
@@ -3619,15 +3619,15 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
     )
     _append_memory_review_section(
         lines,
-        title="â™»ï¸ *Corrected old memories*",
+        title="♻️ *Corrected old memories*",
         entries=overwrites,
         has_filter=has_filter,
         limit=5,
-        formatter=lambda e: f"  [{e.get('ts','')}] {e.get('fact','')[:60]} â† {e.get('old','')[:40]} ({e.get('reason','')})",
+        formatter=lambda e: f"  [{e.get('ts','')}] {e.get('fact','')[:60]} ← {e.get('old','')[:40]} ({e.get('reason','')})",
     )
     _append_memory_review_section(
         lines,
-        title="ðŸ§© *Kept similar memories separate*",
+        title="🧩 *Kept similar memories separate*",
         entries=alongside,
         has_filter=has_filter,
         limit=5,
@@ -3635,7 +3635,7 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
     )
     _append_memory_review_section(
         lines,
-        title="ðŸ” *Ignored as duplicates*",
+        title="🔁 *Ignored as duplicates*",
         entries=skip_dup,
         has_filter=has_filter,
         limit=3,
@@ -3643,7 +3643,7 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
     )
     _append_memory_review_section(
         lines,
-        title="ðŸ”’ *Kept older/richer memory*",
+        title="🔒 *Kept older/richer memory*",
         entries=skip_old,
         has_filter=has_filter,
         limit=3,
@@ -3651,11 +3651,11 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
     )
     _append_memory_review_section(
         lines,
-        title="ðŸ§  *Lessons / reflections*",
+        title="🧠 *Lessons / reflections*",
         entries=reflections,
         has_filter=has_filter,
         limit=5,
-        formatter=lambda e: f"  [{e.get('ts','')}] {'âœ“ applied' if e.get('op') == 'reflection_applied' else 'saved'}: {(e.get('lesson') or e.get('observation') or '')[:80]}",
+        formatter=lambda e: f"  [{e.get('ts','')}] {'✓ applied' if e.get('op') == 'reflection_applied' else 'saved'}: {(e.get('lesson') or e.get('observation') or '')[:80]}",
     )
 
     return "\n".join(lines)
@@ -3675,8 +3675,7 @@ all_tools = [
     scan_receipt,
     text_stats,
     register_tool,
-    research_last30days,
-    morning_briefing,
+    research_last30days, morning_briefing,
     # Project tools
     grant_project_access, list_project_files, read_project_file,
     edit_project_file, write_project_file, grep_project_files,

@@ -74,7 +74,7 @@ def log_event(job: str, action: str, **kwargs):
 
     Example:
         log_event("routine_scan", "triggered", routine_id=14, confidence=0.8)
-        log_event("reminder",     "sent",      task="Medicine Alexandros")
+        log_event("reminder",     "sent",      task="Medicine for Kid1")
         log_event("proactive",    "skipped",   reason="quiet_hours")
 
     Atomic write: writes to .tmp first, fsync, then os.replace → if it

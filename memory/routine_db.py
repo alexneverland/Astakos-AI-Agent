@@ -1106,8 +1106,8 @@ def find_routines_for_reconciliation(
 
     Unlike find_routines_by_name(), here we DO NOT want fuzzy/embedding guesswork.
     We want deterministic, token-based matching on the stored event_name so that facts like:
-      - "Alexandros is at camp"
-      - "Alexandros's football stopped for the summer"
+      - "Kid1 is at camp"
+      - "Kid1's football stopped for the summer"
     can find ALL relevant routines without affecting unrelated ones.
 
     Rules:

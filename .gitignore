@@ -72,6 +72,7 @@ docs/*.csv
 Thumbs.db
 Desktop.ini
 .calendar_briefing_sent
+.ai_briefing_sent
 tmp/
 tmp/
 .pytest_tmp*/

@@ -425,7 +425,6 @@ Scheduler override state is persisted to `scheduler_state.json` and restored on 
 
 ## Setup
 
-> **Note:** Astakos currently runs directly via native Python scripts for deep local access to files and hardware. A Dockerized deployment option for easier remote hosting is planned for the future. For now, please follow these steps to run the agent locally.
 
 ### 1. Clone and Install
 
@@ -442,38 +441,40 @@ pip install -r requirements.txt
 
 ### 2. Environment Variables
 
-Astakos requires a `.env` file in the root directory. Copy the structure below and fill in your API keys (Gemini is required for core agent functions, Telegram for the bot, the rest are optional plugins):
+Astakos ships with a committed `.env.example` template. Copy it to `.env` and fill in only the provider and integrations you want to use:
 
-```env
-# AI Engine (Required)
-GEMINI_API_KEY=your_gemini_api_key
-PROJECT_ID=your_gcp_project_id
-LOCATION=us-central1
-
-# Telegram Bot (Required if using Telegram)
-TELEGRAM_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
-
-# Gmail / Google OAuth (Optional)
-GMAIL_CREDENTIALS_FILE=credentials.json
-
-# Optional integrations
-GOOGLE_PLACES_API_KEY=your_places_api_key
-SPOTIPY_CLIENT_ID=your_spotify_id
-SPOTIPY_CLIENT_SECRET=your_spotify_secret
-GITHUB_TOKEN=your_github_token
-VACUUM_IP=your_vacuum_ip
-VACUUM_TOKEN=your_vacuum_token
-LINKEDIN_TOKEN=your_linkedin_token
+```bash
+copy .env.example .env
 ```
+
+Provider notes:
+
+- `LLM_PROVIDER=vertex` expects `GOOGLE_APPLICATION_CREDENTIALS` to point to a local Google credentials JSON file.
+- `LLM_PROVIDER=gemini` expects `GEMINI_API_KEY`.
+- `LLM_PROVIDER=openai` expects `OPENAI_API_KEY`.
+- `LLM_PROVIDER=anthropic` expects `ANTHROPIC_API_KEY`.
+
+Google OAuth tools such as Calendar / Fit use a separate client secrets file at `credentials/credentials.json`.
 
 ### 3. Run the Agent
 
 You can start the system using the interactive CLI launcher:
 
 ```bash
-# Start the system (this will launch the Web Setup Wizard on port 8000 if unconfigured, or start the bot if configured)
+# Start the system (this launches the Web Setup Wizard if unconfigured, or the CLI if configured)
 python boot.py
+```
+
+To reopen the setup wizard later:
+
+```bash
+python boot.py --setup
+```
+
+To run the API server and Telegram bot together for Docker/headless environments:
+
+```bash
+python boot.py --server
 ```
 
 Alternatively, you can run the components directly:

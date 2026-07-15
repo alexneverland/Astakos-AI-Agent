@@ -119,6 +119,8 @@ async def save_setup(payload: SetupPayload):
                 env_map["ANTHROPIC_API_KEY"] = basic.get("api_key", "")
             elif provider == "gemini":
                 env_map["GEMINI_API_KEY"] = basic.get("api_key", "")
+            elif provider == "vertex":
+                env_map["GOOGLE_APPLICATION_CREDENTIALS"] = basic.get("api_key", "")
                 
         if basic.get("telegram_token"):
             env_map["TELEGRAM_TOKEN"] = basic["telegram_token"]

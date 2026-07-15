@@ -14,6 +14,21 @@ env/
 # Environment files
 .env
 credentials/
+persona.md
+astakos_settings.json
+astakos_custom_intents.json
+.astakos_token
+.calendar_briefing_sent
+.ai_briefing_sent
+.fit_briefing_sent
+.goal_followup_sent
+run_telegram.lock
+last_location.json
+linkedin_draft.json
+runtime_snapshot.json
+runtime_memory_context.json
+analytics_engine_log.json
+agent-permissions.json
 
 # Avoid copying local DBs during the build phase (they will be mounted via volume at runtime)
 *.db
@@ -24,6 +39,13 @@ logs/
 telegram_photos/
 telegram_uploads/
 watch_folder/
+outputs/
+tmp/
+_cleaner_backups/
+.pytest_cache/
+.pytest_tmp/
+__pycache__/
+*.backup
 
 # MacOS
 .DS_Store

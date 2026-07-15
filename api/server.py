@@ -541,7 +541,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
     # 2. --- XML CONTEXT ISOLATION ---
     # The web/telegram is a trusted channel (local server, Lazarus only).
-    # We do NOT wrap in isolated_data — otherwise Lazaros' commands
+    # We do NOT wrap in isolated_data — otherwise the user's commands
     # are blocked by the security prompt itself.
     isolated_user_input = user_input
 

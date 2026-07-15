@@ -10,9 +10,9 @@
       "daily briefing",
       "news briefing",
       "start my day",
-      "?????? briefing",
-      "?????? ?????????",
-      "??? ??????"
+      "πρωινό briefing",
+      "πρωινή ενημέρωση",
+      "πρωινά νέα"
     ]
   },
   {
@@ -611,7 +611,7 @@
   },
   {
     "name": "child_activities",
-    "description": "Δραστηριότητες και ιδέες για τον Αλέξανδρο.",
+    "description": "Δραστηριότητες και ιδέες για το παιδί.",
     "agent": "Home_Agent",
     "risk_level": "SAFE",
     "priority": 9,

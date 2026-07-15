@@ -1,6 +1,6 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: Lazaros (Piston-7)
+# Developer: User
 # Description: Modular LLM-agnostic multi-agent framework
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
@@ -30,7 +30,7 @@ from zoneinfo import ZoneInfo
 from langchain_core.messages import HumanMessage, AIMessage
 from rich.console import Console
 
-from config import STATE_DB, USER_NAME
+from config import STATE_DB, USER_NAME, KID1_NAME
 from core.brain import llm, safe_llm_invoke
 from core.graph import graph
 from core.agents import clean_message
@@ -123,11 +123,11 @@ def proactive_worker():
                 if current_hour < 12:
                     time_context = "Morning: Good morning Master, coding for Mastroapp/Astakos?"
                 elif current_hour < 17:
-                    time_context = "Noon: Joking about Alexandros/LEGO/lentils."
+                    time_context = f"Noon: Joking about {KID1_NAME}/LEGO/lentils."
                 else:
                     time_context = "Evening: Relaxation, Netflix or the rabbit."
 
-                base_poke_prompt = load_agent_prompt("main_poke", "You are Astakos. 2.5 hours of silence have passed. Poke Lazaros briefly.")
+                base_poke_prompt = load_agent_prompt("main_poke", f"You are Astakos. 2.5 hours of silence have passed. Poke {USER_NAME} briefly.")
                 poke_prompt = f"{base_poke_prompt}\nCONTEXT: {time_context}"
 
                 if shutdown_event.is_set():
@@ -212,7 +212,7 @@ def main():
     try:
         while not shutdown_event.is_set():
             try:
-                inp = input("Lazaros: ")
+                inp = input(f"{USER_NAME}: ")
             except EOFError:
                 break
 
