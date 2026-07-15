@@ -37,6 +37,8 @@ http://localhost:8000
 
 The Web Setup Wizard guides you through provider selection and configuration.
 
+> **Note:** Web/API setup works with only one configured AI provider. Telegram is optional until `TELEGRAM_TOKEN` is configured. Docker can start Astakos in Web/API mode even before Telegram is configured. If `TELEGRAM_TOKEN` is missing, Astakos starts the Web Setup Wizard and Web UI only; Telegram features become available after Telegram is configured.
+
 ### What is preserved during an automatic update
 
 - `.env` and provider settings

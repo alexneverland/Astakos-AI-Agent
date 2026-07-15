@@ -72,6 +72,8 @@ http://localhost:8000
 
 Astakos will show the Web Setup Wizard when it has not been configured yet.
 
+> **Note:** Docker setup does not require Telegram on first launch. Astakos can start in Web/API mode with only one supported AI provider configured. Telegram becomes available after you add `TELEGRAM_TOKEN`.
+
 ## Step 4 — Complete the Setup Wizard
 
 Choose your AI provider and enter the required credentials.

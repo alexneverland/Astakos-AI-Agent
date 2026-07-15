@@ -13,14 +13,29 @@ rsync -a --delete \
   --exclude '*.sqlite3' \
   --exclude 'chroma_db/' \
   --exclude 'logs/' \
-  --exclude 'uploads/' \
-  --exclude 'generated_files/' \
+  --exclude 'telegram_uploads/' \
+  --exclude 'telegram_photos/' \
+  --exclude 'watch_folder/' \
+  --exclude 'outputs/' \
+  --exclude 'tmp/' \
+  --exclude '_cleaner_backups/' \
   --exclude 'credentials/' \
   --exclude 'credentials*.json' \
   --exclude 'token*.json' \
-  --exclude 'backups/' \
-  --exclude 'data/' \
-  --exclude 'runtime/' \
+  --exclude 'astakos_settings.json' \
+  --exclude 'astakos_custom_intents.json' \
+  --exclude 'persona.md' \
+  --exclude 'last_location.json' \
+  --exclude 'runtime_snapshot.json' \
+  --exclude 'runtime_memory_context.json' \
+  --exclude 'linkedin_draft.json' \
+  --exclude '.astakos_token' \
+  --exclude '.calendar_briefing_sent' \
+  --exclude '.ai_briefing_sent' \
+  --exclude '.fit_briefing_sent' \
+  --exclude '.goal_followup_sent' \
+  --exclude '.hn_briefing_sent' \
+  --exclude 'run_telegram.lock' \
   --exclude '__pycache__/' \
   /opt/astakos/ /app/
 
