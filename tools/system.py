@@ -1518,7 +1518,12 @@ def control_pending_followup(
 @tool
 def manage_list(action: str, list_name: str, item: str = "") -> str:
     """Manages lists. Actions: 'add', 'remove', 'read', 'clear', 'delete'.
-    For multiple items at once, separate them with a comma (item='milk, cheese')."""
+    For multiple items at once, separate them with a comma (item='milk, cheese').
+    For destructive actions ('clear', 'delete'), item must be '__CONFIRMED_CLEAR__'."""
+    if action in {"clear", "delete"} and item != "__CONFIRMED_CLEAR__":
+        return (
+            f"Error: Refusing to {action} list '{list_name}' without explicit confirmation token."
+        )
     conn = None
     try:
         conn = sqlite3.connect(STATE_DB)
