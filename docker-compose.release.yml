@@ -1,0 +1,25 @@
+services:
+  astakos:
+    image: ghcr.io/alexneverland/astakos-ai-agent:latest
+    container_name: astakos_agent
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - astakos_data:/app
+    environment:
+      PYTHONUNBUFFERED: "1"
+      ASTAKOS_CHECK_UPDATES: "0"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: astakos_watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --label-enable --cleanup --interval 300
+
+volumes:
+  astakos_data:
