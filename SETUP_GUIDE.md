@@ -119,16 +119,7 @@ Vertex AI in Docker requires a real Google service-account JSON file that is mou
 credentials/vertex-service-account.json
 ```
 
-6. Edit `docker-compose.release.yml` and add a read-only bind mount under the `astakos` service:
-
-```yaml
-services:
-  astakos:
-    image: ghcr.io/alexneverland/astakos-ai-agent:latest
-    volumes:
-      - astakos_data:/app
-      - ./credentials:/app/credentials:ro
-```
+6. The included `docker-compose.release.yml` already mounts `./credentials` into the container as `/app/credentials`.
 
 7. Then provide:
 
@@ -136,7 +127,7 @@ services:
 LLM_PROVIDER=vertex
 GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/vertex-service-account.json
 PROJECT_ID=your-gcp-project-id
-LOCATION=us-central1
+LOCATION=global
 ```
 
 If `GOOGLE_APPLICATION_CREDENTIALS` is empty, or points to a host-only path that does not exist inside the container, Astakos will return to the Setup Wizard instead of booting.

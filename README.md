@@ -201,16 +201,7 @@ For the release Docker deployment, Vertex AI needs a service-account JSON file t
 credentials/vertex-service-account.json
 ```
 
-6. Edit `docker-compose.release.yml` and add a read-only bind mount under the `astakos` service:
-
-```yaml
-services:
-  astakos:
-    image: ghcr.io/alexneverland/astakos-ai-agent:latest
-    volumes:
-      - astakos_data:/app
-      - ./credentials:/app/credentials:ro
-```
+6. The included `docker-compose.release.yml` already mounts `./credentials` into the container as `/app/credentials`.
 
 7. In the Setup Wizard or `.env`, use:
 
@@ -218,7 +209,7 @@ services:
 LLM_PROVIDER=vertex
 GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/vertex-service-account.json
 PROJECT_ID=your-gcp-project-id
-LOCATION=us-central1
+LOCATION=global
 ```
 
 8. Restart Astakos:
