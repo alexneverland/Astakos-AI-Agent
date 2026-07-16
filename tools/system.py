@@ -21,12 +21,10 @@ from config import NLP_CONFIG
 from services.routine_intent import classify_routine_intent
 from langchain_core.tools import tool
 from pypdf import PdfReader
-from github import Github
 from google.oauth2.credentials import Credentials
 from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
-from miio import Device
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import docx
@@ -2696,7 +2694,6 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
 
 import subprocess
 import shlex
-from github import Github
 from langchain_core.tools import tool
 
 @tool
@@ -2718,6 +2715,7 @@ def github_manager(action: str, repo_name: str = "", target_files: str = "",
         return "Error: Missing GITHUB_TOKEN."
 
     try:
+        from github import Github
         # ─── 1. LOCAL GIT CLI OPERATIONS (Mastro-Shielded) ──────────────
         if action == "push_local_commits":
             if not target_files or target_files.strip() in [".", "*", "all"]:
@@ -2799,6 +2797,7 @@ def control_vacuum(action: str) -> str:
         return "Error: VACUUM_IP or VACUUM_TOKEN not found."
 
     try:
+        from miio import Device
         vac = Device(ip, token)
 
         if action == "start":
