@@ -597,24 +597,19 @@ def test_context_skip_does_not_create_pending_confirmation():
     rdb.mark_routine_notified.assert_not_called()
 
 
-def test_context_skip_can_set_muted_window():
-    """[CONTEXT_SKIP] with a long-running blocker → writes muted_until immediately."""
+def test_context_skip_does_not_set_muted_window():
+    """[CONTEXT_SKIP] should not write muted_until."""
     rdb = sys.modules["memory.routine_db"]
-    with (
-        patch.object(bot, "_build_proactive_memory_context", return_value="camp context"),
-        patch.object(bot, "_infer_muted_until", return_value="2026-06-26"),
-        patch.object(bot, "_infer_sentimental", return_value=True),
-    ):
-        _run_job(
-            [_due_routine()],
-            craft_return="[CONTEXT_SKIP] Περίεργη η ώρα χωρίς τον μικρό σήμερα, ε;",
-            sentimental_info={
-                "sentimental": None, "muted_from": None, "muted_until": None,
-                "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False,
-            },
-        )
-    rdb.set_routine_muted_until.assert_called_once_with(1, "2026-06-26")
-    rdb.set_routine_sentimental.assert_called_once_with(1, True)
+    _run_job(
+        [_due_routine()],
+        craft_return="[CONTEXT_SKIP] Περίεργη η ώρα χωρίς τον μικρό σήμερα, ε;",
+        sentimental_info={
+            "sentimental": None, "muted_from": None, "muted_until": None,
+            "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False,
+        },
+    )
+    rdb.set_routine_muted_until.assert_not_called()
+    rdb.set_routine_sentimental.assert_not_called()
 
 
 def test_shift_mode_block_does_not_trigger_sentimental_override():
@@ -680,7 +675,7 @@ def test_deferred_context_skip_does_not_create_pending_confirmation():
     assert "routine_skipped_context" in bus_events
     rdb.save_pending_confirmation.assert_not_called()
     rdb.mark_routine_notified.assert_not_called()
-    rdb.set_routine_muted_until.assert_called_once_with(1, "2026-06-26")
+    rdb.set_routine_muted_until.assert_not_called()
 
 
 # ─────────────────────────────────────────────────────────────

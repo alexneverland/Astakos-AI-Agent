@@ -3623,7 +3623,7 @@ def startup_check_missed_routines():
 
             if is_context_skip:
                 _clear_routine_pending_confirmation(r_id)
-                muted_until = _apply_context_mute(r_id, event_name, ctx)
+                muted_until = None
                 log_event("routines", "routine_context_skip", routine_id=r_id, event=event_name,
                           deferred=True, missed_minutes=missed_min,
                           muted_until=muted_until, preview=(context_skip_preview or msg)[:160], debug_type="proactive_policy", debug_source="scheduler", debug_effect="context_skip")
@@ -4015,11 +4015,11 @@ def job_check_routines():
                             cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                             if is_context_skip:
                                 _clear_routine_pending_confirmation(r_id)
-                                muted_until = _apply_context_mute(r_id, event_name, context_skip_ctx)
+                                muted_until = None
                                 log_event(
-                                    "routines", 
-                                    "routine_context_skip", 
-                                    routine_id=r_id, 
+                                    "routines",
+                                    "routine_context_skip",
+                                    routine_id=r_id,
                                     event=event_name,
                                     batch=True, 
                                     muted_until=muted_until, 
@@ -4086,16 +4086,12 @@ def job_check_routines():
                         conn.commit()
 
                         if is_context_skip:
-                            try:
-                                context_skip_ctx = _build_proactive_memory_context(event_name)
-                            except Exception:
-                                context_skip_ctx = ""
                             _clear_routine_pending_confirmation(r_id)
-                            muted_until = _apply_context_mute(r_id, event_name, context_skip_ctx)
+                            muted_until = None
                             log_event(
-                                "routines", 
-                                "routine_context_skip", 
-                                routine_id=r_id, 
+                                "routines",
+                                "routine_context_skip",
+                                routine_id=r_id,
                                 event=event_name,
                                 muted_until=muted_until, 
                                 preview=(context_skip_preview or msg)[:160],

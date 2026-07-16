@@ -154,3 +154,29 @@ def test_everyone_together_at_home_does_not_mark_user_out_of_home(mock_gemini, m
     assert calls.get("partner_with_user") == "true"
     assert calls.get("kid1_with_user") == "true"
     assert calls.get("kid1_with_partner") == "true"
+
+
+def test_no_explicit_kid_mention_does_not_write_false_kid_flags(monkeypatch):
+    import services.context_extractor as ce
+    calls = {}
+
+    def fake_set_context_state(key, value, expires_at=None):
+        calls[key] = value
+
+    class DummyResp:
+        text = '{"partner_with_user": true, "kid1_with_user": true, "kid1_with_partner": true}'
+
+    monkeypatch.setattr(ce, "set_context_state", fake_set_context_state)
+    monkeypatch.setattr(ce, "safe_gemini_call", lambda prompt: DummyResp())
+    monkeypatch.setattr(ce, "reconcile_fact_to_routines", lambda *a, **k: {"scored_directives": []})
+    monkeypatch.setattr(ce, "load_recent_context", lambda *a, **k: [])
+
+    ce.extract_and_update_context_flags(
+        "Είμαι με τη Σοφία τώρα",
+        "",
+        "telegram",
+    )
+
+    assert calls.get("partner_with_user") == "true"
+    assert "kid1_with_user" not in calls
+    assert "kid1_with_partner" not in calls

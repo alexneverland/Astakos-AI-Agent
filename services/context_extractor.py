@@ -291,10 +291,10 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         if not has_kid_explicit:
             if payload.get("kid1_with_user"):
                 print("[ContextExtractor] Ignored kid1_with_user cascade due to lack of explicit mention")
-                payload["kid1_with_user"] = False
+                payload.pop("kid1_with_user", None)
             if payload.get("kid1_with_partner"):
                 print("[ContextExtractor] Ignored kid1_with_partner cascade due to lack of explicit mention")
-                payload["kid1_with_partner"] = False
+                payload.pop("kid1_with_partner", None)
 
         for key, value in payload.items():
             if key in valid_keys and isinstance(value, bool):
