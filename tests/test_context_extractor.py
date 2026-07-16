@@ -140,3 +140,17 @@ def test_home_with_partner_does_not_mark_kid1_away_from_home(monkeypatch):
     assert calls.get("kid1_away_from_home") == "false"
     assert calls.get("user_out_of_home") == "false"
     assert calls.get("user_at_work") == "false"
+
+def test_everyone_together_at_home_does_not_mark_user_out_of_home(mock_gemini, mock_db, mock_reconciler, mock_history):
+    user_text = "Όλοι ήμαστε σπίτι μαζί τώρα παίζω με τον Αλέξανδρο"
+
+    extract_and_update_context_flags(user_text)
+
+    calls = {call[0][0]: call[0][1] for call in mock_db.call_args_list}
+
+    assert calls.get("family_at_home") == "true"
+    assert calls.get("user_out_of_home") == "false"
+    assert calls.get("user_at_work") == "false"
+    assert calls.get("partner_with_user") == "true"
+    assert calls.get("kid1_with_user") == "true"
+    assert calls.get("kid1_with_partner") == "true"

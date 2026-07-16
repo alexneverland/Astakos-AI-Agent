@@ -226,11 +226,16 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             payload.setdefault("user_out_of_home", True)
 
         if _looks_like_everyone_together(user_text):
-            payload["user_out_of_home"] = True
             payload["partner_with_user"] = True
             payload["kid1_with_user"] = True
             payload["kid1_with_partner"] = True
             payload["kid1_away_from_home"] = False
+            if has_home_presence:
+                payload["family_at_home"] = True
+                payload["user_out_of_home"] = False
+                payload["user_at_work"] = False
+            else:
+                payload["user_out_of_home"] = True
 
         elif _looks_like_found_them_reply(user_text) and _has_park_live_presence(user_text):
             payload["user_out_of_home"] = True
