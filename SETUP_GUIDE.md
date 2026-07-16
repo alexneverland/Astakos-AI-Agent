@@ -107,20 +107,39 @@ ANTHROPIC_API_KEY=your-key
 
 ### Vertex AI
 
-Place your Google service-account credentials file inside the local `credentials/` folder, for example:
+Vertex AI in Docker requires a real Google service-account JSON file that is mounted into the container.
+
+1. In Google Cloud Console, create or choose a service account for Vertex AI.
+2. Grant it the access your project needs for Vertex AI.
+3. Create a **JSON** key for that service account and download it.
+4. In the same folder as `docker-compose.release.yml`, create a local folder named `credentials/`.
+5. Copy the downloaded JSON file into that folder, for example:
 
 ```text
-credentials/credentials.json
+credentials/vertex-service-account.json
 ```
 
-Then provide:
+6. Edit `docker-compose.release.yml` and add a read-only bind mount under the `astakos` service:
+
+```yaml
+services:
+  astakos:
+    image: ghcr.io/alexneverland/astakos-ai-agent:latest
+    volumes:
+      - astakos_data:/app
+      - ./credentials:/app/credentials:ro
+```
+
+7. Then provide:
 
 ```env
 LLM_PROVIDER=vertex
-GOOGLE_APPLICATION_CREDENTIALS=credentials/credentials.json
+GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/vertex-service-account.json
 PROJECT_ID=your-gcp-project-id
 LOCATION=us-central1
 ```
+
+If `GOOGLE_APPLICATION_CREDENTIALS` is empty, or points to a host-only path that does not exist inside the container, Astakos will return to the Setup Wizard instead of booting.
 
 The wizard writes local configuration such as `.env`, `astakos_settings.json`, and customized prompts into your Astakos folder. These runtime files are excluded from Git.
 

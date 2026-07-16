@@ -39,6 +39,8 @@ The Web Setup Wizard guides you through provider selection and configuration.
 
 > **Note:** Web/API setup works with only one configured AI provider. Telegram is optional until `TELEGRAM_TOKEN` is configured. Docker can start Astakos in Web/API mode even before Telegram is configured. If `TELEGRAM_TOKEN` is missing, Astakos starts the Web Setup Wizard and Web UI only; Telegram features become available after Telegram is configured.
 
+> **Vertex AI + Docker note:** if you choose `Vertex AI`, you must mount a real Google service-account JSON file into the container and set `GOOGLE_APPLICATION_CREDENTIALS` to the in-container path. A local Windows/macOS/Linux path by itself is not enough for the release Docker setup.
+
 ### What is preserved during an automatic update
 
 - `.env` and provider settings
@@ -184,6 +186,48 @@ You control the machine, credentials, enabled integrations, and stored runtime s
 | Vertex AI | Google credentials JSON, project ID, and location |
 
 Only one provider is required to start.
+
+### Vertex AI with Docker
+
+For the release Docker deployment, Vertex AI needs a service-account JSON file that exists **inside the container**.
+
+1. In Google Cloud Console, create or choose a service account for Vertex AI.
+2. Grant it the access your project needs for Vertex AI.
+3. Create a **JSON** key for that service account and download it.
+4. In the same folder as `docker-compose.release.yml`, create a local folder named `credentials/`.
+5. Copy the downloaded JSON file into that folder, for example:
+
+```text
+credentials/vertex-service-account.json
+```
+
+6. Edit `docker-compose.release.yml` and add a read-only bind mount under the `astakos` service:
+
+```yaml
+services:
+  astakos:
+    image: ghcr.io/alexneverland/astakos-ai-agent:latest
+    volumes:
+      - astakos_data:/app
+      - ./credentials:/app/credentials:ro
+```
+
+7. In the Setup Wizard or `.env`, use:
+
+```env
+LLM_PROVIDER=vertex
+GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/vertex-service-account.json
+PROJECT_ID=your-gcp-project-id
+LOCATION=us-central1
+```
+
+8. Restart Astakos:
+
+```bash
+docker compose -f docker-compose.release.yml up -d
+```
+
+If you do not want to mount a JSON credentials file into Docker, use `Gemini API`, `OpenAI`, or `Anthropic` instead.
 
 ---
 
