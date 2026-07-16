@@ -15,7 +15,7 @@ import pytest
 def _make_routines_db(path, rows):
     conn = sqlite3.connect(path)
     conn.execute("""
-        CREATE TABLE routines ( priority INTEGER DEFAULT 0, conflict_group TEXT, condition_type TEXT, condition_payload TEXT, condition_mode TEXT,
+        CREATE TABLE routines ( priority INTEGER DEFAULT 0, conflict_group TEXT, condition_type TEXT, condition_payload TEXT, condition_mode TEXT, conditions_json TEXT,
             id INTEGER PRIMARY KEY, event_name TEXT, confidence REAL,
             time_str TEXT, day_of_week TEXT, state TEXT, last_triggered TEXT
         )
@@ -68,9 +68,13 @@ def _run_missed(db_rows, fixed_now, grace=90, quiet=False, muted=False, cooldown
                   return_value={"cooldown_hours": 4}),
             patch("memory.routine_db.mark_routine_notified"),
             patch("memory.routine_db.save_pending_confirmation"),
+            patch("memory.routine_db.get_routine_conditions", return_value=[]),
             patch("memory.routine_db.get_routine_schedule_meta",
                   return_value={"active_from": None, "active_until": None,
                                 "paused_until": None, "resume_rule": None, "pause_reason": None}),
+            patch("services.routine_context.build_runtime_routine_context", return_value={}),
+            patch("services.routine_conditions.evaluate_routine_conditions",
+                  return_value={"allowed": True, "results": [], "matched_count": 0, "failed_count": 0}),
         ):
             bot.startup_check_missed_routines()
 
@@ -232,3 +236,57 @@ class TestStartupCheckMissedRoutines:
         """day_of_week='Everyday' must match on any weekday."""
         sent = _run_missed([self._row(day_of_week="Everyday")], _MON_10_30)
         assert sent == ["deferred_msg"]
+
+    def test_blocked_conditions_skip_deferred_followup(self):
+        import clients.telegram_bot as bot
+        import config as cfg
+
+        class FakeDT(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return _MON_10_30
+
+        sent = []
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "astakos_routines.db")
+            _make_routines_db(db_path, [self._row(time_str="10:00")])
+
+            with (
+                patch.object(bot, "is_quiet_hours", return_value=False),
+                patch.object(bot, "is_proactive_muted", return_value=False),
+                patch.object(bot, "is_duplicate_routine", return_value=False),
+                patch.object(bot, "_craft_deferred_msg", return_value="deferred_msg"),
+                patch.object(bot, "send_telegram_msg", side_effect=lambda m: sent.append(m)),
+                patch.object(bot, "log_event"),
+                patch.object(bot, "bus", MagicMock()),
+                patch.object(bot, "pending_routine_confirmations", {}),
+                patch.object(cfg, "BASE_DIR", tmp),
+                patch.object(cfg, "ROUTINES_DB", db_path),
+                patch.object(cfg, "ROUTINE_MISS_GRACE_MINUTES", 90),
+                patch("clients.telegram_bot.datetime", FakeDT),
+                patch("memory.routine_db.get_routine_notify_info", return_value={"cooldown_hours": 4}),
+                patch("memory.routine_db.mark_routine_notified"),
+                patch("memory.routine_db.save_pending_confirmation"),
+                patch("memory.routine_db.get_routine_conditions", return_value=[
+                    {
+                        "condition_type": "shift_mode",
+                        "condition_payload": '{"flag": "current_shift", "equals": "afternoon"}',
+                        "condition_mode": "allow_when_true",
+                    }
+                ]),
+                patch("memory.routine_db.get_routine_schedule_meta",
+                      return_value={"active_from": None, "active_until": None,
+                                    "paused_until": None, "resume_rule": None, "pause_reason": None}),
+                patch("services.routine_context.build_runtime_routine_context",
+                      return_value={"current_shift": "morning"}),
+                patch("services.routine_conditions.evaluate_routine_conditions",
+                      return_value={
+                          "allowed": False,
+                          "results": [{"allowed": False, "reason": "shift_mode_blocked"}],
+                          "matched_count": 0,
+                          "failed_count": 1,
+                      }),
+            ):
+                bot.startup_check_missed_routines()
+
+        assert sent == []

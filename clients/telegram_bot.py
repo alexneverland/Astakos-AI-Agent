@@ -3535,7 +3535,12 @@ def startup_check_missed_routines():
         from memory.routine_db import (
             get_routine_notify_info, mark_routine_notified, save_pending_confirmation,
             get_routine_schedule_meta, is_routine_temporarily_inactive_meta,
+            get_routine_conditions,
         )
+        from services.routine_context import build_runtime_routine_context
+        from services.routine_conditions import evaluate_routine_conditions
+
+        rt_context = build_runtime_routine_context(now=now)
 
         for r_id, event_name, confidence, time_str in missed:
             # ── Seasonal/temporary inactivity check (paused_until / active window) ──
@@ -3556,6 +3561,25 @@ def startup_check_missed_routines():
             if is_duplicate_routine(r_id, info["cooldown_hours"]):
                 print(f"\033[90m[MissedRoutines]: #{r_id} '{event_name}' — cooldown, skip.\033[0m")
                 continue
+
+            cond_list = get_routine_conditions(r_id)
+            if cond_list:
+                cond_result = evaluate_routine_conditions(cond_list, rt_context, now=now)
+                if not cond_result.get("allowed", True):
+                    blocked_reason = str(cond_result.get("results"))
+                    log_event(
+                        "routines", "routine_condition_blocked",
+                        routine_id=r_id, event=event_name,
+                        deferred=True,
+                        failed_count=cond_result.get("failed_count", 1),
+                        reason=blocked_reason,
+                        context_snapshot=rt_context,
+                        debug_type="condition_eval",
+                        debug_source="scheduler",
+                        debug_effect="blocked",
+                    )
+                    print(f"\033[90m[MissedRoutines]: #{r_id} '{event_name}' â€” condition blocked, skip.\033[0m")
+                    continue
 
             try:
                 h, m       = map(int, time_str.split(":"))
