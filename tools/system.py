@@ -1629,7 +1629,7 @@ def google_tasks_tool(
             for task in items:
                 due_text = task.get("due", "")[:10]
                 due_part = f" | due: {due_text}" if due_text else ""
-                lines.append(f"• {task.get("title", t("tools.system.task_no_title"))} | ID: `{task.get('id')}`{due_part}")
+                lines.append(f"• {task.get('title', t('tools.system.task_no_title'))} | ID: `{task.get('id')}`{due_part}")
             return "\n".join(lines)
 
         if action == "create":
