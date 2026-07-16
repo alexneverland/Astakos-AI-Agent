@@ -629,6 +629,19 @@ def mark_routine_notified(routine_id: int):
     conn.close()
 
 
+def mark_routine_triggered_today(routine_id: int):
+    """Marks the routine as triggered today, satisfying it for the current day."""
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    conn = get_connection()
+    cursor = conn.cursor()
+    with db_write_lock:
+        cursor.execute(
+            "UPDATE routines SET last_triggered=?, state='active', is_active=1 WHERE id=?",
+            (today_str, routine_id)
+        )
+        conn.commit()
+    conn.close()
+
 def mark_routine_ignored(routine_id: int):
     """Timeout (not rejection): TRIGGER_PENDING → IGNORED → ACTIVE + doubling of cooldown."""
     current = get_routine_state(routine_id)

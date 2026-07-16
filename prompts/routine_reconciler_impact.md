@@ -23,6 +23,7 @@ Return a list of objects with fields:
     - already_done
     - allow_only_when_active
     - live_context
+    - routine_completed_today
 - context_key: canonical context flag or null
 - context_value: true | false | string | null
 - until_date: YYYY-MM-DD or null
@@ -66,6 +67,12 @@ Output:
 [
   {out_6}
   {out_7}
+]
+
+{fact_4}
+Output:
+[
+  {out_8}
 ]
 
 Fact:

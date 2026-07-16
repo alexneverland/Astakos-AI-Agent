@@ -1499,6 +1499,17 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
         if cond:
             directives.append(cond)
 
+    elif impact_type == "routine_completed_today":
+        d = _build_directive(
+            "routine_completed_today",
+            subject_tokens=subject_tokens,
+            include_tokens=include_tokens,
+            exclude_tokens=exclude_tokens,
+            reason=reason,
+        )
+        if d:
+            directives.append(d)
+
     return directives
 
 def _infer_llm_reconciliation_candidates(
@@ -1555,6 +1566,8 @@ def _infer_llm_reconciliation_candidates(
         fact_3=t("services.routine_reconciler.prompt_fact_3"),
         out_6=t("services.routine_reconciler.prompt_out_6"),
         out_7=t("services.routine_reconciler.prompt_out_7"),
+        fact_4=t("services.routine_reconciler.prompt_fact_4"),
+        out_8=t("services.routine_reconciler.prompt_out_8", today=today),
         fact=fact
     )
 
@@ -1812,6 +1825,21 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
                     "routines", "auto_notifications_mute",
                     routine_id=r_id, event=label,
                     until_date=new_until,
+                    reason=directive.get("reason"),
+                    debug_type="reconciler_applied",
+                    debug_source="reconciler",
+                    debug_effect="routine_changed",
+                )
+                continue
+
+            if kind == "routine_completed_today":
+                from memory.routine_db import mark_routine_triggered_today
+                mark_routine_triggered_today(r_id)
+                stats.setdefault("routines_completed", 0)
+                stats["routines_completed"] += 1
+                log_event(
+                    "routines", "auto_routine_completed",
+                    routine_id=r_id, event=label,
                     reason=directive.get("reason"),
                     debug_type="reconciler_applied",
                     debug_source="reconciler",

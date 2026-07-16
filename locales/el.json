@@ -3774,7 +3774,9 @@
       "prompt_out_4": "{{\"entity\":\"family\",\"activity\":\"outing\",\"aliases\":[\"εξω\",\"βραδυ\"],\"state_change\":null,\"impact\":\"live_context\",\"context_key\":\"user_out_of_home\",\"context_value\":true,\"until_date\":\"{today}\",\"reason\":\"family_out_evening\"}}",
       "prompt_out_5": "{{\"entity\":\"family\",\"activity\":\"outing\",\"aliases\":[\"γυρισαμε σπιτι\"],\"state_change\":null,\"impact\":\"live_context\",\"context_key\":\"user_out_of_home\",\"context_value\":false,\"until_date\":null,\"reason\":\"returned_home\"}}",
       "prompt_out_6": "{{\"entity\":\"{kid1_name}\",\"activity\":\"home_presence\",\"aliases\":[\"μαζι μας\"],\"state_change\":null,\"impact\":\"live_context\",\"context_key\":\"kid1_away_from_home\",\"context_value\":false,\"until_date\":null,\"reason\":\"child_present_again\"}},",
-      "prompt_out_7": "{{\"entity\":\"family\",\"activity\":\"home_presence\",\"aliases\":[\"μαζι μας\"],\"state_change\":null,\"impact\":\"live_context\",\"context_key\":\"family_at_home\",\"context_value\":true,\"until_date\":null,\"reason\":\"family_home_again\"}}"
+      "prompt_out_7": "{{\"entity\":\"family\",\"activity\":\"home_presence\",\"aliases\":[\"μαζι μας\"],\"state_change\":null,\"impact\":\"live_context\",\"context_key\":\"family_at_home\",\"context_value\":true,\"until_date\":null,\"reason\":\"family_home_again\"}}",
+      "prompt_fact_4": "Fact: \"Πήγαμε βόλτα στο πάρκο\"",
+      "prompt_out_8": "{\"entity\": null, \"activity\": \"park\", \"aliases\": [\"πάρκο\", \"βόλτα\", \"κούνιες\"], \"state_change\": \"done\", \"impact\": \"routine_completed_today\", \"context_key\": null, \"context_value\": null, \"until_date\": \"{today}\", \"reason\": \"user_completed\"}"
     }
   },
   "astakos_skills": {
