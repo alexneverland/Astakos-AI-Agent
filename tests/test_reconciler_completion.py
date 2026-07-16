@@ -1,16 +1,21 @@
 import pytest
 from datetime import datetime
+import config
+import memory.routine_db as routine_db
 from services.routine_reconciler import reconcile_fact_to_routines
 from memory.routine_db import (
     upsert_routine,
     get_routines_by_ids,
     delete_routine_db,
-    mark_routine_triggered_today,
     get_connection
 )
 
 @pytest.fixture
-def clean_db():
+def clean_db(monkeypatch, tmp_path):
+    test_db = tmp_path / "test_routines.db"
+    monkeypatch.setattr(config, "ROUTINES_DB", str(test_db), raising=False)
+    monkeypatch.setattr(routine_db, "DB_PATH", str(test_db), raising=False)
+    routine_db.setup_db()
     conn = get_connection()
     c = conn.cursor()
     c.execute("DELETE FROM routines")
