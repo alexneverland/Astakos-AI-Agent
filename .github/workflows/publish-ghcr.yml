@@ -39,6 +39,26 @@ jobs:
             type=ref,event=tag
             type=raw,value=latest
 
+      - name: Build release image for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.release
+          load: true
+          platforms: linux/amd64
+          tags: astakos-release-smoke:latest
+
+      - name: Smoke test API import inside release image
+        run: |
+          docker run --rm \
+            -e LLM_PROVIDER=vertex \
+            -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/fake-vertex.json \
+            -e PROJECT_ID=smoke-test-project \
+            -e LOCATION=us-central1 \
+            --entrypoint /bin/sh \
+            astakos-release-smoke:latest \
+            -lc "printf '{}' > /tmp/fake-vertex.json && cd /opt/astakos && python -c 'import api.server; print(\"release-smoke-ok\")'"
+
       - name: Build and push release image
         uses: docker/build-push-action@v6
         with:
