@@ -138,3 +138,5 @@ def test_home_with_partner_does_not_mark_kid1_away_from_home(monkeypatch):
 
     assert calls.get("kid1_with_partner") == "true"
     assert calls.get("kid1_away_from_home") == "false"
+    assert calls.get("user_out_of_home") == "false"
+    assert calls.get("user_at_work") == "false"
