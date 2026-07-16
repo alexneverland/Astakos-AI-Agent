@@ -12,6 +12,7 @@ token.json
 # Versioned config/schema JSON
 !core/capability_registry.json
 !core/intents_*.json
+!astakos_nlp.json
 !astakos_context_schema.json
 !locales/*.json
 # Databases and vector stores
