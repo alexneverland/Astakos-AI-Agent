@@ -5,6 +5,7 @@ import datetime
 import config
 from core.brain import llm, safe_llm_invoke
 from core.i18n import load_prompt
+from core.utils import clean_message
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from tools.web import get_news
@@ -69,7 +70,7 @@ def morning_briefing() -> str:
 
     try:
         response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
-        return response.content
+        return clean_message(response.content)
     except Exception as exc:
         print(f"[MorningBriefing]: LLM error - {exc}")
         return (
