@@ -6,19 +6,20 @@
 # automatic changes (confidence > 0.75) or asks (0.5-0.75).
 # ================================================================
 
-import config
-from core.i18n import t
 import os
-import json
-import sqlite3
 import sys
-import re
-from datetime import datetime, timedelta
 
 # Bootstrap repo root before any project-local imports when this file runs as a script.
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
+
+import config
+from core.i18n import t
+import json
+import sqlite3
+import re
+from datetime import datetime, timedelta
 
 from memory.routine_db import (
     COOLDOWN_DEFAULT_HOURS,

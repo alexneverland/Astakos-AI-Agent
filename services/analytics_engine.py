@@ -5,20 +5,21 @@
 # recurring patterns and calls upsert_routine automatically.
 # ================================================================
 
-from core.i18n import t
-import json
 import os
-import re
 import sys
-import time
-from collections import defaultdict
-from datetime import datetime, timedelta
-from difflib import SequenceMatcher
 
 # Bootstrap repo root before any project-local imports when this file runs as a script.
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
+
+from core.i18n import t
+import json
+import re
+import time
+from collections import defaultdict
+from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 
 # ── Config ───────────────────────────────────────────────────────
 LOOKBACK_DAYS     = 30    # History days
