@@ -1,4 +1,5 @@
 from core.i18n import t
+from core import nl_config
 import json
 import sqlite3
 import unicodedata
@@ -319,7 +320,7 @@ def _infer_legacy_target_window(
     if t("prompts.ext_str_820") in text and t("prompts.ext_str_842") in text:
         return "explicit_timer"
 
-    if any(marker in text for marker in (t("prompts.ext_str_588"), "tomorrow")):
+    if any(marker in text for marker in (t("prompts.ext_str_588"), *nl_config.RI_FOLLOWUP_NEXT_DAY_WORDS)):
         if topic == "food_purchase":
             return "next_day_late_morning"
         if topic == "outing":
@@ -328,7 +329,14 @@ def _infer_legacy_target_window(
             return "next_day_afternoon"
         return "next_day_morning"
 
-    if any(marker in text for marker in (t("prompts.ext_str_646"), t("prompts.ext_str_747"), "tonight", "evening")):
+    if any(
+        marker in text
+        for marker in (
+            t("prompts.ext_str_646"),
+            t("prompts.ext_str_747"),
+            *nl_config.RI_FOLLOWUP_SAME_DAY_EVENING_WORDS,
+        )
+    ):
         return "same_day_evening"
 
     if topic == "outing":

@@ -682,9 +682,18 @@
             "in",
             "for",
             "from",
-            "as",
             "a",
             "a"
+        ],
+        "followup_next_day_words": [
+            "tomorrow",
+            "from tomorrow",
+            "the day after tomorrow"
+        ],
+        "followup_same_day_evening_words": [
+            "tonight",
+            "evening",
+            "later tonight"
         ]
     },
     "messenger_intent": {

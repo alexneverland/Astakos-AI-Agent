@@ -726,6 +726,20 @@
     ],
     "partner_aliases": [
       "partner"
+    ],
+    "followup_next_day_words": [
+      "αυριο",
+      "από αυριο",
+      "απο αυριο",
+      "μεθαυριο"
+    ],
+    "followup_same_day_evening_words": [
+      "αποψε",
+      "απόψε",
+      "το βραδυ",
+      "το βράδυ",
+      "βραδυ",
+      "βράδυ"
     ]
   },
   "messenger_intent": {

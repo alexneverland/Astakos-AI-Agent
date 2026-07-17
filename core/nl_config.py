@@ -125,6 +125,8 @@ RI_COOLDOWN_RESET_WORDS = tuple(get_intent_list('routine_intent', 'cooldown_rese
 RI_CONTEXT_UPDATE_PHRASES = tuple(get_intent_list('routine_intent', 'context_update_phrases'))
 RI_FILLER_ACKS = tuple(get_intent_list('routine_intent', 'filler_acks'))
 RI_STOP_WORDS = set(get_intent_list('routine_intent', 'stop_words'))
+RI_FOLLOWUP_NEXT_DAY_WORDS = tuple(get_intent_list('routine_intent', 'followup_next_day_words'))
+RI_FOLLOWUP_SAME_DAY_EVENING_WORDS = tuple(get_intent_list('routine_intent', 'followup_same_day_evening_words'))
 
 # Messenger Intents
 MI_COMPOSE_WORDS = tuple(get_intent_list('messenger_intent', 'compose_words'))
