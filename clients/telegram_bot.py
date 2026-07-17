@@ -3596,7 +3596,7 @@ def startup_check_missed_routines():
                         debug_source="scheduler",
                         debug_effect="blocked",
                     )
-                    print(f"\033[90m[MissedRoutines]: #{r_id} '{event_name}' â€” condition blocked, skip.\033[0m")
+                    print(f"\033[90m[MissedRoutines]: #{r_id} '{event_name}' - condition blocked, skip.\033[0m")
                     continue
 
             try:
@@ -4243,10 +4243,14 @@ def job_morning_fit_briefing():
     try:
         from astakos_skills.google_fit import get_morning_summary
         summary = get_morning_summary()
-        _send_and_record_assistant(
+        message_id = _send_and_record_assistant(
             t("clients.telegram_bot.bot_msg_morning_master_summary", summary=summary),
             agent="Fit_Briefing",
         )
+        if not message_id:
+            print("[Fit_Briefing]: send failed, flag not written.")
+            return
+
         with open(flag_file, "w") as f:
             f.write(today_str)
         print(f"✅ [FitBriefing]: Morning briefing sent.")
@@ -4300,7 +4304,11 @@ def job_morning_calendar_briefing():
         else:
             msg = t("clients.telegram_bot.bot_msg_morning_lazaros_events", user_name=config.USER_NAME, today_events=today_events)
 
-        _send_and_record_assistant(msg, agent="Calendar_Briefing")
+        message_id = _send_and_record_assistant(msg, agent="Calendar_Briefing")
+        if not message_id:
+            print("[Calendar_Briefing]: send failed, flag not written.")
+            return
+
         with open(flag_file, "w") as f:
             f.write(today_str)
         print(t("clients.telegram_bot.bot_msg_941efd"))
@@ -4324,7 +4332,10 @@ def job_morning_ai_briefing():
         from astakos_skills.morning_briefing import get_morning_briefing
         msg = get_morning_briefing()
 
-        _send_and_record_assistant(msg, agent="News_Briefing")
+        message_id = _send_and_record_assistant(msg, agent="News_Briefing")
+        if not message_id:
+            print("[News_Briefing]: send failed, flag not written.")
+            return
 
         with open(flag_file, "w") as f:
             f.write(today_str)
@@ -4350,7 +4361,10 @@ def job_morning_hn_briefing():
         from astakos_skills.hn_briefing import get_hn_briefing
 
         msg = get_hn_briefing(limit=6)
-        _send_and_record_assistant(msg, agent="HN_Briefing")
+        message_id = _send_and_record_assistant(msg, agent="HN_Briefing")
+        if not message_id:
+            print("[HN_Briefing]: send failed, flag not written.")
+            return
 
         with open(flag_file, "w") as f:
             f.write(today_str)
