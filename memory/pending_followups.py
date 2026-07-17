@@ -628,6 +628,7 @@ def create_pending_followup_from_candidate(
             "ttl_hours": ttl_hours,
             "delay_minutes_raw": delay_minutes_raw,
             "delay_minutes_final": delay_minutes,
+            "defer_count": 0,
         },
     )
 
@@ -657,7 +658,11 @@ def get_due_pending_followups(now_iso: str) -> list[dict]:
                 expires_at,
                 confidence,
                 metadata_json,
-                created_at
+                created_at,
+                last_decision,
+                decision_reason,
+                outcome_score,
+                times_sent
             FROM pending_followups
             WHERE status='pending'
               AND followup_after_ts <= ?
@@ -683,6 +688,10 @@ def get_due_pending_followups(now_iso: str) -> list[dict]:
                     "confidence": float(row[9] or 0.0),
                     "metadata": json.loads(row[10] or "{}"),
                     "created_at": row[11],
+                    "last_decision": row[12] or "",
+                    "decision_reason": row[13] or "",
+                    "outcome_score": float(row[14] or 0.0),
+                    "times_sent": int(row[15] or 0),
                 }
             )
         return out
@@ -829,6 +838,7 @@ def defer_followup(
 
         metadata["ttl_hours"] = ttl_hours
         metadata["delay_minutes_final"] = safe_delay
+        metadata["defer_count"] = int(metadata.get("defer_count") or 0) + 1
         if target_window:
             metadata["target_window"] = target_window
 

@@ -460,10 +460,28 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
     now_dt = datetime.now()
     state_block = _render_followup_state_snapshot(state_snapshot)
 
-    prompt = core.i18n.load_prompt("telegram_bot_followup_decision.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, 
+    metadata = item.get("metadata") or {}
+    defer_count = int(metadata.get("defer_count") or 0)
+    times_sent = int(item.get("times_sent") or 0)
+    last_decision = str(item.get("last_decision") or "").strip()
+    decision_reason = str(item.get("decision_reason") or "").strip()
+    outcome_score = float(item.get("outcome_score") or 0.0)
+
+    history_block = (
+        f"- defer_count: {defer_count}\n"
+        f"- times_sent: {times_sent}\n"
+        f"- last_decision: {last_decision or 'none'}\n"
+        f"- decision_reason: {decision_reason or 'none'}\n"
+        f"- outcome_score: {outcome_score:.2f}"
+    )
+
+    prompt = core.i18n.load_prompt("telegram_bot_followup_decision.md").format(
+        language=config.RESPONSE_LANGUAGE,
+        user_name=config.USER_NAME, 
         local_time=now_dt.strftime("%Y-%m-%d %H:%M"),
         hour=now_dt.hour,
         state_block=state_block,
+        history_block=history_block,
         topic=item.get('topic'),
         subject=item.get('subject'),
         source_channel=item.get('source_channel'),
@@ -517,11 +535,11 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
     except Exception as exc:
         print(f"[FollowUpDecision Error]: {exc}")
         return {
-            "decision": "send",
-            "skip_action": "none",
-            "stage": "decision_pending",
-            "message": _build_safe_followup_fallback(item, "decision_pending"),
-            "reason": "fallback_non_assumptive",
+            "decision": "skip",
+            "skip_action": "defer",
+            "stage": "skip",
+            "message": "",
+            "reason": "llm_decision_failed_safe_defer",
         }
 
 def _followup_log_label(item: dict) -> str:
