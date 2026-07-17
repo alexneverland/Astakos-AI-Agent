@@ -995,6 +995,12 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     except Exception as e:
         import traceback
         traceback.print_exc()
+        err = str(e).lower()
+        if "429" in err or "resource exhausted" in err or "quota" in err:
+            return JSONResponse(
+                {"error": "Model quota exhausted right now. Please retry shortly."},
+                status_code=503,
+            )
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @server.post("/voice")

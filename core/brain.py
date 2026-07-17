@@ -76,28 +76,22 @@ else:  # default to vertex
     print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI)\033[0m")
 
 
-
 def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
     from time import perf_counter
     """
-    Mastro-Shield for main LLM calls: exponential backoff on
-    network/transport errors (OAuth token refresh timeout, connection reset, etc.).
-
-    Usage:
-        from core.brain import safe_llm_invoke, llm
-        response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
-
-    Catches:
-        - google.auth.exceptions.TransportError  (OAuth refresh timeout)
-        - requests.exceptions.ConnectTimeout
-        - any error with "timeout" / "transport" / "connection" in the msg
-    Does not retry:
-        - 400/401/403 (auth/param errors — retry does not help)
-        - 429 quota (left to safe_gemini_call for sidecar calls)
+    Mastro-Shield override: exponential backoff on network, quota,
+    and transient server-side model failures.
     """
-    _TRANSIENT = ("timeout", "transport", "connection refused",
-                  "connection reset", "remote disconnected", "eof occurred",
-                  "10060", "10054")  # WinError codes
+    _TRANSIENT = (
+        "timeout",
+        "transport",
+        "connection refused",
+        "connection reset",
+        "remote disconnected",
+        "eof occurred",
+        "10060",
+        "10054",
+    )
 
     for attempt in range(retries):
         try:
@@ -117,16 +111,27 @@ def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
         except Exception as e:
             err = str(e).lower()
             is_transient = any(t in err for t in _TRANSIENT)
-            is_fatal     = any(c in err for c in ("400", "401", "403", "invalid"))
+            is_quota = "429" in err or "quota" in err or "resource exhausted" in err
+            is_server = any(code in err for code in ("500", "502", "503"))
+            is_fatal = any(c in err for c in ("400", "401", "403", "invalid"))
 
-            if is_fatal or not is_transient:
+            if is_fatal or not (is_transient or is_quota or is_server):
                 raise
 
             if attempt >= retries - 1:
                 print(f"\033[91m[Brain]: LLM fatal after {retries} attempts: {e}\033[0m")
                 raise
 
-            wait = base_delay * (2 ** attempt)
-            print(f"\033[93m[Brain]: Network error (attempt {attempt+1}/{retries}), "
-                  f"retrying in {wait:.0f}s — {type(e).__name__}\033[0m")
+            if is_quota:
+                wait = base_delay * (4 ** attempt)
+                print(
+                    f"\033[93m[Brain]: Quota limit (attempt {attempt+1}/{retries}), "
+                    f"retrying in {wait:.1f}s - {type(e).__name__}\033[0m"
+                )
+            else:
+                wait = base_delay * (2 ** attempt)
+                print(
+                    f"\033[93m[Brain]: Network/server error (attempt {attempt+1}/{retries}), "
+                    f"retrying in {wait:.0f}s - {type(e).__name__}\033[0m"
+                )
             time.sleep(wait)

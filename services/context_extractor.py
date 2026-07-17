@@ -3,7 +3,7 @@ import config
 from core import nl_config
 from core.i18n import t
 from services.gemini import safe_gemini_call
-from core.utils import clean_message
+from core.utils import clean_message, extract_json_from_text
 from memory.routine_db import set_context_state, get_context_state
 from memory.conversation_history import load_recent_context
 from datetime import datetime
@@ -173,12 +173,9 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         text = response.text if hasattr(response, "text") else str(response)
         cleaned = clean_message(text).strip()
 
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return # No JSON found
-            
-        payload = json.loads(cleaned[start:end + 1])
+        payload = extract_json_from_text(cleaned)
+        if payload is None:
+            return # No valid JSON found
         
         # Validate and apply only known flags
         valid_keys = {
