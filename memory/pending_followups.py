@@ -754,10 +754,7 @@ def candidate_is_distinct_from_recently_resolved(candidate: dict, recent_resolve
     arc_key = build_followup_arc_key(topic, subject)
 
     for item in recent_resolved or []:
-        existing_topic = str(item.get("topic") or "").strip().lower()
         existing_arc = str(item.get("arc_key") or "").strip()
-        if topic == existing_topic:
-            return False
         if arc_key and existing_arc and arc_key == existing_arc:
             return False
     return True

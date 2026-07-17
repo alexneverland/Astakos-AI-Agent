@@ -649,6 +649,22 @@ def test_enqueue_followup_pipeline_allows_distinct_new_arc_after_resolution(monk
     assert created[0]["candidate"]["topic"] == "outing"
 
 
+def test_candidate_is_distinct_from_recently_resolved_allows_same_topic_new_arc():
+    candidate = {
+        "topic": "outing",
+        "subject": "poto me sofia",
+    }
+    recent_resolved = [
+        {
+            "topic": "outing",
+            "subject": "parko me alexandro",
+            "arc_key": pf.build_followup_arc_key("outing", "parko me alexandro"),
+        }
+    ]
+
+    assert pf.candidate_is_distinct_from_recently_resolved(candidate, recent_resolved) is True
+
+
 def test_job_check_pending_followups_persists_sent_message(monkeypatch):
     sent = []
     marked = []
