@@ -133,13 +133,24 @@ class WsLogger:
     def __init__(self, orig):
         self.orig = orig
     def write(self, msg):
-        self.orig.write(msg)
+        clean_msg = re.sub(r'\x1b\[[0-9;]*m', '', msg)
+        output_msg = msg
+        ws_msg = clean_msg
+
+        # Keep terminal/websocket logs readable when a backend path emits an
+        # unexpectedly huge single-line payload.
+        if clean_msg.strip() and len(clean_msg) > 600:
+            truncated = clean_msg[:600].rstrip()
+            suffix = f" ... [truncated {len(clean_msg) - 600} chars]"
+            output_msg = truncated + suffix + ("\n" if clean_msg.endswith("\n") else "")
+            ws_msg = output_msg
+
+        self.orig.write(output_msg)
         self.orig.flush()
-        if msg.strip() and server_loop and active_websockets:
-            clean_msg = re.sub(r'\x1b\[[0-9;]*m', '', msg)
+        if clean_msg.strip() and server_loop and active_websockets:
             for ws in active_websockets:
                 try:
-                    asyncio.run_coroutine_threadsafe(ws.send_text(clean_msg), server_loop)
+                    asyncio.run_coroutine_threadsafe(ws.send_text(ws_msg), server_loop)
                 except Exception:
                     pass
     def flush(self):

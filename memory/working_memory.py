@@ -81,6 +81,55 @@ def _validate_working_memory_tags(raw_text: str) -> str:
     return ", ".join(validated)
 
 
+def _looks_like_operational_working_memory_exchange(user_text: str, ai_text: str) -> bool:
+    """
+    Skip foreground-memory extraction for operational routine/tool-management
+    exchanges. These are not useful "what the user is doing now" tags and can
+    leak internal tool/i18n labels into the working-memory prompt.
+    """
+    user_norm = clean_message(user_text).strip().lower()
+    ai_norm = clean_message(ai_text).strip().lower()
+    combined = f"{user_norm}\n{ai_norm}"
+
+    if not combined.strip():
+        return False
+
+    internal_label_markers = (
+        "_routine_conditions",
+        "_shift_only",
+        "turn-off_routine",
+        "turn_off_routine",
+        "[tools.system.",
+        "[clients.",
+        "[api.",
+    )
+    if any(marker in combined for marker in internal_label_markers):
+        return True
+
+    user_routine_admin = (
+        ("ρουτιν" in user_norm or "routine" in user_norm)
+        and any(token in user_norm for token in (
+            "mute", "unmute", "condition", "cooldown", "βαρδια", "βάρδια",
+            "δουλεια", "δουλειά", "μονο οταν", "μόνο όταν",
+        ))
+    )
+    if user_routine_admin:
+        return True
+
+    ai_operational_markers = (
+        "matching routines:",
+        "condition:",
+        "conditions.",
+        "δεν έγινε προσθήκη ή αφαίρεση condition",
+        "απέκτησε condition",
+        "already had this condition",
+    )
+    if any(marker in ai_norm for marker in ai_operational_markers):
+        return True
+
+    return False
+
+
 def update_working_memory(user_text, ai_text):
     """Instantly extracts context tags from the dialogue."""
     try:
@@ -89,6 +138,11 @@ def update_working_memory(user_text, ai_text):
         # We put on the "glasses" (Smart Parser) before cutting the characters
         safe_user = clean_message(user_text)
         safe_ai = clean_message(ai_text)
+
+        if _looks_like_operational_working_memory_exchange(safe_user, safe_ai):
+            print("\033[90m[Foreground]: operational routine/tool exchange - skip\033[0m")
+            print(f"{config.USER_NAME}: ", end="", flush=True)
+            return
 
         # We select the last 400 characters
         user_context = safe_user[-400:] if len(safe_user) > 400 else safe_user

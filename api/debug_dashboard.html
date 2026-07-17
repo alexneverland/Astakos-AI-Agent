@@ -585,6 +585,22 @@ function extraInfo(e){
   if(e.action==='skipped')          return e.reason??'';
   return '';
 }
+function formatLogValue(value) {
+  let raw = '';
+  if (value == null) {
+    raw = '';
+  } else if (typeof value === 'string') {
+    raw = value;
+  } else {
+    try { raw = JSON.stringify(value); } catch { raw = String(value); }
+  }
+
+  raw = raw.replace(/\s+/g, ' ').trim();
+  if (raw.length <= 180) {
+    return {display: raw, full: raw};
+  }
+  return {display: raw.slice(0, 177) + '...', full: raw};
+}
 function logRow(e) {
   const ts  = (e.timestamp||'').substring(11,19);
   const act = e.action||'?';
@@ -595,7 +611,10 @@ function logRow(e) {
                start:'off',alert_sent:'warn'}[act]||'';
   const extra = Object.entries(e)
     .filter(([k])=>!['timestamp','job','action'].includes(k))
-    .map(([k,v])=>`<span class="off">${k}:</span>${v}`)
+    .map(([k,v])=>{
+      const {display, full} = formatLogValue(v);
+      return `<span class="off">${esc(k)}:</span><span title="${esc(full)}">${esc(display)}</span>`;
+    })
     .join(' &nbsp;');
   const routineId = e.routine_id ?? '';
   return `<tr class="log-row" data-filter="${job} ${act}" data-routine-id="${routineId}" data-kind="${act.includes('error') || act.includes('fail') ? 'errors' : job.includes('routine') ? 'routines' : ''}" data-search="${esc(`${job} ${act} ${JSON.stringify(e)}`.toLowerCase())}">

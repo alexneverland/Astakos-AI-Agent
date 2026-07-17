@@ -42,3 +42,15 @@ def test_update_working_memory_saves_valid_tags():
         wm.update_working_memory("hello", "hi")
 
     save_mock.assert_called_once_with(memory_type="working", new_tags="Refactoring, Docker Auth Fix")
+
+
+def test_update_working_memory_skips_operational_routine_exchange_before_llm():
+    with patch("memory.working_memory.safe_llm_invoke") as llm_mock, \
+         patch("memory.working_memory.memory.save") as save_mock:
+        wm.update_working_memory(
+            "ρουτινα σχολασμα από τη δουλειά μονο οταν ειμαι πρωινη βαρδια και μονο οταν ειμαι στην δουλεια",
+            "⚙️ Η ρουτίνα 'σχόλασμα από τη δουλειά' απέκτησε condition: shift_mode (allow_when_true).",
+        )
+
+    llm_mock.assert_not_called()
+    save_mock.assert_not_called()
