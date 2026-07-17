@@ -1539,7 +1539,7 @@ def append_routine_condition(
     source_memory_ref: str | None = None,
 ) -> bool:
     """Appends a new condition to conditions_json if it doesn't already exist. Returns True if added."""
-    
+
     # Normalize payload
     if isinstance(condition_payload, str):
         try:
@@ -1549,15 +1549,6 @@ def append_routine_condition(
     else:
         parsed_payload = condition_payload
 
-    existing_conditions = get_routine_conditions(routine_id)
-    
-    # Check for duplicates
-    for cond in existing_conditions:
-        if (cond.get("condition_type") == condition_type and 
-            cond.get("condition_payload") == parsed_payload and 
-            cond.get("condition_mode") == condition_mode):
-            return False # Duplicate
-            
     new_cond = {
         "condition_type": condition_type,
         "condition_payload": parsed_payload,
@@ -1565,16 +1556,52 @@ def append_routine_condition(
     }
     if source_memory_ref:
         new_cond["source_memory_ref"] = source_memory_ref
-        
-    existing_conditions.append(new_cond)
-    
+
     with db_write_lock:
         conn = get_connection(write=True)
-        conn.execute(
-            "UPDATE routines SET conditions_json = ? WHERE id = ?",
-            (json.dumps(existing_conditions), routine_id)
-        )
-        conn.commit()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT conditions_json, condition_type, condition_payload, condition_mode FROM routines WHERE id = ?",
+                (routine_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False
+
+            c_json, c_type, c_payload, c_mode = row
+
+            existing_conditions = []
+            if c_json:
+                try:
+                    parsed = json.loads(c_json)
+                    if isinstance(parsed, list):
+                        existing_conditions = parsed
+                except json.JSONDecodeError:
+                    existing_conditions = []
+            elif c_type:
+                existing_conditions = [{
+                    "condition_type": c_type,
+                    "condition_payload": json.loads(c_payload) if c_payload else None,
+                    "condition_mode": c_mode,
+                }]
+
+            for cond in existing_conditions:
+                if (
+                    cond.get("condition_type") == condition_type
+                    and cond.get("condition_payload") == parsed_payload
+                    and cond.get("condition_mode") == condition_mode
+                ):
+                    return False
+
+            existing_conditions.append(new_cond)
+            cursor.execute(
+                "UPDATE routines SET conditions_json = ? WHERE id = ?",
+                (json.dumps(existing_conditions), routine_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
     return True
 
 # ─────────────────────────────────────────────────────────────────────────────

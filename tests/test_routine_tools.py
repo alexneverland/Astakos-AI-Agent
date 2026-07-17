@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from tools.system import control_routine_notifications, control_routine_schedule
+from tools.system import control_routine_condition, control_routine_notifications, control_routine_schedule
 
 
 def test_control_routine_schedule_ignores_context_fact():
@@ -163,3 +163,36 @@ def test_control_pending_followup_repairs_legacy_rows(monkeypatch):
 
         assert "repair" in result.lower()
         assert "#4" in result
+
+
+@patch(
+    "memory.routine_db.find_routines_for_schedule_control",
+    return_value=[
+        {
+            "id": 765,
+            "event": "ÏƒÏ‡ÏŒÎ»Î±ÏƒÎ¼Î± Î±Ï€ÏŒ Ï„Î· Î´Î¿Ï…Î»ÎµÎ¹Î¬",
+            "day": "Thursday",
+        }
+    ],
+)
+@patch("memory.routine_db.append_routine_condition", return_value=True)
+def test_control_routine_condition_allows_structured_add_despite_context_intent(mock_append, mock_find):
+    result = control_routine_condition.invoke(
+        {
+            "event_name": "ÏƒÏ‡ÏŒÎ»Î±ÏƒÎ¼Î± Î±Ï€ÏŒ Ï„Î· Î´Î¿Ï…Î»ÎµÎ¹Î¬",
+            "action": "add",
+            "condition_type": "shift_mode",
+            "payload_json": '{"flag":"current_shift","equals":"morning"}',
+            "condition_mode": "allow_when_true",
+            "source_text": "ÏÎ¿Ï…Ï„Î¹Î½Î± ÏƒÏ‡Î¿Î»Î±ÏƒÎ¼Î± Î±Ï€ÏŒ Ï„Î· Î´Î¿Ï…Î»ÎµÎ¹Î¬ Î¼Î¿Î½Î¿ Î¿Ï„Î±Î½ ÎµÎ¹Î¼Î±Î¹ Ï€ÏÏ‰Î¹Î½Î· Î²Î±ÏÎ´Î¹Î± ÎºÎ±Î¹ Î¼Î¿Î½Î¿ Î¿Ï„Î±Î½ ÎµÎ¹Î¼Î±Î¹ ÏƒÏ„Î·Î½ Î´Î¿Ï…Î»ÎµÎ¹Î±",
+        }
+    )
+
+    mock_append.assert_called_once_with(
+        765,
+        condition_type="shift_mode",
+        condition_payload='{"flag":"current_shift","equals":"morning"}',
+        condition_mode="allow_when_true",
+        source_memory_ref="llm_agent",
+    )
+    assert "condition" in result.lower()

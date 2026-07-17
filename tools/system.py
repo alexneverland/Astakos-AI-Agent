@@ -1126,7 +1126,10 @@ def control_routine_condition(event_name: str, action: str, condition_type: str 
 
     routine_names = _get_routine_names_for_intent_classification()
     intent_result = classify_routine_intent(source_text, routine_names=routine_names)
-    if intent_result.intent == "context_update":
+    is_structured_manual_condition = bool(
+        action == "add" and condition_type and payload_json and condition_mode
+    )
+    if intent_result.intent == "context_update" and not is_structured_manual_condition:
         return t("tools.system.context_update_not_cond")
 
     VALID_ACTIONS = {"add", "remove"}
