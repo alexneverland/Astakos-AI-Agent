@@ -14,17 +14,77 @@ import sqlite3
 from langchain_core.messages import HumanMessage
 from config import WORKING_MEMORY_FILE, STATE_DB
 from memory.vector_store import memory, is_semantically_duplicate, memory_lock  # [MASTRO-FIX]: ONE lock, not two
-from core.utils import clean_message
+from core.utils import clean_message, load_agent_prompt
+from core.brain import llm, safe_llm_invoke
 
 # ════════════════════════════════════════════════════════════════
 # WORKING MEMORY — "Foreground" (what the user is doing now)
 # ════════════════════════════════════════════════════════════════
 
+def _validate_working_memory_tags(raw_text: str) -> str:
+    """
+    Accept only EMPTY or 1-3 short comma-separated tags.
+    Reject verbose / explanatory / malformed LLM output.
+    """
+    text = clean_message(raw_text).strip()
+    if not text:
+        return ""
+
+    if text.upper() == "EMPTY":
+        return "EMPTY"
+
+    if "\n" in text:
+        return ""
+
+    # Reject obvious reasoning / prose / markdown / labels
+    banned_markers = (
+        "because",
+        "i think",
+        "the user",
+        "analysis",
+        "reasoning",
+        "here are",
+        "tags:",
+        "1.",
+        "2.",
+        "- ",
+        "* ",
+        "```",
+        ": ",
+    )
+    lowered = text.lower()
+    if any(marker in lowered for marker in banned_markers):
+        return ""
+
+    parts = [part.strip() for part in text.split(",")]
+    parts = [part for part in parts if part]
+
+    if not 1 <= len(parts) <= 3:
+        return ""
+
+    validated = []
+    for part in parts:
+        # Short tags only
+        word_count = len(part.split())
+        if word_count == 0 or word_count > 4:
+            return ""
+
+        # Reject long/prosy fragments
+        if len(part) > 40:
+            return ""
+
+        if any(ch in part for ch in "\n\r\t;{}[]"):
+            return ""
+
+        validated.append(part)
+
+    return ", ".join(validated)
+
+
 def update_working_memory(user_text, ai_text):
     """Instantly extracts context tags from the dialogue."""
     try:
         print("\033[90m[System]: Started Foreground analysis...\033[0m")
-        from core.brain import llm, safe_llm_invoke
 
         # We put on the "glasses" (Smart Parser) before cutting the characters
         safe_user = clean_message(user_text)
@@ -34,19 +94,18 @@ def update_working_memory(user_text, ai_text):
         user_context = safe_user[-400:] if len(safe_user) > 400 else safe_user
         ai_context = safe_ai[-400:] if len(safe_ai) > 400 else safe_ai
 
-        from core.utils import load_agent_prompt
         base_prompt = load_agent_prompt("memory_sifter")
         prompt = base_prompt.format(user_context=user_context, ai_context=ai_context)
 
         response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
-        
-        # [MASTRO-CLEAN]: We use the Smart Parser on the output as well!
-        # No more "isinstance(list)" and loops.
-        new_tags = clean_message(response.content)
 
-        print(f"\n\033[94m[DEBUG Foreground]: '{new_tags}'\033[0m")
+        raw_tags = clean_message(response.content)
+        new_tags = _validate_working_memory_tags(raw_tags)
 
-        if t("prompts.ext_str_680") in new_tags.upper() or not new_tags:
+        print(f"\n\033[94m[DEBUG Foreground Raw]: '{raw_tags}'\033[0m")
+        print(f"\033[94m[DEBUG Foreground Validated]: '{new_tags}'\033[0m")
+
+        if new_tags == "EMPTY" or not new_tags:
             print(f"{config.USER_NAME}: ", end="", flush=True)
             return
 
