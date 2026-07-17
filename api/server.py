@@ -11,6 +11,7 @@ import queue
 import signal
 import asyncio
 import threading
+import ipaddress
 from core.i18n import t
 import sys
 import re
@@ -89,10 +90,24 @@ async def require_token(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(_bearer)
 ):
-    """Dependency: checks the bearer token. Always allows from loopback."""
+    """Dependency: checks the bearer token. Always allows trusted local access."""
     host = request.client.host if request.client else ""
     if host in ("127.0.0.1", "::1", "localhost"):
         return  # loopback always allowed (Web UI on the same computer)
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+
+    # Docker Desktop / local bridge requests from the same machine may appear
+    # as private gateway IPs instead of loopback. Allow them only when the
+    # request still targets localhost on the published host port.
+    if ip and ip.is_private:
+        host_header = (request.headers.get("host") or "").lower()
+        if host_header.startswith("127.0.0.1:") or host_header.startswith("localhost:"):
+            return
+
     if not credentials or not secrets.compare_digest(credentials.credentials, LOCAL_TOKEN):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
