@@ -249,7 +249,7 @@ When you return results from `search_google_places`, you MUST print the result E
 🗺️ [LOCATION]: 
 If he says 'near here', ALWAYS use 'current' as location in 'search_google_places'.
 2. If {USER_NAME} asks where he is, what park/square/place he is currently in, or asks you to inspect his GPS/location pin, FIRST call `get_current_location`.
-3. If the goal is to identify the nearby real-world place from the live GPS fix, call `search_google_places` with `location="current"`.
+3. If the goal is to identify the nearby real-world place from the live GPS fix, call search_google_places with query="" and location="current".
 4. DO NOT use `duckduckgo_search` for current GPS / live location identification when a fresh location fix exists.
 
 

@@ -767,9 +767,10 @@ def search_supermarket_prices(query: str) -> str:
     except Exception as e:
         return f"⚠️ Error: {str(e)}"
 @tool
-def search_google_places(query: str, location: str = config.DEFAULT_CITY) -> str:
+def search_google_places(query: str = "", location: str = config.DEFAULT_CITY) -> str:
     """
     Searches for restaurants, cafes, and nightlife venues via the Google Places API (New).
+    Can also be used for reverse geocoding if query is empty.
     Returns name, rating, address, type, phone, website, delivery, and reviews.
     """
     import requests
@@ -798,7 +799,9 @@ def search_google_places(query: str, location: str = config.DEFAULT_CITY) -> str
     if not api_key:
         return t("tools.web.places_missing_api")
 
-    search_url = "https://places.googleapis.com/v1/places:searchText"
+    # [MASTRO-REVERSE-GEOCODE]: Check if query is empty or generic
+    # An empty query means "identify my current place", not "find a named place".
+    is_reverse_geocode = not query_norm.strip()
 
     # [MASTRO-UPGRADE]: Added Phone, Website, Takeout, Delivery, DineIn, and Reviews to the FieldMask
     headers = {
@@ -822,31 +825,56 @@ def search_google_places(query: str, location: str = config.DEFAULT_CITY) -> str
         )
     }
 
-    # [MASTRO-FIX]: GPS coords → locationBias (the correct way, not text append)
-    if "," in location and any(c.isdigit() for c in location):
+    if is_reverse_geocode and "," in location and any(c.isdigit() for c in location):
+        search_url = "https://places.googleapis.com/v1/places:searchNearby"
         try:
             lat, lon = location.split(",")
             payload = {
-                "textQuery": query,
+                "locationRestriction": {
+                    "circle": {
+                        "center": {"latitude": float(lat), "longitude": float(lon)},
+                        "radius": 50.0
+                    }
+                },
+                "maxResultCount": 2,
+                "rankPreference": "DISTANCE",
+                "languageCode": "el"
+            }
+        except ValueError:
+            search_url = "https://places.googleapis.com/v1/places:searchText"
+            payload = {
+                "textQuery": f"{query} {location}",
                 "languageCode": "el",
                 "regionCode": "GR",
                 "maxResultCount": 6,
-                "locationBias": {
-                    "circle": {
-                        "center": {"latitude": float(lat), "longitude": float(lon)},
-                        "radius": 2000.0
+            }
+    else:
+        search_url = "https://places.googleapis.com/v1/places:searchText"
+        # [MASTRO-FIX]: GPS coords → locationBias (the correct way, not text append)
+        if "," in location and any(c.isdigit() for c in location):
+            try:
+                lat, lon = location.split(",")
+                payload = {
+                    "textQuery": query,
+                    "languageCode": "el",
+                    "regionCode": "GR",
+                    "maxResultCount": 6,
+                    "locationBias": {
+                        "circle": {
+                            "center": {"latitude": float(lat), "longitude": float(lon)},
+                            "radius": 2000.0
+                        }
                     }
                 }
+            except ValueError:
+                payload = {"textQuery": f"{query} {location}", "languageCode": "el", "regionCode": "GR", "maxResultCount": 6}
+        else:
+            payload = {
+                "textQuery": f"{query} {location}",
+                "languageCode": "el",
+                "regionCode": "GR",
+                "maxResultCount": 6
             }
-        except ValueError:
-            payload = {"textQuery": f"{query} {location}", "languageCode": "el", "regionCode": "GR", "maxResultCount": 6}
-    else:
-        payload = {
-            "textQuery": f"{query} {location}",
-            "languageCode": "el",
-            "regionCode": "GR",
-            "maxResultCount": 6
-        }
 
     try:
         resp = requests.post(search_url, headers=headers, json=payload, timeout=10)
