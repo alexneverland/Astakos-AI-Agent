@@ -419,6 +419,12 @@ def _should_force_light_outing_followup(item: dict) -> bool:
     from datetime import datetime
     from memory.pending_followups import _coerce_local_dt, _local_now
 
+    metadata = item.get("metadata") or {}
+    if int(item.get("times_sent") or 0) > 0:
+        return False
+    if int(metadata.get("defer_count") or 0) > 0:
+        return False
+
     if str(item.get("topic") or "").strip().lower() != "outing":
         return False
 
@@ -427,13 +433,8 @@ def _should_force_light_outing_followup(item: dict) -> bool:
         return False
 
     markers = (
-        t("clients.telegram_bot.bot_msg_9f2131"),
-        t("clients.telegram_bot.bot_msg_6272d2"),
-        t("clients.telegram_bot.bot_msg_150aee"),
-        t("clients.telegram_bot.bot_msg_b660c9"),
         t("clients.telegram_bot.bot_msg_572193"),
         t("clients.telegram_bot.bot_msg_069ca1"),
-        t("clients.telegram_bot.bot_msg_3b2403"),
     )
     if not any(marker in text for marker in markers):
         return False

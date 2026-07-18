@@ -77,3 +77,44 @@ def test_defer_followup_increments_defer_count(monkeypatch, tmp_path):
     due_items = get_due_pending_followups(check_ts)
     item = next(x for x in due_items if x["id"] == followup_id)
     assert int(item["metadata"].get("defer_count") or 0) == 1
+
+
+def test_should_force_light_outing_followup_safety_guards():
+    from clients.telegram_bot import _should_force_light_outing_followup
+    from memory.pending_followups import _local_now
+
+    now_str = _local_now().isoformat(timespec="seconds")
+
+    # 1. defer_count=1 -> False
+    item = {
+        "topic": "outing",
+        "source_user_text": "θα πάω να τους βρω",
+        "metadata": {"defer_count": 1},
+        "followup_after_ts": now_str,
+    }
+    assert _should_force_light_outing_followup(item) is False
+
+    # 2. times_sent=1 -> False
+    item2 = {
+        "topic": "outing",
+        "source_user_text": "θα πάω να τους βρω",
+        "times_sent": 1,
+        "followup_after_ts": now_str,
+    }
+    assert _should_force_light_outing_followup(item2) is False
+
+    # 3. γενικό «πάω πάρκο» -> False (no longer triggers)
+    item3 = {
+        "topic": "outing",
+        "source_user_text": "θα πάω πάρκο",
+        "followup_after_ts": now_str,
+    }
+    assert _should_force_light_outing_followup(item3) is False
+
+    # 4. ρητό «να τους βρω» χωρίς defer/sent -> True
+    item4 = {
+        "topic": "outing",
+        "source_user_text": "θα πάω να τους βρω",
+        "followup_after_ts": now_str,
+    }
+    assert _should_force_light_outing_followup(item4) is True
