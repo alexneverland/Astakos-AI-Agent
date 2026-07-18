@@ -8,6 +8,7 @@ import os
 import re
 import unicodedata
 from typing import Callable, Iterable, Any
+from time import perf_counter
 
 from config import BASE_DIR
 
@@ -585,8 +586,20 @@ def semantic_facts_for_query(
         from memory.vector_store import vector_lock, vector_store
 
         def search_fn(q: str, n: int):
+            lock_started = perf_counter()
             with vector_lock:
-                return vector_store.similarity_search(q, k=n)
+                lock_wait_ms = int((perf_counter() - lock_started) * 1000)
+                search_started = perf_counter()
+                results = vector_store.similarity_search(q, k=n)
+                search_ms = int((perf_counter() - search_started) * 1000)
+
+            if lock_wait_ms >= 1000 or search_ms >= 1000:
+                print(
+                    "[MemoryContextPerf]: "
+                    f"semantic_lock_wait={lock_wait_ms}ms "
+                    f"semantic_search={search_ms}ms k={n}"
+                )
+            return results
 
     facts = []
     seen = set()
@@ -623,7 +636,6 @@ def build_memory_context(
     semantic_k: int = 5,
     write_debug: bool = True,
 ) -> MemoryContext:
-    from time import perf_counter
     # We use clean_query for semantic search & debug — we remove
     # system prefixes ([USER_UPLOADED_FILE], [CURRENT_PHOTO_PATH] etc.)
     # so that the embedding is done with the user's actual text.

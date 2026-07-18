@@ -10,6 +10,7 @@ import json
 import sqlite3
 import threading
 from datetime import datetime
+from time import perf_counter
 
 from langchain_core.embeddings import Embeddings
 import config
@@ -111,6 +112,7 @@ class MastroEmbeddingsCache(Embeddings):
     # -- public API ----------------------------------------------
 
     def embed_query(self, text: str) -> list:
+        started = perf_counter()
         key = self._key(text)
 
         # L1
@@ -123,6 +125,7 @@ class MastroEmbeddingsCache(Embeddings):
         if emb is not None:
             with self._lock:
                 self._l1[key] = emb
+            self._report_slow_query("l2", text, started)
             return emb
 
         # API call
@@ -130,7 +133,17 @@ class MastroEmbeddingsCache(Embeddings):
         with self._lock:
             self._l1[key] = emb
         self._l2_put(key, emb)
+        self._report_slow_query("provider", text, started)
         return emb
+
+    @staticmethod
+    def _report_slow_query(source: str, text: str, started: float) -> None:
+        elapsed_ms = int((perf_counter() - started) * 1000)
+        if elapsed_ms >= 1000:
+            print(
+                "[EmbeddingsCachePerf]: "
+                f"query_source={source} elapsed={elapsed_ms}ms chars={len(text)}"
+            )
 
     def embed_documents(self, texts: list) -> list:
         results = [None] * len(texts)
