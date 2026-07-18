@@ -36,7 +36,7 @@ from config import (
 )
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 from astakos_skills.research_last30days import research_last30days
-from memory.vector_store import vector_store, vector_lock, memory
+from memory.vector_store import vector_store, vector_lock, memory, delete_profile_facts_by_exact_fact
 _lexical_cache: dict = {}  # {cache_key: (timestamp, data)} — TTL 60s
 from services.embeddings import embeddings
 from tools.web import (
@@ -513,8 +513,12 @@ def delete_from_memory(query: str) -> str:
             target_id, content = literal_hits[0]
             with vector_lock:
                 collection.delete(ids=[target_id])
+            profile_deleted = delete_profile_facts_by_exact_fact(content)
             print(f"\n🔥 [DATABASE ACTION]: DELETED (exact match): {content}")
-            return f"Memory '{content}' deleted successfully."
+            return (
+                f"Memory '{content}' deleted successfully "
+                f"(Chroma + {profile_deleted} structured profile record(s))."
+            )
 
         if len(literal_hits) > 1:
             previews = "\n".join(f"  • {str(c).strip()[:140]}" for _, c in literal_hits[:6])
@@ -543,9 +547,13 @@ def delete_from_memory(query: str) -> str:
 
             target_id = results['ids'][0][0]
             collection.delete(ids=[target_id])
+            profile_deleted = delete_profile_facts_by_exact_fact(content)
 
         print(f"\n🔥 [DATABASE ACTION]: DELETED (Dist: {distance:.2f}): {content}")
-        return f"Memory '{content}' deleted successfully."
+        return (
+            f"Memory '{content}' deleted successfully "
+            f"(Chroma + {profile_deleted} structured profile record(s))."
+        )
     except Exception as e:
         return f"Deletion error: {e}"
 

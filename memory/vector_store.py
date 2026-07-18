@@ -1249,6 +1249,36 @@ def _profile_row_to_memory_doc(row) -> dict:
     }
 
 
+def delete_profile_facts_by_exact_fact(fact: str) -> int:
+    """Delete structured-profile records whose fact exactly matches fact."""
+    from config import PROFILE_DB
+
+    normalized_fact = str(fact or "").strip()
+    if not normalized_fact:
+        return 0
+
+    conn = None
+    try:
+        conn = sqlite3.connect(PROFILE_DB)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM profile_facts
+            WHERE lower(trim(fact)) = lower(trim(?))
+            """,
+            (normalized_fact,),
+        )
+        deleted_count = cursor.rowcount
+        conn.commit()
+        return deleted_count
+    except Exception as exc:
+        print(f"[ProfileFacts Delete Error]: {exc}")
+        raise
+    finally:
+        if conn:
+            conn.close()
+
+
 def get_profile_facts(
     category: str | None = None,
     limit: int = 100,
