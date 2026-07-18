@@ -87,6 +87,26 @@ def test_context_extractor_future_departure_still_does_not_set_live_presence(moc
     assert "user_out_of_home" not in calls
     assert "kid1_with_user" not in calls
 
+
+def test_future_departure_recognizes_future_plan_markers():
+    assert _looks_like_future_departure("αύριο θα βγω για ποτό") is True
+    assert _looks_like_future_departure("σήμερα το βράδυ θα πάω έξω") is True
+    assert _looks_like_future_departure("θα βρεθώ με φίλους αργότερα") is True
+
+
+def test_context_extractor_skips_visual_analysis_payload(
+    mock_gemini,
+    mock_db,
+    mock_reconciler,
+    mock_history,
+):
+    user_text = "[VISUAL ANALYSIS]: old photo from a park\nQuestion: what do you see?"
+
+    extract_and_update_context_flags(user_text)
+
+    mock_gemini.assert_not_called()
+    mock_db.assert_not_called()
+
 def test_context_extractor_still_here_at_park(mock_gemini, mock_db, mock_reconciler, mock_history):
     user_text = "είμαστε ακόμα εδώ στο πάρκο"
     extract_and_update_context_flags(user_text)
@@ -103,7 +123,7 @@ def test_context_extractor_found_them_and_staying(mock_gemini, mock_db, mock_rec
         {"content": f"η {config.PARTNER_NAME} είναι στο πάρκο με τον {config.KID1_NAME}"}
     ]
     
-    user_text = "στο πάρκο, τους βρήκα και θα κάτσουμε κι άλλο"
+    user_text = "στο πάρκο, τους βρήκα και καθόμαστε κι άλλο"
     extract_and_update_context_flags(user_text)
     
     calls = {call[0][0]: call[0][1] for call in mock_db.call_args_list}

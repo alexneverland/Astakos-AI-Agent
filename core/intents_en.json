@@ -528,7 +528,14 @@
             "in an hour and a half",
             "in half an hour",
             "in an hour",
-            "in an hour"
+            "in an hour",
+            "i will go out",
+            "i will go",
+            "i will meet",
+            "tonight",
+            "later",
+            "later tonight",
+            "tomorrow"
         ],
         "leaving_words": [
             "i will go",
@@ -551,8 +558,6 @@
             "we are sitting",
             "we sat down",
             "we sat down",
-            "we will sit down",
-            "we will sit",
             "yet",
             "still",
             "here",

@@ -42,6 +42,7 @@ Rules:
 - If the user clearly says {kid1_name} is with {partner_name} without them, then kid1_away_from_home=true.
 - If the user says they will go to meet them later, this DOES NOT mean they are already with them now.
 - If the user says they returned home, or are engaged in non-work activities (e.g., shopping, playing with kids, cooking, park), then they are definitely NOT at work, so user_at_work=false.
+- If the message contains [VISUAL ANALYSIS] or describes a photo, DO NOT use the contents of the photo to deduce current location or context states. Photos can be from the past or different locations. Unless the user explicitly writes text indicating their current state (e.g. "we are here now"), ignore the photo and return {{}}.
 
 Example 1:
 Message: "Good morning, we started, we are on the road, we are going swimming all together."
@@ -158,6 +159,10 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
     and directly updates astakos_routines.db context states.
     """
     if not user_text or len(user_text.strip()) < 3:
+        return
+
+    if "[VISUAL ANALYSIS]" in user_text.upper():
+        print("[ContextExtractor] Skipped visual-analysis payload without explicit live-state text")
         return
 
     try:
