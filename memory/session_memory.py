@@ -832,6 +832,9 @@ def _extract_event_memory_candidate(
     source_text = " ".join(safe_user.split())
     if not source_text:
         return None
+
+    if _looks_like_question_fact(source_text):
+        return None
     if len(source_text) > 280:
         source_text = source_text[:277].rstrip() + "..."
 

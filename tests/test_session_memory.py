@@ -141,6 +141,18 @@ def test_event_memory_candidate_ignores_plain_question():
     assert candidate is None
 
 
+def test_event_memory_candidate_ignores_question_despite_event_like_reply():
+    import memory.session_memory as session_memory
+
+    candidate = session_memory._extract_event_memory_candidate(
+        "θυμασαι που ο Αλεξανδρος ειχε παει κατασκηνωση?",
+        "Φυσικά, θυμάμαι ότι είχαμε μιλήσει για το καλοκαιρινό του πρόγραμμα.",
+        agent_name="Home_Agent",
+        channel="telegram",
+    )
+
+    assert candidate is None
+
 def test_event_memory_candidate_captures_personal_day_event():
     import datetime
     import memory.session_memory as session_memory
