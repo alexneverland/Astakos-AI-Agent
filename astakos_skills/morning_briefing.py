@@ -48,9 +48,9 @@ def morning_briefing() -> str:
     """
     try:
         print("[MorningBriefing]: Fetching news...")
-        tech_news = get_news.invoke({"topic": "Technology news", "limit": 2})
-        local_news = get_news.invoke({"topic": f"{config.DEFAULT_CITY} local news", "limit": 2})
-        ai_news = get_news.invoke({"topic": "AI news", "limit": 3})
+        tech_news = get_news.invoke({"topic": "Technology news", "limit": 3})
+        local_news = get_news.invoke({"topic": f"{config.DEFAULT_CITY} local news", "limit": 3})
+        ai_news = get_news.invoke({"topic": "AI news", "limit": 4})
         roblox_news = get_news.invoke({"topic": "Roblox news", "limit": 2})
     except Exception as exc:
         print(f"[MorningBriefing]: Error fetching news - {exc}")

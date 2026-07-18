@@ -28,9 +28,9 @@ def _clean_text(text: str, max_chars: int = 280) -> str:
     return cleaned
 
 
-def _fetch_hn_items(limit: int = 6) -> list[dict[str, str]]:
+def _fetch_hn_items(limit: int = 8) -> list[dict[str, str]]:
     """Fetch top Hacker News RSS items."""
-    safe_limit = max(1, min(int(limit or 6), 10))
+    safe_limit = max(1, min(int(limit or 8), 10))
     response = requests.get(_HN_RSS_URL, timeout=20)
     response.raise_for_status()
 
@@ -92,7 +92,7 @@ def _format_items(items: list[dict[str, str]]) -> str:
 
 
 @tool
-def hn_briefing(limit: int = 6) -> str:
+def hn_briefing(limit: int = 8) -> str:
     """
     Creates a Hacker News morning briefing from the HN RSS feed.
     """
@@ -126,7 +126,7 @@ def hn_briefing(limit: int = 6) -> str:
     return "\n".join(lines)
 
 
-def get_hn_briefing(limit: int = 6) -> str:
+def get_hn_briefing(limit: int = 8) -> str:
     """Backward-compatible wrapper for direct callers."""
     return hn_briefing.invoke({"limit": limit})
 

@@ -4410,7 +4410,7 @@ def job_morning_hn_briefing():
     try:
         from astakos_skills.hn_briefing import get_hn_briefing
 
-        msg = get_hn_briefing(limit=6)
+        msg = get_hn_briefing(limit=8)
         message_id = _send_and_record_assistant(msg, agent="HN_Briefing")
         if not message_id:
             print("[HN_Briefing]: send failed, flag not written.")
