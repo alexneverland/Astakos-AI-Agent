@@ -294,3 +294,55 @@ def test_parse_linkedin_draft_result_detects_json_payload():
     raw = "SUCCESS_JSON:" + json.dumps(payload, ensure_ascii=False)
 
     assert looks_like_terminal_linkedin_draft_result(raw) is True
+
+
+def test_web_agent_recovers_from_stale_messenger_send_without_draft(monkeypatch, tmp_path):
+    import config
+    from core.agents import web_agent_node
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    monkeypatch.setattr(
+        config,
+        "MESSENGER_DRAFT_FILE",
+        str(tmp_path / "missing_messenger_draft.json"),
+    )
+    monkeypatch.setattr(
+        "core.agents.load_agent_prompt",
+        lambda *args, **kwargs: "test prompt",
+        raising=False,
+    )
+
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "execute_local_pipeline",
+                    "id": "stale-send",
+                    "args": {},
+                }],
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.recovery_calls = 0
+
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+        def invoke(self, messages):
+            self.recovery_calls += 1
+            return AIMessage(content="Ωραία, να περάσετε όμορφα απόψε.")
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+
+    result = web_agent_node({
+        "messages": [HumanMessage(content="Είμαστε έτοιμοι, βγαίνουμε για ποτό.")],
+        "channel": "telegram",
+    })
+
+    reply = result["messages"][-1]
+    assert fake_llm.recovery_calls == 1
+    assert reply.content == "Ωραία, να περάσετε όμορφα απόψε."
+    assert not getattr(reply, "tool_calls", [])

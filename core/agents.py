@@ -433,6 +433,26 @@ def home_agent_node(state):
     return {"current_agent": "Home_Agent", "messages": [response]}
 
 
+def _is_stale_messenger_send_call(response) -> bool:
+    """True only when the model tries to send a draft that no longer exists."""
+    tool_calls = getattr(response, "tool_calls", []) or []
+    if len(tool_calls) != 1:
+        return False
+
+    tool_call = tool_calls[0]
+    if tool_call.get("name") != "execute_local_pipeline":
+        return False
+
+    args = tool_call.get("args", {}) or {}
+    if args.get("target_name") or args.get("message"):
+        return False
+
+    from core.messenger_draft import active_draft_status
+
+    is_active, _, _ = active_draft_status()
+    return not is_active
+
+
 def web_agent_node(state: AgentState):
     from core.utils import (
         load_agent_prompt,
@@ -532,6 +552,22 @@ def web_agent_node(state: AgentState):
     ]
 
     result = llm.bind_tools(web_tools).invoke(final_messages)
+
+    if _is_stale_messenger_send_call(result):
+        print("[Messenger Guard]: blocked stale send call without an active draft.")
+
+        recovery_prompt = (
+            system_prompt
+            + "\n\n[RUNTIME MESSENGER GUARD]\n"
+            + "There is no active Messenger draft. Do not call "
+              "execute_local_pipeline and do not mention Messenger or a draft "
+              "unless the newest user message explicitly asks about one. "
+              "Reply naturally to the newest user message."
+        )
+        result = llm.invoke([
+            SystemMessage(content=recovery_prompt),
+            *final_messages[1:],
+        ])
     content = clean_message(result.content).strip() if result.content else ""
     has_tool_calls = bool(getattr(result, "tool_calls", None))
 
