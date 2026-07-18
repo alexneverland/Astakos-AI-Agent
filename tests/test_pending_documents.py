@@ -42,6 +42,11 @@ def test_document_confirmation_prompt():
     prompt_bad = "Τι θέλεις να κάνω με αυτό το αρχείο;"
     assert looks_like_asset_confirmation_prompt(prompt_bad) is False
 
+def test_document_confirmation_prompt_accepts_markdown_emphasis():
+    prompt = "Να την **αποθηκεύσω** μόνιμα στη μνήμη μου;"
+
+    assert looks_like_asset_confirmation_prompt(prompt) is True
+
 def test_document_pending_flow():
     # 1. Create a pending document
     with patch("memory.pending_assets.STATE_DB", "test_state_docs.db"):

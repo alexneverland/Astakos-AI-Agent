@@ -58,7 +58,10 @@ def classify_pending_asset_reply(text: str) -> str | None:
 
 
 def looks_like_asset_confirmation_prompt(text: str) -> bool:
-    txt = _normalize_gr(text)
+    import re
+    txt_raw = _normalize_gr(text)
+    txt_clean = re.sub(r'[\W_]+', '', txt_raw)
+
     markers = (
         t("prompts.ext_str_8"),
         t("prompts.ext_str_10"),
@@ -73,7 +76,12 @@ def looks_like_asset_confirmation_prompt(text: str) -> bool:
         t("prompts.ext_str_206"),
         t("prompts.ext_str_76"),
     )
-    return any(m in txt for m in markers)
+
+    for m in markers:
+        m_clean = re.sub(r'[\W_]+', '', _normalize_gr(m))
+        if m_clean and m_clean in txt_clean:
+            return True
+    return False
 
 
 def _get_conn():
