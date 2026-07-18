@@ -1663,19 +1663,32 @@ def maybe_create_followup_from_exchange(
 
     update_id = candidate.get("update_existing_id")
     if update_id:
-        topic_for_defer = ""
-        for f in active_followups:
-            if f["id"] == update_id:
-                topic_for_defer = f["topic"]
-                break
-        
+        existing_followup = next(
+            (item for item in active_followups if item["id"] == update_id),
+            None,
+        )
+
+        # A sent arc is historical context, never a pending item to reopen.
+        if (
+            existing_followup
+            and str(existing_followup.get("status") or "").strip().lower() == "sent"
+        ):
+            print(f"[FollowUp]: ignored merge into already-sent #{update_id}")
+            return None
+
+        topic_for_defer = (
+            str(existing_followup.get("topic") or "")
+            if existing_followup
+            else ""
+        )
+
         from memory.pending_followups import defer_followup
         defer_followup(
             followup_id=update_id,
             delay_minutes=candidate.get("delay_minutes", 60),
             reason=candidate.get("reason", "updated_by_deduplication"),
             target_window=candidate.get("target_window", ""),
-            topic=topic_for_defer
+            topic=topic_for_defer,
         )
         print(f"[FollowUp]: merged new info into existing #{update_id}")
         return update_id

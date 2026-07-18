@@ -229,6 +229,57 @@ def test_maybe_create_followup_from_exchange_inserts_when_llm_candidate_is_valid
     assert rows[0][1] == "food_purchase"
 
 
+
+def test_maybe_create_followup_does_not_reopen_sent_item(temp_state_db, monkeypatch):
+    followup_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="βολτα στο παρκο",
+        source_user_text="Είμαι στο πάρκο",
+        source_ai_text="Καλά να περάσετε",
+        followup_after_ts="2030-01-01T19:00:00+02:00",
+        confidence=0.80,
+        metadata={},
+    )
+    pf.mark_followup_sent(followup_id)
+
+    monkeypatch.setattr(
+        pf,
+        "extract_followup_candidate_with_llm",
+        lambda user_text, ai_text, agent_name, active_followups_text="": {
+            "should_follow_up": True,
+            "update_existing_id": followup_id,
+            "delay_minutes": 60,
+            "reason": "new information",
+        },
+    )
+
+    deferred = []
+    monkeypatch.setattr(
+        pf,
+        "defer_followup",
+        lambda **kwargs: deferred.append(kwargs),
+    )
+
+    result = pf.maybe_create_followup_from_exchange(
+        user_text="Μόλις ήρθα στο πάρκο με τον Αλέξανδρο.",
+        ai_text="Ωραία, να περάσετε καλά.",
+        agent_name="Home_Agent",
+        channel="telegram",
+    )
+
+    assert result is None
+    assert deferred == []
+
+    stored = next(
+        item
+        for item in pf.find_pending_followups(limit=10, active_only=False)
+        if item["id"] == followup_id
+    )
+    assert stored["status"] == "sent"
+
+
 def test_maybe_create_followup_from_exchange_skips_low_confidence(temp_state_db, monkeypatch):
     monkeypatch.setattr(
         pf,
