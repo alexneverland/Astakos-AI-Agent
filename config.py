@@ -106,6 +106,7 @@ BOT_NAME = "Astakos"
 DEVELOPER_NAME = "LocalUser"
 DEFAULT_CITY = "London"
 SENTIMENTAL_OVERRIDE_KEYWORDS = ()
+SENTIMENTAL_CONTEXT_NOTE_PROBABILITY = 0.70
 BACKUP_DRIVE_FOLDER_ID = ""
 if os.path.exists(SETTINGS_FILE):
     try:
@@ -121,6 +122,21 @@ if os.path.exists(SETTINGS_FILE):
             DEFAULT_CITY = _settings.get("default_city", "London")
             BACKUP_DRIVE_FOLDER_ID = _settings.get("backup_drive_folder_id", "")
             SENTIMENTAL_OVERRIDE_KEYWORDS = tuple(_settings.get("sentimental_override_keywords", []))
+            try:
+                SENTIMENTAL_CONTEXT_NOTE_PROBABILITY = min(
+                    1.0,
+                    max(
+                        0.0,
+                        float(
+                            _settings.get(
+                                "sentimental_context_note_probability",
+                                SENTIMENTAL_CONTEXT_NOTE_PROBABILITY,
+                            )
+                        ),
+                    ),
+                )
+            except (TypeError, ValueError):
+                pass
     except Exception as e:
         print(f"⚠️ Error reading settings: {e}")
 

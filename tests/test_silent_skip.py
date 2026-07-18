@@ -912,3 +912,40 @@ def test_force_context_skip_from_state_work_departure_skips_when_at_work():
         "user_at_work": {"value": "true", "expires_at": "2026-07-05"},
     }
     assert bot._force_proactive_skip_from_state("αναχώρηση για δουλειά", snap).startswith(f"[CONTEXT_SKIP] ο {config.OWNER_NAME} βρίσκεται ήδη στη δουλειά")
+
+
+def test_sentimental_context_note_sends_without_pending_confirmation(monkeypatch):
+    rdb = sys.modules['memory.routine_db']
+    bot.pending_routine_confirmations.clear()
+
+    monkeypatch.setattr(
+        bot,
+        '_should_send_sentimental_context_note',
+        lambda routine_id, event_name: True,
+    )
+
+    sent, logged, _ = _run_job(
+        [_due_routine()],
+        craft_return='[CONTEXT_NOTE] Καλή ταινία με τον Αλέξανδρο, ο ύπνος πάει αργότερα σήμερα.',
+    )
+
+    assert sent == ['Καλή ταινία με τον Αλέξανδρο, ο ύπνος πάει αργότερα σήμερα.']
+    assert any(action == 'routine_context_note' for _, action in logged)
+    assert bot.pending_routine_confirmations == {}
+    rdb.save_pending_confirmation.assert_not_called()
+    rdb.mark_routine_notified.assert_not_called()
+
+
+def test_non_sentimental_context_note_skips_without_sending(monkeypatch):
+    monkeypatch.setattr(
+        bot,
+        '_should_send_sentimental_context_note',
+        lambda routine_id, event_name: False,
+    )
+
+    sent, _, _ = _run_job(
+        [_due_routine()],
+        craft_return='[CONTEXT_NOTE] Καλή ταινία με τον Αλέξανδρο, ο ύπνος πάει αργότερα σήμερα.',
+    )
+
+    assert sent == []

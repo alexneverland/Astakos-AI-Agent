@@ -3250,6 +3250,29 @@ def _get_env_context() -> str:
         return ""
 
 
+def _should_send_sentimental_context_note(
+    routine_id: int,
+    event_name: str,
+) -> bool:
+    """Return whether a skipped sentimental routine may send one warm note."""
+    from memory.routine_db import get_sentimental_info, set_routine_sentimental
+    import random
+
+    info = get_sentimental_info(routine_id)
+    if info.get("sentimental_silenced"):
+        return False
+
+    sentimental = info.get("sentimental")
+    if sentimental is None:
+        sentimental = _infer_sentimental(event_name, "")
+        set_routine_sentimental(routine_id, bool(sentimental))
+
+    if not sentimental:
+        return False
+
+    return random.random() < config.SENTIMENTAL_CONTEXT_NOTE_PROBABILITY
+
+
 def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> str:
     """LLM creates a natural proactive message instead of a template."""
     from langchain_core.messages import HumanMessage
@@ -3992,6 +4015,9 @@ def job_check_routines():
                     names = ", ".join(f"'{e}'" for _, e, _ in due_routines)
                     msg = _craft_proactive_msg(names, 0.9, count=len(due_routines))
 
+                    if msg.strip().startswith("[CONTEXT_NOTE]"):
+                        msg = msg.replace("[CONTEXT_NOTE]", "[CONTEXT_SKIP]", 1)
+
                     if msg.strip().startswith("[SILENT_SKIP]"):
                         # First time SILENT_SKIP — estimate muted_until for each routine
                         try:
@@ -4092,11 +4118,13 @@ def job_check_routines():
                         _clear_routine_pending_confirmation(r_id)
                         _apply_context_mute(r_id, event_name, ctx)
                     else:
-                        is_context_skip = False
+                        is_context_note = msg.strip().startswith("[CONTEXT_NOTE]")
+                        is_context_skip = "[CONTEXT_SKIP]" in msg or is_context_note
                         context_skip_preview = ""
-                        if "[CONTEXT_SKIP]" in msg:
-                            is_context_skip = True
-                            context_skip_preview = msg.replace("[CONTEXT_SKIP]", "").strip()
+
+                        if is_context_skip:
+                            marker = "[CONTEXT_NOTE]" if is_context_note else "[CONTEXT_SKIP]"
+                            context_skip_preview = msg.replace(marker, "").strip()
                             if not context_skip_preview:
                                 context_skip_preview = "context_skip_without_explanation"
                             msg = context_skip_preview
@@ -4105,6 +4133,27 @@ def job_check_routines():
                         conn.commit()
 
                         if is_context_skip:
+                            if (
+                                is_context_note
+                                and _should_send_sentimental_context_note(
+                                    r_id,
+                                    event_name,
+                                )
+                            ):
+                                _send_and_record_assistant(
+                                    msg,
+                                    agent="Routine_Agent",
+                                )
+                                log_event(
+                                    "routines",
+                                    "routine_context_note",
+                                    routine_id=r_id,
+                                    event=event_name,
+                                    preview=msg[:160],
+                                    debug_type="proactive_decision",
+                                    debug_source="scheduler",
+                                    debug_effect="context_note_sent",
+                                )
                             _clear_routine_pending_confirmation(r_id)
                             muted_until = None
                             log_event(

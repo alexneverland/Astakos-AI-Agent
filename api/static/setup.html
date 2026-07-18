@@ -397,7 +397,9 @@
                 bot_name: document.getElementById('bot_name').value,
                 default_city: document.getElementById('default_city').value,
                 response_language: document.getElementById('response_language').value,
-                partner_name: document.getElementById('partner_name').value
+                partner_name: document.getElementById('partner_name').value,
+                sentimental_context_note_probability:
+                    s.sentimental_context_note_probability ?? 0.7
             };
             if(kids.length > 0) settingsObj.kid1_name = kids[0];
             if(kids.length > 1) settingsObj.kid2_name = kids[1];
