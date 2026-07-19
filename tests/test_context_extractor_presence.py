@@ -34,15 +34,22 @@ def test_context_extractor_presence_rules(mock_gemini, mock_reconciler, mock_his
         mock_gemini.return_value.text = '{"partner_with_user": true, "kid1_with_user": true}'
         extract_and_update_context_flags("Μίλησα μαζί της τώρα")
         calls = {call[0][0]: call[0][1] for call in mock_set.call_args_list}
-        assert calls.get("partner_with_user") == "false"
-        assert calls.get("kid1_with_user") == "false"
+        assert "partner_with_user" not in calls
+        assert "kid1_with_user" not in calls
+        mock_set.reset_mock()
+
+        # Test 1.5: explicit false from LLM for comms message
+        mock_gemini.return_value.text = '{"partner_with_user": false}'
+        extract_and_update_context_flags("Στείλε ένα μήνυμα στη Σοφία, μαζί ήμαστε αλλά της αρέσουν τα μηνύματα")
+        calls = {call[0][0]: call[0][1] for call in mock_set.call_args_list}
+        assert "partner_with_user" not in calls
         mock_set.reset_mock()
 
         # Test 2: "Μίλησα στο τηλέφωνο με τη Partner"
         mock_gemini.return_value.text = '{"partner_with_user": true}'
         extract_and_update_context_flags("Μίλησα στο τηλέφωνο με τη Partner")
         calls = {call[0][0]: call[0][1] for call in mock_set.call_args_list}
-        assert calls.get("partner_with_user") == "false"
+        assert "partner_with_user" not in calls
         mock_set.reset_mock()
 
         # Test 3: "Είμαι μαζί της τώρα"

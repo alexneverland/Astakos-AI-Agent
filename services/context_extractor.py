@@ -261,23 +261,26 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
                 payload["kid1_with_partner"] = True
 
 
-        # 1. Hard negative rule for communication
         has_comm = _has_communication_verb(user_text)
         has_strong = _has_strong_presence(user_text)
         is_explicit_family = _looks_like_everyone_together(user_text)
 
-        if has_comm and not has_strong:
-            if payload.get("partner_with_user"): payload["partner_with_user"] = False
-            if payload.get("kid1_with_user"): payload["kid1_with_user"] = False
-            if payload.get("kid1_with_partner"): payload["kid1_with_partner"] = False
-
-        # 2. Precedence guard: user_at_work beats weak presence
+        # 1. Precedence guard: user_at_work beats weak presence
         current_work = get_context_state("user_at_work")
         is_at_work = current_work and current_work.get("value") == "true"
         if is_at_work and not has_strong:
             if payload.get("partner_with_user"):
                 print("[ContextExtractor] Ignored partner_with_user=true due to existing user_at_work=true and weak presence")
                 payload["partner_with_user"] = False
+
+        # Draft or communication wording alone cannot mutate relationship presence.
+        if has_comm and not has_strong and not is_at_work:
+            for key in (
+                "partner_with_user",
+                "kid1_with_user",
+                "kid1_with_partner",
+            ):
+                payload.pop(key, None)
 
         # 3. Subject propagation logic cutoff for kid1
         kid1_names = nl_config.CE_KID1_NAMES
