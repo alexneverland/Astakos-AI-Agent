@@ -20,6 +20,7 @@ from core.utils import load_agent_prompt
 from config import PHOTOS_DIR, WORKING_MEMORY_FILE, RESPONSE_LANGUAGE
 from core.brain import llm, llm_heavy, safe_llm_invoke
 from astakos_skills.recipe_expert import recipe_expert, log_meal
+from astakos_skills.recipe_library import search_recipe_library, get_saved_recipe, mark_recipe_favorite
 # UTILS & STATE
 from core.utils import AgentState, filter_messages, build_prompt, clean_message, sanitize_history_for_gemini
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
@@ -356,7 +357,7 @@ def chat_agent_node(state: AgentState):
     chat_tools = [
         get_current_location, control_spotify,
         search_memory, save_to_memory, delete_from_memory, retrieve_photo, duckduckgo_search,
-        recipe_expert, log_meal, relay_local_payload, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
+        recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, relay_local_payload, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
         read_local_file, generate_image_tool, get_fit_summary,
         *([archive_file] if not _is_farewell else []),
     ]
@@ -393,6 +394,7 @@ def home_agent_node(state):
     )
     from tools.web import get_navigation_info, search_goldmall_offers
     from astakos_skills.recipe_expert import recipe_expert, log_meal
+    from astakos_skills.recipe_library import search_recipe_library, get_saved_recipe, mark_recipe_favorite
     
     # [MASTRO-SHIELD]: Cleaning up orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
@@ -402,7 +404,7 @@ def home_agent_node(state):
         manage_list, set_local_reminder, delete_from_memory, search_memory,
         control_spotify, control_vacuum,
         search_goldmall_offers, get_navigation_info,
-        google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
+        google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
         get_fit_summary, manage_context_flag
     ]
 

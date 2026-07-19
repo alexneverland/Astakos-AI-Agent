@@ -39,6 +39,7 @@ outputs/
 watch_folder/
 astakos_skills/messenger_profile/
 astakos_skills/food_history.json
+astakos_skills/recipe_library.json
 _cleaner_backups/
 # Logs and caches
 logs/

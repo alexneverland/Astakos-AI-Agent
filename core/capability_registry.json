@@ -1,5 +1,29 @@
 [
   {
+    "name": "search_recipe_library",
+    "description": "Search saved recipes and return compact ids, names, and favorite state.",
+    "agent": "Chat_Agent",
+    "risk_level": "SAFE",
+    "priority": 5,
+    "triggers": []
+  },
+  {
+    "name": "get_saved_recipe",
+    "description": "Return the exact saved recipe content for a recipe id.",
+    "agent": "Chat_Agent",
+    "risk_level": "SAFE",
+    "priority": 5,
+    "triggers": []
+  },
+  {
+    "name": "mark_recipe_favorite",
+    "description": "Set favorite state for one saved recipe.",
+    "agent": "Chat_Agent",
+    "risk_level": "WARNING",
+    "priority": 5,
+    "triggers": []
+  },
+  {
     "name": "morning_briefing",
     "description": "Creates a daily morning briefing from live local, technology, AI, and kids-friendly Roblox news.",
     "agent": "Web_Agent",

@@ -17,6 +17,8 @@ from core.brain import llm
 from core.utils import clean_message 
 from core.i18n import t
 
+from astakos_skills.recipe_library import save_generated_recipe, RecipeLibraryError
+
 HISTORY_FILE = os.path.join(BASE_DIR, "astakos_skills", "food_history.json")
 
 _MEAL_STOPWORDS = {
@@ -83,7 +85,12 @@ def get_recent_meals():
         return []
 
 @tool
-def recipe_expert(query: str, user_context: str, ingredients: str = ""):
+def recipe_expert(
+    query: str,
+    user_context: str,
+    ingredients: str = "",
+    recipe_name: str = "",
+):
     """
     ⚠️ SOS: YOU MUST CALL THIS TOOL for every question regarding food, menus, or recipes.
     The tool will return the recipe, but THE USER DOES NOT SEE IT automatically.
@@ -92,6 +99,7 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
     query: The user's question (e.g., 'What should I cook?')
     user_context: Copy here the MEMORIES you saw regarding the family's preferences.
     ingredients: (Optional) Available ingredients.
+    recipe_name: Set only when generating one complete named recipe. Leave blank for generic three-option suggestions.
     """
     recent = get_recent_meals()
     print(f"\n[Tool Debug] 👨‍🍳 Chef Astakos is preparing suggestions...")
@@ -104,6 +112,7 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
         query=query if query else 'Suggest 3 meals',
         RESPONSE_LANGUAGE=RESPONSE_LANGUAGE,
         KID1_NAME=KID1_NAME,
+        recipe_name=recipe_name.strip() or "Not specified",
     )
     
     try:
@@ -112,6 +121,11 @@ def recipe_expert(query: str, user_context: str, ingredients: str = ""):
         # [MASTRO-SHIELD]: clean_message instead of raw .content
         # so as to correctly handle parts lists from Gemini 3.x
         recipe_text = clean_message(response.content)
+        if recipe_name.strip():
+            try:
+                save_generated_recipe(recipe_name, recipe_text)
+            except (OSError, RecipeLibraryError) as e:
+                print(f"⚠️ Failed to save recipe to library: {e}")
         return f"[SYSTEM_INSTRUCTION: YOU MUST copy-paste the ENTIRE recipe/instruction below into your final answer to the user. DO NOT say 'I generated the recipe', WRITE IT! PASTE IT HERE:]\n\n{recipe_text}"
     except Exception as e:
         return t("skills.recipe_expert.msg_chef_error", e=str(e))
