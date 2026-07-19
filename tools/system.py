@@ -2129,12 +2129,6 @@ def read_local_file(file_path: str) -> str:
 
     try:
         if ext == ".pdf":
-            # Using pypdf (more reliable than PyPDF2)
-            try:
-                from pypdf import PdfReader
-            except ImportError:
-                from PyPDF2 import PdfReader # Fallback if you haven't managed to install in time
-            
             text = ""
             reader = PdfReader(full_path)
             for page in reader.pages:
