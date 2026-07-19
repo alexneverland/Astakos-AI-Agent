@@ -1909,11 +1909,6 @@ def maybe_resolve_followups_from_user_message(user_text: str) -> int:
                 decision="resolved",
                 reason=reason or resolution_type,
             )
-            record_followup_outcome(
-                followup_id,
-                +1.0,
-                "resolved_by_user_message"
-            )
             print(f"[FollowUp]: resolved #{followup_id} ({resolution_type})")
             resolved_count += 1
         return resolved_count

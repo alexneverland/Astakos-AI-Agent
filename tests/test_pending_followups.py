@@ -307,7 +307,7 @@ def test_maybe_create_followup_from_exchange_skips_low_confidence(temp_state_db,
 
 
 def test_maybe_resolve_followups_from_user_message_uses_llm_resolution(temp_state_db, monkeypatch):
-    pf.create_pending_followup(
+    followup_id = pf.create_pending_followup(
         source_channel="telegram",
         source_agent="Chat_Agent",
         topic="outing",
@@ -342,6 +342,13 @@ def test_maybe_resolve_followups_from_user_message_uses_llm_resolution(temp_stat
     assert len(rows) == 1
     assert rows[0][3] == "resolved"
     assert rows[0][6] == "resolved_by_user:completed"
+
+    followup = next(
+        item
+        for item in pf.find_pending_followups(limit=10, active_only=False)
+        if item["id"] == followup_id
+    )
+    assert followup["outcome_score"] == 1.0
 
 
 def test_maybe_resolve_followups_from_user_message_skips_low_confidence_llm(temp_state_db, monkeypatch):
@@ -1002,9 +1009,10 @@ def test_followup_decision_fallback_defaults_to_non_assumptive(monkeypatch):
     }
 
     result = bot._build_followup_decision_with_llm(item, "", {})
-    assert result["decision"] == "send"
-    assert result["stage"] == "decision_pending"
-    assert "Πώς πήγε" not in result["message"]
+    assert result["decision"] == "skip"
+    assert result["skip_action"] == "defer"
+    assert result["stage"] == "skip"
+    assert result["reason"] == "llm_decision_failed_safe_defer"
 
 
 def test_normalize_followup_delay_food_purchase_tomorrow_targets_next_day_lunch_window():
