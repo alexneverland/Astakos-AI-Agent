@@ -8,17 +8,18 @@ import re
 import html
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
-def send_telegram_msg_full(text: str, prefix: str = "", max_len: int = 3500, disable_notification: bool = False):
+def send_telegram_msg_full(text: str, prefix: str = "", max_len: int = 3500, disable_notification: bool = False) -> int | None:
     """Sends the entire text to Telegram, splitting it into chunks if necessary
     (instead of cutting it in half). Telegram hard limit = 4096 chars/message."""
     full = f"{prefix}{text}" if prefix else text
     if len(full) <= max_len:
-        send_telegram_msg(full, disable_notification=disable_notification)
-        return
+        return send_telegram_msg(full, disable_notification=disable_notification)
     chunks = [full[i:i + max_len] for i in range(0, len(full), max_len)]
+    last_id = None
     for idx, chunk in enumerate(chunks, 1):
         suffix = f"\n\n[{idx}/{len(chunks)}]" if len(chunks) > 1 else ""
-        send_telegram_msg(chunk + suffix, disable_notification=disable_notification)
+        last_id = send_telegram_msg(chunk + suffix, disable_notification=disable_notification)
+    return last_id
 
 
 def format_for_telegram(text: str) -> str:

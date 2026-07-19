@@ -1305,7 +1305,11 @@ def _send_and_record_assistant(
     agent: str | None = "Chat_Agent",
 ):
     """Sends an assistant reply to Telegram and writes it to the shared history."""
-    message_id = send_telegram_msg(content)
+    if len(content) <= 3500:
+        message_id = send_telegram_msg(content)
+    else:
+        from tools.telegram import send_telegram_msg_full
+        message_id = send_telegram_msg_full(content)
     if message_id:
         _append_to_analytics_log("ai", content, agent=agent)
     else:
