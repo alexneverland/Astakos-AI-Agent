@@ -311,3 +311,11 @@ def test_save_atomic_on_corrupt_file():
     finally:
         et_module._TRACES_DIR = old_dir
         shutil.rmtree(d, ignore_errors=True)
+
+def test_load_traces_rejects_invalid_date_path(tmp_path):
+    old_dir = et_module._TRACES_DIR
+    et_module._TRACES_DIR = str(tmp_path)
+    try:
+        assert load_traces(date="../../secret") == []
+    finally:
+        et_module._TRACES_DIR = old_dir

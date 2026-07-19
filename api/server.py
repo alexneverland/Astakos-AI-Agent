@@ -17,6 +17,7 @@ import sys
 import re
 import secrets
 import logging
+from api.path_security import resolve_allowed_file
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi.staticfiles import StaticFiles
@@ -546,11 +547,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     user_input = body.get("message", "").strip()
 
     # (Mastro-Shield): Avoid null or strange paths
-    photo_path = body.get("photo_path")
-    if photo_path is None:
-        photo_path = ""
-    else:
-        photo_path = str(photo_path).strip()
+    photo_path = resolve_allowed_file(
+        body.get("photo_path"),
+        (PHOTOS_DIR,),
+    ) or ""
 
     if not user_input:
         return JSONResponse({"error": t("api.server.empty_message")}, status_code=400)
@@ -2156,8 +2156,13 @@ async def upload_to_drive_endpoint(request: Request, _=Depends(require_token)):
     """Uploads a local file to Google Drive, returns the shareable URL."""
     try:
         body     = await request.json()
-        filepath = body.get("path", "").strip()
-        if not filepath or not os.path.exists(filepath):
+        from config import UPLOADS_DIR
+
+        filepath = resolve_allowed_file(
+            body.get("path"),
+            (PHOTOS_DIR, UPLOADS_DIR),
+        )
+        if not filepath:
             return JSONResponse({"ok": False, "error": t("api.server.file_not_found")}, status_code=404)
         from tools.gdrive import upload_to_drive
         url = upload_to_drive(filepath)

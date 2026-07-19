@@ -187,7 +187,13 @@ class ExecutionTrace:
 
 def load_traces(date: str | None = None, limit: int = 50) -> list:
     """Reads day traces (default: today). Returns the last N."""
-    day      = date or datetime.now().strftime("%Y-%m-%d")
+    if date is None:
+        day = datetime.now().strftime("%Y-%m-%d")
+    else:
+        try:
+            day = datetime.strptime(date, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            return []
     log_file = os.path.join(_TRACES_DIR, f"{day}.json")
     if not os.path.exists(log_file):
         return []

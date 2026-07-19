@@ -11,6 +11,7 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       ASTAKOS_CHECK_UPDATES: "0"
+      ASTAKOS_SETUP_HOST: "0.0.0.0"
     labels:
       com.centurylinklabs.watchtower.enable: "true"
 
