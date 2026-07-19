@@ -101,6 +101,7 @@ def _run_missed(db_rows, schedule_meta, grace=90, craft_return="deferred_msg"):
                   side_effect=lambda *a, **kw: save_pending_calls.append(a)),
             patch("memory.routine_db.get_routine_schedule_meta",
                   return_value=schedule_meta),
+            patch("memory.routine_db.get_routine_conditions", return_value=[]),
         ):
             bot.startup_check_missed_routines()
 

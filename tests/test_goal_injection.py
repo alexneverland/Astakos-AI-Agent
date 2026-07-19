@@ -5,6 +5,24 @@ class MockMessage:
     def __init__(self, content):
         self.content = content
 
+
+@pytest.fixture(autouse=True)
+def mock_active_goals(monkeypatch):
+    monkeypatch.setattr(
+        "memory.vector_store.get_active_goals",
+        lambda: [
+            {
+                "project": "Test project",
+                "description": "Test goal",
+                "status": "active",
+                "date": "2026-01-01",
+                "progress": 0,
+                "milestones": "",
+            }
+        ],
+    )
+
+
 def test_goal_injection_routine_command():
     # Routine commands should NOT inject goals
     msg = MockMessage("Ναι προχώρα")
