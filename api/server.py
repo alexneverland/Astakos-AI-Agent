@@ -500,6 +500,10 @@ async def lifespan(app: FastAPI):
 
 server = FastAPI(lifespan=lifespan)
 
+def _api_internal_error(operation: str) -> str:
+    logging.exception("API %s failed", operation)
+    return t("api.server.internal_error")
+
 # Keep terminal output useful: app debug prints stay visible, noisy polling access logs do not.
 logging.getLogger("uvicorn.access").disabled = True
 server.mount("/photos", StaticFiles(directory=PHOTOS_DIR), name="photos")
@@ -1027,7 +1031,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 {"error": "Model quota exhausted right now. Please retry shortly."},
                 status_code=503,
             )
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": _api_internal_error("chat")}, status_code=500)
 
 @server.post("/voice")
 async def process_web_voice(file: UploadFile = File(...), _=Depends(require_token)):
@@ -1073,9 +1077,7 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
         print(f"\033[92m[Web Voice]: {config.USER_NAME} said -> {transcription}\033[0m")
         return JSONResponse({"transcription": transcription})
     except Exception as e:
-        import traceback
-        print(f"\033[91m[Web Voice Error]: {traceback.format_exc()}\033[0m")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": _api_internal_error("voice")}, status_code=500)
 
 
 import edge_tts
@@ -1111,9 +1113,7 @@ async def text_to_speech(request: Request, _=Depends(require_token)):
             headers={"Content-Disposition": "inline; filename=response.mp3"}
         )
     except Exception as e:
-        import traceback
-        print(f"\033[91m[TTS Error]: {traceback.format_exc()}\033[0m")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": _api_internal_error("tts")}, status_code=500)
 
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB limit
@@ -1338,9 +1338,7 @@ async def upload_file(
             "analysis":  memory_analysis,
         })
     except Exception as e:
-        import traceback
-        print(f"\033[91m[Upload Error]: {traceback.format_exc()}\033[0m")
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+        return JSONResponse({"status": "error", "message": _api_internal_error("upload")}, status_code=500)
 
 
 @server.get("/")
@@ -1368,7 +1366,7 @@ async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends
         current_max = get_max_rowid()
         return {"messages": messages, "max_id": current_max}
     except Exception as e:
-        return {"messages": [], "max_id": after_id, "error": str(e)}
+        return {"messages": [], "max_id": after_id, "error": _api_internal_error("poll")}
 
 
 @server.get("/history")
@@ -1746,7 +1744,7 @@ async def debug_runtime(_=Depends(require_token)):
         conn.close()
     except Exception as e:
         state_counts = {}
-        active_routines.append({"error": str(e)})
+        active_routines.append({"error": _api_internal_error("debug_runtime")})
 
     # ── 3. Today's event log: throughput + last errors ───────────
     today      = datetime.now().strftime("%Y-%m-%d")
@@ -1821,8 +1819,8 @@ async def debug_runtime(_=Depends(require_token)):
         }
     except Exception as e:
         channel_sessions = {}
-        conversation_debug = {"ok": False, "error": str(e)}
-        session_debug = {"ok": False, "error": str(e)}
+        conversation_debug = {"ok": False, "error": _api_internal_error("debug_runtime")}
+        session_debug = {"ok": False, "error": _api_internal_error("debug_runtime")}
 
     pending_actions = _get_pending_actions()
     messenger_draft = _get_messenger_draft_debug()
@@ -1902,7 +1900,7 @@ def _get_messenger_draft_debug() -> dict:
         from core.messenger_draft import debug_draft_state
         return debug_draft_state()
     except Exception as e:
-        return {"exists": False, "active": False, "reason": "error", "error": str(e)}
+        return {"exists": False, "active": False, "reason": "error", "error": _api_internal_error("messenger_draft_debug")}
 
 
 @server.post("/debug/action/{tool_call_id}/approve")
@@ -1921,7 +1919,7 @@ async def approve_action(tool_call_id: str, _=Depends(require_token)):
         send_telegram_msg_full(str(result), prefix=t("api.server.dashboard_action_success", tool_name=tool_name))
         return {"ok": True, "status": "executed", "tool": tool_name, "result": str(result)}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _api_internal_error("approve_action")}
 
 
 @server.post("/debug/action/{tool_call_id}/reject")
@@ -1935,7 +1933,7 @@ async def reject_action(tool_call_id: str, _=Depends(require_token)):
             send_telegram_msg(t("api.server.dashboard_action_cancelled", tool_name=item["tool_name"]))
         return {"ok": True, "status": "rejected"}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _api_internal_error("reject_action")}
 
 def _decorate_debug_event(ev: dict) -> dict:
     ev = dict(ev)
@@ -1991,7 +1989,7 @@ async def debug_replay(days: int = 2, _=Depends(require_token)):
         events = [_decorate_debug_event(e) for e in events]
         return {"events": events, "count": len(events), "days": days}
     except Exception as e:
-        return {"events": [], "error": str(e)}
+        return {"events": [], "error": _api_internal_error("routine_timeline")}
 
 @server.delete("/debug/routine/{routine_id}")
 async def delete_routine(routine_id: int, _=Depends(require_token)):
@@ -2005,7 +2003,7 @@ async def delete_routine(routine_id: int, _=Depends(require_token)):
         conn.close()
         return {"ok": True, "deleted": routine_id}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _api_internal_error("delete_routine")}
 
 @server.post("/debug/routine/{routine_id}/reset-cooldown")
 async def reset_routine_cooldown(routine_id: int, _=Depends(require_token)):
@@ -2022,7 +2020,7 @@ async def reset_routine_cooldown(routine_id: int, _=Depends(require_token)):
         conn.close()
         return {"ok": True, "routine_id": routine_id}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _api_internal_error("reset_routine_cooldown")}
 
 @server.post("/debug/routine/{routine_id}/confirm")
 async def force_confirm_routine(routine_id: int, _=Depends(require_token)):
@@ -2039,7 +2037,7 @@ async def force_confirm_routine(routine_id: int, _=Depends(require_token)):
         remove_pending_confirmation(routine_id)
         return {"ok": True, "confirmed": routine_id, "new_state": "active"}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _api_internal_error("confirm_routine")}
 
 @server.patch("/debug/routine/{routine_id}/state")
 async def force_routine_state(routine_id: int, request: Request, _=Depends(require_token)):
@@ -2062,7 +2060,7 @@ async def force_routine_state(routine_id: int, request: Request, _=Depends(requi
         conn.close()
         return {"ok": True, "routine_id": routine_id, "new_state": new_state}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _api_internal_error("routine_state")}
 
 @server.post("/debug/routine/{routine_id}/activate")
 async def activate_routine(routine_id: int, _=Depends(require_token)):
@@ -2076,7 +2074,7 @@ async def activate_routine(routine_id: int, _=Depends(require_token)):
         conn.close()
         return {"ok": True, "activated": routine_id}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _api_internal_error("activate_routine")}
 
 @server.patch("/debug/routine/{routine_id}")
 async def edit_routine(routine_id: int, request: Request, _=Depends(require_token)):
@@ -2105,7 +2103,7 @@ async def edit_routine(routine_id: int, request: Request, _=Depends(require_toke
         conn.close()
         return {"ok": True, "updated": routine_id}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _api_internal_error("edit_routine")}
 
 @server.get("/debug/reflections")
 async def get_reflections(_=Depends(require_token)):
@@ -2121,7 +2119,7 @@ async def get_reflections(_=Depends(require_token)):
         conn.close()
         return {"reflections": [dict(r) for r in rows]}
     except Exception as e:
-        return {"reflections": [], "error": str(e)}
+        return {"reflections": [], "error": _api_internal_error("get_reflections")}
 
 @server.post("/debug/reflection/{reflection_id}/apply")
 async def apply_reflection(reflection_id: int, _=Depends(require_token)):
@@ -2148,7 +2146,7 @@ async def apply_reflection(reflection_id: int, _=Depends(require_token)):
             conn2.close()
         return {"ok": success}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _api_internal_error("apply_reflection")}
 
 
 @server.post("/upload-to-drive")
@@ -2170,7 +2168,7 @@ async def upload_to_drive_endpoint(request: Request, _=Depends(require_token)):
             return {"ok": True, "url": url}
         return JSONResponse({"ok": False, "error": t("api.server.drive_upload_failed")}, status_code=500)
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "error": _api_internal_error("upload_to_drive")}, status_code=500)
 
 
 @server.delete("/debug/reflection/{reflection_id}")
@@ -2185,7 +2183,7 @@ async def delete_reflection(reflection_id: int, _=Depends(require_token)):
         conn.close()
         return {"ok": True}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _api_internal_error("delete_reflection")}
 
 
 @server.get("/debug/goals")
@@ -2212,7 +2210,7 @@ async def debug_goals(_=Depends(require_token)):
         goals.sort(key=lambda g: (g["status"] != "active", g["date"]))
         return {"goals": goals, "count": len(goals)}
     except Exception as e:
-        return {"goals": [], "error": str(e)}
+        return {"goals": [], "error": _api_internal_error("get_goals")}
 
 
 @server.delete("/debug/goals/{project}")
@@ -2229,7 +2227,7 @@ async def delete_goal(project: str, _=Depends(require_token)):
             vector_store._collection.delete(ids=existing["ids"])
         return {"ok": True, "deleted": project}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": _api_internal_error("delete_goal")}
 
 @server.get("/debug/traces")
 async def debug_traces(date: str | None = None, limit: int = 50, _=Depends(require_token)):
@@ -2244,7 +2242,7 @@ async def debug_traces(date: str | None = None, limit: int = 50, _=Depends(requi
         traces = load_traces(date=date, limit=limit)
         return {"traces": traces, "count": len(traces), "date": date or "today"}
     except Exception as e:
-        return {"error": str(e), "traces": []}
+        return {"error": _api_internal_error("debug_traces"), "traces": []}
 
 
 @server.get("/debug/memory-audit")
