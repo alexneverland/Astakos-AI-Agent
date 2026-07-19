@@ -113,6 +113,12 @@ CE_PARK = tuple(get_intent_list('context_extractor', 'park_words'))
 CE_NOW_SITTING = tuple(get_intent_list('context_extractor', 'now_sitting_words'))
 CE_FOUND_THEM = tuple(get_intent_list('context_extractor', 'found_them_words'))
 CE_ALL_TOGETHER = tuple(get_intent_list('context_extractor', 'all_together_words'))
+CE_FAMILY_GROUP = tuple(
+    get_intent_list("context_extractor", "family_group_words")
+)
+CE_RETURN_TOGETHER = tuple(
+    get_intent_list("context_extractor", "return_together_words")
+)
 CE_HOME = tuple(get_intent_list('context_extractor', 'home_words'))
 CE_PARTNER_NAMES = (config.PARTNER_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'partner_names'))
 CE_KID1_NAMES = (config.KID1_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'kid1_names'))

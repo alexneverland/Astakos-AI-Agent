@@ -137,6 +137,15 @@ def _looks_like_everyone_together(text: str) -> bool:
     return any(m in t for m in markers)
 
 
+def _looks_like_family_return_together(text: str) -> bool:
+    t = _normalize_live_text(text)
+    has_family_group = any(marker in t for marker in nl_config.CE_FAMILY_GROUP)
+    has_return_together = any(
+        marker in t for marker in nl_config.CE_RETURN_TOGETHER
+    )
+    return has_family_group and has_return_together
+
+
 def _recent_family_context_hint(channel: str = "telegram") -> str:
     try:
         entries = load_recent_context(limit=6, channel=channel) or []
@@ -227,7 +236,10 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         if _has_park_live_presence(user_text):
             payload.setdefault("user_out_of_home", True)
 
-        if _looks_like_everyone_together(user_text):
+        is_everyone_together = _looks_like_everyone_together(user_text)
+        is_family_return_together = _looks_like_family_return_together(user_text)
+
+        if is_everyone_together or is_family_return_together:
             payload["partner_with_user"] = True
             payload["kid1_with_user"] = True
             payload["kid1_with_partner"] = True
@@ -236,7 +248,7 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
                 payload["family_at_home"] = True
                 payload["user_out_of_home"] = False
                 payload["user_at_work"] = False
-            else:
+            elif is_everyone_together:
                 payload["user_out_of_home"] = True
 
         elif _looks_like_found_them_reply(user_text) and _has_park_live_presence(user_text):
@@ -263,7 +275,10 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
 
         has_comm = _has_communication_verb(user_text)
         has_strong = _has_strong_presence(user_text)
-        is_explicit_family = _looks_like_everyone_together(user_text)
+        is_explicit_family = (
+            _looks_like_everyone_together(user_text)
+            or _looks_like_family_return_together(user_text)
+        )
 
         # 1. Precedence guard: user_at_work beats weak presence
         current_work = get_context_state("user_at_work")

@@ -577,6 +577,17 @@
             "everyone together",
             "all together"
         ],
+        "family_group_words": [
+          "everyone",
+          "all of us",
+          "the whole family"
+        ],
+        "return_together_words": [
+          "returned",
+          "came back",
+          "got back",
+          "arrived"
+        ],
         "home_words": [
             "home",
             "home",

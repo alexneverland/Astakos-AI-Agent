@@ -54,6 +54,36 @@ def test_context_extractor_everyone_together_sets_family_flags(mock_gemini, mock
     assert calls.get("kid1_with_partner") == "true"
     assert calls.get("kid1_away_from_home") == "false"
 
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "Ολοι γυρισαμε σπιτι",
+        "Επιστρεψαμε ολοι στο σπιτι",
+        "Ολοι γυρισαμε",
+    ],
+)
+def test_context_extractor_family_return_sets_family_flags(
+    user_text,
+    mock_gemini,
+    mock_db,
+    mock_reconciler,
+    mock_history,
+):
+    extract_and_update_context_flags(user_text)
+
+    calls = {call[0][0]: call[0][1] for call in mock_db.call_args_list}
+
+    assert calls.get("partner_with_user") == "true"
+    assert calls.get("kid1_with_user") == "true"
+    assert calls.get("kid1_with_partner") == "true"
+
+    if "σπιτι" in user_text:
+        assert calls.get("family_at_home") == "true"
+        assert calls.get("user_out_of_home") == "false"
+    else:
+        assert "user_out_of_home" not in calls
+        assert "family_at_home" not in calls
+
 def test_context_extractor_found_them_at_park_uses_recent_family_context(mock_gemini, mock_db, mock_reconciler, mock_history):
     # recent context has partner/kid1/park
     mock_history.return_value = [
