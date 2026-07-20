@@ -185,6 +185,53 @@ class TestLocationReminders:
         assert sent == []
         assert _row_status(db_path, "Πλήρωσε λογαριασμό") == "pending"
 
+    def test_live_location_departure_triggers_followup(self):
+        import clients.telegram_bot as bot
+        import config as cfg
+        import time
+
+        tmp = tempfile.mkdtemp()
+        db_path = os.path.join(tmp, "astakos_state.db")
+        gps_path = os.path.join(tmp, "last_location.json")
+        _make_reminders_db(db_path, [])
+
+        with (
+            patch.object(cfg, "STATE_DB", db_path),
+            patch.object(cfg, "GPS_STORAGE_FILE", gps_path),
+        ):
+            # Step 1: Set anchor
+            bot.handle_location(
+                {"chat": {"id": 1}, "location": {"latitude": 0.0, "longitude": 0.0}},
+                live_update=True,
+            )
+
+            # Manually mock time passage (46 mins)
+            import json
+
+            with open(gps_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data["anchor_timestamp"] -= 46 * 60
+            with open(gps_path, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+
+            # Step 2: Trigger departure
+            created = []
+            with patch("memory.pending_followups.create_pending_followup", side_effect=lambda **kw: created.append(kw) or 1):
+                # 0.01 degrees ~ 1.1km distance > 300m
+                bot.handle_location(
+                    {"chat": {"id": 1}, "location": {"latitude": 0.01, "longitude": 0.0}},
+                    live_update=True,
+                )
+                bot.handle_location(
+                    {"chat": {"id": 1}, "location": {"latitude": 0.01, "longitude": 0.0}},
+                    live_update=True,
+                )
+
+            assert len(created) == 1
+            assert created[0]["topic"] == "departure"
+            assert created[0]["metadata"]["anchor_duration_minutes"] >= 45
+            assert created[0]["ttl_hours"] == 1
+
 
 # ────────────────────────────────────────────────────────────────
 # main.reminder_worker()
