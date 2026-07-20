@@ -2339,8 +2339,13 @@ def handle_location(msg, live_update=False):
                     "distance_meters": int(distance_m),
                 }
 
-            # A meaningful movement establishes the next stable-location anchor.
-            anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
+                # For live departures, preserve the old anchor until persistence
+                # succeeds so a transient database error can be retried.
+                if not live_update:
+                    anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
+            else:
+                # A short stop is not a departure event; begin a new anchor now.
+                anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
 
         gps_data.update(
             {
@@ -2406,26 +2411,48 @@ def handle_location(msg, live_update=False):
             event_now = _local_now()
             from memory.pending_followups import create_pending_followup
 
-            followup_id = create_pending_followup(
-                source_channel="telegram",
-                source_agent="Location_Event",
-                topic="departure",
-                subject="stable_location_departure",
-                source_user_text=(
-                    "Live location detected departure after a stable stay of "
-                    f"{departure_event['anchor_minutes']} minutes."
-                ),
-                source_ai_text="",
-                followup_after_ts=event_now.isoformat(timespec="seconds"),
-                confidence=0.70,
-                metadata={
-                    "reason": "live_location_departure",
-                    "anchor_duration_minutes": departure_event["anchor_minutes"],
-                    "departure_distance_meters": departure_event["distance_meters"],
-                    "defer_count": 0,
-                },
-                ttl_hours=_DEPARTURE_FOLLOWUP_TTL_HOURS,
+            import sqlite3
+
+            try:
+                followup_id = create_pending_followup(
+                    source_channel="telegram",
+                    source_agent="Location_Event",
+                    topic="departure",
+                    subject="stable_location_departure",
+                    source_user_text=(
+                        "Live location detected departure after a stable stay of "
+                        f"{departure_event['anchor_minutes']} minutes."
+                    ),
+                    source_ai_text="",
+                    followup_after_ts=event_now.isoformat(timespec="seconds"),
+                    confidence=0.70,
+                    metadata={
+                        "reason": "live_location_departure",
+                        "anchor_duration_minutes": departure_event["anchor_minutes"],
+                        "departure_distance_meters": departure_event["distance_meters"],
+                        "defer_count": 0,
+                    },
+                    ttl_hours=_DEPARTURE_FOLLOWUP_TTL_HOURS,
+                )
+            except sqlite3.Error as exc:
+                print(f"\033[91m[DepartureFollowUp Error]: {exc}\033[0m")
+                return
+
+            # Successful create or active-arc dedupe consumes this departure.
+            anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
+            gps_data.update(
+                {
+                    "anchor_lat": anchor_lat,
+                    "anchor_lon": anchor_lon,
+                    "anchor_timestamp": anchor_ts,
+                }
             )
+            try:
+                with open(GPS_STORAGE_FILE, "w", encoding="utf-8") as f:
+                    json.dump(gps_data, f, ensure_ascii=False)
+            except OSError as exc:
+                print(f"\033[91m[Location State Error]: {exc}\033[0m")
+
             if followup_id:
                 print(
                     f"[DepartureFollowUp]: created #{followup_id} "

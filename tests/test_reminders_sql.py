@@ -232,6 +232,57 @@ class TestLocationReminders:
             assert created[0]["metadata"]["anchor_duration_minutes"] >= 45
             assert created[0]["ttl_hours"] == 1
 
+    def test_live_location_departure_retries_after_pending_create_error(self):
+        import json
+        import sqlite3
+        import clients.telegram_bot as bot
+        import config as cfg
+
+        tmp = tempfile.mkdtemp()
+        db_path = os.path.join(tmp, "astakos_state.db")
+        gps_path = os.path.join(tmp, "last_location.json")
+        _make_reminders_db(db_path, [])
+
+        with (
+            patch.object(cfg, "STATE_DB", db_path),
+            patch.object(cfg, "GPS_STORAGE_FILE", gps_path),
+        ):
+            bot.handle_location(
+                {"chat": {"id": 1}, "location": {"latitude": 0.0, "longitude": 0.0}},
+                live_update=True,
+            )
+
+            with open(gps_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            state["anchor_timestamp"] -= 46 * 60
+            with open(gps_path, "w", encoding="utf-8") as f:
+                json.dump(state, f)
+
+            departure_msg = {
+                "chat": {"id": 1},
+                "location": {"latitude": 0.01, "longitude": 0.0},
+            }
+
+            with patch(
+                "memory.pending_followups.create_pending_followup",
+                side_effect=sqlite3.OperationalError("database temporarily locked"),
+            ):
+                bot.handle_location(departure_msg, live_update=True)
+
+            with open(gps_path, "r", encoding="utf-8") as f:
+                retry_state = json.load(f)
+            assert retry_state["anchor_lat"] == 0.0
+
+            created = []
+            with patch(
+                "memory.pending_followups.create_pending_followup",
+                side_effect=lambda **kwargs: created.append(kwargs) or 99,
+            ):
+                bot.handle_location(departure_msg, live_update=True)
+
+        assert len(created) == 1
+        assert created[0]["topic"] == "departure"
+
 
 # ────────────────────────────────────────────────────────────────
 # main.reminder_worker()
