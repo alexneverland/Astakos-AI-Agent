@@ -654,6 +654,15 @@ _DEPARTURE_FOLLOWUP_GLOBAL_COOLDOWN_MINUTES = 5
 _FOLLOWUP_ARC_COOLDOWN_MINUTES = 240
 
 
+def _is_live_location_departure_followup(item: dict) -> bool:
+    """Return true only for the internal live-location departure event."""
+    return (
+        str(item.get("topic") or "").strip().lower() == "departure"
+        and str(item.get("subject") or "").strip() == "stable_location_departure"
+        and str(item.get("source_agent") or "").strip() == "Location_Event"
+    )
+
+
 def job_check_pending_followups():
     from memory.pending_followups import _local_now
     try:
@@ -669,7 +678,7 @@ def job_check_pending_followups():
         for item in due[:3]:
             global_cooldown_minutes = (
                 _DEPARTURE_FOLLOWUP_GLOBAL_COOLDOWN_MINUTES
-                if str(item.get("topic") or "").strip().lower() == "departure"
+                if _is_live_location_departure_followup(item)
                 else _FOLLOWUP_GLOBAL_COOLDOWN_MINUTES
             )
             if has_recent_sent_followup(within_minutes=global_cooldown_minutes):

@@ -622,7 +622,7 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
     assert global_cooldowns == [30]
 
 
-def test_job_check_pending_followups_uses_short_global_cooldown_for_departure(monkeypatch):
+def test_job_check_pending_followups_uses_short_global_cooldown_for_live_location_departure(monkeypatch):
     global_cooldowns = []
     llm_calls = []
 
@@ -635,6 +635,7 @@ def test_job_check_pending_followups_uses_short_global_cooldown_for_departure(mo
                 "id": 8,
                 "topic": "departure",
                 "subject": "stable_location_departure",
+                "source_agent": "Location_Event",
                 "source_user_text": "Live location detected departure.",
             }
         ],
@@ -654,6 +655,42 @@ def test_job_check_pending_followups_uses_short_global_cooldown_for_departure(mo
     bot.job_check_pending_followups()
 
     assert global_cooldowns == [5]
+    assert llm_calls == []
+
+
+def test_job_check_pending_followups_uses_default_cooldown_for_other_departure(monkeypatch):
+    global_cooldowns = []
+    llm_calls = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 9,
+                "topic": "departure",
+                "subject": "manual_departure",
+                "source_agent": "Chat_Agent",
+                "source_user_text": "I am leaving now.",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or True,
+    )
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda *args: llm_calls.append(args),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert global_cooldowns == [30]
     assert llm_calls == []
 
 
