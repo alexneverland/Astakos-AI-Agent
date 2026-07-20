@@ -658,6 +658,66 @@ def test_job_check_pending_followups_uses_short_global_cooldown_for_live_locatio
     assert llm_calls == []
 
 
+def test_live_location_departure_continues_after_short_global_cooldown(monkeypatch):
+    global_cooldowns = []
+    arc_cooldowns = []
+    llm_calls = []
+    skip_calls = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 10,
+                "topic": "departure",
+                "subject": "stable_location_departure",
+                "source_agent": "Location_Event",
+                "source_user_text": "Live location detected departure.",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or False,
+    )
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup_for_arc",
+        lambda arc_key, within_minutes: arc_cooldowns.append(within_minutes) or False,
+    )
+    monkeypatch.setattr(bot, "_build_followup_state_snapshot", lambda: {})
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda item, recent_context, state_snapshot: llm_calls.append(
+            (item, recent_context, state_snapshot)
+        ) or {
+            "decision": "skip",
+            "skip_action": "resolve",
+            "stage": "skip",
+            "message": "",
+            "reason": "test",
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "_apply_followup_skip_outcome",
+        lambda item, decision: skip_calls.append((item["id"], decision["skip_action"]))
+        or "resolved",
+    )
+
+    bot.job_check_pending_followups()
+
+    assert global_cooldowns == [5]
+    assert arc_cooldowns == [240]
+    assert len(llm_calls) == 1
+    assert skip_calls == [(10, "resolve")]
+
+
 def test_job_check_pending_followups_uses_default_cooldown_for_other_departure(monkeypatch):
     global_cooldowns = []
     llm_calls = []
