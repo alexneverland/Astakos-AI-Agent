@@ -2448,6 +2448,11 @@ SCOPES = [
     'https://www.googleapis.com/auth/fitness.heart_rate.read',
 ]
 
+_RECOVERABLE_GOOGLE_OAUTH_REFRESH_ERRORS = (
+    "invalid_scope",
+    "invalid_grant",
+)
+
 def get_gmail_service():
     """Creates the Gmail API service using OAuth."""
     creds = None
@@ -2463,9 +2468,13 @@ def get_gmail_service():
             try:
                 creds.refresh(Request())
             except RefreshError as e:
-                if "invalid_scope" not in str(e).lower():
+                refresh_error = str(e).lower()
+                if not any(
+                    marker in refresh_error
+                    for marker in _RECOVERABLE_GOOGLE_OAUTH_REFRESH_ERRORS
+                ):
                     raise
-                print("[GoogleAuth] token invalid_scope - forcing fresh OAuth consent.")
+                print("[GoogleAuth] token refresh rejected - forcing fresh OAuth consent.")
                 creds = None
 
         if not creds or not creds.valid:
