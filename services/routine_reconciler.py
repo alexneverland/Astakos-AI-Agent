@@ -1126,15 +1126,24 @@ def score_candidate_directive(
 
     if matched_rule_name in {"shift_logic", "child_activity_pause", "notifications_unmute", "partner_not_with_user"}:
         if matched_rule_name == "shift_logic":
-            # If explicit day or tomorrow is specified, it is NOT conservative.
-            # Only week-level mentions ("this week") get the conservative penalty.
-            has_explicit_day = _extract_explicit_weekday_scope_dt(normalized_fact, datetime.now()) is not None
-            has_relative_day = _extract_relative_day_scope_dt(normalized_fact, datetime.now()) is not None
-            if has_explicit_day or has_relative_day:
-                _append_signal(signals, "explicit_shift_schedule")
+            is_weekly_shift_state = (
+                kind == "context_state_set"
+                and directive_key == "current_shift"
+                and reason in {"shift_morning_week", "shift_afternoon_week"}
+                and bool(until_date)
+            )
+
+            if is_weekly_shift_state:
+                _append_signal(signals, "weekly_shift_state")
             else:
-                score += _P_CONSERVATIVE
-                _append_flag(ambiguity_flags, f"{matched_rule_name}_conservative")
+                # Conditions and ambiguous shift statements remain conservative.
+                has_explicit_day = _extract_explicit_weekday_scope_dt(normalized_fact, datetime.now()) is not None
+                has_relative_day = _extract_relative_day_scope_dt(normalized_fact, datetime.now()) is not None
+                if has_explicit_day or has_relative_day:
+                    _append_signal(signals, "explicit_shift_schedule")
+                else:
+                    score += _P_CONSERVATIVE
+                    _append_flag(ambiguity_flags, f"{matched_rule_name}_conservative")
         else:
             score += _P_CONSERVATIVE
             _append_flag(ambiguity_flags, f"{matched_rule_name}_conservative")

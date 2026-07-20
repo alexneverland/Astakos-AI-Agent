@@ -388,8 +388,8 @@ def test_not_together_phrase_without_active_sofia_context_does_nothing():
     assert not any(d.get("key") == "partner_with_user" for d in directives)
 
 
-def test_shift_logic_candidate_scores_debug_only():
-    """Generic weekly shift statements stay debug_only by design."""
+def test_shift_logic_weekly_state_auto_applies():
+    """A direct weekly shift declaration safely updates temporary context."""
     fact = "[USER_FACT]: Αυτή την εβδομάδα δουλεύω απόγευμα στη βάρδια."
 
     candidates = infer_routine_reconciliation_candidates(
@@ -420,21 +420,25 @@ def test_shift_logic_candidate_scores_debug_only():
 
     assert any(
         d["rule_name"] == "shift_logic"
-        and d["decision"] == "debug_only"
+        and d["decision"] == "auto_apply"
+        and d["auto_apply"] is True
+        and d["key"] == "current_shift"
         for d in scored
     )
 
-    # The backward-compat wrapper only returns the auto_apply bucket, so a
-    # debug_only-only rule like shift_logic must NOT show up in its output.
     directives = infer_routine_reconciliation_directives(
         fact,
         category="lazaros",
         reason="user_stated",
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
-    assert not any(
-        d.get("reason") == "shift_afternoon_week" for d in directives
-    ), "infer_routine_reconciliation_directives returns auto_apply directives"
+    assert any(
+        d.get("kind") == "context_state_set"
+        and d.get("key") == "current_shift"
+        and d.get("value") == "afternoon"
+        and d.get("reason") == "shift_afternoon_week"
+        for d in directives
+    )
 
 
 def test_shift_logic_explicit_weekday_auto_applies():
