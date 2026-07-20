@@ -41,7 +41,8 @@ Example 1 (Send):
   "skip_action": "none",
   "stage": "decision_pending",
   "message": "...",
-  "reason": "..."
+  "reason": "...",
+  "context_evidence": ""
 }}
 ```
 
@@ -52,7 +53,8 @@ Example 2 (Skip and Resolve):
   "skip_action": "resolve",
   "stage": "skip",
   "message": "",
-  "reason": "..."
+  "reason": "...",
+  "context_evidence": ""
 }}
 ```
 
@@ -63,7 +65,8 @@ Example 3 (Skip and Defer):
   "skip_action": "defer",
   "stage": "skip",
   "message": "",
-  "reason": "..."
+  "reason": "...",
+  "context_evidence": ""
 }}
 ```
 
@@ -75,3 +78,7 @@ Rules:
 - If defer_count >= 2, avoid another defer unless the context clearly indicates a true postponement.
 - Keep "message" short, natural, and in {language} only when decision="send".
 - ONLY return JSON.
+- For topic "departure", send only when RECENT CONTEXT explicitly explains the user's likely activity at the departed location.
+- For topic "departure", set "context_evidence" to a short verbatim phrase copied from RECENT CONTEXT.
+- For topic "departure", if no such evidence exists, return "skip" with skip_action="resolve". Never send a generic departure check-in.
+- For every other topic, set "context_evidence" to an empty string.

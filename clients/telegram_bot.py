@@ -467,6 +467,7 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
     last_decision = str(item.get("last_decision") or "").strip()
     decision_reason = str(item.get("decision_reason") or "").strip()
     outcome_score = float(item.get("outcome_score") or 0.0)
+    topic = str(item.get("topic") or "").strip().lower()
 
     history_block = (
         f"- defer_count: {defer_count}\n"
@@ -508,6 +509,9 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
         message = clean_message(payload.get("message", "")).strip()
         reason = str(payload.get("reason", "")).strip()
         skip_action = str(payload.get("skip_action") or "none").strip().lower()
+        context_evidence = clean_message(
+            str(payload.get("context_evidence") or "")
+        ).strip()
         if skip_action not in {"resolve", "defer", "none"}:
             skip_action = "none"
 
@@ -521,6 +525,24 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
             "skip",
         }:
             stage = "skip" if decision == "skip" else "decision_pending"
+
+        if topic == "departure":
+            evidence_norm = _normalize_followup_signal_text(context_evidence)
+            recent_context_norm = _normalize_followup_signal_text(recent_context)
+
+            if (
+                decision != "send"
+                or not message
+                or len(evidence_norm) < 5
+                or evidence_norm not in recent_context_norm
+            ):
+                return {
+                    "decision": "skip",
+                    "skip_action": "resolve",
+                    "stage": "skip",
+                    "message": "",
+                    "reason": "departure_missing_verified_recent_context",
+                }
 
         if decision == "send" and not message:
             message = _build_safe_followup_fallback(item, stage)
@@ -537,10 +559,14 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
         print(f"[FollowUpDecision Error]: {exc}")
         return {
             "decision": "skip",
-            "skip_action": "defer",
+            "skip_action": "resolve" if topic == "departure" else "defer",
             "stage": "skip",
             "message": "",
-            "reason": "llm_decision_failed_safe_defer",
+            "reason": (
+                "departure_decision_failed_resolved"
+                if topic == "departure"
+                else "llm_decision_failed_safe_defer"
+            ),
         }
 
 def _followup_log_label(item: dict) -> str:
@@ -624,6 +650,11 @@ def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
     skip_action = str(decision.get("skip_action") or "none").strip().lower()
     topic = str(item.get("topic") or "").strip().lower()
     metadata = item.get("metadata") or {}
+    if topic == "departure":
+        resolution_reason = reason or "departure_not_contextually_valid"
+        resolve_followup(item["id"], f"resolved_by_skip:{resolution_reason}")
+        _set_followup_decision(item["id"], "resolved", resolution_reason)
+        return "resolved"
 
     target_window = str(metadata.get("target_window") or "").strip()
     raw_delay = int(metadata.get("delay_minutes_raw") or metadata.get("delay_minutes_final") or 60)
@@ -2247,6 +2278,23 @@ def _send_photo_to_telegram(photo_path: str, chat_id: str):
     except Exception as e:
         print(f"\033[91m[TelegramBot Photo Send Error]: {e}\033[0m")
         send_telegram_msg(t("clients.telegram_bot.bot_msg_photo_send_fail", e=str(e)))
+_DEPARTURE_ANCHOR_SECONDS = 45 * 60
+_DEPARTURE_DISTANCE_METERS = 300
+_DEPARTURE_FOLLOWUP_TTL_HOURS = 1
+
+
+def _haversine_distance_meters(lat1, lon1, lat2, lon2) -> float:
+    import math
+
+    radius_m = 6_371_000
+    radians = math.pi / 180
+    a = (
+        math.sin((lat2 - lat1) * radians / 2) ** 2
+        + math.cos(lat1 * radians)
+        * math.cos(lat2 * radians)
+        * math.sin((lon2 - lon1) * radians / 2) ** 2
+    )
+    return 2 * radius_m * math.asin(math.sqrt(a))
 def handle_location(msg, live_update=False):
     """Receives live location and checks for location-based reminders."""
     import math
@@ -2257,14 +2305,57 @@ def handle_location(msg, live_update=False):
     lon     = loc.get("longitude")
     if lat is None or lon is None:
         return
-    # Save location to JSON
+    departure_event = None
     try:
         from config import GPS_STORAGE_FILE
         import time
+
+        now_ts = time.time()
+        gps_data = {}
+
+        if os.path.exists(GPS_STORAGE_FILE):
+            try:
+                with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
+                    stored_data = json.load(f)
+                if isinstance(stored_data, dict):
+                    gps_data = stored_data
+            except (OSError, ValueError, json.JSONDecodeError):
+                gps_data = {}
+
+        try:
+            anchor_lat = float(gps_data.get("anchor_lat", lat))
+            anchor_lon = float(gps_data.get("anchor_lon", lon))
+            anchor_ts = float(gps_data.get("anchor_timestamp", now_ts))
+        except (TypeError, ValueError):
+            anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
+
+        distance_m = _haversine_distance_meters(anchor_lat, anchor_lon, lat, lon)
+        anchored_seconds = max(0, now_ts - anchor_ts)
+
+        if distance_m > _DEPARTURE_DISTANCE_METERS:
+            if anchored_seconds >= _DEPARTURE_ANCHOR_SECONDS:
+                departure_event = {
+                    "anchor_minutes": int(anchored_seconds // 60),
+                    "distance_meters": int(distance_m),
+                }
+
+            # A meaningful movement establishes the next stable-location anchor.
+            anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
+
+        gps_data.update(
+            {
+                "lat": lat,
+                "lon": lon,
+                "timestamp": now_ts,
+                "anchor_lat": anchor_lat,
+                "anchor_lon": anchor_lon,
+                "anchor_timestamp": anchor_ts,
+            }
+        )
         with open(GPS_STORAGE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"lat": lat, "lon": lon, "timestamp": time.time()}, f)
-    except Exception:
-        pass
+            json.dump(gps_data, f, ensure_ascii=False)
+    except OSError as exc:
+        print(f"\033[91m[Location State Error]: {exc}\033[0m")
     #print(f"\033[94m[Location]: {lat}, {lon}\033[0m")
 
     # ── Location Reminders (SQL: time = 'loc:<name>' convention) ──
@@ -2309,7 +2400,40 @@ def handle_location(msg, live_update=False):
 
     # ── Web Agent only for manual location (no live updates) ──
     if live_update:
-        return  # Live location update → only reminders, no message
+        if departure_event:
+            from memory.pending_followups import _local_now
+
+            event_now = _local_now()
+            from memory.pending_followups import create_pending_followup
+
+            followup_id = create_pending_followup(
+                source_channel="telegram",
+                source_agent="Location_Event",
+                topic="departure",
+                subject="stable_location_departure",
+                source_user_text=(
+                    "Live location detected departure after a stable stay of "
+                    f"{departure_event['anchor_minutes']} minutes."
+                ),
+                source_ai_text="",
+                followup_after_ts=event_now.isoformat(timespec="seconds"),
+                confidence=0.70,
+                metadata={
+                    "reason": "live_location_departure",
+                    "anchor_duration_minutes": departure_event["anchor_minutes"],
+                    "departure_distance_meters": departure_event["distance_meters"],
+                    "defer_count": 0,
+                },
+                ttl_hours=_DEPARTURE_FOLLOWUP_TTL_HOURS,
+            )
+            if followup_id:
+                print(
+                    f"[DepartureFollowUp]: created #{followup_id} "
+                    f"after {departure_event['anchor_minutes']}m / "
+                    f"{departure_event['distance_meters']}m"
+                )
+
+        return
 
     from core.graph import graph
     from langchain_core.messages import HumanMessage

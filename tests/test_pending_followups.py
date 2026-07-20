@@ -1639,6 +1639,96 @@ def test_followup_decision_returns_structural_skip_action(monkeypatch):
     assert result["skip_action"] == "resolve"
 
 
+def test_departure_decision_requires_verified_recent_context(monkeypatch):
+    import clients.telegram_bot as bot
+    import services.gemini as gemini
+
+    class DummyResponse:
+        text = (
+            '{"decision":"send","skip_action":"none",'
+            '"stage":"decision_pending","message":"How did it go?",'
+            '"reason":"departure detected","context_evidence":""}'
+        )
+
+    monkeypatch.setattr(gemini, "safe_gemini_call", lambda prompt: DummyResponse())
+
+    result = bot._build_followup_decision_with_llm(
+        {
+            "topic": "departure",
+            "subject": "stable_location_departure",
+            "source_user_text": "Live location detected departure.",
+        },
+        "User: general unrelated chat",
+        {},
+    )
+
+    assert result["decision"] == "skip"
+    assert result["skip_action"] == "resolve"
+
+
+def test_departure_decision_accepts_verbatim_recent_context_evidence(monkeypatch):
+    import clients.telegram_bot as bot
+    import services.gemini as gemini
+
+    class DummyResponse:
+        text = (
+            '{"decision":"send","skip_action":"none",'
+            '"stage":"decision_pending","message":"Finished at the gym?",'
+            '"reason":"recent activity is still relevant",'
+            '"context_evidence":"went to the gym"}'
+        )
+
+    monkeypatch.setattr(gemini, "safe_gemini_call", lambda prompt: DummyResponse())
+
+    result = bot._build_followup_decision_with_llm(
+        {
+            "topic": "departure",
+            "subject": "stable_location_departure",
+            "source_user_text": "Live location detected departure.",
+        },
+        "User: I went to the gym and will leave soon.",
+        {},
+    )
+
+    assert result["decision"] == "send"
+    assert result["message"] == "Finished at the gym?"
+
+
+def test_departure_skip_resolves_instead_of_deferring(monkeypatch):
+    import clients.telegram_bot as bot
+    import memory.pending_followups as pf
+
+    resolved = []
+    decisions = []
+
+    monkeypatch.setattr(
+        pf,
+        "resolve_followup",
+        lambda followup_id, reason: resolved.append((followup_id, reason)),
+    )
+    monkeypatch.setattr(
+        pf,
+        "_set_followup_decision",
+        lambda followup_id, decision, reason: decisions.append(
+            (followup_id, decision, reason)
+        ),
+    )
+
+    outcome = bot._apply_followup_skip_outcome(
+        {"id": 42, "topic": "departure", "metadata": {}},
+        {
+            "decision": "skip",
+            "skip_action": "defer",
+            "reason": "no verified recent context",
+        },
+    )
+
+    assert outcome == "resolved"
+    assert resolved == [(42, "resolved_by_skip:no verified recent context")]
+    assert decisions == [(42, "resolved", "no verified recent context")]
+
+
+
 def test_next_day_window_never_targets_today_morning():
     from datetime import datetime
     from memory.pending_followups import FOLLOWUP_LOCAL_TZ, normalize_followup_delay
