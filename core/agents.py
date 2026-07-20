@@ -283,6 +283,13 @@ def dev_agent_node(state):
     return {"current_agent": "Dev_Agent", "messages": [response]}
 
 
+def _should_bind_messenger_draft_tool(user_text: str) -> bool:
+    """Expose draft creation only for an explicit new-message request."""
+    from services.messenger_intent import classify_messenger_intent
+
+    return classify_messenger_intent(user_text).intent == "create_draft"
+
+
 def chat_agent_node(state: AgentState):
     from core.utils import load_agent_prompt, clean_message
     from config import BASE_DIR, PHOTOS_DIR 
@@ -357,7 +364,12 @@ def chat_agent_node(state: AgentState):
     chat_tools = [
         get_current_location, control_spotify,
         search_memory, save_to_memory, delete_from_memory, retrieve_photo, duckduckgo_search,
-        recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, relay_local_payload, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
+        recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
+        *(
+            [relay_local_payload]
+            if _should_bind_messenger_draft_tool(last_msg_text)
+            else []
+        ),
         read_local_file, generate_image_tool, get_fit_summary,
         *([archive_file] if not _is_farewell else []),
     ]

@@ -1,4 +1,5 @@
 from services.messenger_intent import classify_messenger_intent
+from core.agents import _should_bind_messenger_draft_tool
 
 
 def test_create_draft_intent():
@@ -36,3 +37,9 @@ def test_general_close_topic_is_not_clear_draft():
 def test_explicit_clear_draft_still_works():
     result = classify_messenger_intent("κλείσε το draft", has_active_draft=True)
     assert result.intent == "clear_draft"
+
+def test_chat_agent_binds_draft_tool_only_for_create_intent():
+    assert _should_bind_messenger_draft_tool("Γράψε ένα μήνυμα")
+    assert not _should_bind_messenger_draft_tool(
+        "Έχει δουλειά σήμερα δεύτερα φίλε"
+    )
