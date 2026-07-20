@@ -839,10 +839,9 @@ def test_job_check_pending_followups_does_not_mark_sent_when_telegram_send_fails
     assert outcomes == []
 
 
-def test_job_check_pending_followups_forces_light_outing_send_when_due(monkeypatch):
+def test_job_check_pending_followups_respects_outing_skip_decision(monkeypatch):
     sent = []
-    marked = []
-    outcomes = []
+    skip_calls = []
 
     monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
     monkeypatch.setattr(
@@ -861,7 +860,11 @@ def test_job_check_pending_followups_forces_light_outing_send_when_due(monkeypat
             }
         ],
     )
-    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(
+        bot,
+        "_load_recent_proactive_context",
+        lambda limit=10: "Lazaros: I am already at the park with Alexandros.",
+    )
     monkeypatch.setattr(bot, "has_recent_sent_followup", lambda within_minutes=90: False)
     monkeypatch.setattr(
         bot,
@@ -874,33 +877,30 @@ def test_job_check_pending_followups_forces_light_outing_send_when_due(monkeypat
         "_build_followup_decision_with_llm",
         lambda item, recent_context, state_snapshot: {
             "decision": "skip",
+            "skip_action": "resolve",
             "stage": "skip",
             "message": "",
-            "reason": "too early",
+            "reason": "already_active",
         },
     )
-    monkeypatch.setattr(bot, "_should_force_light_outing_followup", lambda item: True)
+    monkeypatch.setattr(
+        bot,
+        "_apply_followup_skip_outcome",
+        lambda item, decision: skip_calls.append(
+            (item["id"], decision["skip_action"], decision["reason"])
+        ) or "resolved",
+    )
     monkeypatch.setattr(
         bot,
         "_send_and_record_assistant",
         lambda msg, chat_id=None, agent=None: sent.append((msg, agent)) or 456,
     )
-    monkeypatch.setattr(
-        bot,
-        "mark_followup_sent",
-        lambda followup_id, reason=None: marked.append((followup_id, reason)),
-    )
-    monkeypatch.setattr(
-        bot,
-        "record_followup_outcome",
-        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
-    )
 
     bot.job_check_pending_followups()
 
-    assert sent == [("Τους βρήκες τελικά για το βόλτα στο πάρκο;", "FollowUp_Agent")]
-    assert marked == [(11, "followup_sent:light_outing_checkin")]
-    assert outcomes == [(11, 0.1, "followup_sent:light_outing_checkin")]
+    assert sent == []
+    assert skip_calls == [(11, "resolve", "already_active")]
+
 
 
 def test_job_check_pending_followups_does_not_skip_just_because_subject_is_in_recent_context(monkeypatch):
