@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -156,6 +156,55 @@ def test_mark_followup_sent_marks_row_sent(temp_state_db):
     rows = _fetch_all(temp_state_db)
     assert len(rows) == 1
     assert rows[0][3] == "sent"
+
+
+def test_recent_sent_followups_use_latest_sent_at_not_highest_id(
+    temp_state_db,
+    monkeypatch,
+):
+    now = pf._local_now()
+    followup_after_ts = now.isoformat(timespec="seconds")
+
+    recent_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="park visit",
+        source_user_text="I am going to the park.",
+        source_ai_text="OK.",
+        followup_after_ts=followup_after_ts,
+        confidence=0.8,
+        metadata={},
+    )
+    monkeypatch.setattr(pf, "_local_now", lambda: now)
+    pf.mark_followup_sent(recent_id)
+
+    older_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="park visit",
+        source_user_text="I am going to the park.",
+        source_ai_text="OK.",
+        followup_after_ts=followup_after_ts,
+        confidence=0.8,
+        metadata={},
+    )
+    monkeypatch.setattr(
+        pf,
+        "_local_now",
+        lambda: now - timedelta(minutes=31),
+    )
+    pf.mark_followup_sent(older_id)
+
+    monkeypatch.setattr(pf, "_local_now", lambda: now)
+    arc_key = pf.build_followup_arc_key("outing", "park visit")
+
+    assert pf.has_recent_sent_followup(within_minutes=30) is True
+    assert pf.has_recent_sent_followup_for_arc(
+        arc_key,
+        within_minutes=30,
+    ) is True
 
 
 def test_expire_old_followups_marks_expired(temp_state_db):
@@ -594,7 +643,12 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
         ],
     )
     monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
-    monkeypatch.setattr(bot, "has_recent_sent_followup", lambda within_minutes=90: True)
+    global_cooldowns = []
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or True,
+    )
     monkeypatch.setattr(
         bot,
         "has_recent_sent_followup_for_arc",
@@ -614,6 +668,139 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
     assert sent == []
     assert marked == []
     assert outcomes == []
+    assert global_cooldowns == [30]
+
+
+def test_job_check_pending_followups_uses_short_global_cooldown_for_live_location_departure(monkeypatch):
+    global_cooldowns = []
+    llm_calls = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 8,
+                "topic": "departure",
+                "subject": "stable_location_departure",
+                "source_agent": "Location_Event",
+                "source_user_text": "Live location detected departure.",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or True,
+    )
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda *args: llm_calls.append(args),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert global_cooldowns == [5]
+    assert llm_calls == []
+
+
+def test_live_location_departure_continues_after_short_global_cooldown(monkeypatch):
+    global_cooldowns = []
+    arc_cooldowns = []
+    llm_calls = []
+    skip_calls = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 10,
+                "topic": "departure",
+                "subject": "stable_location_departure",
+                "source_agent": "Location_Event",
+                "source_user_text": "Live location detected departure.",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or False,
+    )
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup_for_arc",
+        lambda arc_key, within_minutes: arc_cooldowns.append(within_minutes) or False,
+    )
+    monkeypatch.setattr(bot, "_build_followup_state_snapshot", lambda: {})
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda item, recent_context, state_snapshot: llm_calls.append(
+            (item, recent_context, state_snapshot)
+        ) or {
+            "decision": "skip",
+            "skip_action": "resolve",
+            "stage": "skip",
+            "message": "",
+            "reason": "test",
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "_apply_followup_skip_outcome",
+        lambda item, decision: skip_calls.append((item["id"], decision["skip_action"]))
+        or "resolved",
+    )
+
+    bot.job_check_pending_followups()
+
+    assert global_cooldowns == [5]
+    assert arc_cooldowns == [240]
+    assert len(llm_calls) == 1
+    assert skip_calls == [(10, "resolve")]
+
+
+def test_job_check_pending_followups_uses_default_cooldown_for_other_departure(monkeypatch):
+    global_cooldowns = []
+    llm_calls = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 9,
+                "topic": "departure",
+                "subject": "manual_departure",
+                "source_agent": "Chat_Agent",
+                "source_user_text": "I am leaving now.",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or True,
+    )
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda *args: llm_calls.append(args),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert global_cooldowns == [30]
+    assert llm_calls == []
 
 
 def test_enqueue_followup_pipeline_skips_create_after_resolution_update(monkeypatch):
