@@ -733,6 +733,10 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     """
     has_work  = _contains_any(normalized, _WORK_TOKENS) or _contains_any(normalized, _WORK_DEPARTURE_TOKENS)
     has_shift = _contains_any(normalized, _SHIFT_PM_TOKENS) or _contains_any(normalized, _SHIFT_AM_TOKENS)
+    has_negated_shift_statement = _contains_any(
+        normalized,
+        _inline.get("negation", []),
+    )
     has_next_week = _has_next_workweek_scope(normalized)
     has_this_week = _has_this_workweek_scope(normalized)
     explicit_weekday_dt = _extract_explicit_weekday_scope_dt(normalized, now)
@@ -752,7 +756,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     shift_val = "afternoon" if _contains_any(normalized, _SHIFT_PM_TOKENS) else "morning"
 
     # 1. State Update (only if a specific week is mentioned)
-    if has_week_scope and has_work:
+    if has_week_scope and has_work and not has_negated_shift_statement:
         if dates:
             try:
                 parsed_dt = datetime.strptime(dates[0], "%Y-%m-%d")
