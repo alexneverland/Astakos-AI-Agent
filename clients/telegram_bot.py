@@ -2411,6 +2411,8 @@ def handle_location(msg, live_update=False):
             event_now = _local_now()
             from memory.pending_followups import create_pending_followup
 
+            import sqlite3
+
             try:
                 followup_id = create_pending_followup(
                     source_channel="telegram",
@@ -2432,7 +2434,7 @@ def handle_location(msg, live_update=False):
                     },
                     ttl_hours=_DEPARTURE_FOLLOWUP_TTL_HOURS,
                 )
-            except Exception as exc:
+            except sqlite3.Error as exc:
                 print(f"\033[91m[DepartureFollowUp Error]: {exc}\033[0m")
                 return
 

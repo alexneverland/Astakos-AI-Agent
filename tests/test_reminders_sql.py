@@ -234,6 +234,7 @@ class TestLocationReminders:
 
     def test_live_location_departure_retries_after_pending_create_error(self):
         import json
+        import sqlite3
         import clients.telegram_bot as bot
         import config as cfg
 
@@ -264,7 +265,7 @@ class TestLocationReminders:
 
             with patch(
                 "memory.pending_followups.create_pending_followup",
-                side_effect=RuntimeError("database temporarily locked"),
+                side_effect=sqlite3.OperationalError("database temporarily locked"),
             ):
                 bot.handle_location(departure_msg, live_update=True)
 
