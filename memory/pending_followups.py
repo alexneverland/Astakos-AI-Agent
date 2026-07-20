@@ -1290,7 +1290,7 @@ def has_recent_sent_followup(within_minutes: int = 90) -> bool:
             SELECT sent_at
             FROM pending_followups
             WHERE status='sent' AND sent_at IS NOT NULL
-            ORDER BY id DESC
+            ORDER BY sent_at DESC, id DESC
             LIMIT 1
             """
         ).fetchone()
@@ -1313,7 +1313,7 @@ def has_recent_sent_followup_for_arc(arc_key: str, within_minutes: int = 240) ->
             SELECT sent_at
             FROM pending_followups
             WHERE arc_key=? AND status='sent' AND sent_at IS NOT NULL
-            ORDER BY id DESC
+            ORDER BY sent_at DESC, id DESC
             LIMIT 1
             """,
             (arc_key,),
