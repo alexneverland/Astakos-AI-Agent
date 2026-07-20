@@ -441,6 +441,24 @@ def test_shift_logic_weekly_state_auto_applies():
     )
 
 
+def test_shift_logic_negated_weekly_statement_does_not_set_current_shift():
+    """A negated weekly shift statement must not infer the opposite shift."""
+    fact = "[USER_FACT]: Δεν δουλεύω απογευματινή βάρδια αυτή την εβδομάδα."
+
+    candidates = infer_routine_reconciliation_candidates(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 6, 17, 12, 0, 0),
+    )
+
+    assert not any(
+        c.get("kind") == "context_state_set"
+        and c.get("key") == "current_shift"
+        for c in candidates
+    )
+
+
 def test_shift_logic_explicit_weekday_auto_applies():
     fact = "[USER_FACT]: Δευτέρα είμαι απογευματινός βάρδια στην δουλειά."
 
