@@ -415,42 +415,6 @@ def _normalize_followup_signal_text(text: str) -> str:
     return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
 
-def _should_force_light_outing_followup(item: dict) -> bool:
-    from datetime import datetime
-    from memory.pending_followups import _coerce_local_dt, _local_now
-
-    metadata = item.get("metadata") or {}
-    if int(item.get("times_sent") or 0) > 0:
-        return False
-    if int(metadata.get("defer_count") or 0) > 0:
-        return False
-
-    if str(item.get("topic") or "").strip().lower() != "outing":
-        return False
-
-    text = _normalize_followup_signal_text(item.get("source_user_text") or "")
-    if not text:
-        return False
-
-    markers = (
-        t("clients.telegram_bot.bot_msg_572193"),
-        t("clients.telegram_bot.bot_msg_069ca1"),
-    )
-    if not any(marker in text for marker in markers):
-        return False
-
-    due_at_raw = str(item.get("followup_after_ts") or "").strip()
-    if not due_at_raw:
-        return False
-
-    try:
-        due_at = _coerce_local_dt(datetime.fromisoformat(due_at_raw.replace(" ", "T")))
-    except Exception:
-        return False
-
-    elapsed_since_due = (_local_now() - due_at).total_seconds() / 60.0
-    return 0 <= elapsed_since_due <= 60
-
 
 def _build_followup_decision_with_llm(item: dict, recent_context: str, state_snapshot: dict) -> dict:
     from services.gemini import safe_gemini_call
@@ -730,27 +694,6 @@ def job_check_pending_followups():
             )
 
             if decision.get("decision") != "send":
-                if _should_force_light_outing_followup(item):
-                    msg = _build_safe_followup_fallback(item, "light_outing_checkin")
-                    message_id = _send_and_record_assistant(msg, agent="FollowUp_Agent")
-                    if not message_id:
-                        print(f"[FollowUp]: send-failed #{item['id']} forced light outing")
-                        continue
-                    mark_followup_sent(
-                        item["id"],
-                        "followup_sent:light_outing_checkin",
-                    )
-                    record_followup_outcome(
-                        item["id"],
-                        +0.1,
-                        "followup_sent:light_outing_checkin",
-                    )
-                    print(
-                        f"[FollowUp]: forced-light-send #{item['id']} "
-                        f"({_followup_log_label(item)})"
-                    )
-                    continue
-
                 skip_action = _apply_followup_skip_outcome(item, decision)
 
                 print(
