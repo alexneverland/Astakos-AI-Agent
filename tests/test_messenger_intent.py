@@ -1,4 +1,7 @@
-from services.messenger_intent import classify_messenger_intent
+from services.messenger_intent import (
+    classify_messenger_intent,
+    is_create_draft_intent,
+)
 
 
 def test_create_draft_intent():
@@ -36,3 +39,7 @@ def test_general_close_topic_is_not_clear_draft():
 def test_explicit_clear_draft_still_works():
     result = classify_messenger_intent("κλείσε το draft", has_active_draft=True)
     assert result.intent == "clear_draft"
+
+def test_is_create_draft_intent_rejects_unrelated_messages():
+    assert is_create_draft_intent("Γράψε ένα μήνυμα")
+    assert not is_create_draft_intent("Έχει δουλειά σήμερα δεύτερα φίλε")

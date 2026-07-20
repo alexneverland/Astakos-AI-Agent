@@ -58,12 +58,14 @@ def test_ultra_light_ack_response_is_neutral_confirmation():
 from unittest.mock import patch
 
 
+@patch("memory.pending_assets.get_latest_pending_asset", return_value=None)
+@patch("memory.pending_assets.clear_expired_pending_assets")
 @patch("core.messenger_draft.active_draft_status", return_value=(False, "missing", None))
 @patch("tools.telegram.send_telegram_msg")
 @patch("clients.telegram_bot._append_to_analytics_log")
 @patch("clients.telegram_bot.graph.stream")
 @patch("clients.telegram_bot._safe_classify_messenger_intent")
-def test_messenger_intent_clarify_does_not_create_draft(mock_classify, mock_stream, mock_append, mock_send, mock_active):
+def test_messenger_intent_clarify_does_not_create_draft(mock_classify, mock_stream, mock_append, mock_send, mock_active, mock_clear_assets, mock_get_asset):
     from clients.telegram_bot import handle_message
     from services.messenger_intent import MessengerIntentResult
     
@@ -79,13 +81,15 @@ def test_messenger_intent_clarify_does_not_create_draft(mock_classify, mock_stre
     assert "Δεν υπάρχει ενεργό draft αυτή τη στιγμή. Εννοούσα απλώς σαν ιδέα" in sent_text
 
 
+@patch("memory.pending_assets.get_latest_pending_asset", return_value=None)
+@patch("memory.pending_assets.clear_expired_pending_assets")
 @patch("core.messenger_draft.active_draft_status", return_value=(True, "active", {"message": "hello"}))
 @patch("core.messenger_draft.clear_draft", return_value=True)
 @patch("tools.telegram.send_telegram_msg")
 @patch("clients.telegram_bot._append_to_analytics_log")
 @patch("clients.telegram_bot.graph.stream")
 @patch("clients.telegram_bot._safe_classify_messenger_intent")
-def test_messenger_intent_clear_closes_draft(mock_classify, mock_stream, mock_append, mock_send, mock_clear, mock_active):
+def test_messenger_intent_clear_closes_draft(mock_classify, mock_stream, mock_append, mock_send, mock_clear, mock_active, mock_clear_assets, mock_get_asset):
     from clients.telegram_bot import handle_message
     from services.messenger_intent import MessengerIntentResult
     

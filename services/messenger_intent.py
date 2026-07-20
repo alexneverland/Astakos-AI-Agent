@@ -63,3 +63,7 @@ def classify_messenger_intent(text: str, has_active_draft: bool = False) -> Mess
         return MessengerIntentResult("general_chat", 0.85, ["short_chat"])
 
     return MessengerIntentResult("general_chat", 0.60, ["fallback"])
+
+def is_create_draft_intent(text: str) -> bool:
+    """Return whether text explicitly requests a new Messenger draft."""
+    return classify_messenger_intent(text).intent == "create_draft"
