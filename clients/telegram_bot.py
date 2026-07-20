@@ -649,6 +649,11 @@ def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
     _set_followup_decision(item["id"], "skip", reason or "skip_without_state_change")
     return "kept_pending"
 
+_FOLLOWUP_GLOBAL_COOLDOWN_MINUTES = 30
+_DEPARTURE_FOLLOWUP_GLOBAL_COOLDOWN_MINUTES = 5
+_FOLLOWUP_ARC_COOLDOWN_MINUTES = 240
+
+
 def job_check_pending_followups():
     from memory.pending_followups import _local_now
     try:
@@ -662,7 +667,12 @@ def job_check_pending_followups():
         recent_context = _load_recent_proactive_context(limit=10)
 
         for item in due[:3]:
-            if has_recent_sent_followup(within_minutes=90):
+            global_cooldown_minutes = (
+                _DEPARTURE_FOLLOWUP_GLOBAL_COOLDOWN_MINUTES
+                if str(item.get("topic") or "").strip().lower() == "departure"
+                else _FOLLOWUP_GLOBAL_COOLDOWN_MINUTES
+            )
+            if has_recent_sent_followup(within_minutes=global_cooldown_minutes):
                 print(f"[FollowUp]: skip #{item['id']} ({_followup_log_label(item)}) recent global followup")
                 continue
 
@@ -670,7 +680,10 @@ def job_check_pending_followups():
                 item.get("topic", ""),
                 item.get("subject", ""),
             )
-            if has_recent_sent_followup_for_arc(arc_key, within_minutes=240):
+            if has_recent_sent_followup_for_arc(
+                arc_key,
+                within_minutes=_FOLLOWUP_ARC_COOLDOWN_MINUTES,
+            ):
                 print(f"[FollowUp]: skip #{item['id']} ({_followup_log_label(item)}) recent arc followup")
                 continue
 

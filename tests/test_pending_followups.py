@@ -594,7 +594,12 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
         ],
     )
     monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
-    monkeypatch.setattr(bot, "has_recent_sent_followup", lambda within_minutes=90: True)
+    global_cooldowns = []
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or True,
+    )
     monkeypatch.setattr(
         bot,
         "has_recent_sent_followup_for_arc",
@@ -614,6 +619,42 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
     assert sent == []
     assert marked == []
     assert outcomes == []
+    assert global_cooldowns == [30]
+
+
+def test_job_check_pending_followups_uses_short_global_cooldown_for_departure(monkeypatch):
+    global_cooldowns = []
+    llm_calls = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 8,
+                "topic": "departure",
+                "subject": "stable_location_departure",
+                "source_user_text": "Live location detected departure.",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or True,
+    )
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda *args: llm_calls.append(args),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert global_cooldowns == [5]
+    assert llm_calls == []
 
 
 def test_enqueue_followup_pipeline_skips_create_after_resolution_update(monkeypatch):
