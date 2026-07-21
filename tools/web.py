@@ -728,6 +728,11 @@ def search_supermarket_prices(query: str) -> str:
 
     PRICES_URL = "https://warply.s3.amazonaws.com/applications/ed840ad545884deeb6c6b699176797ed/basket-retailers/prices.json?cid=1779969600000"
 
+    query_clean = remove_accents(query).upper()
+    query_tokens = tuple(re.findall(r"\w+", query_clean))
+    if not query_tokens:
+        return t("tools.web.ekat_not_found", query=query)
+
     try:
         r = requests.get(PRICES_URL, timeout=30)
         data = r.json()
@@ -736,13 +741,11 @@ def search_supermarket_prices(query: str) -> str:
         products = result['products']
 
         # Fuzzy search — removal of accents for correct matching
-        query_clean = remove_accents(query).upper()
-        query_tokens = tuple(token for token in query_clean.split() if token)
         matches = []
         for p in products:
             name = p.get("name", "")
-            name_clean = remove_accents(name).upper()
-            if query_tokens and all(token in name_clean for token in query_tokens):
+            name_tokens = set(re.findall(r"\w+", remove_accents(name).upper()))
+            if all(token in name_tokens for token in query_tokens):
                 matches.append(p)
 
         if not matches:
