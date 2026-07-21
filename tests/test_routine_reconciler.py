@@ -403,10 +403,10 @@ def test_shift_logic_weekly_state_auto_applies():
     assert any(
         c["kind"] == "context_state_set"
         and c["reason"] == "shift_afternoon_week"
-        and c["until_date"] == "2026-06-21"
+        and c["until_date"] == "2026-06-19"
         and c["rule_name"] == "shift_logic"
         for c in candidates
-    ), "Expected shift_logic candidate with shift_afternoon_week reason and Sunday until_date"
+    ), "Expected shift_logic candidate with shift_afternoon_week reason and Friday until_date"
     # Score it and verify it auto applies now
     normalized_fact = _normalize(fact)
     scored = [
@@ -459,6 +459,54 @@ def test_shift_logic_negated_weekly_statement_does_not_set_current_shift():
     )
 
 
+def test_shift_logic_correction_sets_current_workweek():
+    fact = "[USER_FACT]: Απογευματινή βάρδια είμαι στη δουλειά, διόρθωσέ το."
+
+    candidates = infer_routine_reconciliation_candidates(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 7, 21, 9, 0, 0),
+    )
+
+    shift = next(
+        candidate
+        for candidate in candidates
+        if candidate.get("kind") == "context_state_set"
+        and candidate.get("key") == "current_shift"
+    )
+
+    assert shift["value"] == "afternoon"
+    assert shift["until_date"] == "2026-07-24"
+    assert shift["reason"] == "shift_afternoon_week"
+
+    scored = score_candidate_directive(
+        shift,
+        normalized_fact=_normalize(fact),
+        matched_rule_name=shift["rule_name"],
+    )
+
+    assert scored["decision"] == "auto_apply"
+    assert scored["auto_apply"] is True
+
+
+def test_shift_logic_deletion_request_does_not_set_current_workweek():
+    fact = "[USER_FACT]: Σβήσε ότι είμαι απογευματινή βάρδια στη δουλειά."
+
+    candidates = infer_routine_reconciliation_candidates(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 7, 21, 9, 0, 0),
+    )
+
+    assert not any(
+        candidate.get("kind") == "context_state_set"
+        and candidate.get("key") == "current_shift"
+        for candidate in candidates
+    )
+
+
 def test_shift_logic_explicit_weekday_auto_applies():
     fact = "[USER_FACT]: Δευτέρα είμαι απογευματινός βάρδια στην δουλειά."
 
@@ -473,7 +521,7 @@ def test_shift_logic_explicit_weekday_auto_applies():
         c["kind"] == "context_state_set"
         and c["reason"] == "shift_afternoon_week"
         and c["key"] == "current_shift"
-        and c["until_date"] == "2026-07-05"
+        and c["until_date"] == "2026-07-03"
         and c["rule_name"] == "shift_logic"
         for c in candidates
     )
