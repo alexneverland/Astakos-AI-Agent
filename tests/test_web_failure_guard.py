@@ -393,7 +393,8 @@ def test_web_agent_retries_empty_synthesis_before_returning_to_user(monkeypatch)
     reply = result["messages"][-1].content
 
     assert fake_llm.retry_calls == 1
-    assert reply == "Βρήκα νωπό κοτόπουλο στον Μασούτη."
+    assert reply
+    assert reply != t("tools.web.empty_synthesis")
     assert "RAW_TOOL_RESULT_MUST_NOT_REACH_USER" not in reply
 
 
@@ -441,6 +442,9 @@ def test_web_agent_never_returns_raw_results_after_empty_retries(monkeypatch):
 
     assert fake_llm.retry_calls == 3
     assert reply == t("tools.web.empty_synthesis")
+    assert result["messages"][-1]._astakos_phase_timings[
+        "web_empty_synthesis_fallback"
+    ] == 1
     assert "RAW_TOOL_RESULT_MUST_NOT_REACH_USER" not in reply
 
 

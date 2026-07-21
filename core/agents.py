@@ -588,8 +588,10 @@ def web_agent_node(state: AgentState):
     has_tool_calls = bool(getattr(result, "tool_calls", None))
 
     if not content and not has_tool_calls:
-        print("[Web_Agent]: empty synthesis after retries.")
-        result = AIMessage(content=t("tools.web.empty_synthesis"))
+        fallback = AIMessage(content=t("tools.web.empty_synthesis"))
+        _merge_phase_timings(fallback, result)
+        _attach_phase_timing(fallback, "web_empty_synthesis_fallback", 1)
+        result = fallback
 
     return {
         "current_agent": "Web_Agent",
