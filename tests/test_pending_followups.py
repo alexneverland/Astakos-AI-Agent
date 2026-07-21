@@ -1931,3 +1931,135 @@ def test_next_day_window_never_targets_today_morning():
     )
 
     assert delay > 20 * 60
+
+def test_next_day_window_without_tomorrow_becomes_after_likely_completion():
+    from datetime import datetime
+    now = datetime(2026, 7, 21, 15, 56, tzinfo=pf.FOLLOWUP_LOCAL_TZ)
+
+    delay = pf.normalize_followup_delay(
+        topic="food_purchase",
+        suggested_minutes=900,
+        source_user_text="που έχει προσφορά το νωπό κοτόπουλο;",
+        target_window="next_day_late_morning",
+        now=now,
+    )
+
+    assert delay == 300
+
+
+def test_fresh_location_departure_evidence_success(monkeypatch, temp_state_db):
+    now = pf._local_now()
+    item = {
+        "id": "fu_test_dep_1",
+        "topic": "departure",
+        "subject": "stable_location_departure",
+        "source_agent": "Location_Event",
+        "followup_after_ts": now.isoformat(),
+    }
+    state_snapshot = {"user_at_work": {"value": "true"}}
+
+    class MockResponse:
+        text = '{"decision": "send", "message": "hello", "context_evidence": ""}'
+
+    monkeypatch.setattr(
+        "services.gemini.safe_gemini_call",
+        lambda prompt: MockResponse(),
+    )
+
+    result = bot._build_followup_decision_with_llm(item, "some context", state_snapshot)
+    assert result["decision"] == "send"
+
+
+def test_fresh_location_departure_evidence_failure_not_at_work(monkeypatch, temp_state_db):
+    now = pf._local_now()
+    item = {
+        "id": "fu_test_dep_2",
+        "topic": "departure",
+        "subject": "stable_location_departure",
+        "source_agent": "Location_Event",
+        "followup_after_ts": now.isoformat(),
+    }
+    state_snapshot = {"user_at_work": {"value": "false"}}
+
+    class MockResponse:
+        text = '{"decision": "send", "message": "hello", "context_evidence": ""}'
+
+    monkeypatch.setattr(
+        "services.gemini.safe_gemini_call",
+        lambda prompt: MockResponse(),
+    )
+
+    result = bot._build_followup_decision_with_llm(item, "some context", state_snapshot)
+    assert result["decision"] == "skip"
+    assert result["skip_action"] == "resolve"
+
+
+def test_fresh_location_departure_evidence_rejects_stale_event(
+    monkeypatch,
+    temp_state_db,
+):
+    from datetime import timedelta
+    now = pf._local_now()
+    item = {
+        "id": "fu_test_dep_3",
+        "topic": "departure",
+        "subject": "stable_location_departure",
+        "source_agent": "Location_Event",
+        "followup_after_ts": (
+            now - timedelta(minutes=11)
+        ).isoformat(),
+    }
+    state_snapshot = {"user_at_work": {"value": "true"}}
+
+    class MockResponse:
+        text = '{"decision": "send", "message": "hello", "context_evidence": ""}'
+
+    monkeypatch.setattr(
+        "services.gemini.safe_gemini_call",
+        lambda prompt: MockResponse(),
+    )
+
+    result = bot._build_followup_decision_with_llm(
+        item,
+        "some context",
+        state_snapshot,
+    )
+
+    assert result["decision"] == "skip"
+    assert result["skip_action"] == "resolve"
+
+
+def test_create_pending_followup_from_candidate_food_purchase_window(monkeypatch):
+    now = pf._local_now()
+    now_fixed = now.replace(hour=15, minute=56, second=0, microsecond=0)
+
+    monkeypatch.setattr(pf, "_local_now", lambda: now_fixed)
+
+    created_kwargs = {}
+
+    def mock_create(*args, **kwargs):
+        nonlocal created_kwargs
+        created_kwargs = kwargs
+        return "fu_mocked"
+
+    monkeypatch.setattr(pf, "create_pending_followup", mock_create)
+
+    candidate = {
+        "topic": "food_purchase",
+        "subject": "buy chicken",
+        "delay_minutes": 900,
+        "target_window": "next_day_late_morning",
+        "confidence": 0.8,
+    }
+
+    pf.create_pending_followup_from_candidate(
+        candidate=candidate,
+        source_channel="telegram",
+        source_agent="chat",
+        source_user_text="που έχει προσφορά το νωπό κοτόπουλο;",
+        source_ai_text="Here are the prices.",
+    )
+
+    metadata = created_kwargs.get("metadata", {})
+    assert metadata.get("target_window") == "after_likely_completion"
+    assert metadata.get("delay_minutes_final") == 300

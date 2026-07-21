@@ -494,11 +494,19 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
             evidence_norm = _normalize_followup_signal_text(context_evidence)
             recent_context_norm = _normalize_followup_signal_text(recent_context)
 
+            has_location_evidence = _has_fresh_work_departure_evidence(
+                item,
+                state_snapshot,
+            )
+            has_context_evidence = (
+                len(evidence_norm) >= 5
+                and evidence_norm in recent_context_norm
+            )
+
             if (
                 decision != "send"
                 or not message
-                or len(evidence_norm) < 5
-                or evidence_norm not in recent_context_norm
+                or (not has_location_evidence and not has_context_evidence)
             ):
                 return {
                     "decision": "skip",
@@ -661,6 +669,37 @@ def _is_live_location_departure_followup(item: dict) -> bool:
         and str(item.get("subject") or "").strip() == "stable_location_departure"
         and str(item.get("source_agent") or "").strip() == "Location_Event"
     )
+
+_LIVE_LOCATION_DEPARTURE_EVIDENCE_MAX_AGE_MINUTES = 10
+
+
+def _has_fresh_work_departure_evidence(
+    item: dict,
+    state_snapshot: dict,
+) -> bool:
+    """Accept a fresh location departure only while work state is active."""
+    if not _is_live_location_departure_followup(item):
+        return False
+
+    user_at_work = state_snapshot.get("user_at_work") or {}
+    if str(user_at_work.get("value") or "").strip().lower() != "true":
+        return False
+
+    due_at_raw = str(item.get("followup_after_ts") or "").strip()
+    if not due_at_raw:
+        return False
+
+    try:
+        from memory.pending_followups import _coerce_local_dt, _local_now
+
+        due_at = _coerce_local_dt(
+            datetime.fromisoformat(due_at_raw.replace(" ", "T"))
+        )
+    except (TypeError, ValueError):
+        return False
+
+    age_minutes = (_local_now() - due_at).total_seconds() / 60.0
+    return 0 <= age_minutes <= _LIVE_LOCATION_DEPARTURE_EVIDENCE_MAX_AGE_MINUTES
 
 
 def job_check_pending_followups():

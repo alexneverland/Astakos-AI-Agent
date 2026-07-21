@@ -386,18 +386,8 @@ def _next_occurrence_for_window(now: datetime, target_window: str, fallback_dela
     return _apply_quiet_hours(now + timedelta(minutes=min(max(fallback_delay_minutes, 60), 300)))
 
 
-def normalize_followup_delay(
-    topic: str,
-    suggested_minutes: int,
-    source_user_text: str = "",
-    target_window: str = "",
-    now: Optional[datetime] = None,
-) -> int:
-    text = _normalize_match_text(source_user_text or "")
-    topic = _coerce_text_scalar(topic, "").lower()
-    target_window = _coerce_text_scalar(target_window, "").lower()
-    
-    known_windows = {
+_FOLLOWUP_TARGET_WINDOWS = frozenset(
+    {
         "",
         "explicit_timer",
         "same_day_short_checkin",
@@ -408,8 +398,55 @@ def normalize_followup_delay(
         "next_day_evening",
         "after_likely_completion",
     }
-    if target_window not in known_windows:
-        target_window = ""
+)
+
+_NEXT_DAY_FOLLOWUP_WINDOWS = frozenset(
+    {
+        "next_day_morning",
+        "next_day_late_morning",
+        "next_day_afternoon",
+        "next_day_evening",
+    }
+)
+
+
+def normalize_followup_target_window(
+    target_window: str,
+    source_user_text: str = "",
+) -> str:
+    """Allow next-day scheduling only when the user explicitly says so."""
+    window = _coerce_text_scalar(target_window, "").lower()
+    if window not in _FOLLOWUP_TARGET_WINDOWS:
+        return ""
+
+    if window not in _NEXT_DAY_FOLLOWUP_WINDOWS:
+        return window
+
+    text = _normalize_match_text(source_user_text)
+    next_day_markers = tuple(
+        _normalize_match_text(marker)
+        for marker in nl_config.RI_FOLLOWUP_NEXT_DAY_WORDS
+        if marker
+    )
+    if any(marker in text for marker in next_day_markers):
+        return window
+
+    return "after_likely_completion"
+
+
+def normalize_followup_delay(
+    topic: str,
+    suggested_minutes: int,
+    source_user_text: str = "",
+    target_window: str = "",
+    now: Optional[datetime] = None,
+) -> int:
+    text = _normalize_match_text(source_user_text or "")
+    topic = _coerce_text_scalar(topic, "").lower()
+    target_window = normalize_followup_target_window(
+        target_window,
+        source_user_text,
+    )
         
     raw_value = int(suggested_minutes or 0)
     now = _coerce_local_dt(now)
@@ -602,17 +639,23 @@ def create_pending_followup_from_candidate(
         return None
 
     now = _local_now()
+
+    target_window = normalize_followup_target_window(
+        str(candidate.get("target_window") or ""),
+        source_user_text,
+    )
+
     delay_minutes = normalize_followup_delay(
         topic=topic,
         suggested_minutes=delay_minutes_raw,
         source_user_text=source_user_text,
-        target_window=str(candidate.get("target_window") or ""),
+        target_window=target_window,
         now=now,
     )
 
     ttl_hours = _compute_followup_ttl_hours(
         delay_minutes=delay_minutes,
-        target_window=str(candidate.get("target_window") or ""),
+        target_window=target_window,
         topic=topic,
     )
 
@@ -632,7 +675,7 @@ def create_pending_followup_from_candidate(
         ttl_hours=ttl_hours,
         metadata={
             "reason": candidate.get("reason", ""),
-            "target_window": str(candidate.get("target_window") or ""),
+            "target_window": target_window,
             "ttl_hours": ttl_hours,
             "delay_minutes_raw": delay_minutes_raw,
             "delay_minutes_final": delay_minutes,
