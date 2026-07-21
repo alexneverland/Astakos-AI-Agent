@@ -47,6 +47,7 @@ _TRIP_TOKENS = _tokens_data['_TRIP_TOKENS']
 _WEEK_TOKENS = _tokens_data['_WEEK_TOKENS']
 _WORK_DEPARTURE_TOKENS = _tokens_data['_WORK_DEPARTURE_TOKENS']
 _WORK_TOKENS = _tokens_data['_WORK_TOKENS']
+_SHIFT_CORRECTION_TOKENS = _inline.get("shift_correction", [])
 
 
 # ── Scoring thresholds [Phase 3B] ────────────────────────────────────────────
@@ -734,7 +735,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     )
     has_shift_correction = _contains_any(
         normalized,
-        nl_config.CB_FIXUP_MARKERS,
+        _SHIFT_CORRECTION_TOKENS,
     )
     has_next_week = _has_next_workweek_scope(normalized)
     has_this_week = _has_this_workweek_scope(normalized)

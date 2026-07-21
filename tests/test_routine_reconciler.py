@@ -490,6 +490,23 @@ def test_shift_logic_correction_sets_current_workweek():
     assert scored["auto_apply"] is True
 
 
+def test_shift_logic_deletion_request_does_not_set_current_workweek():
+    fact = "[USER_FACT]: Σβήσε ότι είμαι απογευματινή βάρδια στη δουλειά."
+
+    candidates = infer_routine_reconciliation_candidates(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 7, 21, 9, 0, 0),
+    )
+
+    assert not any(
+        candidate.get("kind") == "context_state_set"
+        and candidate.get("key") == "current_shift"
+        for candidate in candidates
+    )
+
+
 def test_shift_logic_explicit_weekday_auto_applies():
     fact = "[USER_FACT]: Δευτέρα είμαι απογευματινός βάρδια στην δουλειά."
 
