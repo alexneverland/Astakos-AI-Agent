@@ -36,6 +36,7 @@
   },
   "tools": {
     "web": {
+      "empty_synthesis": "I found results, but could not summarize them reliably. Please try again shortly or specify what you are looking for.",
       "no_news": "Δεν βρέθηκαν ειδήσεις.",
       "news_noise": [
         "Full coverage",
