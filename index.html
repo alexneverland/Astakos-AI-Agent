@@ -1353,15 +1353,12 @@
 
     let _pollInterval = null;
     function _startPolling() {
-        if (!_pollInterval) _pollInterval = setInterval(fetchNewMessages, 5000);
-    }
-    function _stopPolling() {
-        if (_pollInterval) {
-            clearInterval(_pollInterval);
-            _pollInterval = null;
+        if (!_pollInterval) {
+            fetchNewMessages();
+            _pollInterval = setInterval(fetchNewMessages, 5000);
         }
     }
-    ws.onopen  = () => { wsDot.style.background = '#4EC9B0'; wsLabel.textContent = 'Online'; _stopPolling(); };
+    ws.onopen  = () => { wsDot.style.background = '#4EC9B0'; wsLabel.textContent = 'Online'; _startPolling(); };
     ws.onclose = () => { wsDot.style.background = '#F44747'; wsLabel.textContent = 'Offline'; _startPolling(); };
 
     function parseANSI(text) {
