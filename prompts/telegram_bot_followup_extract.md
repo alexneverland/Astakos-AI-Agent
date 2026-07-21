@@ -49,7 +49,9 @@ Use:
 - "same_day_short_checkin" when the user just started something and there will be progress soon
 - "same_day_evening" when the topic will logically conclude later on the same day
 - "next_day_morning" when the topic moves to the next day and makes sense early but not at dawn
-- "next_day_late_morning" when the topic relates to food / outing / family movement that will logically clear up closer to noon
+- Use any "next_day_*" window only when the user explicitly says tomorrow, the day after tomorrow, or otherwise clearly places the outcome on the next day. Never move a topic to tomorrow merely because it concerns food, an outing, or family movement.
+- For a supermarket price/offer search or a planned food purchase without an explicit future day, use "after_likely_completion" with delay_minutes around 360.
+- For a family plan where children are currently alone, use "after_likely_completion" with delay_minutes around 180. Use "same_day_evening" only when the user explicitly frames the check-in as an evening matter.
 - "next_day_afternoon" when the topic is expected to clear up after noon
 - "next_day_evening" when it's an evening plan / later development
 - "after_likely_completion" when the follow-up must happen after the probable end of the event
