@@ -70,6 +70,15 @@ def _normalize(text: str) -> str:
 def _contains_any(text: str, tokens: list[str]) -> bool:
     return any(tok in text for tok in tokens)
 
+
+def _contains_any_whole_token(text: str, tokens: list[str]) -> bool:
+    """Match normalized markers as standalone tokens, never as substrings."""
+    return any(
+        re.search(rf"(?<!\w){re.escape(token)}(?!\w)", text)
+        for token in tokens
+    )
+
+
 def _has_future_intent_without_live_presence(normalized: str) -> bool:
     has_future = _contains_any(normalized, _FUTURE_INTENT_TOKENS)
     has_live = _contains_any(normalized, _PRESENT_LIVE_TOKENS)
@@ -1300,7 +1309,7 @@ def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
     Facts: "The little one is sleeping", "Quiet now"
     """
     has_sleep = _contains_any(normalized, _inline.get("sleep_extra", []))
-    has_quiet = _contains_any(normalized, _inline.get("quiet", []))
+    has_quiet = _contains_any_whole_token(normalized, _inline.get("quiet", []))
     has_child = _contains_any(normalized, _KID1_TOKENS)
     
     if not ((has_sleep and has_child) or has_quiet):

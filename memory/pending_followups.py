@@ -1893,6 +1893,9 @@ def maybe_resolve_followups_from_user_message(user_text: str) -> int:
                 if len(tok) >= 4 and tok in text
             ]
 
+            if topic == "outing" and not shared_tokens:
+                continue
+
             lexical_hint = bool(shared_tokens) or (
                 topic == "outing" and any(x in text for x in (t("prompts.ext_str_572"), t("prompts.ext_str_239"), t("prompts.ext_str_738"), t("prompts.ext_str_529")))
             )

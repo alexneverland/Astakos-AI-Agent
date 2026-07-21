@@ -110,6 +110,7 @@ from services.gemini import safe_gemini_call
 from services.embeddings import embeddings
 from memory.pending_followups import (
     ensure_pending_followups_table,
+    find_pending_followups,
     maybe_create_followup_from_exchange,
     maybe_resolve_followups_from_user_message,
     looks_like_followup_resolution_update,
@@ -494,9 +495,9 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
             evidence_norm = _normalize_followup_signal_text(context_evidence)
             recent_context_norm = _normalize_followup_signal_text(recent_context)
 
-            has_location_evidence = _has_fresh_work_departure_evidence(
-                item,
-                state_snapshot,
+            has_location_evidence = (
+                _has_fresh_work_departure_evidence(item, state_snapshot)
+                or _has_fresh_outing_departure_evidence(item)
             )
             has_context_evidence = (
                 len(evidence_norm) >= 5
@@ -673,16 +674,9 @@ def _is_live_location_departure_followup(item: dict) -> bool:
 _LIVE_LOCATION_DEPARTURE_EVIDENCE_MAX_AGE_MINUTES = 10
 
 
-def _has_fresh_work_departure_evidence(
-    item: dict,
-    state_snapshot: dict,
-) -> bool:
-    """Accept a fresh location departure only while work state is active."""
+def _has_fresh_live_location_departure(item: dict) -> bool:
+    """Return true only for a fresh internal live-location departure event."""
     if not _is_live_location_departure_followup(item):
-        return False
-
-    user_at_work = state_snapshot.get("user_at_work") or {}
-    if str(user_at_work.get("value") or "").strip().lower() != "true":
         return False
 
     due_at_raw = str(item.get("followup_after_ts") or "").strip()
@@ -700,6 +694,29 @@ def _has_fresh_work_departure_evidence(
 
     age_minutes = (_local_now() - due_at).total_seconds() / 60.0
     return 0 <= age_minutes <= _LIVE_LOCATION_DEPARTURE_EVIDENCE_MAX_AGE_MINUTES
+
+
+def _has_fresh_work_departure_evidence(
+    item: dict,
+    state_snapshot: dict,
+) -> bool:
+    """Accept a fresh location departure only while work state is active."""
+    if not _has_fresh_live_location_departure(item):
+        return False
+
+    user_at_work = state_snapshot.get("user_at_work") or {}
+    return str(user_at_work.get("value") or "").strip().lower() == "true"
+
+
+def _has_fresh_outing_departure_evidence(item: dict) -> bool:
+    """Accept fresh GPS departure only for an active conversational outing."""
+    if not _has_fresh_live_location_departure(item):
+        return False
+
+    return any(
+        str(followup.get("topic") or "").strip().lower() == "outing"
+        for followup in find_pending_followups(limit=10, active_only=True)
+    )
 
 
 def job_check_pending_followups():
@@ -2299,6 +2316,37 @@ def _haversine_distance_meters(lat1, lon1, lat2, lon2) -> float:
         * math.sin((lon2 - lon1) * radians / 2) ** 2
     )
     return 2 * radius_m * math.asin(math.sqrt(a))
+
+
+def _sync_live_location_out_of_home_state(lat: float, lon: float) -> None:
+    """Synchronize the current out-of-home flag from a valid live home geofence."""
+    from config import HOME_COORDS, HOME_RADIUS_M
+    from memory.routine_db import get_context_state, set_context_state
+
+    try:
+        home_lat, home_lon = (float(HOME_COORDS[0]), float(HOME_COORDS[1]))
+        home_radius_m = float(HOME_RADIUS_M)
+    except (IndexError, TypeError, ValueError):
+        return
+
+    if (home_lat, home_lon) == (0.0, 0.0) or home_radius_m <= 0:
+        return
+
+    is_out_of_home = (
+        _haversine_distance_meters(lat, lon, home_lat, home_lon) > home_radius_m
+    )
+    desired_value = "true" if is_out_of_home else "false"
+    state = get_context_state("user_out_of_home") or {}
+    current_value = str(state.get("value") or "").strip().lower()
+    expires_at = str(state.get("expires_at") or "").strip()
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    if current_value == desired_value and (not expires_at or expires_at >= today):
+        return
+
+    set_context_state("user_out_of_home", desired_value, expires_at=today)
+
+
 def handle_location(msg, live_update=False):
     """Receives live location and checks for location-based reminders."""
     import math
@@ -2309,6 +2357,10 @@ def handle_location(msg, live_update=False):
     lon     = loc.get("longitude")
     if lat is None or lon is None:
         return
+
+    if live_update:
+        _sync_live_location_out_of_home_state(lat, lon)
+
     departure_event = None
     try:
         from config import GPS_STORAGE_FILE

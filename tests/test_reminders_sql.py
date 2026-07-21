@@ -177,6 +177,79 @@ class TestLocationReminders:
         assert sent == []
         assert _row_status(db_path, "Πάρε γάλα") == "pending"
 
+    def test_live_location_updates_out_of_home_only_on_home_boundary(self):
+        import clients.telegram_bot as bot
+        import config as cfg
+        import memory.routine_db as routine_db
+
+        with tempfile.TemporaryDirectory() as tmp:
+            routine_db_path = os.path.join(tmp, "routines.db")
+            gps_path = os.path.join(tmp, "last_location.json")
+            state_db_path = os.path.join(tmp, "state.db")
+
+            with (
+                patch.object(cfg, "STATE_DB", state_db_path),
+                patch.object(cfg, "GPS_STORAGE_FILE", gps_path),
+                patch.object(cfg, "HOME_COORDS", (40.0, 22.0)),
+                patch.object(cfg, "HOME_RADIUS_M", 150),
+                patch.object(routine_db, "DB_PATH", routine_db_path),
+            ):
+                routine_db.setup_db()
+                with patch(
+                    "memory.routine_db.set_context_state",
+                    wraps=routine_db.set_context_state,
+                ) as set_context_state:
+                    bot.handle_location(
+                        {"chat": {"id": 1}, "location": {"latitude": 40.0, "longitude": 22.0}},
+                        live_update=True,
+                    )
+                    bot.handle_location(
+                        {"chat": {"id": 1}, "location": {"latitude": 40.01, "longitude": 22.0}},
+                        live_update=True,
+                    )
+                    bot.handle_location(
+                        {"chat": {"id": 1}, "location": {"latitude": 40.01, "longitude": 22.0}},
+                        live_update=True,
+                    )
+                    bot.handle_location(
+                        {"chat": {"id": 1}, "location": {"latitude": 40.0, "longitude": 22.0}},
+                        live_update=True,
+                    )
+                    state = routine_db.get_context_state("user_out_of_home")
+
+        assert state["value"] == "false"
+        assert [call.args[:2] for call in set_context_state.call_args_list] == [
+            ("user_out_of_home", "false"),
+            ("user_out_of_home", "true"),
+            ("user_out_of_home", "false"),
+        ]
+
+    def test_live_location_ignores_default_home_coordinates_for_context_state(self):
+        import clients.telegram_bot as bot
+        import config as cfg
+        import memory.routine_db as routine_db
+
+        with tempfile.TemporaryDirectory() as tmp:
+            routine_db_path = os.path.join(tmp, "routines.db")
+            gps_path = os.path.join(tmp, "last_location.json")
+            state_db_path = os.path.join(tmp, "state.db")
+
+            with (
+                patch.object(cfg, "STATE_DB", state_db_path),
+                patch.object(cfg, "GPS_STORAGE_FILE", gps_path),
+                patch.object(cfg, "HOME_COORDS", (0.0, 0.0)),
+                patch.object(cfg, "HOME_RADIUS_M", 150),
+                patch.object(routine_db, "DB_PATH", routine_db_path),
+            ):
+                routine_db.setup_db()
+                with patch("memory.routine_db.set_context_state") as set_context_state:
+                    bot.handle_location(
+                        {"chat": {"id": 1}, "location": {"latitude": 40.0, "longitude": 22.0}},
+                        live_update=True,
+                    )
+
+        set_context_state.assert_not_called()
+
     def test_time_based_reminder_not_touched_by_location_check(self):
         sent, db_path = self._run(
             [{"task": "Πλήρωσε λογαριασμό", "time": PAST_TIME}],

@@ -1090,3 +1090,17 @@ def test_sofia_with_kid1_at_home_while_user_at_work_does_not_set_partner_with_us
     ]
 
     assert sofia_true == []
+
+
+def test_cigarette_does_not_enable_quiet_hours():
+    candidates = infer_routine_reconciliation_candidates(
+        "Καλά είναι φίλε, έξω όταν βγαίνω για τσιγάρο λιώνω",
+        category="work",
+        reason="user_stated",
+        now=datetime(2026, 7, 21, 13, 57),
+    )
+
+    assert not any(
+        candidate.get("key") == "quiet_hours"
+        for candidate in candidates
+    )
