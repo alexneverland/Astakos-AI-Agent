@@ -385,7 +385,7 @@ def test_maybe_resolve_followups_from_user_message_uses_llm_resolution(temp_stat
         lambda **kwargs: {"should_defer": False},
     )
 
-    pf.maybe_resolve_followups_from_user_message("Τους βρήκα τελικά στο πάρκο")
+    pf.maybe_resolve_followups_from_user_message("Βρήκα την Partner τελικά στο πάρκο")
 
     rows = _fetch_all(temp_state_db)
     assert len(rows) == 1
@@ -398,6 +398,36 @@ def test_maybe_resolve_followups_from_user_message_uses_llm_resolution(temp_stat
         if item["id"] == followup_id
     )
     assert followup["outcome_score"] == 1.0
+
+
+def test_maybe_resolve_followups_from_user_message_ignores_unrelated_for_outing(temp_state_db, monkeypatch):
+    followup_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="βόλτα στο πάρκο",
+        source_user_text="πάω βόλτα στο πάρκο",
+        source_ai_text="ΟΚ.",
+        followup_after_ts="2030-01-01T19:00:00",
+        confidence=0.80,
+        metadata={},
+    )
+
+    call_count = 0
+    def mock_classify(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return {"resolves": True, "resolution_type": "completed", "confidence": 0.9}
+
+    monkeypatch.setattr(pf, "classify_followup_resolution_with_llm", mock_classify)
+    monkeypatch.setattr(pf, "classify_followup_deferral_with_llm", lambda **kwargs: {"should_defer": False})
+
+    pf.maybe_resolve_followups_from_user_message("Η Σοφία πήγε σπίτι να κλείσει τον φούρνο")
+
+    assert call_count == 0
+    rows = _fetch_all(temp_state_db)
+    assert len(rows) == 1
+    assert rows[0][3] == "pending"
 
 
 def test_maybe_resolve_followups_from_user_message_skips_low_confidence_llm(temp_state_db, monkeypatch):
@@ -1992,6 +2022,35 @@ def test_fresh_location_departure_evidence_failure_not_at_work(monkeypatch, temp
     result = bot._build_followup_decision_with_llm(item, "some context", state_snapshot)
     assert result["decision"] == "skip"
     assert result["skip_action"] == "resolve"
+
+
+def test_fresh_location_departure_evidence_outing_success(monkeypatch, temp_state_db):
+    now = pf._local_now()
+    item = {
+        "id": "fu_test_dep_outing",
+        "topic": "departure",
+        "subject": "stable_location_departure",
+        "source_agent": "Location_Event",
+        "followup_after_ts": now.isoformat(),
+    }
+    state_snapshot = {"user_at_work": {"value": "false"}}
+
+    monkeypatch.setattr(
+        bot,
+        "find_pending_followups",
+        lambda limit=10, active_only=True: [{"topic": "outing"}],
+    )
+
+    class MockResponse:
+        text = '{"decision": "send", "message": "hello", "context_evidence": ""}'
+
+    monkeypatch.setattr(
+        "services.gemini.safe_gemini_call",
+        lambda prompt: MockResponse(),
+    )
+
+    result = bot._build_followup_decision_with_llm(item, "some context", state_snapshot)
+    assert result["decision"] == "send"
 
 
 def test_fresh_location_departure_evidence_rejects_stale_event(
