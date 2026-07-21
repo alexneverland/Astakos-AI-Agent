@@ -123,11 +123,6 @@ def _infer_workweek_until(now: datetime) -> str:
     return (now + timedelta(days=days_to_friday)).strftime("%Y-%m-%d")
 
 
-def _end_of_workweek(base_dt: datetime) -> str:
-    days_until_sunday = 6 - base_dt.weekday()
-    end_dt = base_dt + timedelta(days=days_until_sunday)
-    return end_dt.date().isoformat()
-
 
 def _next_monday(dt: datetime) -> datetime:
     days_ahead = (7 - dt.weekday()) % 7
@@ -737,6 +732,10 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
         normalized,
         _inline.get("negation", []),
     )
+    has_shift_correction = _contains_any(
+        normalized,
+        nl_config.CB_FIXUP_MARKERS,
+    )
     has_next_week = _has_next_workweek_scope(normalized)
     has_this_week = _has_this_workweek_scope(normalized)
     explicit_weekday_dt = _extract_explicit_weekday_scope_dt(normalized, now)
@@ -747,6 +746,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
         or has_this_week
         or explicit_weekday_dt is not None
         or relative_day_dt is not None
+        or has_shift_correction
     )
 
     if not has_shift:
@@ -773,7 +773,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
             effective_dt = now
 
         stop_words = set(_inline.get("stop_words", []))
-        until = _end_of_workweek(effective_dt)
+        until = _infer_workweek_until(effective_dt)
         d_state = {
             "kind": "context_state_set",
             "key": "current_shift",
