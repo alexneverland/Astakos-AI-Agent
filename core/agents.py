@@ -577,28 +577,21 @@ def web_agent_node(state: AgentState):
             SystemMessage(content=recovery_prompt),
             *final_messages[1:],
         ])
-    content = clean_message(result.content).strip() if result.content else ""
-    has_tool_calls = bool(getattr(result, "tool_calls", None))
 
     if web_errors and not web_successes:
         guarded_reply = build_web_failure_reply(last_msg_text, recent_web_tool_results)
         from langchain_core.messages import AIMessage as _AIMsg
         return {"messages": [_AIMsg(content=guarded_reply)], "current_agent": "Web_Agent"}
 
-    # [MASTRO-FIX]: If the composition is empty (blocked server-side) and there are
-    # tool results in history, we return the raw results as a fallback.
+    result = _ensure_text_response(result, llm, system_prompt, safe_history)
+    content = clean_message(result.content).strip() if result.content else ""
+    has_tool_calls = bool(getattr(result, "tool_calls", None))
+
     if not content and not has_tool_calls:
-        tool_results = [m for m in history if getattr(m, "type", "") == "tool"]
-        if tool_results:
-            print(f"\033[93m[Web_Agent]: ⚠️ Empty synthesis — fallback to raw tool results.\033[0m")
-            parts = []
-            for tm in tool_results[-3:]:
-                raw = clean_message(tm.content).strip()[:900]
-                if raw:
-                    parts.append(raw)
-            if parts:
-                from langchain_core.messages import AIMessage as _AIMsg
-                result = _AIMsg(content="📊 " + "\n\n".join(parts))
+        fallback = AIMessage(content=t("tools.web.empty_synthesis"))
+        _merge_phase_timings(fallback, result)
+        _attach_phase_timing(fallback, "web_empty_synthesis_fallback", 1)
+        result = fallback
 
     return {
         "current_agent": "Web_Agent",

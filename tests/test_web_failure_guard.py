@@ -9,6 +9,8 @@ from core.utils import (
     build_messenger_draft_ready_reply,
 )
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
+from core.i18n import t
+
 
 # 1. Detect web error sentinel
 def test_looks_like_web_tool_error_detects_structured_prefix():
@@ -346,3 +348,145 @@ def test_web_agent_recovers_from_stale_messenger_send_without_draft(monkeypatch,
     assert fake_llm.recovery_calls == 1
     assert reply.content == "Ωραία, να περάσετε όμορφα απόψε."
     assert not getattr(reply, "tool_calls", [])
+
+
+def test_web_agent_retries_empty_synthesis_before_returning_to_user(monkeypatch):
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="")
+
+    class FakeLLM:
+        def __init__(self):
+            self.retry_calls = 0
+
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+        def invoke(self, messages):
+            self.retry_calls += 1
+            return AIMessage(content="Βρήκα νωπό κοτόπουλο στον Μασούτη.")
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+    monkeypatch.setattr(
+        "core.agents.load_agent_prompt",
+        lambda *args, **kwargs: "test prompt",
+        raising=False,
+    )
+
+    result = web_agent_node({
+        "messages": [
+            HumanMessage(content="Πού έχει νωπό κοτόπουλο;"),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "search_supermarket_prices", "args": {}, "id": "t1"}],
+            ),
+            ToolMessage(
+                tool_call_id="t1",
+                name="search_supermarket_prices",
+                content="RAW_TOOL_RESULT_MUST_NOT_REACH_USER",
+            ),
+        ],
+        "channel": "web",
+    })
+
+    reply = result["messages"][-1].content
+
+    assert fake_llm.retry_calls == 1
+    assert reply
+    assert reply != t("tools.web.empty_synthesis")
+    assert "RAW_TOOL_RESULT_MUST_NOT_REACH_USER" not in reply
+
+
+def test_web_agent_never_returns_raw_results_after_empty_retries(monkeypatch):
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="")
+
+    class FakeLLM:
+        def __init__(self):
+            self.retry_calls = 0
+
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+        def invoke(self, messages):
+            self.retry_calls += 1
+            return AIMessage(content="")
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+    monkeypatch.setattr(
+        "core.agents.load_agent_prompt",
+        lambda *args, **kwargs: "test prompt",
+        raising=False,
+    )
+
+    result = web_agent_node({
+        "messages": [
+            HumanMessage(content="Πού έχει νωπό κοτόπουλο;"),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "search_supermarket_prices", "args": {}, "id": "t1"}],
+            ),
+            ToolMessage(
+                tool_call_id="t1",
+                name="search_supermarket_prices",
+                content="RAW_TOOL_RESULT_MUST_NOT_REACH_USER",
+            ),
+        ],
+        "channel": "web",
+    })
+
+    reply = result["messages"][-1].content
+
+    assert fake_llm.retry_calls == 3
+    assert reply == t("tools.web.empty_synthesis")
+    assert result["messages"][-1]._astakos_phase_timings[
+        "web_empty_synthesis_fallback"
+    ] == 1
+    assert "RAW_TOOL_RESULT_MUST_NOT_REACH_USER" not in reply
+
+
+def test_web_agent_skips_empty_retries_when_all_web_tools_failed(monkeypatch):
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="")
+
+    class FakeLLM:
+        def __init__(self):
+            self.retry_calls = 0
+
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+        def invoke(self, messages):
+            self.retry_calls += 1
+            return AIMessage(content="should not be used")
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+    monkeypatch.setattr(
+        "core.agents.load_agent_prompt",
+        lambda *args, **kwargs: "test prompt",
+        raising=False,
+    )
+
+    result = web_agent_node({
+        "messages": [
+            HumanMessage(content="Πού έχει νωπό κοτόπουλο;"),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "search_supermarket_prices", "args": {}, "id": "t1"}],
+            ),
+            ToolMessage(
+                tool_call_id="t1",
+                name="search_supermarket_prices",
+                content="[WEB_TOOL_ERROR][search_supermarket_prices][reason=timeout]",
+            ),
+        ],
+        "channel": "web",
+    })
+
+    assert fake_llm.retry_calls == 0
+    assert result["messages"][-1].content != t("tools.web.empty_synthesis")
