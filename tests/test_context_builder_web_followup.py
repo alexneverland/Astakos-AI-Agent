@@ -266,3 +266,14 @@ def test_direct_web_url_comparison_is_classified_for_semantic_skip():
     assert cb.classify_memory_query_intent(
         "Άνοιξε και σύγκρινε μόνο αυτές τις επίσημες σελίδες."
     ) == "direct_web_research"
+
+
+def test_direct_web_research_precedes_news_classification(monkeypatch):
+    monkeypatch.setattr(
+        cb,
+        "looks_like_news_or_web_fact_query",
+        lambda _text: True,
+    )
+    assert cb.classify_memory_query_intent(
+        "Ψάξε στο web για ειδήσεις."
+    ) == "direct_web_research"

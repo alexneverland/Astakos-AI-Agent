@@ -363,11 +363,11 @@ def classify_memory_query_intent(
     if looks_like_food_memory_query(clean):
         return "food_memory_recall"
 
-    if looks_like_news_or_web_fact_query(clean):
-        return "news_opening"
-
     if looks_like_direct_web_research_query(clean):
         return "direct_web_research"
+
+    if looks_like_news_or_web_fact_query(clean):
+        return "news_opening"
 
     if looks_like_explicit_memory_storage(clean):
         return "explicit_memory_storage"

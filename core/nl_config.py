@@ -102,7 +102,12 @@ CB_FOOD_REGEX = load_intents().get('context_builder', {}).get('food_regex', rf'\
 CB_REMINDER_CONTAINS = tuple(get_intent_list('context_builder', 'reminder_contains'))
 CB_REMINDER_STARTS = tuple(get_intent_list('context_builder', 'reminder_starts'))
 CB_DIRECT_WEB_RESEARCH_MARKERS = tuple(
-    get_intent_list("context_builder", "direct_web_research_markers")
+    marker.strip().lower()
+    for marker in get_intent_list(
+        "context_builder",
+        "direct_web_research_markers",
+    )
+    if isinstance(marker, str) and marker.strip()
 )
 
 
