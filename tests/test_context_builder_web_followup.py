@@ -224,3 +224,45 @@ def test_recall_query_with_overlap_keeps_full_semantic(monkeypatch):
     assert len(debug_calls) == 1
     assert debug_calls[0]["semantic_k_used"] == 8
     assert debug_calls[0]["semantic_adjust_reason"] is None
+
+
+def test_direct_web_research_skips_semantic_but_keeps_recent_context(monkeypatch):
+    debug_calls = []
+    recent_loader = MagicMock(
+        return_value=[
+            {
+                "channel": "web",
+                "time": "11:21",
+                "role": "assistant",
+                "content": "Recent conversation context.",
+            }
+        ]
+    )
+
+    monkeypatch.setattr(cb, "temporal_history_for_query", MagicMock(return_value=[]))
+    monkeypatch.setattr(
+        cb,
+        "_record_memory_context_debug",
+        lambda **kwargs: debug_calls.append(kwargs),
+    )
+
+    context = build_memory_context(
+        "Ψάξε στο web για τις πολιτικές επιστροφών των Amazon και eBay.",
+        channel="web",
+        semantic_k=8,
+        recent_loader=recent_loader,
+        semantic_search=MagicMock(
+            side_effect=AssertionError("semantic search should not run")
+        ),
+    )
+
+    assert context.recent_lines
+    assert len(debug_calls) == 1
+    assert debug_calls[0]["semantic_k_used"] == 0
+    assert debug_calls[0]["semantic_adjust_reason"] == "direct_web_research_skip"
+
+
+def test_direct_web_url_comparison_is_classified_for_semantic_skip():
+    assert cb.classify_memory_query_intent(
+        "Άνοιξε και σύγκρινε μόνο αυτές τις επίσημες σελίδες."
+    ) == "direct_web_research"

@@ -471,6 +471,12 @@
             "morning",
             "morning"
         ],
+        "direct_web_research_markers": [
+            "search the web",
+            "open only these",
+            "open these urls",
+            "open and compare"
+        ],
         "utility_markers": [
             "break",
             "hurt",

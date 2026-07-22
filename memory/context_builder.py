@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
 from core.i18n import t
+from core.nl_config import CB_DIRECT_WEB_RESEARCH_MARKERS
 import os
 import re
 import unicodedata
@@ -99,6 +100,15 @@ def looks_like_news_or_web_fact_query(text: str) -> bool:
     opening_markers = tuple(t("builder.opening_markers"))
 
     return any(marker in low for marker in opening_markers)
+
+
+def looks_like_direct_web_research_query(text: str) -> bool:
+    """Return true for externally configured direct Web research requests."""
+    low = str(text or "").lower().strip()
+    return bool(low) and any(
+        marker and marker in low
+        for marker in CB_DIRECT_WEB_RESEARCH_MARKERS
+    )
 
 
 def looks_like_tool_result_query(text: str) -> bool:
@@ -355,6 +365,9 @@ def classify_memory_query_intent(
 
     if looks_like_news_or_web_fact_query(clean):
         return "news_opening"
+
+    if looks_like_direct_web_research_query(clean):
+        return "direct_web_research"
 
     if looks_like_explicit_memory_storage(clean):
         return "explicit_memory_storage"
@@ -706,6 +719,9 @@ def build_memory_context(
         elif query_intent == "news_opening":
             effective_semantic_k = 0
             semantic_adjust_reason = "news_or_web_fact_skip"
+        elif query_intent == "direct_web_research":
+            effective_semantic_k = 0
+            semantic_adjust_reason = "direct_web_research_skip"
         elif query_intent == "explicit_memory_storage":
             effective_semantic_k = 0
             semantic_adjust_reason = "explicit_memory_storage_skip"
