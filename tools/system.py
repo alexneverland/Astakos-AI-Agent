@@ -2666,7 +2666,7 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
                 return "❌ Read_full requires email_id."
             data = service.users().messages().get(userId="me", id=email_id, format="full").execute()
             body_text = extract_body(data['payload'])
-            return f"📩 Content:\n{clean_text(body_text)[:5000]}"
+            return f"{t('prompts.mail_content_result_prefix')}\n{clean_text(body_text)[:5000]}"
 
         # =========================
         # READ THREAD (Full Conversation)
@@ -2691,7 +2691,10 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
                 output.append(f"--- Message {i+1} | From: {from_val} ({date_val}) ---\n{clean_text(body_text)[:2000]}")
             
             full_text = "\n\n".join(output)
-            return f"📩 Entire thread ({len(messages_in_thread)} messages):\n{full_text[:8000]}"
+            return (
+                f"{t('prompts.mail_thread_result_prefix')} "
+                f"({len(messages_in_thread)} messages):\n{full_text[:8000]}"
+            )
 
         # =========================
         # DELETE

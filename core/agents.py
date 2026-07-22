@@ -820,6 +820,11 @@ def git_agent_node(state):
 
 
 def mail_agent_node(state):
+    from core.mail_intent import (
+        is_mail_body_result,
+        is_mail_tool_result,
+        select_mail_read_action,
+    )
     from core.utils import load_agent_prompt, extract_list_selection_index
     from config import BASE_DIR  
     
@@ -857,11 +862,13 @@ def mail_agent_node(state):
          if getattr(m, "type", "") == "human"),
         0
     )
+    content_prefix = t("prompts.mail_content_result_prefix")
+    thread_prefix = t("prompts.mail_thread_result_prefix")
     mail_tool_results = []
     for msg in history[last_human_idx:]:
         if getattr(msg, "type", "") == "tool":
             content = clean_message(getattr(msg, "content", "")).strip()
-            if content.startswith("ID: ") or content.startswith(t("prompts.ext_str_147")) or content.startswith(t("prompts.ext_str_165")):
+            if is_mail_tool_result(content, content_prefix, thread_prefix):
                 mail_tool_results.append(content)
 
     if mail_tool_results:
@@ -871,8 +878,11 @@ def mail_agent_node(state):
         # [MASTRO-FIX v4 auto-read]: An mono search results, auto-do read
         import re as _re_ar
         _search_hits = [r for r in mail_tool_results if r.startswith('ID: ')]
-        _read_hits = [r for r in mail_tool_results
-                      if t("prompts.ext_str_173") in r or t("prompts.ext_str_62") in r]
+        _read_hits = [
+            result
+            for result in mail_tool_results
+            if is_mail_body_result(result, content_prefix, thread_prefix)
+        ]
         # Guard: if read_full already dispatched this turn, skip auto-read
         _read_dispatched = any(
             any(tc.get('args', {}).get('action') in ['read_full', 'read_thread']
@@ -886,12 +896,11 @@ def mail_agent_node(state):
              if getattr(m, "type", "") == "human"),
             ""
         )
-        user_wants_read = any(kw in user_q.lower() for kw in config.NLP_CONFIG.get("intents", {}).get("read_words", []))
+        intents = config.NLP_CONFIG.get("intents", {})
+        action_to_use = select_mail_read_action(user_q, intents)
         selected_idx = extract_list_selection_index(user_q)
 
-        if _search_hits and not _read_hits and not _read_dispatched and user_wants_read:
-            user_wants_thread = any(kw in user_q.lower() for kw in config.NLP_CONFIG.get("intents", {}).get("thread_words", []))
-            action_to_use = "read_thread" if user_wants_thread else "read_full"
+        if _search_hits and not _read_hits and not _read_dispatched and action_to_use:
             chosen_hit = _search_hits[selected_idx] if selected_idx is not None and 0 <= selected_idx < len(_search_hits) else _search_hits[0]
 
             _ar_match = _re_ar.search(r'ID: ([a-f0-9]{16})', chosen_hit)
@@ -906,9 +915,7 @@ def mail_agent_node(state):
                     }]
                 )
                 return {'current_agent': 'Mail_Agent', 'messages': [_auto_msg]}
-        elif not _read_hits and not _read_dispatched and user_wants_read and _known_ids:
-            user_wants_thread = any(kw in user_q.lower() for kw in config.NLP_CONFIG.get("intents", {}).get("thread_words", []))
-            action_to_use = "read_thread" if user_wants_thread else "read_full"
+        elif not _read_hits and not _read_dispatched and action_to_use and _known_ids:
             _ar_eid = _known_ids[selected_idx] if selected_idx is not None and 0 <= selected_idx < len(_known_ids) else _known_ids[0]
             _auto_msg = AIMessage(
                 content='',
