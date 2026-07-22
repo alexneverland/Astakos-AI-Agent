@@ -21,3 +21,13 @@ def test_recipe_expert_does_not_claim_an_unverified_external_source():
 
     assert "no verified external source" in prompt
     assert "Never claim" in prompt
+
+
+def test_web_research_prompt_declares_internal_brief_contract():
+    from core.utils import load_agent_prompt
+
+    prompt = load_agent_prompt("Web_Agent")
+
+    assert "[RESEARCH BRIEF - INTERNAL]" in prompt
+    assert "generic research tool call" in prompt
+    assert "Do not show this brief" in prompt
