@@ -961,6 +961,20 @@
     const pendingLocalEchoes = [];
     const recentRenderedMessages = [];
     let isFetchingMessages = false;
+    let isInitialCursorInitialized = false;
+    const INITIAL_HISTORY_TIMEOUT_MS = 10000;
+
+    async function fetchJsonWithTimeout(url, timeoutMs) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return await response.json();
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
 
     function getMessageStableId(msg) {
         return msg?.rowid || msg?.id || null;
@@ -1099,8 +1113,7 @@
 
     window.addEventListener('DOMContentLoaded', async () => {
         try {
-            const response = await fetch('http://127.0.0.1:8000/history');
-            const data = await response.json();
+            const data = await fetchJsonWithTimeout('http://127.0.0.1:8000/history', INITIAL_HISTORY_TIMEOUT_MS);
             if (data.history && data.history.length > 0) {
                 data.history.sort((a, b) => (Number(a.rowid) || 0) - (Number(b.rowid) || 0));
                 data.history.forEach(msg => renderHistoryMsg(msg));
@@ -1112,12 +1125,24 @@
             // Load max_id so polling starts from here
             if (!lastKnownMsgId) {
                 try {
-                    const pr = await fetch(`http://127.0.0.1:8000/messages/poll?after_id=0`);
-                    const pd = await pr.json();
+                    const pd = await fetchJsonWithTimeout('http://127.0.0.1:8000/messages/poll?after_id=0', INITIAL_HISTORY_TIMEOUT_MS);
                     if (pd.max_id) lastKnownMsgId = pd.max_id;
                 } catch(e) {}
             }
-        } catch (error) { console.error("History error:", error); }
+            isInitialCursorInitialized = true;
+        } catch (error) {
+            console.error("History error:", error);
+            try {
+                const pollData = await fetchJsonWithTimeout('http://127.0.0.1:8000/messages/poll?after_id=0', INITIAL_HISTORY_TIMEOUT_MS);
+                lastKnownMsgId = Number(pollData.max_id) || 0;
+                isInitialCursorInitialized = true;
+            } catch (pollError) {
+                console.error("History cursor recovery error:", pollError);
+            }
+        }
+        if (isInitialCursorInitialized) {
+            _startPolling();
+        }
     });
 
     function looksLikeCodePaste(text) {
@@ -1353,10 +1378,9 @@
 
     let _pollInterval = null;
     function _startPolling() {
-        if (!_pollInterval) {
-            fetchNewMessages();
-            _pollInterval = setInterval(fetchNewMessages, 5000);
-        }
+        if (!isInitialCursorInitialized || _pollInterval) return;
+        fetchNewMessages();
+        _pollInterval = setInterval(fetchNewMessages, 5000);
     }
     ws.onopen  = () => { wsDot.style.background = '#4EC9B0'; wsLabel.textContent = 'Online'; _startPolling(); };
     ws.onclose = () => { wsDot.style.background = '#F44747'; wsLabel.textContent = 'Offline'; _startPolling(); };
