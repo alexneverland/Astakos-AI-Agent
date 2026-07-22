@@ -37,3 +37,81 @@ def test_place_search_queries_route_to_web_agent():
 
     assert lookup_agent("βρες μου ήσυχο μέρος για φαγητό με παιδιά") == "Web_Agent"
     assert lookup_agent("δώσε μου 3 καλές ψαροταβέρνες κοντά στη Νέα Καλλικράτεια") == "Web_Agent"
+    assert lookup_agent("Ψάξε git log για τα τελευταία commits.") == "Git_Agent"
+    assert lookup_agent("Άνοιξε links για Python.") == "Dev_Agent"
+
+
+def test_explicit_web_search_overrides_vacuum_capability():
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent(
+        "Ψάξε στο web για robot vacuum με πηγές."
+    ) == "Web_Agent"
+
+
+def test_explicit_web_search_overrides_dev_capability():
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent(
+        "Ψάξε στο web για Python με πηγές."
+    ) == "Web_Agent"
+
+
+def test_subject_capability_still_wins_without_explicit_web_search():
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent(
+        "Κάνε σύντομη έρευνα για robot vacuum."
+    ) == "Home_Agent"
+    assert lookup_agent(
+        "Ψάξε για robot vacuum στο web."
+    ) == "Home_Agent"
+
+
+def test_explicit_web_search_overrides_git_capability():
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent(
+        "Ψάξε στο web για git log με παραδείγματα."
+    ) == "Web_Agent"
+
+
+def test_unaccented_explicit_web_search_overrides_dev_capability():
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent(
+        "ψαξε στο web για Python με πηγές."
+    ) == "Web_Agent"
+
+
+def test_malformed_routing_override_triggers_are_ignored(monkeypatch):
+    import core.capability_lookup as capability_lookup
+
+    for malformed_value, user_message in (
+        (None, "unmatched request"),
+        ("-", "-"),
+    ):
+        monkeypatch.setattr(
+            capability_lookup,
+            "_registry",
+            [
+                {
+                    "name": "web_search",
+                    "agent": "Web_Agent",
+                    "routing_override_triggers": malformed_value,
+                    "triggers": [],
+                }
+            ],
+        )
+
+        assert capability_lookup.lookup_agent(user_message) is None
