@@ -442,6 +442,28 @@ def home_agent_node(state):
     return {"current_agent": "Home_Agent", "messages": [response]}
 
 
+_WEB_RESEARCH_TOOL_NAMES = frozenset({
+    "duckduckgo_search",
+    "browse_url",
+})
+_WEB_RESEARCH_CALL_BUDGET = 3
+
+
+def _has_exhausted_web_research_budget(messages: list) -> bool:
+    """Return true when generic web research reached its current-turn budget."""
+    research_calls = 0
+
+    for message in reversed(messages or []):
+        if getattr(message, "type", "") == "human":
+            break
+
+        for tool_call in getattr(message, "tool_calls", []) or []:
+            if tool_call.get("name") in _WEB_RESEARCH_TOOL_NAMES:
+                research_calls += 1
+
+    return research_calls >= _WEB_RESEARCH_CALL_BUDGET
+
+
 def _is_stale_messenger_send_call(response) -> bool:
     """True only when the model tries to send a draft that no longer exists."""
     tool_calls = getattr(response, "tool_calls", []) or []
@@ -560,7 +582,33 @@ def web_agent_node(state: AgentState):
         process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices, relay_local_payload, morning_briefing, hn_briefing
     ]
 
-    result = llm.bind_tools(web_tools).invoke(final_messages)
+    if web_errors and not web_successes:
+        guarded_reply = build_web_failure_reply(
+            last_msg_text,
+            recent_web_tool_results,
+        )
+        from langchain_core.messages import AIMessage as _AIMsg
+        return {
+            "messages": [_AIMsg(content=guarded_reply)],
+            "current_agent": "Web_Agent",
+        }
+
+    if _has_exhausted_web_research_budget(history):
+        research_synthesis_prompt = (
+            f"{system_prompt}\n\n"
+            "[RESEARCH BUDGET REACHED]\n"
+            "The current user turn has already completed its generic web "
+            "research budget. Do not call tools. Give a concise answer based "
+            "only on successful results already in the conversation. Preserve "
+            "source URLs when available, state uncertainty when evidence is "
+            "incomplete or conflicting, and never expose raw tool output."
+        )
+        result = llm.invoke([
+            SystemMessage(content=research_synthesis_prompt),
+            *final_messages[1:],
+        ])
+    else:
+        result = llm.bind_tools(web_tools).invoke(final_messages)
 
     if _is_stale_messenger_send_call(result):
         print("[Messenger Guard]: blocked stale send call without an active draft.")
@@ -577,11 +625,6 @@ def web_agent_node(state: AgentState):
             SystemMessage(content=recovery_prompt),
             *final_messages[1:],
         ])
-
-    if web_errors and not web_successes:
-        guarded_reply = build_web_failure_reply(last_msg_text, recent_web_tool_results)
-        from langchain_core.messages import AIMessage as _AIMsg
-        return {"messages": [_AIMsg(content=guarded_reply)], "current_agent": "Web_Agent"}
 
     result = _ensure_text_response(result, llm, system_prompt, safe_history)
     content = clean_message(result.content).strip() if result.content else ""
