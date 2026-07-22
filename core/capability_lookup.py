@@ -69,6 +69,17 @@ def lookup_agent(user_message: str) -> str | None:
         print("🎯 [CapabilityRegistry]: place-search heuristic → Web_Agent (maps_places)")
         return "Web_Agent"
 
+    for capability in _registry:
+        override_triggers = capability.get("routing_override_triggers", [])
+        if any(_matches_trigger(msg, trigger) for trigger in override_triggers):
+            agent = capability.get("agent")
+            if agent:
+                print(
+                    f"🎯 [CapabilityRegistry]: explicit web intent → {agent} "
+                    f"({capability.get('name')})"
+                )
+                return agent
+
     for trigger in config.NLP_CONFIG.get("capabilities", {}).get("git_triggers", []):
         if _matches_trigger(msg, trigger):
             print(f"🎯 [CapabilityRegistry]: '{trigger}' → Git_Agent (git_ops)")

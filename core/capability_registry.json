@@ -303,6 +303,9 @@
     "agent": "Web_Agent",
     "risk_level": "SAFE",
     "priority": 8,
+    "routing_override_triggers": [
+      "ψάξε στο web"
+    ],
     "triggers": [
       "ψάξε στο internet",
       "duckduckgo",
