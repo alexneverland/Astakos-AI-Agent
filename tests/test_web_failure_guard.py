@@ -544,6 +544,7 @@ def test_web_agent_synthesizes_without_tools_after_research_budget(monkeypatch):
         def __init__(self):
             self.bound_calls = 0
             self.synthesis_calls = 0
+            self.synthesis_messages = []
 
         def bind_tools(self, tools):
             self.bound_calls += 1
@@ -551,14 +552,23 @@ def test_web_agent_synthesizes_without_tools_after_research_budget(monkeypatch):
 
         def invoke(self, messages):
             self.synthesis_calls += 1
+            self.synthesis_messages.append(messages)
             return AIMessage(content="Research synthesis from verified sources.")
 
     fake_llm = FakeLLM()
     monkeypatch.setattr("core.agents.llm", fake_llm)
+    loaded_prompt_names = []
+
+    def fake_load_agent_prompt(name: str, *_args, **_kwargs) -> str:
+        loaded_prompt_names.append(name)
+        return {
+            "Web_Agent": "test prompt",
+            "Web_Research_Synthesis": "[TEST RESEARCH SYNTHESIS CONTRACT]",
+        }.get(name, "")
+
     monkeypatch.setattr(
-        "core.agents.load_agent_prompt",
-        lambda *args, **kwargs: "test prompt",
-        raising=False,
+        "core.utils.load_agent_prompt",
+        fake_load_agent_prompt,
     )
 
     result = web_agent_node({
@@ -586,6 +596,16 @@ def test_web_agent_synthesizes_without_tools_after_research_budget(monkeypatch):
     assert fake_llm.synthesis_calls == 1
     assert reply == "Research synthesis from verified sources."
     assert "TOOL_PATH_MUST_NOT_RUN" not in reply
+    assert "Web_Research_Synthesis" in loaded_prompt_names
+    synthesis_system_messages = [
+        message.content
+        for message in fake_llm.synthesis_messages[0]
+        if getattr(message, "type", "") == "system"
+    ]
+    assert any(
+        "[TEST RESEARCH SYNTHESIS CONTRACT]" in content
+        for content in synthesis_system_messages
+    )
 
 
 def test_web_research_budget_resets_for_a_new_user_turn():
