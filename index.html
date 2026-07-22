@@ -961,6 +961,7 @@
     const pendingLocalEchoes = [];
     const recentRenderedMessages = [];
     let isFetchingMessages = false;
+    let isHistoryInitialized = false;
 
     function getMessageStableId(msg) {
         return msg?.rowid || msg?.id || null;
@@ -1118,6 +1119,10 @@
                 } catch(e) {}
             }
         } catch (error) { console.error("History error:", error); }
+        finally {
+            isHistoryInitialized = true;
+            _startPolling();
+        }
     });
 
     function looksLikeCodePaste(text) {
@@ -1353,10 +1358,9 @@
 
     let _pollInterval = null;
     function _startPolling() {
-        if (!_pollInterval) {
-            fetchNewMessages();
-            _pollInterval = setInterval(fetchNewMessages, 5000);
-        }
+        if (!isHistoryInitialized || _pollInterval) return;
+        fetchNewMessages();
+        _pollInterval = setInterval(fetchNewMessages, 5000);
     }
     ws.onopen  = () => { wsDot.style.background = '#4EC9B0'; wsLabel.textContent = 'Online'; _startPolling(); };
     ws.onclose = () => { wsDot.style.background = '#F44747'; wsLabel.textContent = 'Offline'; _startPolling(); };
