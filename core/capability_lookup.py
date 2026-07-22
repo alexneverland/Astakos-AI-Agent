@@ -69,13 +69,21 @@ def lookup_agent(user_message: str) -> str | None:
         print("🎯 [CapabilityRegistry]: place-search heuristic → Web_Agent (maps_places)")
         return "Web_Agent"
 
+    # Explicit intent overrides are opt-in registry metadata. They precede Git
+    # and normal priority routing only when the registry declares one.
     for capability in _registry:
-        override_triggers = capability.get("routing_override_triggers", [])
-        if any(_matches_trigger(msg, trigger) for trigger in override_triggers):
+        override_triggers = capability.get("routing_override_triggers") or []
+        if not isinstance(override_triggers, (list, tuple)):
+            continue
+
+        if any(
+            isinstance(trigger, str) and _matches_trigger(msg, trigger)
+            for trigger in override_triggers
+        ):
             agent = capability.get("agent")
             if agent:
                 print(
-                    f"🎯 [CapabilityRegistry]: explicit web intent → {agent} "
+                    f"🎯 [CapabilityRegistry]: explicit intent override → {agent} "
                     f"({capability.get('name')})"
                 )
                 return agent
