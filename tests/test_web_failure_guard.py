@@ -533,6 +533,111 @@ def test_web_research_budget_ignores_non_research_tools():
     assert _has_exhausted_web_research_budget(history) is False
 
 
+def test_web_agent_trims_parallel_research_calls_to_remaining_budget(monkeypatch):
+    from core.agents import clean_orphan_tool_calls, web_agent_node
+
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(
+                content=[
+                    {
+                        "type": "function_call",
+                        "name": "duckduckgo_search",
+                        "args": {"query": "third"},
+                        "id": "t3",
+                    },
+                    {
+                        "type": "function_call",
+                        "name": "browse_url",
+                        "args": {"url": "https://example.com/2"},
+                        "id": "t4",
+                    },
+                ],
+                tool_calls=[
+                    {
+                        "name": "duckduckgo_search",
+                        "args": {"query": "third"},
+                        "id": "t3",
+                    },
+                    {
+                        "name": "browse_url",
+                        "args": {"url": "https://example.com/2"},
+                        "id": "t4",
+                    },
+                ],
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.bound_calls = 0
+
+        def bind_tools(self, tools):
+            self.bound_calls += 1
+            return FakeBoundLLM()
+
+        def invoke(self, messages):
+            raise AssertionError("synthesis should not run before the budget is reached")
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr(
+        "core.utils.load_agent_prompt",
+        lambda *args, **kwargs: "test prompt",
+    )
+
+    result = web_agent_node({
+        "messages": [
+            HumanMessage(content="Research this topic."),
+            AIMessage(content="", tool_calls=[
+                {
+                    "name": "duckduckgo_search",
+                    "args": {"query": "first"},
+                    "id": "t1",
+                },
+            ]),
+            ToolMessage(
+                tool_call_id="t1",
+                name="duckduckgo_search",
+                content="first source",
+            ),
+            AIMessage(content="", tool_calls=[
+                {
+                    "name": "browse_url",
+                    "args": {"url": "https://example.com/1"},
+                    "id": "t2",
+                },
+            ]),
+            ToolMessage(
+                tool_call_id="t2",
+                name="browse_url",
+                content="second source",
+            ),
+        ],
+        "channel": "web",
+    })
+
+    calls = result["messages"][-1].tool_calls
+
+    assert [call["id"] for call in calls] == ["t3"]
+    inline_ids = [
+        part.get("id")
+        for part in result["messages"][-1].content
+        if isinstance(part, dict)
+        and part.get("type") in ("function_call", "tool_use")
+    ]
+    assert inline_ids == ["t3"]
+
+    cleaned = clean_orphan_tool_calls([
+        result["messages"][-1],
+        ToolMessage(
+            tool_call_id="t3",
+            name="duckduckgo_search",
+            content="third source",
+        ),
+    ])
+
+    assert len(cleaned) == 2
+    assert cleaned[0].tool_calls == calls
+
 def test_web_agent_synthesizes_without_tools_after_research_budget(monkeypatch):
     from core.agents import web_agent_node
 
@@ -626,3 +731,36 @@ def test_web_research_budget_resets_for_a_new_user_turn():
     ]
 
     assert _has_exhausted_web_research_budget(history) is False
+
+
+def test_web_research_trim_supports_object_calls_without_model_copy():
+    from core.agents import _trim_web_research_tool_calls
+
+    class ToolCall:
+        def __init__(self, name, call_id):
+            self.name = name
+            self.id = call_id
+
+    class LegacyResponse:
+        def __init__(self):
+            self.content = []
+            self.tool_calls = [
+                ToolCall("duckduckgo_search", "t3"),
+                ToolCall("browse_url", "t4"),
+            ]
+
+    history = [
+        HumanMessage(content="Research this topic."),
+        AIMessage(content="", tool_calls=[
+            {"name": "duckduckgo_search", "args": {}, "id": "t1"},
+        ]),
+        AIMessage(content="", tool_calls=[
+            {"name": "browse_url", "args": {}, "id": "t2"},
+        ]),
+    ]
+
+    response = LegacyResponse()
+    trimmed = _trim_web_research_tool_calls(response, history)
+
+    assert trimmed is not response
+    assert [call.id for call in trimmed.tool_calls] == ["t3"]

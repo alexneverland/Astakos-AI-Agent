@@ -4,6 +4,7 @@
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
 
+from copy import copy
 from core.i18n import t
 import os
 import config
@@ -449,8 +450,15 @@ _WEB_RESEARCH_TOOL_NAMES = frozenset({
 _WEB_RESEARCH_CALL_BUDGET = 3
 
 
-def _has_exhausted_web_research_budget(messages: list) -> bool:
-    """Return true when generic web research reached its current-turn budget."""
+def _web_research_tool_call_name(tool_call) -> str:
+    """Return a tool-call name from mapping or object response shapes."""
+    if isinstance(tool_call, dict):
+        return str(tool_call.get("name") or "")
+    return str(getattr(tool_call, "name", "") or "")
+
+
+def _count_web_research_calls(messages: list) -> int:
+    """Count generic Web research calls in the current user turn."""
     research_calls = 0
 
     for message in reversed(messages or []):
@@ -458,10 +466,73 @@ def _has_exhausted_web_research_budget(messages: list) -> bool:
             break
 
         for tool_call in getattr(message, "tool_calls", []) or []:
-            if tool_call.get("name") in _WEB_RESEARCH_TOOL_NAMES:
+            if _web_research_tool_call_name(tool_call) in _WEB_RESEARCH_TOOL_NAMES:
                 research_calls += 1
 
-    return research_calls >= _WEB_RESEARCH_CALL_BUDGET
+    return research_calls
+
+
+def _has_exhausted_web_research_budget(messages: list) -> bool:
+    """Return true when generic Web research reached its current-turn budget."""
+    return _count_web_research_calls(messages) >= _WEB_RESEARCH_CALL_BUDGET
+
+
+def _trim_web_research_tool_calls(response, messages: list):
+    """Keep generic Web research calls within the remaining turn budget."""
+    tool_calls = getattr(response, "tool_calls", []) or []
+    if not tool_calls:
+        return response
+
+    remaining_calls = max(
+        0,
+        _WEB_RESEARCH_CALL_BUDGET - _count_web_research_calls(messages),
+    )
+    retained_calls = []
+
+    for tool_call in tool_calls:
+        if _web_research_tool_call_name(tool_call) in _WEB_RESEARCH_TOOL_NAMES:
+            if remaining_calls <= 0:
+                continue
+            remaining_calls -= 1
+        retained_calls.append(tool_call)
+
+    if len(retained_calls) == len(tool_calls):
+        return response
+
+    retained_call_ids = {
+        (
+            tool_call.get("id")
+            if isinstance(tool_call, dict)
+            else getattr(tool_call, "id", None)
+        )
+        for tool_call in retained_calls
+    }
+    retained_call_ids.discard(None)
+
+    trimmed_content = getattr(response, "content", None)
+    if isinstance(trimmed_content, list):
+        trimmed_content = [
+            part
+            for part in trimmed_content
+            if not (
+                isinstance(part, dict)
+                and part.get("type") in ("function_call", "tool_use")
+                and part.get("id") not in retained_call_ids
+            )
+        ]
+
+    updates = {
+        "content": trimmed_content,
+        "tool_calls": retained_calls,
+    }
+    model_copy = getattr(response, "model_copy", None)
+    if callable(model_copy):
+        trimmed_response = model_copy(update=updates)
+    else:
+        trimmed_response = copy(response)
+        trimmed_response.content = trimmed_content
+        trimmed_response.tool_calls = retained_calls
+    return _merge_phase_timings(trimmed_response, response)
 
 
 def _is_stale_messenger_send_call(response) -> bool:
@@ -608,6 +679,8 @@ def web_agent_node(state: AgentState):
         ])
     else:
         result = llm.bind_tools(web_tools).invoke(final_messages)
+
+    result = _trim_web_research_tool_calls(result, history)
 
     if _is_stale_messenger_send_call(result):
         print("[Messenger Guard]: blocked stale send call without an active draft.")
