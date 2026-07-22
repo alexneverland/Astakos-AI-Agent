@@ -594,14 +594,13 @@ def web_agent_node(state: AgentState):
         }
 
     if _has_exhausted_web_research_budget(history):
-        research_synthesis_prompt = (
-            f"{system_prompt}\n\n"
-            "[RESEARCH BUDGET REACHED]\n"
-            "The current user turn has already completed its generic web "
-            "research budget. Do not call tools. Give a concise answer based "
-            "only on successful results already in the conversation. Preserve "
-            "source URLs when available, state uncertainty when evidence is "
-            "incomplete or conflicting, and never expose raw tool output."
+        research_synthesis_contract = load_agent_prompt(
+            "Web_Research_Synthesis",
+        )
+        research_synthesis_prompt = "\n\n".join(
+            part
+            for part in (system_prompt, research_synthesis_contract)
+            if part
         )
         result = llm.invoke([
             SystemMessage(content=research_synthesis_prompt),
