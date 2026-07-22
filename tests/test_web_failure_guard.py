@@ -490,3 +490,119 @@ def test_web_agent_skips_empty_retries_when_all_web_tools_failed(monkeypatch):
 
     assert fake_llm.retry_calls == 0
     assert result["messages"][-1].content != t("tools.web.empty_synthesis")
+
+
+def test_web_research_budget_is_exhausted_after_three_generic_research_calls():
+    from core.agents import _has_exhausted_web_research_budget
+
+    history = [
+        HumanMessage(content="Research this topic."),
+        AIMessage(content="", tool_calls=[
+            {"name": "duckduckgo_search", "args": {"query": "first"}, "id": "t1"},
+        ]),
+        ToolMessage(tool_call_id="t1", name="duckduckgo_search", content="first source"),
+        AIMessage(content="", tool_calls=[
+            {"name": "browse_url", "args": {"url": "https://example.com/1"}, "id": "t2"},
+        ]),
+        ToolMessage(tool_call_id="t2", name="browse_url", content="second source"),
+        AIMessage(content="", tool_calls=[
+            {"name": "duckduckgo_search", "args": {"query": "third"}, "id": "t3"},
+        ]),
+        ToolMessage(tool_call_id="t3", name="duckduckgo_search", content="third source"),
+    ]
+
+    assert _has_exhausted_web_research_budget(history) is True
+
+
+def test_web_research_budget_ignores_non_research_tools():
+    from core.agents import _has_exhausted_web_research_budget
+
+    history = [
+        HumanMessage(content="Find supermarket prices."),
+        AIMessage(content="", tool_calls=[
+            {"name": "search_supermarket_prices", "args": {"query": "chicken"}, "id": "t1"},
+        ]),
+        AIMessage(content="", tool_calls=[
+            {"name": "search_supermarket_prices", "args": {"query": "milk"}, "id": "t2"},
+        ]),
+        AIMessage(content="", tool_calls=[
+            {"name": "get_weather_forecast", "args": {}, "id": "t3"},
+        ]),
+    ]
+
+    assert _has_exhausted_web_research_budget(history) is False
+
+
+def test_web_agent_synthesizes_without_tools_after_research_budget(monkeypatch):
+    from core.agents import web_agent_node
+
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="TOOL_PATH_MUST_NOT_RUN")
+
+    class FakeLLM:
+        def __init__(self):
+            self.bound_calls = 0
+            self.synthesis_calls = 0
+
+        def bind_tools(self, tools):
+            self.bound_calls += 1
+            return FakeBoundLLM()
+
+        def invoke(self, messages):
+            self.synthesis_calls += 1
+            return AIMessage(content="Research synthesis from verified sources.")
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+    monkeypatch.setattr(
+        "core.agents.load_agent_prompt",
+        lambda *args, **kwargs: "test prompt",
+        raising=False,
+    )
+
+    result = web_agent_node({
+        "messages": [
+            HumanMessage(content="Research this topic."),
+            AIMessage(content="", tool_calls=[
+                {"name": "duckduckgo_search", "args": {"query": "first"}, "id": "t1"},
+            ]),
+            ToolMessage(tool_call_id="t1", name="duckduckgo_search", content="first source"),
+            AIMessage(content="", tool_calls=[
+                {"name": "browse_url", "args": {"url": "https://example.com/1"}, "id": "t2"},
+            ]),
+            ToolMessage(tool_call_id="t2", name="browse_url", content="second source"),
+            AIMessage(content="", tool_calls=[
+                {"name": "duckduckgo_search", "args": {"query": "third"}, "id": "t3"},
+            ]),
+            ToolMessage(tool_call_id="t3", name="duckduckgo_search", content="third source"),
+        ],
+        "channel": "web",
+    })
+
+    reply = result["messages"][-1].content
+
+    assert fake_llm.bound_calls == 0
+    assert fake_llm.synthesis_calls == 1
+    assert reply == "Research synthesis from verified sources."
+    assert "TOOL_PATH_MUST_NOT_RUN" not in reply
+
+
+def test_web_research_budget_resets_for_a_new_user_turn():
+    from core.agents import _has_exhausted_web_research_budget
+
+    history = [
+        HumanMessage(content="Research the first topic."),
+        AIMessage(content="", tool_calls=[
+            {"name": "duckduckgo_search", "args": {"query": "first"}, "id": "t1"},
+        ]),
+        AIMessage(content="", tool_calls=[
+            {"name": "browse_url", "args": {"url": "https://example.com/1"}, "id": "t2"},
+        ]),
+        AIMessage(content="", tool_calls=[
+            {"name": "duckduckgo_search", "args": {"query": "third"}, "id": "t3"},
+        ]),
+        HumanMessage(content="Research a new topic."),
+    ]
+
+    assert _has_exhausted_web_research_budget(history) is False
