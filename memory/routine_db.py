@@ -13,6 +13,10 @@ import config
 
 DB_PATH      = config.ROUTINES_DB
 db_write_lock = threading.Lock()  # Serializes writes — lock-free reads (WAL mode)
+ROUTINE_DB_BUSY_TIMEOUT_MS = 5000
+_wal_setup_lock = threading.Lock()
+_wal_enabled = False
+_wal_enabled_path: str | None = None
 
 # ────────────────────────────────────────────────────────────────
 # CANONICALIZATION LAYER
@@ -91,16 +95,35 @@ def _embedding_similarity(text_a: str, text_b: str) -> float:
 
 def get_connection(write: bool = False):
     """
-    Returns an SQLite connection in WAL mode (graceful fallback if not supported).
-    check_same_thread=False for multi-thread safety.
+    Returns a routine DB connection with a bounded SQLite lock wait.
+    WAL setup is serialized and retried only until it succeeds.
     """
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=3000")
-    except sqlite3.Error:
-        pass  # Fallback: default journal mode (e.g., network drive, read-only fs)of
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=ROUTINE_DB_BUSY_TIMEOUT_MS / 1000,
+        check_same_thread=False,
+    )
+    conn.execute("PRAGMA busy_timeout=5000")
+    _enable_wal(conn)
     return conn
+
+
+def _enable_wal(conn: sqlite3.Connection) -> bool:
+    """Enable WAL once per database path, retrying after a transient startup lock."""
+    global _wal_enabled, _wal_enabled_path
+
+    with _wal_setup_lock:
+        if _wal_enabled and _wal_enabled_path == DB_PATH:
+            return True
+        try:
+            row = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        except sqlite3.Error:
+            return False
+
+        _wal_enabled = bool(row and str(row[0]).lower() == "wal")
+        _wal_enabled_path = DB_PATH if _wal_enabled else None
+        return _wal_enabled
+
 
 def setup_db():
     conn   = get_connection()
