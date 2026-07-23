@@ -684,19 +684,11 @@ def web_agent_node(state: AgentState):
 
     if _is_stale_messenger_send_call(result):
         print("[Messenger Guard]: blocked stale send call without an active draft.")
+        from core.messenger_draft import active_draft_status, inactive_draft_message
+        from langchain_core.messages import AIMessage as _AIMsg
 
-        recovery_prompt = (
-            system_prompt
-            + "\n\n[RUNTIME MESSENGER GUARD]\n"
-            + "There is no active Messenger draft. Do not call "
-              "execute_local_pipeline and do not mention Messenger or a draft "
-              "unless the newest user message explicitly asks about one. "
-              "Reply naturally to the newest user message."
-        )
-        result = llm.invoke([
-            SystemMessage(content=recovery_prompt),
-            *final_messages[1:],
-        ])
+        _, reason, _ = active_draft_status()
+        result = _AIMsg(content=inactive_draft_message(reason))
 
     result = _ensure_text_response(result, llm, system_prompt, safe_history)
     content = clean_message(result.content).strip() if result.content else ""
