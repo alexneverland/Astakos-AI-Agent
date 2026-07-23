@@ -2453,6 +2453,24 @@ def handle_location(msg, live_update=False):
                             )
                             print(f"\033[93m[Location Reminder]: {task} fired ({dist:.0f}m)\033[0m")
                             cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
+
+                from memory.location_reminders import (
+                    complete_location_reminder,
+                    find_departed_current_location_reminders,
+                )
+
+                for rid, task in find_departed_current_location_reminders(
+                    conn,
+                    lat=lat,
+                    lon=lon,
+                    distance_meters=haversine,
+                ):
+                    _send_and_record_assistant(
+                        t("clients.telegram_bot.bot_msg_reminder_leave_current", task=task),
+                        agent="Reminder_Agent",
+                    )
+                    print(f"\033[93m[Location Reminder]: {task} fired after leaving current place\033[0m")
+                    complete_location_reminder(conn, rid)
                 conn.commit()
             finally:
                 conn.close()
