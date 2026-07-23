@@ -674,8 +674,8 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
     Manages local reminders.
     action: 'add' (new), 'read' (read pending ONLY), 'done' (completion)
     task: For 'add' → description. For 'done' → keyword of the reminder being completed.
-    location: ONLY for location-based reminders. Use 'home' when
-              {config.USER_NAME} says 'when I get home', 'as soon as I go home' etc.
+    location: ONLY for location-based reminders. Use 'home' for arrival home,
+              or 'leave_current_location' to trigger after leaving the current place.
               When location is provided, DO NOT provide minutes_from_now or exact_time.
     """
     conn = None
@@ -693,6 +693,8 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             for rtask, tm in pending:
                 if tm and tm.startswith("loc:"):
                     loc = tm.split(":", 1)[1]
+                    if loc == "leave_current_location":
+                        loc = t("tools.system.reminders_location_leave_current")
                     lines.append(f"• [📍 {loc}] {rtask}")
                 else:
                     lines.append(f"• [{tm}] {rtask}")
@@ -718,6 +720,13 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
         # ── ADD: New reminder ─────────────────────────────────
         else:
             from datetime import datetime, timedelta
+            from memory.location_reminders import (
+                LEAVE_CURRENT_LOCATION,
+                get_fresh_current_location,
+                save_leave_current_location_anchor,
+            )
+
+            current_location = None
 
             if minutes_from_now > 0:
                 target_time = (datetime.now() + timedelta(minutes=minutes_from_now)).strftime("%Y-%m-%d %H:%M")
@@ -733,6 +742,10 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
                     except ValueError:
                         return t("tools.system.reminders_add_err_time")
             elif location:
+                if location == LEAVE_CURRENT_LOCATION:
+                    current_location = get_fresh_current_location()
+                    if current_location is None:
+                        return t("tools.system.reminders_add_err_live_location")
                 target_time = f"loc:{location}"
             else:
                 return t("tools.system.reminders_add_err_args")
@@ -748,9 +761,18 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
                 "INSERT INTO reminders (task, time, status) VALUES (?, ?, 'pending')",
                 (task, target_time),
             )
+            if current_location is not None:
+                save_leave_current_location_anchor(
+                    conn,
+                    reminder_id=cursor.lastrowid,
+                    anchor_lat=current_location[0],
+                    anchor_lon=current_location[1],
+                )
             conn.commit()
-            
+
             if location:
+                if location == LEAVE_CURRENT_LOCATION:
+                    return t("tools.system.reminders_add_success_leave_current")
                 return t("tools.system.reminders_add_success_loc", location=location)
             return t("tools.system.reminders_add_success_time", target_time=target_time)
 

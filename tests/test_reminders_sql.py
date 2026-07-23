@@ -361,6 +361,119 @@ class TestLocationReminders:
 # main.reminder_worker()
 # ────────────────────────────────────────────────────────────────
 
+class TestLeaveCurrentLocationReminders:
+
+    def test_fires_after_exit_and_completes_reminder(self):
+        import clients.telegram_bot as bot
+        import config as cfg
+        from memory.location_reminders import save_leave_current_location_anchor
+
+        sent = []
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "astakos_state.db")
+            gps_path = os.path.join(tmp, "last_location.json")
+            _make_reminders_db(
+                db_path,
+                [{"task": "stop at the shop", "time": "loc:leave_current_location"}],
+            )
+            conn = sqlite3.connect(db_path)
+            try:
+                reminder_id = conn.execute("SELECT id FROM reminders").fetchone()[0]
+                save_leave_current_location_anchor(
+                    conn,
+                    reminder_id=reminder_id,
+                    anchor_lat=0.0,
+                    anchor_lon=0.0,
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            with (
+                patch.object(cfg, "STATE_DB", db_path),
+                patch.object(cfg, "GPS_STORAGE_FILE", gps_path),
+                patch.object(cfg, "HOME_COORDS", (0.0, 0.0)),
+                patch.object(cfg, "HOME_RADIUS_M", 150),
+                patch.object(
+                    bot,
+                    "_send_and_record_assistant",
+                    side_effect=lambda message, **_kwargs: sent.append(message),
+                ),
+            ):
+                bot.handle_location(
+                    {"chat": {"id": 1}, "location": {"latitude": 0.003, "longitude": 0.0}},
+                    live_update=True,
+                )
+
+            assert len(sent) == 1
+            assert "stop at the shop" in sent[0]
+            assert _row_status(db_path, "stop at the shop") == "done"
+            conn = sqlite3.connect(db_path)
+            try:
+                assert conn.execute("SELECT COUNT(*) FROM location_reminder_anchors").fetchone()[0] == 0
+            finally:
+                conn.close()
+
+    def test_creation_requires_a_fresh_live_location(self):
+        import config as cfg
+        import tools.system as system
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "astakos_state.db")
+            gps_path = os.path.join(tmp, "last_location.json")
+            _make_reminders_db(db_path, [])
+            with open(gps_path, "w", encoding="utf-8") as location_file:
+                location_file.write('{"lat": 40.0, "lon": 22.0, "timestamp": 0}')
+
+            with (
+                patch.object(system, "STATE_DB", db_path),
+                patch.object(cfg, "GPS_STORAGE_FILE", gps_path),
+            ):
+                response = system.set_local_reminder.invoke(
+                    {"task": "buy milk", "location": "leave_current_location"}
+                )
+
+            assert "live" in response.lower()
+            assert _row_status(db_path, "buy milk") is None
+
+    def test_creation_saves_current_location_anchor(self):
+        import time
+        import config as cfg
+        import tools.system as system
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "astakos_state.db")
+            gps_path = os.path.join(tmp, "last_location.json")
+            _make_reminders_db(db_path, [])
+            with open(gps_path, "w", encoding="utf-8") as location_file:
+                location_file.write(
+                    '{"lat": 40.123, "lon": 22.456, "timestamp": ' + str(time.time()) + '}'
+                )
+
+            with (
+                patch.object(system, "STATE_DB", db_path),
+                patch.object(cfg, "GPS_STORAGE_FILE", gps_path),
+            ):
+                system.set_local_reminder.invoke(
+                    {"task": "buy milk", "location": "leave_current_location"}
+                )
+
+            conn = sqlite3.connect(db_path)
+            try:
+                reminder_id, reminder_time = conn.execute(
+                    "SELECT id, time FROM reminders WHERE task=?", ("buy milk",)
+                ).fetchone()
+                anchor = conn.execute(
+                    "SELECT anchor_lat, anchor_lon FROM location_reminder_anchors WHERE reminder_id=?",
+                    (reminder_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+
+            assert reminder_time == "loc:leave_current_location"
+            assert anchor == (40.123, 22.456)
+
+
 class TestMainReminderWorker:
 
     def _run(self, db_rows, monkeypatch):
