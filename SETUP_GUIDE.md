@@ -112,14 +112,14 @@ Vertex AI in Docker requires a real Google service-account JSON file that is mou
 1. In Google Cloud Console, create or choose a service account for Vertex AI.
 2. Grant it the access your project needs for Vertex AI.
 3. Create a **JSON** key for that service account and download it.
-4. In the same folder as `docker-compose.release.yml`, create a local folder named `credentials/`.
+4. In the same folder as the Compose file you started, create a local folder named `credentials/`.
 5. Copy the downloaded JSON file into that folder, for example:
 
 ```text
 credentials/vertex-service-account.json
 ```
 
-6. The included `docker-compose.release.yml` already mounts `./credentials` into the container as `/app/credentials`.
+6. The source Docker Compose setup maps the project folder to `/app`, and `docker-compose.release.yml` mounts `./credentials` explicitly. In either setup, the credentials folder is available in the container as `/app/credentials`.
 
 7. Then provide:
 
