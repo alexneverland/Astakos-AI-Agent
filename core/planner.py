@@ -20,6 +20,38 @@ def _planner_pending_user_key(state) -> str:
     return f"{channel}:{user_id}"
 
 
+def is_plan_confirmation_message(message: str) -> bool:
+    """Return whether the message is an exact configured plan confirmation."""
+    from core.utils import clean_message
+
+    normalized = clean_message(message)
+    normalized = re.sub(r"^\[\d{1,2}:\d{2}\]\s*", "", normalized).strip().lower()
+    normalized = normalized.rstrip("!.;").strip()
+    confirm_words = config.NLP_CONFIG.get("intents", {}).get("confirm_words", [])
+    return normalized in confirm_words
+
+
+def is_fresh_pending_plan_confirmation(message: str, pending: dict | None) -> bool:
+    """Return whether an exact confirmation applies to a fresh pending plan."""
+    if not pending or not is_plan_confirmation_message(message):
+        return False
+
+    from memory.pending_plans import is_pending_plan_fresh
+
+    return is_pending_plan_fresh(pending.get("created_at"))
+
+
+def get_fresh_pending_plan_confirmation(state: dict, message: str) -> dict | None:
+    """Load a pending plan only when the message safely confirms it."""
+    if not is_plan_confirmation_message(message):
+        return None
+
+    from memory.pending_plans import get_pending_plan
+
+    pending = get_pending_plan(user_id=_planner_pending_user_key(state))
+    return pending if is_fresh_pending_plan_confirmation(message, pending) else None
+
+
 # ────────────────────────────────────────────────────────────────
 # Planner Node — creates a task list from a goal
 # ────────────────────────────────────────────────────────────────
@@ -237,7 +269,10 @@ def pre_check_node(state):
         return {}
 
     # ── Confirmation ──────────────────────────────────────────────
-    if last_msg in config.NLP_CONFIG.get("intents", {}).get("confirm_words", []) or last_msg_norm in config.NLP_CONFIG.get("intents", {}).get("confirm_words", []):
+    if is_plan_confirmation_message(last_msg):
+        if not is_fresh_pending_plan_confirmation(last_msg, pending):
+            print("\033[90m[PreCheck]: Stale pending plan confirmation ignored\033[0m")
+            return {}
         try:
             clear_pending_plan(user_id=pending_user_key)
             print(f"\033[95m[PreCheck]: ✅ Plan confirmed — {len(pending['tasks'])} steps\033[0m")
