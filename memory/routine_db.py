@@ -13,6 +13,7 @@ import config
 
 DB_PATH      = config.ROUTINES_DB
 db_write_lock = threading.Lock()  # Serializes writes — lock-free reads (WAL mode)
+ROUTINE_DB_BUSY_TIMEOUT_MS = 5000
 
 # ────────────────────────────────────────────────────────────────
 # CANONICALIZATION LAYER
@@ -91,19 +92,29 @@ def _embedding_similarity(text_a: str, text_b: str) -> float:
 
 def get_connection(write: bool = False):
     """
-    Returns an SQLite connection in WAL mode (graceful fallback if not supported).
-    check_same_thread=False for multi-thread safety.
+    Returns a routine DB connection with a bounded SQLite lock wait.
+    WAL is configured once during database setup, not on every connection.
     """
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=ROUTINE_DB_BUSY_TIMEOUT_MS / 1000,
+        check_same_thread=False,
+    )
+    conn.execute(f"PRAGMA busy_timeout={ROUTINE_DB_BUSY_TIMEOUT_MS}")
+    return conn
+
+
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Best-effort one-time WAL setup for the routine database."""
     try:
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=3000")
     except sqlite3.Error:
-        pass  # Fallback: default journal mode (e.g., network drive, read-only fs)of
-    return conn
+        pass
+
 
 def setup_db():
     conn   = get_connection()
+    _enable_wal(conn)
     cursor = conn.cursor()
 
     cursor.execute('''
