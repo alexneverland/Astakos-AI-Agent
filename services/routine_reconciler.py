@@ -509,9 +509,7 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
       - state:kid1:outing = done (for the rest of today)
     Only applies if there is already an active outing/out-of-home context.
     """
-    has_home = _contains_any(normalized, _inline.get("home", []))
-    has_presence = _contains_any(normalized, _PRESENT_LIVE_TOKENS + _RETURN_TOKENS + _inline.get("home_presence", []))
-    if not (has_home and has_presence):
+    if not _contains_any(normalized, _HOME_RETURN_TOKENS):
         return []
 
     from memory.routine_db import get_context_state

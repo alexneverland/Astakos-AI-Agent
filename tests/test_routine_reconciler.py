@@ -789,6 +789,28 @@ def test_llm_candidates_merge_with_rule_candidates_without_duplicates(monkeypatc
     assert len(fps) == len(set(fps))
 
 
+def test_return_home_from_outing_ignores_future_return_after_departure():
+    from services.routine_reconciler import _normalize, _rule_return_home_from_outing
+
+    now = datetime(2026, 7, 23, 9, 0)
+
+    with patch(
+        "memory.routine_db.get_context_state",
+        side_effect=lambda key: {"value": "true"} if key == "user_out_of_home" else None,
+    ):
+        directives = _rule_return_home_from_outing(
+            normalized=_normalize(
+                "Καλημέρα φίλε μόλις τελείωσα τις δουλίτσες στο σπίτι, "
+                "καθάρισα τον κούνελο και τώρα πάω λαϊκή. "
+                "Θα λέμε όταν γυρίσω από τη λαϊκή."
+            ),
+            dates=[],
+            now=now,
+        )
+
+    assert directives == []
+
+
 def test_return_home_from_outing_requires_active_out_of_home_context():
     from services.routine_reconciler import _rule_return_home_from_outing
 
