@@ -6,6 +6,7 @@ Please always use the latest version of Astakos for security updates.
 
 | Version | Supported          |
 | ------- | ------------------ |
+| v2.2.x  | :white_check_mark: |
 | v2.1.x  | :white_check_mark: |
 | v2.0.x  | :white_check_mark: |
 | < 2.0   | :x:                |

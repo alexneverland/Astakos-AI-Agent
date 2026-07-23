@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- Mail reply evaluation can now read the relevant email thread before assessing a draft response.
+- Stale confirmations no longer execute an older pending plan.
+- Routine SQLite connections are refreshed safely to reduce intermittent database-lock failures.
+- A future statement about returning home no longer clears the active outing state; explicit return-home phrases still do.
+- A Messenger send request without an active draft now returns the canonical inactive-draft response instead of retrying into a new draft flow.
+
 ## [v2.0.0] — 2026-07-15
 
 **Released: 2026-07-15**
