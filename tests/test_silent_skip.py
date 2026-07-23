@@ -106,6 +106,7 @@ def _stub_modules():
     sm._maybe_trigger_auto_session_summary = MagicMock()
     pf = sys.modules["memory.pending_followups"]
     pf.ensure_pending_followups_table = lambda: None
+    pf.find_pending_followups = lambda *a, **k: []
     pf.maybe_create_followup_from_exchange = lambda *a, **k: None
     pf.maybe_resolve_followups_from_user_message = lambda *a, **k: 0
     pf.looks_like_followup_resolution_update = lambda *a, **k: False
