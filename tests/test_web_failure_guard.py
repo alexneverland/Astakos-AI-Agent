@@ -298,7 +298,7 @@ def test_parse_linkedin_draft_result_detects_json_payload():
     assert looks_like_terminal_linkedin_draft_result(raw) is True
 
 
-def test_web_agent_recovers_from_stale_messenger_send_without_draft(monkeypatch, tmp_path):
+def test_web_agent_returns_inactive_draft_reply_without_retrying_stale_send(monkeypatch, tmp_path):
     import config
     from core.agents import web_agent_node
     from langchain_core.messages import AIMessage, HumanMessage
@@ -326,15 +326,11 @@ def test_web_agent_recovers_from_stale_messenger_send_without_draft(monkeypatch,
             )
 
     class FakeLLM:
-        def __init__(self):
-            self.recovery_calls = 0
-
         def bind_tools(self, tools):
             return FakeBoundLLM()
 
         def invoke(self, messages):
-            self.recovery_calls += 1
-            return AIMessage(content="Ωραία, να περάσετε όμορφα απόψε.")
+            raise AssertionError("stale Messenger send must not retry the LLM")
 
     fake_llm = FakeLLM()
     monkeypatch.setattr("core.agents.llm", fake_llm)
@@ -345,8 +341,7 @@ def test_web_agent_recovers_from_stale_messenger_send_without_draft(monkeypatch,
     })
 
     reply = result["messages"][-1]
-    assert fake_llm.recovery_calls == 1
-    assert reply.content == "Ωραία, να περάσετε όμορφα απόψε."
+    assert reply.content == t("prompts.ext_str_14")
     assert not getattr(reply, "tool_calls", [])
 
 
