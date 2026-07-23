@@ -884,23 +884,43 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         is_ultra_ack = is_ultra_light_ack(isolated_user_input)
         tool_result_fallbacks = []
 
+        from core.planner import get_fresh_pending_plan_confirmation
+
+        pending_plan_confirmation = bool(
+            get_fresh_pending_plan_confirmation(
+                {"channel": "web"},
+                isolated_user_input,
+            )
+        )
+        _trace.mark_phase(
+            "pending_plan_confirmation_active",
+            1 if pending_plan_confirmation else 0,
+        )
+
         mail_prompt_active = is_reply_to_recent_mail_prompt(context_msgs)
         linkedin_prompt_active = is_reply_to_recent_linkedin_prompt(context_msgs)
 
-        if is_ultra_ack and not mail_prompt_active:
+        if is_ultra_ack and not mail_prompt_active and not pending_plan_confirmation:
             _trace.mark_phase("ultra_light_ack_used", 1)
             final_ai_response = get_ultra_light_ack_response()
             handling_agent = "UltraLightACK"
             print(f"\033[92m[Web->UltraLightACK]: Instant reply in '{isolated_user_input}'\033[0m")
         else:
             medium_path_used = is_medium_web_chat_path_candidate(isolated_user_input)
-            fast_path_used = (not medium_path_used) and is_simple_chat_fast_path_candidate(isolated_user_input)
+            fast_path_used = (
+                not pending_plan_confirmation
+                and not medium_path_used
+                and is_simple_chat_fast_path_candidate(isolated_user_input)
+            )
             _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
             _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
             _trace.mark_phase("medium_path_candidate", 1 if medium_path_used else 0)
             _trace.mark_phase("medium_path_used", 1 if medium_path_used else 0)
 
-            if fast_path_used:
+            if pending_plan_confirmation:
+                limit = 100
+                messages_for_graph = context_msgs + [human_msg]
+            elif fast_path_used:
                 limit = 12
                 messages_for_graph = context_msgs[-6:] + [human_msg]
             elif medium_path_used:
