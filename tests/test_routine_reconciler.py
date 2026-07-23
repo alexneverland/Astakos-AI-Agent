@@ -811,6 +811,25 @@ def test_return_home_from_outing_ignores_future_return_after_departure():
     assert directives == []
 
 
+def test_return_home_from_outing_keeps_legacy_explicit_return_phrases():
+    from services.routine_reconciler import _normalize, _rule_return_home_from_outing
+
+    now = datetime(2026, 7, 23, 9, 0)
+
+    for message in ("Γύρισα σπίτι.", "Φτάσαμε σπίτι."):
+        with patch(
+            "memory.routine_db.get_context_state",
+            side_effect=lambda key: {"value": "true"} if key == "user_out_of_home" else None,
+        ):
+            directives = _rule_return_home_from_outing(
+                normalized=_normalize(message),
+                dates=[],
+                now=now,
+            )
+
+        assert [directive["value"] for directive in directives] == ["false"]
+
+
 def test_return_home_from_outing_requires_active_out_of_home_context():
     from services.routine_reconciler import _rule_return_home_from_outing
 
