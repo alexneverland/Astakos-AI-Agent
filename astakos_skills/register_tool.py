@@ -8,6 +8,8 @@ import json
 import re
 import difflib
 import ast
+import stat
+import tempfile
 from langchain_core.tools import tool
 from core.i18n import t
 
@@ -74,6 +76,90 @@ def _validate_skill_tool(skill_path: str, tool_name: str) -> str:
         return f"Only one @tool function is allowed. Extra tools: {', '.join(extra_tools)}."
 
     return ""
+
+
+def _safe_apply_all(
+    targets: list[tuple[str, bytes, bytes]],
+) -> str | None:
+    """Apply file writes with rollback on failure.
+
+    Each target is (path, original_bytes, new_bytes).
+    Skips targets where original == new (no change needed).
+
+    Before any disk write:
+      - .py files are validated with ast.parse
+      - .json files are validated with json.loads
+
+    Writes use a temp-file + os.replace strategy for safety on Windows.
+    If any write fails, every already-written target is restored from
+    its captured original_bytes.
+
+    Returns None on success, or a human-readable error string on failure.
+    """
+    # ── Pre-validate all proposed contents ───────────────────────
+    for path, _orig, new_bytes in targets:
+        if _orig == new_bytes:
+            continue  # no change, skip validation
+        try:
+            content_str = new_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            return f"Validation failed for {path}: {exc}"
+        if path.endswith(".py"):
+            try:
+                ast.parse(content_str)
+            except SyntaxError as exc:
+                return (
+                    f"Validation failed for {path}: "
+                    f"syntax error on line {exc.lineno}: {exc.msg}"
+                )
+        elif path.endswith(".json"):
+            try:
+                json.loads(content_str)
+            except json.JSONDecodeError as exc:
+                return f"Validation failed for {path}: invalid JSON: {exc}"
+
+    # ── Apply writes with rollback ──────────────────────────────
+    def replace_bytes(path: str, content: bytes, *, prefix: str) -> None:
+        original_mode = stat.S_IMODE(os.stat(path).st_mode)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=os.path.dirname(path), prefix=prefix, suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "wb") as temp_file:
+                temp_file.write(content)
+            os.chmod(tmp_path, original_mode)
+            os.replace(tmp_path, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+    written: list[tuple[str, bytes]] = []  # (path, original_bytes) for rollback
+    try:
+        for path, orig_bytes, new_bytes in targets:
+            if orig_bytes == new_bytes:
+                continue
+            replace_bytes(path, new_bytes, prefix=".register_tool_")
+            written.append((path, orig_bytes))
+    except Exception as exc:
+        # ── Rollback every file already written ─────────────────
+        rollback_errors: list[str] = []
+        for rb_path, rb_bytes in written:
+            try:
+                replace_bytes(rb_path, rb_bytes, prefix=".register_tool_rb_")
+            except Exception as rb_exc:
+                rollback_errors.append(f"{rb_path}: {rb_exc}")
+        msg = f"Registration failed: {exc}. Changes were rolled back."
+        if rollback_errors:
+            msg = (
+                f"Registration failed: {exc}. Rollback could not fully restore "
+                "all targets: " + "; ".join(rollback_errors)
+            )
+        return msg
+
+    return None  # success
 
 
 @tool
@@ -263,16 +349,41 @@ def register_tool(
         )
 
     if not dry_run:
-        if risk_content != risk_original:
-            risk_content = risk_content.replace("\r\n", "\n").replace("\n", "\r\n")
-            with open(risk_path, "wb") as f:
-                f.write(risk_content.encode("utf-8"))
-        if registry_new_content and registry_new_content != registry_content:
-            with open(registry_path, "w", encoding="utf-8") as f:
-                f.write(registry_new_content)
-        sys_content = sys_content.replace("\r\n", "\n").replace("\n", "\r\n")
-        with open(sys_path, "wb") as f:
-            f.write(sys_content.encode("utf-8"))
+        # Read original bytes from disk for rollback
+        with open(risk_path, "rb") as f:
+            risk_orig_bytes = f.read()
+        with open(registry_path, "rb") as f:
+            registry_orig_bytes = f.read()
+        with open(sys_path, "rb") as f:
+            sys_orig_bytes = f.read()
+
+        # Preserve exact source bytes for targets whose logical content is unchanged.
+        risk_final = (
+            risk_orig_bytes
+            if risk_content == risk_original
+            else risk_content.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
+        )
+        registry_final = (
+            registry_orig_bytes
+            if registry_new_content == registry_content
+            else registry_new_content.encode("utf-8")
+        )
+        sys_final = (
+            sys_orig_bytes
+            if sys_content == sys_original
+            else sys_content.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
+        )
+
+        apply_error = _safe_apply_all([
+            (risk_path, risk_orig_bytes, risk_final),
+            (registry_path, registry_orig_bytes, registry_final),
+            (sys_path, sys_orig_bytes, sys_final),
+        ])
+        if apply_error:
+            return (
+                f"🔧 register_tool: '{tool_name}'\n"
+                f"❌ {apply_error}"
+            )
 
     summary = "\n".join(results)
     mode = "DRY RUN " if dry_run else ""
