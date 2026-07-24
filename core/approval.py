@@ -93,6 +93,13 @@ PENDING_FILE = os.path.join(
 # Pending actions older than this are considered expired and are automatically removed.
 PENDING_TTL_SECONDS: int = 3600  # 60 minutes
 
+# CRITICAL tools that always require per-action Telegram approval,
+# even inside an approved plan (plan_active=True).
+PLAN_PER_ACTION_APPROVAL_TOOLS: frozenset[str] = frozenset({
+    "run_terminal_command",  # arbitrary OS commands
+    "register_tool",        # permanently modifies system.py + tool_risk.py + capability_registry.json
+})
+
 # ────────────────────────────────────────────────────────────────
 # Pending approval store
 # ────────────────────────────────────────────────────────────────
@@ -283,10 +290,11 @@ def approval_check_node(state):
     # ── Plan mode bypass ───────────────────────────────────────────
     # If we are executing a step of an approved plan, CRITICAL tools are executed
     # without extra Telegram confirmation — the user already approved the plan.
-    # Excluded: run_terminal_command (always requires explicit approval).
+    # Tools in PLAN_PER_ACTION_APPROVAL_TOOLS always require per-action
+    # Telegram approval, even inside an approved plan.
     if critical_calls and state.get("plan_active"):
-        bypassed = [tc for tc in critical_calls if tc["name"] != "run_terminal_command"]
-        still_critical = [tc for tc in critical_calls if tc["name"] == "run_terminal_command"]
+        bypassed = [tc for tc in critical_calls if tc["name"] not in PLAN_PER_ACTION_APPROVAL_TOOLS]
+        still_critical = [tc for tc in critical_calls if tc["name"] in PLAN_PER_ACTION_APPROVAL_TOOLS]
         if bypassed:
             print(f"\033[93m[Approval]: 📋 Plan mode — bypassing CRITICAL approval for: "
                   f"{[tc['name'] for tc in bypassed]}\033[0m")
