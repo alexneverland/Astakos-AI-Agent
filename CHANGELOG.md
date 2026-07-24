@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v2.3.1] — 2026-07-24
+
+**Released: 2026-07-24**
+
+### Fixed
+
+- Release metadata now matches the installed version, preventing false update notices after installation.
+
 ## [v2.3.0] — 2026-07-24
 
 **Released: 2026-07-24**
