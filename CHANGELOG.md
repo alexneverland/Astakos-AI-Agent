@@ -7,6 +7,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v2.3.0] — 2026-07-24
+
+**Released: 2026-07-24**
+
+### Added
+
+- Location reminders can now use the current live GPS point as an anchor and fire after the user leaves that place.
+
+### Changed
+
+- Restored Gemini 3.5 Flash as the fast model for the Gemini and Vertex paths.
+
 ### Fixed
 
 - Mail reply evaluation can now read the relevant email thread before assessing a draft response.
@@ -14,6 +26,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Routine SQLite connections are refreshed safely to reduce intermittent database-lock failures.
 - A future statement about returning home no longer clears the active outing state; explicit return-home phrases still do.
 - A Messenger send request without an active draft now returns the canonical inactive-draft response instead of retrying into a new draft flow.
+- Ultra-light Telegram acknowledgements no longer fail before replying.
+- Correcting a reminder now updates the existing reminder instead of adding a duplicate; same-task reminders at different times remain supported.
 
 ## [v2.0.0] — 2026-07-15
 
