@@ -58,7 +58,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build release image for smoke test
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.release
@@ -78,7 +78,7 @@ jobs:
             -lc "printf '{}' > /tmp/fake-vertex.json && cd /opt/astakos && python -c 'import api.server; print(\"release-smoke-ok\")'"
 
       - name: Build and push release image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.release
