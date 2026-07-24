@@ -2134,7 +2134,6 @@ def handle_message(user_text: str, chat_id: str):
                         # [MASTRO-FIX]: Skip intermediate tool-call steps
                         if getattr(last_msg, "tool_calls", None):
                             continue
-                        from core.utils import clean_message
                         candidate_raw = clean_message(last_msg.content)
                         # Skip tool-call announcement strings (internal debug output)
                         if candidate_raw and not candidate_raw.startswith(t("clients.telegram_bot.bot_msg_78c917")):
