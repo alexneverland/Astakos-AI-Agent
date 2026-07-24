@@ -58,6 +58,61 @@ def test_ultra_light_ack_response_is_neutral_confirmation():
 from unittest.mock import patch
 
 
+def test_handle_message_ultra_light_ack_sends_reply_without_graph(monkeypatch):
+    import clients.telegram_bot as bot
+    import core.utils as utils
+    import memory.execution_trace as execution_trace
+    import memory.pending_assets as pending_assets
+    import tools.telegram as telegram
+
+    class DummyTrace:
+        def __init__(self, **_kwargs):
+            self.agent = ""
+
+        def mark_phase(self, *_args):
+            pass
+
+        def process_event(self, *_args):
+            pass
+
+        def finalize(self, **_kwargs):
+            pass
+
+        def save(self):
+            pass
+
+    sent = []
+    monkeypatch.setattr(bot, "pending_routine_confirmations", {})
+    monkeypatch.setattr(bot, "pending_reflection_confirmations", {})
+    monkeypatch.setattr(bot, "pending_exec_command", None)
+    monkeypatch.setattr(bot, "pending_photo", None)
+    monkeypatch.setattr(bot, "_safe_active_draft_status", lambda: (False, "missing", None))
+    monkeypatch.setattr(bot, "_safe_classify_messenger_intent", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bot, "_build_fast_chat_context", lambda _text: ([], object()))
+    monkeypatch.setattr(bot, "_append_to_analytics_log", lambda *_args: None)
+    monkeypatch.setattr(bot, "_cache_bot_message", lambda *_args: None)
+    monkeypatch.setattr(bot, "enqueue_fast_task", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bot, "enqueue_slow_task", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        bot.threading,
+        "Thread",
+        lambda *_args, **_kwargs: type("Thread", (), {"start": lambda self: None})(),
+    )
+    monkeypatch.setattr(bot.graph, "stream", lambda *_args, **_kwargs: pytest.fail("graph must not run"))
+    monkeypatch.setattr(pending_assets, "clear_expired_pending_assets", lambda: None)
+    monkeypatch.setattr(pending_assets, "get_latest_pending_asset", lambda *_args: None)
+    monkeypatch.setattr(execution_trace, "ExecutionTrace", DummyTrace)
+    monkeypatch.setattr(utils, "is_ultra_light_ack", lambda _text: True)
+    monkeypatch.setattr(utils, "get_ultra_light_ack_response", lambda: "ACK")
+    monkeypatch.setattr(utils, "is_reply_to_recent_mail_prompt", lambda _history: False)
+    monkeypatch.setattr(utils, "is_reply_to_recent_linkedin_prompt", lambda _history: False)
+    monkeypatch.setattr(telegram, "send_telegram_msg", lambda message: sent.append(message) or 1)
+
+    bot.handle_message("ok", "user123")
+
+    assert sent == ["ACK"]
+
+
 @patch("memory.pending_assets.get_latest_pending_asset", return_value=None)
 @patch("memory.pending_assets.clear_expired_pending_assets")
 @patch("core.messenger_draft.active_draft_status", return_value=(False, "missing", None))
