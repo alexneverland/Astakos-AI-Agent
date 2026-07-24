@@ -52,6 +52,69 @@ def _row_status(db_path, task):
         conn.close()
 
 
+def _pending_reminder_rows(db_path):
+    conn = sqlite3.connect(db_path)
+    try:
+        return conn.execute(
+            "SELECT task, time FROM reminders WHERE status='pending' ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+class TestReminderCreateAndUpdate:
+
+    def _invoke(self, rows, payload):
+        import tools.system as system
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "astakos_state.db")
+            _make_reminders_db(db_path, rows)
+            with patch.object(system, "STATE_DB", db_path):
+                response = system.set_local_reminder.invoke(payload)
+            return response, _pending_reminder_rows(db_path)
+
+    def test_update_replaces_a_matching_reminder_without_creating_a_second_row(self):
+        response, pending = self._invoke(
+            [{"task": "Αγορά από ψιλικατζίδικο: ξινό νερό", "time": "2099-01-01 18:00"}],
+            {
+                "action": "update",
+                "match_task": "Αγορά από ψιλικατζίδικο: ξινό νερό",
+                "task": "Αγορά από το Ξινό Νερό: οινόπνευμα και τσίπουρο",
+            },
+        )
+
+        assert "ενημερώθηκε" in response.lower()
+        assert pending == [("Αγορά από το Ξινό Νερό: οινόπνευμα και τσίπουρο", "2099-01-01 18:00")]
+
+    def test_add_keeps_same_task_at_a_different_time_and_reports_existing_one(self):
+        response, pending = self._invoke(
+            [{"task": "Κομμωτήριο", "time": "2099-01-01 08:00"}],
+            {"task": "Κομμωτήριο", "exact_time": "2099-01-01 09:00"},
+        )
+
+        assert "υπήρχε ήδη" in response.lower()
+        assert pending == [
+            ("Κομμωτήριο", "2099-01-01 08:00"),
+            ("Κομμωτήριο", "2099-01-01 09:00"),
+        ]
+
+    def test_update_stops_when_match_task_is_ambiguous(self):
+        response, pending = self._invoke(
+            [
+                {"task": "Κομμωτήριο", "time": "2099-01-01 08:00"},
+                {"task": "Κομμωτήριο", "time": "2099-01-01 09:00"},
+            ],
+            {"action": "update", "match_task": "Κομμωτήριο", "task": "Κομμωτήριο Άννας"},
+        )
+
+        assert "πολλές" in response.lower()
+        assert pending == [
+            ("Κομμωτήριο", "2099-01-01 08:00"),
+            ("Κομμωτήριο", "2099-01-01 09:00"),
+        ]
+
+
 # ────────────────────────────────────────────────────────────────
 # clients.telegram_bot.job_check_reminders()
 # ────────────────────────────────────────────────────────────────
@@ -471,6 +534,55 @@ class TestLeaveCurrentLocationReminders:
                 conn.close()
 
             assert reminder_time == "loc:leave_current_location"
+            assert anchor == (40.123, 22.456)
+
+    def test_update_keeps_existing_leave_current_location_anchor(self):
+        import tools.system as system
+        from memory.location_reminders import save_leave_current_location_anchor
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "astakos_state.db")
+            _make_reminders_db(
+                db_path,
+                [{"task": "Αγορά από ψιλικατζίδικο", "time": "loc:leave_current_location"}],
+            )
+            conn = sqlite3.connect(db_path)
+            try:
+                reminder_id = conn.execute("SELECT id FROM reminders").fetchone()[0]
+                save_leave_current_location_anchor(
+                    conn,
+                    reminder_id=reminder_id,
+                    anchor_lat=40.123,
+                    anchor_lon=22.456,
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            with patch.object(system, "STATE_DB", db_path):
+                response = system.set_local_reminder.invoke(
+                    {
+                        "action": "update",
+                        "match_task": "Αγορά από ψιλικατζίδικο",
+                        "task": "Αγορά από το ψιλικατζίδικο Ξινό Νερό",
+                    }
+                )
+
+            assert "ενημερώθηκε" in response.lower()
+            conn = sqlite3.connect(db_path)
+            try:
+                updated_id, updated_time = conn.execute(
+                    "SELECT id, time FROM reminders"
+                ).fetchone()
+                anchor = conn.execute(
+                    "SELECT anchor_lat, anchor_lon FROM location_reminder_anchors WHERE reminder_id=?",
+                    (updated_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+
+            assert updated_id == reminder_id
+            assert updated_time == "loc:leave_current_location"
             assert anchor == (40.123, 22.456)
 
 

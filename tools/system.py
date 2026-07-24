@@ -644,10 +644,7 @@ def _normalize_reminder_text(text: str) -> str:
     value = re.sub(r"\s+", " ", value).strip()
     return value
 
-def _same_pending_reminder(existing_task: str, new_task: str, existing_time: str, new_time: str) -> bool:
-    if str(existing_time or "").strip() != str(new_time or "").strip():
-        return False
-
+def _same_reminder_task(existing_task: str, new_task: str) -> bool:
     a = _normalize_reminder_text(existing_task)
     b = _normalize_reminder_text(new_task)
 
@@ -668,12 +665,28 @@ def _same_pending_reminder(existing_task: str, new_task: str, existing_time: str
 
     return overlap >= max(2, min_len)
 
+
+def _same_pending_reminder(existing_task: str, new_task: str, existing_time: str, new_time: str) -> bool:
+    return (
+        str(existing_time or "").strip() == str(new_time or "").strip()
+        and _same_reminder_task(existing_task, new_task)
+    )
+
 @tool
-def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = None, action: str = "add", location: str = None) -> str:
+def set_local_reminder(
+    task: str,
+    minutes_from_now: int = 0,
+    exact_time: str = None,
+    action: str = "add",
+    location: str = None,
+    match_task: str = None,
+) -> str:
     """
     Manages local reminders.
-    action: 'add' (new), 'read' (read pending ONLY), 'done' (completion)
-    task: For 'add' → description. For 'done' → keyword of the reminder being completed.
+    action: 'add' (new), 'read' (read pending ONLY), 'done' (completion), 'update' (correct text)
+    task: For 'add'/'update' → description. For 'done' → keyword of the reminder being completed.
+    match_task: For 'update' → the current reminder description to replace. Read first;
+                if multiple pending reminders match, ask the user to clarify rather than guessing.
     location: ONLY for location-based reminders. Use 'home' for arrival home,
               or 'leave_current_location' to trigger after leaving the current place.
               When location is provided, DO NOT provide minutes_from_now or exact_time.
@@ -717,6 +730,38 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             conn.commit()
             return t("tools.system.reminders_done_success", task=task)
 
+        elif action == "update":
+            if not match_task:
+                return t("tools.system.reminders_update_req_match")
+
+            cursor.execute("SELECT id, task, time FROM reminders WHERE status='pending'")
+            matches = [
+                row for row in cursor.fetchall()
+                if _same_reminder_task(row[1], match_task)
+            ]
+            if not matches:
+                return t("tools.system.reminders_update_not_found", task=match_task)
+            if len(matches) > 1:
+                options = "\n".join(f"• [{tm}] {existing_task}" for _, existing_task, tm in matches)
+                return t("tools.system.reminders_update_ambiguous", options=options)
+
+            reminder_id, _, reminder_time = matches[0]
+            cursor.execute(
+                "SELECT task FROM reminders WHERE status='pending' AND id != ? AND time = ?",
+                (reminder_id, reminder_time),
+            )
+            for (existing_task,) in cursor.fetchall():
+                if _same_reminder_task(existing_task, task):
+                    return t(
+                        "tools.system.reminders_add_exists",
+                        target_time=reminder_time,
+                        existing_task=existing_task,
+                    )
+
+            cursor.execute("UPDATE reminders SET task=? WHERE id=?", (task, reminder_id))
+            conn.commit()
+            return t("tools.system.reminders_update_success", task=task)
+
         # ── ADD: New reminder ─────────────────────────────────
         else:
             from datetime import datetime, timedelta
@@ -753,9 +798,12 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             cursor.execute("SELECT id, task, time FROM reminders WHERE status='pending'")
             pending_rows = cursor.fetchall()
 
+            related_reminders = []
             for rid, existing_task, existing_time in pending_rows:
                 if _same_pending_reminder(existing_task, task, existing_time, target_time):
                     return t("tools.system.reminders_add_exists", target_time=target_time, existing_task=existing_task)
+                if _same_reminder_task(existing_task, task):
+                    related_reminders.append((existing_task, existing_time))
 
             cursor.execute(
                 "INSERT INTO reminders (task, time, status) VALUES (?, ?, 'pending')",
@@ -772,9 +820,20 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
 
             if location:
                 if location == LEAVE_CURRENT_LOCATION:
-                    return t("tools.system.reminders_add_success_leave_current")
-                return t("tools.system.reminders_add_success_loc", location=location)
-            return t("tools.system.reminders_add_success_time", target_time=target_time)
+                    response = t("tools.system.reminders_add_success_leave_current")
+                else:
+                    response = t("tools.system.reminders_add_success_loc", location=location)
+            else:
+                response = t("tools.system.reminders_add_success_time", target_time=target_time)
+
+            if related_reminders:
+                existing_task, existing_time = related_reminders[0]
+                response += "\n" + t(
+                    "tools.system.reminders_add_related_existing",
+                    existing_task=existing_task,
+                    existing_time=existing_time,
+                )
+            return response
 
     except Exception as e:
         return t("tools.system.reminders_err_generic", e=str(e))
