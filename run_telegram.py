@@ -15,7 +15,8 @@ except Exception:
     pass
 
 WATCH_DIRS = ["clients", "core", "tools", "memory", "services"]
-SHUTDOWN_TIMEOUT_SECONDS = 20
+# 35s poll + bounded drain/Chroma shutdown work + safety margin.
+SHUTDOWN_TIMEOUT_SECONDS = 50
 LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_telegram.lock")
 
 # ────────────────────────────────────────────────────────────────
