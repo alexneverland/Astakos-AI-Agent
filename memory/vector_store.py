@@ -134,6 +134,18 @@ def _refresh_vector_store(reason: str = "") -> bool:
         return False
 
 
+def close_vector_store():
+    """Properly close ChromaDB client to ensure HNSW vectors are flushed."""
+    global vector_store
+    try:
+        if vector_store and hasattr(vector_store, "_client"):
+            vector_store._client.close()
+            print("\033[90m[VectorStore]: ChromaDB client closed gracefully.\033[0m")
+    except Exception as e:
+        print(f"\033[91m[VectorStore]: Error closing ChromaDB: {e}\033[0m")
+
+
+
 def _should_retry_chroma_error(exc: Exception) -> bool:
     text = str(exc or "")
     lowered = text.lower()
