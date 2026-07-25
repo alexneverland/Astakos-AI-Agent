@@ -4910,6 +4910,8 @@ if __name__ == "__main__":
 
     _signal.signal(_signal.SIGTERM, _handle_exit)
     _signal.signal(_signal.SIGINT,  _handle_exit)
+    if hasattr(_signal, "SIGBREAK"):
+        _signal.signal(_signal.SIGBREAK, _handle_exit)
 
     threading.Thread(target=fast_queue_worker, daemon=True).start()
     threading.Thread(target=slow_queue_worker, daemon=True).start()
@@ -4983,10 +4985,8 @@ if __name__ == "__main__":
             pass
         # Graceful ChromaDB shutdown — wait for any pending writes to finish
         try:
-            from memory.vector_store import vector_lock
-            acquired = vector_lock.acquire(timeout=3)
-            if acquired:
-                vector_lock.release()
+            from memory.vector_store import close_vector_store
+            close_vector_store()
         except Exception:
             pass
         try:

@@ -67,9 +67,16 @@ if __name__ == "__main__":
                 if bot_proc is not None:
                     bot_proc.wait()
             except KeyboardInterrupt:
-                api_proc.terminate()
-                if bot_proc is not None:
-                    bot_proc.terminate()
+                print("\n[Boot]: Graceful shutdown initiated. Waiting up to 10s for child processes...")
+                try:
+                    api_proc.wait(timeout=10)
+                    if bot_proc is not None:
+                        bot_proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    print("\033[93m[Boot]: Timeout waiting for graceful exit. Terminating processes.\033[0m")
+                    api_proc.terminate()
+                    if bot_proc is not None:
+                        bot_proc.terminate()
         else:
             # Start main.py CLI
             subprocess.run([sys.executable, "main.py"])

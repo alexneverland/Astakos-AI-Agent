@@ -263,6 +263,13 @@ def main():
         shutdown_event.set()
     finally:
         shutdown_event.set()
+        
+        try:
+            from memory.vector_store import close_vector_store
+            close_vector_store()
+        except Exception:
+            pass
+            
         _do_session_summary()
 
     print("[System]: Goodbye! 🦞")
