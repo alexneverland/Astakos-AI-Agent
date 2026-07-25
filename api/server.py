@@ -477,13 +477,8 @@ async def lifespan(app: FastAPI):
 
     # Graceful ChromaDB shutdown
     try:
-        from memory.vector_store import vector_lock, close_vector_store
-        acquired = vector_lock.acquire(timeout=5)
-        try:
-            close_vector_store()
-        finally:
-            if acquired:
-                vector_lock.release()
+        from memory.vector_store import close_vector_store
+        close_vector_store()
     except Exception:
         pass
 
