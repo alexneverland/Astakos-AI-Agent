@@ -1662,7 +1662,12 @@
       "restart_notice": "⚡ Ο server θα κάνει auto-restart για να φορτώσει το νέο tool.",
       "msg_invalid_risk": "❌ Μη έγκυρο risk: \\'{risk}\\'. Επίτρεπτα: SAFE, WARNING, NOTIFY, CRITICAL.",
       "msg_file_not_found": "❌ Δεν βρέθηκε το αρχείο: astakos_skills/{tool}.py",
-      "msg_nothing_applied": "❌ Δεν εφαρμόστηκε τίποτα γιατί λείπουν απαραίτητα anchors/δεδομένα:\\n"
+      "msg_nothing_applied": "❌ Δεν εφαρμόστηκε τίποτα γιατί λείπουν απαραίτητα anchors/δεδομένα:\\n",
+      "diff_header": "# Προεπισκόπηση διαφορών για {tool_name}\\n\\n",
+      "diff_saved_info": "\\n\\n[INFO] Το πλήρες diff αποθηκεύτηκε επίσης στο: {diff_file_path}",
+      "diff_saved_warn": "\\n\\n[WARN] Αδυναμία αποθήκευσης diff: {e}",
+      "diff_preview": "\\n\\nΠΡΟΕΠΙΣΚΟΠΗΣΗ DIFF:\\n",
+      "dry_run_footer": "Δεν άλλαξαν αρχεία. Τρέξε ξανά με dry_run=False για εφαρμογή."
     },
     "research_last30days": {
       "timeout": "Σφάλμα: Η έρευνα καθυστέρησε υπερβολικά και διακόπηκε (Timeout 120s).",
@@ -1752,7 +1757,11 @@
     "approval": {
       "req_approval": "🚨 <b>Απαιτείται Έγκριση</b>\n\nTool: <code>{tool_name}</code>\nArgs: <code>{args_prev}</code>\n\nΕκτελώ;",
       "blocked": "🛡️ Η εντολή `{name}` μπλοκαρίστηκε από τον safe executor και δεν μπορεί να εγκριθεί.",
-      "waiting": "⏳ Αναμονή έγκρισης για `{name}`. Σου έστειλα Telegram για επιβεβαίωση."
+      "waiting": "⏳ Αναμονή έγκρισης για `{name}`. Σου έστειλα Telegram για επιβεβαίωση.",
+      "register_tool_hint": "\n\n⚠️ <i>Hint: Ελέγξτε το <code>outputs/draft_diff_*.md</code> artifact για τις πλήρεις αλλαγές κώδικα πριν εγκρίνετε.</i>",
+      "draft_markers": ["φτιαξε draft", "φτιάξε draft", "κανε draft", "δημιουργησε draft"],
+      "draft_revoke_markers": ["μην", "μη", "όχι", "εκτός αν", "αν", "αλλά"],
+      "unauthorized_draft_error": "🛡️ Η εντολή `{name}` μπλοκαρίστηκε: η δημιουργία draft απαιτεί ρητή έγκριση από τον χρήστη στο τελευταίο μήνυμα (π.χ. 'φτιάξε draft')."
     },
     "messenger_draft": {
       "draft_expired": "❌ Σφάλμα: Το προσχέδιο έχει λήξει. Φτιάξε νέο draft πριν στείλω."

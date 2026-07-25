@@ -78,6 +78,18 @@ def _effective_risk(tc: dict) -> str:
         if fname in _CORE:
             return "CRITICAL"
         return "WARNING"
+    if name == "register_tool":
+        args = tc.get("args", {})
+        if not isinstance(args, dict):
+            return "CRITICAL"
+        is_dry = args.get("dry_run", False)
+        # Convert string representations to boolean if needed
+        if isinstance(is_dry, str):
+            is_dry = is_dry.lower() in ["true", "1", "yes", "y", "nai"]
+        if is_dry:
+            return "WARNING"
+        return "CRITICAL"
+
     return _get_risk(name)
 
 def is_critical(tc: dict) -> bool:
@@ -253,6 +265,49 @@ def _save_pending(data: dict):
 # LangGraph node
 # ────────────────────────────────────────────────────────────────
 
+def _has_draft_authorization(state: dict) -> bool:
+    """Return whether the newest user message explicitly authorizes a skill draft.
+
+    Authorization is locale-driven and applies only to the newest HumanMessage.
+    A marker followed by a revocation or condition fails closed, so an LLM cannot
+    treat a qualified or withdrawn request as permission to write a draft.
+    """
+    import re
+
+    from langchain_core.messages import HumanMessage
+    from core.i18n import t
+    from core.utils import clean_message
+
+    messages = state.get("messages", [])
+    # Find the newest HumanMessage
+    for msg in reversed(messages):
+        if getattr(msg, "type", "") == "human" or isinstance(msg, HumanMessage):
+            # Extract normalized text
+            text = clean_message(getattr(msg, "content", "")).strip().casefold()
+            markers = t("core.approval.draft_markers")
+            revoke_markers = t("core.approval.draft_revoke_markers")
+            if not isinstance(markers, list) or not isinstance(revoke_markers, list):
+                return False
+            for marker in markers:
+                if not isinstance(marker, str):
+                    continue
+                marker = marker.strip().casefold()
+                if text == marker:
+                    return True
+                if text.startswith(marker) and len(text) > len(marker):
+                    suffix = text[len(marker):]
+                    if not (suffix[0].isspace() or suffix[0] in (".", "!", ",", ":", ";")):
+                        continue
+                    if any(
+                        isinstance(revoke_marker, str)
+                        and re.search(rf"(?<!\w){re.escape(revoke_marker.casefold())}(?!\w)", suffix)
+                        for revoke_marker in revoke_markers
+                    ):
+                        return False
+                    return True
+            return False
+    return False
+
 def approval_check_node(state):
     """
     Runs before the ToolNode.
@@ -269,13 +324,31 @@ def approval_check_node(state):
     if not tool_calls:
         return {"approval_status": "ok"}
 
-    blocked_calls = [tc for tc in tool_calls if _effective_risk(tc) == "BLOCKED"]
-    if blocked_calls:
+    blocked_entries = [
+        (tc, "core.approval.blocked", "rejected by safe executor")
+        for tc in tool_calls
+        if _effective_risk(tc) == "BLOCKED"
+    ]
+    blocked_call_ids = {tc["id"] for tc, _, _ in blocked_entries}
+
+    # ── Draft Authorization Gate ──────────────────────────────────────
+    # write_custom_tool requires explicit newest-message authorization.
+    # If lacking, we block it exactly like a BLOCKED tool.
+    for tc in tool_calls:
+        if tc["name"] == "write_custom_tool" and tc["id"] not in blocked_call_ids:
+            if not _has_draft_authorization(state):
+                blocked_entries.append((
+                    tc,
+                    "core.approval.unauthorized_draft_error",
+                    "lacks explicit draft authorization",
+                ))
+
+    if blocked_entries:
         tool_messages = []
-        for tc in blocked_calls:
-            print(f"\033[91m[Approval]: 🛡️ BLOCKED — {tc['name']} rejected by safe executor\033[0m")
+        for tc, message_key, reason in blocked_entries:
+            print(f"\033[91m[Approval]: 🛡️ BLOCKED — {tc['name']} {reason}\033[0m")
             tool_messages.append(ToolMessage(
-                content=t("core.approval.blocked", name=tc["name"]),
+                content=t(message_key, name=tc["name"]),
                 tool_call_id=tc["id"],
                 name=tc["name"],
             ))
@@ -378,6 +451,9 @@ def _notify_telegram(tool_call: dict):
 
         from core.i18n import t
         text = t("core.approval.req_approval", tool_name=tool_name, args_prev=args_prev)
+        if tool_name == "register_tool":
+            text += t("core.approval.register_tool_hint")
+
         keyboard = {
             "inline_keyboard": [[
                 {"text": t("clients.telegram_bot.btn_yes"), "callback_data": f"approve:{call_id}"},

@@ -387,9 +387,25 @@ def register_tool(
 
     summary = "\n".join(results)
     mode = "DRY RUN " if dry_run else ""
-    diff_text = ("\n\nDIFF PREVIEW:\n" + "\n\n".join(diffs)) if dry_run and diffs else ""
+
+    diff_text = ""
+    diff_file_path = ""
+    if dry_run and diffs:
+        diff_text = t("skills.register_tool.diff_preview") + "\n\n".join(diffs)
+        # Automatically save the diff to a markdown file for UI review
+        outputs_dir = os.path.join(BASE_DIR, "outputs")
+        diff_file_path = os.path.join(outputs_dir, f"draft_diff_{tool_name}.md")
+        try:
+            os.makedirs(outputs_dir, exist_ok=True)
+            with open(diff_file_path, "w", encoding="utf-8") as f:
+                f.write(t("skills.register_tool.diff_header", tool_name=tool_name))
+                f.write("\n\n".join(diffs))
+            diff_text += t("skills.register_tool.diff_saved_info", diff_file_path=diff_file_path)
+        except Exception as e:
+            diff_text += t("skills.register_tool.diff_saved_warn", e=str(e))
+
     footer = (
-        "No files were changed. Run again with dry_run=False to apply."
+        t("skills.register_tool.dry_run_footer")
         if dry_run else
         t("skills.register_tool.restart_notice")
     )
