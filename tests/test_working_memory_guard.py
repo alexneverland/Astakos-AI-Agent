@@ -54,3 +54,106 @@ def test_update_working_memory_skips_operational_routine_exchange_before_llm():
 
     llm_mock.assert_not_called()
     save_mock.assert_not_called()
+
+
+# ════════════════════════════════════════════════════════════════
+# Regression tests for colon-in-tags bug fix (2026-07-25)
+# The banned marker `": "` was removed because it rejected valid
+# tags like "Shopping: Apple Watch". These tests lock the fix.
+# ════════════════════════════════════════════════════════════════
+
+def test_validate_tags_accepts_colon_in_tag():
+    """Tags with colons (e.g. 'Shopping: Apple Watch') must pass.
+    This was the exact bug — the `': '` banned marker rejected them."""
+    result = wm._validate_working_memory_tags("Shopping: Apple Watch, Checking store hours")
+    assert result == "Shopping: Apple Watch, Checking store hours"
+
+
+def test_validate_tags_accepts_multiple_colon_tags():
+    """Multiple colon-containing tags must pass."""
+    result = wm._validate_working_memory_tags("Task: coding, Mood: focused")
+    assert result == "Task: coding, Mood: focused"
+
+
+def test_validate_tags_accepts_single_colon_tag():
+    """A single colon tag must pass."""
+    result = wm._validate_working_memory_tags("Activity: walking")
+    assert result == "Activity: walking"
+
+
+# ════════════════════════════════════════════════════════════════
+# Rejection rule regression — ensure all other guards still work
+# ════════════════════════════════════════════════════════════════
+
+def test_validate_tags_rejects_empty():
+    assert wm._validate_working_memory_tags("") == ""
+
+
+def test_validate_tags_returns_empty_keyword():
+    assert wm._validate_working_memory_tags("EMPTY") == "EMPTY"
+
+
+def test_validate_tags_rejects_newlines():
+    assert wm._validate_working_memory_tags("Shopping\nWalking") == ""
+
+
+def test_validate_tags_rejects_because():
+    assert wm._validate_working_memory_tags("Shopping because he mentioned it") == ""
+
+
+def test_validate_tags_rejects_the_user():
+    assert wm._validate_working_memory_tags("the user is shopping") == ""
+
+
+def test_validate_tags_rejects_here_are():
+    assert wm._validate_working_memory_tags("Here are the tags") == ""
+
+
+def test_validate_tags_rejects_tags_label():
+    assert wm._validate_working_memory_tags("Tags: shopping, walking") == ""
+
+
+def test_validate_tags_rejects_numbered_list():
+    assert wm._validate_working_memory_tags("1. Shopping") == ""
+
+
+def test_validate_tags_rejects_bullet_list():
+    assert wm._validate_working_memory_tags("- Shopping") == ""
+
+
+def test_validate_tags_rejects_markdown():
+    assert wm._validate_working_memory_tags("```code block```") == ""
+
+
+def test_validate_tags_rejects_more_than_three_tags():
+    assert wm._validate_working_memory_tags("a, b, c, d") == ""
+
+
+def test_validate_tags_rejects_tag_with_too_many_words():
+    """Each tag must be ≤ 4 words."""
+    assert wm._validate_working_memory_tags("this is a very long tag") == ""
+
+
+def test_validate_tags_rejects_tag_over_40_chars():
+    assert wm._validate_working_memory_tags("a" * 41) == ""
+
+
+def test_validate_tags_rejects_special_characters():
+    assert wm._validate_working_memory_tags("Shopping; walking") == ""
+    assert wm._validate_working_memory_tags("Shopping {now}") == ""
+    assert wm._validate_working_memory_tags("Shopping [later]") == ""
+
+
+def test_update_working_memory_saves_colon_tags():
+    """End-to-end: tags with colons should be saved to working memory."""
+    fake_response = _FakeResponse("Shopping: Apple Watch, Checking store hours")
+
+    with patch("memory.working_memory.safe_llm_invoke", return_value=fake_response), \
+         patch("memory.working_memory.memory.save") as save_mock, \
+         patch("memory.working_memory.load_agent_prompt", return_value="{user_context}\n{ai_context}"):
+        wm.update_working_memory("πάμε για ρολόι Apple Watch", "Πάμε!")
+
+    save_mock.assert_called_once_with(
+        memory_type="working",
+        new_tags="Shopping: Apple Watch, Checking store hours",
+    )
