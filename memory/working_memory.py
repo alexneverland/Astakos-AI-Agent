@@ -50,7 +50,6 @@ def _validate_working_memory_tags(raw_text: str) -> str:
         "- ",
         "* ",
         "```",
-        ": ",
     )
     lowered = text.lower()
     if any(marker in lowered for marker in banned_markers):
