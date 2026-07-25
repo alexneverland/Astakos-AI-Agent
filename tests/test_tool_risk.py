@@ -2,6 +2,7 @@
 Tests for core/tool_risk.py — get_risk() and core/approval.py — is_critical().
 """
 import sys, os, json
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime, timedelta
@@ -166,3 +167,32 @@ def test_is_critical_compute_score():
     score = compute_score(meta)
     assert 0.0 <= score <= 1.0
     assert score > 0.5  # high importance/confidence → high score
+def test_register_tool_preview_is_warning_bool():
+    from core.approval import _effective_risk
+    tc = {"name": "register_tool", "args": {"dry_run": True}, "id": "abc"}
+    assert _effective_risk(tc) == "WARNING"
+
+def test_register_tool_preview_is_warning_string():
+    from core.approval import _effective_risk
+    tc = {"name": "register_tool", "args": {"dry_run": "true"}, "id": "abc"}
+    assert _effective_risk(tc) == "WARNING"
+
+def test_register_tool_apply_is_critical_false():
+    from core.approval import _effective_risk
+    tc = {"name": "register_tool", "args": {"dry_run": False}, "id": "abc"}
+    assert _effective_risk(tc) == "CRITICAL"
+
+def test_register_tool_apply_is_critical_false_string():
+    from core.approval import _effective_risk
+    tc = {"name": "register_tool", "args": {"dry_run": "false"}, "id": "abc"}
+    assert _effective_risk(tc) == "CRITICAL"
+
+def test_register_tool_apply_is_critical_missing():
+    from core.approval import _effective_risk
+    tc = {"name": "register_tool", "args": {}, "id": "abc"}
+    assert _effective_risk(tc) == "CRITICAL"
+
+def test_register_tool_apply_is_critical_non_dict():
+    from core.approval import _effective_risk
+    tc = {"name": "register_tool", "args": ["malformed"], "id": "abc"}
+    assert _effective_risk(tc) == "CRITICAL"

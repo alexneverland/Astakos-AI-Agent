@@ -1658,7 +1658,12 @@
       "restart_notice": "⚡ Ο server θα κάνει auto-restart για να φορτώσει το νέο tool.",
       "msg_invalid_risk": "❌ Μη έγκυρο risk: \\'{risk}\\'. Επίτρεπτα: SAFE, WARNING, NOTIFY, CRITICAL.",
       "msg_file_not_found": "❌ Δεν βρέθηκε το αρχείο: astakos_skills/{tool}.py",
-      "msg_nothing_applied": "❌ Δεν εφαρμόστηκε τίποτα γιατί λείπουν απαραίτητα anchors/δεδομένα:\\n"
+      "msg_nothing_applied": "❌ Δεν εφαρμόστηκε τίποτα γιατί λείπουν απαραίτητα anchors/δεδομένα:\\n",
+      "diff_header": "# Diff Preview for {tool_name}\n\n",
+      "diff_saved_info": "\n\n[INFO] Full diff also saved to: {diff_file_path}",
+      "diff_saved_warn": "\n\n[WARN] Could not save diff file: {e}",
+      "diff_preview": "\n\nDIFF PREVIEW:\n",
+      "dry_run_footer": "No files were changed. Run again with dry_run=False to apply."
     },
     "research_last30days": {
       "timeout": "Σφάλμα: Η έρευνα καθυστέρησε υπερβολικά και διακόπηκε (Timeout 120s).",
@@ -1748,7 +1753,11 @@
     "approval": {
       "req_approval": "🚨 <b>Approval Required</b>\n\nTool: <code>{tool_name}</code>\nArgs: <code>{args_prev}</code>\n\nExecute?",
       "blocked": "🛡️ Command `{name}` blocked by safe executor.",
-      "waiting": "⏳ Waiting approval for `{name}`. Sent to Telegram."
+      "waiting": "⏳ Waiting approval for `{name}`. Sent to Telegram.",
+      "register_tool_hint": "\n\n⚠️ <i>Hint: Check the <code>outputs/draft_diff_*.md</code> artifact for the full code changes before approving.</i>",
+      "draft_markers": ["create draft", "make draft", "build draft"],
+      "draft_revoke_markers": ["do not", "don't", "not now", "unless", "if", "but"],
+      "unauthorized_draft_error": "🛡️ Command `{name}` blocked: draft creation requires explicit user authorization in the newest message (e.g. 'create draft')."
     },
     "messenger_draft": {
       "draft_expired": "❌ Error: Draft expired."
