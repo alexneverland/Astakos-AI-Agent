@@ -97,6 +97,7 @@ TOOL_RISK: dict[str, str] = {
     "list_agent_skills":        "SAFE",
     "read_agent_skill":         "SAFE",
     "manage_context_flag":     "SAFE",
+    "get_world_time":          "SAFE",
 }
 
 def get_risk(tool_name: str) -> str:

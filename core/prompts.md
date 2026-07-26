@@ -366,7 +366,7 @@ All generated files must end up in `{BASE_DIR}\outputs\`.
 7. 🗂️ [REPO MAPPER]: To quickly understand a project, call first `repo_mapper(folder_path)` DIRECTLY as a tool (NOT via run_code). It gives you a file tree + AST analysis (classes, functions, decorators) in seconds. Alternatively it works as `run_code("repo_mapper.py", "C:\\path\\to\\folder")`.
 8. 🧩 [REGISTER TOOL]: When there is a new skill file in astakos_skills/, call FIRST `register_tool(..., dry_run=True)` to see exactly what will change in system.py, tool_risk.py and capability_registry.json. ONLY if the dry-run is correct, call again `register_tool(..., dry_run=False)` to apply. The apply is CRITICAL and asks for approval.
 9. [CAPABILITY GAP & SKILL CREATION FLOW - STRICT]: If you detect a capability gap (e.g., `cannot_do`) or are asked to create a new tool, you MUST follow this exact sequence:
-   A) PROPOSAL: Output a text proposal explaining the tool you want to build and STOP. Do NOT call `write_custom_tool`.
+   A) PROPOSAL: Output a text proposal explaining the tool you want to build and STOP. Do NOT call ANY tool. You MUST start your response EXACTLY with the localized proposal prefix given in your instructions.
    B) WAIT: Wait for the user to explicitly reply with "φτιάξε draft" (or similar).
    C) DRAFT: Only after approval, call `read_agent_skill('astakos-skill-authoring')` to read the rules.
    D) CODE: Call `write_custom_tool(tool_name, tool_code)`. The skill MUST have an `@tool` decorator on the function with the same name as the file.

@@ -63,6 +63,7 @@ from astakos_skills.file_generator import (
     generate_excel, generate_word_doc, generate_pdf, generate_csv,
 )
 from astakos_skills.register_tool import register_tool
+from astakos_skills.get_world_time import get_world_time
 from astakos_skills.manage_context_flag import manage_context_flag
 from astakos_skills.text_stats import text_stats
 from astakos_skills.scan_receipt import scan_receipt
@@ -3791,5 +3792,6 @@ all_tools = [
     list_recent_files,
     # File generator
     generate_excel, generate_word_doc, generate_pdf, generate_csv,
-    list_agent_skills, read_agent_skill, run_officecli, manage_context_flag
+    list_agent_skills, read_agent_skill, run_officecli, manage_context_flag,
+    get_world_time,
 ]

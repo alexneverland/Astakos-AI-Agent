@@ -112,7 +112,7 @@ def _ensure_text_response(response, llm_instance, system_prompt: str, safe_histo
             _attach_phase_timing(retry_response, "ensure_text_ms", int((perf_counter() - ensure_started) * 1000))
             _attach_phase_timing(retry_response, "ensure_text_retries", retry_count)
             return retry_response
-    
+
     _attach_phase_timing(response, "ensure_text_ms", int((perf_counter() - ensure_started) * 1000))
     _attach_phase_timing(response, "ensure_text_retries", retry_count)
     return response  # We return the original if all else fails
@@ -175,10 +175,10 @@ def clean_orphan_tool_calls(history: list, k: int = 40) -> list:
                     next_idx += 1
                 else:
                     break
-            
+
             missing_ids = expected_ids - found_ids
             next_is_tool = (i + 1 < len(history) and getattr(history[i + 1], "type", "") == "tool")
-            
+
             if missing_ids or (has_inline_fc and not next_is_tool):
                 # Orphaned tool call — we only keep the text content if it exists_
                 text_only = clean_message(raw_content) if raw_content else ""
@@ -259,20 +259,20 @@ def supervisor_node(state):
 
 def dev_agent_node(state):
     from core.utils import load_agent_prompt
-    from config import BASE_DIR  
-    
+    from config import BASE_DIR
+
     # [MASTRO-SHIELD]: Cleanup of orphan tool_calls — same for all agents
     history = clean_orphan_tool_calls(state["messages"], k=40)
-    
+
     system_base = load_agent_prompt("Dev_Agent", f"You are the Dev_Agent, {config.BOT_NAME}' Chief Developer.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     prompt_content = build_prompt(history, system_base, channel=state.get("channel"))
 
-    tools = [
+    static_tools = [
         write_code, run_code, read_local_file, write_custom_tool, register_tool,
         delete_from_memory, search_memory, save_to_memory,
-        execute_local_pipeline, control_spotify, control_vacuum, 
-        get_navigation_info, recipe_expert, log_meal, 
+        execute_local_pipeline, control_spotify, control_vacuum,
+        get_navigation_info, recipe_expert, log_meal,
         generate_image_tool, search_flights, run_terminal_command, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup,
         save_goal_tool, update_goal_status_tool,
         duckduckgo_search,
@@ -281,7 +281,9 @@ def dev_agent_node(state):
         edit_project_file, write_project_file, grep_project_files, repo_mapper,
         list_recent_files, list_agent_skills, read_agent_skill, run_officecli, manage_context_flag,
     ]
-    
+    from core.agent_tools import get_registered_tools_for_agent
+    tools = get_registered_tools_for_agent("Dev_Agent", static_tools)
+
     safe_history = sanitize_history_for_gemini(history)
     response = llm_heavy.bind_tools(tools).invoke(
         [SystemMessage(content=prompt_content)] + safe_history
@@ -293,11 +295,11 @@ def dev_agent_node(state):
 
 def chat_agent_node(state: AgentState):
     from core.utils import load_agent_prompt, clean_message
-    from config import BASE_DIR, PHOTOS_DIR 
+    from config import BASE_DIR, PHOTOS_DIR
     import re
     import os
     import base64
-    
+
     # [MASTRO-SHIELD]: Cleanup of orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
     last_msg_text = clean_message(history[-1].content) if history else ""
@@ -309,7 +311,7 @@ def chat_agent_node(state: AgentState):
 
     analysis_match = re.search(r"\[ANALYSIS\]:\s*(.*)", last_msg_text)
     path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
-    
+
     pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
     image_part = None
 
@@ -322,7 +324,7 @@ def chat_agent_node(state: AgentState):
             file_path = os.path.join(PHOTOS_DIR, filename)
             ext = os.path.splitext(filename)[1].lower()
             image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
-            
+
             if os.path.exists(file_path) and ext in image_exts:
                 with open(file_path, "rb") as image_file:
                     image_data = base64.b64encode(image_file.read()).decode("utf-8")
@@ -347,7 +349,7 @@ def chat_agent_node(state: AgentState):
 
     safe_history = sanitize_history_for_gemini(history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
-    
+
     if image_part:
         final_messages[-1] = HumanMessage(content=[
             {"type": "text", "text": last_msg_text},
@@ -363,7 +365,7 @@ def chat_agent_node(state: AgentState):
     _FAREWELL_WORDS = tuple(config.NLP_CONFIG.get("tools", {}).get("greetings", []))
     _is_farewell = any(w in last_msg_text.lower() for w in _FAREWELL_WORDS)
 
-    chat_tools = [
+    static_chat_tools = [
         get_current_location, control_spotify,
         search_memory, save_to_memory, delete_from_memory, retrieve_photo, duckduckgo_search,
         recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
@@ -375,6 +377,8 @@ def chat_agent_node(state: AgentState):
         read_local_file, generate_image_tool, get_fit_summary,
         *([archive_file] if not _is_farewell else []),
     ]
+    from core.agent_tools import get_registered_tools_for_agent
+    chat_tools = get_registered_tools_for_agent("Chat_Agent", static_chat_tools)
 
     bind_started = perf_counter()
     bound_llm = llm.bind_tools(chat_tools)
@@ -399,7 +403,7 @@ def home_agent_node(state):
     from core.utils import load_agent_prompt
     from config import BASE_DIR
     from langchain_core.messages import SystemMessage
-    
+
     from tools.system import (
         manage_list, set_local_reminder, delete_from_memory,
         search_memory, control_spotify, control_vacuum, get_current_location,
@@ -409,11 +413,11 @@ def home_agent_node(state):
     from tools.web import get_navigation_info, search_goldmall_offers
     from astakos_skills.recipe_expert import recipe_expert, log_meal
     from astakos_skills.recipe_library import search_recipe_library, get_saved_recipe, mark_recipe_favorite
-    
+
     # [MASTRO-SHIELD]: Cleaning up orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
 
-    tools_to_bind = [
+    static_tools_to_bind = [
         get_current_location,
         manage_list, set_local_reminder, delete_from_memory, search_memory,
         control_spotify, control_vacuum,
@@ -421,6 +425,8 @@ def home_agent_node(state):
         google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
         get_fit_summary, manage_context_flag
     ]
+    from core.agent_tools import get_registered_tools_for_agent
+    tools_to_bind = get_registered_tools_for_agent("Home_Agent", static_tools_to_bind)
 
     system_base = load_agent_prompt("Home_Agent", f"You are {config.DEVELOPER_NAME}'s Home_Agent.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
@@ -573,7 +579,7 @@ def web_agent_node(state: AgentState):
         is_reply_to_recent_linkedin_prompt,
         should_attach_linkedin_draft_reply,
     )
-    from config import BASE_DIR, PHOTOS_DIR 
+    from config import BASE_DIR, PHOTOS_DIR
     import re
     import os
     import base64
@@ -598,7 +604,7 @@ def web_agent_node(state: AgentState):
                 with open(file_path, "rb") as f:
                     img_base64 = base64.b64encode(f.read()).decode("utf-8")
                     image_part = {
-                        "type": "image_url", 
+                        "type": "image_url",
                         "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
                     }
                 print(f"\033[92m[Web-Vision]: Pixels loaded for analysis: {filename}\033[0m")
@@ -629,10 +635,10 @@ def web_agent_node(state: AgentState):
     system_base = load_agent_prompt("Web_Agent", "You are the Web_Agent.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
-    
+
     safe_history = sanitize_history_for_gemini(history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
-    
+
     if image_part:
         final_messages[-1] = HumanMessage(content=[
             {"type": "text", "text": last_msg_text},
@@ -640,24 +646,26 @@ def web_agent_node(state: AgentState):
         ])
 
     from tools.system import (
-        retrieve_photo, read_local_file, post_to_linkedin, 
-        generate_image_tool, search_memory, get_current_location 
+        retrieve_photo, read_local_file, post_to_linkedin,
+        generate_image_tool, search_memory, get_current_location
     )
     from tools.web import (
-        get_news, get_weather_forecast, get_navigation_info, 
+        get_news, get_weather_forecast, get_navigation_info,
         relay_local_payload, search_google_places, browse_url, search_supermarket_prices
     )
-    
+
     from tools.web import execute_local_pipeline
     from astakos_skills.morning_briefing import morning_briefing
     from astakos_skills.hn_briefing import hn_briefing
-    web_tools = [
+    static_web_tools = [
         get_current_location,
-        get_news, get_weather_forecast, duckduckgo_search, 
-        search_memory, get_navigation_info, retrieve_photo, read_local_file, 
+        get_news, get_weather_forecast, duckduckgo_search,
+        search_memory, get_navigation_info, retrieve_photo, read_local_file,
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
         process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices, relay_local_payload, morning_briefing, hn_briefing
     ]
+    from core.agent_tools import get_registered_tools_for_agent
+    web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)
 
     if web_errors and not web_successes:
         guarded_reply = build_web_failure_reply(
@@ -714,19 +722,19 @@ def web_agent_node(state: AgentState):
 
 def tech_agent_node(state: AgentState):
     from core.utils import load_agent_prompt, build_prompt, clean_message
-    from config import BASE_DIR, PHOTOS_DIR 
+    from config import BASE_DIR, PHOTOS_DIR
     from langchain_core.messages import SystemMessage, HumanMessage
     import re
     import os
     import base64
-    
+
     # [MASTRO-SHIELD]: Cleaning orphan tool_calls — this resolved the 400 error
     history = clean_orphan_tool_calls(state["messages"], k=40)
     last_msg_text = clean_message(history[-1].content) if history else ""
 
     analysis_match = re.search(r"\[ANALYSIS\]:\s*(.*)", last_msg_text)
     path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
-    
+
     pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
     image_part = None
 
@@ -739,12 +747,12 @@ def tech_agent_node(state: AgentState):
             file_path = os.path.join(PHOTOS_DIR, filename)
             ext = os.path.splitext(filename)[1].lower()
             image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
-            
+
             if os.path.exists(file_path) and ext in image_exts:
                 with open(file_path, "rb") as f:
                     img_base64 = base64.b64encode(f.read()).decode("utf-8")
                     image_part = {
-                        "type": "image_url", 
+                        "type": "image_url",
                         "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
                     }
                 print(f"\033[94m[Tech-Vision]: Pixels loaded for technical analysis: {filename}\033[0m")
@@ -773,7 +781,7 @@ def tech_agent_node(state: AgentState):
         run_terminal_command, write_code, run_code
     )
 
-    tech_tools = [
+    static_tech_tools = [
         get_current_location,
         archive_file,
         read_local_file,
@@ -789,7 +797,9 @@ def tech_agent_node(state: AgentState):
         write_code,
         run_code
     ]
-    
+    from core.agent_tools import get_registered_tools_for_agent
+    tech_tools = get_registered_tools_for_agent("Tech_Agent", static_tech_tools)
+
     response = llm_heavy.bind_tools(tech_tools).invoke(final_messages)
     return {"current_agent": "Tech_Agent", "messages": [response]}
 
@@ -808,9 +818,13 @@ def git_agent_node(state):
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
-    git_llm = llm.bind_tools([
+    static_git_tools = [
         github_manager, search_memory, run_terminal_command, list_recent_files
-    ])
+    ]
+    from core.agent_tools import get_registered_tools_for_agent
+    git_tools = get_registered_tools_for_agent("Git_Agent", static_git_tools)
+
+    git_llm = llm.bind_tools(git_tools)
     response = safe_llm_invoke(git_llm, [SystemMessage(content=system_prompt)] + safe_history)
     response = _ensure_text_response(response, git_llm, system_prompt, safe_history)
 
@@ -824,11 +838,11 @@ def mail_agent_node(state):
         select_mail_read_action,
     )
     from core.utils import load_agent_prompt, extract_list_selection_index
-    from config import BASE_DIR  
-    
+    from config import BASE_DIR
+
     # [MASTRO-SHIELD]: Cleanup of orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
-    
+
     system_base = load_agent_prompt("Mail_Agent", "You are the Mail_Agent. You manage Gmail.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
@@ -950,7 +964,9 @@ def mail_agent_node(state):
             response = AIMessage(content=resp_text)
         return {"current_agent": "Mail_Agent", "messages": [response]}
 
-    mail_llm = llm.bind_tools([mail_manager])
+    from core.agent_tools import get_registered_tools_for_agent
+    mail_tools = get_registered_tools_for_agent("Mail_Agent", [mail_manager])
+    mail_llm = llm.bind_tools(mail_tools)
     response = safe_llm_invoke(mail_llm, [SystemMessage(content=system_prompt)] + sanitize_history_for_gemini(history))
     response = _ensure_text_response(response, mail_llm, system_prompt, sanitize_history_for_gemini(history))
 
