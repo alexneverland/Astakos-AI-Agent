@@ -1759,7 +1759,7 @@
       "draft_revoke_markers": ["do not", "don't", "not now", "unless", "if", "but"],
       "unauthorized_draft_error": "🛡️ Command `{name}` blocked: draft creation requires explicit user authorization in the newest message (e.g. 'create draft').",
       "capability_proposal_prefix": "New tool proposal:",
-      "capability_gap_instruction": "\n\n[CAPABILITY GAP RULE]\nIf you are a specialized agent (not Dev_Agent) and determine a user request needs a genuinely missing capability (never a transient failure), reply in the same turn with the exact proposal prefix first: '{proposal_prefix}' followed by a short natural proposal. Stop and wait for the user's explicit '{draft_command}' command. Specialized agents must never write code or call draft/registration tools. Dev_Agent must follow its standard guarded capability-draft workflow."
+      "capability_gap_instruction": "\n\n[CAPABILITY GAP RULE]\nWhen detecting a user request for a genuinely missing capability (never a transient failure) or a new tool, you MUST propose it in the same turn by starting your response EXACTLY with the proposal prefix: '{proposal_prefix}' followed by a short natural proposal. Then, stop and wait for the user's explicit '{draft_command}' command.\n- If you are Dev_Agent: Use this prefix and wait for authorization before proceeding with the guarded capability-draft workflow.\n- If you are a specialized agent (not Dev_Agent): You must never write code or call draft/registration tools."
     },
     "messenger_draft": {
       "draft_expired": "❌ Error: Draft expired."

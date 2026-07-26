@@ -5,6 +5,19 @@ from langchain_core.messages import AIMessage, HumanMessage
 from core.i18n import t
 from core.utils import clean_message
 
+def _remove_transport_metadata(text: str) -> str:
+    """
+    Remove ONLY leading transport timestamp metadata from message text.
+
+    Strips the following prefixes before authorization matching:
+    - Current-message prefix: [HH:MM]
+    - Restored shared-history prefix: [YYYY-MM-DD HH:MM / channel]
+    Supports consecutive prefixes.
+    Does not strip arbitrary bracketed user content.
+    """
+    pattern = r"^(?:\[\d{2}:\d{2}\]\s*|\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+/\s+\w+\]\s*)+"
+    return re.sub(pattern, "", text).strip()
+
 def has_capability_draft_authorization(state: dict) -> bool:
     """Return whether the newest user message explicitly authorizes a skill draft
     following a canonical capability-gap proposal.
@@ -26,7 +39,8 @@ def has_capability_draft_authorization(state: dict) -> bool:
         msg = messages[i]
         if getattr(msg, "type", "") == "human" or isinstance(msg, HumanMessage):
             human_msg_idx = i
-            human_text = clean_message(getattr(msg, "content", "")).strip().casefold()
+            raw_text = clean_message(getattr(msg, "content", ""))
+            human_text = _remove_transport_metadata(raw_text).casefold()
             break
 
     if human_msg_idx < 0:
@@ -70,7 +84,8 @@ def has_capability_draft_authorization(state: dict) -> bool:
     if not (getattr(preceding_msg, "type", "") == "ai" or isinstance(preceding_msg, AIMessage)):
         return False
 
-    ai_text = clean_message(getattr(preceding_msg, "content", "")).strip().casefold()
+    raw_ai_text = clean_message(getattr(preceding_msg, "content", ""))
+    ai_text = _remove_transport_metadata(raw_ai_text).casefold()
     proposal_prefix = t("core.approval.capability_proposal_prefix")
     if not isinstance(proposal_prefix, str) or not proposal_prefix.strip():
         return False

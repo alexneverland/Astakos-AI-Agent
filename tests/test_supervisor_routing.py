@@ -50,3 +50,18 @@ def test_supervisor_normal_routing_without_proposal(mock_safe_llm_invoke, mock_l
     # Should fall back to the LLM Router since no prefix was present
     assert result["next_agent"] == "Web_Agent"
     mock_safe_llm_invoke.assert_called_once()
+
+@patch("core.capability_lookup.lookup_agent")
+@patch("core.agents.safe_llm_invoke")
+def test_supervisor_routes_to_dev_agent_with_timestamp_prefix(mock_safe_llm_invoke, mock_lookup_agent):
+    i18n.load_locale("en")
+    mock_lookup_agent.return_value = None
+
+    ai_proposal = AIMessage(content="[2024-05-12 12:34 / telegram] [12:34] New tool proposal: let's build it.")
+    human_msg = HumanMessage(content="[2024-05-12 12:35 / telegram] [12:35] create draft")
+    state = {"messages": [ai_proposal, human_msg]}
+
+    result = supervisor_node(state)
+
+    assert result["next_agent"] == "Dev_Agent"
+    mock_safe_llm_invoke.assert_not_called()

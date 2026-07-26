@@ -148,14 +148,42 @@ def test_draft_mixed_batch():
     assert len(result["messages"]) == 1
     assert result["messages"][0].tool_call_id == "tc-bad"
 
-def test_prompt_injection_exempts_dev_agent():
+def test_prompt_injection_requires_canonical_dev_proposal():
     from core.utils import build_prompt
+
     i18n.load_locale("en")
     prompt = build_prompt([])
-    # Behavioral assertion of the rule's lexical content
-    assert "not Dev_Agent" in prompt
-    assert "never write code" in prompt
+    assert "If you are Dev_Agent: Use this prefix" in prompt
+    assert "New tool proposal:" in prompt
 
     i18n.load_locale("el")
     prompt_el = build_prompt([])
-    assert "όχι ο Dev_Agent" in prompt_el
+    assert "Εάν είστε ο Dev_Agent" in prompt_el
+    assert "Πρόταση νέου εργαλείου:" in prompt_el
+
+def test_draft_authorization_with_transport_metadata():
+    i18n.load_locale("en")
+    ai_proposal = AIMessage(content="[12:34] New tool proposal: I can make this.")
+    human_msg = HumanMessage(content="[12:35] create draft")
+    ai_msg = AIMessage(content="", tool_calls=[{"name": "write_custom_tool", "args": {}, "id": "tc-1"}])
+    state = {"messages": [ai_proposal, human_msg, ai_msg]}
+    result = approval_check_node(state)
+    assert result["approval_status"] == "ok"
+
+def test_draft_authorization_with_history_metadata_consecutive():
+    i18n.load_locale("en")
+    ai_proposal = AIMessage(content="[2024-05-12 12:34 / telegram] [12:34] New tool proposal: sure.")
+    human_msg = HumanMessage(content="[2024-05-12 12:35 / telegram] [12:35] create draft")
+    ai_msg = AIMessage(content="", tool_calls=[{"name": "write_custom_tool", "args": {}, "id": "tc-1"}])
+    state = {"messages": [ai_proposal, human_msg, ai_msg]}
+    result = approval_check_node(state)
+    assert result["approval_status"] == "ok"
+
+def test_draft_authorization_rejects_arbitrary_brackets():
+    i18n.load_locale("en")
+    ai_proposal = AIMessage(content="New tool proposal: sure.")
+    human_msg = HumanMessage(content="[USER_UPLOADED_FILE] create draft")
+    ai_msg = AIMessage(content="", tool_calls=[{"name": "write_custom_tool", "args": {}, "id": "tc-1"}])
+    state = {"messages": [ai_proposal, human_msg, ai_msg]}
+    result = approval_check_node(state)
+    assert result["approval_status"] == "blocked"
