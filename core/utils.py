@@ -710,6 +710,15 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
 
     prompt += memory_context_str
 
+    gap_instruction = t("core.approval.capability_gap_instruction")
+    proposal_prefix = t("core.approval.capability_proposal_prefix")
+    draft_markers = t("core.approval.draft_markers")
+    if isinstance(gap_instruction, str) and isinstance(proposal_prefix, str) and isinstance(draft_markers, list) and draft_markers:
+        prompt += gap_instruction.format(
+            proposal_prefix=proposal_prefix,
+            draft_command=draft_markers[0]
+        ) + "\n\n"
+
     return prompt
 
 # ────────────────────────────────────────────────────────────────

@@ -1757,7 +1757,9 @@
       "register_tool_hint": "\n\n⚠️ <i>Hint: Check the <code>outputs/draft_diff_*.md</code> artifact for the full code changes before approving.</i>",
       "draft_markers": ["create draft", "make draft", "build draft"],
       "draft_revoke_markers": ["do not", "don't", "not now", "unless", "if", "but"],
-      "unauthorized_draft_error": "🛡️ Command `{name}` blocked: draft creation requires explicit user authorization in the newest message (e.g. 'create draft')."
+      "unauthorized_draft_error": "🛡️ Command `{name}` blocked: draft creation requires explicit user authorization in the newest message (e.g. 'create draft').",
+      "capability_proposal_prefix": "New tool proposal:",
+      "capability_gap_instruction": "\n\n[CAPABILITY GAP RULE]\nIf you are a specialized agent (not Dev_Agent) and determine a user request needs a genuinely missing capability (never a transient failure), reply in the same turn with the exact proposal prefix first: '{proposal_prefix}' followed by a short natural proposal. Stop and wait for the user's explicit '{draft_command}' command. Specialized agents must never write code or call draft/registration tools. Dev_Agent must follow its standard guarded capability-draft workflow."
     },
     "messenger_draft": {
       "draft_expired": "❌ Error: Draft expired."

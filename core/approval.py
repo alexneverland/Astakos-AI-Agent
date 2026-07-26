@@ -9,6 +9,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from core.tool_risk import get_risk as _get_risk
+from core.capability_draft import has_capability_draft_authorization
 
 def _effective_risk(tc: dict) -> str:
     """
@@ -265,49 +266,6 @@ def _save_pending(data: dict):
 # LangGraph node
 # ────────────────────────────────────────────────────────────────
 
-def _has_draft_authorization(state: dict) -> bool:
-    """Return whether the newest user message explicitly authorizes a skill draft.
-
-    Authorization is locale-driven and applies only to the newest HumanMessage.
-    A marker followed by a revocation or condition fails closed, so an LLM cannot
-    treat a qualified or withdrawn request as permission to write a draft.
-    """
-    import re
-
-    from langchain_core.messages import HumanMessage
-    from core.i18n import t
-    from core.utils import clean_message
-
-    messages = state.get("messages", [])
-    # Find the newest HumanMessage
-    for msg in reversed(messages):
-        if getattr(msg, "type", "") == "human" or isinstance(msg, HumanMessage):
-            # Extract normalized text
-            text = clean_message(getattr(msg, "content", "")).strip().casefold()
-            markers = t("core.approval.draft_markers")
-            revoke_markers = t("core.approval.draft_revoke_markers")
-            if not isinstance(markers, list) or not isinstance(revoke_markers, list):
-                return False
-            for marker in markers:
-                if not isinstance(marker, str):
-                    continue
-                marker = marker.strip().casefold()
-                if text == marker:
-                    return True
-                if text.startswith(marker) and len(text) > len(marker):
-                    suffix = text[len(marker):]
-                    if not (suffix[0].isspace() or suffix[0] in (".", "!", ",", ":", ";")):
-                        continue
-                    if any(
-                        isinstance(revoke_marker, str)
-                        and re.search(rf"(?<!\w){re.escape(revoke_marker.casefold())}(?!\w)", suffix)
-                        for revoke_marker in revoke_markers
-                    ):
-                        return False
-                    return True
-            return False
-    return False
-
 def approval_check_node(state):
     """
     Runs before the ToolNode.
@@ -336,7 +294,7 @@ def approval_check_node(state):
     # If lacking, we block it exactly like a BLOCKED tool.
     for tc in tool_calls:
         if tc["name"] == "write_custom_tool" and tc["id"] not in blocked_call_ids:
-            if not _has_draft_authorization(state):
+            if not has_capability_draft_authorization(state):
                 blocked_entries.append((
                     tc,
                     "core.approval.unauthorized_draft_error",
