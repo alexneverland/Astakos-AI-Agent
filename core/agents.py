@@ -217,6 +217,12 @@ def supervisor_node(state):
         print(f"\033[95m[Router]: -> planner (/plan command)\033[0m")
         return {"next_agent": "planner"}
 
+    # ── Capability Draft Handoff: check for authorized draft proposal ──
+    from core.capability_draft import has_capability_draft_authorization
+    if has_capability_draft_authorization(state):
+        print(f"\033[95m[Router]: -> Dev_Agent (capability draft authorization)\033[0m")
+        return {"next_agent": "Dev_Agent"}
+
     # ── Capability Registry: first filter before the LLM ───────────
     registry_agent = lookup_agent(str(last_content))
     if registry_agent:
