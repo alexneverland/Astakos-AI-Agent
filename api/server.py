@@ -1233,7 +1233,6 @@ async def upload_file(
         memory_analysis = ""
         detailed_analysis = ""
         if is_image:
-            from core.brain import llm
             from langchain_core.messages import HumanMessage
             import base64
             import io
