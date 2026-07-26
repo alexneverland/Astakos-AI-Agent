@@ -777,8 +777,7 @@ def tech_agent_node(state: AgentState):
 
     from tools.system import (
         read_local_file, drive_manager, archive_file, search_memory,
-        save_to_memory, create_file_tool, get_current_location, tool_stats, system_doctor, memory_review,
-        run_terminal_command, write_code, run_code
+        save_to_memory, create_file_tool, get_current_location, tool_stats, system_doctor, memory_review
     )
 
     static_tech_tools = [
@@ -793,9 +792,9 @@ def tech_agent_node(state: AgentState):
         system_doctor,
         memory_review,
         run_officecli,
-        run_terminal_command,
-        write_code,
-        run_code
+        duckduckgo_search,
+        grep_project_files,
+        list_recent_files
     ]
     from core.agent_tools import get_registered_tools_for_agent
     tech_tools = get_registered_tools_for_agent("Tech_Agent", static_tech_tools)
