@@ -701,11 +701,14 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
                     prompt += "══════════════════════════════════\n\n"
         except: pass
 
+    draft_verification_rule = t("core.approval.draft_verification_rule")
+
     prompt += (
         "MEMORY RULE: If asked for missing info, call 'search_memory' once. "
         "If you already have memory results in context, answer from it and DO NOT call search_memory again in the same turn.\n"
         "PHOTO RULE: If a photo is requested, call 'retrieve_photo' and include [SEND_PHOTO: path] in the response.\n"
-        "FILE RULE: When creating a file with create_file_tool, ALWAYS include [CREATED_FILE: path] as-is in your response. DO NOT replace it with the path as text.\n\n"
+        "FILE RULE: When creating a file with create_file_tool, ALWAYS include [CREATED_FILE: path] as-is in your response. DO NOT replace it with the path as text.\n"
+        f"{draft_verification_rule}\n\n"
     )
 
     prompt += memory_context_str

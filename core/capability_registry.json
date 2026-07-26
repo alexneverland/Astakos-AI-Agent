@@ -1,5 +1,20 @@
 [
   {
+    "name": "get_world_time",
+    "description": "Returns the current local time for a given city.",
+    "agent": "Chat_Agent",
+    "risk_level": "SAFE",
+    "priority": 9,
+    "triggers": [
+      "time in",
+      "what time is it in",
+      "ώρα σε",
+      "ώρα στο",
+      "τι ώρα είναι στο",
+      "τι ώρα έχει τώρα στο"
+    ]
+  },
+  {
     "name": "search_recipe_library",
     "description": "Search saved recipes and return compact ids, names, and favorite state.",
     "agent": "Chat_Agent",
