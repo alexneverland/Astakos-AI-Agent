@@ -450,3 +450,77 @@ def test_backfill_legacy_history_counts_inserted_skipped_and_empty(tmp_path):
     assert first == {"total": 3, "inserted": 2, "skipped": 0, "empty": 1}
     assert second == {"total": 3, "inserted": 0, "skipped": 2, "empty": 1}
     assert [m["content"] for m in load_messages(db_path=db_path)] == ["web user", "web assistant"]
+
+
+def test_conversation_history_deterministic_ordering(tmp_path):
+    from memory.conversation_history import append_message, load_messages, load_recent_context, load_messages_since, load_last_user_activity
+    from core.capability_draft import has_capability_draft_authorization
+    from langchain_core.messages import HumanMessage, AIMessage
+    from core.i18n import t
+
+    db_path = str(tmp_path / "conversation.db")
+    fixed_ts = datetime(2026, 7, 25, 16, 3, 0)
+    proposal_prefix = t("core.approval.capability_proposal_prefix")
+    draft_marker = t("core.approval.draft_markers")[0]
+
+    # 1. Append user message
+    append_message(
+        role="user",
+        content="user turn 1",
+        channel="telegram",
+        timestamp=fixed_ts,
+        db_path=db_path,
+    )
+
+    # 2. Append assistant proposal with exactly the same datetime
+    append_message(
+        role="assistant",
+        content=f"{proposal_prefix} δημιουργία draft...",
+        channel="telegram",
+        timestamp=fixed_ts,
+        db_path=db_path,
+    )
+
+    # Assert load_messages returns user then assistant
+    msgs = load_messages(db_path=db_path)
+    assert len(msgs) >= 2
+    assert msgs[-2]["role"] == "user"
+    assert msgs[-1]["role"] == "assistant"
+
+    # Assert load_recent_context preserves the same order
+    recent = load_recent_context(channel="telegram", db_path=db_path)
+    assert len(recent) >= 2
+    assert recent[-2]["role"] == "user"
+    assert recent[-1]["role"] == "assistant"
+
+    # Assert load_messages_since returns chronological insertion order, user then assistant
+    since = load_messages_since(since_date="2026-07-25", db_path=db_path)
+    assert len(since) >= 2
+    assert since[-2]["role"] == "user"
+    assert since[-1]["role"] == "assistant"
+
+    # 3. Assert this ordering forms a valid sequence for has_capability_draft_authorization
+    # Recreate the state that supervisor_node sees
+    langchain_msgs = []
+    for r in recent:
+        if r["role"] == "user":
+            langchain_msgs.append(HumanMessage(content=f"[{r['date']} {r['time']} / {r['channel']}] {r['content']}"))
+        else:
+            langchain_msgs.append(AIMessage(content=f"[{r['date']} {r['time']} / {r['channel']}] {r['content']}"))
+
+    # And then we append the new Turn 2 user message with timestamp prefix
+    langchain_msgs.append(HumanMessage(content=f"[16:05] {draft_marker}"))
+
+    state = {"messages": langchain_msgs}
+    assert has_capability_draft_authorization(state) is True
+
+    # Assert load_last_user_activity chooses the later inserted user when two user messages share the exact same timestamp
+    append_message(
+        role="user",
+        content="user turn 2",
+        channel="telegram",
+        timestamp=fixed_ts,
+        db_path=db_path,
+    )
+    last_user = load_last_user_activity(channel="telegram", db_path=db_path)
+    assert last_user["content"] == "user turn 2"

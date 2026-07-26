@@ -453,7 +453,7 @@ def load_messages(
         SELECT rowid, *
         FROM conversation_messages
         {where}
-        ORDER BY timestamp DESC, id DESC
+        ORDER BY timestamp DESC, rowid DESC
         LIMIT ?
     """
     params.append(limit)
@@ -509,10 +509,10 @@ def load_messages_since(
                     SELECT rowid, *
                     FROM conversation_messages
                     WHERE {where_clause}
-                    ORDER BY timestamp DESC, id DESC
+                    ORDER BY timestamp DESC, rowid DESC
                     LIMIT ?
                 )
-                ORDER BY timestamp ASC, id ASC
+                ORDER BY timestamp ASC, rowid ASC
                 """,
                 params + [limit],
             ).fetchall()
@@ -522,7 +522,7 @@ def load_messages_since(
                 SELECT rowid, *
                 FROM conversation_messages
                 WHERE {where_clause}
-                ORDER BY timestamp ASC, id ASC
+                ORDER BY timestamp ASC, rowid ASC
                 """,
                 params,
             ).fetchall()
@@ -600,7 +600,7 @@ def load_last_user_activity(
             FROM conversation_messages
             WHERE role IN ('user', 'human', 'Human')
             {channel_clause}
-            ORDER BY timestamp DESC, id DESC
+            ORDER BY timestamp DESC, rowid DESC
             LIMIT 1
             """,
             params,
@@ -700,7 +700,9 @@ def load_recent_context(
 
     messages = sorted(
         by_id.values(),
-        key=lambda message: (message["timestamp"], message["id"]),
+        # SQLite rowid preserves insertion order for same-second messages;
+        # non-SQLite entries retain their stable legacy id ordering.
+        key=lambda message: (message["timestamp"], message.get("rowid", message["id"])),
     )
     if total_limit and len(messages) > total_limit:
         messages = messages[-total_limit:]
