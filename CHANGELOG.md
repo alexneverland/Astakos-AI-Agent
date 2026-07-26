@@ -7,6 +7,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v2.4.0] — 2026-07-27
+
+**Released: 2026-07-27**
+
+### Added
+
+- Guarded capability-gap draft flow with explicit authorization before applying new native tools.
+- Dynamic binding of registered tools to their declared agent.
+- Native world-time capability with city aliases, IANA timezone support, and Athens-relative difference.
+
+### Changed
+
+- Tech_Agent now uses native bounded research/diagnostic tools instead of raw terminal/code execution for factual hardware research.
+
+### Fixed
+
+- Web document and pasted-text uploads no longer fail from the local llm shadowing path.
+- Tool registration preserves valid source list syntax and rolls back failed registrations.
+- Conversation history preserves same-second message ordering.
+- Shutdown/vector-store handling and tool-boundary guards are more reliable.
+
 ## [v2.3.1] — 2026-07-24
 
 **Released: 2026-07-24**

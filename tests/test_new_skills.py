@@ -6,7 +6,17 @@ import sys, os, json, tempfile, shutil
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch
+from core.i18n import t
+import core.i18n
+import pytest
 
+@pytest.fixture
+def english_locale():
+    """Pin the locale to English to make localized tool output assertions deterministic."""
+    original = core.i18n.LANG
+    core.i18n.load_locale("en")
+    yield
+    core.i18n.load_locale(original)
 
 # ═══════════════════════════════════════════════════════════════
 # repo_mapper tests
@@ -208,7 +218,7 @@ def test_register_tool_rejects_skill_without_tool_decorator(tmp_path):
     assert "No files were changed" in result
 
 
-def test_register_tool_dry_run_does_not_modify_files(tmp_path):
+def test_register_tool_dry_run_does_not_modify_files(tmp_path, english_locale):
     from astakos_skills.register_tool import register_tool
     proj = _make_fake_project(tmp_path)
     _write_minimal_skill(proj / "astakos_skills" / "my_tool.py")
@@ -233,17 +243,17 @@ def test_register_tool_dry_run_does_not_modify_files(tmp_path):
         )
 
     assert "DRY RUN" in result
-    assert "DIFF PREVIEW" in result
+    assert t("skills.register_tool.diff_preview") in result
     assert "--- a/tools/system.py" in result
     assert "--- a/core/tool_risk.py" in result
     assert "--- a/core/capability_registry.json" in result
-    assert "No files were changed" in result
+    assert t("skills.register_tool.dry_run_footer") in result
     assert sys_path.read_text(encoding="utf-8") == before["system"]
     assert risk_path.read_text(encoding="utf-8") == before["risk"]
     assert registry_path.read_text(encoding="utf-8") == before["registry"]
 
 
-def test_tool_creation_end_to_end_write_dry_run_apply_registers_everywhere(tmp_path, monkeypatch):
+def test_tool_creation_end_to_end_write_dry_run_apply_registers_everywhere(tmp_path, monkeypatch, english_locale):
     import tools.system as system
     from astakos_skills.register_tool import register_tool
 
@@ -286,7 +296,7 @@ def my_tool(value: str) -> str:
         )
 
     assert "DRY RUN" in dry
-    assert "DIFF PREVIEW" in dry
+    assert t("skills.register_tool.diff_preview") in dry
     assert sys_path.read_text(encoding="utf-8") == before["system"]
     assert risk_path.read_text(encoding="utf-8") == before["risk"]
     assert registry_path.read_text(encoding="utf-8") == before["registry"]
