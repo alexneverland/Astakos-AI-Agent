@@ -77,3 +77,56 @@ def test_register_tool_preview_artifact(tmp_path, monkeypatch, fail_output_dir):
     assert system_py.stat().st_mtime == system_mtime
     assert tool_risk_py.stat().st_mtime == risk_mtime
     assert cap_reg.stat().st_mtime == cap_mtime
+
+
+def test_register_tool_adds_missing_trailing_comma(tmp_path, monkeypatch):
+    import ast
+    import json
+    import astakos_skills.register_tool as rt
+    import config
+    import shutil
+
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    shutil.copytree(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "locales"), tmp_path / "locales")
+
+    skills_dir = tmp_path / "astakos_skills"
+    tools_dir = tmp_path / "tools"
+    core_dir = tmp_path / "core"
+
+    skills_dir.mkdir()
+    tools_dir.mkdir()
+    core_dir.mkdir()
+
+    # Create dummy skill
+    dummy_skill = skills_dir / "my_comma_tool.py"
+    dummy_skill.write_text("from langchain_core.tools import tool\n\n@tool\ndef my_comma_tool(): pass\n")
+
+    # Missing trailing comma on previous_tool
+    system_py = tools_dir / "system.py"
+    system_py.write_text(
+        "from astakos_skills.register_tool import register_tool\n"
+        "all_tools = [\n"
+        "    previous_tool\n"
+        "]\n"
+    )
+
+    tool_risk_py = core_dir / "tool_risk.py"
+    tool_risk_py.write_text("TOOL_RISK_REGISTRY = {}\n\ndef get_risk(name: str) -> str:\n    return 'SAFE'\n")
+
+    cap_reg = core_dir / "capability_registry.json"
+    cap_reg.write_text("[]")
+
+    # Register the new tool (apply=True/dry_run=False)
+    res = rt.register_tool.func(tool_name="my_comma_tool", dry_run=False)
+
+    assert "✅" in res
+
+    # Check generated system.py
+    sys_content = system_py.read_text(encoding="utf-8")
+
+    # Check that previous_tool got a comma and the new tool is appended
+    assert "    previous_tool,\n" in sys_content
+    assert "    my_comma_tool," in sys_content
+
+    # Ensure it is valid Python code by parsing it
+    ast.parse(sys_content)

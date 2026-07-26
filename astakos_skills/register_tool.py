@@ -253,7 +253,10 @@ def register_tool(
         if idx != -1:
             end_idx = sys_content.find("\n]", idx)
             if end_idx != -1:
-                sys_content = sys_content[:end_idx] + f"\n    {tool_name}," + sys_content[end_idx:]
+                prefix = sys_content[:end_idx].rstrip()
+                if not prefix.endswith(",") and not prefix.endswith("["):
+                    prefix += ","
+                sys_content = prefix + f"\n    {tool_name}," + sys_content[end_idx:]
                 results.append(
                     f"DRY RUN system.py: would add {tool_name} to all_tools"
                     if dry_run else

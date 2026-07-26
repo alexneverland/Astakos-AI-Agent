@@ -242,7 +242,8 @@ def test_dry_run_does_not_write_files(tmp_path):
         )
 
     assert "DRY RUN" in result
-    assert "No files were changed" in result
+    from core.i18n import t
+    assert t("skills.register_tool.dry_run_footer") in result
 
     after = _snapshot(proj)
     assert after == before, "Dry-run must not change any file"
