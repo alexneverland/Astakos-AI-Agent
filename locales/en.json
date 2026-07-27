@@ -1746,7 +1746,12 @@
       "drive_upload_failed": "Αποτυχία ανεβάσματος στο Drive",
       "dashboard_action_success": "✅ [{tool_name}] εκτελέστηκε από dashboard:\n",
       "dashboard_action_cancelled": "❌ Action {tool_name} ακυρώθηκε από dashboard.",
-      "summary_rules": "- Κάνε περίληψη 5-8 προτάσεων και εξήγησε τι νέο προσθέτει στη συζήτηση.\\n- Αν το έγγραφο είναι μεγάλο, μπορεί να βλέπεις μόνο αρχή και τέλος του περιεχομένου με ένδειξη ότι το μεσαίο τμήμα παραλείφθηκε. Αν λείπει κρίσιμο σημείο, πες το καθαρά."
+      "summary_rules": "- Κάνε περίληψη 5-8 προτάσεων και εξήγησε τι νέο προσθέτει στη συζήτηση.\\n- Αν το έγγραφο είναι μεγάλο, μπορεί να βλέπεις μόνο αρχή και τέλος του περιεχομένου με ένδειξη ότι το μεσαίο τμήμα παραλείφθηκε. Αν λείπει κρίσιμο σημείο, πες το καθαρά.",
+      "xlsx_oversized_uncompressed": "Excel file structure is too large/complex to safely preview.",
+      "xlsx_corrupt": "Excel file is corrupt or malformed.",
+      "xlsx_preview_clipped": "... (Additional Excel content was omitted for preview)",
+      "xlsx_sheet_unreadable": "Unable to read sheet content.",
+      "xlsx_unreadable_generic": "Unable to read Excel file content."
     }
   },
   "core": {

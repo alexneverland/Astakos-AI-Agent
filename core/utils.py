@@ -989,3 +989,84 @@ def build_linkedin_draft_ready_reply(tool_results: list[str]) -> str:
 
     return "\n".join(lines)
 
+def extract_xlsx_preview(file_path: str, *, max_chars: int) -> str:
+    """
+    Safely extracts a bounded text preview from an Excel file (.xlsx/.xls).
+    Enforces file size, zip member, row, column, and character limits.
+    """
+    import os
+    import zipfile
+    import pandas as pd
+    from core.i18n import t
+
+    # 1. Enforce 20MB guard for both .xlsx and .xls
+    try:
+        file_size = os.path.getsize(file_path)
+        if file_size > 20 * 1024 * 1024:
+            return t("api.server.xlsx_oversized_uncompressed")
+    except OSError:
+        return t("api.server.xlsx_unreadable_generic")
+
+    is_xlsx = str(file_path).lower().endswith(".xlsx")
+
+    # 2. ZIP Preflight for .xlsx only
+    if is_xlsx:
+        try:
+            with zipfile.ZipFile(file_path, 'r') as z:
+                info_list = z.infolist()
+                if len(info_list) > 2000:
+                    return t("api.server.xlsx_oversized_uncompressed")
+                total_size = sum(info.file_size for info in info_list)
+                if total_size > 50_000_000:
+                    return t("api.server.xlsx_oversized_uncompressed")
+        except zipfile.BadZipFile:
+            return t("api.server.xlsx_corrupt")
+        except Exception:
+            return t("api.server.xlsx_unreadable_generic")
+
+    # 3. Pandas Parsing
+    try:
+        preview_parts = []
+        chars_used = 0
+
+        with pd.ExcelFile(file_path) as xls:
+            sheet_names = xls.sheet_names
+            sheets_clipped = len(sheet_names) > 5
+
+            clip_msg = "\n" + t("api.server.xlsx_preview_clipped")
+            clip_len = len(clip_msg)
+
+            for sheet in sheet_names[:5]:
+                try:
+                    header_df = pd.read_excel(xls, sheet_name=sheet, nrows=0)
+                    if len(header_df.columns) == 0:
+                        raise ValueError("Empty")
+                    selected_positions = list(range(min(20, len(header_df.columns))))
+                    df = pd.read_excel(xls, sheet_name=sheet, nrows=5, usecols=selected_positions)
+                    sheet_str = f"--- {sheet} ---\n" + df.to_string(max_colwidth=50, index=False) + "\n"
+                except Exception:
+                    sheet_str = f"--- {sheet} ---\n[{t('api.server.xlsx_sheet_unreadable')}]\n"
+
+                if sheets_clipped or chars_used + len(sheet_str) > max_chars:
+                    budget = max(0, max_chars - chars_used - clip_len)
+                    if len(sheet_str) > budget:
+                        preview_parts.append(sheet_str[:budget])
+                        chars_used += budget
+                        sheets_clipped = True
+                        break
+                    else:
+                        preview_parts.append(sheet_str)
+                        chars_used += len(sheet_str)
+                else:
+                    preview_parts.append(sheet_str)
+                    chars_used += len(sheet_str)
+
+        if sheets_clipped:
+            budget = max_chars - chars_used
+            if budget > 0:
+                preview_parts.append(clip_msg[:budget])
+
+        return "".join(preview_parts)
+    except Exception:
+        return t("api.server.xlsx_unreadable_generic")
+

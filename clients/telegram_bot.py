@@ -921,9 +921,8 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
                 from docx import Document as DocxDoc
                 doc_text = "\n".join(p.text for p in DocxDoc(local_path).paragraphs)[:8000]
             elif file_ext in (".xlsx", ".xls"):
-                import pandas as pd
-                df_data = pd.read_excel(local_path)
-                doc_text = df_data.to_string(index=False)[:8000]
+                from core.utils import extract_xlsx_preview
+                doc_text = extract_xlsx_preview(local_path, max_chars=8000)
             else:
                 doc_text = f"Unsupported document type: {file_ext}"
         except Exception as read_err:
