@@ -1187,8 +1187,8 @@ def _read_document_text_for_analysis(file_path: str, file_ext: str) -> str:
             from core.utils import extract_pdf_preview
             doc_text = _prepare_document_excerpt(extract_pdf_preview(file_path, max_chars=16000))
         elif file_ext in (".docx",):
-            from docx import Document as DocxDoc
-            doc_text = _prepare_document_excerpt("\n".join(p.text for p in DocxDoc(file_path).paragraphs))
+            from core.utils import extract_docx_preview
+            doc_text = _prepare_document_excerpt(extract_docx_preview(file_path, max_chars=16000))
         elif file_ext in (".xlsx", ".xls"):
             from core.utils import extract_xlsx_preview
             doc_text = _prepare_document_excerpt(extract_xlsx_preview(file_path, max_chars=16000))

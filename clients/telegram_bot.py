@@ -973,8 +973,8 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
                 from core.utils import extract_pdf_preview
                 doc_text = extract_pdf_preview(local_path, max_chars=8000)
             elif file_ext in (".docx",):
-                from docx import Document as DocxDoc
-                doc_text = "\n".join(p.text for p in DocxDoc(local_path).paragraphs)[:8000]
+                from core.utils import extract_docx_preview
+                doc_text = extract_docx_preview(local_path, max_chars=8000)
             elif file_ext in (".xlsx", ".xls"):
                 from core.utils import extract_xlsx_preview
                 doc_text = extract_xlsx_preview(local_path, max_chars=8000)

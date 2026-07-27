@@ -1049,6 +1049,87 @@ def extract_pdf_preview(file_path: str, max_chars: int = 8000) -> str:
         logging.warning("Failed to extract PDF %s", file_path, exc_info=True)
         return t("api.server.pdf_unreadable_generic")
 
+
+def extract_docx_preview(file_path: str, max_chars: int) -> str:
+    """
+    Safely extracts a bounded text preview from a DOCX file.
+    Bounds aggregate preview text (does not prevent resource exhaustion from a single malicious compressed XML stream).
+    """
+    if max_chars <= 0:
+        return ""
+
+    import os
+    import zipfile
+    from core.i18n import t
+    import logging
+
+    try:
+        file_size = os.path.getsize(file_path)
+        if file_size > 20 * 1024 * 1024:
+            return t("api.server.docx_oversized_uncompressed")
+    except OSError:
+        return t("api.server.docx_unreadable_generic")
+
+    try:
+        with zipfile.ZipFile(file_path, 'r') as z:
+            info_list = z.infolist()
+            if len(info_list) > 2000:
+                return t("api.server.docx_oversized_uncompressed")
+            total_size = sum(info.file_size for info in info_list)
+            if total_size > 50_000_000:
+                return t("api.server.docx_oversized_uncompressed")
+    except zipfile.BadZipFile:
+        return t("api.server.docx_corrupt")
+    except Exception:
+        logging.warning("Failed to preflight DOCX %s", file_path, exc_info=True)
+        return t("api.server.docx_unreadable_generic")
+
+    try:
+        from docx import Document as DocxDoc
+        doc = DocxDoc(file_path)
+
+        clipped_marker = t("api.server.docx_preview_clipped")
+        if max_chars > len(clipped_marker):
+            budget = max_chars - len(clipped_marker)
+            use_marker = True
+        else:
+            budget = max_chars
+            use_marker = False
+
+        fragments = []
+        current_len = 0
+        clipped = False
+
+        for p in doc.paragraphs:
+            paragraph_text = p.text
+            if paragraph_text:
+                space_needed = len(paragraph_text) if not fragments else 1 + len(paragraph_text)
+                if current_len + space_needed > budget:
+                    if not fragments:
+                        fragments.append(paragraph_text[:budget])
+                    else:
+                        allowed = budget - current_len - 1
+                        if allowed > 0:
+                            fragments.append(paragraph_text[:allowed])
+                    clipped = True
+                    break
+                else:
+                    fragments.append(paragraph_text)
+                    current_len += space_needed
+
+        final_text = "\n".join(fragments)
+        if not final_text.strip():
+            return t("api.server.docx_empty_or_scanned")
+
+        if clipped and use_marker:
+            return final_text + clipped_marker
+        else:
+            return final_text
+
+    except Exception:
+        logging.warning("Failed to parse DOCX %s", file_path, exc_info=True)
+        return t("api.server.docx_unreadable_generic")
+
 def extract_xlsx_preview(file_path: str, *, max_chars: int) -> str:
     """
     Safely extracts a bounded text preview from an Excel file (.xlsx/.xls).
