@@ -970,9 +970,8 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
                 with open(local_path, "r", encoding="utf-8", errors="ignore") as df:
                     doc_text = df.read()[:8000]
             elif file_ext == ".pdf":
-                import pypdf
-                reader = pypdf.PdfReader(local_path)
-                doc_text = "\n".join(p.extract_text() or "" for p in reader.pages)[:8000]
+                from core.utils import extract_pdf_preview
+                doc_text = extract_pdf_preview(local_path, max_chars=8000)
             elif file_ext in (".docx",):
                 from docx import Document as DocxDoc
                 doc_text = "\n".join(p.text for p in DocxDoc(local_path).paragraphs)[:8000]

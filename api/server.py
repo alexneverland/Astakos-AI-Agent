@@ -1184,9 +1184,8 @@ def _read_document_text_for_analysis(file_path: str, file_ext: str) -> str:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as df:
                 doc_text = _prepare_document_excerpt(df.read())
         elif file_ext == ".pdf":
-            import pypdf
-            reader = pypdf.PdfReader(file_path)
-            doc_text = _prepare_document_excerpt("\n".join(p.extract_text() or "" for p in reader.pages))
+            from core.utils import extract_pdf_preview
+            doc_text = _prepare_document_excerpt(extract_pdf_preview(file_path, max_chars=16000))
         elif file_ext in (".docx",):
             from docx import Document as DocxDoc
             doc_text = _prepare_document_excerpt("\n".join(p.text for p in DocxDoc(file_path).paragraphs))

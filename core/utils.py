@@ -989,6 +989,66 @@ def build_linkedin_draft_ready_reply(tool_results: list[str]) -> str:
 
     return "\n".join(lines)
 
+def extract_pdf_preview(file_path: str, max_chars: int = 8000) -> str:
+    """
+    Safely extracts a bounded text preview from a PDF file.
+    Bounds accumulated preview text (does not prevent resource exhaustion from a single malicious compressed PDF page).
+    """
+    import pypdf
+    from core.i18n import t
+
+    try:
+        reader = pypdf.PdfReader(file_path)
+
+        if reader.is_encrypted and not reader.decrypt(""):
+            return t("api.server.pdf_encrypted")
+
+        total = len(reader.pages)
+        if total == 0:
+            return t("api.server.pdf_empty_or_scanned")
+
+        final_text = ""
+        extracted = 0
+
+        for i in range(total):
+            extracted += 1
+            page_text = reader.pages[i].extract_text() or ""
+
+            if page_text:
+                if final_text:
+                    page_text = "\n" + page_text
+
+                budget = max_chars - len(final_text)
+                if len(page_text) > budget:
+                    final_text += page_text[:budget]
+                    break
+                else:
+                    final_text += page_text
+
+            if len(final_text) >= max_chars:
+                break
+
+        if not final_text.strip():
+            return t("api.server.pdf_empty_or_scanned")
+
+        meta = t("api.server.pdf_page_meta", extracted=extracted, total=total)
+        meta_str = "\n" + meta
+
+        if len(final_text) + len(meta_str) > max_chars:
+            available = max_chars - len(meta_str)
+            if available > 0:
+                final_text = final_text[:available].rstrip() + meta_str
+            else:
+                final_text = meta[:max_chars]
+        else:
+            final_text = final_text.rstrip() + meta_str
+
+        return final_text
+    except Exception:
+        import logging
+        logging.warning("Failed to extract PDF %s", file_path, exc_info=True)
+        return t("api.server.pdf_unreadable_generic")
+
 def extract_xlsx_preview(file_path: str, *, max_chars: int) -> str:
     """
     Safely extracts a bounded text preview from an Excel file (.xlsx/.xls).
