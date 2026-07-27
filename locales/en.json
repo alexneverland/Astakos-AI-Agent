@@ -1752,7 +1752,11 @@
       "xlsx_corrupt": "Excel file is corrupt or malformed.",
       "xlsx_preview_clipped": "... (Additional Excel content was omitted for preview)",
       "xlsx_sheet_unreadable": "Unable to read sheet content.",
-      "xlsx_unreadable_generic": "Unable to read Excel file content."
+      "xlsx_unreadable_generic": "Unable to read Excel file content.",
+      "pdf_encrypted": "❌ The PDF is password protected.",
+      "pdf_empty_or_scanned": "⚠️ The PDF contains no readable text (likely scanned).",
+      "pdf_page_meta": "[Excerpt: pages {extracted} of {total}]",
+      "pdf_unreadable_generic": "Unable to read PDF file content."
     }
   },
   "core": {

@@ -1756,7 +1756,11 @@
       "xlsx_corrupt": "Το αρχείο Excel είναι κατεστραμμένο.",
       "xlsx_preview_clipped": "... (Πρόσθετο περιεχόμενο Excel παραλείφθηκε για προεπισκόπηση)",
       "xlsx_sheet_unreadable": "Αδυναμία ανάγνωσης περιεχομένου φύλλου.",
-      "xlsx_unreadable_generic": "Αδυναμία ανάγνωσης περιεχομένου αρχείου Excel."
+      "xlsx_unreadable_generic": "Αδυναμία ανάγνωσης περιεχομένου αρχείου Excel.",
+      "pdf_encrypted": "❌ Το PDF είναι κλειδωμένο με κωδικό.",
+      "pdf_empty_or_scanned": "⚠️ Το PDF δεν περιέχει αναγνώσιμο κείμενο (πιθανώς σκαναρισμένο).",
+      "pdf_page_meta": "[Απόσπασμα: σελίδες {extracted} από {total}]",
+      "pdf_unreadable_generic": "Αδυναμία ανάγνωσης του περιεχομένου του PDF."
     }
   },
   "core": {
