@@ -1021,7 +1021,7 @@ def extract_xlsx_preview(file_path: str, *, max_chars: int) -> str:
                     return t("api.server.xlsx_oversized_uncompressed")
         except zipfile.BadZipFile:
             return t("api.server.xlsx_corrupt")
-        except Exception as e:
+        except Exception:
             return t("api.server.xlsx_unreadable_generic")
 
     # 3. Pandas Parsing
@@ -1039,10 +1039,10 @@ def extract_xlsx_preview(file_path: str, *, max_chars: int) -> str:
             for sheet in sheet_names[:5]:
                 try:
                     header_df = pd.read_excel(xls, sheet_name=sheet, nrows=0)
-                    selected_cols = list(header_df.columns)[:20]
-                    if not selected_cols:
+                    if len(header_df.columns) == 0:
                         raise ValueError("Empty")
-                    df = pd.read_excel(xls, sheet_name=sheet, nrows=5, usecols=selected_cols)
+                    selected_positions = list(range(min(20, len(header_df.columns))))
+                    df = pd.read_excel(xls, sheet_name=sheet, nrows=5, usecols=selected_positions)
                     sheet_str = f"--- {sheet} ---\n" + df.to_string(max_colwidth=50, index=False) + "\n"
                 except Exception:
                     sheet_str = f"--- {sheet} ---\n[{t('api.server.xlsx_sheet_unreadable')}]\n"
@@ -1067,6 +1067,6 @@ def extract_xlsx_preview(file_path: str, *, max_chars: int) -> str:
                 preview_parts.append(clip_msg[:budget])
 
         return "".join(preview_parts)
-    except Exception as e:
+    except Exception:
         return t("api.server.xlsx_unreadable_generic")
 

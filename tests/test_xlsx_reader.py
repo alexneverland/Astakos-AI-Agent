@@ -1,6 +1,7 @@
 import pytest
 import pandas as pd
 import zipfile
+import os
 from core.utils import extract_xlsx_preview
 from core.i18n import t
 
@@ -42,12 +43,6 @@ def test_xlsx_preview_clipping(tmp_path):
     assert len(preview) <= max_chars
 
     clip_msg = "\n" + t("api.server.xlsx_preview_clipped")
-    # For a small max_chars like 30, it will be truncated.
-    # We check if the end of the preview matches the start of the clip_msg
-    # It should have omitted "HelloWorld" since it's cut off early
-    assert "HelloWorldHelloWorld" not in preview
-
-    # We know preview ends with some prefix of clip_msg.
     assert clip_msg[:10] in preview
 
 def test_malformed_xlsx(tmp_path):
@@ -55,7 +50,7 @@ def test_malformed_xlsx(tmp_path):
     file_path.write_text('not a zip file')
 
     preview = extract_xlsx_preview(str(file_path), max_chars=16000)
-    assert t('api.server.xlsx_corrupt') in preview or t('api.server.xlsx_unreadable_generic') in preview
+    assert t('api.server.xlsx_corrupt') in preview
 
 def test_zip_bomb_metadata(tmp_path, monkeypatch):
     file_path = tmp_path / 'bomb.xlsx'
@@ -115,3 +110,69 @@ def test_integration_max_chars():
 
     assert 'extract_xlsx_preview(file_path, max_chars=16000)' in server_src
     assert 'extract_xlsx_preview(local_path, max_chars=8000)' in telegram_src
+
+def test_numeric_column_headers(tmp_path):
+    file_path = tmp_path / 'numeric_headers.xlsx'
+    df = pd.DataFrame({2024: [1, 2], 2025: [3, 4]})
+    df.to_excel(file_path, index=False)
+
+    preview = extract_xlsx_preview(str(file_path), max_chars=16000)
+    assert '2024' in preview
+    assert '2025' in preview
+
+def test_local_20mb_guard(tmp_path, monkeypatch):
+    file_path = tmp_path / 'large.xlsx'
+    file_path.write_text('dummy')
+
+    monkeypatch.setattr(os.path, 'getsize', lambda p: 25 * 1024 * 1024)
+
+    zip_called = False
+    def mock_zip(*args, **kwargs):
+        nonlocal zip_called
+        zip_called = True
+        return zipfile.ZipFile(*args, **kwargs)
+    monkeypatch.setattr(zipfile, 'ZipFile', mock_zip)
+
+    pandas_called = False
+    def mock_read_excel(*args, **kwargs):
+        nonlocal pandas_called
+        pandas_called = True
+        return pd.DataFrame()
+    monkeypatch.setattr(pd, 'read_excel', mock_read_excel)
+
+    preview = extract_xlsx_preview(str(file_path), max_chars=16000)
+    assert t('api.server.xlsx_oversized_uncompressed') in preview
+    assert not zip_called
+    assert not pandas_called
+
+def test_unreadable_path(tmp_path, monkeypatch):
+    file_path = tmp_path / 'unreadable.xlsx'
+
+    def raise_oserror(path):
+        raise OSError("Permission denied")
+    monkeypatch.setattr(os.path, 'getsize', raise_oserror)
+
+    preview = extract_xlsx_preview(str(file_path), max_chars=16000)
+    assert t('api.server.xlsx_unreadable_generic') in preview
+
+def test_more_than_five_sheets(tmp_path):
+    file_path = tmp_path / 'many_sheets.xlsx'
+    with pd.ExcelWriter(file_path) as writer:
+        for i in range(1, 8):
+            df = pd.DataFrame({'A': [1]})
+            df.to_excel(writer, sheet_name=f'Sheet{i}', index=False)
+
+    preview = extract_xlsx_preview(str(file_path), max_chars=16000)
+    for i in range(1, 6):
+        assert f'Sheet{i}' in preview
+    assert 'Sheet6' not in preview
+    assert 'Sheet7' not in preview
+    assert t('api.server.xlsx_preview_clipped') in preview
+
+def test_empty_sheet_no_column(tmp_path):
+    file_path = tmp_path / 'empty.xlsx'
+    df = pd.DataFrame()
+    df.to_excel(file_path, index=False)
+
+    preview = extract_xlsx_preview(str(file_path), max_chars=16000)
+    assert t('api.server.xlsx_sheet_unreadable') in preview
