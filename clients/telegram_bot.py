@@ -967,8 +967,8 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         doc_text = ""
         try:
             if file_ext in (".txt", ".csv", ".json", ".md"):
-                with open(local_path, "r", encoding="utf-8", errors="ignore") as df:
-                    doc_text = df.read()[:8000]
+                from core.utils import extract_text_preview
+                doc_text = extract_text_preview(local_path, max_chars=8000)
             elif file_ext == ".pdf":
                 from core.utils import extract_pdf_preview
                 doc_text = extract_pdf_preview(local_path, max_chars=8000)

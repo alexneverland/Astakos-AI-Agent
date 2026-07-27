@@ -1181,8 +1181,8 @@ def _read_document_text_for_analysis(file_path: str, file_ext: str) -> str:
     doc_text = ""
     try:
         if file_ext in (".txt", ".csv", ".json", ".py", ".md", ".log"):
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as df:
-                doc_text = _prepare_document_excerpt(df.read())
+            from core.utils import extract_text_preview
+            doc_text = _prepare_document_excerpt(extract_text_preview(file_path, max_chars=16000))
         elif file_ext == ".pdf":
             from core.utils import extract_pdf_preview
             doc_text = _prepare_document_excerpt(extract_pdf_preview(file_path, max_chars=16000))

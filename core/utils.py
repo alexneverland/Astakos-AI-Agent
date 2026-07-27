@@ -1130,6 +1130,38 @@ def extract_docx_preview(file_path: str, max_chars: int) -> str:
         logging.warning("Failed to parse DOCX %s", file_path, exc_info=True)
         return t("api.server.docx_unreadable_generic")
 
+def extract_text_preview(file_path: str, max_chars: int) -> str:
+    """
+    Safely extracts a bounded text preview from a plain-text file.
+    Bounds the extracted text preview (does not prevent all upstream upload memory exhaustion).
+    """
+    if max_chars <= 0:
+        return ""
+
+    from core.i18n import t
+    import logging
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(max_chars + 1)
+
+        if not content:
+            return t("api.server.text_empty")
+
+        if len(content) > max_chars:
+            clipped_marker = t("api.server.text_preview_clipped")
+
+            if max_chars > len(clipped_marker):
+                budget = max_chars - len(clipped_marker)
+                return content[:budget] + clipped_marker
+            else:
+                return content[:max_chars]
+        else:
+            return content
+    except Exception:
+        logging.warning("Failed to extract text %s", file_path, exc_info=True)
+        return t("api.server.text_unreadable_generic")
+
 def extract_xlsx_preview(file_path: str, *, max_chars: int) -> str:
     """
     Safely extracts a bounded text preview from an Excel file (.xlsx/.xls).
