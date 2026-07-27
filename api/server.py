@@ -1191,9 +1191,8 @@ def _read_document_text_for_analysis(file_path: str, file_ext: str) -> str:
             from docx import Document as DocxDoc
             doc_text = _prepare_document_excerpt("\n".join(p.text for p in DocxDoc(file_path).paragraphs))
         elif file_ext in (".xlsx", ".xls"):
-            import pandas as pd
-            df_data = pd.read_excel(file_path)
-            doc_text = _prepare_document_excerpt(df_data.to_string(index=False))
+            from core.utils import extract_xlsx_preview
+            doc_text = _prepare_document_excerpt(extract_xlsx_preview(file_path, max_chars=16000))
         else:
             doc_text = t("api.server.unsupported_inline_type", file_ext=file_ext)
     except Exception as read_err:
