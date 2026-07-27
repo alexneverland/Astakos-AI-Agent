@@ -178,3 +178,90 @@ def test_malformed_content_length(monkeypatch, tmp_path, mock_telegram_api):
     files = os.listdir(target_dir)
     assert len(files) == 0
     assert t("api.server.file_too_large") in mock_telegram_api.sent_messages
+
+
+def test_getfile_ok_false(monkeypatch, tmp_path, mock_telegram_api):
+    monkeypatch.setattr('config.BASE_DIR', str(tmp_path))
+
+    def mock_get(url, **kwargs):
+        if 'getFile' in url:
+            return MockResponse(None, ok=False)
+        return MockResponse(b'valid content')
+
+    monkeypatch.setattr('requests.get', mock_get)
+
+    doc_obj = {'file_id': '123', 'file_name': 'report.pdf'}
+    handle_document(doc_obj, '', 'chat_id')
+
+    target_dir = os.path.join(str(tmp_path), 'telegram_uploads')
+    if os.path.exists(target_dir):
+        files = os.listdir(target_dir)
+        assert len(files) == 0
+
+    assert t('api.server.document_download_failed') in mock_telegram_api.sent_messages
+
+def test_getfile_network_error(monkeypatch, tmp_path, mock_telegram_api):
+    monkeypatch.setattr('config.BASE_DIR', str(tmp_path))
+
+    def mock_get(url, **kwargs):
+        if 'getFile' in url:
+            raise Exception('Network timeout')
+        return MockResponse(b'valid content')
+
+    monkeypatch.setattr('requests.get', mock_get)
+
+    doc_obj = {'file_id': '123', 'file_name': 'report.pdf'}
+    handle_document(doc_obj, '', 'chat_id')
+
+    target_dir = os.path.join(str(tmp_path), 'telegram_uploads')
+    if os.path.exists(target_dir):
+        files = os.listdir(target_dir)
+        assert len(files) == 0
+
+    assert t('api.server.document_download_failed') in mock_telegram_api.sent_messages
+
+def test_stream_exactly_20mb(monkeypatch, tmp_path, mock_telegram_api):
+    monkeypatch.setattr('config.BASE_DIR', str(tmp_path))
+
+    def mock_get(url, **kwargs):
+        if 'getFile' in url:
+            return MockResponse(None)
+        chunks = [b'a' * (10 * 1024 * 1024)] * 2
+        return MockResponse(chunks, headers={'Content-Length': str(20 * 1024 * 1024)})
+
+    monkeypatch.setattr('requests.get', mock_get)
+
+    doc_obj = {'file_id': '123', 'file_name': 'exact.pdf'}
+    handle_document(doc_obj, '', 'chat_id')
+
+    target_dir = os.path.join(str(tmp_path), 'telegram_uploads')
+    assert os.path.exists(target_dir)
+    files = os.listdir(target_dir)
+    assert len(files) == 1
+    assert t('api.server.file_too_large') not in mock_telegram_api.sent_messages
+    assert t('api.server.document_download_failed') not in mock_telegram_api.sent_messages
+
+def test_stream_unexpected_error(monkeypatch, tmp_path, mock_telegram_api):
+    monkeypatch.setattr('config.BASE_DIR', str(tmp_path))
+
+    def mock_get(url, **kwargs):
+        if 'getFile' in url:
+            return MockResponse(None)
+
+        class ErrorResponse(MockResponse):
+            def iter_content(self, chunk_size=8192):
+                yield b'partial content'
+                raise Exception('Connection reset')
+
+        return ErrorResponse(None)
+
+    monkeypatch.setattr('requests.get', mock_get)
+
+    doc_obj = {'file_id': '123', 'file_name': 'error.pdf'}
+    handle_document(doc_obj, '', 'chat_id')
+
+    target_dir = os.path.join(str(tmp_path), 'telegram_uploads')
+    if os.path.exists(target_dir):
+        files = os.listdir(target_dir)
+        assert len(files) == 0
+    assert t('api.server.document_download_failed') in mock_telegram_api.sent_messages

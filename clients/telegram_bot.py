@@ -903,16 +903,22 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         part_path = f"{local_path}.part"
 
         # Get file path from Telegram API
-        file_resp = requests.get(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile",
-            params={"file_id": file_id}, timeout=10
-        ).json()
-
-        if not file_resp.get("ok"):
-            send_telegram_msg(t("clients.telegram_bot.bot_msg_error", e="Telegram API"))
+        try:
+            file_resp = requests.get(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile",
+                params={"file_id": file_id}, timeout=10
+            )
+            file_resp.raise_for_status()
+            file_data = file_resp.json()
+            if not file_data.get("ok") or "result" not in file_data or "file_path" not in file_data["result"]:
+                print(f"Telegram API getFile invalid response: {file_data}")
+                send_telegram_msg(t("api.server.document_download_failed"))
+                return
+            file_path_remote = file_data["result"]["file_path"]
+        except Exception as e:
+            print(f"Telegram getFile error: {e}")
+            send_telegram_msg(t("api.server.document_download_failed"))
             return
-
-        file_path_remote = file_resp["result"]["file_path"]
 
         # Download
         file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path_remote}"
@@ -949,6 +955,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
                 if os.path.exists(part_path):
                     os.unlink(part_path)
                 print(f"Telegram document download error: {dl_err}")
+                send_telegram_msg(t("api.server.document_download_failed"))
                 return
 
         print(f"\033[94m[Document]: Saved in Telegram: {local_path}\033[0m")
@@ -1032,7 +1039,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
 
     except Exception as e:
         print(f"\033[91m[Document Error]: {e}\033[0m")
-        send_telegram_msg(f"❌ Document download error: {str(e)}")
+        send_telegram_msg(t("api.server.document_download_failed"))
 # ────────────────────────────────────────────────────────────────
 # VOICE HANDLER (CONSOLIDATED)
 # ────────────────────────────────────────────────────────────────
