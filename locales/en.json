@@ -1729,6 +1729,7 @@
       "unreadable_content": "[Δεν μπόρεσα να διαβάσω το περιεχόμενο: {read_err}]",
       "invalid_file_type": "Μη επιτρεπτός τύπος αρχείου: {file_ext}",
       "file_too_large": "Το αρχείο υπερβαίνει το όριο των 20 MB.",
+      "document_download_failed": "❌ Failed to download the document.",
       "photo_received": "📸 **Φωτογραφία ελήφθη:** {filename}\n\n",
       "file_received": "📁 **Αρχείο ελήφθη:** {filename}\n\n",
       "save_prompt": "**{user_name}, να την αποθηκεύσω μόνιμα στη μνήμη μου;**\nΑπάντησέ μου μόνο με: ναι ή όχι.",
