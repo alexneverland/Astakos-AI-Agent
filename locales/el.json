@@ -1760,7 +1760,12 @@
       "pdf_encrypted": "❌ Το PDF είναι κλειδωμένο με κωδικό.",
       "pdf_empty_or_scanned": "⚠️ Το PDF δεν περιέχει αναγνώσιμο κείμενο (πιθανώς σκαναρισμένο).",
       "pdf_page_meta": "[Απόσπασμα: σελίδες {extracted} από {total}]",
-      "pdf_unreadable_generic": "Αδυναμία ανάγνωσης του περιεχομένου του PDF."
+      "pdf_unreadable_generic": "Αδυναμία ανάγνωσης του περιεχομένου του PDF.",
+      "docx_oversized_uncompressed": "Το αρχείο DOCX είναι πολύ μεγάλο για ασφαλή επεξεργασία.",
+      "docx_corrupt": "Το αρχείο DOCX φαίνεται να είναι κατεστραμμένο ή κρυπτογραφημένο.",
+      "docx_unreadable_generic": "Δεν ήταν δυνατή η ανάγνωση του αρχείου DOCX.",
+      "docx_empty_or_scanned": "Το αρχείο DOCX είναι κενό ή δεν περιέχει αναγνώσιμο κείμενο.",
+      "docx_preview_clipped": "\n\n[... Η προεπισκόπηση DOCX περικόπηκε λόγω μεγέθους ...]"
     }
   },
   "core": {

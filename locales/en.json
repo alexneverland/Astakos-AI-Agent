@@ -1756,7 +1756,12 @@
       "pdf_encrypted": "❌ The PDF is password protected.",
       "pdf_empty_or_scanned": "⚠️ The PDF contains no readable text (likely scanned).",
       "pdf_page_meta": "[Excerpt: pages {extracted} of {total}]",
-      "pdf_unreadable_generic": "Unable to read PDF file content."
+      "pdf_unreadable_generic": "Unable to read PDF file content.",
+      "docx_oversized_uncompressed": "The DOCX file is too large to process safely.",
+      "docx_corrupt": "The DOCX file appears to be corrupted or encrypted.",
+      "docx_unreadable_generic": "The DOCX file could not be read.",
+      "docx_empty_or_scanned": "The DOCX file is empty or contains no readable text.",
+      "docx_preview_clipped": "\n\n[... DOCX preview clipped due to length ...]"
     }
   },
   "core": {
