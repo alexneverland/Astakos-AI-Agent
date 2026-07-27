@@ -880,28 +880,77 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
     """Downloads documents (PDF, Excel etc.) from Telegram to the correct folder."""
     try:
         from config import BASE_DIR
+        import uuid
+        from core.i18n import t
+
         file_id = doc_obj["file_id"]
         # If it doesn't have a name, we give it a random one
-        file_name = doc_obj.get("file_name", f"doc_{int(time.time())}.pdf")
+        raw_file_name = doc_obj.get("file_name", f"doc_{int(time.time())}.pdf")
+        file_name = os.path.basename(raw_file_name)
+        file_ext = os.path.splitext(file_name)[1].lower()
+
+        ALLOWED_TG_DOC_EXTS = {".txt", ".csv", ".json", ".md", ".pdf", ".docx", ".xlsx", ".xls"}
+        if file_ext not in ALLOWED_TG_DOC_EXTS:
+            send_telegram_msg(t("api.server.invalid_file_type", file_ext=file_ext))
+            return
 
         # Documents go to telegram_uploads (as in the Web UI)
         target_dir = os.path.join(BASE_DIR, "telegram_uploads")
         os.makedirs(target_dir, exist_ok=True)
-        local_path = os.path.join(target_dir, file_name)
+
+        safe_uuid = uuid.uuid4().hex
+        local_path = os.path.join(target_dir, f"tg_{safe_uuid}{file_ext}")
+        part_path = f"{local_path}.part"
 
         # Get file path from Telegram API
         file_resp = requests.get(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile",
             params={"file_id": file_id}, timeout=10
         ).json()
+
+        if not file_resp.get("ok"):
+            send_telegram_msg(t("clients.telegram_bot.bot_msg_error", e="Telegram API"))
+            return
+
         file_path_remote = file_resp["result"]["file_path"]
 
         # Download
         file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path_remote}"
-        doc_data = requests.get(file_url, timeout=30).content
+        MAX_TG_DOC_BYTES = 20 * 1024 * 1024
 
-        with open(local_path, "wb") as f:
-            f.write(doc_data)
+        class OversizedFileError(Exception):
+            pass
+
+        with requests.get(file_url, stream=True, timeout=30) as r:
+            r.raise_for_status()
+
+            content_length = r.headers.get("Content-Length")
+            if content_length and content_length.isdigit():
+                if int(content_length) > MAX_TG_DOC_BYTES:
+                    send_telegram_msg(t("api.server.file_too_large"))
+                    return
+
+            downloaded = 0
+            try:
+                with open(part_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            downloaded += len(chunk)
+                            if downloaded > MAX_TG_DOC_BYTES:
+                                raise OversizedFileError()
+                            f.write(chunk)
+                os.replace(part_path, local_path)
+            except OversizedFileError:
+                if os.path.exists(part_path):
+                    os.unlink(part_path)
+                send_telegram_msg(t("api.server.file_too_large"))
+                return
+            except Exception as dl_err:
+                if os.path.exists(part_path):
+                    os.unlink(part_path)
+                print(f"Telegram document download error: {dl_err}")
+                return
+
         print(f"\033[94m[Document]: Saved in Telegram: {local_path}\033[0m")
 
         # We send a message to the user that we received it
