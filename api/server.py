@@ -597,49 +597,100 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     except Exception as e:
         print(f"[RecentAssetFollowup]: {e}")
 
-    # ── Routine Confirmation from Web UI ─────────────────────────
-    # Same logic as telegram_bot — accent-insensitive
-    import unicodedata
-    def _normalize_gr(t):
-        return unicodedata.normalize("NFD", t).encode("ascii", "ignore").decode("ascii").lower()
-
+    # ── Routine Completion Decision from Web UI ─────────────────────
     try:
         from clients.telegram_bot import pending_routine_confirmations
+        from services.routine_completion_helper import decide_completion
+        from services.routine_completion_selector import select_routine as _completion_selector
+
         if pending_routine_confirmations:
-            txt = _normalize_gr(user_input)
-            txt_words = txt.replace(",","").replace(".","").replace("!","").split()
-            yes_w = [_normalize_gr(w) for w in config.NLP_CONFIG.get("intents", {}).get("confirm_words", [])]
-            no_w  = [_normalize_gr(w) for w in config.NLP_CONFIG.get("intents", {}).get("cancel_words", [])]
-            act_w = [_normalize_gr(w) for w in config.NLP_CONFIG.get("intents", {}).get("action_words", [])]
-            implicit = False
-            if any(w in txt for w in act_w):
-                for rid, rdata in pending_routine_confirmations.items():
-                    ev = rdata.get("event","") if isinstance(rdata,dict) else str(rdata)
-                    ev_words = [_normalize_gr(w) for w in ev.split() if len(w)>3]
-                    if any(ew in txt for ew in ev_words):
-                        implicit = True
-                        break
-            if any(w in txt_words for w in yes_w) or implicit:
-                from memory.routine_db import confirm_routine, mark_routine_responded, clear_pending_confirmations
+            pending_candidates = {
+                rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
+                for rid, pdata in pending_routine_confirmations.items()
+            }
+            decision = decide_completion(
+                user_text=user_input,
+                candidates=pending_candidates,
+                pool="pending",
+                semantic_selector=_completion_selector,
+            )
+
+            if decision.action == "complete" and decision.routine_id is not None:
+                from memory.routine_db import confirm_routine, mark_routine_responded, remove_pending_confirmation
                 from memory.event_log import log_event
-                for rid in list(pending_routine_confirmations.keys()):
-                    confirm_routine(rid)
-                    mark_routine_responded(rid)
-                    log_event("routines","confirmed",routine_id=rid,event=pending_routine_confirmations[rid].get("event","?"))
-                    print(f"✅ [Web Routine Confirmed]: {pending_routine_confirmations[rid]}")
-                pending_routine_confirmations.clear()
-                clear_pending_confirmations()
-            elif any(w in txt for w in no_w):
-                from memory.routine_db import decay_routine, clear_pending_confirmations
+
+                rid = decision.routine_id
+                pdata = pending_routine_confirmations.get(rid, {})
+                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+
+                confirm_routine(rid)
+                mark_routine_responded(rid)
+                remove_pending_confirmation(rid)
+                log_event(
+                    "routines", "confirmed",
+                    routine_id=rid, event=ev,
+                )
+                print(f"✅ [Web Routine Confirmed]: {pdata}")
+                pending_routine_confirmations.pop(rid, None)
+
+                reply = t("services.routine_completion.completed", routine_name=ev)
+                return JSONResponse({"agent": "Chat_Agent", "response": reply})
+
+            elif decision.action == "dismiss" and decision.routine_id is not None:
+                from memory.routine_db import decay_routine, remove_pending_confirmation
                 from memory.event_log import log_event
-                for rid in list(pending_routine_confirmations.keys()):
-                    decay_routine(rid)
-                    log_event("routines","dismissed",routine_id=rid,event=pending_routine_confirmations[rid].get("event","?"))
-                    print(f"📉 [Web Routine Dismissed]: {pending_routine_confirmations[rid]}")
-                pending_routine_confirmations.clear()
-                clear_pending_confirmations()
+
+                rid = decision.routine_id
+                pdata = pending_routine_confirmations.get(rid, {})
+                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+
+                decay_routine(rid)
+                remove_pending_confirmation(rid)
+                log_event("routines", "dismissed", routine_id=rid, event=ev)
+                print(f"📉 [Web Routine Dismissed]: {pdata}")
+                pending_routine_confirmations.pop(rid, None)
+                return JSONResponse({"agent": "Chat_Agent", "response": t("services.routine_completion.dismissed", routine_name=ev)})
+
+            elif decision.action == "ask_clarification":
+                cands = decision.clarification_candidates
+                cand_list = "\n".join(f"  {i+1}) {name}" for i, (_, name) in enumerate(cands.items()))
+                reply = t("services.routine_completion.clarification", candidates_list=cand_list)
+                return JSONResponse({"agent": "Chat_Agent", "response": reply})
+
+            # pass_through → continue to normal processing.
+        else:
+            # ── Pre-emptive today-pool completion (no pending) ───────
+            from datetime import datetime as _dt_now
+            from memory.routine_db import get_routines_for_day, mark_routine_triggered_today
+
+            day_name = _dt_now.now().strftime("%A")
+            today_routines = get_routines_for_day(day_name)
+            if today_routines:
+                today_candidates = {r["id"]: r["event"] for r in today_routines}
+                decision = decide_completion(
+                    user_text=user_input,
+                    candidates=today_candidates,
+                    pool="today",
+                    semantic_selector=_completion_selector,
+                )
+
+                if decision.action == "complete" and decision.routine_id is not None:
+                    from memory.event_log import log_event
+
+                    rid = decision.routine_id
+                    ev = today_candidates.get(rid, "?")
+                    mark_routine_triggered_today(rid)
+                    log_event(
+                        "routines", "preemptive_completed",
+                        routine_id=rid, event=ev,
+                    )
+                    print(f"✅ [Web Routine Pre-emptive Completed]: #{rid} {ev}")
+                    reply = t("services.routine_completion.preemptive_completed", routine_name=ev)
+                    return JSONResponse({"agent": "Chat_Agent", "response": reply})
+                # pass_through → continue to normal processing.
     except Exception as _rce:
-        print(f"[Web Routine Confirm]: {_rce}")
+        print(f"[Web Routine Completion]: {_rce}")
+
 
     # ── Pending Asset Confirmation from Web UI ───────────────────
     try:
