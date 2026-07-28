@@ -478,12 +478,16 @@ async def lifespan(app: FastAPI):
     shutdown_event.set()
 
     loop = asyncio.get_event_loop()
+    summary_future = loop.run_in_executor(None, lambda: _run_session_summary("web"))
     try:
-        await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: _run_session_summary("web")),
-            timeout=10.0
-        )
-    except (asyncio.TimeoutError, Exception):
+        await asyncio.wait_for(asyncio.shield(summary_future), timeout=10.0)
+    except asyncio.TimeoutError:
+        print("\033[93m[System]: Summary timeout — skipping.\033[0m")
+        try:
+            await summary_future
+        except Exception:
+            pass
+    except Exception:
         print("\033[93m[System]: Summary timeout — skipping.\033[0m")
 
     # Graceful ChromaDB shutdown
