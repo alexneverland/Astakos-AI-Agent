@@ -285,7 +285,7 @@ def get_capability_context() -> str:
     return "\n".join(parts) if parts else ""
 
 
-def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
+def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str) -> str | None:
     import re
     import json
     try:
@@ -297,7 +297,7 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
         
         resp_text = response.text if hasattr(response, 'text') else str(response)
         if not resp_text or resp_text.strip().lower() == "null":
-            return
+            return None
             
         raw = re.sub(r"```json|```", "", resp_text.strip()).strip()
         start = raw.find('{')
@@ -306,7 +306,7 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
             raw = raw[start:end+1]
             
         if raw.lower() == "null" or not raw:
-            return
+            return None
             
         data = json.loads(raw)
 
@@ -327,9 +327,12 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
                 result = _save_capability("cannot", data["cannot_do"])
                 if result == "inserted":
                     print(f"\033[91m[Self-awareness]: ❌ cannot_do: {data['cannot_do']}\033[0m")
+                    return str(data["cannot_do"])
                 elif result == "duplicate":
                     print(f"\033[90m[Self-awareness]: skip duplicate cannot_do: {data['cannot_do']}\033[0m")
             
     except Exception as e:
         print(f"\033[90m[Self-awareness Error]: {e}\033[0m")
+
+    return None
 
