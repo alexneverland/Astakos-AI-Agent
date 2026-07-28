@@ -1382,7 +1382,34 @@ def send_voice_reply(text, chat_id):
     except Exception as e:
         print(f"❌ TTS Error: {e}")
         send_telegram_msg(f"Master, I lost my voice... (Error: {e})")
-def _append_to_analytics_log(role: str, content: str, agent: str | None = None):
+
+def _enqueue_capability_gap_telegram(user_text: str, ai_text: str, agent: str, channel: str, correlation_rowid: int, chat_id: str | None = None):
+    from memory.working_memory import update_capabilities_from_exchange
+    description = update_capabilities_from_exchange(user_text, ai_text, agent)
+    if not description:
+        return
+
+    from memory.conversation_history import load_messages_after_rowid
+    newer = load_messages_after_rowid(after_rowid=correlation_rowid, channel=channel)
+    if any(m.get("role") == "user" for m in newer):
+        return
+
+    from core.i18n import t
+    prefix = t("core.approval.capability_proposal_prefix")
+    marker = t("core.approval.draft_markers")[0]
+    proposal = f"{prefix} {description} {marker}"
+
+    try:
+        _send_and_record_assistant(proposal, chat_id, agent="Dev_Agent")
+    except Exception as e:
+        print(f"[CapabilityGapTelegram]: error {e}")
+
+def _schedule_capability_gap_if_valid(user_text: str, ai_text: str, agent: str, user_rowid: int | None, chat_id: str | None = None):
+    if user_rowid is not None:
+        enqueue_slow_task(_enqueue_capability_gap_telegram, user_text, ai_text, agent, "telegram", user_rowid, chat_id)
+
+
+def _append_to_analytics_log(role: str, content: str, agent: str | None = None) -> int | None:
     """Logging of a message in the shared SQLite conversation history (telegram channel)."""
     try:
         now = datetime.now()
@@ -1390,19 +1417,21 @@ def _append_to_analytics_log(role: str, content: str, agent: str | None = None):
         try:
             # notify_telegram_message: saves to shared SQLite + WebSocket broadcast to Web UI
             from api.server import notify_telegram_message
-            notify_telegram_message(role=shared_role, content=content, agent=agent)
+            return notify_telegram_message(role=shared_role, content=content, agent=agent)
         except Exception:
             # Fallback: direct append without broadcast (if the server is not running)
             from memory.conversation_history import append_message
-            append_message(
+            saved = append_message(
                 role=shared_role,
                 content=content,
                 channel="telegram",
                 timestamp=now,
                 agent=agent,
             )
+            return saved.get("rowid") if isinstance(saved, dict) else None
     except Exception as e:
         print(f"[ConversationHistory/telegram]: Error shared write: {e}")
+        return None
 
 
 def _send_and_record_assistant(
@@ -2303,7 +2332,7 @@ def handle_message(user_text: str, chat_id: str):
                     _cache_bot_message(_mid, final_ai_response)
             # We keep context for the next message
             _typing_active["on"] = False  # We stop typing
-            _append_to_analytics_log("user", clean_user_text)
+            user_rowid = _append_to_analytics_log("user", clean_user_text)
             _append_to_analytics_log("ai", final_ai_response)
             # Photos
             if "[SEND_PHOTO:" in final_ai_response:
@@ -2320,7 +2349,7 @@ def handle_message(user_text: str, chat_id: str):
             enqueue_fast_task(log_exchange,                       user_text, final_ai_response, handling_agent, "telegram")
             enqueue_fast_task(update_working_memory,              user_text, final_ai_response)
             enqueue_fast_task(_enqueue_slow_memory_sifter,        user_text, final_ai_response, handling_agent, "telegram")
-            enqueue_slow_task(update_capabilities_from_exchange,  user_text, final_ai_response, handling_agent)
+            _schedule_capability_gap_if_valid(user_text, final_ai_response, handling_agent, user_rowid, chat_id)
             enqueue_slow_task(_enqueue_followup_pipeline, user_text, final_ai_response, handling_agent, "telegram")
             enqueue_slow_task(extract_and_update_context_flags, user_text, final_ai_response)
             

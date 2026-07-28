@@ -545,6 +545,26 @@ async def manual_session_save(_=Depends(require_token)):
     # Execution in a separate thread to prevent the API from freezing
     threading.Thread(target=_run_session_summary, args=("web",), daemon=True).start()
     return JSONResponse({"status": "Archiving started!"})
+
+def _enqueue_capability_gap_web(user_text: str, ai_text: str, agent: str, channel: str, correlation_rowid: int):
+    from memory.working_memory import update_capabilities_from_exchange
+    description = update_capabilities_from_exchange(user_text, ai_text, agent)
+    if not description:
+        return
+
+    from memory.conversation_history import load_messages_after_rowid
+    newer = load_messages_after_rowid(after_rowid=correlation_rowid, channel=channel)
+    if any(m.get("role") == "user" for m in newer):
+        return
+
+    from core.i18n import t
+    prefix = t("core.approval.capability_proposal_prefix")
+    marker = t("core.approval.draft_markers")[0]
+    proposal = f"{prefix} {description} {marker}"
+
+    append_to_chat_history("assistant", proposal, agent="Dev_Agent")
+
+
 @server.post("/chat")
 async def chat_endpoint(request: Request, _=Depends(require_token)):
     global last_interaction_time
@@ -1081,7 +1101,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(log_exchange,                      clean_user, clean_ai, handling_agent, "web")
             enqueue_fast_task(update_working_memory,             clean_user, clean_ai)
             enqueue_fast_task(_enqueue_slow_memory_sifter,       clean_user, clean_ai, handling_agent, "web")
-            enqueue_slow_task(update_capabilities_from_exchange, clean_user, clean_ai, handling_agent)
+            enqueue_slow_task(_enqueue_capability_gap_web,       clean_user, clean_ai, handling_agent, "web", current_history_rowid)
             enqueue_slow_task(_enqueue_followup_pipeline, clean_user, clean_ai, handling_agent, "web")
             enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")
             _trace.mark_phase("background_enqueue_ms", int((perf_counter() - t_bg_0) * 1000))
