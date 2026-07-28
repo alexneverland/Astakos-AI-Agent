@@ -3813,6 +3813,12 @@
     "analytics_engine": {
       "prompt": "Ανάλυσε τα παρακάτω μηνύματα χρήστη (Ελληνικά/Αγγλικά).\nΓια κάθε μήνυμα βρες ΑΝ υπάρχει σαφής δραστηριότητα της καθημερινότητας.\n\nΚανόνες:\n- Επέστρεψε ΜΟΝΟ JSON array, τίποτε άλλο\n- Ένα αντικείμενο ανά μήνυμα (ίδιο idx)\n- Χωρίς δραστηριότητα → {{\"idx\": N, \"event\": null}}\n- Με δραστηριότητα → {{\"idx\": N, \"event\": \"σύντομο όνομα\", \"type\": \"κατηγορία\"}}\n- Κατηγορίες: general, work, family, hobby, home\n- Συντηρητικός — μόνο ξεκάθαρες δραστηριότητες, όχι ερωτήσεις/συζητήσεις\n\nΜηνύματα:\n{messages}"
     },
+    "routine_completion": {
+      "clarification": "Which routine do you mean?\n{candidates_list}",
+      "completed": "✅ Completed: {routine_name}",
+      "dismissed": "📉 Dismissed: {routine_name}",
+      "preemptive_completed": "✅ Marked as completed: {routine_name}"
+    },
     "routine_reconciler": {
       "prompt_fact_1": "Fact: \"Το βράδυ θα πάω με τη {partner_name} έξω και ο {kid1_name} θα είναι με τη {kid2_name}\"",
       "prompt_fact_2": "Fact: \"Γυρίσαμε σπίτι\"",

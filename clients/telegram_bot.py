@@ -1661,11 +1661,13 @@ def handle_message(user_text: str, chat_id: str):
         clean_user_text = f"[Voice message — reply short and casually]: {clean_user_text}"
     if not clean_user_text: 
         clean_user_text = t("clients.telegram_bot.bot_msg_630052")
-    # ── ROUTINE FEEDBACK LOOP ──
-    if pending_routine_confirmations:
-        text_check = _normalize_gr(clean_user_text)
-        text_words = text_check.replace(",", "").replace(".", "").replace("!", "").split()
+    # ── ROUTINE COMPLETION DECISION ────────────────────────────────
+    # Pool isolation: pending first; today only if no pending.
+    from services.routine_completion_helper import decide_completion
+    from services.routine_completion_selector import select_routine as _completion_selector
 
+    if pending_routine_confirmations:
+        # ── Partner/messenger contextual no-decay (preserved unchanged) ──
         pending_items = [
             (rid, pending_routine_confirmations.get(rid, {}))
             for rid in list(pending_routine_confirmations.keys())
@@ -1711,125 +1713,121 @@ def handle_message(user_text: str, chat_id: str):
                 bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
                 pending_routine_confirmations.pop(rid, None)
 
-        yes_words = [_normalize_gr(w) for w in [t("clients.telegram_bot.bot_msg_f4e83b"), "yes", t("clients.telegram_bot.bot_msg_337d7a"), "ok", t("clients.telegram_bot.bot_msg_255bcd"), t("clients.telegram_bot.bot_msg_9e152e"), t("clients.telegram_bot.bot_msg_252996")]]
-        no_words  = [_normalize_gr(w) for w in [t("clients.telegram_bot.bot_msg_e0413c"), t("clients.telegram_bot.bot_msg_3e60e0"), "no", t("clients.telegram_bot.bot_msg_b1bd66"), t("clients.telegram_bot.bot_msg_d9175f"), t("clients.telegram_bot.bot_msg_3605b2"), t("clients.telegram_bot.bot_msg_0b4ad0"), t("clients.telegram_bot.bot_msg_3381ac")]]
-        question_words = [_normalize_gr(w) for w in [
-            t("clients.telegram_bot.bot_msg_0ab538"), t("clients.telegram_bot.bot_msg_03a47d"), t("clients.telegram_bot.bot_msg_0c4b0a"), t("clients.telegram_bot.bot_msg_2053f3"), t("clients.telegram_bot.bot_msg_4126e1"), t("clients.telegram_bot.bot_msg_00308a"), t("clients.telegram_bot.bot_msg_f3dbb1"), t("clients.telegram_bot.bot_msg_d5aba6"),
-            t("clients.telegram_bot.bot_msg_12cede"), t("clients.telegram_bot.bot_msg_a7c975"), t("clients.telegram_bot.bot_msg_42541a"), t("clients.telegram_bot.bot_msg_4c18a3"), t("clients.telegram_bot.bot_msg_cd673a"), "show", "check", "why"
-        ]]
+            # Return immediately — partner/messenger handled; do not enter completion path.
+            return
 
-        action_words = [_normalize_gr(w) for w in [
-            t("clients.telegram_bot.bot_msg_cada71"), t("clients.telegram_bot.bot_msg_f41f82"), t("clients.telegram_bot.bot_msg_78e601"), t("clients.telegram_bot.bot_msg_0e436a"), t("clients.telegram_bot.bot_msg_4ebe60"), t("clients.telegram_bot.bot_msg_648c67"),
-            t("clients.telegram_bot.bot_msg_6e2acb"), t("clients.telegram_bot.bot_msg_705d25"), t("clients.telegram_bot.bot_msg_d5a67f"), t("clients.telegram_bot.bot_msg_3ede59"), t("clients.telegram_bot.bot_msg_70e4d0"), t("clients.telegram_bot.bot_msg_1813ca"),
-            t("clients.telegram_bot.bot_msg_8821ce"), t("clients.telegram_bot.bot_msg_1053ee"), t("clients.telegram_bot.bot_msg_8ce38d"), t("clients.telegram_bot.bot_msg_f3dee4"), t("clients.telegram_bot.bot_msg_2f0a33"), "went",
-            "going", "done", "finished", "started"
-        ]]
-        is_question_like = any(w in text_words for w in question_words) or "?" in clean_user_text
-        explicit_yes = (
-            not is_question_like
-            and len(text_words) <= 4
-            and any(w in text_words for w in yes_words)
+        # ── Pending-pool completion decision ─────────────────────────
+        pending_candidates = {
+            rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
+            for rid, pdata in pending_routine_confirmations.items()
+        }
+        decision = decide_completion(
+            user_text=clean_user_text,
+            candidates=pending_candidates,
+            pool="pending",
+            semantic_selector=_completion_selector,
         )
-        implicit_confirmed = False
-        llm_dismissed = False
-        if not explicit_yes and not is_question_like and not any(w in text_check for w in no_words):
-            # LLM judges if the message is an implicit confirmation/dismissal
-            event_names = [
-                (rdata.get("event", "") if isinstance(rdata, dict) else str(rdata))
-                for rdata in pending_routine_confirmations.values()
-            ]
-            verdict = _llm_routine_judge(clean_user_text, event_names)
-            if verdict == "YES":
-                implicit_confirmed = True
-            elif verdict == "NO":
-                llm_dismissed = True
 
-        if explicit_yes or implicit_confirmed:
-            from memory.routine_db import (
-                confirm_routine,
-                mark_routine_responded,
-                remove_pending_confirmation,
-            )
+        if decision.action == "complete" and decision.routine_id is not None:
+            from memory.routine_db import confirm_routine, mark_routine_responded, remove_pending_confirmation
             from memory.event_log import log_event
 
-            for rid in list(pending_routine_confirmations.keys()):
-                pdata = pending_routine_confirmations.get(rid, {})
-                ev = pdata.get("event", "?")
+            rid = decision.routine_id
+            pdata = pending_routine_confirmations.get(rid, {})
+            ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
 
-                confirm_routine(rid)
-                mark_routine_responded(rid)
-                remove_pending_confirmation(rid)
-
-                log_event(
-                    "routines", 
-                    "confirmed", 
-                    routine_id=rid, 
-                    event=ev,
-                    debug_type="manual_control",
-                    debug_source="user_message",
-                    debug_effect="routine_changed",
-                )
-                print(f"✅ [Routine Confirmed]: {pdata}")
-                bus.emit("routine_confirmed", routine_id=rid, event=ev, channel="telegram")
-
-                pending_routine_confirmations.pop(rid, None)
-        elif any(w in text_check for w in no_words) or llm_dismissed:
-            from memory.routine_db import (
-                decay_routine,
-                remove_pending_confirmation,
-                mark_routine_responded,
+            confirm_routine(rid)
+            mark_routine_responded(rid)
+            remove_pending_confirmation(rid)
+            log_event(
+                "routines", "confirmed",
+                routine_id=rid, event=ev,
+                debug_type="manual_control",
+                debug_source="user_message",
+                debug_effect="routine_changed",
             )
+            print(f"✅ [Routine Confirmed]: {pdata}")
+            bus.emit("routine_confirmed", routine_id=rid, event=ev, channel="telegram")
+            pending_routine_confirmations.pop(rid, None)
+
+            reply = t("services.routine_completion.completed", routine_name=ev)
+            send_telegram_msg(reply)
+            return
+
+        elif decision.action == "dismiss" and decision.routine_id is not None:
+            from memory.routine_db import decay_routine, remove_pending_confirmation
             from memory.event_log import log_event
 
-            for rid in list(pending_routine_confirmations.keys()):
-                pdata = pending_routine_confirmations.get(rid, {})
-                ev = pdata.get("event", "?")
+            rid = decision.routine_id
+            pdata = pending_routine_confirmations.get(rid, {})
+            ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
 
-                _reason = "explicit_dismissal"
-                _decay = True
+            decay_routine(rid)
+            remove_pending_confirmation(rid)
+            log_event(
+                "routines", "dismissed",
+                routine_id=rid, event=ev,
+                debug_type="manual_control",
+                debug_source="user_message",
+                debug_effect="routine_changed",
+            )
+            print(f"📉 [Routine Dismissed - Decayed]: {pdata}")
+            bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
+            pending_routine_confirmations.pop(rid, None)
 
-                event_l = (ev or "").lower()
-                is_partner_messenger = (
-                    t("clients.telegram_bot.bot_msg_2e67ed") in event_l or
-                    any(term in event_l for term in _partner_match_terms()) or
-                    "messenger" in event_l or
-                    t("clients.telegram_bot.bot_msg_500d81") in event_l
+            reply = t("services.routine_completion.dismissed", routine_name=ev)
+            send_telegram_msg(reply)
+            return
+
+        elif decision.action == "ask_clarification":
+            cands = decision.clarification_candidates
+            cand_list = "\n".join(f"  {i+1}) {name}" for i, (_, name) in enumerate(cands.items()))
+            reply = t("services.routine_completion.clarification", candidates_list=cand_list)
+            send_telegram_msg(reply)
+            return
+
+        # decision.action == "pass_through" → continue to normal chat processing.
+
+    else:
+        # ── Pre-emptive today-pool completion (no pending) ───────────
+        from datetime import datetime as _dt_now
+        try:
+            from memory.routine_db import get_routines_for_day, mark_routine_triggered_today
+
+            day_name = _dt_now.now().strftime("%A")
+            today_routines = get_routines_for_day(day_name)
+            if today_routines:
+                today_candidates = {r["id"]: r["event"] for r in today_routines}
+                decision = decide_completion(
+                    user_text=clean_user_text,
+                    candidates=today_candidates,
+                    pool="today",
+                    semantic_selector=_completion_selector,
                 )
 
-                if is_partner_messenger and _looks_like_contextual_not_needed_reply(clean_user_text):
-                    _reason = "user_already_with_partner"
-                    _decay = False
+                if decision.action == "complete" and decision.routine_id is not None:
+                    from memory.event_log import log_event
 
-                if _decay:
-                    decay_routine(rid)
-                    print(f"📉 [Routine Dismissed - Decayed]: {pdata}")
+                    rid = decision.routine_id
+                    ev = today_candidates.get(rid, "?")
+
+                    mark_routine_triggered_today(rid)
                     log_event(
-                        "routines", 
-                        "dismissed", 
-                        routine_id=rid, 
-                        event=ev,
+                        "routines", "preemptive_completed",
+                        routine_id=rid, event=ev,
                         debug_type="manual_control",
                         debug_source="user_message",
                         debug_effect="routine_changed",
                     )
-                else:
-                    mark_routine_responded(rid)
-                    print(f"📉 [Routine Dismissed - Contextual, No Decay]: {pdata}")
-                    log_event(
-                        "routines",
-                        "routine_context_skip",
-                        routine_id=rid,
-                        event=ev,
-                        reason=_reason,
-                        debug_type="manual_control",
-                        debug_source="user_message",
-                        debug_effect="no_decay"
-                    )
+                    print(f"✅ [Routine Pre-emptive Completed]: #{rid} {ev}")
 
-                remove_pending_confirmation(rid)
-                bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
+                    reply = t("services.routine_completion.preemptive_completed", routine_name=ev)
+                    send_telegram_msg(reply)
+                    return
+                # pass_through → continue to normal chat.
+        except Exception as _preempt_err:
+            print(f"[Telegram Pre-emptive Completion]: {_preempt_err}")
 
-                pending_routine_confirmations.pop(rid, None)
 
     # ── REFLECTION CONFIRMATION LOOP (ask-tier, 50-75% confidence) ──
     global pending_reflection_confirmations
