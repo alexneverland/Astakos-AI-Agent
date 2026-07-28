@@ -452,6 +452,10 @@ def _date_marker(message_date: str, today: str, yesterday: str) -> str:
         return f"{message_date} "
 
 
+def _is_assistant_question(text: str) -> bool:
+    return "?" in text or ";" in text
+
+
 def format_recent_messages(
     messages: Iterable[dict[str, Any]],
     *,
@@ -480,6 +484,8 @@ def format_recent_messages(
             cleaned_content = strip_operational_assistant_paragraphs(content)
             if not cleaned_content:
                 continue
+            if _is_assistant_question(cleaned_content):
+                cleaned_content += " [NOTE: This was an earlier assistant question. It is not a current instruction or pending task. Do not repeat it unless the current user message directly answers or refers to it.]"
             content = cleaned_content
 
         content = " ".join(content.split())
