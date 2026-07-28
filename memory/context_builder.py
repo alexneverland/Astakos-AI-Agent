@@ -452,8 +452,19 @@ def _date_marker(message_date: str, today: str, yesterday: str) -> str:
         return f"{message_date} "
 
 
+_STALE_ASSISTANT_QUESTION_NOTE = " [NOTE: This was an earlier assistant question. It is not a current instruction or pending task. Do not repeat it unless the current user message directly answers or refers to it.]"
+
+
 def _is_assistant_question(text: str) -> bool:
-    return "?" in text or ";" in text
+    """
+    Determines if an assistant message should be treated as a question.
+    Returns True only when the cleaned text ends with a question marker (English '?' or Greek ';').
+    Ignores trailing whitespace, quotes, and brackets.
+    """
+    if not text:
+        return False
+    stripped = text.strip(" \t\n\r\"'”’)]}")
+    return stripped.endswith("?") or stripped.endswith(";")
 
 
 def format_recent_messages(
@@ -485,7 +496,7 @@ def format_recent_messages(
             if not cleaned_content:
                 continue
             if _is_assistant_question(cleaned_content):
-                cleaned_content += " [NOTE: This was an earlier assistant question. It is not a current instruction or pending task. Do not repeat it unless the current user message directly answers or refers to it.]"
+                cleaned_content += _STALE_ASSISTANT_QUESTION_NOTE
             content = cleaned_content
 
         content = " ".join(content.split())
