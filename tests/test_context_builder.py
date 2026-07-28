@@ -749,3 +749,109 @@ def test_classify_memory_query_intent_explicit_storage():
     import memory.context_builder as cb
     result = cb.classify_memory_query_intent('να θυμασαι οτι ο λαζαρος αλλαξε σχολειο')
     assert result == 'explicit_memory_storage'
+
+def test_format_recent_messages_flags_stale_assistant_questions():
+    from memory.context_builder import format_recent_messages, _STALE_ASSISTANT_QUESTION_NOTE
+
+    messages = [
+        # Old assistant question (should be flagged)
+        {
+            "role": "assistant",
+            "channel": "telegram",
+            "time": "10:00",
+            "date": "2026-07-28",
+            "content": "Did you buy mosquito repellent?"
+        },
+        # User message (should be unchanged)
+        {
+            "role": "user",
+            "channel": "telegram",
+            "time": "10:05",
+            "date": "2026-07-28",
+            "content": "Yes."
+        },
+        # Informative assistant message without question (should be unchanged)
+        {
+            "role": "assistant",
+            "channel": "web",
+            "time": "11:00",
+            "date": "2026-07-28",
+            "content": "Great, it will help."
+        },
+        # Old mixed-channel assistant question (should be flagged)
+        {
+            "role": "assistant",
+            "channel": "telegram",
+            "time": "11:10",
+            "date": "2026-07-28",
+            "content": "What about the pharmacy?"
+        },
+        # Declarative message with '?' in the middle (should be unchanged)
+        {
+            "role": "assistant",
+            "channel": "web",
+            "time": "11:12",
+            "date": "2026-07-28",
+            "content": "I wasn't sure if you went? but glad you did."
+        },
+        # Latest assistant question (should be flagged because all rendered assistant questions are historical background context)
+        {
+            "role": "assistant",
+            "channel": "web",
+            "time": "11:15",
+            "date": "2026-07-28",
+            "content": "Any other questions?"
+        },
+        # Greek assistant question ending in ';' (should be flagged)
+        {
+            "role": "assistant",
+            "channel": "web",
+            "time": "11:20",
+            "date": "2026-07-28",
+            "content": "Τι κάνεις;"
+        },
+        # Assistant question ending in '?' with trailing closing quote/bracket characters (should be flagged)
+        {
+            "role": "assistant",
+            "channel": "web",
+            "time": "11:25",
+            "date": "2026-07-28",
+            "content": "Did you say \"yes\"?]"
+        }
+    ]
+
+    lines = format_recent_messages(messages, limit=8)
+
+    assert len(lines) == 8
+
+    # 1. Old assistant question gets flagged and retains original text
+    assert "Did you buy mosquito repellent?" in lines[0]
+    assert _STALE_ASSISTANT_QUESTION_NOTE in lines[0]
+
+    # 2. User message unchanged and retains original text
+    assert "Yes." in lines[1]
+    assert _STALE_ASSISTANT_QUESTION_NOTE not in lines[1]
+
+    # 3. Informative assistant message unchanged and retains original text
+    assert "Great, it will help." in lines[2]
+    assert _STALE_ASSISTANT_QUESTION_NOTE not in lines[2]
+
+    # 4. Old mixed-channel assistant question gets flagged and retains original text
+    assert "What about the pharmacy?" in lines[3]
+    assert _STALE_ASSISTANT_QUESTION_NOTE in lines[3]
+
+    # 5. Declarative message with '?' in the middle is unchanged
+    assert "I wasn't sure if you went? but glad you did." in lines[4]
+    assert _STALE_ASSISTANT_QUESTION_NOTE not in lines[4]
+
+    # 6. Latest assistant question IS flagged and retains original text
+    assert "Any other questions?" in lines[5]
+    assert _STALE_ASSISTANT_QUESTION_NOTE in lines[5]
+
+    # 7. Greek assistant question gets flagged and retains original text
+    assert "Τι κάνεις;" in lines[6]
+    assert _STALE_ASSISTANT_QUESTION_NOTE in lines[6]
+
+    # 8. Assistant question with trailing quotes/brackets gets flagged and retains original text
+    assert "Did you say \"yes\"?]" in lines[7]
+    assert _STALE_ASSISTANT_QUESTION_NOTE in lines[7]
