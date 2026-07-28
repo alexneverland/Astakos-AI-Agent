@@ -1148,7 +1148,9 @@ def _run_session_summary(channel: str = "web"):
         )
 
         # 5. Save (Here the MemoryManager will also perform the overwrite if needed)
-        memory.save(memory_type="session", summary=summary, session_text=session_text)
+        success = memory.save(memory_type="session", summary=summary, session_text=session_text)
+        if success is False:
+            raise RuntimeError("Vector store failed to save session memory.")
         if using_persistent_log:
             mark_exchanges_summarized([e["id"] for e in current_batch])
         print(f"\033[92m[Session]: ✅ Archived successfully! Mood: {summary.get('mood', '?')}\033[0m")

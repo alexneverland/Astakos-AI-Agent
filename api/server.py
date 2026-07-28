@@ -475,13 +475,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Graceful ChromaDB shutdown
-    try:
-        from memory.vector_store import close_vector_store
-        close_vector_store()
-    except Exception:
-        pass
-
     shutdown_event.set()
 
     loop = asyncio.get_event_loop()
@@ -492,6 +485,13 @@ async def lifespan(app: FastAPI):
         )
     except (asyncio.TimeoutError, Exception):
         print("\033[93m[System]: Summary timeout — skipping.\033[0m")
+
+    # Graceful ChromaDB shutdown
+    try:
+        from memory.vector_store import close_vector_store
+        close_vector_store()
+    except Exception:
+        pass
 # ────────────────────────────────────────────────────────────────
 # FASTAPI APP & MIDDLEWARE
 # ────────────────────────────────────────────────────────────────
