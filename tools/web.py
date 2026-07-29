@@ -693,33 +693,98 @@ def duckduckgo_search(query: str) -> str:
     FOR A SPECIFIC URL ALWAYS use browse_url."""
     from ddgs import DDGS
     from ddgs.exceptions import RatelimitException, TimeoutException, DDGSException
+    from services.gemini import safe_gemini_call
+    import json
+    import re
 
     # backend="auto" (the default) tries sequential/batched ALL engines (up to 8),
     # something that in fail-cascades reached 20-30+ sec. per call. Pin to 2 fast ones,
     # verified backends (verified live: duckduckgo ~1s, google ~0.5s) with 1 fallback.
     backends_to_try = ["duckduckgo", "google"]
-    last_error = t("tools.web.search_err_unknown")
 
-    for backend in backends_to_try:
-        try:
-            with DDGS(timeout=8) as ddgs:
-                results = list(ddgs.text(query, max_results=5, backend=backend))
-            if results:
-                output = []
-                for r in results:
-                    output.append(t("tools.web.search_format_result", title=r["title"], href=r["href"], body=r["body"]))
-                return "\n---\n".join(output)
-            last_error = t("tools.web.search_err_empty")
-        except RatelimitException:
-            last_error = "rate limit"
-        except TimeoutException:
-            last_error = "timeout"
-        except DDGSException as e:
-            last_error = str(e)
-        except Exception as e:
-            last_error = str(e)
+    def _run_ddgs(q: str) -> tuple[str | None, str | None]:
+        """
+        Executes search queries against pinned DDGS backends.
 
-    return t("tools.web.search_all_failed", last_error=last_error, count=len(backends_to_try))
+        Args:
+            q: The search query string.
+
+        Returns:
+            A tuple of (formatted_results, error_message).
+            If successful, error_message is None. If failed, formatted_results is None.
+        """
+        last_error = t("tools.web.search_err_unknown")
+        for backend in backends_to_try:
+            try:
+                with DDGS(timeout=8) as ddgs:
+                    results = list(ddgs.text(q, max_results=5, backend=backend))
+                if results:
+                    output = []
+                    valid_count = 0
+                    for r in results:
+                        if not isinstance(r, dict):
+                            continue
+                        title = r.get("title")
+                        href = r.get("href")
+                        body = r.get("body")
+                        if isinstance(title, str) and isinstance(href, str) and isinstance(body, str):
+                            title = title.strip()
+                            href = href.strip()
+                            body = body.strip()
+                            if title and href and body:
+                                valid_count += 1
+                                output.append(t("tools.web.search_format_result", title=title, href=href, body=body))
+                    if valid_count > 0:
+                        return "\n---\n".join(output), None
+                last_error = t("tools.web.search_err_empty")
+            except RatelimitException:
+                last_error = "rate limit"
+            except TimeoutException:
+                last_error = "timeout"
+            except DDGSException as e:
+                last_error = str(e)
+            except Exception as e:
+                last_error = str(e)
+        return None, last_error
+
+    result_text, err = _run_ddgs(query)
+    if result_text is not None:
+        return result_text
+
+    if not re.search(r'[\u0370-\u03FF\u1F00-\u1FFF]', query):
+        return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
+
+    try:
+        prompt = (
+            "Translate this search query into a short English search query. "
+            "Return STRICT JSON with exactly one key 'query'.\n"
+            f"Original query: {query}"
+        )
+        # Call Gemini exactly once
+        resp = safe_gemini_call(prompt, retries=1)
+        data = json.loads(resp.text)
+
+        if not isinstance(data, dict) or len(data) != 1 or "query" not in data:
+            raise ValueError("Invalid JSON structure")
+
+        english_query = data["query"]
+
+        if not isinstance(english_query, str) or not english_query.strip():
+            raise ValueError("Invalid query")
+
+        english_query = english_query.strip()
+
+        if remove_accents(english_query) == remove_accents(query).strip():
+            raise ValueError("Same query")
+
+        fallback_text, fallback_err = _run_ddgs(english_query)
+        if fallback_text is not None:
+            return fallback_text
+        err = fallback_err
+    except Exception:
+        pass
+
+    return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
 @tool
 def search_supermarket_prices(query: str) -> str:
     """Searches for product prices from all supermarkets (e-katanalotis.gov.gr).
