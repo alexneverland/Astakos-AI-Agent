@@ -616,6 +616,40 @@ def get_routines_for_day(day: str) -> list:
     ]
 
 
+def get_eligible_preemptive_routines_for_day(day: str) -> list:
+    """Return active day routines that have not already been completed today."""
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    conn = get_connection()
+    cursor = conn.cursor()
+    c_day = normalize_day(day)
+    cursor.execute(
+        """
+        SELECT id, time_str, event_name, event_type, confidence, mention_count, state
+        FROM routines
+        WHERE (
+            day_of_week=?
+            OR day_of_week='Everyday'
+            OR (day_of_week IN ('Weekdays','Weekdays','weekdays') AND ? IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Weekdays','Weekdays','weekdays'))
+            OR (day_of_week IN ('Weekends','Weekend','weekend') AND ? IN ('Saturday', 'Sunday', 'Weekends','Weekend','weekend'))
+        )
+        AND state='active'
+        AND (last_triggered IS NULL OR last_triggered != ?)
+        ORDER BY time_str ASC
+        """,
+        (c_day, c_day, c_day, today_str),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": row[0], "time": row[1], "event": row[2],
+            "type": row[3], "confidence": round(row[4], 2),
+            "mentions": row[5], "state": row[6],
+        }
+        for row in rows
+    ]
+
+
 setup_db()
 
 # ────────────────────────────────────────────────────────────────

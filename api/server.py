@@ -25,7 +25,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from rich.console import Console
 from zoneinfo import ZoneInfo
 
@@ -571,6 +571,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
     body       = await request.json()
     user_input = body.get("message", "").strip()
+    routine_completion_context: SystemMessage | None = None
 
     # (Mastro-Shield): Avoid null or strange paths
     photo_path = resolve_allowed_file(
@@ -640,7 +641,12 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             )
 
             if decision.action == "complete" and decision.routine_id is not None:
-                from memory.routine_db import confirm_routine, mark_routine_responded, remove_pending_confirmation
+                from memory.routine_db import (
+                    confirm_routine,
+                    mark_routine_responded,
+                    mark_routine_triggered_today,
+                    remove_pending_confirmation,
+                )
                 from memory.event_log import log_event
 
                 rid = decision.routine_id
@@ -649,6 +655,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
                 confirm_routine(rid)
                 mark_routine_responded(rid)
+                mark_routine_triggered_today(rid)
                 remove_pending_confirmation(rid)
                 log_event(
                     "routines", "confirmed",
@@ -657,8 +664,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 print(f"✅ [Web Routine Confirmed]: {pdata}")
                 pending_routine_confirmations.pop(rid, None)
 
-                reply = t("services.routine_completion.completed", routine_name=ev)
-                return JSONResponse({"agent": "Chat_Agent", "response": reply})
+                from services.routine_completion_context import build_routine_completion_context
+                routine_completion_context = build_routine_completion_context("complete", ev)
 
             elif decision.action == "dismiss" and decision.routine_id is not None:
                 from memory.routine_db import decay_routine, remove_pending_confirmation
@@ -673,22 +680,17 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 log_event("routines", "dismissed", routine_id=rid, event=ev)
                 print(f"📉 [Web Routine Dismissed]: {pdata}")
                 pending_routine_confirmations.pop(rid, None)
-                return JSONResponse({"agent": "Chat_Agent", "response": t("services.routine_completion.dismissed", routine_name=ev)})
-
-            elif decision.action == "ask_clarification":
-                cands = decision.clarification_candidates
-                cand_list = "\n".join(f"  {i+1}) {name}" for i, (_, name) in enumerate(cands.items()))
-                reply = t("services.routine_completion.clarification", candidates_list=cand_list)
-                return JSONResponse({"agent": "Chat_Agent", "response": reply})
+                from services.routine_completion_context import build_routine_completion_context
+                routine_completion_context = build_routine_completion_context("dismiss", ev)
 
             # pass_through → continue to normal processing.
         else:
             # ── Pre-emptive today-pool completion (no pending) ───────
             from datetime import datetime as _dt_now
-            from memory.routine_db import get_routines_for_day, mark_routine_triggered_today
+            from memory.routine_db import get_eligible_preemptive_routines_for_day, mark_routine_triggered_today
 
             day_name = _dt_now.now().strftime("%A")
-            today_routines = get_routines_for_day(day_name)
+            today_routines = get_eligible_preemptive_routines_for_day(day_name)
             if today_routines:
                 today_candidates = {r["id"]: r["event"] for r in today_routines}
                 decision = decide_completion(
@@ -709,8 +711,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                         routine_id=rid, event=ev,
                     )
                     print(f"✅ [Web Routine Pre-emptive Completed]: #{rid} {ev}")
-                    reply = t("services.routine_completion.preemptive_completed", routine_name=ev)
-                    return JSONResponse({"agent": "Chat_Agent", "response": reply})
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context("complete", ev)
                 # pass_through → continue to normal processing.
     except Exception as _rce:
         print(f"[Web Routine Completion]: {_rce}")
@@ -973,7 +975,12 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         mail_prompt_active = is_reply_to_recent_mail_prompt(context_msgs)
         linkedin_prompt_active = is_reply_to_recent_linkedin_prompt(context_msgs)
 
-        if is_ultra_ack and not mail_prompt_active and not pending_plan_confirmation:
+        if (
+            is_ultra_ack
+            and routine_completion_context is None
+            and not mail_prompt_active
+            and not pending_plan_confirmation
+        ):
             _trace.mark_phase("ultra_light_ack_used", 1)
             final_ai_response = get_ultra_light_ack_response()
             handling_agent = "UltraLightACK"
@@ -992,16 +999,16 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
             if pending_plan_confirmation:
                 limit = 100
-                messages_for_graph = context_msgs + [human_msg]
+                messages_for_graph = context_msgs + ([routine_completion_context] if routine_completion_context else []) + [human_msg]
             elif fast_path_used:
                 limit = 12
-                messages_for_graph = context_msgs[-6:] + [human_msg]
+                messages_for_graph = context_msgs[-6:] + ([routine_completion_context] if routine_completion_context else []) + [human_msg]
             elif medium_path_used:
                 limit = 24
-                messages_for_graph = context_msgs[-8:] + [human_msg]
+                messages_for_graph = context_msgs[-8:] + ([routine_completion_context] if routine_completion_context else []) + [human_msg]
             else:
                 limit = 100
-                messages_for_graph = context_msgs + [human_msg]
+                messages_for_graph = context_msgs + ([routine_completion_context] if routine_completion_context else []) + [human_msg]
 
             _trace.mark_phase("web_graph_budget", limit)
 
