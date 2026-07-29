@@ -1,4 +1,5 @@
 import json
+import unicodedata
 import config
 from core import nl_config
 from core.i18n import t
@@ -106,6 +107,23 @@ def _looks_like_future_departure(text: str) -> bool:
 
 def _normalize_live_text(text: str) -> str:
     return clean_message(text or "").strip().lower()
+
+
+def _normalize_person_name(text: str) -> str:
+    """Normalize a configured person name for accent- and final-sigma-insensitive matching."""
+    normalized = unicodedata.normalize("NFD", _normalize_live_text(text))
+    accentless = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return accentless.replace("ς", "σ")
+
+
+def _has_configured_kid1_name(text: str) -> bool:
+    """Return whether live text explicitly mentions the configured child under name variants."""
+    normalized_text = _normalize_person_name(text)
+    return any(
+        normalized_name in normalized_text
+        for name in nl_config.CE_KID1_NAMES
+        if (normalized_name := _normalize_person_name(name))
+    )
 
 
 def _has_park_live_presence(text: str) -> bool:
@@ -252,8 +270,8 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
                 or any(w in recent_hint for w in nl_config.CE_PARTNER_NAMES)
             )
             has_recent_kid1 = (
-                any(w in normalized_user for w in nl_config.CE_KID1_NAMES)
-                or any(w in recent_hint for w in nl_config.CE_KID1_NAMES)
+                _has_configured_kid1_name(user_text)
+                or _has_configured_kid1_name(recent_hint)
             )
 
             if has_recent_partner:
@@ -288,13 +306,13 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
                 payload.pop(key, None)
 
         # 3. Subject propagation logic cutoff for kid1
-        kid1_names = nl_config.CE_KID1_NAMES
         recent_hint_str = _recent_family_context_hint(channel=channel)
-        has_kid_in_recent = any(k in recent_hint_str for k in kid1_names)
+        has_kid_in_recent = _has_configured_kid1_name(recent_hint_str)
         
         has_kid_explicit = (
-            any(k in normalized_user for k in kid1_names) or 
-            is_explicit_family or 
+            _has_configured_kid1_name(user_text)
+            or is_explicit_family
+            or
             (_looks_like_found_them_reply(user_text) and has_kid_in_recent)
         )
         

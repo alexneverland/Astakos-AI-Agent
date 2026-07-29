@@ -118,3 +118,29 @@ def test_live_input_guard_lists_include_both_external_languages() -> None:
         assert set(expected_presence).issubset(presence_markers)
         assert all(_has_communication_verb(marker) for marker in expected_communication)
         assert all(_has_strong_presence(marker) for marker in expected_presence)
+
+
+def test_context_extractor_keeps_kid_partner_flag_for_unaccented_name_variant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve an explicit child-with-partner flag when the name omits accents."""
+    import services.context_extractor as extractor
+
+    calls: dict[str, str] = {}
+    response = MagicMock(text='{"kid1_with_partner": true, "kid1_away_from_home": true}')
+    monkeypatch.setattr(extractor.nl_config, "CE_KID1_NAMES", ("Νίκος",))
+    monkeypatch.setattr(
+        extractor,
+        "set_context_state",
+        lambda key, value, expires_at=None: calls.__setitem__(key, value),
+    )
+    monkeypatch.setattr(extractor, "get_context_state", lambda key: None)
+    monkeypatch.setattr(extractor, "safe_gemini_call", lambda prompt: response)
+    monkeypatch.setattr(extractor, "reconcile_fact_to_routines", lambda *args, **kwargs: {})
+    monkeypatch.setattr(extractor, "apply_routine_reconciliation_directives", lambda *args, **kwargs: None)
+    monkeypatch.setattr(extractor, "load_recent_context", lambda *args, **kwargs: [])
+
+    extractor.extract_and_update_context_flags("Είμαι σπίτι και ο νικοσ είναι στο πάρκο.")
+
+    assert calls.get("kid1_with_partner") == "true"
+    assert calls.get("kid1_away_from_home") == "true"
