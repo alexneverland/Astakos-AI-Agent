@@ -3,11 +3,15 @@ import json
 from unittest.mock import patch, MagicMock
 from tools.web import duckduckgo_search
 
+from typing import Any
+
 class MockMastroResponse:
-    def __init__(self, text):
+    def __init__(self, text: str) -> None:
+        """Initializes a mock response with the given text payload."""
         self.text = text
 
-def test_ddgs_valid_original_returns_directly():
+def test_ddgs_valid_original_returns_directly() -> None:
+    """Ensures valid DDGS results are returned directly without calling Gemini."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
 
@@ -26,7 +30,8 @@ def test_ddgs_valid_original_returns_directly():
         mock_instance.text.assert_called_once_with("δοκιμή", max_results=5, backend="duckduckgo")
 
 
-def test_ddgs_malformed_entry_ignored_and_later_valid_succeeds():
+def test_ddgs_malformed_entry_ignored_and_later_valid_succeeds() -> None:
+    """Ensures malformed DDGS results are skipped and valid ones are processed."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
 
@@ -45,13 +50,15 @@ def test_ddgs_malformed_entry_ignored_and_later_valid_succeeds():
         mock_instance.text.assert_called_once()
 
 
-def test_ddgs_placeholder_only_triggers_fallback():
+def test_ddgs_placeholder_only_triggers_fallback() -> None:
+    """Ensures empty DDGS results trigger a Gemini fallback search."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
 
         mock_instance = MagicMock()
 
-        def mock_text(query, max_results, backend):
+        def mock_text(query: str, max_results: int, backend: str) -> list[Any]:
+            """Mocks DDGS text search, returning placeholders for Greek and valid results for English."""
             if query == "δοκιμή":
                 # Return placeholder
                 return [{"title": " ", "href": "", "body": ""}]
@@ -83,7 +90,8 @@ def test_ddgs_placeholder_only_triggers_fallback():
         assert calls[2][1]["backend"] == "duckduckgo"
 
 
-def test_ddgs_fallback_failure_preserves_error():
+def test_ddgs_fallback_failure_preserves_error() -> None:
+    """Ensures that if both original and fallback searches fail, the error is preserved."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
 
@@ -102,7 +110,8 @@ def test_ddgs_fallback_failure_preserves_error():
         assert mock_instance.text.call_count == 4
 
 
-def test_ddgs_english_only_fails_closed_without_gemini():
+def test_ddgs_english_only_fails_closed_without_gemini() -> None:
+    """Ensures an English-only query fails closed without triggering the Gemini fallback."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
 
@@ -123,7 +132,8 @@ def test_ddgs_english_only_fails_closed_without_gemini():
     '"just a string"',
     '{"query": 42}'
 ])
-def test_ddgs_gemini_strict_validation_fails_closed(gemini_json):
+def test_ddgs_gemini_strict_validation_fails_closed(gemini_json: str) -> None:
+    """Ensures strict validation of Gemini JSON fails closed without calling fallback DDGS."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
 
@@ -140,7 +150,8 @@ def test_ddgs_gemini_strict_validation_fails_closed(gemini_json):
         mock_gemini.assert_called_once()
 
 
-def test_ddgs_same_query_gemini_fails_closed():
+def test_ddgs_same_query_gemini_fails_closed() -> None:
+    """Ensures that a translated query identical to the original fails closed."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
 
