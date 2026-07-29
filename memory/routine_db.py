@@ -444,6 +444,57 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
     return "created"
 
 
+def import_declared_routines(routines: list[dict[str, str]]) -> int | None:
+    """Insert validated setup routines once, returning ``None`` when data already exists.
+
+    Declared routines are an explicit user choice rather than an inferred habit, so
+    they start ACTIVE without inheriting any trigger, cooldown, or confirmation
+    history. The empty-database check and inserts share one write transaction to
+    prevent a re-import from changing an established routine database.
+    """
+    if not routines:
+        return 0
+
+    conn = get_connection(write=True)
+    cursor = conn.cursor()
+    try:
+        with db_write_lock:
+            cursor.execute("BEGIN IMMEDIATE")
+            existing_count = cursor.execute("SELECT COUNT(*) FROM routines").fetchone()[0]
+            if existing_count:
+                conn.rollback()
+                return None
+
+            rows = [
+                (
+                    routine["day"],
+                    routine["time"],
+                    routine["event"],
+                    routine["type"],
+                    make_fingerprint(routine["day"], routine["time"], routine["event"]),
+                )
+                for routine in routines
+            ]
+            cursor.executemany(
+                """INSERT INTO routines
+                   (day_of_week, time_str, event_name, event_type, confidence,
+                    decay_counter, is_active, fingerprint, mention_count, state)
+                   VALUES (?, ?, ?, ?, 1.0, 0, 1, ?, 1, 'active')""",
+                rows,
+            )
+            conn.commit()
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        raise RoutineConflictError("Declared routine fingerprint conflict", context={"error": str(e)}) from e
+    except sqlite3.Error as e:
+        conn.rollback()
+        raise DBWriteError("import_declared_routines", e) from e
+    finally:
+        conn.close()
+
+    return len(routines)
+
+
 def delete_routine_db(routine_id: int) -> bool:
     """Permanently deletes a routine from the database."""
     conn = get_connection()
