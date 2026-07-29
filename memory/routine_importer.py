@@ -86,7 +86,7 @@ def load_routine_import(path: Path) -> list[dict[str, str]]:
     if not isinstance(raw_payload, dict):
         raise RoutineImportError("Routine import root must be an object")
     _require_exact_fields(raw_payload, _TOP_LEVEL_FIELDS, "Routine import root")
-    if raw_payload["version"] != SCHEMA_VERSION:
+    if type(raw_payload["version"]) is not int or raw_payload["version"] != SCHEMA_VERSION:
         raise RoutineImportError(f"Unsupported routine import version: {raw_payload['version']!r}")
     if not isinstance(raw_payload["routines"], list):
         raise RoutineImportError("Routine import routines must be a list")

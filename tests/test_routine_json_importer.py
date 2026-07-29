@@ -96,6 +96,34 @@ def test_importer_rejects_unknown_fields_without_writing(
     assert isolated_routine_db.get_routines_for_day("Monday") == []
 
 
+def test_importer_rejects_boolean_schema_version_without_writing(
+    isolated_routine_db: ModuleType, tmp_path: Path
+) -> None:
+    """A JSON boolean cannot be accepted as schema version one."""
+    from memory.routine_importer import RoutineImportError, import_routines_file
+
+    routines_file = tmp_path / "astakos_routines.json"
+    _write_routine_json(
+        routines_file,
+        {
+            "version": True,
+            "routines": [
+                {
+                    "day": "Monday",
+                    "time": "18:00",
+                    "event": "Evening walk",
+                    "type": "hobby",
+                }
+            ],
+        },
+    )
+
+    with pytest.raises(RoutineImportError, match="Unsupported routine import version"):
+        import_routines_file(routines_file)
+
+    assert isolated_routine_db.get_routines_for_day("Monday") == []
+
+
 def test_importer_rejects_duplicate_declarations_without_writing(
     isolated_routine_db: ModuleType, tmp_path: Path
 ) -> None:
