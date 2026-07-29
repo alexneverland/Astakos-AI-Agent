@@ -66,7 +66,9 @@ def test_web_preemptive_completion_continues_to_graph(client: TestClient) -> Non
     mocks["triggered"].assert_called_once_with(5)
     mocks["confirmed"].assert_not_called()
     graph_messages = mocks["graph"].call_args.args[0]
-    assert any(isinstance(message, SystemMessage) for message in graph_messages)
+    system_messages = [message for message in graph_messages if isinstance(message, SystemMessage)]
+    assert len(system_messages) == 1
+    assert "dynamic routine" not in str(system_messages[0].content)
 
 
 def test_web_empty_eligible_pool_does_not_call_selector(client: TestClient) -> None:
@@ -94,3 +96,19 @@ def test_web_pending_confirmation_marks_routine_triggered_today(client: TestClie
     assert response.status_code == 200
     mocks["confirmed"].assert_called_once_with(5)
     mocks["triggered"].assert_called_once_with(5)
+
+
+def test_web_routine_action_does_not_confirm_pending_asset(client: TestClient) -> None:
+    """A consumed routine action cannot also approve a pending asset in the same turn."""
+    pending_asset = {"id": "asset-1", "asset_type": "document", "file_path": "safe.txt"}
+    with (
+        patch("memory.pending_assets.clear_expired_pending_assets"),
+        patch("memory.pending_assets.get_latest_pending_asset", return_value=pending_asset),
+        patch("memory.pending_assets.classify_pending_asset_reply", return_value="yes"),
+        patch("memory.pending_assets.is_reply_to_recent_asset_prompt", return_value=True),
+        patch("memory.pending_assets.mark_pending_asset_confirmed") as asset_confirmed,
+    ):
+        response, _ = _post_chat(client, pending={5: {"event": "dynamic routine"}})
+    assert response.status_code == 200
+    assert response.json()["response"] == "Natural graph reply."
+    asset_confirmed.assert_not_called()

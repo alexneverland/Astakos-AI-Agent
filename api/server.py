@@ -572,6 +572,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     body       = await request.json()
     user_input = body.get("message", "").strip()
     routine_completion_context: SystemMessage | None = None
+    routine_action_consumed = False
 
     # (Mastro-Shield): Avoid null or strange paths
     photo_path = resolve_allowed_file(
@@ -665,7 +666,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 pending_routine_confirmations.pop(rid, None)
 
                 from services.routine_completion_context import build_routine_completion_context
-                routine_completion_context = build_routine_completion_context("complete", ev)
+                routine_completion_context = build_routine_completion_context()
+                routine_action_consumed = True
 
             elif decision.action == "dismiss" and decision.routine_id is not None:
                 from memory.routine_db import decay_routine, remove_pending_confirmation
@@ -681,7 +683,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 print(f"📉 [Web Routine Dismissed]: {pdata}")
                 pending_routine_confirmations.pop(rid, None)
                 from services.routine_completion_context import build_routine_completion_context
-                routine_completion_context = build_routine_completion_context("dismiss", ev)
+                routine_completion_context = build_routine_completion_context()
+                routine_action_consumed = True
 
             # pass_through → continue to normal processing.
         else:
@@ -712,7 +715,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     )
                     print(f"✅ [Web Routine Pre-emptive Completed]: #{rid} {ev}")
                     from services.routine_completion_context import build_routine_completion_context
-                    routine_completion_context = build_routine_completion_context("complete", ev)
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
                 # pass_through → continue to normal processing.
     except Exception as _rce:
         print(f"[Web Routine Completion]: {_rce}")
@@ -732,7 +736,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         from memory.pending_assets import is_reply_to_recent_asset_prompt
         pending_photo_asset = get_latest_pending_asset("web", "photo")
         pending_doc_asset = get_latest_pending_asset("web", "document")
-        pending_asset = pending_photo_asset or pending_doc_asset
+        pending_asset = None if routine_action_consumed else (pending_photo_asset or pending_doc_asset)
         reply_kind = classify_pending_asset_reply(user_input) if pending_asset else None
         asset_prompt_active = is_reply_to_recent_asset_prompt("web") if pending_asset else False
 
@@ -798,9 +802,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         from memory.execution_trace import ExecutionTrace
 
         draft_active, _, draft_data = active_draft_status()
-        draft_intent = classify_messenger_intent(
-            user_input,
-            has_active_draft=draft_active,
+        draft_intent = (
+            classify_messenger_intent(user_input, has_active_draft=draft_active)
+            if not routine_action_consumed
+            else None
         )
 
         if draft_intent and draft_intent.intent == "clear_draft":
@@ -961,7 +966,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         from core.planner import get_fresh_pending_plan_confirmation
 
-        pending_plan_confirmation = bool(
+        pending_plan_confirmation = not routine_action_consumed and bool(
             get_fresh_pending_plan_confirmation(
                 {"channel": "web"},
                 isolated_user_input,
@@ -996,19 +1001,20 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
             _trace.mark_phase("medium_path_candidate", 1 if medium_path_used else 0)
             _trace.mark_phase("medium_path_used", 1 if medium_path_used else 0)
+            from services.routine_completion_context import append_routine_completion_context
 
             if pending_plan_confirmation:
                 limit = 100
-                messages_for_graph = context_msgs + ([routine_completion_context] if routine_completion_context else []) + [human_msg]
+                messages_for_graph = append_routine_completion_context(context_msgs, routine_completion_context) + [human_msg]
             elif fast_path_used:
                 limit = 12
-                messages_for_graph = context_msgs[-6:] + ([routine_completion_context] if routine_completion_context else []) + [human_msg]
+                messages_for_graph = append_routine_completion_context(context_msgs[-6:], routine_completion_context) + [human_msg]
             elif medium_path_used:
                 limit = 24
-                messages_for_graph = context_msgs[-8:] + ([routine_completion_context] if routine_completion_context else []) + [human_msg]
+                messages_for_graph = append_routine_completion_context(context_msgs[-8:], routine_completion_context) + [human_msg]
             else:
                 limit = 100
-                messages_for_graph = context_msgs + ([routine_completion_context] if routine_completion_context else []) + [human_msg]
+                messages_for_graph = append_routine_completion_context(context_msgs, routine_completion_context) + [human_msg]
 
             _trace.mark_phase("web_graph_budget", limit)
 

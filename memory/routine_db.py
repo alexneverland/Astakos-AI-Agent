@@ -629,7 +629,7 @@ def get_eligible_preemptive_routines_for_day(day: str) -> list:
         WHERE (
             day_of_week=?
             OR day_of_week='Everyday'
-            OR (day_of_week IN ('Weekdays','Weekdays','weekdays') AND ? IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Weekdays','Weekdays','weekdays'))
+            OR (day_of_week IN ('Weekdays','weekdays') AND ? IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Weekdays','weekdays'))
             OR (day_of_week IN ('Weekends','Weekend','weekend') AND ? IN ('Saturday', 'Sunday', 'Weekends','Weekend','weekend'))
         )
         AND state='active'

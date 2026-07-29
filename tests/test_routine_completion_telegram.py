@@ -75,6 +75,7 @@ def _stub_modules():
     sys.modules["langchain_core.messages"].HumanMessage = MagicMock
     sys.modules["langchain_core.messages"].AIMessage    = MagicMock
     sys.modules["langchain_core.messages"].SystemMessage = MagicMock
+    sys.modules["langchain_core.messages"].BaseMessage = MagicMock
 
     # ── memory.* ──────────────────────────────────────────────
     for mod in [
@@ -319,9 +320,18 @@ def _reset_mocks():
     sys.modules["core.event_bus"].bus.reset_mock()
     sys.modules["tools.telegram"].send_telegram_msg.reset_mock()
     sys.modules["services.routine_completion_selector"].select_routine.reset_mock()
+    bot.pending_reflection_confirmations = {}
+    bot.pending_exec_command = None
 
 
-def _run_handle_message(text, pending=None, today_routines=None, selector_return=None):
+def _run_handle_message(
+    text,
+    pending=None,
+    today_routines=None,
+    selector_return=None,
+    pending_reflections=None,
+    pending_command=None,
+):
     """
     Call ``bot.handle_message`` with controlled state.
 
@@ -338,6 +348,8 @@ def _run_handle_message(text, pending=None, today_routines=None, selector_return
     selector_mod.select_routine.return_value = selector_return
 
     bot.pending_routine_confirmations = dict(pending or {})
+    bot.pending_reflection_confirmations = dict(pending_reflections or {})
+    bot.pending_exec_command = pending_command
 
     sent = []
 
@@ -484,6 +496,23 @@ def test_single_pending_bare_no_dismisses_exactly_one():
     rdb.confirm_routine.assert_not_called()
     assert len(sent) == 1  # exactly one acknowledgment message
     assert 5 not in bot.pending_routine_confirmations
+
+
+def test_routine_completion_skips_other_pending_confirmations() -> None:
+    """One routine completion cannot also authorize reflection or executor work."""
+    from services.routine_completion_helper import RoutineSelection
+
+    sent = _run_handle_message(
+        "yes",
+        pending={5: {"event": "Routine"}},
+        selector_return=RoutineSelection(action="complete", routine_id=5),
+        pending_reflections={1: {"observation": "pending reflection"}},
+        pending_command="Write-Output should-not-run",
+    )
+
+    assert 1 in bot.pending_reflection_confirmations
+    assert bot.pending_exec_command == "Write-Output should-not-run"
+    assert sent == ["Natural graph reply."]
 # ─────────────────────────────────────────────────────────────
 # (d) Partner/messenger contextual skip ⇒ return guard,
 #     decide_completion never called
