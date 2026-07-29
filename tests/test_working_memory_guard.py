@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from core import nl_config
 import memory.working_memory as wm
 
 
@@ -79,6 +80,35 @@ def test_operational_guard_uses_external_routine_admin_markers(monkeypatch) -> N
         "normal user message",
         "configured ai marker",
     ) is True
+
+
+def test_operational_guard_lists_include_both_external_languages() -> None:
+    """Ensure working-memory operational guards retain markers from both language files."""
+    for language_code in ("el", "en"):
+        language_intents = nl_config._load_base_intents(language_code)
+        working_memory_intents = language_intents["working_memory"]
+        reference_markers = working_memory_intents["routine_reference_markers"]
+        admin_markers = working_memory_intents["routine_admin_markers"]
+        ai_markers = working_memory_intents["operational_ai_markers"]
+
+        assert set(reference_markers).issubset(nl_config.WM_ROUTINE_REFERENCE_MARKERS)
+        assert set(admin_markers).issubset(nl_config.WM_ROUTINE_ADMIN_MARKERS)
+        assert set(ai_markers).issubset(nl_config.WM_OPERATIONAL_AI_MARKERS)
+        assert all(
+            wm._looks_like_operational_working_memory_exchange(
+                f"{reference_marker} {admin_marker}",
+                "normal response",
+            )
+            for reference_marker in reference_markers
+            for admin_marker in admin_markers
+        )
+        assert all(
+            wm._looks_like_operational_working_memory_exchange(
+                "normal user message",
+                ai_marker,
+            )
+            for ai_marker in ai_markers
+        )
 
 
 # ════════════════════════════════════════════════════════════════

@@ -163,13 +163,13 @@ CE_KID1_NAMES = (config.KID1_NAME.lower(),) + tuple(get_intent_list('context_ext
 
 # Working-memory operational guards
 WM_ROUTINE_REFERENCE_MARKERS = tuple(
-    get_intent_list("working_memory", "routine_reference_markers")
+    get_live_input_guard_list("working_memory", "routine_reference_markers")
 )
 WM_ROUTINE_ADMIN_MARKERS = tuple(
-    get_intent_list("working_memory", "routine_admin_markers")
+    get_live_input_guard_list("working_memory", "routine_admin_markers")
 )
 WM_OPERATIONAL_AI_MARKERS = tuple(
-    get_intent_list("working_memory", "operational_ai_markers")
+    get_live_input_guard_list("working_memory", "operational_ai_markers")
 )
 
 # Routine Intents
