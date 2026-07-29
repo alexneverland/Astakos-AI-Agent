@@ -85,4 +85,5 @@ vendor/officecli/*.exe
 persona.md
 astakos_settings.json
 astakos_custom_intents.json
+astakos_routines.json
 .hn_briefing_sent
