@@ -124,6 +124,29 @@ def test_importer_rejects_boolean_schema_version_without_writing(
     assert isolated_routine_db.get_routines_for_day("Monday") == []
 
 
+@pytest.mark.parametrize(
+    ("path_kind", "expected_message"),
+    [
+        ("directory", "cannot be read"),
+        ("non_utf8", "must use UTF-8"),
+    ],
+)
+def test_importer_reports_file_access_and_decoding_errors(
+    tmp_path: Path, path_kind: str, expected_message: str
+) -> None:
+    """Unreadable import inputs fail through the routine validation contract."""
+    from memory.routine_importer import RoutineImportError, load_routine_import
+
+    routines_path = tmp_path / "astakos_routines.json"
+    if path_kind == "directory":
+        routines_path.mkdir()
+    else:
+        routines_path.write_bytes(b"\xff")
+
+    with pytest.raises(RoutineImportError, match=expected_message):
+        load_routine_import(routines_path)
+
+
 def test_importer_rejects_duplicate_declarations_without_writing(
     isolated_routine_db: ModuleType, tmp_path: Path
 ) -> None:

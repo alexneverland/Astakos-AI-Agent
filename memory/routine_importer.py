@@ -80,6 +80,10 @@ def load_routine_import(path: Path) -> list[dict[str, str]]:
         raw_payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as e:
         raise RoutineImportError(f"Routine import file does not exist: {path}") from e
+    except UnicodeDecodeError as e:
+        raise RoutineImportError("Routine import file must use UTF-8 encoding") from e
+    except OSError as e:
+        raise RoutineImportError(f"Routine import file cannot be read: {path}") from e
     except json.JSONDecodeError as e:
         raise RoutineImportError(f"Routine import file contains invalid JSON: {e.msg}") from e
 
