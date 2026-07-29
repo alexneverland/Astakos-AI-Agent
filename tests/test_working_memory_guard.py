@@ -119,6 +119,22 @@ def test_operational_guard_rejects_marker_substrings_inside_normal_words() -> No
     ) is False
 
 
+def test_operational_guard_preserves_ordinary_routine_and_work_context() -> None:
+    """Ensure routine mentions with ordinary work context remain eligible for memory extraction."""
+    ordinary_messages = (
+        "I changed my morning routine after work",
+        "Άλλαξα τη ρουτίνα μου μετά τη δουλειά",
+    )
+
+    assert all(
+        not wm._looks_like_operational_working_memory_exchange(
+            message,
+            "normal response",
+        )
+        for message in ordinary_messages
+    )
+
+
 # ════════════════════════════════════════════════════════════════
 # Regression tests for colon-in-tags bug fix (2026-07-25)
 # The banned marker `": "` was removed because it rejected valid

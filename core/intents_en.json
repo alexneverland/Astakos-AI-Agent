@@ -636,8 +636,6 @@
             "unmute",
             "condition",
             "cooldown",
-            "shift",
-            "work",
             "only when"
         ],
         "operational_ai_markers": [
