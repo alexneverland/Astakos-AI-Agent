@@ -9,6 +9,7 @@ from core.i18n import t
 from core import nl_config
 import os
 import json
+import re
 import threading
 from datetime import datetime
 import sqlite3
@@ -81,6 +82,14 @@ def _validate_working_memory_tags(raw_text: str) -> str:
     return ", ".join(validated)
 
 
+def _has_standalone_marker(text: str, markers: tuple[str, ...]) -> bool:
+    """Return whether a configured marker appears without being part of a larger word."""
+    return any(
+        re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", text)
+        for marker in markers
+    )
+
+
 def _looks_like_operational_working_memory_exchange(user_text: str, ai_text: str) -> bool:
     """
     Skip foreground-memory extraction for operational routine/tool-management
@@ -108,7 +117,10 @@ def _looks_like_operational_working_memory_exchange(user_text: str, ai_text: str
 
     user_routine_admin = (
         any(marker in user_norm for marker in nl_config.WM_ROUTINE_REFERENCE_MARKERS)
-        and any(marker in user_norm for marker in nl_config.WM_ROUTINE_ADMIN_MARKERS)
+        and _has_standalone_marker(
+            user_norm,
+            nl_config.WM_ROUTINE_ADMIN_MARKERS,
+        )
     )
     if user_routine_admin:
         return True

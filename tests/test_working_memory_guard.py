@@ -111,6 +111,14 @@ def test_operational_guard_lists_include_both_external_languages() -> None:
         )
 
 
+def test_operational_guard_rejects_marker_substrings_inside_normal_words() -> None:
+    """Ensure bilingual admin markers do not classify ordinary compound words as commands."""
+    assert wm._looks_like_operational_working_memory_exchange(
+        "I changed my workout routine today",
+        "normal response",
+    ) is False
+
+
 # ════════════════════════════════════════════════════════════════
 # Regression tests for colon-in-tags bug fix (2026-07-25)
 # The banned marker `": "` was removed because it rejected valid
