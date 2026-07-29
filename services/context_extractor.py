@@ -1,4 +1,6 @@
 import json
+import re
+import unicodedata
 import config
 from core import nl_config
 from core.i18n import t
@@ -106,6 +108,23 @@ def _looks_like_future_departure(text: str) -> bool:
 
 def _normalize_live_text(text: str) -> str:
     return clean_message(text or "").strip().lower()
+
+
+def _normalize_person_name(text: str) -> str:
+    """Normalize a configured person name for accent- and final-sigma-insensitive matching."""
+    normalized = unicodedata.normalize("NFD", _normalize_live_text(text))
+    accentless = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return accentless.replace("ς", "σ")
+
+
+def _has_configured_person_name(text: str, names: tuple[str, ...]) -> bool:
+    """Return whether live text mentions a configured person under name variants."""
+    normalized_text = _normalize_person_name(text)
+    return any(
+        re.search(rf"(?<!\w){re.escape(normalized_name)}(?!\w)", normalized_text)
+        for name in names
+        if (normalized_name := _normalize_person_name(name))
+    )
 
 
 def _has_park_live_presence(text: str) -> bool:
@@ -248,12 +267,12 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
 
             recent_hint = _recent_family_context_hint(channel=channel)
             has_recent_partner = (
-                any(w in normalized_user for w in nl_config.CE_PARTNER_NAMES)
-                or any(w in recent_hint for w in nl_config.CE_PARTNER_NAMES)
+                _has_configured_person_name(user_text, nl_config.CE_PARTNER_NAMES)
+                or _has_configured_person_name(recent_hint, nl_config.CE_PARTNER_NAMES)
             )
             has_recent_kid1 = (
-                any(w in normalized_user for w in nl_config.CE_KID1_NAMES)
-                or any(w in recent_hint for w in nl_config.CE_KID1_NAMES)
+                _has_configured_person_name(user_text, nl_config.CE_KID1_NAMES)
+                or _has_configured_person_name(recent_hint, nl_config.CE_KID1_NAMES)
             )
 
             if has_recent_partner:
@@ -288,13 +307,16 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
                 payload.pop(key, None)
 
         # 3. Subject propagation logic cutoff for kid1
-        kid1_names = nl_config.CE_KID1_NAMES
         recent_hint_str = _recent_family_context_hint(channel=channel)
-        has_kid_in_recent = any(k in recent_hint_str for k in kid1_names)
+        has_kid_in_recent = _has_configured_person_name(
+            recent_hint_str,
+            nl_config.CE_KID1_NAMES,
+        )
         
         has_kid_explicit = (
-            any(k in normalized_user for k in kid1_names) or 
-            is_explicit_family or 
+            _has_configured_person_name(user_text, nl_config.CE_KID1_NAMES)
+            or is_explicit_family
+            or
             (_looks_like_found_them_reply(user_text) and has_kid_in_recent)
         )
         
