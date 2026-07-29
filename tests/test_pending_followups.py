@@ -924,6 +924,66 @@ def test_process_followup_exchange_allows_distinct_new_arc_after_resolution(
     assert created[0]["candidate"]["topic"] == "outing"
 
 
+def test_process_followup_exchange_updates_other_active_arc_after_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserves an update request for another active arc after resolution."""
+    deferred = []
+    active_followup = {
+        "id": 91,
+        "topic": "task_progress",
+        "subject": "vacuum remaining rooms",
+        "status": "pending",
+    }
+
+    monkeypatch.setattr(pf, "maybe_resolve_followups_from_user_message", lambda text: 1)
+    monkeypatch.setattr(pf, "looks_like_followup_resolution_update", lambda text: True)
+    monkeypatch.setattr(
+        pf,
+        "get_recently_resolved_followups",
+        lambda limit=5, within_seconds=180: [
+            {
+                "topic": "food_purchase",
+                "subject": "groceries",
+                "arc_key": pf.build_followup_arc_key("food_purchase", "groceries"),
+            }
+        ],
+    )
+    monkeypatch.setattr(pf, "find_pending_followups", lambda limit=10, active_only=True: [active_followup])
+    monkeypatch.setattr(
+        pf,
+        "extract_followup_candidate_with_llm",
+        lambda user_text, ai_text, agent_name, active_followups_text="": {
+            "should_follow_up": False,
+            "update_existing_id": 91,
+            "delay_minutes": 90,
+            "reason": "user postponed the other task",
+        },
+    )
+    monkeypatch.setattr(
+        pf,
+        "defer_followup",
+        lambda **kwargs: deferred.append(kwargs),
+    )
+
+    pf.process_followup_exchange(
+        user_text="I bought the groceries; I will vacuum the rest later.",
+        ai_text="Got it.",
+        agent_name="Chat_Agent",
+        channel="web",
+    )
+
+    assert deferred == [
+        {
+            "followup_id": 91,
+            "delay_minutes": 90,
+            "reason": "user postponed the other task",
+            "target_window": "",
+            "topic": "task_progress",
+        }
+    ]
+
+
 def test_web_followup_pipeline_uses_shared_lifecycle_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
