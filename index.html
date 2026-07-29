@@ -1133,12 +1133,26 @@
         } catch (error) {
             console.error("History error:", error);
             try {
-                const pollData = await fetchJsonWithTimeout('http://127.0.0.1:8000/messages/poll?after_id=0', INITIAL_HISTORY_TIMEOUT_MS);
-                if (pollData.messages && pollData.messages.length > 0) {
-                    pollData.messages.sort((a, b) => (Number(a.rowid) || 0) - (Number(b.rowid) || 0));
-                    pollData.messages.forEach(renderHistoryMsg);
+                let recoveryAfterId = 0;
+                let recoveryMaxId = 0;
+                while (true) {
+                    const pollData = await fetchJsonWithTimeout(
+                        `http://127.0.0.1:8000/messages/poll?after_id=${recoveryAfterId}`,
+                        INITIAL_HISTORY_TIMEOUT_MS
+                    );
+                    if (!recoveryMaxId) recoveryMaxId = Number(pollData.max_id) || 0;
+
+                    const messages = Array.isArray(pollData.messages) ? pollData.messages : [];
+                    if (messages.length === 0) break;
+
+                    messages.sort((a, b) => (Number(a.rowid) || 0) - (Number(b.rowid) || 0));
+                    messages.forEach(renderHistoryMsg);
+
+                    const pageLastRowId = Math.max(...messages.map(msg => Number(msg.rowid) || 0));
+                    if (pageLastRowId <= recoveryAfterId || pageLastRowId >= recoveryMaxId) break;
+                    recoveryAfterId = pageLastRowId;
                 }
-                lastKnownMsgId = Number(pollData.max_id) || 0;
+                if (recoveryMaxId > lastKnownMsgId) lastKnownMsgId = recoveryMaxId;
                 isInitialCursorInitialized = true;
             } catch (pollError) {
                 console.error("History cursor recovery error:", pollError);
