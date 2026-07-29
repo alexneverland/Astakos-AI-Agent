@@ -101,8 +101,12 @@ def load_routine_import(path: Path) -> list[dict[str, str]]:
         raise RoutineImportError("Routine import file must use UTF-8 encoding") from e
     except OSError as e:
         raise RoutineImportError(f"Routine import file cannot be read: {path}") from e
+    except RoutineImportError:
+        raise
     except json.JSONDecodeError as e:
         raise RoutineImportError(f"Routine import file contains invalid JSON: {e.msg}") from e
+    except ValueError as e:
+        raise RoutineImportError("Routine import file contains an invalid JSON numeric value") from e
 
     if not isinstance(raw_payload, dict):
         raise RoutineImportError("Routine import root must be an object")

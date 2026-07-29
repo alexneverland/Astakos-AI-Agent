@@ -191,6 +191,23 @@ def test_importer_rejects_unpaired_unicode_surrogates(tmp_path: Path) -> None:
         load_routine_import(routines_path)
 
 
+def test_importer_reports_oversized_json_numbers(tmp_path: Path) -> None:
+    """A decoder integer limit is surfaced through the import validation contract."""
+    from memory.routine_importer import RoutineImportError, load_routine_import
+
+    integer_limit = sys.get_int_max_str_digits()
+    if integer_limit == 0:
+        pytest.skip("The interpreter has disabled the JSON integer digit limit.")
+    routines_path = tmp_path / "astakos_routines.json"
+    routines_path.write_text(
+        f'{{"version": {"9" * (integer_limit + 1)}, "routines": []}}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RoutineImportError, match="invalid JSON numeric value"):
+        load_routine_import(routines_path)
+
+
 def test_importer_rejects_duplicate_declarations_without_writing(
     isolated_routine_db: ModuleType, tmp_path: Path
 ) -> None:
