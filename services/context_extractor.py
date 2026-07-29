@@ -1,4 +1,5 @@
 import json
+import re
 import unicodedata
 import config
 from core import nl_config
@@ -120,7 +121,7 @@ def _has_configured_person_name(text: str, names: tuple[str, ...]) -> bool:
     """Return whether live text mentions a configured person under name variants."""
     normalized_text = _normalize_person_name(text)
     return any(
-        normalized_name in normalized_text
+        re.search(rf"(?<!\w){re.escape(normalized_name)}(?!\w)", normalized_text)
         for name in names
         if (normalized_name := _normalize_person_name(name))
     )

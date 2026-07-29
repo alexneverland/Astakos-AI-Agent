@@ -150,3 +150,4 @@ def test_context_extractor_keeps_kid_partner_flag_for_unaccented_name_variant(
 def test_configured_person_name_matching_normalizes_partner_variants() -> None:
     """Recognize configured partner names when live text omits Greek accents."""
     assert _has_configured_person_name("η μαρια είναι στο πάρκο", ("Μαρία",))
+    assert not _has_configured_person_name("η Μαριάννα είναι στο πάρκο", ("Μαρία",))
