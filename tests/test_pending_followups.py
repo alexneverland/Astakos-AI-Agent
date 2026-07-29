@@ -687,12 +687,6 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
     monkeypatch.setattr(bot, "_build_followup_decision_with_llm", lambda item, recent_context, state_snapshot: {}, raising=False)
     monkeypatch.setattr(bot, "send_telegram_msg", lambda msg: sent.append(msg))
     monkeypatch.setattr(bot, "mark_followup_sent", lambda followup_id: marked.append(followup_id))
-    monkeypatch.setattr(
-        bot,
-        "record_followup_outcome",
-        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
-    )
-
     bot.job_check_pending_followups()
 
     assert sent == []
@@ -833,13 +827,16 @@ def test_job_check_pending_followups_uses_default_cooldown_for_other_departure(m
     assert llm_calls == []
 
 
-def test_enqueue_followup_pipeline_skips_create_after_resolution_update(monkeypatch):
+def test_process_followup_exchange_skips_redundant_arc_after_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rejects recreation of the arc that the current user message resolved."""
     created = []
 
-    monkeypatch.setattr(bot, "maybe_resolve_followups_from_user_message", lambda text: 1)
-    monkeypatch.setattr(bot, "looks_like_followup_resolution_update", lambda text: True)
+    monkeypatch.setattr(pf, "maybe_resolve_followups_from_user_message", lambda text: 1)
+    monkeypatch.setattr(pf, "looks_like_followup_resolution_update", lambda text: True)
     monkeypatch.setattr(
-        bot,
+        pf,
         "extract_followup_candidate_with_llm",
         lambda user_text, ai_text, agent_name, active_followups_text="": {
             "should_follow_up": True,
@@ -851,7 +848,7 @@ def test_enqueue_followup_pipeline_skips_create_after_resolution_update(monkeypa
         },
     )
     monkeypatch.setattr(
-        bot,
+        pf,
         "get_recently_resolved_followups",
         lambda limit=5, within_seconds=180: [
             {
@@ -861,30 +858,33 @@ def test_enqueue_followup_pipeline_skips_create_after_resolution_update(monkeypa
             }
         ],
     )
-    monkeypatch.setattr(bot, "candidate_is_distinct_from_recently_resolved", lambda candidate, recent: False)
+    monkeypatch.setattr(pf, "candidate_is_distinct_from_recently_resolved", lambda candidate, recent: False)
     monkeypatch.setattr(
-        bot,
+        pf,
         "create_pending_followup_from_candidate",
         lambda **kwargs: created.append(kwargs),
     )
 
-    bot._enqueue_followup_pipeline(
-        "τις πήρα τώρα και φεύγω",
-        "ωραία μάστορα",
-        "Chat_Agent",
-        "telegram",
+    pf.process_followup_exchange(
+        user_text="τις πήρα τώρα και φεύγω",
+        ai_text="ωραία μάστορα",
+        agent_name="Chat_Agent",
+        channel="telegram",
     )
 
     assert created == []
 
 
-def test_enqueue_followup_pipeline_allows_distinct_new_arc_after_resolution(monkeypatch):
+def test_process_followup_exchange_allows_distinct_new_arc_after_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allows a distinct new follow-up after the prior arc is resolved."""
     created = []
 
-    monkeypatch.setattr(bot, "maybe_resolve_followups_from_user_message", lambda text: 1)
-    monkeypatch.setattr(bot, "looks_like_followup_resolution_update", lambda text: True)
+    monkeypatch.setattr(pf, "maybe_resolve_followups_from_user_message", lambda text: 1)
+    monkeypatch.setattr(pf, "looks_like_followup_resolution_update", lambda text: True)
     monkeypatch.setattr(
-        bot,
+        pf,
         "extract_followup_candidate_with_llm",
         lambda user_text, ai_text, agent_name, active_followups_text="": {
             "should_follow_up": True,
@@ -896,7 +896,7 @@ def test_enqueue_followup_pipeline_allows_distinct_new_arc_after_resolution(monk
         },
     )
     monkeypatch.setattr(
-        bot,
+        pf,
         "get_recently_resolved_followups",
         lambda limit=5, within_seconds=180: [
             {
@@ -906,22 +906,112 @@ def test_enqueue_followup_pipeline_allows_distinct_new_arc_after_resolution(monk
             }
         ],
     )
-    monkeypatch.setattr(bot, "candidate_is_distinct_from_recently_resolved", lambda candidate, recent: True)
+    monkeypatch.setattr(pf, "candidate_is_distinct_from_recently_resolved", lambda candidate, recent: True)
     monkeypatch.setattr(
-        bot,
+        pf,
         "create_pending_followup_from_candidate",
         lambda **kwargs: created.append(kwargs) or 77,
     )
 
-    bot._enqueue_followup_pipeline(
-        "τις πήρα τώρα και πάω να τους βρω στο πάρκο",
-        "ωραία μάστορα",
-        "Chat_Agent",
-        "telegram",
+    pf.process_followup_exchange(
+        user_text="τις πήρα τώρα και πάω να τους βρω στο πάρκο",
+        ai_text="ωραία μάστορα",
+        agent_name="Chat_Agent",
+        channel="telegram",
     )
 
     assert len(created) == 1
     assert created[0]["candidate"]["topic"] == "outing"
+
+
+def test_process_followup_exchange_updates_other_active_arc_after_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserves an update request for another active arc after resolution."""
+    deferred = []
+    active_followup = {
+        "id": 91,
+        "topic": "task_progress",
+        "subject": "vacuum remaining rooms",
+        "status": "pending",
+    }
+
+    monkeypatch.setattr(pf, "maybe_resolve_followups_from_user_message", lambda text: 1)
+    monkeypatch.setattr(pf, "looks_like_followup_resolution_update", lambda text: True)
+    monkeypatch.setattr(
+        pf,
+        "get_recently_resolved_followups",
+        lambda limit=5, within_seconds=180: [
+            {
+                "topic": "food_purchase",
+                "subject": "groceries",
+                "arc_key": pf.build_followup_arc_key("food_purchase", "groceries"),
+            }
+        ],
+    )
+    monkeypatch.setattr(pf, "find_pending_followups", lambda limit=10, active_only=True: [active_followup])
+    monkeypatch.setattr(
+        pf,
+        "extract_followup_candidate_with_llm",
+        lambda user_text, ai_text, agent_name, active_followups_text="": {
+            "should_follow_up": False,
+            "update_existing_id": 91,
+            "delay_minutes": 90,
+            "reason": "user postponed the other task",
+        },
+    )
+    monkeypatch.setattr(
+        pf,
+        "defer_followup",
+        lambda **kwargs: deferred.append(kwargs),
+    )
+
+    pf.process_followup_exchange(
+        user_text="I bought the groceries; I will vacuum the rest later.",
+        ai_text="Got it.",
+        agent_name="Chat_Agent",
+        channel="web",
+    )
+
+    assert deferred == [
+        {
+            "followup_id": 91,
+            "delay_minutes": 90,
+            "reason": "user postponed the other task",
+            "target_window": "",
+            "topic": "task_progress",
+        }
+    ]
+
+
+def test_web_followup_pipeline_uses_shared_lifecycle_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeps Web follow-up processing on the shared resolution-safe path."""
+    import api.server as server
+
+    calls = []
+    monkeypatch.setattr(
+        server,
+        "process_followup_exchange",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    server._enqueue_followup_pipeline(
+        "I completed the shopping.",
+        "Great.",
+        "Chat_Agent",
+        "web",
+    )
+
+    assert calls == [
+        {
+            "user_text": "I completed the shopping.",
+            "ai_text": "Great.",
+            "agent_name": "Chat_Agent",
+            "channel": "web",
+        }
+    ]
 
 
 def test_candidate_is_distinct_from_recently_resolved_allows_same_topic_new_arc():
@@ -986,17 +1076,61 @@ def test_job_check_pending_followups_persists_sent_message(monkeypatch):
         "mark_followup_sent",
         lambda followup_id, reason=None: marked.append((followup_id, reason)),
     )
-    monkeypatch.setattr(
-        bot,
-        "record_followup_outcome",
-        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
-    )
-
     bot.job_check_pending_followups()
 
     assert sent == [("κανε τις μπριζολες οπως τις σκεφτεσαι;", "FollowUp_Agent")]
     assert marked == [(9, "followup_sent:decision_pending")]
-    assert outcomes == [(9, 0.2, "followup_sent:decision_pending")]
+    assert outcomes == []
+
+
+def test_mark_followup_sent_records_single_outcome(temp_state_db: Path) -> None:
+    """Records the send outcome exactly once when a follow-up is sent."""
+    followup_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="park visit",
+        source_user_text="We are going to the park.",
+        source_ai_text="Have fun.",
+        followup_after_ts="2030-01-01T19:00:00",
+        confidence=0.8,
+        metadata={},
+    )
+
+    pf.mark_followup_sent(followup_id)
+
+    item = next(
+        item
+        for item in pf.find_pending_followups(limit=10, active_only=True)
+        if item["id"] == followup_id
+    )
+    assert item["outcome_score"] == 0.2
+
+
+@pytest.mark.parametrize(
+    ("muted", "quiet"),
+    [(True, False), (False, True)],
+)
+def test_job_check_pending_followups_skips_delivery_when_proactive_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    muted: bool,
+    quiet: bool,
+) -> None:
+    """Keeps expiry cleanup active while quiet hours or mute blocks delivery."""
+    expired = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: expired.append(now_iso))
+    monkeypatch.setattr(bot, "is_proactive_muted", lambda: muted)
+    monkeypatch.setattr(bot, "is_quiet_hours", lambda: quiet)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: pytest.fail("due follow-ups must not be loaded while disabled"),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert len(expired) == 1
 
 
 def test_job_check_pending_followups_does_not_mark_sent_when_telegram_send_fails(monkeypatch):
@@ -1044,12 +1178,6 @@ def test_job_check_pending_followups_does_not_mark_sent_when_telegram_send_fails
         "mark_followup_sent",
         lambda followup_id, reason=None: marked.append((followup_id, reason)),
     )
-    monkeypatch.setattr(
-        bot,
-        "record_followup_outcome",
-        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
-    )
-
     bot.job_check_pending_followups()
 
     assert marked == []
@@ -1170,17 +1298,11 @@ def test_job_check_pending_followups_does_not_skip_just_because_subject_is_in_re
         "mark_followup_sent",
         lambda followup_id, reason=None: marked.append((followup_id, reason)),
     )
-    monkeypatch.setattr(
-        bot,
-        "record_followup_outcome",
-        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
-    )
-
     bot.job_check_pending_followups()
 
     assert sent == [("Tous vrikes telika gia volta sto parko?", "FollowUp_Agent")]
     assert marked == [(12, "followup_sent:decision_pending")]
-    assert outcomes == [(12, 0.2, "followup_sent:decision_pending")]
+    assert outcomes == []
 
 
 def test_followup_safe_fallback_is_non_assumptive():

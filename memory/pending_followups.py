@@ -1645,6 +1645,7 @@ def maybe_create_followup_from_exchange(
     ai_text: str,
     agent_name: str,
     channel: str,
+    recently_resolved: list[dict] | None = None,
 ):
     clean_user = str(user_text or "").strip()
     clean_ai = str(ai_text or "").strip()
@@ -1739,12 +1740,49 @@ def maybe_create_followup_from_exchange(
     if not candidate.get("should_follow_up"):
         return None
 
+    if recently_resolved and not candidate_is_distinct_from_recently_resolved(
+        candidate,
+        recently_resolved,
+    ):
+        print("[FollowUp]: create-skip redundant arc after resolution update")
+        return None
+
     return create_pending_followup_from_candidate(
         candidate=candidate,
         source_channel=channel,
         source_agent=agent_name,
         source_user_text=clean_user,
         source_ai_text=clean_ai,
+    )
+
+
+def process_followup_exchange(
+    *,
+    user_text: str,
+    ai_text: str,
+    agent_name: str,
+    channel: str,
+) -> int | None:
+    """Resolve an existing follow-up, then create only a distinct new arc.
+
+    A user completion update may resolve an active arc and still describe a
+    separate future need.  This shared path prevents the just-resolved arc
+    from being recreated while preserving genuinely distinct candidates.
+    """
+    resolved_count = maybe_resolve_followups_from_user_message(user_text)
+    recently_resolved = None
+    if resolved_count > 0 and looks_like_followup_resolution_update(user_text):
+        recently_resolved = get_recently_resolved_followups(
+            limit=5,
+            within_seconds=180,
+        )
+
+    return maybe_create_followup_from_exchange(
+        user_text=user_text,
+        ai_text=ai_text,
+        agent_name=agent_name,
+        channel=channel,
+        recently_resolved=recently_resolved,
     )
 
 

@@ -111,20 +111,13 @@ from services.embeddings import embeddings
 from memory.pending_followups import (
     ensure_pending_followups_table,
     find_pending_followups,
-    maybe_create_followup_from_exchange,
-    maybe_resolve_followups_from_user_message,
-    looks_like_followup_resolution_update,
-    extract_followup_candidate_with_llm,
-    create_pending_followup_from_candidate,
-    get_recently_resolved_followups,
-    candidate_is_distinct_from_recently_resolved,
+    process_followup_exchange,
     get_due_pending_followups,
     mark_followup_sent,
     expire_old_followups,
     has_recent_sent_followup,
     has_recent_sent_followup_for_arc,
     build_followup_arc_key,
-    record_followup_outcome,
 )
 from core.event_bus import bus
 # ────────────────────────────────────────────────────────────────
@@ -303,27 +296,7 @@ def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
     )
 
 def _enqueue_followup_pipeline(user_text, ai_text, agent_name, channel):
-    resolved_count = maybe_resolve_followups_from_user_message(user_text)
-    if resolved_count > 0 and looks_like_followup_resolution_update(user_text):
-        candidate = extract_followup_candidate_with_llm(user_text, ai_text, agent_name)
-        if not candidate or not candidate.get("should_follow_up"):
-            print(f"[FollowUp]: create-skip after resolution update ({resolved_count} resolved)")
-            return
-
-        recent_resolved = get_recently_resolved_followups(limit=5, within_seconds=180)
-        if not candidate_is_distinct_from_recently_resolved(candidate, recent_resolved):
-            print(f"[FollowUp]: create-skip redundant arc after resolution update ({resolved_count} resolved)")
-            return
-
-        create_pending_followup_from_candidate(
-            candidate=candidate,
-            source_channel=channel,
-            source_agent=agent_name,
-            source_user_text=user_text,
-            source_ai_text=ai_text,
-        )
-        return
-    maybe_create_followup_from_exchange(
+    process_followup_exchange(
         user_text=user_text,
         ai_text=ai_text,
         agent_name=agent_name,
@@ -725,6 +698,9 @@ def job_check_pending_followups():
         now_iso = _local_now().isoformat(timespec="seconds")
         expire_old_followups(now_iso)
 
+        if is_proactive_muted() or is_quiet_hours():
+            return
+
         due = get_due_pending_followups(now_iso)
         if not due:
             return
@@ -795,7 +771,6 @@ def job_check_pending_followups():
                 item["id"],
                 f"followup_sent:{decision.get('stage')}",
             )
-            record_followup_outcome(item["id"], +0.2, f"followup_sent:{decision.get('stage')}")
             print(
                 f"[FollowUp]: sent #{item['id']} "
                 f"stage={decision.get('stage')} "

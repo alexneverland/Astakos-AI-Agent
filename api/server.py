@@ -35,13 +35,11 @@ from core.agents import clean_message
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
 from services.context_extractor import extract_and_update_context_flags
 from memory.pending_followups import (
-    maybe_create_followup_from_exchange,
-    maybe_resolve_followups_from_user_message,
+    process_followup_exchange,
     find_pending_followups,
 )
 def _enqueue_followup_pipeline(user_text, ai_text, agent_name, channel):
-    maybe_resolve_followups_from_user_message(user_text)
-    maybe_create_followup_from_exchange(
+    process_followup_exchange(
         user_text=user_text,
         ai_text=ai_text,
         agent_name=agent_name,
