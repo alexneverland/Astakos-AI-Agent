@@ -452,9 +452,6 @@ def import_declared_routines(routines: list[dict[str, str]]) -> int | None:
     history. The empty-database check and inserts share one write transaction to
     prevent a re-import from changing an established routine database.
     """
-    if not routines:
-        return 0
-
     conn = get_connection(write=True)
     cursor = conn.cursor()
     try:

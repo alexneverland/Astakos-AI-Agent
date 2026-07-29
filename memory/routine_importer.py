@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -67,6 +68,12 @@ def _validate_routine(raw_routine: Any, index: int) -> dict[str, str]:
     return {"day": day, "time": time, "event": event, "type": event_type}
 
 
+def _make_declaration_fingerprint(routine: dict[str, str]) -> str:
+    """Build the routine-db-compatible fingerprint without importing persistence."""
+    key = f"{routine['day']}|{routine['time']}|{routine['event'].lower().strip()}"
+    return hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
+
+
 def load_routine_import(path: Path) -> list[dict[str, str]]:
     """Read and fully validate a portable routine JSON file before database access."""
     try:
@@ -85,9 +92,7 @@ def load_routine_import(path: Path) -> list[dict[str, str]]:
         raise RoutineImportError("Routine import routines must be a list")
 
     routines = [_validate_routine(raw_routine, index) for index, raw_routine in enumerate(raw_payload["routines"])]
-    from memory.routine_db import make_fingerprint
-
-    fingerprints = [make_fingerprint(routine["day"], routine["time"], routine["event"]) for routine in routines]
+    fingerprints = [_make_declaration_fingerprint(routine) for routine in routines]
     if len(fingerprints) != len(set(fingerprints)):
         raise RoutineImportError("Routine import contains duplicate day/time/event entries")
     return routines
