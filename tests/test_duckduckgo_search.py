@@ -133,10 +133,11 @@ def test_ddgs_english_only_fails_closed_without_gemini(capsys: Any) -> None:
 
 @pytest.mark.parametrize(("gemini_json", "expected_log"), [
     ("invalid json", "Gemini returned invalid JSON."),
+    ('{"query": "test",}', "Gemini returned invalid JSON."),
     ('{"query": ""}', "Gemini returned an empty or non-string query."),
     ('{}', "Gemini returned an invalid JSON structure."),
     ('{"query": "english", "extra": true}', "Gemini returned an invalid JSON structure."),
-    ('"just a string"', "Gemini returned invalid JSON."),
+    ('"just a string"', "Gemini returned an invalid JSON structure."),
     ('{"query": 42}', "Gemini returned an empty or non-string query.")
 ])
 def test_ddgs_gemini_strict_validation_fails_closed(

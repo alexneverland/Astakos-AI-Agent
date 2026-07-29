@@ -694,7 +694,6 @@ def duckduckgo_search(query: str) -> str:
     from ddgs import DDGS
     from ddgs.exceptions import RatelimitException, TimeoutException, DDGSException
     from services.gemini import safe_gemini_call
-    from core.utils import extract_json_from_text
 
     # backend="auto" (the default) tries sequential/batched ALL engines (up to 8),
     # something that in fail-cascades reached 20-30+ sec. per call. Pin to 2 fast ones,
@@ -776,8 +775,16 @@ def duckduckgo_search(query: str) -> str:
         )
         # Call Gemini exactly once
         resp = safe_gemini_call(prompt, retries=1)
-        data = extract_json_from_text(resp.text)
-        if data is None:
+        raw_response = resp.text.strip()
+        fenced_match = re.fullmatch(
+            r"```(?:json)?\s*(.*?)\s*```",
+            raw_response,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        json_payload = fenced_match.group(1) if fenced_match else raw_response
+        try:
+            data = json.loads(json_payload)
+        except json.JSONDecodeError:
             print("[Web Search]: English fallback skipped because Gemini returned invalid JSON.")
             return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
 
