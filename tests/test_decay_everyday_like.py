@@ -1,10 +1,33 @@
+from collections.abc import Iterator
+from pathlib import Path
+
 import pytest
+import config
+import memory.routine_db as routine_db
 from memory.routine_db import (
     upsert_routine,
     decay_routine,
     get_connection,
     RoutineState
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_routines_db(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Iterator[None]:
+    """Route every decay test in this module to a fresh temporary routine DB."""
+    test_db = tmp_path / "routines.db"
+    monkeypatch.setattr(config, "ROUTINES_DB", str(test_db), raising=False)
+    monkeypatch.setattr(routine_db, "DB_PATH", str(test_db))
+    monkeypatch.setattr(routine_db, "_wal_enabled", False)
+    monkeypatch.setattr(routine_db, "_wal_enabled_path", None)
+
+    routine_db.setup_db()
+    assert Path(routine_db.DB_PATH) == test_db
+    yield
+
 
 def test_decay_everyday_like():
     conn = get_connection()
