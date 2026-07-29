@@ -694,20 +694,20 @@ def duckduckgo_search(query: str) -> str:
     from ddgs import DDGS
     from ddgs.exceptions import RatelimitException, TimeoutException, DDGSException
     from services.gemini import safe_gemini_call
-    import json
-    import re
+    from core.utils import extract_json_from_text
 
     # backend="auto" (the default) tries sequential/batched ALL engines (up to 8),
     # something that in fail-cascades reached 20-30+ sec. per call. Pin to 2 fast ones,
     # verified backends (verified live: duckduckgo ~1s, google ~0.5s) with 1 fallback.
     backends_to_try = ["duckduckgo", "google"]
 
-    def _run_ddgs(q: str) -> tuple[str | None, str | None]:
+    def _run_ddgs(q: str, phase: str) -> tuple[str | None, str | None]:
         """
         Executes search queries against pinned DDGS backends.
 
         Args:
             q: The search query string.
+            phase: A diagnostic label for the original or fallback attempt.
 
         Returns:
             A tuple of (formatted_results, error_message).
@@ -735,26 +735,40 @@ def duckduckgo_search(query: str) -> str:
                                 valid_count += 1
                                 output.append(t("tools.web.search_format_result", title=title, href=href, body=body))
                     if valid_count > 0:
+                        print(
+                            f"[Web Search]: {phase} DDGS search succeeded via "
+                            f"{backend} ({valid_count} valid results)."
+                        )
                         return "\n---\n".join(output), None
+                    print(
+                        f"[Web Search]: {phase} DDGS result from {backend} "
+                        "contained no valid entries."
+                    )
                 last_error = t("tools.web.search_err_empty")
             except RatelimitException:
                 last_error = "rate limit"
+                print(f"[Web Search]: {phase} DDGS backend {backend} was rate limited.")
             except TimeoutException:
                 last_error = "timeout"
+                print(f"[Web Search]: {phase} DDGS backend {backend} timed out.")
             except DDGSException as e:
                 last_error = str(e)
+                print(f"[Web Search]: {phase} DDGS backend {backend} failed with DDGSException.")
             except Exception as e:
                 last_error = str(e)
+                print(f"[Web Search]: {phase} DDGS backend {backend} failed unexpectedly.")
         return None, last_error
 
-    result_text, err = _run_ddgs(query)
+    result_text, err = _run_ddgs(query, "Original")
     if result_text is not None:
         return result_text
 
     if not re.search(r'[\u0370-\u03FF\u1F00-\u1FFF]', query):
+        print("[Web Search]: English fallback skipped because the original query has no Greek characters.")
         return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
 
     try:
+        print("[Web Search]: Original Greek query failed; requesting an English fallback query.")
         prompt = (
             "Translate this search query into a short English search query. "
             "Return STRICT JSON with exactly one key 'query'.\n"
@@ -762,27 +776,35 @@ def duckduckgo_search(query: str) -> str:
         )
         # Call Gemini exactly once
         resp = safe_gemini_call(prompt, retries=1)
-        data = json.loads(resp.text)
+        data = extract_json_from_text(resp.text)
+        if data is None:
+            print("[Web Search]: English fallback skipped because Gemini returned invalid JSON.")
+            return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
 
         if not isinstance(data, dict) or len(data) != 1 or "query" not in data:
+            print("[Web Search]: English fallback skipped because Gemini returned an invalid JSON structure.")
             raise ValueError("Invalid JSON structure")
 
         english_query = data["query"]
 
         if not isinstance(english_query, str) or not english_query.strip():
+            print("[Web Search]: English fallback skipped because Gemini returned an empty or non-string query.")
             raise ValueError("Invalid query")
 
         english_query = english_query.strip()
 
         if remove_accents(english_query) == remove_accents(query).strip():
+            print("[Web Search]: English fallback skipped because Gemini returned the original query.")
             raise ValueError("Same query")
 
-        fallback_text, fallback_err = _run_ddgs(english_query)
+        print("[Web Search]: Gemini produced an English fallback query; retrying DDGS.")
+        fallback_text, fallback_err = _run_ddgs(english_query, "English fallback")
         if fallback_text is not None:
             return fallback_text
         err = fallback_err
-    except Exception:
-        pass
+        print("[Web Search]: English fallback DDGS retry produced no valid results.")
+    except Exception as exc:
+        print(f"[Web Search]: English fallback failed before retry ({type(exc).__name__}).")
 
     return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
 @tool
