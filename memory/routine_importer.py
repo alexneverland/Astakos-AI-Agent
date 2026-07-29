@@ -34,6 +34,16 @@ class RoutineImportError(ValueError):
     """Raised when a portable routine file is invalid or unsafe to import."""
 
 
+def _reject_duplicate_object_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Decode a JSON object while rejecting ambiguous duplicate member names."""
+    decoded: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in decoded:
+            raise RoutineImportError(f"Routine import contains duplicate key: {key}")
+        decoded[key] = value
+    return decoded
+
+
 def _require_exact_fields(value: dict[str, Any], expected: frozenset[str], label: str) -> None:
     """Reject fields outside the portable schema instead of silently ignoring them."""
     unknown_fields = sorted(set(value) - expected)
@@ -77,7 +87,10 @@ def _make_declaration_fingerprint(routine: dict[str, str]) -> str:
 def load_routine_import(path: Path) -> list[dict[str, str]]:
     """Read and fully validate a portable routine JSON file before database access."""
     try:
-        raw_payload = json.loads(path.read_text(encoding="utf-8"))
+        raw_payload = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_object_keys,
+        )
     except FileNotFoundError as e:
         raise RoutineImportError(f"Routine import file does not exist: {path}") from e
     except UnicodeDecodeError as e:

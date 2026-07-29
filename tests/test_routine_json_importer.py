@@ -147,6 +147,31 @@ def test_importer_reports_file_access_and_decoding_errors(
         load_routine_import(routines_path)
 
 
+@pytest.mark.parametrize(
+    "raw_payload",
+    [
+        '{"version": 1, "routines": [], "routines": []}',
+        (
+            '{"version": 1, "routines": ['
+            '{"day": "Monday", "time": "18:00", '
+            '"event": "Evening walk", "event": "Night walk", "type": "hobby"}'
+            ']}'
+        ),
+    ],
+)
+def test_importer_rejects_duplicate_json_object_members(
+    tmp_path: Path, raw_payload: str
+) -> None:
+    """Ambiguous JSON object members fail before routine validation or persistence."""
+    from memory.routine_importer import RoutineImportError, load_routine_import
+
+    routines_path = tmp_path / "astakos_routines.json"
+    routines_path.write_text(raw_payload, encoding="utf-8")
+
+    with pytest.raises(RoutineImportError, match="duplicate key"):
+        load_routine_import(routines_path)
+
+
 def test_importer_rejects_duplicate_declarations_without_writing(
     isolated_routine_db: ModuleType, tmp_path: Path
 ) -> None:

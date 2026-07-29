@@ -22,7 +22,7 @@ using this exact schema:
 
 Allowed `day` values are `Monday` through `Sunday`, `Everyday`, `Weekdays`, and
 `Weekends`. `time` must use 24-hour `HH:MM`; `type` is one of `family`, `work`,
-`hobby`, or `general`.
+`hobby`, or `general`; `event` must contain 3–200 characters.
 
 The importer validates the full JSON before it writes anything. It imports only
 when the routines database is empty; otherwise it does nothing. Imported routines
