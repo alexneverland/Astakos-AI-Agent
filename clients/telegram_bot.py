@@ -31,7 +31,7 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE, NLP_CONFIG
 import config
@@ -1694,6 +1694,8 @@ def handle_message(user_text: str, chat_id: str):
     # Pool isolation: pending first; today only if no pending.
     from services.routine_completion_helper import decide_completion
     from services.routine_completion_selector import select_routine as _completion_selector
+    routine_completion_context: SystemMessage | None = None
+    routine_action_consumed = False
 
     if pending_routine_confirmations:
         # ── Partner/messenger contextual no-decay (preserved unchanged) ──
@@ -1758,7 +1760,12 @@ def handle_message(user_text: str, chat_id: str):
         )
 
         if decision.action == "complete" and decision.routine_id is not None:
-            from memory.routine_db import confirm_routine, mark_routine_responded, remove_pending_confirmation
+            from memory.routine_db import (
+                confirm_routine,
+                mark_routine_responded,
+                mark_routine_triggered_today,
+                remove_pending_confirmation,
+            )
             from memory.event_log import log_event
 
             rid = decision.routine_id
@@ -1767,6 +1774,7 @@ def handle_message(user_text: str, chat_id: str):
 
             confirm_routine(rid)
             mark_routine_responded(rid)
+            mark_routine_triggered_today(rid)
             remove_pending_confirmation(rid)
             log_event(
                 "routines", "confirmed",
@@ -1779,9 +1787,9 @@ def handle_message(user_text: str, chat_id: str):
             bus.emit("routine_confirmed", routine_id=rid, event=ev, channel="telegram")
             pending_routine_confirmations.pop(rid, None)
 
-            reply = t("services.routine_completion.completed", routine_name=ev)
-            send_telegram_msg(reply)
-            return
+            from services.routine_completion_context import build_routine_completion_context
+            routine_completion_context = build_routine_completion_context()
+            routine_action_consumed = True
 
         elif decision.action == "dismiss" and decision.routine_id is not None:
             from memory.routine_db import decay_routine, remove_pending_confirmation
@@ -1804,16 +1812,9 @@ def handle_message(user_text: str, chat_id: str):
             bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
             pending_routine_confirmations.pop(rid, None)
 
-            reply = t("services.routine_completion.dismissed", routine_name=ev)
-            send_telegram_msg(reply)
-            return
-
-        elif decision.action == "ask_clarification":
-            cands = decision.clarification_candidates
-            cand_list = "\n".join(f"  {i+1}) {name}" for i, (_, name) in enumerate(cands.items()))
-            reply = t("services.routine_completion.clarification", candidates_list=cand_list)
-            send_telegram_msg(reply)
-            return
+            from services.routine_completion_context import build_routine_completion_context
+            routine_completion_context = build_routine_completion_context()
+            routine_action_consumed = True
 
         # decision.action == "pass_through" → continue to normal chat processing.
 
@@ -1821,10 +1822,10 @@ def handle_message(user_text: str, chat_id: str):
         # ── Pre-emptive today-pool completion (no pending) ───────────
         from datetime import datetime as _dt_now
         try:
-            from memory.routine_db import get_routines_for_day, mark_routine_triggered_today
+            from memory.routine_db import get_eligible_preemptive_routines_for_day, mark_routine_triggered_today
 
             day_name = _dt_now.now().strftime("%A")
-            today_routines = get_routines_for_day(day_name)
+            today_routines = get_eligible_preemptive_routines_for_day(day_name)
             if today_routines:
                 today_candidates = {r["id"]: r["event"] for r in today_routines}
                 decision = decide_completion(
@@ -1850,9 +1851,9 @@ def handle_message(user_text: str, chat_id: str):
                     )
                     print(f"✅ [Routine Pre-emptive Completed]: #{rid} {ev}")
 
-                    reply = t("services.routine_completion.preemptive_completed", routine_name=ev)
-                    send_telegram_msg(reply)
-                    return
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
                 # pass_through → continue to normal chat.
         except Exception as _preempt_err:
             print(f"[Telegram Pre-emptive Completion]: {_preempt_err}")
@@ -1860,7 +1861,7 @@ def handle_message(user_text: str, chat_id: str):
 
     # ── REFLECTION CONFIRMATION LOOP (ask-tier, 50-75% confidence) ──
     global pending_reflection_confirmations
-    if pending_reflection_confirmations:
+    if not routine_action_consumed and pending_reflection_confirmations:
         text_check = _normalize_gr(clean_user_text)
         text_words = text_check.replace(",", "").replace(".", "").replace("!", "").split()
         yes_words = [_normalize_gr(w) for w in NLP_CONFIG.get("telegram", {}).get("confirm_tokens", [])]
@@ -1917,7 +1918,7 @@ def handle_message(user_text: str, chat_id: str):
 
     # ── SAFE EXECUTOR CONFIRMATION LOOP ──────────────────────────
     global pending_exec_command
-    if pending_exec_command:
+    if not routine_action_consumed and pending_exec_command:
         text_check = _normalize_gr(clean_user_text)
         if any(w in text_check for w in [_normalize_gr(w) for w in NLP_CONFIG.get("telegram", {}).get("confirm_tokens", [])]):
             cmd = pending_exec_command
@@ -1951,7 +1952,11 @@ def handle_message(user_text: str, chat_id: str):
     global pending_photo
     photo_prefix = ""
     with pending_photo_lock:
-        if pending_photo and (time.time() - pending_photo["timestamp"]) < 30:
+        if (
+            not routine_action_consumed
+            and pending_photo
+            and (time.time() - pending_photo["timestamp"]) < 30
+        ):
             p = pending_photo
             pending_photo = None
             print(f"\033[94m[Photo+Msg]: Combination of pending photo + message\033[0m")
@@ -1975,7 +1980,7 @@ def handle_message(user_text: str, chat_id: str):
     from memory.pending_assets import is_reply_to_recent_asset_prompt
     pending_photo_asset = get_latest_pending_asset("telegram", "photo")
     pending_doc_asset = get_latest_pending_asset("telegram", "document")
-    pending_asset = pending_photo_asset or pending_doc_asset
+    pending_asset = None if routine_action_consumed else (pending_photo_asset or pending_doc_asset)
     reply_kind = classify_pending_asset_reply(clean_user_text) if pending_asset else None
     asset_prompt_active = is_reply_to_recent_asset_prompt("telegram") if pending_asset else False
 
@@ -2023,9 +2028,10 @@ def handle_message(user_text: str, chat_id: str):
 
     # ── Messenger Draft Intent Guard ─────────────────────────────
     draft_active, draft_reason, draft_data = _safe_active_draft_status()
-    draft_intent = _safe_classify_messenger_intent(
-        clean_user_text,
-        has_active_draft=draft_active,
+    draft_intent = (
+        _safe_classify_messenger_intent(clean_user_text, has_active_draft=draft_active)
+        if not routine_action_consumed
+        else None
     )
 
     if draft_intent and draft_intent.intent == "clear_draft":
@@ -2125,6 +2131,8 @@ def handle_message(user_text: str, chat_id: str):
         # ── Context: shared mixed history from SQLite ────────────
         t_context_0 = perf_counter()
         context_msgs, current_msg = _build_fast_chat_context(clean_user_text)
+        from services.routine_completion_context import append_routine_completion_context
+        context_msgs = append_routine_completion_context(context_msgs, routine_completion_context)
         context_load_ms = int((perf_counter() - t_context_0) * 1000)
         # ── Flow via LangGraph ───────────────────────────────────_
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"
@@ -2157,7 +2165,7 @@ def handle_message(user_text: str, chat_id: str):
 
         mail_prompt_active = is_reply_to_recent_mail_prompt(context_msgs)
         
-        if is_ultra_ack and not mail_prompt_active:
+        if is_ultra_ack and routine_completion_context is None and not mail_prompt_active:
             _trace.mark_phase("ultra_light_ack_used", 1)
             handling_agent = "UltraLightACK"
             final_ai_response = get_ultra_light_ack_response()

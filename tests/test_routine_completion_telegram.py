@@ -74,6 +74,8 @@ def _stub_modules():
         sys.modules[mod] = types.ModuleType(mod)
     sys.modules["langchain_core.messages"].HumanMessage = MagicMock
     sys.modules["langchain_core.messages"].AIMessage    = MagicMock
+    sys.modules["langchain_core.messages"].SystemMessage = MagicMock
+    sys.modules["langchain_core.messages"].BaseMessage = MagicMock
 
     # ── memory.* ──────────────────────────────────────────────
     for mod in [
@@ -177,6 +179,7 @@ def _stub_modules():
     rdb.update_sentimental_last_sent      = MagicMock()
     rdb.set_sentimental_silenced          = MagicMock()
     rdb.get_routines_for_day              = MagicMock(return_value=[])
+    rdb.get_eligible_preemptive_routines_for_day = MagicMock(return_value=[])
     rdb.mark_routine_triggered_today      = MagicMock()
 
     # ── core.* ────────────────────────────────────────────────
@@ -187,7 +190,19 @@ def _stub_modules():
     ]:
         sys.modules[mod] = types.ModuleType(mod)
 
-    sys.modules["core.utils"].is_simple_chat_fast_path_candidate = MagicMock(return_value=False)
+    utils = sys.modules["core.utils"]
+    utils.is_simple_chat_fast_path_candidate = MagicMock(return_value=False)
+    utils.is_medium_web_chat_path_candidate = MagicMock(return_value=False)
+    utils.is_ultra_light_ack = MagicMock(return_value=False)
+    utils.get_ultra_light_ack_response = MagicMock(return_value="")
+    utils.is_reply_to_recent_mail_prompt = MagicMock(return_value=False)
+    utils.is_reply_to_recent_linkedin_prompt = MagicMock(return_value=False)
+    utils.looks_like_terminal_linkedin_draft_result = MagicMock(return_value=False)
+    utils.build_linkedin_draft_ready_reply = MagicMock(return_value="")
+    utils.should_attach_linkedin_draft_reply = MagicMock(return_value=False)
+    utils.looks_like_terminal_messenger_draft_result = MagicMock(return_value=False)
+    utils.build_messenger_draft_ready_reply = MagicMock(return_value="")
+    utils.strip_operational_assistant_paragraphs = MagicMock(side_effect=lambda text: text)
 
     brain = sys.modules["core.brain"]
     brain.llm             = MagicMock()
@@ -241,16 +256,20 @@ def _stub_modules():
         return_value={"allowed": True, "results": [], "matched_count": 0, "failed_count": 0}
     )
 
+    from services.routine_completion_helper import RoutineSelection
     import services.routine_completion_selector
-    services.routine_completion_selector.select_routine = MagicMock(return_value=None)
+    services.routine_completion_selector.select_routine = MagicMock(
+        return_value=RoutineSelection(action="none", routine_id=None)
+    )
 
     # ── tools.* ───────────────────────────────────────────────
-    for mod in ["tools", "tools.telegram"]:
+    for mod in ["tools", "tools.telegram", "tools.system"]:
         sys.modules[mod] = types.ModuleType(mod)
     tg = sys.modules["tools.telegram"]
     tg.send_telegram_msg      = MagicMock()
     tg.send_telegram_voice    = MagicMock()
     tg.send_telegram_msg_full = MagicMock()
+    sys.modules["tools.system"]._CURRENT_CHANNEL = None
 
     # ── python-telegram-bot ───────────────────────────────────
     for mod in ["telegram", "telegram.ext"]:
@@ -293,7 +312,7 @@ def _reset_mocks():
     """Reset routine-related mocks before each test."""
     rdb = sys.modules["memory.routine_db"]
     for name in ("confirm_routine", "decay_routine", "mark_routine_responded",
-                 "remove_pending_confirmation", "get_routines_for_day",
+                 "remove_pending_confirmation", "get_eligible_preemptive_routines_for_day",
                  "mark_routine_triggered_today"):
         getattr(rdb, name).reset_mock()
 
@@ -301,9 +320,18 @@ def _reset_mocks():
     sys.modules["core.event_bus"].bus.reset_mock()
     sys.modules["tools.telegram"].send_telegram_msg.reset_mock()
     sys.modules["services.routine_completion_selector"].select_routine.reset_mock()
+    bot.pending_reflection_confirmations = {}
+    bot.pending_exec_command = None
 
 
-def _run_handle_message(text, pending=None, today_routines=None, selector_return=None):
+def _run_handle_message(
+    text,
+    pending=None,
+    today_routines=None,
+    selector_return=None,
+    pending_reflections=None,
+    pending_command=None,
+):
     """
     Call ``bot.handle_message`` with controlled state.
 
@@ -314,14 +342,23 @@ def _run_handle_message(text, pending=None, today_routines=None, selector_return
     _reset_mocks()
 
     rdb = sys.modules["memory.routine_db"]
-    rdb.get_routines_for_day.return_value = today_routines or []
+    rdb.get_eligible_preemptive_routines_for_day.return_value = today_routines or []
 
     selector_mod = sys.modules["services.routine_completion_selector"]
     selector_mod.select_routine.return_value = selector_return
 
     bot.pending_routine_confirmations = dict(pending or {})
+    bot.pending_reflection_confirmations = dict(pending_reflections or {})
+    bot.pending_exec_command = pending_command
 
     sent = []
+
+    graph_mock = sys.modules["core.graph"].graph
+    graph_mock.stream = MagicMock(return_value=[{
+        "Chat_Agent": {"messages": [types.SimpleNamespace(
+            content="Natural graph reply.", tool_calls=None, type="ai"
+        )]}
+    }])
 
     def _requests_post_trap(*a, **kw):
         raise AssertionError("Real requests.post was called — test isolation breach")
@@ -335,6 +372,9 @@ def _run_handle_message(text, pending=None, today_routines=None, selector_return
         patch.object(bot, "send_telegram_msg", side_effect=lambda m, **kw: sent.append(m), create=True),
         patch.object(bot, "bus", sys.modules["core.event_bus"].bus),
         patch.object(bot, "log_event", sys.modules["memory.event_log"].log_event),
+        patch.object(bot, "_build_fast_chat_context", return_value=([], MagicMock(content=text))),
+        patch.object(bot, "_append_to_analytics_log", return_value=1),
+        patch.object(bot, "_cache_bot_message", create=True),
     ):
         try:
             bot.handle_message(text, "123456")
@@ -352,6 +392,7 @@ def _run_handle_message(text, pending=None, today_routines=None, selector_return
 
 def test_preemptive_completion_calls_mark_triggered():
     """Pre-emptive today-pool match ⇒ mark_routine_triggered_today(5) called."""
+    from services.routine_completion_helper import RoutineSelection
     rdb = sys.modules["memory.routine_db"]
 
     sent = _run_handle_message(
@@ -361,6 +402,7 @@ def test_preemptive_completion_calls_mark_triggered():
             {"id": 5, "time": "15:00", "event": "Σούπερ μάρκετ",
              "type": "general", "confidence": 0.9, "mentions": 3, "state": "active"},
         ],
+        selector_return=RoutineSelection(action="complete", routine_id=5),
     )
 
     rdb.mark_routine_triggered_today.assert_called_once_with(5)
@@ -369,11 +411,10 @@ def test_preemptive_completion_calls_mark_triggered():
     assert len(sent) == 1  # ack message sent
 
 
-def test_preemptive_completion_returns_early_no_graph():
-    """Pre-emptive handled completion must NOT fall through to the graph."""
+def test_preemptive_completion_continues_to_graph():
+    """Pre-emptive completion preserves the normal graph conversation path."""
+    from services.routine_completion_helper import RoutineSelection
     graph_mock = sys.modules["core.graph"].graph
-    graph_mock.stream = MagicMock(side_effect=AssertionError("Graph invoked — leak"))
-
     rdb = sys.modules["memory.routine_db"]
 
     _run_handle_message(
@@ -383,18 +424,21 @@ def test_preemptive_completion_returns_early_no_graph():
             {"id": 5, "time": "15:00", "event": "Σούπερ μάρκετ",
              "type": "general", "confidence": 0.9, "mentions": 3, "state": "active"},
         ],
+        selector_return=RoutineSelection(action="complete", routine_id=5),
     )
 
-    # If we got here, graph.stream was never called — early return worked.
     rdb.mark_routine_triggered_today.assert_called_once_with(5)
+    graph_mock.stream.assert_called_once()
+    graph_messages = graph_mock.stream.call_args.args[0]["messages"]
+    assert len(graph_messages) == 2
 
 
 # ─────────────────────────────────────────────────────────────
 # (b) Multiple pending + bare yes ⇒ clarification
 # ─────────────────────────────────────────────────────────────
 
-def test_multi_pending_bare_yes_returns_clarification():
-    """'ναι' with 2 pending ⇒ clarification message, no confirm, no decay."""
+def test_multiple_pending_without_selection_passes_to_graph():
+    """An ambiguous pending message does not mutate a routine or emit a canned reply."""
     rdb = sys.modules["memory.routine_db"]
 
     sent = _run_handle_message(
@@ -408,9 +452,7 @@ def test_multi_pending_bare_yes_returns_clarification():
     rdb.confirm_routine.assert_not_called()
     rdb.decay_routine.assert_not_called()
     rdb.mark_routine_responded.assert_not_called()
-    assert len(sent) == 1
-    # The clarification message should list both candidates.
-    assert "Πάρκο" in sent[0] or "Σούπερ" in sent[0]
+    assert sent == ["Natural graph reply."]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -420,15 +462,18 @@ def test_multi_pending_bare_yes_returns_clarification():
 def test_single_pending_bare_yes_confirms_exactly_one():
     """'ναι' with 1 pending ⇒ confirm_routine(5), mark_routine_responded(5),
     remove_pending_confirmation(5). No decay."""
+    from services.routine_completion_helper import RoutineSelection
     rdb = sys.modules["memory.routine_db"]
 
     sent = _run_handle_message(
         "ναι",
         pending={5: {"event": "Πάρκο"}},
+        selector_return=RoutineSelection(action="complete", routine_id=5),
     )
 
     rdb.confirm_routine.assert_called_once_with(5)
     rdb.mark_routine_responded.assert_called_once_with(5)
+    rdb.mark_routine_triggered_today.assert_called_once_with(5)
     rdb.remove_pending_confirmation.assert_called_once_with(5)
     rdb.decay_routine.assert_not_called()
     assert len(sent) == 1  # ack message
@@ -437,11 +482,13 @@ def test_single_pending_bare_yes_confirms_exactly_one():
 
 def test_single_pending_bare_no_dismisses_exactly_one():
     """'όχι' with 1 pending ⇒ decay_routine(5), remove_pending_confirmation(5)."""
+    from services.routine_completion_helper import RoutineSelection
     rdb = sys.modules["memory.routine_db"]
 
     sent = _run_handle_message(
         "όχι",
         pending={5: {"event": "Πάρκο"}},
+        selector_return=RoutineSelection(action="dismiss", routine_id=5),
     )
 
     rdb.decay_routine.assert_called_once_with(5)
@@ -449,6 +496,23 @@ def test_single_pending_bare_no_dismisses_exactly_one():
     rdb.confirm_routine.assert_not_called()
     assert len(sent) == 1  # exactly one acknowledgment message
     assert 5 not in bot.pending_routine_confirmations
+
+
+def test_routine_completion_skips_other_pending_confirmations() -> None:
+    """One routine completion cannot also authorize reflection or executor work."""
+    from services.routine_completion_helper import RoutineSelection
+
+    sent = _run_handle_message(
+        "yes",
+        pending={5: {"event": "Routine"}},
+        selector_return=RoutineSelection(action="complete", routine_id=5),
+        pending_reflections={1: {"observation": "pending reflection"}},
+        pending_command="Write-Output should-not-run",
+    )
+
+    assert 1 in bot.pending_reflection_confirmations
+    assert bot.pending_exec_command == "Write-Output should-not-run"
+    assert sent == ["Natural graph reply."]
 # ─────────────────────────────────────────────────────────────
 # (d) Partner/messenger contextual skip ⇒ return guard,
 #     decide_completion never called
