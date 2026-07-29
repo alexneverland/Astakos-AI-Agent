@@ -172,6 +172,25 @@ def test_importer_rejects_duplicate_json_object_members(
         load_routine_import(routines_path)
 
 
+def test_importer_rejects_unpaired_unicode_surrogates(tmp_path: Path) -> None:
+    """An escaped lone surrogate is a validation error, not a fingerprint crash."""
+    from memory.routine_importer import RoutineImportError, load_routine_import
+
+    routines_path = tmp_path / "astakos_routines.json"
+    routines_path.write_text(
+        (
+            '{"version": 1, "routines": ['
+            '{"day": "Monday", "time": "18:00", '
+            '"event": "ab\\ud800", "type": "hobby"}'
+            ']}'
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RoutineImportError, match="valid Unicode"):
+        load_routine_import(routines_path)
+
+
 def test_importer_rejects_duplicate_declarations_without_writing(
     isolated_routine_db: ModuleType, tmp_path: Path
 ) -> None:

@@ -71,6 +71,10 @@ def _validate_routine(raw_routine: Any, index: int) -> dict[str, str]:
     if not _TIME_PATTERN.fullmatch(time):
         raise RoutineImportError(f"routines[{index}].time must use HH:MM")
     event = event.strip()
+    try:
+        event.encode("utf-8")
+    except UnicodeEncodeError as e:
+        raise RoutineImportError(f"routines[{index}].event must contain valid Unicode") from e
     if not 3 <= len(event) <= 200:
         raise RoutineImportError(f"routines[{index}].event must contain 3-200 characters")
     if event_type not in _ROUTINE_TYPES:
