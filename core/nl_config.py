@@ -5,6 +5,21 @@ import config
 
 _intents = None
 
+
+def _load_base_intents(language_code: str) -> dict:
+    """Load one bundled intent catalog without applying the user-specific overlay."""
+    base_intents_path = os.path.join(
+        os.path.dirname(__file__),
+        f"intents_{language_code}.json",
+    )
+    try:
+        with open(base_intents_path, "r", encoding="utf-8") as file:
+            return json.load(file)
+    except Exception as error:
+        print(t("core.nl_config.error_loading", e=error))
+        return {}
+
+
 def _deep_merge_dicts(base: dict, custom: dict) -> dict:
     """Deep merges custom dict into base dict. For lists, extends the base list."""
     merged = base.copy()
@@ -25,15 +40,8 @@ def load_intents() -> dict:
     global _intents
     if _intents is None:
         lang_code = "el" if config.RESPONSE_LANGUAGE.lower() == "greek" else "en"
-        base_intents_path = os.path.join(os.path.dirname(__file__), f"intents_{lang_code}.json")
-        custom_intents_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "astakos_custom_intents.json")
-        
-        try:
-            with open(base_intents_path, "r", encoding="utf-8") as f:
-                _intents = json.load(f)
-        except Exception as e:
-            print(t("core.nl_config.error_loading", e=e))
-            _intents = {}
+        custom_intents_path = config.get_custom_intents_path()
+        _intents = _load_base_intents(lang_code)
             
         if os.path.exists(custom_intents_path):
             try:
@@ -48,6 +56,22 @@ def load_intents() -> dict:
 def get_intent_list(module: str, key: str) -> list:
     intents = load_intents()
     return intents.get(module, {}).get(key, [])
+
+
+def get_live_input_guard_list(module: str, key: str) -> list:
+    """Return deduplicated bundled-language and custom markers for live input guards."""
+    markers = []
+    for language_code in ("el", "en"):
+        markers.extend(
+            _load_base_intents(language_code).get(module, {}).get(key, [])
+        )
+    markers.extend(get_intent_list(module, key))
+    return list(
+        dict.fromkeys(
+            marker for marker in markers if isinstance(marker, str) and marker
+        )
+    )
+
 
 def get_intent_dict(module: str, key: str) -> dict:
     intents = load_intents()
@@ -128,8 +152,25 @@ CE_RETURN_TOGETHER = tuple(
     get_intent_list("context_extractor", "return_together_words")
 )
 CE_HOME = tuple(get_intent_list('context_extractor', 'home_words'))
+CE_COMMUNICATION_VERBS = tuple(
+    get_live_input_guard_list("context_extractor", "communication_verbs")
+)
+CE_STRONG_PRESENCE = tuple(
+    get_live_input_guard_list("context_extractor", "strong_presence_phrases")
+)
 CE_PARTNER_NAMES = (config.PARTNER_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'partner_names'))
 CE_KID1_NAMES = (config.KID1_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'kid1_names'))
+
+# Working-memory operational guards
+WM_ROUTINE_REFERENCE_MARKERS = tuple(
+    get_intent_list("working_memory", "routine_reference_markers")
+)
+WM_ROUTINE_ADMIN_MARKERS = tuple(
+    get_intent_list("working_memory", "routine_admin_markers")
+)
+WM_OPERATIONAL_AI_MARKERS = tuple(
+    get_intent_list("working_memory", "operational_ai_markers")
+)
 
 # Routine Intents
 RI_CONTROL_VERBS = tuple(get_intent_list('routine_intent', 'control_verbs'))

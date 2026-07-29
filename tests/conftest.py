@@ -3,16 +3,31 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 
 # Ensure root is in path for config import
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-TEST_CUSTOM_INTENTS_PATH = os.path.join(os.path.dirname(__file__), '..', 'astakos_custom_intents.json')
-BACKUP_PATH = os.path.join(os.path.dirname(__file__), '..', 'astakos_custom_intents.json.bak')
+_PREVIOUS_CUSTOM_INTENTS_PATH = os.environ.get("ASTAKOS_CUSTOM_INTENTS_PATH")
+_TEST_CUSTOM_INTENTS_DIR = tempfile.mkdtemp(prefix="astakos_test_intents_")
+TEST_CUSTOM_INTENTS_PATH = os.path.join(
+    _TEST_CUSTOM_INTENTS_DIR,
+    "astakos_custom_intents.json",
+)
+os.environ["ASTAKOS_CUSTOM_INTENTS_PATH"] = TEST_CUSTOM_INTENTS_PATH
 
 MOCK_CUSTOM_INTENTS = {
     "system_tool": {
         "family_markers": ["kid1", "partner", "σοφια", "αλεξανδρος"]
+    },
+    "routines": {
+        "tokens": {
+            "_KID1_TOKENS": ["αλεξανδρ"],
+            "_PARTNER_TOKENS": ["σοφια"],
+        },
+        "inline": {
+            "partner_aliases": ["sofia", "σοφ"],
+        },
     },
     "context_builder": {
         "partner_gift_words": ["σοφια", "ρολοι", "ρολόι", "δώρο", "παρτνερ", "partner"],
@@ -47,19 +62,18 @@ MOCK_CUSTOM_INTENTS = {
     }
 }
 
-def pytest_configure(config):
-    # Backup existing if any
-    if os.path.exists(TEST_CUSTOM_INTENTS_PATH):
-        shutil.copy2(TEST_CUSTOM_INTENTS_PATH, BACKUP_PATH)
-    
+def pytest_configure(config: pytest.Config) -> None:
+    """Create an isolated custom-intents overlay for the test session."""
     with open(TEST_CUSTOM_INTENTS_PATH, "w", encoding="utf-8") as f:
         json.dump(MOCK_CUSTOM_INTENTS, f, ensure_ascii=False, indent=2)
 
-def pytest_unconfigure(config):
-    if os.path.exists(BACKUP_PATH):
-        shutil.move(BACKUP_PATH, TEST_CUSTOM_INTENTS_PATH)
-    elif os.path.exists(TEST_CUSTOM_INTENTS_PATH):
-        os.remove(TEST_CUSTOM_INTENTS_PATH)
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Remove only the isolated test overlay and restore the prior environment."""
+    if _PREVIOUS_CUSTOM_INTENTS_PATH is None:
+        os.environ.pop("ASTAKOS_CUSTOM_INTENTS_PATH", None)
+    else:
+        os.environ["ASTAKOS_CUSTOM_INTENTS_PATH"] = _PREVIOUS_CUSTOM_INTENTS_PATH
+    shutil.rmtree(_TEST_CUSTOM_INTENTS_DIR, ignore_errors=True)
 
 @pytest.fixture(autouse=True)
 def mock_dbs(monkeypatch, tmp_path):

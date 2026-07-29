@@ -602,8 +602,52 @@
             "he is at home",
             "he is at home"
         ],
+        "communication_verbs": [
+            "talked with",
+            "spoke with",
+            "talked to",
+            "spoke to",
+            "talked on the phone",
+            "called",
+            "called me",
+            "told me",
+            "sent me",
+            "we messaged",
+            "chat",
+            "message"
+        ],
+        "strong_presence_phrases": [
+            "i am with",
+            "we are together",
+            "is with me",
+            "we are here together",
+            "we are home together",
+            "we are out together"
+        ],
         "partner_names": [],
         "kid1_names": []
+    },
+    "working_memory": {
+        "routine_reference_markers": [
+            "routine"
+        ],
+        "routine_admin_markers": [
+            "mute",
+            "unmute",
+            "condition",
+            "cooldown",
+            "shift",
+            "work",
+            "only when"
+        ],
+        "operational_ai_markers": [
+            "matching routines:",
+            "condition:",
+            "conditions.",
+            "no condition was added or removed",
+            "gained condition",
+            "already had this condition"
+        ]
     },
     "routine_intent": {
         "control_verbs": [

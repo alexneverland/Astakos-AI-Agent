@@ -11,6 +11,15 @@ load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
+def get_custom_intents_path() -> str:
+    """Return the optional test override or the local custom-intents path."""
+    return os.getenv(
+        "ASTAKOS_CUSTOM_INTENTS_PATH",
+        os.path.join(BASE_DIR, "astakos_custom_intents.json"),
+    )
+
+
 # ==========================================
 # 1. CREDENTIALS & API KEYS
 # ==========================================
@@ -162,7 +171,7 @@ def _deep_merge_dicts(base: dict, custom: dict) -> dict:
 def _load_nlp_config() -> dict:
     lang_code = "el" if RESPONSE_LANGUAGE.lower() == "greek" else "en"
     base_path = os.path.join(BASE_DIR, "core", f"intents_{lang_code}.json")
-    custom_path = os.path.join(BASE_DIR, "astakos_custom_intents.json")
+    custom_path = get_custom_intents_path()
     legacy_path = os.path.join(BASE_DIR, "astakos_nlp.json")
 
     data = {}

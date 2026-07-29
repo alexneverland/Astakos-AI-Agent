@@ -6,6 +6,7 @@
 
 import config
 from core.i18n import t
+from core import nl_config
 import os
 import json
 import threading
@@ -106,24 +107,13 @@ def _looks_like_operational_working_memory_exchange(user_text: str, ai_text: str
         return True
 
     user_routine_admin = (
-        ("ρουτιν" in user_norm or "routine" in user_norm)
-        and any(token in user_norm for token in (
-            "mute", "unmute", "condition", "cooldown", "βαρδια", "βάρδια",
-            "δουλεια", "δουλειά", "μονο οταν", "μόνο όταν",
-        ))
+        any(marker in user_norm for marker in nl_config.WM_ROUTINE_REFERENCE_MARKERS)
+        and any(marker in user_norm for marker in nl_config.WM_ROUTINE_ADMIN_MARKERS)
     )
     if user_routine_admin:
         return True
 
-    ai_operational_markers = (
-        "matching routines:",
-        "condition:",
-        "conditions.",
-        "δεν έγινε προσθήκη ή αφαίρεση condition",
-        "απέκτησε condition",
-        "already had this condition",
-    )
-    if any(marker in ai_norm for marker in ai_operational_markers):
+    if any(marker in ai_norm for marker in nl_config.WM_OPERATIONAL_AI_MARKERS):
         return True
 
     return False
