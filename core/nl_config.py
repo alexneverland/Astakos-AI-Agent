@@ -26,7 +26,7 @@ def load_intents() -> dict:
     if _intents is None:
         lang_code = "el" if config.RESPONSE_LANGUAGE.lower() == "greek" else "en"
         base_intents_path = os.path.join(os.path.dirname(__file__), f"intents_{lang_code}.json")
-        custom_intents_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "astakos_custom_intents.json")
+        custom_intents_path = config.get_custom_intents_path()
         
         try:
             with open(base_intents_path, "r", encoding="utf-8") as f:
@@ -128,8 +128,25 @@ CE_RETURN_TOGETHER = tuple(
     get_intent_list("context_extractor", "return_together_words")
 )
 CE_HOME = tuple(get_intent_list('context_extractor', 'home_words'))
+CE_COMMUNICATION_VERBS = tuple(
+    get_intent_list("context_extractor", "communication_verbs")
+)
+CE_STRONG_PRESENCE = tuple(
+    get_intent_list("context_extractor", "strong_presence_phrases")
+)
 CE_PARTNER_NAMES = (config.PARTNER_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'partner_names'))
 CE_KID1_NAMES = (config.KID1_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'kid1_names'))
+
+# Working-memory operational guards
+WM_ROUTINE_REFERENCE_MARKERS = tuple(
+    get_intent_list("working_memory", "routine_reference_markers")
+)
+WM_ROUTINE_ADMIN_MARKERS = tuple(
+    get_intent_list("working_memory", "routine_admin_markers")
+)
+WM_OPERATIONAL_AI_MARKERS = tuple(
+    get_intent_list("working_memory", "operational_ai_markers")
+)
 
 # Routine Intents
 RI_CONTROL_VERBS = tuple(get_intent_list('routine_intent', 'control_verbs'))

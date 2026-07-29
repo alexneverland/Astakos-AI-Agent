@@ -134,6 +134,8 @@ If `GOOGLE_APPLICATION_CREDENTIALS` is empty, or points to a host-only path that
 
 The wizard writes local configuration such as `.env`, `astakos_settings.json`, and customized prompts into your Astakos folder. These runtime files are excluded from Git.
 
+`astakos_custom_intents.json` is also a local, Git-excluded overlay for private aliases and vocabulary. Copy its `.example` file when you want to add family aliases or personal trigger words; do not add those values to the shared intent files.
+
 ## Step 5 — Start Chatting
 
 Use the Web UI at:

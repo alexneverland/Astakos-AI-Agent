@@ -102,7 +102,6 @@
                 "απουσιαζει"
             ],
             "_KID1_TOKENS": [
-                "αλεξανδρ",
                 "μικρ",
                 "παιδι",
                 "kid1"
@@ -259,7 +258,6 @@
                 "νυχτ"
             ],
             "_PARTNER_TOKENS": [
-                "σοφια",
                 "partner"
             ],
             "_STOP_TOKENS": [
@@ -395,8 +393,7 @@
                 "μικρ"
             ],
             "partner_aliases": [
-                "sofia",
-                "σοφ"
+                "partner"
             ],
             "general_noise": [
                 "το",

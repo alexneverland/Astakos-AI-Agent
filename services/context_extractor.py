@@ -90,24 +90,14 @@ AI Answer (recent/current): "{ai_text}"
 
 
 def _has_communication_verb(text: str) -> bool:
+    """Return whether configured communication language appears in live text."""
     t = _normalize_live_text(text)
-    comms = [
-        "μίλησα μαζί", "μιλησα μαζι", "μίλησα με", "μιλησα με",
-        "μίλησα στο τηλέφωνο", "μιλησα στο τηλεφωνο", "πήρα τηλέφωνο",
-        "πηρα τηλεφωνο", "με πήρε", "με πηρε", "μου είπε", "μου ειπε",
-        "μου έστειλε", "μου εστειλε", "στείλαμε", "στειλαμε", "chat", "μήνυμα", "μηνυμα"
-    ]
-    return any(c in t for c in comms)
+    return any(marker in t for marker in nl_config.CE_COMMUNICATION_VERBS)
 
 def _has_strong_presence(text: str) -> bool:
+    """Return whether configured explicit co-presence language appears in text."""
     t = _normalize_live_text(text)
-    strong = [
-        "είμαι με", "ειμαι με", "είμαστε μαζί", "ειμαστε μαζι",
-        "είναι μαζί μου", "ειναι μαζι μου", "είμαστε εδώ μαζί",
-        "ειμαστε εδω μαζι", "είμαστε σπίτι μαζί", "ειμαστε σπιτι μαζι",
-        "είμαστε έξω μαζί", "ειμαστε εξω μαζι"
-    ]
-    return any(s in t for s in strong)
+    return any(marker in t for marker in nl_config.CE_STRONG_PRESENCE)
 
 def _looks_like_future_departure(text: str) -> bool:
     t = clean_message(text or "").strip().lower()

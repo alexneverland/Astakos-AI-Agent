@@ -56,6 +56,31 @@ def test_update_working_memory_skips_operational_routine_exchange_before_llm():
     save_mock.assert_not_called()
 
 
+def test_operational_guard_uses_external_routine_admin_markers(monkeypatch) -> None:
+    """Ensure routine administration detection follows configured marker lists."""
+    monkeypatch.setattr(
+        "memory.working_memory.nl_config.WM_ROUTINE_REFERENCE_MARKERS",
+        ("configured routine",),
+    )
+    monkeypatch.setattr(
+        "memory.working_memory.nl_config.WM_ROUTINE_ADMIN_MARKERS",
+        ("configured admin",),
+    )
+    monkeypatch.setattr(
+        "memory.working_memory.nl_config.WM_OPERATIONAL_AI_MARKERS",
+        ("configured ai marker",),
+    )
+
+    assert wm._looks_like_operational_working_memory_exchange(
+        "configured routine configured admin",
+        "normal response",
+    ) is True
+    assert wm._looks_like_operational_working_memory_exchange(
+        "normal user message",
+        "configured ai marker",
+    ) is True
+
+
 # ════════════════════════════════════════════════════════════════
 # Regression tests for colon-in-tags bug fix (2026-07-25)
 # The banned marker `": "` was removed because it rejected valid

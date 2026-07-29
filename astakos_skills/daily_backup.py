@@ -7,7 +7,7 @@
 
 import os
 import sys
-# Προσθήκη του root directory (C:\astakos_v2) στο sys.path για να μπορεί να τρέχει αυτόνομα
+# Add the project root to sys.path so this module can run independently.
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config

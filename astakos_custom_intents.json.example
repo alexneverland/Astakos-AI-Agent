@@ -1,4 +1,10 @@
 {
+    "system_tool": {
+        "family_markers": [
+            "your_partner_alias",
+            "your_child_alias"
+        ]
+    },
     "context_extractor": {
         "park_words": [
             "park",
@@ -12,13 +18,43 @@
         "work_words": [
             "work",
             "office"
+        ],
+        "partner_names": [
+            "your_partner_alias"
+        ],
+        "kid1_names": [
+            "your_child_alias"
         ]
+    },
+    "routines": {
+        "tokens": {
+            "_KID1_TOKENS": [
+                "your_child_alias"
+            ],
+            "_PARTNER_TOKENS": [
+                "your_partner_alias"
+            ]
+        },
+        "inline": {
+            "kid1_aliases": [
+                "your_child_alias"
+            ],
+            "partner_aliases": [
+                "your_partner_alias"
+            ]
+        }
     },
     "messenger_intent": {
         "cancel_words": [
             "cancel",
             "stop",
             "abort"
+        ]
+    },
+    "utils": {
+        "fast_path_blocked_tokens": [
+            "your_partner_alias",
+            "your_child_alias"
         ]
     }
 }
