@@ -116,12 +116,12 @@ def _normalize_person_name(text: str) -> str:
     return accentless.replace("ς", "σ")
 
 
-def _has_configured_kid1_name(text: str) -> bool:
-    """Return whether live text explicitly mentions the configured child under name variants."""
+def _has_configured_person_name(text: str, names: tuple[str, ...]) -> bool:
+    """Return whether live text mentions a configured person under name variants."""
     normalized_text = _normalize_person_name(text)
     return any(
         normalized_name in normalized_text
-        for name in nl_config.CE_KID1_NAMES
+        for name in names
         if (normalized_name := _normalize_person_name(name))
     )
 
@@ -266,12 +266,12 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
 
             recent_hint = _recent_family_context_hint(channel=channel)
             has_recent_partner = (
-                any(w in normalized_user for w in nl_config.CE_PARTNER_NAMES)
-                or any(w in recent_hint for w in nl_config.CE_PARTNER_NAMES)
+                _has_configured_person_name(user_text, nl_config.CE_PARTNER_NAMES)
+                or _has_configured_person_name(recent_hint, nl_config.CE_PARTNER_NAMES)
             )
             has_recent_kid1 = (
-                _has_configured_kid1_name(user_text)
-                or _has_configured_kid1_name(recent_hint)
+                _has_configured_person_name(user_text, nl_config.CE_KID1_NAMES)
+                or _has_configured_person_name(recent_hint, nl_config.CE_KID1_NAMES)
             )
 
             if has_recent_partner:
@@ -307,10 +307,13 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
 
         # 3. Subject propagation logic cutoff for kid1
         recent_hint_str = _recent_family_context_hint(channel=channel)
-        has_kid_in_recent = _has_configured_kid1_name(recent_hint_str)
+        has_kid_in_recent = _has_configured_person_name(
+            recent_hint_str,
+            nl_config.CE_KID1_NAMES,
+        )
         
         has_kid_explicit = (
-            _has_configured_kid1_name(user_text)
+            _has_configured_person_name(user_text, nl_config.CE_KID1_NAMES)
             or is_explicit_family
             or
             (_looks_like_found_them_reply(user_text) and has_kid_in_recent)

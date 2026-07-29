@@ -3,6 +3,7 @@ from unittest.mock import patch, MagicMock
 
 from services.context_extractor import (
     _has_communication_verb,
+    _has_configured_person_name,
     _has_strong_presence,
     extract_and_update_context_flags,
 )
@@ -144,3 +145,8 @@ def test_context_extractor_keeps_kid_partner_flag_for_unaccented_name_variant(
 
     assert calls.get("kid1_with_partner") == "true"
     assert calls.get("kid1_away_from_home") == "true"
+
+
+def test_configured_person_name_matching_normalizes_partner_variants() -> None:
+    """Recognize configured partner names when live text omits Greek accents."""
+    assert _has_configured_person_name("η μαρια είναι στο πάρκο", ("Μαρία",))
