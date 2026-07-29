@@ -50,8 +50,8 @@ def test_ddgs_malformed_entry_ignored_and_later_valid_succeeds() -> None:
         mock_instance.text.assert_called_once()
 
 
-def test_ddgs_placeholder_only_triggers_fallback() -> None:
-    """Ensures empty DDGS results trigger a Gemini fallback search."""
+def test_ddgs_placeholder_only_triggers_fallback(capsys: Any) -> None:
+    """Ensures a fenced Gemini JSON response triggers a fallback search."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
 
@@ -70,7 +70,7 @@ def test_ddgs_placeholder_only_triggers_fallback() -> None:
         mock_instance.text.side_effect = mock_text
         mock_ddgs.return_value.__enter__.return_value = mock_instance
 
-        mock_gemini.return_value = MockMastroResponse(json.dumps({"query": "test"}))
+        mock_gemini.return_value = MockMastroResponse("```json\n{\"query\": \"test\"}\n```")
 
         res = duckduckgo_search.invoke({"query": "δοκιμή"})
 
@@ -88,9 +88,13 @@ def test_ddgs_placeholder_only_triggers_fallback() -> None:
         # fallback pass returns early on first backend
         assert calls[2][0][0] == "test"
         assert calls[2][1]["backend"] == "duckduckgo"
+        output = capsys.readouterr().out
+        assert "Original Greek query failed; requesting an English fallback query." in output
+        assert "Gemini produced an English fallback query; retrying DDGS." in output
+        assert "English fallback DDGS search succeeded via duckduckgo" in output
 
 
-def test_ddgs_fallback_failure_preserves_error() -> None:
+def test_ddgs_fallback_failure_preserves_error(capsys: Any) -> None:
     """Ensures that if both original and fallback searches fail, the error is preserved."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
@@ -108,9 +112,10 @@ def test_ddgs_fallback_failure_preserves_error() -> None:
 
         # 2 original backend attempts + 2 fallback backend attempts
         assert mock_instance.text.call_count == 4
+        assert "English fallback DDGS retry produced no valid results." in capsys.readouterr().out
 
 
-def test_ddgs_english_only_fails_closed_without_gemini() -> None:
+def test_ddgs_english_only_fails_closed_without_gemini(capsys: Any) -> None:
     """Ensures an English-only query fails closed without triggering the Gemini fallback."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
@@ -123,16 +128,23 @@ def test_ddgs_english_only_fails_closed_without_gemini() -> None:
 
         assert mock_instance.text.call_count == 2
         mock_gemini.assert_not_called()
+        assert "English fallback skipped because the original query has no Greek characters" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("gemini_json", [
-    '{"query": ""}',
-    '{}',
-    '{"query": "english", "extra": true}',
-    '"just a string"',
-    '{"query": 42}'
+@pytest.mark.parametrize(("gemini_json", "expected_log"), [
+    ("invalid json", "Gemini returned invalid JSON."),
+    ('{"query": "test",}', "Gemini returned invalid JSON."),
+    ('{"query": ""}', "Gemini returned an empty or non-string query."),
+    ('{}', "Gemini returned an invalid JSON structure."),
+    ('{"query": "english", "extra": true}', "Gemini returned an invalid JSON structure."),
+    ('"just a string"', "Gemini returned an invalid JSON structure."),
+    ('{"query": 42}', "Gemini returned an empty or non-string query.")
 ])
-def test_ddgs_gemini_strict_validation_fails_closed(gemini_json: str) -> None:
+def test_ddgs_gemini_strict_validation_fails_closed(
+    gemini_json: str,
+    expected_log: str,
+    capsys: Any,
+) -> None:
     """Ensures strict validation of Gemini JSON fails closed without calling fallback DDGS."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
@@ -148,9 +160,10 @@ def test_ddgs_gemini_strict_validation_fails_closed(gemini_json: str) -> None:
         # 2 original attempts only, no fallback attempts
         assert mock_instance.text.call_count == 2
         mock_gemini.assert_called_once()
+        assert expected_log in capsys.readouterr().out
 
 
-def test_ddgs_same_query_gemini_fails_closed() -> None:
+def test_ddgs_same_query_gemini_fails_closed(capsys: Any) -> None:
     """Ensures that a translated query identical to the original fails closed."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
@@ -166,3 +179,4 @@ def test_ddgs_same_query_gemini_fails_closed() -> None:
         # 2 original attempts only
         assert mock_instance.text.call_count == 2
         mock_gemini.assert_called_once()
+        assert "Gemini returned the original query." in capsys.readouterr().out
