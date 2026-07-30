@@ -1582,6 +1582,26 @@ def _latest_routine_outcome(events: list[dict], routine_id: int) -> dict | None:
     return outcomes[-1] if outcomes else None
 
 
+def _routine_outcome_fields(events: list[dict], routine_id: int) -> dict[str, str | None]:
+    """Build the Dashboard outcome fields shared by active and non-active routines."""
+    latest = _latest_routine_outcome(events, routine_id)
+    if not latest:
+        return {
+            "last_outcome_action": None,
+            "last_outcome_label": "Not evaluated",
+            "last_outcome_ts": None,
+            "last_outcome_reason": None,
+        }
+
+    action = latest["action"]
+    return {
+        "last_outcome_action": action,
+        "last_outcome_label": _routine_outcome_label(action),
+        "last_outcome_ts": latest.get("timestamp"),
+        "last_outcome_reason": latest.get("reason") or latest.get("debug_effect"),
+    }
+
+
 @server.get("/debug/runtime")
 async def debug_runtime(_=Depends(require_token)):
     """
@@ -1713,18 +1733,7 @@ async def debug_runtime(_=Depends(require_token)):
                 except Exception:
                     pass
 
-            last_outcome_action = None
-            last_outcome_label = "Not evaluated"
-            last_outcome_ts = None
-            last_outcome_reason = None
-            
-            # Every event logged by the routines job with this ID is lifecycle evidence.
-            latest = _latest_routine_outcome(today_events, r_id)
-            if latest:
-                last_outcome_action = latest.get("action")
-                last_outcome_label = _routine_outcome_label(last_outcome_action)
-                last_outcome_ts = latest.get("timestamp")
-                last_outcome_reason = latest.get("reason") or latest.get("debug_effect")
+            outcome_fields = _routine_outcome_fields(today_events, r_id)
 
             if not memory_ref and conditions_list:
                 memory_ref = conditions_list[0].get("source_memory_ref")
@@ -1754,10 +1763,7 @@ async def debug_runtime(_=Depends(require_token)):
                 "pause_reason":      pause_reason,
                 "condition_reason": cond_reason,
                 "muted_until": muted_until,
-                "last_outcome_action": last_outcome_action,
-                "last_outcome_label": last_outcome_label,
-                "last_outcome_ts": last_outcome_ts,
-                "last_outcome_reason": last_outcome_reason
+                **outcome_fields,
             })
 
         # Pending confirmations
@@ -1841,6 +1847,8 @@ async def debug_runtime(_=Depends(require_token)):
             if not memory_ref and conditions_list:
                 memory_ref = conditions_list[0].get("source_memory_ref")
 
+            outcome_fields = _routine_outcome_fields(today_events, r_id)
+
             cooldown_info.append({
                 "id": r_id, "day": day, "time": tstr,
                 "event": ev, "state": state,
@@ -1857,7 +1865,8 @@ async def debug_runtime(_=Depends(require_token)):
                 "source_memory_ref": memory_ref,
                 "paused_until":      paused_until,
                 "pause_reason":      pause_reason,
-                "muted_until":       muted_until
+                "muted_until":       muted_until,
+                **outcome_fields,
             })
 
         # Stats

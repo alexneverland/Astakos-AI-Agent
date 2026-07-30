@@ -1,4 +1,8 @@
-from api.server import _latest_routine_outcome, _routine_outcome_label
+from api.server import (
+    _latest_routine_outcome,
+    _routine_outcome_fields,
+    _routine_outcome_label,
+)
 
 
 def test_dashboard_label_mapper() -> None:
@@ -14,6 +18,7 @@ def test_dashboard_label_mapper() -> None:
 def test_missing_event_has_no_dashboard_outcome() -> None:
     """Keeps the dashboard's no-event state distinct from lifecycle outcomes."""
     assert _latest_routine_outcome([], 123) is None
+    assert _routine_outcome_fields([], 123)["last_outcome_label"] == "Not evaluated"
 
 
 def test_latest_event_is_picked_including_manual_completion() -> None:
@@ -29,3 +34,18 @@ def test_latest_event_is_picked_including_manual_completion() -> None:
     assert latest is not None
     assert latest["action"] == "preemptive_completed"
     assert _routine_outcome_label(latest["action"]) == "Completed today"
+
+
+def test_non_active_routine_receives_dismissed_outcome_fields() -> None:
+    """Keeps a dismissed routine's lifecycle result visible after its state changes."""
+    fields = _routine_outcome_fields(
+        [{"routine_id": 42, "action": "dismissed", "timestamp": "2026-07-30T09:30:00"}],
+        42,
+    )
+
+    assert fields == {
+        "last_outcome_action": "dismissed",
+        "last_outcome_label": "Dismissed",
+        "last_outcome_ts": "2026-07-30T09:30:00",
+        "last_outcome_reason": None,
+    }
