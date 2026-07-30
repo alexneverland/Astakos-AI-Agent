@@ -975,7 +975,7 @@ function render(d) {
     let reason = r.last_outcome_reason ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${esc(r.last_outcome_reason)}</div>` : "";
     
     let colorVar = "var(--text-muted)";
-    if (lbl === "Sent") colorVar = "var(--green)";
+    if (lbl === "Sent" || lbl === "Sent: deferred follow-up" || lbl === "Completed today" || lbl === "Confirmed") colorVar = "var(--green)";
     else if (lbl.includes("Blocked") || lbl.includes("inactive") || lbl.includes("stale") || lbl.includes("Timed out")) colorVar = "var(--orange)";
     else if (lbl.includes("Skipped")) colorVar = "var(--yellow)";
 
