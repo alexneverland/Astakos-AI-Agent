@@ -6,14 +6,20 @@ Candidates:
 
 Current user message: "{user_text}"
 
-Decide whether the user clearly reports that they completed one full candidate routine now.
-Natural paraphrases and inflection are valid. A generic, similar, planned, in-progress,
-questioning, uncertain, or unrelated statement is not enough. If the full routine reference is
-ambiguous or unclear, choose none. Never infer a routine merely because it shares a broad action.
+Choose exactly one action only when the user clearly refers to one full candidate routine.
+Natural paraphrases and inflection are valid. Never infer a routine merely because it shares a
+broad action. A generic, similar, questioning, uncertain, or unrelated statement is none.
 
-For the pending pool only, a clear user dismissal can use action "dismiss". For the today
-pool, action "dismiss" is forbidden. Return exactly one candidate or none.
+- complete: the user clearly reports that the routine has already finished.
+- acknowledge: the user clearly commits to starting or doing the routine shortly, but does not
+  report that it finished. This is not completion.
+- skip_today: the user clearly says they will not do the routine today. This is not a permanent
+  cancellation.
+- pause: the user clearly says they no longer want this routine at all. This pauses it; it does
+  not delete it.
+- none: every other case.
 
 Respond ONLY with strict JSON containing exactly the keys "action" and "routine_id".
-Allowed actions are "complete", "dismiss", and "none". Use an integer candidate ID for
-"complete" or "dismiss"; for "none", use null. Example: {"action":"none","routine_id":null}
+Allowed actions are "complete", "acknowledge", "skip_today", "pause", and "none". Use an
+integer candidate ID for every action except "none"; for "none", use null. Example:
+{"action":"none","routine_id":null}

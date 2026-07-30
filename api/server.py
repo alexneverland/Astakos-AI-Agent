@@ -667,26 +667,62 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 routine_completion_context = build_routine_completion_context()
                 routine_action_consumed = True
 
-            elif decision.action == "dismiss" and decision.routine_id is not None:
-                from memory.routine_db import decay_routine, remove_pending_confirmation
+            elif decision.action == "acknowledge" and decision.routine_id is not None:
+                from memory.routine_db import mark_routine_acknowledged, remove_pending_confirmation
                 from memory.event_log import log_event
 
                 rid = decision.routine_id
                 pdata = pending_routine_confirmations.get(rid, {})
                 ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
 
-                decay_routine(rid)
+                mark_routine_acknowledged(rid)
                 remove_pending_confirmation(rid)
-                log_event("routines", "dismissed", routine_id=rid, event=ev)
-                print(f"📉 [Web Routine Dismissed]: {pdata}")
+                log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
+                print(f"[Web Routine Acknowledged]: {pdata}")
+                pending_routine_confirmations.pop(rid, None)
+                from services.routine_completion_context import build_routine_completion_context
+                routine_completion_context = build_routine_completion_context()
+                routine_action_consumed = True
+
+            elif decision.action == "skip_today" and decision.routine_id is not None:
+                from memory.routine_db import record_routine_skip_today, remove_pending_confirmation
+                from memory.event_log import log_event
+
+                rid = decision.routine_id
+                pdata = pending_routine_confirmations.get(rid, {})
+                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+                skip_result = record_routine_skip_today(rid)
+                remove_pending_confirmation(rid)
+                log_event(
+                    "routines", "routine_skipped_today", routine_id=rid, event=ev,
+                    skip_streak=skip_result["skip_streak"],
+                    cooldown_applied=skip_result["cooldown_applied"],
+                )
+                print(f"[Web Routine Skipped Today]: {pdata}")
+                pending_routine_confirmations.pop(rid, None)
+                from services.routine_completion_context import build_routine_completion_context
+                routine_completion_context = build_routine_completion_context()
+                routine_action_consumed = True
+
+            elif decision.action == "pause" and decision.routine_id is not None:
+                from memory.routine_db import pause_routine_indefinitely, remove_pending_confirmation
+                from memory.event_log import log_event
+
+                rid = decision.routine_id
+                pdata = pending_routine_confirmations.get(rid, {})
+                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+                pause_routine_indefinitely(rid)
+                remove_pending_confirmation(rid)
+                log_event("routines", "routine_paused", routine_id=rid, event=ev)
+                print(f"[Web Routine Paused]: {pdata}")
                 pending_routine_confirmations.pop(rid, None)
                 from services.routine_completion_context import build_routine_completion_context
                 routine_completion_context = build_routine_completion_context()
                 routine_action_consumed = True
 
             # pass_through → continue to normal processing.
-        else:
-            # ── Pre-emptive today-pool completion (no pending) ───────
+        if not routine_action_consumed:
+            # ── Pre-emptive today-pool completion (no consumed pending action) ──
             from datetime import datetime as _dt_now
             from memory.routine_db import get_eligible_preemptive_routines_for_day, mark_routine_triggered_today
 
@@ -712,6 +748,46 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                         routine_id=rid, event=ev,
                     )
                     print(f"✅ [Web Routine Pre-emptive Completed]: #{rid} {ev}")
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
+                elif decision.action == "acknowledge" and decision.routine_id is not None:
+                    from memory.event_log import log_event
+                    from memory.routine_db import mark_routine_acknowledged
+
+                    rid = decision.routine_id
+                    ev = today_candidates.get(rid, "?")
+                    mark_routine_acknowledged(rid)
+                    log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
+                    print(f"[Web Routine Acknowledged]: #{rid} {ev}")
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
+                elif decision.action == "skip_today" and decision.routine_id is not None:
+                    from memory.event_log import log_event
+                    from memory.routine_db import record_routine_skip_today
+
+                    rid = decision.routine_id
+                    ev = today_candidates.get(rid, "?")
+                    skip_result = record_routine_skip_today(rid)
+                    log_event(
+                        "routines", "routine_skipped_today", routine_id=rid, event=ev,
+                        skip_streak=skip_result["skip_streak"],
+                        cooldown_applied=skip_result["cooldown_applied"],
+                    )
+                    print(f"[Web Routine Skipped Today]: #{rid} {ev}")
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
+                elif decision.action == "pause" and decision.routine_id is not None:
+                    from memory.event_log import log_event
+                    from memory.routine_db import pause_routine_indefinitely
+
+                    rid = decision.routine_id
+                    ev = today_candidates.get(rid, "?")
+                    pause_routine_indefinitely(rid)
+                    log_event("routines", "routine_paused", routine_id=rid, event=ev)
+                    print(f"[Web Routine Paused]: #{rid} {ev}")
                     from services.routine_completion_context import build_routine_completion_context
                     routine_completion_context = build_routine_completion_context()
                     routine_action_consumed = True
@@ -1562,9 +1638,19 @@ _ROUTINE_OUTCOME_LABELS = {
     "routine_pending_stale_cleared": "Stale pending cleared",
 }
 
+_ROUTINE_OUTCOME_I18N_KEYS = {
+    "routine_acknowledged": "api.server.routine_outcome_acknowledged",
+    "routine_skipped_today": "api.server.routine_outcome_skipped_today",
+    "routine_paused": "api.server.routine_outcome_paused",
+    "routine_response_window_expired": "api.server.routine_outcome_response_window_expired",
+}
+
 
 def _routine_outcome_label(action: str) -> str:
     """Return a readable Debug label for any routine lifecycle event action."""
+    localized_key = _ROUTINE_OUTCOME_I18N_KEYS.get(action)
+    if localized_key:
+        return t(localized_key)
     return _ROUTINE_OUTCOME_LABELS.get(
         action,
         f"Recorded: {action.replace('_', ' ').capitalize()}",
@@ -1666,13 +1752,14 @@ async def debug_runtime(_=Depends(require_token)):
             SELECT id, day_of_week, time_str, event_name, confidence,
                    mention_count, notify_cooldown_hours, last_notified_ts, state,
                    condition_type, condition_payload, condition_mode,
-                   priority, source_memory_ref, conflict_group, paused_until, pause_reason, muted_until
+                    priority, source_memory_ref, conflict_group, paused_until, pause_reason, muted_until,
+                    paused_indefinitely
             FROM routines
             WHERE state='active'
             ORDER BY day_of_week, time_str
         """)
         for row in cursor.fetchall():
-            r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state, c_type, c_payload, c_mode, priority, memory_ref, conflict_group, paused_until, pause_reason, muted_until = row
+            r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state, c_type, c_payload, c_mode, priority, memory_ref, conflict_group, paused_until, pause_reason, muted_until, paused_indefinitely = row
             now_dt = datetime.now()
             cooldown_remaining = None
             if last_ts:
@@ -1760,6 +1847,7 @@ async def debug_runtime(_=Depends(require_token)):
                 "conflict_group":    conflict_group,
                 "source_memory_ref": memory_ref,
                 "paused_until":      paused_until,
+                "paused_indefinitely": bool(paused_indefinitely),
                 "pause_reason":      pause_reason,
                 "condition_reason": cond_reason,
                 "muted_until": muted_until,

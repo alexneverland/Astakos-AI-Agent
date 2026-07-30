@@ -1,8 +1,11 @@
+from pathlib import Path
+
 from api.server import (
     _latest_routine_outcome,
     _routine_outcome_fields,
     _routine_outcome_label,
 )
+from core.i18n import t
 
 
 def test_dashboard_label_mapper() -> None:
@@ -12,6 +15,10 @@ def test_dashboard_label_mapper() -> None:
     assert _routine_outcome_label("routine_triggered") == "Sent"
     assert _routine_outcome_label("preemptive_completed") == "Completed today"
     assert _routine_outcome_label("confirmed") == "Confirmed"
+    assert _routine_outcome_label("routine_acknowledged") == t("api.server.routine_outcome_acknowledged")
+    assert _routine_outcome_label("routine_skipped_today") == t("api.server.routine_outcome_skipped_today")
+    assert _routine_outcome_label("routine_paused") == t("api.server.routine_outcome_paused")
+    assert _routine_outcome_label("routine_response_window_expired") == t("api.server.routine_outcome_response_window_expired")
     assert _routine_outcome_label("unknown_action") == "Recorded: Unknown action"
 
 
@@ -36,16 +43,27 @@ def test_latest_event_is_picked_including_manual_completion() -> None:
     assert _routine_outcome_label(latest["action"]) == "Completed today"
 
 
-def test_non_active_routine_receives_dismissed_outcome_fields() -> None:
-    """Keeps a dismissed routine's lifecycle result visible after its state changes."""
+def test_non_active_routine_receives_pause_outcome_fields() -> None:
+    """Keeps a paused routine's lifecycle result visible after its state changes."""
     fields = _routine_outcome_fields(
-        [{"routine_id": 42, "action": "dismissed", "timestamp": "2026-07-30T09:30:00"}],
+        [{"routine_id": 42, "action": "routine_paused", "timestamp": "2026-07-30T09:30:00"}],
         42,
     )
 
     assert fields == {
-        "last_outcome_action": "dismissed",
-        "last_outcome_label": "Dismissed",
+        "last_outcome_action": "routine_paused",
+        "last_outcome_label": t("api.server.routine_outcome_paused"),
         "last_outcome_ts": "2026-07-30T09:30:00",
         "last_outcome_reason": None,
     }
+
+
+def test_dashboard_indefinite_pause_contract_is_rendered() -> None:
+    """The runtime payload and dashboard UI both preserve the indefinite-pause state."""
+    project_root = Path(__file__).resolve().parent.parent
+    server_source = (project_root / "api" / "server.py").read_text(encoding="utf-8")
+    dashboard_source = (project_root / "api" / "debug_dashboard.html").read_text(encoding="utf-8")
+
+    assert '"paused_indefinitely": bool(paused_indefinitely)' in server_source
+    assert "r.paused_indefinitely" in dashboard_source
+    assert "PAUSED INDEFINITELY" in dashboard_source

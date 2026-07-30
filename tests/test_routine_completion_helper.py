@@ -28,20 +28,60 @@ def test_valid_pending_completion_selects_exact_candidate() -> None:
     assert decision.source == "pending"
 
 
-def test_valid_pending_dismiss_selects_exact_candidate() -> None:
-    """A valid pending dismissal remains available only for the pending pool."""
+def test_valid_pending_skip_selects_exact_candidate() -> None:
+    """A valid pending same-day skip selects one exact candidate."""
     decision = decide_completion(
         "natural message",
         {7: "dynamic routine"},
         "pending",
-        _selector(RoutineSelection(action="dismiss", routine_id=7)),
+        _selector(RoutineSelection(action="skip_today", routine_id=7)),
     )
-    assert decision.action == "dismiss"
+    assert decision.action == "skip_today"
     assert decision.routine_id == 7
 
 
-def test_today_dismiss_fails_closed() -> None:
-    """A dismiss action never mutates a pre-emptive today routine."""
+def test_valid_acknowledgement_selects_exact_today_candidate() -> None:
+    """A clear future commitment records one routine without completing it."""
+    decision = decide_completion(
+        "natural message",
+        {7: "dynamic routine"},
+        "today",
+        _selector(RoutineSelection(action="acknowledge", routine_id=7)),
+    )
+
+    assert decision.action == "acknowledge"
+    assert decision.routine_id == 7
+    assert decision.source == "today"
+
+
+def test_valid_today_skip_selects_exact_candidate() -> None:
+    """A clear same-day refusal skips only the selected routine."""
+    decision = decide_completion(
+        "natural message",
+        {7: "dynamic routine"},
+        "today",
+        _selector(RoutineSelection(action="skip_today", routine_id=7)),
+    )
+
+    assert decision.action == "skip_today"
+    assert decision.routine_id == 7
+
+
+def test_valid_pause_selects_exact_candidate() -> None:
+    """A clear permanent cancellation pauses only one exact candidate."""
+    decision = decide_completion(
+        "natural message",
+        {7: "dynamic routine"},
+        "today",
+        _selector(RoutineSelection(action="pause", routine_id=7)),
+    )
+
+    assert decision.action == "pause"
+    assert decision.routine_id == 7
+
+
+def test_legacy_dismiss_fails_closed() -> None:
+    """The retired ambiguous dismissal action never mutates a routine."""
     decision = decide_completion(
         "natural message",
         {7: "dynamic routine"},
@@ -94,6 +134,16 @@ def test_selector_accepts_only_strict_valid_json() -> None:
     ):
         selection = select_routine("natural message", {7: "dynamic routine"}, "today")
     assert selection == RoutineSelection(action="complete", routine_id=7)
+
+
+def test_selector_accepts_strict_acknowledgement_json() -> None:
+    """The adapter preserves a valid acknowledgement action for an exact candidate."""
+    response = MagicMock(text='{"action":"acknowledge","routine_id":7}')
+    with patch("services.routine_completion_selector.load_prompt", return_value="{pool} {routines_block} {user_text}"), patch(
+        "services.routine_completion_selector.safe_gemini_call", return_value=response
+    ):
+        selection = select_routine("natural message", {7: "dynamic routine"}, "today")
+    assert selection == RoutineSelection(action="acknowledge", routine_id=7)
 
 
 def test_selector_rejects_malformed_or_extra_json() -> None:

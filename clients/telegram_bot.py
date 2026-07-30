@@ -1666,7 +1666,8 @@ def handle_message(user_text: str, chat_id: str):
     if not clean_user_text: 
         clean_user_text = t("clients.telegram_bot.bot_msg_630052")
     # ── ROUTINE COMPLETION DECISION ────────────────────────────────
-    # Pool isolation: pending first; today only if no pending.
+    # Pending routines get first priority; a pass-through still checks today's pool.
+    from memory.event_log import log_event
     from services.routine_completion_helper import decide_completion
     from services.routine_completion_selector import select_routine as _completion_selector
     routine_completion_context: SystemMessage | None = None
@@ -1766,38 +1767,92 @@ def handle_message(user_text: str, chat_id: str):
             routine_completion_context = build_routine_completion_context()
             routine_action_consumed = True
 
-        elif decision.action == "dismiss" and decision.routine_id is not None:
-            from memory.routine_db import decay_routine, remove_pending_confirmation
+        elif decision.action == "acknowledge" and decision.routine_id is not None:
+            from memory.routine_db import mark_routine_acknowledged, remove_pending_confirmation
             from memory.event_log import log_event
 
             rid = decision.routine_id
             pdata = pending_routine_confirmations.get(rid, {})
             ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
 
-            decay_routine(rid)
+            mark_routine_acknowledged(rid)
             remove_pending_confirmation(rid)
             log_event(
-                "routines", "dismissed",
+                "routines", "routine_acknowledged",
                 routine_id=rid, event=ev,
                 debug_type="manual_control",
                 debug_source="user_message",
                 debug_effect="routine_changed",
             )
-            print(f"📉 [Routine Dismissed - Decayed]: {pdata}")
-            bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
+            print(f"✅ [Routine Acknowledged]: {pdata}")
+            bus.emit("routine_acknowledged", routine_id=rid, event=ev, channel="telegram")
             pending_routine_confirmations.pop(rid, None)
+            from services.routine_completion_context import build_routine_completion_context
+            routine_completion_context = build_routine_completion_context()
+            routine_action_consumed = True
 
+        elif decision.action == "skip_today" and decision.routine_id is not None:
+            from memory.routine_db import record_routine_skip_today, remove_pending_confirmation
+            from memory.event_log import log_event
+
+            rid = decision.routine_id
+            pdata = pending_routine_confirmations.get(rid, {})
+            ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+            result = record_routine_skip_today(rid)
+
+            remove_pending_confirmation(rid)
+            log_event(
+                "routines", "routine_skipped_today",
+                routine_id=rid, event=ev,
+                skip_streak=result["skip_streak"],
+                cooldown_hours=result["cooldown_hours"],
+                debug_type="manual_control",
+                debug_source="user_message",
+                debug_effect="cooldown_changed" if result["cooldown_applied"] else "routine_changed",
+            )
+            print(f"⏭️ [Routine Skipped Today]: {pdata}")
+            bus.emit("routine_skipped_today", routine_id=rid, event=ev, channel="telegram")
+            pending_routine_confirmations.pop(rid, None)
+            from services.routine_completion_context import build_routine_completion_context
+            routine_completion_context = build_routine_completion_context()
+            routine_action_consumed = True
+
+        elif decision.action == "pause" and decision.routine_id is not None:
+            from memory.routine_db import pause_routine_indefinitely, remove_pending_confirmation
+            from memory.event_log import log_event
+
+            rid = decision.routine_id
+            pdata = pending_routine_confirmations.get(rid, {})
+            ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+            pause_routine_indefinitely(rid)
+            remove_pending_confirmation(rid)
+            log_event(
+                "routines", "routine_paused",
+                routine_id=rid, event=ev,
+                debug_type="manual_control",
+                debug_source="user_message",
+                debug_effect="paused",
+            )
+            print(f"⏸️ [Routine Paused]: {pdata}")
+            bus.emit("routine_paused", routine_id=rid, event=ev, channel="telegram")
+            pending_routine_confirmations.pop(rid, None)
             from services.routine_completion_context import build_routine_completion_context
             routine_completion_context = build_routine_completion_context()
             routine_action_consumed = True
 
         # decision.action == "pass_through" → continue to normal chat processing.
 
-    else:
-        # ── Pre-emptive today-pool completion (no pending) ───────────
+    if not routine_action_consumed:
+        # ── Today-pool lifecycle decision after pending pass-through ──
         from datetime import datetime as _dt_now
         try:
-            from memory.routine_db import get_eligible_preemptive_routines_for_day, mark_routine_triggered_today
+            from memory.routine_db import (
+                get_eligible_preemptive_routines_for_day,
+                mark_routine_acknowledged,
+                mark_routine_triggered_today,
+                pause_routine_indefinitely,
+                record_routine_skip_today,
+            )
 
             day_name = _dt_now.now().strftime("%A")
             today_routines = get_eligible_preemptive_routines_for_day(day_name)
@@ -1829,7 +1884,56 @@ def handle_message(user_text: str, chat_id: str):
                     from services.routine_completion_context import build_routine_completion_context
                     routine_completion_context = build_routine_completion_context()
                     routine_action_consumed = True
-                # pass_through → continue to normal chat.
+                elif decision.action == "acknowledge" and decision.routine_id is not None:
+                    rid = decision.routine_id
+                    ev = today_candidates.get(rid, "?")
+                    mark_routine_acknowledged(rid)
+                    log_event(
+                        "routines", "routine_acknowledged",
+                        routine_id=rid, event=ev,
+                        debug_type="manual_control",
+                        debug_source="user_message",
+                        debug_effect="routine_changed",
+                    )
+                    print(f"✅ [Routine Acknowledged]: #{rid} {ev}")
+                    bus.emit("routine_acknowledged", routine_id=rid, event=ev, channel="telegram")
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
+                elif decision.action == "skip_today" and decision.routine_id is not None:
+                    rid = decision.routine_id
+                    ev = today_candidates.get(rid, "?")
+                    result = record_routine_skip_today(rid)
+                    log_event(
+                        "routines", "routine_skipped_today",
+                        routine_id=rid, event=ev,
+                        skip_streak=result["skip_streak"],
+                        cooldown_hours=result["cooldown_hours"],
+                        debug_type="manual_control",
+                        debug_source="user_message",
+                        debug_effect="cooldown_changed" if result["cooldown_applied"] else "routine_changed",
+                    )
+                    print(f"⏭️ [Routine Skipped Today]: #{rid} {ev}")
+                    bus.emit("routine_skipped_today", routine_id=rid, event=ev, channel="telegram")
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
+                elif decision.action == "pause" and decision.routine_id is not None:
+                    rid = decision.routine_id
+                    ev = today_candidates.get(rid, "?")
+                    pause_routine_indefinitely(rid)
+                    log_event(
+                        "routines", "routine_paused",
+                        routine_id=rid, event=ev,
+                        debug_type="manual_control",
+                        debug_source="user_message",
+                        debug_effect="paused",
+                    )
+                    print(f"⏸️ [Routine Paused]: #{rid} {ev}")
+                    bus.emit("routine_paused", routine_id=rid, event=ev, channel="telegram")
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
         except Exception as _preempt_err:
             print(f"[Telegram Pre-emptive Completion]: {_preempt_err}")
 
@@ -4034,7 +4138,7 @@ def job_check_routines():
         return
     if is_quiet_hours():
         if pending_routine_confirmations:
-            from memory.routine_db import decay_routine, remove_pending_confirmation, get_routine_state, RoutineState
+            from memory.routine_db import expire_routine_confirmation, remove_pending_confirmation, get_routine_state, RoutineState
             now_check = datetime.now()
             for rid in list(pending_routine_confirmations.keys()):
                 if (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds() > 1800:
@@ -4057,24 +4161,23 @@ def job_check_routines():
                         remove_pending_confirmation(rid)
                         continue
 
-                    decay_routine(rid)
+                    expire_routine_confirmation(rid)
                     log_event(
                         "routines", 
-                        "routine_timeout_decay", 
+                        "routine_response_window_expired",
                         routine_id=rid,
                         event=pending_routine_confirmations[rid]["event"],
                         elapsed_s=1800,
                         debug_type="pending_cleanup",
                         debug_source="timeout_guard",
-                        debug_effect="cooldown_changed",
+                        debug_effect="pending_expired_no_decay",
                     )
                     pending_routine_confirmations.pop(rid, None)
                     remove_pending_confirmation(rid)
-    # 2. Timeout decay for pending confirmations (>30')
-    # TRIGGER_PENDING → IGNORED → ACTIVE (cooldown doubled, confidence intact)
+    # 2. Expire pending response windows after 30 minutes without a penalty.
     if pending_routine_confirmations:
         from memory.routine_db import (
-            mark_routine_ignored,
+            expire_routine_confirmation,
             remove_pending_confirmation,
             get_routine_state,
             RoutineState,
@@ -4106,19 +4209,19 @@ def job_check_routines():
                     continue
 
                 try:
-                    mark_routine_ignored(rid)  # TRIGGER_PENDING → IGNORED → ACTIVE + doubled cooldown
+                    expire_routine_confirmation(rid)
                 except DBWriteError as e:
-                    print(f"\033[91m[Timeout Decay DBWriteError]: {e}\033[0m")
+                    print(f"\033[91m[Routine Response Window DBWriteError]: {e}\033[0m")
 
                 timeout_err = PendingTimeoutError(rid, ev, elapsed)
-                log_event("routines", "routine_timeout_decay",
+                log_event("routines", "routine_response_window_expired",
                     routine_id=rid,
                     event=ev,
                     elapsed_s=int(elapsed),
                     error=str(timeout_err),
                     debug_type="pending_cleanup",
                     debug_source="timeout_guard",
-                    debug_effect="cooldown_changed",
+                    debug_effect="pending_expired_no_decay",
                 )
 
                 del pending_routine_confirmations[rid]

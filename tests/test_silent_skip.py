@@ -76,10 +76,11 @@ def _stub_modules():
         sys.modules[mod] = types.ModuleType(mod)
     sys.modules["langchain_core.messages"].HumanMessage = MagicMock
     sys.modules["langchain_core.messages"].AIMessage    = MagicMock
+    sys.modules["langchain_core.messages"].SystemMessage = MagicMock
 
     # ── memory.* ──────────────────────────────────────────────
     for mod in [
-        "memory", "memory.event_log", "memory.vector_store",
+        "memory", "memory.event_log", "memory.execution_trace", "memory.vector_store",
         "memory.working_memory", "memory.session_memory", "memory.pending_followups",
         "memory.context_builder", "memory.routine_db",
         "memory.pending_assets",
@@ -92,6 +93,7 @@ def _stub_modules():
     el.is_duplicate_routine      = MagicMock(return_value=False)
 
     sys.modules["memory.vector_store"].memory = MagicMock()
+    sys.modules["memory.execution_trace"].ExecutionTrace = MagicMock()
 
     wm = sys.modules["memory.working_memory"]
     wm.update_working_memory             = MagicMock()
@@ -107,6 +109,7 @@ def _stub_modules():
     pf = sys.modules["memory.pending_followups"]
     pf.ensure_pending_followups_table = lambda: None
     pf.find_pending_followups = lambda *a, **k: []
+    pf.process_followup_exchange = lambda *a, **k: None
     pf.maybe_create_followup_from_exchange = lambda *a, **k: None
     pf.maybe_resolve_followups_from_user_message = lambda *a, **k: 0
     pf.looks_like_followup_resolution_update = lambda *a, **k: False
@@ -153,6 +156,7 @@ def _stub_modules():
     rdb.mark_routine_responded     = MagicMock()
     rdb.clear_pending_confirmations = MagicMock()
     rdb.mark_routine_ignored       = MagicMock()
+    rdb.expire_routine_confirmation = MagicMock()
     # new stubs for muted_until
     rdb.get_routine_muted_until    = MagicMock(return_value=None)   # not muted by default
     rdb.set_routine_muted_until    = MagicMock()
@@ -217,11 +221,14 @@ def _stub_modules():
         "services", "services.gemini", "services.embeddings",
         "services.routine_context", "services.routine_conditions",
         "services.context_extractor", "services.messenger_intent",
+        "services.routine_completion_helper", "services.routine_completion_selector",
     ]:
         sys.modules[mod] = types.ModuleType(mod)
 
     sys.modules["services.context_extractor"].extract_and_update_context_flags = MagicMock()
     sys.modules["services.messenger_intent"].classify_messenger_intent = MagicMock(return_value=None)
+    sys.modules["services.routine_completion_helper"].decide_completion = MagicMock()
+    sys.modules["services.routine_completion_selector"].select_routine = MagicMock()
 
     sys.modules["services.routine_context"].build_runtime_routine_context = MagicMock(return_value={
         "today": "2026-06-17",
@@ -768,6 +775,24 @@ def test_timeout_decay_ignores_stale_pending():
 
     # Reset mock
     rdb.get_routine_state.return_value = rdb.RoutineState.TRIGGER_PENDING
+
+
+def test_timeout_expires_pending_without_cooldown_penalty():
+    """An unanswered routine reminder clears its response window without decay."""
+    past_time = _fixed_now() - timedelta(minutes=40)
+    bot.pending_routine_confirmations[889] = {"event": "Routine", "sent_at": past_time}
+
+    rdb = sys.modules["memory.routine_db"]
+    rdb.get_routine_state.return_value = rdb.RoutineState.TRIGGER_PENDING
+    rdb.mark_routine_ignored.reset_mock()
+    rdb.expire_routine_confirmation.reset_mock()
+
+    _, logged, _ = _run_job([])
+
+    assert 889 not in bot.pending_routine_confirmations
+    rdb.mark_routine_ignored.assert_not_called()
+    rdb.expire_routine_confirmation.assert_called_once_with(889)
+    assert any(action == "routine_response_window_expired" for _, action in logged)
 
 def test_telegram_bot_contextual_dismiss_skips_decay_for_sofia():
     bot.pending_routine_confirmations = {

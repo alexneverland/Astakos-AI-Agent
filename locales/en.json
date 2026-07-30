@@ -1712,6 +1712,10 @@
   },
   "api": {
     "server": {
+      "routine_outcome_acknowledged": "Acknowledged: in progress",
+      "routine_outcome_skipped_today": "Skipped today",
+      "routine_outcome_paused": "Paused indefinitely",
+      "routine_outcome_response_window_expired": "Response window expired",
       "draft_expired": "❌ Σφάλμα: Το προσχέδιο έχει λήξει.",
       "no_active_draft": "Δεν υπάρχει ενεργό draft αυτή τη στιγμή. ",
       "no_active_draft_to_clear": "Δεν υπάρχει ενεργό draft αυτή τη στιγμή για να καθαρίσω.",
