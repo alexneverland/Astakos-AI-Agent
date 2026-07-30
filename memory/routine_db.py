@@ -145,6 +145,13 @@ def setup_db():
             ignore_count INTEGER DEFAULT 0,
             notify_cooldown_hours REAL DEFAULT 20.0,
             last_notified_ts TEXT,
+            explicit_skip_streak INTEGER DEFAULT 0,
+            paused_indefinitely BOOLEAN DEFAULT 0,
+            active_from TEXT DEFAULT NULL,
+            active_until TEXT DEFAULT NULL,
+            paused_until TEXT DEFAULT NULL,
+            resume_rule TEXT DEFAULT NULL,
+            pause_reason TEXT DEFAULT NULL,
             state TEXT DEFAULT 'learned'
         )
     ''')
@@ -170,6 +177,34 @@ def setup_db():
     if "last_notified_ts" not in existing_cols:
         cursor.execute("ALTER TABLE routines ADD COLUMN last_notified_ts TEXT")
         print("[routine_db]: Migration → 'last_notified_ts'")
+
+    if "explicit_skip_streak" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN explicit_skip_streak INTEGER DEFAULT 0")
+        print("[routine_db]: Migration → 'explicit_skip_streak'")
+
+    if "paused_indefinitely" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN paused_indefinitely BOOLEAN DEFAULT 0")
+        print("[routine_db]: Migration → 'paused_indefinitely'")
+
+    if "active_from" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN active_from TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'active_from'")
+
+    if "active_until" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN active_until TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'active_until'")
+
+    if "paused_until" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN paused_until TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'paused_until'")
+
+    if "resume_rule" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN resume_rule TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'resume_rule'")
+
+    if "pause_reason" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN pause_reason TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'pause_reason'")
 
     if "state" not in existing_cols:
         cursor.execute("ALTER TABLE routines ADD COLUMN state TEXT DEFAULT 'learned'")
@@ -559,7 +594,7 @@ def confirm_routine(routine_id: int):
             with db_write_lock:
                 # CONFIRMED → ACTIVE immediately (single write, valid shortcut)
                 cursor.execute(
-                    "UPDATE routines SET confidence=?, decay_counter=0, is_active=1, mention_count=?, state='active' WHERE id=?",
+                    "UPDATE routines SET confidence=?, decay_counter=0, explicit_skip_streak=0, is_active=1, mention_count=?, state='active' WHERE id=?",
                     (new_conf, new_m, routine_id)
                 )
                 conn.commit()
@@ -735,17 +770,123 @@ def mark_routine_notified(routine_id: int):
 
 
 def mark_routine_triggered_today(routine_id: int):
-    """Marks the routine as triggered today, satisfying it for the current day."""
+    """Record a confirmed completion and reset its explicit-skip streak."""
     today_str = datetime.now().strftime("%Y-%m-%d")
     conn = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET last_triggered=?, state='active', is_active=1 WHERE id=?",
+            "UPDATE routines SET last_triggered=?, explicit_skip_streak=0, state='active', is_active=1 WHERE id=?",
             (today_str, routine_id)
         )
         conn.commit()
     conn.close()
+
+
+def mark_routine_acknowledged(routine_id: int) -> None:
+    """Record a near-future commitment without treating the routine as complete."""
+    current = get_routine_state(routine_id)
+    if current == RoutineState.TRIGGER_PENDING:
+        validate_transition(current, RoutineState.ACTIVE)
+    elif current != RoutineState.ACTIVE:
+        raise RoutineConflictError(
+            f"Routine #{routine_id} cannot be acknowledged from state {current.value}",
+            context={"routine_id": routine_id, "state": current.value},
+        )
+
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            conn.execute(
+                "UPDATE routines SET last_notified_ts=?, state='active', is_active=1 WHERE id=?",
+                (datetime.now().isoformat(timespec="seconds"), routine_id),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise DBWriteError("mark_routine_acknowledged", e) from e
+    finally:
+        conn.close()
+
+
+def expire_routine_confirmation(routine_id: int) -> None:
+    """Close an unanswered response window without changing routine confidence or cooldown."""
+    current = get_routine_state(routine_id)
+    if current == RoutineState.ACTIVE:
+        return
+    validate_transition(current, RoutineState.ACTIVE)
+
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            conn.execute(
+                "UPDATE routines SET state='active', is_active=1 WHERE id=?",
+                (routine_id,),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise DBWriteError("expire_routine_confirmation", e) from e
+    finally:
+        conn.close()
+
+
+def record_routine_skip_today(routine_id: int, threshold: int = 3) -> dict[str, int | float | bool | None]:
+    """Skip one routine today and apply cooldown only on the configured refusal streak."""
+    current = get_routine_state(routine_id)
+    if current == RoutineState.TRIGGER_PENDING:
+        validate_transition(current, RoutineState.ACTIVE)
+    elif current != RoutineState.ACTIVE:
+        raise RoutineConflictError(
+            f"Routine #{routine_id} cannot be skipped from state {current.value}",
+            context={"routine_id": routine_id, "state": current.value},
+        )
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT explicit_skip_streak, notify_cooldown_hours FROM routines WHERE id=?",
+            (routine_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise RoutineConflictError(
+                f"Routine #{routine_id} does not exist",
+                context={"routine_id": routine_id},
+            )
+
+        skip_streak = int(row[0] or 0) + 1
+        current_cooldown = clamp_cooldown_hours(row[1] or COOLDOWN_DEFAULT_HOURS)
+        cooldown_applied = skip_streak >= threshold
+        cooldown_hours = clamp_cooldown_hours(current_cooldown * 2) if cooldown_applied else None
+        next_streak = 0 if cooldown_applied else skip_streak
+
+        with db_write_lock:
+            cursor.execute(
+                """
+                UPDATE routines
+                SET last_triggered=?, explicit_skip_streak=?, notify_cooldown_hours=?,
+                    state='active', is_active=1
+                WHERE id=?
+                """,
+                (
+                    today_str,
+                    next_streak,
+                    cooldown_hours if cooldown_hours is not None else current_cooldown,
+                    routine_id,
+                ),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise DBWriteError("record_routine_skip_today", e) from e
+    finally:
+        conn.close()
+
+    return {
+        "skip_streak": skip_streak,
+        "cooldown_applied": cooldown_applied,
+        "cooldown_hours": cooldown_hours,
+    }
 
 def mark_routine_ignored(routine_id: int):
     """Timeout (not rejection): TRIGGER_PENDING → IGNORED → ACTIVE + doubling of cooldown."""
@@ -1314,14 +1455,14 @@ def ensure_routine_schedule_columns() -> None:
 
 def get_routine_schedule_meta(routine_id: int) -> dict:
     """
-    Returns active_from / active_until / paused_until / resume_rule / pause_reason
+    Returns active_from / active_until / pause metadata / resume_rule.
     for a routine. Unknown id → dict with all None (same defensive pattern as
     get_sentimental_info).
     """
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        """SELECT active_from, active_until, paused_until, resume_rule, pause_reason
+        """SELECT active_from, active_until, paused_until, paused_indefinitely, resume_rule, pause_reason
            FROM routines WHERE id=?""",
         (routine_id,)
     )
@@ -1330,14 +1471,15 @@ def get_routine_schedule_meta(routine_id: int) -> dict:
     if not row:
         return {
             "active_from": None, "active_until": None, "paused_until": None,
-            "resume_rule": None, "pause_reason": None,
+            "paused_indefinitely": False, "resume_rule": None, "pause_reason": None,
         }
     return {
-        "active_from":  row[0],
+        "active_from": row[0],
         "active_until": row[1],
         "paused_until": row[2],
-        "resume_rule":  row[3],
-        "pause_reason": row[4],
+        "paused_indefinitely": bool(row[3]),
+        "resume_rule": row[4],
+        "pause_reason": row[5],
     }
 
 
@@ -1352,7 +1494,7 @@ def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | N
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET paused_until=?, pause_reason=? WHERE id=?",
+            "UPDATE routines SET paused_until=?, paused_indefinitely=0, pause_reason=? WHERE id=?",
             (paused_until, reason, routine_id)
         )
         conn.commit()
@@ -1363,12 +1505,12 @@ def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | N
 
 
 def clear_routine_paused_until(routine_id: int) -> None:
-    """Removes the temporary pause (manual resume) — also clears the pause_reason."""
+    """Resume a temporarily or indefinitely paused routine."""
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET paused_until=NULL, pause_reason=NULL WHERE id=?",
+            "UPDATE routines SET paused_until=NULL, paused_indefinitely=0, pause_reason=NULL WHERE id=?",
             (routine_id,)
         )
         conn.commit()
@@ -1376,6 +1518,26 @@ def clear_routine_paused_until(routine_id: int) -> None:
     print(f"[routine_db]: #{routine_id} resumed (paused_until cleared)")
     from memory.event_log import log_event
     log_event("routines", "resumed", routine_id=routine_id)
+
+
+def pause_routine_indefinitely(routine_id: int, reason: str = "user_requested") -> None:
+    """Pause a routine until an explicit resume request without deleting its history."""
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            conn.execute(
+                "UPDATE routines SET paused_until=NULL, paused_indefinitely=1, pause_reason=? WHERE id=?",
+                (reason, routine_id),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise DBWriteError("pause_routine_indefinitely", e) from e
+    finally:
+        conn.close()
+
+    from memory.event_log import log_event
+
+    log_event("routines", "paused", routine_id=routine_id, reason=reason, indefinite=True)
 
 
 def set_routine_active_window(routine_id: int, active_from: str | None = None,
@@ -1442,6 +1604,9 @@ def is_routine_temporarily_inactive_meta(routine: dict, now: datetime | None = N
       (False, None)                  — normally active
     """
     today = (now or datetime.now()).strftime("%Y-%m-%d")
+
+    if routine.get("paused_indefinitely"):
+        return True, "paused_indefinitely"
 
     paused_until = routine.get("paused_until")
     if paused_until and today <= paused_until:

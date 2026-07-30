@@ -158,6 +158,13 @@ def _stub_modules():
     rdb.mark_routine_responded            = MagicMock()
     rdb.clear_pending_confirmations       = MagicMock()
     rdb.mark_routine_ignored              = MagicMock()
+    rdb.mark_routine_acknowledged          = MagicMock()
+    rdb.record_routine_skip_today          = MagicMock(return_value={
+        "skip_streak": 1,
+        "cooldown_applied": False,
+        "cooldown_hours": None,
+    })
+    rdb.pause_routine_indefinitely         = MagicMock()
     rdb.get_routine_muted_until           = MagicMock(return_value=None)
     rdb.set_routine_muted_until           = MagicMock()
     rdb.clear_routine_muted_until         = MagicMock()
@@ -315,14 +322,17 @@ def _reset_mocks():
     """Reset routine-related mocks before each test."""
     rdb = sys.modules["memory.routine_db"]
     for name in ("confirm_routine", "decay_routine", "mark_routine_responded",
-                 "remove_pending_confirmation", "get_eligible_preemptive_routines_for_day",
-                 "mark_routine_triggered_today"):
+                  "remove_pending_confirmation", "get_eligible_preemptive_routines_for_day",
+                 "mark_routine_triggered_today", "mark_routine_acknowledged",
+                 "record_routine_skip_today", "pause_routine_indefinitely"):
         getattr(rdb, name).reset_mock()
 
     sys.modules["memory.event_log"].log_event.reset_mock()
     sys.modules["core.event_bus"].bus.reset_mock()
     sys.modules["tools.telegram"].send_telegram_msg.reset_mock()
-    sys.modules["services.routine_completion_selector"].select_routine.reset_mock()
+    selector = sys.modules["services.routine_completion_selector"].select_routine
+    selector.reset_mock()
+    selector.side_effect = None
     bot.pending_reflection_confirmations = {}
     bot.pending_exec_command = None
 
@@ -332,6 +342,7 @@ def _run_handle_message(
     pending=None,
     today_routines=None,
     selector_return=None,
+    selector_returns=None,
     pending_reflections=None,
     pending_command=None,
 ):
@@ -348,7 +359,10 @@ def _run_handle_message(
     rdb.get_eligible_preemptive_routines_for_day.return_value = today_routines or []
 
     selector_mod = sys.modules["services.routine_completion_selector"]
-    selector_mod.select_routine.return_value = selector_return
+    if selector_returns is None:
+        selector_mod.select_routine.return_value = selector_return
+    else:
+        selector_mod.select_routine.side_effect = selector_returns
 
     bot.pending_routine_confirmations = dict(pending or {})
     bot.pending_reflection_confirmations = dict(pending_reflections or {})
@@ -436,6 +450,74 @@ def test_preemptive_completion_continues_to_graph():
     assert len(graph_messages) == 2
 
 
+def test_today_acknowledgement_does_not_complete_routine() -> None:
+    """A future commitment suppresses today's reminder without marking completion."""
+    from services.routine_completion_helper import RoutineSelection
+    rdb = sys.modules["memory.routine_db"]
+
+    _run_handle_message(
+        "natural future commitment",
+        today_routines=[{"id": 5, "event": "Dynamic routine", "state": "active"}],
+        selector_return=RoutineSelection(action="acknowledge", routine_id=5),
+    )
+
+    rdb.mark_routine_acknowledged.assert_called_once_with(5)
+    rdb.mark_routine_triggered_today.assert_not_called()
+    rdb.confirm_routine.assert_not_called()
+
+
+def test_unrelated_pending_does_not_block_today_completion() -> None:
+    """A pass-through pending decision still lets a later today candidate complete."""
+    from services.routine_completion_helper import RoutineSelection
+    rdb = sys.modules["memory.routine_db"]
+
+    _run_handle_message(
+        "natural completion message",
+        pending={11: {"event": "Unrelated pending routine"}},
+        today_routines=[{"id": 5, "event": "Dynamic routine", "state": "active"}],
+        selector_returns=[
+            RoutineSelection(action="none", routine_id=None),
+            RoutineSelection(action="complete", routine_id=5),
+        ],
+    )
+
+    rdb.mark_routine_triggered_today.assert_called_once_with(5)
+    rdb.confirm_routine.assert_not_called()
+    assert 11 in bot.pending_routine_confirmations
+
+
+def test_pending_skip_today_does_not_decay_routine() -> None:
+    """A same-day refusal closes the pending reminder without long-term decay."""
+    from services.routine_completion_helper import RoutineSelection
+    rdb = sys.modules["memory.routine_db"]
+
+    _run_handle_message(
+        "natural same-day refusal",
+        pending={5: {"event": "Dynamic routine"}},
+        selector_return=RoutineSelection(action="skip_today", routine_id=5),
+    )
+
+    rdb.record_routine_skip_today.assert_called_once_with(5)
+    rdb.decay_routine.assert_not_called()
+    assert 5 not in bot.pending_routine_confirmations
+
+
+def test_today_pause_is_reversible_and_does_not_complete_routine() -> None:
+    """A permanent-cancellation decision pauses instead of deleting or completing."""
+    from services.routine_completion_helper import RoutineSelection
+    rdb = sys.modules["memory.routine_db"]
+
+    _run_handle_message(
+        "natural permanent cancellation",
+        today_routines=[{"id": 5, "event": "Dynamic routine", "state": "active"}],
+        selector_return=RoutineSelection(action="pause", routine_id=5),
+    )
+
+    rdb.pause_routine_indefinitely.assert_called_once_with(5)
+    rdb.mark_routine_triggered_today.assert_not_called()
+    rdb.confirm_routine.assert_not_called()
+
+
 # ─────────────────────────────────────────────────────────────
 # (b) Multiple pending + bare yes ⇒ clarification
 # ─────────────────────────────────────────────────────────────
@@ -483,18 +565,19 @@ def test_single_pending_bare_yes_confirms_exactly_one():
     assert 5 not in bot.pending_routine_confirmations
 
 
-def test_single_pending_bare_no_dismisses_exactly_one():
-    """'όχι' with 1 pending ⇒ decay_routine(5), remove_pending_confirmation(5)."""
+def test_single_pending_bare_no_uses_explicit_skip_today():
+    """A same-day refusal skips the exact pending routine without decay."""
     from services.routine_completion_helper import RoutineSelection
     rdb = sys.modules["memory.routine_db"]
 
     sent = _run_handle_message(
         "όχι",
         pending={5: {"event": "Πάρκο"}},
-        selector_return=RoutineSelection(action="dismiss", routine_id=5),
+        selector_return=RoutineSelection(action="skip_today", routine_id=5),
     )
 
-    rdb.decay_routine.assert_called_once_with(5)
+    rdb.record_routine_skip_today.assert_called_once_with(5)
+    rdb.decay_routine.assert_not_called()
     rdb.remove_pending_confirmation.assert_called_once_with(5)
     rdb.confirm_routine.assert_not_called()
     assert len(sent) == 1  # exactly one acknowledgment message

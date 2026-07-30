@@ -35,18 +35,30 @@ def _graph_result(*_args: object, **_kwargs: object) -> dict[str, object]:
 def _post_chat(
     client: TestClient,
     pending: dict[int, dict[str, str]] | None = None,
+    selector_returns: list[RoutineSelection] | None = None,
 ) -> tuple[object, dict[str, MagicMock]]:
     """Run one Web message under isolated completion and graph dependencies."""
     graph_runner = MagicMock(side_effect=_graph_result)
+    selector = MagicMock(
+        side_effect=selector_returns
+        if selector_returns is not None
+        else [RoutineSelection(action="complete", routine_id=5)]
+    )
     with (
         patch("memory.routine_db.get_eligible_preemptive_routines_for_day", return_value=[{"id": 5, "event": "dynamic routine"}]) as eligible,
         patch("memory.routine_db.mark_routine_triggered_today") as triggered,
         patch("memory.routine_db.confirm_routine") as confirmed,
         patch("memory.routine_db.mark_routine_responded"),
         patch("memory.routine_db.remove_pending_confirmation"),
-        patch("memory.routine_db.decay_routine"),
+        patch("memory.routine_db.mark_routine_acknowledged") as acknowledged,
+        patch("memory.routine_db.record_routine_skip_today", return_value={"skip_streak": 1, "cooldown_applied": False}) as skipped,
+        patch("memory.routine_db.pause_routine_indefinitely") as paused,
         patch("memory.event_log.log_event"),
-        patch("services.routine_completion_selector.select_routine", return_value=RoutineSelection(action="complete", routine_id=5)) as selector,
+        patch("services.routine_completion_selector.select_routine", selector),
+        patch(
+            "services.routine_completion_context.build_routine_completion_context",
+            return_value=SystemMessage(content="Routine lifecycle updated."),
+        ),
         patch("api.server.append_to_chat_history", side_effect=_saved_message),
         patch("api.server._load_shared_context_messages", return_value=[]),
         patch("api.server._run_web_graph_stream_sync", graph_runner),
@@ -55,7 +67,16 @@ def _post_chat(
         patch("clients.telegram_bot.pending_routine_confirmations", pending or {}),
     ):
         response = client.post("/chat", json={"message": "natural message"}, headers={"Authorization": f"Bearer {LOCAL_TOKEN}"})
-        return response, {"eligible": eligible, "triggered": triggered, "confirmed": confirmed, "selector": selector, "graph": graph_runner}
+        return response, {
+            "eligible": eligible,
+            "triggered": triggered,
+            "confirmed": confirmed,
+            "acknowledged": acknowledged,
+            "skipped": skipped,
+            "paused": paused,
+            "selector": selector,
+            "graph": graph_runner,
+        }
 
 
 def test_web_preemptive_completion_continues_to_graph(client: TestClient) -> None:
@@ -96,6 +117,56 @@ def test_web_pending_confirmation_marks_routine_triggered_today(client: TestClie
     assert response.status_code == 200
     mocks["confirmed"].assert_called_once_with(5)
     mocks["triggered"].assert_called_once_with(5)
+
+
+def test_web_acknowledgement_does_not_complete_routine(client: TestClient) -> None:
+    """A future commitment is acknowledged without marking the routine done."""
+    response, mocks = _post_chat(
+        client,
+        selector_returns=[RoutineSelection(action="acknowledge", routine_id=5)],
+    )
+    assert response.status_code == 200
+    mocks["acknowledged"].assert_called_once_with(5)
+    mocks["triggered"].assert_not_called()
+    mocks["confirmed"].assert_not_called()
+
+
+def test_web_pending_pass_through_allows_today_completion(client: TestClient) -> None:
+    """An unrelated pending routine does not block a same-day completion."""
+    response, mocks = _post_chat(
+        client,
+        pending={7: {"event": "unrelated pending routine"}},
+        selector_returns=[
+            RoutineSelection(action="none", routine_id=None),
+            RoutineSelection(action="complete", routine_id=5),
+        ],
+    )
+    assert response.status_code == 200
+    mocks["selector"].assert_called()
+    assert mocks["selector"].call_count == 2
+    mocks["triggered"].assert_called_once_with(5)
+
+
+def test_web_skip_today_does_not_complete_routine(client: TestClient) -> None:
+    """An explicit one-day refusal records a skip without completion."""
+    response, mocks = _post_chat(
+        client,
+        selector_returns=[RoutineSelection(action="skip_today", routine_id=5)],
+    )
+    assert response.status_code == 200
+    mocks["skipped"].assert_called_once_with(5)
+    mocks["triggered"].assert_not_called()
+
+
+def test_web_pause_keeps_routine_reversible(client: TestClient) -> None:
+    """A permanent refusal pauses the routine instead of deleting or completing it."""
+    response, mocks = _post_chat(
+        client,
+        selector_returns=[RoutineSelection(action="pause", routine_id=5)],
+    )
+    assert response.status_code == 200
+    mocks["paused"].assert_called_once_with(5)
+    mocks["triggered"].assert_not_called()
 
 
 def test_web_routine_action_does_not_confirm_pending_asset(client: TestClient) -> None:

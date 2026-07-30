@@ -66,11 +66,9 @@ def select_routine(
     routine_id = parsed["routine_id"]
     if action == "none" and routine_id is None:
         return _none_selection()
-    if action not in ("complete", "dismiss"):
+    if action not in ("complete", "acknowledge", "skip_today", "pause"):
         return _none_selection()
     if type(routine_id) is not int or routine_id not in candidates:
-        return _none_selection()
-    if action == "dismiss" and pool != "pending":
         return _none_selection()
 
     return RoutineSelection(action=action, routine_id=routine_id)
