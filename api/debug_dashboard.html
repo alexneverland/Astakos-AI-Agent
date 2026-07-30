@@ -708,6 +708,9 @@ async function fetchTimeline(){
 }
 
 function stateBadge(r) {
+  if (r.paused_indefinitely) {
+    return `<span class="badge b-orange">PAUSED</span>`;
+  }
   if (r.paused_until) {
     return `<span class="badge b-orange">PAUSED</span>`;
   }
@@ -886,7 +889,9 @@ function render(d) {
 
   function renderCondition(r) {
     if (r.conditions && r.conditions.length > 0) {
-      const mainBadge = r.paused_until
+      const mainBadge = r.paused_indefinitely
+        ? '<span class="badge b-orange">PAUSED INDEFINITELY</span>'
+        : r.paused_until
         ? `<span class="badge b-orange" title="Paused until ${r.paused_until}">PAUSED</span>`
         : r.muted_until
           ? `<span class="badge b-purple" title="Muted until ${r.muted_until}">MUTED</span>`
@@ -935,7 +940,9 @@ function render(d) {
     if (!r.condition_type) {
       return `<div class="cond-box"><span class="badge b-muted">No condition</span></div>`;
     }
-    const badge = r.paused_until
+    const badge = r.paused_indefinitely
+        ? '<span class="badge b-orange">PAUSED INDEFINITELY</span>'
+        : r.paused_until
         ? `<span class="badge b-orange" title="Paused until ${r.paused_until}">PAUSED</span>`
         : r.muted_until
           ? `<span class="badge b-purple" title="Muted until ${r.muted_until}">MUTED</span>`
@@ -1230,7 +1237,7 @@ function render(d) {
         <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}</div></td>
         <td class="cell-tight" style="vertical-align:middle">
           <div style="margin-bottom:6px">${stateBadge(r)}</div>
-          ${r.paused_until ? `<div style="font-size:10px;color:var(--orange);margin-bottom:4px;font-weight:bold" title="Reason: ${r.pause_reason||'N/A'}">⏸️ Paused until: <br/>${r.paused_until}</div>` : ''}
+          ${r.paused_indefinitely ? `<div style="font-size:10px;color:var(--orange);margin-bottom:4px;font-weight:bold" title="Reason: ${r.pause_reason||'N/A'}">⏸️ Paused indefinitely</div>` : r.paused_until ? `<div style="font-size:10px;color:var(--orange);margin-bottom:4px;font-weight:bold" title="Reason: ${r.pause_reason||'N/A'}">⏸️ Paused until: <br/>${r.paused_until}</div>` : ''}
           ${r.muted_until ? `<div style="font-size:10px;color:var(--purple);margin-bottom:4px;font-weight:bold">🔇 Muted until: <br/>${r.muted_until}</div>` : ''}
           <div style="width:80px;margin-bottom:4px">${confBar(r.confidence)}</div>
           <div style="font-size:10px;color:var(--text-muted)">CD: <span class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null?r.cooldown_remaining_h+'h':'-'}</span></div>

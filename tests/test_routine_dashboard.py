@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from api.server import (
     _latest_routine_outcome,
     _routine_outcome_fields,
@@ -54,3 +56,14 @@ def test_non_active_routine_receives_pause_outcome_fields() -> None:
         "last_outcome_ts": "2026-07-30T09:30:00",
         "last_outcome_reason": None,
     }
+
+
+def test_dashboard_indefinite_pause_contract_is_rendered() -> None:
+    """The runtime payload and dashboard UI both preserve the indefinite-pause state."""
+    project_root = Path(__file__).resolve().parent.parent
+    server_source = (project_root / "api" / "server.py").read_text(encoding="utf-8")
+    dashboard_source = (project_root / "api" / "debug_dashboard.html").read_text(encoding="utf-8")
+
+    assert '"paused_indefinitely": bool(paused_indefinitely)' in server_source
+    assert "r.paused_indefinitely" in dashboard_source
+    assert "PAUSED INDEFINITELY" in dashboard_source

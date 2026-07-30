@@ -101,6 +101,7 @@ def test_skip_streak_migration_applies_cooldown_only_on_third_refusal(
     assert third["skip_streak"] == 3
     assert third["cooldown_applied"] is True
     assert third["cooldown_hours"] == 40.0
+    assert routine_db.get_routine_notify_info(routine_id)["last_notified_ts"] is not None
 
 
 def test_indefinite_pause_migration_blocks_scheduler_without_deleting_routine(

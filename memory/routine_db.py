@@ -861,19 +861,21 @@ def record_routine_skip_today(routine_id: int, threshold: int = 3) -> dict[str, 
         cooldown_applied = skip_streak >= threshold
         cooldown_hours = clamp_cooldown_hours(current_cooldown * 2) if cooldown_applied else None
         next_streak = 0 if cooldown_applied else skip_streak
+        cooldown_started_at = datetime.now().isoformat(timespec="seconds") if cooldown_applied else None
 
         with db_write_lock:
             cursor.execute(
                 """
                 UPDATE routines
                 SET last_triggered=?, explicit_skip_streak=?, notify_cooldown_hours=?,
-                    state='active', is_active=1
+                    last_notified_ts=COALESCE(?, last_notified_ts), state='active', is_active=1
                 WHERE id=?
                 """,
                 (
                     today_str,
                     next_streak,
                     cooldown_hours if cooldown_hours is not None else current_cooldown,
+                    cooldown_started_at,
                     routine_id,
                 ),
             )
