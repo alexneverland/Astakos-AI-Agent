@@ -700,7 +700,7 @@ def get_routines_for_day(day: str) -> list:
 
 
 def get_eligible_preemptive_routines_for_day(day: str) -> list:
-    """Return active day routines that have not already been completed today."""
+    """Return schedulable day routines that are incomplete and not indefinitely paused."""
     today_str = datetime.now().strftime("%Y-%m-%d")
     conn = get_connection()
     cursor = conn.cursor()
@@ -716,6 +716,7 @@ def get_eligible_preemptive_routines_for_day(day: str) -> list:
             OR (day_of_week IN ('Weekends','Weekend','weekend') AND ? IN ('Saturday', 'Sunday', 'Weekends','Weekend','weekend'))
         )
         AND state='active'
+        AND COALESCE(paused_indefinitely, 0)=0
         AND (last_triggered IS NULL OR last_triggered != ?)
         ORDER BY time_str ASC
         """,
@@ -1521,12 +1522,17 @@ def clear_routine_paused_until(routine_id: int) -> None:
 
 
 def pause_routine_indefinitely(routine_id: int, reason: str = "user_requested") -> None:
-    """Pause a routine until an explicit resume request without deleting its history."""
+    """Pause a routine reversibly and restore any pending lifecycle state to active."""
     conn = get_connection()
     try:
         with db_write_lock:
             conn.execute(
-                "UPDATE routines SET paused_until=NULL, paused_indefinitely=1, pause_reason=? WHERE id=?",
+                """
+                UPDATE routines
+                SET paused_until=NULL, paused_indefinitely=1, pause_reason=?,
+                    state='active', is_active=1
+                WHERE id=?
+                """,
                 (reason, routine_id),
             )
             conn.commit()

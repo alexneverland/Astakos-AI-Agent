@@ -1667,6 +1667,7 @@ def handle_message(user_text: str, chat_id: str):
         clean_user_text = t("clients.telegram_bot.bot_msg_630052")
     # ── ROUTINE COMPLETION DECISION ────────────────────────────────
     # Pending routines get first priority; a pass-through still checks today's pool.
+    from memory.event_log import log_event
     from services.routine_completion_helper import decide_completion
     from services.routine_completion_selector import select_routine as _completion_selector
     routine_completion_context: SystemMessage | None = None
@@ -1786,6 +1787,8 @@ def handle_message(user_text: str, chat_id: str):
             print(f"✅ [Routine Acknowledged]: {pdata}")
             bus.emit("routine_acknowledged", routine_id=rid, event=ev, channel="telegram")
             pending_routine_confirmations.pop(rid, None)
+            from services.routine_completion_context import build_routine_completion_context
+            routine_completion_context = build_routine_completion_context()
             routine_action_consumed = True
 
         elif decision.action == "skip_today" and decision.routine_id is not None:
@@ -1810,6 +1813,8 @@ def handle_message(user_text: str, chat_id: str):
             print(f"⏭️ [Routine Skipped Today]: {pdata}")
             bus.emit("routine_skipped_today", routine_id=rid, event=ev, channel="telegram")
             pending_routine_confirmations.pop(rid, None)
+            from services.routine_completion_context import build_routine_completion_context
+            routine_completion_context = build_routine_completion_context()
             routine_action_consumed = True
 
         elif decision.action == "pause" and decision.routine_id is not None:
@@ -1831,6 +1836,8 @@ def handle_message(user_text: str, chat_id: str):
             print(f"⏸️ [Routine Paused]: {pdata}")
             bus.emit("routine_paused", routine_id=rid, event=ev, channel="telegram")
             pending_routine_confirmations.pop(rid, None)
+            from services.routine_completion_context import build_routine_completion_context
+            routine_completion_context = build_routine_completion_context()
             routine_action_consumed = True
 
         # decision.action == "pass_through" → continue to normal chat processing.
@@ -1890,6 +1897,8 @@ def handle_message(user_text: str, chat_id: str):
                     )
                     print(f"✅ [Routine Acknowledged]: #{rid} {ev}")
                     bus.emit("routine_acknowledged", routine_id=rid, event=ev, channel="telegram")
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
                     routine_action_consumed = True
                 elif decision.action == "skip_today" and decision.routine_id is not None:
                     rid = decision.routine_id
@@ -1906,6 +1915,8 @@ def handle_message(user_text: str, chat_id: str):
                     )
                     print(f"⏭️ [Routine Skipped Today]: #{rid} {ev}")
                     bus.emit("routine_skipped_today", routine_id=rid, event=ev, channel="telegram")
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
                     routine_action_consumed = True
                 elif decision.action == "pause" and decision.routine_id is not None:
                     rid = decision.routine_id
@@ -1920,6 +1931,8 @@ def handle_message(user_text: str, chat_id: str):
                     )
                     print(f"⏸️ [Routine Paused]: #{rid} {ev}")
                     bus.emit("routine_paused", routine_id=rid, event=ev, channel="telegram")
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
                     routine_action_consumed = True
         except Exception as _preempt_err:
             print(f"[Telegram Pre-emptive Completion]: {_preempt_err}")

@@ -451,19 +451,28 @@ def test_preemptive_completion_continues_to_graph():
 
 
 def test_today_acknowledgement_does_not_complete_routine() -> None:
-    """A future commitment suppresses today's reminder without marking completion."""
+    """A future commitment carries trusted lifecycle context without marking completion."""
     from services.routine_completion_helper import RoutineSelection
     rdb = sys.modules["memory.routine_db"]
+    graph_mock = sys.modules["core.graph"].graph
+    lifecycle_context = MagicMock(name="lifecycle_context")
 
-    _run_handle_message(
-        "natural future commitment",
-        today_routines=[{"id": 5, "event": "Dynamic routine", "state": "active"}],
-        selector_return=RoutineSelection(action="acknowledge", routine_id=5),
-    )
+    with patch(
+        "services.routine_completion_context.build_routine_completion_context",
+        return_value=lifecycle_context,
+    ) as build_context:
+        _run_handle_message(
+            "natural future commitment",
+            today_routines=[{"id": 5, "event": "Dynamic routine", "state": "active"}],
+            selector_return=RoutineSelection(action="acknowledge", routine_id=5),
+        )
 
     rdb.mark_routine_acknowledged.assert_called_once_with(5)
     rdb.mark_routine_triggered_today.assert_not_called()
     rdb.confirm_routine.assert_not_called()
+    build_context.assert_called_once_with()
+    graph_messages = graph_mock.stream.call_args.args[0]["messages"]
+    assert lifecycle_context in graph_messages
 
 
 def test_unrelated_pending_does_not_block_today_completion() -> None:

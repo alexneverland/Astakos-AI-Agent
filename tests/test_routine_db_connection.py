@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -106,7 +107,7 @@ def test_indefinite_pause_migration_blocks_scheduler_without_deleting_routine(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An indefinite user pause is persisted separately from routine lifecycle state."""
+    """An indefinite pause restores pending state and remains reversible without deletion."""
     db_path = tmp_path / "routines.db"
     monkeypatch.setattr(routine_db, "DB_PATH", str(db_path))
     monkeypatch.setattr(routine_db, "_wal_enabled", False)
@@ -119,15 +120,52 @@ def test_indefinite_pause_migration_blocks_scheduler_without_deleting_routine(
         INSERT INTO routines (day_of_week, time_str, event_name, event_type, confidence, state, is_active)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        ("Thursday", "09:00", "Dynamic routine", "general", 0.9, "active", 1),
+        (datetime.now().strftime("%A"), "09:00", "Dynamic routine", "general", 0.9, "trigger_pending", 1),
     )
     routine_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
     connection.commit()
     connection.close()
 
+    monkeypatch.setattr("memory.event_log.log_event", lambda *args, **kwargs: None)
     routine_db.pause_routine_indefinitely(routine_id)
     metadata = routine_db.get_routine_schedule_meta(routine_id)
 
     assert metadata["paused_indefinitely"] is True
     assert routine_db.is_routine_temporarily_inactive_meta(metadata)[0] is True
     assert routine_db.get_routine_state(routine_id).value == "active"
+
+    routine_db.clear_routine_paused_until(routine_id)
+
+    assert routine_db.get_routine_state(routine_id).value == "active"
+
+
+def test_indefinite_pause_excludes_routine_from_preemptive_candidates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An indefinitely paused routine is absent from the shared Web and Telegram candidate query."""
+    db_path = tmp_path / "routines.db"
+    monkeypatch.setattr(routine_db, "DB_PATH", str(db_path))
+    monkeypatch.setattr(routine_db, "_wal_enabled", False)
+    monkeypatch.setattr(routine_db, "_wal_enabled_path", None)
+    monkeypatch.setattr("memory.event_log.log_event", lambda *args, **kwargs: None)
+    routine_db.setup_db()
+
+    day = datetime.now().strftime("%A")
+    connection = routine_db.get_connection()
+    connection.execute(
+        """
+        INSERT INTO routines (day_of_week, time_str, event_name, event_type, confidence, state, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (day, "09:00", "Dynamic routine", "general", 0.9, "active", 1),
+    )
+    routine_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+    connection.commit()
+    connection.close()
+
+    assert [row["id"] for row in routine_db.get_eligible_preemptive_routines_for_day(day)] == [routine_id]
+
+    routine_db.pause_routine_indefinitely(routine_id)
+
+    assert routine_db.get_eligible_preemptive_routines_for_day(day) == []
