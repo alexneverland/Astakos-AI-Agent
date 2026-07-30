@@ -1643,6 +1643,7 @@ _ROUTINE_OUTCOME_I18N_KEYS = {
     "routine_skipped_today": "api.server.routine_outcome_skipped_today",
     "routine_paused": "api.server.routine_outcome_paused",
     "routine_response_window_expired": "api.server.routine_outcome_response_window_expired",
+    "routine_unanswered_decay": "api.server.routine_outcome_unanswered_decay",
 }
 
 

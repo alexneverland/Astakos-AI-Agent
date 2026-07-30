@@ -1720,6 +1720,7 @@
       "routine_outcome_skipped_today": "Παράλειψη για σήμερα",
       "routine_outcome_paused": "Μόνιμη παύση",
       "routine_outcome_response_window_expired": "Το παράθυρο απάντησης έληξε",
+      "routine_outcome_unanswered_decay": "Μειώθηκε η βεβαιότητα μετά από αναπάντητες υπενθυμίσεις",
       "draft_expired": "❌ Σφάλμα: Το προσχέδιο έχει λήξει.",
       "no_active_draft": "Δεν υπάρχει ενεργό draft αυτή τη στιγμή. ",
       "no_active_draft_to_clear": "Δεν υπάρχει ενεργό draft αυτή τη στιγμή για να καθαρίσω.",

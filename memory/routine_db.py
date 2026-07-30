@@ -146,6 +146,7 @@ def setup_db():
             notify_cooldown_hours REAL DEFAULT 20.0,
             last_notified_ts TEXT,
             explicit_skip_streak INTEGER DEFAULT 0,
+            unanswered_reminder_streak INTEGER DEFAULT 0,
             paused_indefinitely BOOLEAN DEFAULT 0,
             active_from TEXT DEFAULT NULL,
             active_until TEXT DEFAULT NULL,
@@ -181,6 +182,10 @@ def setup_db():
     if "explicit_skip_streak" not in existing_cols:
         cursor.execute("ALTER TABLE routines ADD COLUMN explicit_skip_streak INTEGER DEFAULT 0")
         print("[routine_db]: Migration → 'explicit_skip_streak'")
+
+    if "unanswered_reminder_streak" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN unanswered_reminder_streak INTEGER DEFAULT 0")
+        print("[routine_db]: Migration → 'unanswered_reminder_streak'")
 
     if "paused_indefinitely" not in existing_cols:
         cursor.execute("ALTER TABLE routines ADD COLUMN paused_indefinitely BOOLEAN DEFAULT 0")
@@ -594,7 +599,7 @@ def confirm_routine(routine_id: int):
             with db_write_lock:
                 # CONFIRMED → ACTIVE immediately (single write, valid shortcut)
                 cursor.execute(
-                    "UPDATE routines SET confidence=?, decay_counter=0, explicit_skip_streak=0, is_active=1, mention_count=?, state='active' WHERE id=?",
+                    "UPDATE routines SET confidence=?, decay_counter=0, explicit_skip_streak=0, unanswered_reminder_streak=0, is_active=1, mention_count=?, state='active' WHERE id=?",
                     (new_conf, new_m, routine_id)
                 )
                 conn.commit()
@@ -743,6 +748,8 @@ setup_db()
 COOLDOWN_DEFAULT_HOURS = 20.0
 COOLDOWN_MIN_HOURS     = 4.0
 COOLDOWN_MAX_HOURS     = 72.0
+UNANSWERED_REMINDER_THRESHOLD = 3
+UNANSWERED_REMINDER_CONFIDENCE_STEP = 0.2
 
 def clamp_cooldown_hours(value) -> float:
     """
@@ -771,13 +778,13 @@ def mark_routine_notified(routine_id: int):
 
 
 def mark_routine_triggered_today(routine_id: int):
-    """Record a confirmed completion and reset its explicit-skip streak."""
+    """Record a confirmed completion and reset routine refusal and unanswered streaks."""
     today_str = datetime.now().strftime("%Y-%m-%d")
     conn = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET last_triggered=?, explicit_skip_streak=0, state='active', is_active=1 WHERE id=?",
+            "UPDATE routines SET last_triggered=?, explicit_skip_streak=0, unanswered_reminder_streak=0, state='active', is_active=1 WHERE id=?",
             (today_str, routine_id)
         )
         conn.commit()
@@ -799,7 +806,7 @@ def mark_routine_acknowledged(routine_id: int) -> None:
     try:
         with db_write_lock:
             conn.execute(
-                "UPDATE routines SET last_notified_ts=?, state='active', is_active=1 WHERE id=?",
+                "UPDATE routines SET last_notified_ts=?, unanswered_reminder_streak=0, state='active', is_active=1 WHERE id=?",
                 (datetime.now().isoformat(timespec="seconds"), routine_id),
             )
             conn.commit()
@@ -828,6 +835,86 @@ def expire_routine_confirmation(routine_id: int) -> None:
         raise DBWriteError("expire_routine_confirmation", e) from e
     finally:
         conn.close()
+
+
+def record_unanswered_routine_expiry(
+    routine_id: int,
+    threshold: int = UNANSWERED_REMINDER_THRESHOLD,
+) -> dict[str, int | float | bool | str]:
+    """Close an unanswered delivered reminder and decay confidence at the configured threshold."""
+    if threshold < 1:
+        raise ValueError("Unanswered reminder threshold must be positive")
+
+    current = get_routine_state(routine_id)
+    if current == RoutineState.ACTIVE:
+        return {
+            "unanswered_streak": 0,
+            "confidence_reduced": False,
+            "confidence": 0.0,
+            "state": RoutineState.ACTIVE.value,
+        }
+    if current != RoutineState.TRIGGER_PENDING:
+        raise RoutineConflictError(
+            f"Routine #{routine_id} cannot expire from state {current.value}",
+            context={"routine_id": routine_id, "state": current.value},
+        )
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT confidence, decay_counter, unanswered_reminder_streak FROM routines WHERE id=?",
+            (routine_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise RoutineConflictError(
+                f"Routine #{routine_id} does not exist",
+                context={"routine_id": routine_id},
+            )
+
+        current_confidence = float(row[0] or 0.0)
+        current_decay = int(row[1] or 0)
+        unanswered_streak = int(row[2] or 0) + 1
+        confidence_reduced = unanswered_streak >= threshold
+        new_confidence = (
+            round(max(0.0, current_confidence - UNANSWERED_REMINDER_CONFIDENCE_STEP), 4)
+            if confidence_reduced
+            else current_confidence
+        )
+        next_streak = 0 if confidence_reduced else unanswered_streak
+        new_state = RoutineState.DECAYED if new_confidence < 0.1 else RoutineState.ACTIVE
+        validate_transition(current, new_state)
+
+        with db_write_lock:
+            cursor.execute(
+                """
+                UPDATE routines
+                SET confidence=?, decay_counter=?, unanswered_reminder_streak=?,
+                    state=?, is_active=?
+                WHERE id=?
+                """,
+                (
+                    new_confidence,
+                    current_decay + int(confidence_reduced),
+                    next_streak,
+                    new_state.value,
+                    int(new_state == RoutineState.ACTIVE),
+                    routine_id,
+                ),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise DBWriteError("record_unanswered_routine_expiry", e) from e
+    finally:
+        conn.close()
+
+    return {
+        "unanswered_streak": unanswered_streak,
+        "confidence_reduced": confidence_reduced,
+        "confidence": new_confidence,
+        "state": new_state.value,
+    }
 
 
 def record_routine_skip_today(routine_id: int, threshold: int = 3) -> dict[str, int | float | bool | None]:
@@ -867,7 +954,7 @@ def record_routine_skip_today(routine_id: int, threshold: int = 3) -> dict[str, 
             cursor.execute(
                 """
                 UPDATE routines
-                SET last_triggered=?, explicit_skip_streak=?, notify_cooldown_hours=?,
+                SET last_triggered=?, explicit_skip_streak=?, unanswered_reminder_streak=0, notify_cooldown_hours=?,
                     last_notified_ts=COALESCE(?, last_notified_ts), state='active', is_active=1
                 WHERE id=?
                 """,
@@ -932,6 +1019,7 @@ def mark_routine_responded(routine_id: int):
             """
             UPDATE routines
             SET ignore_count=0,
+                unanswered_reminder_streak=0,
                 notify_cooldown_hours=?,
                 state='active',
                 is_active=1
@@ -963,6 +1051,7 @@ def reset_routine_cooldown(routine_id: int, clear_last_notified: bool = True) ->
                 """
                 UPDATE routines
                 SET ignore_count=0,
+                    unanswered_reminder_streak=0,
                     notify_cooldown_hours=?,
                     last_notified_ts=NULL,
                     state='active',
@@ -976,6 +1065,7 @@ def reset_routine_cooldown(routine_id: int, clear_last_notified: bool = True) ->
                 """
                 UPDATE routines
                 SET ignore_count=0,
+                    unanswered_reminder_streak=0,
                     notify_cooldown_hours=?,
                     state='active',
                     is_active=1
@@ -1532,7 +1622,7 @@ def pause_routine_indefinitely(routine_id: int, reason: str = "user_requested") 
                 """
                 UPDATE routines
                 SET paused_until=NULL, paused_indefinitely=1, pause_reason=?,
-                    state='active', is_active=1
+                    unanswered_reminder_streak=0, state='active', is_active=1
                 WHERE id=?
                 """,
                 (reason, routine_id),

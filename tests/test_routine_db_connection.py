@@ -104,6 +104,161 @@ def test_skip_streak_migration_applies_cooldown_only_on_third_refusal(
     assert routine_db.get_routine_notify_info(routine_id)["last_notified_ts"] is not None
 
 
+def test_unanswered_reminder_streak_migrates_existing_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The migration adds the unanswered counter to an existing routines table without rewriting rows."""
+    db_path = tmp_path / "routines.db"
+    connection = sqlite3.connect(db_path)
+    connection.execute(
+        """
+        CREATE TABLE routines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            day_of_week TEXT,
+            time_str TEXT,
+            event_name TEXT,
+            event_type TEXT,
+            confidence REAL,
+            last_triggered TEXT,
+            decay_counter INTEGER,
+            is_active BOOLEAN DEFAULT 1,
+            fingerprint TEXT,
+            mention_count INTEGER DEFAULT 1,
+            ignore_count INTEGER DEFAULT 0,
+            notify_cooldown_hours REAL DEFAULT 20.0,
+            last_notified_ts TEXT,
+            explicit_skip_streak INTEGER DEFAULT 0,
+            paused_indefinitely BOOLEAN DEFAULT 0
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO routines (day_of_week, time_str, event_name, confidence) VALUES (?, ?, ?, ?)",
+        ("Thursday", "09:00", "Existing routine", 0.9),
+    )
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setattr(routine_db, "DB_PATH", str(db_path))
+    monkeypatch.setattr(routine_db, "_wal_enabled", False)
+    monkeypatch.setattr(routine_db, "_wal_enabled_path", None)
+    routine_db.setup_db()
+
+    connection = routine_db.get_connection()
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(routines)").fetchall()}
+    migrated_row = connection.execute(
+        "SELECT event_name, unanswered_reminder_streak FROM routines"
+    ).fetchone()
+    connection.close()
+
+    assert "unanswered_reminder_streak" in columns
+    assert migrated_row == ("Existing routine", 0)
+
+
+def test_unanswered_reminder_decay_requires_three_delivered_expiries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only three separate unanswered delivered reminders reduce confidence or decay a routine."""
+    db_path = tmp_path / "routines.db"
+    monkeypatch.setattr(routine_db, "DB_PATH", str(db_path))
+    monkeypatch.setattr(routine_db, "_wal_enabled", False)
+    monkeypatch.setattr(routine_db, "_wal_enabled_path", None)
+    routine_db.setup_db()
+
+    connection = routine_db.get_connection()
+    connection.execute(
+        """
+        INSERT INTO routines (
+            day_of_week, time_str, event_name, event_type, confidence,
+            state, is_active, unanswered_reminder_streak
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("Thursday", "09:00", "Dynamic routine", "general", 0.4, "trigger_pending", 0, 0),
+    )
+    routine_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+    connection.commit()
+    connection.close()
+
+    def expire_next_delivery() -> dict[str, int | float | bool | str]:
+        """Put the routine into the sent state to simulate its next delivered reminder."""
+        connection = routine_db.get_connection()
+        connection.execute(
+            "UPDATE routines SET state='trigger_pending', is_active=0 WHERE id=?",
+            (routine_id,),
+        )
+        connection.commit()
+        connection.close()
+        return routine_db.record_unanswered_routine_expiry(routine_id)
+
+    first = routine_db.record_unanswered_routine_expiry(routine_id)
+    second = expire_next_delivery()
+    third = expire_next_delivery()
+
+    assert first["unanswered_streak"] == 1
+    assert first["confidence_reduced"] is False
+    assert second["unanswered_streak"] == 2
+    assert second["confidence_reduced"] is False
+    assert third == {
+        "unanswered_streak": 3,
+        "confidence_reduced": True,
+        "confidence": 0.2,
+        "state": "active",
+    }
+    assert routine_db.get_routine_notify_info(routine_id)["cooldown_hours"] == 20.0
+
+    fourth = expire_next_delivery()
+    fifth = expire_next_delivery()
+    sixth = expire_next_delivery()
+
+    assert fourth["confidence_reduced"] is False
+    assert fifth["confidence_reduced"] is False
+    assert sixth == {
+        "unanswered_streak": 3,
+        "confidence_reduced": True,
+        "confidence": 0.0,
+        "state": "decayed",
+    }
+    assert routine_db.get_routine_state(routine_id).value == "decayed"
+
+
+def test_routine_response_resets_unanswered_reminder_streak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An acknowledgement clears the unanswered reminder streak without completing the routine."""
+    db_path = tmp_path / "routines.db"
+    monkeypatch.setattr(routine_db, "DB_PATH", str(db_path))
+    monkeypatch.setattr(routine_db, "_wal_enabled", False)
+    monkeypatch.setattr(routine_db, "_wal_enabled_path", None)
+    routine_db.setup_db()
+
+    connection = routine_db.get_connection()
+    connection.execute(
+        """
+        INSERT INTO routines (
+            day_of_week, time_str, event_name, event_type, confidence,
+            state, is_active, unanswered_reminder_streak
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("Thursday", "09:00", "Dynamic routine", "general", 0.9, "trigger_pending", 0, 2),
+    )
+    routine_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+    connection.commit()
+    connection.close()
+
+    routine_db.mark_routine_acknowledged(routine_id)
+
+    connection = routine_db.get_connection()
+    streak = connection.execute(
+        "SELECT unanswered_reminder_streak FROM routines WHERE id=?",
+        (routine_id,),
+    ).fetchone()[0]
+    connection.close()
+    assert streak == 0
+
+
 def test_indefinite_pause_migration_blocks_scheduler_without_deleting_routine(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -19,6 +19,7 @@ def test_dashboard_label_mapper() -> None:
     assert _routine_outcome_label("routine_skipped_today") == t("api.server.routine_outcome_skipped_today")
     assert _routine_outcome_label("routine_paused") == t("api.server.routine_outcome_paused")
     assert _routine_outcome_label("routine_response_window_expired") == t("api.server.routine_outcome_response_window_expired")
+    assert _routine_outcome_label("routine_unanswered_decay") == t("api.server.routine_outcome_unanswered_decay")
     assert _routine_outcome_label("unknown_action") == "Recorded: Unknown action"
 
 
