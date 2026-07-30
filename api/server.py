@@ -1544,6 +1544,44 @@ def _debug_condition_state_details(flag_name: str, effective_value, raw_states: 
     }
 
 
+_ROUTINE_OUTCOME_LABELS = {
+    "routine_triggered": "Sent",
+    "deferred_followup": "Sent: deferred follow-up",
+    "preemptive_completed": "Completed today",
+    "confirmed": "Confirmed",
+    "dismissed": "Dismissed",
+    "pending_cleared_muted": "Notifications muted",
+    "routine_condition_blocked": "Blocked by condition",
+    "routine_condition_allowed": "Condition passed",
+    "routine_cooldown_skip": "Skipped: cooldown",
+    "routine_silent_skip": "Skipped: silent",
+    "routine_context_skip": "Skipped: context",
+    "routine_rate_limit_skip": "Skipped: rate limit",
+    "routine_inactive_skip": "Skipped: inactive",
+    "routine_timeout_decay": "Timed out",
+    "routine_pending_stale_cleared": "Stale pending cleared",
+}
+
+
+def _routine_outcome_label(action: str) -> str:
+    """Return a readable Debug label for any routine lifecycle event action."""
+    return _ROUTINE_OUTCOME_LABELS.get(
+        action,
+        f"Recorded: {action.replace('_', ' ').capitalize()}",
+    )
+
+
+def _latest_routine_outcome(events: list[dict], routine_id: int) -> dict | None:
+    """Return the latest valid routine event for one routine from today's event log."""
+    outcomes = [
+        event for event in events
+        if event.get("routine_id") == routine_id
+        and isinstance(event.get("action"), str)
+        and event["action"]
+    ]
+    return outcomes[-1] if outcomes else None
+
+
 @server.get("/debug/runtime")
 async def debug_runtime(_=Depends(require_token)):
     """
@@ -1602,21 +1640,6 @@ async def debug_runtime(_=Depends(require_token)):
         from memory.event_log import get_events
         today_str = datetime.now().strftime("%Y-%m-%d")
         today_events = get_events(today_str, job="routines")
-
-        def _routine_outcome_label(action: str, debug_effect: str | None = None) -> str:
-            mapping = {
-                "routine_triggered": "Sent",
-                "routine_condition_blocked": "Blocked by condition",
-                "routine_condition_allowed": "Condition passed",
-                "routine_cooldown_skip": "Skipped: cooldown",
-                "routine_silent_skip": "Skipped: silent",
-                "routine_context_skip": "Skipped: context",
-                "routine_rate_limit_skip": "Skipped: rate limit",
-                "routine_inactive_skip": "Skipped: inactive",
-                "routine_timeout_decay": "Timed out",
-                "routine_pending_stale_cleared": "Stale pending cleared",
-            }
-            return mapping.get(action, action)
 
         # Active routines
         cursor.execute("""
@@ -1695,12 +1718,11 @@ async def debug_runtime(_=Depends(require_token)):
             last_outcome_ts = None
             last_outcome_reason = None
             
-            # Find the latest event for this r_id among canonical routine outcome actions
-            r_events = [e for e in today_events if e.get("routine_id") == r_id and e.get("action", "").startswith("routine_")]
-            if r_events:
-                latest = r_events[-1]
+            # Every event logged by the routines job with this ID is lifecycle evidence.
+            latest = _latest_routine_outcome(today_events, r_id)
+            if latest:
                 last_outcome_action = latest.get("action")
-                last_outcome_label = _routine_outcome_label(last_outcome_action, latest.get("debug_effect"))
+                last_outcome_label = _routine_outcome_label(last_outcome_action)
                 last_outcome_ts = latest.get("timestamp")
                 last_outcome_reason = latest.get("reason") or latest.get("debug_effect")
 

@@ -32,7 +32,7 @@ _TMP_BASE = tempfile.mkdtemp()
 _STUB_MODULE_NAMES = [
     "config",
     "langchain_core", "langchain_core.messages",
-    "memory", "memory.event_log", "memory.vector_store",
+    "memory", "memory.event_log", "memory.execution_trace", "memory.vector_store",
     "memory.working_memory", "memory.session_memory", "memory.pending_followups",
     "memory.context_builder", "memory.routine_db",
     "memory.pending_assets",
@@ -79,7 +79,7 @@ def _stub_modules():
 
     # ── memory.* ──────────────────────────────────────────────
     for mod in [
-        "memory", "memory.event_log", "memory.vector_store",
+        "memory", "memory.event_log", "memory.execution_trace", "memory.vector_store",
         "memory.working_memory", "memory.session_memory", "memory.pending_followups",
         "memory.context_builder", "memory.routine_db",
         "memory.pending_assets",
@@ -105,9 +105,12 @@ def _stub_modules():
     sm.startup_stale_cleanup  = MagicMock()
     sm._maybe_trigger_auto_session_summary = MagicMock()
 
+    sys.modules["memory.execution_trace"].ExecutionTrace = MagicMock()
+
     pf = sys.modules["memory.pending_followups"]
     pf.ensure_pending_followups_table = lambda: None
     pf.find_pending_followups = lambda *a, **k: []
+    pf.process_followup_exchange = lambda *a, **k: None
     pf.maybe_create_followup_from_exchange = lambda *a, **k: None
     pf.maybe_resolve_followups_from_user_message = lambda *a, **k: 0
     pf.looks_like_followup_resolution_update = lambda *a, **k: False
