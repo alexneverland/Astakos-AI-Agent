@@ -795,6 +795,25 @@ def test_timeout_records_unanswered_delivery_without_cooldown_penalty():
     rdb.record_unanswered_routine_expiry.assert_called_once_with(889)
     assert any(action == "routine_response_window_expired" for _, action in logged)
 
+
+def test_timeout_logs_confidence_decay_after_unanswered_threshold():
+    """The threshold result is exposed as a distinct routine lifecycle outcome."""
+    past_time = _fixed_now() - timedelta(minutes=40)
+    bot.pending_routine_confirmations[890] = {"event": "Routine", "sent_at": past_time}
+
+    rdb = sys.modules["memory.routine_db"]
+    rdb.get_routine_state.return_value = rdb.RoutineState.TRIGGER_PENDING
+    rdb.record_unanswered_routine_expiry.reset_mock()
+    rdb.record_unanswered_routine_expiry.return_value = {"confidence_reduced": True}
+
+    _, logged, _ = _run_job([])
+
+    assert 890 not in bot.pending_routine_confirmations
+    rdb.record_unanswered_routine_expiry.assert_called_once_with(890)
+    assert any(action == "routine_unanswered_decay" for _, action in logged)
+    rdb.record_unanswered_routine_expiry.return_value = {"confidence_reduced": False}
+
+
 def test_telegram_bot_contextual_dismiss_skips_decay_for_sofia():
     bot.pending_routine_confirmations = {
         999: {"event": "Στείλε μήνυμα στη Partner (messenger)", "sent_at": _fixed_now()}
