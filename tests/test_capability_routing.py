@@ -74,6 +74,14 @@ def test_subject_capability_still_wins_without_explicit_web_search():
     ) == "Home_Agent"
 
 
+def test_clear_draft_is_not_routed_to_vacuum_capability() -> None:
+    """A draft-cleanup command must not use the vacuum capability's generic trigger."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+    assert lookup_agent("Καθάρισε draft") != "Home_Agent"
+
+
 def test_explicit_web_search_overrides_git_capability():
     from core.capability_lookup import lookup_agent, reload_registry
 

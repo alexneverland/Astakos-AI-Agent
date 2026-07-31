@@ -43,7 +43,7 @@ def classify_messenger_intent(text: str, has_active_draft: bool = False) -> Mess
         return MessengerIntentResult("general_chat", 0.50, ["empty"])
 
     has_draft_word = any(word in normalized for word in ("draft",) + nl_config.MI_COMPOSE_WORDS)
-    if has_active_draft and has_draft_word and _has_any(normalized, _DRAFT_CLEAR_PATTERNS):
+    if has_draft_word and _has_any(normalized, _DRAFT_CLEAR_PATTERNS):
         return MessengerIntentResult("clear_draft", 0.98, ["clear_phrase"])
 
     if _has_any(normalized, _DRAFT_CLARIFY_PATTERNS):
