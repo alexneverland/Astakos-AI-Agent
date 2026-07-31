@@ -40,6 +40,12 @@ def test_explicit_clear_draft_still_works():
     result = classify_messenger_intent("κλείσε το draft", has_active_draft=True)
     assert result.intent == "clear_draft"
 
+
+def test_explicit_clear_draft_is_intercepted_without_active_draft() -> None:
+    """A draft-clear request must not fall through to unrelated capability routing."""
+    result = classify_messenger_intent("καθάρισε draft", has_active_draft=False)
+    assert result.intent == "clear_draft"
+
 def test_is_create_draft_intent_rejects_unrelated_messages():
     assert is_create_draft_intent("Γράψε ένα μήνυμα")
     assert not is_create_draft_intent("Έχει δουλειά σήμερα δεύτερα φίλε")

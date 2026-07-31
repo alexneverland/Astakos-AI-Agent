@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 from core.utils import (
     get_ultra_light_ack_response,
@@ -161,6 +163,35 @@ def test_messenger_intent_clear_closes_draft(mock_classify, mock_stream, mock_ap
     args, _ = mock_send.call_args
     sent_text = args[0]
     assert "The draft is cleared" in sent_text or "Το draft καθαρίστηκε" in sent_text
+
+
+@patch("memory.pending_assets.get_latest_pending_asset", return_value=None)
+@patch("memory.pending_assets.clear_expired_pending_assets")
+@patch("core.messenger_draft.active_draft_status", return_value=(False, "missing", None))
+@patch("core.messenger_draft.clear_draft", return_value=False)
+@patch("tools.telegram.send_telegram_msg")
+@patch("clients.telegram_bot._append_to_analytics_log")
+@patch("clients.telegram_bot.graph.stream")
+@patch("clients.telegram_bot._safe_classify_messenger_intent")
+def test_messenger_intent_clear_without_active_draft_stays_out_of_graph(
+    mock_classify: Any,
+    mock_stream: Any,
+    mock_append: Any,
+    mock_send: Any,
+    mock_clear: Any,
+    mock_active: Any,
+    mock_clear_assets: Any,
+    mock_get_asset: Any,
+) -> None:
+    """A stale draft-clear request must be handled locally, never by capability routing."""
+    from clients.telegram_bot import handle_message
+    from services.messenger_intent import MessengerIntentResult
+
+    mock_classify.return_value = MessengerIntentResult(intent="clear_draft", confidence=1.0)
+    handle_message("Καθάρισε draft", "user123")
+
+    mock_clear.assert_called_once()
+    mock_stream.assert_not_called()
 
 
 def test_medium_path_candidate_for_telegram_reflective_turn():

@@ -405,7 +405,7 @@ def home_agent_node(state):
     from langchain_core.messages import SystemMessage
 
     from tools.system import (
-        manage_list, set_local_reminder, delete_from_memory,
+        manage_list, set_local_reminder,
         search_memory, control_spotify, control_vacuum, get_current_location,
         learn_routine, edit_routine, delete_routine, get_routines, search_routines,
         control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup
@@ -419,7 +419,7 @@ def home_agent_node(state):
 
     static_tools_to_bind = [
         get_current_location,
-        manage_list, set_local_reminder, delete_from_memory, search_memory,
+        manage_list, set_local_reminder, search_memory,
         control_spotify, control_vacuum,
         search_goldmall_offers, get_navigation_info,
         google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
