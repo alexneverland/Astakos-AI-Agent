@@ -4138,7 +4138,7 @@ def job_check_routines():
         return
     if is_quiet_hours():
         if pending_routine_confirmations:
-            from memory.routine_db import expire_routine_confirmation, remove_pending_confirmation, get_routine_state, RoutineState
+            from memory.routine_db import record_unanswered_routine_expiry, remove_pending_confirmation, get_routine_state, RoutineState
             now_check = datetime.now()
             for rid in list(pending_routine_confirmations.keys()):
                 if (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds() > 1800:
@@ -4161,23 +4161,27 @@ def job_check_routines():
                         remove_pending_confirmation(rid)
                         continue
 
-                    expire_routine_confirmation(rid)
+                    result = record_unanswered_routine_expiry(rid)
                     log_event(
                         "routines", 
-                        "routine_response_window_expired",
+                        "routine_unanswered_decay" if result["confidence_reduced"] else "routine_response_window_expired",
                         routine_id=rid,
                         event=pending_routine_confirmations[rid]["event"],
                         elapsed_s=1800,
                         debug_type="pending_cleanup",
                         debug_source="timeout_guard",
-                        debug_effect="pending_expired_no_decay",
+                        debug_effect=(
+                            "confidence_decayed"
+                            if result["confidence_reduced"]
+                            else "pending_expired_unanswered"
+                        ),
                     )
                     pending_routine_confirmations.pop(rid, None)
                     remove_pending_confirmation(rid)
-    # 2. Expire pending response windows after 30 minutes without a penalty.
+    # 2. Expire pending response windows after 30 minutes and record unanswered deliveries.
     if pending_routine_confirmations:
         from memory.routine_db import (
-            expire_routine_confirmation,
+            record_unanswered_routine_expiry,
             remove_pending_confirmation,
             get_routine_state,
             RoutineState,
@@ -4209,19 +4213,24 @@ def job_check_routines():
                     continue
 
                 try:
-                    expire_routine_confirmation(rid)
+                    result = record_unanswered_routine_expiry(rid)
                 except DBWriteError as e:
                     print(f"\033[91m[Routine Response Window DBWriteError]: {e}\033[0m")
+                    result = {"confidence_reduced": False}
 
                 timeout_err = PendingTimeoutError(rid, ev, elapsed)
-                log_event("routines", "routine_response_window_expired",
+                log_event("routines", "routine_unanswered_decay" if result["confidence_reduced"] else "routine_response_window_expired",
                     routine_id=rid,
                     event=ev,
                     elapsed_s=int(elapsed),
                     error=str(timeout_err),
                     debug_type="pending_cleanup",
                     debug_source="timeout_guard",
-                    debug_effect="pending_expired_no_decay",
+                    debug_effect=(
+                        "confidence_decayed"
+                        if result["confidence_reduced"]
+                        else "pending_expired_unanswered"
+                    ),
                 )
 
                 del pending_routine_confirmations[rid]

@@ -157,6 +157,7 @@ def _stub_modules():
     rdb.clear_pending_confirmations = MagicMock()
     rdb.mark_routine_ignored       = MagicMock()
     rdb.expire_routine_confirmation = MagicMock()
+    rdb.record_unanswered_routine_expiry = MagicMock(return_value={"confidence_reduced": False})
     # new stubs for muted_until
     rdb.get_routine_muted_until    = MagicMock(return_value=None)   # not muted by default
     rdb.set_routine_muted_until    = MagicMock()
@@ -777,22 +778,41 @@ def test_timeout_decay_ignores_stale_pending():
     rdb.get_routine_state.return_value = rdb.RoutineState.TRIGGER_PENDING
 
 
-def test_timeout_expires_pending_without_cooldown_penalty():
-    """An unanswered routine reminder clears its response window without decay."""
+def test_timeout_records_unanswered_delivery_without_cooldown_penalty():
+    """An unanswered delivered reminder is recorded without using refusal cooldown logic."""
     past_time = _fixed_now() - timedelta(minutes=40)
     bot.pending_routine_confirmations[889] = {"event": "Routine", "sent_at": past_time}
 
     rdb = sys.modules["memory.routine_db"]
     rdb.get_routine_state.return_value = rdb.RoutineState.TRIGGER_PENDING
     rdb.mark_routine_ignored.reset_mock()
-    rdb.expire_routine_confirmation.reset_mock()
+    rdb.record_unanswered_routine_expiry.reset_mock()
 
     _, logged, _ = _run_job([])
 
     assert 889 not in bot.pending_routine_confirmations
     rdb.mark_routine_ignored.assert_not_called()
-    rdb.expire_routine_confirmation.assert_called_once_with(889)
+    rdb.record_unanswered_routine_expiry.assert_called_once_with(889)
     assert any(action == "routine_response_window_expired" for _, action in logged)
+
+
+def test_timeout_logs_confidence_decay_after_unanswered_threshold():
+    """The threshold result is exposed as a distinct routine lifecycle outcome."""
+    past_time = _fixed_now() - timedelta(minutes=40)
+    bot.pending_routine_confirmations[890] = {"event": "Routine", "sent_at": past_time}
+
+    rdb = sys.modules["memory.routine_db"]
+    rdb.get_routine_state.return_value = rdb.RoutineState.TRIGGER_PENDING
+    rdb.record_unanswered_routine_expiry.reset_mock()
+    rdb.record_unanswered_routine_expiry.return_value = {"confidence_reduced": True}
+
+    _, logged, _ = _run_job([])
+
+    assert 890 not in bot.pending_routine_confirmations
+    rdb.record_unanswered_routine_expiry.assert_called_once_with(890)
+    assert any(action == "routine_unanswered_decay" for _, action in logged)
+    rdb.record_unanswered_routine_expiry.return_value = {"confidence_reduced": False}
+
 
 def test_telegram_bot_contextual_dismiss_skips_decay_for_sofia():
     bot.pending_routine_confirmations = {
