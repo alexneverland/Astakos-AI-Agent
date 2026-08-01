@@ -1,5 +1,6 @@
 from services.messenger_intent import (
     classify_messenger_intent,
+    is_draft_offer_acceptance,
     is_create_draft_intent,
 )
 
@@ -45,6 +46,12 @@ def test_explicit_clear_draft_is_intercepted_without_active_draft() -> None:
     """A draft-clear request must not fall through to unrelated capability routing."""
     result = classify_messenger_intent("καθάρισε draft", has_active_draft=False)
     assert result.intent == "clear_draft"
+
+
+def test_bare_affirmative_accepts_only_a_pending_draft_offer() -> None:
+    """A bare affirmative is eligible for the trusted pending-offer path."""
+    assert is_draft_offer_acceptance("ναι") is True
+    assert is_draft_offer_acceptance("ο Πασσιάς έχει και κρέας") is False
 
 def test_is_create_draft_intent_rejects_unrelated_messages():
     assert is_create_draft_intent("Γράψε ένα μήνυμα")
