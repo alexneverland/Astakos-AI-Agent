@@ -1,6 +1,7 @@
 """Web integration coverage for natural routine completion and graph continuity."""
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -36,6 +37,9 @@ def _post_chat(
     client: TestClient,
     pending: dict[int, dict[str, str]] | None = None,
     selector_returns: list[RoutineSelection] | None = None,
+    *,
+    message: str = "natural message",
+    accepted_draft_offer: object | None = None,
 ) -> tuple[object, dict[str, MagicMock]]:
     """Run one Web message under isolated completion and graph dependencies."""
     graph_runner = MagicMock(side_effect=_graph_result)
@@ -56,6 +60,10 @@ def _post_chat(
         patch("memory.event_log.log_event"),
         patch("services.routine_completion_selector.select_routine", selector),
         patch(
+            "services.routine_completion_context.accept_pending_messenger_draft_offer",
+            return_value=accepted_draft_offer,
+        ) as accepted_offer,
+        patch(
             "services.routine_completion_context.build_routine_completion_context",
             return_value=SystemMessage(content="Routine lifecycle updated."),
         ),
@@ -66,7 +74,7 @@ def _post_chat(
         patch("api.server.enqueue_slow_task"),
         patch("clients.telegram_bot.pending_routine_confirmations", pending or {}),
     ):
-        response = client.post("/chat", json={"message": "natural message"}, headers={"Authorization": f"Bearer {LOCAL_TOKEN}"})
+        response = client.post("/chat", json={"message": message}, headers={"Authorization": f"Bearer {LOCAL_TOKEN}"})
         return response, {
             "eligible": eligible,
             "triggered": triggered,
@@ -75,6 +83,7 @@ def _post_chat(
             "skipped": skipped,
             "paused": paused,
             "selector": selector,
+            "accepted_offer": accepted_offer,
             "graph": graph_runner,
         }
 
@@ -129,6 +138,26 @@ def test_web_acknowledgement_does_not_complete_routine(client: TestClient) -> No
     mocks["acknowledged"].assert_called_once_with(5)
     mocks["triggered"].assert_not_called()
     mocks["confirmed"].assert_not_called()
+
+
+def test_web_bare_draft_offer_acceptance_uses_shared_context(client: TestClient) -> None:
+    """Web bare consent consumes one trusted offer and injects its draft context."""
+    draft_context = SystemMessage(content="[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]")
+    accepted_offer = SimpleNamespace(routine_id=5, context=draft_context)
+
+    response, mocks = _post_chat(
+        client,
+        pending={5: {"event": "Message routine", "draft_offer": True}},
+        message="yes",
+        accepted_draft_offer=accepted_offer,
+    )
+
+    assert response.status_code == 200
+    mocks["accepted_offer"].assert_called_once()
+    mocks["selector"].assert_not_called()
+    mocks["acknowledged"].assert_called_once_with(5)
+    graph_messages = mocks["graph"].call_args.args[0]
+    assert draft_context in graph_messages
 
 
 def test_web_pending_pass_through_allows_today_completion(client: TestClient) -> None:
