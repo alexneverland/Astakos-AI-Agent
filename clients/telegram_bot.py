@@ -290,19 +290,22 @@ def _enqueue_slow_memory_sifter(
     handling_agent: str,
     channel: str,
     external_content_sources: set[str] | None = None,
+    trusted_user_only: bool = False,
 ) -> None:
-    """Queue memory sifting unless the exchange derives from external content."""
+    """Queue memory sifting, optionally using only trusted user-originated text."""
     if external_content_sources:
         print("[MemorySifterSlow]: external-derived exchange - skip automatic memory write")
         return
-    seed_facts = run_memory_sifter_fast(user_text, ai_text, handling_agent, channel)
+    safe_ai_text = "" if trusted_user_only else ai_text
+    seed_facts = run_memory_sifter_fast(user_text, safe_ai_text, handling_agent, channel)
     enqueue_slow_task(
         run_memory_sifter_slow,
         user_text,
-        ai_text,
+        safe_ai_text,
         handling_agent,
         channel,
         seed_facts,
+        not trusted_user_only,
     )
 
 def _enqueue_followup_pipeline(user_text, ai_text, agent_name, channel):
@@ -2472,7 +2475,6 @@ def handle_message(user_text: str, chat_id: str):
             assistant_metadata = derived_external_content_history_metadata(
                 provenance_messages_for_reply,
                 external_tool_names,
-                final_ai_response,
             )
             if assistant_metadata:
                 _append_to_analytics_log(
@@ -2496,12 +2498,20 @@ def handle_message(user_text: str, chat_id: str):
             t_bg_0 = perf_counter()
             from core.untrusted_content import external_content_source_names
             external_content_sources = external_content_source_names(assistant_metadata)
-            enqueue_fast_task(log_exchange,                       user_text, final_ai_response, handling_agent, "telegram")
-            enqueue_fast_task(update_working_memory,              user_text, final_ai_response, external_content_sources)
-            enqueue_fast_task(_enqueue_slow_memory_sifter,        user_text, final_ai_response, handling_agent, "telegram", external_content_sources)
-            _schedule_capability_gap_if_valid(user_text, final_ai_response, handling_agent, user_rowid, chat_id)
-            enqueue_slow_task(_enqueue_followup_pipeline, user_text, final_ai_response, handling_agent, "telegram")
-            enqueue_slow_task(extract_and_update_context_flags, user_text, final_ai_response)
+            if external_content_sources:
+                print("[Security]: external-derived reply - use trusted user text only for background state")
+                enqueue_fast_task(log_exchange,                   user_text, "", handling_agent, "telegram")
+                enqueue_fast_task(update_working_memory,          user_text, "")
+                enqueue_fast_task(_enqueue_slow_memory_sifter,    user_text, "", handling_agent, "telegram", None, True)
+                enqueue_slow_task(_enqueue_followup_pipeline, user_text, "", handling_agent, "telegram")
+                enqueue_slow_task(extract_and_update_context_flags, user_text, "")
+            else:
+                enqueue_fast_task(log_exchange,                   user_text, final_ai_response, handling_agent, "telegram")
+                enqueue_fast_task(update_working_memory,          user_text, final_ai_response, external_content_sources)
+                enqueue_fast_task(_enqueue_slow_memory_sifter,    user_text, final_ai_response, handling_agent, "telegram", external_content_sources)
+                _schedule_capability_gap_if_valid(user_text, final_ai_response, handling_agent, user_rowid, chat_id)
+                enqueue_slow_task(_enqueue_followup_pipeline, user_text, final_ai_response, handling_agent, "telegram")
+                enqueue_slow_task(extract_and_update_context_flags, user_text, final_ai_response)
             
             background_enqueue_ms = int((perf_counter() - t_bg_0) * 1000)
             _trace.mark_phase("background_enqueue_ms", background_enqueue_ms)

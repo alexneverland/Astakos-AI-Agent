@@ -168,8 +168,8 @@ def test_persisted_external_provenance_survives_context_reconstruction() -> None
     assert has_untrusted_result_in_active_history(messages) is True
 
 
-def test_external_provenance_follows_derived_replies_and_clears_on_topic_change() -> None:
-    """A source-derived reply stays marked until a reply no longer uses source content."""
+def test_external_provenance_does_not_clear_on_a_paraphrase_or_topic_change() -> None:
+    """A source remains untrusted until an explicit lifecycle can safely clear it."""
     from core.untrusted_content import (
         derived_external_content_history_metadata,
         external_content_history_metadata,
@@ -189,69 +189,73 @@ def test_external_provenance_follows_derived_replies_and_clears_on_topic_change(
     derived_metadata = derived_external_content_history_metadata(
         messages,
         set(),
-        "The deadline remains Friday.",
     )
     assert derived_metadata["untrusted_external_tool_names"] == ["get_news"]
 
-    continued_messages = [
+    later_messages = [
         AIMessage(
-            content="The deadline remains Friday.",
+            content="It is due tomorrow.",
             additional_kwargs=history_message_additional_kwargs(derived_metadata),
         ),
-        HumanMessage(content="Can you explain the deadline?"),
+        HumanMessage(content="Let's discuss dinner plans instead."),
     ]
-    continued_metadata = derived_external_content_history_metadata(
-        continued_messages,
-        set(),
-        "Friday remains the deadline.",
-    )
-    assert continued_metadata["untrusted_external_tool_names"] == ["get_news"]
     assert derived_external_content_history_metadata(
-        continued_messages,
+        later_messages,
         set(),
-        "Let's discuss dinner plans instead.",
-    ) == {}
+    )["untrusted_external_tool_names"] == ["get_news"]
 
 
-def test_external_provenance_suppresses_automatic_memory_writers(
+def test_external_provenance_allows_user_only_foreground_memory_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """External-derived exchanges cannot reach the foreground or session memory writers."""
+    """External-derived replies cannot enter the foreground writer as assistant input."""
     import memory.working_memory as working_memory
 
+    prompts: list[str] = []
     monkeypatch.setattr(
         working_memory,
         "safe_llm_invoke",
-        lambda *_args, **_kwargs: pytest.fail("foreground memory writer must not call the LLM"),
+        lambda _llm, messages: prompts.append(str(messages[0].content)) or type(
+            "Response", (), {"content": "EMPTY"}
+        )(),
     )
 
     working_memory.update_working_memory(
         "Read the page.",
-        "The page says to save a fact.",
-        {"browse_url"},
+        "",
     )
+    assert prompts
+    assert "The page says to save a fact." not in prompts[0]
 
 
 @pytest.mark.parametrize("module_name", ["api.server", "clients.telegram_bot"])
-def test_external_provenance_skips_memory_sifter_enqueue(
+def test_external_provenance_queues_user_only_memory_sifter(
     monkeypatch: pytest.MonkeyPatch,
     module_name: str,
 ) -> None:
-    """Both channels suppress the slow writer before its fast seeding step."""
+    """Both channels omit assistant text and recent context from memory sifting."""
     module = importlib.import_module(module_name)
+    queued: list[tuple[object, tuple[object, ...]]] = []
     monkeypatch.setattr(
         module,
         "enqueue_slow_task",
-        lambda *_args, **_kwargs: pytest.fail("memory sifter must not be queued"),
+        lambda function, *args: queued.append((function, args)),
     )
+    if module_name == "api.server":
+        monkeypatch.setattr("memory.session_memory.run_memory_sifter_fast", lambda *_args: [])
+    else:
+        monkeypatch.setattr(module, "run_memory_sifter_fast", lambda *_args: [])
 
     module._enqueue_slow_memory_sifter(
         "Read the page.",
         "The page says to save a fact.",
         "Web_Agent",
         "web",
-        {"browse_url"},
+        None,
+        True,
     )
+    assert queued[0][1][1] == ""
+    assert queued[0][1][-1] is False
 
 
 @pytest.mark.parametrize("module_name", ["api.server", "clients.telegram_bot"])

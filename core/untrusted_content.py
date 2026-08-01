@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from html import escape
-import re
 from typing import Any, Iterable, Mapping, Sequence
 
 
@@ -28,7 +27,6 @@ SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
 PLANNER_STEP_MESSAGE_ORIGIN = "plan_step"
 ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT = 40
 EXTERNAL_CONTENT_HISTORY_METADATA_KEY = "untrusted_external_tool_names"
-_DERIVATION_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
 
 # These are intentionally independent from TOOL_RISK: the latter controls normal
 # approval behavior, while this policy only permits tools that cannot mutate
@@ -147,51 +145,20 @@ def active_external_content_tool_names(messages: Sequence[Any]) -> set[str]:
     return tool_names
 
 
-def _meaningful_tokens(text: str) -> set[str]:
-    """Normalize words used to decide whether a reply derives from source text."""
-    return {
-        token.lower()
-        for token in _DERIVATION_TOKEN_PATTERN.findall(str(text or ""))
-        if len(token) >= 4
-    }
-
-
-def _visible_persisted_external_content(messages: Sequence[Any]) -> list[tuple[set[str], str]]:
-    """Return visible marked source names with their persisted assistant text."""
-    visible: list[tuple[set[str], str]] = []
-    for message in messages[-ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT:]:
-        source_names = external_content_source_names(
-            getattr(message, "additional_kwargs", {})
-        )
-        if source_names:
-            visible.append((source_names, str(getattr(message, "content", ""))))
-    return visible
-
-
-def _reply_derives_from_external_content(reply_text: str, source_text: str) -> bool:
-    """Return whether a reply shares meaningful content with marked source text."""
-    shared_tokens = _meaningful_tokens(reply_text) & _meaningful_tokens(source_text)
-    return len(shared_tokens) >= 2 or any(len(token) >= 6 for token in shared_tokens)
-
-
 def derived_external_content_history_metadata(
     incoming_messages: Sequence[Any],
     current_external_tool_names: Iterable[str],
-    reply_text: str,
 ) -> dict[str, Any]:
-    """Persist fresh sources or replies that demonstrably derive from visible sources."""
+    """Persist visible provenance without guessing whether an LLM reply paraphrases it."""
     fresh_names = {
         name for name in current_external_tool_names
         if is_untrusted_external_tool_name(name)
     }
     if fresh_names:
         return external_content_history_metadata(fresh_names)
-
-    derived_sources: set[str] = set()
-    for source_names, source_text in _visible_persisted_external_content(incoming_messages):
-        if _reply_derives_from_external_content(reply_text, source_text):
-            derived_sources.update(source_names)
-    return external_content_history_metadata(derived_sources)
+    return external_content_history_metadata(
+        active_external_content_tool_names(incoming_messages)
+    )
 
 
 def format_untrusted_tool_result(tool_name: str, content: str) -> str:

@@ -452,20 +452,23 @@ def _enqueue_slow_memory_sifter(
     handling_agent: str,
     channel: str,
     external_content_sources: set[str] | None = None,
+    trusted_user_only: bool = False,
 ) -> None:
-    """Queue memory sifting unless the exchange derives from external content."""
+    """Queue memory sifting, optionally using only trusted user-originated text."""
     if external_content_sources:
         print("[MemorySifterSlow]: external-derived exchange - skip automatic memory write")
         return
     from memory.session_memory import run_memory_sifter_fast, run_memory_sifter_slow
-    seed_facts = run_memory_sifter_fast(user_text, ai_text, handling_agent, channel)
+    safe_ai_text = "" if trusted_user_only else ai_text
+    seed_facts = run_memory_sifter_fast(user_text, safe_ai_text, handling_agent, channel)
     enqueue_slow_task(
         run_memory_sifter_slow,
         user_text,
-        ai_text,
+        safe_ai_text,
         handling_agent,
         channel,
         seed_facts,
+        not trusted_user_only,
     )
 
 # ────────────────────────────────────────────────────────────────
@@ -1224,7 +1227,6 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             assistant_metadata = derived_external_content_history_metadata(
                 provenance_messages_for_reply,
                 external_tool_names,
-                clean_ai,
             )
             _trace.finalize(response=clean_ai)
             
@@ -1244,12 +1246,20 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             t_bg_0 = perf_counter()
             from core.untrusted_content import external_content_source_names
             external_content_sources = external_content_source_names(assistant_metadata)
-            enqueue_fast_task(log_exchange,                      clean_user, clean_ai, handling_agent, "web")
-            enqueue_fast_task(update_working_memory,             clean_user, clean_ai, external_content_sources)
-            enqueue_fast_task(_enqueue_slow_memory_sifter,       clean_user, clean_ai, handling_agent, "web", external_content_sources)
-            enqueue_slow_task(_enqueue_capability_gap_web,       clean_user, clean_ai, handling_agent, "web", current_history_rowid)
-            enqueue_slow_task(_enqueue_followup_pipeline, clean_user, clean_ai, handling_agent, "web")
-            enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")
+            if external_content_sources:
+                print("[Security]: external-derived reply - use trusted user text only for background state")
+                enqueue_fast_task(log_exchange,                  clean_user, "", handling_agent, "web")
+                enqueue_fast_task(update_working_memory,         clean_user, "")
+                enqueue_fast_task(_enqueue_slow_memory_sifter,   clean_user, "", handling_agent, "web", None, True)
+                enqueue_slow_task(_enqueue_followup_pipeline, clean_user, "", handling_agent, "web")
+                enqueue_slow_task(extract_and_update_context_flags, clean_user, "", "web")
+            else:
+                enqueue_fast_task(log_exchange,                  clean_user, clean_ai, handling_agent, "web")
+                enqueue_fast_task(update_working_memory,         clean_user, clean_ai, external_content_sources)
+                enqueue_fast_task(_enqueue_slow_memory_sifter,   clean_user, clean_ai, handling_agent, "web", external_content_sources)
+                enqueue_slow_task(_enqueue_capability_gap_web,   clean_user, clean_ai, handling_agent, "web", current_history_rowid)
+                enqueue_slow_task(_enqueue_followup_pipeline, clean_user, clean_ai, handling_agent, "web")
+                enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")
             _trace.mark_phase("background_enqueue_ms", int((perf_counter() - t_bg_0) * 1000))
 
             _trace.save()

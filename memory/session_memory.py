@@ -1876,6 +1876,7 @@ def run_memory_sifter_slow(
     agent_name: str = "Unknown",
     channel: str = "web",
     deterministic_seed_facts: list[str] | None = None,
+    include_recent_context: bool = True,
 ):
     deterministic_seed_facts = deterministic_seed_facts or []
     print("\033[90m[MemorySifterSlow]: start\033[0m")
@@ -1928,19 +1929,20 @@ def run_memory_sifter_slow(
         # in api/server.py), so the SESSION_LOGS here does NOT yet contain the
         # current exchange -> no double entry/race condition.
         recent_context_block = ""
-        try:
-            recent_entries = SESSION_LOGS[-4:]
-            if recent_entries:
-                ctx_lines = "\n".join(
-                    t("memory.session_memory.conversation_log_short", user=e['user'], ai=e['ai'])
-                    for e in recent_entries
-                )
-                recent_context_block = (
-                    f"{t('memory.session_memory.context_warning')}\n"
-                    f"{ctx_lines}\n"
-                )
-        except Exception:
-            recent_context_block = ""
+        if include_recent_context:
+            try:
+                recent_entries = SESSION_LOGS[-4:]
+                if recent_entries:
+                    ctx_lines = "\n".join(
+                        t("memory.session_memory.conversation_log_short", user=e['user'], ai=e['ai'])
+                        for e in recent_entries
+                    )
+                    recent_context_block = (
+                        f"{t('memory.session_memory.context_warning')}\n"
+                        f"{ctx_lines}\n"
+                    )
+            except Exception:
+                recent_context_block = ""
 
         sifter_prompt = load_prompt("memory_sifter.md").replace(
             "{language}", config.RESPONSE_LANGUAGE
