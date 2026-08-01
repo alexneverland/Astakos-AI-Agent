@@ -539,6 +539,83 @@ def test_pending_partner_routine_without_draft_offer_keeps_selector_path() -> No
     )
 
 
+def test_batched_pending_offer_keeps_selector_path() -> None:
+    """A batch cannot convert bare consent into a Messenger draft for any routine."""
+    graph_mock = sys.modules["core.graph"].graph
+    selector_mock = sys.modules["services.routine_completion_selector"].select_routine
+
+    with (
+        patch(
+            "services.messenger_intent.is_draft_offer_acceptance",
+            return_value=True,
+        ),
+        patch(
+            "services.routine_completion_context.build_messenger_draft_offer_context"
+        ) as build_draft_context,
+    ):
+        _run_handle_message(
+            "Î½Î±Î¹",
+            pending={
+                5: {"event": "Message routine", "draft_offer": True},
+                6: {"event": "Other routine", "draft_offer": False},
+            },
+        )
+
+    selector_mock.assert_called_once()
+    build_draft_context.assert_not_called()
+    graph_messages = graph_mock.stream.call_args.args[0]["messages"]
+    assert all(
+        "[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]" not in str(
+            getattr(message, "content", "")
+        )
+        for message in graph_messages
+    )
+
+
+def test_proactive_message_uses_structured_draft_offer_state() -> None:
+    """Only an exact structured proactive response can arm one draft offer."""
+    bot.config.USER_NAME = "User"
+    with (
+        patch.object(bot.core.i18n, "load_prompt", return_value="{context}"),
+        patch.object(bot, "_build_proactive_memory_context", return_value=""),
+        patch.object(bot, "_build_proactive_state_snapshot", return_value={}),
+        patch.object(bot, "_force_proactive_skip_from_state", return_value=None),
+        patch.object(bot, "_get_env_context", return_value=""),
+        patch.object(
+            bot,
+            "safe_llm_invoke",
+            return_value=types.SimpleNamespace(
+                content='{"message":"Shall I prepare a draft?","offers_messenger_draft":true}'
+            ),
+        ),
+    ):
+        message, draft_offer = bot._craft_proactive_msg("Message routine", 0.9)
+
+    assert message == "Shall I prepare a draft?"
+    assert draft_offer is True
+
+
+def test_proactive_plain_message_cannot_arm_draft_offer() -> None:
+    """Unstructured proactive prose remains deliverable but cannot authorize bare consent."""
+    bot.config.USER_NAME = "User"
+    with (
+        patch.object(bot.core.i18n, "load_prompt", return_value="{context}"),
+        patch.object(bot, "_build_proactive_memory_context", return_value=""),
+        patch.object(bot, "_build_proactive_state_snapshot", return_value={}),
+        patch.object(bot, "_force_proactive_skip_from_state", return_value=None),
+        patch.object(bot, "_get_env_context", return_value=""),
+        patch.object(
+            bot,
+            "safe_llm_invoke",
+            return_value=types.SimpleNamespace(content="Remember to read your partner's message."),
+        ),
+    ):
+        message, draft_offer = bot._craft_proactive_msg("Message routine", 0.9)
+
+    assert message == "Remember to read your partner's message."
+    assert draft_offer is False
+
+
 def test_unrelated_pending_does_not_block_today_completion() -> None:
     """A pass-through pending decision still lets a later today candidate complete."""
     from services.routine_completion_helper import RoutineSelection
