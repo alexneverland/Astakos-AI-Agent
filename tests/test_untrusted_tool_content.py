@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -17,6 +19,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
         "hn_briefing",
         "morning_briefing",
         "read_local_file",
+        "research_last30days",
         "search_flights",
         "search_goldmall_offers",
         "search_google_places",
@@ -114,6 +117,60 @@ def test_approval_requires_approval_for_mutation_after_a_new_user_turn(
     assert result["approval_status"] == "pending"
     assert result["messages"][0].tool_call_id == "tool-2"
     assert save_pending_calls[0][0] == "save_to_memory"
+
+
+def test_persisted_external_provenance_survives_context_reconstruction() -> None:
+    """Persisted provenance must protect a later graph request without ToolMessages."""
+    from core.untrusted_content import (
+        external_content_history_metadata,
+        history_message_additional_kwargs,
+        has_untrusted_result_in_active_history,
+    )
+
+    metadata = external_content_history_metadata(["browse_url"])
+    restored = AIMessage(
+        content="The deadline is Friday.",
+        additional_kwargs=history_message_additional_kwargs(metadata),
+    )
+    messages = [
+        restored,
+        HumanMessage(content="Save that deadline to my memory."),
+        AIMessage(content="", tool_calls=[]),
+    ]
+
+    assert has_untrusted_result_in_active_history(messages) is True
+
+
+@pytest.mark.parametrize("module_name", ["api.server", "clients.telegram_bot"])
+def test_shared_context_loaders_restore_persisted_external_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+    module_name: str,
+) -> None:
+    """Both channel entry points restore persisted provenance into AI history."""
+    from core.untrusted_content import (
+        external_content_history_metadata,
+        has_untrusted_result_in_active_history,
+    )
+
+    module = importlib.import_module(module_name)
+    monkeypatch.setattr(
+        "memory.conversation_history.load_recent_context",
+        lambda **_kwargs: [
+            {
+                "id": "assistant-1",
+                "role": "assistant",
+                "content": "The deadline is Friday.",
+                "date": "2026-08-01",
+                "time": "12:00",
+                "channel": "web",
+                "metadata": external_content_history_metadata(["get_news"]),
+            }
+        ],
+    )
+
+    messages = module._load_shared_context_messages("web")
+
+    assert has_untrusted_result_in_active_history(messages) is True
 
 
 def test_approval_keeps_read_only_tools_available_after_external_content() -> None:

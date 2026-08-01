@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from html import escape
-from typing import Any, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 
 UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
@@ -15,6 +15,7 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "hn_briefing",
     "morning_briefing",
     "read_local_file",
+    "research_last30days",
     "search_flights",
     "search_goldmall_offers",
     "search_google_places",
@@ -23,6 +24,7 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
 SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
 PLANNER_STEP_MESSAGE_ORIGIN = "plan_step"
 ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT = 40
+EXTERNAL_CONTENT_HISTORY_METADATA_KEY = "untrusted_external_tool_names"
 
 # These are intentionally independent from TOOL_RISK: the latter controls normal
 # approval behavior, while this policy only permits tools that cannot mutate
@@ -77,6 +79,34 @@ def is_direct_user_message(message: Any) -> bool:
     return not bool(metadata.get(SYNTHETIC_MESSAGE_ORIGIN_KEY))
 
 
+def external_content_history_metadata(tool_names: Iterable[str]) -> dict[str, list[str]]:
+    """Build persisted provenance metadata for trusted local conversation history."""
+    external_names = sorted({
+        tool_name
+        for tool_name in tool_names
+        if is_untrusted_external_tool_name(tool_name)
+    })
+    if not external_names:
+        return {}
+    return {EXTERNAL_CONTENT_HISTORY_METADATA_KEY: external_names}
+
+
+def history_message_additional_kwargs(metadata: Mapping[str, Any] | None) -> dict[str, list[str]]:
+    """Restore validated external-source provenance into a graph history message."""
+    raw_names = (metadata or {}).get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, [])
+    if not isinstance(raw_names, list):
+        return {}
+    return external_content_history_metadata(
+        name for name in raw_names if isinstance(name, str)
+    )
+
+
+def has_persisted_external_content_provenance(message: Any) -> bool:
+    """Return whether a reconstructed history message carries external provenance."""
+    metadata = getattr(message, "additional_kwargs", {})
+    return bool(history_message_additional_kwargs(metadata))
+
+
 def format_untrusted_tool_result(tool_name: str, content: str) -> str:
     """Render external tool text as escaped reference data for an LLM turn."""
     safe_content = escape(str(content or ""), quote=False)
@@ -115,7 +145,10 @@ def has_untrusted_result_in_active_history(messages: Sequence[Any]) -> bool:
     restore automatic mutation while an external result is still prompt-visible.
     """
     return any(
-        getattr(message, "type", "") == "tool"
-        and is_untrusted_external_tool_name(getattr(message, "name", None))
+        (
+            getattr(message, "type", "") == "tool"
+            and is_untrusted_external_tool_name(getattr(message, "name", None))
+        )
+        or has_persisted_external_content_provenance(message)
         for message in messages[-ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT:]
     )

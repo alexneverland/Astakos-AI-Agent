@@ -164,6 +164,7 @@ def append_to_chat_history(
     agent: str | None = None,
     *,
     return_saved: bool = False,
+    metadata: dict | None = None,
 ):
     """Add message to the shared SQLite conversation history (web channel) and websocket push."""
     now = datetime.now()
@@ -176,6 +177,7 @@ def append_to_chat_history(
             content=content,
             channel="web",
             agent=agent,
+            metadata=metadata,
             timestamp=now,
         )
         shared_message_id = saved.get("id")
@@ -198,7 +200,13 @@ def append_to_chat_history(
     return shared_message_id
 
 
-def notify_telegram_message(role: str, content: str, agent: str | None = None) -> int | None:
+def notify_telegram_message(
+    role: str,
+    content: str,
+    agent: str | None = None,
+    *,
+    metadata: dict | None = None,
+) -> int | None:
     """
     Called by the Telegram handler when a message arrives/is sent.
     Saves to the shared SQLite database and notifies the Web UI via WebSocket.
@@ -214,6 +222,7 @@ def notify_telegram_message(role: str, content: str, agent: str | None = None) -
             channel="telegram",
             timestamp=now,
             agent=agent,
+            metadata=metadata,
         )
         msg_id = saved.get("rowid") or get_max_rowid()
         _broadcast_ws({
@@ -242,6 +251,7 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
         return []
 
     context_msgs = []
+    from core.untrusted_content import history_message_additional_kwargs
     for entry in entries:
         if exclude_message_id and entry.get("id") == exclude_message_id:
             continue
@@ -252,7 +262,10 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
         if entry.get("role") in ("user", "human", "Human"):
             context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
         else:
-            context_msgs.append(AIMessage(content=f"{prefix}{content}"))
+            context_msgs.append(AIMessage(
+                content=f"{prefix}{content}",
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
     return context_msgs
 
 
@@ -319,6 +332,7 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
     final_ai_response = ""
     handling_agent = "Chat_Agent"
     tool_result_fallbacks: list[str] = []
+    external_tool_names: set[str] = set()
 
     t_graph_0 = perf_counter()
     for event in graph.stream(
@@ -334,6 +348,9 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
                 t_tools_0 = perf_counter()
                 for msg in data.get("messages", []):
                     if getattr(msg, "type", "") == "tool":
+                        from core.untrusted_content import is_untrusted_external_tool_name
+                        if is_untrusted_external_tool_name(getattr(msg, "name", None)):
+                            external_tool_names.add(str(getattr(msg, "name", "")))
                         tool_content = clean_message(getattr(msg, "content", "")).strip()
                         if tool_content:
                             tool_result_fallbacks.append(tool_content)
@@ -369,6 +386,7 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
         "final_ai_response": final_ai_response,
         "handling_agent": handling_agent,
         "tool_result_fallbacks": tool_result_fallbacks,
+        "external_tool_names": sorted(external_tool_names),
         "graph_elapsed_ms": graph_elapsed_ms,
     }
 
@@ -1037,6 +1055,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         
         is_ultra_ack = is_ultra_light_ack(isolated_user_input)
         tool_result_fallbacks = []
+        external_tool_names: list[str] = []
 
         from core.planner import get_fresh_pending_plan_confirmation
 
@@ -1101,6 +1120,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             final_ai_response = graph_result["final_ai_response"]
             handling_agent = graph_result["handling_agent"]
             tool_result_fallbacks = graph_result["tool_result_fallbacks"]
+            external_tool_names = graph_result["external_tool_names"]
             graph_elapsed_ms = graph_result["graph_elapsed_ms"]
             _trace.mark_phase("graph_call_ms", graph_elapsed_ms)
             _trace.mark_phase("graph_stream_ms", graph_elapsed_ms)
@@ -1174,13 +1194,22 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             clean_ai = sanitize_messenger_draft_claims(clean_ai)
             clean_ai = strip_operational_assistant_paragraphs(clean_ai).strip() or clean_ai
+            from core.untrusted_content import external_content_history_metadata
+            assistant_metadata = external_content_history_metadata(
+                external_tool_names
+            )
             _trace.finalize(response=clean_ai)
             
+            assistant_history_kwargs = {
+                "agent": handling_agent,
+                "return_saved": True,
+            }
+            if assistant_metadata:
+                assistant_history_kwargs["metadata"] = assistant_metadata
             assistant_history_saved = append_to_chat_history(
                 "assistant",
                 clean_ai,
-                agent=handling_agent,
-                return_saved=True,
+                **assistant_history_kwargs,
             )
             assistant_history_rowid = assistant_history_saved.get("rowid")
             

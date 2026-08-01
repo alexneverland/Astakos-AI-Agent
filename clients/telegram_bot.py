@@ -1384,7 +1384,13 @@ def _schedule_capability_gap_if_valid(user_text: str, ai_text: str, agent: str, 
         enqueue_slow_task(_enqueue_capability_gap_telegram, user_text, ai_text, agent, "telegram", user_rowid, chat_id)
 
 
-def _append_to_analytics_log(role: str, content: str, agent: str | None = None) -> int | None:
+def _append_to_analytics_log(
+    role: str,
+    content: str,
+    agent: str | None = None,
+    *,
+    metadata: dict | None = None,
+) -> int | None:
     """Logging of a message in the shared SQLite conversation history (telegram channel)."""
     try:
         now = datetime.now()
@@ -1392,7 +1398,12 @@ def _append_to_analytics_log(role: str, content: str, agent: str | None = None) 
         try:
             # notify_telegram_message: saves to shared SQLite + WebSocket broadcast to Web UI
             from api.server import notify_telegram_message
-            return notify_telegram_message(role=shared_role, content=content, agent=agent)
+            return notify_telegram_message(
+                role=shared_role,
+                content=content,
+                agent=agent,
+                metadata=metadata,
+            )
         except Exception:
             # Fallback: direct append without broadcast (if the server is not running)
             from memory.conversation_history import append_message
@@ -1402,6 +1413,7 @@ def _append_to_analytics_log(role: str, content: str, agent: str | None = None) 
                 channel="telegram",
                 timestamp=now,
                 agent=agent,
+                metadata=metadata,
             )
             return saved.get("rowid") if isinstance(saved, dict) else None
     except Exception as e:
@@ -1559,6 +1571,7 @@ def _load_shared_context_messages(channel: str) -> list:
         return []
 
     context_msgs = []
+    from core.untrusted_content import history_message_additional_kwargs
     for entry in entries:
         content = entry.get("content", "")
         if not content:
@@ -1567,7 +1580,10 @@ def _load_shared_context_messages(channel: str) -> list:
         if entry.get("role") in ("user", "human", "Human"):
             context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
         else:
-            context_msgs.append(AIMessage(content=f"{prefix}{content}"))
+            context_msgs.append(AIMessage(
+                content=f"{prefix}{content}",
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
     return context_msgs
 
 
@@ -2312,6 +2328,7 @@ def handle_message(user_text: str, chat_id: str):
         # 3. tool_message_collect_ms
         tool_collect_started = perf_counter()
         tool_result_fallbacks = []
+        external_tool_names: set[str] = set()
         for event in events:
             for node, data in event.items():
                 if data is None:
@@ -2319,6 +2336,9 @@ def handle_message(user_text: str, chat_id: str):
                 if node == "tools":
                     for msg in data.get("messages", []):
                         if getattr(msg, "type", "") == "tool":
+                            from core.untrusted_content import is_untrusted_external_tool_name
+                            if is_untrusted_external_tool_name(getattr(msg, "name", None)):
+                                external_tool_names.add(str(getattr(msg, "name", "")))
                             tool_content = clean_message(getattr(msg, "content", "")).strip()
                             if tool_content:
                                 tool_result_fallbacks.append(tool_content)
@@ -2420,7 +2440,16 @@ def handle_message(user_text: str, chat_id: str):
             # We keep context for the next message
             _typing_active["on"] = False  # We stop typing
             user_rowid = _append_to_analytics_log("user", clean_user_text)
-            _append_to_analytics_log("ai", final_ai_response)
+            from core.untrusted_content import external_content_history_metadata
+            assistant_metadata = external_content_history_metadata(external_tool_names)
+            if assistant_metadata:
+                _append_to_analytics_log(
+                    "ai",
+                    final_ai_response,
+                    metadata=assistant_metadata,
+                )
+            else:
+                _append_to_analytics_log("ai", final_ai_response)
             # Photos
             if "[SEND_PHOTO:" in final_ai_response:
                 match = re.search(r"\[SEND_PHOTO:\s*(.+?)\]", final_ai_response)
