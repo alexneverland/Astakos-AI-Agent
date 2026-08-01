@@ -865,6 +865,42 @@ def test_web_agent_exposes_messenger_draft_tool_for_accepted_routine_offer(monke
     assert "relay_local_payload" in bound_tool_names
 
 
+def test_web_agent_exposes_messenger_draft_tool_for_active_draft_edit(monkeypatch: Any) -> None:
+    """An active draft keeps the persistence tool available for a natural edit request."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Web agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr(
+        "core.messenger_draft.active_draft_status",
+        lambda: (True, "active", {"message": "Initial draft"}),
+    )
+
+    web_agent_node({
+        "messages": [HumanMessage(content="Κάν' το πιο ζεστό.")],
+        "channel": "telegram",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+
+
 def test_proactive_prompt_requires_message_routines_to_request_draft_first() -> None:
     """Message routines must ask before generating a Messenger draft or message body."""
     prompt_path = Path(__file__).resolve().parents[1] / "prompts" / "telegram_bot_craft_proactive.md"

@@ -1776,7 +1776,7 @@ def handle_message(user_text: str, chat_id: str):
     # ── ROUTINE COMPLETION DECISION ────────────────────────────────
     # Pending routines get first priority; a pass-through still checks today's pool.
     from memory.event_log import log_event
-    from services.routine_completion_helper import decide_completion
+    from services.routine_completion_helper import RoutineSelection, decide_completion
     from services.routine_completion_selector import select_routine as _completion_selector
     routine_completion_context: SystemMessage | None = None
     routine_draft_offer_context: SystemMessage | None = None
@@ -1826,12 +1826,27 @@ def handle_message(user_text: str, chat_id: str):
             rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
             for rid, pdata in pending_routine_confirmations.items()
         }
-        decision = decide_completion(
-            user_text=clean_user_text,
-            candidates=pending_candidates,
-            pool="pending",
-            semantic_selector=_completion_selector,
+        pending_draft_offer = (
+            pending_items[0]
+            if len(pending_items) == 1
+            and _is_partner_messenger_routine(
+                str((pending_items[0][1] or {}).get("event", ""))
+            )
+            else None
         )
+        from services.messenger_intent import is_draft_offer_acceptance
+        if pending_draft_offer and is_draft_offer_acceptance(clean_user_text):
+            decision = RoutineSelection(
+                action="acknowledge",
+                routine_id=pending_draft_offer[0],
+            )
+        else:
+            decision = decide_completion(
+                user_text=clean_user_text,
+                candidates=pending_candidates,
+                pool="pending",
+                semantic_selector=_completion_selector,
+            )
 
         if decision.action == "complete" and decision.routine_id is not None:
             from memory.routine_db import (
@@ -1887,7 +1902,6 @@ def handle_message(user_text: str, chat_id: str):
             pending_routine_confirmations.pop(rid, None)
             from services.routine_completion_context import build_routine_completion_context
             routine_completion_context = build_routine_completion_context()
-            from services.messenger_intent import is_draft_offer_acceptance
             if _is_partner_messenger_routine(str(ev)) and is_draft_offer_acceptance(clean_user_text):
                 from services.routine_completion_context import build_messenger_draft_offer_context
                 routine_draft_offer_context = build_messenger_draft_offer_context()

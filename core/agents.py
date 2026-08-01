@@ -372,7 +372,11 @@ def chat_agent_node(state: AgentState):
         read_local_file, generate_image_tool, get_fit_summary,
         *([archive_file] if not _is_farewell else []),
     ]
-    if is_create_draft_intent(last_msg_text) or has_accepted_routine_draft_offer(history):
+    if (
+        is_create_draft_intent(last_msg_text)
+        or has_accepted_routine_draft_offer(history)
+        or _has_active_messenger_draft()
+    ):
         static_chat_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     chat_tools = get_registered_tools_for_agent("Chat_Agent", static_chat_tools)
@@ -564,6 +568,17 @@ def _is_stale_messenger_send_call(response) -> bool:
     return not is_active
 
 
+def _has_active_messenger_draft() -> bool:
+    """Return whether an active Messenger draft permits a revision tool binding."""
+    try:
+        from core.messenger_draft import active_draft_status
+
+        is_active, _, _ = active_draft_status()
+        return is_active
+    except Exception:
+        return False
+
+
 def web_agent_node(state: AgentState):
     from core.utils import (
         load_agent_prompt,
@@ -663,7 +678,11 @@ def web_agent_node(state: AgentState):
         process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices,
         morning_briefing, hn_briefing,
     ]
-    if is_create_draft_intent(latest_user_text) or has_accepted_routine_draft_offer(history):
+    if (
+        is_create_draft_intent(latest_user_text)
+        or has_accepted_routine_draft_offer(history)
+        or _has_active_messenger_draft()
+    ):
         static_web_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)
