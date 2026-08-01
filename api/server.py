@@ -1056,6 +1056,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         is_ultra_ack = is_ultra_light_ack(isolated_user_input)
         tool_result_fallbacks = []
         external_tool_names: list[str] = []
+        incoming_external_tool_names: set[str] = set()
 
         from core.planner import get_fresh_pending_plan_confirmation
 
@@ -1111,6 +1112,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
             _trace.mark_phase("web_graph_budget", limit)
 
+            from core.untrusted_content import active_external_content_tool_names
+            incoming_external_tool_names = active_external_content_tool_names(messages_for_graph)
             graph_result = await asyncio.to_thread(
                 _run_web_graph_stream_sync,
                 messages_for_graph,
@@ -1120,7 +1123,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             final_ai_response = graph_result["final_ai_response"]
             handling_agent = graph_result["handling_agent"]
             tool_result_fallbacks = graph_result["tool_result_fallbacks"]
-            external_tool_names = graph_result["external_tool_names"]
+            external_tool_names = sorted(
+                set(graph_result["external_tool_names"]) | incoming_external_tool_names
+            )
             graph_elapsed_ms = graph_result["graph_elapsed_ms"]
             _trace.mark_phase("graph_call_ms", graph_elapsed_ms)
             _trace.mark_phase("graph_stream_ms", graph_elapsed_ms)

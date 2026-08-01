@@ -163,6 +163,27 @@ def test_persisted_external_provenance_survives_context_reconstruction() -> None
     assert has_untrusted_result_in_active_history(messages) is True
 
 
+def test_active_external_provenance_names_survive_a_derived_reply() -> None:
+    """A reply derived from restored external content retains its source provenance."""
+    from core.untrusted_content import (
+        active_external_content_tool_names,
+        external_content_history_metadata,
+        history_message_additional_kwargs,
+    )
+
+    messages = [
+        AIMessage(
+            content="The deadline is Friday.",
+            additional_kwargs=history_message_additional_kwargs(
+                external_content_history_metadata(["get_news"])
+            ),
+        ),
+        HumanMessage(content="Explain that in more detail."),
+    ]
+
+    assert active_external_content_tool_names(messages) == {"get_news"}
+
+
 @pytest.mark.parametrize("module_name", ["api.server", "clients.telegram_bot"])
 def test_shared_context_loaders_restore_persisted_external_provenance(
     monkeypatch: pytest.MonkeyPatch,

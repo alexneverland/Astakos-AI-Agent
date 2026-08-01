@@ -106,10 +106,22 @@ def history_message_additional_kwargs(metadata: Mapping[str, Any] | None) -> dic
     )
 
 
-def has_persisted_external_content_provenance(message: Any) -> bool:
-    """Return whether a reconstructed history message carries external provenance."""
-    metadata = getattr(message, "additional_kwargs", {})
-    return bool(history_message_additional_kwargs(metadata))
+def active_external_content_tool_names(messages: Sequence[Any]) -> set[str]:
+    """Return external source names visible in the active agent history window."""
+    tool_names: set[str] = set()
+    for message in messages[-ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT:]:
+        if getattr(message, "type", "") == "tool":
+            tool_name = str(getattr(message, "name", ""))
+            if is_untrusted_external_tool_name(tool_name):
+                tool_names.add(tool_name)
+        metadata = getattr(message, "additional_kwargs", {})
+        tool_names.update(
+            history_message_additional_kwargs(metadata).get(
+                EXTERNAL_CONTENT_HISTORY_METADATA_KEY,
+                [],
+            )
+        )
+    return tool_names
 
 
 def format_untrusted_tool_result(tool_name: str, content: str) -> str:
@@ -149,11 +161,4 @@ def has_untrusted_result_in_active_history(messages: Sequence[Any]) -> bool:
     This mirrors that window so an unrelated later user message cannot silently
     restore automatic mutation while an external result is still prompt-visible.
     """
-    return any(
-        (
-            getattr(message, "type", "") == "tool"
-            and is_untrusted_external_tool_name(getattr(message, "name", None))
-        )
-        or has_persisted_external_content_provenance(message)
-        for message in messages[-ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT:]
-    )
+    return bool(active_external_content_tool_names(messages))
