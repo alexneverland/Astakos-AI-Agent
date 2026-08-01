@@ -56,6 +56,17 @@ def _partner_match_terms() -> list[str]:
         if term
     ]
 
+
+def _is_partner_messenger_routine(event_name: str) -> bool:
+    """Return whether a routine event concerns composing or sending a partner Messenger message."""
+    event_l = _normalize_gr(event_name)
+    return (
+        t("clients.telegram_bot.bot_msg_2e67ed") in event_l
+        or any(term in event_l for term in _partner_match_terms())
+        or "messenger" in event_l
+        or t("clients.telegram_bot.bot_msg_500d81") in event_l
+    )
+
 def _safe_classify_messenger_intent(text: str, *, has_active_draft: bool):
     """Lazy/fail-soft import so tests that stub `services` don't crash telegram_bot import."""
     try:
@@ -1671,6 +1682,7 @@ def handle_message(user_text: str, chat_id: str):
     from services.routine_completion_helper import decide_completion
     from services.routine_completion_selector import select_routine as _completion_selector
     routine_completion_context: SystemMessage | None = None
+    routine_draft_offer_context: SystemMessage | None = None
     routine_action_consumed = False
 
     if pending_routine_confirmations:
@@ -1680,12 +1692,7 @@ def handle_message(user_text: str, chat_id: str):
             for rid in list(pending_routine_confirmations.keys())
         ]
         has_pending_partner_messenger = any(
-            (
-                t("clients.telegram_bot.bot_msg_2e67ed") in _normalize_gr(str((pdata or {}).get("event", "")))
-                or any(term in _normalize_gr(str((pdata or {}).get("event", ""))) for term in _partner_match_terms())
-                or "messenger" in _normalize_gr(str((pdata or {}).get("event", "")))
-                or t("clients.telegram_bot.bot_msg_500d81") in _normalize_gr(str((pdata or {}).get("event", "")))
-            )
+            _is_partner_messenger_routine(str((pdata or {}).get("event", "")))
             for _, pdata in pending_items
         )
 
@@ -1695,13 +1702,7 @@ def handle_message(user_text: str, chat_id: str):
 
             for rid, pdata in pending_items:
                 ev = (pdata or {}).get("event", "?")
-                event_l = _normalize_gr(str(ev))
-                is_partner_messenger = (
-                    t("clients.telegram_bot.bot_msg_2e67ed") in event_l
-                    or any(term in event_l for term in _partner_match_terms())
-                    or "messenger" in event_l
-                    or t("clients.telegram_bot.bot_msg_500d81") in event_l
-                )
+                is_partner_messenger = _is_partner_messenger_routine(str(ev))
                 if not is_partner_messenger:
                     continue
 
@@ -1789,6 +1790,10 @@ def handle_message(user_text: str, chat_id: str):
             pending_routine_confirmations.pop(rid, None)
             from services.routine_completion_context import build_routine_completion_context
             routine_completion_context = build_routine_completion_context()
+            from services.messenger_intent import is_draft_offer_acceptance
+            if _is_partner_messenger_routine(str(ev)) and is_draft_offer_acceptance(clean_user_text):
+                from services.routine_completion_context import build_messenger_draft_offer_context
+                routine_draft_offer_context = build_messenger_draft_offer_context()
             routine_action_consumed = True
 
         elif decision.action == "skip_today" and decision.routine_id is not None:
@@ -2212,6 +2217,8 @@ def handle_message(user_text: str, chat_id: str):
         context_msgs, current_msg = _build_fast_chat_context(clean_user_text)
         from services.routine_completion_context import append_routine_completion_context
         context_msgs = append_routine_completion_context(context_msgs, routine_completion_context)
+        if routine_draft_offer_context is not None:
+            context_msgs.append(routine_draft_offer_context)
         context_load_ms = int((perf_counter() - t_context_0) * 1000)
         # ── Flow via LangGraph ───────────────────────────────────_
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any, Iterable
 import unicodedata
 import re
 from core import nl_config
@@ -22,6 +23,8 @@ _DRAFT_CLEAR_PATTERNS = nl_config.MI_CLEANUP_WORDS
 
 _GENERAL_SHORT = nl_config.MI_GENERAL_CHAT_SHORT
 
+MESSENGER_ROUTINE_DRAFT_OFFER_MARKER = "[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]"
+
 
 def _normalize(text: str) -> str:
     raw = str(text or "").strip().lower()
@@ -34,6 +37,21 @@ def _normalize(text: str) -> str:
 
 def _has_any(text: str, patterns: tuple[str, ...]) -> bool:
     return any(p in text for p in patterns)
+
+
+def is_draft_offer_acceptance(text: str) -> bool:
+    """Return whether text is a bare configured affirmative for a pending draft offer."""
+    normalized = _normalize(text)
+    return any(normalized == _normalize(pattern) for pattern in _DRAFT_CONFIRM_PATTERNS)
+
+
+def has_accepted_routine_draft_offer(messages: Iterable[Any]) -> bool:
+    """Return whether trusted graph history contains a routine draft-offer acceptance marker."""
+    return any(
+        getattr(message, "type", "") == "system"
+        and str(getattr(message, "content", "")).startswith(MESSENGER_ROUTINE_DRAFT_OFFER_MARKER)
+        for message in messages
+    )
 
 
 def classify_messenger_intent(text: str, has_active_draft: bool = False) -> MessengerIntentResult:

@@ -138,6 +138,7 @@ def test_messenger_intent_clarify_does_not_create_draft(mock_classify, mock_stre
     assert "Δεν υπάρχει ενεργό draft αυτή τη στιγμή. Εννοούσα απλώς σαν ιδέα" in sent_text
 
 
+@patch("memory.routine_db.get_eligible_preemptive_routines_for_day", return_value=[])
 @patch("memory.pending_assets.get_latest_pending_asset", return_value=None)
 @patch("memory.pending_assets.clear_expired_pending_assets")
 @patch("core.messenger_draft.active_draft_status", return_value=(True, "active", {"message": "hello"}))
@@ -146,7 +147,18 @@ def test_messenger_intent_clarify_does_not_create_draft(mock_classify, mock_stre
 @patch("clients.telegram_bot._append_to_analytics_log")
 @patch("clients.telegram_bot.graph.stream")
 @patch("clients.telegram_bot._safe_classify_messenger_intent")
-def test_messenger_intent_clear_closes_draft(mock_classify, mock_stream, mock_append, mock_send, mock_clear, mock_active, mock_clear_assets, mock_get_asset):
+def test_messenger_intent_clear_closes_draft(
+    mock_classify: Any,
+    mock_stream: Any,
+    mock_append: Any,
+    mock_send: Any,
+    mock_clear: Any,
+    mock_active: Any,
+    mock_clear_assets: Any,
+    mock_get_asset: Any,
+    mock_eligible: Any,
+) -> None:
+    """A draft-clear request is isolated from live routine candidates."""
     from clients.telegram_bot import handle_message
     from services.messenger_intent import MessengerIntentResult
     

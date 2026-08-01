@@ -248,6 +248,10 @@ def _stub_modules():
 
     sys.modules["services.context_extractor"].extract_and_update_context_flags = MagicMock()
     sys.modules["services.messenger_intent"].classify_messenger_intent = MagicMock(return_value=None)
+    sys.modules["services.messenger_intent"].is_draft_offer_acceptance = MagicMock(return_value=False)
+    sys.modules["services.messenger_intent"].MESSENGER_ROUTINE_DRAFT_OFFER_MARKER = (
+        "[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]"
+    )
 
     sys.modules["services.routine_context"].build_runtime_routine_context = MagicMock(return_value={
         "today": "2026-06-17",
@@ -473,6 +477,37 @@ def test_today_acknowledgement_does_not_complete_routine() -> None:
     build_context.assert_called_once_with()
     graph_messages = graph_mock.stream.call_args.args[0]["messages"]
     assert lifecycle_context in graph_messages
+
+
+def test_pending_messenger_offer_bare_yes_adds_trusted_draft_context() -> None:
+    """A bare accepted offer adds draft-only context for one pending Messenger routine."""
+    from services.routine_completion_helper import RoutineSelection
+
+    graph_mock = sys.modules["core.graph"].graph
+    draft_context = types.SimpleNamespace(
+        content="[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]",
+        type="system",
+    )
+
+    with (
+        patch(
+            "services.messenger_intent.is_draft_offer_acceptance",
+            return_value=True,
+        ),
+        patch(
+            "services.routine_completion_context.build_messenger_draft_offer_context",
+            return_value=draft_context,
+        ) as build_draft_context,
+    ):
+        _run_handle_message(
+            "ναι",
+            pending={5: {"event": "Compose Messenger message"}},
+            selector_return=RoutineSelection(action="acknowledge", routine_id=5),
+        )
+
+    build_draft_context.assert_called_once_with()
+    graph_messages = graph_mock.stream.call_args.args[0]["messages"]
+    assert draft_context in graph_messages
 
 
 def test_unrelated_pending_does_not_block_today_completion() -> None:
