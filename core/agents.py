@@ -655,6 +655,7 @@ def web_agent_node(state: AgentState):
     )
 
     from tools.web import execute_local_pipeline
+    from services.messenger_intent import is_create_draft_intent
     from astakos_skills.morning_briefing import morning_briefing
     from astakos_skills.hn_briefing import hn_briefing
     static_web_tools = [
@@ -662,7 +663,9 @@ def web_agent_node(state: AgentState):
         get_news, get_weather_forecast, duckduckgo_search,
         search_memory, get_navigation_info, retrieve_photo, read_local_file,
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
-        process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices, relay_local_payload, morning_briefing, hn_briefing
+        process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices,
+        *([relay_local_payload] if is_create_draft_intent(latest_user_text) else []),
+        morning_briefing, hn_briefing,
     ]
     from core.agent_tools import get_registered_tools_for_agent
     web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)

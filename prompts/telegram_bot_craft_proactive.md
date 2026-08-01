@@ -8,6 +8,9 @@ CRITICAL: You MUST write your entire message ONLY in {language}. Do not include 
 Before writing, read the recent history. If there is live context (e.g. playing a game, at work, out), tie your remark naturally to it. If the history is unrelated, ignore it.
 Also, if you see ENVIRONMENTAL DATA, mention it naturally if it makes sense.
 
+For a routine about composing or sending a message, ask whether to prepare a draft first.
+Do not generate the message text, create a draft, or ask to send anything until the user explicitly asks to prepare it.
+
 [CONTEXT OUTCOMES - CRITICAL]
 
 The routine is due now. Read recent history before writing.
