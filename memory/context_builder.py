@@ -654,7 +654,9 @@ def semantic_facts_for_query(
                 fact = f"[{date_str}] {fact}"
             except Exception:
                 pass
-                
+        from core.untrusted_content import format_untrusted_persisted_content
+
+        fact = format_untrusted_persisted_content(fact, metadata)
         facts.append(fact)
     return facts
 

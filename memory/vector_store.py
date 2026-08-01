@@ -600,6 +600,7 @@ class AstakosMemoryManager:
         state_markers: list[str] | None = None,
         time_scope: str = "",
         relation_type: str = "",
+        external_content_sources: list[str] | None = None,
     ):
         from config import PROFILE_DB
 
@@ -830,6 +831,7 @@ class AstakosMemoryManager:
         tags = tags or []
         entities = entities or []
         state_markers = state_markers or []
+        external_content_sources = external_content_sources or []
         now_ts = datetime.now().timestamp()
         metadata = {
             "category": category, "agent": agent_name,
@@ -848,6 +850,12 @@ class AstakosMemoryManager:
             "time_scope": time_scope or "",
             "relation_type": relation_type or "",
         }
+        if external_content_sources:
+            from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+            metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                external_content_sources,
+            )
         if photo_path:
             if not os.path.isabs(photo_path):
                 photo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", photo_path)
@@ -893,6 +901,12 @@ class AstakosMemoryManager:
                     "reason": reason,
                     "agent_name": agent_name,
                 }, ensure_ascii=False)
+                if external_content_sources:
+                    from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+                    profile_metadata = json.loads(profile_metadata_json)
+                    profile_metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = external_content_sources
+                    profile_metadata_json = json.dumps(profile_metadata, ensure_ascii=False)
                 
                 if replace_old_fact_text is not None:
                     c.execute("SELECT id FROM profile_facts WHERE category=? AND fact=?", (category, replace_old_fact_text))

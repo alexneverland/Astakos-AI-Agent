@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from html import escape
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -24,6 +25,7 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "list_project_files",
     "list_recent_files",
     "morning_briefing",
+    "memory_review",
     "read_local_file",
     "read_agent_skill",
     "read_project_file",
@@ -35,6 +37,7 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "search_flights",
     "search_goldmall_offers",
     "search_google_places",
+    "search_memory",
     "search_supermarket_prices",
 })
 SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
@@ -260,11 +263,31 @@ def external_content_history_metadata(
 def history_message_additional_kwargs(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """Restore validated external-source provenance into a graph history message."""
     raw_names = (metadata or {}).get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, [])
+    if isinstance(raw_names, str):
+        try:
+            raw_names = json.loads(raw_names)
+        except (TypeError, ValueError):
+            return {}
     if not isinstance(raw_names, list):
         return {}
     return external_content_history_metadata(
         (name for name in raw_names if isinstance(name, str)),
     )
+
+
+def external_content_sources_from_json(raw_sources: str) -> list[str]:
+    """Return validated external provenance names encoded for a deferred tool call."""
+    try:
+        parsed = json.loads(raw_sources)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return sorted({
+        source
+        for source in parsed
+        if isinstance(source, str) and source in EXTERNAL_PROVENANCE_SOURCE_NAMES
+    })
 
 
 def format_untrusted_persisted_content(

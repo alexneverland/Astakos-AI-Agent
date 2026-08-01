@@ -429,13 +429,20 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
     return result.get("output", "")
 
 @tool
-def save_to_memory(fact: str, entities: str = "", category: str = "other", reason: str = "agent_inferred") -> str:
+def save_to_memory(
+    fact: str,
+    entities: str = "",
+    category: str = "other",
+    reason: str = "agent_inferred",
+    external_content_sources_json: str = "",
+) -> str:
     """
     Saves information SEMANTICALLY.
     fact: The fact (e.g., "Kid1 only eats lentils").
     entities: Keywords separated by commas (e.g., "Kid1, Food, Preference").
     category: The category (e.g., 'family', 'home', 'lazaros', 'tech', 'work').
     reason: Why it is being saved — 'user_stated' if explicitly said by the user, 'agent_inferred' otherwise.
+    external_content_sources_json: Internal approval provenance. Do not set this manually.
 
     ⚡ Fire-and-forget: ChromaDB/Vertex AI work is done in a background thread.
     Returns immediately so that the agent does not block the user for ~11s.
@@ -457,6 +464,11 @@ def save_to_memory(fact: str, entities: str = "", category: str = "other", reaso
                 canonical_fact = f"[USER_FACT]: {canonical_fact}"
 
             raw_entities = [x.strip() for x in entities.split(",") if x.strip()]
+            from core.untrusted_content import external_content_sources_from_json
+
+            external_content_sources = external_content_sources_from_json(
+                external_content_sources_json,
+            )
 
             candidate = build_canonical_memory_candidate(
                 memory_type="fact",
@@ -468,6 +480,8 @@ def save_to_memory(fact: str, entities: str = "", category: str = "other", reaso
                 reason=reason,
                 confidence=0.85 if reason == "user_stated" else 0.7,
             )
+            if external_content_sources:
+                candidate["external_content_sources"] = external_content_sources
 
             saved = memory.save(**candidate)
 

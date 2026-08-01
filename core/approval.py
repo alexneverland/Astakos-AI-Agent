@@ -392,7 +392,15 @@ def approval_check_node(state):
     tool_messages = []
     current_channel = state.get("channel", "telegram")
     for tc in critical_calls:
-        save_pending(tc["name"], tc.get("args", {}), tc["id"], channel=current_channel)
+        pending_args = dict(tc.get("args", {}))
+        if tc["name"] == "save_to_memory" and tc["id"] in external_context_approval_ids:
+            from core.untrusted_content import active_external_content_tool_names
+            import json
+
+            pending_args["external_content_sources_json"] = json.dumps(
+                sorted(active_external_content_tool_names(state["messages"])),
+            )
+        save_pending(tc["name"], pending_args, tc["id"], channel=current_channel)
         print(f"\033[91m[Approval]: 🚨 CRITICAL — {tc['name']} blocked, awaiting approval\033[0m")
 
         # We send a Telegram notification

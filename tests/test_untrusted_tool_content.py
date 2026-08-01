@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -23,6 +24,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
         "list_agent_skills",
         "list_project_files",
         "list_recent_files",
+        "memory_review",
         "morning_briefing",
         "grep_project_files",
         "read_local_file",
@@ -33,6 +35,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
         "run_code",
         "run_terminal_command",
         "scan_receipt",
+        "search_memory",
         "search_flights",
         "search_goldmall_offers",
         "search_google_places",
@@ -402,6 +405,49 @@ def test_approval_requires_approval_for_mutation_after_a_new_user_turn(
     assert result["approval_status"] == "pending"
     assert result["messages"][0].tool_call_id == "tool-2"
     assert save_pending_calls[0][0] == "save_to_memory"
+    assert save_pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
+
+
+def test_deferred_memory_provenance_rejects_invalid_source_names() -> None:
+    """Only known external sources may be carried into an approved memory save."""
+    from core.untrusted_content import external_content_sources_from_json
+
+    assert external_content_sources_from_json('["browse_url", "unknown_tool"]') == [
+        "browse_url",
+    ]
+    assert external_content_sources_from_json('{"source": "browse_url"}') == []
+
+
+def test_approved_memory_save_forwards_external_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Approved external facts carry their source names into the memory writer."""
+    import threading
+    from tools import system
+
+    saved_candidates: list[dict[str, object]] = []
+
+    class ImmediateThread:
+        """Run the memory write synchronously so the tool handoff can be inspected."""
+
+        def __init__(self, target: Callable[[], None], daemon: bool) -> None:
+            self._target = target
+
+        def start(self) -> None:
+            self._target()
+
+    monkeypatch.setattr(threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        "memory.vector_store.memory.save",
+        lambda **candidate: saved_candidates.append(candidate) or True,
+    )
+
+    system.save_to_memory.invoke({
+        "fact": "The deadline is Friday.",
+        "external_content_sources_json": '["browse_url"]',
+    })
+
+    assert saved_candidates[0]["external_content_sources"] == ["browse_url"]
 
 
 def test_persisted_external_provenance_survives_context_reconstruction() -> None:
