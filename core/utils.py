@@ -443,7 +443,7 @@ def sanitize_history_for_gemini(messages: list) -> list:
     from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
     from core.untrusted_content import (
         format_untrusted_tool_result,
-        is_untrusted_external_tool_name,
+        is_untrusted_external_tool_result,
     )
 
     sanitized = []
@@ -452,7 +452,7 @@ def sanitize_history_for_gemini(messages: list) -> list:
             # Convert the tool's output into a simple System/Human context
             # so that the next Agent does not get confused
             content = clean_message(msg.content)
-            if is_untrusted_external_tool_name(msg.name):
+            if is_untrusted_external_tool_result(msg, messages):
                 content = format_untrusted_tool_result(msg.name, content)
             else:
                 content = t("core.utils.tool_result", name=msg.name, content=content)

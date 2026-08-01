@@ -340,6 +340,7 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
     handling_agent = "Chat_Agent"
     tool_result_fallbacks: list[str] = []
     external_tool_names: set[str] = set()
+    tool_args_by_id: dict[str, dict] = {}
 
     t_graph_0 = perf_counter()
     for event in graph.stream(
@@ -350,6 +351,12 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
         for node, data in event.items():
             if data is None:
                 continue
+            for event_message in data.get("messages", []):
+                for tool_call in getattr(event_message, "tool_calls", None) or []:
+                    tool_call_id = str(tool_call.get("id", ""))
+                    tool_args = tool_call.get("args", {})
+                    if tool_call_id and isinstance(tool_args, dict):
+                        tool_args_by_id[tool_call_id] = tool_args
 
             if node == "tools":
                 t_tools_0 = perf_counter()
@@ -357,10 +364,11 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
                     if getattr(msg, "type", "") == "tool":
                         from core.untrusted_content import (
                             format_untrusted_tool_result,
-                            is_untrusted_external_tool_name,
+                            is_untrusted_external_tool_call,
                         )
                         tool_name = str(getattr(msg, "name", ""))
-                        is_external = is_untrusted_external_tool_name(tool_name)
+                        tool_args = tool_args_by_id.get(str(getattr(msg, "tool_call_id", "")), {})
+                        is_external = is_untrusted_external_tool_call(tool_name, tool_args)
                         if is_external:
                             external_tool_names.add(tool_name)
                         tool_content = clean_message(getattr(msg, "content", "")).strip()

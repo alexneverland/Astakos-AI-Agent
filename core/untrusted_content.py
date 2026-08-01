@@ -31,12 +31,23 @@ SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
 PLANNER_STEP_MESSAGE_ORIGIN = "plan_step"
 ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT = 40
 EXTERNAL_CONTENT_HISTORY_METADATA_KEY = "untrusted_external_tool_names"
+MAIL_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
+    "check",
+    "check_emails",
+    "read",
+    "read_full",
+    "read_thread",
+    "search",
+})
 DRIVE_READ_ACTIONS: frozenset[str] = frozenset({
     "download",
     "info",
     "list_files",
     "search",
 })
+EXTERNAL_PROVENANCE_TOOL_NAMES: frozenset[str] = (
+    UNTRUSTED_EXTERNAL_TOOL_NAMES | {"mail_manager"}
+)
 
 # These are intentionally independent from TOOL_RISK: the latter controls normal
 # approval behavior, while this policy only permits tools that cannot mutate
@@ -81,6 +92,39 @@ def is_untrusted_external_tool_name(tool_name: str | None) -> bool:
     return str(tool_name or "") in UNTRUSTED_EXTERNAL_TOOL_NAMES
 
 
+def is_untrusted_external_tool_call(
+    tool_name: str | None,
+    tool_args: Mapping[str, Any] | None = None,
+) -> bool:
+    """Return whether a concrete tool call may return externally supplied instructions."""
+    normalized_name = str(tool_name or "")
+    if normalized_name == "mail_manager":
+        action = str((tool_args or {}).get("action", "")).strip().lower()
+        return action in MAIL_EXTERNAL_READ_ACTIONS
+    return is_untrusted_external_tool_name(normalized_name)
+
+
+def tool_call_args_for_result(message: Any, messages: Sequence[Any]) -> Mapping[str, Any]:
+    """Recover validated call arguments for a ToolMessage from its preceding AI call."""
+    tool_call_id = str(getattr(message, "tool_call_id", ""))
+    if not tool_call_id:
+        return {}
+    for prior_message in reversed(messages):
+        for tool_call in getattr(prior_message, "tool_calls", None) or []:
+            if str(tool_call.get("id", "")) == tool_call_id:
+                args = tool_call.get("args", {})
+                return args if isinstance(args, Mapping) else {}
+    return {}
+
+
+def is_untrusted_external_tool_result(message: Any, messages: Sequence[Any]) -> bool:
+    """Return whether a ToolMessage is an external source using its concrete action."""
+    return is_untrusted_external_tool_call(
+        getattr(message, "name", None),
+        tool_call_args_for_result(message, messages),
+    )
+
+
 def is_read_only_external_followup_tool(
     tool_name: str | None,
     tool_args: Mapping[str, Any] | None = None,
@@ -90,6 +134,9 @@ def is_read_only_external_followup_tool(
     if normalized_name == "drive_manager":
         action = str((tool_args or {}).get("action", "list_files")).strip().lower()
         return action in DRIVE_READ_ACTIONS
+    if normalized_name == "mail_manager":
+        action = str((tool_args or {}).get("action", "")).strip().lower()
+        return action in MAIL_EXTERNAL_READ_ACTIONS
     return normalized_name in READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES
 
 
@@ -108,7 +155,7 @@ def external_content_history_metadata(
     external_names = sorted({
         tool_name
         for tool_name in tool_names
-        if is_untrusted_external_tool_name(tool_name)
+        if tool_name in EXTERNAL_PROVENANCE_TOOL_NAMES
     })
     if not external_names:
         return {}
@@ -150,7 +197,7 @@ def active_external_content_tool_names(messages: Sequence[Any]) -> set[str]:
     for message in messages[-ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT:]:
         if getattr(message, "type", "") == "tool":
             tool_name = str(getattr(message, "name", ""))
-            if is_untrusted_external_tool_name(tool_name):
+            if is_untrusted_external_tool_result(message, messages):
                 tool_names.add(tool_name)
         metadata = getattr(message, "additional_kwargs", {})
         tool_names.update(
@@ -169,7 +216,7 @@ def derived_external_content_history_metadata(
     """Persist visible provenance without guessing whether an LLM reply paraphrases it."""
     fresh_names = {
         name for name in current_external_tool_names
-        if is_untrusted_external_tool_name(name)
+        if name in EXTERNAL_PROVENANCE_TOOL_NAMES
     }
     if fresh_names:
         return external_content_history_metadata(fresh_names)
@@ -203,7 +250,7 @@ def has_untrusted_result_since_latest_user_message(messages: Sequence[Any]) -> b
             return False
         if (
             message_type == "tool"
-            and is_untrusted_external_tool_name(getattr(message, "name", None))
+            and is_untrusted_external_tool_result(message, messages)
         ):
             return True
     return False
