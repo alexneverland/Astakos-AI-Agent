@@ -24,9 +24,11 @@ def build_routine_completion_context() -> SystemMessage:
     return SystemMessage(content=template)
 
 
-def build_messenger_draft_offer_context() -> SystemMessage:
-    """Create trusted graph context after a user accepts a pending message routine offer."""
-    template = load_prompt("routine_messenger_draft_offer.md")
+def build_messenger_draft_offer_context(event_name: str) -> SystemMessage:
+    """Create trusted graph context for one accepted pending message routine offer."""
+    template = load_prompt("routine_messenger_draft_offer.md").format(
+        routine_event=event_name,
+    )
     return SystemMessage(content=f"{MESSENGER_ROUTINE_DRAFT_OFFER_MARKER}\n{template}")
 
 
@@ -48,6 +50,9 @@ def accept_pending_messenger_draft_offer(
         return None
     if pending_data.get("draft_offer") is not True:
         return None
+    event_name = pending_data.get("event")
+    if not isinstance(event_name, str) or not event_name.strip():
+        return None
 
     from services.messenger_intent import is_draft_offer_acceptance
 
@@ -55,7 +60,7 @@ def accept_pending_messenger_draft_offer(
         return None
     return AcceptedMessengerDraftOffer(
         routine_id=routine_id,
-        context=build_messenger_draft_offer_context(),
+        context=build_messenger_draft_offer_context(event_name.strip()),
     )
 
 
