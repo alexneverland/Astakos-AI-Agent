@@ -480,10 +480,10 @@ def test_today_acknowledgement_does_not_complete_routine() -> None:
 
 
 def test_pending_messenger_offer_bare_yes_adds_trusted_draft_context() -> None:
-    """A bare accepted offer adds draft-only context for one pending Messenger routine."""
-    from services.routine_completion_helper import RoutineSelection
+    """One pending Messenger offer accepts bare consent without invoking the selector."""
 
     graph_mock = sys.modules["core.graph"].graph
+    selector_mock = sys.modules["services.routine_completion_selector"].select_routine
     draft_context = types.SimpleNamespace(
         content="[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]",
         type="system",
@@ -502,10 +502,10 @@ def test_pending_messenger_offer_bare_yes_adds_trusted_draft_context() -> None:
         _run_handle_message(
             "ναι",
             pending={5: {"event": "Compose Messenger message"}},
-            selector_return=RoutineSelection(action="acknowledge", routine_id=5),
         )
 
     build_draft_context.assert_called_once_with()
+    selector_mock.assert_not_called()
     graph_messages = graph_mock.stream.call_args.args[0]["messages"]
     assert draft_context in graph_messages
 
