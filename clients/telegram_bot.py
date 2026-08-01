@@ -4667,21 +4667,6 @@ def job_analytics_engine():
     except Exception as e:
         print(f"[Analytics Job Error]: {e}")
 
-    # Reflection engine — runs immediately after the analytics
-    try:
-        from services.reflection_engine import run_reflection
-        global pending_reflection_confirmations
-        r_stats = run_reflection()
-        for item in r_stats.get("pending_items", []):
-            pending_reflection_confirmations[item["id"]] = item
-
-        if pending_reflection_confirmations:
-            _send_pending_reflections_summary()
-
-        print(f"[Reflection Job]: applied={r_stats.get('applied',0)}, pending={r_stats.get('pending',0)}")
-    except Exception as re:
-        print(f"[Reflection Job Error]: {re}")
-
 def job_morning_fit_briefing():
     """Morning Google Fit briefing — runs only 08:00–09:00, once."""
     now_hour = datetime.now().hour
@@ -5100,13 +5085,9 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"[PendingAssets]: Init failed: {e}")
     from memory.routine_db import load_pending_confirmations
-    from services.reflection_engine import load_pending_reflections
     pending_routine_confirmations.update(load_pending_confirmations())
-    pending_reflection_confirmations.update(load_pending_reflections())
     if pending_routine_confirmations:
         print(f"\033[93m[Recovery]: \u03a6\u03bf\u03c1\u03c4\u03ce\u03b8\u03b7\u03ba\u03b1\u03bd {len(pending_routine_confirmations)} pending confirmations.\033[0m")
-    if pending_reflection_confirmations:
-        print(f"\033[93m[Recovery]: Loaded {len(pending_reflection_confirmations)} pending reflections.\033[0m")
 
     astakos_scheduler = AstakosScheduler()
     astakos_scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders",   verbose=False)
