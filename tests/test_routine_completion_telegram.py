@@ -616,6 +616,30 @@ def test_proactive_plain_message_cannot_arm_draft_offer() -> None:
     assert draft_offer is False
 
 
+def test_proactive_malformed_json_uses_safe_fallback() -> None:
+    """Fenced structured output never reaches the user or authorizes a draft offer."""
+    bot.config.USER_NAME = "User"
+    with (
+        patch.object(bot.core.i18n, "load_prompt", return_value="{context}"),
+        patch.object(bot, "_build_proactive_memory_context", return_value=""),
+        patch.object(bot, "_build_proactive_state_snapshot", return_value={}),
+        patch.object(bot, "_force_proactive_skip_from_state", return_value=None),
+        patch.object(bot, "_get_env_context", return_value=""),
+        patch.object(bot, "t", return_value="Safe proactive fallback."),
+        patch.object(
+            bot,
+            "safe_llm_invoke",
+            return_value=types.SimpleNamespace(
+                content='```json\n{"message":"Do not expose","offers_messenger_draft":true}\n```'
+            ),
+        ),
+    ):
+        message, draft_offer = bot._craft_proactive_msg("Message routine", 0.9)
+
+    assert message == "Safe proactive fallback."
+    assert draft_offer is False
+
+
 def test_unrelated_pending_does_not_block_today_completion() -> None:
     """A pass-through pending decision still lets a later today candidate complete."""
     from services.routine_completion_helper import RoutineSelection
