@@ -17,6 +17,8 @@ _DRAFT_CREATE_PATTERNS = nl_config.MI_COMPOSE_WORDS
 
 _DRAFT_CONFIRM_PATTERNS = nl_config.MI_SEND_APPROVAL_WORDS
 
+_DRAFT_OFFER_AFFIRMATIVES = nl_config.MI_DRAFT_OFFER_AFFIRMATIVES
+
 _DRAFT_CLARIFY_PATTERNS = nl_config.MI_CLARIFICATION_WORDS
 
 _DRAFT_CLEAR_PATTERNS = nl_config.MI_CLEANUP_WORDS
@@ -42,7 +44,7 @@ def _has_any(text: str, patterns: tuple[str, ...]) -> bool:
 def is_draft_offer_acceptance(text: str) -> bool:
     """Return whether text is a bare configured affirmative for a pending draft offer."""
     normalized = _normalize(text)
-    return any(normalized == _normalize(pattern) for pattern in _DRAFT_CONFIRM_PATTERNS)
+    return any(normalized == _normalize(pattern) for pattern in _DRAFT_OFFER_AFFIRMATIVES)
 
 
 def has_accepted_routine_draft_offer(messages: Iterable[Any]) -> bool:
