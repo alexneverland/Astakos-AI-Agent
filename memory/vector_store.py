@@ -966,7 +966,14 @@ class AstakosMemoryManager:
         except Exception as reconcile_err:
             print(f"\033[90m[RoutineReconciler]: skip ({reconcile_err})\033[0m")
 
-    def _save_photo(self, file_path: str, analysis: str, caption: str):
+    def _save_photo(
+        self,
+        file_path: str,
+        analysis: str,
+        caption: str,
+        external_content_sources: list[str] | None = None,
+    ):
+        """Store a photo archive while retaining any untrusted-source provenance."""
         fact = t("memory.vector_store.photo_fact", caption=caption or t("memory.vector_store.photo_default"), analysis=analysis[:350])
         metadata = {
             "category": "photos", "agent": "Direct_Index", "photo_path": file_path,
@@ -975,12 +982,19 @@ class AstakosMemoryManager:
             "importance": 4, "confidence": 0.8,
             "last_accessed": datetime.now().timestamp(),
         }
+        if external_content_sources:
+            from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+            metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                external_content_sources,
+            )
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Photo 'pinned' ({os.path.basename(file_path)})\033[0m")
 
         entry = {
             "file_path": file_path, "analysis": analysis, "caption": caption,
             "date": datetime.now().strftime("%Y-%m-%d"), "timestamp": datetime.now().isoformat(),
+            "external_content_sources": external_content_sources or [],
         }
         index = []
         if os.path.exists(PHOTOS_INDEX_FILE):
@@ -994,7 +1008,14 @@ class AstakosMemoryManager:
             json.dump(index, f, ensure_ascii=False, indent=2)
         return True
 
-    def _save_document(self, file_path: str, analysis: str, caption: str):
+    def _save_document(
+        self,
+        file_path: str,
+        analysis: str,
+        caption: str,
+        external_content_sources: list[str] | None = None,
+    ):
+        """Store a document archive while retaining any untrusted-source provenance."""
         fact = t("memory.vector_store.doc_fact", caption=caption or t("memory.vector_store.doc_default"), analysis=analysis[:1000])
         metadata = {
             "category": "documents", "agent": "Direct_Index", "file_path": file_path,
@@ -1003,6 +1024,12 @@ class AstakosMemoryManager:
             "importance": 5, "confidence": 0.8,
             "last_accessed": datetime.now().timestamp(),
         }
+        if external_content_sources:
+            from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+            metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                external_content_sources,
+            )
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Document 'pinned' ({os.path.basename(file_path)})\033[0m")
 
@@ -1011,6 +1038,7 @@ class AstakosMemoryManager:
         entry = {
             "file_path": file_path, "summary": analysis, "caption": caption,
             "date": datetime.now().strftime("%Y-%m-%d"), "timestamp": datetime.now().isoformat(),
+            "external_content_sources": external_content_sources or [],
         }
         index = []
         if os.path.exists(docs_index_file):

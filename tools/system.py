@@ -1625,11 +1625,27 @@ def control_pending_followup(
     )
 
 
+def _ensure_list_provenance_column(cursor: sqlite3.Cursor) -> None:
+    """Add per-item external provenance storage to legacy list databases once."""
+    columns = {row[1] for row in cursor.execute("PRAGMA table_info(lists)")}
+    if "external_content_sources_json" not in columns:
+        cursor.execute(
+            "ALTER TABLE lists "
+            "ADD COLUMN external_content_sources_json TEXT NOT NULL DEFAULT '[]'"
+        )
+
+
 @tool
-def manage_list(action: str, list_name: str, item: str = "") -> str:
+def manage_list(
+    action: str,
+    list_name: str,
+    item: str = "",
+    external_content_sources_json: str = "",
+) -> str:
     """Manages lists. Actions: 'add', 'remove', 'read', 'clear', 'delete'.
     For multiple items at once, separate them with a comma (item='milk, cheese').
-    For destructive actions ('clear', 'delete'), item must be '__CONFIRMED_CLEAR__'."""
+    For destructive actions ('clear', 'delete'), item must be '__CONFIRMED_CLEAR__'.
+    external_content_sources_json is internal approval provenance. Do not set it manually."""
     if action in {"clear", "delete"} and item != "__CONFIRMED_CLEAR__":
         return (
             f"Error: Refusing to {action} list '{list_name}' without explicit confirmation token."
@@ -1638,6 +1654,7 @@ def manage_list(action: str, list_name: str, item: str = "") -> str:
     try:
         conn = sqlite3.connect(STATE_DB)
         cursor = conn.cursor()
+        _ensure_list_provenance_column(cursor)
         
         cursor.execute("SELECT DISTINCT list_name FROM lists")
         existing_lists = [row[0] for row in cursor.fetchall()]
@@ -1650,20 +1667,58 @@ def manage_list(action: str, list_name: str, item: str = "") -> str:
                     break
 
         if action == "read":
-            cursor.execute("SELECT item FROM lists WHERE list_name=?", (list_name,))
-            items = [row[0] for row in cursor.fetchall()]
+            cursor.execute(
+                "SELECT item, external_content_sources_json FROM lists WHERE list_name=?",
+                (list_name,),
+            )
+            rows = cursor.fetchall()
+            items = [row[0] for row in rows]
             if not items:
                 return f"The list '{list_name}' is empty."
-            return f"Contents of '{list_name}':\n" + "\n".join([f"- {i}" for i in items])
+            from core.untrusted_content import (
+                external_content_sources_from_json,
+                format_untrusted_tool_result,
+            )
+
+            rendered_items = []
+            for list_item, raw_sources in rows:
+                sources = external_content_sources_from_json(raw_sources or "")
+                if sources:
+                    list_item = format_untrusted_tool_result(
+                        "persisted list sources: " + ", ".join(sources),
+                        list_item,
+                    )
+                rendered_items.append(f"- {list_item}")
+            return f"Contents of '{list_name}':\n" + "\n".join(rendered_items)
 
         to_process = [i.strip() for i in item.split(",")] if item else []
+        from core.untrusted_content import external_content_sources_from_json
+
+        external_sources = external_content_sources_from_json(external_content_sources_json)
+        provenance_json = json.dumps(external_sources)
 
         if action == "add":
             for obj in to_process:
                 if obj:
-                    cursor.execute("SELECT id FROM lists WHERE list_name=? AND item=?", (list_name, obj))
-                    if not cursor.fetchone():
-                        cursor.execute("INSERT INTO lists (list_name, item) VALUES (?, ?)", (list_name, obj))
+                    cursor.execute(
+                        "SELECT id, external_content_sources_json FROM lists "
+                        "WHERE list_name=? AND item=?",
+                        (list_name, obj),
+                    )
+                    existing = cursor.fetchone()
+                    if existing is None:
+                        cursor.execute(
+                            "INSERT INTO lists (list_name, item, external_content_sources_json) "
+                            "VALUES (?, ?, ?)",
+                            (list_name, obj, provenance_json),
+                        )
+                    elif external_sources:
+                        existing_sources = external_content_sources_from_json(existing[1] or "")
+                        merged_sources = sorted(set(existing_sources) | set(external_sources))
+                        cursor.execute(
+                            "UPDATE lists SET external_content_sources_json=? WHERE id=?",
+                            (json.dumps(merged_sources), existing[0]),
+                        )
         elif action == "remove":
             for obj in to_process:
                 cursor.execute("DELETE FROM lists WHERE list_name=? AND item=?", (list_name, obj))

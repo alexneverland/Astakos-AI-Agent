@@ -881,6 +881,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     file_path=pending_asset["file_path"],
                     analysis=pending_asset.get("analysis", ""),
                     caption=pending_asset.get("caption", "") or pending_asset["filename"],
+                    external_content_sources=pending_asset.get("external_content_sources", []),
                 )
             else:
                 memory.save(
@@ -888,6 +889,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     file_path=pending_asset["file_path"],
                     analysis=pending_asset.get("analysis", ""),
                     caption=pending_asset.get("caption", "") or pending_asset["filename"],
+                    external_content_sources=pending_asset.get("external_content_sources", []),
                 )
                 
             mark_pending_asset_confirmed(pending_asset["id"])
@@ -1593,6 +1595,7 @@ async def upload_file(
                     filename=filename,
                     analysis=memory_analysis,
                     caption=user_caption,
+                    external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
                 )
             except Exception as e:
                 print(f"[PendingAssets]: Web upload error: {e}")

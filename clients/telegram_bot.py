@@ -1031,6 +1031,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
                 filename=file_name,
                 analysis=memory_analysis,
                 caption=caption or "",
+                external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
             )
         except Exception as e:
             print(f"[PendingAssets]: Telegram document upload error: {e}")
@@ -1313,6 +1314,7 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
                 filename=filename,
                 analysis=analysis,
                 caption=question or "",
+                external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
             )
     except Exception as e:
         print(f"[PendingAssets]: {e}")
@@ -2167,6 +2169,7 @@ def handle_message(user_text: str, chat_id: str):
                 file_path=pending_asset["file_path"],
                 analysis=pending_asset.get("analysis", ""),
                 caption=pending_asset.get("caption", "") or pending_asset["filename"],
+                external_content_sources=pending_asset.get("external_content_sources", []),
             )
         else:
             memory.save(
@@ -2174,6 +2177,7 @@ def handle_message(user_text: str, chat_id: str):
                 file_path=pending_asset["file_path"],
                 analysis=pending_asset.get("analysis", ""),
                 caption=pending_asset.get("caption", "") or pending_asset["filename"],
+                external_content_sources=pending_asset.get("external_content_sources", []),
             )
             
         mark_pending_asset_confirmed(pending_asset["id"])

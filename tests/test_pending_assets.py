@@ -47,6 +47,23 @@ def test_create_and_fetch_pending_asset():
     assert row["status"] == "pending"
     assert row["channel"] == "telegram"
 
+
+def test_pending_asset_retains_external_source_provenance():
+    """Confirmed archive callers can recover validated provenance from pending assets."""
+    create_pending_asset_archive(
+        channel="telegram",
+        asset_type="document",
+        file_path="C:\\tmp\\source.txt",
+        filename="source.txt",
+        analysis="External analysis",
+        external_content_sources=["user_provided_asset", "unknown_source"],
+    )
+
+    row = get_latest_pending_asset("telegram", "document")
+
+    assert row is not None
+    assert row["external_content_sources"] == ["user_provided_asset"]
+
 def test_create_pending_photo_archive_replaces_previous_pending_same_channel():
     # Create first one
     asset_id_1 = create_pending_asset_archive(
