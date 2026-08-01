@@ -3759,6 +3759,8 @@ def _craft_proactive_msg(
         except (TypeError, ValueError):
             pass
         print("[Proactive Craft]: invalid structured response; draft offer disabled.")
+        if raw_content.lstrip().startswith(("{", "```")):
+            return t("clients.telegram_bot.bot_msg_oops_remembered", event_name=event_name), False
         return raw_content, False
     except Exception as e:
         print(f"[Proactive Craft Error]: {e}")
