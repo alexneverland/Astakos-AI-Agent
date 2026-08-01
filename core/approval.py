@@ -289,10 +289,16 @@ def approval_check_node(state):
     ]
     blocked_call_ids = {tc["id"] for tc, _, _ in blocked_entries}
 
-    from core.untrusted_content import has_untrusted_result_since_latest_user_message
+    from core.untrusted_content import (
+        has_untrusted_result_since_latest_user_message,
+        is_read_only_external_followup_tool,
+    )
     if has_untrusted_result_since_latest_user_message(state["messages"]):
         for tc in tool_calls:
-            if _effective_risk(tc) != "SAFE" and tc["id"] not in blocked_call_ids:
+            if (
+                not is_read_only_external_followup_tool(tc["name"])
+                and tc["id"] not in blocked_call_ids
+            ):
                 blocked_entries.append((
                     tc,
                     "core.approval.external_content_action_blocked",
