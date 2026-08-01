@@ -501,13 +501,42 @@ def test_pending_messenger_offer_bare_yes_adds_trusted_draft_context() -> None:
     ):
         _run_handle_message(
             "ναι",
-            pending={5: {"event": "Compose Messenger message"}},
+            pending={
+                5: {
+                    "event": "Dinner with Partner",
+                    "draft_offer": True,
+                }
+            },
         )
 
     build_draft_context.assert_called_once_with()
     selector_mock.assert_not_called()
     graph_messages = graph_mock.stream.call_args.args[0]["messages"]
     assert draft_context in graph_messages
+
+
+def test_pending_partner_routine_without_draft_offer_keeps_selector_path() -> None:
+    """A partner-named routine cannot convert bare consent into a draft without proof."""
+    graph_mock = sys.modules["core.graph"].graph
+    selector_mock = sys.modules["services.routine_completion_selector"].select_routine
+
+    with patch(
+        "services.routine_completion_context.build_messenger_draft_offer_context"
+    ) as build_draft_context:
+        _run_handle_message(
+            "ναι",
+            pending={5: {"event": "Dinner with Partner", "draft_offer": False}},
+        )
+
+    selector_mock.assert_called_once()
+    build_draft_context.assert_not_called()
+    graph_messages = graph_mock.stream.call_args.args[0]["messages"]
+    assert all(
+        "[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]" not in str(
+            getattr(message, "content", "")
+        )
+        for message in graph_messages
+    )
 
 
 def test_unrelated_pending_does_not_block_today_completion() -> None:

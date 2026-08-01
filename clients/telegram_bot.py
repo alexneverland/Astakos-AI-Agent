@@ -67,6 +67,17 @@ def _is_partner_messenger_routine(event_name: str) -> bool:
         or t("clients.telegram_bot.bot_msg_500d81") in event_l
     )
 
+
+def _proactive_message_offers_messenger_draft(message_text: str) -> bool:
+    """Return whether the delivered proactive text explicitly offered to prepare a draft."""
+    try:
+        from services.messenger_intent import is_create_draft_intent
+
+        return is_create_draft_intent(message_text)
+    except Exception:
+        return False
+
+
 def _safe_classify_messenger_intent(text: str, *, has_active_draft: bool):
     """Lazy/fail-soft import so tests that stub `services` don't crash telegram_bot import."""
     try:
@@ -183,7 +194,7 @@ def _cache_bot_message(message_id: int | None, text: str) -> None:
             oldest = sorted(_bot_message_cache.keys())[0]
             del _bot_message_cache[oldest]
 last_interaction_time = time.time()
-# Pending routine confirmations: {routine_id: {"event": ..., "sent_at": ...}}
+# Pending routine confirmations: {routine_id: {"event": ..., "sent_at": ..., "draft_offer": bool}}
 pending_routine_confirmations = {}
 pending_exec_command = None
 # Pending reflection confirmations (ask-tier, 50-75% confidence): {reflection_id: {full reflection dict}}
@@ -1732,9 +1743,7 @@ def handle_message(user_text: str, chat_id: str):
         pending_draft_offer = (
             pending_items[0]
             if len(pending_items) == 1
-            and _is_partner_messenger_routine(
-                str((pending_items[0][1] or {}).get("event", ""))
-            )
+            and bool((pending_items[0][1] or {}).get("draft_offer"))
             else None
         )
         from services.messenger_intent import is_draft_offer_acceptance
@@ -1805,7 +1814,7 @@ def handle_message(user_text: str, chat_id: str):
             pending_routine_confirmations.pop(rid, None)
             from services.routine_completion_context import build_routine_completion_context
             routine_completion_context = build_routine_completion_context()
-            if _is_partner_messenger_routine(str(ev)) and is_draft_offer_acceptance(clean_user_text):
+            if isinstance(pdata, dict) and pdata.get("draft_offer") and is_draft_offer_acceptance(clean_user_text):
                 from services.routine_completion_context import build_messenger_draft_offer_context
                 routine_draft_offer_context = build_messenger_draft_offer_context()
             routine_action_consumed = True
@@ -4095,8 +4104,13 @@ def startup_check_missed_routines():
 
             mark_routine_notified(r_id)
             sent_at = datetime.now()
-            pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
-            save_pending_confirmation(r_id, event_name, sent_at)
+            draft_offer = _proactive_message_offers_messenger_draft(msg)
+            pending_routine_confirmations[r_id] = {
+                "event": event_name,
+                "sent_at": sent_at,
+                "draft_offer": draft_offer,
+            }
+            save_pending_confirmation(r_id, event_name, sent_at, draft_offer=draft_offer)
             log_event("routines", "deferred_followup",
                       routine_id=r_id, event=event_name,
                       missed_minutes=missed_min, preview=msg[:160])
@@ -4513,8 +4527,13 @@ def job_check_routines():
                                     debug_source="scheduler",
                                     debug_effect="notification_sent",
                                 )
-                                pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
-                                save_pending_confirmation(r_id, event_name, sent_at)
+                                draft_offer = _proactive_message_offers_messenger_draft(msg)
+                                pending_routine_confirmations[r_id] = {
+                                    "event": event_name,
+                                    "sent_at": sent_at,
+                                    "draft_offer": draft_offer,
+                                }
+                                save_pending_confirmation(r_id, event_name, sent_at, draft_offer=draft_offer)
                                 bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel="telegram")
                         conn.commit()
                 else:
@@ -4609,8 +4628,13 @@ def job_check_routines():
                                 debug_effect="notification_sent",
                             )
                             sent_at = datetime.now()
-                            pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
-                            save_pending_confirmation(r_id, event_name, sent_at)
+                            draft_offer = _proactive_message_offers_messenger_draft(msg)
+                            pending_routine_confirmations[r_id] = {
+                                "event": event_name,
+                                "sent_at": sent_at,
+                                "draft_offer": draft_offer,
+                            }
+                            save_pending_confirmation(r_id, event_name, sent_at, draft_offer=draft_offer)
                             bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=False, channel="telegram")
 
 

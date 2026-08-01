@@ -1732,20 +1732,35 @@ def _setup_pending_table():
         CREATE TABLE IF NOT EXISTS pending_confirmations (
             routine_id INTEGER PRIMARY KEY,
             event_name TEXT,
-            sent_at    TEXT
+            sent_at    TEXT,
+            draft_offer INTEGER NOT NULL DEFAULT 0
         )
     """)
+    existing_cols = [row[1] for row in cursor.execute("PRAGMA table_info(pending_confirmations)")]
+    if "draft_offer" not in existing_cols:
+        cursor.execute(
+            "ALTER TABLE pending_confirmations ADD COLUMN draft_offer INTEGER NOT NULL DEFAULT 0"
+        )
+        print("[routine_db]: Migration → 'pending_confirmations.draft_offer'")
     conn.commit()
     conn.close()
 
 
-def save_pending_confirmation(routine_id: int, event_name: str, sent_at: datetime):
+def save_pending_confirmation(
+    routine_id: int,
+    event_name: str,
+    sent_at: datetime,
+    *,
+    draft_offer: bool = False,
+) -> None:
+    """Persist one pending routine response window and its explicit draft-offer state."""
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "INSERT OR REPLACE INTO pending_confirmations (routine_id, event_name, sent_at) VALUES (?, ?, ?)",
-            (routine_id, event_name, sent_at.isoformat())
+            """INSERT OR REPLACE INTO pending_confirmations
+               (routine_id, event_name, sent_at, draft_offer) VALUES (?, ?, ?, ?)""",
+            (routine_id, event_name, sent_at.isoformat(), int(draft_offer))
         )
         conn.commit()
     conn.close()
@@ -1772,7 +1787,7 @@ def load_pending_confirmations() -> dict:
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT pc.routine_id, pc.event_name, pc.sent_at
+        SELECT pc.routine_id, pc.event_name, pc.sent_at, pc.draft_offer
         FROM pending_confirmations pc
         JOIN routines r ON r.id = pc.routine_id
         WHERE r.state = 'trigger_pending'
@@ -1794,12 +1809,16 @@ def load_pending_confirmations() -> dict:
         remove_pending_confirmation(rid)
 
     result = {}
-    for r_id, event_name, sent_at_str in rows:
+    for r_id, event_name, sent_at_str, draft_offer in rows:
         try:
             sent_at = datetime.fromisoformat(sent_at_str)
         except Exception:
             sent_at = datetime.now()
-        result[r_id] = {"event": event_name, "sent_at": sent_at}
+        result[r_id] = {
+            "event": event_name,
+            "sent_at": sent_at,
+            "draft_offer": bool(draft_offer),
+        }
 
     return result
 
