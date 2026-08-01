@@ -91,7 +91,10 @@ EXTERNAL_PROVENANCE_SOURCE_NAMES: frozenset[str] = (
 # approval behavior, while this policy only permits tools that cannot mutate
 # state after an external source remains visible in active agent context.
 READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES: frozenset[str] = (
-    (UNTRUSTED_EXTERNAL_TOOL_NAMES - {"drive_manager"})
+    (
+        UNTRUSTED_EXTERNAL_TOOL_NAMES
+        - {"drive_manager", "run_code", "run_terminal_command"}
+    )
     | frozenset({
         "browse_url",
         "duckduckgo_search",
