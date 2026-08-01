@@ -509,7 +509,7 @@ def test_pending_messenger_offer_bare_yes_adds_trusted_draft_context() -> None:
             },
         )
 
-    build_draft_context.assert_called_once_with()
+    build_draft_context.assert_called_once_with("Dinner with Partner")
     selector_mock.assert_not_called()
     graph_messages = graph_mock.stream.call_args.args[0]["messages"]
     assert draft_context in graph_messages
@@ -595,8 +595,8 @@ def test_proactive_message_uses_structured_draft_offer_state() -> None:
     assert draft_offer is True
 
 
-def test_proactive_plain_message_cannot_arm_draft_offer() -> None:
-    """Unstructured proactive prose remains deliverable but cannot authorize bare consent."""
+def test_proactive_unstructured_message_uses_safe_fallback() -> None:
+    """Unstructured proactive prose cannot reach the user or authorize bare consent."""
     bot.config.USER_NAME = "User"
     with (
         patch.object(bot.core.i18n, "load_prompt", return_value="{context}"),
@@ -604,6 +604,7 @@ def test_proactive_plain_message_cannot_arm_draft_offer() -> None:
         patch.object(bot, "_build_proactive_state_snapshot", return_value={}),
         patch.object(bot, "_force_proactive_skip_from_state", return_value=None),
         patch.object(bot, "_get_env_context", return_value=""),
+        patch.object(bot, "t", return_value="Safe proactive fallback."),
         patch.object(
             bot,
             "safe_llm_invoke",
@@ -612,12 +613,12 @@ def test_proactive_plain_message_cannot_arm_draft_offer() -> None:
     ):
         message, draft_offer = bot._craft_proactive_msg("Message routine", 0.9)
 
-    assert message == "Remember to read your partner's message."
+    assert message == "Safe proactive fallback."
     assert draft_offer is False
 
 
-def test_proactive_malformed_json_uses_safe_fallback() -> None:
-    """Fenced structured output never reaches the user or authorizes a draft offer."""
+def test_proactive_prefixed_json_uses_safe_fallback() -> None:
+    """Prefixed structured output never reaches the user or authorizes a draft offer."""
     bot.config.USER_NAME = "User"
     with (
         patch.object(bot.core.i18n, "load_prompt", return_value="{context}"),
@@ -630,7 +631,7 @@ def test_proactive_malformed_json_uses_safe_fallback() -> None:
             bot,
             "safe_llm_invoke",
             return_value=types.SimpleNamespace(
-                content='```json\n{"message":"Do not expose","offers_messenger_draft":true}\n```'
+                content='Here is the JSON: {"message":"Do not expose","offers_messenger_draft":true}'
             ),
         ),
     ):
