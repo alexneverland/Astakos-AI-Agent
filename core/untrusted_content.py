@@ -72,6 +72,7 @@ DRIVE_READ_ACTIONS: frozenset[str] = frozenset({
     "search",
 })
 GOOGLE_TASKS_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({"list"})
+MANAGE_LIST_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({"read"})
 SPOTIFY_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
     "now_playing",
     "search",
@@ -98,7 +99,7 @@ EXTERNAL_PROVENANCE_SOURCE_NAMES: frozenset[str] = (
 READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES: frozenset[str] = (
     (
         UNTRUSTED_EXTERNAL_TOOL_NAMES
-        - {"drive_manager", "run_code", "run_terminal_command"}
+        - {"drive_manager", "manage_list", "run_code", "run_terminal_command"}
     )
     | frozenset({
         "browse_url",
@@ -156,6 +157,9 @@ def is_untrusted_external_tool_call(
     if normalized_name == "google_tasks_tool":
         action = str((tool_args or {}).get("action", "list")).strip().lower()
         return action in GOOGLE_TASKS_EXTERNAL_READ_ACTIONS
+    if normalized_name == "manage_list":
+        action = str((tool_args or {}).get("action", "")).strip().lower()
+        return action in MANAGE_LIST_EXTERNAL_READ_ACTIONS
     if normalized_name == "control_spotify":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         return action in SPOTIFY_EXTERNAL_READ_ACTIONS
@@ -234,6 +238,9 @@ def is_read_only_external_followup_tool(
     if normalized_name == "google_tasks_tool":
         action = str((tool_args or {}).get("action", "list")).strip().lower()
         return action in GOOGLE_TASKS_EXTERNAL_READ_ACTIONS
+    if normalized_name == "manage_list":
+        action = str((tool_args or {}).get("action", "")).strip().lower()
+        return action in MANAGE_LIST_EXTERNAL_READ_ACTIONS
     if normalized_name == "control_spotify":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         return action in SPOTIFY_READ_ONLY_ACTIONS
