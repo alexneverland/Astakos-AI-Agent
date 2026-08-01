@@ -971,6 +971,12 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         except Exception as read_err:
             doc_text = f"[Could not read content: {read_err}]"
 
+        from core.untrusted_content import (
+            USER_PROVIDED_ASSET_SOURCE,
+            external_content_history_metadata,
+            format_untrusted_tool_result,
+        )
+        doc_text = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, doc_text)
         from memory.conversation_history import build_asset_context_text
         conversation_context = build_asset_context_text("telegram")
 
@@ -994,20 +1000,25 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         
         send_telegram_msg(chat_ai_msg)
 
-        user_log_msg = f"[USER_UPLOADED_FILE]: {file_name}\n[FILE PATH]: {local_path}\n[VISUAL ANALYSIS]: {memory_analysis}\n[USER_CAPTION]: {caption or ''}\n[CONTENT_SOURCE]: uploaded_document"
+        user_log_msg = (
+            f"[USER_UPLOADED_FILE]: {file_name}\n[FILE PATH]: {local_path}\n"
+            f"[VISUAL ANALYSIS]: {format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, memory_analysis)}\n"
+            f"[USER_CAPTION]: {caption or ''}\n[CONTENT_SOURCE]: uploaded_document"
+        )
+        asset_metadata = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
         
         # Record in history
         try:
             from memory.conversation_history import append_message
             now = datetime.now()
-            append_message("user", user_log_msg, "telegram", agent=None, timestamp=now)
-            append_message("assistant", chat_ai_msg, "telegram", agent="Chat_Agent", timestamp=now)
-            enqueue_fast_task(log_exchange, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
-            enqueue_fast_task(update_working_memory, user_log_msg, chat_ai_msg)
-            enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
-            enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
-            enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
-            enqueue_slow_task(extract_and_update_context_flags, caption or user_log_msg, chat_ai_msg)
+            append_message("user", user_log_msg, "telegram", agent=None, metadata=asset_metadata, timestamp=now)
+            append_message("assistant", chat_ai_msg, "telegram", agent="Chat_Agent", metadata=asset_metadata, timestamp=now)
+            print("[Security]: upload-derived reply - use trusted user text only for background state")
+            enqueue_fast_task(log_exchange, caption or "", "", "Chat_Agent", "telegram")
+            enqueue_fast_task(update_working_memory, caption or "", "")
+            enqueue_fast_task(_enqueue_slow_memory_sifter, caption or "", "", "Chat_Agent", "telegram", None, True)
+            enqueue_slow_task(_enqueue_followup_pipeline, caption or "", "", "Chat_Agent", "telegram")
+            enqueue_slow_task(extract_and_update_context_flags, caption or "", "")
         except Exception as e:
             print(f"[Document/History]: {e}")
 
@@ -1192,11 +1203,16 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     context_msgs = _load_shared_context_messages("telegram")
 
     now_ts = datetime.now().strftime("%H:%M")
+    from core.untrusted_content import (
+        USER_PROVIDED_ASSET_SOURCE,
+        external_content_history_metadata,
+        format_untrusted_tool_result,
+    )
     user_log_msg = (
         f"[{now_ts}] "
         f"[USER_UPLOADED_PHOTO]: {filename}\n"
         f"[PHOTO PATH]: {local_path}\n"
-        f"[VISUAL ANALYSIS]: {analysis}\n"
+        f"[VISUAL ANALYSIS]: {format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, analysis)}\n"
         f"Question: {question}"
     )
     print(f"\033[94m[Photo->Graph]: {user_log_msg[:200]}\033[0m")
@@ -1204,10 +1220,14 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     # Streaming — collect, send once (same pattern as handle_message)
     final_response = ""
     events: list[dict] = []
+    photo_message = HumanMessage(
+        content=user_log_msg,
+        additional_kwargs=external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE]),
+    )
     try:
         from memory.execution_trace import ExecutionTrace
         _ptrace = ExecutionTrace(channel="telegram", user_message=user_log_msg)
-        for event in graph.stream({"messages": context_msgs + [HumanMessage(content=user_log_msg)], "channel": "telegram"}, {"recursion_limit": 50}):
+        for event in graph.stream({"messages": context_msgs + [photo_message], "channel": "telegram"}, {"recursion_limit": 50}):
             events.append(event)
             _ptrace.process_event(event)
             for node, data in event.items():
@@ -1235,15 +1255,27 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
 
     # ── Photo persistence / Pending asset ──
     from core.untrusted_content import (
-        external_content_history_metadata,
+        derived_external_content_history_metadata,
+        external_content_source_names,
         external_tool_names_from_events,
     )
-    external_content_sources = external_tool_names_from_events(events)
-    assistant_metadata = external_content_history_metadata(external_content_sources)
+    current_external_tool_names = external_tool_names_from_events(events)
+    assistant_metadata = derived_external_content_history_metadata(
+        context_msgs + [photo_message],
+        current_external_tool_names,
+    )
+    external_content_sources = external_content_source_names(assistant_metadata)
     try:
         from memory.conversation_history import append_message
         now = datetime.now()
-        append_message(role="user", content=user_log_msg, channel="telegram", agent=None, timestamp=now)
+        append_message(
+            role="user",
+            content=user_log_msg,
+            channel="telegram",
+            agent=None,
+            metadata=external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE]),
+            timestamp=now,
+        )
         append_message(
             role="assistant",
             content=final_response,
@@ -1258,11 +1290,11 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     handling_agent = "Chat_Agent"
     if external_content_sources:
         print("[Security]: external-derived photo reply - use trusted user text only for background state")
-        enqueue_fast_task(log_exchange, user_log_msg, "", handling_agent, "telegram")
-        enqueue_fast_task(update_working_memory, user_log_msg, "")
-        enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, "", handling_agent, "telegram", None, True)
-        enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, "", handling_agent, "telegram")
-        enqueue_slow_task(extract_and_update_context_flags, user_log_msg, "")
+        enqueue_fast_task(log_exchange, question or "", "", handling_agent, "telegram")
+        enqueue_fast_task(update_working_memory, question or "", "")
+        enqueue_fast_task(_enqueue_slow_memory_sifter, question or "", "", handling_agent, "telegram", None, True)
+        enqueue_slow_task(_enqueue_followup_pipeline, question or "", "", handling_agent, "telegram")
+        enqueue_slow_task(extract_and_update_context_flags, question or "", "")
     else:
         enqueue_fast_task(log_exchange, user_log_msg, final_response, handling_agent, "telegram")
         enqueue_fast_task(update_working_memory, user_log_msg, final_response)
@@ -1617,7 +1649,10 @@ def _load_shared_context_messages(channel: str) -> list:
             continue
         prefix = f"[{entry.get('date', '')} {entry.get('time', '')} / {entry.get('channel', '')}] "
         if entry.get("role") in ("user", "human", "Human"):
-            context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
+            context_msgs.append(HumanMessage(
+                content=f"{prefix}{content}",
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
         else:
             content = format_untrusted_persisted_content(
                 f"{prefix}{content}",

@@ -13,15 +13,25 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     # rather than relying on a later caller to recover its action arguments.
     "drive_manager",
     "duckduckgo_search",
+    "get_current_location",
+    "get_fit_summary",
     "get_navigation_info",
     "get_news",
     "get_weather_forecast",
     "grep_project_files",
     "hn_briefing",
+    "list_agent_skills",
+    "list_project_files",
+    "list_recent_files",
     "morning_briefing",
     "read_local_file",
+    "read_agent_skill",
     "read_project_file",
+    "repo_mapper",
     "research_last30days",
+    "run_code",
+    "run_terminal_command",
+    "scan_receipt",
     "search_flights",
     "search_goldmall_offers",
     "search_google_places",
@@ -31,6 +41,7 @@ SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
 PLANNER_STEP_MESSAGE_ORIGIN = "plan_step"
 ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT = 40
 EXTERNAL_CONTENT_HISTORY_METADATA_KEY = "untrusted_external_tool_names"
+USER_PROVIDED_ASSET_SOURCE = "user_provided_asset"
 MAIL_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
     "check",
     "check_emails",
@@ -55,11 +66,24 @@ DRIVE_READ_ACTIONS: frozenset[str] = frozenset({
     "list_files",
     "search",
 })
-EXTERNAL_PROVENANCE_TOOL_NAMES: frozenset[str] = (
+GOOGLE_TASKS_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({"list"})
+SPOTIFY_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
+    "now_playing",
+    "search",
+    "top_tracks",
+})
+SPOTIFY_READ_ONLY_ACTIONS: frozenset[str] = frozenset({
+    "now_playing",
+    "top_tracks",
+})
+EXTERNAL_PROVENANCE_SOURCE_NAMES: frozenset[str] = (
     UNTRUSTED_EXTERNAL_TOOL_NAMES | {
         "github_manager",
         "google_calendar_tool",
+        "google_tasks_tool",
         "mail_manager",
+        "control_spotify",
+        USER_PROVIDED_ASSET_SOURCE,
     }
 )
 
@@ -121,6 +145,12 @@ def is_untrusted_external_tool_call(
     if normalized_name == "github_manager":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         return action in GITHUB_EXTERNAL_READ_ACTIONS
+    if normalized_name == "google_tasks_tool":
+        action = str((tool_args or {}).get("action", "list")).strip().lower()
+        return action in GOOGLE_TASKS_EXTERNAL_READ_ACTIONS
+    if normalized_name == "control_spotify":
+        action = str((tool_args or {}).get("action", "")).strip().lower()
+        return action in SPOTIFY_EXTERNAL_READ_ACTIONS
     return is_untrusted_external_tool_name(normalized_name)
 
 
@@ -193,6 +223,12 @@ def is_read_only_external_followup_tool(
     if normalized_name == "github_manager":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         return action in GITHUB_EXTERNAL_READ_ACTIONS
+    if normalized_name == "google_tasks_tool":
+        action = str((tool_args or {}).get("action", "list")).strip().lower()
+        return action in GOOGLE_TASKS_EXTERNAL_READ_ACTIONS
+    if normalized_name == "control_spotify":
+        action = str((tool_args or {}).get("action", "")).strip().lower()
+        return action in SPOTIFY_READ_ONLY_ACTIONS
     return normalized_name in READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES
 
 
@@ -211,7 +247,7 @@ def external_content_history_metadata(
     external_names = sorted({
         tool_name
         for tool_name in tool_names
-        if tool_name in EXTERNAL_PROVENANCE_TOOL_NAMES
+        if tool_name in EXTERNAL_PROVENANCE_SOURCE_NAMES
     })
     if not external_names:
         return {}
@@ -272,7 +308,7 @@ def derived_external_content_history_metadata(
     """Persist visible provenance without guessing whether an LLM reply paraphrases it."""
     fresh_names = {
         name for name in current_external_tool_names
-        if name in EXTERNAL_PROVENANCE_TOOL_NAMES
+        if name in EXTERNAL_PROVENANCE_SOURCE_NAMES
     }
     if fresh_names:
         return external_content_history_metadata(fresh_names)

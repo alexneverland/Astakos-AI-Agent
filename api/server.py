@@ -263,7 +263,10 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
             continue
         prefix = f"[{entry.get('date', '')} {entry.get('time', '')} / {entry.get('channel', '')}] "
         if entry.get("role") in ("user", "human", "Human"):
-            context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
+            context_msgs.append(HumanMessage(
+                content=f"{prefix}{content}",
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
         else:
             content = format_untrusted_persisted_content(
                 f"{prefix}{content}",
@@ -1511,6 +1514,11 @@ async def upload_file(
         elif file_ext in doc_exts:
             # We read the content of the document
             doc_text = _read_document_text_for_analysis(file_path, file_ext)
+            from core.untrusted_content import (
+                USER_PROVIDED_ASSET_SOURCE,
+                format_untrusted_tool_result,
+            )
+            doc_text = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, doc_text)
 
             # We send to the LLM for summary/analysis
             from memory.conversation_history import build_asset_context_text
@@ -1559,14 +1567,19 @@ async def upload_file(
         upload_history_msg = t("api.server.upload_history_msg", filename=filename)
         if user_caption:
             upload_history_msg += t("api.server.upload_history_caption", user_caption=user_caption)
+        from core.untrusted_content import (
+            USER_PROVIDED_ASSET_SOURCE,
+            external_content_history_metadata,
+        )
+        asset_metadata = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
         append_to_chat_history("user", upload_history_msg)
-        append_to_chat_history("assistant", chat_ai_msg)
-        enqueue_fast_task(log_exchange, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
-        enqueue_fast_task(update_working_memory, user_log_msg, chat_ai_msg)
-        enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
-        enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
-        enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
-        enqueue_slow_task(extract_and_update_context_flags, user_log_msg, chat_ai_msg, "web")
+        append_to_chat_history("assistant", chat_ai_msg, metadata=asset_metadata)
+        print("[Security]: upload-derived reply - use trusted user text only for background state")
+        enqueue_fast_task(log_exchange, user_caption, "", "Chat_Agent", "web")
+        enqueue_fast_task(update_working_memory, user_caption, "")
+        enqueue_fast_task(_enqueue_slow_memory_sifter, user_caption, "", "Chat_Agent", "web", None, True)
+        enqueue_slow_task(_enqueue_followup_pipeline, user_caption, "", "Chat_Agent", "web")
+        enqueue_slow_task(extract_and_update_context_flags, user_caption, "", "web")
 
         from memory.pending_assets import looks_like_asset_confirmation_prompt
         if looks_like_asset_confirmation_prompt(chat_ai_msg):
