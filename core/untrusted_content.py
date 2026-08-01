@@ -39,6 +39,12 @@ MAIL_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
     "read_thread",
     "search",
 })
+CALENDAR_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
+    "list",
+    "search",
+    "today",
+    "week",
+})
 DRIVE_READ_ACTIONS: frozenset[str] = frozenset({
     "download",
     "info",
@@ -46,7 +52,7 @@ DRIVE_READ_ACTIONS: frozenset[str] = frozenset({
     "search",
 })
 EXTERNAL_PROVENANCE_TOOL_NAMES: frozenset[str] = (
-    UNTRUSTED_EXTERNAL_TOOL_NAMES | {"mail_manager"}
+    UNTRUSTED_EXTERNAL_TOOL_NAMES | {"google_calendar_tool", "mail_manager"}
 )
 
 # These are intentionally independent from TOOL_RISK: the latter controls normal
@@ -101,6 +107,9 @@ def is_untrusted_external_tool_call(
     if normalized_name == "mail_manager":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         return action in MAIL_EXTERNAL_READ_ACTIONS
+    if normalized_name == "google_calendar_tool":
+        action = str((tool_args or {}).get("action", "list")).strip().lower()
+        return action in CALENDAR_EXTERNAL_READ_ACTIONS
     return is_untrusted_external_tool_name(normalized_name)
 
 
@@ -125,6 +134,36 @@ def is_untrusted_external_tool_result(message: Any, messages: Sequence[Any]) -> 
     )
 
 
+def external_tool_names_from_events(events: Iterable[Mapping[str, Any]]) -> set[str]:
+    """Collect external-source tool names from streamed graph events and call arguments."""
+    event_list = list(events)
+    tool_args_by_id: dict[str, Mapping[str, Any]] = {}
+    for event in event_list:
+        for data in event.values():
+            if not isinstance(data, Mapping):
+                continue
+            for message in data.get("messages", []):
+                for tool_call in getattr(message, "tool_calls", None) or []:
+                    tool_call_id = str(tool_call.get("id", ""))
+                    tool_args = tool_call.get("args", {})
+                    if tool_call_id and isinstance(tool_args, Mapping):
+                        tool_args_by_id[tool_call_id] = tool_args
+
+    tool_names: set[str] = set()
+    for event in event_list:
+        for data in event.values():
+            if not isinstance(data, Mapping):
+                continue
+            for message in data.get("messages", []):
+                if getattr(message, "type", "") != "tool":
+                    continue
+                tool_name = str(getattr(message, "name", ""))
+                tool_args = tool_args_by_id.get(str(getattr(message, "tool_call_id", "")), {})
+                if is_untrusted_external_tool_call(tool_name, tool_args):
+                    tool_names.add(tool_name)
+    return tool_names
+
+
 def is_read_only_external_followup_tool(
     tool_name: str | None,
     tool_args: Mapping[str, Any] | None = None,
@@ -137,6 +176,9 @@ def is_read_only_external_followup_tool(
     if normalized_name == "mail_manager":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         return action in MAIL_EXTERNAL_READ_ACTIONS
+    if normalized_name == "google_calendar_tool":
+        action = str((tool_args or {}).get("action", "list")).strip().lower()
+        return action in CALENDAR_EXTERNAL_READ_ACTIONS
     return normalized_name in READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES
 
 

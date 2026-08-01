@@ -1203,10 +1203,12 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
 
     # Streaming — collect, send once (same pattern as handle_message)
     final_response = ""
+    events: list[dict] = []
     try:
         from memory.execution_trace import ExecutionTrace
         _ptrace = ExecutionTrace(channel="telegram", user_message=user_log_msg)
         for event in graph.stream({"messages": context_msgs + [HumanMessage(content=user_log_msg)], "channel": "telegram"}, {"recursion_limit": 50}):
+            events.append(event)
             _ptrace.process_event(event)
             for node, data in event.items():
                 if data is None:
@@ -1232,21 +1234,42 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         final_response += t("clients.telegram_bot.bot_msg_2d5d94")
 
     # ── Photo persistence / Pending asset ──
+    from core.untrusted_content import (
+        external_content_history_metadata,
+        external_tool_names_from_events,
+    )
+    external_content_sources = external_tool_names_from_events(events)
+    assistant_metadata = external_content_history_metadata(external_content_sources)
     try:
         from memory.conversation_history import append_message
         now = datetime.now()
         append_message(role="user", content=user_log_msg, channel="telegram", agent=None, timestamp=now)
-        append_message(role="assistant", content=final_response, channel="telegram", agent="Chat_Agent", timestamp=now)
+        append_message(
+            role="assistant",
+            content=final_response,
+            channel="telegram",
+            agent="Chat_Agent",
+            metadata=assistant_metadata,
+            timestamp=now,
+        )
     except Exception as e:
         print(f"[Photo/History]: {e}")
 
     handling_agent = "Chat_Agent"
-    enqueue_fast_task(log_exchange, user_log_msg, final_response, handling_agent, "telegram")
-    enqueue_fast_task(update_working_memory, user_log_msg, final_response)
-    enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, final_response, handling_agent, "telegram")
-    enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, final_response, handling_agent)
-    enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, final_response, handling_agent, "telegram")
-    enqueue_slow_task(extract_and_update_context_flags, user_log_msg, final_response)
+    if external_content_sources:
+        print("[Security]: external-derived photo reply - use trusted user text only for background state")
+        enqueue_fast_task(log_exchange, user_log_msg, "", handling_agent, "telegram")
+        enqueue_fast_task(update_working_memory, user_log_msg, "")
+        enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, "", handling_agent, "telegram", None, True)
+        enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, "", handling_agent, "telegram")
+        enqueue_slow_task(extract_and_update_context_flags, user_log_msg, "")
+    else:
+        enqueue_fast_task(log_exchange, user_log_msg, final_response, handling_agent, "telegram")
+        enqueue_fast_task(update_working_memory, user_log_msg, final_response)
+        enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, final_response, handling_agent, "telegram")
+        enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, final_response, handling_agent)
+        enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, final_response, handling_agent, "telegram")
+        enqueue_slow_task(extract_and_update_context_flags, user_log_msg, final_response)
 
     try:
         from memory.pending_assets import create_pending_asset_archive, looks_like_asset_confirmation_prompt

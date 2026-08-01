@@ -2089,10 +2089,23 @@ def run_memory_sifter_slow(
         print(f"⚠️ [Sifter Error]: {e}")
 
 
-def trigger_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
+def trigger_memory_sifter(
+    user_text: str,
+    ai_text: str,
+    agent_name: str = "Unknown",
+    channel: str = "web",
+    include_recent_context: bool = True,
+) -> None:
     """Wrapper — executed via Queue Worker."""
     seed_facts = run_memory_sifter_fast(user_text, ai_text, agent_name, channel)
-    run_memory_sifter_slow(user_text, ai_text, agent_name, channel, deterministic_seed_facts=seed_facts)
+    run_memory_sifter_slow(
+        user_text,
+        ai_text,
+        agent_name,
+        channel,
+        deterministic_seed_facts=seed_facts,
+        include_recent_context=include_recent_context,
+    )
 
 
 # ════════════════════════════════════════════════════════════════
