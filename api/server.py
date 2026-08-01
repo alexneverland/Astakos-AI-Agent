@@ -251,7 +251,10 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
         return []
 
     context_msgs = []
-    from core.untrusted_content import history_message_additional_kwargs
+    from core.untrusted_content import (
+        format_untrusted_persisted_content,
+        history_message_additional_kwargs,
+    )
     for entry in entries:
         if exclude_message_id and entry.get("id") == exclude_message_id:
             continue
@@ -262,8 +265,12 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
         if entry.get("role") in ("user", "human", "Human"):
             context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
         else:
+            content = format_untrusted_persisted_content(
+                f"{prefix}{content}",
+                entry.get("metadata"),
+            )
             context_msgs.append(AIMessage(
-                content=f"{prefix}{content}",
+                content=content,
                 additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
             ))
     return context_msgs

@@ -120,6 +120,19 @@ def history_message_additional_kwargs(metadata: Mapping[str, Any] | None) -> dic
     )
 
 
+def format_untrusted_persisted_content(
+    content: str,
+    metadata: Mapping[str, Any] | None,
+) -> str:
+    """Wrap provenance-marked persisted text before it re-enters an LLM prompt."""
+    restored_metadata = history_message_additional_kwargs(metadata)
+    source_names = restored_metadata.get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, [])
+    if not source_names:
+        return str(content or "")
+    source_label = "persisted external sources: " + ", ".join(source_names)
+    return format_untrusted_tool_result(source_label, str(content or ""))
+
+
 def active_external_content_tool_names(messages: Sequence[Any]) -> set[str]:
     """Return external source names visible in the active agent history window."""
     tool_names: set[str] = set()
