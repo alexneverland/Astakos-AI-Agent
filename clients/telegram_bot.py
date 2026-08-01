@@ -284,7 +284,17 @@ def enqueue_fast_task(func, *args):
 def enqueue_slow_task(func, *args):
     slow_queue.put((func, args))
 
-def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
+def _enqueue_slow_memory_sifter(
+    user_text: str,
+    ai_text: str,
+    handling_agent: str,
+    channel: str,
+    external_content_sources: set[str] | None = None,
+) -> None:
+    """Queue memory sifting unless the exchange derives from external content."""
+    if external_content_sources:
+        print("[MemorySifterSlow]: external-derived exchange - skip automatic memory write")
+        return
     seed_facts = run_memory_sifter_fast(user_text, ai_text, handling_agent, channel)
     enqueue_slow_task(
         run_memory_sifter_slow,
@@ -2462,6 +2472,7 @@ def handle_message(user_text: str, chat_id: str):
             assistant_metadata = derived_external_content_history_metadata(
                 provenance_messages_for_reply,
                 external_tool_names,
+                final_ai_response,
             )
             if assistant_metadata:
                 _append_to_analytics_log(
@@ -2483,9 +2494,11 @@ def handle_message(user_text: str, chat_id: str):
 
             # Background Tasks
             t_bg_0 = perf_counter()
+            from core.untrusted_content import external_content_source_names
+            external_content_sources = external_content_source_names(assistant_metadata)
             enqueue_fast_task(log_exchange,                       user_text, final_ai_response, handling_agent, "telegram")
-            enqueue_fast_task(update_working_memory,              user_text, final_ai_response)
-            enqueue_fast_task(_enqueue_slow_memory_sifter,        user_text, final_ai_response, handling_agent, "telegram")
+            enqueue_fast_task(update_working_memory,              user_text, final_ai_response, external_content_sources)
+            enqueue_fast_task(_enqueue_slow_memory_sifter,        user_text, final_ai_response, handling_agent, "telegram", external_content_sources)
             _schedule_capability_gap_if_valid(user_text, final_ai_response, handling_agent, user_rowid, chat_id)
             enqueue_slow_task(_enqueue_followup_pipeline, user_text, final_ai_response, handling_agent, "telegram")
             enqueue_slow_task(extract_and_update_context_flags, user_text, final_ai_response)

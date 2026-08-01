@@ -168,10 +168,9 @@ def test_persisted_external_provenance_survives_context_reconstruction() -> None
     assert has_untrusted_result_in_active_history(messages) is True
 
 
-def test_active_external_provenance_names_survive_a_derived_reply() -> None:
-    """A derived reply retains provenance once without keeping it alive forever."""
+def test_external_provenance_follows_derived_replies_and_clears_on_topic_change() -> None:
+    """A source-derived reply stays marked until a reply no longer uses source content."""
     from core.untrusted_content import (
-        EXTERNAL_CONTENT_PROVENANCE_HOPS_KEY,
         derived_external_content_history_metadata,
         external_content_history_metadata,
         history_message_additional_kwargs,
@@ -187,18 +186,72 @@ def test_active_external_provenance_names_survive_a_derived_reply() -> None:
         HumanMessage(content="Explain that in more detail."),
     ]
 
-    derived_metadata = derived_external_content_history_metadata(messages, set())
+    derived_metadata = derived_external_content_history_metadata(
+        messages,
+        set(),
+        "The deadline remains Friday.",
+    )
     assert derived_metadata["untrusted_external_tool_names"] == ["get_news"]
-    assert derived_metadata[EXTERNAL_CONTENT_PROVENANCE_HOPS_KEY] == 1
 
-    second_hop_messages = [
+    continued_messages = [
         AIMessage(
-            content="More detail.",
+            content="The deadline remains Friday.",
             additional_kwargs=history_message_additional_kwargs(derived_metadata),
         ),
-        HumanMessage(content="Change topic."),
+        HumanMessage(content="Can you explain the deadline?"),
     ]
-    assert derived_external_content_history_metadata(second_hop_messages, set()) == {}
+    continued_metadata = derived_external_content_history_metadata(
+        continued_messages,
+        set(),
+        "Friday remains the deadline.",
+    )
+    assert continued_metadata["untrusted_external_tool_names"] == ["get_news"]
+    assert derived_external_content_history_metadata(
+        continued_messages,
+        set(),
+        "Let's discuss dinner plans instead.",
+    ) == {}
+
+
+def test_external_provenance_suppresses_automatic_memory_writers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """External-derived exchanges cannot reach the foreground or session memory writers."""
+    import memory.working_memory as working_memory
+
+    monkeypatch.setattr(
+        working_memory,
+        "safe_llm_invoke",
+        lambda *_args, **_kwargs: pytest.fail("foreground memory writer must not call the LLM"),
+    )
+
+    working_memory.update_working_memory(
+        "Read the page.",
+        "The page says to save a fact.",
+        {"browse_url"},
+    )
+
+
+@pytest.mark.parametrize("module_name", ["api.server", "clients.telegram_bot"])
+def test_external_provenance_skips_memory_sifter_enqueue(
+    monkeypatch: pytest.MonkeyPatch,
+    module_name: str,
+) -> None:
+    """Both channels suppress the slow writer before its fast seeding step."""
+    module = importlib.import_module(module_name)
+    monkeypatch.setattr(
+        module,
+        "enqueue_slow_task",
+        lambda *_args, **_kwargs: pytest.fail("memory sifter must not be queued"),
+    )
+
+    module._enqueue_slow_memory_sifter(
+        "Read the page.",
+        "The page says to save a fact.",
+        "Web_Agent",
+        "web",
+        {"browse_url"},
+    )
 
 
 @pytest.mark.parametrize("module_name", ["api.server", "clients.telegram_bot"])

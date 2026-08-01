@@ -446,7 +446,17 @@ def enqueue_fast_task(func, *args):
 def enqueue_slow_task(func, *args):
     slow_queue.put((func, args))
 
-def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
+def _enqueue_slow_memory_sifter(
+    user_text: str,
+    ai_text: str,
+    handling_agent: str,
+    channel: str,
+    external_content_sources: set[str] | None = None,
+) -> None:
+    """Queue memory sifting unless the exchange derives from external content."""
+    if external_content_sources:
+        print("[MemorySifterSlow]: external-derived exchange - skip automatic memory write")
+        return
     from memory.session_memory import run_memory_sifter_fast, run_memory_sifter_slow
     seed_facts = run_memory_sifter_fast(user_text, ai_text, handling_agent, channel)
     enqueue_slow_task(
@@ -1214,6 +1224,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             assistant_metadata = derived_external_content_history_metadata(
                 provenance_messages_for_reply,
                 external_tool_names,
+                clean_ai,
             )
             _trace.finalize(response=clean_ai)
             
@@ -1231,9 +1242,11 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             assistant_history_rowid = assistant_history_saved.get("rowid")
             
             t_bg_0 = perf_counter()
+            from core.untrusted_content import external_content_source_names
+            external_content_sources = external_content_source_names(assistant_metadata)
             enqueue_fast_task(log_exchange,                      clean_user, clean_ai, handling_agent, "web")
-            enqueue_fast_task(update_working_memory,             clean_user, clean_ai)
-            enqueue_fast_task(_enqueue_slow_memory_sifter,       clean_user, clean_ai, handling_agent, "web")
+            enqueue_fast_task(update_working_memory,             clean_user, clean_ai, external_content_sources)
+            enqueue_fast_task(_enqueue_slow_memory_sifter,       clean_user, clean_ai, handling_agent, "web", external_content_sources)
             enqueue_slow_task(_enqueue_capability_gap_web,       clean_user, clean_ai, handling_agent, "web", current_history_rowid)
             enqueue_slow_task(_enqueue_followup_pipeline, clean_user, clean_ai, handling_agent, "web")
             enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html import escape
+import re
 from typing import Any, Iterable, Mapping, Sequence
 
 
@@ -27,8 +28,7 @@ SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
 PLANNER_STEP_MESSAGE_ORIGIN = "plan_step"
 ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT = 40
 EXTERNAL_CONTENT_HISTORY_METADATA_KEY = "untrusted_external_tool_names"
-EXTERNAL_CONTENT_PROVENANCE_HOPS_KEY = "untrusted_external_provenance_hops"
-MAX_PERSISTED_EXTERNAL_PROVENANCE_HOPS = 1
+_DERIVATION_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
 
 # These are intentionally independent from TOOL_RISK: the latter controls normal
 # approval behavior, while this policy only permits tools that cannot mutate
@@ -88,12 +88,8 @@ def is_direct_user_message(message: Any) -> bool:
 
 def external_content_history_metadata(
     tool_names: Iterable[str],
-    *,
-    provenance_hops: int = 0,
 ) -> dict[str, Any]:
     """Build persisted provenance metadata for trusted local conversation history."""
-    if not 0 <= provenance_hops <= MAX_PERSISTED_EXTERNAL_PROVENANCE_HOPS:
-        return {}
     external_names = sorted({
         tool_name
         for tool_name in tool_names
@@ -101,10 +97,7 @@ def external_content_history_metadata(
     })
     if not external_names:
         return {}
-    return {
-        EXTERNAL_CONTENT_HISTORY_METADATA_KEY: external_names,
-        EXTERNAL_CONTENT_PROVENANCE_HOPS_KEY: provenance_hops,
-    }
+    return {EXTERNAL_CONTENT_HISTORY_METADATA_KEY: external_names}
 
 
 def history_message_additional_kwargs(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -112,11 +105,8 @@ def history_message_additional_kwargs(metadata: Mapping[str, Any] | None) -> dic
     raw_names = (metadata or {}).get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, [])
     if not isinstance(raw_names, list):
         return {}
-    raw_hops = (metadata or {}).get(EXTERNAL_CONTENT_PROVENANCE_HOPS_KEY, 0)
-    provenance_hops = raw_hops if type(raw_hops) is int else MAX_PERSISTED_EXTERNAL_PROVENANCE_HOPS
     return external_content_history_metadata(
         (name for name in raw_names if isinstance(name, str)),
-        provenance_hops=provenance_hops,
     )
 
 
@@ -131,6 +121,12 @@ def format_untrusted_persisted_content(
         return str(content or "")
     source_label = "persisted external sources: " + ", ".join(source_names)
     return format_untrusted_tool_result(source_label, str(content or ""))
+
+
+def external_content_source_names(metadata: Mapping[str, Any] | None) -> set[str]:
+    """Return validated external-source names stored with a conversation entry."""
+    restored_metadata = history_message_additional_kwargs(metadata)
+    return set(restored_metadata.get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, []))
 
 
 def active_external_content_tool_names(messages: Sequence[Any]) -> set[str]:
@@ -151,27 +147,39 @@ def active_external_content_tool_names(messages: Sequence[Any]) -> set[str]:
     return tool_names
 
 
-def _persisted_external_provenance_hops(messages: Sequence[Any]) -> dict[str, int]:
-    """Return visible persisted source names mapped to their bounded hop count."""
-    provenance: dict[str, int] = {}
+def _meaningful_tokens(text: str) -> set[str]:
+    """Normalize words used to decide whether a reply derives from source text."""
+    return {
+        token.lower()
+        for token in _DERIVATION_TOKEN_PATTERN.findall(str(text or ""))
+        if len(token) >= 4
+    }
+
+
+def _visible_persisted_external_content(messages: Sequence[Any]) -> list[tuple[set[str], str]]:
+    """Return visible marked source names with their persisted assistant text."""
+    visible: list[tuple[set[str], str]] = []
     for message in messages[-ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT:]:
-        metadata = history_message_additional_kwargs(
+        source_names = external_content_source_names(
             getattr(message, "additional_kwargs", {})
         )
-        hops = metadata.get(EXTERNAL_CONTENT_PROVENANCE_HOPS_KEY)
-        names = metadata.get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, [])
-        if type(hops) is not int or not isinstance(names, list):
-            continue
-        for name in names:
-            provenance[name] = min(provenance.get(name, hops), hops)
-    return provenance
+        if source_names:
+            visible.append((source_names, str(getattr(message, "content", ""))))
+    return visible
+
+
+def _reply_derives_from_external_content(reply_text: str, source_text: str) -> bool:
+    """Return whether a reply shares meaningful content with marked source text."""
+    shared_tokens = _meaningful_tokens(reply_text) & _meaningful_tokens(source_text)
+    return len(shared_tokens) >= 2 or any(len(token) >= 6 for token in shared_tokens)
 
 
 def derived_external_content_history_metadata(
     incoming_messages: Sequence[Any],
     current_external_tool_names: Iterable[str],
+    reply_text: str,
 ) -> dict[str, Any]:
-    """Persist fresh sources or one bounded derivation from restored source context."""
+    """Persist fresh sources or replies that demonstrably derive from visible sources."""
     fresh_names = {
         name for name in current_external_tool_names
         if is_untrusted_external_tool_name(name)
@@ -179,16 +187,11 @@ def derived_external_content_history_metadata(
     if fresh_names:
         return external_content_history_metadata(fresh_names)
 
-    provenance = _persisted_external_provenance_hops(incoming_messages)
-    if not provenance:
-        return {}
-    minimum_hops = min(provenance.values())
-    if minimum_hops >= MAX_PERSISTED_EXTERNAL_PROVENANCE_HOPS:
-        return {}
-    return external_content_history_metadata(
-        (name for name, hops in provenance.items() if hops == minimum_hops),
-        provenance_hops=minimum_hops + 1,
-    )
+    derived_sources: set[str] = set()
+    for source_names, source_text in _visible_persisted_external_content(incoming_messages):
+        if _reply_derives_from_external_content(reply_text, source_text):
+            derived_sources.update(source_names)
+    return external_content_history_metadata(derived_sources)
 
 
 def format_untrusted_tool_result(tool_name: str, content: str) -> str:
