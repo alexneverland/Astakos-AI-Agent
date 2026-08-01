@@ -880,8 +880,15 @@ def build_asset_context_text(channel: str, limit: int = 8) -> str:
         if content.startswith(("[USER_UPLOADED_FILE]", "[USER_UPLOADED_PHOTO]")):
             continue
 
+        content = content[:700]
+        if entry.get("role") not in {"user", "human", "Human"}:
+            from core.untrusted_content import format_untrusted_persisted_content
+            content = format_untrusted_persisted_content(
+                content,
+                entry.get("metadata"),
+            )
         speaker = t("prompts.ext_str_437") if entry.get("role") == "user" else t("prompts.ext_str_350")
-        lines.append(f"{speaker}: {content[:700]}")
+        lines.append(f"{speaker}: {content}")
 
     return "\n".join(lines[-limit:])
 

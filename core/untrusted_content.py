@@ -45,6 +45,10 @@ CALENDAR_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
     "today",
     "week",
 })
+GITHUB_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
+    "list_repos",
+    "read_file",
+})
 DRIVE_READ_ACTIONS: frozenset[str] = frozenset({
     "download",
     "info",
@@ -52,7 +56,11 @@ DRIVE_READ_ACTIONS: frozenset[str] = frozenset({
     "search",
 })
 EXTERNAL_PROVENANCE_TOOL_NAMES: frozenset[str] = (
-    UNTRUSTED_EXTERNAL_TOOL_NAMES | {"google_calendar_tool", "mail_manager"}
+    UNTRUSTED_EXTERNAL_TOOL_NAMES | {
+        "github_manager",
+        "google_calendar_tool",
+        "mail_manager",
+    }
 )
 
 # These are intentionally independent from TOOL_RISK: the latter controls normal
@@ -110,6 +118,9 @@ def is_untrusted_external_tool_call(
     if normalized_name == "google_calendar_tool":
         action = str((tool_args or {}).get("action", "list")).strip().lower()
         return action in CALENDAR_EXTERNAL_READ_ACTIONS
+    if normalized_name == "github_manager":
+        action = str((tool_args or {}).get("action", "")).strip().lower()
+        return action in GITHUB_EXTERNAL_READ_ACTIONS
     return is_untrusted_external_tool_name(normalized_name)
 
 
@@ -179,6 +190,9 @@ def is_read_only_external_followup_tool(
     if normalized_name == "google_calendar_tool":
         action = str((tool_args or {}).get("action", "list")).strip().lower()
         return action in CALENDAR_EXTERNAL_READ_ACTIONS
+    if normalized_name == "github_manager":
+        action = str((tool_args or {}).get("action", "")).strip().lower()
+        return action in GITHUB_EXTERNAL_READ_ACTIONS
     return normalized_name in READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES
 
 
