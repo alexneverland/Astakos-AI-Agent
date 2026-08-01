@@ -297,7 +297,7 @@ def approval_check_node(state):
     if has_untrusted_result_since_latest_user_message(state["messages"]):
         for tc in tool_calls:
             if (
-                not is_read_only_external_followup_tool(tc["name"])
+                not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
                 and tc["id"] not in blocked_call_ids
             ):
                 blocked_entries.append((
@@ -313,7 +313,7 @@ def approval_check_node(state):
         for tc in tool_calls
         if (
             external_content_is_active
-            and not is_read_only_external_followup_tool(tc["name"])
+            and not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
             and tc["id"] not in blocked_call_ids
         )
     }

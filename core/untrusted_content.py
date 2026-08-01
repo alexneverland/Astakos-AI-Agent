@@ -31,12 +31,18 @@ SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
 PLANNER_STEP_MESSAGE_ORIGIN = "plan_step"
 ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT = 40
 EXTERNAL_CONTENT_HISTORY_METADATA_KEY = "untrusted_external_tool_names"
+DRIVE_READ_ACTIONS: frozenset[str] = frozenset({
+    "download",
+    "info",
+    "list_files",
+    "search",
+})
 
 # These are intentionally independent from TOOL_RISK: the latter controls normal
 # approval behavior, while this policy only permits tools that cannot mutate
 # state after an external source remains visible in active agent context.
 READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES: frozenset[str] = (
-    UNTRUSTED_EXTERNAL_TOOL_NAMES
+    (UNTRUSTED_EXTERNAL_TOOL_NAMES - {"drive_manager"})
     | frozenset({
         "browse_url",
         "duckduckgo_search",
@@ -75,9 +81,16 @@ def is_untrusted_external_tool_name(tool_name: str | None) -> bool:
     return str(tool_name or "") in UNTRUSTED_EXTERNAL_TOOL_NAMES
 
 
-def is_read_only_external_followup_tool(tool_name: str | None) -> bool:
-    """Return whether a tool is safe to call after external content in this turn."""
-    return str(tool_name or "") in READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES
+def is_read_only_external_followup_tool(
+    tool_name: str | None,
+    tool_args: Mapping[str, Any] | None = None,
+) -> bool:
+    """Return whether a call can read data without mutating state after external content."""
+    normalized_name = str(tool_name or "")
+    if normalized_name == "drive_manager":
+        action = str((tool_args or {}).get("action", "list_files")).strip().lower()
+        return action in DRIVE_READ_ACTIONS
+    return normalized_name in READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES
 
 
 def is_direct_user_message(message: Any) -> bool:
