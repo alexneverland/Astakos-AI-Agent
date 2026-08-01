@@ -410,6 +410,40 @@ def test_approval_requires_approval_for_mutation_after_a_new_user_turn(
     assert save_pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
 
 
+def test_approval_requires_consent_for_web_photo_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A user-provided web photo remains untrusted while the graph handles it."""
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+
+    pending_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        "core.approval.save_pending",
+        lambda *args, **_kwargs: pending_calls.append(args),
+    )
+    monkeypatch.setattr("core.approval._notify_telegram", lambda _tool_call: None)
+    state = {
+        "messages": [
+            HumanMessage(
+                content="What does this image say?",
+                additional_kwargs=external_content_history_metadata(["user_provided_asset"]),
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "save_to_memory",
+                    "args": {"fact": "Image instruction"},
+                    "id": "tool-1",
+                }],
+            ),
+        ],
+    }
+
+    assert approval_check_node(state)["approval_status"] == "pending"
+    assert pending_calls[0][1]["external_content_sources_json"] == '["user_provided_asset"]'
+
+
 def test_deferred_memory_provenance_rejects_invalid_source_names() -> None:
     """Only known external sources may be carried into an approved memory save."""
     from core.untrusted_content import external_content_sources_from_json

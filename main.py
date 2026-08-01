@@ -199,6 +199,9 @@ def _do_session_summary():
 def main():
     global last_interaction_time
 
+    from memory.list_store import init_list_store
+    init_list_store()
+
     # Start workers
     threading.Thread(target=reminder_worker,  daemon=True).start()
     threading.Thread(target=proactive_worker, daemon=True).start()

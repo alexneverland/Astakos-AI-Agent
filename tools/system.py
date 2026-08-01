@@ -1625,16 +1625,6 @@ def control_pending_followup(
     )
 
 
-def _ensure_list_provenance_column(cursor: sqlite3.Cursor) -> None:
-    """Add per-item external provenance storage to legacy list databases once."""
-    columns = {row[1] for row in cursor.execute("PRAGMA table_info(lists)")}
-    if "external_content_sources_json" not in columns:
-        cursor.execute(
-            "ALTER TABLE lists "
-            "ADD COLUMN external_content_sources_json TEXT NOT NULL DEFAULT '[]'"
-        )
-
-
 @tool
 def manage_list(
     action: str,
@@ -1654,7 +1644,6 @@ def manage_list(
     try:
         conn = sqlite3.connect(STATE_DB)
         cursor = conn.cursor()
-        _ensure_list_provenance_column(cursor)
         
         cursor.execute("SELECT DISTINCT list_name FROM lists")
         existing_lists = [row[0] for row in cursor.fetchall()]

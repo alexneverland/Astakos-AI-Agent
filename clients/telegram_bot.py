@@ -5242,7 +5242,9 @@ if __name__ == "__main__":
     _load_override_state()
     try:
         from memory.pending_assets import init_pending_assets_table
+        from memory.list_store import init_list_store
         init_pending_assets_table()
+        init_list_store()
         ensure_pending_followups_table()
     except Exception as e:
         print(f"[PendingAssets]: Init failed: {e}")
