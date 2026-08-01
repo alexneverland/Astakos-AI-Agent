@@ -11,6 +11,8 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "duckduckgo_search",
     "read_local_file",
 })
+SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
+PLANNER_STEP_MESSAGE_ORIGIN = "plan_step"
 
 # These are intentionally independent from TOOL_RISK: the latter controls normal
 # approval behavior, while this policy only permits tools that cannot mutate
@@ -33,7 +35,6 @@ READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES: frozenset[str] = frozenset({
     "read_agent_skill",
     "read_local_file",
     "read_project_file",
-    "recipe_expert",
     "repo_mapper",
     "retrieve_photo",
     "search_flights",
@@ -58,6 +59,14 @@ def is_read_only_external_followup_tool(tool_name: str | None) -> bool:
     return str(tool_name or "") in READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES
 
 
+def is_direct_user_message(message: Any) -> bool:
+    """Return whether a HumanMessage originated from the user, not orchestration."""
+    if getattr(message, "type", "") != "human":
+        return False
+    metadata = getattr(message, "additional_kwargs", {})
+    return not bool(metadata.get(SYNTHETIC_MESSAGE_ORIGIN_KEY))
+
+
 def format_untrusted_tool_result(tool_name: str, content: str) -> str:
     """Render external tool text as escaped reference data for an LLM turn."""
     safe_content = escape(str(content or ""), quote=False)
@@ -78,7 +87,7 @@ def has_untrusted_result_since_latest_user_message(messages: Sequence[Any]) -> b
     """Return whether this turn has consumed web or local-file external content."""
     for message in reversed(messages):
         message_type = getattr(message, "type", "")
-        if message_type == "human":
+        if is_direct_user_message(message):
             return False
         if (
             message_type == "tool"
