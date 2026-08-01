@@ -780,6 +780,12 @@
             "heavy it",
             "we left"
         ],
+        "draft_offer_affirmatives": [
+            "yes",
+            "ok",
+            "okay",
+            "sure"
+        ],
         "clarification_words": [
             "what message",
             "what a message",

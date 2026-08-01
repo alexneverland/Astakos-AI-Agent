@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import escape
 from typing import Mapping
 
 from langchain_core.messages import BaseMessage, SystemMessage
@@ -27,7 +28,7 @@ def build_routine_completion_context() -> SystemMessage:
 def build_messenger_draft_offer_context(event_name: str) -> SystemMessage:
     """Create trusted graph context for one accepted pending message routine offer."""
     template = load_prompt("routine_messenger_draft_offer.md").format(
-        routine_event=event_name,
+        routine_event=escape(event_name, quote=False),
     )
     return SystemMessage(content=f"{MESSENGER_ROUTINE_DRAFT_OFFER_MARKER}\n{template}")
 
