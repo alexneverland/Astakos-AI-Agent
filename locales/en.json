@@ -1792,6 +1792,7 @@
         "but"
       ],
       "unauthorized_draft_error": "🛡️ Command `{name}` blocked: draft creation requires explicit user authorization in the newest message (e.g. 'create draft').",
+      "external_content_action_blocked": "🛡️ Command `{name}` blocked: after reading external content, send a new message that explicitly requests the action.",
       "capability_proposal_prefix": "New tool proposal:",
       "draft_verification_rule": "DRAFT VERIFICATION RULE: Treat [CAPABILITY], can_do, and cannot_do memories as historical observations. Do NOT claim a draft exists or tell the user to 'apply' based on these memories unless you have CURRENT verification (e.g. from a register_tool dry-run in this exact turn or a verified project abstraction).",
       "capability_gap_instruction": "\n\n[CAPABILITY GAP RULE]\nWhen detecting a user request for a genuinely missing capability (never a transient failure) or a new tool, you MUST propose it in the same turn by starting your response EXACTLY with the proposal prefix: '{proposal_prefix}' followed by a short natural proposal. Then, stop and wait for the user's explicit '{draft_command}' command.\n- If you are Dev_Agent: Use this prefix and wait for authorization before proceeding with the guarded capability-draft workflow. CRITICAL: You must NOT call ANY tools during this proposal turn.\n- If you are a specialized agent (not Dev_Agent): You must never write code or call draft/registration tools."

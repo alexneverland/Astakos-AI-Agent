@@ -441,13 +441,22 @@ def sanitize_history_for_gemini(messages: list) -> list:
     so that information is preserved without violating the strict structure of the API.
     """
     from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+    from core.untrusted_content import (
+        format_untrusted_tool_result,
+        is_untrusted_external_tool_name,
+    )
 
     sanitized = []
     for msg in messages:
         if msg.type == "tool":
             # Convert the tool's output into a simple System/Human context
             # so that the next Agent does not get confused
-            sanitized.append(HumanMessage(content=t("core.utils.tool_result", name=msg.name, content=clean_message(msg.content))))
+            content = clean_message(msg.content)
+            if is_untrusted_external_tool_name(msg.name):
+                content = format_untrusted_tool_result(msg.name, content)
+            else:
+                content = t("core.utils.tool_result", name=msg.name, content=content)
+            sanitized.append(HumanMessage(content=content))
         
         elif msg.type == "ai" and hasattr(msg, "tool_calls") and msg.tool_calls:
             # If the AI made a tool_call, we only keep its reasoning (if it exists)
