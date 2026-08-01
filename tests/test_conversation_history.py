@@ -29,6 +29,32 @@ def test_append_message_stores_channel_timestamp_and_session(tmp_path):
     assert messages[0]["metadata"] == {"source": "test"}
 
 
+def test_deduplication_keeps_external_provenance_distinct(tmp_path) -> None:
+    """Ensure a provenance-marked reply is not discarded as an ordinary duplicate."""
+    from memory.conversation_history import append_message, load_messages
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(
+        role="assistant",
+        content="The deadline is Friday.",
+        channel="web",
+        db_path=db_path,
+    )
+    append_message(
+        role="assistant",
+        content="The deadline is Friday.",
+        channel="web",
+        metadata={"untrusted_external_tool_names": ["drive_manager"]},
+        db_path=db_path,
+    )
+
+    messages = load_messages(channel="web", db_path=db_path)
+    assert len(messages) == 2
+    assert messages[-1]["metadata"] == {
+        "untrusted_external_tool_names": ["drive_manager"]
+    }
+
+
 def test_load_messages_can_filter_by_channel_and_session(tmp_path):
     from memory.conversation_history import append_message, load_messages
 

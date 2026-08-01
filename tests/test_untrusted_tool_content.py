@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
     "tool_name",
     [
         "browse_url",
+        "drive_manager",
         "duckduckgo_search",
         "get_news",
         "get_navigation_info",

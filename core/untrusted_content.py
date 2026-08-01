@@ -8,6 +8,10 @@ from typing import Any, Iterable, Mapping, Sequence
 
 UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "browse_url",
+    # Drive responses can include remote file names, listings, or downloaded
+    # document text.  Treat the whole polymorphic tool as externally sourced
+    # rather than relying on a later caller to recover its action arguments.
+    "drive_manager",
     "duckduckgo_search",
     "get_navigation_info",
     "get_news",
