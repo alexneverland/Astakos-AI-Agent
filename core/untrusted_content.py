@@ -9,14 +9,24 @@ from typing import Any, Sequence
 UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "browse_url",
     "duckduckgo_search",
+    "get_navigation_info",
+    "get_news",
+    "get_weather_forecast",
+    "hn_briefing",
+    "morning_briefing",
     "read_local_file",
+    "search_flights",
+    "search_goldmall_offers",
+    "search_google_places",
+    "search_supermarket_prices",
 })
 SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
 PLANNER_STEP_MESSAGE_ORIGIN = "plan_step"
+ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT = 40
 
 # These are intentionally independent from TOOL_RISK: the latter controls normal
 # approval behavior, while this policy only permits tools that cannot mutate
-# state after an external source has been read in the current user turn.
+# state after an external source remains visible in active agent context.
 READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES: frozenset[str] = frozenset({
     "browse_url",
     "duckduckgo_search",
@@ -84,7 +94,7 @@ def format_untrusted_tool_result(tool_name: str, content: str) -> str:
 
 
 def has_untrusted_result_since_latest_user_message(messages: Sequence[Any]) -> bool:
-    """Return whether this turn has consumed web or local-file external content."""
+    """Return whether this turn has consumed untrusted external content."""
     for message in reversed(messages):
         message_type = getattr(message, "type", "")
         if is_direct_user_message(message):
@@ -95,3 +105,17 @@ def has_untrusted_result_since_latest_user_message(messages: Sequence[Any]) -> b
         ):
             return True
     return False
+
+
+def has_untrusted_result_in_active_history(messages: Sequence[Any]) -> bool:
+    """Return whether the agent's active tool-history window contains external data.
+
+    Agent nodes retain the latest 40 messages through ``clean_orphan_tool_calls``.
+    This mirrors that window so an unrelated later user message cannot silently
+    restore automatic mutation while an external result is still prompt-visible.
+    """
+    return any(
+        getattr(message, "type", "") == "tool"
+        and is_untrusted_external_tool_name(getattr(message, "name", None))
+        for message in messages[-ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT:]
+    )

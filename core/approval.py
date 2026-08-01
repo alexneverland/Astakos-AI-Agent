@@ -290,6 +290,7 @@ def approval_check_node(state):
     blocked_call_ids = {tc["id"] for tc, _, _ in blocked_entries}
 
     from core.untrusted_content import (
+        has_untrusted_result_in_active_history,
         has_untrusted_result_since_latest_user_message,
         is_read_only_external_followup_tool,
     )
@@ -305,6 +306,17 @@ def approval_check_node(state):
                     "follows untrusted external tool content in the same user turn",
                 ))
                 blocked_call_ids.add(tc["id"])
+
+    external_content_is_active = has_untrusted_result_in_active_history(state["messages"])
+    external_context_approval_ids = {
+        tc["id"]
+        for tc in tool_calls
+        if (
+            external_content_is_active
+            and not is_read_only_external_followup_tool(tc["name"])
+            and tc["id"] not in blocked_call_ids
+        )
+    }
 
     # ── Draft Authorization Gate ──────────────────────────────────────
     # write_custom_tool requires explicit newest-message authorization.
@@ -333,7 +345,10 @@ def approval_check_node(state):
             "messages": tool_messages,
         }
 
-    critical_calls = [tc for tc in tool_calls if is_critical(tc)]
+    critical_calls = [
+        tc for tc in tool_calls
+        if is_critical(tc) or tc["id"] in external_context_approval_ids
+    ]
 
     # ── Plan mode bypass ───────────────────────────────────────────
     # If we are executing a step of an approved plan, CRITICAL tools are executed
@@ -341,8 +356,15 @@ def approval_check_node(state):
     # Tools in PLAN_PER_ACTION_APPROVAL_TOOLS always require per-action
     # Telegram approval, even inside an approved plan.
     if critical_calls and state.get("plan_active"):
-        bypassed = [tc for tc in critical_calls if tc["name"] not in PLAN_PER_ACTION_APPROVAL_TOOLS]
-        still_critical = [tc for tc in critical_calls if tc["name"] in PLAN_PER_ACTION_APPROVAL_TOOLS]
+        bypassed = [
+            tc for tc in critical_calls
+            if (
+                tc["name"] not in PLAN_PER_ACTION_APPROVAL_TOOLS
+                and tc["id"] not in external_context_approval_ids
+            )
+        ]
+        bypassed_ids = {tc["id"] for tc in bypassed}
+        still_critical = [tc for tc in critical_calls if tc["id"] not in bypassed_ids]
         if bypassed:
             print(f"\033[93m[Approval]: 📋 Plan mode — bypassing CRITICAL approval for: "
                   f"{[tc['name'] for tc in bypassed]}\033[0m")
