@@ -27,6 +27,8 @@ SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
 PLANNER_STEP_MESSAGE_ORIGIN = "plan_step"
 ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT = 40
 EXTERNAL_CONTENT_HISTORY_METADATA_KEY = "untrusted_external_tool_names"
+EXTERNAL_CONTENT_PROVENANCE_HOPS_KEY = "untrusted_external_provenance_hops"
+MAX_PERSISTED_EXTERNAL_PROVENANCE_HOPS = 1
 
 # These are intentionally independent from TOOL_RISK: the latter controls normal
 # approval behavior, while this policy only permits tools that cannot mutate
@@ -84,8 +86,14 @@ def is_direct_user_message(message: Any) -> bool:
     return not bool(metadata.get(SYNTHETIC_MESSAGE_ORIGIN_KEY))
 
 
-def external_content_history_metadata(tool_names: Iterable[str]) -> dict[str, list[str]]:
+def external_content_history_metadata(
+    tool_names: Iterable[str],
+    *,
+    provenance_hops: int = 0,
+) -> dict[str, Any]:
     """Build persisted provenance metadata for trusted local conversation history."""
+    if not 0 <= provenance_hops <= MAX_PERSISTED_EXTERNAL_PROVENANCE_HOPS:
+        return {}
     external_names = sorted({
         tool_name
         for tool_name in tool_names
@@ -93,16 +101,22 @@ def external_content_history_metadata(tool_names: Iterable[str]) -> dict[str, li
     })
     if not external_names:
         return {}
-    return {EXTERNAL_CONTENT_HISTORY_METADATA_KEY: external_names}
+    return {
+        EXTERNAL_CONTENT_HISTORY_METADATA_KEY: external_names,
+        EXTERNAL_CONTENT_PROVENANCE_HOPS_KEY: provenance_hops,
+    }
 
 
-def history_message_additional_kwargs(metadata: Mapping[str, Any] | None) -> dict[str, list[str]]:
+def history_message_additional_kwargs(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """Restore validated external-source provenance into a graph history message."""
     raw_names = (metadata or {}).get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, [])
     if not isinstance(raw_names, list):
         return {}
+    raw_hops = (metadata or {}).get(EXTERNAL_CONTENT_PROVENANCE_HOPS_KEY, 0)
+    provenance_hops = raw_hops if type(raw_hops) is int else MAX_PERSISTED_EXTERNAL_PROVENANCE_HOPS
     return external_content_history_metadata(
-        name for name in raw_names if isinstance(name, str)
+        (name for name in raw_names if isinstance(name, str)),
+        provenance_hops=provenance_hops,
     )
 
 
@@ -124,9 +138,50 @@ def active_external_content_tool_names(messages: Sequence[Any]) -> set[str]:
     return tool_names
 
 
+def _persisted_external_provenance_hops(messages: Sequence[Any]) -> dict[str, int]:
+    """Return visible persisted source names mapped to their bounded hop count."""
+    provenance: dict[str, int] = {}
+    for message in messages[-ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT:]:
+        metadata = history_message_additional_kwargs(
+            getattr(message, "additional_kwargs", {})
+        )
+        hops = metadata.get(EXTERNAL_CONTENT_PROVENANCE_HOPS_KEY)
+        names = metadata.get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, [])
+        if type(hops) is not int or not isinstance(names, list):
+            continue
+        for name in names:
+            provenance[name] = min(provenance.get(name, hops), hops)
+    return provenance
+
+
+def derived_external_content_history_metadata(
+    incoming_messages: Sequence[Any],
+    current_external_tool_names: Iterable[str],
+) -> dict[str, Any]:
+    """Persist fresh sources or one bounded derivation from restored source context."""
+    fresh_names = {
+        name for name in current_external_tool_names
+        if is_untrusted_external_tool_name(name)
+    }
+    if fresh_names:
+        return external_content_history_metadata(fresh_names)
+
+    provenance = _persisted_external_provenance_hops(incoming_messages)
+    if not provenance:
+        return {}
+    minimum_hops = min(provenance.values())
+    if minimum_hops >= MAX_PERSISTED_EXTERNAL_PROVENANCE_HOPS:
+        return {}
+    return external_content_history_metadata(
+        (name for name, hops in provenance.items() if hops == minimum_hops),
+        provenance_hops=minimum_hops + 1,
+    )
+
+
 def format_untrusted_tool_result(tool_name: str, content: str) -> str:
     """Render external tool text as escaped reference data for an LLM turn."""
     safe_content = escape(str(content or ""), quote=False)
+    safe_content = safe_content.replace("[", "&#91;").replace("]", "&#93;")
     return (
         "[UNTRUSTED EXTERNAL TOOL RESULT]\n"
         f"Source tool: {tool_name}\n"

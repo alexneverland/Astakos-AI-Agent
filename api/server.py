@@ -348,10 +348,17 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
                 t_tools_0 = perf_counter()
                 for msg in data.get("messages", []):
                     if getattr(msg, "type", "") == "tool":
-                        from core.untrusted_content import is_untrusted_external_tool_name
-                        if is_untrusted_external_tool_name(getattr(msg, "name", None)):
-                            external_tool_names.add(str(getattr(msg, "name", "")))
+                        from core.untrusted_content import (
+                            format_untrusted_tool_result,
+                            is_untrusted_external_tool_name,
+                        )
+                        tool_name = str(getattr(msg, "name", ""))
+                        is_external = is_untrusted_external_tool_name(tool_name)
+                        if is_external:
+                            external_tool_names.add(tool_name)
                         tool_content = clean_message(getattr(msg, "content", "")).strip()
+                        if is_external:
+                            tool_content = format_untrusted_tool_result(tool_name, tool_content)
                         if tool_content:
                             tool_result_fallbacks.append(tool_content)
                 trace.mark_phase(
@@ -1056,7 +1063,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         is_ultra_ack = is_ultra_light_ack(isolated_user_input)
         tool_result_fallbacks = []
         external_tool_names: list[str] = []
-        incoming_external_tool_names: set[str] = set()
+        provenance_messages_for_reply: list = []
 
         from core.planner import get_fresh_pending_plan_confirmation
 
@@ -1112,8 +1119,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
             _trace.mark_phase("web_graph_budget", limit)
 
-            from core.untrusted_content import active_external_content_tool_names
-            incoming_external_tool_names = active_external_content_tool_names(messages_for_graph)
+            provenance_messages_for_reply = messages_for_graph
             graph_result = await asyncio.to_thread(
                 _run_web_graph_stream_sync,
                 messages_for_graph,
@@ -1123,9 +1129,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             final_ai_response = graph_result["final_ai_response"]
             handling_agent = graph_result["handling_agent"]
             tool_result_fallbacks = graph_result["tool_result_fallbacks"]
-            external_tool_names = sorted(
-                set(graph_result["external_tool_names"]) | incoming_external_tool_names
-            )
+            external_tool_names = graph_result["external_tool_names"]
             graph_elapsed_ms = graph_result["graph_elapsed_ms"]
             _trace.mark_phase("graph_call_ms", graph_elapsed_ms)
             _trace.mark_phase("graph_stream_ms", graph_elapsed_ms)
@@ -1199,9 +1203,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             clean_ai = sanitize_messenger_draft_claims(clean_ai)
             clean_ai = strip_operational_assistant_paragraphs(clean_ai).strip() or clean_ai
-            from core.untrusted_content import external_content_history_metadata
-            assistant_metadata = external_content_history_metadata(
-                external_tool_names
+            from core.untrusted_content import derived_external_content_history_metadata
+            assistant_metadata = derived_external_content_history_metadata(
+                provenance_messages_for_reply,
+                external_tool_names,
             )
             _trace.finalize(response=clean_ai)
             

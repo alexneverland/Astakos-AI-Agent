@@ -2254,13 +2254,12 @@ def handle_message(user_text: str, chat_id: str):
         is_ultra_ack = is_ultra_light_ack(clean_user_text)
         fast_path_used = False
         medium_path_used = False
-        incoming_external_tool_names: set[str] = set()
+        provenance_messages_for_reply: list = []
 
         # 1. graph_call_ms
         graph_call_started = perf_counter()
 
         mail_prompt_active = is_reply_to_recent_mail_prompt(context_msgs)
-        from core.untrusted_content import active_external_content_tool_names
         
         if is_ultra_ack and routine_completion_context is None and not mail_prompt_active:
             _trace.mark_phase("ultra_light_ack_used", 1)
@@ -2276,14 +2275,10 @@ def handle_message(user_text: str, chat_id: str):
             _trace.mark_phase("medium_path_candidate", 1 if medium_path_used else 0)
 
             if fast_path_used:
-                incoming_external_tool_names = active_external_content_tool_names(
-                    context_msgs[-6:] + [current_msg]
-                )
+                provenance_messages_for_reply = context_msgs[-6:] + [current_msg]
                 events = _run_fast_chat_path(context_msgs, current_msg)
             elif medium_path_used:
-                incoming_external_tool_names = active_external_content_tool_names(
-                    context_msgs[-8:] + [current_msg]
-                )
+                provenance_messages_for_reply = context_msgs[-8:] + [current_msg]
                 events = list(
                     graph.stream(
                         {"messages": context_msgs[-8:] + [current_msg], "channel": "telegram"},
@@ -2291,9 +2286,7 @@ def handle_message(user_text: str, chat_id: str):
                     )
                 )
             else:
-                incoming_external_tool_names = active_external_content_tool_names(
-                    context_msgs + [current_msg]
-                )
+                provenance_messages_for_reply = context_msgs + [current_msg]
                 events = list(
                     graph.stream(
                         {"messages": context_msgs + [current_msg], "channel": "telegram"},
@@ -2347,13 +2340,19 @@ def handle_message(user_text: str, chat_id: str):
                 if node == "tools":
                     for msg in data.get("messages", []):
                         if getattr(msg, "type", "") == "tool":
-                            from core.untrusted_content import is_untrusted_external_tool_name
-                            if is_untrusted_external_tool_name(getattr(msg, "name", None)):
-                                external_tool_names.add(str(getattr(msg, "name", "")))
+                            from core.untrusted_content import (
+                                format_untrusted_tool_result,
+                                is_untrusted_external_tool_name,
+                            )
+                            tool_name = str(getattr(msg, "name", ""))
+                            is_external = is_untrusted_external_tool_name(tool_name)
+                            if is_external:
+                                external_tool_names.add(tool_name)
                             tool_content = clean_message(getattr(msg, "content", "")).strip()
+                            if is_external:
+                                tool_content = format_untrusted_tool_result(tool_name, tool_content)
                             if tool_content:
                                 tool_result_fallbacks.append(tool_content)
-        external_tool_names.update(incoming_external_tool_names)
         tool_message_collect_ms = int((perf_counter() - tool_collect_started) * 1000)
         _trace.mark_phase("tool_message_collect_ms", tool_message_collect_ms)
 
@@ -2452,8 +2451,11 @@ def handle_message(user_text: str, chat_id: str):
             # We keep context for the next message
             _typing_active["on"] = False  # We stop typing
             user_rowid = _append_to_analytics_log("user", clean_user_text)
-            from core.untrusted_content import external_content_history_metadata
-            assistant_metadata = external_content_history_metadata(external_tool_names)
+            from core.untrusted_content import derived_external_content_history_metadata
+            assistant_metadata = derived_external_content_history_metadata(
+                provenance_messages_for_reply,
+                external_tool_names,
+            )
             if assistant_metadata:
                 _append_to_analytics_log(
                     "ai",
