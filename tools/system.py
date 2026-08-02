@@ -859,7 +859,13 @@ from langchain_core.tools import tool
 from memory.routine_db import upsert_routine
 
 @tool
-def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: str = "general") -> str:
+def learn_routine(
+    day_of_week: str,
+    time_str: str,
+    event_name: str,
+    event_type: str = "general",
+    external_content_sources_json: str = "",
+) -> str:
     """
     [CRITICAL]: Use this WHEN {config.USER_NAME} mentions a habit,
     a routine, or something that is repeated (e.g., "Every Friday at 13:00 I go to the farmers market").
@@ -879,6 +885,7 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
     ("today I went…", "tomorrow I have…").
     """
     from datetime import datetime
+    from core.untrusted_content import external_content_sources_from_json
 
     VALID_DAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Everyday", "Weekdays"}
     VALID_TYPES = {"family", "work", "hobby", "general"}
@@ -898,7 +905,16 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
         event_type = "general"
 
     try:
-        res = upsert_routine(day_of_week, time_str, event_name, event_type, confidence_boost=0.3)
+        res = upsert_routine(
+            day_of_week,
+            time_str,
+            event_name,
+            event_type,
+            confidence_boost=0.3,
+            external_content_sources=external_content_sources_from_json(
+                external_content_sources_json,
+            ),
+        )
 
         if res == "created":
             return t("tools.system.routine_added_first", event_name=event_name)
@@ -1013,7 +1029,20 @@ def get_routines(day_of_week: str) -> str:
         for r in routines:
             conf_pct = int(r['confidence'] * 100)
             mentions = r.get('mentions', 1)
-            lines.append(t("tools.system.routine_day_item", time=r["time"], event=r["event"], type=r["type"], conf=conf_pct, mentions=mentions))
+            event = r["event"]
+            source_json = r.get("external_content_sources_json", "")
+            if source_json:
+                from core.untrusted_content import (
+                    external_content_sources_from_json,
+                    format_untrusted_tool_result,
+                )
+                sources = external_content_sources_from_json(source_json)
+                if sources:
+                    event = format_untrusted_tool_result(
+                        "persisted routine sources: " + ", ".join(sources),
+                        event,
+                    )
+            lines.append(t("tools.system.routine_day_item", time=r["time"], event=event, type=r["type"], conf=conf_pct, mentions=mentions))
         return "\n".join(lines)
     except Exception as e:
         return t("tools.system.routine_fetch_err", e=str(e))
@@ -1034,7 +1063,20 @@ def search_routines(event_name: str) -> str:
         
         lines = [f"Found {len(routines)} matching routines:"]
         for r in routines:
-            lines.append(f"- ID: {r['id']} | Event: {r['event']} | Day: {r['day']} | Time: {r['time']}")
+            event = r["event"]
+            source_json = r.get("external_content_sources_json", "")
+            if source_json:
+                from core.untrusted_content import (
+                    external_content_sources_from_json,
+                    format_untrusted_tool_result,
+                )
+                sources = external_content_sources_from_json(source_json)
+                if sources:
+                    event = format_untrusted_tool_result(
+                        "persisted routine sources: " + ", ".join(sources),
+                        event,
+                    )
+            lines.append(f"- ID: {r['id']} | Event: {event} | Day: {r['day']} | Time: {r['time']}")
         return "\n".join(lines)
     except Exception as e:
         return f"Error searching routines: {str(e)}"

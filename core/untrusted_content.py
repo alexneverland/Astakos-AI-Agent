@@ -18,6 +18,7 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "get_fit_summary",
     "get_navigation_info",
     "get_news",
+    "get_routines",
     "get_weather_forecast",
     "grep_project_files",
     "hn_briefing",
@@ -40,6 +41,7 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "search_goldmall_offers",
     "search_google_places",
     "search_memory",
+    "search_routines",
     "search_supermarket_prices",
 })
 SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"

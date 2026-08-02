@@ -475,7 +475,22 @@ def filter_messages(messages: list, k: int = 40) -> list:
     if not messages:
         return []
 
-    safe_list = list(messages[-k:])
+    all_messages = list(messages)
+    start_index = max(0, len(all_messages) - k)
+    safe_list = all_messages[start_index:]
+
+    # Preserve the AI tool-call that supplies action arguments for a ToolMessage
+    # at the cutoff. Action-aware untrusted-source classification must not lose
+    # that pairing merely because history is bounded.
+    if safe_list and getattr(safe_list[0], "type", "") == "tool":
+        first_tool_call_id = str(getattr(safe_list[0], "tool_call_id", ""))
+        for previous in reversed(all_messages[:start_index]):
+            if any(
+                str(call.get("id", "")) == first_tool_call_id
+                for call in (getattr(previous, "tool_calls", None) or [])
+            ):
+                safe_list.insert(0, previous)
+                break
     cleaned_list = []
 
     # First pass: basic cleaning
