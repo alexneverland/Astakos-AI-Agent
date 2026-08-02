@@ -1173,8 +1173,15 @@ def save_photo_to_index(file_path: str, analysis: str, caption: str = ""):
 # Long-Term Goals
 # ================================================================
 
-def save_goal(project: str, description: str, status: str = "active", progress: int = 0, milestones: str = "") -> bool:
-    """Saves or updates a goal. Overwrites if it already exists."""
+def save_goal(
+    project: str,
+    description: str,
+    status: str = "active",
+    progress: int = 0,
+    milestones: str = "",
+    external_content_sources: list[str] | None = None,
+) -> bool:
+    """Save or update a goal while retaining any untrusted-source provenance."""
     try:
         with vector_lock, _cross_process_lock():
             existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
@@ -1189,6 +1196,12 @@ def save_goal(project: str, description: str, status: str = "active", progress: 
                 "date": datetime.now().strftime("%Y-%m-%d"), "retrieval_count": 0,
                 "importance": 10, "confidence": 0.95, "last_accessed": datetime.now().timestamp(),
             }
+            if external_content_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+                metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                    external_content_sources,
+                )
             vector_store.add_texts([text], metadatas=[metadata])
             print(f"\033[92m[Goals]: '{project}' ({status}, {progress}%)\033[0m")
             return True
@@ -1266,6 +1279,7 @@ def get_active_goals() -> list[dict]:
                     "date":        meta.get("date", ""),
                     "progress":    meta.get("progress", 0),
                     "milestones":  meta.get("milestones", ""),
+                    "metadata": meta,
                 })
         return goals
     except Exception as e:

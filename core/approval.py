@@ -393,7 +393,7 @@ def approval_check_node(state):
     current_channel = state.get("channel", "telegram")
     for tc in critical_calls:
         pending_args = dict(tc.get("args", {}))
-        if tc["name"] in {"save_to_memory", "manage_list"} and tc["id"] in external_context_approval_ids:
+        if tc["name"] in {"save_to_memory", "manage_list", "save_goal_tool"} and tc["id"] in external_context_approval_ids:
             from core.untrusted_content import active_external_content_tool_names
             import json
 

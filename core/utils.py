@@ -686,11 +686,22 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
             if active_goals:
                 prompt += "═══ GOALS IN PROGRESS ═══\n"
                 for g in active_goals:
+                    from core.untrusted_content import format_untrusted_persisted_content
+
                     status_icon = "🎯" if g["status"] == "active" else "⏸"
                     prog_str = f" | Progress: {g.get('progress', 0)}%" if g.get('progress') else ""
-                    prompt += " " + status_icon + " [" + g['project'] + "] " + g['description'] + " (since " + g['date'] + ")" + prog_str + "\n"
+                    goal_text = "[" + g['project'] + "] " + g['description']
+                    goal_text = format_untrusted_persisted_content(
+                        goal_text,
+                        g.get("metadata"),
+                    )
+                    prompt += " " + status_icon + " " + goal_text + " (since " + g['date'] + ")" + prog_str + "\n"
                     if g.get('milestones'):
-                        prompt += f"    Milestones: {g['milestones']}\n"
+                        milestones = format_untrusted_persisted_content(
+                            str(g['milestones']),
+                            g.get("metadata"),
+                        )
+                        prompt += f"    Milestones: {milestones}\n"
                 prompt += "💡 If the conversation is about one of these, mention the continuation naturally.\n"
                 prompt += "══════════════════════════\n\n"
         except Exception as _e:

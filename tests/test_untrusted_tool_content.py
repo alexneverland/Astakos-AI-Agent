@@ -443,6 +443,39 @@ def test_approval_requires_consent_for_web_photo_context(
     assert pending_calls[0][1]["external_content_sources_json"] == '["user_provided_asset"]'
 
 
+def test_approval_forwards_external_provenance_to_goal_save(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An approved goal save retains the source that supplied its content."""
+    from core.approval import approval_check_node
+
+    pending_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        "core.approval.save_pending",
+        lambda *args, **_kwargs: pending_calls.append(args),
+    )
+    monkeypatch.setattr("core.approval._notify_telegram", lambda _tool_call: None)
+    state = {
+        "messages": [
+            HumanMessage(content="Read this source."),
+            ToolMessage(tool_call_id="tool-1", name="browse_url", content="Deadline details."),
+            AIMessage(content="The deadline is Friday."),
+            HumanMessage(content="Save that as a goal."),
+            AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "save_goal_tool",
+                    "args": {"project": "Deadline", "description": "Friday"},
+                    "id": "tool-2",
+                }],
+            ),
+        ],
+    }
+
+    assert approval_check_node(state)["approval_status"] == "pending"
+    assert pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
+
+
 def test_deferred_memory_provenance_rejects_invalid_source_names() -> None:
     """Only known external sources may be carried into an approved memory save."""
     from core.untrusted_content import external_content_sources_from_json

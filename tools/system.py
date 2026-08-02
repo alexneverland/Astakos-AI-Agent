@@ -3240,7 +3240,14 @@ def get_fit_summary(days_ago: int = 1) -> str:
 
 
 @tool
-def save_goal_tool(project: str, description: str, status: str = "active", progress: int = 0, milestones: str = "") -> str:
+def save_goal_tool(
+    project: str,
+    description: str,
+    status: str = "active",
+    progress: int = 0,
+    milestones: str = "",
+    external_content_sources_json: str = "",
+) -> str:
     """
     Saves or updates a long-term goal for {config.USER_NAME}.
     project: Short project name (e.g., 'ShiftMaster', 'Astakos', 'PraxisERP').
@@ -3248,9 +3255,21 @@ def save_goal_tool(project: str, description: str, status: str = "active", progr
     status: 'active' (in progress) | 'paused' (shelved) | 'done' (completed).
     progress: Progress percentage 0-100.
     milestones: Smaller steps or milestones (as a string).
+    external_content_sources_json: Internal approval provenance. Do not set this manually.
     """
     from memory.vector_store import save_goal
-    ok = save_goal(project=project, description=description, status=status, progress=progress, milestones=milestones)
+    from core.untrusted_content import external_content_sources_from_json
+
+    ok = save_goal(
+        project=project,
+        description=description,
+        status=status,
+        progress=progress,
+        milestones=milestones,
+        external_content_sources=external_content_sources_from_json(
+            external_content_sources_json,
+        ),
+    )
     if ok:
         return f"✅ Goal '{project}' saved ({status}, {progress}%)."
     return f"❌ Failed to save goal '{project}'."
