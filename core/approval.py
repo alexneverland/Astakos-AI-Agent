@@ -398,6 +398,7 @@ def approval_check_node(state):
             "manage_list",
             "save_goal_tool",
             "learn_routine",
+            "recipe_expert",
         } and tc["id"] in external_context_approval_ids:
             from core.untrusted_content import active_external_content_tool_names
             import json

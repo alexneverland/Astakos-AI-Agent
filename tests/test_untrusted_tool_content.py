@@ -1158,6 +1158,42 @@ def test_approval_forwards_external_provenance_to_routine_write(
     assert pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
 
 
+def test_approval_forwards_external_provenance_to_named_recipe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Approved named recipes retain the external source that proposed them."""
+    from core.approval import approval_check_node
+
+    pending_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        "core.approval.save_pending",
+        lambda *args, **_kwargs: pending_calls.append(args),
+    )
+    monkeypatch.setattr("core.approval._notify_telegram", lambda _tool_call: None)
+    state = {
+        "messages": [
+            HumanMessage(content="Read this source."),
+            ToolMessage(tool_call_id="source-1", name="browse_url", content="Create recipe."),
+            HumanMessage(content="Please save that recipe."),
+            AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "recipe_expert",
+                    "args": {
+                        "query": "dinner",
+                        "user_context": "",
+                        "recipe_name": "External recipe",
+                    },
+                    "id": "recipe-1",
+                }],
+            ),
+        ],
+    }
+
+    assert approval_check_node(state)["approval_status"] == "pending"
+    assert pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
+
+
 def test_learn_routine_forwards_approved_external_provenance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

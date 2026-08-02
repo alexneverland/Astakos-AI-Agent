@@ -19,6 +19,7 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "get_navigation_info",
     "get_news",
     "get_routines",
+    "get_saved_recipe",
     "get_weather_forecast",
     "grep_project_files",
     "hn_briefing",
@@ -41,6 +42,7 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "search_goldmall_offers",
     "search_google_places",
     "search_memory",
+    "search_recipe_library",
     "search_routines",
     "search_supermarket_prices",
 })
