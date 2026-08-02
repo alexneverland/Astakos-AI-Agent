@@ -126,8 +126,12 @@ def _enable_wal(conn: sqlite3.Connection) -> bool:
         return _wal_enabled
 
 
-def setup_db():
+def setup_db() -> None:
+    """Create and migrate the routines database under a serialized startup lock."""
     conn   = get_connection()
+    # API and Telegram start in separate processes. Serialize schema inspection
+    # and ALTER statements so a legacy upgrade cannot race between them.
+    conn.execute("BEGIN IMMEDIATE")
     cursor = conn.cursor()
 
     cursor.execute('''

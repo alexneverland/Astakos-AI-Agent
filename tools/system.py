@@ -695,6 +695,7 @@ def set_local_reminder(
     action: str = "add",
     location: str = None,
     match_task: str = None,
+    external_content_sources_json: str = "",
 ) -> str:
     """
     Manages local reminders.
@@ -705,6 +706,7 @@ def set_local_reminder(
     location: ONLY for location-based reminders. Use 'home' for arrival home,
               or 'leave_current_location' to trigger after leaving the current place.
               When location is provided, DO NOT provide minutes_from_now or exact_time.
+    external_content_sources_json: Internal approval provenance. Do not set it manually.
     """
     conn = None
     try:
@@ -713,12 +715,26 @@ def set_local_reminder(
 
         # ── READ: Returns ONLY pending ──────────────────────
         if action == "read":
-            cursor.execute("SELECT task, time FROM reminders WHERE status='pending'")
+            cursor.execute(
+                "SELECT task, time, external_content_sources_json "
+                "FROM reminders WHERE status='pending'"
+            )
             pending = cursor.fetchall()
             if not pending:
                 return t("tools.system.reminders_read_empty")
             lines = []
-            for rtask, tm in pending:
+            for rtask, tm, sources_json in pending:
+                from core.untrusted_content import (
+                    external_content_sources_from_json,
+                    format_untrusted_tool_result,
+                )
+
+                sources = external_content_sources_from_json(sources_json or "")
+                if sources:
+                    rtask = format_untrusted_tool_result(
+                        f"persisted reminder sources: {', '.join(sources)}",
+                        rtask,
+                    )
                 if tm and tm.startswith("loc:"):
                     loc = tm.split(":", 1)[1]
                     if loc == "leave_current_location":
@@ -773,7 +789,19 @@ def set_local_reminder(
                         existing_task=existing_task,
                     )
 
-            cursor.execute("UPDATE reminders SET task=? WHERE id=?", (task, reminder_id))
+            cursor.execute(
+                "SELECT external_content_sources_json FROM reminders WHERE id=?",
+                (reminder_id,),
+            )
+            existing_sources_json = cursor.fetchone()[0]
+            from core.untrusted_content import external_content_sources_from_json
+
+            existing_sources = external_content_sources_from_json(existing_sources_json or "")
+            new_sources = external_content_sources_from_json(external_content_sources_json)
+            cursor.execute(
+                "UPDATE reminders SET task=?, external_content_sources_json=? WHERE id=?",
+                (task, json.dumps(sorted(set(existing_sources) | set(new_sources))), reminder_id),
+            )
             conn.commit()
             return t("tools.system.reminders_update_success", task=task)
 
@@ -787,6 +815,11 @@ def set_local_reminder(
             )
 
             current_location = None
+            from core.untrusted_content import external_content_sources_from_json
+
+            provenance_json = json.dumps(
+                external_content_sources_from_json(external_content_sources_json)
+            )
 
             if minutes_from_now > 0:
                 target_time = (datetime.now() + timedelta(minutes=minutes_from_now)).strftime("%Y-%m-%d %H:%M")
@@ -821,8 +854,9 @@ def set_local_reminder(
                     related_reminders.append((existing_task, existing_time))
 
             cursor.execute(
-                "INSERT INTO reminders (task, time, status) VALUES (?, ?, 'pending')",
-                (task, target_time),
+                "INSERT INTO reminders (task, time, status, external_content_sources_json) "
+                "VALUES (?, ?, 'pending', ?)",
+                (task, target_time, provenance_json),
             )
             if current_location is not None:
                 save_leave_current_location_anchor(

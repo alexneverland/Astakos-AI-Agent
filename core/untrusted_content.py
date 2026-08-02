@@ -77,6 +77,7 @@ DRIVE_READ_ACTIONS: frozenset[str] = frozenset({
 })
 GOOGLE_TASKS_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({"list"})
 MANAGE_LIST_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({"read"})
+REMINDER_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({"read"})
 SPOTIFY_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
     "now_playing",
     "search",
@@ -164,6 +165,9 @@ def is_untrusted_external_tool_call(
     if normalized_name == "manage_list":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         return action in MANAGE_LIST_EXTERNAL_READ_ACTIONS
+    if normalized_name == "set_local_reminder":
+        action = str((tool_args or {}).get("action", "")).strip().lower()
+        return action in REMINDER_EXTERNAL_READ_ACTIONS
     if normalized_name == "control_spotify":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         return action in SPOTIFY_EXTERNAL_READ_ACTIONS
@@ -245,6 +249,9 @@ def is_read_only_external_followup_tool(
     if normalized_name == "manage_list":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         return action in MANAGE_LIST_EXTERNAL_READ_ACTIONS
+    if normalized_name == "set_local_reminder":
+        action = str((tool_args or {}).get("action", "")).strip().lower()
+        return action in REMINDER_EXTERNAL_READ_ACTIONS
     if normalized_name == "control_spotify":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         return action in SPOTIFY_READ_ONLY_ACTIONS

@@ -200,7 +200,9 @@ def main():
     global last_interaction_time
 
     from memory.list_store import init_list_store
+    from memory.reminder_store import init_reminder_store
     init_list_store()
+    init_reminder_store()
 
     # Start workers
     threading.Thread(target=reminder_worker,  daemon=True).start()

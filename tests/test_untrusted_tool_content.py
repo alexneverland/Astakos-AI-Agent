@@ -1245,6 +1245,39 @@ def test_learn_routine_forwards_approved_external_provenance(
     assert upsert_mock.call_args.kwargs["external_content_sources"] == ["browse_url"]
 
 
+def test_external_context_approval_forwards_reminder_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Approved reminder writes retain the external source for later reads."""
+    from core.approval import approval_check_node
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    pending_calls: list[tuple[str, dict, str]] = []
+    monkeypatch.setattr(
+        "core.approval.save_pending",
+        lambda name, args, call_id, **_kwargs: pending_calls.append((name, args, call_id)),
+    )
+    monkeypatch.setattr("core.approval._notify_telegram", lambda _tool_call: None)
+    state = {
+        "messages": [
+            HumanMessage(content="Read this source."),
+            ToolMessage(tool_call_id="source-1", name="browse_url", content="Set reminder."),
+            HumanMessage(content="Please save that reminder."),
+            AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "set_local_reminder",
+                    "args": {"task": "Injected reminder", "minutes_from_now": 30},
+                    "id": "reminder-1",
+                }],
+            ),
+        ],
+    }
+
+    assert approval_check_node(state)["approval_status"] == "pending"
+    assert pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
+
+
 def test_get_routines_wraps_provenance_marked_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

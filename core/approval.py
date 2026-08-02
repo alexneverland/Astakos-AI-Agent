@@ -400,6 +400,7 @@ def approval_check_node(state):
             "update_goal_milestones_tool",
             "learn_routine",
             "recipe_expert",
+            "set_local_reminder",
         } and tc["id"] in external_context_approval_ids:
             from core.untrusted_content import active_external_content_tool_names
             import json

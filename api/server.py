@@ -509,8 +509,10 @@ async def lifespan(app: FastAPI):
     try:
         from memory.pending_assets import init_pending_assets_table
         from memory.list_store import init_list_store
+        from memory.reminder_store import init_reminder_store
         init_pending_assets_table()
         init_list_store()
+        init_reminder_store()
     except Exception as e:
         print(f"[PendingAssets]: Init failed: {e}")
         
