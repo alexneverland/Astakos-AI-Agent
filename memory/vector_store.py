@@ -1200,6 +1200,22 @@ def save_photo_to_index(file_path: str, analysis: str, caption: str = ""):
 # Long-Term Goals
 # ================================================================
 
+def _merged_goal_external_content_sources(
+    metadata: dict | None,
+    new_sources: list[str] | None,
+) -> list[str]:
+    """Merge existing goal provenance with an approved external goal update."""
+    from core.untrusted_content import (
+        EXTERNAL_CONTENT_HISTORY_METADATA_KEY,
+        external_content_sources_from_json,
+    )
+
+    existing_sources = external_content_sources_from_json(
+        (metadata or {}).get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, ""),
+    )
+    return sorted(set(existing_sources) | set(new_sources or []))
+
+
 def save_goal(
     project: str,
     description: str,
@@ -1212,9 +1228,15 @@ def save_goal(
     try:
         with vector_lock, _cross_process_lock():
             existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            existing_metadata = None
             if existing["ids"]:
+                existing_metadata = dict(existing["metadatas"][0])
                 vector_store._collection.delete(ids=existing["ids"])
                 print(f"\033[94m[Goals]: Overwrite '{project}'\033[0m")
+            merged_sources = _merged_goal_external_content_sources(
+                existing_metadata,
+                external_content_sources,
+            )
             text = f"[GOAL] {project}: {description}"
             metadata = {
                 "category": "goal", "project": project, "status": status,
@@ -1223,11 +1245,11 @@ def save_goal(
                 "date": datetime.now().strftime("%Y-%m-%d"), "retrieval_count": 0,
                 "importance": 10, "confidence": 0.95, "last_accessed": datetime.now().timestamp(),
             }
-            if external_content_sources:
+            if merged_sources:
                 from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
 
                 metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
-                    external_content_sources,
+                    merged_sources,
                 )
             vector_store.add_texts([text], metadatas=[metadata])
             print(f"\033[92m[Goals]: '{project}' ({status}, {progress}%)\033[0m")
@@ -1273,8 +1295,12 @@ def update_goal_progress(project: str, progress: int) -> bool:
         return False
 
 
-def update_goal_milestones(project: str, milestones: str) -> bool:
-    """Updates the milestones of a goal."""
+def update_goal_milestones(
+    project: str,
+    milestones: str,
+    external_content_sources: list[str] | None = None,
+) -> bool:
+    """Update goal milestones while retaining any external-source provenance."""
     try:
         with vector_lock, _cross_process_lock():
             existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
@@ -1283,6 +1309,16 @@ def update_goal_milestones(project: str, milestones: str) -> bool:
             old_meta = dict(existing["metadatas"][0])
             vector_store._collection.delete(ids=existing["ids"])
             new_meta = {**old_meta, "milestones": milestones, "timestamp": datetime.now().timestamp()}
+            merged_sources = _merged_goal_external_content_sources(
+                old_meta,
+                external_content_sources,
+            )
+            if merged_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+                new_meta[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                    merged_sources,
+                )
             vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
             print(f"\033[92m[Goals]: '{project}' milestones updated\033[0m")
             return True

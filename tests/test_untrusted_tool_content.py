@@ -1194,6 +1194,38 @@ def test_approval_forwards_external_provenance_to_named_recipe(
     assert pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
 
 
+def test_approval_forwards_external_provenance_to_goal_milestones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Approved milestone updates retain the external source that supplied the text."""
+    from core.approval import approval_check_node
+
+    pending_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        "core.approval.save_pending",
+        lambda *args, **_kwargs: pending_calls.append(args),
+    )
+    monkeypatch.setattr("core.approval._notify_telegram", lambda _tool_call: None)
+    state = {
+        "messages": [
+            HumanMessage(content="Read this source."),
+            ToolMessage(tool_call_id="source-1", name="browse_url", content="Milestone text."),
+            HumanMessage(content="Use that milestone."),
+            AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "update_goal_milestones_tool",
+                    "args": {"project": "Research", "milestones": "1) External task"},
+                    "id": "milestone-1",
+                }],
+            ),
+        ],
+    }
+
+    assert approval_check_node(state)["approval_status"] == "pending"
+    assert pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
+
+
 def test_learn_routine_forwards_approved_external_provenance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

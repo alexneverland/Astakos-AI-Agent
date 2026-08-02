@@ -397,6 +397,7 @@ def approval_check_node(state):
             "save_to_memory",
             "manage_list",
             "save_goal_tool",
+            "update_goal_milestones_tool",
             "learn_routine",
             "recipe_expert",
         } and tc["id"] in external_context_approval_ids:

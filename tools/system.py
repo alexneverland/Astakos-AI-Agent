@@ -3346,14 +3346,26 @@ def update_goal_progress_tool(project: str, progress: int) -> str:
 
 
 @tool
-def update_goal_milestones_tool(project: str, milestones: str) -> str:
+def update_goal_milestones_tool(
+    project: str,
+    milestones: str,
+    external_content_sources_json: str = "",
+) -> str:
     """
     Updates the milestones of an existing goal.
     project: The name of the project.
     milestones: The new milestones (in string format, e.g., '1) UI, 2) DB').
     """
     from memory.vector_store import update_goal_milestones
-    ok = update_goal_milestones(project=project, milestones=milestones)
+    from core.untrusted_content import external_content_sources_from_json
+
+    ok = update_goal_milestones(
+        project=project,
+        milestones=milestones,
+        external_content_sources=external_content_sources_from_json(
+            external_content_sources_json,
+        ),
+    )
     if ok:
         return f"✅ Goal '{project}' milestones updated."
     return f"❌ Goal '{project}' not found."
