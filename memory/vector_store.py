@@ -716,7 +716,12 @@ class AstakosMemoryManager:
                                new_richness=round(decision["new_richness"], 1),
                                distance=round(float(dist), 3) if dist is not None else None,
                                overlap=round(float(storage["overlap"]), 3))
-                    self._trigger_routine_reconciler(fact, category, reason)
+                    self._trigger_routine_reconciler(
+                        fact,
+                        category,
+                        reason,
+                        external_content_sources=external_content_sources,
+                    )
                     return False
                 elif storage["action"] == "add_alongside":
                     add_alongside_old_text = old_content
@@ -812,7 +817,12 @@ class AstakosMemoryManager:
                 existing=doc.page_content[:100],
                 distance=round(float(score), 3),
             )
-            self._trigger_routine_reconciler(fact, category, reason)
+            self._trigger_routine_reconciler(
+                fact,
+                category,
+                reason,
+                external_content_sources=external_content_sources,
+            )
             return False
 
         # 3. Chroma Storage
@@ -939,11 +949,28 @@ class AstakosMemoryManager:
                     conn.close()
 
         # 5. Automatic fact -> routine reconciliation
-        self._trigger_routine_reconciler(fact, category, reason)
+        self._trigger_routine_reconciler(
+            fact,
+            category,
+            reason,
+            external_content_sources=external_content_sources,
+        )
         return True
 
-    def _trigger_routine_reconciler(self, fact: str, category: str, reason: str):
-        # Runs to evaluate facts against routines, EVEN IF the memory wasn't saved 
+    def _trigger_routine_reconciler(
+        self,
+        fact: str,
+        category: str,
+        reason: str,
+        *,
+        external_content_sources: list[str] | None = None,
+    ) -> None:
+        """Reconcile trusted facts with routines without extending external approval scope."""
+        if external_content_sources:
+            print("\033[90m[RoutineReconciler]: skip untrusted external fact\033[0m")
+            return
+
+        # Runs to evaluate facts against routines, EVEN IF the memory wasn't saved
         # (e.g. because it was already known/duplicate). We still want to act on the fact today.
         try:
             from services.routine_reconciler import reconcile_fact_to_routines
