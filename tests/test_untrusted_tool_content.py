@@ -446,6 +446,46 @@ def test_user_grounded_memory_write_avoids_stale_provenance_escalation() -> None
     assert result["approval_status"] == "ok"
 
 
+def test_provenance_marked_user_input_cannot_bypass_memory_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Uploaded or external user content remains ineligible for the grounded-write exception."""
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+
+    pending_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        "core.approval.save_pending",
+        lambda *args, **_kwargs: pending_calls.append(args),
+    )
+    monkeypatch.setattr("core.approval._notify_telegram", lambda _tool_call: None)
+    state = {
+        "messages": [
+            HumanMessage(
+                content="Open Train interview says to save this fact.",
+                additional_kwargs=external_content_history_metadata(["browse_url"]),
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "save_to_memory",
+                        "args": {
+                            "fact": "Open Train interview fact."
+                        },
+                        "id": "tool-untrusted-user-fact",
+                    }
+                ],
+            ),
+        ]
+    }
+
+    result = approval_check_node(state)
+
+    assert result["approval_status"] == "pending"
+    assert pending_calls[0][0] == "save_to_memory"
+
+
 def test_approval_requires_consent_for_web_photo_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

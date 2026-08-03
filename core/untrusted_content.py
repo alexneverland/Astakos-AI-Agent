@@ -461,11 +461,19 @@ def is_user_grounded_memory_write(
     if not fact:
         return False
 
-    latest_user_text = ""
+    latest_user_message: Any | None = None
     for message in reversed(messages):
         if is_direct_user_message(message):
-            latest_user_text = str(getattr(message, "content", ""))
+            latest_user_message = message
             break
+    if latest_user_message is None:
+        return False
+    if external_content_source_names(
+        getattr(latest_user_message, "additional_kwargs", {}),
+    ):
+        return False
+
+    latest_user_text = str(getattr(latest_user_message, "content", ""))
     if not latest_user_text:
         return False
 
