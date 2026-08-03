@@ -1330,19 +1330,25 @@ def test_clean_routine_reads_do_not_activate_external_provenance(tool_name: str)
 @pytest.mark.parametrize("tool_name", ["get_routines", "search_routines"])
 def test_marked_routine_reads_activate_external_provenance(tool_name: str) -> None:
     """A routine result with persisted source wrapping remains untrusted."""
-    from core.untrusted_content import is_untrusted_external_tool_result_content
+    from core.untrusted_content import (
+        UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER,
+        is_untrusted_external_tool_result_content,
+    )
 
     assert is_untrusted_external_tool_result_content(
         tool_name,
         {},
-        "[UNTRUSTED EXTERNAL TOOL RESULT] persisted routine source",
+        f"{UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER} persisted routine source",
     )
 
 
 @pytest.mark.parametrize("tool_name", ["get_routines", "search_routines"])
 def test_routine_event_provenance_depends_on_returned_entries(tool_name: str) -> None:
     """Streaming provenance collection ignores clean routines and retains marked ones."""
-    from core.untrusted_content import external_tool_names_from_events
+    from core.untrusted_content import (
+        UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER,
+        external_tool_names_from_events,
+    )
 
     def events_for(content: str) -> list[dict[str, object]]:
         """Build one streamed routine read exchange with the supplied result text."""
@@ -1369,7 +1375,7 @@ def test_routine_event_provenance_depends_on_returned_entries(tool_name: str) ->
 
     assert external_tool_names_from_events(events_for("Routine: clean rabbit cage.")) == set()
     assert external_tool_names_from_events(
-        events_for("[UNTRUSTED EXTERNAL TOOL RESULT] persisted routine source"),
+        events_for(f"{UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER} persisted routine source"),
     ) == {tool_name}
 
 
