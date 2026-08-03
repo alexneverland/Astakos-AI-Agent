@@ -1315,6 +1315,70 @@ def test_get_routines_wraps_provenance_marked_events(
     assert "persisted routine sources: browse_url" in rendered
 
 
+@pytest.mark.parametrize("tool_name", ["get_routines", "search_routines"])
+def test_clean_routine_reads_do_not_activate_external_provenance(tool_name: str) -> None:
+    """Routine reads remain trusted unless their returned entry carries provenance."""
+    from core.untrusted_content import is_untrusted_external_tool_result_content
+
+    assert not is_untrusted_external_tool_result_content(
+        tool_name,
+        {},
+        "Routine: clean rabbit cage.",
+    )
+
+
+@pytest.mark.parametrize("tool_name", ["get_routines", "search_routines"])
+def test_marked_routine_reads_activate_external_provenance(tool_name: str) -> None:
+    """A routine result with persisted source wrapping remains untrusted."""
+    from core.untrusted_content import (
+        UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER,
+        is_untrusted_external_tool_result_content,
+    )
+
+    assert is_untrusted_external_tool_result_content(
+        tool_name,
+        {},
+        f"{UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER} persisted routine source",
+    )
+
+
+@pytest.mark.parametrize("tool_name", ["get_routines", "search_routines"])
+def test_routine_event_provenance_depends_on_returned_entries(tool_name: str) -> None:
+    """Streaming provenance collection ignores clean routines and retains marked ones."""
+    from core.untrusted_content import (
+        UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER,
+        external_tool_names_from_events,
+    )
+
+    def events_for(content: str) -> list[dict[str, object]]:
+        """Build one streamed routine read exchange with the supplied result text."""
+        return [{
+            "Home_Agent": {
+                "messages": [AIMessage(
+                    content="",
+                    tool_calls=[{
+                        "name": tool_name,
+                        "args": {"day_of_week": "Monday"},
+                        "id": "routine-read-1",
+                    }],
+                )],
+            },
+        }, {
+            "tools": {
+                "messages": [ToolMessage(
+                    tool_call_id="routine-read-1",
+                    name=tool_name,
+                    content=content,
+                )],
+            },
+        }]
+
+    assert external_tool_names_from_events(events_for("Routine: clean rabbit cage.")) == set()
+    assert external_tool_names_from_events(
+        events_for(f"{UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER} persisted routine source"),
+    ) == {tool_name}
+
+
 def test_bounded_history_preserves_external_tool_call_arguments() -> None:
     """Action-aware external reads stay wrapped when their AI call crosses the cutoff."""
     from core.utils import filter_messages, sanitize_history_for_gemini

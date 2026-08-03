@@ -36,6 +36,21 @@ def test_fast_path_question():
     assert is_simple_chat_fast_path_candidate("τι κάνει ο Kid1;") is False
 
 
+def test_fast_chat_path_allows_bounded_tool_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fast chat retains enough graph steps for a short sequence of read tools."""
+    import clients.telegram_bot as bot
+
+    observed_config: dict[str, int] = {}
+    monkeypatch.setattr(
+        bot.graph,
+        "stream",
+        lambda _state, config: observed_config.update(config) or [],
+    )
+
+    assert bot._run_fast_chat_path([], object()) == []
+    assert observed_config["recursion_limit"] == 24
+
+
 def test_ultra_light_ack_basic_cases():
     assert is_ultra_light_ack("ναι") is True
     assert is_ultra_light_ack("οκ") is True

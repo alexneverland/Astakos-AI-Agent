@@ -1734,10 +1734,11 @@ def _build_fast_chat_context(clean_user_text: str):
     return context_msgs, current_msg
 
 def _run_fast_chat_path(context_msgs, current_msg):
+    """Run the compact Telegram graph path with room for bounded read-tool chains."""
     return list(
         graph.stream(
             {"messages": context_msgs[-6:] + [current_msg], "channel": "telegram"},
-            {"recursion_limit": 12},
+            {"recursion_limit": 24},
         )
     )
 
