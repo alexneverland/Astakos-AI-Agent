@@ -684,11 +684,15 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
     # ── Routine Completion Decision from Web UI ─────────────────────
     try:
-        from clients.telegram_bot import pending_routine_confirmations
+        from memory.routine_db import load_pending_confirmations
         from services.routine_completion_helper import decide_completion
         from services.routine_completion_selector import select_routine as _completion_selector
         from services.routine_completion_context import accept_pending_messenger_draft_offer
 
+        # Web and Telegram run in separate processes. The database is the shared
+        # pending-confirmation source of truth; importing the bot's RAM mapping
+        # here would always miss offers created by the Telegram scheduler.
+        pending_routine_confirmations = load_pending_confirmations()
         if pending_routine_confirmations:
             pending_candidates = {
                 rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))

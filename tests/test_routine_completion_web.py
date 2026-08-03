@@ -58,6 +58,10 @@ def _post_chat(
         patch("memory.routine_db.mark_routine_acknowledged") as acknowledged,
         patch("memory.routine_db.record_routine_skip_today", return_value={"skip_streak": 1, "cooldown_applied": False}) as skipped,
         patch("memory.routine_db.pause_routine_indefinitely") as paused,
+        patch(
+            "memory.routine_db.load_pending_confirmations",
+            return_value=pending or {},
+        ) as load_pending,
         patch("memory.event_log.log_event"),
         patch("services.routine_completion_selector.select_routine", selector),
         patch(
@@ -73,7 +77,6 @@ def _post_chat(
         patch("api.server._run_web_graph_stream_sync", graph_runner),
         patch("api.server.enqueue_fast_task"),
         patch("api.server.enqueue_slow_task"),
-        patch("clients.telegram_bot.pending_routine_confirmations", pending or {}),
     ):
         response = client.post("/chat", json={"message": message}, headers={"Authorization": f"Bearer {LOCAL_TOKEN}"})
         return response, {
@@ -83,6 +86,7 @@ def _post_chat(
             "acknowledged": acknowledged,
             "skipped": skipped,
             "paused": paused,
+            "load_pending": load_pending,
             "selector": selector,
             "accepted_offer": accepted_offer,
             "graph": graph_runner,
@@ -113,7 +117,7 @@ def test_web_empty_eligible_pool_does_not_call_selector(client: TestClient) -> N
         patch("api.server._run_web_graph_stream_sync", graph_runner),
         patch("api.server.enqueue_fast_task"),
         patch("api.server.enqueue_slow_task"),
-        patch("clients.telegram_bot.pending_routine_confirmations", {}),
+        patch("memory.routine_db.load_pending_confirmations", return_value={}),
     ):
         response = client.post("/chat", json={"message": "natural message"}, headers={"Authorization": f"Bearer {LOCAL_TOKEN}"})
     assert response.status_code == 200
@@ -141,8 +145,8 @@ def test_web_acknowledgement_does_not_complete_routine(client: TestClient) -> No
     mocks["confirmed"].assert_not_called()
 
 
-def test_web_bare_draft_offer_acceptance_uses_shared_context(client: TestClient) -> None:
-    """Web bare consent consumes one trusted offer and injects its draft context."""
+def test_web_bare_draft_offer_acceptance_loads_persisted_offer(client: TestClient) -> None:
+    """Web bare consent consumes the persisted Telegram offer and injects draft context."""
     draft_context = SystemMessage(content="[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]")
     accepted_offer = SimpleNamespace(routine_id=5, context=draft_context)
 
@@ -154,6 +158,7 @@ def test_web_bare_draft_offer_acceptance_uses_shared_context(client: TestClient)
     )
 
     assert response.status_code == 200
+    mocks["load_pending"].assert_called_once()
     mocks["accepted_offer"].assert_called_once()
     mocks["selector"].assert_not_called()
     mocks["acknowledged"].assert_called_once_with(5)
