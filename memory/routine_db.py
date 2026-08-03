@@ -1,4 +1,5 @@
 from core.i18n import t
+import json
 import sqlite3
 import os
 import hashlib
@@ -125,8 +126,12 @@ def _enable_wal(conn: sqlite3.Connection) -> bool:
         return _wal_enabled
 
 
-def setup_db():
+def setup_db() -> None:
+    """Create and migrate the routines database under a serialized startup lock."""
     conn   = get_connection()
+    # API and Telegram start in separate processes. Serialize schema inspection
+    # and ALTER statements so a legacy upgrade cannot race between them.
+    conn.execute("BEGIN IMMEDIATE")
     cursor = conn.cursor()
 
     cursor.execute('''
@@ -153,6 +158,7 @@ def setup_db():
             paused_until TEXT DEFAULT NULL,
             resume_rule TEXT DEFAULT NULL,
             pause_reason TEXT DEFAULT NULL,
+            external_content_sources_json TEXT NOT NULL DEFAULT '[]',
             state TEXT DEFAULT 'learned'
         )
     ''')
@@ -278,6 +284,13 @@ def setup_db():
         cursor.execute("ALTER TABLE routines ADD COLUMN source_memory_ref TEXT")
         print("[routine_db]: Migration → 'source_memory_ref'")
 
+    if "external_content_sources_json" not in existing_cols:
+        cursor.execute(
+            "ALTER TABLE routines "
+            "ADD COLUMN external_content_sources_json TEXT NOT NULL DEFAULT '[]'"
+        )
+        print("[routine_db]: Migration -> 'external_content_sources_json'")
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS context_state (
             key TEXT PRIMARY KEY,
@@ -345,7 +358,33 @@ def transition_routine(routine_id: int, to_state: RoutineState) -> None:
 # CORE OPERATIONS
 # ────────────────────────────────────────────────────────────────
 
-def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
+def _merge_external_content_sources(
+    existing_sources_json: str | None,
+    new_sources: list[str] | None,
+) -> str:
+    """Merge routine provenance without downgrading existing source data."""
+    try:
+        existing_sources = json.loads(existing_sources_json or "[]")
+    except (TypeError, ValueError):
+        existing_sources = []
+    if not isinstance(existing_sources, list):
+        existing_sources = []
+    merged_sources = {
+        source
+        for source in [*existing_sources, *(new_sources or [])]
+        if isinstance(source, str) and source
+    }
+    return json.dumps(sorted(merged_sources))
+
+
+def upsert_routine(
+    day: str,
+    time: str,
+    event: str,
+    ev_type: str = "general",
+    confidence_boost: float = 0.1,
+    external_content_sources: list[str] | None = None,
+) -> str:
     """
     3-stage dedup before saving:
       Stage 1 — exact fingerprint match
@@ -367,10 +406,14 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
     cursor = conn.cursor()
 
     # ── Stage 1: exact fingerprint ───────────────────────────────
-    cursor.execute("SELECT id, confidence, mention_count, state FROM routines WHERE fingerprint=?", (fp,))
+    cursor.execute(
+        "SELECT id, confidence, mention_count, state, external_content_sources_json "
+        "FROM routines WHERE fingerprint=?",
+        (fp,),
+    )
     row = cursor.fetchone()
     if row:
-        r_id, conf, mentions, cur_state_str = row
+        r_id, conf, mentions, cur_state_str, existing_sources_json = row
         new_conf = min(1.0, conf + confidence_boost)
         new_m    = (mentions or 1) + 1
         new_state = RoutineState.ACTIVE if new_m >= 2 else RoutineState.LEARNED
@@ -382,8 +425,19 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
         try:
             with db_write_lock:
                 cursor.execute(
-                    "UPDATE routines SET confidence=?, decay_counter=0, is_active=?, mention_count=?, state=? WHERE id=?",
-                    (new_conf, active_flag, new_m, new_state.value, r_id)
+                    "UPDATE routines SET confidence=?, decay_counter=0, is_active=?, "
+                    "mention_count=?, state=?, external_content_sources_json=? WHERE id=?",
+                    (
+                        new_conf,
+                        active_flag,
+                        new_m,
+                        new_state.value,
+                        _merge_external_content_sources(
+                            existing_sources_json,
+                            external_content_sources,
+                        ),
+                        r_id,
+                    )
                 )
                 conn.commit()
         except sqlite3.Error as e:
@@ -396,13 +450,14 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
 
     # We fetch candidates of the same day/time for Stage 2 & 3
     cursor.execute(
-        "SELECT id, event_name, confidence, mention_count, state FROM routines WHERE day_of_week=? AND time_str=?",
+        "SELECT id, event_name, confidence, mention_count, state, external_content_sources_json "
+        "FROM routines WHERE day_of_week=? AND time_str=?",
         (c_day, c_time)
     )
     candidates = cursor.fetchall()
 
     # ── Stage 2: difflib fuzzy ───────────────────────────────────
-    for r_id, ex_ev, conf, mentions, cur_state_str in candidates:
+    for r_id, ex_ev, conf, mentions, cur_state_str, existing_sources_json in candidates:
         if event_similarity(c_event, ex_ev) >= 0.72:
             new_conf = min(1.0, conf + confidence_boost)
             new_m    = (mentions or 1) + 1
@@ -417,9 +472,22 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
                     cursor.execute(
                         """UPDATE routines
                            SET event_name=?, confidence=?, decay_counter=0,
-                               is_active=?, mention_count=?, fingerprint=?, state=?
+                               is_active=?, mention_count=?, fingerprint=?, state=?,
+                               external_content_sources_json=?
                            WHERE id=?""",
-                        (c_event, new_conf, active_flag, new_m, new_fp, new_state.value, r_id)
+                        (
+                            c_event,
+                            new_conf,
+                            active_flag,
+                            new_m,
+                            new_fp,
+                            new_state.value,
+                            _merge_external_content_sources(
+                                existing_sources_json,
+                                external_content_sources,
+                            ),
+                            r_id,
+                        )
                     )
                     conn.commit()
             except sqlite3.Error as e:
@@ -430,7 +498,7 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
             return "merged"
 
     # ── Stage 3: embedding cosine similarity ─────────────────────
-    for r_id, ex_ev, conf, mentions, cur_state_str in candidates:
+    for r_id, ex_ev, conf, mentions, cur_state_str, existing_sources_json in candidates:
         # Sanity check: if the texts are too different in length, skip
         len_ratio = min(len(c_event), len(ex_ev)) / max(len(c_event), len(ex_ev)) if max(len(c_event), len(ex_ev)) > 0 else 0
         if len_ratio < 0.4:
@@ -450,9 +518,22 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
                     cursor.execute(
                         """UPDATE routines
                            SET event_name=?, confidence=?, decay_counter=0,
-                               is_active=?, mention_count=?, fingerprint=?, state=?
+                               is_active=?, mention_count=?, fingerprint=?, state=?,
+                               external_content_sources_json=?
                            WHERE id=?""",
-                        (c_event, new_conf, active_flag, new_m, new_fp, new_state.value, r_id)
+                        (
+                            c_event,
+                            new_conf,
+                            active_flag,
+                            new_m,
+                            new_fp,
+                            new_state.value,
+                            _merge_external_content_sources(
+                                existing_sources_json,
+                                external_content_sources,
+                            ),
+                            r_id,
+                        )
                     )
                     conn.commit()
             except sqlite3.Error as e:
@@ -468,9 +549,18 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
             cursor.execute('''
                 INSERT INTO routines
                     (day_of_week, time_str, event_name, event_type, confidence,
-                     decay_counter, is_active, fingerprint, mention_count, state)
-                VALUES (?, ?, ?, ?, ?, 0, 0, ?, 1, 'learned')
-            ''', (c_day, c_time, c_event, ev_type, 0.3, fp))
+                     decay_counter, is_active, fingerprint, mention_count, state,
+                     external_content_sources_json)
+                VALUES (?, ?, ?, ?, ?, 0, 0, ?, 1, 'learned', ?)
+            ''', (
+                c_day,
+                c_time,
+                c_event,
+                ev_type,
+                0.3,
+                fp,
+                _merge_external_content_sources(None, external_content_sources),
+            ))
             conn.commit()
     except sqlite3.IntegrityError as e:
         raise RoutineConflictError(
@@ -681,7 +771,8 @@ def get_routines_for_day(day: str) -> list:
     cursor = conn.cursor()
     c_day  = normalize_day(day)
     cursor.execute("""
-        SELECT id, time_str, event_name, event_type, confidence, mention_count, state
+        SELECT id, time_str, event_name, event_type, confidence, mention_count, state,
+               external_content_sources_json
         FROM routines
         WHERE (
             day_of_week=?
@@ -694,14 +785,17 @@ def get_routines_for_day(day: str) -> list:
     """, (c_day, c_day, c_day))
     rows = cursor.fetchall()
     conn.close()
-    return [
-        {
+    routines = []
+    for r in rows:
+        routine = {
             "id": r[0], "time": r[1], "event": r[2],
             "type": r[3], "confidence": round(r[4], 2),
             "mentions": r[5], "state": r[6],
         }
-        for r in rows
-    ]
+        if r[7] and r[7] != "[]":
+            routine["external_content_sources_json"] = r[7]
+        routines.append(routine)
+    return routines
 
 
 def get_eligible_preemptive_routines_for_day(day: str) -> list:
@@ -1285,7 +1379,8 @@ def find_routines_by_name(event_name: str, min_similarity: float = 0.75) -> list
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state
+        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state,
+                  external_content_sources_json
            FROM routines WHERE state IN ('active', 'learned')"""
     )
     rows = cursor.fetchall()
@@ -1295,10 +1390,13 @@ def find_routines_by_name(event_name: str, min_similarity: float = 0.75) -> list
         return []
 
     def _row_to_dict(r) -> dict:
-        return {
+        routine = {
             "id": r[0], "day": r[1], "time": r[2], "event": r[3],
             "type": r[4], "confidence": round(r[5], 2), "state": r[6],
         }
+        if r[7] and r[7] != "[]":
+            routine["external_content_sources_json"] = r[7]
+        return routine
 
     target = normalize_event(event_name)
 
@@ -1355,7 +1453,8 @@ def find_routines_for_schedule_control(
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state
+        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state,
+                  external_content_sources_json
            FROM routines WHERE state IN ('active', 'learned')"""
     )
     rows = cursor.fetchall()
@@ -1374,10 +1473,13 @@ def find_routines_for_schedule_control(
     rows = filtered_rows
 
     def _row_to_dict(r) -> dict:
-        return {
+        routine = {
             "id": r[0], "day": r[1], "time": r[2], "event": r[3],
             "type": r[4], "confidence": round(r[5], 2), "state": r[6],
         }
+        if r[7] and r[7] != "[]":
+            routine["external_content_sources_json"] = r[7]
+        return routine
 
     target = normalize_event(event_name)
 

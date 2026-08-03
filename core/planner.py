@@ -156,8 +156,21 @@ def task_executor_node(state):
     # Progress indicator
     progress_msg = t("core.planner.step_progress", step=idx+1, total=len(tasks), desc=task['description'])
 
+    from core.untrusted_content import (
+        PLANNER_STEP_MESSAGE_ORIGIN,
+        SYNTHETIC_MESSAGE_ORIGIN_KEY,
+    )
+
     return {
-        "messages":   [AIMessage(content=progress_msg), HumanMessage(content=instruction)],
+        "messages":   [
+            AIMessage(content=progress_msg),
+            HumanMessage(
+                content=instruction,
+                additional_kwargs={
+                    SYNTHETIC_MESSAGE_ORIGIN_KEY: PLANNER_STEP_MESSAGE_ORIGIN,
+                },
+            ),
+        ],
         "plan_index": idx,
         "next_agent": agent,
     }

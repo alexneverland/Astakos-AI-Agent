@@ -429,13 +429,20 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
     return result.get("output", "")
 
 @tool
-def save_to_memory(fact: str, entities: str = "", category: str = "other", reason: str = "agent_inferred") -> str:
+def save_to_memory(
+    fact: str,
+    entities: str = "",
+    category: str = "other",
+    reason: str = "agent_inferred",
+    external_content_sources_json: str = "",
+) -> str:
     """
     Saves information SEMANTICALLY.
     fact: The fact (e.g., "Kid1 only eats lentils").
     entities: Keywords separated by commas (e.g., "Kid1, Food, Preference").
     category: The category (e.g., 'family', 'home', 'lazaros', 'tech', 'work').
     reason: Why it is being saved — 'user_stated' if explicitly said by the user, 'agent_inferred' otherwise.
+    external_content_sources_json: Internal approval provenance. Do not set this manually.
 
     ⚡ Fire-and-forget: ChromaDB/Vertex AI work is done in a background thread.
     Returns immediately so that the agent does not block the user for ~11s.
@@ -457,6 +464,11 @@ def save_to_memory(fact: str, entities: str = "", category: str = "other", reaso
                 canonical_fact = f"[USER_FACT]: {canonical_fact}"
 
             raw_entities = [x.strip() for x in entities.split(",") if x.strip()]
+            from core.untrusted_content import external_content_sources_from_json
+
+            external_content_sources = external_content_sources_from_json(
+                external_content_sources_json,
+            )
 
             candidate = build_canonical_memory_candidate(
                 memory_type="fact",
@@ -468,6 +480,8 @@ def save_to_memory(fact: str, entities: str = "", category: str = "other", reaso
                 reason=reason,
                 confidence=0.85 if reason == "user_stated" else 0.7,
             )
+            if external_content_sources:
+                candidate["external_content_sources"] = external_content_sources
 
             saved = memory.save(**candidate)
 
@@ -681,6 +695,7 @@ def set_local_reminder(
     action: str = "add",
     location: str = None,
     match_task: str = None,
+    external_content_sources_json: str = "",
 ) -> str:
     """
     Manages local reminders.
@@ -691,6 +706,7 @@ def set_local_reminder(
     location: ONLY for location-based reminders. Use 'home' for arrival home,
               or 'leave_current_location' to trigger after leaving the current place.
               When location is provided, DO NOT provide minutes_from_now or exact_time.
+    external_content_sources_json: Internal approval provenance. Do not set it manually.
     """
     conn = None
     try:
@@ -699,12 +715,26 @@ def set_local_reminder(
 
         # ── READ: Returns ONLY pending ──────────────────────
         if action == "read":
-            cursor.execute("SELECT task, time FROM reminders WHERE status='pending'")
+            cursor.execute(
+                "SELECT task, time, external_content_sources_json "
+                "FROM reminders WHERE status='pending'"
+            )
             pending = cursor.fetchall()
             if not pending:
                 return t("tools.system.reminders_read_empty")
             lines = []
-            for rtask, tm in pending:
+            for rtask, tm, sources_json in pending:
+                from core.untrusted_content import (
+                    external_content_sources_from_json,
+                    format_untrusted_tool_result,
+                )
+
+                sources = external_content_sources_from_json(sources_json or "")
+                if sources:
+                    rtask = format_untrusted_tool_result(
+                        f"persisted reminder sources: {', '.join(sources)}",
+                        rtask,
+                    )
                 if tm and tm.startswith("loc:"):
                     loc = tm.split(":", 1)[1]
                     if loc == "leave_current_location":
@@ -759,7 +789,19 @@ def set_local_reminder(
                         existing_task=existing_task,
                     )
 
-            cursor.execute("UPDATE reminders SET task=? WHERE id=?", (task, reminder_id))
+            cursor.execute(
+                "SELECT external_content_sources_json FROM reminders WHERE id=?",
+                (reminder_id,),
+            )
+            existing_sources_json = cursor.fetchone()[0]
+            from core.untrusted_content import external_content_sources_from_json
+
+            existing_sources = external_content_sources_from_json(existing_sources_json or "")
+            new_sources = external_content_sources_from_json(external_content_sources_json)
+            cursor.execute(
+                "UPDATE reminders SET task=?, external_content_sources_json=? WHERE id=?",
+                (task, json.dumps(sorted(set(existing_sources) | set(new_sources))), reminder_id),
+            )
             conn.commit()
             return t("tools.system.reminders_update_success", task=task)
 
@@ -773,6 +815,11 @@ def set_local_reminder(
             )
 
             current_location = None
+            from core.untrusted_content import external_content_sources_from_json
+
+            provenance_json = json.dumps(
+                external_content_sources_from_json(external_content_sources_json)
+            )
 
             if minutes_from_now > 0:
                 target_time = (datetime.now() + timedelta(minutes=minutes_from_now)).strftime("%Y-%m-%d %H:%M")
@@ -807,8 +854,9 @@ def set_local_reminder(
                     related_reminders.append((existing_task, existing_time))
 
             cursor.execute(
-                "INSERT INTO reminders (task, time, status) VALUES (?, ?, 'pending')",
-                (task, target_time),
+                "INSERT INTO reminders (task, time, status, external_content_sources_json) "
+                "VALUES (?, ?, 'pending', ?)",
+                (task, target_time, provenance_json),
             )
             if current_location is not None:
                 save_leave_current_location_anchor(
@@ -845,7 +893,13 @@ from langchain_core.tools import tool
 from memory.routine_db import upsert_routine
 
 @tool
-def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: str = "general") -> str:
+def learn_routine(
+    day_of_week: str,
+    time_str: str,
+    event_name: str,
+    event_type: str = "general",
+    external_content_sources_json: str = "",
+) -> str:
     """
     [CRITICAL]: Use this WHEN {config.USER_NAME} mentions a habit,
     a routine, or something that is repeated (e.g., "Every Friday at 13:00 I go to the farmers market").
@@ -865,6 +919,7 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
     ("today I went…", "tomorrow I have…").
     """
     from datetime import datetime
+    from core.untrusted_content import external_content_sources_from_json
 
     VALID_DAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Everyday", "Weekdays"}
     VALID_TYPES = {"family", "work", "hobby", "general"}
@@ -884,7 +939,16 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
         event_type = "general"
 
     try:
-        res = upsert_routine(day_of_week, time_str, event_name, event_type, confidence_boost=0.3)
+        res = upsert_routine(
+            day_of_week,
+            time_str,
+            event_name,
+            event_type,
+            confidence_boost=0.3,
+            external_content_sources=external_content_sources_from_json(
+                external_content_sources_json,
+            ),
+        )
 
         if res == "created":
             return t("tools.system.routine_added_first", event_name=event_name)
@@ -999,7 +1063,20 @@ def get_routines(day_of_week: str) -> str:
         for r in routines:
             conf_pct = int(r['confidence'] * 100)
             mentions = r.get('mentions', 1)
-            lines.append(t("tools.system.routine_day_item", time=r["time"], event=r["event"], type=r["type"], conf=conf_pct, mentions=mentions))
+            event = r["event"]
+            source_json = r.get("external_content_sources_json", "")
+            if source_json:
+                from core.untrusted_content import (
+                    external_content_sources_from_json,
+                    format_untrusted_tool_result,
+                )
+                sources = external_content_sources_from_json(source_json)
+                if sources:
+                    event = format_untrusted_tool_result(
+                        "persisted routine sources: " + ", ".join(sources),
+                        event,
+                    )
+            lines.append(t("tools.system.routine_day_item", time=r["time"], event=event, type=r["type"], conf=conf_pct, mentions=mentions))
         return "\n".join(lines)
     except Exception as e:
         return t("tools.system.routine_fetch_err", e=str(e))
@@ -1020,7 +1097,20 @@ def search_routines(event_name: str) -> str:
         
         lines = [f"Found {len(routines)} matching routines:"]
         for r in routines:
-            lines.append(f"- ID: {r['id']} | Event: {r['event']} | Day: {r['day']} | Time: {r['time']}")
+            event = r["event"]
+            source_json = r.get("external_content_sources_json", "")
+            if source_json:
+                from core.untrusted_content import (
+                    external_content_sources_from_json,
+                    format_untrusted_tool_result,
+                )
+                sources = external_content_sources_from_json(source_json)
+                if sources:
+                    event = format_untrusted_tool_result(
+                        "persisted routine sources: " + ", ".join(sources),
+                        event,
+                    )
+            lines.append(f"- ID: {r['id']} | Event: {event} | Day: {r['day']} | Time: {r['time']}")
         return "\n".join(lines)
     except Exception as e:
         return f"Error searching routines: {str(e)}"
@@ -1612,10 +1702,16 @@ def control_pending_followup(
 
 
 @tool
-def manage_list(action: str, list_name: str, item: str = "") -> str:
+def manage_list(
+    action: str,
+    list_name: str,
+    item: str = "",
+    external_content_sources_json: str = "",
+) -> str:
     """Manages lists. Actions: 'add', 'remove', 'read', 'clear', 'delete'.
     For multiple items at once, separate them with a comma (item='milk, cheese').
-    For destructive actions ('clear', 'delete'), item must be '__CONFIRMED_CLEAR__'."""
+    For destructive actions ('clear', 'delete'), item must be '__CONFIRMED_CLEAR__'.
+    external_content_sources_json is internal approval provenance. Do not set it manually."""
     if action in {"clear", "delete"} and item != "__CONFIRMED_CLEAR__":
         return (
             f"Error: Refusing to {action} list '{list_name}' without explicit confirmation token."
@@ -1636,20 +1732,58 @@ def manage_list(action: str, list_name: str, item: str = "") -> str:
                     break
 
         if action == "read":
-            cursor.execute("SELECT item FROM lists WHERE list_name=?", (list_name,))
-            items = [row[0] for row in cursor.fetchall()]
+            cursor.execute(
+                "SELECT item, external_content_sources_json FROM lists WHERE list_name=?",
+                (list_name,),
+            )
+            rows = cursor.fetchall()
+            items = [row[0] for row in rows]
             if not items:
                 return f"The list '{list_name}' is empty."
-            return f"Contents of '{list_name}':\n" + "\n".join([f"- {i}" for i in items])
+            from core.untrusted_content import (
+                external_content_sources_from_json,
+                format_untrusted_tool_result,
+            )
+
+            rendered_items = []
+            for list_item, raw_sources in rows:
+                sources = external_content_sources_from_json(raw_sources or "")
+                if sources:
+                    list_item = format_untrusted_tool_result(
+                        "persisted list sources: " + ", ".join(sources),
+                        list_item,
+                    )
+                rendered_items.append(f"- {list_item}")
+            return f"Contents of '{list_name}':\n" + "\n".join(rendered_items)
 
         to_process = [i.strip() for i in item.split(",")] if item else []
+        from core.untrusted_content import external_content_sources_from_json
+
+        external_sources = external_content_sources_from_json(external_content_sources_json)
+        provenance_json = json.dumps(external_sources)
 
         if action == "add":
             for obj in to_process:
                 if obj:
-                    cursor.execute("SELECT id FROM lists WHERE list_name=? AND item=?", (list_name, obj))
-                    if not cursor.fetchone():
-                        cursor.execute("INSERT INTO lists (list_name, item) VALUES (?, ?)", (list_name, obj))
+                    cursor.execute(
+                        "SELECT id, external_content_sources_json FROM lists "
+                        "WHERE list_name=? AND item=?",
+                        (list_name, obj),
+                    )
+                    existing = cursor.fetchone()
+                    if existing is None:
+                        cursor.execute(
+                            "INSERT INTO lists (list_name, item, external_content_sources_json) "
+                            "VALUES (?, ?, ?)",
+                            (list_name, obj, provenance_json),
+                        )
+                    elif external_sources:
+                        existing_sources = external_content_sources_from_json(existing[1] or "")
+                        merged_sources = sorted(set(existing_sources) | set(external_sources))
+                        cursor.execute(
+                            "UPDATE lists SET external_content_sources_json=? WHERE id=?",
+                            (json.dumps(merged_sources), existing[0]),
+                        )
         elif action == "remove":
             for obj in to_process:
                 cursor.execute("DELETE FROM lists WHERE list_name=? AND item=?", (list_name, obj))
@@ -3182,7 +3316,14 @@ def get_fit_summary(days_ago: int = 1) -> str:
 
 
 @tool
-def save_goal_tool(project: str, description: str, status: str = "active", progress: int = 0, milestones: str = "") -> str:
+def save_goal_tool(
+    project: str,
+    description: str,
+    status: str = "active",
+    progress: int = 0,
+    milestones: str = "",
+    external_content_sources_json: str = "",
+) -> str:
     """
     Saves or updates a long-term goal for {config.USER_NAME}.
     project: Short project name (e.g., 'ShiftMaster', 'Astakos', 'PraxisERP').
@@ -3190,9 +3331,21 @@ def save_goal_tool(project: str, description: str, status: str = "active", progr
     status: 'active' (in progress) | 'paused' (shelved) | 'done' (completed).
     progress: Progress percentage 0-100.
     milestones: Smaller steps or milestones (as a string).
+    external_content_sources_json: Internal approval provenance. Do not set this manually.
     """
     from memory.vector_store import save_goal
-    ok = save_goal(project=project, description=description, status=status, progress=progress, milestones=milestones)
+    from core.untrusted_content import external_content_sources_from_json
+
+    ok = save_goal(
+        project=project,
+        description=description,
+        status=status,
+        progress=progress,
+        milestones=milestones,
+        external_content_sources=external_content_sources_from_json(
+            external_content_sources_json,
+        ),
+    )
     if ok:
         return f"✅ Goal '{project}' saved ({status}, {progress}%)."
     return f"❌ Failed to save goal '{project}'."
@@ -3227,14 +3380,26 @@ def update_goal_progress_tool(project: str, progress: int) -> str:
 
 
 @tool
-def update_goal_milestones_tool(project: str, milestones: str) -> str:
+def update_goal_milestones_tool(
+    project: str,
+    milestones: str,
+    external_content_sources_json: str = "",
+) -> str:
     """
     Updates the milestones of an existing goal.
     project: The name of the project.
     milestones: The new milestones (in string format, e.g., '1) UI, 2) DB').
     """
     from memory.vector_store import update_goal_milestones
-    ok = update_goal_milestones(project=project, milestones=milestones)
+    from core.untrusted_content import external_content_sources_from_json
+
+    ok = update_goal_milestones(
+        project=project,
+        milestones=milestones,
+        external_content_sources=external_content_sources_from_json(
+            external_content_sources_json,
+        ),
+    )
     if ok:
         return f"✅ Goal '{project}' milestones updated."
     return f"❌ Goal '{project}' not found."

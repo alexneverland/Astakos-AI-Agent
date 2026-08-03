@@ -1876,6 +1876,7 @@ def run_memory_sifter_slow(
     agent_name: str = "Unknown",
     channel: str = "web",
     deterministic_seed_facts: list[str] | None = None,
+    include_recent_context: bool = True,
 ):
     deterministic_seed_facts = deterministic_seed_facts or []
     print("\033[90m[MemorySifterSlow]: start\033[0m")
@@ -1928,19 +1929,20 @@ def run_memory_sifter_slow(
         # in api/server.py), so the SESSION_LOGS here does NOT yet contain the
         # current exchange -> no double entry/race condition.
         recent_context_block = ""
-        try:
-            recent_entries = SESSION_LOGS[-4:]
-            if recent_entries:
-                ctx_lines = "\n".join(
-                    t("memory.session_memory.conversation_log_short", user=e['user'], ai=e['ai'])
-                    for e in recent_entries
-                )
-                recent_context_block = (
-                    f"{t('memory.session_memory.context_warning')}\n"
-                    f"{ctx_lines}\n"
-                )
-        except Exception:
-            recent_context_block = ""
+        if include_recent_context:
+            try:
+                recent_entries = SESSION_LOGS[-4:]
+                if recent_entries:
+                    ctx_lines = "\n".join(
+                        t("memory.session_memory.conversation_log_short", user=e['user'], ai=e['ai'])
+                        for e in recent_entries
+                    )
+                    recent_context_block = (
+                        f"{t('memory.session_memory.context_warning')}\n"
+                        f"{ctx_lines}\n"
+                    )
+            except Exception:
+                recent_context_block = ""
 
         sifter_prompt = load_prompt("memory_sifter.md").replace(
             "{language}", config.RESPONSE_LANGUAGE
@@ -2087,10 +2089,23 @@ def run_memory_sifter_slow(
         print(f"⚠️ [Sifter Error]: {e}")
 
 
-def trigger_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
+def trigger_memory_sifter(
+    user_text: str,
+    ai_text: str,
+    agent_name: str = "Unknown",
+    channel: str = "web",
+    include_recent_context: bool = True,
+) -> None:
     """Wrapper — executed via Queue Worker."""
     seed_facts = run_memory_sifter_fast(user_text, ai_text, agent_name, channel)
-    run_memory_sifter_slow(user_text, ai_text, agent_name, channel, deterministic_seed_facts=seed_facts)
+    run_memory_sifter_slow(
+        user_text,
+        ai_text,
+        agent_name,
+        channel,
+        deterministic_seed_facts=seed_facts,
+        include_recent_context=include_recent_context,
+    )
 
 
 # ════════════════════════════════════════════════════════════════

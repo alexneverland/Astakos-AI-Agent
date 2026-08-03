@@ -600,6 +600,7 @@ class AstakosMemoryManager:
         state_markers: list[str] | None = None,
         time_scope: str = "",
         relation_type: str = "",
+        external_content_sources: list[str] | None = None,
     ):
         from config import PROFILE_DB
 
@@ -715,7 +716,12 @@ class AstakosMemoryManager:
                                new_richness=round(decision["new_richness"], 1),
                                distance=round(float(dist), 3) if dist is not None else None,
                                overlap=round(float(storage["overlap"]), 3))
-                    self._trigger_routine_reconciler(fact, category, reason)
+                    self._trigger_routine_reconciler(
+                        fact,
+                        category,
+                        reason,
+                        external_content_sources=external_content_sources,
+                    )
                     return False
                 elif storage["action"] == "add_alongside":
                     add_alongside_old_text = old_content
@@ -811,7 +817,12 @@ class AstakosMemoryManager:
                 existing=doc.page_content[:100],
                 distance=round(float(score), 3),
             )
-            self._trigger_routine_reconciler(fact, category, reason)
+            self._trigger_routine_reconciler(
+                fact,
+                category,
+                reason,
+                external_content_sources=external_content_sources,
+            )
             return False
 
         # 3. Chroma Storage
@@ -830,6 +841,7 @@ class AstakosMemoryManager:
         tags = tags or []
         entities = entities or []
         state_markers = state_markers or []
+        external_content_sources = external_content_sources or []
         now_ts = datetime.now().timestamp()
         metadata = {
             "category": category, "agent": agent_name,
@@ -848,6 +860,12 @@ class AstakosMemoryManager:
             "time_scope": time_scope or "",
             "relation_type": relation_type or "",
         }
+        if external_content_sources:
+            from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+            metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                external_content_sources,
+            )
         if photo_path:
             if not os.path.isabs(photo_path):
                 photo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", photo_path)
@@ -893,6 +911,12 @@ class AstakosMemoryManager:
                     "reason": reason,
                     "agent_name": agent_name,
                 }, ensure_ascii=False)
+                if external_content_sources:
+                    from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+                    profile_metadata = json.loads(profile_metadata_json)
+                    profile_metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = external_content_sources
+                    profile_metadata_json = json.dumps(profile_metadata, ensure_ascii=False)
                 
                 if replace_old_fact_text is not None:
                     c.execute("SELECT id FROM profile_facts WHERE category=? AND fact=?", (category, replace_old_fact_text))
@@ -925,11 +949,28 @@ class AstakosMemoryManager:
                     conn.close()
 
         # 5. Automatic fact -> routine reconciliation
-        self._trigger_routine_reconciler(fact, category, reason)
+        self._trigger_routine_reconciler(
+            fact,
+            category,
+            reason,
+            external_content_sources=external_content_sources,
+        )
         return True
 
-    def _trigger_routine_reconciler(self, fact: str, category: str, reason: str):
-        # Runs to evaluate facts against routines, EVEN IF the memory wasn't saved 
+    def _trigger_routine_reconciler(
+        self,
+        fact: str,
+        category: str,
+        reason: str,
+        *,
+        external_content_sources: list[str] | None = None,
+    ) -> None:
+        """Reconcile trusted facts with routines without extending external approval scope."""
+        if external_content_sources:
+            print("\033[90m[RoutineReconciler]: skip untrusted external fact\033[0m")
+            return
+
+        # Runs to evaluate facts against routines, EVEN IF the memory wasn't saved
         # (e.g. because it was already known/duplicate). We still want to act on the fact today.
         try:
             from services.routine_reconciler import reconcile_fact_to_routines
@@ -952,7 +993,14 @@ class AstakosMemoryManager:
         except Exception as reconcile_err:
             print(f"\033[90m[RoutineReconciler]: skip ({reconcile_err})\033[0m")
 
-    def _save_photo(self, file_path: str, analysis: str, caption: str):
+    def _save_photo(
+        self,
+        file_path: str,
+        analysis: str,
+        caption: str,
+        external_content_sources: list[str] | None = None,
+    ):
+        """Store a photo archive while retaining any untrusted-source provenance."""
         fact = t("memory.vector_store.photo_fact", caption=caption or t("memory.vector_store.photo_default"), analysis=analysis[:350])
         metadata = {
             "category": "photos", "agent": "Direct_Index", "photo_path": file_path,
@@ -961,12 +1009,19 @@ class AstakosMemoryManager:
             "importance": 4, "confidence": 0.8,
             "last_accessed": datetime.now().timestamp(),
         }
+        if external_content_sources:
+            from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+            metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                external_content_sources,
+            )
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Photo 'pinned' ({os.path.basename(file_path)})\033[0m")
 
         entry = {
             "file_path": file_path, "analysis": analysis, "caption": caption,
             "date": datetime.now().strftime("%Y-%m-%d"), "timestamp": datetime.now().isoformat(),
+            "external_content_sources": external_content_sources or [],
         }
         index = []
         if os.path.exists(PHOTOS_INDEX_FILE):
@@ -980,7 +1035,14 @@ class AstakosMemoryManager:
             json.dump(index, f, ensure_ascii=False, indent=2)
         return True
 
-    def _save_document(self, file_path: str, analysis: str, caption: str):
+    def _save_document(
+        self,
+        file_path: str,
+        analysis: str,
+        caption: str,
+        external_content_sources: list[str] | None = None,
+    ):
+        """Store a document archive while retaining any untrusted-source provenance."""
         fact = t("memory.vector_store.doc_fact", caption=caption or t("memory.vector_store.doc_default"), analysis=analysis[:1000])
         metadata = {
             "category": "documents", "agent": "Direct_Index", "file_path": file_path,
@@ -989,6 +1051,12 @@ class AstakosMemoryManager:
             "importance": 5, "confidence": 0.8,
             "last_accessed": datetime.now().timestamp(),
         }
+        if external_content_sources:
+            from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+            metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                external_content_sources,
+            )
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Document 'pinned' ({os.path.basename(file_path)})\033[0m")
 
@@ -997,6 +1065,7 @@ class AstakosMemoryManager:
         entry = {
             "file_path": file_path, "summary": analysis, "caption": caption,
             "date": datetime.now().strftime("%Y-%m-%d"), "timestamp": datetime.now().isoformat(),
+            "external_content_sources": external_content_sources or [],
         }
         index = []
         if os.path.exists(docs_index_file):
@@ -1131,14 +1200,43 @@ def save_photo_to_index(file_path: str, analysis: str, caption: str = ""):
 # Long-Term Goals
 # ================================================================
 
-def save_goal(project: str, description: str, status: str = "active", progress: int = 0, milestones: str = "") -> bool:
-    """Saves or updates a goal. Overwrites if it already exists."""
+def _merged_goal_external_content_sources(
+    metadata: dict | None,
+    new_sources: list[str] | None,
+) -> list[str]:
+    """Merge existing goal provenance with an approved external goal update."""
+    from core.untrusted_content import (
+        EXTERNAL_CONTENT_HISTORY_METADATA_KEY,
+        external_content_sources_from_json,
+    )
+
+    existing_sources = external_content_sources_from_json(
+        (metadata or {}).get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, ""),
+    )
+    return sorted(set(existing_sources) | set(new_sources or []))
+
+
+def save_goal(
+    project: str,
+    description: str,
+    status: str = "active",
+    progress: int = 0,
+    milestones: str = "",
+    external_content_sources: list[str] | None = None,
+) -> bool:
+    """Save or update a goal while retaining any untrusted-source provenance."""
     try:
         with vector_lock, _cross_process_lock():
             existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            existing_metadata = None
             if existing["ids"]:
+                existing_metadata = dict(existing["metadatas"][0])
                 vector_store._collection.delete(ids=existing["ids"])
                 print(f"\033[94m[Goals]: Overwrite '{project}'\033[0m")
+            merged_sources = _merged_goal_external_content_sources(
+                existing_metadata,
+                external_content_sources,
+            )
             text = f"[GOAL] {project}: {description}"
             metadata = {
                 "category": "goal", "project": project, "status": status,
@@ -1147,6 +1245,12 @@ def save_goal(project: str, description: str, status: str = "active", progress: 
                 "date": datetime.now().strftime("%Y-%m-%d"), "retrieval_count": 0,
                 "importance": 10, "confidence": 0.95, "last_accessed": datetime.now().timestamp(),
             }
+            if merged_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+                metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                    merged_sources,
+                )
             vector_store.add_texts([text], metadatas=[metadata])
             print(f"\033[92m[Goals]: '{project}' ({status}, {progress}%)\033[0m")
             return True
@@ -1191,8 +1295,12 @@ def update_goal_progress(project: str, progress: int) -> bool:
         return False
 
 
-def update_goal_milestones(project: str, milestones: str) -> bool:
-    """Updates the milestones of a goal."""
+def update_goal_milestones(
+    project: str,
+    milestones: str,
+    external_content_sources: list[str] | None = None,
+) -> bool:
+    """Update goal milestones while retaining any external-source provenance."""
     try:
         with vector_lock, _cross_process_lock():
             existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
@@ -1201,6 +1309,16 @@ def update_goal_milestones(project: str, milestones: str) -> bool:
             old_meta = dict(existing["metadatas"][0])
             vector_store._collection.delete(ids=existing["ids"])
             new_meta = {**old_meta, "milestones": milestones, "timestamp": datetime.now().timestamp()}
+            merged_sources = _merged_goal_external_content_sources(
+                old_meta,
+                external_content_sources,
+            )
+            if merged_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+                new_meta[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                    merged_sources,
+                )
             vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
             print(f"\033[92m[Goals]: '{project}' milestones updated\033[0m")
             return True
@@ -1224,6 +1342,7 @@ def get_active_goals() -> list[dict]:
                     "date":        meta.get("date", ""),
                     "progress":    meta.get("progress", 0),
                     "milestones":  meta.get("milestones", ""),
+                    "metadata": meta,
                 })
         return goals
     except Exception as e:

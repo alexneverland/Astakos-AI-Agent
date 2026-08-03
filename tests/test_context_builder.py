@@ -84,6 +84,18 @@ def test_semantic_facts_dedupes_and_strips_tags():
     ]
 
 
+def test_semantic_facts_wrap_persisted_external_provenance():
+    """Chroma facts approved from external data remain untrusted when recalled."""
+    doc = _Doc("[USER_FACT] Deadline is Friday.")
+    doc.metadata = {"untrusted_external_tool_names": '["browse_url"]'}
+
+    facts = semantic_facts_for_query("deadline details", search_fn=lambda _query, _k: [doc])
+
+    assert len(facts) == 1
+    assert "[UNTRUSTED EXTERNAL TOOL RESULT]" in facts[0]
+    assert "Source tool: persisted external sources: browse_url" in facts[0]
+
+
 def test_build_memory_context_combines_recent_and_semantic():
     def fake_recent_loader(**kwargs):
         return [

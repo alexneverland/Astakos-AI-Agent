@@ -30,8 +30,22 @@ _dedup_recent: dict[tuple, float] = {}  # key → last_write_epoch
 DEDUP_TTL_SECONDS = 5.0
 
 
-def _dedup_key(channel: str, role: str, content: str, db_path: str = CONVERSATION_DB_FILE) -> tuple:
-    return (os.path.abspath(db_path), channel, role, content[:200])
+def _dedup_key(
+    channel: str,
+    role: str,
+    content: str,
+    metadata: dict[str, Any] | None = None,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> tuple:
+    """Build a rapid-write deduplication key without discarding message provenance."""
+    metadata_key = json.dumps(
+        metadata or {},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return (os.path.abspath(db_path), channel, role, content[:200], metadata_key)
 
 
 def _is_recent_duplicate(key: tuple) -> bool:
@@ -208,7 +222,7 @@ def append_message(
     }
 
     # [DEDUP GUARD]: Prevents rapid double-writes
-    _key = _dedup_key(channel, role, content, db_path)
+    _key = _dedup_key(channel, role, content, message["metadata"], db_path)
     if _is_recent_duplicate(_key):
         print(f"\033[93m[ConvHistory]: Dedup skip — {channel}/{role} '{content[:40]}'[0m")
         return message
@@ -866,8 +880,15 @@ def build_asset_context_text(channel: str, limit: int = 8) -> str:
         if content.startswith(("[USER_UPLOADED_FILE]", "[USER_UPLOADED_PHOTO]")):
             continue
 
+        content = content[:700]
+        if entry.get("role") not in {"user", "human", "Human"}:
+            from core.untrusted_content import format_untrusted_persisted_content
+            content = format_untrusted_persisted_content(
+                content,
+                entry.get("metadata"),
+            )
         speaker = t("prompts.ext_str_437") if entry.get("role") == "user" else t("prompts.ext_str_350")
-        lines.append(f"{speaker}: {content[:700]}")
+        lines.append(f"{speaker}: {content}")
 
     return "\n".join(lines[-limit:])
 

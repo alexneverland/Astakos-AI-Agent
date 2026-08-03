@@ -502,6 +502,11 @@ def format_recent_messages(
         content = " ".join(content.split())
         if len(content) > 260:
             content = content[:257].rstrip() + "..."
+        from core.untrusted_content import format_untrusted_persisted_content
+        content = format_untrusted_persisted_content(
+            content,
+            message.get("metadata"),
+        )
         lines.append(f"- [{channel} {date_label}{time_label}] {speaker}: {content}")
     return lines
 
@@ -649,7 +654,9 @@ def semantic_facts_for_query(
                 fact = f"[{date_str}] {fact}"
             except Exception:
                 pass
-                
+        from core.untrusted_content import format_untrusted_persisted_content
+
+        fact = format_untrusted_persisted_content(fact, metadata)
         facts.append(fact)
     return facts
 

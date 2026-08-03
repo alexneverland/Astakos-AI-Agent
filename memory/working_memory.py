@@ -13,6 +13,7 @@ import re
 import threading
 from datetime import datetime
 import sqlite3
+from typing import Iterable
 from langchain_core.messages import HumanMessage
 from config import WORKING_MEMORY_FILE, STATE_DB
 from memory.vector_store import memory, is_semantically_duplicate, memory_lock  # [MASTRO-FIX]: ONE lock, not two
@@ -131,10 +132,19 @@ def _looks_like_operational_working_memory_exchange(user_text: str, ai_text: str
     return False
 
 
-def update_working_memory(user_text, ai_text):
-    """Instantly extracts context tags from the dialogue."""
+def update_working_memory(
+    user_text: str,
+    ai_text: str,
+    external_content_sources: Iterable[str] | None = None,
+) -> None:
+    """Instantly extracts context tags unless the exchange derives from external content."""
     try:
         print("\033[90m[System]: Started Foreground analysis...\033[0m")
+
+        if external_content_sources:
+            print("\033[90m[Foreground]: external-derived exchange - skip automatic memory write\033[0m")
+            print(f"{config.USER_NAME}: ", end="", flush=True)
+            return
 
         # We put on the "glasses" (Smart Parser) before cutting the characters
         safe_user = clean_message(user_text)

@@ -101,12 +101,19 @@ def init_pending_assets_table():
                 filename TEXT NOT NULL,
                 analysis TEXT,
                 caption TEXT,
+                external_content_sources_json TEXT NOT NULL DEFAULT '[]',
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL,
                 expires_at TEXT NOT NULL
             )
             """
         )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(pending_asset_archives)")}
+        if "external_content_sources_json" not in columns:
+            conn.execute(
+                "ALTER TABLE pending_asset_archives "
+                "ADD COLUMN external_content_sources_json TEXT NOT NULL DEFAULT '[]'"
+            )
         conn.commit()
     finally:
         conn.close()
@@ -127,7 +134,7 @@ def get_latest_recent_asset(channel: str, max_age_minutes: int = 20):
             """,
             (channel, cutoff_iso),
         ).fetchone()
-        return dict(row) if row else None
+        return _pending_asset_row(row)
     finally:
         conn.close()
 
@@ -150,6 +157,23 @@ def clear_expired_pending_assets():
         conn.close()
 
 
+def _pending_asset_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    """Return a pending asset row with validated external provenance names."""
+    if row is None:
+        return None
+    asset = dict(row)
+    try:
+        raw_sources = json.loads(asset.get("external_content_sources_json") or "[]")
+    except (TypeError, ValueError):
+        raw_sources = []
+    from core.untrusted_content import external_content_history_metadata
+
+    asset["external_content_sources"] = external_content_history_metadata(
+        raw_sources if isinstance(raw_sources, list) else [],
+    ).get("untrusted_external_tool_names", [])
+    return asset
+
+
 def create_pending_asset_archive(
     channel: str,
     asset_type: str,
@@ -158,9 +182,17 @@ def create_pending_asset_archive(
     analysis: str,
     caption: str = "",
     ttl_minutes: int = 30,
+    external_content_sources: list[str] | None = None,
 ):
+    """Create a pending archive while retaining validated source provenance."""
     now = datetime.now()
     expires_at = now + timedelta(minutes=ttl_minutes)
+    from core.untrusted_content import external_content_history_metadata
+
+    source_names = external_content_history_metadata(external_content_sources or []).get(
+        "untrusted_external_tool_names",
+        [],
+    )
 
     conn = _get_conn()
     try:
@@ -179,9 +211,9 @@ def create_pending_asset_archive(
             """
             INSERT INTO pending_asset_archives (
                 channel, asset_type, file_path, filename,
-                analysis, caption, status, created_at, expires_at
+                analysis, caption, external_content_sources_json, status, created_at, expires_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
             """,
             (
                 channel,
@@ -190,6 +222,7 @@ def create_pending_asset_archive(
                 filename,
                 analysis,
                 caption,
+                json.dumps(source_names),
                 now.isoformat(),
                 expires_at.isoformat(),
             ),
@@ -220,7 +253,7 @@ def get_latest_pending_asset(channel: str, asset_type: str = "photo"):
             """,
             (channel, asset_type, now_iso),
         ).fetchone()
-        return dict(row) if row else None
+        return _pending_asset_row(row)
     finally:
         conn.close()
 

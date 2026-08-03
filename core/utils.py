@@ -441,13 +441,22 @@ def sanitize_history_for_gemini(messages: list) -> list:
     so that information is preserved without violating the strict structure of the API.
     """
     from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+    from core.untrusted_content import (
+        format_untrusted_tool_result,
+        is_untrusted_external_tool_result,
+    )
 
     sanitized = []
     for msg in messages:
         if msg.type == "tool":
             # Convert the tool's output into a simple System/Human context
             # so that the next Agent does not get confused
-            sanitized.append(HumanMessage(content=t("core.utils.tool_result", name=msg.name, content=clean_message(msg.content))))
+            content = clean_message(msg.content)
+            if is_untrusted_external_tool_result(msg, messages):
+                content = format_untrusted_tool_result(msg.name, content)
+            else:
+                content = t("core.utils.tool_result", name=msg.name, content=content)
+            sanitized.append(HumanMessage(content=content))
         
         elif msg.type == "ai" and hasattr(msg, "tool_calls") and msg.tool_calls:
             # If the AI made a tool_call, we only keep its reasoning (if it exists)
@@ -466,7 +475,22 @@ def filter_messages(messages: list, k: int = 40) -> list:
     if not messages:
         return []
 
-    safe_list = list(messages[-k:])
+    all_messages = list(messages)
+    start_index = max(0, len(all_messages) - k)
+    safe_list = all_messages[start_index:]
+
+    # Preserve the AI tool-call that supplies action arguments for a ToolMessage
+    # at the cutoff. Action-aware untrusted-source classification must not lose
+    # that pairing merely because history is bounded.
+    if safe_list and getattr(safe_list[0], "type", "") == "tool":
+        first_tool_call_id = str(getattr(safe_list[0], "tool_call_id", ""))
+        for previous in reversed(all_messages[:start_index]):
+            if any(
+                str(call.get("id", "")) == first_tool_call_id
+                for call in (getattr(previous, "tool_calls", None) or [])
+            ):
+                safe_list.insert(0, previous)
+                break
     cleaned_list = []
 
     # First pass: basic cleaning
@@ -677,11 +701,22 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
             if active_goals:
                 prompt += "═══ GOALS IN PROGRESS ═══\n"
                 for g in active_goals:
+                    from core.untrusted_content import format_untrusted_persisted_content
+
                     status_icon = "🎯" if g["status"] == "active" else "⏸"
                     prog_str = f" | Progress: {g.get('progress', 0)}%" if g.get('progress') else ""
-                    prompt += " " + status_icon + " [" + g['project'] + "] " + g['description'] + " (since " + g['date'] + ")" + prog_str + "\n"
+                    goal_text = "[" + g['project'] + "] " + g['description']
+                    goal_text = format_untrusted_persisted_content(
+                        goal_text,
+                        g.get("metadata"),
+                    )
+                    prompt += " " + status_icon + " " + goal_text + " (since " + g['date'] + ")" + prog_str + "\n"
                     if g.get('milestones'):
-                        prompt += f"    Milestones: {g['milestones']}\n"
+                        milestones = format_untrusted_persisted_content(
+                            str(g['milestones']),
+                            g.get("metadata"),
+                        )
+                        prompt += f"    Milestones: {milestones}\n"
                 prompt += "💡 If the conversation is about one of these, mention the continuation naturally.\n"
                 prompt += "══════════════════════════\n\n"
         except Exception as _e:

@@ -115,6 +115,33 @@ def test_recipe_expert_saves_named_recipe(monkeypatch):
     assert "Here is your recipe: *Carbonara*" in saved_calls[0][1]
     assert "[SYSTEM_INSTRUCTION" in result
 
+
+def test_recipe_expert_forwards_external_provenance_for_named_recipe(monkeypatch):
+    class MockResponse:
+        content = "Here is your recipe: *External Carbonara*"
+
+    def mock_invoke(*args, **kwargs):
+        return MockResponse()
+
+    saved_calls = []
+
+    def mock_save(name, content, **kwargs):
+        saved_calls.append((name, content, kwargs))
+        return {"id": "123", "name": name, "content": content}
+
+    monkeypatch.setattr(type(recipe_expert.llm), "invoke", mock_invoke)
+    monkeypatch.setattr(recipe_expert, "save_generated_recipe", mock_save)
+
+    recipe_expert.recipe_expert.func(
+        query="I want carbonara",
+        user_context="",
+        ingredients="",
+        recipe_name="Carbonara",
+        external_content_sources_json='["browse_url"]',
+    )
+
+    assert saved_calls[0][2]["external_content_sources"] == ["browse_url"]
+
 def test_recipe_expert_returns_text_on_save_failure(monkeypatch):
     class MockResponse:
         content = "Here is your recipe: *Failed Save*"

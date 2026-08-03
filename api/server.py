@@ -164,6 +164,7 @@ def append_to_chat_history(
     agent: str | None = None,
     *,
     return_saved: bool = False,
+    metadata: dict | None = None,
 ):
     """Add message to the shared SQLite conversation history (web channel) and websocket push."""
     now = datetime.now()
@@ -176,6 +177,7 @@ def append_to_chat_history(
             content=content,
             channel="web",
             agent=agent,
+            metadata=metadata,
             timestamp=now,
         )
         shared_message_id = saved.get("id")
@@ -198,7 +200,13 @@ def append_to_chat_history(
     return shared_message_id
 
 
-def notify_telegram_message(role: str, content: str, agent: str | None = None) -> int | None:
+def notify_telegram_message(
+    role: str,
+    content: str,
+    agent: str | None = None,
+    *,
+    metadata: dict | None = None,
+) -> int | None:
     """
     Called by the Telegram handler when a message arrives/is sent.
     Saves to the shared SQLite database and notifies the Web UI via WebSocket.
@@ -214,6 +222,7 @@ def notify_telegram_message(role: str, content: str, agent: str | None = None) -
             channel="telegram",
             timestamp=now,
             agent=agent,
+            metadata=metadata,
         )
         msg_id = saved.get("rowid") or get_max_rowid()
         _broadcast_ws({
@@ -242,6 +251,10 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
         return []
 
     context_msgs = []
+    from core.untrusted_content import (
+        format_untrusted_persisted_content,
+        history_message_additional_kwargs,
+    )
     for entry in entries:
         if exclude_message_id and entry.get("id") == exclude_message_id:
             continue
@@ -249,10 +262,20 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
         if not content:
             continue
         prefix = f"[{entry.get('date', '')} {entry.get('time', '')} / {entry.get('channel', '')}] "
+        content = format_untrusted_persisted_content(
+            f"{prefix}{content}",
+            entry.get("metadata"),
+        )
         if entry.get("role") in ("user", "human", "Human"):
-            context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
+            context_msgs.append(HumanMessage(
+                content=content,
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
         else:
-            context_msgs.append(AIMessage(content=f"{prefix}{content}"))
+            context_msgs.append(AIMessage(
+                content=content,
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
     return context_msgs
 
 
@@ -319,6 +342,8 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
     final_ai_response = ""
     handling_agent = "Chat_Agent"
     tool_result_fallbacks: list[str] = []
+    external_tool_names: set[str] = set()
+    tool_args_by_id: dict[str, dict] = {}
 
     t_graph_0 = perf_counter()
     for event in graph.stream(
@@ -329,12 +354,29 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
         for node, data in event.items():
             if data is None:
                 continue
+            for event_message in data.get("messages", []):
+                for tool_call in getattr(event_message, "tool_calls", None) or []:
+                    tool_call_id = str(tool_call.get("id", ""))
+                    tool_args = tool_call.get("args", {})
+                    if tool_call_id and isinstance(tool_args, dict):
+                        tool_args_by_id[tool_call_id] = tool_args
 
             if node == "tools":
                 t_tools_0 = perf_counter()
                 for msg in data.get("messages", []):
                     if getattr(msg, "type", "") == "tool":
+                        from core.untrusted_content import (
+                            format_untrusted_tool_result,
+                            is_untrusted_external_tool_call,
+                        )
+                        tool_name = str(getattr(msg, "name", ""))
+                        tool_args = tool_args_by_id.get(str(getattr(msg, "tool_call_id", "")), {})
+                        is_external = is_untrusted_external_tool_call(tool_name, tool_args)
+                        if is_external:
+                            external_tool_names.add(tool_name)
                         tool_content = clean_message(getattr(msg, "content", "")).strip()
+                        if is_external:
+                            tool_content = format_untrusted_tool_result(tool_name, tool_content)
                         if tool_content:
                             tool_result_fallbacks.append(tool_content)
                 trace.mark_phase(
@@ -369,6 +411,7 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
         "final_ai_response": final_ai_response,
         "handling_agent": handling_agent,
         "tool_result_fallbacks": tool_result_fallbacks,
+        "external_tool_names": sorted(external_tool_names),
         "graph_elapsed_ms": graph_elapsed_ms,
     }
 
@@ -414,16 +457,29 @@ def enqueue_fast_task(func, *args):
 def enqueue_slow_task(func, *args):
     slow_queue.put((func, args))
 
-def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
+def _enqueue_slow_memory_sifter(
+    user_text: str,
+    ai_text: str,
+    handling_agent: str,
+    channel: str,
+    external_content_sources: set[str] | None = None,
+    trusted_user_only: bool = False,
+) -> None:
+    """Queue memory sifting, optionally using only trusted user-originated text."""
+    if external_content_sources:
+        print("[MemorySifterSlow]: external-derived exchange - skip automatic memory write")
+        return
     from memory.session_memory import run_memory_sifter_fast, run_memory_sifter_slow
-    seed_facts = run_memory_sifter_fast(user_text, ai_text, handling_agent, channel)
+    safe_ai_text = "" if trusted_user_only else ai_text
+    seed_facts = run_memory_sifter_fast(user_text, safe_ai_text, handling_agent, channel)
     enqueue_slow_task(
         run_memory_sifter_slow,
         user_text,
-        ai_text,
+        safe_ai_text,
         handling_agent,
         channel,
         seed_facts,
+        not trusted_user_only,
     )
 
 # ────────────────────────────────────────────────────────────────
@@ -452,7 +508,11 @@ async def lifespan(app: FastAPI):
     print("\n--- Astakos API Server: Started ---")
     try:
         from memory.pending_assets import init_pending_assets_table
+        from memory.list_store import init_list_store
+        from memory.reminder_store import init_reminder_store
         init_pending_assets_table()
+        init_list_store()
+        init_reminder_store()
     except Exception as e:
         print(f"[PendingAssets]: Init failed: {e}")
         
@@ -825,6 +885,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     file_path=pending_asset["file_path"],
                     analysis=pending_asset.get("analysis", ""),
                     caption=pending_asset.get("caption", "") or pending_asset["filename"],
+                    external_content_sources=pending_asset.get("external_content_sources", []),
                 )
             else:
                 memory.save(
@@ -832,6 +893,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     file_path=pending_asset["file_path"],
                     analysis=pending_asset.get("analysis", ""),
                     caption=pending_asset.get("caption", "") or pending_asset["filename"],
+                    external_content_sources=pending_asset.get("external_content_sources", []),
                 )
                 
             mark_pending_asset_confirmed(pending_asset["id"])
@@ -978,10 +1040,20 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                         ".gif": "image/gif", ".webp": "image/webp"}.get(ext, "image/jpeg")
 
+                from core.untrusted_content import (
+                    USER_PROVIDED_ASSET_SOURCE,
+                    external_content_history_metadata,
+                    format_untrusted_asset_vision_prompt,
+                )
                 human_msg = HumanMessage(content=[
-                    {"type": "text", "text": enhanced_user_input},
+                    {
+                        "type": "text",
+                        "text": format_untrusted_asset_vision_prompt(enhanced_user_input),
+                    },
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_b64}"}}
-                ])
+                ], additional_kwargs=external_content_history_metadata([
+                    USER_PROVIDED_ASSET_SOURCE,
+                ]))
                 print(f"\033[92m[Chat]: Multimodal message (Image): {filename}\033[0m")
                 print(f"\033[94m[Vision]: Ready for analysis by LLM — message: '{isolated_user_input[:120]}'\033[0m")
 
@@ -998,14 +1070,20 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         # Timestamp on the current message
         now_ts = datetime.now().strftime("%H:%M")
         if isinstance(human_msg.content, str):
-            human_msg = HumanMessage(content=f"[{now_ts}] {human_msg.content}")
+            human_msg = HumanMessage(
+                content=f"[{now_ts}] {human_msg.content}",
+                additional_kwargs=human_msg.additional_kwargs,
+            )
         elif isinstance(human_msg.content, list):
             parts = list(human_msg.content)
             for i, p in enumerate(parts):
                 if isinstance(p, dict) and p.get("type") == "text":
                     parts[i] = {"type": "text", "text": f"[{now_ts}] {p['text']}"}
                     break
-            human_msg = HumanMessage(content=parts)
+            human_msg = HumanMessage(
+                content=parts,
+                additional_kwargs=human_msg.additional_kwargs,
+            )
         # ── Running LangGraph ─────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "web"
         if photo_path and os.path.exists(photo_path):
@@ -1037,6 +1115,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         
         is_ultra_ack = is_ultra_light_ack(isolated_user_input)
         tool_result_fallbacks = []
+        external_tool_names: list[str] = []
+        provenance_messages_for_reply: list = []
 
         from core.planner import get_fresh_pending_plan_confirmation
 
@@ -1092,6 +1172,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
             _trace.mark_phase("web_graph_budget", limit)
 
+            provenance_messages_for_reply = messages_for_graph
             graph_result = await asyncio.to_thread(
                 _run_web_graph_stream_sync,
                 messages_for_graph,
@@ -1101,6 +1182,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             final_ai_response = graph_result["final_ai_response"]
             handling_agent = graph_result["handling_agent"]
             tool_result_fallbacks = graph_result["tool_result_fallbacks"]
+            external_tool_names = graph_result["external_tool_names"]
             graph_elapsed_ms = graph_result["graph_elapsed_ms"]
             _trace.mark_phase("graph_call_ms", graph_elapsed_ms)
             _trace.mark_phase("graph_stream_ms", graph_elapsed_ms)
@@ -1174,23 +1256,43 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             clean_ai = sanitize_messenger_draft_claims(clean_ai)
             clean_ai = strip_operational_assistant_paragraphs(clean_ai).strip() or clean_ai
+            from core.untrusted_content import derived_external_content_history_metadata
+            assistant_metadata = derived_external_content_history_metadata(
+                provenance_messages_for_reply,
+                external_tool_names,
+            )
             _trace.finalize(response=clean_ai)
             
+            assistant_history_kwargs = {
+                "agent": handling_agent,
+                "return_saved": True,
+            }
+            if assistant_metadata:
+                assistant_history_kwargs["metadata"] = assistant_metadata
             assistant_history_saved = append_to_chat_history(
                 "assistant",
                 clean_ai,
-                agent=handling_agent,
-                return_saved=True,
+                **assistant_history_kwargs,
             )
             assistant_history_rowid = assistant_history_saved.get("rowid")
             
             t_bg_0 = perf_counter()
-            enqueue_fast_task(log_exchange,                      clean_user, clean_ai, handling_agent, "web")
-            enqueue_fast_task(update_working_memory,             clean_user, clean_ai)
-            enqueue_fast_task(_enqueue_slow_memory_sifter,       clean_user, clean_ai, handling_agent, "web")
-            enqueue_slow_task(_enqueue_capability_gap_web,       clean_user, clean_ai, handling_agent, "web", current_history_rowid)
-            enqueue_slow_task(_enqueue_followup_pipeline, clean_user, clean_ai, handling_agent, "web")
-            enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")
+            from core.untrusted_content import external_content_source_names
+            external_content_sources = external_content_source_names(assistant_metadata)
+            if external_content_sources:
+                print("[Security]: external-derived reply - use trusted user text only for background state")
+                enqueue_fast_task(log_exchange,                  clean_user, "", handling_agent, "web")
+                enqueue_fast_task(update_working_memory,         clean_user, "")
+                enqueue_fast_task(_enqueue_slow_memory_sifter,   clean_user, "", handling_agent, "web", None, True)
+                enqueue_slow_task(_enqueue_followup_pipeline, clean_user, "", handling_agent, "web")
+                enqueue_slow_task(extract_and_update_context_flags, clean_user, "", "web")
+            else:
+                enqueue_fast_task(log_exchange,                  clean_user, clean_ai, handling_agent, "web")
+                enqueue_fast_task(update_working_memory,         clean_user, clean_ai, external_content_sources)
+                enqueue_fast_task(_enqueue_slow_memory_sifter,   clean_user, clean_ai, handling_agent, "web", external_content_sources)
+                enqueue_slow_task(_enqueue_capability_gap_web,   clean_user, clean_ai, handling_agent, "web", current_history_rowid)
+                enqueue_slow_task(_enqueue_followup_pipeline, clean_user, clean_ai, handling_agent, "web")
+                enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")
             _trace.mark_phase("background_enqueue_ms", int((perf_counter() - t_bg_0) * 1000))
 
             _trace.save()
@@ -1406,10 +1508,19 @@ async def upload_file(
             img.save(img_byte_arr, format='JPEG')
             img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
             
-            def analyze_img(prompt_text):
+            from core.untrusted_content import (
+                USER_PROVIDED_ASSET_SOURCE,
+                format_untrusted_asset_vision_prompt,
+            )
+
+            def analyze_img(prompt_text: str) -> str:
+                """Analyze an uploaded image with an explicit untrusted-data boundary."""
                 msg = HumanMessage(
                     content=[
-                        {"type": "text", "text": prompt_text},
+                        {
+                            "type": "text",
+                            "text": format_untrusted_asset_vision_prompt(prompt_text),
+                        },
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
                     ]
                 )
@@ -1434,6 +1545,11 @@ async def upload_file(
         elif file_ext in doc_exts:
             # We read the content of the document
             doc_text = _read_document_text_for_analysis(file_path, file_ext)
+            from core.untrusted_content import (
+                USER_PROVIDED_ASSET_SOURCE,
+                format_untrusted_tool_result,
+            )
+            doc_text = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, doc_text)
 
             # We send to the LLM for summary/analysis
             from memory.conversation_history import build_asset_context_text
@@ -1482,14 +1598,19 @@ async def upload_file(
         upload_history_msg = t("api.server.upload_history_msg", filename=filename)
         if user_caption:
             upload_history_msg += t("api.server.upload_history_caption", user_caption=user_caption)
+        from core.untrusted_content import (
+            USER_PROVIDED_ASSET_SOURCE,
+            external_content_history_metadata,
+        )
+        asset_metadata = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
         append_to_chat_history("user", upload_history_msg)
-        append_to_chat_history("assistant", chat_ai_msg)
-        enqueue_fast_task(log_exchange, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
-        enqueue_fast_task(update_working_memory, user_log_msg, chat_ai_msg)
-        enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
-        enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
-        enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
-        enqueue_slow_task(extract_and_update_context_flags, user_log_msg, chat_ai_msg, "web")
+        append_to_chat_history("assistant", chat_ai_msg, metadata=asset_metadata)
+        print("[Security]: upload-derived reply - use trusted user text only for background state")
+        enqueue_fast_task(log_exchange, user_caption, "", "Chat_Agent", "web")
+        enqueue_fast_task(update_working_memory, user_caption, "")
+        enqueue_fast_task(_enqueue_slow_memory_sifter, user_caption, "", "Chat_Agent", "web", None, True)
+        enqueue_slow_task(_enqueue_followup_pipeline, user_caption, "", "Chat_Agent", "web")
+        enqueue_slow_task(extract_and_update_context_flags, user_caption, "", "web")
 
         from memory.pending_assets import looks_like_asset_confirmation_prompt
         if looks_like_asset_confirmation_prompt(chat_ai_msg):
@@ -1503,6 +1624,7 @@ async def upload_file(
                     filename=filename,
                     analysis=memory_analysis,
                     caption=user_caption,
+                    external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
                 )
             except Exception as e:
                 print(f"[PendingAssets]: Web upload error: {e}")

@@ -284,15 +284,28 @@ def enqueue_fast_task(func, *args):
 def enqueue_slow_task(func, *args):
     slow_queue.put((func, args))
 
-def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
-    seed_facts = run_memory_sifter_fast(user_text, ai_text, handling_agent, channel)
+def _enqueue_slow_memory_sifter(
+    user_text: str,
+    ai_text: str,
+    handling_agent: str,
+    channel: str,
+    external_content_sources: set[str] | None = None,
+    trusted_user_only: bool = False,
+) -> None:
+    """Queue memory sifting, optionally using only trusted user-originated text."""
+    if external_content_sources:
+        print("[MemorySifterSlow]: external-derived exchange - skip automatic memory write")
+        return
+    safe_ai_text = "" if trusted_user_only else ai_text
+    seed_facts = run_memory_sifter_fast(user_text, safe_ai_text, handling_agent, channel)
     enqueue_slow_task(
         run_memory_sifter_slow,
         user_text,
-        ai_text,
+        safe_ai_text,
         handling_agent,
         channel,
         seed_facts,
+        not trusted_user_only,
     )
 
 def _enqueue_followup_pipeline(user_text, ai_text, agent_name, channel):
@@ -958,6 +971,12 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         except Exception as read_err:
             doc_text = f"[Could not read content: {read_err}]"
 
+        from core.untrusted_content import (
+            USER_PROVIDED_ASSET_SOURCE,
+            external_content_history_metadata,
+            format_untrusted_tool_result,
+        )
+        doc_text = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, doc_text)
         from memory.conversation_history import build_asset_context_text
         conversation_context = build_asset_context_text("telegram")
 
@@ -981,20 +1000,25 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         
         send_telegram_msg(chat_ai_msg)
 
-        user_log_msg = f"[USER_UPLOADED_FILE]: {file_name}\n[FILE PATH]: {local_path}\n[VISUAL ANALYSIS]: {memory_analysis}\n[USER_CAPTION]: {caption or ''}\n[CONTENT_SOURCE]: uploaded_document"
+        user_log_msg = (
+            f"[USER_UPLOADED_FILE]: {file_name}\n[FILE PATH]: {local_path}\n"
+            f"[VISUAL ANALYSIS]: {format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, memory_analysis)}\n"
+            f"[USER_CAPTION]: {caption or ''}\n[CONTENT_SOURCE]: uploaded_document"
+        )
+        asset_metadata = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
         
         # Record in history
         try:
             from memory.conversation_history import append_message
             now = datetime.now()
-            append_message("user", user_log_msg, "telegram", agent=None, timestamp=now)
-            append_message("assistant", chat_ai_msg, "telegram", agent="Chat_Agent", timestamp=now)
-            enqueue_fast_task(log_exchange, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
-            enqueue_fast_task(update_working_memory, user_log_msg, chat_ai_msg)
-            enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
-            enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
-            enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
-            enqueue_slow_task(extract_and_update_context_flags, caption or user_log_msg, chat_ai_msg)
+            append_message("user", user_log_msg, "telegram", agent=None, metadata=asset_metadata, timestamp=now)
+            append_message("assistant", chat_ai_msg, "telegram", agent="Chat_Agent", metadata=asset_metadata, timestamp=now)
+            print("[Security]: upload-derived reply - use trusted user text only for background state")
+            enqueue_fast_task(log_exchange, caption or "", "", "Chat_Agent", "telegram")
+            enqueue_fast_task(update_working_memory, caption or "", "")
+            enqueue_fast_task(_enqueue_slow_memory_sifter, caption or "", "", "Chat_Agent", "telegram", None, True)
+            enqueue_slow_task(_enqueue_followup_pipeline, caption or "", "", "Chat_Agent", "telegram")
+            enqueue_slow_task(extract_and_update_context_flags, caption or "", "")
         except Exception as e:
             print(f"[Document/History]: {e}")
 
@@ -1007,6 +1031,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
                 filename=file_name,
                 analysis=memory_analysis,
                 caption=caption or "",
+                external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
             )
         except Exception as e:
             print(f"[PendingAssets]: Telegram document upload error: {e}")
@@ -1179,21 +1204,32 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     context_msgs = _load_shared_context_messages("telegram")
 
     now_ts = datetime.now().strftime("%H:%M")
+    from core.untrusted_content import (
+        USER_PROVIDED_ASSET_SOURCE,
+        external_content_history_metadata,
+        format_untrusted_tool_result,
+    )
     user_log_msg = (
         f"[{now_ts}] "
         f"[USER_UPLOADED_PHOTO]: {filename}\n"
         f"[PHOTO PATH]: {local_path}\n"
-        f"[VISUAL ANALYSIS]: {analysis}\n"
+        f"[VISUAL ANALYSIS]: {format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, analysis)}\n"
         f"Question: {question}"
     )
     print(f"\033[94m[Photo->Graph]: {user_log_msg[:200]}\033[0m")
 
     # Streaming — collect, send once (same pattern as handle_message)
     final_response = ""
+    events: list[dict] = []
+    photo_message = HumanMessage(
+        content=user_log_msg,
+        additional_kwargs=external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE]),
+    )
     try:
         from memory.execution_trace import ExecutionTrace
         _ptrace = ExecutionTrace(channel="telegram", user_message=user_log_msg)
-        for event in graph.stream({"messages": context_msgs + [HumanMessage(content=user_log_msg)], "channel": "telegram"}, {"recursion_limit": 50}):
+        for event in graph.stream({"messages": context_msgs + [photo_message], "channel": "telegram"}, {"recursion_limit": 50}):
+            events.append(event)
             _ptrace.process_event(event)
             for node, data in event.items():
                 if data is None:
@@ -1219,21 +1255,54 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         final_response += t("clients.telegram_bot.bot_msg_2d5d94")
 
     # ── Photo persistence / Pending asset ──
+    from core.untrusted_content import (
+        derived_external_content_history_metadata,
+        external_content_source_names,
+        external_tool_names_from_events,
+    )
+    current_external_tool_names = external_tool_names_from_events(events)
+    assistant_metadata = derived_external_content_history_metadata(
+        context_msgs + [photo_message],
+        current_external_tool_names,
+    )
+    external_content_sources = external_content_source_names(assistant_metadata)
     try:
         from memory.conversation_history import append_message
         now = datetime.now()
-        append_message(role="user", content=user_log_msg, channel="telegram", agent=None, timestamp=now)
-        append_message(role="assistant", content=final_response, channel="telegram", agent="Chat_Agent", timestamp=now)
+        append_message(
+            role="user",
+            content=user_log_msg,
+            channel="telegram",
+            agent=None,
+            metadata=external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE]),
+            timestamp=now,
+        )
+        append_message(
+            role="assistant",
+            content=final_response,
+            channel="telegram",
+            agent="Chat_Agent",
+            metadata=assistant_metadata,
+            timestamp=now,
+        )
     except Exception as e:
         print(f"[Photo/History]: {e}")
 
     handling_agent = "Chat_Agent"
-    enqueue_fast_task(log_exchange, user_log_msg, final_response, handling_agent, "telegram")
-    enqueue_fast_task(update_working_memory, user_log_msg, final_response)
-    enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, final_response, handling_agent, "telegram")
-    enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, final_response, handling_agent)
-    enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, final_response, handling_agent, "telegram")
-    enqueue_slow_task(extract_and_update_context_flags, user_log_msg, final_response)
+    if external_content_sources:
+        print("[Security]: external-derived photo reply - use trusted user text only for background state")
+        enqueue_fast_task(log_exchange, question or "", "", handling_agent, "telegram")
+        enqueue_fast_task(update_working_memory, question or "", "")
+        enqueue_fast_task(_enqueue_slow_memory_sifter, question or "", "", handling_agent, "telegram", None, True)
+        enqueue_slow_task(_enqueue_followup_pipeline, question or "", "", handling_agent, "telegram")
+        enqueue_slow_task(extract_and_update_context_flags, question or "", "")
+    else:
+        enqueue_fast_task(log_exchange, user_log_msg, final_response, handling_agent, "telegram")
+        enqueue_fast_task(update_working_memory, user_log_msg, final_response)
+        enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, final_response, handling_agent, "telegram")
+        enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, final_response, handling_agent)
+        enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, final_response, handling_agent, "telegram")
+        enqueue_slow_task(extract_and_update_context_flags, user_log_msg, final_response)
 
     try:
         from memory.pending_assets import create_pending_asset_archive, looks_like_asset_confirmation_prompt
@@ -1245,6 +1314,7 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
                 filename=filename,
                 analysis=analysis,
                 caption=question or "",
+                external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
             )
     except Exception as e:
         print(f"[PendingAssets]: {e}")
@@ -1384,7 +1454,13 @@ def _schedule_capability_gap_if_valid(user_text: str, ai_text: str, agent: str, 
         enqueue_slow_task(_enqueue_capability_gap_telegram, user_text, ai_text, agent, "telegram", user_rowid, chat_id)
 
 
-def _append_to_analytics_log(role: str, content: str, agent: str | None = None) -> int | None:
+def _append_to_analytics_log(
+    role: str,
+    content: str,
+    agent: str | None = None,
+    *,
+    metadata: dict | None = None,
+) -> int | None:
     """Logging of a message in the shared SQLite conversation history (telegram channel)."""
     try:
         now = datetime.now()
@@ -1392,7 +1468,12 @@ def _append_to_analytics_log(role: str, content: str, agent: str | None = None) 
         try:
             # notify_telegram_message: saves to shared SQLite + WebSocket broadcast to Web UI
             from api.server import notify_telegram_message
-            return notify_telegram_message(role=shared_role, content=content, agent=agent)
+            return notify_telegram_message(
+                role=shared_role,
+                content=content,
+                agent=agent,
+                metadata=metadata,
+            )
         except Exception:
             # Fallback: direct append without broadcast (if the server is not running)
             from memory.conversation_history import append_message
@@ -1402,6 +1483,7 @@ def _append_to_analytics_log(role: str, content: str, agent: str | None = None) 
                 channel="telegram",
                 timestamp=now,
                 agent=agent,
+                metadata=metadata,
             )
             return saved.get("rowid") if isinstance(saved, dict) else None
     except Exception as e:
@@ -1559,15 +1641,29 @@ def _load_shared_context_messages(channel: str) -> list:
         return []
 
     context_msgs = []
+    from core.untrusted_content import (
+        format_untrusted_persisted_content,
+        history_message_additional_kwargs,
+    )
     for entry in entries:
         content = entry.get("content", "")
         if not content:
             continue
         prefix = f"[{entry.get('date', '')} {entry.get('time', '')} / {entry.get('channel', '')}] "
+        content = format_untrusted_persisted_content(
+            f"{prefix}{content}",
+            entry.get("metadata"),
+        )
         if entry.get("role") in ("user", "human", "Human"):
-            context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
+            context_msgs.append(HumanMessage(
+                content=content,
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
         else:
-            context_msgs.append(AIMessage(content=f"{prefix}{content}"))
+            context_msgs.append(AIMessage(
+                content=content,
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
     return context_msgs
 
 
@@ -2073,6 +2169,7 @@ def handle_message(user_text: str, chat_id: str):
                 file_path=pending_asset["file_path"],
                 analysis=pending_asset.get("analysis", ""),
                 caption=pending_asset.get("caption", "") or pending_asset["filename"],
+                external_content_sources=pending_asset.get("external_content_sources", []),
             )
         else:
             memory.save(
@@ -2080,6 +2177,7 @@ def handle_message(user_text: str, chat_id: str):
                 file_path=pending_asset["file_path"],
                 analysis=pending_asset.get("analysis", ""),
                 caption=pending_asset.get("caption", "") or pending_asset["filename"],
+                external_content_sources=pending_asset.get("external_content_sources", []),
             )
             
         mark_pending_asset_confirmed(pending_asset["id"])
@@ -2238,6 +2336,7 @@ def handle_message(user_text: str, chat_id: str):
         is_ultra_ack = is_ultra_light_ack(clean_user_text)
         fast_path_used = False
         medium_path_used = False
+        provenance_messages_for_reply: list = []
 
         # 1. graph_call_ms
         graph_call_started = perf_counter()
@@ -2258,8 +2357,10 @@ def handle_message(user_text: str, chat_id: str):
             _trace.mark_phase("medium_path_candidate", 1 if medium_path_used else 0)
 
             if fast_path_used:
+                provenance_messages_for_reply = context_msgs[-6:] + [current_msg]
                 events = _run_fast_chat_path(context_msgs, current_msg)
             elif medium_path_used:
+                provenance_messages_for_reply = context_msgs[-8:] + [current_msg]
                 events = list(
                     graph.stream(
                         {"messages": context_msgs[-8:] + [current_msg], "channel": "telegram"},
@@ -2267,6 +2368,7 @@ def handle_message(user_text: str, chat_id: str):
                     )
                 )
             else:
+                provenance_messages_for_reply = context_msgs + [current_msg]
                 events = list(
                     graph.stream(
                         {"messages": context_msgs + [current_msg], "channel": "telegram"},
@@ -2312,6 +2414,18 @@ def handle_message(user_text: str, chat_id: str):
         # 3. tool_message_collect_ms
         tool_collect_started = perf_counter()
         tool_result_fallbacks = []
+        external_tool_names: set[str] = set()
+        tool_args_by_id: dict[str, dict] = {}
+        for event in events:
+            for data in event.values():
+                if data is None:
+                    continue
+                for event_message in data.get("messages", []):
+                    for tool_call in getattr(event_message, "tool_calls", None) or []:
+                        tool_call_id = str(tool_call.get("id", ""))
+                        tool_args = tool_call.get("args", {})
+                        if tool_call_id and isinstance(tool_args, dict):
+                            tool_args_by_id[tool_call_id] = tool_args
         for event in events:
             for node, data in event.items():
                 if data is None:
@@ -2319,7 +2433,18 @@ def handle_message(user_text: str, chat_id: str):
                 if node == "tools":
                     for msg in data.get("messages", []):
                         if getattr(msg, "type", "") == "tool":
+                            from core.untrusted_content import (
+                                format_untrusted_tool_result,
+                                is_untrusted_external_tool_call,
+                            )
+                            tool_name = str(getattr(msg, "name", ""))
+                            tool_args = tool_args_by_id.get(str(getattr(msg, "tool_call_id", "")), {})
+                            is_external = is_untrusted_external_tool_call(tool_name, tool_args)
+                            if is_external:
+                                external_tool_names.add(tool_name)
                             tool_content = clean_message(getattr(msg, "content", "")).strip()
+                            if is_external:
+                                tool_content = format_untrusted_tool_result(tool_name, tool_content)
                             if tool_content:
                                 tool_result_fallbacks.append(tool_content)
         tool_message_collect_ms = int((perf_counter() - tool_collect_started) * 1000)
@@ -2420,7 +2545,19 @@ def handle_message(user_text: str, chat_id: str):
             # We keep context for the next message
             _typing_active["on"] = False  # We stop typing
             user_rowid = _append_to_analytics_log("user", clean_user_text)
-            _append_to_analytics_log("ai", final_ai_response)
+            from core.untrusted_content import derived_external_content_history_metadata
+            assistant_metadata = derived_external_content_history_metadata(
+                provenance_messages_for_reply,
+                external_tool_names,
+            )
+            if assistant_metadata:
+                _append_to_analytics_log(
+                    "ai",
+                    final_ai_response,
+                    metadata=assistant_metadata,
+                )
+            else:
+                _append_to_analytics_log("ai", final_ai_response)
             # Photos
             if "[SEND_PHOTO:" in final_ai_response:
                 match = re.search(r"\[SEND_PHOTO:\s*(.+?)\]", final_ai_response)
@@ -2433,12 +2570,22 @@ def handle_message(user_text: str, chat_id: str):
 
             # Background Tasks
             t_bg_0 = perf_counter()
-            enqueue_fast_task(log_exchange,                       user_text, final_ai_response, handling_agent, "telegram")
-            enqueue_fast_task(update_working_memory,              user_text, final_ai_response)
-            enqueue_fast_task(_enqueue_slow_memory_sifter,        user_text, final_ai_response, handling_agent, "telegram")
-            _schedule_capability_gap_if_valid(user_text, final_ai_response, handling_agent, user_rowid, chat_id)
-            enqueue_slow_task(_enqueue_followup_pipeline, user_text, final_ai_response, handling_agent, "telegram")
-            enqueue_slow_task(extract_and_update_context_flags, user_text, final_ai_response)
+            from core.untrusted_content import external_content_source_names
+            external_content_sources = external_content_source_names(assistant_metadata)
+            if external_content_sources:
+                print("[Security]: external-derived reply - use trusted user text only for background state")
+                enqueue_fast_task(log_exchange,                   user_text, "", handling_agent, "telegram")
+                enqueue_fast_task(update_working_memory,          user_text, "")
+                enqueue_fast_task(_enqueue_slow_memory_sifter,    user_text, "", handling_agent, "telegram", None, True)
+                enqueue_slow_task(_enqueue_followup_pipeline, user_text, "", handling_agent, "telegram")
+                enqueue_slow_task(extract_and_update_context_flags, user_text, "")
+            else:
+                enqueue_fast_task(log_exchange,                   user_text, final_ai_response, handling_agent, "telegram")
+                enqueue_fast_task(update_working_memory,          user_text, final_ai_response, external_content_sources)
+                enqueue_fast_task(_enqueue_slow_memory_sifter,    user_text, final_ai_response, handling_agent, "telegram", external_content_sources)
+                _schedule_capability_gap_if_valid(user_text, final_ai_response, handling_agent, user_rowid, chat_id)
+                enqueue_slow_task(_enqueue_followup_pipeline, user_text, final_ai_response, handling_agent, "telegram")
+                enqueue_slow_task(extract_and_update_context_flags, user_text, final_ai_response)
             
             background_enqueue_ms = int((perf_counter() - t_bg_0) * 1000)
             _trace.mark_phase("background_enqueue_ms", background_enqueue_ms)
@@ -5080,7 +5227,11 @@ if __name__ == "__main__":
     _load_override_state()
     try:
         from memory.pending_assets import init_pending_assets_table
+        from memory.list_store import init_list_store
+        from memory.reminder_store import init_reminder_store
         init_pending_assets_table()
+        init_list_store()
+        init_reminder_store()
         ensure_pending_followups_table()
     except Exception as e:
         print(f"[PendingAssets]: Init failed: {e}")

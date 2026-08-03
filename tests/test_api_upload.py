@@ -20,8 +20,8 @@ def test_pasted_text_upload_reaches_document_summary_without_unbound_error(clien
     # 2. Mock external side effects to avoid DB/network
     with patch("config.UPLOADS_DIR", str(mock_uploads_dir)), \
          patch("api.server.safe_llm_invoke") as mock_invoke, \
-         patch("api.server.append_to_chat_history"), \
-         patch("api.server.enqueue_fast_task"), \
+         patch("api.server.append_to_chat_history") as mock_history, \
+         patch("api.server.enqueue_fast_task") as mock_fast_queue, \
          patch("api.server.enqueue_slow_task"), \
          patch("memory.conversation_history.build_asset_context_text", return_value="fake_context"), \
          patch("memory.pending_assets.create_pending_asset_archive"):
@@ -46,6 +46,17 @@ def test_pasted_text_upload_reaches_document_summary_without_unbound_error(clien
         assert json_resp["status"] == "success"
         assert "Fake document summary." in json_resp["ai_message"]
         assert mock_invoke.called
+        rendered_prompt = str(mock_invoke.call_args.args[1][0].content)
+        assert "[UNTRUSTED EXTERNAL TOOL RESULT]" in rendered_prompt
+        assert "Source tool: user_provided_asset" in rendered_prompt
+        assistant_call = next(
+            call for call in mock_history.call_args_list
+            if call.args[:1] == ("assistant",)
+        )
+        assert assistant_call.kwargs["metadata"] == {
+            "untrusted_external_tool_names": ["user_provided_asset"]
+        }
+        assert any(call.args[2] == "" for call in mock_fast_queue.call_args_list)
 
 def test_lifespan_timeout_race(monkeypatch):
     import asyncio

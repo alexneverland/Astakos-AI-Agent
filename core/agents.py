@@ -938,7 +938,11 @@ def mail_agent_node(state):
             )
             return {'current_agent': 'Mail_Agent', 'messages': [_auto_msg]}
         # Has read results or no valid ID -> synthesize below
-        joined_results = "\n\n".join(mail_tool_results[:5])[:4000]
+        from core.untrusted_content import format_untrusted_tool_result
+        joined_results = format_untrusted_tool_result(
+            "mail_manager",
+            "\n\n".join(mail_tool_results[:5])[:4000],
+        )
         user_q = next(
             (clean_message(m.content) for m in reversed(history)
              if getattr(m, "type", "") == "human"),

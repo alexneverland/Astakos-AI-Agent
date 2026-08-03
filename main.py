@@ -199,6 +199,11 @@ def _do_session_summary():
 def main():
     global last_interaction_time
 
+    from memory.list_store import init_list_store
+    from memory.reminder_store import init_reminder_store
+    init_list_store()
+    init_reminder_store()
+
     # Start workers
     threading.Thread(target=reminder_worker,  daemon=True).start()
     threading.Thread(target=proactive_worker, daemon=True).start()
@@ -231,7 +236,8 @@ def main():
             handling_agent    = "Chat_Agent"
 
             try:
-                for event in graph.stream({"messages": [HumanMessage(content=inp)]}):
+                events = list(graph.stream({"messages": [HumanMessage(content=inp)]}))
+                for event in events:
                     for node, data in event.items():
                         if data is None:
                             continue
@@ -248,10 +254,18 @@ def main():
                                     )
 
                 if final_ai_response:
-                    enqueue_task(update_working_memory,             inp, final_ai_response)
-                    enqueue_task(trigger_memory_sifter,             inp, final_ai_response, handling_agent, "terminal")
-                    enqueue_task(log_exchange,                      inp, final_ai_response, handling_agent, "terminal")
-                    enqueue_task(update_capabilities_from_exchange, inp, final_ai_response, handling_agent)
+                    from core.untrusted_content import external_tool_names_from_events
+                    external_content_sources = external_tool_names_from_events(events)
+                    if external_content_sources:
+                        print("[Security]: external-derived reply - use trusted user text only for background state")
+                        enqueue_task(update_working_memory, inp, "")
+                        enqueue_task(trigger_memory_sifter, inp, "", handling_agent, "terminal", False)
+                        enqueue_task(log_exchange, inp, "", handling_agent, "terminal")
+                    else:
+                        enqueue_task(update_working_memory,             inp, final_ai_response)
+                        enqueue_task(trigger_memory_sifter,             inp, final_ai_response, handling_agent, "terminal")
+                        enqueue_task(log_exchange,                      inp, final_ai_response, handling_agent, "terminal")
+                        enqueue_task(update_capabilities_from_exchange, inp, final_ai_response, handling_agent)
 
             except Exception as e:
                 import traceback
