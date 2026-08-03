@@ -55,6 +55,8 @@ ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT = 40
 EXTERNAL_CONTENT_HISTORY_METADATA_KEY = "untrusted_external_tool_names"
 USER_PROVIDED_ASSET_SOURCE = "user_provided_asset"
 UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER = "[UNTRUSTED EXTERNAL TOOL RESULT]"
+USER_GROUNDED_MEMORY_MIN_TOKEN_LENGTH = 4
+USER_GROUNDED_MEMORY_MIN_SHARED_TOKENS = 2
 MAIL_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
     "check",
     "check_emails",
@@ -441,6 +443,20 @@ def has_untrusted_result_in_active_history(messages: Sequence[Any]) -> bool:
     return bool(active_external_content_tool_names(messages))
 
 
+def meaningful_groundedness_tokens(text: str) -> set[str]:
+    """Return Unicode word tokens used by the user-grounded memory check.
+
+    The check supports the project's Greek and English conversational inputs.
+    It intentionally excludes short words because they are poor evidence that a
+    saved fact came from the user's latest message.
+    """
+    return {
+        token.casefold()
+        for token in re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+        if len(token) >= USER_GROUNDED_MEMORY_MIN_TOKEN_LENGTH
+    }
+
+
 def is_user_grounded_memory_write(
     tool_call: Mapping[str, Any],
     messages: Sequence[Any],
@@ -477,12 +493,10 @@ def is_user_grounded_memory_write(
     if not latest_user_text:
         return False
 
-    def meaningful_tokens(text: str) -> set[str]:
-        """Normalize natural-language tokens suitable for groundedness checks."""
-        return {
-            token.casefold()
-            for token in re.findall(r"[^\W_]+", text, flags=re.UNICODE)
-            if len(token) >= 4
-        }
-
-    return len(meaningful_tokens(fact) & meaningful_tokens(latest_user_text)) >= 2
+    return (
+        len(
+            meaningful_groundedness_tokens(fact)
+            & meaningful_groundedness_tokens(latest_user_text)
+        )
+        >= USER_GROUNDED_MEMORY_MIN_SHARED_TOKENS
+    )

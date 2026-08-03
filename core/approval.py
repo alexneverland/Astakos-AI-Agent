@@ -290,6 +290,7 @@ def approval_check_node(state):
     blocked_call_ids = {tc["id"] for tc, _, _ in blocked_entries}
 
     from core.untrusted_content import (
+        active_external_content_tool_names,
         has_untrusted_result_in_active_history,
         has_untrusted_result_since_latest_user_message,
         is_read_only_external_followup_tool,
@@ -309,6 +310,25 @@ def approval_check_node(state):
                 blocked_call_ids.add(tc["id"])
 
     external_content_is_active = has_untrusted_result_in_active_history(state["messages"])
+    user_grounded_memory_call_ids = {
+        tc["id"]
+        for tc in tool_calls
+        if external_content_is_active
+        and is_user_grounded_memory_write(tc, state["messages"])
+    }
+    if user_grounded_memory_call_ids:
+        import json
+
+        active_sources_json = json.dumps(
+            sorted(active_external_content_tool_names(state["messages"])),
+        )
+        for tc in tool_calls:
+            if tc["id"] not in user_grounded_memory_call_ids:
+                continue
+            args = tc.get("args")
+            if isinstance(args, dict):
+                args["external_content_sources_json"] = active_sources_json
+
     external_context_approval_ids = {
         tc["id"]
         for tc in tool_calls
@@ -404,7 +424,6 @@ def approval_check_node(state):
             "recipe_expert",
             "set_local_reminder",
         } and tc["id"] in external_context_approval_ids:
-            from core.untrusted_content import active_external_content_tool_names
             import json
 
             pending_args["external_content_sources_json"] = json.dumps(

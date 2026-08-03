@@ -444,6 +444,9 @@ def test_user_grounded_memory_write_avoids_stale_provenance_escalation() -> None
     result = approval_check_node(state)
 
     assert result["approval_status"] == "ok"
+    assert state["messages"][-1].tool_calls[0]["args"][
+        "external_content_sources_json"
+    ] == '["browse_url"]'
 
 
 def test_provenance_marked_user_input_cannot_bypass_memory_approval(
