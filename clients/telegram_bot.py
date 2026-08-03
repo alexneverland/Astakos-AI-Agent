@@ -2325,9 +2325,11 @@ def handle_message(user_text: str, chat_id: str):
         t_context_0 = perf_counter()
         context_msgs, current_msg = _build_fast_chat_context(clean_user_text)
         from services.routine_completion_context import append_routine_completion_context
-        context_msgs = append_routine_completion_context(context_msgs, routine_completion_context)
-        if routine_draft_offer_context is not None:
-            context_msgs.append(routine_draft_offer_context)
+        context_msgs = append_routine_completion_context(
+            context_msgs,
+            routine_completion_context,
+            routine_draft_offer_context,
+        )
         context_load_ms = int((perf_counter() - t_context_0) * 1000)
         # ── Flow via LangGraph ───────────────────────────────────_
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"

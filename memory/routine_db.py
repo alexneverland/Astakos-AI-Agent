@@ -1827,25 +1827,32 @@ def is_routine_temporarily_inactive_meta(routine: dict, now: datetime | None = N
 # PENDING CONFIRMATIONS PERSISTENCE (Recovery After Restart)
 # ────────────────────────────────────────────────────────────────
 
-def _setup_pending_table():
-    conn   = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS pending_confirmations (
-            routine_id INTEGER PRIMARY KEY,
-            event_name TEXT,
-            sent_at    TEXT,
-            draft_offer INTEGER NOT NULL DEFAULT 0
-        )
-    """)
-    existing_cols = [row[1] for row in cursor.execute("PRAGMA table_info(pending_confirmations)")]
-    if "draft_offer" not in existing_cols:
-        cursor.execute(
-            "ALTER TABLE pending_confirmations ADD COLUMN draft_offer INTEGER NOT NULL DEFAULT 0"
-        )
-        print("[routine_db]: Migration → 'pending_confirmations.draft_offer'")
-    conn.commit()
-    conn.close()
+def _setup_pending_table() -> None:
+    """Create and migrate pending confirmations under a cross-process SQLite lock."""
+    conn = get_connection()
+    try:
+        # Web and Telegram boot in separate processes, so a Python thread lock
+        # cannot protect this schema upgrade. SQLite serializes both processes
+        # before either inspects or mutates the pending-confirmations table.
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pending_confirmations (
+                routine_id INTEGER PRIMARY KEY,
+                event_name TEXT,
+                sent_at    TEXT,
+                draft_offer INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        existing_cols = [row[1] for row in cursor.execute("PRAGMA table_info(pending_confirmations)")]
+        if "draft_offer" not in existing_cols:
+            cursor.execute(
+                "ALTER TABLE pending_confirmations ADD COLUMN draft_offer INTEGER NOT NULL DEFAULT 0"
+            )
+            print("[routine_db]: Migration → 'pending_confirmations.draft_offer'")
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def save_pending_confirmation(
