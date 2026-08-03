@@ -29,6 +29,7 @@ def _graph_result(*_args: object, **_kwargs: object) -> dict[str, object]:
         "final_ai_response": "Natural graph reply.",
         "handling_agent": "Chat_Agent",
         "tool_result_fallbacks": [],
+        "external_tool_names": [],
         "graph_elapsed_ms": 1,
     }
 

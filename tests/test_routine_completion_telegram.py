@@ -42,7 +42,7 @@ _STUB_MODULE_NAMES = [
     "services.gemini", "services.embeddings", "services.context_extractor",
     "services.messenger_intent",
     "services.routine_context", "services.routine_conditions",
-    "tools", "tools.telegram",
+    "tools", "tools.telegram", "tools.system",
     "telegram", "telegram.ext",
 ]
 _ORIGINAL_MODULES = {}
