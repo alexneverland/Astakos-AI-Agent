@@ -859,9 +859,14 @@ def test_approval_blocks_drive_mutations_after_external_content(action: str) -> 
     assert result["messages"][0].tool_call_id == "tool-2"
 
 
-def test_approval_keeps_drive_download_available_after_external_content() -> None:
+def test_approval_keeps_drive_download_available_after_external_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Drive read actions remain available for normal multi-document research."""
     from core.approval import approval_check_node
+
+    notify = MagicMock()
+    monkeypatch.setattr("core.approval._notify_telegram_notify", notify)
 
     state = {
         "messages": [
@@ -879,6 +884,7 @@ def test_approval_keeps_drive_download_available_after_external_content() -> Non
     }
 
     assert approval_check_node(state)["approval_status"] == "ok"
+    notify.assert_called_once_with(state["messages"][-1].tool_calls[0])
 
 
 def test_approval_blocks_plan_bypass_after_external_content() -> None:
