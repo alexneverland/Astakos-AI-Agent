@@ -1650,16 +1650,16 @@ def _load_shared_context_messages(channel: str) -> list:
         if not content:
             continue
         prefix = f"[{entry.get('date', '')} {entry.get('time', '')} / {entry.get('channel', '')}] "
+        content = format_untrusted_persisted_content(
+            f"{prefix}{content}",
+            entry.get("metadata"),
+        )
         if entry.get("role") in ("user", "human", "Human"):
             context_msgs.append(HumanMessage(
-                content=f"{prefix}{content}",
+                content=content,
                 additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
             ))
         else:
-            content = format_untrusted_persisted_content(
-                f"{prefix}{content}",
-                entry.get("metadata"),
-            )
             context_msgs.append(AIMessage(
                 content=content,
                 additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),

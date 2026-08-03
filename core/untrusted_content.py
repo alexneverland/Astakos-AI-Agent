@@ -93,6 +93,7 @@ EXTERNAL_PROVENANCE_SOURCE_NAMES: frozenset[str] = (
         "google_calendar_tool",
         "google_tasks_tool",
         "mail_manager",
+        "set_local_reminder",
         "control_spotify",
         USER_PROVIDED_ASSET_SOURCE,
     }
