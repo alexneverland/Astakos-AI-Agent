@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from html import escape
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -438,3 +439,42 @@ def has_untrusted_result_in_active_history(messages: Sequence[Any]) -> bool:
     restore automatic mutation while an external result is still prompt-visible.
     """
     return bool(active_external_content_tool_names(messages))
+
+
+def is_user_grounded_memory_write(
+    tool_call: Mapping[str, Any],
+    messages: Sequence[Any],
+) -> bool:
+    """Return whether a memory fact is demonstrably grounded in the latest user turn.
+
+    This narrowly prevents historical external provenance from escalating a normal
+    user update.  It never applies to same-turn external results, which are
+    blocked before this helper is considered.
+    """
+    if str(tool_call.get("name", "")) != "save_to_memory":
+        return False
+
+    args = tool_call.get("args", {})
+    if not isinstance(args, Mapping):
+        return False
+    fact = str(args.get("fact", ""))
+    if not fact:
+        return False
+
+    latest_user_text = ""
+    for message in reversed(messages):
+        if is_direct_user_message(message):
+            latest_user_text = str(getattr(message, "content", ""))
+            break
+    if not latest_user_text:
+        return False
+
+    def meaningful_tokens(text: str) -> set[str]:
+        """Normalize natural-language tokens suitable for groundedness checks."""
+        return {
+            token.casefold()
+            for token in re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+            if len(token) >= 4
+        }
+
+    return len(meaningful_tokens(fact) & meaningful_tokens(latest_user_text)) >= 2

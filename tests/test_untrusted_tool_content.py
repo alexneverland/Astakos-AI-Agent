@@ -410,6 +410,42 @@ def test_approval_requires_approval_for_mutation_after_a_new_user_turn(
     assert save_pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
 
 
+def test_user_grounded_memory_write_avoids_stale_provenance_escalation() -> None:
+    """A detailed user update can be saved despite unrelated marked history."""
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+
+    state = {
+        "messages": [
+            AIMessage(
+                content="Old external summary.",
+                additional_kwargs=external_content_history_metadata(["browse_url"]),
+            ),
+            HumanMessage(
+                content=(
+                    "Πέρασα τη συνέντευξη στην Open Train και πάω στο δεύτερο επίπεδο."
+                ),
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "save_to_memory",
+                        "args": {
+                            "fact": "Πέρασε τη συνέντευξη Open Train στο δεύτερο επίπεδο."
+                        },
+                        "id": "tool-user-fact",
+                    }
+                ],
+            ),
+        ]
+    }
+
+    result = approval_check_node(state)
+
+    assert result["approval_status"] == "ok"
+
+
 def test_approval_requires_consent_for_web_photo_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
