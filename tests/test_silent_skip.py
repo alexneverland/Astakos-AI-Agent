@@ -36,14 +36,15 @@ _TMP_BASE = tempfile.mkdtemp()   # persistent temp dir for config.BASE_DIR
 _STUB_MODULE_NAMES = [
     "config",
     "langchain_core", "langchain_core.messages",
-    "memory", "memory.event_log", "memory.vector_store",
+    "memory", "memory.event_log", "memory.execution_trace", "memory.vector_store",
     "memory.working_memory", "memory.session_memory", "memory.pending_followups",
-    "memory.context_builder", "memory.routine_db",
+    "memory.context_builder", "memory.routine_db", "memory.pending_assets",
     "core.brain", "core.graph", "core.agents",
     "core.exceptions", "core.event_bus",
     "core.routine_state", "core.prompts", "core.utils", "core.i18n", "core.nl_config",
     "services", "services.gemini", "services.embeddings", "services.context_extractor", "services.messenger_intent", "services.routine_context",
-    "services.routine_conditions",
+    "services.routine_conditions", "services.routine_completion_context",
+    "services.routine_completion_helper", "services.routine_completion_selector",
     "tools", "tools.telegram",
     "telegram", "telegram.ext",
 ]
@@ -222,13 +223,22 @@ def _stub_modules():
         "services", "services.gemini", "services.embeddings",
         "services.routine_context", "services.routine_conditions",
         "services.context_extractor", "services.messenger_intent",
-        "services.routine_completion_helper", "services.routine_completion_selector",
+        "services.routine_completion_context", "services.routine_completion_helper",
+        "services.routine_completion_selector",
     ]:
         sys.modules[mod] = types.ModuleType(mod)
 
     sys.modules["services.context_extractor"].extract_and_update_context_flags = MagicMock()
     sys.modules["services.messenger_intent"].classify_messenger_intent = MagicMock(return_value=None)
+    sys.modules["services.messenger_intent"].is_draft_offer_acceptance = MagicMock(return_value=False)
+    sys.modules["services.routine_completion_context"].accept_pending_messenger_draft_offer = MagicMock(return_value=None)
+    sys.modules["services.routine_completion_context"].build_routine_completion_context = MagicMock()
     sys.modules["services.routine_completion_helper"].decide_completion = MagicMock()
+    sys.modules["services.routine_completion_helper"].RoutineSelection = type(
+        "RoutineSelection",
+        (),
+        {},
+    )
     sys.modules["services.routine_completion_selector"].select_routine = MagicMock()
 
     sys.modules["services.routine_context"].build_runtime_routine_context = MagicMock(return_value={
@@ -342,10 +352,11 @@ def _run_job(
     muted_until=None,
     sentimental_info=None,
     random_value=0.99,
+    return_craft_mock=False,
 ):
     """
     Runs job_check_routines() with mocked externals.
-    Returns: (sent_messages, logged_events, bus_events)
+    Returns: (sent_messages, logged_events, bus_events), plus the craft mock on request.
     """
     sent       = []
     logged     = []
@@ -367,6 +378,8 @@ def _run_job(
         "sentimental": 0, "muted_from": None, "muted_until": None,
         "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False
     }
+    crafted_result = craft_return if isinstance(craft_return, tuple) else (craft_return, False)
+    craft_mock = MagicMock(return_value=crafted_result)
 
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "astakos_routines.db")
@@ -386,7 +399,7 @@ def _run_job(
             patch.object(bot, "is_duplicate_routine",  return_value=duplicate),
             patch.object(bot, "can_send_proactive",    return_value=True),
             patch.object(bot, "should_skip_proactive_for_recent_activity", return_value=False),
-            patch.object(bot, "_craft_proactive_msg",  return_value=craft_return),
+            patch.object(bot, "_craft_proactive_msg",  craft_mock),
             patch.object(bot, "send_telegram_msg",     side_effect=lambda m: sent.append(m)),
             patch.object(bot, "log_event",             side_effect=lambda *a, **kw: logged.append((a[0], a[1]))),
             patch.object(bot, "bus",                   mock_bus),
@@ -394,6 +407,8 @@ def _run_job(
         ):
             bot.job_check_routines()
 
+    if return_craft_mock:
+        return sent, logged, bus_events, craft_mock
     return sent, logged, bus_events
 
 
@@ -519,7 +534,7 @@ def test_silent_skip_updates_last_triggered():
             patch.object(bot, "is_duplicate_routine", return_value=False),
             patch.object(bot, "can_send_proactive",   return_value=True),
             patch.object(bot, "should_skip_proactive_for_recent_activity", return_value=False),
-            patch.object(bot, "_craft_proactive_msg", return_value="[SILENT_SKIP]"),
+            patch.object(bot, "_craft_proactive_msg", return_value=("[SILENT_SKIP]", False)),
             patch.object(bot, "send_telegram_msg",    return_value=None),
             patch.object(bot, "log_event",            return_value=None),
             patch.object(bot, "bus",                  mock_bus),
@@ -738,6 +753,19 @@ def test_normal_msg_is_sent():
     """Regular message → sent as is."""
     sent, _, _ = _run_job([_due_routine()], craft_return="Μάστορα, πάμε πάρκο;")
     assert sent == ["Μάστορα, πάμε πάρκο;"], f"Got: {sent}"
+
+
+def test_single_non_messenger_routine_disables_draft_offer_authorization():
+    """A model response cannot arm a Messenger offer for an ordinary routine."""
+    bot.pending_routine_confirmations.clear()
+    _, _, _, craft_mock = _run_job(
+        [_due_routine()],
+        craft_return=("Shall I do the routine?", True),
+        return_craft_mock=True,
+    )
+
+    assert craft_mock.call_args.kwargs["allow_messenger_draft_offer"] is False
+    assert bot.pending_routine_confirmations[1]["draft_offer"] is False
 
 
 def test_normal_msg_no_skip_logs():

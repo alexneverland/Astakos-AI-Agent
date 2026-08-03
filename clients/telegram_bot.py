@@ -4721,7 +4721,13 @@ def job_check_routines():
                 else:
                     # One routine → personalized message
                     r_id, event_name, confidence = due_routines[0]
-                    msg, draft_offer = _craft_proactive_msg(event_name, confidence)
+                    can_offer_messenger_draft = _is_partner_messenger_routine(event_name)
+                    msg, draft_offer = _craft_proactive_msg(
+                        event_name,
+                        confidence,
+                        allow_messenger_draft_offer=can_offer_messenger_draft,
+                    )
+                    draft_offer = draft_offer and can_offer_messenger_draft
 
                     if msg.strip().startswith("[SILENT_SKIP]"):
                         # First time SILENT_SKIP — estimate muted_until
