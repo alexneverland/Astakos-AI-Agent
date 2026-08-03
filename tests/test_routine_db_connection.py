@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import memory.routine_db as routine_db
@@ -69,6 +70,35 @@ def test_enable_wal_remains_best_effort_when_database_is_locked(monkeypatch):
     assert fake_connection.statements == ["PRAGMA journal_mode=WAL"]
 
 
+def test_pending_confirmation_migration_uses_sqlite_write_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pending-confirmation schema check is serialized across startup processes."""
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.cursor.return_value = cursor
+    cursor.execute.side_effect = [
+        None,
+        [
+            (0, "routine_id"),
+            (1, "event_name"),
+            (2, "sent_at"),
+        ],
+        None,
+    ]
+    monkeypatch.setattr(routine_db, "get_connection", lambda: connection)
+
+    routine_db._setup_pending_table()
+
+    connection.execute.assert_called_once_with("BEGIN IMMEDIATE")
+    assert any(
+        "ALTER TABLE pending_confirmations ADD COLUMN draft_offer" in str(call.args[0])
+        for call in cursor.execute.call_args_list
+    )
+    connection.commit.assert_called_once()
+    connection.close.assert_called_once()
+
+
 def test_skip_streak_migration_applies_cooldown_only_on_third_refusal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -102,6 +132,44 @@ def test_skip_streak_migration_applies_cooldown_only_on_third_refusal(
     assert third["cooldown_applied"] is True
     assert third["cooldown_hours"] == 40.0
     assert routine_db.get_routine_notify_info(routine_id)["last_notified_ts"] is not None
+
+
+def test_acknowledge_pending_draft_offer_is_consumed_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only one process can acknowledge the same persisted draft offer."""
+    db_path = tmp_path / "routines.db"
+    monkeypatch.setattr(routine_db, "DB_PATH", str(db_path))
+    monkeypatch.setattr(routine_db, "_wal_enabled", False)
+    monkeypatch.setattr(routine_db, "_wal_enabled_path", None)
+    routine_db.setup_db()
+    routine_db._setup_pending_table()
+
+    connection = routine_db.get_connection()
+    connection.execute(
+        """
+        INSERT INTO routines (day_of_week, time_str, event_name, event_type, confidence, state, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("Thursday", "09:00", "Message routine", "general", 0.9, "trigger_pending", 0),
+    )
+    routine_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+    connection.commit()
+    connection.close()
+
+    sent_at = datetime.now()
+    routine_db.save_pending_confirmation(
+        routine_id,
+        "Message routine",
+        sent_at,
+        draft_offer=True,
+    )
+
+    assert routine_db.acknowledge_pending_draft_offer(routine_id, sent_at) is True
+    assert routine_db.acknowledge_pending_draft_offer(routine_id, sent_at) is False
+    assert routine_db.get_routine_state(routine_id).value == "active"
+    assert routine_db.load_pending_confirmations() == {}
 
 
 def test_unanswered_reminder_streak_migrates_existing_database(

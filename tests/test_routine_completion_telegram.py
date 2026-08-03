@@ -42,7 +42,7 @@ _STUB_MODULE_NAMES = [
     "services.gemini", "services.embeddings", "services.context_extractor",
     "services.messenger_intent",
     "services.routine_context", "services.routine_conditions",
-    "tools", "tools.telegram",
+    "tools", "tools.telegram", "tools.system",
     "telegram", "telegram.ext",
 ]
 _ORIGINAL_MODULES = {}
@@ -159,6 +159,7 @@ def _stub_modules():
     rdb.clear_pending_confirmations       = MagicMock()
     rdb.mark_routine_ignored              = MagicMock()
     rdb.mark_routine_acknowledged          = MagicMock()
+    rdb.acknowledge_pending_draft_offer    = MagicMock(return_value=True)
     rdb.record_routine_skip_today          = MagicMock(return_value={
         "skip_streak": 1,
         "cooldown_applied": False,
@@ -248,6 +249,10 @@ def _stub_modules():
 
     sys.modules["services.context_extractor"].extract_and_update_context_flags = MagicMock()
     sys.modules["services.messenger_intent"].classify_messenger_intent = MagicMock(return_value=None)
+    sys.modules["services.messenger_intent"].is_draft_offer_acceptance = MagicMock(return_value=False)
+    sys.modules["services.messenger_intent"].MESSENGER_ROUTINE_DRAFT_OFFER_MARKER = (
+        "[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]"
+    )
 
     sys.modules["services.routine_context"].build_runtime_routine_context = MagicMock(return_value={
         "today": "2026-06-17",
@@ -323,7 +328,8 @@ def _reset_mocks():
     rdb = sys.modules["memory.routine_db"]
     for name in ("confirm_routine", "decay_routine", "mark_routine_responded",
                   "remove_pending_confirmation", "get_eligible_preemptive_routines_for_day",
-                 "mark_routine_triggered_today", "mark_routine_acknowledged",
+                  "mark_routine_triggered_today", "mark_routine_acknowledged",
+                 "acknowledge_pending_draft_offer",
                  "record_routine_skip_today", "pause_routine_indefinitely"):
         getattr(rdb, name).reset_mock()
 
@@ -345,6 +351,7 @@ def _run_handle_message(
     selector_returns=None,
     pending_reflections=None,
     pending_command=None,
+    active_draft_status=(False, "missing", None),
 ):
     """
     Call ``bot.handle_message`` with controlled state.
@@ -392,6 +399,7 @@ def _run_handle_message(
         patch.object(bot, "_build_fast_chat_context", return_value=([], MagicMock(content=text))),
         patch.object(bot, "_append_to_analytics_log", return_value=1),
         patch.object(bot, "_cache_bot_message", create=True),
+        patch.object(bot, "_safe_active_draft_status", return_value=active_draft_status),
     ):
         try:
             bot.handle_message(text, "123456")
@@ -473,6 +481,192 @@ def test_today_acknowledgement_does_not_complete_routine() -> None:
     build_context.assert_called_once_with()
     graph_messages = graph_mock.stream.call_args.args[0]["messages"]
     assert lifecycle_context in graph_messages
+
+
+def test_pending_messenger_offer_bare_yes_adds_trusted_draft_context() -> None:
+    """One pending Messenger offer accepts bare consent without invoking the selector."""
+
+    graph_mock = sys.modules["core.graph"].graph
+    selector_mock = sys.modules["services.routine_completion_selector"].select_routine
+    draft_context = types.SimpleNamespace(
+        content="[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]",
+        type="system",
+    )
+
+    with (
+        patch(
+            "services.messenger_intent.is_draft_offer_acceptance",
+            return_value=True,
+        ),
+        patch(
+            "services.routine_completion_context.build_messenger_draft_offer_context",
+            return_value=draft_context,
+        ) as build_draft_context,
+    ):
+        _run_handle_message(
+            "ναι",
+            pending={
+                5: {
+                    "event": "Dinner with Partner",
+                    "draft_offer": True,
+                }
+            },
+        )
+
+    build_draft_context.assert_called_once_with("Dinner with Partner")
+    selector_mock.assert_not_called()
+    graph_messages = graph_mock.stream.call_args.args[0]["messages"]
+    assert draft_context in graph_messages
+
+
+def test_active_draft_keeps_bare_yes_out_of_pending_offer_path() -> None:
+    """An active draft takes precedence over an unrelated pending draft offer."""
+    selector_mock = sys.modules["services.routine_completion_selector"].select_routine
+
+    with patch(
+            "services.routine_completion_context.build_messenger_draft_offer_context"
+        ) as build_draft_context:
+        _run_handle_message(
+            "ναι",
+            pending={
+                5: {
+                    "event": "Message routine",
+                    "draft_offer": True,
+                    "sent_at": datetime.now(),
+                }
+            },
+            active_draft_status=(True, "active", {"message": "draft"}),
+        )
+
+    selector_mock.assert_called_once()
+    build_draft_context.assert_not_called()
+    sys.modules["memory.routine_db"].acknowledge_pending_draft_offer.assert_not_called()
+
+
+def test_pending_partner_routine_without_draft_offer_keeps_selector_path() -> None:
+    """A partner-named routine cannot convert bare consent into a draft without proof."""
+    graph_mock = sys.modules["core.graph"].graph
+    selector_mock = sys.modules["services.routine_completion_selector"].select_routine
+
+    with patch(
+        "services.routine_completion_context.build_messenger_draft_offer_context"
+    ) as build_draft_context:
+        _run_handle_message(
+            "ναι",
+            pending={5: {"event": "Dinner with Partner", "draft_offer": False}},
+        )
+
+    selector_mock.assert_called_once()
+    build_draft_context.assert_not_called()
+    graph_messages = graph_mock.stream.call_args.args[0]["messages"]
+    assert all(
+        "[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]" not in str(
+            getattr(message, "content", "")
+        )
+        for message in graph_messages
+    )
+
+
+def test_batched_pending_offer_keeps_selector_path() -> None:
+    """A batch cannot convert bare consent into a Messenger draft for any routine."""
+    graph_mock = sys.modules["core.graph"].graph
+    selector_mock = sys.modules["services.routine_completion_selector"].select_routine
+
+    with (
+        patch(
+            "services.messenger_intent.is_draft_offer_acceptance",
+            return_value=True,
+        ),
+        patch(
+            "services.routine_completion_context.build_messenger_draft_offer_context"
+        ) as build_draft_context,
+    ):
+        _run_handle_message(
+            "Î½Î±Î¹",
+            pending={
+                5: {"event": "Message routine", "draft_offer": True},
+                6: {"event": "Other routine", "draft_offer": False},
+            },
+        )
+
+    selector_mock.assert_called_once()
+    build_draft_context.assert_not_called()
+    graph_messages = graph_mock.stream.call_args.args[0]["messages"]
+    assert all(
+        "[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]" not in str(
+            getattr(message, "content", "")
+        )
+        for message in graph_messages
+    )
+
+
+def test_proactive_message_uses_structured_draft_offer_state() -> None:
+    """Only an exact structured proactive response can arm one draft offer."""
+    bot.config.USER_NAME = "User"
+    with (
+        patch.object(bot.core.i18n, "load_prompt", return_value="{context}"),
+        patch.object(bot, "_build_proactive_memory_context", return_value=""),
+        patch.object(bot, "_build_proactive_state_snapshot", return_value={}),
+        patch.object(bot, "_force_proactive_skip_from_state", return_value=None),
+        patch.object(bot, "_get_env_context", return_value=""),
+        patch.object(
+            bot,
+            "safe_llm_invoke",
+            return_value=types.SimpleNamespace(
+                content='{"message":"Shall I prepare a draft?","offers_messenger_draft":true}'
+            ),
+        ),
+    ):
+        message, draft_offer = bot._craft_proactive_msg("Message routine", 0.9)
+
+    assert message == "Shall I prepare a draft?"
+    assert draft_offer is True
+
+
+def test_proactive_unstructured_message_uses_safe_fallback() -> None:
+    """Unstructured proactive prose cannot reach the user or authorize bare consent."""
+    bot.config.USER_NAME = "User"
+    with (
+        patch.object(bot.core.i18n, "load_prompt", return_value="{context}"),
+        patch.object(bot, "_build_proactive_memory_context", return_value=""),
+        patch.object(bot, "_build_proactive_state_snapshot", return_value={}),
+        patch.object(bot, "_force_proactive_skip_from_state", return_value=None),
+        patch.object(bot, "_get_env_context", return_value=""),
+        patch.object(bot, "t", return_value="Safe proactive fallback."),
+        patch.object(
+            bot,
+            "safe_llm_invoke",
+            return_value=types.SimpleNamespace(content="Remember to read your partner's message."),
+        ),
+    ):
+        message, draft_offer = bot._craft_proactive_msg("Message routine", 0.9)
+
+    assert message == "Safe proactive fallback."
+    assert draft_offer is False
+
+
+def test_proactive_prefixed_json_uses_safe_fallback() -> None:
+    """Prefixed structured output never reaches the user or authorizes a draft offer."""
+    bot.config.USER_NAME = "User"
+    with (
+        patch.object(bot.core.i18n, "load_prompt", return_value="{context}"),
+        patch.object(bot, "_build_proactive_memory_context", return_value=""),
+        patch.object(bot, "_build_proactive_state_snapshot", return_value={}),
+        patch.object(bot, "_force_proactive_skip_from_state", return_value=None),
+        patch.object(bot, "_get_env_context", return_value=""),
+        patch.object(bot, "t", return_value="Safe proactive fallback."),
+        patch.object(
+            bot,
+            "safe_llm_invoke",
+            return_value=types.SimpleNamespace(
+                content='Here is the JSON: {"message":"Do not expose","offers_messenger_draft":true}'
+            ),
+        ),
+    ):
+        message, draft_offer = bot._craft_proactive_msg("Message routine", 0.9)
+
+    assert message == "Safe proactive fallback."
+    assert draft_offer is False
 
 
 def test_unrelated_pending_does_not_block_today_completion() -> None:

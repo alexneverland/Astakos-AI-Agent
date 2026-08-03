@@ -1827,27 +1827,49 @@ def is_routine_temporarily_inactive_meta(routine: dict, now: datetime | None = N
 # PENDING CONFIRMATIONS PERSISTENCE (Recovery After Restart)
 # ────────────────────────────────────────────────────────────────
 
-def _setup_pending_table():
-    conn   = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS pending_confirmations (
-            routine_id INTEGER PRIMARY KEY,
-            event_name TEXT,
-            sent_at    TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+def _setup_pending_table() -> None:
+    """Create and migrate pending confirmations under a cross-process SQLite lock."""
+    conn = get_connection()
+    try:
+        # Web and Telegram boot in separate processes, so a Python thread lock
+        # cannot protect this schema upgrade. SQLite serializes both processes
+        # before either inspects or mutates the pending-confirmations table.
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pending_confirmations (
+                routine_id INTEGER PRIMARY KEY,
+                event_name TEXT,
+                sent_at    TEXT,
+                draft_offer INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        existing_cols = [row[1] for row in cursor.execute("PRAGMA table_info(pending_confirmations)")]
+        if "draft_offer" not in existing_cols:
+            cursor.execute(
+                "ALTER TABLE pending_confirmations ADD COLUMN draft_offer INTEGER NOT NULL DEFAULT 0"
+            )
+            print("[routine_db]: Migration → 'pending_confirmations.draft_offer'")
+        conn.commit()
+    finally:
+        conn.close()
 
 
-def save_pending_confirmation(routine_id: int, event_name: str, sent_at: datetime):
+def save_pending_confirmation(
+    routine_id: int,
+    event_name: str,
+    sent_at: datetime,
+    *,
+    draft_offer: bool = False,
+) -> None:
+    """Persist one pending routine response window and its explicit draft-offer state."""
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "INSERT OR REPLACE INTO pending_confirmations (routine_id, event_name, sent_at) VALUES (?, ?, ?)",
-            (routine_id, event_name, sent_at.isoformat())
+            """INSERT OR REPLACE INTO pending_confirmations
+               (routine_id, event_name, sent_at, draft_offer) VALUES (?, ?, ?, ?)""",
+            (routine_id, event_name, sent_at.isoformat(), int(draft_offer))
         )
         conn.commit()
     conn.close()
@@ -1859,6 +1881,57 @@ def remove_pending_confirmation(routine_id: int):
         conn.execute("DELETE FROM pending_confirmations WHERE routine_id=?", (routine_id,))
         conn.commit()
     conn.close()
+
+
+def acknowledge_pending_draft_offer(routine_id: int, sent_at: datetime) -> bool:
+    """Atomically acknowledge one exact pending Messenger draft offer once.
+
+    The pending row and routine state are changed in one SQLite transaction so
+    Web and Telegram cannot both consume the same offer from separate processes.
+    """
+    if not isinstance(sent_at, datetime):
+        return False
+
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.cursor()
+            matched = cursor.execute(
+                """
+                SELECT 1
+                FROM pending_confirmations AS pc
+                JOIN routines AS r ON r.id = pc.routine_id
+                WHERE pc.routine_id=?
+                  AND pc.sent_at=?
+                  AND pc.draft_offer=1
+                  AND r.state='trigger_pending'
+                """,
+                (routine_id, sent_at.isoformat()),
+            ).fetchone()
+            if matched is None:
+                conn.rollback()
+                return False
+
+            cursor.execute(
+                """
+                UPDATE routines
+                SET last_notified_ts=?, unanswered_reminder_streak=0,
+                    state='active', is_active=1
+                WHERE id=?
+                """,
+                (datetime.now().isoformat(timespec="seconds"), routine_id),
+            )
+            cursor.execute(
+                "DELETE FROM pending_confirmations WHERE routine_id=? AND sent_at=? AND draft_offer=1",
+                (routine_id, sent_at.isoformat()),
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        raise DBWriteError("acknowledge_pending_draft_offer", e) from e
+    finally:
+        conn.close()
 
 
 def clear_pending_confirmations():
@@ -1874,7 +1947,7 @@ def load_pending_confirmations() -> dict:
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT pc.routine_id, pc.event_name, pc.sent_at
+        SELECT pc.routine_id, pc.event_name, pc.sent_at, pc.draft_offer
         FROM pending_confirmations pc
         JOIN routines r ON r.id = pc.routine_id
         WHERE r.state = 'trigger_pending'
@@ -1896,12 +1969,16 @@ def load_pending_confirmations() -> dict:
         remove_pending_confirmation(rid)
 
     result = {}
-    for r_id, event_name, sent_at_str in rows:
+    for r_id, event_name, sent_at_str, draft_offer in rows:
         try:
             sent_at = datetime.fromisoformat(sent_at_str)
         except Exception:
             sent_at = datetime.now()
-        result[r_id] = {"event": event_name, "sent_at": sent_at}
+        result[r_id] = {
+            "event": event_name,
+            "sent_at": sent_at,
+            "draft_offer": bool(draft_offer),
+        }
 
     return result
 

@@ -358,7 +358,7 @@ def chat_agent_node(state: AgentState):
 
     from tools.system import archive_file, retrieve_photo, save_to_memory, delete_from_memory, search_memory, control_spotify, get_current_location, read_local_file
     from tools.web import execute_local_pipeline, relay_local_payload, search_supermarket_prices
-    from services.messenger_intent import is_create_draft_intent
+    from services.messenger_intent import has_accepted_routine_draft_offer, is_create_draft_intent
 
     # [FAREWELL GUARD]: If the user says goodbye, we remove archive_file
     # so that the LLM does not automatically archive files that are in the context.
@@ -369,14 +369,15 @@ def chat_agent_node(state: AgentState):
         get_current_location, control_spotify,
         search_memory, save_to_memory, delete_from_memory, retrieve_photo, duckduckgo_search,
         recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
-        *(
-            [relay_local_payload]
-            if is_create_draft_intent(last_msg_text)
-            else []
-        ),
         read_local_file, generate_image_tool, get_fit_summary,
         *([archive_file] if not _is_farewell else []),
     ]
+    if (
+        is_create_draft_intent(last_msg_text)
+        or has_accepted_routine_draft_offer(history)
+        or _has_active_messenger_draft()
+    ):
+        static_chat_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     chat_tools = get_registered_tools_for_agent("Chat_Agent", static_chat_tools)
 
@@ -567,6 +568,17 @@ def _is_stale_messenger_send_call(response) -> bool:
     return not is_active
 
 
+def _has_active_messenger_draft() -> bool:
+    """Return whether an active Messenger draft permits a revision tool binding."""
+    try:
+        from core.messenger_draft import active_draft_status
+
+        is_active, _, _ = active_draft_status()
+        return is_active
+    except Exception:
+        return False
+
+
 def web_agent_node(state: AgentState):
     from core.utils import (
         load_agent_prompt,
@@ -655,6 +667,7 @@ def web_agent_node(state: AgentState):
     )
 
     from tools.web import execute_local_pipeline
+    from services.messenger_intent import has_accepted_routine_draft_offer, is_create_draft_intent
     from astakos_skills.morning_briefing import morning_briefing
     from astakos_skills.hn_briefing import hn_briefing
     static_web_tools = [
@@ -662,8 +675,15 @@ def web_agent_node(state: AgentState):
         get_news, get_weather_forecast, duckduckgo_search,
         search_memory, get_navigation_info, retrieve_photo, read_local_file,
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
-        process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices, relay_local_payload, morning_briefing, hn_briefing
+        process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices,
+        morning_briefing, hn_briefing,
     ]
+    if (
+        is_create_draft_intent(latest_user_text)
+        or has_accepted_routine_draft_offer(history)
+        or _has_active_messenger_draft()
+    ):
+        static_web_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)
 

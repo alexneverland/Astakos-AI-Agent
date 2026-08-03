@@ -186,6 +186,7 @@ RI_FOLLOWUP_SAME_DAY_EVENING_WORDS = tuple(get_intent_list('routine_intent', 'fo
 # Messenger Intents
 MI_COMPOSE_WORDS = tuple(get_intent_list('messenger_intent', 'compose_words'))
 MI_SEND_APPROVAL_WORDS = tuple(get_intent_list('messenger_intent', 'send_approval_words'))
+MI_DRAFT_OFFER_AFFIRMATIVES = tuple(get_live_input_guard_list('messenger_intent', 'draft_offer_affirmatives'))
 MI_CLARIFICATION_WORDS = tuple(get_intent_list('messenger_intent', 'clarification_words'))
 MI_CLEANUP_WORDS = tuple(get_intent_list('messenger_intent', 'cleanup_words'))
 MI_GENERAL_CHAT_SHORT = set(get_intent_list('messenger_intent', 'general_chat_short'))

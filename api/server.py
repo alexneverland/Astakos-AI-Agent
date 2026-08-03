@@ -630,6 +630,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     body       = await request.json()
     user_input = body.get("message", "").strip()
     routine_completion_context: SystemMessage | None = None
+    routine_draft_offer_context: SystemMessage | None = None
     routine_action_consumed = False
 
     # (Mastro-Shield): Avoid null or strange paths
@@ -683,21 +684,57 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
     # ── Routine Completion Decision from Web UI ─────────────────────
     try:
-        from clients.telegram_bot import pending_routine_confirmations
+        from core.messenger_draft import active_draft_status
+        from memory.routine_db import (
+            acknowledge_pending_draft_offer,
+            load_pending_confirmations,
+        )
         from services.routine_completion_helper import decide_completion
         from services.routine_completion_selector import select_routine as _completion_selector
+        from services.routine_completion_context import accept_pending_messenger_draft_offer
 
+        # Web and Telegram run in separate processes. The database is the shared
+        # pending-confirmation source of truth; importing the bot's RAM mapping
+        # here would always miss offers created by the Telegram scheduler.
+        pending_routine_confirmations = load_pending_confirmations()
         if pending_routine_confirmations:
             pending_candidates = {
                 rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
                 for rid, pdata in pending_routine_confirmations.items()
             }
-            decision = decide_completion(
-                user_text=user_input,
-                candidates=pending_candidates,
-                pool="pending",
-                semantic_selector=_completion_selector,
-            )
+            active_draft, _, _ = active_draft_status()
+            accepted_draft_offer = None
+            draft_offer_consumed = False
+            if not active_draft:
+                accepted_draft_offer = accept_pending_messenger_draft_offer(
+                    pending_routine_confirmations,
+                    user_input,
+                )
+                if accepted_draft_offer is not None:
+                    pending_data = pending_routine_confirmations.get(
+                        accepted_draft_offer.routine_id,
+                        {},
+                    )
+                    draft_offer_consumed = acknowledge_pending_draft_offer(
+                        accepted_draft_offer.routine_id,
+                        pending_data.get("sent_at"),
+                    )
+                    if not draft_offer_consumed:
+                        accepted_draft_offer = None
+            if accepted_draft_offer is not None:
+                from services.routine_completion_helper import RoutineSelection
+
+                decision = RoutineSelection(
+                    action="acknowledge",
+                    routine_id=accepted_draft_offer.routine_id,
+                )
+            else:
+                decision = decide_completion(
+                    user_text=user_input,
+                    candidates=pending_candidates,
+                    pool="pending",
+                    semantic_selector=_completion_selector,
+                )
 
             if decision.action == "complete" and decision.routine_id is not None:
                 from memory.routine_db import (
@@ -735,13 +772,16 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 pdata = pending_routine_confirmations.get(rid, {})
                 ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
 
-                mark_routine_acknowledged(rid)
-                remove_pending_confirmation(rid)
+                if not draft_offer_consumed:
+                    mark_routine_acknowledged(rid)
+                    remove_pending_confirmation(rid)
                 log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
                 print(f"[Web Routine Acknowledged]: {pdata}")
                 pending_routine_confirmations.pop(rid, None)
                 from services.routine_completion_context import build_routine_completion_context
                 routine_completion_context = build_routine_completion_context()
+                if accepted_draft_offer is not None and accepted_draft_offer.routine_id == rid:
+                    routine_draft_offer_context = accepted_draft_offer.context
                 routine_action_consumed = True
 
             elif decision.action == "skip_today" and decision.routine_id is not None:
@@ -1159,16 +1199,16 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
             if pending_plan_confirmation:
                 limit = 100
-                messages_for_graph = append_routine_completion_context(context_msgs, routine_completion_context) + [human_msg]
+                messages_for_graph = append_routine_completion_context(context_msgs, routine_completion_context, routine_draft_offer_context) + [human_msg]
             elif fast_path_used:
                 limit = 12
-                messages_for_graph = append_routine_completion_context(context_msgs[-6:], routine_completion_context) + [human_msg]
+                messages_for_graph = append_routine_completion_context(context_msgs[-6:], routine_completion_context, routine_draft_offer_context) + [human_msg]
             elif medium_path_used:
                 limit = 24
-                messages_for_graph = append_routine_completion_context(context_msgs[-8:], routine_completion_context) + [human_msg]
+                messages_for_graph = append_routine_completion_context(context_msgs[-8:], routine_completion_context, routine_draft_offer_context) + [human_msg]
             else:
                 limit = 100
-                messages_for_graph = append_routine_completion_context(context_msgs, routine_completion_context) + [human_msg]
+                messages_for_graph = append_routine_completion_context(context_msgs, routine_completion_context, routine_draft_offer_context) + [human_msg]
 
             _trace.mark_phase("web_graph_budget", limit)
 
