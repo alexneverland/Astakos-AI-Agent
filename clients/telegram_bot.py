@@ -1828,10 +1828,27 @@ def handle_message(user_text: str, chat_id: str):
             rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
             for rid, pdata in pending_routine_confirmations.items()
         }
-        accepted_draft_offer = accept_pending_messenger_draft_offer(
-            pending_routine_confirmations,
-            clean_user_text,
-        )
+        active_draft, _, _ = _safe_active_draft_status()
+        accepted_draft_offer = None
+        draft_offer_consumed = False
+        if not active_draft:
+            accepted_draft_offer = accept_pending_messenger_draft_offer(
+                pending_routine_confirmations,
+                clean_user_text,
+            )
+            if accepted_draft_offer is not None:
+                from memory.routine_db import acknowledge_pending_draft_offer
+
+                pending_data = pending_routine_confirmations.get(
+                    accepted_draft_offer.routine_id,
+                    {},
+                )
+                draft_offer_consumed = acknowledge_pending_draft_offer(
+                    accepted_draft_offer.routine_id,
+                    pending_data.get("sent_at"),
+                )
+                if not draft_offer_consumed:
+                    accepted_draft_offer = None
         if accepted_draft_offer is not None:
             decision = RoutineSelection(
                 action="acknowledge",
@@ -1885,8 +1902,9 @@ def handle_message(user_text: str, chat_id: str):
             pdata = pending_routine_confirmations.get(rid, {})
             ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
 
-            mark_routine_acknowledged(rid)
-            remove_pending_confirmation(rid)
+            if not draft_offer_consumed:
+                mark_routine_acknowledged(rid)
+                remove_pending_confirmation(rid)
             log_event(
                 "routines", "routine_acknowledged",
                 routine_id=rid, event=ev,

@@ -134,6 +134,44 @@ def test_skip_streak_migration_applies_cooldown_only_on_third_refusal(
     assert routine_db.get_routine_notify_info(routine_id)["last_notified_ts"] is not None
 
 
+def test_acknowledge_pending_draft_offer_is_consumed_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only one process can acknowledge the same persisted draft offer."""
+    db_path = tmp_path / "routines.db"
+    monkeypatch.setattr(routine_db, "DB_PATH", str(db_path))
+    monkeypatch.setattr(routine_db, "_wal_enabled", False)
+    monkeypatch.setattr(routine_db, "_wal_enabled_path", None)
+    routine_db.setup_db()
+    routine_db._setup_pending_table()
+
+    connection = routine_db.get_connection()
+    connection.execute(
+        """
+        INSERT INTO routines (day_of_week, time_str, event_name, event_type, confidence, state, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("Thursday", "09:00", "Message routine", "general", 0.9, "trigger_pending", 0),
+    )
+    routine_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+    connection.commit()
+    connection.close()
+
+    sent_at = datetime.now()
+    routine_db.save_pending_confirmation(
+        routine_id,
+        "Message routine",
+        sent_at,
+        draft_offer=True,
+    )
+
+    assert routine_db.acknowledge_pending_draft_offer(routine_id, sent_at) is True
+    assert routine_db.acknowledge_pending_draft_offer(routine_id, sent_at) is False
+    assert routine_db.get_routine_state(routine_id).value == "active"
+    assert routine_db.load_pending_confirmations() == {}
+
+
 def test_unanswered_reminder_streak_migrates_existing_database(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

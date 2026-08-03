@@ -159,6 +159,7 @@ def _stub_modules():
     rdb.clear_pending_confirmations       = MagicMock()
     rdb.mark_routine_ignored              = MagicMock()
     rdb.mark_routine_acknowledged          = MagicMock()
+    rdb.acknowledge_pending_draft_offer    = MagicMock(return_value=True)
     rdb.record_routine_skip_today          = MagicMock(return_value={
         "skip_streak": 1,
         "cooldown_applied": False,
@@ -327,7 +328,8 @@ def _reset_mocks():
     rdb = sys.modules["memory.routine_db"]
     for name in ("confirm_routine", "decay_routine", "mark_routine_responded",
                   "remove_pending_confirmation", "get_eligible_preemptive_routines_for_day",
-                 "mark_routine_triggered_today", "mark_routine_acknowledged",
+                  "mark_routine_triggered_today", "mark_routine_acknowledged",
+                 "acknowledge_pending_draft_offer",
                  "record_routine_skip_today", "pause_routine_indefinitely"):
         getattr(rdb, name).reset_mock()
 
@@ -349,6 +351,7 @@ def _run_handle_message(
     selector_returns=None,
     pending_reflections=None,
     pending_command=None,
+    active_draft_status=(False, "missing", None),
 ):
     """
     Call ``bot.handle_message`` with controlled state.
@@ -396,6 +399,7 @@ def _run_handle_message(
         patch.object(bot, "_build_fast_chat_context", return_value=([], MagicMock(content=text))),
         patch.object(bot, "_append_to_analytics_log", return_value=1),
         patch.object(bot, "_cache_bot_message", create=True),
+        patch.object(bot, "_safe_active_draft_status", return_value=active_draft_status),
     ):
         try:
             bot.handle_message(text, "123456")
@@ -513,6 +517,30 @@ def test_pending_messenger_offer_bare_yes_adds_trusted_draft_context() -> None:
     selector_mock.assert_not_called()
     graph_messages = graph_mock.stream.call_args.args[0]["messages"]
     assert draft_context in graph_messages
+
+
+def test_active_draft_keeps_bare_yes_out_of_pending_offer_path() -> None:
+    """An active draft takes precedence over an unrelated pending draft offer."""
+    selector_mock = sys.modules["services.routine_completion_selector"].select_routine
+
+    with patch(
+            "services.routine_completion_context.build_messenger_draft_offer_context"
+        ) as build_draft_context:
+        _run_handle_message(
+            "ναι",
+            pending={
+                5: {
+                    "event": "Message routine",
+                    "draft_offer": True,
+                    "sent_at": datetime.now(),
+                }
+            },
+            active_draft_status=(True, "active", {"message": "draft"}),
+        )
+
+    selector_mock.assert_called_once()
+    build_draft_context.assert_not_called()
+    sys.modules["memory.routine_db"].acknowledge_pending_draft_offer.assert_not_called()
 
 
 def test_pending_partner_routine_without_draft_offer_keeps_selector_path() -> None:

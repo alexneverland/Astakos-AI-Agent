@@ -1883,6 +1883,57 @@ def remove_pending_confirmation(routine_id: int):
     conn.close()
 
 
+def acknowledge_pending_draft_offer(routine_id: int, sent_at: datetime) -> bool:
+    """Atomically acknowledge one exact pending Messenger draft offer once.
+
+    The pending row and routine state are changed in one SQLite transaction so
+    Web and Telegram cannot both consume the same offer from separate processes.
+    """
+    if not isinstance(sent_at, datetime):
+        return False
+
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.cursor()
+            matched = cursor.execute(
+                """
+                SELECT 1
+                FROM pending_confirmations AS pc
+                JOIN routines AS r ON r.id = pc.routine_id
+                WHERE pc.routine_id=?
+                  AND pc.sent_at=?
+                  AND pc.draft_offer=1
+                  AND r.state='trigger_pending'
+                """,
+                (routine_id, sent_at.isoformat()),
+            ).fetchone()
+            if matched is None:
+                conn.rollback()
+                return False
+
+            cursor.execute(
+                """
+                UPDATE routines
+                SET last_notified_ts=?, unanswered_reminder_streak=0,
+                    state='active', is_active=1
+                WHERE id=?
+                """,
+                (datetime.now().isoformat(timespec="seconds"), routine_id),
+            )
+            cursor.execute(
+                "DELETE FROM pending_confirmations WHERE routine_id=? AND sent_at=? AND draft_offer=1",
+                (routine_id, sent_at.isoformat()),
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        raise DBWriteError("acknowledge_pending_draft_offer", e) from e
+    finally:
+        conn.close()
+
+
 def clear_pending_confirmations():
     conn = get_connection()
     with db_write_lock:
