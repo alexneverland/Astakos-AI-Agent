@@ -18,7 +18,6 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "get_fit_summary",
     "get_navigation_info",
     "get_news",
-    "get_routines",
     "get_saved_recipe",
     "get_weather_forecast",
     "grep_project_files",
@@ -43,8 +42,11 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "search_google_places",
     "search_memory",
     "search_recipe_library",
-    "search_routines",
     "search_supermarket_prices",
+})
+PERSISTED_PROVENANCE_RESULT_TOOL_NAMES: frozenset[str] = frozenset({
+    "get_routines",
+    "search_routines",
 })
 SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
 PLANNER_STEP_MESSAGE_ORIGIN = "plan_step"
@@ -92,7 +94,9 @@ EXTERNAL_PROVENANCE_SOURCE_NAMES: frozenset[str] = (
         "github_manager",
         "google_calendar_tool",
         "google_tasks_tool",
+        "get_routines",
         "mail_manager",
+        "search_routines",
         "set_local_reminder",
         "control_spotify",
         USER_PROVIDED_ASSET_SOURCE,
@@ -132,6 +136,7 @@ READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES: frozenset[str] = (
         "search_google_places",
         "search_memory",
         "search_recipe_library",
+        "search_routines",
         "search_supermarket_prices",
         "system_doctor",
         "text_stats",
@@ -190,9 +195,25 @@ def tool_call_args_for_result(message: Any, messages: Sequence[Any]) -> Mapping[
 
 def is_untrusted_external_tool_result(message: Any, messages: Sequence[Any]) -> bool:
     """Return whether a ToolMessage is an external source using its concrete action."""
-    return is_untrusted_external_tool_call(
+    return is_untrusted_external_tool_result_content(
         getattr(message, "name", None),
         tool_call_args_for_result(message, messages),
+        getattr(message, "content", ""),
+    )
+
+
+def is_untrusted_external_tool_result_content(
+    tool_name: str | None,
+    tool_args: Mapping[str, Any] | None,
+    content: str,
+) -> bool:
+    """Return whether one concrete result contains externally derived persisted data."""
+    normalized_name = str(tool_name or "")
+    if normalized_name in PERSISTED_PROVENANCE_RESULT_TOOL_NAMES:
+        return "[UNTRUSTED EXTERNAL TOOL RESULT]" in str(content or "")
+    return is_untrusted_external_tool_call(
+        normalized_name,
+        tool_args,
     )
 
 
@@ -221,7 +242,11 @@ def external_tool_names_from_events(events: Iterable[Mapping[str, Any]]) -> set[
                     continue
                 tool_name = str(getattr(message, "name", ""))
                 tool_args = tool_args_by_id.get(str(getattr(message, "tool_call_id", "")), {})
-                if is_untrusted_external_tool_call(tool_name, tool_args):
+                if is_untrusted_external_tool_result_content(
+                    tool_name,
+                    tool_args,
+                    str(getattr(message, "content", "")),
+                ):
                     tool_names.add(tool_name)
     return tool_names
 
