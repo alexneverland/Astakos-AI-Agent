@@ -814,9 +814,13 @@
             "edit it",
             "rewrite it",
             "make it more",
+            "make it shorter",
+            "make it longer",
+            "translate it to english",
             "add to the message",
             "remove from the message",
-            "the ending",
+            "change the ending",
+            "edit the ending",
             "make it warmer"
         ],
         "clarification_words": [

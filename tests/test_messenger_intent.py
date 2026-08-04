@@ -81,6 +81,11 @@ def test_is_create_draft_intent_rejects_unrelated_messages():
 def test_active_draft_edit_intent_requires_a_configured_revision_request() -> None:
     """Only a revision request may expose persistence for an existing draft."""
     assert is_active_draft_edit_intent("Κάν' το πιο ζεστό") is True
+    assert is_active_draft_edit_intent("Κάν' το πιο σύντομο") is True
+    assert is_active_draft_edit_intent("Make it shorter") is True
+    assert is_active_draft_edit_intent("Translate it to English") is True
+    assert is_active_draft_edit_intent("Don't change it") is False
+    assert is_active_draft_edit_intent("I didn't understand the ending") is False
     assert is_active_draft_edit_intent("Σε τρεις μέρες φεύγουμε Γεωργία") is False
 
 
