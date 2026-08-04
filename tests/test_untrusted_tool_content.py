@@ -620,8 +620,8 @@ def test_persisted_external_provenance_survives_context_reconstruction() -> None
     assert has_untrusted_result_in_active_history(messages) is True
 
 
-def test_external_provenance_does_not_clear_on_a_paraphrase_or_topic_change() -> None:
-    """A source remains untrusted until an explicit lifecycle can safely clear it."""
+def test_external_provenance_does_not_propagate_from_stale_history() -> None:
+    """Old marked history must not permanently mark unrelated new replies."""
     from core.untrusted_content import (
         derived_external_content_history_metadata,
         external_content_history_metadata,
@@ -642,7 +642,7 @@ def test_external_provenance_does_not_clear_on_a_paraphrase_or_topic_change() ->
         messages,
         set(),
     )
-    assert derived_metadata["untrusted_external_tool_names"] == ["get_news"]
+    assert derived_metadata == {}
 
     later_messages = [
         AIMessage(
@@ -651,16 +651,13 @@ def test_external_provenance_does_not_clear_on_a_paraphrase_or_topic_change() ->
         ),
         HumanMessage(content="Let's discuss dinner plans instead."),
     ]
-    assert derived_external_content_history_metadata(
-        later_messages,
-        set(),
-    )["untrusted_external_tool_names"] == ["get_news"]
+    assert derived_external_content_history_metadata(later_messages, set()) == {}
 
 
-def test_photo_reply_inherits_restored_external_provenance(
+def test_photo_reply_uses_current_asset_provenance_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A photo reply preserves source provenance when it uses restored history."""
+    """A photo reply retains its current asset source but not stale history."""
     import clients.telegram_bot as telegram_bot
     from core.untrusted_content import external_content_history_metadata
 
@@ -720,7 +717,6 @@ def test_photo_reply_inherits_restored_external_provenance(
 
     assistant_entry = next(entry for entry in saved_messages if entry["role"] == "assistant")
     assert assistant_entry["metadata"] == external_content_history_metadata([
-        "get_news",
         "user_provided_asset",
     ])
 
