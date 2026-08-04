@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from html import escape
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -54,6 +55,8 @@ ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT = 40
 EXTERNAL_CONTENT_HISTORY_METADATA_KEY = "untrusted_external_tool_names"
 USER_PROVIDED_ASSET_SOURCE = "user_provided_asset"
 UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER = "[UNTRUSTED EXTERNAL TOOL RESULT]"
+USER_GROUNDED_MEMORY_MIN_TOKEN_LENGTH = 4
+USER_GROUNDED_MEMORY_MIN_SHARED_TOKENS = 2
 MAIL_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
     "check",
     "check_emails",
@@ -438,3 +441,62 @@ def has_untrusted_result_in_active_history(messages: Sequence[Any]) -> bool:
     restore automatic mutation while an external result is still prompt-visible.
     """
     return bool(active_external_content_tool_names(messages))
+
+
+def meaningful_groundedness_tokens(text: str) -> set[str]:
+    """Return Unicode word tokens used by the user-grounded memory check.
+
+    The check supports the project's Greek and English conversational inputs.
+    It intentionally excludes short words because they are poor evidence that a
+    saved fact came from the user's latest message.
+    """
+    return {
+        token.casefold()
+        for token in re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+        if len(token) >= USER_GROUNDED_MEMORY_MIN_TOKEN_LENGTH
+    }
+
+
+def is_user_grounded_memory_write(
+    tool_call: Mapping[str, Any],
+    messages: Sequence[Any],
+) -> bool:
+    """Return whether a memory fact is demonstrably grounded in the latest user turn.
+
+    This narrowly prevents historical external provenance from escalating a normal
+    user update.  It never applies to same-turn external results, which are
+    blocked before this helper is considered.
+    """
+    if str(tool_call.get("name", "")) != "save_to_memory":
+        return False
+
+    args = tool_call.get("args", {})
+    if not isinstance(args, Mapping):
+        return False
+    fact = str(args.get("fact", ""))
+    if not fact:
+        return False
+
+    latest_user_message: Any | None = None
+    for message in reversed(messages):
+        if is_direct_user_message(message):
+            latest_user_message = message
+            break
+    if latest_user_message is None:
+        return False
+    if external_content_source_names(
+        getattr(latest_user_message, "additional_kwargs", {}),
+    ):
+        return False
+
+    latest_user_text = str(getattr(latest_user_message, "content", ""))
+    if not latest_user_text:
+        return False
+
+    return (
+        len(
+            meaningful_groundedness_tokens(fact)
+            & meaningful_groundedness_tokens(latest_user_text)
+        )
+        >= USER_GROUNDED_MEMORY_MIN_SHARED_TOKENS
+    )

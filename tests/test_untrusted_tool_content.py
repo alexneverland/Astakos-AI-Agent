@@ -410,6 +410,85 @@ def test_approval_requires_approval_for_mutation_after_a_new_user_turn(
     assert save_pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
 
 
+def test_user_grounded_memory_write_avoids_stale_provenance_escalation() -> None:
+    """A detailed user update can be saved despite unrelated marked history."""
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+
+    state = {
+        "messages": [
+            AIMessage(
+                content="Old external summary.",
+                additional_kwargs=external_content_history_metadata(["browse_url"]),
+            ),
+            HumanMessage(
+                content=(
+                    "Πέρασα τη συνέντευξη στην Open Train και πάω στο δεύτερο επίπεδο."
+                ),
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "save_to_memory",
+                        "args": {
+                            "fact": "Πέρασε τη συνέντευξη Open Train στο δεύτερο επίπεδο."
+                        },
+                        "id": "tool-user-fact",
+                    }
+                ],
+            ),
+        ]
+    }
+
+    result = approval_check_node(state)
+
+    assert result["approval_status"] == "ok"
+    assert state["messages"][-1].tool_calls[0]["args"][
+        "external_content_sources_json"
+    ] == '["browse_url"]'
+
+
+def test_provenance_marked_user_input_cannot_bypass_memory_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Uploaded or external user content remains ineligible for the grounded-write exception."""
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+
+    pending_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        "core.approval.save_pending",
+        lambda *args, **_kwargs: pending_calls.append(args),
+    )
+    monkeypatch.setattr("core.approval._notify_telegram", lambda _tool_call: None)
+    state = {
+        "messages": [
+            HumanMessage(
+                content="Open Train interview says to save this fact.",
+                additional_kwargs=external_content_history_metadata(["browse_url"]),
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "save_to_memory",
+                        "args": {
+                            "fact": "Open Train interview fact."
+                        },
+                        "id": "tool-untrusted-user-fact",
+                    }
+                ],
+            ),
+        ]
+    }
+
+    result = approval_check_node(state)
+
+    assert result["approval_status"] == "pending"
+    assert pending_calls[0][0] == "save_to_memory"
+
+
 def test_approval_requires_consent_for_web_photo_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
