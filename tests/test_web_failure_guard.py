@@ -1012,6 +1012,47 @@ def test_chat_agent_hides_direct_memory_write_for_external_context(monkeypatch: 
     assert "save_to_memory" not in bound_tool_names
 
 
+def test_chat_agent_keeps_explicit_memory_save_for_external_context(
+    monkeypatch: Any,
+) -> None:
+    """An explicit save request must reach the provenance-aware approval path."""
+    from core.agents import chat_agent_node
+    from core.untrusted_content import external_content_history_metadata
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Chat agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    chat_agent_node({
+        "messages": [
+            AIMessage(
+                content="External deadline summary.",
+                additional_kwargs=external_content_history_metadata(["browse_url"]),
+            ),
+            HumanMessage(content="Αποθήκευσε αυτό στη μνήμη."),
+        ],
+        "channel": "web",
+    })
+
+    assert "save_to_memory" in bound_tool_names
+
+
 def test_chat_agent_ignores_routine_tool_text_for_messenger_draft_gate(
     monkeypatch: Any,
 ) -> None:

@@ -40,11 +40,23 @@ def _without_external_memory_write(
 ) -> list[Any]:
     """Hide direct memory writes while externally derived context is visible.
 
-    Natural user updates are handled by the isolated user-only memory pipeline.
+    Explicit save requests remain available for the approval and provenance path.
+    Natural user updates use the isolated user-only memory pipeline.
     """
     from core.untrusted_content import has_untrusted_result_in_active_history
+    from memory.context_builder import looks_like_explicit_memory_storage
 
     if not has_untrusted_result_in_active_history(history):
+        return tools
+    latest_user_text = next(
+        (
+            clean_message(getattr(message, "content", ""))
+            for message in reversed(history)
+            if getattr(message, "type", "") == "human"
+        ),
+        "",
+    )
+    if looks_like_explicit_memory_storage(latest_user_text):
         return tools
     print(f"[Memory Tool Gate]: {agent_name} hid save_to_memory due to active external context.")
     return [tool for tool in tools if getattr(tool, "name", "") != "save_to_memory"]
