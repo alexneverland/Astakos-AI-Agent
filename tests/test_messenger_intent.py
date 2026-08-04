@@ -86,6 +86,8 @@ def test_active_draft_edit_intent_requires_a_configured_revision_request() -> No
     assert is_active_draft_edit_intent("Translate it to English") is True
     assert is_active_draft_edit_intent("Don't change it") is False
     assert is_active_draft_edit_intent("I didn't understand the ending") is False
+    assert is_active_draft_edit_intent("Change it to say I'm not coming") is True
+    assert is_active_draft_edit_intent('Change it to "Don\'t wait for me"') is True
     assert is_active_draft_edit_intent("Σε τρεις μέρες φεύγουμε Γεωργία") is False
 
 

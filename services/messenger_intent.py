@@ -138,9 +138,20 @@ def is_create_draft_intent(text: str) -> bool:
 def is_active_draft_edit_intent(text: str) -> bool:
     """Return whether text asks to revise the currently active Messenger draft."""
     normalized = _normalize(text)
-    if _has_token_or_phrase(normalized, _DRAFT_REQUEST_NEGATIONS):
-        return False
-    return _has_token_or_phrase(normalized, _DRAFT_EDIT_PATTERNS)
+    tokens = normalized.split()
+    for pattern in _DRAFT_EDIT_PATTERNS:
+        pattern_tokens = _normalize(pattern).split()
+        if not pattern_tokens:
+            continue
+        for index in range(len(tokens) - len(pattern_tokens) + 1):
+            if tokens[index:index + len(pattern_tokens)] != pattern_tokens:
+                continue
+            if not _has_token_or_phrase(
+                " ".join(tokens[:index]),
+                _DRAFT_REQUEST_NEGATIONS,
+            ):
+                return True
+    return False
 
 
 def is_explicit_draft_creation_request(text: str) -> bool:
