@@ -797,8 +797,7 @@
             "write",
             "prepare",
             "make",
-            "create",
-            "draft"
+            "create"
         ],
         "draft_request_objects": [
             "message",
