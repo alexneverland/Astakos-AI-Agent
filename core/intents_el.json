@@ -862,6 +862,29 @@
       "οκ",
       "ok"
     ],
+    "draft_request_negations": [
+      "μην",
+      "μη",
+      "όχι",
+      "οχι",
+      "δεν"
+    ],
+    "draft_request_action_verbs": [
+      "γραψε",
+      "ετοιμασε",
+      "φτιαξε"
+    ],
+    "draft_request_leading_tokens": [
+      "ναι",
+      "οκ",
+      "ok",
+      "φιλε"
+    ],
+    "draft_request_objects": [
+      "μηνυμα",
+      "draft",
+      "προσχεδιο"
+    ],
     "clarification_words": [
       "ποιο μηνυμα",
       "τι μηνυμα",

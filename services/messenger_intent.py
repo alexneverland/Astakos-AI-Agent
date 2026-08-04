@@ -19,6 +19,14 @@ _DRAFT_CONFIRM_PATTERNS = nl_config.MI_SEND_APPROVAL_WORDS
 
 _DRAFT_OFFER_AFFIRMATIVES = nl_config.MI_DRAFT_OFFER_AFFIRMATIVES
 
+_DRAFT_REQUEST_NEGATIONS = nl_config.MI_DRAFT_REQUEST_NEGATIONS
+
+_DRAFT_REQUEST_ACTION_VERBS = nl_config.MI_DRAFT_REQUEST_ACTION_VERBS
+
+_DRAFT_REQUEST_LEADING_TOKENS = nl_config.MI_DRAFT_REQUEST_LEADING_TOKENS
+
+_DRAFT_REQUEST_OBJECTS = nl_config.MI_DRAFT_REQUEST_OBJECTS
+
 _DRAFT_CLARIFY_PATTERNS = nl_config.MI_CLARIFICATION_WORDS
 
 _DRAFT_CLEAR_PATTERNS = nl_config.MI_CLEANUP_WORDS
@@ -39,6 +47,42 @@ def _normalize(text: str) -> str:
 
 def _has_any(text: str, patterns: tuple[str, ...]) -> bool:
     return any(p in text for p in patterns)
+
+
+def _has_token_or_phrase(text: str, patterns: tuple[str, ...]) -> bool:
+    """Return whether normalized text contains an exact configured token or phrase."""
+    tokens = text.split()
+    for pattern in patterns:
+        pattern_tokens = _normalize(pattern).split()
+        if not pattern_tokens:
+            continue
+        if len(pattern_tokens) == 1 and pattern_tokens[0] in tokens:
+            return True
+        if any(
+            tokens[index:index + len(pattern_tokens)] == pattern_tokens
+            for index in range(len(tokens) - len(pattern_tokens) + 1)
+        ):
+            return True
+    return False
+
+
+def _has_leading_draft_creation_verb(text: str) -> bool:
+    """Return whether a configured creation verb follows only configured leading tokens."""
+    leading_tokens = {
+        token
+        for pattern in _DRAFT_REQUEST_LEADING_TOKENS
+        for token in _normalize(pattern).split()
+    }
+    action_verbs = {
+        token
+        for pattern in _DRAFT_REQUEST_ACTION_VERBS
+        for token in _normalize(pattern).split()
+    }
+    tokens = text.split()
+    for index, token in enumerate(tokens):
+        if token in action_verbs and all(prefix in leading_tokens for prefix in tokens[:index]):
+            return True
+    return False
 
 
 def is_draft_offer_acceptance(text: str) -> bool:
@@ -87,3 +131,14 @@ def classify_messenger_intent(text: str, has_active_draft: bool = False) -> Mess
 def is_create_draft_intent(text: str) -> bool:
     """Return whether text explicitly requests a new Messenger draft."""
     return classify_messenger_intent(text).intent == "create_draft"
+
+
+def is_explicit_draft_creation_request(text: str) -> bool:
+    """Return whether text has affirmative configured draft action and object terms."""
+    normalized = _normalize(text)
+    if _has_token_or_phrase(normalized, _DRAFT_REQUEST_NEGATIONS):
+        return False
+    return (
+        _has_leading_draft_creation_verb(normalized)
+        and _has_token_or_phrase(normalized, _DRAFT_REQUEST_OBJECTS)
+    )

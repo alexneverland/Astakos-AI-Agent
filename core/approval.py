@@ -8,6 +8,9 @@
 import os
 import json
 from datetime import datetime, timedelta
+from typing import Sequence
+from langchain_core.messages import BaseMessage
+from langchain_core.messages.tool import ToolCall
 from core.tool_risk import get_risk as _get_risk
 from core.capability_draft import has_capability_draft_authorization
 
@@ -92,6 +95,43 @@ def _effective_risk(tc: dict) -> str:
         return "CRITICAL"
 
     return _get_risk(name)
+
+
+def _is_explicit_messenger_draft_creation(
+    tool_call: ToolCall,
+    prior_messages: Sequence[BaseMessage],
+) -> bool:
+    """Return whether a user explicitly requested the reversible Messenger draft write.
+
+    This only exempts ``relay_local_payload`` from the *stale* external-context
+    escalation. Same-turn external tool results remain blocked, and sending a
+    saved draft still goes through the separate CRITICAL approval path.
+    """
+    if tool_call.get("name") != "relay_local_payload":
+        return False
+
+    from core.untrusted_content import (
+        external_content_source_names,
+        is_direct_user_message,
+    )
+    from services.messenger_intent import (
+        has_accepted_routine_draft_offer,
+        is_explicit_draft_creation_request,
+    )
+
+    if has_accepted_routine_draft_offer(prior_messages):
+        return True
+
+    for message in reversed(prior_messages):
+        if is_direct_user_message(message):
+            if external_content_source_names(
+                getattr(message, "additional_kwargs", {}),
+            ):
+                return False
+            return is_explicit_draft_creation_request(
+                str(getattr(message, "content", "")),
+            )
+    return False
 
 def is_critical(tc: dict) -> bool:
     return _effective_risk(tc) == "CRITICAL"
@@ -278,6 +318,7 @@ def approval_check_node(state):
 
     last_msg = state["messages"][-1]
     tool_calls = getattr(last_msg, "tool_calls", [])
+    prior_messages = state["messages"][:-1]
 
     if not tool_calls:
         return {"approval_status": "ok"}
@@ -336,6 +377,7 @@ def approval_check_node(state):
             external_content_is_active
             and not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
             and not is_user_grounded_memory_write(tc, state["messages"])
+            and not _is_explicit_messenger_draft_creation(tc, prior_messages)
             and tc["id"] not in blocked_call_ids
         )
     }
