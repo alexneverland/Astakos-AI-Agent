@@ -78,6 +78,15 @@ Astakos will show the Web Setup Wizard when it has not been configured yet.
 
 Choose your AI provider and enter the required credentials.
 
+### Optional: declare your weekly routines
+
+The **Routines** tab contains the local `astakos_routines.json` template. Add
+only routines you want from the first day, then save setup. Astakos validates
+the complete JSON before writing it and imports it only into an empty routines
+database; an existing routine database is never overwritten. The local file is
+preserved by release Docker updates. See [the routine JSON reference](docs/routine-json-import.md)
+for the exact schema.
+
 ### Gemini API
 
 You need:
