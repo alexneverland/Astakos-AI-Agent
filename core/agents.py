@@ -11,7 +11,7 @@ import config
 import re
 import base64
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 from tools.system import archive_file
 # LangChain / LangGraph Imports
@@ -31,6 +31,23 @@ from memory.working_memory import get_capability_context
 from memory.session_memory import load_last_session_hint
 from astakos_skills.search_flights import search_flights
 from astakos_skills.repo_mapper import repo_mapper
+
+
+def _without_external_memory_write(
+    history: list[Any],
+    tools: list[Any],
+    agent_name: str,
+) -> list[Any]:
+    """Hide direct memory writes while externally derived context is visible.
+
+    Natural user updates are handled by the isolated user-only memory pipeline.
+    """
+    from core.untrusted_content import has_untrusted_result_in_active_history
+
+    if not has_untrusted_result_in_active_history(history):
+        return tools
+    print(f"[Memory Tool Gate]: {agent_name} hid save_to_memory due to active external context.")
+    return [tool for tool in tools if getattr(tool, "name", "") != "save_to_memory"]
 # TOOLS
 from tools.system import (
     search_memory, save_to_memory, delete_from_memory, retrieve_photo,
@@ -281,6 +298,7 @@ def dev_agent_node(state):
         edit_project_file, write_project_file, grep_project_files, repo_mapper,
         list_recent_files, list_agent_skills, read_agent_skill, run_officecli, manage_context_flag,
     ]
+    static_tools = _without_external_memory_write(history, static_tools, "Dev_Agent")
     from core.agent_tools import get_registered_tools_for_agent
     tools = get_registered_tools_for_agent("Dev_Agent", static_tools)
 
@@ -358,7 +376,11 @@ def chat_agent_node(state: AgentState):
 
     from tools.system import archive_file, retrieve_photo, save_to_memory, delete_from_memory, search_memory, control_spotify, get_current_location, read_local_file
     from tools.web import execute_local_pipeline, relay_local_payload, search_supermarket_prices
-    from services.messenger_intent import has_accepted_routine_draft_offer, is_create_draft_intent
+    from services.messenger_intent import (
+        has_accepted_routine_draft_offer,
+        is_active_draft_edit_intent,
+        is_create_draft_intent,
+    )
 
     # [FAREWELL GUARD]: If the user says goodbye, we remove archive_file
     # so that the LLM does not automatically archive files that are in the context.
@@ -372,11 +394,22 @@ def chat_agent_node(state: AgentState):
         read_local_file, generate_image_tool, get_fit_summary,
         *([archive_file] if not _is_farewell else []),
     ]
-    if (
-        is_create_draft_intent(last_msg_text)
-        or has_accepted_routine_draft_offer(history)
-        or _has_active_messenger_draft()
-    ):
+    static_chat_tools = _without_external_memory_write(
+        history,
+        static_chat_tools,
+        "Chat_Agent",
+    )
+    draft_tool_reason = None
+    # Tool results can contain routine names such as "message".  Only the
+    # latest direct user turn may authorize creating or editing a draft.
+    if is_create_draft_intent(latest_user_text):
+        draft_tool_reason = "explicit_create"
+    elif has_accepted_routine_draft_offer(history):
+        draft_tool_reason = "accepted_routine_offer"
+    elif _has_active_messenger_draft() and is_active_draft_edit_intent(latest_user_text):
+        draft_tool_reason = "active_draft_edit"
+    if draft_tool_reason:
+        print(f"[Messenger Tool Gate]: Chat_Agent enabled relay_local_payload ({draft_tool_reason}).")
         static_chat_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     chat_tools = get_registered_tools_for_agent("Chat_Agent", static_chat_tools)
@@ -667,7 +700,11 @@ def web_agent_node(state: AgentState):
     )
 
     from tools.web import execute_local_pipeline
-    from services.messenger_intent import has_accepted_routine_draft_offer, is_create_draft_intent
+    from services.messenger_intent import (
+        has_accepted_routine_draft_offer,
+        is_active_draft_edit_intent,
+        is_create_draft_intent,
+    )
     from astakos_skills.morning_briefing import morning_briefing
     from astakos_skills.hn_briefing import hn_briefing
     static_web_tools = [
@@ -678,11 +715,15 @@ def web_agent_node(state: AgentState):
         process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices,
         morning_briefing, hn_briefing,
     ]
-    if (
-        is_create_draft_intent(latest_user_text)
-        or has_accepted_routine_draft_offer(history)
-        or _has_active_messenger_draft()
-    ):
+    draft_tool_reason = None
+    if is_create_draft_intent(latest_user_text):
+        draft_tool_reason = "explicit_create"
+    elif has_accepted_routine_draft_offer(history):
+        draft_tool_reason = "accepted_routine_offer"
+    elif _has_active_messenger_draft() and is_active_draft_edit_intent(latest_user_text):
+        draft_tool_reason = "active_draft_edit"
+    if draft_tool_reason:
+        print(f"[Messenger Tool Gate]: Web_Agent enabled relay_local_payload ({draft_tool_reason}).")
         static_web_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)
@@ -816,6 +857,11 @@ def tech_agent_node(state: AgentState):
         grep_project_files,
         list_recent_files
     ]
+    static_tech_tools = _without_external_memory_write(
+        history,
+        static_tech_tools,
+        "Tech_Agent",
+    )
     from core.agent_tools import get_registered_tools_for_agent
     tech_tools = get_registered_tools_for_agent("Tech_Agent", static_tech_tools)
 

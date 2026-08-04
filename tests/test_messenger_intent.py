@@ -1,5 +1,6 @@
 from services.messenger_intent import (
     classify_messenger_intent,
+    is_active_draft_edit_intent,
     is_draft_offer_acceptance,
     is_create_draft_intent,
     is_explicit_draft_creation_request,
@@ -75,6 +76,12 @@ def test_messenger_draft_context_escapes_routine_event_xml() -> None:
 def test_is_create_draft_intent_rejects_unrelated_messages():
     assert is_create_draft_intent("Γράψε ένα μήνυμα")
     assert not is_create_draft_intent("Έχει δουλειά σήμερα δεύτερα φίλε")
+
+
+def test_active_draft_edit_intent_requires_a_configured_revision_request() -> None:
+    """Only a revision request may expose persistence for an existing draft."""
+    assert is_active_draft_edit_intent("Κάν' το πιο ζεστό") is True
+    assert is_active_draft_edit_intent("Σε τρεις μέρες φεύγουμε Γεωργία") is False
 
 
 def test_explicit_draft_creation_request_rejects_negated_requests() -> None:

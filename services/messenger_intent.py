@@ -27,6 +27,8 @@ _DRAFT_REQUEST_LEADING_TOKENS = nl_config.MI_DRAFT_REQUEST_LEADING_TOKENS
 
 _DRAFT_REQUEST_OBJECTS = nl_config.MI_DRAFT_REQUEST_OBJECTS
 
+_DRAFT_EDIT_PATTERNS = nl_config.MI_DRAFT_EDIT_PATTERNS
+
 _DRAFT_CLARIFY_PATTERNS = nl_config.MI_CLARIFICATION_WORDS
 
 _DRAFT_CLEAR_PATTERNS = nl_config.MI_CLEANUP_WORDS
@@ -131,6 +133,11 @@ def classify_messenger_intent(text: str, has_active_draft: bool = False) -> Mess
 def is_create_draft_intent(text: str) -> bool:
     """Return whether text explicitly requests a new Messenger draft."""
     return classify_messenger_intent(text).intent == "create_draft"
+
+
+def is_active_draft_edit_intent(text: str) -> bool:
+    """Return whether text asks to revise the currently active Messenger draft."""
+    return _has_token_or_phrase(_normalize(text), _DRAFT_EDIT_PATTERNS)
 
 
 def is_explicit_draft_creation_request(text: str) -> bool:

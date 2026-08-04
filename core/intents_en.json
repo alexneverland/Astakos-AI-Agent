@@ -809,6 +809,16 @@
             "message",
             "draft"
         ],
+        "draft_edit_patterns": [
+            "change it",
+            "edit it",
+            "rewrite it",
+            "make it more",
+            "add to the message",
+            "remove from the message",
+            "the ending",
+            "make it warmer"
+        ],
         "clarification_words": [
             "what message",
             "what a message",

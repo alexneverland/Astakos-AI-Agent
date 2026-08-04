@@ -335,7 +335,6 @@ def approval_check_node(state):
         has_untrusted_result_in_active_history,
         has_untrusted_result_since_latest_user_message,
         is_read_only_external_followup_tool,
-        is_user_grounded_memory_write,
     )
     if has_untrusted_result_since_latest_user_message(state["messages"]):
         for tc in tool_calls:
@@ -351,32 +350,12 @@ def approval_check_node(state):
                 blocked_call_ids.add(tc["id"])
 
     external_content_is_active = has_untrusted_result_in_active_history(state["messages"])
-    user_grounded_memory_call_ids = {
-        tc["id"]
-        for tc in tool_calls
-        if external_content_is_active
-        and is_user_grounded_memory_write(tc, state["messages"])
-    }
-    if user_grounded_memory_call_ids:
-        import json
-
-        active_sources_json = json.dumps(
-            sorted(active_external_content_tool_names(state["messages"])),
-        )
-        for tc in tool_calls:
-            if tc["id"] not in user_grounded_memory_call_ids:
-                continue
-            args = tc.get("args")
-            if isinstance(args, dict):
-                args["external_content_sources_json"] = active_sources_json
-
     external_context_approval_ids = {
         tc["id"]
         for tc in tool_calls
         if (
             external_content_is_active
             and not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
-            and not is_user_grounded_memory_write(tc, state["messages"])
             and not _is_explicit_messenger_draft_creation(tc, prior_messages)
             and tc["id"] not in blocked_call_ids
         )
