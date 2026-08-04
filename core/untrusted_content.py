@@ -381,16 +381,27 @@ def derived_external_content_history_metadata(
     incoming_messages: Sequence[Any],
     current_external_tool_names: Iterable[str],
 ) -> dict[str, Any]:
-    """Persist visible provenance without guessing whether an LLM reply paraphrases it."""
+    """Persist provenance produced by this turn without inheriting stale history.
+
+    Fresh external tool results and a provenance-marked current user input (such
+    as an uploaded image) may influence the reply.  Older marked assistant
+    history remains wrapped while it is visible, but must not repeatedly mark
+    unrelated replies and keep normal conversation permanently restricted.
+    """
     fresh_names = {
         name for name in current_external_tool_names
         if name in EXTERNAL_PROVENANCE_SOURCE_NAMES
     }
-    if fresh_names:
-        return external_content_history_metadata(fresh_names)
-    return external_content_history_metadata(
-        active_external_content_tool_names(incoming_messages)
-    )
+    for message in reversed(incoming_messages):
+        if not is_direct_user_message(message):
+            continue
+        fresh_names.update(
+            history_message_additional_kwargs(
+                getattr(message, "additional_kwargs", {}),
+            ).get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, [])
+        )
+        break
+    return external_content_history_metadata(fresh_names)
 
 
 def format_untrusted_tool_result(tool_name: str, content: str) -> str:
