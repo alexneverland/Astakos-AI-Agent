@@ -1,11 +1,13 @@
 import os
+from pathlib import Path
+import threading
+import time
+
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import threading
-import time
 
 app = FastAPI(title="Astakos Setup Wizard")
 
@@ -19,6 +21,8 @@ PERSONA_FILE = os.path.join(BASE_DIR, "persona.md")
 PERSONA_EXAMPLE = os.path.join(BASE_DIR, "persona.md.example")
 INTENTS_FILE = os.path.join(BASE_DIR, "astakos_custom_intents.json")
 INTENTS_EXAMPLE = os.path.join(BASE_DIR, "astakos_custom_intents.json.example")
+ROUTINES_FILE = os.path.join(BASE_DIR, "astakos_routines.json")
+ROUTINES_EXAMPLE = os.path.join(BASE_DIR, "astakos_routines.json.example")
 SETUP_GUIDE_FILE = os.path.join(BASE_DIR, "SETUP_GUIDE.md")
 
 SETTINGS_FILE = os.path.join(BASE_DIR, "astakos_settings.json")
@@ -26,9 +30,12 @@ SETTINGS_EXAMPLE = os.path.join(BASE_DIR, "astakos_settings.json.example")
 PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")
 
 class SetupPayload(BaseModel):
+    """Validated data submitted by the local Setup Wizard."""
+
     basic: dict
     advanced: dict
     prompts: dict
+    routines: str = ""
 
 def get_file_content(filepath, fallback_filepath=None):
     if os.path.exists(filepath):
@@ -88,6 +95,7 @@ TELEGRAM_CHAT_ID=
     return {
         "persona": get_file_content(PERSONA_FILE, PERSONA_EXAMPLE),
         "intents": get_file_content(INTENTS_FILE, INTENTS_EXAMPLE),
+        "routines": get_file_content(ROUTINES_FILE, ROUTINES_EXAMPLE),
         "env": env_content,
         "settings": settings_json,
         "prompts": prompts_data,
@@ -96,9 +104,19 @@ TELEGRAM_CHAT_ID=
 
 @app.post("/api/setup")
 async def save_setup(payload: SetupPayload):
+    """Persist validated setup data and import first-run routine declarations once."""
     adv = payload.advanced
     basic = payload.basic
     prompts = payload.prompts
+    routines_text = payload.routines.strip()
+
+    if routines_text:
+        from memory.routine_importer import RoutineImportError, validate_routine_import_text
+
+        try:
+            validate_routine_import_text(routines_text)
+        except RoutineImportError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
     
     # Process ENV
     new_env = basic.get("env", "").strip()
@@ -144,6 +162,16 @@ async def save_setup(payload: SetupPayload):
         write_file_content(PERSONA_FILE, basic["persona"])
     if basic.get("intents"):
         write_file_content(INTENTS_FILE, basic["intents"])
+
+    routine_import: dict[str, int | str] | None = None
+    if routines_text:
+        write_file_content(ROUTINES_FILE, f"{routines_text}\n")
+        try:
+            from memory.routine_importer import RoutineImportError, import_routines_file
+
+            routine_import = import_routines_file(Path(ROUTINES_FILE))
+        except RoutineImportError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
         
     # Write prompts
     for p_path, content in prompts.items():
@@ -160,7 +188,7 @@ async def save_setup(payload: SetupPayload):
     
     threading.Thread(target=shutdown).start()
 
-    return {"status": "success"}
+    return {"status": "success", "routine_import": routine_import}
 
 def run_wizard():
     host = os.getenv("ASTAKOS_SETUP_HOST", "127.0.0.1")

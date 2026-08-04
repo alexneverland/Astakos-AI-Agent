@@ -88,19 +88,13 @@ def _make_declaration_fingerprint(routine: dict[str, str]) -> str:
     return hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
 
 
-def load_routine_import(path: Path) -> list[dict[str, str]]:
-    """Read and fully validate a portable routine JSON file before database access."""
+def validate_routine_import_text(raw_text: str) -> list[dict[str, str]]:
+    """Fully validate portable routine JSON text without touching persistence."""
     try:
         raw_payload = json.loads(
-            path.read_text(encoding="utf-8"),
+            raw_text,
             object_pairs_hook=_reject_duplicate_object_keys,
         )
-    except FileNotFoundError as e:
-        raise RoutineImportError(f"Routine import file does not exist: {path}") from e
-    except UnicodeDecodeError as e:
-        raise RoutineImportError("Routine import file must use UTF-8 encoding") from e
-    except OSError as e:
-        raise RoutineImportError(f"Routine import file cannot be read: {path}") from e
     except RoutineImportError:
         raise
     except json.JSONDecodeError as e:
@@ -121,6 +115,19 @@ def load_routine_import(path: Path) -> list[dict[str, str]]:
     if len(fingerprints) != len(set(fingerprints)):
         raise RoutineImportError("Routine import contains duplicate day/time/event entries")
     return routines
+
+
+def load_routine_import(path: Path) -> list[dict[str, str]]:
+    """Read and fully validate a portable routine JSON file before database access."""
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as e:
+        raise RoutineImportError(f"Routine import file does not exist: {path}") from e
+    except UnicodeDecodeError as e:
+        raise RoutineImportError("Routine import file must use UTF-8 encoding") from e
+    except OSError as e:
+        raise RoutineImportError(f"Routine import file cannot be read: {path}") from e
+    return validate_routine_import_text(raw_text)
 
 
 def import_routines_file(path: Path) -> dict[str, int | str]:

@@ -24,6 +24,7 @@ rsync -a --delete \
   --exclude 'token*.json' \
   --exclude 'astakos_settings.json' \
   --exclude 'astakos_custom_intents.json' \
+  --exclude 'astakos_routines.json' \
   --exclude 'persona.md' \
   --exclude 'last_location.json' \
   --exclude 'runtime_snapshot.json' \
