@@ -8,6 +8,7 @@
 import os
 import json
 from datetime import datetime, timedelta
+from typing import Any, Sequence
 from core.tool_risk import get_risk as _get_risk
 from core.capability_draft import has_capability_draft_authorization
 
@@ -92,6 +93,34 @@ def _effective_risk(tc: dict) -> str:
         return "CRITICAL"
 
     return _get_risk(name)
+
+
+def _is_explicit_messenger_draft_creation(
+    tool_call: dict[str, Any],
+    messages: Sequence[Any],
+) -> bool:
+    """Return whether a user explicitly requested the reversible Messenger draft write.
+
+    This only exempts ``relay_local_payload`` from the *stale* external-context
+    escalation. Same-turn external tool results remain blocked, and sending a
+    saved draft still goes through the separate CRITICAL approval path.
+    """
+    if tool_call.get("name") != "relay_local_payload":
+        return False
+
+    from core.untrusted_content import is_direct_user_message
+    from services.messenger_intent import (
+        has_accepted_routine_draft_offer,
+        is_create_draft_intent,
+    )
+
+    if has_accepted_routine_draft_offer(messages):
+        return True
+
+    for message in reversed(messages[:-1]):
+        if is_direct_user_message(message):
+            return is_create_draft_intent(str(getattr(message, "content", "")))
+    return False
 
 def is_critical(tc: dict) -> bool:
     return _effective_risk(tc) == "CRITICAL"
@@ -336,6 +365,7 @@ def approval_check_node(state):
             external_content_is_active
             and not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
             and not is_user_grounded_memory_write(tc, state["messages"])
+            and not _is_explicit_messenger_draft_creation(tc, state["messages"])
             and tc["id"] not in blocked_call_ids
         )
     }

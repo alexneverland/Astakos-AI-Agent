@@ -143,6 +143,102 @@ def test_execute_local_pipeline_with_active_draft_requests_approval(monkeypatch,
     save_pending.assert_called_once()
     notify.assert_called_once()
 
+
+def test_explicit_messenger_draft_creation_skips_stale_external_approval():
+    """A requested draft remains reviewable even with stale external provenance."""
+    from langchain_core.messages import AIMessage, HumanMessage
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+
+    external_reply = AIMessage(
+        content="A prior news summary.",
+        additional_kwargs=external_content_history_metadata(["get_news"]),
+    )
+    user_message = HumanMessage(content="Ναι φίλε φτιάξε ένα μήνυμα")
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Sofia", "payload_data": "Καλημέρα"},
+            "id": "tc-draft",
+        }],
+    )
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({
+            "messages": [external_reply, user_message, draft_call],
+        })
+
+    assert result["approval_status"] == "ok"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
+def test_accepted_routine_offer_draft_creation_skips_stale_external_approval():
+    """A trusted accepted routine offer may create its reviewable draft."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+    from services.messenger_intent import MESSENGER_ROUTINE_DRAFT_OFFER_MARKER
+
+    external_reply = AIMessage(
+        content="A prior news summary.",
+        additional_kwargs=external_content_history_metadata(["get_news"]),
+    )
+    offer_context = SystemMessage(content=MESSENGER_ROUTINE_DRAFT_OFFER_MARKER)
+    user_message = HumanMessage(content="ναι")
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Sofia", "payload_data": "Καλημέρα"},
+            "id": "tc-routine-draft",
+        }],
+    )
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({
+            "messages": [external_reply, offer_context, user_message, draft_call],
+        })
+
+    assert result["approval_status"] == "ok"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
+def test_explicit_draft_creation_stays_blocked_after_same_turn_external_result():
+    """A same-turn external result cannot authorize a requested draft write."""
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from core.approval import approval_check_node
+
+    user_message = HumanMessage(content="Ναι φίλε φτιάξε ένα μήνυμα")
+    external_result = ToolMessage(
+        content="Untrusted page content.",
+        name="get_news",
+        tool_call_id="tc-news",
+    )
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Sofia", "payload_data": "Καλημέρα"},
+            "id": "tc-draft",
+        }],
+    )
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({
+            "messages": [user_message, external_result, draft_call],
+        })
+
+    assert result["approval_status"] == "blocked"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
 def test_blocked_terminal_command_is_not_saved_for_approval():
     """BLOCKED terminal command → approval_status=blocked and pending is not saved."""
     from core.approval import approval_check_node
