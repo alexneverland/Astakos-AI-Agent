@@ -133,6 +133,11 @@ def load_routine_import(path: Path) -> list[dict[str, str]]:
 def import_routines_file(path: Path) -> dict[str, int | str]:
     """Import a validated routine file only into an empty routine database."""
     routines = load_routine_import(path)
+    return import_validated_routines(routines)
+
+
+def import_validated_routines(routines: list[dict[str, str]]) -> dict[str, int | str]:
+    """Persist already-validated routine declarations only into an empty database."""
     from memory.routine_db import import_declared_routines
 
     imported_count = import_declared_routines(routines)

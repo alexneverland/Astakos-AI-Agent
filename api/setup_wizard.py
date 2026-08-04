@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 import threading
 import time
 
@@ -109,12 +108,13 @@ async def save_setup(payload: SetupPayload):
     basic = payload.basic
     prompts = payload.prompts
     routines_text = payload.routines.strip()
+    validated_routines: list[dict[str, str]] | None = None
 
     if routines_text:
         from memory.routine_importer import RoutineImportError, validate_routine_import_text
 
         try:
-            validate_routine_import_text(routines_text)
+            validated_routines = validate_routine_import_text(routines_text)
         except RoutineImportError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
     
@@ -164,12 +164,12 @@ async def save_setup(payload: SetupPayload):
         write_file_content(INTENTS_FILE, basic["intents"])
 
     routine_import: dict[str, int | str] | None = None
-    if routines_text:
+    if routines_text and validated_routines is not None:
         write_file_content(ROUTINES_FILE, f"{routines_text}\n")
         try:
-            from memory.routine_importer import RoutineImportError, import_routines_file
+            from memory.routine_importer import RoutineImportError, import_validated_routines
 
-            routine_import = import_routines_file(Path(ROUTINES_FILE))
+            routine_import = import_validated_routines(validated_routines)
         except RoutineImportError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
         

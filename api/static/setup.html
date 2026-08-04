@@ -29,9 +29,9 @@
         <div class="glass-panel rounded-2xl shadow-2xl p-8">
             <!-- Tabs -->
             <div class="flex space-x-4 mb-8 border-b border-gray-700 pb-4">
-                <button type="button" onclick="switchTab('basic')" id="tab-basic" class="text-blue-400 font-semibold border-b-2 border-blue-400 pb-2 px-4 transition-all">Basic Settings</button>
-                <button type="button" onclick="switchTab('routines')" id="tab-routines" class="text-gray-500 font-medium hover:text-gray-300 pb-2 px-4 transition-all">Routines</button>
-                <button type="button" onclick="switchTab('advanced')" id="tab-advanced" class="text-gray-500 font-medium hover:text-gray-300 pb-2 px-4 transition-all">Advanced Prompts</button>
+                <button type="button" onclick="switchTab('basic')" id="tab-basic" data-setup-tab="basic" class="text-blue-400 font-semibold border-b-2 border-blue-400 pb-2 px-4 transition-all">Basic Settings</button>
+                <button type="button" onclick="switchTab('routines')" id="tab-routines" data-setup-tab="routines" class="text-gray-500 font-medium hover:text-gray-300 pb-2 px-4 transition-all">Routines</button>
+                <button type="button" onclick="switchTab('advanced')" id="tab-advanced" data-setup-tab="advanced" class="text-gray-500 font-medium hover:text-gray-300 pb-2 px-4 transition-all">Advanced Prompts</button>
             </div>
 
             <!-- Form -->
@@ -286,14 +286,15 @@
         }
 
         function switchTab(tab) {
-            ['basic', 'routines', 'advanced'].forEach(name => {
+            document.querySelectorAll('[data-setup-tab]').forEach(button => {
+                const name = button.dataset.setupTab;
                 const active = name === tab;
                 document.getElementById(`content-${name}`).classList.toggle('hidden', !active);
-                document.getElementById(`tab-${name}`).classList.toggle('text-blue-400', active);
-                document.getElementById(`tab-${name}`).classList.toggle('border-b-2', active);
-                document.getElementById(`tab-${name}`).classList.toggle('border-blue-400', active);
-                document.getElementById(`tab-${name}`).classList.toggle('text-gray-500', !active);
-                document.getElementById(`tab-${name}`).classList.toggle('hover:text-gray-300', !active);
+                button.classList.toggle('text-blue-400', active);
+                button.classList.toggle('border-b-2', active);
+                button.classList.toggle('border-blue-400', active);
+                button.classList.toggle('text-gray-500', !active);
+                button.classList.toggle('hover:text-gray-300', !active);
             });
         }
 

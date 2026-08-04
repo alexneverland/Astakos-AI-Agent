@@ -73,11 +73,11 @@ def test_setup_wizard_writes_valid_routines_then_imports_once(
     import memory.routine_importer as routine_importer
 
     _configure_isolated_setup_files(monkeypatch, tmp_path)
-    imported_paths: list[Path] = []
+    imported_routines: list[list[dict[str, str]]] = []
     monkeypatch.setattr(
         routine_importer,
-        "import_routines_file",
-        lambda path: imported_paths.append(path) or {"status": "imported", "count": 1},
+        "import_validated_routines",
+        lambda routines: imported_routines.append(routines) or {"status": "imported", "count": 1},
     )
 
     result = asyncio.run(wizard.save_setup(wizard.SetupPayload(
@@ -89,7 +89,12 @@ def test_setup_wizard_writes_valid_routines_then_imports_once(
 
     routines_path = tmp_path / "astakos_routines.json"
     assert routines_path.read_text(encoding="utf-8") == f"{_VALID_ROUTINES_JSON}\n"
-    assert imported_paths == [routines_path]
+    assert imported_routines == [[{
+        "day": "Monday",
+        "time": "18:00",
+        "event": "Evening walk",
+        "type": "hobby",
+    }]]
     assert result["routine_import"] == {"status": "imported", "count": 1}
 
 
