@@ -239,6 +239,37 @@ def test_explicit_draft_creation_stays_blocked_after_same_turn_external_result()
     notify.assert_not_called()
 
 
+def test_negated_draft_request_stays_approval_gated_with_stale_external_history():
+    """A negated draft request cannot bypass stale external-content approval."""
+    from langchain_core.messages import AIMessage, HumanMessage
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+
+    external_reply = AIMessage(
+        content="A prior news summary.",
+        additional_kwargs=external_content_history_metadata(["get_news"]),
+    )
+    user_message = HumanMessage(content="Μην φτιάξεις ένα μήνυμα")
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Sofia", "payload_data": "Καλημέρα"},
+            "id": "tc-negated-draft",
+        }],
+    )
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({
+            "messages": [external_reply, user_message, draft_call],
+        })
+
+    assert result["approval_status"] == "pending"
+    save_pending.assert_called_once()
+    notify.assert_called_once()
+
+
 def test_blocked_terminal_command_is_not_saved_for_approval():
     """BLOCKED terminal command → approval_status=blocked and pending is not saved."""
     from core.approval import approval_check_node

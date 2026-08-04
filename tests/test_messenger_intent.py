@@ -2,6 +2,7 @@ from services.messenger_intent import (
     classify_messenger_intent,
     is_draft_offer_acceptance,
     is_create_draft_intent,
+    is_explicit_draft_creation_request,
 )
 from services.routine_completion_context import build_messenger_draft_offer_context
 from unittest.mock import patch
@@ -74,3 +75,10 @@ def test_messenger_draft_context_escapes_routine_event_xml() -> None:
 def test_is_create_draft_intent_rejects_unrelated_messages():
     assert is_create_draft_intent("Γράψε ένα μήνυμα")
     assert not is_create_draft_intent("Έχει δουλειά σήμερα δεύτερα φίλε")
+
+
+def test_explicit_draft_creation_request_rejects_negated_requests() -> None:
+    """Configured negations cannot authorize a new Messenger draft."""
+    assert is_explicit_draft_creation_request("Φτιάξε ένα μήνυμα") is True
+    assert is_explicit_draft_creation_request("Μην φτιάξεις ένα μήνυμα") is False
+    assert is_explicit_draft_creation_request("Don't write a message") is False

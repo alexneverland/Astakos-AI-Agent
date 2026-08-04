@@ -786,6 +786,13 @@
             "okay",
             "sure"
         ],
+        "draft_request_negations": [
+            "no",
+            "not",
+            "don't",
+            "do not",
+            "never"
+        ],
         "clarification_words": [
             "what message",
             "what a message",

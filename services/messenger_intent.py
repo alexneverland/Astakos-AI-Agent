@@ -19,6 +19,8 @@ _DRAFT_CONFIRM_PATTERNS = nl_config.MI_SEND_APPROVAL_WORDS
 
 _DRAFT_OFFER_AFFIRMATIVES = nl_config.MI_DRAFT_OFFER_AFFIRMATIVES
 
+_DRAFT_REQUEST_NEGATIONS = nl_config.MI_DRAFT_REQUEST_NEGATIONS
+
 _DRAFT_CLARIFY_PATTERNS = nl_config.MI_CLARIFICATION_WORDS
 
 _DRAFT_CLEAR_PATTERNS = nl_config.MI_CLEANUP_WORDS
@@ -39,6 +41,21 @@ def _normalize(text: str) -> str:
 
 def _has_any(text: str, patterns: tuple[str, ...]) -> bool:
     return any(p in text for p in patterns)
+
+
+def _has_token_or_phrase(text: str, patterns: tuple[str, ...]) -> bool:
+    """Return whether normalized text contains an exact configured token or phrase."""
+    tokens = set(text.split())
+    for pattern in patterns:
+        normalized_pattern = _normalize(pattern)
+        if not normalized_pattern:
+            continue
+        if " " in normalized_pattern:
+            if normalized_pattern in text:
+                return True
+        elif normalized_pattern in tokens:
+            return True
+    return False
 
 
 def is_draft_offer_acceptance(text: str) -> bool:
@@ -87,3 +104,11 @@ def classify_messenger_intent(text: str, has_active_draft: bool = False) -> Mess
 def is_create_draft_intent(text: str) -> bool:
     """Return whether text explicitly requests a new Messenger draft."""
     return classify_messenger_intent(text).intent == "create_draft"
+
+
+def is_explicit_draft_creation_request(text: str) -> bool:
+    """Return whether text affirmatively requests a new draft without a configured negation."""
+    normalized = _normalize(text)
+    if _has_token_or_phrase(normalized, _DRAFT_REQUEST_NEGATIONS):
+        return False
+    return is_create_draft_intent(normalized)
