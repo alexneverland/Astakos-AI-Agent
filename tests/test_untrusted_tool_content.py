@@ -410,10 +410,19 @@ def test_approval_requires_approval_for_mutation_after_a_new_user_turn(
     assert save_pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
 
 
-def test_user_grounded_memory_write_avoids_stale_provenance_escalation() -> None:
-    """A detailed user update can be saved despite unrelated marked history."""
+def test_memory_write_requires_approval_with_active_external_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """External context never bypasses approval through lexical fact matching."""
     from core.approval import approval_check_node
     from core.untrusted_content import external_content_history_metadata
+
+    pending_calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        "core.approval.save_pending",
+        lambda *args, **_kwargs: pending_calls.append(args),
+    )
+    monkeypatch.setattr("core.approval._notify_telegram", lambda _tool_call: None)
 
     state = {
         "messages": [
@@ -443,10 +452,9 @@ def test_user_grounded_memory_write_avoids_stale_provenance_escalation() -> None
 
     result = approval_check_node(state)
 
-    assert result["approval_status"] == "ok"
-    assert state["messages"][-1].tool_calls[0]["args"][
-        "external_content_sources_json"
-    ] == '["browse_url"]'
+    assert result["approval_status"] == "pending"
+    assert pending_calls[0][0] == "save_to_memory"
+    assert pending_calls[0][1]["external_content_sources_json"] == '["browse_url"]'
 
 
 def test_provenance_marked_user_input_cannot_bypass_memory_approval(

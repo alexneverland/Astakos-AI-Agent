@@ -191,6 +191,7 @@ MI_DRAFT_REQUEST_NEGATIONS = tuple(get_live_input_guard_list('messenger_intent',
 MI_DRAFT_REQUEST_ACTION_VERBS = tuple(get_live_input_guard_list('messenger_intent', 'draft_request_action_verbs'))
 MI_DRAFT_REQUEST_LEADING_TOKENS = tuple(get_live_input_guard_list('messenger_intent', 'draft_request_leading_tokens'))
 MI_DRAFT_REQUEST_OBJECTS = tuple(get_live_input_guard_list('messenger_intent', 'draft_request_objects'))
+MI_DRAFT_EDIT_PATTERNS = tuple(get_live_input_guard_list('messenger_intent', 'draft_edit_patterns'))
 MI_CLARIFICATION_WORDS = tuple(get_intent_list('messenger_intent', 'clarification_words'))
 MI_CLEANUP_WORDS = tuple(get_intent_list('messenger_intent', 'cleanup_words'))
 MI_GENERAL_CHAT_SHORT = set(get_intent_list('messenger_intent', 'general_chat_short'))
