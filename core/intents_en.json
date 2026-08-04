@@ -793,6 +793,17 @@
             "do not",
             "never"
         ],
+        "draft_request_action_verbs": [
+            "write",
+            "prepare",
+            "make",
+            "create",
+            "draft"
+        ],
+        "draft_request_objects": [
+            "message",
+            "draft"
+        ],
         "clarification_words": [
             "what message",
             "what a message",

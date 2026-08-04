@@ -21,6 +21,10 @@ _DRAFT_OFFER_AFFIRMATIVES = nl_config.MI_DRAFT_OFFER_AFFIRMATIVES
 
 _DRAFT_REQUEST_NEGATIONS = nl_config.MI_DRAFT_REQUEST_NEGATIONS
 
+_DRAFT_REQUEST_ACTION_VERBS = nl_config.MI_DRAFT_REQUEST_ACTION_VERBS
+
+_DRAFT_REQUEST_OBJECTS = nl_config.MI_DRAFT_REQUEST_OBJECTS
+
 _DRAFT_CLARIFY_PATTERNS = nl_config.MI_CLARIFICATION_WORDS
 
 _DRAFT_CLEAR_PATTERNS = nl_config.MI_CLEANUP_WORDS
@@ -107,8 +111,11 @@ def is_create_draft_intent(text: str) -> bool:
 
 
 def is_explicit_draft_creation_request(text: str) -> bool:
-    """Return whether text affirmatively requests a new draft without a configured negation."""
+    """Return whether text has affirmative configured draft action and object terms."""
     normalized = _normalize(text)
     if _has_token_or_phrase(normalized, _DRAFT_REQUEST_NEGATIONS):
         return False
-    return is_create_draft_intent(normalized)
+    return (
+        _has_token_or_phrase(normalized, _DRAFT_REQUEST_ACTION_VERBS)
+        and _has_token_or_phrase(normalized, _DRAFT_REQUEST_OBJECTS)
+    )
