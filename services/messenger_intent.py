@@ -136,8 +136,6 @@ def is_create_draft_intent(text: str) -> bool:
 def is_explicit_draft_creation_request(text: str) -> bool:
     """Return whether text has affirmative configured draft action and object terms."""
     normalized = _normalize(text)
-    if "?" in str(text) or ";" in str(text):
-        return False
     if _has_token_or_phrase(normalized, _DRAFT_REQUEST_NEGATIONS):
         return False
     return (

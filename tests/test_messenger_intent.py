@@ -86,3 +86,4 @@ def test_explicit_draft_creation_request_rejects_negated_requests() -> None:
     assert is_explicit_draft_creation_request("Show draft") is False
     assert is_explicit_draft_creation_request("How do I write a message?") is False
     assert is_explicit_draft_creation_request("Write a message saying I can do nothing today") is True
+    assert is_explicit_draft_creation_request('Write a message asking "Are you coming?"') is True
