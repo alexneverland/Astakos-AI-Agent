@@ -1045,7 +1045,7 @@ def test_chat_agent_keeps_explicit_memory_save_for_external_context(
                 content="External deadline summary.",
                 additional_kwargs=external_content_history_metadata(["browse_url"]),
             ),
-            HumanMessage(content="Αποθήκευσε αυτό στη μνήμη."),
+            HumanMessage(content="Save that deadline to my memory."),
         ],
         "channel": "web",
     })
