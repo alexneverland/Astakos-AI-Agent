@@ -24,6 +24,15 @@ def _looks_like_place_search(msg: str) -> bool:
     has_qualifier = bool(tokens & set(caps.get("place_search_qualifiers", [])))
     return has_action and (has_place_noun or has_qualifier)
 
+
+def _looks_like_specific_web_target(msg: str) -> bool:
+    """Return whether the user supplied a URL or conventional website domain."""
+    return bool(re.search(
+        r"(?<!\w)(?:https?://|www\.)\S+|(?<!\w)[\w-]+\.[a-z]{2,}(?!\w)",
+        msg,
+        flags=re.IGNORECASE,
+    ))
+
 def _load_registry():
     global _registry
     if _registry:
@@ -67,6 +76,10 @@ def lookup_agent(user_message: str) -> str | None:
     # Place-finding queries should prefer Web_Agent over generic food/home routing.
     if _looks_like_place_search(msg):
         print("🎯 [CapabilityRegistry]: place-search heuristic → Web_Agent (maps_places)")
+        return "Web_Agent"
+
+    if _looks_like_specific_web_target(msg):
+        print("[CapabilityRegistry]: supplied website target → Web_Agent (web_search)")
         return "Web_Agent"
 
     # Explicit intent overrides are opt-in registry metadata. They precede Git

@@ -123,3 +123,25 @@ def test_malformed_routing_override_triggers_are_ignored(monkeypatch):
         )
 
         assert capability_lookup.lookup_agent(user_message) is None
+
+
+def test_explicit_web_search_without_article_overrides_price_capability() -> None:
+    """Natural 'search web' wording must beat the generic price trigger."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent(
+        "Μπορείς να ψάξεις web στο Public και να μου πεις τιμή από καρέκλα γραφείου;"
+    ) == "Web_Agent"
+
+
+def test_specific_web_domain_overrides_price_capability() -> None:
+    """A supplied website domain must use general Web search, not supermarket prices."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent(
+        "Βρες μου τιμή για καρέκλα γραφείου στο public.gr"
+    ) == "Web_Agent"
