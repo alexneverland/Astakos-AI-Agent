@@ -7,6 +7,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v2.4.1] — 2026-08-04
+
+**Released: 2026-08-04**
+
+### Added
+
+- Setup Wizard support for validating and importing a portable `astakos_routines.json` declaration during first-run setup.
+
+### Fixed
+
+- Hardened handling of untrusted external and persisted content before it can influence state-changing tools or background memory pipelines.
+- Preserved external-content provenance across supported conversation, memory, routine, reminder, list, goal, recipe, and asset paths.
+- Restored the strict Messenger routine-draft lifecycle across Telegram and Web, including atomic pending-offer consumption.
+
 ## [v2.4.0] — 2026-07-27
 
 **Released: 2026-07-27**
