@@ -874,6 +874,12 @@
       "ετοιμασε",
       "φτιαξε"
     ],
+    "draft_request_leading_tokens": [
+      "ναι",
+      "οκ",
+      "ok",
+      "φιλε"
+    ],
     "draft_request_objects": [
       "μηνυμα",
       "draft",
