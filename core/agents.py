@@ -60,6 +60,29 @@ def _without_external_memory_write(
         return tools
     print(f"[Memory Tool Gate]: {agent_name} hid save_to_memory due to active external context.")
     return [tool for tool in tools if getattr(tool, "name", "") != "save_to_memory"]
+
+
+def _without_stale_external_research_tools(
+    history: list[Any],
+    tools: list[Any],
+    latest_user_text: str,
+) -> list[Any]:
+    """Hide research tools when stale external context is unrelated to this turn."""
+    from core.untrusted_content import has_untrusted_result_in_active_history
+    from memory.context_builder import looks_like_direct_web_research_query
+
+    if (
+        not has_untrusted_result_in_active_history(history)
+        or looks_like_direct_web_research_query(latest_user_text)
+    ):
+        return tools
+    stale_research_tools = {"duckduckgo_search", "search_supermarket_prices"}
+    print("[Stale Web Tool Gate]: Chat_Agent hid stale research tools.")
+    return [
+        tool
+        for tool in tools
+        if getattr(tool, "name", "") not in stale_research_tools
+    ]
 # TOOLS
 from tools.system import (
     search_memory, save_to_memory, delete_from_memory, retrieve_photo,
@@ -410,6 +433,11 @@ def chat_agent_node(state: AgentState):
         history,
         static_chat_tools,
         "Chat_Agent",
+    )
+    static_chat_tools = _without_stale_external_research_tools(
+        history,
+        static_chat_tools,
+        latest_user_text,
     )
     draft_tool_reason = None
     # Tool results can contain routine names such as "message".  Only the

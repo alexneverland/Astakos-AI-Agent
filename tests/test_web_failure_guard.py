@@ -1012,6 +1012,92 @@ def test_chat_agent_hides_direct_memory_write_for_external_context(monkeypatch: 
     assert "save_to_memory" not in bound_tool_names
 
 
+def test_chat_agent_hides_stale_research_tools_for_unrelated_new_turn(
+    monkeypatch: Any,
+) -> None:
+    """A home update must not re-run an older Web research request."""
+    from core.agents import chat_agent_node
+    from core.untrusted_content import external_content_history_metadata
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Chat agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    chat_agent_node({
+        "messages": [
+            HumanMessage(content="Τι καιρό θα έχει στο Rustavi;"),
+            AIMessage(
+                content="External weather summary.",
+                additional_kwargs=external_content_history_metadata(["get_weather_forecast"]),
+            ),
+            HumanMessage(content="Γύρισα σπίτι φίλε."),
+        ],
+        "channel": "telegram",
+    })
+
+    assert "duckduckgo_search" not in bound_tool_names
+    assert "search_supermarket_prices" not in bound_tool_names
+
+
+def test_chat_agent_keeps_research_tools_for_current_direct_web_request(
+    monkeypatch: Any,
+) -> None:
+    """A current direct Web request may still use research tools."""
+    from core.agents import chat_agent_node
+    from core.untrusted_content import external_content_history_metadata
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Chat agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    chat_agent_node({
+        "messages": [
+            HumanMessage(content="Τι καιρό θα έχει στο Rustavi;"),
+            AIMessage(
+                content="External weather summary.",
+                additional_kwargs=external_content_history_metadata(["get_weather_forecast"]),
+            ),
+            HumanMessage(content="Ψάξε στο web τι καιρό θα έχει στη Γεωργία."),
+        ],
+        "channel": "telegram",
+    })
+
+    assert "duckduckgo_search" in bound_tool_names
+    assert "search_supermarket_prices" in bound_tool_names
+
+
 def test_chat_agent_keeps_explicit_memory_save_for_external_context(
     monkeypatch: Any,
 ) -> None:
