@@ -301,6 +301,34 @@ def test_descriptive_message_stays_approval_gated_with_stale_external_history():
     notify.assert_called_once()
 
 
+def test_provenance_marked_human_message_cannot_bypass_draft_approval():
+    """Asset analysis stored in a HumanMessage is not direct draft authorization."""
+    from langchain_core.messages import AIMessage, HumanMessage
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+
+    user_message = HumanMessage(
+        content="Write a message",
+        additional_kwargs=external_content_history_metadata(["user_provided_asset"]),
+    )
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Sofia", "payload_data": "Καλημέρα"},
+            "id": "tc-provenance-marked-draft",
+        }],
+    )
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({"messages": [user_message, draft_call]})
+
+    assert result["approval_status"] == "pending"
+    save_pending.assert_called_once()
+    notify.assert_called_once()
+
+
 def test_blocked_terminal_command_is_not_saved_for_approval():
     """BLOCKED terminal command → approval_status=blocked and pending is not saved."""
     from core.approval import approval_check_node

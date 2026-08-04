@@ -110,7 +110,10 @@ def _is_explicit_messenger_draft_creation(
     if tool_call.get("name") != "relay_local_payload":
         return False
 
-    from core.untrusted_content import is_direct_user_message
+    from core.untrusted_content import (
+        external_content_source_names,
+        is_direct_user_message,
+    )
     from services.messenger_intent import (
         has_accepted_routine_draft_offer,
         is_explicit_draft_creation_request,
@@ -121,6 +124,10 @@ def _is_explicit_messenger_draft_creation(
 
     for message in reversed(prior_messages):
         if is_direct_user_message(message):
+            if external_content_source_names(
+                getattr(message, "additional_kwargs", {}),
+            ):
+                return False
             return is_explicit_draft_creation_request(
                 str(getattr(message, "content", "")),
             )
