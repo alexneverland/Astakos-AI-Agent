@@ -97,6 +97,16 @@ def _effective_risk(tc: dict) -> str:
     return _get_risk(name)
 
 
+def _is_accepted_routine_messenger_draft_creation(
+    tool_call: ToolCall,
+    prior_messages: Sequence[BaseMessage],
+) -> bool:
+    """Return whether a trusted routine acceptance authorizes a draft write."""
+    if tool_call.get("name") != "relay_local_payload":
+        return False
+    from services.messenger_intent import has_accepted_routine_draft_offer
+    return has_accepted_routine_draft_offer(prior_messages)
+
 def _is_explicit_messenger_draft_creation(
     tool_call: ToolCall,
     prior_messages: Sequence[BaseMessage],
@@ -119,7 +129,7 @@ def _is_explicit_messenger_draft_creation(
         is_explicit_draft_creation_request,
     )
 
-    if has_accepted_routine_draft_offer(prior_messages):
+    if _is_accepted_routine_messenger_draft_creation(tool_call, prior_messages):
         return True
 
     for message in reversed(prior_messages):
@@ -340,6 +350,7 @@ def approval_check_node(state):
         for tc in tool_calls:
             if (
                 not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
+                and not _is_accepted_routine_messenger_draft_creation(tc, prior_messages)
                 and tc["id"] not in blocked_call_ids
             ):
                 blocked_entries.append((

@@ -357,3 +357,36 @@ def test_no_tool_calls_passes_through():
 
     result = approval_check_node({"messages": [ai_msg]})
     assert result["approval_status"] == "ok"
+def test_accepted_routine_offer_draft_creation_skips_same_turn_memory_read_block():
+    """A routine-approved draft survives an incidental untrusted memory read."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+    from core.approval import approval_check_node
+    from services.messenger_intent import MESSENGER_ROUTINE_DRAFT_OFFER_MARKER
+
+    offer_context = SystemMessage(content=MESSENGER_ROUTINE_DRAFT_OFFER_MARKER)
+    user_message = HumanMessage(content="yes, prepare the draft")
+    memory_result = ToolMessage(
+        content="[UNTRUSTED EXTERNAL TOOL RESULT] persisted memory reference",
+        name="search_memory",
+        tool_call_id="tc-memory-read",
+    )
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Sofia", "payload_data": "Hello"},
+            "id": "tc-routine-draft-after-read",
+        }],
+    )
+
+    with (
+        patch("core.approval.save_pending") as save_pending,
+        patch("core.approval._notify_telegram") as notify,
+    ):
+        result = approval_check_node({
+            "messages": [offer_context, user_message, memory_result, draft_call],
+        })
+
+    assert result["approval_status"] == "ok"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
