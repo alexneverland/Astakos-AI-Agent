@@ -320,7 +320,13 @@
     "priority": 8,
     "routing_override_triggers": [
       "ψάξε στο web",
-      "ψαξε στο web"
+      "ψαξε στο web",
+      "ψάξε web",
+      "ψαξε web",
+      "ψάξεις web",
+      "ψαξεις web",
+      "search web",
+      "search the web"
     ],
     "triggers": [
       "ψάξε στο internet",

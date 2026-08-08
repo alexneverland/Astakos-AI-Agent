@@ -13,6 +13,11 @@ import config
 
 _REGISTRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "capability_registry.json")
 _registry: list[dict] = []
+_WEB_TARGET_PATTERN = re.compile(
+    r"(?<!\w)(?:https?://|www\.)\S+|(?<!\w)(?:[\w-]+\.)+"
+    r"(?:com|org|net|edu|gov|gr|eu|co\.uk|uk|de|fr|it|es|io|ai|app)(?!\w)",
+    flags=re.IGNORECASE,
+)
 
 
 
@@ -23,6 +28,11 @@ def _looks_like_place_search(msg: str) -> bool:
     has_place_noun = bool(tokens & set(caps.get("place_search_nouns", [])))
     has_qualifier = bool(tokens & set(caps.get("place_search_qualifiers", [])))
     return has_action and (has_place_noun or has_qualifier)
+
+
+def _looks_like_specific_web_target(msg: str) -> bool:
+    """Return whether the user supplied a URL or conventional website domain."""
+    return bool(_WEB_TARGET_PATTERN.search(msg))
 
 def _load_registry():
     global _registry
@@ -67,6 +77,10 @@ def lookup_agent(user_message: str) -> str | None:
     # Place-finding queries should prefer Web_Agent over generic food/home routing.
     if _looks_like_place_search(msg):
         print("🎯 [CapabilityRegistry]: place-search heuristic → Web_Agent (maps_places)")
+        return "Web_Agent"
+
+    if _looks_like_specific_web_target(msg):
+        print("[CapabilityRegistry]: supplied website target → Web_Agent (web_search)")
         return "Web_Agent"
 
     # Explicit intent overrides are opt-in registry metadata. They precede Git

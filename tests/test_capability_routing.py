@@ -123,3 +123,43 @@ def test_malformed_routing_override_triggers_are_ignored(monkeypatch):
         )
 
         assert capability_lookup.lookup_agent(user_message) is None
+
+
+def test_explicit_web_search_without_article_overrides_price_capability() -> None:
+    """Natural 'search web' wording must beat the generic price trigger."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent(
+        "Μπορείς να ψάξεις web στο Public και να μου πεις τιμή από καρέκλα γραφείου;"
+    ) == "Web_Agent"
+
+
+def test_specific_web_domain_overrides_price_capability() -> None:
+    """A supplied website domain must use general Web search, not supermarket prices."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent(
+        "Βρες μου τιμή για καρέκλα γραφείου στο public.gr"
+    ) == "Web_Agent"
+
+
+def test_file_extension_does_not_route_to_web_agent() -> None:
+    """Dotted local identifiers must not be mistaken for website targets."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent("Δες το config.json και πες μου τι αλλάζει.") != "Web_Agent"
+
+
+def test_plain_price_query_keeps_supermarket_price_route() -> None:
+    """A price request without a supplied website keeps its existing route."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent("Πες μου τιμή για καρέκλα γραφείου.") == "Home_Agent"
