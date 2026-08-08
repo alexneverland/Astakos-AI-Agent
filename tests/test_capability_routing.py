@@ -145,3 +145,21 @@ def test_specific_web_domain_overrides_price_capability() -> None:
     assert lookup_agent(
         "Βρες μου τιμή για καρέκλα γραφείου στο public.gr"
     ) == "Web_Agent"
+
+
+def test_file_extension_does_not_route_to_web_agent() -> None:
+    """Dotted local identifiers must not be mistaken for website targets."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent("Δες το config.json και πες μου τι αλλάζει.") != "Web_Agent"
+
+
+def test_plain_price_query_keeps_supermarket_price_route() -> None:
+    """A price request without a supplied website keeps its existing route."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent("Πες μου τιμή για καρέκλα γραφείου.") == "Home_Agent"

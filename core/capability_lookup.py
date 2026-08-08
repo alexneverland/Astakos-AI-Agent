@@ -13,6 +13,11 @@ import config
 
 _REGISTRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "capability_registry.json")
 _registry: list[dict] = []
+_WEB_TARGET_PATTERN = re.compile(
+    r"(?<!\w)(?:https?://|www\.)\S+|(?<!\w)(?:[\w-]+\.)+"
+    r"(?:com|org|net|edu|gov|gr|eu|co\.uk|uk|de|fr|it|es|io|ai|app)(?!\w)",
+    flags=re.IGNORECASE,
+)
 
 
 
@@ -27,11 +32,7 @@ def _looks_like_place_search(msg: str) -> bool:
 
 def _looks_like_specific_web_target(msg: str) -> bool:
     """Return whether the user supplied a URL or conventional website domain."""
-    return bool(re.search(
-        r"(?<!\w)(?:https?://|www\.)\S+|(?<!\w)[\w-]+\.[a-z]{2,}(?!\w)",
-        msg,
-        flags=re.IGNORECASE,
-    ))
+    return bool(_WEB_TARGET_PATTERN.search(msg))
 
 def _load_registry():
     global _registry
