@@ -1,6 +1,61 @@
 from types import SimpleNamespace
 
 
+def test_vacation_routine_pause_keeps_reminders_and_followups_active(monkeypatch):
+    import clients.telegram_bot as bot
+
+    monkeypatch.setattr(bot._time, "time", lambda: 1000.0)
+    monkeypatch.setattr(
+        bot,
+        "_override_state",
+        {
+            "pause_reminders": False,
+            "mute_proactive": False,
+            "sleep_until": None,
+            "routine_pause_until": 2000.0,
+        },
+    )
+
+    assert bot.is_routines_paused() is True
+    assert bot.is_reminders_paused() is False
+    assert bot.is_proactive_muted() is False
+
+
+def test_routine_scheduler_skips_during_vacation_pause(monkeypatch):
+    import clients.telegram_bot as bot
+
+    def routine_db_must_not_be_queried(_path):
+        raise AssertionError("routine DB must not be queried")
+
+    monkeypatch.setattr(bot, "is_routines_paused", lambda: True)
+    monkeypatch.setattr(bot, "pending_routine_confirmations", {})
+    monkeypatch.setattr(bot.os.path, "exists", routine_db_must_not_be_queried)
+
+    bot.job_check_routines()
+
+
+def test_vacation_pause_clears_pending_routine_confirmations(monkeypatch):
+    import clients.telegram_bot as bot
+    import memory.routine_db as routine_db
+
+    removed = []
+    monkeypatch.setattr(
+        bot,
+        "pending_routine_confirmations",
+        {42: {"event": "Morning routine"}},
+    )
+    monkeypatch.setattr(
+        routine_db,
+        "remove_pending_confirmation",
+        lambda routine_id: removed.append(routine_id),
+    )
+
+    bot._clear_pending_routine_confirmations_for_vacation()
+
+    assert bot.pending_routine_confirmations == {}
+    assert removed == [42]
+
+
 def test_georgian_quick_phrases_menu_alias_is_recognized():
     import clients.telegram_bot as bot
 

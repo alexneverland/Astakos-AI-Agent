@@ -815,7 +815,12 @@ def job_check_pending_followups():
 import time as _time
 
 _OVERRIDE_FILE = os.path.join(os.path.dirname(__file__), "..", "scheduler_state.json")
-_override_state = {"pause_reminders": False, "mute_proactive": False, "sleep_until": None}
+_override_state = {
+    "pause_reminders": False,
+    "mute_proactive": False,
+    "sleep_until": None,
+    "routine_pause_until": None,
+}
 _override_lock  = threading.Lock()
 
 def _load_override_state():
@@ -877,6 +882,29 @@ def is_proactive_muted() -> bool:
         if _override_state.get("sleep_until") and _time.time() < _override_state["sleep_until"]:
             return True
         return bool(_override_state.get("mute_proactive"))
+
+
+def is_routines_paused() -> bool:
+    """Return whether the user has temporarily paused routine notifications only."""
+    with _override_lock:
+        until = _override_state.get("routine_pause_until")
+        try:
+            return until is not None and _time.time() < float(until)
+        except (TypeError, ValueError):
+            return False
+
+
+def _clear_pending_routine_confirmations_for_vacation() -> None:
+    """Clear pending routine prompts so a vacation pause cannot count as an ignore."""
+    from memory.routine_db import remove_pending_confirmation
+
+    for routine_id in list(pending_routine_confirmations):
+        try:
+            remove_pending_confirmation(routine_id)
+        except Exception as exc:
+            print(f"[VacationPause]: could not clear pending routine #{routine_id}: {exc}")
+            continue
+        pending_routine_confirmations.pop(routine_id, None)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -3147,6 +3175,8 @@ def run_polling():
         {"command": "story",            "description": t("clients.telegram_bot.bot_msg_0a3ea6")},
         {"command": "voice",            "description": t("clients.telegram_bot.bot_msg_7c1625")},
         {"command": "status",           "description": t("clients.telegram_bot.bot_msg_12478c")},
+        {"command": "vacation",         "description": t("clients.telegram_bot.bot_msg_vacation")},
+        {"command": "vacation_resume",  "description": t("clients.telegram_bot.bot_msg_vacation_resume")},
         {"command": "doctor",           "description": t("clients.telegram_bot.bot_msg_cde5a6")},
         {"command": "mute",             "description": t("clients.telegram_bot.bot_msg_664071")},
         {"command": "pause",            "description": t("clients.telegram_bot.bot_msg_06c029")},
@@ -3292,9 +3322,35 @@ def run_polling():
 
                 if cmd == "/resume":
                     with _override_lock:
-                        _override_state.update({"pause_reminders": False, "mute_proactive": False, "sleep_until": None})
+                        _override_state.update({
+                            "pause_reminders": False,
+                            "mute_proactive": False,
+                            "sleep_until": None,
+                            "routine_pause_until": None,
+                        })
                     _save_override_state()
                     send_telegram_msg(t("clients.telegram_bot.bot_msg_b33ab5"))
+                    continue
+                if cmd == "/vacation_resume":
+                    with _override_lock:
+                        _override_state["routine_pause_until"] = None
+                    _save_override_state()
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_vacation_resumed"))
+                    continue
+                if cmd == "/vacation" or cmd.startswith("/vacation "):
+                    parts = cmd.split()
+                    try:
+                        days = int(parts[1]) if len(parts) == 2 else 0
+                    except ValueError:
+                        days = 0
+                    if not 1 <= days <= 365:
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_vacation_usage"))
+                        continue
+                    with _override_lock:
+                        _override_state["routine_pause_until"] = _time.time() + days * 86400
+                    _clear_pending_routine_confirmations_for_vacation()
+                    _save_override_state()
+                    send_telegram_msg(t("clients.telegram_bot.bot_msg_vacation_paused", days=days))
                     continue
                 if user_text.lower().startswith("/confirm"):
                     cmd_to_confirm = user_text[len("/confirm"):].strip()
@@ -4455,6 +4511,10 @@ def job_check_routines():
 
                 del pending_routine_confirmations[rid]
                 remove_pending_confirmation(rid)
+
+    if is_routines_paused():
+        print("[job_check_routines]: Vacation routine pause active — skipped")
+        return
 
     # 1. Upcoming routine notifications
     try:
