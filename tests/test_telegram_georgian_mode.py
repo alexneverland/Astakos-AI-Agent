@@ -29,20 +29,26 @@ def test_routine_scheduler_skips_during_vacation_pause(monkeypatch):
 
     monkeypatch.setattr(bot, "is_routines_paused", lambda: True)
     monkeypatch.setattr(bot, "pending_routine_confirmations", {})
-    monkeypatch.setattr(bot.os.path, "exists", routine_db_must_not_be_queried)
+    with monkeypatch.context() as context:
+        context.setattr(bot.os.path, "exists", routine_db_must_not_be_queried)
+        bot.job_check_routines()
 
-    bot.job_check_routines()
 
-
-def test_vacation_pause_clears_pending_routine_confirmations(monkeypatch):
+def test_vacation_pause_reactivates_and_clears_pending_routine_confirmations(monkeypatch):
     import clients.telegram_bot as bot
     import memory.routine_db as routine_db
 
+    expired = []
     removed = []
     monkeypatch.setattr(
         bot,
         "pending_routine_confirmations",
         {42: {"event": "Morning routine"}},
+    )
+    monkeypatch.setattr(
+        routine_db,
+        "expire_routine_confirmation",
+        lambda routine_id: expired.append(routine_id),
     )
     monkeypatch.setattr(
         routine_db,
@@ -53,7 +59,20 @@ def test_vacation_pause_clears_pending_routine_confirmations(monkeypatch):
     bot._clear_pending_routine_confirmations_for_vacation()
 
     assert bot.pending_routine_confirmations == {}
+    assert expired == [42]
     assert removed == [42]
+
+
+def test_startup_missed_routines_skip_during_vacation_pause(monkeypatch):
+    import clients.telegram_bot as bot
+
+    def routine_db_must_not_be_queried(_path):
+        raise AssertionError("routine DB must not be queried")
+
+    monkeypatch.setattr(bot, "is_routines_paused", lambda: True)
+    with monkeypatch.context() as context:
+        context.setattr(bot.os.path, "exists", routine_db_must_not_be_queried)
+        bot.startup_check_missed_routines()
 
 
 def test_georgian_quick_phrases_menu_alias_is_recognized():

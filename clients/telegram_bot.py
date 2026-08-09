@@ -895,14 +895,15 @@ def is_routines_paused() -> bool:
 
 
 def _clear_pending_routine_confirmations_for_vacation() -> None:
-    """Clear pending routine prompts so a vacation pause cannot count as an ignore."""
-    from memory.routine_db import remove_pending_confirmation
+    """Reactivate and clear pending routine prompts for a vacation pause."""
+    from memory.routine_db import expire_routine_confirmation, remove_pending_confirmation
 
     for routine_id in list(pending_routine_confirmations):
         try:
+            expire_routine_confirmation(routine_id)
             remove_pending_confirmation(routine_id)
         except Exception as exc:
-            print(f"[VacationPause]: could not clear pending routine #{routine_id}: {exc}")
+            print(f"[VacationPause]: could not reactivate pending routine #{routine_id}: {exc}")
             continue
         pending_routine_confirmations.pop(routine_id, None)
 
@@ -4189,7 +4190,7 @@ def startup_check_missed_routines():
     from datetime import timedelta
     from config import BASE_DIR, ROUTINE_MISS_GRACE_MINUTES
 
-    if is_quiet_hours() or is_proactive_muted():
+    if is_quiet_hours() or is_proactive_muted() or is_routines_paused():
         print("\033[90m[MissedRoutines]: Quiet hours / muted — skip startup check.\033[0m")
         return
 
