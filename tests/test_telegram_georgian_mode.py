@@ -1,6 +1,13 @@
 from types import SimpleNamespace
 
 
+def test_georgian_quick_phrases_menu_alias_is_recognized():
+    import clients.telegram_bot as bot
+
+    assert "/g_phrases" in bot.GEORGIAN_COMMAND_ALIASES
+    assert "/g_phrases" in bot.GEORGIAN_QUICK_PHRASES_ALIASES
+
+
 def test_pending_georgian_mode_consumes_once(monkeypatch):
     import clients.telegram_bot as bot
 
