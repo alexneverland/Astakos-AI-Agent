@@ -2161,6 +2161,22 @@ async def debug_runtime(_=Depends(require_token)):
     sleep_until = override.get("sleep_until")
     sleeping    = sleep_until and time.time() < sleep_until
     sleep_until_str = datetime.fromtimestamp(sleep_until).strftime("%H:%M") if sleeping else None
+    routine_pause_until = override.get("routine_pause_until")
+    try:
+        routine_pause_until = float(routine_pause_until)
+    except (TypeError, ValueError):
+        routine_pause_until = None
+    routines_paused = bool(routine_pause_until and time.time() < routine_pause_until)
+    routine_pause_until_str = (
+        datetime.fromtimestamp(routine_pause_until).strftime("%d/%m %H:%M")
+        if routines_paused
+        else None
+    )
+    routine_pause_remaining_days = (
+        max(1, int((routine_pause_until - time.time() + 86399) // 86400))
+        if routines_paused
+        else None
+    )
 
     # ── 5. Heartbeat health ──────────────────────────────────────
     snap_age = round(time.time() - datetime.fromisoformat(snapshot["written_at"]).timestamp(), 0) \
@@ -2227,6 +2243,9 @@ async def debug_runtime(_=Depends(require_token)):
             "quiet_hours":        snapshot.get("quiet_hours"),
             "proactive_muted":    snapshot.get("proactive_muted"),
             "reminders_paused":   snapshot.get("reminders_paused"),
+            "routines_paused":    snapshot.get("routines_paused"),
+            "routine_pause_until": snapshot.get("routine_pause_until"),
+            "routine_pause_remaining_days": snapshot.get("routine_pause_remaining_days"),
             "proactive_this_hour": snapshot.get("proactive_this_hour", 0),
             "pending_count":      snapshot.get("pending_confirmations", 0),
         },
@@ -2235,6 +2254,9 @@ async def debug_runtime(_=Depends(require_token)):
             "mute_proactive":  bool(override.get("mute_proactive")),
             "sleeping":        bool(sleeping),
             "sleep_until":     sleep_until_str,
+            "routines_paused": routines_paused,
+            "routine_pause_until": routine_pause_until_str,
+            "routine_pause_remaining_days": routine_pause_remaining_days,
         },
         "routines": {
             "state_counts":    state_counts,

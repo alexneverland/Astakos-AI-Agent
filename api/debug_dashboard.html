@@ -1007,6 +1007,7 @@ function render(d) {
   if (ovr.sleeping)        flags.push(`<span class="badge b-red">😴 Sleep until ${ovr.sleep_until}</span>`);
   if (ovr.pause_reminders) flags.push('<span class="badge b-yellow">⏸ Reminders Paused</span>');
   if (ovr.mute_proactive)  flags.push('<span class="badge b-yellow">🔇 Proactive Muted</span>');
+  if (ovr.routines_paused) flags.push(`<span class="badge b-yellow">🌴 Vacation: routines paused for ${esc(ovr.routine_pause_remaining_days)} day(s), until ${esc(ovr.routine_pause_until)}</span>`);
   if (s.quiet_hours)       flags.push('<span class="badge b-muted">🌙 Quiet Hours</span>');
 
   let html = '';
