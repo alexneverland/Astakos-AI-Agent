@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 
@@ -19,6 +20,54 @@ def test_vacation_routine_pause_keeps_reminders_and_followups_active(monkeypatch
     assert bot.is_routines_paused() is True
     assert bot.is_reminders_paused() is False
     assert bot.is_proactive_muted() is False
+
+
+def test_scheduler_status_shows_active_vacation_routine_pause(monkeypatch):
+    import clients.telegram_bot as bot
+
+    monkeypatch.setattr(bot.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(bot._time, "time", lambda: 1000.0)
+    monkeypatch.setattr(bot, "is_quiet_hours", lambda: False)
+    monkeypatch.setattr(
+        bot,
+        "_override_state",
+        {
+            "pause_reminders": False,
+            "mute_proactive": False,
+            "sleep_until": None,
+            "routine_pause_until": 1000.0 + 2 * 86400,
+        },
+    )
+
+    status = bot.AstakosScheduler().status()
+
+    assert "Vacation routines paused" in status
+    assert "2 day(s) remaining" in status
+
+
+def test_runtime_snapshot_includes_active_vacation_routine_pause(tmp_path, monkeypatch):
+    import clients.telegram_bot as bot
+    import config
+
+    monkeypatch.setattr(bot.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(bot._time, "time", lambda: 1000.0)
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        bot,
+        "_override_state",
+        {
+            "pause_reminders": False,
+            "mute_proactive": False,
+            "sleep_until": None,
+            "routine_pause_until": 1000.0 + 2 * 86400,
+        },
+    )
+
+    bot.AstakosScheduler()._write_snapshot()
+
+    snapshot = json.loads((tmp_path / "runtime_snapshot.json").read_text(encoding="utf-8"))
+    assert snapshot["routines_paused"] is True
+    assert snapshot["routine_pause_remaining_days"] == 2
 
 
 def test_routine_scheduler_skips_during_vacation_pause(monkeypatch):

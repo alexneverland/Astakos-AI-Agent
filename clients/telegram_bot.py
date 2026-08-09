@@ -884,14 +884,20 @@ def is_proactive_muted() -> bool:
         return bool(_override_state.get("mute_proactive"))
 
 
-def is_routines_paused() -> bool:
-    """Return whether the user has temporarily paused routine notifications only."""
+def _active_routine_pause_until() -> float | None:
+    """Return the active routine-only pause deadline, if one remains."""
     with _override_lock:
         until = _override_state.get("routine_pause_until")
         try:
-            return until is not None and _time.time() < float(until)
+            deadline = float(until)
         except (TypeError, ValueError):
-            return False
+            return None
+        return deadline if _time.time() < deadline else None
+
+
+def is_routines_paused() -> bool:
+    """Return whether the user has temporarily paused routine notifications only."""
+    return _active_routine_pause_until() is not None
 
 
 def _clear_pending_routine_confirmations_for_vacation() -> None:
@@ -5260,8 +5266,19 @@ class AstakosScheduler:
                 "quiet_hours":           is_quiet_hours(),
                 "proactive_muted":       is_proactive_muted(),
                 "reminders_paused":      is_reminders_paused(),
+                "routines_paused":       is_routines_paused(),
                 "memory_context":        memory_context_debug,
             }
+            routine_pause_until = _active_routine_pause_until()
+            if routine_pause_until is not None:
+                remaining_seconds = max(0, routine_pause_until - now)
+                snapshot["routine_pause_until"] = datetime.fromtimestamp(
+                    routine_pause_until,
+                ).isoformat(timespec="seconds")
+                snapshot["routine_pause_remaining_days"] = max(
+                    1,
+                    int((remaining_seconds + 86399) // 86400),
+                )
             with _proactive_lock:
                 snapshot["proactive_this_hour"] = _proactive_count["count"]
             path = os.path.join(BASE_DIR, "runtime_snapshot.json")
@@ -5342,6 +5359,7 @@ class AstakosScheduler:
         quiet = is_quiet_hours()
         quiet_label = t("clients.telegram_bot.bot_msg_1e9be7") if quiet else t("clients.telegram_bot.bot_msg_4e73eb")
         lines.append(f"\U0001f319 Quiet hours: {quiet_label} ({QUIET_HOURS[0]:02d}:00\u2013{QUIET_HOURS[1]:02d}:00)")
+        routine_pause_until = _active_routine_pause_until()
         with _proactive_lock:
             lines.append(f"\U0001f4e3 Proactive this hour: {_proactive_count['count']}/{MAX_PROACTIVE_PER_HOUR}")
         with _override_lock:
@@ -5349,11 +5367,16 @@ class AstakosScheduler:
             muted   = _override_state.get("mute_proactive")
             sleep_u = _override_state.get("sleep_until")
             sleeping = sleep_u and _time.time() < sleep_u
-        if paused or muted or sleeping:
+        if paused or muted or sleeping or routine_pause_until is not None:
             ovr = []
             if paused:   ovr.append("reminders paused")
             if muted:    ovr.append("proactive muted")
             if sleeping: ovr.append(f"sleep until {datetime.fromtimestamp(sleep_u).strftime('%H:%M')}")
+            if routine_pause_until is not None:
+                remaining_seconds = max(0, routine_pause_until - now)
+                remaining_days = max(1, int((remaining_seconds + 86399) // 86400))
+                until = datetime.fromtimestamp(routine_pause_until).strftime("%d/%m %H:%M")
+                ovr.append(f"Vacation routines paused until {until} ({remaining_days} day(s) remaining)")
             lines.append(f"\U0001f6d1 Override: {', '.join(ovr)}")
         return "\n".join(lines)
 
