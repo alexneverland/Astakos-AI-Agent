@@ -38,6 +38,13 @@ import config
 import core.i18n
 from core.i18n import t
 
+GEORGIAN_QUICK_PHRASES_ALIASES = frozenset({
+    "/georgian_phrases", "/g_phrases",
+})
+GEORGIAN_COMMAND_ALIASES = frozenset({
+    "/georgian", "/geo", "/g",
+}) | GEORGIAN_QUICK_PHRASES_ALIASES
+
 def _normalize_gr(text: str) -> str:
     """Removes accents from Greek text for accent-insensitive comparison."""
     import unicodedata
@@ -3256,7 +3263,7 @@ def run_polling():
                 if not cmd.startswith("/") and _consume_pending_partner():
                     _send_georgian_translation(user_text, force_src="ka")
                     continue
-                if cmd.startswith("/") and cmd not in ("/georgian", "/geo", "/g", "/georgian_phrases", "/gr", "/greek"):
+                if cmd.startswith("/") and cmd not in (*GEORGIAN_COMMAND_ALIASES, "/gr", "/greek"):
                     _clear_pending_georgian()
                     _clear_pending_partner()
 
@@ -3330,12 +3337,12 @@ def run_polling():
                         send_telegram_msg(t("clients.telegram_bot.bot_msg_adde11"))
                     continue
 
-                if cmd in ("/georgian", "/geo", "/g", "/georgian_phrases"):
+                if cmd in GEORGIAN_COMMAND_ALIASES:
                     from tools.georgian import phrases_message
                     rest = user_text[len(cmd):].strip()
 
                     # /georgian_phrases → quick list
-                    if cmd == "/georgian_phrases" or rest.lower() == "phrases":
+                    if cmd in GEORGIAN_QUICK_PHRASES_ALIASES or rest.lower() == "phrases":
                         send_telegram_msg(phrases_message())
                         continue
 
