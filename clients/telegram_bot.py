@@ -38,12 +38,12 @@ import config
 import core.i18n
 from core.i18n import t
 
-GEORGIAN_COMMAND_ALIASES = frozenset({
-    "/georgian", "/geo", "/g", "/georgian_phrases", "/g_phrases",
-})
 GEORGIAN_QUICK_PHRASES_ALIASES = frozenset({
     "/georgian_phrases", "/g_phrases",
 })
+GEORGIAN_COMMAND_ALIASES = frozenset({
+    "/georgian", "/geo", "/g",
+}) | GEORGIAN_QUICK_PHRASES_ALIASES
 
 def _normalize_gr(text: str) -> str:
     """Removes accents from Greek text for accent-insensitive comparison."""
