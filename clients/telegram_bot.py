@@ -910,6 +910,12 @@ def _log_vacation_routine_skip(pause_until: float) -> None:
     print("[job_check_routines]: Vacation routine pause active — skipped")
 
 
+def _reset_vacation_pause_skip_log() -> None:
+    """Allow the next vacation pause window to log its first scheduler skip."""
+    global _vacation_pause_logged_until
+    _vacation_pause_logged_until = None
+
+
 def _clear_pending_routine_confirmations_for_vacation() -> None:
     """Reactivate and clear pending routine prompts for a vacation pause."""
     from memory.routine_db import expire_routine_confirmation, remove_pending_confirmation
@@ -3178,6 +3184,11 @@ def _run_system_doctor_command() -> str:
     return str(system_doctor.invoke({"days": 1}))
 
 
+def _send_system_doctor_report() -> None:
+    """Deliver the Doctor report in Telegram-safe message chunks."""
+    send_telegram_msg_full(_run_system_doctor_command())
+
+
 def run_polling():
     """Long-polling loop — reads updates from the Telegram API."""
     global voice_mode_enabled
@@ -3352,12 +3363,14 @@ def run_polling():
                             "sleep_until": None,
                             "routine_pause_until": None,
                         })
+                    _reset_vacation_pause_skip_log()
                     _save_override_state()
                     send_telegram_msg(t("clients.telegram_bot.bot_msg_b33ab5"))
                     continue
                 if cmd == "/vacation_resume":
                     with _override_lock:
                         _override_state["routine_pause_until"] = None
+                    _reset_vacation_pause_skip_log()
                     _save_override_state()
                     send_telegram_msg(t("clients.telegram_bot.bot_msg_vacation_resumed"))
                     continue
@@ -3370,6 +3383,7 @@ def run_polling():
                     if not 1 <= days <= 365:
                         send_telegram_msg(t("clients.telegram_bot.bot_msg_vacation_usage"))
                         continue
+                    _reset_vacation_pause_skip_log()
                     with _override_lock:
                         _override_state["routine_pause_until"] = _time.time() + days * 86400
                     _clear_pending_routine_confirmations_for_vacation()
@@ -3396,7 +3410,7 @@ def run_polling():
 
                 if cmd == "/doctor":
                     try:
-                        send_telegram_msg(_run_system_doctor_command())
+                        _send_system_doctor_report()
                     except Exception as e:
                         send_telegram_msg(t("clients.telegram_bot.bot_msg_doctor_error", e=e))
                     continue
