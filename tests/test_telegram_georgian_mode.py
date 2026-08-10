@@ -210,6 +210,38 @@ def test_pending_georgian_mode_expires(monkeypatch):
     assert bot._consume_pending_georgian() is False
 
 
+def test_transcribed_voice_uses_pending_georgian_translation(monkeypatch):
+    import clients.telegram_bot as bot
+
+    translations = []
+    monkeypatch.setattr(bot, "_consume_pending_georgian", lambda: True)
+    monkeypatch.setattr(bot, "_consume_pending_partner", lambda: False)
+    monkeypatch.setattr(
+        bot,
+        "_send_georgian_translation",
+        lambda text, force_src="auto": translations.append((text, force_src)),
+    )
+
+    assert bot._handle_transcribed_voice("καλημέρα") is True
+    assert translations == [("καλημέρα", "auto")]
+
+
+def test_transcribed_voice_uses_pending_partner_translation(monkeypatch):
+    import clients.telegram_bot as bot
+
+    translations = []
+    monkeypatch.setattr(bot, "_consume_pending_georgian", lambda: False)
+    monkeypatch.setattr(bot, "_consume_pending_partner", lambda: True)
+    monkeypatch.setattr(
+        bot,
+        "_send_georgian_translation",
+        lambda text, force_src="auto": translations.append((text, force_src)),
+    )
+
+    assert bot._handle_transcribed_voice("გამარჯობა") is True
+    assert translations == [("გამარჯობა", "ka")]
+
+
 def test_send_georgian_translation_sends_text_and_audio(monkeypatch):
     import clients.telegram_bot as bot
     from tools import georgian
@@ -235,5 +267,5 @@ def test_send_georgian_translation_sends_text_and_audio(monkeypatch):
     bot._send_georgian_translation("καλημέρα")
 
     assert sent == ["🇬🇪 <code>გამარჯობა</code>\n📢 <i>gamarjoba</i>"]
-    assert posted[0].url.endswith("/sendAudio")
-    assert posted[0].files["audio"][0] == "georgian.mp3"
+    assert posted[0].url.endswith("/sendVoice")
+    assert posted[0].files["voice"][0] == "georgian.mp3"

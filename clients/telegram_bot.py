@@ -1150,6 +1150,8 @@ def handle_voice(voice_obj: dict, chat_id: str):
         ai_reply = stt_response.text.strip() if stt_response and stt_response.text else t("clients.telegram_bot.bot_msg_dacaa2")
 
         print(f"\033[92m[Voice AI]: {ai_reply}\033[0m")
+        if _handle_transcribed_voice(ai_reply):
+            return
         # We send the flag [VOICE] + [VOICE_INPUT] so that handle_message knows to reply with audio
         # and the Lobster that the message came from voice (to reply more briefly and colloquially)
         handle_message(f"[VOICE]: [VOICE_INPUT] {ai_reply}", chat_id)
@@ -1161,6 +1163,19 @@ def handle_voice(voice_obj: dict, chat_id: str):
     finally:
         if local_path and os.path.exists(local_path):
             os.remove(local_path)
+
+
+def _handle_transcribed_voice(transcript: str) -> bool:
+    """Translate one voice transcript when a Georgian one-shot mode is active."""
+    if _consume_pending_georgian():
+        _send_georgian_translation(transcript)
+        return True
+    if _consume_pending_partner():
+        _send_georgian_translation(transcript, force_src="ka")
+        return True
+    return False
+
+
 def send_telegram_document(file_path, chat_id=None):
     if not chat_id: chat_id = TELEGRAM_CHAT_ID
     try:
@@ -1642,11 +1657,11 @@ def _send_georgian_translation(text: str, *, force_src: str = "auto"):
 
     try:
         audio_bytes = tts_audio(result["translated"], lang=result["tgt"])
-        tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendAudio"
+        tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVoice"
         requests.post(
             tg_url,
             data={"chat_id": TELEGRAM_CHAT_ID},
-            files={"audio": ("georgian.mp3", audio_bytes, "audio/mpeg")},
+            files={"voice": ("georgian.mp3", audio_bytes, "audio/mpeg")},
             timeout=20,
         )
         print(f"\033[92m[Georgian]: {direction} '{text}' → '{result['translated']}' + audio\033[0m")
