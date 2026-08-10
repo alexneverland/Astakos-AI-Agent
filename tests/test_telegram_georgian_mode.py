@@ -22,6 +22,34 @@ def test_vacation_routine_pause_keeps_reminders_and_followups_active(monkeypatch
     assert bot.is_proactive_muted() is False
 
 
+def test_doctor_command_invokes_structured_tool(monkeypatch):
+    import clients.telegram_bot as bot
+    import tools.system as system
+
+    calls = []
+    monkeypatch.setattr(
+        system,
+        "system_doctor",
+        SimpleNamespace(invoke=lambda payload: calls.append(payload) or "doctor report"),
+    )
+
+    assert bot._run_system_doctor_command() == "doctor report"
+    assert calls == [{"days": 1}]
+
+
+def test_vacation_pause_skip_is_logged_once_per_pause(monkeypatch):
+    import clients.telegram_bot as bot
+
+    printed = []
+    monkeypatch.setattr(bot, "_vacation_pause_logged_until", None, raising=False)
+    monkeypatch.setattr(bot, "print", lambda message: printed.append(message), raising=False)
+
+    bot._log_vacation_routine_skip(2000.0)
+    bot._log_vacation_routine_skip(2000.0)
+
+    assert printed == ["[job_check_routines]: Vacation routine pause active — skipped"]
+
+
 def test_scheduler_status_shows_active_vacation_routine_pause(monkeypatch):
     import clients.telegram_bot as bot
 

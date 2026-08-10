@@ -822,6 +822,7 @@ _override_state = {
     "routine_pause_until": None,
 }
 _override_lock  = threading.Lock()
+_vacation_pause_logged_until: float | None = None
 
 def _load_override_state():
     global _override_state
@@ -898,6 +899,15 @@ def _active_routine_pause_until() -> float | None:
 def is_routines_paused() -> bool:
     """Return whether the user has temporarily paused routine notifications only."""
     return _active_routine_pause_until() is not None
+
+
+def _log_vacation_routine_skip(pause_until: float) -> None:
+    """Log one scheduler skip per active vacation pause window."""
+    global _vacation_pause_logged_until
+    if _vacation_pause_logged_until == pause_until:
+        return
+    _vacation_pause_logged_until = pause_until
+    print("[job_check_routines]: Vacation routine pause active — skipped")
 
 
 def _clear_pending_routine_confirmations_for_vacation() -> None:
@@ -3161,6 +3171,13 @@ def _save_reaction_to_memory(text: str) -> None:
         print(f"⚠️ [Reaction Save]: {e}")
 
 
+def _run_system_doctor_command() -> str:
+    """Run the read-only Doctor tool through its StructuredTool interface."""
+    from tools.system import system_doctor
+
+    return str(system_doctor.invoke({"days": 1}))
+
+
 def run_polling():
     """Long-polling loop — reads updates from the Telegram API."""
     global voice_mode_enabled
@@ -3379,8 +3396,7 @@ def run_polling():
 
                 if cmd == "/doctor":
                     try:
-                        from tools.system import system_doctor
-                        send_telegram_msg(system_doctor(days=1))
+                        send_telegram_msg(_run_system_doctor_command())
                     except Exception as e:
                         send_telegram_msg(t("clients.telegram_bot.bot_msg_doctor_error", e=e))
                     continue
@@ -4519,8 +4535,9 @@ def job_check_routines():
                 del pending_routine_confirmations[rid]
                 remove_pending_confirmation(rid)
 
-    if is_routines_paused():
-        print("[job_check_routines]: Vacation routine pause active — skipped")
+    routine_pause_until = _active_routine_pause_until()
+    if routine_pause_until is not None:
+        _log_vacation_routine_skip(routine_pause_until)
         return
 
     # 1. Upcoming routine notifications
