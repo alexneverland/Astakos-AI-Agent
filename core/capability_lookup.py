@@ -30,6 +30,12 @@ def _looks_like_place_search(msg: str) -> bool:
     return has_action and (has_place_noun or has_qualifier)
 
 
+def _looks_like_arrival_navigation_follow_up(msg: str) -> bool:
+    """Recognize a short Greek follow-up asking to check arrival progress."""
+    tokens = set(re.findall(r"[^\W_]+", msg.lower(), flags=re.UNICODE))
+    return "φτάνουμε" in tokens and bool(tokens & {"δες", "δεσ"})
+
+
 def _looks_like_specific_web_target(msg: str) -> bool:
     """Return whether the user supplied a URL or conventional website domain."""
     return bool(_WEB_TARGET_PATTERN.search(msg))
@@ -77,6 +83,9 @@ def lookup_agent(user_message: str) -> str | None:
     # Place-finding queries should prefer Web_Agent over generic food/home routing.
     if _looks_like_place_search(msg):
         print("🎯 [CapabilityRegistry]: place-search heuristic → Web_Agent (maps_places)")
+        return "Web_Agent"
+
+    if _looks_like_arrival_navigation_follow_up(msg):
         return "Web_Agent"
 
     if _looks_like_specific_web_target(msg):
