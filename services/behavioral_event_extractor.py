@@ -202,6 +202,10 @@ def run_behavioral_event_intake(
         key=BEHAVIORAL_EVENT_PROGRESS_KEY,
         **store_kwargs,
     )
+    pending_replay = behavioral_event_state.get_pending_replay(
+        key=BEHAVIORAL_EVENT_PROGRESS_KEY,
+        **store_kwargs,
+    )
     max_rowid = (max_rowid_loader or get_max_rowid)()
     stats: dict[str, int | str] = {
         "mode": "incremental",
@@ -238,7 +242,10 @@ def run_behavioral_event_intake(
         )
 
     after_rowid = int(progress["last_rowid"])
-    if pending_boundary is not None and pending_boundary < after_rowid:
+    if pending_replay is not None:
+        after_rowid = int(pending_replay["cursor_rowid"])
+        stats.update(mode="replay_incremental", last_rowid_before=after_rowid)
+    elif pending_boundary is not None and pending_boundary < after_rowid:
         after_rowid = pending_boundary
         stats.update(mode="replay_incremental", last_rowid_before=after_rowid)
 
@@ -281,8 +288,14 @@ def run_behavioral_event_intake(
     behavioral_event_state.set_progress(
         key=BEHAVIORAL_EVENT_PROGRESS_KEY,
         last_rowid=max_seen,
-        consumed_boundary=pending_boundary,
+        consumed_boundary=None if pending_replay is not None else pending_boundary,
         **store_kwargs,
     )
+    if pending_replay is not None:
+        behavioral_event_state.advance_pending_replay(
+            key=BEHAVIORAL_EVENT_PROGRESS_KEY,
+            cursor_rowid=max_seen,
+            **store_kwargs,
+        )
     stats["last_rowid_after"] = max_seen
     return stats
