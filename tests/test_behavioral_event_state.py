@@ -124,7 +124,7 @@ def test_advancing_progress_clears_only_boundaries_covered_by_the_batch(tmp_path
     behavioral_event_state.set_progress(last_rowid=20, db_path=db_path)
     assert behavioral_event_state.get_initialization_boundary(db_path=db_path) == 20
 
-    behavioral_event_state.set_progress(last_rowid=21, db_path=db_path)
+    behavioral_event_state.set_progress(last_rowid=21, consumed_boundary=20, db_path=db_path)
     assert behavioral_event_state.get_initialization_boundary(db_path=db_path) is None
 
 

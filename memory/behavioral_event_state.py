@@ -233,10 +233,11 @@ def get_progress(*, key: str = "behavioral_events", db_path: str = DB_PATH) -> d
 def set_progress(
     *,
     last_rowid: int,
+    consumed_boundary: int | None = None,
     key: str = "behavioral_events",
     db_path: str = DB_PATH,
 ) -> None:
-    """Advance the intake watermark after a fully handled message batch."""
+    """Advance progress and clear only the replay boundary this batch consumed."""
     if int(last_rowid) < 0:
         raise ValueError("behavioral event last_rowid must not be negative")
     init_db(db_path)
@@ -251,10 +252,14 @@ def set_progress(
             """,
             (key, int(last_rowid), datetime.now().isoformat(timespec="seconds")),
         )
-        conn.execute(
-            "DELETE FROM behavioral_event_bootstrap_boundaries WHERE key=? AND last_rowid < ?",
-            (key, int(last_rowid)),
-        )
+        if consumed_boundary is not None and int(consumed_boundary) < int(last_rowid):
+            conn.execute(
+                """
+                DELETE FROM behavioral_event_bootstrap_boundaries
+                WHERE key=? AND last_rowid=?
+                """,
+                (key, int(consumed_boundary)),
+            )
 
 
 def get_initialization_boundary(

@@ -281,6 +281,7 @@ def run_behavioral_event_intake(
     behavioral_event_state.set_progress(
         key=BEHAVIORAL_EVENT_PROGRESS_KEY,
         last_rowid=max_seen,
+        consumed_boundary=pending_boundary,
         **store_kwargs,
     )
     stats["last_rowid_after"] = max_seen

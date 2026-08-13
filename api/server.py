@@ -1654,7 +1654,7 @@ async def upload_file(
             external_content_history_metadata,
         )
         asset_metadata = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
-        append_to_chat_history("user", upload_history_msg)
+        append_to_chat_history("user", upload_history_msg, metadata=asset_metadata)
         append_to_chat_history("assistant", chat_ai_msg, metadata=asset_metadata)
         print("[Security]: upload-derived reply - use trusted user text only for background state")
         enqueue_fast_task(log_exchange, user_caption, "", "Chat_Agent", "web")
