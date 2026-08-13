@@ -56,6 +56,13 @@ def test_pasted_text_upload_reaches_document_summary_without_unbound_error(clien
         assert assistant_call.kwargs["metadata"] == {
             "untrusted_external_tool_names": ["user_provided_asset"]
         }
+        user_call = next(
+            call for call in mock_history.call_args_list
+            if call.args[:1] == ("user",)
+        )
+        assert user_call.kwargs["metadata"] == {
+            "untrusted_external_tool_names": ["user_provided_asset"]
+        }
         assert any(call.args[2] == "" for call in mock_fast_queue.call_args_list)
 
 def test_lifespan_timeout_race(monkeypatch):

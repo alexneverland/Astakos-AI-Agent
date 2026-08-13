@@ -205,11 +205,40 @@ def set_progress(
             INSERT INTO behavioral_event_progress(key, last_rowid, updated_at)
             VALUES (?, ?, ?)
             ON CONFLICT(key) DO UPDATE SET
-                last_rowid=excluded.last_rowid,
+                last_rowid=MAX(behavioral_event_progress.last_rowid, excluded.last_rowid),
                 updated_at=excluded.updated_at
             """,
             (key, int(last_rowid), datetime.now().isoformat(timespec="seconds")),
         )
+
+
+def initialize_progress_if_missing(
+    *,
+    last_rowid: int,
+    key: str = "behavioral_events",
+    db_path: str = DB_PATH,
+) -> dict[str, Any]:
+    """Initialize the existing watermark exactly once for a queued first batch."""
+    if int(last_rowid) < 0:
+        raise ValueError("behavioral event last_rowid must not be negative")
+    init_db(db_path)
+    with _db_lock, _conn(db_path) as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO behavioral_event_progress(key, last_rowid, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (key, int(last_rowid), datetime.now().isoformat(timespec="seconds")),
+        )
+        row = conn.execute(
+            "SELECT last_rowid, updated_at FROM behavioral_event_progress WHERE key=?",
+            (key,),
+        ).fetchone()
+    return {
+        "key": key,
+        "last_rowid": int(row["last_rowid"]),
+        "updated_at": row["updated_at"],
+    }
 
 
 def list_events(

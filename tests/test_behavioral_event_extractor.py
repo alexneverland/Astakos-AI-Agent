@@ -118,6 +118,24 @@ def test_empty_first_run_is_initialized_only_once(tmp_path):
     assert stats["last_rowid_after"] == 1
 
 
+def test_first_background_intake_processes_the_triggering_new_row(tmp_path):
+    """A first-run boundary must not silently baseline the triggering message."""
+    db_path = str(tmp_path / "behavioral_events.db")
+    source = {**_source(), "rowid": 12, "id": "telegram:12", "role": "user", "content": "Î‰Ï€Î¹Î± Ï„ÏƒÎ¯Ï€Î¿Ï…ÏÎ¿"}
+
+    stats = run_behavioral_event_intake(
+        db_path=db_path,
+        max_rowid_loader=lambda: 12,
+        message_loader=lambda after_rowid: [source] if after_rowid == 11 else [],
+        extract_batch=lambda messages: [_extraction()],
+        initialization_rowid=12,
+    )
+
+    assert stats["confirmed"] == 1
+    assert stats["last_rowid_before"] == 11
+    assert stats["last_rowid_after"] == 12
+
+
 def test_intake_persists_only_new_trusted_user_message(tmp_path):
     db_path = str(tmp_path / "behavioral_events.db")
     source = {**_source(), "rowid": 12, "id": "telegram:12"}

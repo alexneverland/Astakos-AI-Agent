@@ -182,6 +182,14 @@ def append_to_chat_history(
         )
         shared_message_id = saved.get("id")
         shared_message_rowid = saved.get("rowid")
+        if role == "user":
+            from services.behavioral_event_scheduler import schedule_persisted_user_intake
+
+            schedule_persisted_user_intake(
+                rowid=shared_message_rowid,
+                metadata=metadata,
+                enqueue_slow_task=enqueue_slow_task,
+            )
         
         _broadcast_ws({
             "type": "new_message",
@@ -206,11 +214,12 @@ def notify_telegram_message(
     agent: str | None = None,
     *,
     metadata: dict | None = None,
-) -> int | None:
+    return_saved: bool = False,
+) -> int | dict[str, int | None] | None:
     """
     Called by the Telegram handler when a message arrives/is sent.
     Saves to the shared SQLite database and notifies the Web UI via WebSocket.
-    Returns the new message id or None if it fails.
+    Returns the display message id, or the persisted-row result when requested.
     """
     now = datetime.now()
     try:
@@ -235,6 +244,8 @@ def notify_telegram_message(
             "time": now.strftime("%H:%M"),
             "content": content,
         })
+        if return_saved:
+            return {"rowid": saved.get("rowid"), "message_id": msg_id}
         return msg_id
     except Exception as e:
         print(f"[ConversationHistory/telegram]: Error write: {e}")
@@ -1643,7 +1654,7 @@ async def upload_file(
             external_content_history_metadata,
         )
         asset_metadata = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
-        append_to_chat_history("user", upload_history_msg)
+        append_to_chat_history("user", upload_history_msg, metadata=asset_metadata)
         append_to_chat_history("assistant", chat_ai_msg, metadata=asset_metadata)
         print("[Security]: upload-derived reply - use trusted user text only for background state")
         enqueue_fast_task(log_exchange, user_caption, "", "Chat_Agent", "web")

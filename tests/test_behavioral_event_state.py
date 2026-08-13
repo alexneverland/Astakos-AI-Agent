@@ -58,6 +58,15 @@ def test_progress_starts_empty_and_updates_independently(tmp_path):
     assert behavioral_event_state.get_progress(db_path=db_path)["last_rowid"] == 77
 
 
+def test_progress_never_moves_backwards_after_a_concurrent_worker_finishes_late(tmp_path):
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    behavioral_event_state.set_progress(last_rowid=77, db_path=db_path)
+    behavioral_event_state.set_progress(last_rowid=42, db_path=db_path)
+
+    assert behavioral_event_state.get_progress(db_path=db_path)["last_rowid"] == 77
+
+
 def test_store_rejects_non_boolean_safety_flags(tmp_path):
     db_path = str(tmp_path / "behavioral_events.db")
 
