@@ -40,6 +40,41 @@ def test_recipe_request_exposes_recipe_tool_but_not_meal_logging() -> None:
     assert [tool.name for tool in selected] == ["recipe_expert", "search_memory"]
 
 
+def test_supported_recipe_words_keep_recipe_tool_available() -> None:
+    """Existing registry terms such as menu and recipe remain usable."""
+    from core.agents import _food_tools_for_latest_user_text
+
+    tools = [_NamedTool("recipe_expert"), _NamedTool("log_meal")]
+
+    assert [tool.name for tool in _food_tools_for_latest_user_text(tools, "Θέλω μενού.")] == [
+        "recipe_expert",
+    ]
+    assert [tool.name for tool in _food_tools_for_latest_user_text(tools, "recipe") ] == [
+        "recipe_expert",
+    ]
+
+
+def test_combined_meal_report_and_recipe_request_exposes_both_food_tools() -> None:
+    """One message may both update history and ask how to make the meal."""
+    from core.agents import _food_tools_for_latest_user_text
+
+    tools = [_NamedTool("recipe_expert"), _NamedTool("log_meal")]
+
+    selected = _food_tools_for_latest_user_text(
+        tools,
+        "Έφαγα carbonara και θέλω τη συνταγή.",
+    )
+
+    assert [tool.name for tool in selected] == ["recipe_expert", "log_meal"]
+
+
+def test_greek_question_mark_does_not_turn_a_question_into_a_meal_report() -> None:
+    """Greek semicolon punctuation must not activate automatic meal logging."""
+    from services.food_intent import is_meal_report
+
+    assert is_meal_report("Τι φάγαμε;") is False
+
+
 def test_direct_meal_report_skips_stale_external_approval(monkeypatch) -> None:
     """A grounded meal report remains automatic despite old web context."""
     from core.approval import approval_check_node

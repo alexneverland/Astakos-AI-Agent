@@ -10,9 +10,12 @@ _MEAL_REPORT_VERBS = frozenset({
     "φαγαμε", "εφαγαμε", "φαγα", "εφαγα", "φαγατε", "εφαγες",
     "μαγειρεψα", "μαγειρεψαμε", "μαγειρεψες", "εφτιαξα", "εφτιαξαμε",
 })
+_QUESTION_MARKS = frozenset({"?", ";", "？"})
 _RECIPE_REQUEST_PHRASES = (
-    "συνταγη", "ιδεα για φαγητο", "τι να φαμε", "τι να μαγειρεψ",
-    "προτεινε", "προταση για φαγητο", "τι να φτιαξ",
+    # Keep the existing recipe capability's documented trigger vocabulary.
+    "συνταγη", "μαγειρευω", "τι να φτιαξω", "τι να μαγειρεψω",
+    "recipe", "μενου", "menu", "μαγειρικη", "τι φαμε",
+    "ιδεα για φαγητο", "προτεινε", "προταση για φαγητο",
 )
 
 
@@ -27,7 +30,7 @@ def _normalize(text: str) -> str:
 
 def is_meal_report(text: str) -> bool:
     """Return whether a statement clearly reports a meal that was eaten/cooked."""
-    if "?" in str(text or ""):
+    if any(mark in str(text or "") for mark in _QUESTION_MARKS):
         return False
     return bool(set(_normalize(text).split()) & _MEAL_REPORT_VERBS)
 

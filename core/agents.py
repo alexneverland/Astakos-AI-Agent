@@ -85,22 +85,24 @@ def _without_stale_external_research_tools(
     ]
 
 
+_FOOD_TOOL_NAMES = frozenset({"recipe_expert", "log_meal"})
+
+
 def _food_tools_for_latest_user_text(tools: list[Any], latest_user_text: str) -> list[Any]:
     """Expose only the food tool justified by the user's latest direct intent."""
     from services.food_intent import is_meal_report, is_recipe_request
 
+    allowed_food_tools: set[str] = set()
     if is_meal_report(latest_user_text):
-        allowed_food_tools = {"log_meal"}
-    elif is_recipe_request(latest_user_text):
-        allowed_food_tools = {"recipe_expert"}
-    else:
-        allowed_food_tools: set[str] = set()
+        allowed_food_tools.add("log_meal")
+    if is_recipe_request(latest_user_text):
+        allowed_food_tools.add("recipe_expert")
 
     return [
         tool
         for tool in tools
-        if getattr(tool, "name", "") not in {"recipe_expert", "log_meal"}
-        or getattr(tool, "name", "") in allowed_food_tools
+        if (tool_name := getattr(tool, "name", "")) not in _FOOD_TOOL_NAMES
+        or tool_name in allowed_food_tools
     ]
 # TOOLS
 from tools.system import (
