@@ -90,12 +90,28 @@ def init_db(db_path: str = DB_PATH) -> None:
         )
         conn.execute(
             """
-            INSERT OR IGNORE INTO behavioral_event_sources(source_message_id, event_id)
-            SELECT source_message_id, MIN(id)
-            FROM behavioral_events
-            GROUP BY source_message_id
+            CREATE TABLE IF NOT EXISTS behavioral_event_schema_state (
+                key TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            )
             """
         )
+        migration = conn.execute(
+            """
+            INSERT OR IGNORE INTO behavioral_event_schema_state(key, applied_at)
+            VALUES ('source_backfill_v1', ?)
+            """,
+            (datetime.now().isoformat(timespec="seconds"),),
+        )
+        if migration.rowcount == 1:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO behavioral_event_sources(source_message_id, event_id)
+                SELECT source_message_id, MIN(id)
+                FROM behavioral_events
+                GROUP BY source_message_id
+                """
+            )
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_behavioral_events_state_date

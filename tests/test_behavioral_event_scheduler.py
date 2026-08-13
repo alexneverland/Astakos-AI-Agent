@@ -127,6 +127,51 @@ def test_background_runner_enqueues_a_named_continuation_for_a_full_page(monkeyp
     assert queued == [(scheduler.run_background_behavioral_event_intake, (None, enqueue))]
 
 
+def test_background_runner_retries_a_transient_extraction_failure_after_a_delay(monkeypatch: Any) -> None:
+    queued: list[tuple[Any, tuple[Any, ...]]] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "services.behavioral_event_extractor",
+        SimpleNamespace(
+            MAX_INTAKE_MESSAGES=100,
+            run_behavioral_event_intake=lambda **_kwargs: {"loaded": 3, "errors": 1},
+        ),
+    )
+    monkeypatch.setattr(scheduler.threading, "Timer", _FakeTimer)
+
+    def enqueue(task: Any, *args: Any) -> None:
+        queued.append((task, args))
+
+    scheduler.run_background_behavioral_event_intake(12, enqueue)
+
+    retry_timer = _FakeTimer.instances[-1]
+    assert retry_timer.started is True
+    retry_timer.fire()
+    assert queued == [(scheduler.run_background_behavioral_event_intake, (None, enqueue, 1))]
+
+
+def test_background_runner_stops_retrying_after_the_bounded_limit(monkeypatch: Any) -> None:
+    queued: list[tuple[Any, tuple[Any, ...]]] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "services.behavioral_event_extractor",
+        SimpleNamespace(
+            MAX_INTAKE_MESSAGES=100,
+            run_behavioral_event_intake=lambda **_kwargs: {"loaded": 3, "errors": 1},
+        ),
+    )
+    monkeypatch.setattr(scheduler.threading, "Timer", _FakeTimer)
+
+    scheduler.run_background_behavioral_event_intake(
+        12,
+        lambda task, *args: queued.append((task, args)),
+        retry_attempt=scheduler.BEHAVIORAL_EVENT_INTAKE_MAX_RETRIES,
+    )
+
+    assert _FakeTimer.instances == []
+    assert queued == []
+
+
 def test_web_persisted_user_message_schedules_local_slow_queue(monkeypatch: Any) -> None:
     import api.server as server
     import memory.conversation_history as history

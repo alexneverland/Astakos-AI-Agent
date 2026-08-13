@@ -9,6 +9,8 @@ from typing import Any, Mapping
 
 
 BEHAVIORAL_EVENT_INTAKE_DEBOUNCE_SECONDS = 15.0
+BEHAVIORAL_EVENT_INTAKE_RETRY_DELAY_SECONDS = 60.0
+BEHAVIORAL_EVENT_INTAKE_MAX_RETRIES = 3
 _logger = logging.getLogger(__name__)
 _scheduler_lock = threading.Lock()
 _pending_timer: threading.Timer | None = None
@@ -19,17 +21,30 @@ _schedule_generation = 0
 def run_background_behavioral_event_intake(
     initialization_rowid: int | None = None,
     enqueue_slow_task: Callable[..., Any] | None = None,
+    retry_attempt: int = 0,
 ) -> None:
     """Run the observational intake without letting a queue worker fail."""
     try:
         from services.behavioral_event_extractor import MAX_INTAKE_MESSAGES, run_behavioral_event_intake
 
         stats = run_behavioral_event_intake(initialization_rowid=initialization_rowid)
-        if (
-            enqueue_slow_task is not None
-            and int(stats.get("errors", 0)) == 0
-            and int(stats.get("loaded", 0)) >= MAX_INTAKE_MESSAGES
-        ):
+        if enqueue_slow_task is None:
+            return
+        if int(stats.get("errors", 0)) > 0:
+            if retry_attempt < BEHAVIORAL_EVENT_INTAKE_MAX_RETRIES:
+                def enqueue_retry() -> None:
+                    enqueue_slow_task(
+                        run_background_behavioral_event_intake,
+                        None,
+                        enqueue_slow_task,
+                        retry_attempt + 1,
+                    )
+
+                timer = threading.Timer(BEHAVIORAL_EVENT_INTAKE_RETRY_DELAY_SECONDS, enqueue_retry)
+                timer.daemon = True
+                timer.start()
+            return
+        if int(stats.get("loaded", 0)) >= MAX_INTAKE_MESSAGES:
             enqueue_slow_task(run_background_behavioral_event_intake, None, enqueue_slow_task)
     except Exception:
         _logger.exception("Behavioral event background intake failed")
