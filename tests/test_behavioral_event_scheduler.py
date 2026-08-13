@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
@@ -58,7 +59,9 @@ def test_rapid_requests_coalesce_into_one_slow_queue_task() -> None:
     first.fire()
     second.fire()
 
-    assert queued == [scheduler.run_background_behavioral_event_intake]
+    assert len(queued) == 1
+    assert isinstance(queued[0], partial)
+    assert queued[0].func is scheduler.run_background_behavioral_event_intake
 
 
 def test_old_timer_cannot_enqueue_after_a_newer_request() -> None:
@@ -73,7 +76,9 @@ def test_old_timer_cannot_enqueue_after_a_newer_request() -> None:
     assert queued == []
 
     second.fire()
-    assert queued == [scheduler.run_background_behavioral_event_intake]
+    assert len(queued) == 1
+    assert isinstance(queued[0], partial)
+    assert queued[0].func is scheduler.run_background_behavioral_event_intake
 
 
 def test_web_persisted_user_message_schedules_local_slow_queue(monkeypatch: Any) -> None:
@@ -83,7 +88,7 @@ def test_web_persisted_user_message_schedules_local_slow_queue(monkeypatch: Any)
     scheduled: list[Any] = []
     monkeypatch.setattr(history, "append_message", lambda **_kwargs: {"id": "web:1", "rowid": 1})
     monkeypatch.setattr(server, "_broadcast_ws", lambda _event: None)
-    monkeypatch.setattr(scheduler, "schedule_behavioral_event_intake", scheduled.append)
+    monkeypatch.setattr(scheduler, "schedule_behavioral_event_intake", lambda enqueue, **_kwargs: scheduled.append(enqueue))
 
     server.append_to_chat_history("user", "I had lunch")
 
@@ -96,7 +101,7 @@ def test_telegram_persisted_user_message_schedules_telegram_slow_queue(monkeypat
 
     scheduled: list[Any] = []
     monkeypatch.setattr(server, "notify_telegram_message", lambda **_kwargs: {"rowid": 7})
-    monkeypatch.setattr(scheduler, "schedule_behavioral_event_intake", scheduled.append)
+    monkeypatch.setattr(scheduler, "schedule_behavioral_event_intake", lambda enqueue, **_kwargs: scheduled.append(enqueue))
 
     bot._append_to_analytics_log("user", "I had lunch")
 
@@ -109,7 +114,7 @@ def test_telegram_deduplicated_user_message_does_not_schedule_intake(monkeypatch
 
     scheduled: list[Any] = []
     monkeypatch.setattr(server, "notify_telegram_message", lambda **_kwargs: {"rowid": None})
-    monkeypatch.setattr(scheduler, "schedule_behavioral_event_intake", scheduled.append)
+    monkeypatch.setattr(scheduler, "schedule_behavioral_event_intake", lambda enqueue, **_kwargs: scheduled.append(enqueue))
 
     bot._append_to_analytics_log("user", "duplicate message")
 
@@ -138,7 +143,22 @@ def test_background_runner_contains_intake_failures(monkeypatch: Any) -> None:
     monkeypatch.setitem(
         sys.modules,
         "services.behavioral_event_extractor",
-        SimpleNamespace(run_behavioral_event_intake=lambda: (_ for _ in ()).throw(RuntimeError("offline"))),
+        SimpleNamespace(run_behavioral_event_intake=lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("offline"))),
     )
 
     scheduler.run_background_behavioral_event_intake()
+
+
+def test_scheduler_failure_is_contained_before_history_callers_observe_it(monkeypatch: Any) -> None:
+    def fail_schedule(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("thread exhaustion")
+
+    monkeypatch.setattr(scheduler, "schedule_behavioral_event_intake", fail_schedule)
+
+    scheduled = scheduler.schedule_persisted_user_intake(
+        rowid=3,
+        metadata=None,
+        enqueue_slow_task=lambda _task: None,
+    )
+
+    assert scheduled is False

@@ -183,6 +183,7 @@ def run_behavioral_event_intake(
     message_loader: Callable[[int], list[Mapping[str, Any]]] | None = None,
     max_rowid_loader: Callable[[], int] | None = None,
     extract_batch: Callable[[list[Mapping[str, Any]]], list[Mapping[str, Any] | None] | None] | None = None,
+    initialization_rowid: int | None = None,
 ) -> dict[str, int | str]:
     """Incrementally store events from new trusted messages without backfilling.
 
@@ -210,7 +211,7 @@ def run_behavioral_event_intake(
         "skipped_invalid": 0,
         "errors": 0,
     }
-    if progress["updated_at"] is None:
+    if progress["updated_at"] is None and initialization_rowid is None:
         behavioral_event_state.set_progress(
             key=BEHAVIORAL_EVENT_PROGRESS_KEY,
             last_rowid=max_rowid,
@@ -218,6 +219,19 @@ def run_behavioral_event_intake(
         )
         stats.update(mode="initialized", last_rowid_after=max_rowid)
         return stats
+    if progress["updated_at"] is None:
+        if isinstance(initialization_rowid, bool) or not isinstance(initialization_rowid, int) or initialization_rowid <= 0:
+            raise ValueError("behavioral event initialization_rowid must be a positive integer")
+        progress = behavioral_event_state.initialize_progress_if_missing(
+            key=BEHAVIORAL_EVENT_PROGRESS_KEY,
+            last_rowid=initialization_rowid - 1,
+            **store_kwargs,
+        )
+        stats.update(
+            mode="initialized_incremental",
+            last_rowid_before=int(progress["last_rowid"]),
+            last_rowid_after=int(progress["last_rowid"]),
+        )
 
     loader = message_loader or (
         lambda after_rowid: load_messages_after_rowid(

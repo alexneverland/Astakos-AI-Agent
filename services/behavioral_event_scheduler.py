@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from functools import partial
 from typing import Any, Mapping
 
 
@@ -12,15 +13,16 @@ BEHAVIORAL_EVENT_INTAKE_DEBOUNCE_SECONDS = 15.0
 _logger = logging.getLogger(__name__)
 _scheduler_lock = threading.Lock()
 _pending_timer: threading.Timer | None = None
+_pending_initialization_rowid: int | None = None
 _schedule_generation = 0
 
 
-def run_background_behavioral_event_intake() -> None:
+def run_background_behavioral_event_intake(*, initialization_rowid: int | None = None) -> None:
     """Run the observational intake without letting a queue worker fail."""
     try:
         from services.behavioral_event_extractor import run_behavioral_event_intake
 
-        run_behavioral_event_intake()
+        run_behavioral_event_intake(initialization_rowid=initialization_rowid)
     except Exception:
         _logger.exception("Behavioral event background intake failed")
 
@@ -30,22 +32,35 @@ def schedule_behavioral_event_intake(
     *,
     delay_seconds: float = BEHAVIORAL_EVENT_INTAKE_DEBOUNCE_SECONDS,
     timer_factory: Callable[[float, Callable[[], None]], threading.Timer] = threading.Timer,
+    initialization_rowid: int | None = None,
 ) -> None:
     """Coalesce rapid user-message writes into one later slow-queue task."""
-    global _pending_timer, _schedule_generation
+    global _pending_timer, _pending_initialization_rowid, _schedule_generation
     with _scheduler_lock:
         _schedule_generation += 1
         generation = _schedule_generation
+        if initialization_rowid is not None:
+            if _pending_initialization_rowid is None:
+                _pending_initialization_rowid = initialization_rowid
+            else:
+                _pending_initialization_rowid = min(_pending_initialization_rowid, initialization_rowid)
         if _pending_timer is not None:
             _pending_timer.cancel()
 
         def enqueue_current_generation() -> None:
-            global _pending_timer
+            global _pending_timer, _pending_initialization_rowid
             with _scheduler_lock:
                 if generation != _schedule_generation:
                     return
+                first_rowid = _pending_initialization_rowid
                 _pending_timer = None
-            enqueue_slow_task(run_background_behavioral_event_intake)
+                _pending_initialization_rowid = None
+            enqueue_slow_task(
+                partial(
+                    run_background_behavioral_event_intake,
+                    initialization_rowid=first_rowid,
+                )
+            )
 
         timer = timer_factory(delay_seconds, enqueue_current_generation)
         timer.daemon = True
@@ -66,15 +81,23 @@ def schedule_persisted_user_intake(
 
     if external_content_source_names(metadata or {}):
         return False
-    schedule_behavioral_event_intake(enqueue_slow_task)
+    try:
+        schedule_behavioral_event_intake(
+            enqueue_slow_task,
+            initialization_rowid=rowid,
+        )
+    except Exception:
+        _logger.exception("Behavioral event intake scheduling failed")
+        return False
     return True
 
 
 def _reset_scheduler_for_tests() -> None:
     """Reset process-local debounce state for deterministic unit tests."""
-    global _pending_timer, _schedule_generation
+    global _pending_timer, _pending_initialization_rowid, _schedule_generation
     with _scheduler_lock:
         if _pending_timer is not None:
             _pending_timer.cancel()
         _pending_timer = None
+        _pending_initialization_rowid = None
         _schedule_generation = 0

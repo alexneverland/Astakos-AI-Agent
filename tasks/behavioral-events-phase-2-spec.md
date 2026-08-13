@@ -17,7 +17,9 @@ blocking a chat response. The existing nightly job remains as a catch-up path.
 ## Design
 
 - A process-local debouncer coalesces repeated enqueue requests into one slow
-  task after a short quiet period.
+  task after a short quiet period. On the first run, it carries the earliest
+  newly persisted row id so intake starts immediately before that boundary
+  instead of silently baselining those new messages.
 - The slow task invokes `run_behavioral_event_intake()` and fails quietly; the
   queue worker must remain healthy.
 - Each process may schedule work independently, but the shared watermark and
