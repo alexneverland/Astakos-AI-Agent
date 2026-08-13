@@ -17,4 +17,5 @@
 ## Checkpoint
 
 - [x] Run focused behavioral-event tests, compile checks, and `git diff --check`.
-- [x] Confirm nightly catch-up remains enabled and no consumer behavior changed.
+- [x] Remove behavioral intake from the nightly analytics job; routine analytics
+  remains enabled and no consumer behavior changed.

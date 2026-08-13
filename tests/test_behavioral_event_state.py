@@ -37,6 +37,19 @@ def test_store_records_confirmed_event_and_rejects_source_replay(tmp_path):
     assert events[0]["item_detail"] == "tsipouro"
 
 
+def test_store_rejects_a_replay_that_changes_the_extracted_event_shape(tmp_path):
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    first = behavioral_event_state.record_event(_event(), db_path=db_path)
+    replay = behavioral_event_state.record_event(
+        _event(event_type="meal", item="pasta", status="consumed"),
+        db_path=db_path,
+    )
+
+    assert replay == {"action": "duplicate_source", "event_id": first["event_id"]}
+    assert len(behavioral_event_state.list_events(db_path=db_path)) == 1
+
+
 def test_store_keeps_candidate_separate_from_confirmed_events(tmp_path):
     db_path = str(tmp_path / "behavioral_events.db")
 
@@ -56,6 +69,24 @@ def test_progress_starts_empty_and_updates_independently(tmp_path):
     behavioral_event_state.set_progress(last_rowid=77, db_path=db_path)
 
     assert behavioral_event_state.get_progress(db_path=db_path)["last_rowid"] == 77
+
+
+def test_progress_never_moves_backwards_after_a_concurrent_worker_finishes_late(tmp_path):
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    behavioral_event_state.set_progress(last_rowid=77, db_path=db_path)
+    behavioral_event_state.set_progress(last_rowid=42, db_path=db_path)
+
+    assert behavioral_event_state.get_progress(db_path=db_path)["last_rowid"] == 77
+
+
+def test_initialization_keeps_the_earliest_cross_process_boundary(tmp_path):
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    behavioral_event_state.initialize_progress_if_missing(last_rowid=19, db_path=db_path)
+    progress = behavioral_event_state.initialize_progress_if_missing(last_rowid=9, db_path=db_path)
+
+    assert progress["last_rowid"] == 9
 
 
 def test_store_rejects_non_boolean_safety_flags(tmp_path):

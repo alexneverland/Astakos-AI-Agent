@@ -5039,12 +5039,6 @@ def job_analytics_engine():
     except Exception as e:
         print(f"[Analytics Job Error]: {e}")
 
-    try:
-        from services.behavioral_event_extractor import run_behavioral_event_intake
-        run_behavioral_event_intake()
-    except Exception as e:
-        print(f"[BehavioralEvents Error]: {e}")
-
 def job_morning_fit_briefing():
     """Morning Google Fit briefing — runs only 08:00–09:00, once."""
     now_hour = datetime.now().hour

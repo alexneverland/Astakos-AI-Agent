@@ -137,24 +137,17 @@ def _event_values(event: Mapping[str, Any]) -> tuple[Any, ...]:
 
 
 def record_event(event: Mapping[str, Any], *, db_path: str = DB_PATH) -> dict[str, Any]:
-    """Persist one validated event, returning a no-op for an identical source replay."""
+    """Persist one validated event, returning a no-op for any source replay."""
     values = _event_values(event)
     init_db(db_path)
-    deduplication_key = (
-        _required_text(event, "source_message_id"),
-        _required_text(event, "event_type"),
-        _optional_text(event, "item"),
-        _required_text(event, "status"),
-        _required_text(event, "event_date"),
-    )
+    source_message_id = _required_text(event, "source_message_id")
     with _db_lock, _conn(db_path) as conn:
         existing = conn.execute(
             """
             SELECT id FROM behavioral_events
-            WHERE source_message_id=? AND event_type=? AND item IS ?
-              AND status=? AND event_date=?
+            WHERE source_message_id=?
             """,
-            deduplication_key,
+            (source_message_id,),
         ).fetchone()
         if existing:
             return {"action": "duplicate_source", "event_id": int(existing["id"])}
@@ -205,7 +198,7 @@ def set_progress(
             INSERT INTO behavioral_event_progress(key, last_rowid, updated_at)
             VALUES (?, ?, ?)
             ON CONFLICT(key) DO UPDATE SET
-                last_rowid=excluded.last_rowid,
+                last_rowid=MAX(behavioral_event_progress.last_rowid, excluded.last_rowid),
                 updated_at=excluded.updated_at
             """,
             (key, int(last_rowid), datetime.now().isoformat(timespec="seconds")),
@@ -218,15 +211,18 @@ def initialize_progress_if_missing(
     key: str = "behavioral_events",
     db_path: str = DB_PATH,
 ) -> dict[str, Any]:
-    """Create an intake watermark once, preserving a concurrent initializer."""
+    """Keep the earliest concurrent bootstrap boundary for background intake."""
     if int(last_rowid) < 0:
         raise ValueError("behavioral event last_rowid must not be negative")
     init_db(db_path)
     with _db_lock, _conn(db_path) as conn:
         conn.execute(
             """
-            INSERT OR IGNORE INTO behavioral_event_progress(key, last_rowid, updated_at)
+            INSERT INTO behavioral_event_progress(key, last_rowid, updated_at)
             VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                last_rowid=MIN(behavioral_event_progress.last_rowid, excluded.last_rowid),
+                updated_at=excluded.updated_at
             """,
             (key, int(last_rowid), datetime.now().isoformat(timespec="seconds")),
         )

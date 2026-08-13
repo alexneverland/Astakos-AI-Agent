@@ -7,12 +7,11 @@ from types import SimpleNamespace
 from typing import Any
 
 
-def test_nightly_analytics_runs_without_invoking_reflection(monkeypatch: Any) -> None:
-    """Keeps passive routine discovery active while Reflection remains paused."""
+def test_nightly_analytics_runs_without_reflection_or_behavioral_intake(monkeypatch: Any) -> None:
+    """Keeps routine discovery active without rescanning behavioral events."""
     import clients.telegram_bot as bot
 
     analytics_calls: list[bool] = []
-    behavioral_event_calls: list[bool] = []
     reflection_calls: list[bool] = []
 
     class ThreeAm:
@@ -33,11 +32,6 @@ def test_nightly_analytics_runs_without_invoking_reflection(monkeypatch: Any) ->
     )
     monkeypatch.setitem(
         sys.modules,
-        "services.behavioral_event_extractor",
-        SimpleNamespace(run_behavioral_event_intake=lambda: behavioral_event_calls.append(True) or {}),
-    )
-    monkeypatch.setitem(
-        sys.modules,
         "services.reflection_engine",
         SimpleNamespace(run_reflection=lambda: reflection_calls.append(True) or {"pending_items": []}),
     )
@@ -45,12 +39,11 @@ def test_nightly_analytics_runs_without_invoking_reflection(monkeypatch: Any) ->
     bot.job_analytics_engine()
 
     assert analytics_calls == [True]
-    assert behavioral_event_calls == [True]
     assert reflection_calls == []
 
 
-def test_behavioral_intake_failure_does_not_block_routine_analytics_notification(monkeypatch: Any) -> None:
-    """Behavioral recording is observational and cannot break routine analytics."""
+def test_nightly_routine_analytics_notification_is_unchanged(monkeypatch: Any) -> None:
+    """Removing behavioral intake does not alter routine analytics notifications."""
     import clients.telegram_bot as bot
 
     class ThreeAm:
@@ -66,19 +59,13 @@ def test_behavioral_intake_failure_does_not_block_routine_analytics_notification
         "services.analytics_engine",
         SimpleNamespace(run_analytics=lambda: {"created": 1, "merged": 0, "detected": 1}),
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "services.behavioral_event_extractor",
-        SimpleNamespace(run_behavioral_event_intake=lambda: (_ for _ in ()).throw(RuntimeError("unavailable"))),
-    )
-
     bot.job_analytics_engine()
 
     assert len(notifications) == 1
 
 
-def test_routine_analytics_failure_does_not_block_behavioral_intake(monkeypatch: Any) -> None:
-    """Behavioral intake is isolated from routine analytics and its notification path."""
+def test_nightly_routine_analytics_failure_is_contained(monkeypatch: Any) -> None:
+    """Routine analytics failures remain contained after intake is decoupled."""
     import clients.telegram_bot as bot
 
     class ThreeAm:
@@ -86,19 +73,10 @@ def test_routine_analytics_failure_does_not_block_behavioral_intake(monkeypatch:
         def now(cls) -> SimpleNamespace:
             return SimpleNamespace(hour=3)
 
-    behavioral_event_calls: list[bool] = []
     monkeypatch.setattr(bot, "datetime", ThreeAm)
     monkeypatch.setitem(
         sys.modules,
         "services.analytics_engine",
         SimpleNamespace(run_analytics=lambda: (_ for _ in ()).throw(RuntimeError("unavailable"))),
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "services.behavioral_event_extractor",
-        SimpleNamespace(run_behavioral_event_intake=lambda: behavioral_event_calls.append(True) or {}),
-    )
-
     bot.job_analytics_engine()
-
-    assert behavioral_event_calls == [True]

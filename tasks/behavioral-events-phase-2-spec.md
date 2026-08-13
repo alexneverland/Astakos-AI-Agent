@@ -3,7 +3,7 @@
 ## Objective
 
 Process newly persisted trusted user messages shortly after they arrive, without
-blocking a chat response. The existing nightly job remains as a catch-up path.
+blocking a chat response. Behavioral intake is not run by the nightly job.
 
 ## Scope
 
@@ -22,9 +22,9 @@ blocking a chat response. The existing nightly job remains as a catch-up path.
   instead of silently baselining those new messages.
 - The slow task invokes `run_behavioral_event_intake()` and fails quietly; the
   queue worker must remain healthy.
-- Each process may schedule work independently, but the shared watermark and
-  event source deduplication keep replay safe. The nightly job remains the
-  recovery path if a process was offline.
+- Each process may schedule work independently. The shared watermark preserves
+  the earliest bootstrap boundary and only advances, while event source
+  deduplication keeps rare cross-process replay safe.
 
 ## Success Criteria
 
@@ -39,5 +39,5 @@ blocking a chat response. The existing nightly job remains as a catch-up path.
 - Always: test the debouncer and both integration call sites before merge.
 - Ask first: changing delay policy, adding an event consumer, backfilling
   history, modifying real databases, or changing routines/prompts.
-- Never: process raw external content, add a per-message synchronous LLM call,
-  or remove the nightly catch-up job in this phase.
+- Never: process raw external content or add a per-message synchronous LLM
+  call.
