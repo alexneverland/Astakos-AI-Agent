@@ -1,0 +1,41 @@
+# Spec: Behavioral Events — Phase 2 Background Intake
+
+## Objective
+
+Process newly persisted trusted user messages shortly after they arrive, without
+blocking a chat response. The existing nightly job remains as a catch-up path.
+
+## Scope
+
+- Schedule one debounced intake task after a user message is persisted.
+- Reuse the existing validated watermark-based intake and its provenance filter.
+- Reuse the existing slow queues in Web and Telegram; do not add a scheduler,
+  thread, dependency, or database schema.
+- Keep the work observational: no prompt, routine, Chroma, profile, reminder,
+  or user-visible changes.
+
+## Design
+
+- A process-local debouncer coalesces repeated enqueue requests into one slow
+  task after a short quiet period.
+- The slow task invokes `run_behavioral_event_intake()` and fails quietly; the
+  queue worker must remain healthy.
+- Each process may schedule work independently, but the shared watermark and
+  event source deduplication keep replay safe. The nightly job remains the
+  recovery path if a process was offline.
+
+## Success Criteria
+
+- A persisted trusted user message schedules non-blocking intake in Web and
+  Telegram's normal graph flows.
+- Several rapid schedules produce one queued invocation per process window.
+- A task failure neither blocks the queue nor changes user-facing behavior.
+- Existing provenance rules still reject externally-derived history rows.
+
+## Boundaries
+
+- Always: test the debouncer and both integration call sites before merge.
+- Ask first: changing delay policy, adding an event consumer, backfilling
+  history, modifying real databases, or changing routines/prompts.
+- Never: process raw external content, add a per-message synchronous LLM call,
+  or remove the nightly catch-up job in this phase.

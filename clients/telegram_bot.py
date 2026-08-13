@@ -1553,12 +1553,23 @@ def _append_to_analytics_log(
         try:
             # notify_telegram_message: saves to shared SQLite + WebSocket broadcast to Web UI
             from api.server import notify_telegram_message
-            return notify_telegram_message(
+            saved = notify_telegram_message(
                 role=shared_role,
                 content=content,
                 agent=agent,
                 metadata=metadata,
+                return_saved=True,
             )
+            rowid = saved.get("rowid") if isinstance(saved, dict) else None
+            if shared_role == "user":
+                from services.behavioral_event_scheduler import schedule_persisted_user_intake
+
+                schedule_persisted_user_intake(
+                    rowid=rowid,
+                    metadata=metadata,
+                    enqueue_slow_task=enqueue_slow_task,
+                )
+            return rowid
         except Exception:
             # Fallback: direct append without broadcast (if the server is not running)
             from memory.conversation_history import append_message
@@ -1570,7 +1581,16 @@ def _append_to_analytics_log(
                 agent=agent,
                 metadata=metadata,
             )
-            return saved.get("rowid") if isinstance(saved, dict) else None
+            rowid = saved.get("rowid") if isinstance(saved, dict) else None
+            if shared_role == "user":
+                from services.behavioral_event_scheduler import schedule_persisted_user_intake
+
+                schedule_persisted_user_intake(
+                    rowid=rowid,
+                    metadata=metadata,
+                    enqueue_slow_task=enqueue_slow_task,
+                )
+            return rowid
     except Exception as e:
         print(f"[ConversationHistory/telegram]: Error shared write: {e}")
         return None
