@@ -35,7 +35,7 @@ def run_background_behavioral_event_intake(
                 def enqueue_retry() -> None:
                     enqueue_slow_task(
                         run_background_behavioral_event_intake,
-                        None,
+                        initialization_rowid,
                         enqueue_slow_task,
                         retry_attempt + 1,
                     )

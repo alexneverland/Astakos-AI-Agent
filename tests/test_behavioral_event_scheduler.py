@@ -147,7 +147,7 @@ def test_background_runner_retries_a_transient_extraction_failure_after_a_delay(
     retry_timer = _FakeTimer.instances[-1]
     assert retry_timer.started is True
     retry_timer.fire()
-    assert queued == [(scheduler.run_background_behavioral_event_intake, (None, enqueue, 1))]
+    assert queued == [(scheduler.run_background_behavioral_event_intake, (12, enqueue, 1))]
 
 
 def test_background_runner_stops_retrying_after_the_bounded_limit(monkeypatch: Any) -> None:
