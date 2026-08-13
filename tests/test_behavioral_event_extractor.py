@@ -136,54 +136,6 @@ def test_first_background_intake_processes_the_triggering_new_row(tmp_path):
     assert stats["last_rowid_after"] == 12
 
 
-def test_delayed_earlier_boundary_replays_the_skipped_row_after_progress_advances(tmp_path):
-    from memory import behavioral_event_state
-
-    db_path = str(tmp_path / "behavioral_events.db")
-    source = {**_source(), "rowid": 10, "id": "telegram:10", "role": "user", "content": "I had lunch"}
-    behavioral_event_state.set_progress(last_rowid=20, db_path=db_path)
-    behavioral_event_state.register_initialization_boundary(last_rowid=9, db_path=db_path)
-
-    stats = run_behavioral_event_intake(
-        db_path=db_path,
-        max_rowid_loader=lambda: 20,
-        message_loader=lambda after_rowid: [source] if after_rowid == 9 else [],
-        extract_batch=lambda messages: [_extraction()],
-    )
-
-    assert stats["confirmed"] == 1
-    assert stats["last_rowid_before"] == 9
-    assert behavioral_event_state.get_initialization_boundary(db_path=db_path) is None
-
-
-def test_delayed_replay_keeps_its_cursor_across_multiple_intake_pages(tmp_path):
-    from memory import behavioral_event_state
-
-    db_path = str(tmp_path / "behavioral_events.db")
-    behavioral_event_state.set_progress(last_rowid=250, db_path=db_path)
-    behavioral_event_state.register_initialization_boundary(last_rowid=9, db_path=db_path)
-
-    def rows_after(after_rowid: int) -> list[dict[str, object]]:
-        end = min(after_rowid + 100, 250)
-        return [
-            {**_source(), "rowid": rowid, "id": f"telegram:{rowid}", "role": "user", "content": "update"}
-            for rowid in range(after_rowid + 1, end + 1)
-        ]
-
-    for expected_after_rowid in (9, 109, 209):
-        stats = run_behavioral_event_intake(
-            db_path=db_path,
-            max_rowid_loader=lambda: 250,
-            message_loader=lambda after_rowid, expected=expected_after_rowid: (
-                rows_after(after_rowid) if after_rowid == expected else []
-            ),
-            extract_batch=lambda messages: [None] * len(messages),
-        )
-        assert stats["last_rowid_before"] == expected_after_rowid
-
-    assert behavioral_event_state.get_pending_replay(db_path=db_path) is None
-
-
 def test_intake_persists_only_new_trusted_user_message(tmp_path):
     db_path = str(tmp_path / "behavioral_events.db")
     source = {**_source(), "rowid": 12, "id": "telegram:12"}

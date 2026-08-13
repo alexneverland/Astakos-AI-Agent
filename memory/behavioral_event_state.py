@@ -74,56 +74,6 @@ def init_db(db_path: str = DB_PATH) -> None:
         )
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS behavioral_event_bootstrap_boundaries (
-                key TEXT PRIMARY KEY,
-                last_rowid INTEGER NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS behavioral_event_replay_state (
-                key TEXT PRIMARY KEY,
-                boundary_rowid INTEGER NOT NULL,
-                cursor_rowid INTEGER NOT NULL,
-                target_rowid INTEGER NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS behavioral_event_sources (
-                source_message_id TEXT PRIMARY KEY,
-                event_id INTEGER NOT NULL REFERENCES behavioral_events(id)
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS behavioral_event_schema_state (
-                key TEXT PRIMARY KEY,
-                applied_at TEXT NOT NULL
-            )
-            """
-        )
-        migration = conn.execute(
-            """
-            INSERT OR IGNORE INTO behavioral_event_schema_state(key, applied_at)
-            VALUES ('source_backfill_v1', ?)
-            """,
-            (datetime.now().isoformat(timespec="seconds"),),
-        )
-        if migration.rowcount == 1:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO behavioral_event_sources(source_message_id, event_id)
-                SELECT source_message_id, MIN(id)
-                FROM behavioral_events
-                GROUP BY source_message_id
-                """
-            )
-        conn.execute(
-            """
             CREATE INDEX IF NOT EXISTS idx_behavioral_events_state_date
             ON behavioral_events(record_state, event_date DESC)
             """
@@ -187,24 +137,27 @@ def _event_values(event: Mapping[str, Any]) -> tuple[Any, ...]:
 
 
 def record_event(event: Mapping[str, Any], *, db_path: str = DB_PATH) -> dict[str, Any]:
-    """Persist one validated event, returning a no-op for any source replay."""
+    """Persist one validated event, returning a no-op for an identical source replay."""
     values = _event_values(event)
     init_db(db_path)
-    source_message_id = _required_text(event, "source_message_id")
+    deduplication_key = (
+        _required_text(event, "source_message_id"),
+        _required_text(event, "event_type"),
+        _optional_text(event, "item"),
+        _required_text(event, "status"),
+        _required_text(event, "event_date"),
+    )
     with _db_lock, _conn(db_path) as conn:
-        claim = conn.execute(
+        existing = conn.execute(
             """
-            INSERT OR IGNORE INTO behavioral_event_sources(source_message_id, event_id)
-            VALUES (?, 0)
+            SELECT id FROM behavioral_events
+            WHERE source_message_id=? AND event_type=? AND item IS ?
+              AND status=? AND event_date=?
             """,
-            (source_message_id,),
-        )
-        if claim.rowcount == 0:
-            existing = conn.execute(
-                "SELECT event_id FROM behavioral_event_sources WHERE source_message_id=?",
-                (source_message_id,),
-            ).fetchone()
-            return {"action": "duplicate_source", "event_id": int(existing["event_id"])}
+            deduplication_key,
+        ).fetchone()
+        if existing:
+            return {"action": "duplicate_source", "event_id": int(existing["id"])}
         cursor = conn.execute(
             """
             INSERT INTO behavioral_events (
@@ -215,10 +168,6 @@ def record_event(event: Mapping[str, Any], *, db_path: str = DB_PATH) -> dict[st
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             values,
-        )
-        conn.execute(
-            "UPDATE behavioral_event_sources SET event_id=? WHERE source_message_id=?",
-            (int(cursor.lastrowid), source_message_id),
         )
     return {"action": "recorded", "event_id": int(cursor.lastrowid)}
 
@@ -243,11 +192,10 @@ def get_progress(*, key: str = "behavioral_events", db_path: str = DB_PATH) -> d
 def set_progress(
     *,
     last_rowid: int,
-    consumed_boundary: int | None = None,
     key: str = "behavioral_events",
     db_path: str = DB_PATH,
 ) -> None:
-    """Advance progress and clear only the replay boundary this batch consumed."""
+    """Advance the intake watermark after a fully handled message batch."""
     if int(last_rowid) < 0:
         raise ValueError("behavioral event last_rowid must not be negative")
     init_db(db_path)
@@ -262,138 +210,6 @@ def set_progress(
             """,
             (key, int(last_rowid), datetime.now().isoformat(timespec="seconds")),
         )
-        if consumed_boundary is not None and int(consumed_boundary) < int(last_rowid):
-            conn.execute(
-                """
-                DELETE FROM behavioral_event_bootstrap_boundaries
-                WHERE key=? AND last_rowid=?
-                """,
-                (key, int(consumed_boundary)),
-            )
-
-
-def get_pending_replay(
-    *,
-    key: str = "behavioral_events",
-    db_path: str = DB_PATH,
-) -> dict[str, int] | None:
-    """Return a delayed-boundary replay cursor, if an older row arrived late."""
-    init_db(db_path)
-    with _conn(db_path) as conn:
-        row = conn.execute(
-            """
-            SELECT boundary_rowid, cursor_rowid, target_rowid
-            FROM behavioral_event_replay_state WHERE key=?
-            """,
-            (key,),
-        ).fetchone()
-    if row is None:
-        return None
-    return {
-        "boundary_rowid": int(row["boundary_rowid"]),
-        "cursor_rowid": int(row["cursor_rowid"]),
-        "target_rowid": int(row["target_rowid"]),
-    }
-
-
-def advance_pending_replay(
-    *,
-    cursor_rowid: int,
-    expected_boundary_rowid: int,
-    expected_cursor_rowid: int,
-    key: str = "behavioral_events",
-    db_path: str = DB_PATH,
-) -> bool:
-    """Advance only the replay snapshot consumed by the current worker."""
-    init_db(db_path)
-    with _db_lock, _conn(db_path) as conn:
-        updated = conn.execute(
-            """
-            UPDATE behavioral_event_replay_state
-            SET cursor_rowid=MAX(cursor_rowid, ?)
-            WHERE key=? AND boundary_rowid=? AND cursor_rowid=?
-            """,
-            (
-                int(cursor_rowid),
-                key,
-                int(expected_boundary_rowid),
-                int(expected_cursor_rowid),
-            ),
-        )
-        if updated.rowcount != 1:
-            return False
-        conn.execute(
-            """
-            DELETE FROM behavioral_event_replay_state
-            WHERE key=? AND cursor_rowid >= target_rowid
-            """,
-            (key,),
-        )
-    return True
-
-
-def get_initialization_boundary(
-    *,
-    key: str = "behavioral_events",
-    db_path: str = DB_PATH,
-) -> int | None:
-    """Return the earliest pending replay boundary, if one is registered."""
-    init_db(db_path)
-    with _conn(db_path) as conn:
-        row = conn.execute(
-            "SELECT last_rowid FROM behavioral_event_bootstrap_boundaries WHERE key=?",
-            (key,),
-        ).fetchone()
-    return int(row["last_rowid"]) if row is not None else None
-
-
-def register_initialization_boundary(
-    *,
-    last_rowid: int,
-    key: str = "behavioral_events",
-    db_path: str = DB_PATH,
-) -> dict[str, Any]:
-    """Persist the earliest newly written row before background intake runs."""
-    if int(last_rowid) < 0:
-        raise ValueError("behavioral event last_rowid must not be negative")
-    init_db(db_path)
-    with _db_lock, _conn(db_path) as conn:
-        progress = conn.execute(
-            "SELECT last_rowid, updated_at FROM behavioral_event_progress WHERE key=?",
-            (key,),
-        ).fetchone()
-        if progress is not None and int(last_rowid) < int(progress["last_rowid"]):
-            conn.execute(
-                """
-                INSERT INTO behavioral_event_replay_state(
-                    key, boundary_rowid, cursor_rowid, target_rowid
-                ) VALUES (?, ?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET
-                    boundary_rowid=MIN(behavioral_event_replay_state.boundary_rowid, excluded.boundary_rowid),
-                    cursor_rowid=MIN(behavioral_event_replay_state.cursor_rowid, excluded.cursor_rowid),
-                    target_rowid=MAX(behavioral_event_replay_state.target_rowid, excluded.target_rowid)
-                """,
-                (key, int(last_rowid), int(last_rowid), int(progress["last_rowid"])),
-            )
-            replay = conn.execute(
-                "SELECT boundary_rowid FROM behavioral_event_replay_state WHERE key=?",
-                (key,),
-            ).fetchone()
-            return {"key": key, "last_rowid": int(replay["boundary_rowid"]), "updated_at": progress["updated_at"]}
-        conn.execute(
-            """
-            INSERT INTO behavioral_event_bootstrap_boundaries(key, last_rowid)
-            VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET
-                last_rowid=MIN(behavioral_event_bootstrap_boundaries.last_rowid, excluded.last_rowid)
-            """,
-            (key, int(last_rowid)),
-        )
-        boundary = conn.execute(
-            "SELECT last_rowid FROM behavioral_event_bootstrap_boundaries WHERE key=?",
-            (key,),
-        ).fetchone()
-    return {"key": key, "last_rowid": int(boundary["last_rowid"]), "updated_at": None}
 
 
 def initialize_progress_if_missing(
@@ -402,38 +218,26 @@ def initialize_progress_if_missing(
     key: str = "behavioral_events",
     db_path: str = DB_PATH,
 ) -> dict[str, Any]:
-    """Return the durable bootstrap boundary without regressing progress."""
+    """Initialize the existing watermark exactly once for a queued first batch."""
     if int(last_rowid) < 0:
         raise ValueError("behavioral event last_rowid must not be negative")
     init_db(db_path)
     with _db_lock, _conn(db_path) as conn:
-        progress = conn.execute(
-            "SELECT last_rowid, updated_at FROM behavioral_event_progress WHERE key=?",
-            (key,),
-        ).fetchone()
-        if progress is not None:
-            return {
-                "key": key,
-                "last_rowid": int(progress["last_rowid"]),
-                "updated_at": progress["updated_at"],
-            }
         conn.execute(
             """
-            INSERT INTO behavioral_event_bootstrap_boundaries(key, last_rowid)
-            VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET
-                last_rowid=MIN(behavioral_event_bootstrap_boundaries.last_rowid, excluded.last_rowid)
+            INSERT OR IGNORE INTO behavioral_event_progress(key, last_rowid, updated_at)
+            VALUES (?, ?, ?)
             """,
-            (key, int(last_rowid)),
+            (key, int(last_rowid), datetime.now().isoformat(timespec="seconds")),
         )
         row = conn.execute(
-            "SELECT last_rowid FROM behavioral_event_bootstrap_boundaries WHERE key=?",
+            "SELECT last_rowid, updated_at FROM behavioral_event_progress WHERE key=?",
             (key,),
         ).fetchone()
     return {
         "key": key,
         "last_rowid": int(row["last_rowid"]),
-        "updated_at": None,
+        "updated_at": row["updated_at"],
     }
 
 

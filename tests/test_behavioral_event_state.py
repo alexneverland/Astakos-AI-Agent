@@ -37,19 +37,6 @@ def test_store_records_confirmed_event_and_rejects_source_replay(tmp_path):
     assert events[0]["item_detail"] == "tsipouro"
 
 
-def test_store_rejects_a_replay_that_changes_the_extracted_event_shape(tmp_path):
-    db_path = str(tmp_path / "behavioral_events.db")
-
-    first = behavioral_event_state.record_event(_event(), db_path=db_path)
-    replay = behavioral_event_state.record_event(
-        _event(event_type="meal", item="pasta", status="consumed"),
-        db_path=db_path,
-    )
-
-    assert replay == {"action": "duplicate_source", "event_id": first["event_id"]}
-    assert len(behavioral_event_state.list_events(db_path=db_path)) == 1
-
-
 def test_store_keeps_candidate_separate_from_confirmed_events(tmp_path):
     db_path = str(tmp_path / "behavioral_events.db")
 
@@ -78,113 +65,6 @@ def test_progress_never_moves_backwards_after_a_concurrent_worker_finishes_late(
     behavioral_event_state.set_progress(last_rowid=42, db_path=db_path)
 
     assert behavioral_event_state.get_progress(db_path=db_path)["last_rowid"] == 77
-
-
-def test_initialization_keeps_the_earliest_cross_process_boundary(tmp_path):
-    db_path = str(tmp_path / "behavioral_events.db")
-
-    behavioral_event_state.initialize_progress_if_missing(last_rowid=19, db_path=db_path)
-    progress = behavioral_event_state.initialize_progress_if_missing(last_rowid=9, db_path=db_path)
-
-    assert progress["last_rowid"] == 9
-
-
-def test_completed_progress_is_not_lowered_by_a_delayed_bootstrap_boundary(tmp_path):
-    db_path = str(tmp_path / "behavioral_events.db")
-
-    behavioral_event_state.initialize_progress_if_missing(last_rowid=19, db_path=db_path)
-    behavioral_event_state.set_progress(last_rowid=27, db_path=db_path)
-    delayed = behavioral_event_state.initialize_progress_if_missing(last_rowid=9, db_path=db_path)
-
-    assert delayed["last_rowid"] == 27
-
-
-def test_registered_bootstrap_boundary_keeps_the_earliest_persisted_row(tmp_path):
-    db_path = str(tmp_path / "behavioral_events.db")
-
-    behavioral_event_state.register_initialization_boundary(last_rowid=19, db_path=db_path)
-    boundary = behavioral_event_state.register_initialization_boundary(last_rowid=9, db_path=db_path)
-
-    assert boundary["last_rowid"] == 9
-
-
-def test_delayed_boundary_is_retained_after_progress_has_advanced(tmp_path):
-    db_path = str(tmp_path / "behavioral_events.db")
-
-    behavioral_event_state.set_progress(last_rowid=20, db_path=db_path)
-    behavioral_event_state.register_initialization_boundary(last_rowid=9, db_path=db_path)
-
-    replay = behavioral_event_state.get_pending_replay(db_path=db_path)
-    assert replay == {"boundary_rowid": 9, "cursor_rowid": 9, "target_rowid": 20}
-
-
-def test_advancing_progress_clears_only_boundaries_covered_by_the_batch(tmp_path):
-    db_path = str(tmp_path / "behavioral_events.db")
-
-    behavioral_event_state.register_initialization_boundary(last_rowid=20, db_path=db_path)
-    behavioral_event_state.set_progress(last_rowid=20, db_path=db_path)
-    assert behavioral_event_state.get_initialization_boundary(db_path=db_path) == 20
-
-    behavioral_event_state.set_progress(last_rowid=21, consumed_boundary=20, db_path=db_path)
-    assert behavioral_event_state.get_initialization_boundary(db_path=db_path) is None
-
-
-def test_replay_cursor_is_retained_until_it_reaches_the_original_progress_target(tmp_path):
-    db_path = str(tmp_path / "behavioral_events.db")
-
-    behavioral_event_state.set_progress(last_rowid=250, db_path=db_path)
-    behavioral_event_state.register_initialization_boundary(last_rowid=9, db_path=db_path)
-    initial_replay = behavioral_event_state.get_pending_replay(db_path=db_path)
-    assert initial_replay is not None
-    behavioral_event_state.advance_pending_replay(
-        cursor_rowid=109,
-        expected_boundary_rowid=initial_replay["boundary_rowid"],
-        expected_cursor_rowid=initial_replay["cursor_rowid"],
-        db_path=db_path,
-    )
-
-    assert behavioral_event_state.get_pending_replay(db_path=db_path) == {
-        "boundary_rowid": 9,
-        "cursor_rowid": 109,
-        "target_rowid": 250,
-    }
-
-    replay = behavioral_event_state.get_pending_replay(db_path=db_path)
-    assert replay is not None
-    behavioral_event_state.advance_pending_replay(
-        cursor_rowid=250,
-        expected_boundary_rowid=replay["boundary_rowid"],
-        expected_cursor_rowid=replay["cursor_rowid"],
-        db_path=db_path,
-    )
-    assert behavioral_event_state.get_pending_replay(db_path=db_path) is None
-
-
-def test_replay_advance_does_not_skip_a_newly_earlier_boundary(tmp_path):
-    """A worker may advance only the replay snapshot it actually consumed."""
-    db_path = str(tmp_path / "behavioral_events.db")
-
-    behavioral_event_state.set_progress(last_rowid=250, db_path=db_path)
-    behavioral_event_state.register_initialization_boundary(last_rowid=9, db_path=db_path)
-    consumed_replay = behavioral_event_state.get_pending_replay(db_path=db_path)
-    assert consumed_replay is not None
-
-    # A concurrent persistence path discovers an older unprocessed row.
-    behavioral_event_state.register_initialization_boundary(last_rowid=4, db_path=db_path)
-
-    advanced = behavioral_event_state.advance_pending_replay(
-        cursor_rowid=109,
-        expected_boundary_rowid=consumed_replay["boundary_rowid"],
-        expected_cursor_rowid=consumed_replay["cursor_rowid"],
-        db_path=db_path,
-    )
-
-    assert advanced is False
-    assert behavioral_event_state.get_pending_replay(db_path=db_path) == {
-        "boundary_rowid": 4,
-        "cursor_rowid": 4,
-        "target_rowid": 250,
-    }
 
 
 def test_store_rejects_non_boolean_safety_flags(tmp_path):

@@ -17,14 +17,14 @@ blocking a chat response. Behavioral intake is not run by the nightly job.
 ## Design
 
 - A process-local debouncer coalesces repeated enqueue requests into one slow
-  task after a short quiet period. On the first run, it carries the earliest
+  task during the queue window before that task runs. On the first run, it carries the earliest
   newly persisted row id so intake starts immediately before that boundary
   instead of silently baselining those new messages.
 - The slow task invokes `run_behavioral_event_intake()` and fails quietly; the
   queue worker must remain healthy.
-- Each process may schedule work independently. The shared watermark preserves
-  the earliest bootstrap boundary and only advances, while event source
-  deduplication keeps rare cross-process replay safe.
+- Each process may schedule work independently. The existing watermark only
+  advances, while the existing event uniqueness rule makes identical replayed
+  extractions a no-op.
 
 ## Success Criteria
 
