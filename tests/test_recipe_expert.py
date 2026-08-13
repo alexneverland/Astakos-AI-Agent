@@ -113,7 +113,7 @@ def test_recipe_expert_saves_named_recipe(monkeypatch):
     assert len(saved_calls) == 1
     assert saved_calls[0][0] == "Carbonara"
     assert "Here is your recipe: *Carbonara*" in saved_calls[0][1]
-    assert "[SYSTEM_INSTRUCTION" in result
+    assert result == "Here is your recipe: *Carbonara*"
 
 
 def test_recipe_expert_forwards_external_provenance_for_named_recipe(monkeypatch):
@@ -164,4 +164,4 @@ def test_recipe_expert_returns_text_on_save_failure(monkeypatch):
     )
 
     assert "Here is your recipe: *Failed Save*" in result
-    assert "[SYSTEM_INSTRUCTION" in result
+    assert result == "Here is your recipe: *Failed Save*"
