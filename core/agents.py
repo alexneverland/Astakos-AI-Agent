@@ -83,6 +83,27 @@ def _without_stale_external_research_tools(
         for tool in tools
         if getattr(tool, "name", "") not in stale_research_tools
     ]
+
+
+_FOOD_TOOL_NAMES = frozenset({"recipe_expert", "log_meal"})
+
+
+def _food_tools_for_latest_user_text(tools: list[Any], latest_user_text: str) -> list[Any]:
+    """Expose only the food tool justified by the user's latest direct intent."""
+    from services.food_intent import is_meal_report, is_recipe_request
+
+    allowed_food_tools: set[str] = set()
+    if is_meal_report(latest_user_text):
+        allowed_food_tools.add("log_meal")
+    if is_recipe_request(latest_user_text):
+        allowed_food_tools.add("recipe_expert")
+
+    return [
+        tool
+        for tool in tools
+        if (tool_name := getattr(tool, "name", "")) not in _FOOD_TOOL_NAMES
+        or tool_name in allowed_food_tools
+    ]
 # TOOLS
 from tools.system import (
     search_memory, save_to_memory, delete_from_memory, retrieve_photo,
@@ -439,6 +460,10 @@ def chat_agent_node(state: AgentState):
         static_chat_tools,
         latest_user_text,
     )
+    static_chat_tools = _food_tools_for_latest_user_text(
+        static_chat_tools,
+        latest_user_text,
+    )
     draft_tool_reason = None
     # Tool results can contain routine names such as "message".  Only the
     # latest direct user turn may authorize creating or editing a draft.
@@ -490,6 +515,14 @@ def home_agent_node(state):
 
     # [MASTRO-SHIELD]: Cleaning up orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
+    latest_user_text = next(
+        (
+            clean_message(getattr(message, "content", ""))
+            for message in reversed(history)
+            if getattr(message, "type", "") == "human"
+        ),
+        "",
+    )
 
     static_tools_to_bind = [
         get_current_location,
@@ -499,6 +532,10 @@ def home_agent_node(state):
         google_calendar_tool, google_tasks_tool, recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
         get_fit_summary, manage_context_flag
     ]
+    static_tools_to_bind = _food_tools_for_latest_user_text(
+        static_tools_to_bind,
+        latest_user_text,
+    )
     from core.agent_tools import get_registered_tools_for_agent
     tools_to_bind = get_registered_tools_for_agent("Home_Agent", static_tools_to_bind)
 

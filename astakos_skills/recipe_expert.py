@@ -139,7 +139,7 @@ def recipe_expert(
                     save_generated_recipe(recipe_name, recipe_text)
             except (OSError, RecipeLibraryError) as e:
                 print(f"⚠️ Failed to save recipe to library: {e}")
-        return f"[SYSTEM_INSTRUCTION: YOU MUST copy-paste the ENTIRE recipe/instruction below into your final answer to the user. DO NOT say 'I generated the recipe', WRITE IT! PASTE IT HERE:]\n\n{recipe_text}"
+        return recipe_text
     except Exception as e:
         return t("skills.recipe_expert.msg_chef_error", e=str(e))
 

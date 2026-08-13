@@ -143,6 +143,31 @@ def _is_explicit_messenger_draft_creation(
             )
     return False
 
+
+def _is_direct_user_meal_log(
+    tool_call: ToolCall,
+    prior_messages: Sequence[BaseMessage],
+) -> bool:
+    """Allow only a grounded direct meal report to bypass stale provenance."""
+    if tool_call.get("name") != "log_meal":
+        return False
+
+    from core.untrusted_content import external_content_source_names, is_direct_user_message
+    from services.food_intent import is_meal_report
+
+    meal_name = str((tool_call.get("args") or {}).get("meal_name", "")).strip()
+    if not meal_name:
+        return False
+
+    for message in reversed(prior_messages):
+        if not is_direct_user_message(message):
+            continue
+        if external_content_source_names(getattr(message, "additional_kwargs", {})):
+            return False
+        user_text = str(getattr(message, "content", ""))
+        return is_meal_report(user_text) and meal_name.casefold() in user_text.casefold()
+    return False
+
 def is_critical(tc: dict) -> bool:
     return _effective_risk(tc) == "CRITICAL"
 
@@ -368,6 +393,7 @@ def approval_check_node(state):
             external_content_is_active
             and not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
             and not _is_explicit_messenger_draft_creation(tc, prior_messages)
+            and not _is_direct_user_meal_log(tc, prior_messages)
             and tc["id"] not in blocked_call_ids
         )
     }
