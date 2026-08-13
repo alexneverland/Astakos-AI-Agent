@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
-from functools import partial
 from typing import Any, Mapping
 
 
@@ -17,7 +16,7 @@ _pending_initialization_rowid: int | None = None
 _schedule_generation = 0
 
 
-def run_background_behavioral_event_intake(*, initialization_rowid: int | None = None) -> None:
+def run_background_behavioral_event_intake(initialization_rowid: int | None = None) -> None:
     """Run the observational intake without letting a queue worker fail."""
     try:
         from services.behavioral_event_extractor import run_behavioral_event_intake
@@ -28,7 +27,7 @@ def run_background_behavioral_event_intake(*, initialization_rowid: int | None =
 
 
 def schedule_behavioral_event_intake(
-    enqueue_slow_task: Callable[[Callable[[], None]], Any],
+    enqueue_slow_task: Callable[..., Any],
     *,
     delay_seconds: float = BEHAVIORAL_EVENT_INTAKE_DEBOUNCE_SECONDS,
     timer_factory: Callable[[float, Callable[[], None]], threading.Timer] = threading.Timer,
@@ -55,12 +54,9 @@ def schedule_behavioral_event_intake(
                 first_rowid = _pending_initialization_rowid
                 _pending_timer = None
                 _pending_initialization_rowid = None
-            enqueue_slow_task(
-                partial(
-                    run_background_behavioral_event_intake,
-                    initialization_rowid=first_rowid,
-                )
-            )
+            # The queue workers log ``task_func.__name__`` before invocation,
+            # so enqueue the named runner and its argument separately.
+            enqueue_slow_task(run_background_behavioral_event_intake, first_rowid)
 
         timer = timer_factory(delay_seconds, enqueue_current_generation)
         timer.daemon = True
@@ -72,7 +68,7 @@ def schedule_persisted_user_intake(
     *,
     rowid: int | None,
     metadata: Mapping[str, Any] | None,
-    enqueue_slow_task: Callable[[Callable[[], None]], Any],
+    enqueue_slow_task: Callable[..., Any],
 ) -> bool:
     """Schedule intake only for a newly persisted, provenance-free user row."""
     if isinstance(rowid, bool) or not isinstance(rowid, int) or rowid <= 0:

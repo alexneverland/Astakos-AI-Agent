@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
@@ -39,15 +38,18 @@ def setup_function() -> None:
 
 
 def test_rapid_requests_coalesce_into_one_slow_queue_task() -> None:
-    queued: list[Any] = []
+    queued: list[tuple[Any, tuple[Any, ...]]] = []
+
+    def enqueue(task: Any, *args: Any) -> None:
+        queued.append((task, args))
 
     scheduler.schedule_behavioral_event_intake(
-        queued.append,
+        enqueue,
         delay_seconds=10,
         timer_factory=_FakeTimer,
     )
     scheduler.schedule_behavioral_event_intake(
-        queued.append,
+        enqueue,
         delay_seconds=10,
         timer_factory=_FakeTimer,
     )
@@ -60,16 +62,18 @@ def test_rapid_requests_coalesce_into_one_slow_queue_task() -> None:
     second.fire()
 
     assert len(queued) == 1
-    assert isinstance(queued[0], partial)
-    assert queued[0].func is scheduler.run_background_behavioral_event_intake
+    assert queued == [(scheduler.run_background_behavioral_event_intake, (None,))]
 
 
 def test_old_timer_cannot_enqueue_after_a_newer_request() -> None:
-    queued: list[Any] = []
+    queued: list[tuple[Any, tuple[Any, ...]]] = []
 
-    scheduler.schedule_behavioral_event_intake(queued.append, timer_factory=_FakeTimer)
+    def enqueue(task: Any, *args: Any) -> None:
+        queued.append((task, args))
+
+    scheduler.schedule_behavioral_event_intake(enqueue, timer_factory=_FakeTimer)
     first = _FakeTimer.instances[-1]
-    scheduler.schedule_behavioral_event_intake(queued.append, timer_factory=_FakeTimer)
+    scheduler.schedule_behavioral_event_intake(enqueue, timer_factory=_FakeTimer)
     second = _FakeTimer.instances[-1]
 
     first.fire()
@@ -77,8 +81,27 @@ def test_old_timer_cannot_enqueue_after_a_newer_request() -> None:
 
     second.fire()
     assert len(queued) == 1
-    assert isinstance(queued[0], partial)
-    assert queued[0].func is scheduler.run_background_behavioral_event_intake
+    assert queued == [(scheduler.run_background_behavioral_event_intake, (None,))]
+
+
+def test_slow_queue_receives_a_named_runner_with_the_initialization_rowid() -> None:
+    queued: list[tuple[Any, tuple[Any, ...]]] = []
+
+    def enqueue(task: Any, *args: Any) -> None:
+        queued.append((task, args))
+
+    scheduler.schedule_behavioral_event_intake(
+        enqueue,
+        timer_factory=_FakeTimer,
+        initialization_rowid=12,
+    )
+
+    _FakeTimer.instances[-1].fire()
+
+    task, args = queued[0]
+    assert task is scheduler.run_background_behavioral_event_intake
+    assert task.__name__ == "run_background_behavioral_event_intake"
+    assert args == (12,)
 
 
 def test_web_persisted_user_message_schedules_local_slow_queue(monkeypatch: Any) -> None:
