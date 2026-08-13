@@ -299,20 +299,29 @@ def get_pending_replay(
 def advance_pending_replay(
     *,
     cursor_rowid: int,
+    expected_boundary_rowid: int,
+    expected_cursor_rowid: int,
     key: str = "behavioral_events",
     db_path: str = DB_PATH,
-) -> None:
-    """Advance a replay cursor and remove it only once it reaches its target."""
+) -> bool:
+    """Advance only the replay snapshot consumed by the current worker."""
     init_db(db_path)
     with _db_lock, _conn(db_path) as conn:
-        conn.execute(
+        updated = conn.execute(
             """
             UPDATE behavioral_event_replay_state
             SET cursor_rowid=MAX(cursor_rowid, ?)
-            WHERE key=?
+            WHERE key=? AND boundary_rowid=? AND cursor_rowid=?
             """,
-            (int(cursor_rowid), key),
+            (
+                int(cursor_rowid),
+                key,
+                int(expected_boundary_rowid),
+                int(expected_cursor_rowid),
+            ),
         )
+        if updated.rowcount != 1:
+            return False
         conn.execute(
             """
             DELETE FROM behavioral_event_replay_state
@@ -320,6 +329,7 @@ def advance_pending_replay(
             """,
             (key,),
         )
+    return True
 
 
 def get_initialization_boundary(

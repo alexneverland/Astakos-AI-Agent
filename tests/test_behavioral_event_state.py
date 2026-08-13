@@ -134,7 +134,14 @@ def test_replay_cursor_is_retained_until_it_reaches_the_original_progress_target
 
     behavioral_event_state.set_progress(last_rowid=250, db_path=db_path)
     behavioral_event_state.register_initialization_boundary(last_rowid=9, db_path=db_path)
-    behavioral_event_state.advance_pending_replay(cursor_rowid=109, db_path=db_path)
+    initial_replay = behavioral_event_state.get_pending_replay(db_path=db_path)
+    assert initial_replay is not None
+    behavioral_event_state.advance_pending_replay(
+        cursor_rowid=109,
+        expected_boundary_rowid=initial_replay["boundary_rowid"],
+        expected_cursor_rowid=initial_replay["cursor_rowid"],
+        db_path=db_path,
+    )
 
     assert behavioral_event_state.get_pending_replay(db_path=db_path) == {
         "boundary_rowid": 9,
@@ -142,8 +149,42 @@ def test_replay_cursor_is_retained_until_it_reaches_the_original_progress_target
         "target_rowid": 250,
     }
 
-    behavioral_event_state.advance_pending_replay(cursor_rowid=250, db_path=db_path)
+    replay = behavioral_event_state.get_pending_replay(db_path=db_path)
+    assert replay is not None
+    behavioral_event_state.advance_pending_replay(
+        cursor_rowid=250,
+        expected_boundary_rowid=replay["boundary_rowid"],
+        expected_cursor_rowid=replay["cursor_rowid"],
+        db_path=db_path,
+    )
     assert behavioral_event_state.get_pending_replay(db_path=db_path) is None
+
+
+def test_replay_advance_does_not_skip_a_newly_earlier_boundary(tmp_path):
+    """A worker may advance only the replay snapshot it actually consumed."""
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    behavioral_event_state.set_progress(last_rowid=250, db_path=db_path)
+    behavioral_event_state.register_initialization_boundary(last_rowid=9, db_path=db_path)
+    consumed_replay = behavioral_event_state.get_pending_replay(db_path=db_path)
+    assert consumed_replay is not None
+
+    # A concurrent persistence path discovers an older unprocessed row.
+    behavioral_event_state.register_initialization_boundary(last_rowid=4, db_path=db_path)
+
+    advanced = behavioral_event_state.advance_pending_replay(
+        cursor_rowid=109,
+        expected_boundary_rowid=consumed_replay["boundary_rowid"],
+        expected_cursor_rowid=consumed_replay["cursor_rowid"],
+        db_path=db_path,
+    )
+
+    assert advanced is False
+    assert behavioral_event_state.get_pending_replay(db_path=db_path) == {
+        "boundary_rowid": 4,
+        "cursor_rowid": 4,
+        "target_rowid": 250,
+    }
 
 
 def test_store_rejects_non_boolean_safety_flags(tmp_path):

@@ -295,6 +295,8 @@ def run_behavioral_event_intake(
         behavioral_event_state.advance_pending_replay(
             key=BEHAVIORAL_EVENT_PROGRESS_KEY,
             cursor_rowid=max_seen,
+            expected_boundary_rowid=int(pending_replay["boundary_rowid"]),
+            expected_cursor_rowid=int(pending_replay["cursor_rowid"]),
             **store_kwargs,
         )
     stats["last_rowid_after"] = max_seen
