@@ -167,6 +167,27 @@ def test_telegram_deduplicated_user_message_does_not_schedule_intake(monkeypatch
     assert scheduled == []
 
 
+def test_first_persisted_row_registers_its_predecessor_as_the_bootstrap_boundary(monkeypatch: Any) -> None:
+    import memory.behavioral_event_state as event_state
+
+    boundaries: list[int] = []
+    monkeypatch.setattr(
+        event_state,
+        "register_initialization_boundary",
+        lambda *, last_rowid: boundaries.append(last_rowid),
+    )
+    monkeypatch.setattr(scheduler, "schedule_behavioral_event_intake", lambda *_args, **_kwargs: None)
+
+    scheduled = scheduler.schedule_persisted_user_intake(
+        rowid=10,
+        metadata=None,
+        enqueue_slow_task=lambda *_args: None,
+    )
+
+    assert scheduled is True
+    assert boundaries == [9]
+
+
 def test_provenance_marked_user_history_does_not_schedule_intake(monkeypatch: Any) -> None:
     import api.server as server
     import memory.conversation_history as history

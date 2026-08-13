@@ -89,7 +89,7 @@ def schedule_persisted_user_intake(
     try:
         from memory.behavioral_event_state import register_initialization_boundary
 
-        register_initialization_boundary(last_rowid=rowid)
+        register_initialization_boundary(last_rowid=rowid - 1)
         schedule_behavioral_event_intake(
             enqueue_slow_task,
             initialization_rowid=rowid,
