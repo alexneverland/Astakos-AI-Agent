@@ -50,6 +50,28 @@ def _valid_event_date(value: str) -> bool:
         return False
 
 
+def _align_extraction_results(
+    raw: object,
+    *,
+    expected_count: int,
+) -> list[Mapping[str, Any] | None] | None:
+    """Validate the extractor's ordered, one-result-per-source response."""
+    if not isinstance(raw, list) or len(raw) != expected_count:
+        return None
+    aligned: list[Mapping[str, Any] | None] = []
+    for expected_index, item in enumerate(raw):
+        if item is None:
+            aligned.append(None)
+            continue
+        if not isinstance(item, Mapping):
+            return None
+        index = item.get("idx")
+        if isinstance(index, bool) or not isinstance(index, int) or index != expected_index:
+            return None
+        aligned.append(item)
+    return aligned
+
+
 def normalize_extracted_event(
     extraction: Mapping[str, Any],
     source: Mapping[str, Any],
@@ -63,8 +85,11 @@ def normalize_extracted_event(
         return None
     if any(not _nonempty_text(extraction.get(field)) for field in _REQUIRED_EXTRACTION_FIELDS):
         return None
+    raw_confidence = extraction.get("confidence")
+    if isinstance(raw_confidence, bool):
+        return None
     try:
-        confidence = float(extraction.get("confidence"))
+        confidence = float(raw_confidence)
     except (TypeError, ValueError):
         return None
     if not 0.0 <= confidence <= 1.0:
@@ -120,7 +145,9 @@ def _extract_event_batch(messages: list[Mapping[str, Any]]) -> list[Mapping[str,
         for index, message in enumerate(messages)
     ]
     prompt = """Classify each user message below as at most one behavioral event.
-Return JSON only: a list of objects with `idx` plus these fields when applicable:
+Return JSON only: a list with exactly one entry for each message, in the same
+order. Each entry must be either null or an object with its matching `idx` plus
+these fields when applicable:
 event_type, category, subject, item, item_detail, status, event_date,
 confidence (0..1), negated, hypothetical, reported_by_user.
 Use subject `user` only for the user's own completed/current report. Do not infer
@@ -139,17 +166,7 @@ Messages:\n""" + json.dumps(lines, ensure_ascii=False)
         raw = extract_json_from_text(str(content or ""))
     except Exception:
         return None
-    if not isinstance(raw, list):
-        return None
-
-    results: list[Mapping[str, Any] | None] = [None] * len(messages)
-    for item in raw:
-        if not isinstance(item, Mapping):
-            continue
-        idx = item.get("idx")
-        if isinstance(idx, int) and 0 <= idx < len(results):
-            results[idx] = item
-    return results
+    return _align_extraction_results(raw, expected_count=len(messages))
 
 
 def _is_trusted_direct_user_message(message: Mapping[str, Any]) -> bool:
@@ -193,7 +210,7 @@ def run_behavioral_event_intake(
         "skipped_invalid": 0,
         "errors": 0,
     }
-    if int(progress["last_rowid"]) == 0:
+    if progress["updated_at"] is None:
         behavioral_event_state.set_progress(
             key=BEHAVIORAL_EVENT_PROGRESS_KEY,
             last_rowid=max_rowid,
