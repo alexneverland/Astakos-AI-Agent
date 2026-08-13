@@ -67,6 +67,24 @@ def test_background_runner_enqueues_a_named_continuation_for_a_full_page(monkeyp
     assert queued == [(scheduler.run_background_behavioral_event_intake, (enqueue,))]
 
 
+def test_background_runner_does_not_paginate_a_failed_full_page(monkeypatch: Any) -> None:
+    queued: list[tuple[Any, tuple[Any, ...]]] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "services.behavioral_event_extractor",
+        SimpleNamespace(
+            MAX_INTAKE_MESSAGES=100,
+            run_behavioral_event_intake=lambda **_kwargs: {"loaded": 100, "errors": 1},
+        ),
+    )
+
+    scheduler.run_background_behavioral_event_intake(
+        lambda task, *args: queued.append((task, args)),
+    )
+
+    assert queued == []
+
+
 def test_background_runner_contains_intake_failures(monkeypatch: Any) -> None:
     monkeypatch.setitem(
         sys.modules,

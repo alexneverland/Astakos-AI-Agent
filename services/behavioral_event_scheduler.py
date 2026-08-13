@@ -28,7 +28,11 @@ def run_background_behavioral_event_intake(
         from services.behavioral_event_extractor import MAX_INTAKE_MESSAGES, run_behavioral_event_intake
 
         stats = run_behavioral_event_intake(initialization_rowid=initialization_rowid)
-        if enqueue_slow_task is not None and int(stats.get("loaded", 0)) >= MAX_INTAKE_MESSAGES:
+        if (
+            enqueue_slow_task is not None
+            and int(stats.get("errors", 0)) == 0
+            and int(stats.get("loaded", 0)) >= MAX_INTAKE_MESSAGES
+        ):
             enqueue_slow_task(run_background_behavioral_event_intake, enqueue_slow_task)
     except Exception:
         _logger.exception("Behavioral event background intake failed")
