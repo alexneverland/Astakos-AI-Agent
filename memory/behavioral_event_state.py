@@ -74,6 +74,30 @@ def init_db(db_path: str = DB_PATH) -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS behavioral_event_bootstrap_boundaries (
+                key TEXT PRIMARY KEY,
+                last_rowid INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS behavioral_event_sources (
+                source_message_id TEXT PRIMARY KEY,
+                event_id INTEGER NOT NULL REFERENCES behavioral_events(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO behavioral_event_sources(source_message_id, event_id)
+            SELECT source_message_id, MIN(id)
+            FROM behavioral_events
+            GROUP BY source_message_id
+            """
+        )
+        conn.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_behavioral_events_state_date
             ON behavioral_events(record_state, event_date DESC)
             """
@@ -142,15 +166,19 @@ def record_event(event: Mapping[str, Any], *, db_path: str = DB_PATH) -> dict[st
     init_db(db_path)
     source_message_id = _required_text(event, "source_message_id")
     with _db_lock, _conn(db_path) as conn:
-        existing = conn.execute(
+        claim = conn.execute(
             """
-            SELECT id FROM behavioral_events
-            WHERE source_message_id=?
+            INSERT OR IGNORE INTO behavioral_event_sources(source_message_id, event_id)
+            VALUES (?, 0)
             """,
             (source_message_id,),
-        ).fetchone()
-        if existing:
-            return {"action": "duplicate_source", "event_id": int(existing["id"])}
+        )
+        if claim.rowcount == 0:
+            existing = conn.execute(
+                "SELECT event_id FROM behavioral_event_sources WHERE source_message_id=?",
+                (source_message_id,),
+            ).fetchone()
+            return {"action": "duplicate_source", "event_id": int(existing["event_id"])}
         cursor = conn.execute(
             """
             INSERT INTO behavioral_events (
@@ -161,6 +189,10 @@ def record_event(event: Mapping[str, Any], *, db_path: str = DB_PATH) -> dict[st
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             values,
+        )
+        conn.execute(
+            "UPDATE behavioral_event_sources SET event_id=? WHERE source_message_id=?",
+            (int(cursor.lastrowid), source_message_id),
         )
     return {"action": "recorded", "event_id": int(cursor.lastrowid)}
 
@@ -203,6 +235,47 @@ def set_progress(
             """,
             (key, int(last_rowid), datetime.now().isoformat(timespec="seconds")),
         )
+        conn.execute(
+            "DELETE FROM behavioral_event_bootstrap_boundaries WHERE key=?",
+            (key,),
+        )
+
+
+def register_initialization_boundary(
+    *,
+    last_rowid: int,
+    key: str = "behavioral_events",
+    db_path: str = DB_PATH,
+) -> dict[str, Any]:
+    """Persist the earliest newly written row before background intake runs."""
+    if int(last_rowid) < 0:
+        raise ValueError("behavioral event last_rowid must not be negative")
+    init_db(db_path)
+    with _db_lock, _conn(db_path) as conn:
+        progress = conn.execute(
+            "SELECT last_rowid, updated_at FROM behavioral_event_progress WHERE key=?",
+            (key,),
+        ).fetchone()
+        if progress is not None:
+            return {
+                "key": key,
+                "last_rowid": int(progress["last_rowid"]),
+                "updated_at": progress["updated_at"],
+            }
+        conn.execute(
+            """
+            INSERT INTO behavioral_event_bootstrap_boundaries(key, last_rowid)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                last_rowid=MIN(behavioral_event_bootstrap_boundaries.last_rowid, excluded.last_rowid)
+            """,
+            (key, int(last_rowid)),
+        )
+        boundary = conn.execute(
+            "SELECT last_rowid FROM behavioral_event_bootstrap_boundaries WHERE key=?",
+            (key,),
+        ).fetchone()
+    return {"key": key, "last_rowid": int(boundary["last_rowid"]), "updated_at": None}
 
 
 def initialize_progress_if_missing(
@@ -211,29 +284,38 @@ def initialize_progress_if_missing(
     key: str = "behavioral_events",
     db_path: str = DB_PATH,
 ) -> dict[str, Any]:
-    """Keep the earliest concurrent bootstrap boundary for background intake."""
+    """Return the durable bootstrap boundary without regressing progress."""
     if int(last_rowid) < 0:
         raise ValueError("behavioral event last_rowid must not be negative")
     init_db(db_path)
     with _db_lock, _conn(db_path) as conn:
+        progress = conn.execute(
+            "SELECT last_rowid, updated_at FROM behavioral_event_progress WHERE key=?",
+            (key,),
+        ).fetchone()
+        if progress is not None:
+            return {
+                "key": key,
+                "last_rowid": int(progress["last_rowid"]),
+                "updated_at": progress["updated_at"],
+            }
         conn.execute(
             """
-            INSERT INTO behavioral_event_progress(key, last_rowid, updated_at)
-            VALUES (?, ?, ?)
+            INSERT INTO behavioral_event_bootstrap_boundaries(key, last_rowid)
+            VALUES (?, ?)
             ON CONFLICT(key) DO UPDATE SET
-                last_rowid=MIN(behavioral_event_progress.last_rowid, excluded.last_rowid),
-                updated_at=excluded.updated_at
+                last_rowid=MIN(behavioral_event_bootstrap_boundaries.last_rowid, excluded.last_rowid)
             """,
-            (key, int(last_rowid), datetime.now().isoformat(timespec="seconds")),
+            (key, int(last_rowid)),
         )
         row = conn.execute(
-            "SELECT last_rowid, updated_at FROM behavioral_event_progress WHERE key=?",
+            "SELECT last_rowid FROM behavioral_event_bootstrap_boundaries WHERE key=?",
             (key,),
         ).fetchone()
     return {
         "key": key,
         "last_rowid": int(row["last_rowid"]),
-        "updated_at": row["updated_at"],
+        "updated_at": None,
     }
 
 

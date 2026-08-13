@@ -62,7 +62,7 @@ def test_rapid_requests_coalesce_into_one_slow_queue_task() -> None:
     second.fire()
 
     assert len(queued) == 1
-    assert queued == [(scheduler.run_background_behavioral_event_intake, (None,))]
+    assert queued == [(scheduler.run_background_behavioral_event_intake, (None, enqueue))]
 
 
 def test_old_timer_cannot_enqueue_after_a_newer_request() -> None:
@@ -81,7 +81,7 @@ def test_old_timer_cannot_enqueue_after_a_newer_request() -> None:
 
     second.fire()
     assert len(queued) == 1
-    assert queued == [(scheduler.run_background_behavioral_event_intake, (None,))]
+    assert queued == [(scheduler.run_background_behavioral_event_intake, (None, enqueue))]
 
 
 def test_slow_queue_receives_a_named_runner_with_the_initialization_rowid() -> None:
@@ -101,7 +101,30 @@ def test_slow_queue_receives_a_named_runner_with_the_initialization_rowid() -> N
     task, args = queued[0]
     assert task is scheduler.run_background_behavioral_event_intake
     assert task.__name__ == "run_background_behavioral_event_intake"
-    assert args == (12,)
+    assert args == (12, enqueue)
+
+
+def test_background_runner_enqueues_a_named_continuation_for_a_full_page(monkeypatch: Any) -> None:
+    calls: list[Any] = []
+    queued: list[tuple[Any, tuple[Any, ...]]] = []
+
+    def intake(**_kwargs: Any) -> dict[str, int]:
+        calls.append(True)
+        return {"loaded": 100, "errors": 0}
+
+    def enqueue(task: Any, *args: Any) -> None:
+        queued.append((task, args))
+
+    monkeypatch.setitem(
+        sys.modules,
+        "services.behavioral_event_extractor",
+        SimpleNamespace(run_behavioral_event_intake=intake, MAX_INTAKE_MESSAGES=100),
+    )
+
+    scheduler.run_background_behavioral_event_intake(12, enqueue)
+
+    assert calls == [True]
+    assert queued == [(scheduler.run_background_behavioral_event_intake, (None, enqueue))]
 
 
 def test_web_persisted_user_message_schedules_local_slow_queue(monkeypatch: Any) -> None:
@@ -166,7 +189,10 @@ def test_background_runner_contains_intake_failures(monkeypatch: Any) -> None:
     monkeypatch.setitem(
         sys.modules,
         "services.behavioral_event_extractor",
-        SimpleNamespace(run_behavioral_event_intake=lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("offline"))),
+        SimpleNamespace(
+            MAX_INTAKE_MESSAGES=100,
+            run_behavioral_event_intake=lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")),
+        ),
     )
 
     scheduler.run_background_behavioral_event_intake()

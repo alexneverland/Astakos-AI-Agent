@@ -89,6 +89,25 @@ def test_initialization_keeps_the_earliest_cross_process_boundary(tmp_path):
     assert progress["last_rowid"] == 9
 
 
+def test_completed_progress_is_not_lowered_by_a_delayed_bootstrap_boundary(tmp_path):
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    behavioral_event_state.initialize_progress_if_missing(last_rowid=19, db_path=db_path)
+    behavioral_event_state.set_progress(last_rowid=27, db_path=db_path)
+    delayed = behavioral_event_state.initialize_progress_if_missing(last_rowid=9, db_path=db_path)
+
+    assert delayed["last_rowid"] == 27
+
+
+def test_registered_bootstrap_boundary_keeps_the_earliest_persisted_row(tmp_path):
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    behavioral_event_state.register_initialization_boundary(last_rowid=19, db_path=db_path)
+    boundary = behavioral_event_state.register_initialization_boundary(last_rowid=9, db_path=db_path)
+
+    assert boundary["last_rowid"] == 9
+
+
 def test_store_rejects_non_boolean_safety_flags(tmp_path):
     db_path = str(tmp_path / "behavioral_events.db")
 

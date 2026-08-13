@@ -16,12 +16,21 @@ _pending_initialization_rowid: int | None = None
 _schedule_generation = 0
 
 
-def run_background_behavioral_event_intake(initialization_rowid: int | None = None) -> None:
+def run_background_behavioral_event_intake(
+    initialization_rowid: int | None = None,
+    enqueue_slow_task: Callable[..., Any] | None = None,
+) -> None:
     """Run the observational intake without letting a queue worker fail."""
     try:
-        from services.behavioral_event_extractor import run_behavioral_event_intake
+        from services.behavioral_event_extractor import MAX_INTAKE_MESSAGES, run_behavioral_event_intake
 
-        run_behavioral_event_intake(initialization_rowid=initialization_rowid)
+        stats = run_behavioral_event_intake(initialization_rowid=initialization_rowid)
+        if (
+            enqueue_slow_task is not None
+            and int(stats.get("errors", 0)) == 0
+            and int(stats.get("loaded", 0)) >= MAX_INTAKE_MESSAGES
+        ):
+            enqueue_slow_task(run_background_behavioral_event_intake, None, enqueue_slow_task)
     except Exception:
         _logger.exception("Behavioral event background intake failed")
 
@@ -56,7 +65,7 @@ def schedule_behavioral_event_intake(
                 _pending_initialization_rowid = None
             # The queue workers log ``task_func.__name__`` before invocation,
             # so enqueue the named runner and its argument separately.
-            enqueue_slow_task(run_background_behavioral_event_intake, first_rowid)
+            enqueue_slow_task(run_background_behavioral_event_intake, first_rowid, enqueue_slow_task)
 
         timer = timer_factory(delay_seconds, enqueue_current_generation)
         timer.daemon = True
@@ -78,6 +87,9 @@ def schedule_persisted_user_intake(
     if external_content_source_names(metadata or {}):
         return False
     try:
+        from memory.behavioral_event_state import register_initialization_boundary
+
+        register_initialization_boundary(last_rowid=rowid)
         schedule_behavioral_event_intake(
             enqueue_slow_task,
             initialization_rowid=rowid,
