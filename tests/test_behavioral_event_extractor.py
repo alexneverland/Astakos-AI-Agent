@@ -1,4 +1,5 @@
 from services.behavioral_event_extractor import (
+    _align_extraction_results,
     normalize_extracted_event,
     run_behavioral_event_intake,
 )
@@ -61,6 +62,19 @@ def test_plans_and_string_booleans_never_become_confirmed_events():
     assert string_boolean is None
 
 
+def test_boolean_confidence_is_rejected_at_the_untrusted_boundary():
+    """A JSON boolean must not be coerced into a confirmed confidence score."""
+    assert normalize_extracted_event(_extraction(confidence=True), _source()) is None
+
+
+def test_extractor_results_require_one_unique_indexed_entry_per_message():
+    """Malformed model indices fail the whole batch instead of dropping source rows."""
+    assert _align_extraction_results([{"idx": 0}, None], expected_count=2) == [{"idx": 0}, None]
+    assert _align_extraction_results([{"idx": 0}, {"idx": 0}], expected_count=2) is None
+    assert _align_extraction_results([{"idx": True}, None], expected_count=2) is None
+    assert _align_extraction_results([{"idx": 0}, "not an object"], expected_count=2) is None
+
+
 def test_missing_identity_or_required_event_fields_are_rejected():
     assert normalize_extracted_event(_extraction(event_type=""), _source()) is None
     assert normalize_extracted_event(_extraction(), {"channel": "telegram"}) is None
@@ -79,6 +93,29 @@ def test_first_intake_sets_watermark_without_backfill(tmp_path):
     assert stats["mode"] == "initialized"
     assert stats["last_rowid_after"] == 55
     assert calls == []
+
+
+def test_empty_first_run_is_initialized_only_once(tmp_path):
+    """A persisted zero watermark is valid and must not re-skip later messages."""
+    db_path = str(tmp_path / "behavioral_events.db")
+    source = {**_source(), "rowid": 1, "id": "telegram:1", "role": "user", "content": "Î‰Ï€Î¹Î± Ï„ÏƒÎ¯Ï€Î¿Ï…ÏÎ¿"}
+
+    initialized = run_behavioral_event_intake(
+        db_path=db_path,
+        max_rowid_loader=lambda: 0,
+        message_loader=lambda after_rowid: [],
+    )
+    stats = run_behavioral_event_intake(
+        db_path=db_path,
+        max_rowid_loader=lambda: 1,
+        message_loader=lambda after_rowid: [source],
+        extract_batch=lambda messages: [_extraction()],
+    )
+
+    assert initialized["mode"] == "initialized"
+    assert stats["mode"] == "incremental"
+    assert stats["confirmed"] == 1
+    assert stats["last_rowid_after"] == 1
 
 
 def test_intake_persists_only_new_trusted_user_message(tmp_path):
@@ -185,5 +222,28 @@ def test_intake_advances_watermark_for_valid_empty_event_result(tmp_path):
         extract_batch=lambda messages: [None],
     )
 
+    assert stats["skipped_invalid"] == 1
+    assert stats["last_rowid_after"] == 12
+
+
+def test_intake_skips_non_mapping_proposals_but_advances_watermark(tmp_path):
+    """One malformed proposal cannot replay an otherwise handled source row forever."""
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    run_behavioral_event_intake(
+        db_path=db_path,
+        max_rowid_loader=lambda: 11,
+        message_loader=lambda after_rowid: [],
+    )
+    stats = run_behavioral_event_intake(
+        db_path=db_path,
+        max_rowid_loader=lambda: 12,
+        message_loader=lambda after_rowid: [{
+            **_source(), "rowid": 12, "role": "user", "content": "Î‰Ï€Î¹Î± Ï„ÏƒÎ¯Ï€Î¿Ï…ÏÎ¿",
+        }],
+        extract_batch=lambda messages: ["malformed"],
+    )
+
+    assert stats["errors"] == 0
     assert stats["skipped_invalid"] == 1
     assert stats["last_rowid_after"] == 12

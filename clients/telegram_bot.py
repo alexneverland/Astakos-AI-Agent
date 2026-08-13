@@ -5018,7 +5018,6 @@ def job_analytics_engine():
             )
     except Exception as e:
         print(f"[Analytics Job Error]: {e}")
-        return
 
     try:
         from services.behavioral_event_extractor import run_behavioral_event_intake

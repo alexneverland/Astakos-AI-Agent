@@ -75,3 +75,30 @@ def test_behavioral_intake_failure_does_not_block_routine_analytics_notification
     bot.job_analytics_engine()
 
     assert len(notifications) == 1
+
+
+def test_routine_analytics_failure_does_not_block_behavioral_intake(monkeypatch: Any) -> None:
+    """Behavioral intake is isolated from routine analytics and its notification path."""
+    import clients.telegram_bot as bot
+
+    class ThreeAm:
+        @classmethod
+        def now(cls) -> SimpleNamespace:
+            return SimpleNamespace(hour=3)
+
+    behavioral_event_calls: list[bool] = []
+    monkeypatch.setattr(bot, "datetime", ThreeAm)
+    monkeypatch.setitem(
+        sys.modules,
+        "services.analytics_engine",
+        SimpleNamespace(run_analytics=lambda: (_ for _ in ()).throw(RuntimeError("unavailable"))),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "services.behavioral_event_extractor",
+        SimpleNamespace(run_behavioral_event_intake=lambda: behavioral_event_calls.append(True) or {}),
+    )
+
+    bot.job_analytics_engine()
+
+    assert behavioral_event_calls == [True]
