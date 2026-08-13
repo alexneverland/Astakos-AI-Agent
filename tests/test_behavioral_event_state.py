@@ -108,6 +108,26 @@ def test_registered_bootstrap_boundary_keeps_the_earliest_persisted_row(tmp_path
     assert boundary["last_rowid"] == 9
 
 
+def test_delayed_boundary_is_retained_after_progress_has_advanced(tmp_path):
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    behavioral_event_state.set_progress(last_rowid=20, db_path=db_path)
+    behavioral_event_state.register_initialization_boundary(last_rowid=9, db_path=db_path)
+
+    assert behavioral_event_state.get_initialization_boundary(db_path=db_path) == 9
+
+
+def test_advancing_progress_clears_only_boundaries_covered_by_the_batch(tmp_path):
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    behavioral_event_state.register_initialization_boundary(last_rowid=20, db_path=db_path)
+    behavioral_event_state.set_progress(last_rowid=20, db_path=db_path)
+    assert behavioral_event_state.get_initialization_boundary(db_path=db_path) == 20
+
+    behavioral_event_state.set_progress(last_rowid=21, db_path=db_path)
+    assert behavioral_event_state.get_initialization_boundary(db_path=db_path) is None
+
+
 def test_store_rejects_non_boolean_safety_flags(tmp_path):
     db_path = str(tmp_path / "behavioral_events.db")
 

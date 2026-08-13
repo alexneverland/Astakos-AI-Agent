@@ -252,9 +252,24 @@ def set_progress(
             (key, int(last_rowid), datetime.now().isoformat(timespec="seconds")),
         )
         conn.execute(
-            "DELETE FROM behavioral_event_bootstrap_boundaries WHERE key=?",
-            (key,),
+            "DELETE FROM behavioral_event_bootstrap_boundaries WHERE key=? AND last_rowid < ?",
+            (key, int(last_rowid)),
         )
+
+
+def get_initialization_boundary(
+    *,
+    key: str = "behavioral_events",
+    db_path: str = DB_PATH,
+) -> int | None:
+    """Return the earliest pending replay boundary, if one is registered."""
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT last_rowid FROM behavioral_event_bootstrap_boundaries WHERE key=?",
+            (key,),
+        ).fetchone()
+    return int(row["last_rowid"]) if row is not None else None
 
 
 def register_initialization_boundary(
@@ -268,16 +283,6 @@ def register_initialization_boundary(
         raise ValueError("behavioral event last_rowid must not be negative")
     init_db(db_path)
     with _db_lock, _conn(db_path) as conn:
-        progress = conn.execute(
-            "SELECT last_rowid, updated_at FROM behavioral_event_progress WHERE key=?",
-            (key,),
-        ).fetchone()
-        if progress is not None:
-            return {
-                "key": key,
-                "last_rowid": int(progress["last_rowid"]),
-                "updated_at": progress["updated_at"],
-            }
         conn.execute(
             """
             INSERT INTO behavioral_event_bootstrap_boundaries(key, last_rowid)

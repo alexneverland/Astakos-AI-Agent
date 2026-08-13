@@ -18,6 +18,28 @@ _pending_initialization_rowid: int | None = None
 _schedule_generation = 0
 
 
+def _schedule_retry(
+    initialization_rowid: int | None,
+    enqueue_slow_task: Callable[..., Any] | None,
+    retry_attempt: int,
+) -> None:
+    """Queue a bounded delayed retry when intake could not read or extract rows."""
+    if enqueue_slow_task is None or retry_attempt >= BEHAVIORAL_EVENT_INTAKE_MAX_RETRIES:
+        return
+
+    def enqueue_retry() -> None:
+        enqueue_slow_task(
+            run_background_behavioral_event_intake,
+            initialization_rowid,
+            enqueue_slow_task,
+            retry_attempt + 1,
+        )
+
+    timer = threading.Timer(BEHAVIORAL_EVENT_INTAKE_RETRY_DELAY_SECONDS, enqueue_retry)
+    timer.daemon = True
+    timer.start()
+
+
 def run_background_behavioral_event_intake(
     initialization_rowid: int | None = None,
     enqueue_slow_task: Callable[..., Any] | None = None,
@@ -31,23 +53,13 @@ def run_background_behavioral_event_intake(
         if enqueue_slow_task is None:
             return
         if int(stats.get("errors", 0)) > 0:
-            if retry_attempt < BEHAVIORAL_EVENT_INTAKE_MAX_RETRIES:
-                def enqueue_retry() -> None:
-                    enqueue_slow_task(
-                        run_background_behavioral_event_intake,
-                        initialization_rowid,
-                        enqueue_slow_task,
-                        retry_attempt + 1,
-                    )
-
-                timer = threading.Timer(BEHAVIORAL_EVENT_INTAKE_RETRY_DELAY_SECONDS, enqueue_retry)
-                timer.daemon = True
-                timer.start()
+            _schedule_retry(initialization_rowid, enqueue_slow_task, retry_attempt)
             return
         if int(stats.get("loaded", 0)) >= MAX_INTAKE_MESSAGES:
             enqueue_slow_task(run_background_behavioral_event_intake, None, enqueue_slow_task)
     except Exception:
         _logger.exception("Behavioral event background intake failed")
+        _schedule_retry(initialization_rowid, enqueue_slow_task, retry_attempt)
 
 
 def schedule_behavioral_event_intake(

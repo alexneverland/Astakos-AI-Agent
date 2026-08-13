@@ -198,6 +198,10 @@ def run_behavioral_event_intake(
         key=BEHAVIORAL_EVENT_PROGRESS_KEY,
         **store_kwargs,
     )
+    pending_boundary = behavioral_event_state.get_initialization_boundary(
+        key=BEHAVIORAL_EVENT_PROGRESS_KEY,
+        **store_kwargs,
+    )
     max_rowid = (max_rowid_loader or get_max_rowid)()
     stats: dict[str, int | str] = {
         "mode": "incremental",
@@ -233,17 +237,22 @@ def run_behavioral_event_intake(
             last_rowid_after=int(progress["last_rowid"]),
         )
 
+    after_rowid = int(progress["last_rowid"])
+    if pending_boundary is not None and pending_boundary < after_rowid:
+        after_rowid = pending_boundary
+        stats.update(mode="replay_incremental", last_rowid_before=after_rowid)
+
     loader = message_loader or (
         lambda after_rowid: load_messages_after_rowid(
             after_rowid=after_rowid,
             limit=MAX_INTAKE_MESSAGES,
         )
     )
-    rows = list(loader(int(progress["last_rowid"])))
+    rows = list(loader(after_rowid))
     stats["loaded"] = len(rows)
     if not rows:
         return stats
-    max_seen = max((int(row.get("rowid") or 0) for row in rows), default=int(progress["last_rowid"]))
+    max_seen = max((int(row.get("rowid") or 0) for row in rows), default=after_rowid)
     trusted_rows = []
     for row in rows:
         if _is_trusted_direct_user_message(row):

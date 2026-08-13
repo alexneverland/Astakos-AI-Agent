@@ -136,6 +136,26 @@ def test_first_background_intake_processes_the_triggering_new_row(tmp_path):
     assert stats["last_rowid_after"] == 12
 
 
+def test_delayed_earlier_boundary_replays_the_skipped_row_after_progress_advances(tmp_path):
+    from memory import behavioral_event_state
+
+    db_path = str(tmp_path / "behavioral_events.db")
+    source = {**_source(), "rowid": 10, "id": "telegram:10", "role": "user", "content": "I had lunch"}
+    behavioral_event_state.set_progress(last_rowid=20, db_path=db_path)
+    behavioral_event_state.register_initialization_boundary(last_rowid=9, db_path=db_path)
+
+    stats = run_behavioral_event_intake(
+        db_path=db_path,
+        max_rowid_loader=lambda: 20,
+        message_loader=lambda after_rowid: [source] if after_rowid == 9 else [],
+        extract_batch=lambda messages: [_extraction()],
+    )
+
+    assert stats["confirmed"] == 1
+    assert stats["last_rowid_before"] == 9
+    assert behavioral_event_state.get_initialization_boundary(db_path=db_path) is None
+
+
 def test_intake_persists_only_new_trusted_user_message(tmp_path):
     db_path = str(tmp_path / "behavioral_events.db")
     source = {**_source(), "rowid": 12, "id": "telegram:12"}
