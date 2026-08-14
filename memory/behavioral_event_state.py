@@ -15,7 +15,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "behavioral_events.db")
+# The original experimental store may contain a historical catch-up backlog.
+# Observational intake starts from a clean epoch and only receives new messages.
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "behavioral_event_observations.db")
 
 _db_lock = threading.Lock()
 
