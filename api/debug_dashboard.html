@@ -482,7 +482,7 @@ function renderLatencyPanel(traces) {
 }
 
 async function fetchAllNow() {
-  await Promise.all([fetchData(), fetchTimeline(), fetchTraces(), fetchMemoryAudit()]);
+  await Promise.all([fetchData(true), fetchTimeline(), fetchTraces(), fetchMemoryAudit()]);
   startCountdown();
 }
 
@@ -1460,7 +1460,7 @@ async function fetchTraces() {
   }
 }
 
-async function fetchData() {
+async function fetchData(forceBehavioralPatterns = false) {
   try {
   const r = await fetch('/debug/runtime');
     const data = await r.json();
@@ -1480,14 +1480,14 @@ async function fetchData() {
     const rj = await rr.json();
     renderReflections(rj.reflections || [], window._showApplied || false);
   } catch(e) {}
-  fetchBehavioralPatterns();
+  await fetchBehavioralPatterns(forceBehavioralPatterns);
 }
 
 
-async function fetchBehavioralPatterns() {
+async function fetchBehavioralPatterns(force = false) {
   const now = Date.now();
   if (behavioralPatternsFetchInFlight
-      || now - behavioralPatternsLastFetchedAt < BEHAVIORAL_PATTERNS_REFRESH) {
+      || (!force && now - behavioralPatternsLastFetchedAt < BEHAVIORAL_PATTERNS_REFRESH)) {
     return;
   }
   behavioralPatternsFetchInFlight = true;
@@ -1512,6 +1512,7 @@ function renderBehavioralPatternLoadError() {
   const container = document.getElementById('behavioral-patterns-section');
   if (!container) return;
   container.innerHTML = '<div class="card" style="grid-column:span 2;border-left:3px solid #f85149"><h2>🔎 BEHAVIORAL PATTERNS</h2><p class="err" role="status">Could not load behavioral patterns. The event store remains unchanged.</p></div>';
+  enhanceRenderedDashboard(container);
 }
 
 

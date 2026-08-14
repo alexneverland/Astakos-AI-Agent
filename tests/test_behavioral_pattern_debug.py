@@ -84,3 +84,11 @@ def test_debug_dashboard_fetches_and_renders_behavioral_patterns():
     assert "BEHAVIORAL_PATTERNS_REFRESH = 60000" in dashboard
     assert "behavioralPatternsFetchInFlight" in dashboard
     assert "enhanceRenderedDashboard(container);" in dashboard
+    assert "async function fetchData(forceBehavioralPatterns = false)" in dashboard
+    assert "await fetchBehavioralPatterns(forceBehavioralPatterns);" in dashboard
+    assert "fetchData(true)" in dashboard
+    error_card = dashboard[
+        dashboard.index("function renderBehavioralPatternLoadError"):
+        dashboard.index("function renderBehavioralPatterns")
+    ]
+    assert "enhanceRenderedDashboard(container);" in error_card
