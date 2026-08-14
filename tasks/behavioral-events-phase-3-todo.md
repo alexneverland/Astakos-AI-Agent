@@ -10,10 +10,10 @@
 
 ## Task 2: Debug-only inspection
 
-- [ ] Expose the computed candidates through an existing debug inspection path.
-- [ ] Acceptance: it performs no write and is unavailable to normal agent
+- [x] Expose the computed candidates through an existing debug inspection path.
+- [x] Acceptance: it performs no write and is unavailable to normal agent
   prompts or tools.
-- [ ] Verify: focused endpoint tests.
+- [x] Verify: focused endpoint tests.
 
 ## Checkpoint
 
