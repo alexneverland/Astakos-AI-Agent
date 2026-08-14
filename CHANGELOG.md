@@ -7,6 +7,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v2.5.0] — 2026-08-14
+
+**Released: 2026-08-14**
+
+### Added
+
+- An isolated behavioral-observation layer that records only validated, trusted user reports as confirmed events or non-actionable candidates.
+- Debug visibility for repeated behavioral-pattern candidates. These observations do not create routines, reminders, memory writes, or notifications automatically.
+- A temporary vacation pause for routine notifications, with visible pause status and preserved reminders and follow-ups.
+
+### Changed
+
+- The behavioral observer now starts from a clean observation epoch, preventing historical conversation backfill after installation or upgrade.
+- The Beginner Setup Guide now distinguishes the source-build Docker path from the ready-to-run release image with automatic updates.
+
+### Fixed
+
+- Georgian voice translation supports both Greek-to-Georgian and Georgian-to-Greek voice flows.
+- Meal history is recorded automatically from direct user reports so recipe suggestions can avoid recently eaten meals.
+- Explicit website searches, navigation ETA fallback, and Messenger draft handling are more reliable while external-content safeguards remain in place.
+
 ## [v2.4.1] — 2026-08-04
 
 **Released: 2026-08-04**

@@ -71,7 +71,8 @@ def test_find_routines_for_schedule_control_returns_all_exact_duplicates(tmp_pat
             event_name TEXT,
             event_type TEXT,
             confidence REAL,
-            state TEXT
+            state TEXT,
+            external_content_sources_json TEXT NOT NULL DEFAULT '[]'
         )
         """
     )
