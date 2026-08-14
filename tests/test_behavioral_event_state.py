@@ -60,11 +60,15 @@ def test_read_only_list_does_not_create_a_missing_event_database(tmp_path):
     assert not (tmp_path / "behavioral_events.db").exists()
 
 
-def test_read_only_connection_uses_an_immutable_sqlite_uri(monkeypatch, tmp_path):
+def test_read_only_connection_uses_a_live_wal_safe_sqlite_uri(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
+    executed: list[str] = []
 
     class FakeConnection:
         row_factory = None
+
+        def execute(self, statement: str) -> None:
+            executed.append(statement)
 
         def close(self) -> None:
             return None
@@ -79,8 +83,10 @@ def test_read_only_connection_uses_an_immutable_sqlite_uri(monkeypatch, tmp_path
     with behavioral_event_state._read_only_conn(str(tmp_path / "behavioral_events.db")):
         pass
 
-    assert "mode=ro&immutable=1" in str(captured["database_uri"])
+    assert "?mode=ro" in str(captured["database_uri"])
+    assert "immutable=1" not in str(captured["database_uri"])
     assert captured["kwargs"] == {"uri": True, "timeout": 30}
+    assert executed == ["PRAGMA query_only=ON"]
 
 
 def test_read_only_list_surfaces_a_missing_schema_in_an_existing_database(monkeypatch, tmp_path):

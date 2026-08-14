@@ -40,10 +40,16 @@ def _conn(db_path: str = DB_PATH):
 
 @contextmanager
 def _read_only_conn(db_path: str = DB_PATH) -> Iterator[sqlite3.Connection]:
-    """Open an existing event database without initializing or mutating it."""
-    database_uri = f"{Path(db_path).resolve().as_uri()}?mode=ro&immutable=1"
+    """Open an existing event database without schema or event-data writes.
+
+    SQLite may maintain WAL sidecars while serving a consistent live snapshot.
+    Those files are required for safe concurrent inspection and never alter the
+    behavioral event records or schema.
+    """
+    database_uri = f"{Path(db_path).resolve().as_uri()}?mode=ro"
     conn = sqlite3.connect(database_uri, uri=True, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA query_only=ON")
     try:
         yield conn
     finally:
