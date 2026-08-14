@@ -1,0 +1,98 @@
+from services.behavioral_pattern_aggregator import aggregate_behavioral_pattern_candidates
+
+
+def _event(**overrides):
+    event = {
+        "event_type": "meal",
+        "category": "food",
+        "subject": "user",
+        "item": "pasta",
+        "status": "consumed",
+        "event_date": "2026-08-01",
+        "record_state": "confirmed",
+    }
+    event.update(overrides)
+    return event
+
+
+def test_aggregator_returns_evidence_after_three_distinct_dates():
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(event_date="2026-08-01"),
+        _event(event_date="2026-08-04"),
+        _event(event_date="2026-08-07"),
+    ])
+
+    assert candidates == [{
+        "event_type": "meal",
+        "category": "food",
+        "subject": "user",
+        "item": "pasta",
+        "status": "consumed",
+        "occurrence_count": 3,
+        "first_date": "2026-08-01",
+        "last_date": "2026-08-07",
+    }]
+
+
+def test_aggregator_requires_three_distinct_dates_not_three_events():
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(event_date="2026-08-01"),
+        _event(event_date="2026-08-01"),
+        _event(event_date="2026-08-04"),
+    ])
+
+    assert candidates == []
+
+
+def test_aggregator_canonicalizes_equivalent_iso_dates_before_counting():
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(event_date="2026-01-01"),
+        _event(event_date="20260101"),
+        _event(event_date="2026-W01-4"),
+    ])
+
+    assert candidates == []
+
+
+def test_aggregator_groups_case_variants_under_one_deterministic_signature():
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(item="Pasta", event_date="2026-08-01"),
+        _event(item="pasta", event_date="2026-08-04"),
+        _event(item="PASTA", event_date="2026-08-07"),
+    ])
+
+    assert candidates == [{
+        "event_type": "meal",
+        "category": "food",
+        "subject": "user",
+        "item": "pasta",
+        "status": "consumed",
+        "occurrence_count": 3,
+        "first_date": "2026-08-01",
+        "last_date": "2026-08-07",
+    }]
+
+
+def test_aggregator_excludes_candidate_and_incomplete_events():
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(event_date="2026-08-01"),
+        _event(event_date="2026-08-04", record_state="candidate"),
+        _event(event_date="2026-08-07"),
+        _event(event_date="2026-08-10", event_type="", item=""),
+    ])
+
+    assert candidates == []
+
+
+def test_aggregator_orders_by_evidence_then_recency():
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(item="pasta", event_date="2026-08-01"),
+        _event(item="pasta", event_date="2026-08-04"),
+        _event(item="pasta", event_date="2026-08-07"),
+        _event(item="salad", event_date="2026-08-02"),
+        _event(item="salad", event_date="2026-08-05"),
+        _event(item="salad", event_date="2026-08-08"),
+        _event(item="salad", event_date="2026-08-11"),
+    ])
+
+    assert [candidate["item"] for candidate in candidates] == ["salad", "pasta"]
