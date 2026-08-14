@@ -1511,7 +1511,7 @@ async function fetchBehavioralPatterns(force = false) {
 function renderBehavioralPatternLoadError() {
   const container = document.getElementById('behavioral-patterns-section');
   if (!container) return;
-  container.innerHTML = '<div class="card" style="grid-column:span 2;border-left:3px solid #f85149"><h2>🔎 BEHAVIORAL PATTERNS</h2><p class="err" role="status">Could not load behavioral patterns. The event store remains unchanged.</p></div>';
+  container.innerHTML = '<div class="card" style="grid-column:span 2;border-left:3px solid #f85149"><h2>🔎 BEHAVIORAL PATTERNS</h2><p class="err" role="status">Load error: Could not load behavioral patterns. The event store remains unchanged.</p></div>';
   enhanceRenderedDashboard(container);
 }
 

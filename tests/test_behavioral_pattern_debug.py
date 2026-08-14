@@ -91,4 +91,5 @@ def test_debug_dashboard_fetches_and_renders_behavioral_patterns():
         dashboard.index("function renderBehavioralPatternLoadError"):
         dashboard.index("function renderBehavioralPatterns")
     ]
+    assert "Load error:" in error_card
     assert "enhanceRenderedDashboard(container);" in error_card
