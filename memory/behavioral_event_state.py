@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -38,9 +39,9 @@ def _conn(db_path: str = DB_PATH):
 
 
 @contextmanager
-def _read_only_conn(db_path: str = DB_PATH):
+def _read_only_conn(db_path: str = DB_PATH) -> Iterator[sqlite3.Connection]:
     """Open an existing event database without initializing or mutating it."""
-    database_uri = f"{Path(db_path).resolve().as_uri()}?mode=ro"
+    database_uri = f"{Path(db_path).resolve().as_uri()}?mode=ro&immutable=1"
     conn = sqlite3.connect(database_uri, uri=True, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
@@ -276,11 +277,6 @@ def list_events(
         query += " WHERE record_state=?"
         params = (record_state,)
     query += " ORDER BY event_date DESC, id DESC"
-    try:
-        with connection(db_path) as conn:
-            rows = conn.execute(query, params).fetchall()
-    except sqlite3.OperationalError as exc:
-        if not initialize and "no such table" in str(exc).lower():
-            return []
-        raise
+    with connection(db_path) as conn:
+        rows = conn.execute(query, params).fetchall()
     return [dict(row) for row in rows]

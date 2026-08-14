@@ -53,6 +53,24 @@ def test_debug_behavioral_patterns_exposes_read_only_confirmed_candidates(monkey
     }
 
 
+def test_debug_behavioral_patterns_surfaces_storage_errors(monkeypatch):
+    def broken_list_events(*, record_state=None, initialize=True):
+        raise RuntimeError("missing behavioral schema")
+
+    monkeypatch.setattr("memory.behavioral_event_state.list_events", broken_list_events)
+    client = TestClient(server)
+
+    response = client.get(
+        "/debug/behavioral-patterns",
+        headers={"Authorization": f"Bearer {LOCAL_TOKEN}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["candidates"] == []
+    assert response.json()["count"] == 0
+    assert "error" in response.json()
+
+
 def test_debug_dashboard_fetches_and_renders_behavioral_patterns():
     dashboard = (Path(__file__).parents[1] / "api" / "debug_dashboard.html").read_text(
         encoding="utf-8",
