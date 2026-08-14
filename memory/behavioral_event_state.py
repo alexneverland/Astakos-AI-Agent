@@ -6,7 +6,6 @@ notifications. It is the isolated data foundation for later behavioral analysis.
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -17,7 +16,8 @@ from typing import Any, Mapping
 
 # The original experimental store may contain a historical catch-up backlog.
 # Observational intake starts from a clean epoch and only receives new messages.
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "behavioral_event_observations.db")
+OBSERVATION_DB_FILENAME = "behavioral_event_observations.db"
+DB_PATH = str(Path(__file__).resolve().parent.parent / OBSERVATION_DB_FILENAME)
 
 _db_lock = threading.Lock()
 
@@ -273,7 +273,7 @@ def list_events(
     if initialize:
         init_db(db_path)
         connection = _conn
-    elif not os.path.isfile(db_path):
+    elif not Path(db_path).is_file():
         return []
     else:
         connection = _read_only_conn

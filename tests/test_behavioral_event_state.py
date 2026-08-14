@@ -31,7 +31,7 @@ def _event(**overrides):
 
 def test_default_observational_store_is_separate_from_legacy_event_store() -> None:
     """A rollout must not silently replay the legacy experimental backlog."""
-    assert Path(behavioral_event_state.DB_PATH).name == "behavioral_event_observations.db"
+    assert Path(behavioral_event_state.DB_PATH).name == behavioral_event_state.OBSERVATION_DB_FILENAME
 
 
 def test_store_records_confirmed_event_and_rejects_source_replay(tmp_path):
