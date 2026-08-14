@@ -44,6 +44,35 @@ def test_aggregator_requires_three_distinct_dates_not_three_events():
     assert candidates == []
 
 
+def test_aggregator_canonicalizes_equivalent_iso_dates_before_counting():
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(event_date="2026-01-01"),
+        _event(event_date="20260101"),
+        _event(event_date="2026-W01-4"),
+    ])
+
+    assert candidates == []
+
+
+def test_aggregator_groups_case_variants_under_one_deterministic_signature():
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(item="Pasta", event_date="2026-08-01"),
+        _event(item="pasta", event_date="2026-08-04"),
+        _event(item="PASTA", event_date="2026-08-07"),
+    ])
+
+    assert candidates == [{
+        "event_type": "meal",
+        "category": "food",
+        "subject": "user",
+        "item": "pasta",
+        "status": "consumed",
+        "occurrence_count": 3,
+        "first_date": "2026-08-01",
+        "last_date": "2026-08-07",
+    }]
+
+
 def test_aggregator_excludes_candidate_and_incomplete_events():
     candidates = aggregate_behavioral_pattern_candidates([
         _event(event_date="2026-08-01"),

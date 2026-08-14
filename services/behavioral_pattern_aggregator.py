@@ -22,19 +22,29 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _event_pattern_key(event: Mapping[str, Any]) -> tuple[str, str, str, str | None, str] | None:
-    """Return the stable grouping key for one confirmed, structurally valid event."""
-    if _text(event.get("record_state")) != "confirmed":
-        return None
-    required = tuple(_text(event.get(field)) for field in _REQUIRED_PATTERN_FIELDS)
-    if not all(required):
-        return None
-    event_date = _text(event.get("event_date"))
+def _signature_text(value: Any) -> str:
+    """Return deterministic case-insensitive text for a grouping signature."""
+    return _text(value).casefold()
+
+
+def _canonical_event_date(value: Any) -> str | None:
+    """Return an ISO calendar date, or ``None`` for an invalid date value."""
     try:
-        date.fromisoformat(event_date)
+        return date.fromisoformat(_text(value)).isoformat()
     except ValueError:
         return None
-    item = _text(event.get("item")) or None
+
+
+def _event_pattern_key(event: Mapping[str, Any]) -> tuple[str, str, str, str | None, str] | None:
+    """Return the stable grouping key for one confirmed, structurally valid event."""
+    if _signature_text(event.get("record_state")) != "confirmed":
+        return None
+    required = tuple(_signature_text(event.get(field)) for field in _REQUIRED_PATTERN_FIELDS)
+    if not all(required):
+        return None
+    if _canonical_event_date(event.get("event_date")) is None:
+        return None
+    item = _signature_text(event.get("item")) or None
     return required[0], required[1], required[2], item, required[3]
 
 
@@ -51,7 +61,10 @@ def aggregate_behavioral_pattern_candidates(
         key = _event_pattern_key(event)
         if key is None:
             continue
-        grouped_dates[key].append(_text(event.get("event_date")))
+        event_date = _canonical_event_date(event.get("event_date"))
+        if event_date is None:
+            continue
+        grouped_dates[key].append(event_date)
 
     candidates: list[dict[str, Any]] = []
     for key, event_dates in grouped_dates.items():
