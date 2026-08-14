@@ -2685,6 +2685,29 @@ async def debug_memory_audit(days: int = 1, _=Depends(require_token)):
     return {"entries": entries, "count": len(entries)}
 
 
+@server.get("/debug/behavioral-patterns")
+async def debug_behavioral_patterns(
+    _: None = Depends(require_token),
+) -> dict[str, object]:
+    """Return read-only pattern candidates from confirmed behavioral events."""
+    try:
+        from memory.behavioral_event_state import list_events
+        from services.behavioral_pattern_aggregator import (
+            aggregate_behavioral_pattern_candidates,
+        )
+
+        candidates = aggregate_behavioral_pattern_candidates(
+            list_events(record_state="confirmed", initialize=False),
+        )
+        return {"candidates": candidates, "count": len(candidates)}
+    except Exception:
+        return {
+            "candidates": [],
+            "count": 0,
+            "error": _api_internal_error("debug_behavioral_patterns"),
+        }
+
+
 @server.get("/debug")
 async def debug_panel(_=Depends(require_token)):
     """Observability HTML dashboard — auto-refresh every 5s."""

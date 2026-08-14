@@ -1,3 +1,8 @@
+import sqlite3
+from contextlib import nullcontext
+
+import pytest
+
 from memory import behavioral_event_state
 
 
@@ -46,6 +51,60 @@ def test_store_keeps_candidate_separate_from_confirmed_events(tmp_path):
     candidates = behavioral_event_state.list_events(record_state="candidate", db_path=db_path)
     assert len(candidates) == 1
     assert candidates[0]["record_state"] == "candidate"
+
+
+def test_read_only_list_does_not_create_a_missing_event_database(tmp_path):
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    assert behavioral_event_state.list_events(db_path=db_path, initialize=False) == []
+    assert not (tmp_path / "behavioral_events.db").exists()
+
+
+def test_read_only_connection_uses_a_live_wal_safe_sqlite_uri(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+    executed: list[str] = []
+
+    class FakeConnection:
+        row_factory = None
+
+        def execute(self, statement: str) -> None:
+            executed.append(statement)
+
+        def close(self) -> None:
+            return None
+
+    def fake_connect(database_uri: str, **kwargs):
+        captured["database_uri"] = database_uri
+        captured["kwargs"] = kwargs
+        return FakeConnection()
+
+    monkeypatch.setattr(behavioral_event_state.sqlite3, "connect", fake_connect)
+
+    with behavioral_event_state._read_only_conn(str(tmp_path / "behavioral_events.db")):
+        pass
+
+    assert "?mode=ro" in str(captured["database_uri"])
+    assert "immutable=1" not in str(captured["database_uri"])
+    assert captured["kwargs"] == {"uri": True, "timeout": 30}
+    assert executed == ["PRAGMA query_only=ON"]
+
+
+def test_read_only_list_surfaces_a_missing_schema_in_an_existing_database(monkeypatch, tmp_path):
+    db_path = tmp_path / "behavioral_events.db"
+    db_path.touch()
+
+    class MissingSchemaConnection:
+        def execute(self, *_args, **_kwargs):
+            raise sqlite3.OperationalError("no such table: behavioral_events")
+
+    monkeypatch.setattr(
+        behavioral_event_state,
+        "_read_only_conn",
+        lambda _db_path: nullcontext(MissingSchemaConnection()),
+    )
+
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        behavioral_event_state.list_events(db_path=str(db_path), initialize=False)
 
 
 def test_progress_starts_empty_and_updates_independently(tmp_path):
