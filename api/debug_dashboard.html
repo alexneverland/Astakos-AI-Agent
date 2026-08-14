@@ -1520,6 +1520,7 @@ function renderBehavioralPatterns(candidates) {
   if (!container) return;
   if (!candidates.length) {
     container.innerHTML = '<div class="card" style="grid-column:span 2"><h2>🔎 BEHAVIORAL PATTERNS</h2><p style="color:var(--muted)">No confirmed patterns with evidence from 3 distinct dates yet.</p></div>';
+    enhanceRenderedDashboard(container);
     return;
   }
   const rows = candidates.map(pattern => '<tr>'

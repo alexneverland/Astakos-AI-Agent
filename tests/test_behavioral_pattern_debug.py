@@ -20,8 +20,8 @@ def _event(event_date: str) -> dict[str, str]:
 def test_debug_behavioral_patterns_exposes_read_only_confirmed_candidates(monkeypatch):
     requested_states: list[str | None] = []
 
-    def fake_list_events(*, record_state=None):
-        requested_states.append(record_state)
+    def fake_list_events(*, record_state=None, initialize=True):
+        requested_states.append((record_state, initialize))
         return [
             _event("2026-08-01"),
             _event("2026-08-04"),
@@ -37,7 +37,7 @@ def test_debug_behavioral_patterns_exposes_read_only_confirmed_candidates(monkey
     )
 
     assert response.status_code == 200
-    assert requested_states == ["confirmed"]
+    assert requested_states == [("confirmed", False)]
     assert response.json() == {
         "candidates": [{
             "event_type": "meal",
@@ -65,3 +65,4 @@ def test_debug_dashboard_fetches_and_renders_behavioral_patterns():
     assert "pj.error" in dashboard
     assert "BEHAVIORAL_PATTERNS_REFRESH = 60000" in dashboard
     assert "behavioralPatternsFetchInFlight" in dashboard
+    assert "enhanceRenderedDashboard(container);" in dashboard

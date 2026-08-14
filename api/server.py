@@ -2686,7 +2686,9 @@ async def debug_memory_audit(days: int = 1, _=Depends(require_token)):
 
 
 @server.get("/debug/behavioral-patterns")
-async def debug_behavioral_patterns(_=Depends(require_token)):
+async def debug_behavioral_patterns(
+    _: None = Depends(require_token),
+) -> dict[str, object]:
     """Return read-only pattern candidates from confirmed behavioral events."""
     try:
         from memory.behavioral_event_state import list_events
@@ -2695,7 +2697,7 @@ async def debug_behavioral_patterns(_=Depends(require_token)):
         )
 
         candidates = aggregate_behavioral_pattern_candidates(
-            list_events(record_state="confirmed"),
+            list_events(record_state="confirmed", initialize=False),
         )
         return {"candidates": candidates, "count": len(candidates)}
     except Exception:

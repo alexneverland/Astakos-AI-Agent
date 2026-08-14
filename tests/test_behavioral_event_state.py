@@ -48,6 +48,13 @@ def test_store_keeps_candidate_separate_from_confirmed_events(tmp_path):
     assert candidates[0]["record_state"] == "candidate"
 
 
+def test_read_only_list_does_not_create_a_missing_event_database(tmp_path):
+    db_path = str(tmp_path / "behavioral_events.db")
+
+    assert behavioral_event_state.list_events(db_path=db_path, initialize=False) == []
+    assert not (tmp_path / "behavioral_events.db").exists()
+
+
 def test_progress_starts_empty_and_updates_independently(tmp_path):
     db_path = str(tmp_path / "behavioral_events.db")
 

@@ -11,6 +11,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Mapping
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "behavioral_events.db")
@@ -32,6 +33,18 @@ def _conn(db_path: str = DB_PATH):
     try:
         with conn:
             yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def _read_only_conn(db_path: str = DB_PATH):
+    """Open an existing event database without initializing or mutating it."""
+    database_uri = f"{Path(db_path).resolve().as_uri()}?mode=ro"
+    conn = sqlite3.connect(database_uri, uri=True, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
     finally:
         conn.close()
 
@@ -245,9 +258,16 @@ def list_events(
     *,
     record_state: str | None = None,
     db_path: str = DB_PATH,
+    initialize: bool = True,
 ) -> list[dict[str, Any]]:
-    """Return events ordered newest first for inspection or later aggregation."""
-    init_db(db_path)
+    """Return events ordered newest first, optionally without schema initialization."""
+    if initialize:
+        init_db(db_path)
+        connection = _conn
+    elif not os.path.isfile(db_path):
+        return []
+    else:
+        connection = _read_only_conn
     query = "SELECT * FROM behavioral_events"
     params: tuple[Any, ...] = ()
     if record_state is not None:
@@ -256,6 +276,11 @@ def list_events(
         query += " WHERE record_state=?"
         params = (record_state,)
     query += " ORDER BY event_date DESC, id DESC"
-    with _conn(db_path) as conn:
-        rows = conn.execute(query, params).fetchall()
+    try:
+        with connection(db_path) as conn:
+            rows = conn.execute(query, params).fetchall()
+    except sqlite3.OperationalError as exc:
+        if not initialize and "no such table" in str(exc).lower():
+            return []
+        raise
     return [dict(row) for row in rows]
