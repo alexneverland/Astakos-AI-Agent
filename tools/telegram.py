@@ -6,7 +6,21 @@
 import requests
 import re
 import html
+import os
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+
+
+def _is_pytest_execution() -> bool:
+    """Return whether this call is executing inside an active pytest test."""
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+def _suppress_test_delivery(delivery_type: str) -> bool:
+    """Block every real Telegram transport while a pytest test is active."""
+    if not _is_pytest_execution():
+        return False
+    print(f"[Test Safety]: Telegram {delivery_type} suppressed during pytest.")
+    return True
 
 def send_telegram_msg_full(text: str, prefix: str = "", max_len: int = 3500, disable_notification: bool = False) -> int | None:
     """Sends the entire text to Telegram, splitting it into chunks if necessary
@@ -63,6 +77,11 @@ def _plain_telegram_fallback(text: str) -> str:
 
 def send_telegram_msg(text: str, disable_notification: bool = False) -> int | None:
     """Sends a message to Telegram. Returns the message_id or None."""
+    # Tests must never emit to the real bot, even if an individual test forgets
+    # to mock a caller such as SafeExec or a document handler.
+    if _suppress_test_delivery("message delivery"):
+        return None
+
     token = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
 
@@ -100,7 +119,9 @@ def send_telegram_msg(text: str, disable_notification: bool = False) -> int | No
 
 async def send_telegram_photo(image_path: str, caption: str = ""):
     """Sends a photo to Telegram from a local path."""
-    import os
+    if _suppress_test_delivery("photo delivery"):
+        return
+
     token   = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
     if not token or not chat_id or not os.path.exists(image_path):
@@ -128,7 +149,10 @@ def send_telegram_document(file_path: str, caption: str = "", drive_url: str = "
     Sends a file to Telegram as a document (sendDocument).
     If drive_url is provided, it adds an inline keyboard button "Open in Google Drive".
     """
-    import os, json
+    if _suppress_test_delivery("document delivery"):
+        return
+
+    import json
     token   = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
     if not token or not chat_id:
@@ -177,7 +201,9 @@ async def send_telegram_voice(text: str):
     [MASTRO-FIX]: Uses edge-tts instead of gTTS.
     Same voice as the Web UI (el-GR-NestorasNeural), much better quality.
     """
-    import os
+    if _suppress_test_delivery("voice delivery"):
+        return
+
     import re
     import edge_tts
     import io

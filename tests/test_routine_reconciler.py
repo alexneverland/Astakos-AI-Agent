@@ -37,8 +37,10 @@ def _make_routines_db(path, rows):
             active_from TEXT,
             active_until TEXT,
             paused_until TEXT,
+            paused_indefinitely BOOLEAN DEFAULT 0,
             resume_rule TEXT,
-            pause_reason TEXT
+            pause_reason TEXT,
+            external_content_sources_json TEXT NOT NULL DEFAULT '[]'
         )
         """
     )

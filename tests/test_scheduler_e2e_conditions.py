@@ -35,7 +35,12 @@ def _due_row(rid=14, name="ρουτίνα", priority=0, ctype=None):
     }
 
 
-def _run_job(db_rows, routine_conditions=None, context_state=None, craft_return="κανονικό μήνυμα"):
+def _run_job(
+    db_rows,
+    routine_conditions=None,
+    context_state=None,
+    craft_return=("κανονικό μήνυμα", False),
+):
     import clients.telegram_bot as bot
     import config as cfg
 

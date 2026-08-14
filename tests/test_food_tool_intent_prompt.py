@@ -10,10 +10,7 @@ def test_food_context_does_not_trigger_meal_logging():
         "do not turn it into a recipe or meal-logging intent" in prompt
     )
     assert (
-        "explicitly asks to record the meal in history" in prompt
+        "directly reports that he ate or cooked a named meal" in prompt
     )
-    assert (
-        "chose, cooked, ate, or has leftovers from a meal is context only"
-        in prompt
-    )
-    assert '"we ate"' not in prompt
+    assert "Do this silently: do not ask for approval" in prompt
+    assert "food mentioned only as general context" in prompt
