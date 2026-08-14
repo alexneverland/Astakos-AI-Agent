@@ -49,9 +49,20 @@ def test_aggregator_canonicalizes_equivalent_iso_dates_before_counting():
         _event(event_date="2026-01-01"),
         _event(event_date="20260101"),
         _event(event_date="2026-W01-4"),
+        _event(event_date="2026-01-04"),
+        _event(event_date="2026-01-07"),
     ])
 
-    assert candidates == []
+    assert candidates == [{
+        "event_type": "meal",
+        "category": "food",
+        "subject": "user",
+        "item": "pasta",
+        "status": "consumed",
+        "occurrence_count": 5,
+        "first_date": "2026-01-01",
+        "last_date": "2026-01-07",
+    }]
 
 
 def test_aggregator_groups_case_variants_under_one_deterministic_signature():
