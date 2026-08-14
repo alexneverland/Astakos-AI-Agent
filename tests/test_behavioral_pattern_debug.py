@@ -61,3 +61,7 @@ def test_debug_dashboard_fetches_and_renders_behavioral_patterns():
     assert 'id="behavioral-patterns-section"' in dashboard
     assert "fetch('/debug/behavioral-patterns')" in dashboard
     assert "renderBehavioralPatterns" in dashboard
+    assert "renderBehavioralPatternLoadError" in dashboard
+    assert "pj.error" in dashboard
+    assert "BEHAVIORAL_PATTERNS_REFRESH = 60000" in dashboard
+    assert "behavioralPatternsFetchInFlight" in dashboard

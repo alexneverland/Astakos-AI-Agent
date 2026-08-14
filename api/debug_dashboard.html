@@ -294,11 +294,14 @@
 <div id="log-section" style="margin-top:16px;padding:0 0 24px 0"></div>
 <script>
 const REFRESH = 5000;
+const BEHAVIORAL_PATTERNS_REFRESH = 60000;
 let rafId;
 let timelineData = [];
 let dashboardFilter = 'all';
 let focusedRoutineId = null;
 let focusedRoutineName = '';
+let behavioralPatternsFetchInFlight = false;
+let behavioralPatternsLastFetchedAt = 0;
 let noiseCollapsed = localStorage.getItem('astakos_debug_noise_collapsed') !== 'false';
 const collapsedSections = new Set(
   JSON.parse(localStorage.getItem('astakos_debug_collapsed_sections') || '[]')
@@ -1477,12 +1480,38 @@ async function fetchData() {
     const rj = await rr.json();
     renderReflections(rj.reflections || [], window._showApplied || false);
   } catch(e) {}
-  // Read-only behavioral observations; these do not affect agent behavior.
+  fetchBehavioralPatterns();
+}
+
+
+async function fetchBehavioralPatterns() {
+  const now = Date.now();
+  if (behavioralPatternsFetchInFlight
+      || now - behavioralPatternsLastFetchedAt < BEHAVIORAL_PATTERNS_REFRESH) {
+    return;
+  }
+  behavioralPatternsFetchInFlight = true;
   try {
     const pr = await fetch('/debug/behavioral-patterns');
     const pj = await pr.json();
+    if (!pr.ok || pj.error) {
+      renderBehavioralPatternLoadError();
+      return;
+    }
     renderBehavioralPatterns(pj.candidates || []);
-  } catch(e) {}
+  } catch(e) {
+    renderBehavioralPatternLoadError();
+  } finally {
+    behavioralPatternsLastFetchedAt = Date.now();
+    behavioralPatternsFetchInFlight = false;
+  }
+}
+
+
+function renderBehavioralPatternLoadError() {
+  const container = document.getElementById('behavioral-patterns-section');
+  if (!container) return;
+  container.innerHTML = '<div class="card" style="grid-column:span 2;border-left:3px solid #f85149"><h2>🔎 BEHAVIORAL PATTERNS</h2><p class="err" role="status">Could not load behavioral patterns. The event store remains unchanged.</p></div>';
 }
 
 
