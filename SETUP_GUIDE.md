@@ -2,7 +2,7 @@
 
 Run your own personal AI assistant on your computer without manually building a Python environment.
 
-The recommended installation uses **Docker Desktop**. Docker installs the Python dependencies, browser components, and runtime services inside an isolated container while your memories, settings, databases, and files remain in the Astakos folder on your computer.
+The recommended installation uses **Docker Desktop**. Docker installs the Python dependencies, browser components, and runtime services inside an isolated container while your memories, settings, databases, and files remain on your computer: in the project folder for a source build or in a named Docker volume for the release image.
 
 > **What you need:** Docker Desktop, one supported AI provider, and about 10 minutes for the first setup.
 
@@ -13,6 +13,7 @@ The recommended installation uses **Docker Desktop**. Docker installs the Python
 | Path | Best for | What you install manually |
 |---|---|---|
 | **Docker — recommended** | Most users, Windows/macOS/Linux, clean installation | Docker Desktop only |
+| **Docker release image** | Users who want automatic image updates | Docker Desktop only |
 | **Manual Python setup** | Developers who want to modify or debug the code directly | Python 3.11+, virtual environment, dependencies |
 
 Astakos supports these model providers:
@@ -23,6 +24,8 @@ Astakos supports these model providers:
 - **Vertex AI** — intended for Google Cloud users; requires a project and credentials JSON.
 
 You only need **one** provider to start.
+
+> Want automatic Docker image updates instead of building from source? Download `docker-compose.release.yml` from the [latest release](https://github.com/alexneverland/Astakos-AI-Agent/releases/latest), place it in an empty folder, and run `docker compose -f docker-compose.release.yml up -d`. The full release-image instructions are in the [README](README.md#recommended-docker-with-automatic-updates).
 
 ---
 

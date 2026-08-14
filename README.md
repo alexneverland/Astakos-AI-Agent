@@ -146,6 +146,7 @@ Astakos combines memory, agents, schedulers, approvals, analytics, and tools int
 - Shared Telegram and Web conversation history in SQLite.
 - ChromaDB semantic memory for facts, goals, sessions, documents, and photos.
 - Hybrid recall combining recent context, SQLite history, and semantic memory.
+- Isolated behavioral observations that classify trusted user reports and surface repeated pattern candidates in Debug before they can influence any future feature.
 - Recurring-routine learning with context-aware reminders and adaptive anti-spam cooldowns.
 - Delayed conversational follow-ups that cancel when the topic is already resolved.
 - Long-term goal tracking and follow-up after inactivity.
@@ -164,7 +165,7 @@ LangGraph routes work to specialized Chat, Home, Web, Tech, Git, Mail, and Dev a
 
 Planner v2 supports automatic multi-step detection, confirmation before execution, progress reporting, validation, re-planning, and final reflection.
 
-Astakos includes SAFE, WARNING, NOTIFY, and CRITICAL action levels, approval expiry, terminal-command protection, execution traces, tool statistics, `/doctor`, and runtime dashboards.
+Astakos includes SAFE, WARNING, NOTIFY, and CRITICAL action levels, approval expiry, terminal-command protection, provenance handling for external content, execution traces, tool statistics, `/doctor`, and runtime dashboards.
 
 ---
 
