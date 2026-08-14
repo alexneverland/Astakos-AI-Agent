@@ -13,7 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
-- An isolated behavioral-observation layer that records only validated, trusted user reports as confirmed events or non-actioning candidates.
+- An isolated behavioral-observation layer that records only validated, trusted user reports as confirmed events or non-actionable candidates.
 - Debug visibility for repeated behavioral-pattern candidates. These observations do not create routines, reminders, memory writes, or notifications automatically.
 - A temporary vacation pause for routine notifications, with visible pause status and preserved reminders and follow-ups.
 
