@@ -3,6 +3,7 @@
 from typing import Any, Dict
 from unittest.mock import patch
 import pytest
+import requests
 
 import clients.telegram_bot as bot
 
@@ -93,7 +94,7 @@ def test_authorized_chat_with_unauthorized_from_id_rejected() -> None:
             if "answerCallbackQuery" in call.args[0]
         ]
         assert len(answer_calls) >= 1
-        assert answer_calls[0].kwargs["json"]["text"] == "⛔ Unauthorized"
+        assert answer_calls[0].kwargs["json"]["text"] == bot.UNAUTHORIZED_CALLBACK_ALERT_TEXT
 
 
 def test_authorized_from_id_with_unauthorized_chat_id_rejected() -> None:
@@ -123,7 +124,7 @@ def test_authorized_from_id_with_unauthorized_chat_id_rejected() -> None:
             if "answerCallbackQuery" in call.args[0]
         ]
         assert len(answer_calls) >= 1
-        assert answer_calls[0].kwargs["json"]["text"] == "⛔ Unauthorized"
+        assert answer_calls[0].kwargs["json"]["text"] == bot.UNAUTHORIZED_CALLBACK_ALERT_TEXT
 
 
 def test_unauthorized_user_reject_callback_blocked() -> None:
@@ -145,6 +146,27 @@ def test_unauthorized_user_reject_callback_blocked() -> None:
         assert not mock_pop.called, "pop_pending must never be called for unauthorized user"
 
 
+def test_unauthorized_callback_transport_failure_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Keeps Telegram callback transport failures observable without executing a tool."""
+    cq = _build_callback_query(
+        action="approve",
+        tool_call_id="call-sec-network",
+        from_id="99999999",
+        chat_id="99999999",
+    )
+
+    with patch(
+        "requests.post",
+        side_effect=requests.RequestException("network unavailable"),
+    ), patch("core.approval.execute_approved_pending") as mock_exec:
+        bot._handle_approval_callback(cq)
+
+    assert not mock_exec.called
+    assert "Failed to answer unauthorized callback cq_999" in caplog.text
+
+
 def test_unconfigured_telegram_chat_id_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Proves that when TELEGRAM_CHAT_ID is empty/unconfigured, all callback queries are rejected."""
     monkeypatch.setattr(bot, "TELEGRAM_CHAT_ID", "")
@@ -157,12 +179,14 @@ def test_unconfigured_telegram_chat_id_fails_closed(monkeypatch: pytest.MonkeyPa
     )
 
     with patch("core.approval.execute_approved_pending") as mock_exec, \
-         patch("core.approval.get_pending") as mock_get:
+         patch("core.approval.get_pending") as mock_get, \
+         patch("requests.post") as mock_post:
 
         bot._handle_approval_callback(cq)
 
         assert not mock_exec.called
         assert not mock_get.called
+        assert mock_post.called
 
 
 def test_authorized_user_approve_callback_executes_tool() -> None:

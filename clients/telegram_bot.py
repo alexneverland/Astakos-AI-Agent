@@ -18,6 +18,7 @@ import os
 import sys
 import time
 import json
+import logging
 import requests
 import re
 import threading
@@ -37,6 +38,10 @@ from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FI
 import config
 import core.i18n
 from core.i18n import t
+
+
+logger = logging.getLogger(__name__)
+UNAUTHORIZED_CALLBACK_ALERT_TEXT = "⛔ Unauthorized"
 
 GEORGIAN_QUICK_PHRASES_ALIASES = frozenset({
     "/georgian_phrases", "/g_phrases",
@@ -3023,16 +3028,28 @@ def _handle_approval_callback(cq: dict) -> None:
         # Security check: Both chat_id and from_id must match the authorized private Telegram identity
         allowed_id = str(TELEGRAM_CHAT_ID)
         if not allowed_id or chat_id != allowed_id or from_id != allowed_id:
-            print(f"\033[91m[TelegramBot/Security]: Unauthorized approval callback from user={from_id}, chat={chat_id}\033[0m")
+            logger.warning(
+                "[TelegramBot/Security]: Unauthorized approval callback from user=%s, chat=%s",
+                from_id,
+                chat_id,
+            )
             if cq_id and TELEGRAM_TOKEN:
                 try:
                     requests.post(
                         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
-                        json={"callback_query_id": cq_id, "text": "⛔ Unauthorized", "show_alert": True},
+                        json={
+                            "callback_query_id": cq_id,
+                            "text": UNAUTHORIZED_CALLBACK_ALERT_TEXT,
+                            "show_alert": True,
+                        },
                         timeout=5,
                     )
-                except Exception:
-                    pass
+                except requests.RequestException as error:
+                    logger.warning(
+                        "[TelegramBot/Security]: Failed to answer unauthorized callback %s: %s",
+                        cq_id,
+                        error,
+                    )
             return
 
         # Answer the callback (remove loading spinner)
