@@ -20,6 +20,7 @@ import re
 import secrets
 import logging
 from collections.abc import Mapping
+from urllib.parse import quote, urlencode
 from api.path_security import resolve_allowed_file
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -169,6 +170,15 @@ def _extract_token_from_scope(scope: Scope) -> str | None:
         QueryParams(query_text),
         Headers(scope=scope),
     )
+
+
+def _private_asset_url(request: Request, mount_path: str, filename: str) -> str:
+    """Build a same-origin asset URL with a token only for non-local clients."""
+    asset_url = f"/{mount_path}/{quote(filename, safe='')}"
+    host = request.client.host if request.client else ""
+    if _is_trusted_client_host(host):
+        return asset_url
+    return f"{asset_url}?{urlencode({'token': LOCAL_TOKEN})}"
 
 
 class AuthenticatedStaticFiles(StaticFiles):
@@ -1400,13 +1410,11 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         if photo_match:
             file_path = photo_match.group(1).strip()
             filename = os.path.basename(file_path)
-            base_url = str(request.base_url).rstrip("/")
-            
             # We smartly check where the photo is located
             if "outputs" in file_path.lower():
-                img_url = f"{base_url}/outputs/{filename}"
+                img_url = _private_asset_url(request, "outputs", filename)
             else:
-                img_url = f"{base_url}/photos/{filename}"
+                img_url = _private_asset_url(request, "photos", filename)
                 
             img_html = f'<br><br><img src="{img_url}" alt="Astakos Image" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">'
             
@@ -1796,7 +1804,7 @@ async def upload_file(
             "status":    "success",
             "filename":  filename,
             "file_path": file_path,
-            "url":       f"/photos/{filename}" if is_image else None,
+            "url":       _private_asset_url(request, "photos", filename) if is_image else None,
             "ai_message": chat_ai_msg,
             "analysis":  memory_analysis,
         })

@@ -1,13 +1,16 @@
 """Regression tests for authentication of private static asset mounts."""
 
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from api.server import (
     AuthenticatedStaticFiles,
     LOCAL_TOKEN,
+    _private_asset_url,
     _extract_token_from_query_and_headers,
     server,
 )
@@ -19,6 +22,45 @@ def test_shared_token_extraction_prefers_query_token() -> None:
         {"token": "query-token"},
         {"authorization": f"Bearer {LOCAL_TOKEN}"},
     ) == "query-token"
+
+
+def _build_request(client_host: str) -> Request:
+    """Build a minimal HTTP request with an explicit client address."""
+    return Request({
+        "type": "http",
+        "scheme": "http",
+        "server": ("astakos.local", 8000),
+        "path": "/chat",
+        "raw_path": b"/chat",
+        "query_string": b"",
+        "headers": [(b"host", b"astakos.local:8000")],
+        "client": (client_host, 50000),
+    })
+
+
+def test_lan_generated_asset_url_includes_local_token() -> None:
+    """A browser loading a LAN image can authenticate without replaying Bearer."""
+    asset_url = _private_asset_url(
+        _build_request("192.168.1.100"),
+        "outputs",
+        "generated image.png",
+    )
+
+    parsed = urlparse(asset_url)
+    assert parsed.netloc == ""
+    assert parsed.path == "/outputs/generated%20image.png"
+    assert parse_qs(parsed.query) == {"token": [LOCAL_TOKEN]}
+
+
+def test_loopback_generated_asset_url_has_no_token() -> None:
+    """The native local UI does not need token-bearing image URLs."""
+    asset_url = _private_asset_url(
+        _build_request("127.0.0.1"),
+        "photos",
+        "uploaded.png",
+    )
+
+    assert urlparse(asset_url).query == ""
 
 
 @pytest.mark.parametrize("path", ["/photos", "/outputs", "/avatars"])
