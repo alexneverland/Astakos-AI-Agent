@@ -12,3 +12,4 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - ASTAKOS_SETUP_HOST=0.0.0.0
+      - ASTAKOS_CONTAINER=1
