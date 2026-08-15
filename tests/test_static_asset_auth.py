@@ -1,18 +1,22 @@
 """Regression tests for authentication of private static asset mounts."""
 
+import re
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from memory import conversation_history
 
 from api.server import (
     ASSET_TOKEN_TTL_SECONDS,
     AuthenticatedStaticFiles,
     LOCAL_TOKEN,
     _create_asset_access_token,
+    _asset_history_marker,
     _private_asset_url,
+    _render_persisted_asset_markers,
     _extract_token_from_query_and_headers,
     _validate_asset_access_token,
     server,
@@ -66,6 +70,65 @@ def test_loopback_generated_asset_url_has_no_token() -> None:
     )
 
     assert urlparse(asset_url).query == ""
+
+
+def test_persisted_asset_marker_contains_only_a_stable_asset_reference() -> None:
+    """History stores no temporary credential that could later expire or leak."""
+    marker = _asset_history_marker("outputs", "generated image.png")
+
+    assert marker == "[ASTAKOS_ASSET:/outputs/generated%20image.png]"
+    assert "asset_token" not in marker
+    assert LOCAL_TOKEN not in marker
+
+
+def test_persisted_asset_marker_renders_a_fresh_scoped_url() -> None:
+    """A history reload mints a new client-facing URL from the stable marker."""
+    rendered = _render_persisted_asset_markers(
+        "Here it is: " + _asset_history_marker("outputs", "generated image.png"),
+        _build_request("192.168.1.100"),
+    )
+
+    match = re.search(r'src="([^"]+)"', rendered)
+    assert match is not None
+    parsed = urlparse(match.group(1))
+    assert parsed.path == "/outputs/generated%20image.png"
+    assert _validate_asset_access_token(
+        parse_qs(parsed.query)["asset_token"][0],
+        parsed.path,
+    )
+
+
+def test_history_endpoint_refreshes_persisted_asset_url(monkeypatch) -> None:
+    """Reloaded LAN history receives a new scoped URL instead of an expired one."""
+    marker = _asset_history_marker("outputs", "generated image.png")
+    monkeypatch.setattr(
+        conversation_history,
+        "load_messages",
+        lambda **_: [{
+            "content": marker,
+            "role": "assistant",
+            "time": "10:00",
+            "date": "2026-08-15",
+            "channel": "web",
+            "id": "asset-message",
+            "rowid": 1,
+            "agent": "Chat_Agent",
+        }],
+    )
+    client = TestClient(server, client=("192.168.1.100", 50000))
+
+    response = client.get("/history", headers={"Authorization": f"Bearer {LOCAL_TOKEN}"})
+
+    assert response.status_code == 200
+    rendered = response.json()["history"][0]["content"]
+    match = re.search(r'src="([^"]+)"', rendered)
+    assert match is not None
+    parsed = urlparse(match.group(1))
+    assert parsed.path == "/outputs/generated%20image.png"
+    assert _validate_asset_access_token(
+        parse_qs(parsed.query)["asset_token"][0],
+        parsed.path,
+    )
 
 
 @pytest.mark.parametrize("path", ["/photos", "/outputs", "/avatars"])

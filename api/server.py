@@ -17,13 +17,14 @@ import signal
 import asyncio
 import threading
 import ipaddress
+import html
 from core.i18n import t
 import sys
 import re
 import secrets
 import logging
 from collections.abc import Mapping
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, unquote, urlencode
 from api.path_security import resolve_allowed_file
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -95,6 +96,9 @@ def _get_or_create_token() -> str:
 LOCAL_TOKEN = _get_or_create_token()
 _bearer = HTTPBearer(auto_error=False)
 ASSET_TOKEN_TTL_SECONDS = 300
+_ASSET_HISTORY_MARKER_RE = re.compile(
+    r"\[ASTAKOS_ASSET:(?P<asset_path>/(?:photos|outputs|avatars)/[^\]\r\n]+)\]",
+)
 
 def _is_container_environment() -> bool:
     """Returns True if the application is running inside a Docker or container runtime."""
@@ -214,6 +218,42 @@ def _private_asset_url(request: Request, mount_path: str, filename: str) -> str:
     if _is_trusted_client_host(host):
         return asset_url
     return f"{asset_url}?{urlencode({'asset_token': _create_asset_access_token(asset_url)})}"
+
+
+def _asset_history_marker(mount_path: str, filename: str) -> str:
+    """Return the stable, token-free asset reference persisted in chat history."""
+    return f"[ASTAKOS_ASSET:{_asset_request_path(mount_path, filename)}]"
+
+
+def _asset_url_from_history_marker(request: Request, asset_path: str) -> str | None:
+    """Mint a fresh URL only for a canonical, persisted private-asset reference."""
+    for mount_path in ("photos", "outputs", "avatars"):
+        prefix = f"/{mount_path}/"
+        if not asset_path.startswith(prefix):
+            continue
+        filename = unquote(asset_path[len(prefix):])
+        if not filename or filename != os.path.basename(filename):
+            return None
+        if _asset_request_path(mount_path, filename) != asset_path:
+            return None
+        return _private_asset_url(request, mount_path, filename)
+    return None
+
+
+def _render_persisted_asset_markers(content: str, request: Request) -> str:
+    """Replace token-free persisted references with fresh client-facing image URLs."""
+    def replace_marker(match: re.Match[str]) -> str:
+        image_url = _asset_url_from_history_marker(request, match.group("asset_path"))
+        if not image_url:
+            return match.group(0)
+        return (
+            '<br><br><img src="'
+            f'{html.escape(image_url, quote=True)}'
+            '" alt="Astakos Image" style="max-width: 100%; border-radius: 8px; '
+            'box-shadow: 0 4px 8px rgba(0,0,0,0.2);">'
+        )
+
+    return _ASSET_HISTORY_MARKER_RE.sub(replace_marker, content)
 
 
 class AuthenticatedStaticFiles(StaticFiles):
@@ -341,6 +381,7 @@ def append_to_chat_history(
     *,
     return_saved: bool = False,
     metadata: dict | None = None,
+    display_content: str | None = None,
 ):
     """Add message to the shared SQLite conversation history (web channel) and websocket push."""
     now = datetime.now()
@@ -375,7 +416,7 @@ def append_to_chat_history(
             "role": role,
             "agent": agent,
             "time": now.strftime("%H:%M"),
-            "content": content,
+            "content": display_content if display_content is not None else content,
         })
     except Exception as e:
         print(f"[ConversationHistory/web]: Error shared write: {e}")
@@ -487,7 +528,11 @@ def _tool_results_fallback_response(user_text: str, tool_results: list[str]) -> 
     return t("api.server.synthesis_failed") + joined_results[:1800]
 
 
-def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -> list:
+def _load_shared_history_entries(
+    channel: str | None = None,
+    limit: int = 200,
+    request: Request | None = None,
+) -> list:
     try:
         from memory.conversation_history import load_messages
         entries = load_messages(channel=channel, limit=limit)
@@ -506,6 +551,8 @@ def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -
             role = "user"
         elif role in ("ai", "bot"):
             role = "assistant"
+        if request is not None:
+            content = _render_persisted_asset_markers(content, request)
         history.append({
             "role": role,
             "content": content,
@@ -1465,14 +1512,13 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             filename = os.path.basename(file_path)
             # We smartly check where the photo is located
             if "outputs" in file_path.lower():
-                img_url = _private_asset_url(request, "outputs", filename)
+                asset_marker = _asset_history_marker("outputs", filename)
             else:
-                img_url = _private_asset_url(request, "photos", filename)
-                
-            img_html = f'<br><br><img src="{img_url}" alt="Astakos Image" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">'
-            
-            # We replace the label with the image
-            clean_ai = re.sub(r"\[SEND_PHOTO:\s*(.*?)\]", img_html, clean_ai)
+                asset_marker = _asset_history_marker("photos", filename)
+
+            # Persist a stable reference. A fresh short-lived URL is rendered only
+            # for this response and later when the browser reloads history.
+            clean_ai = re.sub(r"\[SEND_PHOTO:\s*(.*?)\]", asset_marker, clean_ai)
 
         if final_ai_response:
             # We store the CLEAN strings everywhere (including the Link/Img if it exists)
@@ -1481,12 +1527,13 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             clean_ai = sanitize_messenger_draft_claims(clean_ai)
             clean_ai = strip_operational_assistant_paragraphs(clean_ai).strip() or clean_ai
+            client_ai = _render_persisted_asset_markers(clean_ai, request)
             from core.untrusted_content import derived_external_content_history_metadata
             assistant_metadata = derived_external_content_history_metadata(
                 provenance_messages_for_reply,
                 external_tool_names,
             )
-            _trace.finalize(response=clean_ai)
+            _trace.finalize(response=client_ai)
             
             assistant_history_kwargs = {
                 "agent": handling_agent,
@@ -1497,6 +1544,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             assistant_history_saved = append_to_chat_history(
                 "assistant",
                 clean_ai,
+                display_content=client_ai,
                 **assistant_history_kwargs,
             )
             assistant_history_rowid = assistant_history_saved.get("rowid")
@@ -1524,7 +1572,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         return JSONResponse({
             "agent":    handling_agent,
-            "response": clean_ai,  # Returning the response to the Frontend
+            "response": client_ai if final_ai_response else clean_ai,
             "user_rowid": current_history_rowid,
             "assistant_rowid": assistant_history_rowid if final_ai_response else None,
         })
@@ -1878,7 +1926,7 @@ async def health():
 
 
 @server.get("/messages/poll")
-async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends(require_token)):
+async def poll_messages(request: Request, after_id: int = 0, channel: str | None = None, _=Depends(require_token)):
     """
     Polling endpoint for the Web UI.
     Returns messages with id > after_id (default: 0 = all).
@@ -1887,6 +1935,11 @@ async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends
     try:
         from memory.conversation_history import load_messages_after_rowid, get_max_rowid
         messages = load_messages_after_rowid(after_rowid=after_id, channel=channel or None, limit=50)
+        for message in messages:
+            message["content"] = _render_persisted_asset_markers(
+                str(message.get("content", "")),
+                request,
+            )
         current_max = get_max_rowid()
         return {"messages": messages, "max_id": current_max}
     except Exception as e:
@@ -1894,9 +1947,9 @@ async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends
 
 
 @server.get("/history")
-async def get_history(_=Depends(require_token)):
+async def get_history(request: Request, _=Depends(require_token)):
     """Provides the history to the Web UI from the shared SQLite."""
-    history = _load_shared_history_entries(limit=200)
+    history = _load_shared_history_entries(limit=200, request=request)
     return {"history": history}
 
 
