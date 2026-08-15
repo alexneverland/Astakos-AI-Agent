@@ -1,13 +1,16 @@
 """Regression tests for authentication of private static asset mounts."""
 
 import re
+import json
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from memory import conversation_history
+import api.server as server_module
 
 from api.server import (
     ASSET_TOKEN_TTL_SECONDS,
@@ -17,6 +20,7 @@ from api.server import (
     _asset_history_marker,
     _private_asset_url,
     _render_persisted_asset_markers,
+    _render_persisted_asset_markers_for_client,
     _extract_token_from_query_and_headers,
     _validate_asset_access_token,
     server,
@@ -88,7 +92,7 @@ def test_persisted_asset_marker_renders_a_fresh_scoped_url() -> None:
         _build_request("192.168.1.100"),
     )
 
-    match = re.search(r'src="([^"]+)"', rendered)
+    match = re.search(r"\[ASTAKOS_ASSET_URL:([^\]]+)\]", rendered)
     assert match is not None
     parsed = urlparse(match.group(1))
     assert parsed.path == "/outputs/generated%20image.png"
@@ -100,7 +104,7 @@ def test_persisted_asset_marker_renders_a_fresh_scoped_url() -> None:
 
 def test_history_endpoint_refreshes_persisted_asset_url(monkeypatch) -> None:
     """Reloaded LAN history receives a new scoped URL instead of an expired one."""
-    marker = _asset_history_marker("outputs", "generated image.png")
+    marker = "[SEND_PHOTO: C:/astakos_v2/outputs/generated image.png]"
     monkeypatch.setattr(
         conversation_history,
         "load_messages",
@@ -121,10 +125,72 @@ def test_history_endpoint_refreshes_persisted_asset_url(monkeypatch) -> None:
 
     assert response.status_code == 200
     rendered = response.json()["history"][0]["content"]
-    match = re.search(r'src="([^"]+)"', rendered)
+    match = re.search(r"\[ASTAKOS_ASSET_URL:([^\]]+)\]", rendered)
     assert match is not None
     parsed = urlparse(match.group(1))
     assert parsed.path == "/outputs/generated%20image.png"
+    assert _validate_asset_access_token(
+        parse_qs(parsed.query)["asset_token"][0],
+        parsed.path,
+    )
+
+
+def test_legacy_telegram_photo_marker_renders_a_scoped_url() -> None:
+    """Telegram history remains visible after static assets require authentication."""
+    rendered = _render_persisted_asset_markers(
+        "[SEND_PHOTO: C:/astakos_v2/outputs/generated image.png]",
+        _build_request("192.168.1.100"),
+    )
+
+    assert "[SEND_PHOTO:" not in rendered
+    match = re.search(r"\[ASTAKOS_ASSET_URL:([^\]]+)\]", rendered)
+    assert match is not None
+    parsed = urlparse(match.group(1))
+    assert parsed.path == "/outputs/generated%20image.png"
+    assert _validate_asset_access_token(
+        parse_qs(parsed.query)["asset_token"][0],
+        parsed.path,
+    )
+
+
+def test_asset_urls_are_minted_per_websocket_client_host() -> None:
+    """A LAN socket receives its own scoped URL rather than a loopback URL."""
+    marker = _asset_history_marker("outputs", "generated image.png")
+
+    loopback_rendered = _render_persisted_asset_markers_for_client(marker, "127.0.0.1")
+    lan_rendered = _render_persisted_asset_markers_for_client(marker, "192.168.1.100")
+
+    assert "asset_token" not in loopback_rendered
+    lan_match = re.search(r"\[ASTAKOS_ASSET_URL:([^\]]+)\]", lan_rendered)
+    assert lan_match is not None
+    parsed = urlparse(lan_match.group(1))
+    assert _validate_asset_access_token(
+        parse_qs(parsed.query)["asset_token"][0],
+        parsed.path,
+    )
+
+
+def test_websocket_broadcast_mints_asset_urls_per_recipient(monkeypatch) -> None:
+    """One loopback broadcast cannot leave a LAN observer with an unusable URL."""
+    loopback_socket = MagicMock()
+    loopback_socket.client.host = "127.0.0.1"
+    lan_socket = MagicMock()
+    lan_socket.client.host = "192.168.1.100"
+    monkeypatch.setattr(server_module, "server_loop", object())
+    monkeypatch.setattr(server_module, "active_websockets", [loopback_socket, lan_socket])
+    monkeypatch.setattr(server_module.asyncio, "run_coroutine_threadsafe", lambda *_: None)
+
+    server_module._broadcast_ws({
+        "type": "new_message",
+        "content": _asset_history_marker("outputs", "generated image.png"),
+    })
+
+    loopback_content = json.loads(loopback_socket.send_text.call_args.args[0])["content"]
+    lan_content = json.loads(lan_socket.send_text.call_args.args[0])["content"]
+    assert "asset_token" not in loopback_content
+    lan_match = re.search(r"\[ASTAKOS_ASSET_URL:([^\]]+)\]", lan_content)
+    assert lan_match is not None
+    parsed = urlparse(lan_match.group(1))
     assert _validate_asset_access_token(
         parse_qs(parsed.query)["asset_token"][0],
         parsed.path,

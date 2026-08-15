@@ -99,6 +99,7 @@ ASSET_TOKEN_TTL_SECONDS = 300
 _ASSET_HISTORY_MARKER_RE = re.compile(
     r"\[ASTAKOS_ASSET:(?P<asset_path>/(?:photos|outputs|avatars)/[^\]\r\n]+)\]",
 )
+_SEND_PHOTO_MARKER_RE = re.compile(r"\[SEND_PHOTO:\s*(?P<file_path>.*?)\]")
 
 def _is_container_environment() -> bool:
     """Returns True if the application is running inside a Docker or container runtime."""
@@ -211,13 +212,18 @@ def _validate_asset_access_token(
     return hmac.compare_digest(supplied_signature, expected_signature)
 
 
-def _private_asset_url(request: Request, mount_path: str, filename: str) -> str:
-    """Build a same-origin asset URL with a scoped token for non-local clients."""
+def _private_asset_url_for_client_host(host: str, mount_path: str, filename: str) -> str:
+    """Build a same-origin asset URL with a scoped token for one client host."""
     asset_url = _asset_request_path(mount_path, filename)
-    host = request.client.host if request.client else ""
     if _is_trusted_client_host(host):
         return asset_url
     return f"{asset_url}?{urlencode({'asset_token': _create_asset_access_token(asset_url)})}"
+
+
+def _private_asset_url(request: Request, mount_path: str, filename: str) -> str:
+    """Build a same-origin asset URL with a scoped token for an HTTP client."""
+    host = request.client.host if request.client else ""
+    return _private_asset_url_for_client_host(host, mount_path, filename)
 
 
 def _asset_history_marker(mount_path: str, filename: str) -> str:
@@ -225,7 +231,7 @@ def _asset_history_marker(mount_path: str, filename: str) -> str:
     return f"[ASTAKOS_ASSET:{_asset_request_path(mount_path, filename)}]"
 
 
-def _asset_url_from_history_marker(request: Request, asset_path: str) -> str | None:
+def _asset_url_from_history_marker(client_host: str, asset_path: str) -> str | None:
     """Mint a fresh URL only for a canonical, persisted private-asset reference."""
     for mount_path in ("photos", "outputs", "avatars"):
         prefix = f"/{mount_path}/"
@@ -236,24 +242,40 @@ def _asset_url_from_history_marker(request: Request, asset_path: str) -> str | N
             return None
         if _asset_request_path(mount_path, filename) != asset_path:
             return None
-        return _private_asset_url(request, mount_path, filename)
+        return _private_asset_url_for_client_host(client_host, mount_path, filename)
     return None
 
 
-def _render_persisted_asset_markers(content: str, request: Request) -> str:
-    """Replace token-free persisted references with fresh client-facing image URLs."""
+def _asset_history_marker_from_legacy_photo_path(file_path: str) -> str:
+    """Translate a legacy Telegram photo marker into a stable private-asset reference."""
+    filename = os.path.basename(file_path.strip())
+    mount_path = "outputs" if "outputs" in file_path.lower() else "photos"
+    return _asset_history_marker(mount_path, filename)
+
+
+def _render_persisted_asset_markers_for_client(
+    content: str,
+    client_host: str,
+) -> str:
+    """Mint per-client URLs from stable or legacy image references for the Web UI."""
+    normalized_content = _SEND_PHOTO_MARKER_RE.sub(
+        lambda match: _asset_history_marker_from_legacy_photo_path(match.group("file_path")),
+        content,
+    )
+
     def replace_marker(match: re.Match[str]) -> str:
-        image_url = _asset_url_from_history_marker(request, match.group("asset_path"))
+        image_url = _asset_url_from_history_marker(client_host, match.group("asset_path"))
         if not image_url:
             return match.group(0)
-        return (
-            '<br><br><img src="'
-            f'{html.escape(image_url, quote=True)}'
-            '" alt="Astakos Image" style="max-width: 100%; border-radius: 8px; '
-            'box-shadow: 0 4px 8px rgba(0,0,0,0.2);">'
-        )
+        return f"[ASTAKOS_ASSET_URL:{html.escape(image_url, quote=True)}]"
 
-    return _ASSET_HISTORY_MARKER_RE.sub(replace_marker, content)
+    return _ASSET_HISTORY_MARKER_RE.sub(replace_marker, normalized_content)
+
+
+def _render_persisted_asset_markers(content: str, request: Request) -> str:
+    """Mint fresh client-facing image URLs for an HTTP request."""
+    host = request.client.host if request.client else ""
+    return _render_persisted_asset_markers_for_client(content, host)
 
 
 class AuthenticatedStaticFiles(StaticFiles):
@@ -332,14 +354,23 @@ server_loop = None
 
 
 def _broadcast_ws(payload: dict):
-    """Sends a JSON event to all connected WebSocket clients."""
+    """Sends a JSON event to all clients, minting asset URLs per recipient."""
     import json as _json
     if not server_loop or not active_websockets:
         return
-    msg = _json.dumps(payload, ensure_ascii=False)
     for ws in active_websockets:
         try:
-            asyncio.run_coroutine_threadsafe(ws.send_text(msg), server_loop)
+            message_payload = payload.copy()
+            content = message_payload.get("content")
+            if isinstance(content, str):
+                client = getattr(ws, "client", None)
+                client_host = str(getattr(client, "host", ""))
+                message_payload["content"] = _render_persisted_asset_markers_for_client(
+                    content,
+                    client_host,
+                )
+            message = _json.dumps(message_payload, ensure_ascii=False)
+            asyncio.run_coroutine_threadsafe(ws.send_text(message), server_loop)
         except Exception:
             pass
 
@@ -381,7 +412,6 @@ def append_to_chat_history(
     *,
     return_saved: bool = False,
     metadata: dict | None = None,
-    display_content: str | None = None,
 ):
     """Add message to the shared SQLite conversation history (web channel) and websocket push."""
     now = datetime.now()
@@ -416,7 +446,7 @@ def append_to_chat_history(
             "role": role,
             "agent": agent,
             "time": now.strftime("%H:%M"),
-            "content": display_content if display_content is not None else content,
+            "content": content,
         })
     except Exception as e:
         print(f"[ConversationHistory/web]: Error shared write: {e}")
@@ -1544,7 +1574,6 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             assistant_history_saved = append_to_chat_history(
                 "assistant",
                 clean_ai,
-                display_content=client_ai,
                 **assistant_history_kwargs,
             )
             assistant_history_rowid = assistant_history_saved.get("rowid")
@@ -1648,6 +1677,7 @@ async def text_to_speech(request: Request, _=Depends(require_token)):
         text = re.sub(r'[*#`]', '', text)
         text = re.sub(r'\[.*?\]\(.*?\)', '', text)
         text = re.sub(r'\[SEND_PHOTO:.*?\]', '', text)
+        text = re.sub(r'\[ASTAKOS_ASSET_URL:.*?\]', '', text)
         text = text.strip()
         from core.i18n import CURRENT_LOCALE
         voice = "el-GR-NestorasNeural" if CURRENT_LOCALE == "el" else "en-US-ChristopherNeural"
