@@ -211,8 +211,16 @@ PLAN_PER_ACTION_APPROVAL_TOOLS: frozenset[str] = frozenset({
 
 
 def requires_plan_per_action_approval(tool_call: dict) -> bool:
-    """Return whether a critical call crosses a plan approval boundary."""
-    return tool_call["name"] in PLAN_PER_ACTION_APPROVAL_TOOLS
+    """Return whether this concrete call crosses a plan approval boundary.
+
+    The explicit risk check makes this safe to reuse outside the current
+    ``critical_calls`` path: read-only actions of action-aware tools do not
+    become approval boundaries merely because their tool name is listed.
+    """
+    return (
+        _effective_risk(tool_call) == "CRITICAL"
+        and tool_call["name"] in PLAN_PER_ACTION_APPROVAL_TOOLS
+    )
 
 # ────────────────────────────────────────────────────────────────
 # Pending approval store

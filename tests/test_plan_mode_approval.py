@@ -71,8 +71,8 @@ def test_run_terminal_command_plan_active_requires_approval():
     """run_terminal_command still requires per-action approval in plan mode.
 
     run_terminal_command has DYNAMIC risk (depends on classify_command).
-    We mock is_critical to return True so the test exercises the plan-mode
-    bypass policy, not classify_command heuristics.
+    We mock _effective_risk to return CRITICAL so the test exercises the
+    plan-mode boundary policy, not classify_command heuristics.
     """
     from core.approval import approval_check_node
 
@@ -82,7 +82,7 @@ def test_run_terminal_command_plan_active_requires_approval():
     )
 
     with (
-        patch("core.approval.is_critical", return_value=True),
+        patch("core.approval._effective_risk", return_value="CRITICAL"),
         patch("core.approval.save_pending") as mock_save,
         patch("core.approval._notify_telegram") as mock_notify,
     ):
@@ -185,6 +185,16 @@ def test_plan_safe_actions_remain_smooth(tool_name: str, args: dict) -> None:
     assert result["approval_status"] == "ok"
     mock_save.assert_not_called()
     mock_notify.assert_not_called()
+
+
+def test_plan_boundary_helper_rejects_safe_action_of_boundary_tool() -> None:
+    """Boundary membership alone cannot escalate a safe action when reused."""
+    from core.approval import requires_plan_per_action_approval
+
+    assert not requires_plan_per_action_approval({
+        "name": "github_manager",
+        "args": {"action": "read_file", "repo_name": "repo", "target_files": "README.md"},
+    })
 
 
 def test_plan_does_not_bypass_external_context_escalation() -> None:
