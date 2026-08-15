@@ -55,6 +55,12 @@ def _effective_risk(tc: dict) -> str:
         if action in {"search", "check_emails", "check", "read", "read_full", "read_thread"}:
             return "SAFE"
         return "CRITICAL"
+    if name == "github_manager":
+        action = str(tc.get("args", {}).get("action", "")).lower()
+        if action in {"list_repos", "read_file"}:
+            return "SAFE"
+        # Unknown actions fail closed because this tool can publish changes.
+        return "CRITICAL"
     if name == "google_tasks_tool":
         action = str(tc.get("args", {}).get("action", "list")).lower()
         if action == "delete":
@@ -181,12 +187,32 @@ PENDING_FILE = os.path.join(
 # Pending actions older than this are considered expired and are automatically removed.
 PENDING_TTL_SECONDS: int = 3600  # 60 minutes
 
-# CRITICAL tools that always require per-action Telegram approval,
-# even inside an approved plan (plan_active=True).
+# CRITICAL tools that always require a separate Telegram approval inside an
+# approved plan.  The plan approval covers ordinary steps; it must not silently
+# cross an external, destructive, permission, or project-write boundary.
+#
+# Action-aware tools are included here only after _effective_risk() has already
+# classified the concrete action as CRITICAL.  For example, reading mail or a
+# repository remains smooth, while sending mail or pushing repository changes
+# needs a new approval.
 PLAN_PER_ACTION_APPROVAL_TOOLS: frozenset[str] = frozenset({
-    "run_terminal_command",  # arbitrary OS commands
-    "register_tool",        # permanently modifies system.py + tool_risk.py + capability_registry.json
+    "run_terminal_command",              # arbitrary OS commands
+    "register_tool",                     # permanent tool registry changes
+    "write_project_file",                # full project-file overwrite
+    "grant_project_access",              # permission change
+    "mail_manager",                      # only send/reply/delete are CRITICAL
+    "post_to_linkedin",                  # external publication
+    "process_and_clear_linkedin_post",   # external publication/clearing
+    "execute_local_pipeline",            # sends an active Messenger draft
+    "edit_project_file",                 # only core-file edits are CRITICAL
+    "drive_manager",                     # only delete/share/move are CRITICAL
+    "github_manager",                    # only create/update/push are CRITICAL
 })
+
+
+def requires_plan_per_action_approval(tool_call: dict) -> bool:
+    """Return whether a critical call crosses a plan approval boundary."""
+    return tool_call["name"] in PLAN_PER_ACTION_APPROVAL_TOOLS
 
 # ────────────────────────────────────────────────────────────────
 # Pending approval store
@@ -431,15 +457,15 @@ def approval_check_node(state):
     ]
 
     # ── Plan mode bypass ───────────────────────────────────────────
-    # If we are executing a step of an approved plan, CRITICAL tools are executed
-    # without extra Telegram confirmation — the user already approved the plan.
-    # Tools in PLAN_PER_ACTION_APPROVAL_TOOLS always require per-action
-    # Telegram approval, even inside an approved plan.
+    # An approved plan carries ordinary CRITICAL steps, but external,
+    # destructive, permission, and project-write boundaries still need a
+    # separate Telegram confirmation. External-content escalation is never
+    # bypassed by a plan.
     if critical_calls and state.get("plan_active"):
         bypassed = [
             tc for tc in critical_calls
             if (
-                tc["name"] not in PLAN_PER_ACTION_APPROVAL_TOOLS
+                not requires_plan_per_action_approval(tc)
                 and tc["id"] not in external_context_approval_ids
             )
         ]
