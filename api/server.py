@@ -9,6 +9,9 @@ import json
 import time
 import socket
 import struct
+import base64
+import hashlib
+import hmac
 import queue
 import signal
 import asyncio
@@ -91,6 +94,7 @@ def _get_or_create_token() -> str:
 
 LOCAL_TOKEN = _get_or_create_token()
 _bearer = HTTPBearer(auto_error=False)
+ASSET_TOKEN_TTL_SECONDS = 300
 
 def _is_container_environment() -> bool:
     """Returns True if the application is running inside a Docker or container runtime."""
@@ -152,37 +156,72 @@ def _extract_token_from_query_and_headers(
     if token:
         return token
 
+    return _extract_bearer_token(headers)
+
+
+def _extract_bearer_token(headers: Mapping[str, str]) -> str | None:
+    """Extract a bearer token from headers without accepting URL credentials."""
     authorization = headers.get("authorization", "")
     if authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
     return None
 
 
-def _extract_token_from_scope(scope: Scope) -> str | None:
-    """Extract static-asset credentials from an ASGI HTTP scope."""
-    query_string = scope.get("query_string", b"")
-    query_text = (
-        query_string.decode("latin-1")
-        if isinstance(query_string, bytes)
-        else str(query_string)
-    )
-    return _extract_token_from_query_and_headers(
-        QueryParams(query_text),
-        Headers(scope=scope),
-    )
+def _asset_request_path(mount_path: str, relative_path: str) -> str:
+    """Return a normalized same-origin static path for a mounted asset."""
+    return f"/{mount_path.strip('/')}/{quote(relative_path.lstrip('/'), safe='/')}"
+
+
+def _create_asset_access_token(asset_path: str, *, now: int | None = None) -> str:
+    """Create a short-lived token restricted to one static asset path."""
+    issued_at = int(time.time()) if now is None else now
+    expires_at = issued_at + ASSET_TOKEN_TTL_SECONDS
+    payload = f"{expires_at}:{asset_path}".encode("utf-8")
+    signature = hmac.new(LOCAL_TOKEN.encode("utf-8"), payload, hashlib.sha256).digest()
+    encoded_signature = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+    return f"{expires_at}.{encoded_signature}"
+
+
+def _validate_asset_access_token(
+    token: str | None,
+    asset_path: str,
+    *,
+    now: int | None = None,
+) -> bool:
+    """Validate a short-lived token for exactly one static asset path."""
+    if not token or not LOCAL_TOKEN:
+        return False
+    try:
+        expires_text, supplied_signature = token.split(".", 1)
+        expires_at = int(expires_text)
+    except (TypeError, ValueError):
+        return False
+
+    current_time = int(time.time()) if now is None else now
+    if expires_at <= current_time:
+        return False
+    payload = f"{expires_at}:{asset_path}".encode("utf-8")
+    expected_signature = base64.urlsafe_b64encode(
+        hmac.new(LOCAL_TOKEN.encode("utf-8"), payload, hashlib.sha256).digest(),
+    ).decode("ascii").rstrip("=")
+    return hmac.compare_digest(supplied_signature, expected_signature)
 
 
 def _private_asset_url(request: Request, mount_path: str, filename: str) -> str:
-    """Build a same-origin asset URL with a token only for non-local clients."""
-    asset_url = f"/{mount_path}/{quote(filename, safe='')}"
+    """Build a same-origin asset URL with a scoped token for non-local clients."""
+    asset_url = _asset_request_path(mount_path, filename)
     host = request.client.host if request.client else ""
     if _is_trusted_client_host(host):
         return asset_url
-    return f"{asset_url}?{urlencode({'token': LOCAL_TOKEN})}"
+    return f"{asset_url}?{urlencode({'asset_token': _create_asset_access_token(asset_url)})}"
 
 
 class AuthenticatedStaticFiles(StaticFiles):
     """Serve private assets only to trusted local clients or token holders."""
+
+    def __init__(self, *, directory: str, mount_path: str) -> None:
+        super().__init__(directory=directory)
+        self._mount_path = mount_path.strip("/")
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         client = scope.get("client")
@@ -190,7 +229,21 @@ class AuthenticatedStaticFiles(StaticFiles):
         if _is_trusted_client_host(host):
             return await super().get_response(path, scope)
 
-        if not _validate_token_string(_extract_token_from_scope(scope)):
+        query_string = scope.get("query_string", b"")
+        query_text = (
+            query_string.decode("latin-1")
+            if isinstance(query_string, bytes)
+            else str(query_string)
+        )
+        query_params = QueryParams(query_text)
+        asset_token = query_params.get("asset_token")
+        if asset_token and _validate_asset_access_token(
+            asset_token,
+            _asset_request_path(self._mount_path, path),
+        ):
+            return await super().get_response(path, scope)
+
+        if asset_token or not _validate_token_string(_extract_bearer_token(Headers(scope=scope))):
             return JSONResponse(
                 {"detail": "Unauthorized"},
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -700,18 +753,18 @@ def _api_internal_error(operation: str) -> str:
 
 # Keep terminal output useful: app debug prints stay visible, noisy polling access logs do not.
 logging.getLogger("uvicorn.access").disabled = True
-server.mount("/photos", AuthenticatedStaticFiles(directory=PHOTOS_DIR), name="photos")
+server.mount("/photos", AuthenticatedStaticFiles(directory=PHOTOS_DIR, mount_path="photos"), name="photos")
 
 # --- [MASTRO-ROUTE]: Allow downloading from the outputs folder ---
 from config import BASE_DIR
 outputs_dir = os.path.join(BASE_DIR, "outputs")
 os.makedirs(outputs_dir, exist_ok=True)
-server.mount("/outputs", AuthenticatedStaticFiles(directory=outputs_dir), name="outputs")
+server.mount("/outputs", AuthenticatedStaticFiles(directory=outputs_dir, mount_path="outputs"), name="outputs")
 
 # --- [MASTRO-FIX]: Separate folder for the UI faces ---
 avatars_dir = os.path.join(BASE_DIR, "avatars")
 os.makedirs(avatars_dir, exist_ok=True)
-server.mount("/avatars", AuthenticatedStaticFiles(directory=avatars_dir), name="avatars")
+server.mount("/avatars", AuthenticatedStaticFiles(directory=avatars_dir, mount_path="avatars"), name="avatars")
 
 # CORS — localhost only (no external source can call the server)
 server.add_middleware(
