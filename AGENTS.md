@@ -31,6 +31,41 @@ astakos/
    - **Search Before Edit:** Always use tools like `grep_search` and `view_file` to understand the surrounding context and existing logic before modifying any file.
    - **Zero-Tolerance for Hacks:** Do not implement quick hacks. If a specialized mechanism exists (like `context_builder.py` logic), extend it rather than bypassing it with global overrides.
 
+## Git and Pull Request Autonomy
+
+When the user asks an agent to create, finish, or close a pull request for a
+scoped task, that request is standing authorization for the normal Git
+lifecycle of that task. Do not request separate confirmation for each routine
+step. Complete the work in this order:
+
+1. Inspect the working tree and current branch before changing Git state.
+2. Create a short-lived task branch from the current integration branch when
+   practical; do not disturb unrelated local work.
+3. Stage only the files that belong to the requested task. Never use
+   `git add -A` or `git add .`.
+4. Run the relevant tests and `git diff --check`; inspect the staged diff
+   before committing.
+5. Create an atomic, descriptive commit, push the task branch, and open or
+   update its pull request. Then stop and report that the PR is ready.
+6. Do not merge, delete the branch, poll for reviews, or address review
+   comments unless the user explicitly asks for that next action. A green
+   review check is not evidence that a review has no comments.
+7. When the user asks to read comments, retrieve and summarize the completed
+   reviews from the requested PR. When the user asks to address comments,
+   resolve the actionable findings, verify the change, and update the PR.
+8. Only when the user explicitly asks to merge and delete may the agent merge
+   the PR, after required checks pass and all known actionable review findings
+   are resolved. Then update the integration branch and delete only the merged
+   task branch.
+
+The following always require a new, explicit user instruction and must not be
+inferred from a general PR request: force-pushes; `git reset --hard`; `git
+clean`; history rewrites; modifying remotes; deleting branches other than the
+agent's merged task branch; creating or publishing tags/releases; modifying
+credentials, `.env`, or `config.py`; database migrations; and Docker,
+runtime, or watchdog changes. Platform-enforced confirmations and higher-level
+safety policies always take precedence over this repository policy.
+
 ## Coding Conventions
 - Python >= 3.11 required.
 - Provide type hints (typing) and professional docstrings for all functions.
