@@ -3008,16 +3008,32 @@ def handle_location(msg, live_update=False):
 # POLLING LOOP
 # ────────────────────────────────────────────────────────────────
 
-def _handle_approval_callback(cq: dict):
+def _handle_approval_callback(cq: dict) -> None:
     """Handles the ✅/❌ approval callbacks from inline keyboard."""
     try:
         from core.approval import execute_approved_pending, get_pending, pop_pending
         from tools.system import all_tools
 
-        cq_id   = cq["id"]
+        cq_id   = cq.get("id", "")
         data    = cq.get("data", "")
-        chat_id = str(cq["message"]["chat"]["id"])
-        msg_id  = cq["message"]["message_id"]
+        chat_id = str(cq.get("message", {}).get("chat", {}).get("id", ""))
+        msg_id  = cq.get("message", {}).get("message_id")
+        from_id = str(cq.get("from", {}).get("id", ""))
+
+        # Security check: Both chat_id and from_id must match the authorized private Telegram identity
+        allowed_id = str(TELEGRAM_CHAT_ID)
+        if not allowed_id or chat_id != allowed_id or from_id != allowed_id:
+            print(f"\033[91m[TelegramBot/Security]: Unauthorized approval callback from user={from_id}, chat={chat_id}\033[0m")
+            if cq_id and TELEGRAM_TOKEN:
+                try:
+                    requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+                        json={"callback_query_id": cq_id, "text": "⛔ Unauthorized", "show_alert": True},
+                        timeout=5,
+                    )
+                except Exception:
+                    pass
+            return
 
         # Answer the callback (remove loading spinner)
         requests.post(
