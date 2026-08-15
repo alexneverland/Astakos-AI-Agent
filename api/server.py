@@ -23,7 +23,7 @@ import sys
 import re
 import secrets
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from urllib.parse import quote, unquote, urlencode
 from api.path_security import resolve_allowed_file
 from contextlib import asynccontextmanager
@@ -96,10 +96,6 @@ def _get_or_create_token() -> str:
 LOCAL_TOKEN = _get_or_create_token()
 _bearer = HTTPBearer(auto_error=False)
 ASSET_TOKEN_TTL_SECONDS = 300
-_ASSET_HISTORY_MARKER_RE = re.compile(
-    r"\[ASTAKOS_ASSET:(?P<asset_path>/(?:photos|outputs|avatars)/[^\]\r\n]+)\]",
-)
-_SEND_PHOTO_MARKER_RE = re.compile(r"\[SEND_PHOTO:\s*(?P<file_path>.*?)\]")
 
 def _is_container_environment() -> bool:
     """Returns True if the application is running inside a Docker or container runtime."""
@@ -231,6 +227,31 @@ def _asset_history_marker(mount_path: str, filename: str) -> str:
     return f"[ASTAKOS_ASSET:{_asset_request_path(mount_path, filename)}]"
 
 
+def _replace_bracketed_markers(
+    content: str,
+    prefix: str,
+    transform: Callable[[str], str | None],
+) -> str:
+    """Replace bounded ``[PREFIX:value]`` markers without regex backtracking."""
+    cursor = 0
+    parts: list[str] = []
+    while True:
+        marker_start = content.find(prefix, cursor)
+        if marker_start < 0:
+            parts.append(content[cursor:])
+            return "".join(parts)
+        value_start = marker_start + len(prefix)
+        marker_end = content.find("]", value_start)
+        if marker_end < 0:
+            parts.append(content[cursor:])
+            return "".join(parts)
+        parts.append(content[cursor:marker_start])
+        marker = content[marker_start:marker_end + 1]
+        replacement = transform(content[value_start:marker_end])
+        parts.append(marker if replacement is None else replacement)
+        cursor = marker_end + 1
+
+
 def _asset_url_from_history_marker(client_host: str, asset_path: str) -> str | None:
     """Mint a fresh URL only for a canonical, persisted private-asset reference."""
     for mount_path in ("photos", "outputs", "avatars"):
@@ -248,8 +269,9 @@ def _asset_url_from_history_marker(client_host: str, asset_path: str) -> str | N
 
 def _asset_history_marker_from_legacy_photo_path(file_path: str) -> str:
     """Translate a legacy Telegram photo marker into a stable private-asset reference."""
-    filename = os.path.basename(file_path.strip())
-    mount_path = "outputs" if "outputs" in file_path.lower() else "photos"
+    normalized_path = file_path.strip().replace("\\", "/")
+    filename = normalized_path.rsplit("/", 1)[-1]
+    mount_path = "outputs" if "outputs" in normalized_path.lower() else "photos"
     return _asset_history_marker(mount_path, filename)
 
 
@@ -258,18 +280,23 @@ def _render_persisted_asset_markers_for_client(
     client_host: str,
 ) -> str:
     """Mint per-client URLs from stable or legacy image references for the Web UI."""
-    normalized_content = _SEND_PHOTO_MARKER_RE.sub(
-        lambda match: _asset_history_marker_from_legacy_photo_path(match.group("file_path")),
+    normalized_content = _replace_bracketed_markers(
         content,
+        "[SEND_PHOTO:",
+        lambda file_path: _asset_history_marker_from_legacy_photo_path(file_path),
     )
 
-    def replace_marker(match: re.Match[str]) -> str:
-        image_url = _asset_url_from_history_marker(client_host, match.group("asset_path"))
+    def replace_marker(asset_path: str) -> str | None:
+        image_url = _asset_url_from_history_marker(client_host, asset_path)
         if not image_url:
-            return match.group(0)
+            return None
         return f"[ASTAKOS_ASSET_URL:{html.escape(image_url, quote=True)}]"
 
-    return _ASSET_HISTORY_MARKER_RE.sub(replace_marker, normalized_content)
+    return _replace_bracketed_markers(
+        normalized_content,
+        "[ASTAKOS_ASSET:",
+        replace_marker,
+    )
 
 
 def _render_persisted_asset_markers(content: str, request: Request) -> str:
@@ -1536,19 +1563,13 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             clean_ai = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", lambda m: file_card, clean_ai)
 
         # 2. --- MASTRO INTERCEPTOR FOR IMAGES (Web UI) ---
-        photo_match = re.search(r"\[SEND_PHOTO:\s*(.*?)\]", clean_ai)
-        if photo_match:
-            file_path = photo_match.group(1).strip()
-            filename = os.path.basename(file_path)
-            # We smartly check where the photo is located
-            if "outputs" in file_path.lower():
-                asset_marker = _asset_history_marker("outputs", filename)
-            else:
-                asset_marker = _asset_history_marker("photos", filename)
-
-            # Persist a stable reference. A fresh short-lived URL is rendered only
-            # for this response and later when the browser reloads history.
-            clean_ai = re.sub(r"\[SEND_PHOTO:\s*(.*?)\]", asset_marker, clean_ai)
+        # Persist stable references. Fresh client-specific URLs are rendered only
+        # when returning the response or replaying history.
+        clean_ai = _replace_bracketed_markers(
+            clean_ai,
+            "[SEND_PHOTO:",
+            lambda file_path: _asset_history_marker_from_legacy_photo_path(file_path),
+        )
 
         if final_ai_response:
             # We store the CLEAN strings everywhere (including the Link/Img if it exists)
@@ -1676,8 +1697,9 @@ async def text_to_speech(request: Request, _=Depends(require_token)):
             return JSONResponse({"error": t("api.server.empty_text_for_tts")}, status_code=400)
         text = re.sub(r'[*#`]', '', text)
         text = re.sub(r'\[.*?\]\(.*?\)', '', text)
-        text = re.sub(r'\[SEND_PHOTO:.*?\]', '', text)
-        text = re.sub(r'\[ASTAKOS_ASSET_URL:.*?\]', '', text)
+        text = _replace_bracketed_markers(text, "[SEND_PHOTO:", lambda _: "")
+        text = _replace_bracketed_markers(text, "[ASTAKOS_ASSET:", lambda _: "")
+        text = _replace_bracketed_markers(text, "[ASTAKOS_ASSET_URL:", lambda _: "")
         text = text.strip()
         from core.i18n import CURRENT_LOCALE
         voice = "el-GR-NestorasNeural" if CURRENT_LOCALE == "el" else "en-US-ChristopherNeural"

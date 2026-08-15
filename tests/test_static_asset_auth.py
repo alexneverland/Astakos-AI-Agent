@@ -18,6 +18,7 @@ from api.server import (
     LOCAL_TOKEN,
     _create_asset_access_token,
     _asset_history_marker,
+    _asset_history_marker_from_legacy_photo_path,
     _private_asset_url,
     _render_persisted_asset_markers,
     _render_persisted_asset_markers_for_client,
@@ -138,7 +139,7 @@ def test_history_endpoint_refreshes_persisted_asset_url(monkeypatch) -> None:
 def test_legacy_telegram_photo_marker_renders_a_scoped_url() -> None:
     """Telegram history remains visible after static assets require authentication."""
     rendered = _render_persisted_asset_markers(
-        "[SEND_PHOTO: C:/astakos_v2/outputs/generated image.png]",
+        "[SEND_PHOTO: C:\\astakos_v2\\outputs\\generated image.png]",
         _build_request("192.168.1.100"),
     )
 
@@ -151,6 +152,15 @@ def test_legacy_telegram_photo_marker_renders_a_scoped_url() -> None:
         parse_qs(parsed.query)["asset_token"][0],
         parsed.path,
     )
+
+
+def test_legacy_windows_photo_path_uses_the_filename_on_any_host() -> None:
+    """Windows Telegram history remains readable after moving to Linux or Docker."""
+    marker = _asset_history_marker_from_legacy_photo_path(
+        r"C:\Astakos\outputs\generated image.png",
+    )
+
+    assert marker == "[ASTAKOS_ASSET:/outputs/generated%20image.png]"
 
 
 def test_asset_urls_are_minted_per_websocket_client_host() -> None:
