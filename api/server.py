@@ -7,6 +7,8 @@
 import os
 import json
 import time
+import socket
+import struct
 import queue
 import signal
 import asyncio
@@ -85,27 +87,54 @@ def _get_or_create_token() -> str:
 LOCAL_TOKEN = _get_or_create_token()
 _bearer = HTTPBearer(auto_error=False)
 
+def _is_container_environment() -> bool:
+    """Returns True if the application is running inside a Docker or container runtime."""
+    if os.getenv("ASTAKOS_CONTAINER") in ("1", "true", "True"):
+        return True
+    return os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")
+
+
+def _get_default_gateway_linux() -> str | None:
+    """Reads default gateway IP from /proc/net/route in a Linux container."""
+    try:
+        if os.path.exists("/proc/net/route"):
+            with open("/proc/net/route", "r") as f:
+                for line in f:
+                    fields = line.strip().split()
+                    if len(fields) >= 3 and fields[1] == "00000000":
+                        val = int(fields[2], 16)
+                        return socket.inet_ntoa(struct.pack("<L", val))
+    except (OSError, ValueError, struct.error):
+        pass
+    return None
+
+
+def _is_docker_bridge_gateway(host: str) -> bool:
+    """
+    Checks if a client host IP exactly matches the container's verified default gateway
+    when running inside a container environment. Fails closed if the gateway is indeterminate.
+    """
+    if not _is_container_environment() or not host:
+        return False
+
+    gw = _get_default_gateway_linux()
+    if not gw:
+        return False
+
+    return host == gw
+
+
 async def require_token(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer)
-):
-    """Dependency: checks the bearer token. Always allows trusted local access."""
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+) -> None:
+    """Dependency: checks the bearer token. Allows trusted local loopback and Docker bridge gateway."""
     host = request.client.host if request.client else ""
     if host in ("127.0.0.1", "::1", "localhost"):
         return  # loopback always allowed (Web UI on the same computer)
 
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        ip = None
-
-    # Docker Desktop / local bridge requests from the same machine may appear
-    # as private gateway IPs instead of loopback. Allow them only when the
-    # request still targets localhost on the published host port.
-    if ip and ip.is_private:
-        host_header = (request.headers.get("host") or "").lower()
-        if host_header.startswith("127.0.0.1:") or host_header.startswith("localhost:"):
-            return
+    if _is_docker_bridge_gateway(host):
+        return  # Docker bridge gateway request from host-published localhost port
 
     if not credentials or not secrets.compare_digest(credentials.credentials, LOCAL_TOKEN):
         raise HTTPException(status_code=401, detail="Unauthorized")
