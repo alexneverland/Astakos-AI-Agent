@@ -1,5 +1,6 @@
 """Tests for /ws/logs WebSocket authentication and authorization."""
 
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 import pytest
@@ -8,6 +9,16 @@ from starlette import status
 from fastapi.testclient import TestClient
 
 from api.server import server, LOCAL_TOKEN, require_ws_token, active_websockets
+
+
+@pytest.fixture(autouse=True)
+def _reset_active_websockets() -> Iterator[None]:
+    """Isolate process-wide WebSocket state across authentication tests."""
+    active_websockets.clear()
+    try:
+        yield
+    finally:
+        active_websockets.clear()
 
 
 def _build_mock_websocket(

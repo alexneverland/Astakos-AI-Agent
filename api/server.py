@@ -1805,9 +1805,10 @@ async def websocket_logs(websocket: WebSocket):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        if websocket in active_websockets:
-            active_websockets.remove(websocket)
+        pass
     except Exception:
+        logging.exception("Unexpected error in /ws/logs handler")
+    finally:
         if websocket in active_websockets:
             active_websockets.remove(websocket)
 
