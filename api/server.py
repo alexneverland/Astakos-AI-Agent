@@ -19,6 +19,7 @@ import sys
 import re
 import secrets
 import logging
+from collections.abc import Mapping
 from api.path_security import resolve_allowed_file
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -141,6 +142,35 @@ def _validate_token_string(token: str | None) -> bool:
     return secrets.compare_digest(token, LOCAL_TOKEN)
 
 
+def _extract_token_from_query_and_headers(
+    query_params: Mapping[str, str],
+    headers: Mapping[str, str],
+) -> str | None:
+    """Extract a query token first, otherwise a bearer token from headers."""
+    token = query_params.get("token")
+    if token:
+        return token
+
+    authorization = headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return None
+
+
+def _extract_token_from_scope(scope: Scope) -> str | None:
+    """Extract static-asset credentials from an ASGI HTTP scope."""
+    query_string = scope.get("query_string", b"")
+    query_text = (
+        query_string.decode("latin-1")
+        if isinstance(query_string, bytes)
+        else str(query_string)
+    )
+    return _extract_token_from_query_and_headers(
+        QueryParams(query_text),
+        Headers(scope=scope),
+    )
+
+
 class AuthenticatedStaticFiles(StaticFiles):
     """Serve private assets only to trusted local clients or token holders."""
 
@@ -150,15 +180,11 @@ class AuthenticatedStaticFiles(StaticFiles):
         if _is_trusted_client_host(host):
             return await super().get_response(path, scope)
 
-        query_string = scope.get("query_string", b"")
-        token = QueryParams(query_string.decode("latin-1")).get("token")
-        if not token:
-            authorization = Headers(scope=scope).get("authorization", "")
-            if authorization.lower().startswith("bearer "):
-                token = authorization[7:].strip()
-
-        if not _validate_token_string(token):
-            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        if not _validate_token_string(_extract_token_from_scope(scope)):
+            return JSONResponse(
+                {"detail": "Unauthorized"},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
         return await super().get_response(path, scope)
 
 
@@ -185,16 +211,12 @@ async def require_ws_token(websocket: WebSocket) -> bool:
     if _is_trusted_client_host(host):
         return True
 
-    # 1. Check query parameter: ?token=...
-    token = websocket.query_params.get("token")
-
-    # 2. Check Authorization header: Bearer <token>
-    if not token:
-        auth_header = websocket.headers.get("authorization", "")
-        if auth_header.lower().startswith("bearer "):
-            token = auth_header[7:].strip()
-
-    if _validate_token_string(token):
+    if _validate_token_string(
+        _extract_token_from_query_and_headers(
+            websocket.query_params,
+            websocket.headers,
+        ),
+    ):
         return True
 
     # Unauthorized: terminate WebSocket connection with policy violation code (1008)
