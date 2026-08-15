@@ -23,6 +23,9 @@ from api.path_security import resolve_allowed_file
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers, QueryParams
+from starlette.responses import Response
+from starlette.types import Scope
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, HTTPException, Depends, Form, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -136,6 +139,27 @@ def _validate_token_string(token: str | None) -> bool:
     if not token or not LOCAL_TOKEN:
         return False
     return secrets.compare_digest(token, LOCAL_TOKEN)
+
+
+class AuthenticatedStaticFiles(StaticFiles):
+    """Serve private assets only to trusted local clients or token holders."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        client = scope.get("client")
+        host = str(client[0]) if client else ""
+        if _is_trusted_client_host(host):
+            return await super().get_response(path, scope)
+
+        query_string = scope.get("query_string", b"")
+        token = QueryParams(query_string.decode("latin-1")).get("token")
+        if not token:
+            authorization = Headers(scope=scope).get("authorization", "")
+            if authorization.lower().startswith("bearer "):
+                token = authorization[7:].strip()
+
+        if not _validate_token_string(token):
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        return await super().get_response(path, scope)
 
 
 async def require_token(
@@ -644,18 +668,18 @@ def _api_internal_error(operation: str) -> str:
 
 # Keep terminal output useful: app debug prints stay visible, noisy polling access logs do not.
 logging.getLogger("uvicorn.access").disabled = True
-server.mount("/photos", StaticFiles(directory=PHOTOS_DIR), name="photos")
+server.mount("/photos", AuthenticatedStaticFiles(directory=PHOTOS_DIR), name="photos")
 
 # --- [MASTRO-ROUTE]: Allow downloading from the outputs folder ---
 from config import BASE_DIR
 outputs_dir = os.path.join(BASE_DIR, "outputs")
 os.makedirs(outputs_dir, exist_ok=True)
-server.mount("/outputs", StaticFiles(directory=outputs_dir), name="outputs")
+server.mount("/outputs", AuthenticatedStaticFiles(directory=outputs_dir), name="outputs")
 
 # --- [MASTRO-FIX]: Separate folder for the UI faces ---
 avatars_dir = os.path.join(BASE_DIR, "avatars")
 os.makedirs(avatars_dir, exist_ok=True)
-server.mount("/avatars", StaticFiles(directory=avatars_dir), name="avatars")
+server.mount("/avatars", AuthenticatedStaticFiles(directory=avatars_dir), name="avatars")
 
 # CORS — localhost only (no external source can call the server)
 server.add_middleware(
