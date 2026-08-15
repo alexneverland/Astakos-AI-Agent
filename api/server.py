@@ -23,7 +23,7 @@ from api.path_security import resolve_allowed_file
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi.staticfiles import StaticFiles
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, HTTPException, Depends, Form
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, HTTPException, Depends, Form, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -124,20 +124,58 @@ def _is_docker_bridge_gateway(host: str) -> bool:
     return host == gw
 
 
+def _is_trusted_client_host(host: str) -> bool:
+    """Checks whether the client host is trusted without a token (loopback or verified Docker bridge gateway)."""
+    if host in ("127.0.0.1", "::1", "localhost"):
+        return True
+    return _is_docker_bridge_gateway(host)
+
+
+def _validate_token_string(token: str | None) -> bool:
+    """Safely validates a bearer/query token against LOCAL_TOKEN in constant time."""
+    if not token or not LOCAL_TOKEN:
+        return False
+    return secrets.compare_digest(token, LOCAL_TOKEN)
+
+
 async def require_token(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(_bearer),
 ) -> None:
     """Dependency: checks the bearer token. Allows trusted local loopback and Docker bridge gateway."""
     host = request.client.host if request.client else ""
-    if host in ("127.0.0.1", "::1", "localhost"):
+    if _is_trusted_client_host(host):
         return  # loopback always allowed (Web UI on the same computer)
 
-    if _is_docker_bridge_gateway(host):
-        return  # Docker bridge gateway request from host-published localhost port
-
-    if not credentials or not secrets.compare_digest(credentials.credentials, LOCAL_TOKEN):
+    token = credentials.credentials if credentials else None
+    if not _validate_token_string(token):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+async def require_ws_token(websocket: WebSocket) -> bool:
+    """
+    Validates WebSocket client against trusted origins or Bearer/Query token.
+    Closes connection with WS_1008_POLICY_VIOLATION if unauthorized.
+    """
+    host = websocket.client.host if websocket.client else ""
+    if _is_trusted_client_host(host):
+        return True
+
+    # 1. Check query parameter: ?token=...
+    token = websocket.query_params.get("token")
+
+    # 2. Check Authorization header: Bearer <token>
+    if not token:
+        auth_header = websocket.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+
+    if _validate_token_string(token):
+        return True
+
+    # Unauthorized: terminate WebSocket connection with policy violation code (1008)
+    await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+    return False
 
 # ── WebSocket log streaming ────────────────────────────────────
 active_websockets: list = []
@@ -1758,12 +1796,19 @@ async def get_history(_=Depends(require_token)):
 @server.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket):
     """Keeps the channel open — sends live print() output to the Web UI."""
+    if not await require_ws_token(websocket):
+        return
+
     await websocket.accept()
     active_websockets.append(websocket)
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    except Exception:
+        logging.exception("Unexpected error in /ws/logs handler")
+    finally:
         if websocket in active_websockets:
             active_websockets.remove(websocket)
 
