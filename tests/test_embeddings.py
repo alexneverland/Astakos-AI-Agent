@@ -42,11 +42,14 @@ def test_embed_query_dimensions(embeddings):
 
 def test_vertex_provider_uses_unified_google_embeddings_adapter(embeddings):
     """Vertex embeddings use LangChain's supported unified Google adapter."""
+    from config import LOCATION, PROJECT_ID
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
     assert isinstance(embeddings.base, GoogleGenerativeAIEmbeddings)
     assert embeddings.base.model == "text-embedding-004"
     assert embeddings.base.vertexai is True
+    assert embeddings.base.project == PROJECT_ID
+    assert embeddings.base.location == LOCATION
 
 
 def test_similar_phrases_high_similarity(embeddings):
