@@ -333,7 +333,7 @@ def test_clear_content_of_protected_core_file_requires_confirmation():
 def test_deleting_protected_core_file_requires_confirmation():
     for command in (r"Remove-Item core\agents.py", r"del core\agents.py"):
         policy, _ = classify_command(command)
-    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+        assert policy == ExecPolicy.REQUIRE_CONFIRMATION
 
 
 def test_unknown_protected_file_operations_require_confirmation():
@@ -433,13 +433,13 @@ def test_git_log_is_safe():
 def test_pytest_command_is_safe():
     policy, _ = classify_command("pytest")
     assert policy == ExecPolicy.SAFE
+    policy, _ = classify_command("python -m pytest -q tests/test_safe_executor.py")
+    assert policy == ExecPolicy.SAFE
 
 
 def test_unknown_terminal_command_requires_confirmation():
     policy, _ = classify_command("Write-Host hello")
     assert policy == ExecPolicy.REQUIRE_CONFIRMATION
-    policy, _ = classify_command("python -m pytest -q tests/test_safe_executor.py")
-    assert policy == ExecPolicy.SAFE
 
 
 # -- alias bypass -----------------------------------------------
