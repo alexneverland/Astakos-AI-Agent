@@ -100,11 +100,11 @@ _PROTECTED_WRITE_PATHS = (
 )
 
 
-def _protected_file_write_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
+def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
     """Require approval for terminal writes to skill/registry/core files."""
-    normalized = _normalize_command(cmd).replace("\\", "/")
+    normalized_path_cmd = normalized_cmd.replace("\\", "/")
     protected = "|".join(_PROTECTED_WRITE_PATHS)
-    if not re.search(protected, normalized, re.IGNORECASE):
+    if not re.search(protected, normalized_path_cmd, re.IGNORECASE):
         return None, ""
 
     write_patterns = (
@@ -117,24 +117,34 @@ def _protected_file_write_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
         r"\btee\b",
         r"\btruncate\b",
         r"\bsed\s+.*-i",
+        # Conservative: copy/move commands touching protected paths require
+        # approval because PowerShell/CMD destination parsing is not reliable.
+        r"\b(?:Copy-Item|cp|Move-Item|mv)\b",
     )
-    if any(re.search(pattern, normalized, re.IGNORECASE) for pattern in write_patterns):
+    if any(
+        re.search(pattern, normalized_path_cmd, re.IGNORECASE)
+        for pattern in write_patterns
+    ):
         return ExecPolicy.REQUIRE_CONFIRMATION, "protected file write via terminal"
 
     return None, ""
 
 
-def _python_inline_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
-    """Inspect inline python -c / py -c commands."""
+def _python_inline_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
+    """Require approval for inline Python after any interpreter options."""
     interpreter = r"(?:python(?:\d+(?:\.\d+)*)?|py)(?:\.exe)?"
-    if re.search(rf"(?:^|[\s\\/]){interpreter}[\"']?\s+-c\b", cmd, re.IGNORECASE):
+    inline_python = (
+        rf"(?:^|[\s\\/]){interpreter}[\"']?"
+        r"(?:\s+(?!-c)[^\s]+)*\s+-c\S*"
+    )
+    if re.search(inline_python, normalized_cmd, re.IGNORECASE):
         return ExecPolicy.REQUIRE_CONFIRMATION, "python inline command (-c)"
     return None, ""
 
 
-def _register_tool_terminal_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
+def _register_tool_terminal_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
     """Detect register_tool apply attempts hidden inside terminal commands."""
-    lowered = _normalize_command(cmd).lower().replace("\\", "/")
+    lowered = normalized_cmd.lower().replace("\\", "/")
     if "register_tool" not in lowered:
         return None, ""
 
@@ -145,23 +155,27 @@ def _register_tool_terminal_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
             return ExecPolicy.WARNING, "register_tool.py dry-run via terminal"
         return ExecPolicy.REQUIRE_CONFIRMATION, "register_tool.py apply via terminal"
 
-    if re.search(r"register_tool\s*(?:\.func)?\s*\(", cmd, re.IGNORECASE):
+    if re.search(r"register_tool\s*(?:\.func)?\s*\(", normalized_cmd, re.IGNORECASE):
         if re.search(
             t("prompts.ext_dry_run_s_s_true_1_true_yes_y_"),
-            cmd,
+            normalized_cmd,
             re.IGNORECASE,
         ):
             return ExecPolicy.WARNING, "register_tool dry-run via terminal"
         return ExecPolicy.REQUIRE_CONFIRMATION, "register_tool apply via terminal"
 
     # ── alias import: "import register_tool as rt; rt(...)" ──
-    alias_match = re.search(r"import\s+register_tool\s+as\s+(\w+)", cmd, re.IGNORECASE)
+    alias_match = re.search(
+        r"import\s+register_tool\s+as\s+(\w+)",
+        normalized_cmd,
+        re.IGNORECASE,
+    )
     if alias_match:
         alias = re.escape(alias_match.group(1))
-        if re.search(rf"\b{alias}\s*\(", cmd):
+        if re.search(rf"\b{alias}\s*\(", normalized_cmd):
             if re.search(
                 r"dry_run\s*=\s*(?:true|1|['\"](?:true|yes|y|nai|\u03bd\u03b1\u03b9)['\"])",
-                cmd, re.IGNORECASE,
+                normalized_cmd, re.IGNORECASE,
             ):
                 return ExecPolicy.WARNING, "register_tool alias dry-run via terminal"
             return ExecPolicy.REQUIRE_CONFIRMATION, "register_tool alias apply via terminal"
@@ -174,36 +188,36 @@ def classify_command(cmd: str) -> tuple[ExecPolicy, str]:
 
     # 1. BLOCKED patterns (most dangerous first)
     for p in _BLOCKED:
-        if re.search(p, normalized_cmd, re.IGNORECASE) or re.search(p, cmd, re.IGNORECASE):
+        if re.search(p, normalized_cmd, re.IGNORECASE):
             return ExecPolicy.BLOCKED, p
 
     # 2. Protected file writes
-    protected_policy, protected_reason = _protected_file_write_policy(cmd)
+    protected_policy, protected_reason = _protected_file_write_policy(normalized_cmd)
     if protected_policy is not None:
         return protected_policy, protected_reason
 
     # 3. Register tool terminal policy
-    register_policy, register_reason = _register_tool_terminal_policy(cmd)
+    register_policy, register_reason = _register_tool_terminal_policy(normalized_cmd)
     if register_policy is not None:
         return register_policy, register_reason
 
     # 4. Conservative compound-command fallback (&&, ||, ;, \n)
-    if re.search(r"(&&|\|\||;|\n|\r)", cmd):
+    if re.search(r"(&&|\|\||;|\n|\r)", normalized_cmd):
         return ExecPolicy.REQUIRE_CONFIRMATION, "compound command"
 
     # 5. Require confirmation patterns
     for p in _REQUIRE_CONFIRM:
-        if re.search(p, normalized_cmd, re.IGNORECASE) or re.search(p, cmd, re.IGNORECASE):
+        if re.search(p, normalized_cmd, re.IGNORECASE):
             return ExecPolicy.REQUIRE_CONFIRMATION, p
 
     # 6. Python inline (-c) commands
-    python_policy, python_reason = _python_inline_policy(cmd)
+    python_policy, python_reason = _python_inline_policy(normalized_cmd)
     if python_policy is not None:
         return python_policy, python_reason
 
     # 7. WARNING patterns
     for p in _WARNING:
-        if re.search(p, normalized_cmd, re.IGNORECASE) or re.search(p, cmd, re.IGNORECASE):
+        if re.search(p, normalized_cmd, re.IGNORECASE):
             return ExecPolicy.WARNING, p
 
     # 8. SAFE

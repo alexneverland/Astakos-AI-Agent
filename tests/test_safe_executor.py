@@ -224,6 +224,23 @@ def test_executable_and_versioned_python_c_require_confirmation():
         r'.\venv\Scripts\python.exe -c "print(1)"',
         'python3.11 -c "print(1)"',
         'py.exe -c "print(1)"',
+        'python -I -c "print(1)"',
+        'python -W ignore -c "print(1)"',
+        'python -cprint(1)',
+        'p`y -c "print(1)"',
+    )
+
+    for command in commands:
+        policy, _ = classify_command(command)
+        assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+
+def test_copy_or_move_touching_protected_core_file_requires_confirmation():
+    commands = (
+        'Copy-Item payload.py core/agents.py',
+        'cp payload.py core/approval.py',
+        'Move-Item payload.py core/brain.py',
+        'mv payload.py core/safe_executor.py',
     )
 
     for command in commands:
@@ -264,6 +281,11 @@ def test_pip_install_is_warning():
 
 def test_npm_install_is_warning():
     policy, _ = classify_command("npm install express")
+    assert policy == ExecPolicy.WARNING
+
+
+def test_non_recursive_remove_item_is_warning():
+    policy, _ = classify_command(r"Remove-Item C:\temp.txt")
     assert policy == ExecPolicy.WARNING
 
 
