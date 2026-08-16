@@ -19,7 +19,7 @@ class _FakeResponse:
         self.content = "ok"
 
 
-def test_google_model_override_uses_configured_nonempty_value(monkeypatch):
+def test_google_model_override_uses_configured_nonempty_value(monkeypatch, capsys):
     monkeypatch.setenv("ASTAKOS_GEMINI_FAST_MODEL", " gemini-3.7-flash ")
 
     model = brain._google_model_from_environment(
@@ -27,9 +27,10 @@ def test_google_model_override_uses_configured_nonempty_value(monkeypatch):
     )
 
     assert model == "gemini-3.7-flash"
+    assert "ASTAKOS_GEMINI_FAST_MODEL='gemini-3.7-flash'" in capsys.readouterr().out
 
 
-def test_google_model_override_keeps_default_when_blank(monkeypatch):
+def test_google_model_override_keeps_default_when_blank(monkeypatch, capsys):
     monkeypatch.setenv("ASTAKOS_GEMINI_FAST_MODEL", "   ")
 
     model = brain._google_model_from_environment(
@@ -37,6 +38,7 @@ def test_google_model_override_keeps_default_when_blank(monkeypatch):
     )
 
     assert model == "gemini-3.5-flash"
+    assert capsys.readouterr().out == ""
 
 
 def test_safe_llm_invoke_retries_on_quota_then_succeeds():

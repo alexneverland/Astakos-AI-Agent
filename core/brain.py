@@ -22,9 +22,17 @@ DEFAULT_GEMINI_HEAVY_MODEL = "gemini-3.1-pro-preview"
 
 
 def _google_model_from_environment(variable_name: str, default_model: str) -> str:
-    """Return an optional Google-model override, falling back to the stable default."""
+    """Return an optional Google-model override, surfacing active overrides at startup."""
     configured_model = os.getenv(variable_name, "").strip()
-    return configured_model or default_model
+    if not configured_model:
+        return default_model
+    if configured_model != default_model:
+        print(
+            "\033[93m[Brain]: Google model override active "
+            f"({variable_name}={configured_model!r}; default={default_model!r}). "
+            "Verify that the configured Gemini model is available.\033[0m",
+        )
+    return configured_model
 
 # [MASTRO-SHIELD v3]: Safety for Google models
 _BN = HarmBlockThreshold.BLOCK_NONE
