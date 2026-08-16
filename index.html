@@ -915,6 +915,12 @@
     function renderMessageText(text) {
         let processedText = escapeHtml(text);
 
+        const scopedPhotoRegex = /\[ASTAKOS_ASSET_URL:\s*(\/(?:photos|outputs|avatars)\/[^\]\r\n]+)\]/g;
+        processedText = processedText.replace(scopedPhotoRegex, (match, assetUrl) => {
+            const cleanUrl = assetUrl.replace(/&amp;/g, "&");
+            return `<br><img src="${escapeHtml(cleanUrl)}" class="chat-img" />`;
+        });
+
         const photoRegex = /\[SEND_PHOTO:\s*(.*?)\]/g;
         processedText = processedText.replace(photoRegex, (match, filepath) => {
             const cleanPath = filepath.replace(/&amp;/g, "&");
@@ -1455,6 +1461,7 @@
         let cleanText = text
             .replace(/[*#`]/g, '')
             .replace(/\[SEND_PHOTO:.*?\]/g, '')
+            .replace(/\[ASTAKOS_ASSET_URL:.*?\]/g, '')
             .replace(/\[(.*?)\]\(.*?\)/g, '$1')
             .replace(/^\[.*?\]:\s*/g, '')
             .trim();

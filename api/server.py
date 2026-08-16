@@ -9,20 +9,29 @@ import json
 import time
 import socket
 import struct
+import base64
+import hashlib
+import hmac
 import queue
 import signal
 import asyncio
 import threading
 import ipaddress
+import html
 from core.i18n import t
 import sys
 import re
 import secrets
 import logging
+from collections.abc import Callable, Mapping
+from urllib.parse import quote, unquote, urlencode
 from api.path_security import resolve_allowed_file
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers, QueryParams
+from starlette.responses import Response
+from starlette.types import Scope
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, HTTPException, Depends, Form, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -86,6 +95,7 @@ def _get_or_create_token() -> str:
 
 LOCAL_TOKEN = _get_or_create_token()
 _bearer = HTTPBearer(auto_error=False)
+ASSET_TOKEN_TTL_SECONDS = 300
 
 def _is_container_environment() -> bool:
     """Returns True if the application is running inside a Docker or container runtime."""
@@ -138,6 +148,198 @@ def _validate_token_string(token: str | None) -> bool:
     return secrets.compare_digest(token, LOCAL_TOKEN)
 
 
+def _extract_token_from_query_and_headers(
+    query_params: Mapping[str, str],
+    headers: Mapping[str, str],
+) -> str | None:
+    """Extract a query token first, otherwise a bearer token from headers."""
+    token = query_params.get("token")
+    if token:
+        return token
+
+    return _extract_bearer_token(headers)
+
+
+def _extract_bearer_token(headers: Mapping[str, str]) -> str | None:
+    """Extract a bearer token from headers without accepting URL credentials."""
+    authorization = headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return None
+
+
+def _asset_request_path(mount_path: str, relative_path: str) -> str:
+    """Return a normalized same-origin static path for a mounted asset."""
+    return f"/{mount_path.strip('/')}/{quote(relative_path.lstrip('/'), safe='/')}"
+
+
+def _create_asset_access_token(asset_path: str, *, now: int | None = None) -> str:
+    """Create a short-lived token restricted to one static asset path."""
+    issued_at = int(time.time()) if now is None else now
+    expires_at = issued_at + ASSET_TOKEN_TTL_SECONDS
+    payload = f"{expires_at}:{asset_path}".encode("utf-8")
+    signature = hmac.new(LOCAL_TOKEN.encode("utf-8"), payload, hashlib.sha256).digest()
+    encoded_signature = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+    return f"{expires_at}.{encoded_signature}"
+
+
+def _validate_asset_access_token(
+    token: str | None,
+    asset_path: str,
+    *,
+    now: int | None = None,
+) -> bool:
+    """Validate a short-lived token for exactly one static asset path."""
+    if not token or not LOCAL_TOKEN:
+        return False
+    try:
+        expires_text, supplied_signature = token.split(".", 1)
+        expires_at = int(expires_text)
+    except (TypeError, ValueError):
+        return False
+
+    current_time = int(time.time()) if now is None else now
+    if expires_at <= current_time:
+        return False
+    payload = f"{expires_at}:{asset_path}".encode("utf-8")
+    expected_signature = base64.urlsafe_b64encode(
+        hmac.new(LOCAL_TOKEN.encode("utf-8"), payload, hashlib.sha256).digest(),
+    ).decode("ascii").rstrip("=")
+    return hmac.compare_digest(supplied_signature, expected_signature)
+
+
+def _private_asset_url_for_client_host(host: str, mount_path: str, filename: str) -> str:
+    """Build a same-origin asset URL with a scoped token for one client host."""
+    asset_url = _asset_request_path(mount_path, filename)
+    if _is_trusted_client_host(host):
+        return asset_url
+    return f"{asset_url}?{urlencode({'asset_token': _create_asset_access_token(asset_url)})}"
+
+
+def _private_asset_url(request: Request, mount_path: str, filename: str) -> str:
+    """Build a same-origin asset URL with a scoped token for an HTTP client."""
+    host = request.client.host if request.client else ""
+    return _private_asset_url_for_client_host(host, mount_path, filename)
+
+
+def _asset_history_marker(mount_path: str, filename: str) -> str:
+    """Return the stable, token-free asset reference persisted in chat history."""
+    return f"[ASTAKOS_ASSET:{_asset_request_path(mount_path, filename)}]"
+
+
+def _replace_bracketed_markers(
+    content: str,
+    prefix: str,
+    transform: Callable[[str], str | None],
+) -> str:
+    """Replace bounded ``[PREFIX:value]`` markers without regex backtracking."""
+    cursor = 0
+    parts: list[str] = []
+    while True:
+        marker_start = content.find(prefix, cursor)
+        if marker_start < 0:
+            parts.append(content[cursor:])
+            return "".join(parts)
+        value_start = marker_start + len(prefix)
+        marker_end = content.find("]", value_start)
+        if marker_end < 0:
+            parts.append(content[cursor:])
+            return "".join(parts)
+        parts.append(content[cursor:marker_start])
+        marker = content[marker_start:marker_end + 1]
+        replacement = transform(content[value_start:marker_end])
+        parts.append(marker if replacement is None else replacement)
+        cursor = marker_end + 1
+
+
+def _asset_url_from_history_marker(client_host: str, asset_path: str) -> str | None:
+    """Mint a fresh URL only for a canonical, persisted private-asset reference."""
+    for mount_path in ("photos", "outputs", "avatars"):
+        prefix = f"/{mount_path}/"
+        if not asset_path.startswith(prefix):
+            continue
+        filename = unquote(asset_path[len(prefix):])
+        if not filename or filename != os.path.basename(filename):
+            return None
+        if _asset_request_path(mount_path, filename) != asset_path:
+            return None
+        return _private_asset_url_for_client_host(client_host, mount_path, filename)
+    return None
+
+
+def _asset_history_marker_from_legacy_photo_path(file_path: str) -> str:
+    """Translate a legacy Telegram photo marker into a stable private-asset reference."""
+    normalized_path = file_path.strip().replace("\\", "/")
+    filename = normalized_path.rsplit("/", 1)[-1]
+    mount_path = "outputs" if "outputs" in normalized_path.lower() else "photos"
+    return _asset_history_marker(mount_path, filename)
+
+
+def _render_persisted_asset_markers_for_client(
+    content: str,
+    client_host: str,
+) -> str:
+    """Mint per-client URLs from stable or legacy image references for the Web UI."""
+    normalized_content = _replace_bracketed_markers(
+        content,
+        "[SEND_PHOTO:",
+        lambda file_path: _asset_history_marker_from_legacy_photo_path(file_path),
+    )
+
+    def replace_marker(asset_path: str) -> str | None:
+        image_url = _asset_url_from_history_marker(client_host, asset_path)
+        if not image_url:
+            return None
+        return f"[ASTAKOS_ASSET_URL:{html.escape(image_url, quote=True)}]"
+
+    return _replace_bracketed_markers(
+        normalized_content,
+        "[ASTAKOS_ASSET:",
+        replace_marker,
+    )
+
+
+def _render_persisted_asset_markers(content: str, request: Request) -> str:
+    """Mint fresh client-facing image URLs for an HTTP request."""
+    host = request.client.host if request.client else ""
+    return _render_persisted_asset_markers_for_client(content, host)
+
+
+class AuthenticatedStaticFiles(StaticFiles):
+    """Serve private assets only to trusted local clients or token holders."""
+
+    def __init__(self, *, directory: str, mount_path: str) -> None:
+        super().__init__(directory=directory)
+        self._mount_path = mount_path.strip("/")
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        client = scope.get("client")
+        host = str(client[0]) if client else ""
+        if _is_trusted_client_host(host):
+            return await super().get_response(path, scope)
+
+        query_string = scope.get("query_string", b"")
+        query_text = (
+            query_string.decode("latin-1")
+            if isinstance(query_string, bytes)
+            else str(query_string)
+        )
+        query_params = QueryParams(query_text)
+        asset_token = query_params.get("asset_token")
+        if asset_token and _validate_asset_access_token(
+            asset_token,
+            _asset_request_path(self._mount_path, path),
+        ):
+            return await super().get_response(path, scope)
+
+        if asset_token or not _validate_token_string(_extract_bearer_token(Headers(scope=scope))):
+            return JSONResponse(
+                {"detail": "Unauthorized"},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+        return await super().get_response(path, scope)
+
+
 async def require_token(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(_bearer),
@@ -161,16 +363,12 @@ async def require_ws_token(websocket: WebSocket) -> bool:
     if _is_trusted_client_host(host):
         return True
 
-    # 1. Check query parameter: ?token=...
-    token = websocket.query_params.get("token")
-
-    # 2. Check Authorization header: Bearer <token>
-    if not token:
-        auth_header = websocket.headers.get("authorization", "")
-        if auth_header.lower().startswith("bearer "):
-            token = auth_header[7:].strip()
-
-    if _validate_token_string(token):
+    if _validate_token_string(
+        _extract_token_from_query_and_headers(
+            websocket.query_params,
+            websocket.headers,
+        ),
+    ):
         return True
 
     # Unauthorized: terminate WebSocket connection with policy violation code (1008)
@@ -183,14 +381,23 @@ server_loop = None
 
 
 def _broadcast_ws(payload: dict):
-    """Sends a JSON event to all connected WebSocket clients."""
+    """Sends a JSON event to all clients, minting asset URLs per recipient."""
     import json as _json
     if not server_loop or not active_websockets:
         return
-    msg = _json.dumps(payload, ensure_ascii=False)
     for ws in active_websockets:
         try:
-            asyncio.run_coroutine_threadsafe(ws.send_text(msg), server_loop)
+            message_payload = payload.copy()
+            content = message_payload.get("content")
+            if isinstance(content, str):
+                client = getattr(ws, "client", None)
+                client_host = str(getattr(client, "host", ""))
+                message_payload["content"] = _render_persisted_asset_markers_for_client(
+                    content,
+                    client_host,
+                )
+            message = _json.dumps(message_payload, ensure_ascii=False)
+            asyncio.run_coroutine_threadsafe(ws.send_text(message), server_loop)
         except Exception:
             pass
 
@@ -378,7 +585,11 @@ def _tool_results_fallback_response(user_text: str, tool_results: list[str]) -> 
     return t("api.server.synthesis_failed") + joined_results[:1800]
 
 
-def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -> list:
+def _load_shared_history_entries(
+    channel: str | None = None,
+    limit: int = 200,
+    request: Request | None = None,
+) -> list:
     try:
         from memory.conversation_history import load_messages
         entries = load_messages(channel=channel, limit=limit)
@@ -397,6 +608,8 @@ def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -
             role = "user"
         elif role in ("ai", "bot"):
             role = "assistant"
+        if request is not None:
+            content = _render_persisted_asset_markers(content, request)
         history.append({
             "role": role,
             "content": content,
@@ -644,18 +857,18 @@ def _api_internal_error(operation: str) -> str:
 
 # Keep terminal output useful: app debug prints stay visible, noisy polling access logs do not.
 logging.getLogger("uvicorn.access").disabled = True
-server.mount("/photos", StaticFiles(directory=PHOTOS_DIR), name="photos")
+server.mount("/photos", AuthenticatedStaticFiles(directory=PHOTOS_DIR, mount_path="photos"), name="photos")
 
 # --- [MASTRO-ROUTE]: Allow downloading from the outputs folder ---
 from config import BASE_DIR
 outputs_dir = os.path.join(BASE_DIR, "outputs")
 os.makedirs(outputs_dir, exist_ok=True)
-server.mount("/outputs", StaticFiles(directory=outputs_dir), name="outputs")
+server.mount("/outputs", AuthenticatedStaticFiles(directory=outputs_dir, mount_path="outputs"), name="outputs")
 
 # --- [MASTRO-FIX]: Separate folder for the UI faces ---
 avatars_dir = os.path.join(BASE_DIR, "avatars")
 os.makedirs(avatars_dir, exist_ok=True)
-server.mount("/avatars", StaticFiles(directory=avatars_dir), name="avatars")
+server.mount("/avatars", AuthenticatedStaticFiles(directory=avatars_dir, mount_path="avatars"), name="avatars")
 
 # CORS — localhost only (no external source can call the server)
 server.add_middleware(
@@ -1350,22 +1563,13 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             clean_ai = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", lambda m: file_card, clean_ai)
 
         # 2. --- MASTRO INTERCEPTOR FOR IMAGES (Web UI) ---
-        photo_match = re.search(r"\[SEND_PHOTO:\s*(.*?)\]", clean_ai)
-        if photo_match:
-            file_path = photo_match.group(1).strip()
-            filename = os.path.basename(file_path)
-            base_url = str(request.base_url).rstrip("/")
-            
-            # We smartly check where the photo is located
-            if "outputs" in file_path.lower():
-                img_url = f"{base_url}/outputs/{filename}"
-            else:
-                img_url = f"{base_url}/photos/{filename}"
-                
-            img_html = f'<br><br><img src="{img_url}" alt="Astakos Image" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">'
-            
-            # We replace the label with the image
-            clean_ai = re.sub(r"\[SEND_PHOTO:\s*(.*?)\]", img_html, clean_ai)
+        # Persist stable references. Fresh client-specific URLs are rendered only
+        # when returning the response or replaying history.
+        clean_ai = _replace_bracketed_markers(
+            clean_ai,
+            "[SEND_PHOTO:",
+            lambda file_path: _asset_history_marker_from_legacy_photo_path(file_path),
+        )
 
         if final_ai_response:
             # We store the CLEAN strings everywhere (including the Link/Img if it exists)
@@ -1374,12 +1578,13 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             clean_ai = sanitize_messenger_draft_claims(clean_ai)
             clean_ai = strip_operational_assistant_paragraphs(clean_ai).strip() or clean_ai
+            client_ai = _render_persisted_asset_markers(clean_ai, request)
             from core.untrusted_content import derived_external_content_history_metadata
             assistant_metadata = derived_external_content_history_metadata(
                 provenance_messages_for_reply,
                 external_tool_names,
             )
-            _trace.finalize(response=clean_ai)
+            _trace.finalize(response=client_ai)
             
             assistant_history_kwargs = {
                 "agent": handling_agent,
@@ -1417,7 +1622,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         return JSONResponse({
             "agent":    handling_agent,
-            "response": clean_ai,  # Returning the response to the Frontend
+            "response": client_ai if final_ai_response else clean_ai,
             "user_rowid": current_history_rowid,
             "assistant_rowid": assistant_history_rowid if final_ai_response else None,
         })
@@ -1492,7 +1697,9 @@ async def text_to_speech(request: Request, _=Depends(require_token)):
             return JSONResponse({"error": t("api.server.empty_text_for_tts")}, status_code=400)
         text = re.sub(r'[*#`]', '', text)
         text = re.sub(r'\[.*?\]\(.*?\)', '', text)
-        text = re.sub(r'\[SEND_PHOTO:.*?\]', '', text)
+        text = _replace_bracketed_markers(text, "[SEND_PHOTO:", lambda _: "")
+        text = _replace_bracketed_markers(text, "[ASTAKOS_ASSET:", lambda _: "")
+        text = _replace_bracketed_markers(text, "[ASTAKOS_ASSET_URL:", lambda _: "")
         text = text.strip()
         from core.i18n import CURRENT_LOCALE
         voice = "el-GR-NestorasNeural" if CURRENT_LOCALE == "el" else "en-US-ChristopherNeural"
@@ -1750,7 +1957,7 @@ async def upload_file(
             "status":    "success",
             "filename":  filename,
             "file_path": file_path,
-            "url":       f"/photos/{filename}" if is_image else None,
+            "url":       _private_asset_url(request, "photos", filename) if is_image else None,
             "ai_message": chat_ai_msg,
             "analysis":  memory_analysis,
         })
@@ -1771,7 +1978,7 @@ async def health():
 
 
 @server.get("/messages/poll")
-async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends(require_token)):
+async def poll_messages(request: Request, after_id: int = 0, channel: str | None = None, _=Depends(require_token)):
     """
     Polling endpoint for the Web UI.
     Returns messages with id > after_id (default: 0 = all).
@@ -1780,6 +1987,11 @@ async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends
     try:
         from memory.conversation_history import load_messages_after_rowid, get_max_rowid
         messages = load_messages_after_rowid(after_rowid=after_id, channel=channel or None, limit=50)
+        for message in messages:
+            message["content"] = _render_persisted_asset_markers(
+                str(message.get("content", "")),
+                request,
+            )
         current_max = get_max_rowid()
         return {"messages": messages, "max_id": current_max}
     except Exception as e:
@@ -1787,9 +1999,9 @@ async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends
 
 
 @server.get("/history")
-async def get_history(_=Depends(require_token)):
+async def get_history(request: Request, _=Depends(require_token)):
     """Provides the history to the Web UI from the shared SQLite."""
-    history = _load_shared_history_entries(limit=200)
+    history = _load_shared_history_entries(limit=200, request=request)
     return {"history": history}
 
 
