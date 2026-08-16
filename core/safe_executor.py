@@ -12,8 +12,9 @@ class ExecPolicy(Enum):
 
 def _normalize_command(cmd: str) -> str:
     """Normalize command for security inspection by stripping PowerShell backtick obfuscation."""
-    # Strip backticks within tokens (e.g. R`e`m`o`v`e`-`I`t`e`m -> Remove-Item, I`E`X -> IEX)
-    return re.sub(r"`(?=[a-zA-Z0-9_\-])", "", str(cmd or ""))
+    # Strip inline backtick escapes (including punctuation in protected paths).
+    # Preserve a trailing backtick because it is PowerShell line continuation.
+    return re.sub(r"`(?=[^\r\n])", "", str(cmd or ""))
 
 
 # ── Patterns (order: most dangerous first) ──────────────────────
@@ -126,7 +127,7 @@ def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None
     write_patterns = (
         r"\bopen\s*\([^)]*,\s*['\"][wax+]",
         r"\bopen\s*\([^)]*['\"][wax+]",
-        r"\b(Set-Content|sc|Out-File|Add-Content|ac|Clear-Content|clc)\b",
+        r"\b(Set-Content|sc|Out-File|Add-Content|ac|Clear-Content|clc|New-Item|ni)\b",
         r"\b(?:Remove-Item|ri|rm|erase|rd|rmdir|del)\b",
         r">\s*[^&|]+",
         r">>\s*[^&|]+",
@@ -203,7 +204,7 @@ def _unwrap_command_wrapper(normalized_cmd: str) -> str | None:
     if not tokens:
         return None
 
-    executable = tokens[0].strip("'\"").lower()
+    executable = re.split(r"[\\/]", tokens[0].strip("'\"").lower())[-1]
     if executable in {"cmd", "cmd.exe"}:
         for index, token in enumerate(tokens[1:], start=1):
             if token.lower() in {"/c", "/k"} and index + 1 < len(tokens):
