@@ -56,9 +56,10 @@ elif _provider == "gemini":
         google_api_key=config.GEMINI_API_KEY
     )
 else:
-    from langchain_google_vertexai import VertexAIEmbeddings
-    base_embeddings = VertexAIEmbeddings(
-        model_name="text-embedding-004",
+    from langchain_google_genai import GoogleGenerativeAIEmbeddings
+    base_embeddings = GoogleGenerativeAIEmbeddings(
+        model="text-embedding-004",
+        vertexai=True,
         project=PROJECT_ID,
         location=LOCATION,
     )
