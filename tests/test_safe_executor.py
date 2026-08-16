@@ -227,6 +227,8 @@ def test_executable_and_versioned_python_c_require_confirmation():
         'python -I -c "print(1)"',
         'python -W ignore -c "print(1)"',
         'python -cprint(1)',
+        'python -Bc "print(1)"',
+        'python -Ic "print(1)"',
         'p`y -c "print(1)"',
     )
 
@@ -246,6 +248,16 @@ def test_copy_or_move_touching_protected_core_file_requires_confirmation():
     for command in commands:
         policy, _ = classify_command(command)
         assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+
+def test_powershell_rm_alias_with_recursive_force_requires_confirmation():
+    policy, _ = classify_command(r"rm -r -f C:\temp")
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+
+def test_clear_content_of_protected_core_file_requires_confirmation():
+    policy, _ = classify_command(r"Clear-Content core\agents.py")
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
 
 
 # -- Compound Commands --------------------------------------------

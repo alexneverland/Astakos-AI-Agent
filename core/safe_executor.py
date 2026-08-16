@@ -52,8 +52,8 @@ _BLOCKED = [
 
 _REQUIRE_CONFIRM = [
     # ── PowerShell file ops (full and shorthand flags/aliases) ──
-    r"\b(?:Remove-Item|ri|erase|rd|rmdir|del)\b.*-(?:r|rec|recurse)\b.*-(?:f|fo|force)\b",
-    r"\b(?:Remove-Item|ri|erase|rd|rmdir|del)\b.*-(?:f|fo|force)\b.*-(?:r|rec|recurse)\b",
+    r"\b(?:Remove-Item|ri|rm|erase|rd|rmdir|del)\b.*-(?:r|rec|recurse)\b.*-(?:f|fo|force)\b",
+    r"\b(?:Remove-Item|ri|rm|erase|rd|rmdir|del)\b.*-(?:f|fo|force)\b.*-(?:r|rec|recurse)\b",
     r"\b(?:Remove-Item|ri)\b.*astakos",           # project root protection
     # ── System state ──────────────────────────────────────────
     r"shutdown", r"restart-computer",
@@ -110,7 +110,7 @@ def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None
     write_patterns = (
         r"\bopen\s*\([^)]*,\s*['\"][wax+]",
         r"\bopen\s*\([^)]*['\"][wax+]",
-        r"\b(Set-Content|Out-File|Add-Content)\b",
+        r"\b(Set-Content|Out-File|Add-Content|Clear-Content|clc)\b",
         r">\s*[^&|]+",
         r">>\s*[^&|]+",
         r"\.(?:write_text|write_bytes|write)\s*\(",
@@ -135,7 +135,7 @@ def _python_inline_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
     interpreter = r"(?:python(?:\d+(?:\.\d+)*)?|py)(?:\.exe)?"
     inline_python = (
         rf"(?:^|[\s\\/]){interpreter}[\"']?"
-        r"(?:\s+(?!-c)[^\s]+)*\s+-c\S*"
+        r"(?:\s+[^\s]+)*?\s+-[A-Za-z]*c\S*"
     )
     if re.search(inline_python, normalized_cmd, re.IGNORECASE):
         return ExecPolicy.REQUIRE_CONFIRMATION, "python inline command (-c)"
