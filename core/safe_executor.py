@@ -19,7 +19,7 @@ def _normalize_command(cmd: str) -> str:
 # ── Patterns (order: most dangerous first) ──────────────────────
 _BLOCKED = [
     # ── Direct web-download-to-shell pipelines ─────────────────
-    r"\b(?:curl|wget|Invoke-WebRequest|iwr)\b.*\|\s*(?:&\s*)?(?:(?:ba|z|da)?sh|powershell|pwsh|iex|Invoke-Expression)\b",
+    r"\b(?:curl|wget|Invoke-WebRequest|iwr)\b.*\|\s*(?:&\s*)?['\"]?(?:(?:ba|z|da)?sh|powershell|pwsh|iex|Invoke-Expression)\b",
     # ── Unix destructive ───────────────────────────────────────
     r"\brm\s+(?:.*-(?:[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r)|.*-[a-zA-Z]*r\b.*-[a-zA-Z]*f\b|.*-[a-zA-Z]*f\b.*-[a-zA-Z]*r\b).*\s+/(?:$|\s|\*)",  # rm -rf /, rm -r -f /, rm -rf /*
     r"rm\s+-[rf]{1,2}\s+/",              # rm -rf /
@@ -126,7 +126,7 @@ def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None
     write_patterns = (
         r"\bopen\s*\([^)]*,\s*['\"][wax+]",
         r"\bopen\s*\([^)]*['\"][wax+]",
-        r"\b(Set-Content|Out-File|Add-Content|Clear-Content|clc)\b",
+        r"\b(Set-Content|Out-File|Add-Content|ac|Clear-Content|clc)\b",
         r"\b(?:Remove-Item|ri|rm|erase|rd|rmdir|del)\b",
         r">\s*[^&|]+",
         r">>\s*[^&|]+",
