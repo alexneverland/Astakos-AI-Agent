@@ -86,6 +86,7 @@ _WARNING = [
 ]
 
 _PROTECTED_WRITE_PATHS = (
+    r"(?:^|[/\s'\";])config\.py\b",
     r"astakos_skills[/][^/\s'\";]+\.py",
     r"tools[/]system\.py",
     r"core[/]approval\.py",
@@ -132,7 +133,7 @@ def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None
 
 
 def _python_inline_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
-    """Require approval for inline Python after any interpreter options."""
+    """Require approval for inline Python code passed by option or standard input."""
     interpreter = r"(?:python(?:w|\d+(?:\.\d+)*)?|py)(?:\.exe)?"
     inline_python = (
         rf"(?:^|[\s\\/]){interpreter}[\"']?"
@@ -140,6 +141,13 @@ def _python_inline_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
     )
     if re.search(inline_python, normalized_cmd, re.IGNORECASE):
         return ExecPolicy.REQUIRE_CONFIRMATION, "python inline command (-c)"
+
+    stdin_python = (
+        rf"\|\s*(?:&\s*)?{interpreter}[\"']?"
+        r"(?:\s+-[A-Za-z]+)*\s*(?:-\s*)?$"
+    )
+    if re.search(stdin_python, normalized_cmd, re.IGNORECASE):
+        return ExecPolicy.REQUIRE_CONFIRMATION, "python program from stdin"
     return None, ""
 
 

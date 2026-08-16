@@ -201,6 +201,12 @@ def test_core_file_set_content_requires_confirmation():
     assert "protected file write" in reason
 
 
+def test_config_file_overwrite_requires_confirmation():
+    for command in ("echo x > config.py", "Set-Content config.py x"):
+        policy, _ = classify_command(command)
+        assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+
 # -- python -c inline commands ------------------------------------
 
 def test_python_c_print_requires_confirmation():
@@ -236,6 +242,12 @@ def test_executable_and_versioned_python_c_require_confirmation():
     )
 
     for command in commands:
+        policy, _ = classify_command(command)
+        assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+
+def test_python_stdin_program_requires_confirmation():
+    for command in ('echo "print(1)" | python -', 'echo "print(1)" | python'):
         policy, _ = classify_command(command)
         assert policy == ExecPolicy.REQUIRE_CONFIRMATION
 
