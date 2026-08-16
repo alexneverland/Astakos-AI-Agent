@@ -8,9 +8,19 @@ class ExecPolicy(Enum):
     REQUIRE_CONFIRMATION = "require_confirmation"
     BLOCKED             = "blocked"
 
+
+def _normalize_command(cmd: str) -> str:
+    """Normalize command for security inspection by stripping PowerShell backtick obfuscation."""
+    # Strip backticks within tokens (e.g. R`e`m`o`v`e`-`I`t`e`m -> Remove-Item, I`E`X -> IEX)
+    return re.sub(r"`(?=[a-zA-Z0-9_\-])", "", str(cmd or ""))
+
+
 # ── Patterns (order: most dangerous first) ──────────────────────
 _BLOCKED = [
+    # ── Direct web-download-to-shell pipelines ─────────────────
+    r"\b(?:curl|wget|Invoke-WebRequest|iwr)\b.*\|\s*(?:(?:ba|z|da)?sh|powershell|pwsh|iex|Invoke-Expression)\b",
     # ── Unix destructive ───────────────────────────────────────
+    r"\brm\s+(?:.*-(?:[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r)|.*-[a-zA-Z]*r\b.*-[a-zA-Z]*f\b|.*-[a-zA-Z]*f\b.*-[a-zA-Z]*r\b).*\s+/(?:$|\s|\*)",  # rm -rf /, rm -r -f /, rm -rf /*
     r"rm\s+-[rf]{1,2}\s+/",              # rm -rf /
     # ── Windows CMD destructive ────────────────────────────────
     r"del\s+.*\*",                       # del /f /s C:\*
@@ -27,23 +37,24 @@ _BLOCKED = [
     r"reg\s+delete",                      # delete registry key
     r"reg\s+add",                         # add/modify registry key
     r"reg\s+import",                      # import registry file
-    # ── PowerShell execution bypass ────────────────────────────
-    r"powershell.*-[eE]ncodedCommand",     # encoded PS command
-    r"powershell.*-[eE]xec.*[bB]ypass",   # execution policy bypass
-    r"Invoke-Expression",                  # PS eval equivalent
-    r"iex\s*\(",                         # PS iex() shorthand
-    r"IEX\s*\(",
+    # ── PowerShell execution bypass & encoded commands ─────────
+    r"(?:powershell|pwsh).*\s+-(?:e|enc|encoded|encodedcommand)(?:\s+|:)",                 # encoded PS command (whitespace or colon)
+    r"(?:powershell|pwsh).*\s+-(?:ep|exec|executionpolicy)(?:\s+|:)(?:bypass|unrestricted)\b",  # execution policy bypass (whitespace or colon)
+    r"\bInvoke-Expression\b",            # PS eval equivalent
+    r"\biex\s*[\(\s]",                   # PS iex shorthand
     # ── Dangerous system tools ─────────────────────────────────
-    r"wmic",                               # WMI — can execute code remotely
+    r"\bwmic\b",                         # WMI — can execute code remotely
     r"schtasks.*(/create|/change)",        # create/modify scheduled tasks
     r"icacls.*grant.*Everyone",            # grant Everyone access
     r"takeown\s+/f.*\s+/r",             # recursive ownership takeover
     r"cipher\s+/w",                       # wipe free space (slow+destructive)
 ]
+
 _REQUIRE_CONFIRM = [
-    # ── PowerShell file ops ────────────────────────────────────
-    r"Remove-Item.+-Recurse.+-Force",      # rm -rf equivalent
-    r"Remove-Item\s+.*astakos",           # project root protection
+    # ── PowerShell file ops (full and shorthand flags/aliases) ──
+    r"\b(?:Remove-Item|ri|erase|rd|rmdir|del)\b.*-(?:r|rec|recurse)\b.*-(?:f|fo|force)\b",
+    r"\b(?:Remove-Item|ri|erase|rd|rmdir|del)\b.*-(?:f|fo|force)\b.*-(?:r|rec|recurse)\b",
+    r"\b(?:Remove-Item|ri)\b.*astakos",           # project root protection
     # ── System state ──────────────────────────────────────────
     r"shutdown", r"restart-computer",
     r"taskkill", r"Stop-Process",
@@ -55,7 +66,7 @@ _REQUIRE_CONFIRM = [
     r"git\s+reset\s+--hard",            # lose local changes
     r"git\s+clean\s+-[fd]",             # delete untracked files
     # ── SQL destructive ────────────────────────────────────────
-    r"DROP\s+TABLE", r"DROP\s+DATABASE",
+    r"DROP\s+TABLE", r"DROP\s+DATABASE", r"DROP\s+VIEW", r"DROP\s+SCHEMA",
     r"DELETE\s+FROM",
     r"TRUNCATE\s+TABLE",
     # ── Network config ─────────────────────────────────────────
@@ -63,50 +74,67 @@ _REQUIRE_CONFIRM = [
     # ── Capability registry direct write ─────────────────────
     r"open\s*\([^)]*capability_registry\.json[^)]*[\x27\x22][wa]",  # write/append open
 ]
+
 _WARNING = [
-    r"Remove-Item",                  # without -Recurse -Force
-    r"pip\s+install",
-    r"npm\s+install",                # npm packages
-    r"git\s+commit",
-    r"git\s+push",
-    r"Move-Item", r"Rename-Item",
-    r"Set-Content", r"Out-File",
+    r"\bRemove-Item\b",                  # without -Recurse -Force
+    r"\bpip\s+install\b",
+    r"\bnpm\s+install\b",                # npm packages
+    r"\bgit\s+commit\b",
+    r"\bgit\s+push\b",
+    r"\bMove-Item\b", r"\bRename-Item\b",
+    r"\bSet-Content\b", r"\bOut-File\b",
 ]
 
 _PROTECTED_WRITE_PATHS = (
     r"astakos_skills[/][^/\s'\";]+\.py",
     r"tools[/]system\.py",
-    r"core[/]tool_risk\.py",
-    r"core[/]capability_registry\.json",
+    r"core[/]approval\.py",
+    r"core[/]agents\.py",
+    r"core[/]brain\.py",
     r"core[/]safe_executor\.py",
     r"core[/]graph\.py",
+    r"core[/]tool_risk\.py",
+    r"core[/]capability_registry\.json",
     r"core[/]prompts\.md",
+    r"core[/][^/\s'\";]+\.py",
 )
 
 
 def _protected_file_write_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
     """Require approval for terminal writes to skill/registry/core files."""
-    normalized = cmd.replace("\\", "/")
+    normalized = _normalize_command(cmd).replace("\\", "/")
     protected = "|".join(_PROTECTED_WRITE_PATHS)
     if not re.search(protected, normalized, re.IGNORECASE):
         return None, ""
 
     write_patterns = (
         r"\bopen\s*\([^)]*,\s*['\"][wax+]",
+        r"\bopen\s*\([^)]*['\"][wax+]",
         r"\b(Set-Content|Out-File|Add-Content)\b",
         r">\s*[^&|]+",
         r">>\s*[^&|]+",
-        r"\.write\s*\(",
-        r"\.write_text\s*\(",
+        r"\.(?:write_text|write_bytes|write)\s*\(",
+        r"\btee\b",
+        r"\btruncate\b",
+        r"\bsed\s+.*-i",
     )
-    if any(re.search(pattern, cmd, re.IGNORECASE) for pattern in write_patterns):
+    if any(re.search(pattern, normalized, re.IGNORECASE) for pattern in write_patterns):
         return ExecPolicy.REQUIRE_CONFIRMATION, "protected file write via terminal"
 
     return None, ""
 
+
+def _python_inline_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
+    """Inspect inline python -c / py -c commands."""
+    interpreter = r"(?:python(?:\d+(?:\.\d+)*)?|py)(?:\.exe)?"
+    if re.search(rf"(?:^|[\s\\/]){interpreter}[\"']?\s+-c\b", cmd, re.IGNORECASE):
+        return ExecPolicy.REQUIRE_CONFIRMATION, "python inline command (-c)"
+    return None, ""
+
+
 def _register_tool_terminal_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
     """Detect register_tool apply attempts hidden inside terminal commands."""
-    lowered = cmd.lower().replace("\\", "/")
+    lowered = _normalize_command(cmd).lower().replace("\\", "/")
     if "register_tool" not in lowered:
         return None, ""
 
@@ -140,22 +168,45 @@ def _register_tool_terminal_policy(cmd: str) -> tuple[ExecPolicy | None, str]:
 
     return None, ""
 
+
 def classify_command(cmd: str) -> tuple[ExecPolicy, str]:
+    normalized_cmd = _normalize_command(cmd)
+
+    # 1. BLOCKED patterns (most dangerous first)
     for p in _BLOCKED:
-        if re.search(p, cmd, re.IGNORECASE):
+        if re.search(p, normalized_cmd, re.IGNORECASE) or re.search(p, cmd, re.IGNORECASE):
             return ExecPolicy.BLOCKED, p
+
+    # 2. Protected file writes
     protected_policy, protected_reason = _protected_file_write_policy(cmd)
     if protected_policy is not None:
         return protected_policy, protected_reason
+
+    # 3. Register tool terminal policy
     register_policy, register_reason = _register_tool_terminal_policy(cmd)
     if register_policy is not None:
         return register_policy, register_reason
+
+    # 4. Conservative compound-command fallback (&&, ||, ;, \n)
+    if re.search(r"(&&|\|\||;|\n|\r)", cmd):
+        return ExecPolicy.REQUIRE_CONFIRMATION, "compound command"
+
+    # 5. Require confirmation patterns
     for p in _REQUIRE_CONFIRM:
-        if re.search(p, cmd, re.IGNORECASE):
+        if re.search(p, normalized_cmd, re.IGNORECASE) or re.search(p, cmd, re.IGNORECASE):
             return ExecPolicy.REQUIRE_CONFIRMATION, p
+
+    # 6. Python inline (-c) commands
+    python_policy, python_reason = _python_inline_policy(cmd)
+    if python_policy is not None:
+        return python_policy, python_reason
+
+    # 7. WARNING patterns
     for p in _WARNING:
-        if re.search(p, cmd, re.IGNORECASE):
+        if re.search(p, normalized_cmd, re.IGNORECASE) or re.search(p, cmd, re.IGNORECASE):
             return ExecPolicy.WARNING, p
+
+    # 8. SAFE
     return ExecPolicy.SAFE, ""
 
 
@@ -189,4 +240,3 @@ def safe_execute(cmd: str, executor_func, confirm_callback=None) -> dict:
 
     # SAFE or WARNING approved → execution
     return executor_func(cmd)
-
