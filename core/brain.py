@@ -17,6 +17,15 @@ warnings.filterwarnings("ignore")
 # 1. Base Model Definitions
 _provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
 
+DEFAULT_GEMINI_FAST_MODEL = "gemini-3.5-flash"
+DEFAULT_GEMINI_HEAVY_MODEL = "gemini-3.1-pro-preview"
+
+
+def _google_model_from_environment(variable_name: str, default_model: str) -> str:
+    """Return an optional Google-model override, falling back to the stable default."""
+    configured_model = os.getenv(variable_name, "").strip()
+    return configured_model or default_model
+
 # [MASTRO-SHIELD v3]: Safety for Google models
 _BN = HarmBlockThreshold.BLOCK_NONE
 custom_safety = {
@@ -47,8 +56,12 @@ elif _provider == "anthropic":
     print("\033[92m[Brain]: Anthropic Engines Loaded\033[0m")
 
 elif _provider == "gemini":
-    FAST_MODEL = "gemini-3.5-flash"
-    HEAVY_MODEL = "gemini-3.1-pro-preview"
+    FAST_MODEL = _google_model_from_environment(
+        "ASTAKOS_GEMINI_FAST_MODEL", DEFAULT_GEMINI_FAST_MODEL,
+    )
+    HEAVY_MODEL = _google_model_from_environment(
+        "ASTAKOS_GEMINI_HEAVY_MODEL", DEFAULT_GEMINI_HEAVY_MODEL,
+    )
     llm = ChatGoogleGenerativeAI(
         model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety, api_key=config.GEMINI_API_KEY
     )
@@ -60,8 +73,12 @@ elif _provider == "gemini":
     print("\033[92m[Brain]: Gemini Engines Loaded (API Key)\033[0m")
 
 else:  # default to vertex
-    FAST_MODEL = "gemini-3.5-flash"
-    HEAVY_MODEL = "gemini-3.1-pro-preview"
+    FAST_MODEL = _google_model_from_environment(
+        "ASTAKOS_GEMINI_FAST_MODEL", DEFAULT_GEMINI_FAST_MODEL,
+    )
+    HEAVY_MODEL = _google_model_from_environment(
+        "ASTAKOS_GEMINI_HEAVY_MODEL", DEFAULT_GEMINI_HEAVY_MODEL,
+    )
     llm = ChatGoogleGenerativeAI(
         model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety,
         vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")

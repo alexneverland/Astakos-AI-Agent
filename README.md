@@ -190,6 +190,21 @@ You control the machine, credentials, enabled integrations, and stored runtime s
 
 Only one provider is required to start.
 
+### Optional Gemini model selection
+
+Gemini API and Vertex AI use `gemini-3.5-flash` for everyday interactions and
+`gemini-3.1-pro-preview` for heavier reasoning by default. To test a newer
+Google model without changing the shared defaults, set only the model you want
+to override in your local `.env`:
+
+```env
+ASTAKOS_GEMINI_FAST_MODEL=gemini-3.7-flash
+```
+
+Remove that line (or leave it blank) and restart Astakos to return immediately
+to the tested default. `ASTAKOS_GEMINI_HEAVY_MODEL` is available separately,
+but should normally be left unset.
+
 ### Vertex AI with Docker
 
 For the release Docker deployment, Vertex AI needs a service-account JSON file that exists **inside the container**.

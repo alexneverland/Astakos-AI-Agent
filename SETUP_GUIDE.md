@@ -140,6 +140,8 @@ LLM_PROVIDER=vertex
 GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/vertex-service-account.json
 PROJECT_ID=your-gcp-project-id
 LOCATION=global
+# Optional: leave blank for the tested daily-model default.
+ASTAKOS_GEMINI_FAST_MODEL=
 ```
 
 If `GOOGLE_APPLICATION_CREDENTIALS` is empty, or points to a host-only path that does not exist inside the container, Astakos will return to the Setup Wizard instead of booting.
