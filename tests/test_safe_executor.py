@@ -207,6 +207,17 @@ def test_config_file_overwrite_requires_confirmation():
         assert policy == ExecPolicy.REQUIRE_CONFIRMATION
 
 
+def test_credential_file_overwrite_requires_confirmation():
+    for command in (
+        "echo x > .env",
+        "Set-Content .env x",
+        "echo x > credentials.json",
+        "Set-Content credentials.json x",
+    ):
+        policy, _ = classify_command(command)
+        assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+
 # -- python -c inline commands ------------------------------------
 
 def test_python_c_print_requires_confirmation():
@@ -257,6 +268,12 @@ def test_python_stdin_program_requires_confirmation():
         assert policy == ExecPolicy.REQUIRE_CONFIRMATION
 
 
+def test_python_script_or_module_arguments_remain_safe():
+    for command in ("python script.py -c harmless", "python -m pytest -c pytest.ini"):
+        policy, _ = classify_command(command)
+        assert policy == ExecPolicy.SAFE
+
+
 def test_copy_or_move_touching_protected_core_file_requires_confirmation():
     commands = (
         'Copy-Item payload.py core/agents.py',
@@ -279,6 +296,8 @@ def test_clear_content_of_protected_core_file_requires_confirmation():
     policy, _ = classify_command(r"Clear-Content core\agents.py")
     assert policy == ExecPolicy.REQUIRE_CONFIRMATION
     policy, _ = classify_command(r"Clear-Content core\.\agents.py")
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+    policy, _ = classify_command(r'Clear-Content "core\x y\..\agents.py"')
     assert policy == ExecPolicy.REQUIRE_CONFIRMATION
 
 

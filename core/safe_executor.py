@@ -1,5 +1,6 @@
 from core.i18n import t
 import re
+import shlex
 from enum import Enum
 
 class ExecPolicy(Enum):
@@ -87,6 +88,8 @@ _WARNING = [
 
 _PROTECTED_WRITE_PATHS = (
     r"(?:^|[/\s'\";])config\.py\b",
+    r"(?:^|[/\s'\";])\.env\b",
+    r"(?:^|[/\s'\";])credentials\.json\b",
     r"astakos_skills[/][^/\s'\";]+\.py",
     r"tools[/]system\.py",
     r"core[/]approval\.py",
@@ -109,7 +112,7 @@ def _canonicalize_path_syntax(command: str) -> str:
         previous = canonical
         canonical = re.sub(r"/{2,}", "/", canonical)
         canonical = re.sub(r"/\./", "/", canonical)
-        canonical = re.sub(r"/[^/\s'\";]+/\.\./", "/", canonical)
+        canonical = re.sub(r"/[^/;]+/\.\./", "/", canonical)
     return canonical
 
 
@@ -147,12 +150,37 @@ def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None
 def _python_inline_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
     """Require approval for inline Python code passed by option or standard input."""
     interpreter = r"(?:python(?:w|\d+(?:\.\d+)*)?|py)(?:\.exe)?"
-    inline_python = (
-        rf"(?:^|[\s\\/]){interpreter}[\"']?"
-        r"(?:\s+[^\s]+)*?\s+-[A-Za-z]*c\S*"
-    )
-    if re.search(inline_python, normalized_cmd, re.IGNORECASE):
-        return ExecPolicy.REQUIRE_CONFIRMATION, "python inline command (-c)"
+    try:
+        tokens = shlex.split(normalized_cmd, posix=False)
+    except ValueError:
+        tokens = []
+
+    if tokens and tokens[0] == "&":
+        tokens = tokens[1:]
+    executable = tokens[0].strip("'\"") if tokens else ""
+    interpreter_pattern = rf"(?:^|[\\/]){interpreter}$"
+    if re.search(interpreter_pattern, executable, re.IGNORECASE):
+        option_index = 1
+        while option_index < len(tokens):
+            token = tokens[option_index].strip("'\"")
+            lowered = token.lower()
+            if token == "-":
+                return ExecPolicy.REQUIRE_CONFIRMATION, "python program from stdin"
+            if (
+                lowered.startswith("-")
+                and not lowered.startswith("--")
+                and "c" in lowered[1:]
+            ):
+                return ExecPolicy.REQUIRE_CONFIRMATION, "python inline command (-c)"
+            if lowered == "-m" or lowered.startswith("-m"):
+                return None, ""
+            if lowered in {"-w", "-x", "--check-hash-based-pycs"}:
+                option_index += 2
+                continue
+            if token.startswith("-"):
+                option_index += 1
+                continue
+            return None, ""
 
     piped_python = (
         rf"\|\s*(?:&\s*)?{interpreter}[\"']?"
