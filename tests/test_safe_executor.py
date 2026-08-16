@@ -271,8 +271,23 @@ def test_python_stdin_program_requires_confirmation():
         assert policy == ExecPolicy.REQUIRE_CONFIRMATION
 
 
+def test_wrapped_or_path_qualified_python_requires_confirmation():
+    for command in (
+        'cmd /c python -c "print(1)"',
+        'powershell -Command python -c "print(1)"',
+        'Write-Output "print(1)" | & "python"',
+        r'Write-Output "print(1)" | .\venv\Scripts\python.exe',
+    ):
+        policy, _ = classify_command(command)
+        assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+
 def test_python_script_or_module_arguments_remain_safe():
-    for command in ("python script.py -c harmless", "python -m pytest -c pytest.ini"):
+    for command in (
+        "python script.py -c harmless",
+        "python -m pytest -c pytest.ini",
+        "python -Xcpu_count=2 script.py",
+    ):
         policy, _ = classify_command(command)
         assert policy == ExecPolicy.SAFE
 

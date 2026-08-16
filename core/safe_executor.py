@@ -147,46 +147,82 @@ def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None
     return None, ""
 
 
-def _python_inline_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
-    """Require approval for inline Python code passed by option or standard input."""
-    interpreter = r"(?:python(?:w|\d+(?:\.\d+)*)?|py)(?:\.exe)?"
+_PYTHON_INTERPRETER = r"(?:python(?:w|\d+(?:\.\d+)*)?|py)(?:\.exe)?"
+
+
+def _shell_tokens(command: str) -> list[str]:
+    """Return shell-like tokens without executing the command."""
     try:
-        tokens = shlex.split(normalized_cmd, posix=False)
+        return shlex.split(command, posix=False)
     except ValueError:
-        tokens = []
+        return []
+
+
+def _is_python_interpreter(token: str) -> bool:
+    """Return whether a token names a supported Python interpreter executable."""
+    executable = token.strip("'\"")
+    pattern = rf"(?:^|[\\/]){_PYTHON_INTERPRETER}$"
+    return bool(re.search(pattern, executable, re.IGNORECASE))
+
+
+def _python_direct_policy(tokens: list[str]) -> tuple[ExecPolicy | None, str]:
+    """Inspect interpreter options until Python selects a module or script."""
+    option_index = 0
+    while option_index < len(tokens):
+        token = tokens[option_index].strip("'\"")
+        lowered = token.lower()
+        if token == "-":
+            return ExecPolicy.REQUIRE_CONFIRMATION, "python program from stdin"
+        if lowered.startswith("-c") and not lowered.startswith("--"):
+            return ExecPolicy.REQUIRE_CONFIRMATION, "python inline command (-c)"
+        if lowered == "-m" or lowered.startswith("-m"):
+            return None, ""
+        if token.startswith("-X") or token.startswith("-W"):
+            option_index += 1 if len(token) > 2 else 2
+            continue
+        if re.fullmatch(r"-[A-Za-z]+", token) and "c" in lowered[1:]:
+            return ExecPolicy.REQUIRE_CONFIRMATION, "python inline command (-c)"
+        if token.startswith("-"):
+            option_index += 1
+            continue
+        return None, ""
+    return None, ""
+
+
+def _unwrap_command_wrapper(normalized_cmd: str) -> str | None:
+    """Extract a recognized shell wrapper payload without executing it."""
+    tokens = _shell_tokens(normalized_cmd)
+    if not tokens:
+        return None
+
+    executable = tokens[0].strip("'\"").lower()
+    if executable in {"cmd", "cmd.exe"}:
+        for index, token in enumerate(tokens[1:], start=1):
+            if token.lower() in {"/c", "/k"} and index + 1 < len(tokens):
+                return " ".join(tokens[index + 1:])
+        return None
+
+    if executable in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
+        for index, token in enumerate(tokens[1:], start=1):
+            if token.lower() in {"-command", "-c"} and index + 1 < len(tokens):
+                return " ".join(tokens[index + 1:])
+    return None
+
+
+def _python_inline_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
+    """Require approval for direct or piped Python execution."""
+    tokens = _shell_tokens(normalized_cmd)
 
     if tokens and tokens[0] == "&":
         tokens = tokens[1:]
-    executable = tokens[0].strip("'\"") if tokens else ""
-    interpreter_pattern = rf"(?:^|[\\/]){interpreter}$"
-    if re.search(interpreter_pattern, executable, re.IGNORECASE):
-        option_index = 1
-        while option_index < len(tokens):
-            token = tokens[option_index].strip("'\"")
-            lowered = token.lower()
-            if token == "-":
-                return ExecPolicy.REQUIRE_CONFIRMATION, "python program from stdin"
-            if (
-                lowered.startswith("-")
-                and not lowered.startswith("--")
-                and "c" in lowered[1:]
-            ):
-                return ExecPolicy.REQUIRE_CONFIRMATION, "python inline command (-c)"
-            if lowered == "-m" or lowered.startswith("-m"):
-                return None, ""
-            if lowered in {"-w", "-x", "--check-hash-based-pycs"}:
-                option_index += 2
-                continue
-            if token.startswith("-"):
-                option_index += 1
-                continue
-            return None, ""
+    if tokens and _is_python_interpreter(tokens[0]):
+        return _python_direct_policy(tokens[1:])
 
-    piped_python = (
-        rf"\|\s*(?:&\s*)?{interpreter}[\"']?"
-        r"(?:\s+[^|;&\r\n]+)*\s*$"
-    )
-    if re.search(piped_python, normalized_cmd, re.IGNORECASE):
+    pipeline_tail = normalized_cmd.rsplit("|", maxsplit=1)[-1]
+    pipeline_tokens = _shell_tokens(pipeline_tail)
+    if pipeline_tokens and pipeline_tokens[0] == "&":
+        pipeline_tokens = pipeline_tokens[1:]
+    if pipeline_tokens and _is_python_interpreter(pipeline_tokens[0]):
         return ExecPolicy.REQUIRE_CONFIRMATION, "python execution from pipeline"
     return None, ""
 
@@ -232,13 +268,19 @@ def _register_tool_terminal_policy(normalized_cmd: str) -> tuple[ExecPolicy | No
     return None, ""
 
 
-def classify_command(cmd: str) -> tuple[ExecPolicy, str]:
+def classify_command(cmd: str, _wrapper_depth: int = 0) -> tuple[ExecPolicy, str]:
     normalized_cmd = _normalize_command(cmd)
 
     # 1. BLOCKED patterns (most dangerous first)
     for p in _BLOCKED:
         if re.search(p, normalized_cmd, re.IGNORECASE):
             return ExecPolicy.BLOCKED, p
+
+    # Inspect the payload of common wrappers before classifying the wrapper itself.
+    if _wrapper_depth < 2:
+        wrapper_payload = _unwrap_command_wrapper(normalized_cmd)
+        if wrapper_payload:
+            return classify_command(wrapper_payload, _wrapper_depth + 1)
 
     # 2. Protected file writes
     protected_policy, protected_reason = _protected_file_write_policy(normalized_cmd)
