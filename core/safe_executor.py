@@ -126,7 +126,7 @@ def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None
     write_patterns = (
         r"\bopen\s*\([^)]*,\s*['\"][wax+]",
         r"\bopen\s*\([^)]*['\"][wax+]",
-        r"\b(Set-Content|Out-File|Add-Content|ac|Clear-Content|clc)\b",
+        r"\b(Set-Content|sc|Out-File|Add-Content|ac|Clear-Content|clc)\b",
         r"\b(?:Remove-Item|ri|rm|erase|rd|rmdir|del)\b",
         r">\s*[^&|]+",
         r">>\s*[^&|]+",
@@ -177,6 +177,9 @@ def _python_direct_policy(tokens: list[str]) -> tuple[ExecPolicy | None, str]:
             return ExecPolicy.REQUIRE_CONFIRMATION, "python inline command (-c)"
         if lowered == "-m" or lowered.startswith("-m"):
             return None, ""
+        if lowered == "--check-hash-based-pycs":
+            option_index += 2
+            continue
         if token.startswith("-X") or token.startswith("-W"):
             option_index += 1 if len(token) > 2 else 2
             continue
@@ -192,6 +195,11 @@ def _python_direct_policy(tokens: list[str]) -> tuple[ExecPolicy | None, str]:
 def _unwrap_command_wrapper(normalized_cmd: str) -> str | None:
     """Extract a recognized shell wrapper payload without executing it."""
     tokens = _shell_tokens(normalized_cmd)
+    if not tokens:
+        return None
+
+    if tokens[0] == "&":
+        tokens = tokens[1:]
     if not tokens:
         return None
 

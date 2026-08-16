@@ -216,6 +216,7 @@ def test_credential_file_overwrite_requires_confirmation():
         "echo x > credentials.json",
         "Set-Content credentials.json x",
         "ac .env x",
+        "sc .env x",
     ):
         policy, _ = classify_command(command)
         assert policy == ExecPolicy.REQUIRE_CONFIRMATION
@@ -275,6 +276,9 @@ def test_wrapped_or_path_qualified_python_requires_confirmation():
     for command in (
         'cmd /c python -c "print(1)"',
         'powershell -Command python -c "print(1)"',
+        'python --check-hash-based-pycs always -c "print(1)"',
+        ' & cmd /c python -c "print(1)"',
+        ' & powershell -Command python -c "print(1)"',
         'Write-Output "print(1)" | & "python"',
         r'Write-Output "print(1)" | .\venv\Scripts\python.exe',
     ):
