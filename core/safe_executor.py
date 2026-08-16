@@ -101,9 +101,21 @@ _PROTECTED_WRITE_PATHS = (
 )
 
 
+def _canonicalize_path_syntax(command: str) -> str:
+    """Normalize separators and dot segments for protected-path matching only."""
+    canonical = command.replace("\\", "/")
+    previous = ""
+    while canonical != previous:
+        previous = canonical
+        canonical = re.sub(r"/{2,}", "/", canonical)
+        canonical = re.sub(r"/\./", "/", canonical)
+        canonical = re.sub(r"/[^/\s'\";]+/\.\./", "/", canonical)
+    return canonical
+
+
 def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
     """Require approval for terminal writes to skill/registry/core files."""
-    normalized_path_cmd = normalized_cmd.replace("\\", "/")
+    normalized_path_cmd = _canonicalize_path_syntax(normalized_cmd)
     protected = "|".join(_PROTECTED_WRITE_PATHS)
     if not re.search(protected, normalized_path_cmd, re.IGNORECASE):
         return None, ""
@@ -142,12 +154,12 @@ def _python_inline_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
     if re.search(inline_python, normalized_cmd, re.IGNORECASE):
         return ExecPolicy.REQUIRE_CONFIRMATION, "python inline command (-c)"
 
-    stdin_python = (
+    piped_python = (
         rf"\|\s*(?:&\s*)?{interpreter}[\"']?"
-        r"(?:\s+-[A-Za-z]+)*\s*(?:-\s*)?$"
+        r"(?:\s+[^|;&\r\n]+)*\s*$"
     )
-    if re.search(stdin_python, normalized_cmd, re.IGNORECASE):
-        return ExecPolicy.REQUIRE_CONFIRMATION, "python program from stdin"
+    if re.search(piped_python, normalized_cmd, re.IGNORECASE):
+        return ExecPolicy.REQUIRE_CONFIRMATION, "python execution from pipeline"
     return None, ""
 
 
