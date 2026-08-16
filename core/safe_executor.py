@@ -20,7 +20,7 @@ def _normalize_command(cmd: str) -> str:
 # ── Patterns (order: most dangerous first) ──────────────────────
 _BLOCKED = [
     # ── Direct web-download-to-shell pipelines ─────────────────
-    r"\b(?:curl|wget|Invoke-WebRequest|iwr)\b.*\|\s*(?:&\s*)?['\"]?(?:(?:ba|z|da)?sh|powershell|pwsh|iex|Invoke-Expression)\b",
+    r"\b(?:curl|wget|Invoke-WebRequest|iwr|Invoke-RestMethod|irm)\b.*\|\s*(?:&\s*)?['\"]?(?:(?:ba|z|da)?sh|powershell|pwsh|iex|Invoke-Expression)\b",
     # ── Unix destructive ───────────────────────────────────────
     r"\brm\s+(?:.*-(?:[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r)|.*-[a-zA-Z]*r\b.*-[a-zA-Z]*f\b|.*-[a-zA-Z]*f\b.*-[a-zA-Z]*r\b).*\s+/(?:$|\s|\*)",  # rm -rf /, rm -r -f /, rm -rf /*
     r"rm\s+-[rf]{1,2}\s+/",              # rm -rf /
@@ -104,6 +104,28 @@ _PROTECTED_WRITE_PATHS = (
     r"core[/][^/\s'\";]+\.py",
 )
 
+_SENSITIVE_PROTECTED_PATHS = (
+    r"(?:^|[/\s'\";])\.env\b",
+    r"(?:^|[/\s'\";])credentials\.json\b",
+)
+
+_SAFE_READ_COMMAND = re.compile(
+    r"^\s*(?:"
+    r"Get-Content|gc|type|cat|Select-String|sls|"
+    r"Get-ChildItem|gci|dir|ls|Test-Path|Resolve-Path|Get-Item|gi"
+    r")\b[^;&|><\r\n]*$",
+    re.IGNORECASE,
+)
+
+_SAFE_COMMAND = re.compile(
+    r"^\s*(?:"
+    r"(?:git\s+(?:status|log|diff|show|branch))|"
+    r"pytest|"
+    r"(?:python(?:w|\d+(?:\.\d+)*)?|py)(?:\.exe)?\s+-m\s+pytest"
+    r")\b[^;&|><\r\n]*$",
+    re.IGNORECASE,
+)
+
 
 def _canonicalize_path_syntax(command: str) -> str:
     """Normalize separators and dot segments for protected-path matching only."""
@@ -118,34 +140,21 @@ def _canonicalize_path_syntax(command: str) -> str:
 
 
 def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
-    """Require approval for terminal writes to skill/registry/core files."""
+    """Fail closed for terminal operations that touch protected repository files."""
     normalized_path_cmd = _canonicalize_path_syntax(normalized_cmd)
     protected = "|".join(_PROTECTED_WRITE_PATHS)
     if not re.search(protected, normalized_path_cmd, re.IGNORECASE):
         return None, ""
 
-    write_patterns = (
-        r"\bopen\s*\([^)]*,\s*['\"][wax+]",
-        r"\bopen\s*\([^)]*['\"][wax+]",
-        r"\b(Set-Content|sc|Out-File|Add-Content|ac|Clear-Content|clc|New-Item|ni)\b",
-        r"\b(?:Remove-Item|ri|rm|erase|rd|rmdir|del)\b",
-        r">\s*[^&|]+",
-        r">>\s*[^&|]+",
-        r"\.(?:write_text|write_bytes|write)\s*\(",
-        r"\btee\b",
-        r"\btruncate\b",
-        r"\bsed\s+.*-i",
-        # Conservative: copy/move commands touching protected paths require
-        # approval because PowerShell/CMD destination parsing is not reliable.
-        r"\b(?:Copy-Item|cp|Move-Item|mv)\b",
-    )
-    if any(
-        re.search(pattern, normalized_path_cmd, re.IGNORECASE)
-        for pattern in write_patterns
+    if re.search(
+        "|".join(_SENSITIVE_PROTECTED_PATHS),
+        normalized_path_cmd,
+        re.IGNORECASE,
     ):
-        return ExecPolicy.REQUIRE_CONFIRMATION, "protected file write via terminal"
-
-    return None, ""
+        return ExecPolicy.REQUIRE_CONFIRMATION, "sensitive protected file via terminal"
+    if _SAFE_READ_COMMAND.fullmatch(normalized_path_cmd):
+        return None, ""
+    return ExecPolicy.REQUIRE_CONFIRMATION, "protected file operation via terminal"
 
 
 _PYTHON_INTERPRETER = r"(?:python(?:w|\d+(?:\.\d+)*)?|py)(?:\.exe)?"
@@ -214,7 +223,10 @@ def _unwrap_command_wrapper(normalized_cmd: str) -> str | None:
     if executable in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
         for index, token in enumerate(tokens[1:], start=1):
             if token.lower() in {"-command", "-c"} and index + 1 < len(tokens):
-                return " ".join(tokens[index + 1:])
+                payload = " ".join(tokens[index + 1:]).strip()
+                if len(payload) >= 2 and payload[0] == payload[-1] and payload[0] in "'\"":
+                    return payload[1:-1].strip()
+                return payload
     return None
 
 
@@ -291,15 +303,15 @@ def classify_command(cmd: str, _wrapper_depth: int = 0) -> tuple[ExecPolicy, str
         if wrapper_payload:
             return classify_command(wrapper_payload, _wrapper_depth + 1)
 
-    # 2. Protected file writes
-    protected_policy, protected_reason = _protected_file_write_policy(normalized_cmd)
-    if protected_policy is not None:
-        return protected_policy, protected_reason
-
-    # 3. Register tool terminal policy
+    # 2. Register tool terminal policy
     register_policy, register_reason = _register_tool_terminal_policy(normalized_cmd)
     if register_policy is not None:
         return register_policy, register_reason
+
+    # 3. Protected file operations
+    protected_policy, protected_reason = _protected_file_write_policy(normalized_cmd)
+    if protected_policy is not None:
+        return protected_policy, protected_reason
 
     # 4. Conservative compound-command fallback (&&, ||, ;, \n)
     if re.search(r"(&&|\|\||;|\n|\r)", normalized_cmd):
@@ -320,8 +332,11 @@ def classify_command(cmd: str, _wrapper_depth: int = 0) -> tuple[ExecPolicy, str
         if re.search(p, normalized_cmd, re.IGNORECASE):
             return ExecPolicy.WARNING, p
 
-    # 8. SAFE
-    return ExecPolicy.SAFE, ""
+    # 8. Explicitly allow only known read/test commands. Unknown commands
+    # require approval instead of being treated as safe by default.
+    if _SAFE_READ_COMMAND.fullmatch(normalized_cmd) or _SAFE_COMMAND.fullmatch(normalized_cmd):
+        return ExecPolicy.SAFE, "known safe terminal command"
+    return ExecPolicy.REQUIRE_CONFIRMATION, "unknown terminal command"
 
 
 def safe_execute(cmd: str, executor_func, confirm_callback=None) -> dict:
