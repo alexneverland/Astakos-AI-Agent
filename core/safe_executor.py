@@ -56,7 +56,11 @@ _REQUIRE_CONFIRM = [
     # ── PowerShell file ops (full and shorthand flags/aliases) ──
     r"\b(?:Remove-Item|ri|rm|erase|rd|rmdir|del)\b.*-(?:r|rec|recurse)\b.*-(?:f|fo|force)\b",
     r"\b(?:Remove-Item|ri|rm|erase|rd|rmdir|del)\b.*-(?:f|fo|force)\b.*-(?:r|rec|recurse)\b",
-    r"\b(?:Remove-Item|ri)\b.*astakos",           # project root protection
+    # ── Mutating file operations ──────────────────────────────
+    r"\b(?:Set-Content|sc|Out-File|Add-Content|ac|Clear-Content|clc|New-Item|ni)\b",
+    r"\b(?:Move-Item|mi|mv|Rename-Item|rni|ren)\b",
+    r"\b(?:Copy-Item|cpi|cp)\b",
+    r"\b(?:Remove-Item|ri)\b",
     # ── System state ──────────────────────────────────────────
     r"shutdown", r"restart-computer",
     r"taskkill", r"Stop-Process",
@@ -78,13 +82,10 @@ _REQUIRE_CONFIRM = [
 ]
 
 _WARNING = [
-    r"\bRemove-Item\b",                  # without -Recurse -Force
     r"\bpip\s+install\b",
     r"\bnpm\s+install\b",                # npm packages
     r"\bgit\s+commit\b",
     r"\bgit\s+push\b",
-    r"\bMove-Item\b", r"\bRename-Item\b",
-    r"\bSet-Content\b", r"\bOut-File\b",
 ]
 
 _PROTECTED_WRITE_PATHS = (

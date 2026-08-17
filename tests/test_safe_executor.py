@@ -403,9 +403,24 @@ def test_npm_install_is_warning():
     assert policy == ExecPolicy.WARNING
 
 
-def test_non_recursive_remove_item_is_warning():
+def test_remove_item_requires_confirmation():
     policy, _ = classify_command(r"Remove-Item C:\temp.txt")
-    assert policy == ExecPolicy.WARNING
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+
+def test_file_mutating_commands_require_confirmation():
+    for command in (
+        r"Set-Content C:\temp.txt -Value 'hello'",
+        r"Out-File C:\output.txt",
+        r"Move-Item C:\a.txt C:\b.txt",
+        r"Rename-Item C:\a.txt b.txt",
+        r"Copy-Item C:\a.txt C:\b.txt",
+        r"New-Item C:\newfile.txt",
+        r"Clear-Content C:\temp.txt",
+    ):
+        policy, _ = classify_command(command)
+        assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
 
 
 # -- SAFE commands ------------------------------------------------
