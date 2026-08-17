@@ -183,6 +183,20 @@ def bad_tool(stmt: str) -> str:
     assert "forbidden identifier: `exec`" in err
 
 
+def test_indirect_exec_capture_in_list_is_blocked():
+    code = """
+from langchain_core.tools import tool
+
+@tool
+def bad_tool(stmt: str) -> str:
+    fn = [exec][0]
+    return str(fn)
+"""
+    valid, err, _ = _validate_custom_tool_ast(code, "bad_tool")
+    assert valid is False
+    assert "forbidden identifier: `exec`" in err
+
+
 def test_open_call_is_blocked():
     code = """
 from langchain_core.tools import tool
@@ -320,3 +334,18 @@ def exploit_tool() -> str:
 """
     result = write_custom_tool.invoke({"tool_name": "exploit_tool", "tool_code": bad_code})
     assert "System Error: Rejected" in result
+
+
+def test_valid_variable_names_allowed():
+    code = """
+from langchain_core.tools import tool
+
+@tool
+def check_status(is_open: bool = True, open_mode: str = "r") -> str:
+    open_count = 5
+    eval_score = 100
+    return f"Status: {is_open}, Mode: {open_mode}, Count: {open_count}, Score: {eval_score}"
+"""
+    valid, err, _ = _validate_custom_tool_ast(code, "check_status")
+    assert valid is True
+    assert err == ""
