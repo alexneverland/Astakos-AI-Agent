@@ -2536,7 +2536,7 @@ def _validate_custom_tool_ast(code: str, tool_name: str) -> tuple[bool, str, set
                 elif root_module not in _SAFE_TOOL_MODULES:
                     return False, f"System Error: Rejected — unapproved module import: `{node.module}`.", set()
 
-        # 2. Inspect variable names / identifiers (prevents aliasing and direct lookup of dangerous builtins/dunders)
+        # 2. Inspect identifiers (prevents calls, aliasing x=eval, capturing in structures [exec], passing as arguments)
         elif isinstance(node, ast.Name):
             if node.id in _FORBIDDEN_TOOL_CALLS or node.id in _FORBIDDEN_TOOL_DUNDERS:
                 return False, f"System Error: Rejected — forbidden identifier: `{node.id}`.", set()
@@ -2665,15 +2665,16 @@ if __name__ == "__main__":
         with open(final_path, "w", encoding="utf-8") as f:
             f.write(paste_code.rstrip() + "\n")
 
+        caps_str = f" [Capabilities: {', '.join(sorted(detected_caps))}]" if detected_caps else ""
         print(f"\n\033[92m{sep}")
-        print(f"  ✅  TOOL WRITTEN: {tool_name}")
+        print(f"  ✅  TOOL WRITTEN: {tool_name}{caps_str}")
         print(f"  🧪  Test: {stdout}")
         print(sep)
         print(paste_code)
         print(f"{sep}\033[0m\n")
         print(f"{config.USER_NAME}: ", end="", flush=True)
 
-        return f"✅ Tool '{tool_name}' written to astakos_skills/{tool_name}.py and passed the test ({stdout})."
+        return f"✅ Tool '{tool_name}' written to astakos_skills/{tool_name}.py and passed the test ({stdout}).{caps_str}"
 
     except subprocess.TimeoutExpired:
         return "❌ Timeout: the test script hung for more than 15 seconds."
