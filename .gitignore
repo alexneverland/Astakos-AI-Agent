@@ -1,6 +1,7 @@
 # Secrets and local credentials
 .env
 .env.*
+!.env.example
 .astakos_token
 credentials/
 credentials.json

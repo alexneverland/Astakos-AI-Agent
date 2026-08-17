@@ -67,3 +67,24 @@ def test_safe_llm_invoke_raises_after_quota_retries_exhausted():
             assert "429" in str(exc)
         else:
             raise AssertionError("Expected safe_llm_invoke to raise after exhausting retries")
+
+
+def test_resolve_gemini_safety_threshold_defaults_to_block_none(monkeypatch, capsys):
+    monkeypatch.delenv("ASTAKOS_GEMINI_SAFETY_THRESHOLD", raising=False)
+    threshold = brain._resolve_gemini_safety_threshold()
+    assert threshold == brain.HarmBlockThreshold.BLOCK_NONE
+    assert capsys.readouterr().out == ""
+
+
+def test_resolve_gemini_safety_threshold_parses_valid_option(monkeypatch, capsys):
+    monkeypatch.setenv("ASTAKOS_GEMINI_SAFETY_THRESHOLD", "BLOCK_ONLY_HIGH")
+    threshold = brain._resolve_gemini_safety_threshold()
+    assert threshold == brain.HarmBlockThreshold.BLOCK_ONLY_HIGH
+    assert "Gemini safety threshold active (BLOCK_ONLY_HIGH)" in capsys.readouterr().out
+
+
+def test_resolve_gemini_safety_threshold_falls_back_on_invalid_option(monkeypatch, capsys):
+    monkeypatch.setenv("ASTAKOS_GEMINI_SAFETY_THRESHOLD", "INVALID_SETTING")
+    threshold = brain._resolve_gemini_safety_threshold()
+    assert threshold == brain.HarmBlockThreshold.BLOCK_NONE
+    assert "Unknown safety threshold 'INVALID_SETTING', falling back to BLOCK_NONE" in capsys.readouterr().out
