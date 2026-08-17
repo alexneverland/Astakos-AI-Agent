@@ -107,19 +107,25 @@ _PROTECTED_WRITE_PATHS = (
 _SENSITIVE_PROTECTED_PATHS = (
     r"(?:^|[/\s'\";])\.env\b",
     r"(?:^|[/\s'\";])credentials\.json\b",
+    r"(?:^|[/\s'\";])\.[eE][^\s'\";*?\[\]]*[*?\[\]]",                # .e*, .e??, .e[n]v, .env*
+    r"(?:^|[/\s'\";])\.[^\s'\";*?\[\]]*[*?\[\]][^\s'\";]*nv\b",      # .?nv, .*nv
+    r"(?:^|[/\s'\";])[^\s'\";*?\[\]]*[*?\[\]][^\s'\";]*\.env\b",      # *.env
+    r"(?:^|[/\s'\";])cred[a-zA-Z0-9_\-]*[*?\[\]]",                   # cred*, cred[e]ntials.json
+    r"(?:^|[/\s'\";])c[^\s'\";*?\[\]]*[*?\[\]][^\s'\";]*json\b",     # c*s.json
+    r"(?:^|[/\s'\";])[^\s'\";*?\[\]]*[*?\[\]][^\s'\";]*credentials\.json\b",
+    r"(?:^|[/\s'\";])token[a-zA-Z0-9_\-]*[*?\[\]]",                  # token*.json
 )
 
 _SAFE_READ_COMMAND = re.compile(
     r"^\s*(?:"
     r"Get-Content|gc|type|cat|Select-String|sls|"
     r"Get-ChildItem|gci|dir|ls|Test-Path|Resolve-Path|Get-Item|gi"
-    r")\b[^;&|><\r\n]*$",
+    r")\b[^;&|><\r\n\(\)\$]*$",
     re.IGNORECASE,
 )
 
 _SAFE_COMMAND = re.compile(
     r"^\s*(?:"
-    r"(?:git\s+(?:status|log|diff|show|branch))|"
     r"pytest|"
     r"(?:python(?:w|\d+(?:\.\d+)*)?|py)(?:\.exe)?\s+-m\s+pytest"
     r")\b[^;&|><\r\n]*$",
@@ -127,9 +133,53 @@ _SAFE_COMMAND = re.compile(
 )
 
 
+def _is_safe_git_command(tokens: list[str]) -> bool:
+    """Return whether a git command invocation is strictly read-only."""
+    if not tokens or tokens[0].lower() != "git":
+        return False
+    if len(tokens) == 1:
+        return False
+
+    subcmd = tokens[1].lower()
+    # Simple safe subcommands that only inspect state
+    if subcmd in {"status", "log", "show"}:
+        return True
+
+    if subcmd == "diff":
+        # Disallow --output / -o which writes diff output to a file
+        return not any(
+            arg.lower().startswith("--output") or arg.lower() == "-o"
+            for arg in tokens[2:]
+        )
+
+    if subcmd == "branch":
+        branch_args = tokens[2:]
+        if not branch_args:
+            return True  # plain 'git branch' lists branches
+
+        safe_branch_options = {
+            "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose",
+            "--list", "-l", "--show-current", "--merged", "--no-merged",
+            "--contains", "--no-contains",
+        }
+        for arg in branch_args:
+            lowered = arg.lower()
+            if lowered in safe_branch_options or lowered.startswith("--sort=") or lowered.startswith("--format="):
+                continue
+            if "--list" in branch_args or "-l" in branch_args:
+                if not lowered.startswith("-"):
+                    continue
+            # Any delete (-d, -D, --delete), move (-m, -M, --move), copy (-c, -C), or branch creation
+            return False
+        return True
+
+    return False
+
+
 def _canonicalize_path_syntax(command: str) -> str:
-    """Normalize separators and dot segments for protected-path matching only."""
-    canonical = command.replace("\\", "/")
+    """Normalize separators, strip inline quotes, and resolve dot segments for protected-path matching only."""
+    unquoted = command.replace("'", "").replace('"', "")
+    canonical = unquoted.replace("\\", "/")
     previous = ""
     while canonical != previous:
         previous = canonical
@@ -142,9 +192,6 @@ def _canonicalize_path_syntax(command: str) -> str:
 def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None, str]:
     """Fail closed for terminal operations that touch protected repository files."""
     normalized_path_cmd = _canonicalize_path_syntax(normalized_cmd)
-    protected = "|".join(_PROTECTED_WRITE_PATHS)
-    if not re.search(protected, normalized_path_cmd, re.IGNORECASE):
-        return None, ""
 
     if re.search(
         "|".join(_SENSITIVE_PROTECTED_PATHS),
@@ -152,7 +199,12 @@ def _protected_file_write_policy(normalized_cmd: str) -> tuple[ExecPolicy | None
         re.IGNORECASE,
     ):
         return ExecPolicy.REQUIRE_CONFIRMATION, "sensitive protected file via terminal"
-    if _SAFE_READ_COMMAND.fullmatch(normalized_path_cmd):
+
+    protected = "|".join(_PROTECTED_WRITE_PATHS)
+    if not re.search(protected, normalized_path_cmd, re.IGNORECASE):
+        return None, ""
+
+    if not re.search(r"(\$[\(\{]|`|\(|\))", normalized_path_cmd) and _SAFE_READ_COMMAND.fullmatch(normalized_path_cmd):
         return None, ""
     return ExecPolicy.REQUIRE_CONFIRMATION, "protected file operation via terminal"
 
@@ -217,7 +269,10 @@ def _unwrap_command_wrapper(normalized_cmd: str) -> str | None:
     if executable in {"cmd", "cmd.exe"}:
         for index, token in enumerate(tokens[1:], start=1):
             if token.lower() in {"/c", "/k"} and index + 1 < len(tokens):
-                return " ".join(tokens[index + 1:])
+                payload = " ".join(tokens[index + 1:]).strip()
+                if len(payload) >= 2 and payload[0] == payload[-1] and payload[0] in "'\"":
+                    return payload[1:-1].strip()
+                return payload
         return None
 
     if executable in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
@@ -256,8 +311,12 @@ def _register_tool_terminal_policy(normalized_cmd: str) -> tuple[ExecPolicy | No
 
     if "register_tool.py" in lowered:
         if "--help" in lowered or re.search(r"(?:^|\s)-h(?:\s|$)", lowered):
+            if re.search(r"(&&|\|\||;|\||&|\n|\r)", normalized_cmd):
+                return None, ""
             return ExecPolicy.SAFE, "register_tool.py help"
         if re.search(t("prompts.ext_true_1_yes_y_nai_s_s"), lowered):
+            if re.search(r"(&&|\|\||;|\||&|\n|\r)", normalized_cmd):
+                return None, ""
             return ExecPolicy.WARNING, "register_tool.py dry-run via terminal"
         return ExecPolicy.REQUIRE_CONFIRMATION, "register_tool.py apply via terminal"
 
@@ -313,8 +372,8 @@ def classify_command(cmd: str, _wrapper_depth: int = 0) -> tuple[ExecPolicy, str
     if protected_policy is not None:
         return protected_policy, protected_reason
 
-    # 4. Conservative compound-command fallback (&&, ||, ;, \n)
-    if re.search(r"(&&|\|\||;|\n|\r)", normalized_cmd):
+    # 4. Conservative compound-command fallback (&&, ||, ;, |, &, \n)
+    if re.search(r"(&&|\|\||;|\||&|\n|\r)", normalized_cmd):
         return ExecPolicy.REQUIRE_CONFIRMATION, "compound command"
 
     # 5. Require confirmation patterns
@@ -332,10 +391,17 @@ def classify_command(cmd: str, _wrapper_depth: int = 0) -> tuple[ExecPolicy, str
         if re.search(p, normalized_cmd, re.IGNORECASE):
             return ExecPolicy.WARNING, p
 
-    # 8. Explicitly allow only known read/test commands. Unknown commands
-    # require approval instead of being treated as safe by default.
-    if _SAFE_READ_COMMAND.fullmatch(normalized_cmd) or _SAFE_COMMAND.fullmatch(normalized_cmd):
-        return ExecPolicy.SAFE, "known safe terminal command"
+    # 8. Explicitly allow only known read/test commands without evaluative subexpressions.
+    # Unknown, evaluative, or mutating commands require approval instead of being treated as safe by default.
+    if not re.search(r"(\$[\(\{]|`|\(|\))", normalized_cmd):
+        if _SAFE_READ_COMMAND.fullmatch(normalized_cmd):
+            return ExecPolicy.SAFE, "known safe terminal command"
+        tokens = _shell_tokens(normalized_cmd)
+        if _is_safe_git_command(tokens):
+            return ExecPolicy.SAFE, "known safe terminal command"
+        if _SAFE_COMMAND.fullmatch(normalized_cmd):
+            return ExecPolicy.SAFE, "known safe terminal command"
+
     return ExecPolicy.REQUIRE_CONFIRMATION, "unknown terminal command"
 
 

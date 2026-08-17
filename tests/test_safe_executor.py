@@ -461,3 +461,104 @@ def test_alias_import_dry_run_is_warning():
     policy, reason = classify_command(cmd)
     assert policy == ExecPolicy.WARNING
     assert "alias" in reason
+
+
+# -- Subexpressions in Safe Commands ------------------------------
+
+def test_powershell_subexpression_in_safe_read_requires_confirmation():
+    for command in (
+        "Get-Content $(calc.exe)",
+        "gc $(whoami)",
+        "cat $(calc.exe)",
+        "Get-ChildItem $(calc.exe)",
+        "cat (calc.exe)",
+        "gc (whoami)",
+        "type (Get-Process)",
+    ):
+        policy, _ = classify_command(command)
+        assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+
+def test_powershell_subexpression_with_blocked_eval_is_blocked():
+    policy, _ = classify_command("type $(Invoke-Expression 'Get-Process')")
+    assert policy == ExecPolicy.BLOCKED
+
+
+# -- Sensitive Path Wildcards & Quotes ----------------------------
+
+def test_sensitive_path_wildcards_require_confirmation():
+    for command in (
+        "Get-Content .e??",
+        "Get-Content .e*",
+        "Get-Content *.env*",
+        "cat .?nv",
+        "cat .e[n]v",
+        "cat .e'n'v",
+        'cat ".e""n""v"',
+        "cat credential?.json",
+        "type cred*",
+        "cat c*s.json",
+        "gc token*.json",
+        "Get-Content .env",
+        "type credentials.json",
+    ):
+        policy, reason = classify_command(command)
+        assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+        assert "sensitive protected file" in reason
+
+
+# -- Git Actions & Safety -----------------------------------------
+
+def test_git_branch_listing_is_safe():
+    for command in (
+        "git branch",
+        "git branch -a",
+        "git branch --all",
+        "git branch -r",
+        "git branch --remotes",
+        "git branch -v",
+        "git branch -vv",
+        "git branch --list",
+        'git branch --list "codex/*"',
+        "git branch --show-current",
+        "git branch --merged",
+        "git branch --no-merged",
+    ):
+        policy, _ = classify_command(command)
+        assert policy == ExecPolicy.SAFE
+
+
+def test_git_branch_mutating_actions_require_confirmation():
+    for command in (
+        "git branch -D feature",
+        "git branch -d old-branch",
+        "git branch --delete old-branch",
+        "git branch -m old-name new-name",
+        "git branch -M old-name new-name",
+        "git branch --move old-name new-name",
+        "git branch -c old copy",
+        "git branch -C old copy",
+        "git branch new-feature-branch",
+    ):
+        policy, _ = classify_command(command)
+        assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+
+def test_git_diff_output_requires_confirmation():
+    for command in (
+        "git diff --output=scripts/malicious.py HEAD~1",
+        "git diff --output=test.txt",
+        "git diff -o out.patch",
+    ):
+        policy, _ = classify_command(command)
+        assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+
+# -- Compound Register Tool Chaining ------------------------------
+
+def test_compound_register_tool_chaining_does_not_bypass():
+    policy, _ = classify_command("python register_tool.py --help ; git reset --hard")
+    assert policy == ExecPolicy.REQUIRE_CONFIRMATION
+
+    policy, _ = classify_command("python register_tool.py --help && rm -rf /")
+    assert policy == ExecPolicy.BLOCKED
