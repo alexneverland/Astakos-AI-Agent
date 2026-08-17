@@ -8,6 +8,8 @@
 import os
 import re
 import json
+import ast
+import tempfile
 from core.i18n import t
 import sys
 import math
@@ -2463,94 +2465,121 @@ def run_code(filename: str, script_args: str = "") -> str:
         return f"Run Error: {str(e)}"
 
 
-@tool
-def write_custom_tool(tool_name: str, tool_code: str) -> str:
-    """Writes and tests a new tool in astakos_skills/.
-    It does not register it automatically in system/risk/registry — this is done with register_tool."""
-    import ast
+_SAFE_TOOL_MODULES = frozenset({
+    "math", "json", "datetime", "re", "typing", "pydantic",
+    "random", "string", "collections", "itertools", "decimal",
+    "hashlib", "uuid", "time", "functools", "inspect",
+    "langchain_core", "langchain_core.tools", "base64", "zlib",
+    "gzip", "enum", "dataclasses", "copy",
+})
 
-    clean_code = re.sub(r"```(?:python)?", "", tool_code).replace("```", "").strip()
+_ALLOWED_EXTERNAL_TOOL_MODULES = frozenset({
+    "httpx", "requests", "urllib", "bs4", "beautifulsoup4",
+    "csv", "pandas", "sqlite3",
+})
 
+_FORBIDDEN_TOOL_MODULES = frozenset({
+    "os", "sys", "subprocess", "ctypes", "shutil", "importlib",
+    "builtins", "socket", "ftplib", "smtplib", "paramiko",
+    "pickle", "shelve", "marshal", "pty", "commands", "posix",
+    "nt", "signal", "threading", "multiprocessing", "asyncio", "gc",
+})
+
+_FORBIDDEN_TOOL_CALLS = frozenset({
+    "eval", "exec", "open", "compile", "__import__",
+    "globals", "locals", "vars", "getattr", "setattr", "delattr",
+    "exit", "quit",
+})
+
+_FORBIDDEN_TOOL_DUNDERS = frozenset({
+    "__builtins__", "__class__", "__bases__", "__subclasses__",
+    "__globals__", "__code__", "__dict__", "__getattribute__",
+    "__reduce__", "__reduce_ex__",
+})
+
+
+def _validate_custom_tool_ast(code: str, tool_name: str) -> tuple[bool, str, set[str]]:
+    """Validate dynamically generated tool Python code via AST inspection."""
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tool_name):
-        return "System Error: invalid tool_name. Use a Python identifier, e.g. my_tool."
-
-    def _decorator_name(decorator):
-        if isinstance(decorator, ast.Call):
-            return _decorator_name(decorator.func)
-        if isinstance(decorator, ast.Name):
-            return decorator.id
-        if isinstance(decorator, ast.Attribute):
-            base = _decorator_name(decorator.value)
-            return f"{base}.{decorator.attr}" if base else decorator.attr
-        return ""
-
-    def _has_tool_decorator(function_node):
-        return any(_decorator_name(dec).split(".")[-1] == "tool" for dec in function_node.decorator_list)
-
-    # [SECURITY]: Blocklist for generated tool code — filesystem, network, execution
-    _dangerous_patterns = [
-        r"subprocess",
-        r"os\s*\.\s*system",
-        r"__import__",
-        r"eval\s*\(",
-        r"exec\s*\(",
-        r"pathlib",                           # filesystem ops
-        r"shutil",                            # copy/move/delete files
-        r"import\s+socket",                   # raw network
-        r"from\s+socket\s+import",            # raw network
-        r"import\s+requests",                 # HTTP calls
-        r"from\s+requests\s+import",          # HTTP calls
-        r"requests\s*\.",                     # HTTP calls
-        r"import\s+urllib",                   # HTTP calls
-        r"from\s+urllib\s+import",            # HTTP calls
-        r"urllib\s*\.",                       # HTTP calls
-        r"import\s+httpx",                    # HTTP calls
-        r"from\s+httpx\s+import",             # HTTP calls
-        r"httpx\s*\.",                        # HTTP calls
-        r"import\s+aiohttp",                  # async HTTP
-        r"from\s+aiohttp\s+import",           # async HTTP
-        r"aiohttp\s*\.",                      # async HTTP
-        r"import\s+ftplib",                   # FTP
-        r"from\s+ftplib\s+import",            # FTP
-        r"import\s+smtplib",                  # email sending
-        r"from\s+smtplib\s+import",           # email sending
-        r"import\s+paramiko",                 # SSH
-        r"from\s+paramiko\s+import",          # SSH
-        r"ctypes",                            # low-level OS access
-        r"importlib",                         # dynamic imports
-        r"compile\s*\(",                      # bytecode compile
-        r"globals\s*\(\s*\)",                 # globals manipulation
-        r"locals\s*\(\s*\)",                  # locals manipulation
-        r"__builtins__",                      # builtins override
-    ]
-    for _dp in _dangerous_patterns:
-        if re.search(_dp, clean_code, re.IGNORECASE):
-            return f"System Error: Rejected — detected forbidden pattern: `{_dp}`."
-    dangerous_pattern = None  # legacy — replaced by _dangerous_patterns
-    # (legacy check replaced by the _dangerous_patterns loop above)
+        return False, "System Error: invalid tool_name. Use a Python identifier, e.g. my_tool.", set()
 
     try:
-        tree = ast.parse(clean_code)
+        tree = ast.parse(code)
     except SyntaxError as se:
-        return f"❌ Syntax error (line {se.lineno}): {se.msg}\nLook: {se.text}"
+        return False, f"❌ Syntax error (line {se.lineno}): {se.msg}\nLook: {se.text}", set()
+    except Exception as exc:
+        return False, f"❌ Code parsing error: {exc}", set()
+
+    detected_capabilities = set()
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "open":
-            return "System Error: Rejected — detected forbidden built-in open() call."
+        # 1. Inspect imports
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root_module = alias.name.split(".")[0]
+                if root_module in _FORBIDDEN_TOOL_MODULES:
+                    return False, f"System Error: Rejected — forbidden module import: `{alias.name}`.", set()
+                if root_module in _ALLOWED_EXTERNAL_TOOL_MODULES:
+                    detected_capabilities.add(root_module)
+                elif root_module not in _SAFE_TOOL_MODULES:
+                    return False, f"System Error: Rejected — unapproved module import: `{alias.name}`.", set()
 
+        elif isinstance(node, ast.ImportFrom):
+            if node.level and node.level > 0:
+                return False, "System Error: Rejected — relative imports are not permitted in skills.", set()
+            if node.module:
+                root_module = node.module.split(".")[0]
+                if root_module in _FORBIDDEN_TOOL_MODULES:
+                    return False, f"System Error: Rejected — forbidden module import: `{node.module}`.", set()
+                if root_module in _ALLOWED_EXTERNAL_TOOL_MODULES:
+                    detected_capabilities.add(root_module)
+                elif root_module not in _SAFE_TOOL_MODULES:
+                    return False, f"System Error: Rejected — unapproved module import: `{node.module}`.", set()
+
+        # 2. Inspect variable names / identifiers (prevents aliasing and direct lookup of dangerous builtins/dunders)
+        elif isinstance(node, ast.Name):
+            if node.id in _FORBIDDEN_TOOL_CALLS or node.id in _FORBIDDEN_TOOL_DUNDERS:
+                return False, f"System Error: Rejected — forbidden identifier: `{node.id}`.", set()
+            if node.id in _FORBIDDEN_TOOL_MODULES:
+                return False, f"System Error: Rejected — forbidden module reference: `{node.id}`.", set()
+
+        # 3. Inspect attribute access (prevents dunder chaining and forbidden execution methods)
+        elif isinstance(node, ast.Attribute):
+            if node.attr in _FORBIDDEN_TOOL_DUNDERS:
+                return False, f"System Error: Rejected — forbidden dunder attribute access: `{node.attr}`.", set()
+            if node.attr in {"system", "popen", "spawn", "execv", "execve", "eval", "exec", "compile", "__import__"}:
+                return False, f"System Error: Rejected — forbidden execution method: `{node.attr}()`.", set()
+            if node.attr in {"sys", "os", "subprocess", "importlib", "builtins"}:
+                return False, f"System Error: Rejected — forbidden module access: `{node.attr}`.", set()
+
+    # 4. Verify exactly one top-level function with @tool decorator
     top_level_functions = [
         node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
     matching_functions = [node for node in top_level_functions if node.name == tool_name]
     if len(matching_functions) != 1:
         return (
-            f"System Error: code must contain exactly one top-level function "
-            f"named '{tool_name}'."
+            False,
+            f"System Error: code must contain exactly one top-level function named '{tool_name}'.",
+            set(),
         )
+
+    def _decorator_name(dec):
+        if isinstance(dec, ast.Call):
+            return _decorator_name(dec.func)
+        if isinstance(dec, ast.Name):
+            return dec.id
+        if isinstance(dec, ast.Attribute):
+            base = _decorator_name(dec.value)
+            return f"{base}.{dec.attr}" if base else dec.attr
+        return ""
+
+    def _has_tool_decorator(fn_node):
+        return any(_decorator_name(dec).split(".")[-1] == "tool" for dec in fn_node.decorator_list)
 
     target_function = matching_functions[0]
     if not _has_tool_decorator(target_function):
-        return f"System Error: function '{tool_name}' must have the @tool decorator."
+        return False, f"System Error: function '{tool_name}' must have the @tool decorator.", set()
 
     extra_tool_functions = [
         node.name for node in top_level_functions
@@ -2558,9 +2587,23 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
     ]
     if extra_tool_functions:
         return (
-            "System Error: only one @tool function is allowed. "
-            f"Extra decorated functions: {', '.join(extra_tool_functions)}."
+            False,
+            f"System Error: only one @tool function is allowed. Extra decorated functions: {', '.join(extra_tool_functions)}.",
+            set(),
         )
+
+    return True, "", detected_capabilities
+
+
+@tool
+def write_custom_tool(tool_name: str, tool_code: str) -> str:
+    """Writes and tests a new tool in astakos_skills/.
+    It does not register it automatically in system/risk/registry — this is done with register_tool."""
+    clean_code = re.sub(r"```(?:python)?", "", tool_code).replace("```", "").strip()
+
+    valid, err_msg, detected_caps = _validate_custom_tool_ast(clean_code, tool_name)
+    if not valid:
+        return err_msg
 
     try:
         workspace_dir = os.path.realpath(WORKSPACE_DIR)
@@ -2569,9 +2612,7 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
             return "System Error: invalid tool path."
         if os.path.exists(final_path):
             return f"System Error: astakos_skills/{tool_name}.py already exists."
-        temp_path = os.path.join(WORKSPACE_DIR, f"_test_{tool_name}.py")
-    except:
-        temp_path = f"_test_{tool_name}.py"
+    except Exception:
         final_path = f"{tool_name}.py"
 
     test_script = f"""import math, json, inspect
@@ -2599,18 +2640,15 @@ if __name__ == "__main__":
         print(f"TEST_FAIL: {{e}}")
 """
 
+    temp_path = None
     try:
-        with open(temp_path, "w", encoding="utf-8") as f:
-            f.write(test_script)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as tf:
+            tf.write(test_script)
+            temp_path = tf.name
 
         res = subprocess.run([sys.executable, temp_path], capture_output=True, text=True, timeout=15)
         stdout = res.stdout.strip()
         stderr = res.stderr.strip()
-
-        try:
-            os.remove(temp_path)
-        except:
-            pass
 
         if "TEST_FAIL" in stdout or (res.returncode != 0 and not stdout):
             error_detail = stdout or stderr
@@ -2638,13 +2676,16 @@ if __name__ == "__main__":
         return f"✅ Tool '{tool_name}' written to astakos_skills/{tool_name}.py and passed the test ({stdout})."
 
     except subprocess.TimeoutExpired:
-        try:
-            os.remove(temp_path)
-        except:
-            pass
         return "❌ Timeout: the test script hung for more than 15 seconds."
     except Exception as e:
         return f"Error: {str(e)}"
+    finally:
+        if temp_path:
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except Exception:
+                pass
 
 
 # ────────────────────────────────────────────────────────────────
