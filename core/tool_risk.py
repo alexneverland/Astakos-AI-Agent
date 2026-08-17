@@ -17,6 +17,7 @@ TOOL_RISK: dict[str, str] = {
     "post_to_linkedin":         "CRITICAL",
     "process_and_clear_linkedin_post": "CRITICAL",
     "write_project_file":       "CRITICAL",  # full rewrite
+    "write_custom_tool":        "CRITICAL",  # generates and tests custom skill
     "register_tool":            "CRITICAL",  # modifies system.py + tool_risk.py
     "grant_project_access":     "CRITICAL",  # permanent permission change
 
@@ -44,7 +45,6 @@ TOOL_RISK: dict[str, str] = {
     "control_routine_cooldown":  "WARNING",
     "control_pending_followup":  "WARNING",
     "write_code":               "WARNING",
-    "write_custom_tool":        "WARNING",
     "update_pending_linkedin_post": "WARNING",
     "relay_local_payload":      "WARNING",
     "save_to_memory":           "WARNING",

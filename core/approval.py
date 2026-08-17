@@ -197,6 +197,7 @@ PENDING_TTL_SECONDS: int = 3600  # 60 minutes
 # needs a new approval.
 PLAN_PER_ACTION_APPROVAL_TOOLS: frozenset[str] = frozenset({
     "run_terminal_command",              # arbitrary OS commands
+    "write_custom_tool",                 # generates and tests dynamic skill
     "register_tool",                     # permanent tool registry changes
     "write_project_file",                # full project-file overwrite
     "grant_project_access",              # permission change
