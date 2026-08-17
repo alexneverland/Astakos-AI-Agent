@@ -34,14 +34,35 @@ def _google_model_from_environment(variable_name: str, default_model: str) -> st
         )
     return configured_model
 
+def _resolve_gemini_safety_threshold() -> HarmBlockThreshold:
+    """Return the configured HarmBlockThreshold, defaulting to BLOCK_NONE."""
+    raw = os.getenv("ASTAKOS_GEMINI_SAFETY_THRESHOLD", "").strip().upper()
+    if not raw:
+        return HarmBlockThreshold.BLOCK_NONE
+    mapping = {
+        "BLOCK_NONE": HarmBlockThreshold.BLOCK_NONE,
+        "BLOCK_ONLY_HIGH": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        "BLOCK_MEDIUM_AND_ABOVE": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        "BLOCK_LOW_AND_ABOVE": HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+    }
+    if raw in mapping:
+        if raw != "BLOCK_NONE":
+            print(f"\033[93m[Brain]: Gemini safety threshold active ({raw}).\033[0m")
+        return mapping[raw]
+    print(
+        f"\033[93m[Brain]: Unknown safety threshold {raw!r}, falling back to BLOCK_NONE.\033[0m"
+    )
+    return HarmBlockThreshold.BLOCK_NONE
+
+
 # [MASTRO-SHIELD v3]: Safety for Google models
-_BN = HarmBlockThreshold.BLOCK_NONE
+_selected_threshold = _resolve_gemini_safety_threshold()
 custom_safety = {
-    HarmCategory.HARM_CATEGORY_HARASSMENT:         _BN,
-    HarmCategory.HARM_CATEGORY_HATE_SPEECH:        _BN,
-    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT:  _BN,
-    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT:  _BN,
-    HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY:    _BN,
+    HarmCategory.HARM_CATEGORY_HARASSMENT:         _selected_threshold,
+    HarmCategory.HARM_CATEGORY_HATE_SPEECH:        _selected_threshold,
+    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT:  _selected_threshold,
+    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT:  _selected_threshold,
+    HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY:    _selected_threshold,
 }
 
 vertex_client = None
