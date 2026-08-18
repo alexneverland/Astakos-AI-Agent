@@ -432,7 +432,8 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
 
 @tool
 def save_to_memory(
-    fact: str,
+    fact: str = "",
+    content: str = "",
     entities: str = "",
     category: str = "other",
     reason: str = "agent_inferred",
@@ -440,7 +441,8 @@ def save_to_memory(
 ) -> str:
     """
     Saves information SEMANTICALLY.
-    fact: The fact (e.g., "Kid1 only eats lentils").
+    fact: The fact to save (e.g., "Kid1 only eats lentils").
+    content: Alias for fact (if the agent provides content instead of fact).
     entities: Keywords separated by commas (e.g., "Kid1, Food, Preference").
     category: The category (e.g., 'family', 'home', 'lazaros', 'tech', 'work').
     reason: Why it is being saved — 'user_stated' if explicitly said by the user, 'agent_inferred' otherwise.
@@ -453,6 +455,10 @@ def save_to_memory(
     import threading
     from tools import system as _self
 
+    resolved_fact = (fact or content).strip()
+    if not resolved_fact:
+        return "⚠️ Error: No fact or content provided to save_to_memory."
+
     # Capture channel context BEFORE the thread (module-level var, thread-unsafe if read later)
     _source = _self._CURRENT_CHANNEL
 
@@ -461,7 +467,7 @@ def save_to_memory(
             from memory.vector_store import memory
             from memory.session_memory import build_canonical_memory_candidate
 
-            canonical_fact = fact.strip()
+            canonical_fact = resolved_fact
             if not canonical_fact.startswith(("[USER_FACT]", "[LESSON]", "[CAPABILITY]")):
                 canonical_fact = f"[USER_FACT]: {canonical_fact}"
 
