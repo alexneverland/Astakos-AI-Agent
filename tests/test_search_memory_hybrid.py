@@ -56,6 +56,13 @@ def test_search_memory_returns_sqlite_and_chroma_sections(monkeypatch):
             _Doc("[USER_FACT]: Ο Kid1 έχει ποδόσφαιρο.", {"category": "family"})
         ]),
     )
+    monkeypatch.setattr(
+        system,
+        "safe_similarity_search",
+        lambda *args, **kwargs: [
+            _Doc("[USER_FACT]: Ο Kid1 έχει ποδόσφαιρο.", {"category": "family"})
+        ],
+    )
 
     result = system.search_memory.func("Kid1 ποδόσφαιρο")
 
@@ -78,6 +85,7 @@ def test_search_memory_can_return_sqlite_when_chroma_empty(monkeypatch):
     )
     monkeypatch.setattr(system, "vector_lock", _Lock())
     monkeypatch.setattr(system, "vector_store", _VectorStore([]))
+    monkeypatch.setattr(system, "safe_similarity_search", lambda *args, **kwargs: [])
     system._lexical_cache.clear()
 
     result = system.search_memory.func("πάρκο Partner")

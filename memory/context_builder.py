@@ -618,14 +618,14 @@ def semantic_facts_for_query(
         return []
 
     if search_fn is None:
-        from memory.vector_store import vector_lock, vector_store
+        import memory.vector_store as vector_memory
 
         def search_fn(q: str, n: int):
             lock_started = perf_counter()
-            with vector_lock:
+            with vector_memory.vector_lock:
                 lock_wait_ms = int((perf_counter() - lock_started) * 1000)
                 search_started = perf_counter()
-                results = vector_store.similarity_search(q, k=n)
+                results = vector_memory.safe_similarity_search(q, k=n)
                 search_ms = int((perf_counter() - search_started) * 1000)
 
             if lock_wait_ms >= 1000 or search_ms >= 1000:

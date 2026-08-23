@@ -181,6 +181,26 @@ def _safe_chroma_query(*, query_embeddings, n_results, where=None, include=None)
                 "_error": str(e),
             }
 
+
+def safe_similarity_search(query: str, *, k: int, filter: dict | None = None) -> list:
+    """Search Chroma through the current handle and retry once after a refresh.
+
+    Consumers must use this helper instead of retaining an imported ``vector_store``
+    reference: a refresh replaces that module-level handle after a recoverable
+    Chroma error.
+    """
+    for attempt in range(2):
+        try:
+            kwargs = {"k": k}
+            if filter is not None:
+                kwargs["filter"] = filter
+            return vector_store.similarity_search(query, **kwargs)
+        except Exception as e:
+            if attempt == 0 and _should_retry_chroma_error(e) and _refresh_vector_store("similarity retry"):
+                continue
+            print(f"\033[93m[MemoryManager]: Chroma similarity error (graceful skip): {e}\033[0m")
+            return []
+
 def _safe_chroma_delete(ids: list[str]) -> bool:
     if not ids:
         return False

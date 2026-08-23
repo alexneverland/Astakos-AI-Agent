@@ -38,7 +38,13 @@ from config import (
 )
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 from astakos_skills.research_last30days import research_last30days
-from memory.vector_store import vector_store, vector_lock, memory, delete_profile_facts_by_exact_fact
+from memory.vector_store import (
+    vector_store,
+    vector_lock,
+    memory,
+    delete_profile_facts_by_exact_fact,
+    safe_similarity_search,
+)
 _lexical_cache: dict = {}  # {cache_key: (timestamp, data)} — TTL 60s
 from services.embeddings import embeddings
 from tools.web import (
@@ -292,9 +298,13 @@ def search_memory(query: str, category: str = "") -> str:
             # [PERF]: 1 similarity_search instead of 3 — primary_query is sufficient (expanded queries do not improve significantly)
             for search_query in search_queries[:1]:
                 if effective_category:
-                    batch = vector_store.similarity_search(search_query, k=6, filter={"category": effective_category})
+                    batch = safe_similarity_search(
+                        search_query,
+                        k=6,
+                        filter={"category": effective_category},
+                    )
                 else:
-                    batch = vector_store.similarity_search(search_query, k=6)
+                    batch = safe_similarity_search(search_query, k=6)
                 for doc in batch:
                     key = getattr(doc, "page_content", str(doc))
                     if key in seen_docs:
@@ -593,7 +603,7 @@ def retrieve_photo(query: str) -> str:
         import numpy as np
 
         with vector_lock:
-            results = vector_store.similarity_search(query, k=10)
+            results = safe_similarity_search(query, k=10)
 
         for doc in results:
             photo_path = doc.metadata.get("photo_path")
