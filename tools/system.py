@@ -536,6 +536,8 @@ def delete_from_memory(query: str) -> str:
 
         with vector_lock:
             data = vector_memory._safe_chroma_get(include=["documents", "metadatas"])
+        if data.get("_error"):
+            return "Deletion error: Chroma scan could not complete safely."
 
         # 1) Exact substring match FIRST — more reliable than embeddings when_
         # the phrases are close/similar (e.g. old incorrect vs correct address:
