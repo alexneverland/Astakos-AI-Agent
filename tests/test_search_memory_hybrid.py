@@ -50,11 +50,18 @@ def test_search_memory_returns_sqlite_and_chroma_sections(monkeypatch):
     )
     monkeypatch.setattr(system, "vector_lock", _Lock())
     monkeypatch.setattr(
-        system,
+        system.vector_memory,
         "vector_store",
         _VectorStore([
             _Doc("[USER_FACT]: Ο Kid1 έχει ποδόσφαιρο.", {"category": "family"})
         ]),
+    )
+    monkeypatch.setattr(
+        system.vector_memory,
+        "safe_similarity_search",
+        lambda *args, **kwargs: [
+            _Doc("[USER_FACT]: Ο Kid1 έχει ποδόσφαιρο.", {"category": "family"})
+        ],
     )
 
     result = system.search_memory.func("Kid1 ποδόσφαιρο")
@@ -77,7 +84,8 @@ def test_search_memory_can_return_sqlite_when_chroma_empty(monkeypatch):
         ],
     )
     monkeypatch.setattr(system, "vector_lock", _Lock())
-    monkeypatch.setattr(system, "vector_store", _VectorStore([]))
+    monkeypatch.setattr(system.vector_memory, "vector_store", _VectorStore([]))
+    monkeypatch.setattr(system.vector_memory, "safe_similarity_search", lambda *args, **kwargs: [])
     system._lexical_cache.clear()
 
     result = system.search_memory.func("πάρκο Partner")
@@ -115,10 +123,42 @@ def test_lexical_memory_matches_finds_doc_despite_different_grammatical_case(mon
         metadata={"category": "family"},
     )
     monkeypatch.setattr(system, "vector_lock", _Lock())
-    monkeypatch.setattr(system, "vector_store", _VectorStore([doc]))
+    monkeypatch.setattr(system.vector_memory, "vector_store", _VectorStore([doc]))
     system._lexical_cache.clear()
 
     matches = system._lexical_memory_matches("τι θέλει για τα γενεθλιών του Αλεξάνδρου;")
 
     assert len(matches) == 1
     assert "διαστημόπλοιο" in matches[0].page_content
+
+
+def test_lexical_memory_matches_uses_current_refreshed_store(monkeypatch):
+    """Lexical fallback must not retain the Chroma handle replaced by a refresh."""
+    import tools.system as system
+
+    stale_store = _VectorStore([])
+    fresh_doc = _Doc("[USER_FACT]: Ο Αλέξανδρος θέλει ποδόσφαιρο.", {"category": "family"})
+    monkeypatch.setattr(system, "vector_store", stale_store, raising=False)
+    monkeypatch.setattr(system.vector_memory, "vector_store", _VectorStore([fresh_doc]))
+    monkeypatch.setattr(system, "vector_lock", _Lock())
+    system._lexical_cache.clear()
+
+    matches = system._lexical_memory_matches("Αλέξανδρος ποδόσφαιρο", category="family")
+
+    assert [match.page_content for match in matches] == [fresh_doc.page_content]
+
+
+def test_lexical_memory_matches_does_not_cache_a_failed_collection_scan(monkeypatch):
+    """A transient Chroma error must not hide lexical matches for the cache TTL."""
+    import tools.system as system
+
+    monkeypatch.setattr(system, "vector_lock", _Lock())
+    monkeypatch.setattr(
+        system.vector_memory,
+        "_safe_chroma_get",
+        lambda **kwargs: {"ids": [], "documents": [], "metadatas": [], "_error": "query failed"},
+    )
+    system._lexical_cache.clear()
+
+    assert system._lexical_memory_matches("Αλέξανδρος ποδόσφαιρο", category="family") == []
+    assert "family" not in system._lexical_cache

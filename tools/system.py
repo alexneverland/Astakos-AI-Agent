@@ -38,7 +38,8 @@ from config import (
 )
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 from astakos_skills.research_last30days import research_last30days
-from memory.vector_store import vector_store, vector_lock, memory, delete_profile_facts_by_exact_fact
+import memory.vector_store as vector_memory
+from memory.vector_store import vector_lock, memory, delete_profile_facts_by_exact_fact
 _lexical_cache: dict = {}  # {cache_key: (timestamp, data)} — TTL 60s
 from services.embeddings import embeddings
 from tools.web import (
@@ -225,7 +226,12 @@ def _lexical_memory_matches(query: str, category: str = "", limit: int = 4) -> l
             kwargs = {"include": ["documents", "metadatas"]}
             if category:
                 kwargs["where"] = {"category": category}
-            data = vector_store._collection.get(**kwargs)
+            data = vector_memory._safe_chroma_get(
+                where=kwargs.get("where"),
+                include=kwargs["include"],
+            )
+            if data.get("_error"):
+                return []
             _lexical_cache[cache_key] = (_time.monotonic(), data)
     except Exception:
         return []
@@ -292,9 +298,13 @@ def search_memory(query: str, category: str = "") -> str:
             # [PERF]: 1 similarity_search instead of 3 — primary_query is sufficient (expanded queries do not improve significantly)
             for search_query in search_queries[:1]:
                 if effective_category:
-                    batch = vector_store.similarity_search(search_query, k=6, filter={"category": effective_category})
+                    batch = vector_memory.safe_similarity_search(
+                        search_query,
+                        k=6,
+                        filter={"category": effective_category},
+                    )
                 else:
-                    batch = vector_store.similarity_search(search_query, k=6)
+                    batch = vector_memory.safe_similarity_search(search_query, k=6)
                 for doc in batch:
                     key = getattr(doc, "page_content", str(doc))
                     if key in seen_docs:
@@ -327,8 +337,9 @@ def search_memory(query: str, category: str = "") -> str:
                         kwargs = {"n_results": min(6, len(results))}
                         if effective_category:
                             kwargs["where"] = {"category": effective_category}
-                        raw = vector_store._collection.query(
-                            query_embeddings=[embeddings.embed_query(primary_query)], **kwargs
+                        raw = vector_memory._safe_chroma_query(
+                            query_embeddings=[embeddings.embed_query(primary_query)],
+                            **kwargs,
                         )
                     if raw.get("ids") and raw["ids"][0]:
                         bump_retrieval_count(raw["ids"][0])
@@ -526,8 +537,9 @@ def delete_from_memory(query: str) -> str:
         norm_query = _norm(query).strip()
 
         with vector_lock:
-            collection = vector_store._collection
-            data = collection.get(include=["documents", "metadatas"])
+            data = vector_memory._safe_chroma_get(include=["documents", "metadatas"])
+        if data.get("_error"):
+            return "Deletion error: Chroma scan could not complete safely."
 
         # 1) Exact substring match FIRST — more reliable than embeddings when_
         # the phrases are close/similar (e.g. old incorrect vs correct address:
@@ -540,7 +552,9 @@ def delete_from_memory(query: str) -> str:
         if len(literal_hits) == 1:
             target_id, content = literal_hits[0]
             with vector_lock:
-                collection.delete(ids=[target_id])
+                deleted = vector_memory._safe_chroma_delete([target_id])
+            if not deleted:
+                return "Deletion error: Chroma could not remove the matching record."
             profile_deleted = delete_profile_facts_by_exact_fact(content)
             print(f"\n🔥 [DATABASE ACTION]: DELETED (exact match): {content}")
             return (
@@ -559,7 +573,12 @@ def delete_from_memory(query: str) -> str:
         # there is no literal match. u_00ad_ u_00ad__
         query_emb = embeddings.embed_query(query)
         with vector_lock:
-            results = collection.query(query_embeddings=[query_emb], n_results=1)
+            results = vector_memory._safe_chroma_query(
+                query_embeddings=[query_emb],
+                n_results=1,
+            )
+            if results.get("_error"):
+                return "Deletion error: Chroma search could not complete safely."
 
             if not results['ids'] or not results['ids'][0]:
                 return "No relevant records found for deletion."
@@ -574,7 +593,9 @@ def delete_from_memory(query: str) -> str:
                 )
 
             target_id = results['ids'][0][0]
-            collection.delete(ids=[target_id])
+            deleted = vector_memory._safe_chroma_delete([target_id])
+            if not deleted:
+                return "Deletion error: Chroma could not remove the matching record."
             profile_deleted = delete_profile_facts_by_exact_fact(content)
 
         print(f"\n🔥 [DATABASE ACTION]: DELETED (Dist: {distance:.2f}): {content}")
@@ -593,7 +614,7 @@ def retrieve_photo(query: str) -> str:
         import numpy as np
 
         with vector_lock:
-            results = vector_store.similarity_search(query, k=10)
+            results = vector_memory.safe_similarity_search(query, k=10)
 
         for doc in results:
             photo_path = doc.metadata.get("photo_path")

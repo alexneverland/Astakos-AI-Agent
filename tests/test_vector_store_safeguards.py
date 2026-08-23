@@ -113,3 +113,24 @@ def test_safe_chroma_query_retries_after_error_finding_id(monkeypatch):
 
     assert result["ids"] == [["ok"]]
     assert mock_store._collection.calls == 2
+
+
+def test_similarity_search_uses_reopened_store_after_error_finding_id(monkeypatch):
+    """A refresh must replace a stale imported Chroma handle for later searches."""
+    stale_store = MagicMock()
+    stale_store.similarity_search.side_effect = RuntimeError(
+        "Error executing plan: Internal error: Error finding id",
+    )
+    refreshed_store = MagicMock()
+    refreshed_store.similarity_search.return_value = ["fresh result"]
+
+    monkeypatch.setattr(vs, "vector_store", stale_store)
+
+    def replace_store(reason=""):
+        monkeypatch.setattr(vs, "vector_store", refreshed_store)
+        return True
+
+    monkeypatch.setattr(vs, "_refresh_vector_store", replace_store)
+
+    assert vs.safe_similarity_search("test", k=3) == ["fresh result"]
+    refreshed_store.similarity_search.assert_called_once_with("test", k=3)

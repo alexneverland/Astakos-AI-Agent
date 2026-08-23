@@ -13,7 +13,7 @@ def test_search_memory_includes_structured_profile_block(monkeypatch):
         def similarity_search(self, *args, **kwargs):
             return []
 
-    monkeypatch.setattr(system, "vector_store", DummyStore())
+    monkeypatch.setattr(system.vector_memory, "vector_store", DummyStore())
     monkeypatch.setattr(system, "embeddings", type("E", (), {"embed_query": lambda self, x: [0.0]})())
     import threading
     monkeypatch.setattr(system, "vector_lock", threading.Lock())

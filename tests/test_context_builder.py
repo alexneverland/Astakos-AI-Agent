@@ -84,6 +84,21 @@ def test_semantic_facts_dedupes_and_strips_tags():
     ]
 
 
+def test_semantic_facts_uses_refresh_aware_chroma_search(monkeypatch):
+    """Default semantic retrieval must not retain a stale Chroma handle."""
+    import memory.vector_store as vector_memory
+
+    monkeypatch.setattr(
+        vector_memory,
+        "safe_similarity_search",
+        lambda query, *, k: [_Doc("[USER_FACT] Η Σοφία είναι σπίτι.")],
+    )
+
+    assert semantic_facts_for_query("τι κάνει η Σοφία", k=3) == [
+        "[USER_FACT] Η Σοφία είναι σπίτι.",
+    ]
+
+
 def test_semantic_facts_wrap_persisted_external_provenance():
     """Chroma facts approved from external data remain untrusted when recalled."""
     doc = _Doc("[USER_FACT] Deadline is Friday.")
