@@ -63,3 +63,29 @@ def test_delete_from_memory_aborts_when_exact_scan_fails(monkeypatch):
     result = system.delete_from_memory.func("παλιά λάθος διεύθυνση")
 
     assert result == "Deletion error: Chroma scan could not complete safely."
+
+
+def test_delete_from_memory_surfaces_semantic_query_failure(monkeypatch):
+    """A failed semantic fallback must not be reported as an empty search result."""
+    from tools import system
+
+    monkeypatch.setattr(system, "vector_lock", threading.Lock())
+    monkeypatch.setattr(
+        system.vector_memory,
+        "_safe_chroma_get",
+        lambda **kwargs: {"ids": [], "documents": [], "metadatas": []},
+    )
+    monkeypatch.setattr(
+        system.vector_memory,
+        "_safe_chroma_query",
+        lambda **kwargs: {"ids": [[]], "documents": [[]], "metadatas": [[]], "_error": "query failed"},
+    )
+    monkeypatch.setattr(
+        system.embeddings,
+        "embed_query",
+        lambda query: [0.1, 0.2],
+    )
+
+    result = system.delete_from_memory.func("παλιά λάθος διεύθυνση")
+
+    assert result == "Deletion error: Chroma search could not complete safely."

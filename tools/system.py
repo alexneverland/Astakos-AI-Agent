@@ -230,6 +230,8 @@ def _lexical_memory_matches(query: str, category: str = "", limit: int = 4) -> l
                 where=kwargs.get("where"),
                 include=kwargs["include"],
             )
+            if data.get("_error"):
+                return []
             _lexical_cache[cache_key] = (_time.monotonic(), data)
     except Exception:
         return []
@@ -575,6 +577,8 @@ def delete_from_memory(query: str) -> str:
                 query_embeddings=[query_emb],
                 n_results=1,
             )
+            if results.get("_error"):
+                return "Deletion error: Chroma search could not complete safely."
 
             if not results['ids'] or not results['ids'][0]:
                 return "No relevant records found for deletion."

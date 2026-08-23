@@ -146,3 +146,19 @@ def test_lexical_memory_matches_uses_current_refreshed_store(monkeypatch):
     matches = system._lexical_memory_matches("Αλέξανδρος ποδόσφαιρο", category="family")
 
     assert [match.page_content for match in matches] == [fresh_doc.page_content]
+
+
+def test_lexical_memory_matches_does_not_cache_a_failed_collection_scan(monkeypatch):
+    """A transient Chroma error must not hide lexical matches for the cache TTL."""
+    import tools.system as system
+
+    monkeypatch.setattr(system, "vector_lock", _Lock())
+    monkeypatch.setattr(
+        system.vector_memory,
+        "_safe_chroma_get",
+        lambda **kwargs: {"ids": [], "documents": [], "metadatas": [], "_error": "query failed"},
+    )
+    system._lexical_cache.clear()
+
+    assert system._lexical_memory_matches("Αλέξανδρος ποδόσφαιρο", category="family") == []
+    assert "family" not in system._lexical_cache
