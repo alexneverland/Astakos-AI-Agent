@@ -469,7 +469,10 @@ def chat_agent_node(state: AgentState):
     # latest direct user turn may authorize creating or editing a draft.
     if is_create_draft_intent(latest_user_text):
         draft_tool_reason = "explicit_create"
-    elif has_accepted_routine_draft_offer(history):
+    elif has_accepted_routine_draft_offer(
+        history,
+        state_authorized=state.get("routine_draft_offer_authorized"),
+    ):
         draft_tool_reason = "accepted_routine_offer"
     elif _has_active_messenger_draft() and is_active_draft_edit_intent(latest_user_text):
         draft_tool_reason = "active_draft_edit"
@@ -795,7 +798,10 @@ def web_agent_node(state: AgentState):
     draft_tool_reason = None
     if is_create_draft_intent(latest_user_text):
         draft_tool_reason = "explicit_create"
-    elif has_accepted_routine_draft_offer(history):
+    elif has_accepted_routine_draft_offer(
+        history,
+        state_authorized=state.get("routine_draft_offer_authorized"),
+    ):
         draft_tool_reason = "accepted_routine_offer"
     elif _has_active_messenger_draft() and is_active_draft_edit_intent(latest_user_text):
         draft_tool_reason = "active_draft_edit"

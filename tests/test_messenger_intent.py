@@ -4,9 +4,12 @@ from services.messenger_intent import (
     is_draft_offer_acceptance,
     is_create_draft_intent,
     is_explicit_draft_creation_request,
+    has_accepted_routine_draft_offer,
+    MESSENGER_ROUTINE_DRAFT_OFFER_MARKER,
 )
 from services.routine_completion_context import build_messenger_draft_offer_context
 from unittest.mock import patch
+from langchain_core.messages import SystemMessage
 
 
 def test_create_draft_intent():
@@ -60,6 +63,13 @@ def test_bare_affirmative_accepts_only_a_pending_draft_offer() -> None:
     assert is_draft_offer_acceptance("we left") is False
     assert is_draft_offer_acceptance("ναι") is True
     assert is_draft_offer_acceptance("ο Πασσιάς έχει και κρέας") is False
+
+
+def test_consumed_routine_offer_state_does_not_reuse_history_marker() -> None:
+    """An older trusted marker cannot revive a one-shot draft authorization."""
+    marker = SystemMessage(content=MESSENGER_ROUTINE_DRAFT_OFFER_MARKER)
+    assert has_accepted_routine_draft_offer([marker]) is True
+    assert has_accepted_routine_draft_offer([marker], state_authorized=False) is False
 
 def test_messenger_draft_context_escapes_routine_event_xml() -> None:
     """Routine event data cannot close its trusted SystemMessage reference block."""

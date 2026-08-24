@@ -106,22 +106,52 @@ def _effective_risk(tc: dict) -> str:
 def _is_accepted_routine_messenger_draft_creation(
     tool_call: ToolCall,
     prior_messages: Sequence[BaseMessage],
+    *,
+    routine_draft_offer_authorized: bool | None = None,
 ) -> bool:
     """Return whether a trusted routine acceptance authorizes a draft write."""
     if tool_call.get("name") != "relay_local_payload":
         return False
     from services.messenger_intent import has_accepted_routine_draft_offer
-    return has_accepted_routine_draft_offer(prior_messages)
+    return has_accepted_routine_draft_offer(
+        prior_messages,
+        state_authorized=routine_draft_offer_authorized,
+    )
+
+
+def _is_trusted_active_messenger_draft_edit(
+    tool_call: ToolCall,
+    prior_messages: Sequence[BaseMessage],
+) -> bool:
+    """Return whether a clean direct user message requests an active-draft revision."""
+    if tool_call.get("name") != "relay_local_payload":
+        return False
+
+    from core.messenger_draft import has_active_draft
+    from core.untrusted_content import external_content_source_names, is_direct_user_message
+    from services.messenger_intent import is_active_draft_edit_intent
+
+    if not has_active_draft():
+        return False
+    for message in reversed(prior_messages):
+        if is_direct_user_message(message):
+            if external_content_source_names(getattr(message, "additional_kwargs", {})):
+                return False
+            return is_active_draft_edit_intent(str(getattr(message, "content", "")))
+    return False
 
 def _is_explicit_messenger_draft_creation(
     tool_call: ToolCall,
     prior_messages: Sequence[BaseMessage],
+    *,
+    routine_draft_offer_authorized: bool | None = None,
 ) -> bool:
     """Return whether a user explicitly requested the reversible Messenger draft write.
 
-    This only exempts ``relay_local_payload`` from the *stale* external-context
-    escalation. Same-turn external tool results remain blocked, and sending a
-    saved draft still goes through the separate CRITICAL approval path.
+    This only exempts ``relay_local_payload`` from the external-context
+    escalation. A trusted active-draft edit is also permitted after an
+    incidental read because the user must still review the draft before the
+    separate CRITICAL send path can run.
     """
     if tool_call.get("name") != "relay_local_payload":
         return False
@@ -130,12 +160,16 @@ def _is_explicit_messenger_draft_creation(
         external_content_source_names,
         is_direct_user_message,
     )
-    from services.messenger_intent import (
-        has_accepted_routine_draft_offer,
-        is_explicit_draft_creation_request,
-    )
+    from services.messenger_intent import is_explicit_draft_creation_request
 
-    if _is_accepted_routine_messenger_draft_creation(tool_call, prior_messages):
+    if _is_accepted_routine_messenger_draft_creation(
+        tool_call,
+        prior_messages,
+        routine_draft_offer_authorized=routine_draft_offer_authorized,
+    ):
+        return True
+
+    if _is_trusted_active_messenger_draft_edit(tool_call, prior_messages):
         return True
 
     for message in reversed(prior_messages):
@@ -389,6 +423,9 @@ def approval_check_node(state):
     last_msg = state["messages"][-1]
     tool_calls = getattr(last_msg, "tool_calls", [])
     prior_messages = state["messages"][:-1]
+    routine_draft_offer_authorized = state.get("routine_draft_offer_authorized")
+    if routine_draft_offer_authorized is not None:
+        routine_draft_offer_authorized = routine_draft_offer_authorized is True
 
     if not tool_calls:
         return {"approval_status": "ok"}
@@ -410,7 +447,12 @@ def approval_check_node(state):
         for tc in tool_calls:
             if (
                 not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
-                and not _is_accepted_routine_messenger_draft_creation(tc, prior_messages)
+                and not _is_accepted_routine_messenger_draft_creation(
+                    tc,
+                    prior_messages,
+                    routine_draft_offer_authorized=routine_draft_offer_authorized,
+                )
+                and not _is_trusted_active_messenger_draft_edit(tc, prior_messages)
                 and tc["id"] not in blocked_call_ids
             ):
                 blocked_entries.append((
@@ -427,7 +469,11 @@ def approval_check_node(state):
         if (
             external_content_is_active
             and not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
-            and not _is_explicit_messenger_draft_creation(tc, prior_messages)
+            and not _is_explicit_messenger_draft_creation(
+                tc,
+                prior_messages,
+                routine_draft_offer_authorized=routine_draft_offer_authorized,
+            )
             and not _is_direct_user_meal_log(tc, prior_messages)
             and tc["id"] not in blocked_call_ids
         )
@@ -501,7 +547,19 @@ def approval_check_node(state):
                 if _effective_risk(tc) == "WARNING":
                     print(f"\033[93m[Approval]: ⚠️ WARNING tool: {tc['name']}\033[0m")
 
-        return {"approval_status": "ok"}
+        approval_update = {"approval_status": "ok"}
+        if any(
+            _is_accepted_routine_messenger_draft_creation(
+                tc,
+                prior_messages,
+                routine_draft_offer_authorized=routine_draft_offer_authorized,
+            )
+            for tc in tool_calls
+        ):
+            # The routine acceptance is a one-shot authority for creating exactly
+            # one reviewable draft, not a general write capability for this turn.
+            approval_update["routine_draft_offer_authorized"] = False
+        return approval_update
 
     # There are CRITICAL calls — we save them and request approval
     tool_messages = []

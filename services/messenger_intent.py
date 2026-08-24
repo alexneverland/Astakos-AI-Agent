@@ -93,8 +93,19 @@ def is_draft_offer_acceptance(text: str) -> bool:
     return any(normalized == _normalize(pattern) for pattern in _DRAFT_OFFER_AFFIRMATIVES)
 
 
-def has_accepted_routine_draft_offer(messages: Iterable[Any]) -> bool:
-    """Return whether trusted graph history contains a routine draft-offer acceptance marker."""
+def has_accepted_routine_draft_offer(
+    messages: Iterable[Any],
+    *,
+    state_authorized: bool | None = None,
+) -> bool:
+    """Return whether the current graph run has a trusted routine-draft acceptance.
+
+    ``None`` preserves the legacy system-marker lookup.  A supplied boolean is
+    authoritative so a consumed one-shot authorization cannot be revived by
+    an older marker still present in the graph history.
+    """
+    if state_authorized is not None:
+        return state_authorized is True
     return any(
         getattr(message, "type", "") == "system"
         and str(getattr(message, "content", "")).startswith(MESSENGER_ROUTINE_DRAFT_OFFER_MARKER)

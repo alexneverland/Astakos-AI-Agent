@@ -35,6 +35,8 @@ class AgentState(TypedDict):
     plan_step_failed: NotRequired[bool]             # True if the last step showed failure
     replan_skipped_steps: NotRequired[list]         # indices of skipped steps (replan)
     channel: NotRequired[str]                       # "telegram" | "web" | "terminal"
+    routine_draft_offer_authorized: NotRequired[bool]
+    # Set only by the Telegram routine-confirmation flow for the current graph run.
 
 # ────────────────────────────────────────────────────────────────
 # 2. MESSAGE HELPERS (Mastro-Shield & Smart Parser)
