@@ -1,0 +1,168 @@
+# ================================================================
+# Project: Astakos AI Agent 🦞
+# Module:  Test Provider Mocks
+# Description: Deterministic offline mock adapters for contract testing
+# Copyright (c) 2026 - All Rights Reserved
+# ================================================================
+
+from __future__ import annotations
+
+from typing import Sequence
+from core.ai_provider import (
+    AIProviderAdapter,
+    CapabilityNotSupportedError,
+    ProviderAuthError,
+    RateLimitError,
+)
+
+
+class MockOpenAIAdapter(AIProviderAdapter):
+    provider_name = "openai"
+    supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
+
+    def __init__(self, should_fail_auth: bool = False, should_rate_limit: bool = False):
+        self.should_fail_auth = should_fail_auth
+        self.should_rate_limit = should_rate_limit
+
+    def _check_faults(self):
+        if self.should_fail_auth:
+            raise ProviderAuthError("openai", "Invalid OpenAI API key.")
+        if self.should_rate_limit:
+            raise RateLimitError("openai", "OpenAI rate limit exceeded (429).", retry_after=5.0)
+
+    def generate_text(self, prompt: str, model_type: str = "fast", system_prompt: str | None = None, temperature: float | None = None) -> str:
+        self._check_faults()
+        return f"[OpenAI Mock Text]: {prompt}"
+
+    def analyze_vision(self, prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+        self._check_faults()
+        return f"[OpenAI Mock Vision ({len(image_bytes)} bytes)]: {prompt}"
+
+    def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
+        self._check_faults()
+        return "[OpenAI Mock Audio]: Transcribed test voice"
+
+    def generate_image(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
+        self._check_faults()
+        return b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_openai_image"
+
+    def embed_text(self, texts: Sequence[str], is_query: bool = False) -> list[list[float]]:
+        self._check_faults()
+        # Returns 1536-dimensional mock vectors
+        return [[0.01 * (i + 1) for i in range(1536)] for _ in texts]
+
+
+class MockGeminiAPIAdapter(AIProviderAdapter):
+    provider_name = "gemini"
+    supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
+
+    def __init__(self, should_fail_auth: bool = False, should_rate_limit: bool = False):
+        self.should_fail_auth = should_fail_auth
+        self.should_rate_limit = should_rate_limit
+
+    def _check_faults(self):
+        if self.should_fail_auth:
+            raise ProviderAuthError("gemini", "Invalid Gemini API key.")
+        if self.should_rate_limit:
+            raise RateLimitError("gemini", "Gemini quota exceeded (429).", retry_after=10.0)
+
+    def generate_text(self, prompt: str, model_type: str = "fast", system_prompt: str | None = None, temperature: float | None = None) -> str:
+        self._check_faults()
+        return f"[Gemini Mock Text]: {prompt}"
+
+    def analyze_vision(self, prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+        self._check_faults()
+        return f"[Gemini Mock Vision ({len(image_bytes)} bytes)]: {prompt}"
+
+    def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
+        self._check_faults()
+        return "[Gemini Mock Audio]: Transcribed test voice"
+
+    def generate_image(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
+        self._check_faults()
+        return b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_gemini_image"
+
+    def embed_text(self, texts: Sequence[str], is_query: bool = False) -> list[list[float]]:
+        self._check_faults()
+        # Returns 768-dimensional mock vectors
+        return [[0.02 * (i + 1) for i in range(768)] for _ in texts]
+
+
+class MockVertexAIAdapter(AIProviderAdapter):
+    provider_name = "vertex"
+    supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
+
+    def __init__(self, should_fail_auth: bool = False, should_rate_limit: bool = False):
+        self.should_fail_auth = should_fail_auth
+        self.should_rate_limit = should_rate_limit
+
+    def _check_faults(self):
+        if self.should_fail_auth:
+            raise ProviderAuthError("vertex", "Vertex AI permission denied (403).")
+        if self.should_rate_limit:
+            raise RateLimitError("vertex", "Vertex AI resource exhausted (429).", retry_after=15.0)
+
+    def generate_text(self, prompt: str, model_type: str = "fast", system_prompt: str | None = None, temperature: float | None = None) -> str:
+        self._check_faults()
+        return f"[Vertex Mock Text]: {prompt}"
+
+    def analyze_vision(self, prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+        self._check_faults()
+        return f"[Vertex Mock Vision ({len(image_bytes)} bytes)]: {prompt}"
+
+    def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
+        self._check_faults()
+        return "[Vertex Mock Audio]: Transcribed test voice"
+
+    def generate_image(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
+        self._check_faults()
+        return b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_vertex_image"
+
+    def embed_text(self, texts: Sequence[str], is_query: bool = False) -> list[list[float]]:
+        self._check_faults()
+        # Returns 768-dimensional mock vectors
+        return [[0.03 * (i + 1) for i in range(768)] for _ in texts]
+
+
+class MockAnthropicAdapter(AIProviderAdapter):
+    provider_name = "anthropic"
+    supported_capabilities = {"text", "vision"}
+
+    def __init__(self, should_fail_auth: bool = False, should_rate_limit: bool = False):
+        self.should_fail_auth = should_fail_auth
+        self.should_rate_limit = should_rate_limit
+
+    def _check_faults(self):
+        if self.should_fail_auth:
+            raise ProviderAuthError("anthropic", "Invalid Anthropic API key.")
+        if self.should_rate_limit:
+            raise RateLimitError("anthropic", "Anthropic rate limit exceeded (429).", retry_after=8.0)
+
+    def generate_text(self, prompt: str, model_type: str = "fast", system_prompt: str | None = None, temperature: float | None = None) -> str:
+        self._check_faults()
+        return f"[Anthropic Mock Text]: {prompt}"
+
+    def analyze_vision(self, prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+        self._check_faults()
+        return f"[Anthropic Mock Vision ({len(image_bytes)} bytes)]: {prompt}"
+
+    def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
+        raise CapabilityNotSupportedError(
+            provider="anthropic",
+            capability="audio_stt",
+            message="Audio transcription is not supported natively by Anthropic.",
+        )
+
+    def generate_image(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
+        raise CapabilityNotSupportedError(
+            provider="anthropic",
+            capability="image_gen",
+            message="Image generation is not supported by Anthropic.",
+        )
+
+    def embed_text(self, texts: Sequence[str], is_query: bool = False) -> list[list[float]]:
+        raise CapabilityNotSupportedError(
+            provider="anthropic",
+            capability="embeddings",
+            message="Embeddings are not supported natively by Anthropic.",
+        )

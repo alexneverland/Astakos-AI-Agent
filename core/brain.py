@@ -121,6 +121,18 @@ else:  # default to vertex
     )
     print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI)\033[0m")
 
+from core.ai_provider import AIProviderAdapter, get_provider_adapter
+
+_active_provider_adapter: AIProviderAdapter | None = None
+
+
+def get_active_provider_adapter() -> AIProviderAdapter:
+    """Return the active AIProviderAdapter singleton instance."""
+    global _active_provider_adapter
+    if _active_provider_adapter is None:
+        _active_provider_adapter = get_provider_adapter(_provider)
+    return _active_provider_adapter
+
 
 def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
     from time import perf_counter
