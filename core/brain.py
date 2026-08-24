@@ -27,13 +27,28 @@ from core.ai_provider import (
 )
 
 # 1. Base Model Definitions
+_KNOWN_PROVIDERS = frozenset({"openai", "gemini", "anthropic", "vertex"})
+
+
+def _effective_provider(provider_name: str) -> str:
+    """Resolve unknown configured providers to the legacy Vertex fallback."""
+    return provider_name if provider_name in _KNOWN_PROVIDERS else "vertex"
+
+
+def _google_model_from_environment(variable_name: str, default_model: str) -> str:
+    """Compatibility wrapper retaining the legacy override-warning behavior."""
+    return google_model_from_environment(variable_name, default_model, emit_warning=True)
+
+
 _provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
-_google_model_from_environment = google_model_from_environment
-FAST_MODEL, HEAVY_MODEL = resolve_provider_models(_provider, emit_warnings=True)
+_effective_provider_name = _effective_provider(_provider)
+FAST_MODEL, HEAVY_MODEL = resolve_provider_models(
+    _effective_provider_name,
+    emit_warnings=True,
+)
 _resolve_gemini_safety_threshold = resolve_gemini_safety_threshold
 
 # [MASTRO-SHIELD v3]: Safety for Google models
-_selected_threshold = resolve_gemini_safety_threshold()
 custom_safety = get_gemini_safety_settings()
 
 vertex_client = None
@@ -86,8 +101,7 @@ def get_active_provider_adapter() -> AIProviderAdapter:
     if _active_provider_adapter is None:
         with _adapter_lock:
             if _active_provider_adapter is None:
-                effective_provider = _provider if _provider in ("openai", "gemini", "anthropic", "vertex") else "vertex"
-                _active_provider_adapter = get_provider_adapter(effective_provider)
+                _active_provider_adapter = get_provider_adapter(_effective_provider(_provider))
     return _active_provider_adapter
 
 

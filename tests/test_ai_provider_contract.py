@@ -502,6 +502,12 @@ class TestBrainBackwardCompatibility:
         orig_adapter = brain._active_provider_adapter
         orig_provider = brain._provider
         try:
+            effective_provider = brain._effective_provider("completely_unknown_provider_xyz")
+            assert effective_provider == "vertex"
+            fast_model, heavy_model = brain.resolve_provider_models(effective_provider)
+            assert fast_model == brain.DEFAULT_GEMINI_FAST_MODEL
+            assert heavy_model == brain.DEFAULT_GEMINI_HEAVY_MODEL
+
             brain._provider = "completely_unknown_provider_xyz"
             brain._active_provider_adapter = None
             adapter = brain.get_active_provider_adapter()
