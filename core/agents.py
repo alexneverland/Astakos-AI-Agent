@@ -383,6 +383,17 @@ def chat_agent_node(state: AgentState):
             latest_user_text = clean_message(getattr(msg, "content", ""))
             break
 
+    from services.messenger_intent import is_active_draft_edit_intent
+    active_draft_edit_context_isolated = (
+        _has_active_messenger_draft()
+        and is_active_draft_edit_intent(latest_user_text)
+    )
+    prompt_history = (
+        _isolate_active_draft_edit_history(history)
+        if active_draft_edit_context_isolated
+        else history
+    )
+
     analysis_match = re.search(r"\[ANALYSIS\]:\s*(.*)", last_msg_text)
     path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
 
@@ -419,9 +430,14 @@ def chat_agent_node(state: AgentState):
     json_base = load_agent_prompt("Chat_Agent", f"You are {config.BOT_NAME}, {config.USER_NAME}'s trusted buddy.")
     json_base = json_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt_text = f"{json_base}{vision_context}"
-    system_prompt = build_prompt(history, system_prompt_text, channel=state.get("channel"))
+    system_prompt = build_prompt(
+        prompt_history,
+        system_prompt_text,
+        channel=state.get("channel"),
+        include_memory_context=not active_draft_edit_context_isolated,
+    )
 
-    safe_history = sanitize_history_for_gemini(history)
+    safe_history = sanitize_history_for_gemini(prompt_history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
 
     if image_part:
@@ -474,11 +490,14 @@ def chat_agent_node(state: AgentState):
         state_authorized=state.get("routine_draft_offer_authorized"),
     ):
         draft_tool_reason = "accepted_routine_offer"
-    elif _has_active_messenger_draft() and is_active_draft_edit_intent(latest_user_text):
+    elif active_draft_edit_context_isolated:
         draft_tool_reason = "active_draft_edit"
     if draft_tool_reason:
         print(f"[Messenger Tool Gate]: Chat_Agent enabled relay_local_payload ({draft_tool_reason}).")
-        static_chat_tools.append(relay_local_payload)
+        if draft_tool_reason == "active_draft_edit":
+            static_chat_tools = [relay_local_payload]
+        else:
+            static_chat_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     chat_tools = get_registered_tools_for_agent("Chat_Agent", static_chat_tools)
 
@@ -498,7 +517,11 @@ def chat_agent_node(state: AgentState):
     ensure_wrapper_ms = int((perf_counter() - ensure_started) * 1000)
 
     _attach_phase_timing(response, "chat_ensure_wrapper_ms", ensure_wrapper_ms)
-    return {"current_agent": "Chat_Agent", "messages": [response]}
+    return {
+        "current_agent": "Chat_Agent",
+        "messages": [response],
+        "active_draft_edit_context_isolated": active_draft_edit_context_isolated,
+    }
 
 
 def home_agent_node(state):
@@ -692,6 +715,31 @@ def _has_active_messenger_draft() -> bool:
         return False
 
 
+def _isolate_active_draft_edit_history(history: list[Any]) -> list[Any]:
+    """Remove externally derived messages before composing an active draft edit."""
+    from core.untrusted_content import (
+        external_content_source_names,
+        is_untrusted_external_tool_result,
+    )
+
+    isolated_history = [
+        message
+        for message in history
+        if not (
+            (
+                getattr(message, "type", "") == "tool"
+                and is_untrusted_external_tool_result(message, history)
+            )
+            or external_content_source_names(
+                getattr(message, "additional_kwargs", {}),
+            )
+        )
+    ]
+    if len(isolated_history) != len(history):
+        print("[Messenger Draft Guard]: excluded external context during draft revision.")
+    return isolated_history
+
+
 def web_agent_node(state: AgentState):
     from core.utils import (
         load_agent_prompt,
@@ -757,11 +805,28 @@ def web_agent_node(state: AgentState):
             "current_agent": "Web_Agent",
         }
 
+    from services.messenger_intent import is_active_draft_edit_intent
+
+    active_draft_edit_context_isolated = (
+        _has_active_messenger_draft()
+        and is_active_draft_edit_intent(latest_user_text)
+    )
+    prompt_history = (
+        _isolate_active_draft_edit_history(history)
+        if active_draft_edit_context_isolated
+        else history
+    )
+
     system_base = load_agent_prompt("Web_Agent", "You are the Web_Agent.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
-    system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
+    system_prompt = build_prompt(
+        prompt_history,
+        system_base,
+        channel=state.get("channel"),
+        include_memory_context=not active_draft_edit_context_isolated,
+    )
 
-    safe_history = sanitize_history_for_gemini(history)
+    safe_history = sanitize_history_for_gemini(prompt_history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
 
     if image_part:
@@ -803,11 +868,14 @@ def web_agent_node(state: AgentState):
         state_authorized=state.get("routine_draft_offer_authorized"),
     ):
         draft_tool_reason = "accepted_routine_offer"
-    elif _has_active_messenger_draft() and is_active_draft_edit_intent(latest_user_text):
+    elif active_draft_edit_context_isolated:
         draft_tool_reason = "active_draft_edit"
     if draft_tool_reason:
         print(f"[Messenger Tool Gate]: Web_Agent enabled relay_local_payload ({draft_tool_reason}).")
-        static_web_tools.append(relay_local_payload)
+        if draft_tool_reason == "active_draft_edit":
+            static_web_tools = [relay_local_payload]
+        else:
+            static_web_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)
 
@@ -860,7 +928,8 @@ def web_agent_node(state: AgentState):
 
     return {
         "current_agent": "Web_Agent",
-        "messages": [result]
+        "messages": [result],
+        "active_draft_edit_context_isolated": active_draft_edit_context_isolated,
     }
 
 

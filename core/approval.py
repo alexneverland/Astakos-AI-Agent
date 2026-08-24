@@ -122,9 +122,13 @@ def _is_accepted_routine_messenger_draft_creation(
 def _is_trusted_active_messenger_draft_edit(
     tool_call: ToolCall,
     prior_messages: Sequence[BaseMessage],
+    *,
+    context_isolated: bool = False,
 ) -> bool:
     """Return whether a clean direct message safely revises the active draft."""
     if tool_call.get("name") != "relay_local_payload":
+        return False
+    if not context_isolated:
         return False
 
     from core.messenger_draft import active_draft_status
@@ -161,6 +165,7 @@ def _is_explicit_messenger_draft_creation(
     prior_messages: Sequence[BaseMessage],
     *,
     routine_draft_offer_authorized: bool | None = None,
+    active_draft_edit_context_isolated: bool = False,
 ) -> bool:
     """Return whether a user explicitly requested the reversible Messenger draft write.
 
@@ -185,7 +190,11 @@ def _is_explicit_messenger_draft_creation(
     ):
         return True
 
-    if _is_trusted_active_messenger_draft_edit(tool_call, prior_messages):
+    if _is_trusted_active_messenger_draft_edit(
+        tool_call,
+        prior_messages,
+        context_isolated=active_draft_edit_context_isolated,
+    ):
         return True
 
     for message in reversed(prior_messages):
@@ -442,6 +451,7 @@ def approval_check_node(state):
     routine_draft_offer_authorized = state.get("routine_draft_offer_authorized")
     if routine_draft_offer_authorized is not None:
         routine_draft_offer_authorized = routine_draft_offer_authorized is True
+    active_draft_edit_context_isolated = state.get("active_draft_edit_context_isolated") is True
 
     if not tool_calls:
         return {"approval_status": "ok"}
@@ -468,7 +478,11 @@ def approval_check_node(state):
                     prior_messages,
                     routine_draft_offer_authorized=routine_draft_offer_authorized,
                 )
-                and not _is_trusted_active_messenger_draft_edit(tc, prior_messages)
+                and not _is_trusted_active_messenger_draft_edit(
+                    tc,
+                    prior_messages,
+                    context_isolated=active_draft_edit_context_isolated,
+                )
                 and tc["id"] not in blocked_call_ids
             ):
                 blocked_entries.append((
@@ -489,6 +503,7 @@ def approval_check_node(state):
                 tc,
                 prior_messages,
                 routine_draft_offer_authorized=routine_draft_offer_authorized,
+                active_draft_edit_context_isolated=active_draft_edit_context_isolated,
             )
             and not _is_direct_user_meal_log(tc, prior_messages)
             and tc["id"] not in blocked_call_ids

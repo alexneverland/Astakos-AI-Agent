@@ -37,6 +37,9 @@ class AgentState(TypedDict):
     channel: NotRequired[str]                       # "telegram" | "web" | "terminal"
     routine_draft_offer_authorized: NotRequired[bool]
     # Set only by the Telegram routine-confirmation flow for the current graph run.
+    active_draft_edit_context_isolated: NotRequired[bool]
+    # Set only when an active Messenger draft revision is invoked without
+    # externally derived prompt context or read tools.
 
 # ────────────────────────────────────────────────────────────────
 # 2. MESSAGE HELPERS (Mastro-Shield & Smart Parser)
@@ -615,7 +618,13 @@ SKIP_SEMANTIC_KEYWORDS = (
 # 5. THE BRAIN (Build Prompt)
 # ────────────────────────────────────────────────────────────────
 
-def build_prompt(state_messages, agent_role="", channel: str | None = None) -> str:
+def build_prompt(
+    state_messages,
+    agent_role="",
+    channel: str | None = None,
+    *,
+    include_memory_context: bool = True,
+) -> str:
     """The main Prompt synthesis engine."""
     from config import WORKING_MEMORY_FILE, BASE_DIR
     from memory.working_memory import get_capability_context
@@ -642,7 +651,7 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
     semantic_k = k_value if len(clean_text) > 10 and not is_routine_command and not has_skip_keyword else 0
     recent_limit = 6 if channel and not has_current_photo else 0
 
-    if semantic_k > 0 or recent_limit > 0:
+    if include_memory_context and (semantic_k > 0 or recent_limit > 0):
         try:
             from memory.context_builder import build_memory_context
 
