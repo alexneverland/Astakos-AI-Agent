@@ -134,15 +134,42 @@ class TestRealOpenAIAdapterBoundary:
         vision_out = self.adapter.analyze_vision("Describe image", b"fake_bytes")
         assert vision_out == "OpenAI offline response"
 
+    @pytest.mark.parametrize(
+        ("mime_type", "expected_filename"),
+        [
+            ("audio/ogg", "audio.ogg"),
+            ("audio/webm", "audio.webm"),
+            ("audio/wav", "audio.wav"),
+            ("audio/mpeg", "audio.mp3"),
+            ("audio/mp4", "audio.mp4"),
+            ("audio/flac", "audio.flac"),
+        ],
+    )
     @patch("requests.post")
-    def test_transcribe_audio_success(self, mock_post):
+    def test_transcribe_audio_preserves_matching_filename_extension(
+        self,
+        mock_post,
+        mime_type,
+        expected_filename,
+    ):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"text": "Transcribed test audio"}
         mock_post.return_value = mock_resp
 
-        result = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
+        result = self.adapter.transcribe_audio(b"audio_bytes", mime_type=mime_type)
         assert result == "Transcribed test audio"
+        uploaded_filename, _, uploaded_mime = mock_post.call_args.kwargs["files"]["file"]
+        assert uploaded_filename == expected_filename
+        assert uploaded_mime == mime_type
+
+    @patch("requests.post")
+    def test_transcribe_audio_rejects_unknown_mime_type(self, mock_post):
+        with pytest.raises(CapabilityNotSupportedError) as exc_info:
+            self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/unknown")
+        assert exc_info.value.provider == "openai"
+        assert exc_info.value.capability == "audio_stt"
+        mock_post.assert_not_called()
 
     @patch("requests.post")
     def test_generate_image_aspect_ratios(self, mock_post):

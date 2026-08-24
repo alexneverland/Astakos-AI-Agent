@@ -268,11 +268,34 @@ class OpenAIAdapter(AIProviderAdapter):
     ) -> str:
         if not self.api_key:
             raise ProviderAuthError("openai", "OPENAI_API_KEY is not configured.")
+
+        extension_by_mime = {
+            "audio/aac": "aac",
+            "audio/flac": "flac",
+            "audio/m4a": "m4a",
+            "audio/mp3": "mp3",
+            "audio/mp4": "mp4",
+            "audio/mpeg": "mp3",
+            "audio/mpga": "mpga",
+            "audio/ogg": "ogg",
+            "audio/wav": "wav",
+            "audio/webm": "webm",
+            "audio/x-m4a": "m4a",
+            "audio/x-wav": "wav",
+        }
+        normalized_mime_type = mime_type.strip().lower()
+        extension = extension_by_mime.get(normalized_mime_type)
+        if extension is None:
+            raise CapabilityNotSupportedError(
+                provider="openai",
+                capability="audio_stt",
+                message=f"Audio MIME type '{mime_type}' is not supported by OpenAI transcription.",
+            )
+
         try:
             import requests
-            ext = "webm" if "webm" in mime_type else "ogg"
             headers = {"Authorization": f"Bearer {self.api_key}"}
-            files = {"file": (f"audio.{ext}", audio_bytes, mime_type)}
+            files = {"file": (f"audio.{extension}", audio_bytes, normalized_mime_type)}
             data = {"model": "whisper-1"}
             resp = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files=files, data=data, timeout=30)
             if resp.status_code in (401, 403):
