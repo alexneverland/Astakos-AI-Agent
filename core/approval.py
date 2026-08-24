@@ -547,19 +547,7 @@ def approval_check_node(state):
                 if _effective_risk(tc) == "WARNING":
                     print(f"\033[93m[Approval]: ⚠️ WARNING tool: {tc['name']}\033[0m")
 
-        approval_update = {"approval_status": "ok"}
-        if any(
-            _is_accepted_routine_messenger_draft_creation(
-                tc,
-                prior_messages,
-                routine_draft_offer_authorized=routine_draft_offer_authorized,
-            )
-            for tc in tool_calls
-        ):
-            # The routine acceptance is a one-shot authority for creating exactly
-            # one reviewable draft, not a general write capability for this turn.
-            approval_update["routine_draft_offer_authorized"] = False
-        return approval_update
+        return {"approval_status": "ok"}
 
     # There are CRITICAL calls — we save them and request approval
     tool_messages = []
@@ -597,6 +585,28 @@ def approval_check_node(state):
         "approval_status": "pending",
         "messages": tool_messages,
     }
+
+
+def consume_successful_routine_draft_authorization(state: dict) -> dict:
+    """Consume a routine-draft authorization only after its draft write succeeds."""
+    if state.get("routine_draft_offer_authorized") is not True:
+        return {}
+
+    from core.utils import clean_message, looks_like_terminal_messenger_draft_result
+
+    for message in reversed(state.get("messages", [])):
+        message_type = getattr(message, "type", "")
+        if message_type == "tool":
+            if getattr(message, "name", "") != "relay_local_payload":
+                continue
+            if looks_like_terminal_messenger_draft_result(
+                clean_message(getattr(message, "content", "")),
+            ):
+                return {"routine_draft_offer_authorized": False}
+            return {}
+        if message_type == "ai" and getattr(message, "tool_calls", None):
+            break
+    return {}
 
 
 def _args_preview(args: dict) -> str:

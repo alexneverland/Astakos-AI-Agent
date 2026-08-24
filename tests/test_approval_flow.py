@@ -422,9 +422,37 @@ def test_routine_draft_state_authorization_survives_missing_system_marker():
         })
 
     assert result["approval_status"] == "ok"
-    assert result["routine_draft_offer_authorized"] is False
+    assert result.get("routine_draft_offer_authorized") is None
     save_pending.assert_not_called()
     notify.assert_not_called()
+
+
+def test_routine_draft_authorization_is_consumed_only_after_successful_write():
+    """A failed relay leaves the one-shot authorization available for correction."""
+    from langchain_core.messages import AIMessage, ToolMessage
+    from core.approval import consume_successful_routine_draft_authorization
+
+    tool_call = AIMessage(
+        content="",
+        tool_calls=[{"name": "relay_local_payload", "args": {}, "id": "tc-draft"}],
+    )
+    failed_write = ToolMessage(
+        content="❌ Δεν αποθήκευσα Messenger draft. Η εικόνα δεν βρέθηκε.",
+        name="relay_local_payload",
+        tool_call_id="tc-draft",
+    )
+    successful_write = ToolMessage(
+        content="✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: Καλημέρα",
+        name="relay_local_payload",
+        tool_call_id="tc-draft",
+    )
+    state = {"routine_draft_offer_authorized": True, "messages": [tool_call, failed_write]}
+
+    assert consume_successful_routine_draft_authorization(state) == {}
+    state["messages"][-1] = successful_write
+    assert consume_successful_routine_draft_authorization(state) == {
+        "routine_draft_offer_authorized": False,
+    }
 
 
 def test_clean_active_draft_edit_skips_same_turn_memory_read_block(monkeypatch, tmp_path):
