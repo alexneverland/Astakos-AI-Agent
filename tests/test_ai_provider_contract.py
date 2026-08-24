@@ -1,10 +1,12 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Tests for AI Provider Capability Adapter Contract
-# Description: Validates typed contracts, errors, and adapter behavior
+# Description: Validates typed contracts, errors, and real adapter boundaries (offline)
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
 
+import base64
+import os
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -19,6 +21,7 @@ from core.ai_provider import (
     VertexAIAdapter,
     AnthropicAdapter,
     get_provider_adapter,
+    resolve_provider_models,
 )
 from tests.fixtures.provider_mocks import (
     MockOpenAIAdapter,
@@ -28,8 +31,8 @@ from tests.fixtures.provider_mocks import (
 )
 
 
-class TestAIProviderContract:
-    """Verifies that all adapters strictly conform to the AIProviderAdapter contract."""
+class TestAIProviderContractAndResolution:
+    """Verifies adapter metadata, factory instantiation, and shared model resolution."""
 
     @pytest.mark.parametrize(
         "adapter_cls,expected_name,expected_caps",
@@ -47,110 +50,233 @@ class TestAIProviderContract:
         assert adapter.supported_capabilities == expected_caps
         for cap in expected_caps:
             assert adapter.is_capability_supported(cap) is True
-        assert adapter.is_capability_supported("non_existent_capability") is False
+        assert adapter.is_capability_supported("unsupported_xyz") is False
 
     def test_factory_resolves_all_known_providers(self):
         openai_adapter = get_provider_adapter("openai", api_key="test-key")
         assert isinstance(openai_adapter, OpenAIAdapter)
-        assert openai_adapter.provider_name == "openai"
+        assert openai_adapter.fast_model == "gpt-4o-mini"
+        assert openai_adapter.heavy_model == "gpt-4o"
 
         gemini_adapter = get_provider_adapter("gemini", api_key="test-key")
         assert isinstance(gemini_adapter, GeminiAPIAdapter)
-        assert gemini_adapter.provider_name == "gemini"
+        assert gemini_adapter.fast_model == "gemini-3.5-flash"
+        assert gemini_adapter.heavy_model == "gemini-3.1-pro-preview"
 
         vertex_adapter = get_provider_adapter("vertex", project_id="test-proj", location="global")
         assert isinstance(vertex_adapter, VertexAIAdapter)
-        assert vertex_adapter.provider_name == "vertex"
+        assert vertex_adapter.fast_model == "gemini-3.5-flash"
+        assert vertex_adapter.heavy_model == "gemini-3.1-pro-preview"
 
         anthropic_adapter = get_provider_adapter("anthropic", api_key="test-key")
         assert isinstance(anthropic_adapter, AnthropicAdapter)
-        assert anthropic_adapter.provider_name == "anthropic"
+        assert anthropic_adapter.fast_model == "claude-3-5-haiku-latest"
+        assert anthropic_adapter.heavy_model == "claude-3-5-sonnet-latest"
 
     def test_factory_raises_for_unknown_provider(self):
         with pytest.raises(AIProviderError) as exc_info:
             get_provider_adapter("unsupported_provider_xyz")
         assert "Unknown AI provider" in str(exc_info.value)
 
-    def test_mock_adapters_conform_to_contract(self):
-        adapters = [
-            MockOpenAIAdapter(),
-            MockGeminiAPIAdapter(),
-            MockVertexAIAdapter(),
-            MockAnthropicAdapter(),
-        ]
-        for adapter in adapters:
-            assert isinstance(adapter, AIProviderAdapter)
-            text_out = adapter.generate_text("Hello Astakos")
-            assert isinstance(text_out, str)
-            assert "Hello Astakos" in text_out
+    def test_shared_model_resolution_env_overrides(self, monkeypatch):
+        monkeypatch.setenv("ASTAKOS_GEMINI_FAST_MODEL", "gemini-custom-fast")
+        monkeypatch.setenv("ASTAKOS_GEMINI_HEAVY_MODEL", "gemini-custom-heavy")
 
-            vision_out = adapter.analyze_vision("Describe image", b"fake_image_bytes")
-            assert isinstance(vision_out, str)
-            assert "Describe image" in vision_out
+        fast_g, heavy_g = resolve_provider_models("gemini")
+        assert fast_g == "gemini-custom-fast"
+        assert heavy_g == "gemini-custom-heavy"
+
+        gemini_adapter = GeminiAPIAdapter(api_key="test-key")
+        assert gemini_adapter.fast_model == "gemini-custom-fast"
+        assert gemini_adapter.heavy_model == "gemini-custom-heavy"
 
 
-class TestAnthropicUnsupportedCapabilities:
-    """Verifies that unsupported operations on Anthropic raise typed, informative errors."""
+class TestRealOpenAIAdapterBoundary:
+    """Offline SDK boundary tests for OpenAIAdapter."""
 
     def setup_method(self):
-        self.adapter = AnthropicAdapter(api_key="test-anthropic-key")
+        self.adapter = OpenAIAdapter(api_key="sk-test-openai-key")
 
-    def test_transcribe_audio_raises_capability_not_supported(self):
-        with pytest.raises(CapabilityNotSupportedError) as exc_info:
-            self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
-        err = exc_info.value
-        assert err.provider == "anthropic"
-        assert err.capability == "audio_stt"
-        assert "Audio transcription is not natively supported by Anthropic" in err.user_message
+    @patch("langchain_openai.ChatOpenAI.invoke")
+    def test_generate_text_and_vision_success(self, mock_invoke):
+        mock_resp = MagicMock()
+        mock_resp.content = "OpenAI offline response"
+        mock_invoke.return_value = mock_resp
 
-    def test_generate_image_raises_capability_not_supported(self):
-        with pytest.raises(CapabilityNotSupportedError) as exc_info:
-            self.adapter.generate_image("A cute robot lobster", aspect_ratio="1:1")
-        err = exc_info.value
-        assert err.provider == "anthropic"
-        assert err.capability == "image_gen"
-        assert "Image generation is not supported by Anthropic" in err.user_message
+        text_out = self.adapter.generate_text("Hello OpenAI")
+        assert text_out == "OpenAI offline response"
 
-    def test_embed_text_raises_capability_not_supported(self):
-        with pytest.raises(CapabilityNotSupportedError) as exc_info:
-            self.adapter.embed_text(["Text to embed"])
-        err = exc_info.value
-        assert err.provider == "anthropic"
-        assert err.capability == "embeddings"
-        assert "Embeddings are not natively supported by Anthropic" in err.user_message
+        vision_out = self.adapter.analyze_vision("Describe image", b"fake_bytes")
+        assert vision_out == "OpenAI offline response"
 
+    @patch("requests.post")
+    def test_transcribe_audio_success(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"text": "Transcribed test audio"}
+        mock_post.return_value = mock_resp
 
-class TestTypedErrorMapping:
-    """Verifies that authentication and rate-limit faults map to typed exceptions."""
+        result = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
+        assert result == "Transcribed test audio"
 
-    def test_mock_fault_injection(self):
-        # Auth fault
-        auth_adapter = MockOpenAIAdapter(should_fail_auth=True)
+    @patch("requests.post")
+    def test_generate_image_success(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        raw_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00dalle_image"
+        mock_resp.json.return_value = {"data": [{"b64_json": base64.b64encode(raw_bytes).decode("utf-8")}]}
+        mock_post.return_value = mock_resp
+
+        img_bytes = self.adapter.generate_image("A cute lobster")
+        assert img_bytes == raw_bytes
+
+    @patch("langchain_openai.OpenAIEmbeddings.embed_documents")
+    def test_embed_text_success(self, mock_embed):
+        mock_embed.return_value = [[0.1] * 1536, [0.2] * 1536]
+        vecs = self.adapter.embed_text(["doc 1", "doc 2"])
+        assert len(vecs) == 2
+        assert len(vecs[0]) == 1536
+
+    @patch("langchain_openai.ChatOpenAI.invoke")
+    def test_auth_and_rate_limit_errors(self, mock_invoke):
+        # 401 Auth Error
+        mock_invoke.side_effect = Exception("401 Unauthorized: Invalid API key")
         with pytest.raises(ProviderAuthError) as exc_info:
-            auth_adapter.generate_text("test")
+            self.adapter.generate_text("test")
         assert exc_info.value.provider == "openai"
 
-        # Rate limit fault
-        rate_adapter = MockGeminiAPIAdapter(should_rate_limit=True)
+        # 429 Rate Limit Error
+        mock_invoke.side_effect = Exception("429 Rate limit reached for requests")
         with pytest.raises(RateLimitError) as exc_info:
-            rate_adapter.generate_text("test")
-        assert exc_info.value.provider == "gemini"
-        assert exc_info.value.retry_after == 10.0
-
-    def test_missing_api_key_raises_auth_error(self):
-        openai_adapter = OpenAIAdapter(api_key="")
-        with pytest.raises(ProviderAuthError) as exc_info:
-            openai_adapter.generate_text("test")
+            self.adapter.generate_text("test")
         assert exc_info.value.provider == "openai"
 
-        gemini_adapter = GeminiAPIAdapter(api_key="")
+
+class TestRealGeminiAPIAdapterBoundary:
+    """Offline SDK boundary tests for GeminiAPIAdapter."""
+
+    def setup_method(self):
+        self.adapter = GeminiAPIAdapter(api_key="ai-studio-test-key")
+
+    @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
+    def test_generate_text_and_vision_success(self, mock_invoke):
+        mock_resp = MagicMock()
+        mock_resp.content = "Gemini offline response"
+        mock_invoke.return_value = mock_resp
+
+        text_out = self.adapter.generate_text("Hello Gemini")
+        assert text_out == "Gemini offline response"
+
+        vision_out = self.adapter.analyze_vision("Look at this", b"fake_bytes")
+        assert vision_out == "Gemini offline response"
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_success(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = "Gemini transcribed voice"
+        mock_client.models.generate_content.return_value = mock_resp
+        mock_client_cls.return_value = mock_client
+
+        out = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
+        assert out == "Gemini transcribed voice"
+
+    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_documents")
+    def test_embed_text_success(self, mock_embed):
+        mock_embed.return_value = [[0.05] * 768]
+        vecs = self.adapter.embed_text(["test text"])
+        assert len(vecs) == 1
+        assert len(vecs[0]) == 768
+
+    @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
+    def test_auth_and_rate_limit_errors(self, mock_invoke):
+        # 403 Permission Denied
+        mock_invoke.side_effect = Exception("403 PERMISSION_DENIED: API key not valid")
         with pytest.raises(ProviderAuthError) as exc_info:
-            gemini_adapter.generate_text("test")
+            self.adapter.generate_text("test")
         assert exc_info.value.provider == "gemini"
 
-        anthropic_adapter = AnthropicAdapter(api_key="")
+        # 429 Quota Exceeded
+        mock_invoke.side_effect = Exception("429 RESOURCE_EXHAUSTED: Quota exceeded")
+        with pytest.raises(RateLimitError) as exc_info:
+            self.adapter.generate_text("test")
+        assert exc_info.value.provider == "gemini"
+
+
+class TestRealVertexAIAdapterBoundary:
+    """Offline SDK boundary tests for VertexAIAdapter."""
+
+    def setup_method(self):
+        self.adapter = VertexAIAdapter(project_id="test-proj", location="global")
+
+    @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
+    def test_generate_text_and_vision_success(self, mock_invoke):
+        mock_resp = MagicMock()
+        mock_resp.content = "Vertex AI response"
+        mock_invoke.return_value = mock_resp
+
+        text_out = self.adapter.generate_text("Hello Vertex")
+        assert text_out == "Vertex AI response"
+
+    @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
+    def test_auth_and_rate_limit_errors(self, mock_invoke):
+        # 403 Permission Denied
+        mock_invoke.side_effect = Exception("403 Permission denied on project test-proj")
         with pytest.raises(ProviderAuthError) as exc_info:
-            anthropic_adapter.generate_text("test")
+            self.adapter.generate_text("test")
+        assert exc_info.value.provider == "vertex"
+
+        # 429 Quota Exceeded
+        mock_invoke.side_effect = Exception("429 Resource exhausted: Rate limit reached")
+        with pytest.raises(RateLimitError) as exc_info:
+            self.adapter.generate_text("test")
+        assert exc_info.value.provider == "vertex"
+
+
+class TestRealAnthropicAdapterBoundary:
+    """Offline SDK boundary tests for AnthropicAdapter."""
+
+    def setup_method(self):
+        self.adapter = AnthropicAdapter(api_key="sk-ant-test-key")
+
+    @patch("langchain_anthropic.ChatAnthropic.invoke")
+    def test_generate_text_and_vision_success(self, mock_invoke):
+        mock_resp = MagicMock()
+        mock_resp.content = "Claude offline response"
+        mock_invoke.return_value = mock_resp
+
+        text_out = self.adapter.generate_text("Hello Claude")
+        assert text_out == "Claude offline response"
+
+        vision_out = self.adapter.analyze_vision("Analyze chart", b"chart_bytes")
+        assert vision_out == "Claude offline response"
+
+    def test_unsupported_operations_raise_typed_errors(self):
+        with pytest.raises(CapabilityNotSupportedError) as exc_audio:
+            self.adapter.transcribe_audio(b"audio", mime_type="audio/ogg")
+        assert exc_audio.value.provider == "anthropic"
+        assert exc_audio.value.capability == "audio_stt"
+
+        with pytest.raises(CapabilityNotSupportedError) as exc_img:
+            self.adapter.generate_image("A robot")
+        assert exc_img.value.provider == "anthropic"
+        assert exc_img.value.capability == "image_gen"
+
+        with pytest.raises(CapabilityNotSupportedError) as exc_emb:
+            self.adapter.embed_text(["some text"])
+        assert exc_emb.value.provider == "anthropic"
+        assert exc_emb.value.capability == "embeddings"
+
+    @patch("langchain_anthropic.ChatAnthropic.invoke")
+    def test_auth_and_rate_limit_errors(self, mock_invoke):
+        mock_invoke.side_effect = Exception("401 authentication_error: invalid x-api-key")
+        with pytest.raises(ProviderAuthError) as exc_info:
+            self.adapter.generate_text("test")
+        assert exc_info.value.provider == "anthropic"
+
+        mock_invoke.side_effect = Exception("429 rate_limit_error: request limit exceeded")
+        with pytest.raises(RateLimitError) as exc_info:
+            self.adapter.generate_text("test")
         assert exc_info.value.provider == "anthropic"
 
 

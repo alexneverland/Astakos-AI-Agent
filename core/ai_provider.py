@@ -16,7 +16,35 @@ import config
 
 
 # ────────────────────────────────────────────────────────────────
-# 1. TYPED EXCEPTIONS & ERROR TAXONOMY
+# 1. SHARED MODEL RESOLUTION (Single Source of Truth)
+# ────────────────────────────────────────────────────────────────
+
+DEFAULT_GEMINI_FAST_MODEL = "gemini-3.5-flash"
+DEFAULT_GEMINI_HEAVY_MODEL = "gemini-3.1-pro-preview"
+
+
+def resolve_provider_models(
+    provider_name: str,
+    fast_override: str | None = None,
+    heavy_override: str | None = None,
+) -> tuple[str, str]:
+    """Return (fast_model, heavy_model) for the given provider without hardcoded divergence."""
+    provider = (provider_name or "").strip().lower()
+    if provider == "openai":
+        return (fast_override or "gpt-4o-mini", heavy_override or "gpt-4o")
+    elif provider == "anthropic":
+        return (fast_override or "claude-3-5-haiku-latest", heavy_override or "claude-3-5-sonnet-latest")
+    elif provider in ("gemini", "vertex"):
+        env_fast = os.getenv("ASTAKOS_GEMINI_FAST_MODEL", "").strip()
+        env_heavy = os.getenv("ASTAKOS_GEMINI_HEAVY_MODEL", "").strip()
+        fast = fast_override or env_fast or DEFAULT_GEMINI_FAST_MODEL
+        heavy = heavy_override or env_heavy or DEFAULT_GEMINI_HEAVY_MODEL
+        return (fast, heavy)
+    return (fast_override or "fast-model", heavy_override or "heavy-model")
+
+
+# ────────────────────────────────────────────────────────────────
+# 2. TYPED EXCEPTIONS & ERROR TAXONOMY
 # ────────────────────────────────────────────────────────────────
 
 class AIProviderError(Exception):
@@ -55,7 +83,7 @@ class RateLimitError(AIProviderError):
 
 
 # ────────────────────────────────────────────────────────────────
-# 2. ABSTRACT BASE ADAPTER CONTRACT
+# 3. ABSTRACT BASE ADAPTER CONTRACT
 # ────────────────────────────────────────────────────────────────
 
 class AIProviderAdapter(ABC):
@@ -113,7 +141,7 @@ class AIProviderAdapter(ABC):
 
 
 # ────────────────────────────────────────────────────────────────
-# 3. CONCRETE PROVIDER ADAPTERS
+# 4. CONCRETE PROVIDER ADAPTERS
 # ────────────────────────────────────────────────────────────────
 
 class OpenAIAdapter(AIProviderAdapter):
@@ -122,16 +150,15 @@ class OpenAIAdapter(AIProviderAdapter):
     provider_name = "openai"
     supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
         self.api_key = api_key or getattr(config, "OPENAI_API_KEY", "")
-        self.fast_model = "gpt-4o-mini"
-        self.heavy_model = "gpt-4o"
+        self.fast_model, self.heavy_model = resolve_provider_models("openai", fast_model, heavy_model)
         self.embedding_model = "text-embedding-3-small"
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
-        from langchain_openai import ChatOpenAI
         if not self.api_key:
             raise ProviderAuthError("openai", "OPENAI_API_KEY is not configured.")
+        from langchain_openai import ChatOpenAI
         model = self.heavy_model if model_type == "heavy" else self.fast_model
         temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
         return ChatOpenAI(model=model, temperature=temp, api_key=self.api_key)
@@ -191,7 +218,7 @@ class OpenAIAdapter(AIProviderAdapter):
             files = {"file": (f"audio.{ext}", audio_bytes, mime_type)}
             data = {"model": "whisper-1"}
             resp = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files=files, data=data, timeout=30)
-            if resp.status_code == 401 or resp.status_code == 403:
+            if resp.status_code in (401, 403):
                 raise ProviderAuthError("openai", f"OpenAI Whisper auth failed: {resp.text}")
             if resp.status_code == 429:
                 raise RateLimitError("openai", "OpenAI Whisper quota exceeded.")
@@ -275,21 +302,20 @@ class GeminiAPIAdapter(AIProviderAdapter):
 
     def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
         self.api_key = api_key or getattr(config, "GEMINI_API_KEY", "") or getattr(config, "GOOGLE_API_KEY", "")
-        self.fast_model = fast_model or os.getenv("ASTAKOS_GEMINI_FAST_MODEL", "gemini-2.5-flash")
-        self.heavy_model = heavy_model or os.getenv("ASTAKOS_GEMINI_HEAVY_MODEL", "gemini-1.5-pro")
+        self.fast_model, self.heavy_model = resolve_provider_models("gemini", fast_model, heavy_model)
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
-        from langchain_google_genai import ChatGoogleGenerativeAI
         if not self.api_key:
             raise ProviderAuthError("gemini", "GEMINI_API_KEY is not configured.")
+        from langchain_google_genai import ChatGoogleGenerativeAI
         model = self.heavy_model if model_type == "heavy" else self.fast_model
         temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
         return ChatGoogleGenerativeAI(model=model, temperature=temp, api_key=self.api_key)
 
     def _get_genai_client(self):
-        from google import genai
         if not self.api_key:
             raise ProviderAuthError("gemini", "GEMINI_API_KEY is not configured.")
+        from google import genai
         return genai.Client(api_key=self.api_key)
 
     def generate_text(
@@ -418,8 +444,7 @@ class VertexAIAdapter(AIProviderAdapter):
     ):
         self.project_id = project_id or getattr(config, "PROJECT_ID", "your-gcp-project-id")
         self.location = location or getattr(config, "LOCATION", "global")
-        self.fast_model = fast_model or os.getenv("ASTAKOS_GEMINI_FAST_MODEL", "gemini-3.5-flash")
-        self.heavy_model = heavy_model or os.getenv("ASTAKOS_GEMINI_HEAVY_MODEL", "gemini-3.1-pro-preview")
+        self.fast_model, self.heavy_model = resolve_provider_models("vertex", fast_model, heavy_model)
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -561,15 +586,14 @@ class AnthropicAdapter(AIProviderAdapter):
     provider_name = "anthropic"
     supported_capabilities = {"text", "vision"}
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
         self.api_key = api_key or getattr(config, "ANTHROPIC_API_KEY", "")
-        self.fast_model = "claude-3-5-haiku-latest"
-        self.heavy_model = "claude-3-5-sonnet-latest"
+        self.fast_model, self.heavy_model = resolve_provider_models("anthropic", fast_model, heavy_model)
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
-        from langchain_anthropic import ChatAnthropic
         if not self.api_key:
             raise ProviderAuthError("anthropic", "ANTHROPIC_API_KEY is not configured.")
+        from langchain_anthropic import ChatAnthropic
         model = self.heavy_model if model_type == "heavy" else self.fast_model
         temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
         return ChatAnthropic(model=model, temperature=temp, api_key=self.api_key)
@@ -660,7 +684,7 @@ class AnthropicAdapter(AIProviderAdapter):
 
 
 # ────────────────────────────────────────────────────────────────
-# 4. PROVIDER ADAPTER FACTORY
+# 5. PROVIDER ADAPTER FACTORY
 # ────────────────────────────────────────────────────────────────
 
 _ADAPTER_REGISTRY: dict[str, type[AIProviderAdapter]] = {
