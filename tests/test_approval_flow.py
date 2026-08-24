@@ -607,6 +607,22 @@ def test_active_draft_edit_history_excludes_external_messages():
     ]) == [trusted_user_message]
 
 
+def test_active_draft_edit_filter_runs_after_registry_expansion():
+    """A draft-only run retains no dynamically registered tools."""
+    from types import SimpleNamespace
+    from core.agents import _draft_edit_tools_only
+
+    relay_tool = SimpleNamespace(name="relay_local_payload")
+    dynamic_write = SimpleNamespace(name="mark_recipe_favorite")
+    dynamic_read = SimpleNamespace(name="get_saved_recipe")
+
+    assert _draft_edit_tools_only([
+        relay_tool,
+        dynamic_write,
+        dynamic_read,
+    ]) == [relay_tool]
+
+
 def test_active_draft_edit_cannot_change_target_after_memory_read(monkeypatch, tmp_path):
     """Untrusted content cannot redirect a direct revision to another contact."""
     import config

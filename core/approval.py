@@ -133,7 +133,7 @@ def _is_trusted_active_messenger_draft_edit(
 
     from core.messenger_draft import active_draft_status
     from core.untrusted_content import external_content_source_names, is_direct_user_message
-    from services.messenger_intent import is_unambiguous_active_draft_edit_intent
+    from services.messenger_intent import is_contextually_grounded_active_draft_edit
     from tools.web import remove_accents
 
     args = tool_call.get("args", {})
@@ -157,8 +157,9 @@ def _is_trusted_active_messenger_draft_edit(
         if is_direct_user_message(message):
             if external_content_source_names(getattr(message, "additional_kwargs", {})):
                 return False
-            return is_unambiguous_active_draft_edit_intent(
+            return is_contextually_grounded_active_draft_edit(
                 str(getattr(message, "content", "")),
+                prior_messages,
             )
     return False
 

@@ -894,7 +894,23 @@ def test_web_agent_exposes_messenger_draft_tool_for_active_draft_edit(monkeypatc
     )
 
     web_agent_node({
-        "messages": [HumanMessage(content="Κάν' το πιο ζεστό.")],
+        "messages": [
+            HumanMessage(content="Γράψε ένα μήνυμα"),
+            AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "relay_local_payload",
+                    "args": {},
+                    "id": "tc-draft",
+                }],
+            ),
+            ToolMessage(
+                content="✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: Initial draft",
+                name="relay_local_payload",
+                tool_call_id="tc-draft",
+            ),
+            HumanMessage(content="Κάν' το πιο ζεστό."),
+        ],
         "channel": "telegram",
     })
 

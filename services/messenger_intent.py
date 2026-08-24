@@ -167,17 +167,59 @@ def is_active_draft_edit_intent(text: str) -> bool:
 
 def is_unambiguous_active_draft_edit_intent(text: str) -> bool:
     """Return whether text clearly refers to revising the active Messenger draft."""
-    if not is_active_draft_edit_intent(text):
-        return False
-
     normalized = _normalize(text)
     explicit_references = (
         "message", "μηνυμα", "draft", "προσχεδιο",
-        "αλλαξε το", "διορθωσε το", "καν το", "καντο",
-        "change it", "edit it", "rewrite it", "make it", "translate it",
         "change the ending", "edit the ending",
     )
-    return _has_token_or_phrase(normalized, explicit_references)
+    if not _has_token_or_phrase(normalized, explicit_references):
+        return False
+    if is_active_draft_edit_intent(text):
+        return True
+    explicit_edit_actions = (
+        "change", "edit", "rewrite", "make", "translate",
+        "αλλαξε", "διορθωσε", "καν", "καντο", "βαλε", "βγαλε",
+    )
+    return _has_token_or_phrase(normalized, explicit_edit_actions)
+
+
+def has_immediately_preceding_messenger_draft_write(messages: Iterable[Any]) -> bool:
+    """Return whether the latest user turn directly follows a successful draft write."""
+    from core.untrusted_content import is_direct_user_message
+    from core.utils import clean_message, looks_like_terminal_messenger_draft_result
+
+    found_latest_user = False
+    for message in reversed(list(messages)):
+        if is_direct_user_message(message):
+            if found_latest_user:
+                return False
+            found_latest_user = True
+            continue
+        if not found_latest_user:
+            continue
+        if (
+            getattr(message, "type", "") == "tool"
+            and getattr(message, "name", "") == "relay_local_payload"
+            and looks_like_terminal_messenger_draft_result(
+                clean_message(getattr(message, "content", "")),
+            )
+        ):
+            return True
+    return False
+
+
+def is_contextually_grounded_active_draft_edit(
+    text: str,
+    messages: Iterable[Any],
+) -> bool:
+    """Allow shorthand draft edits only as the immediate reply to a saved draft."""
+    return (
+        is_unambiguous_active_draft_edit_intent(text)
+        or (
+            is_active_draft_edit_intent(text)
+            and has_immediately_preceding_messenger_draft_write(messages)
+        )
+    )
 
 
 def is_explicit_draft_creation_request(text: str) -> bool:

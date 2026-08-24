@@ -383,10 +383,10 @@ def chat_agent_node(state: AgentState):
             latest_user_text = clean_message(getattr(msg, "content", ""))
             break
 
-    from services.messenger_intent import is_unambiguous_active_draft_edit_intent
+    from services.messenger_intent import is_contextually_grounded_active_draft_edit
     active_draft_edit_context_isolated = (
         _has_active_messenger_draft()
-        and is_unambiguous_active_draft_edit_intent(latest_user_text)
+        and is_contextually_grounded_active_draft_edit(latest_user_text, history)
     )
     prompt_history = (
         _isolate_active_draft_edit_history(history)
@@ -499,6 +499,8 @@ def chat_agent_node(state: AgentState):
             static_chat_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     chat_tools = get_registered_tools_for_agent("Chat_Agent", static_chat_tools)
+    if draft_tool_reason == "active_draft_edit":
+        chat_tools = _draft_edit_tools_only(chat_tools)
 
     bind_started = perf_counter()
     bound_llm = llm.bind_tools(chat_tools)
@@ -739,6 +741,15 @@ def _isolate_active_draft_edit_history(history: list[Any]) -> list[Any]:
     return isolated_history
 
 
+def _draft_edit_tools_only(tools: list[Any]) -> list[Any]:
+    """Keep only the reversible Messenger draft writer after registry expansion."""
+    return [
+        tool
+        for tool in tools
+        if getattr(tool, "name", "") == "relay_local_payload"
+    ]
+
+
 def web_agent_node(state: AgentState):
     from core.utils import (
         load_agent_prompt,
@@ -804,11 +815,11 @@ def web_agent_node(state: AgentState):
             "current_agent": "Web_Agent",
         }
 
-    from services.messenger_intent import is_unambiguous_active_draft_edit_intent
+    from services.messenger_intent import is_contextually_grounded_active_draft_edit
 
     active_draft_edit_context_isolated = (
         _has_active_messenger_draft()
-        and is_unambiguous_active_draft_edit_intent(latest_user_text)
+        and is_contextually_grounded_active_draft_edit(latest_user_text, history)
     )
     prompt_history = (
         _isolate_active_draft_edit_history(history)
@@ -876,6 +887,8 @@ def web_agent_node(state: AgentState):
             static_web_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)
+    if draft_tool_reason == "active_draft_edit":
+        web_tools = _draft_edit_tools_only(web_tools)
 
     if web_errors and not web_successes:
         guarded_reply = build_web_failure_reply(
