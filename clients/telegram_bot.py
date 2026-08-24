@@ -1843,11 +1843,19 @@ def _build_fast_chat_context(clean_user_text: str):
     current_msg = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
     return context_msgs, current_msg
 
-def _run_fast_chat_path(context_msgs, current_msg):
+def _run_fast_chat_path(
+    context_msgs,
+    current_msg,
+    *,
+    routine_draft_offer_authorized: bool = False,
+):
     """Run the compact Telegram graph path with room for bounded read-tool chains."""
+    graph_state = {"messages": context_msgs[-6:] + [current_msg], "channel": "telegram"}
+    if routine_draft_offer_authorized:
+        graph_state["routine_draft_offer_authorized"] = True
     return list(
         graph.stream(
-            {"messages": context_msgs[-6:] + [current_msg], "channel": "telegram"},
+            graph_state,
             {"recursion_limit": 24},
         )
     )
@@ -1880,6 +1888,7 @@ def handle_message(user_text: str, chat_id: str):
     from services.routine_completion_selector import select_routine as _completion_selector
     routine_completion_context: SystemMessage | None = None
     routine_draft_offer_context: SystemMessage | None = None
+    routine_draft_offer_authorized = False
     routine_action_consumed = False
 
     if pending_routine_confirmations:
@@ -2017,6 +2026,7 @@ def handle_message(user_text: str, chat_id: str):
             routine_completion_context = build_routine_completion_context()
             if accepted_draft_offer is not None and accepted_draft_offer.routine_id == rid:
                 routine_draft_offer_context = accepted_draft_offer.context
+                routine_draft_offer_authorized = True
             routine_action_consumed = True
 
         elif decision.action == "skip_today" and decision.routine_id is not None:
@@ -2494,20 +2504,30 @@ def handle_message(user_text: str, chat_id: str):
 
             if fast_path_used:
                 provenance_messages_for_reply = context_msgs[-6:] + [current_msg]
-                events = _run_fast_chat_path(context_msgs, current_msg)
+                events = _run_fast_chat_path(
+                    context_msgs,
+                    current_msg,
+                    routine_draft_offer_authorized=routine_draft_offer_authorized,
+                )
             elif medium_path_used:
                 provenance_messages_for_reply = context_msgs[-8:] + [current_msg]
+                graph_state = {"messages": context_msgs[-8:] + [current_msg], "channel": "telegram"}
+                if routine_draft_offer_authorized:
+                    graph_state["routine_draft_offer_authorized"] = True
                 events = list(
                     graph.stream(
-                        {"messages": context_msgs[-8:] + [current_msg], "channel": "telegram"},
+                        graph_state,
                         {"recursion_limit": 24},
                     )
                 )
             else:
                 provenance_messages_for_reply = context_msgs + [current_msg]
+                graph_state = {"messages": context_msgs + [current_msg], "channel": "telegram"}
+                if routine_draft_offer_authorized:
+                    graph_state["routine_draft_offer_authorized"] = True
                 events = list(
                     graph.stream(
-                        {"messages": context_msgs + [current_msg], "channel": "telegram"},
+                        graph_state,
                         {"recursion_limit": 100},
                     )
                 )

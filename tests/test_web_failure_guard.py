@@ -894,7 +894,17 @@ def test_web_agent_exposes_messenger_draft_tool_for_active_draft_edit(monkeypatc
     )
 
     web_agent_node({
-        "messages": [HumanMessage(content="Κάν' το πιο ζεστό.")],
+        "messages": [
+            HumanMessage(content="Γράψε ένα μήνυμα"),
+            AIMessage(
+                content=(
+                    "Έτοιμο το προσχέδιο, μάστορα:\n\n"
+                    "«Initial draft»\n\n"
+                    "Το αποθήκευσα. Θέλεις αλλαγές ή να το στείλω;"
+                ),
+            ),
+            HumanMessage(content="Κάν' το πιο ζεστό."),
+        ],
         "channel": "telegram",
     })
 

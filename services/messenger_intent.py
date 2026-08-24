@@ -93,8 +93,19 @@ def is_draft_offer_acceptance(text: str) -> bool:
     return any(normalized == _normalize(pattern) for pattern in _DRAFT_OFFER_AFFIRMATIVES)
 
 
-def has_accepted_routine_draft_offer(messages: Iterable[Any]) -> bool:
-    """Return whether trusted graph history contains a routine draft-offer acceptance marker."""
+def has_accepted_routine_draft_offer(
+    messages: Iterable[Any],
+    *,
+    state_authorized: bool | None = None,
+) -> bool:
+    """Return whether the current graph run has a trusted routine-draft acceptance.
+
+    ``None`` preserves the legacy system-marker lookup.  A supplied boolean is
+    authoritative so a consumed one-shot authorization cannot be revived by
+    an older marker still present in the graph history.
+    """
+    if state_authorized is not None:
+        return state_authorized is True
     return any(
         getattr(message, "type", "") == "system"
         and str(getattr(message, "content", "")).startswith(MESSENGER_ROUTINE_DRAFT_OFFER_MARKER)
@@ -152,6 +163,62 @@ def is_active_draft_edit_intent(text: str) -> bool:
             ):
                 return True
     return False
+
+
+def is_unambiguous_active_draft_edit_intent(text: str) -> bool:
+    """Return whether text clearly refers to revising the active Messenger draft."""
+    normalized = _normalize(text)
+    explicit_references = (
+        "message", "μηνυμα", "draft", "προσχεδιο",
+        "change the ending", "edit the ending",
+    )
+    if not _has_token_or_phrase(normalized, explicit_references):
+        return False
+    if is_active_draft_edit_intent(text):
+        return True
+    explicit_edit_actions = (
+        "change", "edit", "rewrite", "make", "translate",
+        "αλλαξε", "διορθωσε", "καν", "καντο", "βαλε", "βγαλε",
+    )
+    return _has_token_or_phrase(normalized, explicit_edit_actions)
+
+
+def has_immediately_preceding_messenger_draft_write(messages: Iterable[Any]) -> bool:
+    """Return whether the latest user turn directly follows a saved-draft display."""
+    from core.untrusted_content import is_direct_user_message
+    from core.utils import clean_message, looks_like_messenger_draft_ready_reply
+
+    found_latest_user = False
+    for message in reversed(list(messages)):
+        if is_direct_user_message(message):
+            if found_latest_user:
+                return False
+            found_latest_user = True
+            continue
+        if not found_latest_user:
+            continue
+        if (
+            getattr(message, "type", "") in {"ai", "assistant"}
+            and looks_like_messenger_draft_ready_reply(
+                clean_message(getattr(message, "content", "")),
+            )
+        ):
+            return True
+    return False
+
+
+def is_contextually_grounded_active_draft_edit(
+    text: str,
+    messages: Iterable[Any],
+) -> bool:
+    """Allow shorthand draft edits only as the immediate reply to a saved draft."""
+    return (
+        is_unambiguous_active_draft_edit_intent(text)
+        or (
+            is_active_draft_edit_intent(text)
+            and has_immediately_preceding_messenger_draft_write(messages)
+        )
+    )
 
 
 def is_explicit_draft_creation_request(text: str) -> bool:

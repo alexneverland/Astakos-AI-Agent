@@ -13,7 +13,7 @@ from core.agents import (
     supervisor_node, chat_agent_node, home_agent_node, web_agent_node,
     tech_agent_node, git_agent_node, mail_agent_node, dev_agent_node, tool_router
 )
-from core.approval import approval_check_node
+from core.approval import approval_check_node, consume_successful_routine_draft_authorization
 from core.planner import (
     planner_node, task_executor_node, capture_result_node,
     pre_check_node, cancel_plan_node, validate_step_node,
@@ -49,6 +49,10 @@ def build_graph():
     workflow.add_node("Dev_Agent",    dev_agent_node)
     workflow.add_node("tools",          ToolNode(all_tools, handle_tool_errors=True))
     workflow.add_node("approval_check", approval_check_node)
+    workflow.add_node(
+        "consume_routine_draft_authorization",
+        consume_successful_routine_draft_authorization,
+    )
     workflow.add_node("tool_loop_block", tool_loop_block_node)
     workflow.add_node("planner",        planner_node)
     workflow.add_node("task_executor",  task_executor_node)
@@ -103,9 +107,11 @@ def build_graph():
 
     workflow.add_edge("tool_loop_block", END)
 
-    # After tools → return to the correct agent
+    # After tools, consume a one-shot routine-draft authorization only on a
+    # confirmed successful write, then return to the originating agent.
+    workflow.add_edge("tools", "consume_routine_draft_authorization")
     workflow.add_conditional_edges(
-        "tools",
+        "consume_routine_draft_authorization",
         tool_router,
         {name: name for name in AGENT_MAP}
     )

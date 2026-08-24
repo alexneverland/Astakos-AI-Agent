@@ -41,14 +41,16 @@ def test_fast_chat_path_allows_bounded_tool_chain(monkeypatch: pytest.MonkeyPatc
     import clients.telegram_bot as bot
 
     observed_config: dict[str, int] = {}
+    observed_state: dict[str, Any] = {}
     monkeypatch.setattr(
         bot.graph,
         "stream",
-        lambda _state, config: observed_config.update(config) or [],
+        lambda state, config: observed_state.update(state) or observed_config.update(config) or [],
     )
 
-    assert bot._run_fast_chat_path([], object()) == []
+    assert bot._run_fast_chat_path([], object(), routine_draft_offer_authorized=True) == []
     assert observed_config["recursion_limit"] == 24
+    assert observed_state["routine_draft_offer_authorized"] is True
 
 
 def test_ultra_light_ack_basic_cases():

@@ -1,12 +1,18 @@
 from services.messenger_intent import (
     classify_messenger_intent,
     is_active_draft_edit_intent,
+    is_unambiguous_active_draft_edit_intent,
+    has_immediately_preceding_messenger_draft_write,
+    is_contextually_grounded_active_draft_edit,
     is_draft_offer_acceptance,
     is_create_draft_intent,
     is_explicit_draft_creation_request,
+    has_accepted_routine_draft_offer,
+    MESSENGER_ROUTINE_DRAFT_OFFER_MARKER,
 )
 from services.routine_completion_context import build_messenger_draft_offer_context
 from unittest.mock import patch
+from langchain_core.messages import SystemMessage
 
 
 def test_create_draft_intent():
@@ -61,6 +67,13 @@ def test_bare_affirmative_accepts_only_a_pending_draft_offer() -> None:
     assert is_draft_offer_acceptance("ναι") is True
     assert is_draft_offer_acceptance("ο Πασσιάς έχει και κρέας") is False
 
+
+def test_consumed_routine_offer_state_does_not_reuse_history_marker() -> None:
+    """An older trusted marker cannot revive a one-shot draft authorization."""
+    marker = SystemMessage(content=MESSENGER_ROUTINE_DRAFT_OFFER_MARKER)
+    assert has_accepted_routine_draft_offer([marker]) is True
+    assert has_accepted_routine_draft_offer([marker], state_authorized=False) is False
+
 def test_messenger_draft_context_escapes_routine_event_xml() -> None:
     """Routine event data cannot close its trusted SystemMessage reference block."""
     with patch(
@@ -89,6 +102,48 @@ def test_active_draft_edit_intent_requires_a_configured_revision_request() -> No
     assert is_active_draft_edit_intent("Change it to say I'm not coming") is True
     assert is_active_draft_edit_intent('Change it to "Don\'t wait for me"') is True
     assert is_active_draft_edit_intent("Σε τρεις μέρες φεύγουμε Γεωργία") is False
+
+
+def test_unambiguous_active_draft_edit_intent_keeps_generic_weather_questions_out() -> None:
+    """An active draft must not claim generic comparative questions."""
+    assert is_unambiguous_active_draft_edit_intent("Κάν' το πιο ζεστό") is False
+    assert is_unambiguous_active_draft_edit_intent("Άλλαξε το μήνυμα") is True
+    assert is_unambiguous_active_draft_edit_intent("Make the message shorter") is True
+    assert is_unambiguous_active_draft_edit_intent("θα είναι πιο ζεστό αύριο;") is False
+    assert is_unambiguous_active_draft_edit_intent("Will it be warmer tomorrow?") is False
+
+
+def test_recent_draft_write_allows_immediate_shorthand_edit_only() -> None:
+    """A shorthand edit is grounded only as the next user reply to a saved draft."""
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    draft_display = AIMessage(
+        content=(
+            "Έτοιμο το προσχέδιο, μάστορα:\n\n"
+            "«Καλημέρα»\n\n"
+            "Το αποθήκευσα. Θέλεις αλλαγές ή να το στείλω;"
+        ),
+    )
+    immediate_edit = HumanMessage(content="Κάν' το πιο ζεστό")
+    unrelated_turn = HumanMessage(content="Τι καιρό θα κάνει αύριο;")
+
+    assert has_immediately_preceding_messenger_draft_write([
+        draft_display,
+        immediate_edit,
+    ]) is True
+    assert is_contextually_grounded_active_draft_edit(
+        "Κάν' το πιο ζεστό",
+        [draft_display, immediate_edit],
+    ) is True
+    assert has_immediately_preceding_messenger_draft_write([
+        draft_display,
+        unrelated_turn,
+        immediate_edit,
+    ]) is False
+    assert is_contextually_grounded_active_draft_edit(
+        "Κάν' το πιο ζεστό",
+        [draft_display, unrelated_turn, immediate_edit],
+    ) is False
 
 
 def test_explicit_draft_creation_request_rejects_negated_requests() -> None:

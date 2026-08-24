@@ -72,3 +72,27 @@ def test_goal_injection_wraps_external_goal(monkeypatch: pytest.MonkeyPatch) -> 
     prompt = build_prompt([MockMessage("Explain my goals")], agent_role="Chat_Agent", channel="telegram")
 
     assert "[UNTRUSTED EXTERNAL TOOL RESULT]" in prompt
+
+
+def test_prompt_can_exclude_all_persisted_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Draft isolation omits every persisted prompt source, not only memories."""
+    monkeypatch.setattr(
+        "memory.session_memory.load_last_session_hint",
+        lambda: "External session hint",
+    )
+    monkeypatch.setattr(
+        "memory.working_memory.get_capability_context",
+        lambda: "External capability context",
+    )
+
+    prompt = build_prompt(
+        [MockMessage("Άλλαξε το μήνυμα")],
+        agent_role="Chat_Agent",
+        channel="telegram",
+        include_persisted_context=False,
+    )
+
+    assert "UNIFIED MEMORY CONTEXT" not in prompt
+    assert "CONTINUED FROM PREVIOUS SESSION" not in prompt
+    assert "GOALS IN PROGRESS" not in prompt
+    assert "External capability context" not in prompt

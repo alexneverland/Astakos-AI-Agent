@@ -390,3 +390,335 @@ def test_accepted_routine_offer_draft_creation_skips_same_turn_memory_read_block
     assert result["approval_status"] == "ok"
     save_pending.assert_not_called()
     notify.assert_not_called()
+
+
+def test_routine_draft_state_authorization_survives_missing_system_marker():
+    """Telegram's trusted per-run authorization survives context truncation."""
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from core.approval import approval_check_node
+
+    user_message = HumanMessage(content="ναι φίλε γράψε")
+    memory_result = ToolMessage(
+        content="[UNTRUSTED EXTERNAL TOOL RESULT] persisted memory reference",
+        name="search_memory",
+        tool_call_id="tc-memory-read",
+    )
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Sofia", "payload_data": "Καλημέρα"},
+            "id": "tc-routine-draft-state",
+        }],
+    )
+
+    with (
+        patch("core.approval.save_pending") as save_pending,
+        patch("core.approval._notify_telegram") as notify,
+    ):
+        result = approval_check_node({
+            "messages": [user_message, memory_result, draft_call],
+            "routine_draft_offer_authorized": True,
+        })
+
+    assert result["approval_status"] == "ok"
+    assert result.get("routine_draft_offer_authorized") is None
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
+def test_routine_draft_authorization_is_consumed_only_after_successful_write():
+    """A failed relay leaves the one-shot authorization available for correction."""
+    from langchain_core.messages import AIMessage, ToolMessage
+    from core.approval import consume_successful_routine_draft_authorization
+
+    tool_call = AIMessage(
+        content="",
+        tool_calls=[{"name": "relay_local_payload", "args": {}, "id": "tc-draft"}],
+    )
+    failed_write = ToolMessage(
+        content="❌ Δεν αποθήκευσα Messenger draft. Η εικόνα δεν βρέθηκε.",
+        name="relay_local_payload",
+        tool_call_id="tc-draft",
+    )
+    successful_write = ToolMessage(
+        content="✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: Καλημέρα",
+        name="relay_local_payload",
+        tool_call_id="tc-draft",
+    )
+    state = {"routine_draft_offer_authorized": True, "messages": [tool_call, failed_write]}
+
+    assert consume_successful_routine_draft_authorization(state) == {}
+    state["messages"][-1] = successful_write
+    assert consume_successful_routine_draft_authorization(state) == {
+        "routine_draft_offer_authorized": False,
+    }
+
+
+def test_routine_draft_authorization_consumes_if_any_relay_in_batch_succeeds():
+    """A later failed relay cannot preserve authority after an earlier success."""
+    from langchain_core.messages import AIMessage, ToolMessage
+    from core.approval import consume_successful_routine_draft_authorization
+
+    tool_call = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "relay_local_payload", "args": {}, "id": "tc-first"},
+            {"name": "relay_local_payload", "args": {}, "id": "tc-second"},
+        ],
+    )
+    success = ToolMessage(
+        content="✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: Καλημέρα",
+        name="relay_local_payload",
+        tool_call_id="tc-first",
+    )
+    failure = ToolMessage(
+        content="❌ Δεν αποθήκευσα Messenger draft. Η εικόνα δεν βρέθηκε.",
+        name="relay_local_payload",
+        tool_call_id="tc-second",
+    )
+
+    assert consume_successful_routine_draft_authorization({
+        "routine_draft_offer_authorized": True,
+        "messages": [tool_call, success, failure],
+    }) == {"routine_draft_offer_authorized": False}
+
+
+def test_active_draft_edit_after_untrusted_read_requires_isolated_context(monkeypatch, tmp_path):
+    """A draft revision after a read needs the agent's isolated-context proof."""
+    import config
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from core.approval import approval_check_node
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    draft_file.write_text(
+        json.dumps(
+            {
+                "target_name": "Sofia",
+                "message": "Παλιό μήνυμα",
+                "status": "pending",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "expires_at": (datetime.now() + timedelta(minutes=30)).isoformat(timespec="seconds"),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    user_message = HumanMessage(content="Άλλαξε το μήνυμα και κάν' το πιο σύντομο")
+    memory_result = ToolMessage(
+        content="[UNTRUSTED EXTERNAL TOOL RESULT] persisted memory reference",
+        name="search_memory",
+        tool_call_id="tc-memory-read",
+    )
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Sofia", "payload_data": "Νέο σύντομο μήνυμα"},
+            "id": "tc-active-draft-edit",
+        }],
+    )
+
+    with (
+        patch("core.approval.save_pending") as save_pending,
+        patch("core.approval._notify_telegram") as notify,
+    ):
+        result = approval_check_node({
+            "messages": [user_message, memory_result, draft_call],
+        })
+
+    assert result["approval_status"] == "blocked"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
+def test_active_draft_edit_after_untrusted_read_allows_isolated_context(monkeypatch, tmp_path):
+    """An isolated direct revision remains approval-free after a memory read."""
+    import config
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from core.approval import approval_check_node
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    draft_file.write_text(
+        json.dumps(
+            {
+                "target_name": "Sofia",
+                "message": "Παλιό μήνυμα",
+                "status": "pending",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "expires_at": (datetime.now() + timedelta(minutes=30)).isoformat(timespec="seconds"),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    user_message = HumanMessage(content="Άλλαξε το μήνυμα και κάν' το πιο σύντομο")
+    memory_result = ToolMessage(
+        content="[UNTRUSTED EXTERNAL TOOL RESULT] persisted memory reference",
+        name="search_memory",
+        tool_call_id="tc-memory-read",
+    )
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Sofia", "payload_data": "Νέο σύντομο μήνυμα"},
+            "id": "tc-active-draft-edit",
+        }],
+    )
+
+    with (
+        patch("core.approval.save_pending") as save_pending,
+        patch("core.approval._notify_telegram") as notify,
+    ):
+        result = approval_check_node({
+            "messages": [user_message, memory_result, draft_call],
+            "active_draft_edit_context_isolated": True,
+        })
+
+    assert result["approval_status"] == "ok"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
+def test_active_draft_edit_history_excludes_external_messages():
+    """Draft revision prompts retain only trusted conversation messages."""
+    from langchain_core.messages import HumanMessage, ToolMessage
+    from core.agents import _isolate_active_draft_edit_history
+    from core.untrusted_content import external_content_history_metadata
+
+    trusted_user_message = HumanMessage(content="Άλλαξε το μήνυμα")
+    external_tool_result = ToolMessage(
+        content="untrusted reference",
+        name="search_memory",
+        tool_call_id="tc-memory-read",
+    )
+    provenance_marked_message = HumanMessage(
+        content="external image analysis",
+        additional_kwargs=external_content_history_metadata(["user_provided_asset"]),
+    )
+
+    assert _isolate_active_draft_edit_history([
+        trusted_user_message,
+        external_tool_result,
+        provenance_marked_message,
+    ]) == [trusted_user_message]
+
+
+def test_active_draft_edit_filter_runs_after_registry_expansion():
+    """A draft-only run retains no dynamically registered tools."""
+    from types import SimpleNamespace
+    from core.agents import _draft_edit_tools_only
+
+    relay_tool = SimpleNamespace(name="relay_local_payload")
+    dynamic_write = SimpleNamespace(name="mark_recipe_favorite")
+    dynamic_read = SimpleNamespace(name="get_saved_recipe")
+
+    assert _draft_edit_tools_only([
+        relay_tool,
+        dynamic_write,
+        dynamic_read,
+    ]) == [relay_tool]
+
+
+def test_active_draft_edit_cannot_change_target_after_memory_read(monkeypatch, tmp_path):
+    """Untrusted content cannot redirect a direct revision to another contact."""
+    import config
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from core.approval import approval_check_node
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    draft_file.write_text(
+        json.dumps(
+            {
+                "target_name": "Sofia",
+                "message": "Παλιό μήνυμα",
+                "status": "pending",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "expires_at": (datetime.now() + timedelta(minutes=30)).isoformat(timespec="seconds"),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    user_message = HumanMessage(content="Άλλαξε το μήνυμα και κάν' το πιο σύντομο")
+    memory_result = ToolMessage(
+        content="[UNTRUSTED EXTERNAL TOOL RESULT] persisted memory reference",
+        name="search_memory",
+        tool_call_id="tc-memory-read",
+    )
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Alex", "payload_data": "Νέο μήνυμα"},
+            "id": "tc-draft-target-change",
+        }],
+    )
+
+    with (
+        patch("core.approval.save_pending") as save_pending,
+        patch("core.approval._notify_telegram") as notify,
+    ):
+        result = approval_check_node({
+            "messages": [user_message, memory_result, draft_call],
+        })
+
+    assert result["approval_status"] == "blocked"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
+def test_provenance_marked_active_draft_edit_stays_approval_gated(monkeypatch, tmp_path):
+    """External text inside a HumanMessage cannot revise an active draft unchecked."""
+    import config
+    from langchain_core.messages import AIMessage, HumanMessage
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    draft_file.write_text(
+        json.dumps(
+            {
+                "target_name": "Sofia",
+                "message": "Παλιό μήνυμα",
+                "status": "pending",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "expires_at": (datetime.now() + timedelta(minutes=30)).isoformat(timespec="seconds"),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    external_reply = AIMessage(
+        content="A prior news summary.",
+        additional_kwargs=external_content_history_metadata(["get_news"]),
+    )
+    user_message = HumanMessage(
+        content="Άλλαξε το μήνυμα",
+        additional_kwargs=external_content_history_metadata(["user_provided_asset"]),
+    )
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Sofia", "payload_data": "Μήνυμα"},
+            "id": "tc-provenance-active-draft-edit",
+        }],
+    )
+
+    with (
+        patch("core.approval.save_pending") as save_pending,
+        patch("core.approval._notify_telegram") as notify,
+    ):
+        result = approval_check_node({
+            "messages": [external_reply, user_message, draft_call],
+        })
+
+    assert result["approval_status"] == "pending"
+    save_pending.assert_called_once()
+    notify.assert_called_once()

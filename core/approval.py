@@ -106,22 +106,76 @@ def _effective_risk(tc: dict) -> str:
 def _is_accepted_routine_messenger_draft_creation(
     tool_call: ToolCall,
     prior_messages: Sequence[BaseMessage],
+    *,
+    routine_draft_offer_authorized: bool | None = None,
 ) -> bool:
     """Return whether a trusted routine acceptance authorizes a draft write."""
     if tool_call.get("name") != "relay_local_payload":
         return False
     from services.messenger_intent import has_accepted_routine_draft_offer
-    return has_accepted_routine_draft_offer(prior_messages)
+    return has_accepted_routine_draft_offer(
+        prior_messages,
+        state_authorized=routine_draft_offer_authorized,
+    )
+
+
+def _is_trusted_active_messenger_draft_edit(
+    tool_call: ToolCall,
+    prior_messages: Sequence[BaseMessage],
+    *,
+    context_isolated: bool = False,
+) -> bool:
+    """Return whether a clean direct message safely revises the active draft."""
+    if tool_call.get("name") != "relay_local_payload":
+        return False
+    if not context_isolated:
+        return False
+
+    from core.messenger_draft import active_draft_status
+    from core.untrusted_content import external_content_source_names, is_direct_user_message
+    from services.messenger_intent import is_contextually_grounded_active_draft_edit
+    from tools.web import remove_accents
+
+    args = tool_call.get("args", {})
+    if not isinstance(args, dict):
+        return False
+    active, _, draft = active_draft_status()
+    if not active or not isinstance(draft, dict):
+        return False
+
+    draft_target = remove_accents(str(draft.get("target_name", "")).strip())
+    requested_target = remove_accents(str(args.get("target_entity", "")).strip())
+    if not draft_target or requested_target != draft_target:
+        return False
+
+    existing_image = os.path.normcase(os.path.normpath(str(draft.get("image_path", "")).strip()))
+    requested_image = os.path.normcase(os.path.normpath(str(args.get("image_path", "")).strip()))
+    if requested_image != existing_image:
+        return False
+
+    for message in reversed(prior_messages):
+        if is_direct_user_message(message):
+            if external_content_source_names(getattr(message, "additional_kwargs", {})):
+                return False
+            return is_contextually_grounded_active_draft_edit(
+                str(getattr(message, "content", "")),
+                prior_messages,
+            )
+    return False
 
 def _is_explicit_messenger_draft_creation(
     tool_call: ToolCall,
     prior_messages: Sequence[BaseMessage],
+    *,
+    routine_draft_offer_authorized: bool | None = None,
+    active_draft_edit_context_isolated: bool = False,
 ) -> bool:
     """Return whether a user explicitly requested the reversible Messenger draft write.
 
-    This only exempts ``relay_local_payload`` from the *stale* external-context
-    escalation. Same-turn external tool results remain blocked, and sending a
-    saved draft still goes through the separate CRITICAL approval path.
+    This only exempts ``relay_local_payload`` from the external-context
+    escalation. A trusted active-draft edit is also permitted after an
+    incidental read because the user must still review the draft before the
+    separate CRITICAL send path can run.
     """
     if tool_call.get("name") != "relay_local_payload":
         return False
@@ -130,12 +184,20 @@ def _is_explicit_messenger_draft_creation(
         external_content_source_names,
         is_direct_user_message,
     )
-    from services.messenger_intent import (
-        has_accepted_routine_draft_offer,
-        is_explicit_draft_creation_request,
-    )
+    from services.messenger_intent import is_explicit_draft_creation_request
 
-    if _is_accepted_routine_messenger_draft_creation(tool_call, prior_messages):
+    if _is_accepted_routine_messenger_draft_creation(
+        tool_call,
+        prior_messages,
+        routine_draft_offer_authorized=routine_draft_offer_authorized,
+    ):
+        return True
+
+    if _is_trusted_active_messenger_draft_edit(
+        tool_call,
+        prior_messages,
+        context_isolated=active_draft_edit_context_isolated,
+    ):
         return True
 
     for message in reversed(prior_messages):
@@ -389,6 +451,10 @@ def approval_check_node(state):
     last_msg = state["messages"][-1]
     tool_calls = getattr(last_msg, "tool_calls", [])
     prior_messages = state["messages"][:-1]
+    routine_draft_offer_authorized = state.get("routine_draft_offer_authorized")
+    if routine_draft_offer_authorized is not None:
+        routine_draft_offer_authorized = routine_draft_offer_authorized is True
+    active_draft_edit_context_isolated = state.get("active_draft_edit_context_isolated") is True
 
     if not tool_calls:
         return {"approval_status": "ok"}
@@ -410,7 +476,16 @@ def approval_check_node(state):
         for tc in tool_calls:
             if (
                 not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
-                and not _is_accepted_routine_messenger_draft_creation(tc, prior_messages)
+                and not _is_accepted_routine_messenger_draft_creation(
+                    tc,
+                    prior_messages,
+                    routine_draft_offer_authorized=routine_draft_offer_authorized,
+                )
+                and not _is_trusted_active_messenger_draft_edit(
+                    tc,
+                    prior_messages,
+                    context_isolated=active_draft_edit_context_isolated,
+                )
                 and tc["id"] not in blocked_call_ids
             ):
                 blocked_entries.append((
@@ -427,7 +502,12 @@ def approval_check_node(state):
         if (
             external_content_is_active
             and not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
-            and not _is_explicit_messenger_draft_creation(tc, prior_messages)
+            and not _is_explicit_messenger_draft_creation(
+                tc,
+                prior_messages,
+                routine_draft_offer_authorized=routine_draft_offer_authorized,
+                active_draft_edit_context_isolated=active_draft_edit_context_isolated,
+            )
             and not _is_direct_user_meal_log(tc, prior_messages)
             and tc["id"] not in blocked_call_ids
         )
@@ -539,6 +619,28 @@ def approval_check_node(state):
         "approval_status": "pending",
         "messages": tool_messages,
     }
+
+
+def consume_successful_routine_draft_authorization(state: dict) -> dict:
+    """Consume a routine-draft authorization only after its draft write succeeds."""
+    if state.get("routine_draft_offer_authorized") is not True:
+        return {}
+
+    from core.utils import clean_message, looks_like_terminal_messenger_draft_result
+
+    for message in reversed(state.get("messages", [])):
+        message_type = getattr(message, "type", "")
+        if message_type == "tool":
+            if getattr(message, "name", "") != "relay_local_payload":
+                continue
+            if looks_like_terminal_messenger_draft_result(
+                clean_message(getattr(message, "content", "")),
+            ):
+                return {"routine_draft_offer_authorized": False}
+            continue
+        if message_type == "ai" and getattr(message, "tool_calls", None):
+            break
+    return {}
 
 
 def _args_preview(args: dict) -> str:
