@@ -181,6 +181,36 @@ class TestRealGeminiAPIAdapterBoundary:
         out = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
         assert out == "Gemini transcribed voice"
 
+    @patch("google.genai.Client")
+    def test_generate_image_success(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_img = MagicMock()
+        mock_img.image_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00imagen_bytes"
+        mock_resp.generated_images = [MagicMock(image=mock_img)]
+        mock_client.models.generate_images.return_value = mock_resp
+        mock_client_cls.return_value = mock_client
+
+        out = self.adapter.generate_image("A scenic sunset")
+        assert out == b"\xff\xd8\xff\xe0\x00\x10JFIF\x00imagen_bytes"
+
+    @patch("google.genai.Client")
+    def test_generate_image_auth_and_rate_limit_errors(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+
+        # Auth Error
+        mock_client.models.generate_images.side_effect = Exception("403 PERMISSION_DENIED: Imagen API access denied")
+        with pytest.raises(ProviderAuthError) as exc_auth:
+            self.adapter.generate_image("prompt")
+        assert exc_auth.value.provider == "gemini"
+
+        # Rate Limit Error
+        mock_client.models.generate_images.side_effect = Exception("429 RESOURCE_EXHAUSTED: Daily quota exceeded")
+        with pytest.raises(RateLimitError) as exc_rate:
+            self.adapter.generate_image("prompt")
+        assert exc_rate.value.provider == "gemini"
+
     @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_documents")
     def test_embed_text_success(self, mock_embed):
         mock_embed.return_value = [[0.05] * 768]
@@ -217,6 +247,54 @@ class TestRealVertexAIAdapterBoundary:
 
         text_out = self.adapter.generate_text("Hello Vertex")
         assert text_out == "Vertex AI response"
+
+        vision_out = self.adapter.analyze_vision("Analyze blueprint", b"fake_blueprint_bytes")
+        assert vision_out == "Vertex AI response"
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_success(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = "Vertex transcribed audio"
+        mock_client.models.generate_content.return_value = mock_resp
+        mock_client_cls.return_value = mock_client
+
+        out = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
+        assert out == "Vertex transcribed audio"
+
+    @patch("google.genai.Client")
+    def test_generate_image_success(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_img = MagicMock()
+        mock_img.image_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00vertex_imagen_bytes"
+        mock_resp.generated_images = [MagicMock(image=mock_img)]
+        mock_client.models.generate_images.return_value = mock_resp
+        mock_client_cls.return_value = mock_client
+
+        out = self.adapter.generate_image("A futuristic city")
+        assert out == b"\xff\xd8\xff\xe0\x00\x10JFIF\x00vertex_imagen_bytes"
+
+    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_documents")
+    def test_embed_text_success(self, mock_embed):
+        mock_embed.return_value = [[0.03] * 768, [0.04] * 768]
+        vecs = self.adapter.embed_text(["doc a", "doc b"])
+        assert len(vecs) == 2
+        assert len(vecs[0]) == 768
+
+    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_query")
+    def test_embed_query_success(self, mock_query):
+        mock_query.return_value = [0.09] * 768
+        vecs = self.adapter.embed_text(["single query"], is_query=True)
+        assert len(vecs) == 1
+        assert len(vecs[0]) == 768
+
+    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_documents")
+    def test_embed_text_auth_error(self, mock_embed):
+        mock_embed.side_effect = Exception("403 PERMISSION_DENIED: Vertex Embeddings API disabled")
+        with pytest.raises(ProviderAuthError) as exc_auth:
+            self.adapter.embed_text(["test text"])
+        assert exc_auth.value.provider == "vertex"
 
     @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
     def test_auth_and_rate_limit_errors(self, mock_invoke):
@@ -289,6 +367,9 @@ class TestBrainBackwardCompatibility:
         assert hasattr(brain, "llm_heavy")
         assert hasattr(brain, "FAST_MODEL")
         assert hasattr(brain, "HEAVY_MODEL")
+        assert hasattr(brain, "DEFAULT_GEMINI_FAST_MODEL")
+        assert hasattr(brain, "DEFAULT_GEMINI_HEAVY_MODEL")
+        assert hasattr(brain, "_google_model_from_environment")
         assert hasattr(brain, "safe_llm_invoke")
         assert hasattr(brain, "get_active_provider_adapter")
 

@@ -14,25 +14,20 @@ from google import genai
 # Ignore warnings to keep the terminal clean
 warnings.filterwarnings("ignore")
 
+from core.ai_provider import (
+    AIProviderAdapter,
+    DEFAULT_GEMINI_FAST_MODEL,
+    DEFAULT_GEMINI_HEAVY_MODEL,
+    get_provider_adapter,
+    google_model_from_environment,
+    resolve_provider_models,
+)
+
 # 1. Base Model Definitions
 _provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
+_google_model_from_environment = google_model_from_environment
+FAST_MODEL, HEAVY_MODEL = resolve_provider_models(_provider, emit_warnings=True)
 
-DEFAULT_GEMINI_FAST_MODEL = "gemini-3.5-flash"
-DEFAULT_GEMINI_HEAVY_MODEL = "gemini-3.1-pro-preview"
-
-
-def _google_model_from_environment(variable_name: str, default_model: str) -> str:
-    """Return an optional Google-model override, surfacing active overrides at startup."""
-    configured_model = os.getenv(variable_name, "").strip()
-    if not configured_model:
-        return default_model
-    if configured_model != default_model:
-        print(
-            "\033[93m[Brain]: Google model override active "
-            f"({variable_name}={configured_model!r}; default={default_model!r}). "
-            "Verify that the configured Gemini model is available.\033[0m",
-        )
-    return configured_model
 
 def _resolve_gemini_safety_threshold() -> HarmBlockThreshold:
     """Return the configured HarmBlockThreshold, defaulting to BLOCK_NONE."""
@@ -70,27 +65,17 @@ console = Console()
 
 if _provider == "openai":
     from langchain_openai import ChatOpenAI
-    FAST_MODEL = "gpt-4o-mini"
-    HEAVY_MODEL = "gpt-4o"
     llm = ChatOpenAI(model=FAST_MODEL, temperature=0.7, api_key=config.OPENAI_API_KEY)
     llm_heavy = ChatOpenAI(model=HEAVY_MODEL, temperature=0.1, api_key=config.OPENAI_API_KEY)
     print("\033[92m[Brain]: OpenAI Engines Loaded\033[0m")
 
 elif _provider == "anthropic":
     from langchain_anthropic import ChatAnthropic
-    FAST_MODEL = "claude-3-5-haiku-latest"
-    HEAVY_MODEL = "claude-3-5-sonnet-latest"
     llm = ChatAnthropic(model=FAST_MODEL, temperature=0.7, api_key=config.ANTHROPIC_API_KEY)
     llm_heavy = ChatAnthropic(model=HEAVY_MODEL, temperature=0.1, api_key=config.ANTHROPIC_API_KEY)
     print("\033[92m[Brain]: Anthropic Engines Loaded\033[0m")
 
 elif _provider == "gemini":
-    FAST_MODEL = _google_model_from_environment(
-        "ASTAKOS_GEMINI_FAST_MODEL", DEFAULT_GEMINI_FAST_MODEL,
-    )
-    HEAVY_MODEL = _google_model_from_environment(
-        "ASTAKOS_GEMINI_HEAVY_MODEL", DEFAULT_GEMINI_HEAVY_MODEL,
-    )
     llm = ChatGoogleGenerativeAI(
         model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety, api_key=config.GEMINI_API_KEY
     )
@@ -102,12 +87,6 @@ elif _provider == "gemini":
     print("\033[92m[Brain]: Gemini Engines Loaded (API Key)\033[0m")
 
 else:  # default to vertex
-    FAST_MODEL = _google_model_from_environment(
-        "ASTAKOS_GEMINI_FAST_MODEL", DEFAULT_GEMINI_FAST_MODEL,
-    )
-    HEAVY_MODEL = _google_model_from_environment(
-        "ASTAKOS_GEMINI_HEAVY_MODEL", DEFAULT_GEMINI_HEAVY_MODEL,
-    )
     llm = ChatGoogleGenerativeAI(
         model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety,
         vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
@@ -120,8 +99,6 @@ else:  # default to vertex
         vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
     )
     print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI)\033[0m")
-
-from core.ai_provider import AIProviderAdapter, get_provider_adapter
 
 _active_provider_adapter: AIProviderAdapter | None = None
 

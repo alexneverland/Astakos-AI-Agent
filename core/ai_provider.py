@@ -23,10 +23,25 @@ DEFAULT_GEMINI_FAST_MODEL = "gemini-3.5-flash"
 DEFAULT_GEMINI_HEAVY_MODEL = "gemini-3.1-pro-preview"
 
 
+def google_model_from_environment(variable_name: str, default_model: str, emit_warning: bool = False) -> str:
+    """Return an optional Google-model override, surfacing active overrides at startup if requested."""
+    configured_model = os.getenv(variable_name, "").strip()
+    if not configured_model:
+        return default_model
+    if emit_warning and configured_model != default_model:
+        print(
+            "\033[93m[Brain]: Google model override active "
+            f"({variable_name}={configured_model!r}; default={default_model!r}). "
+            "Verify that the configured Gemini model is available.\033[0m",
+        )
+    return configured_model
+
+
 def resolve_provider_models(
     provider_name: str,
     fast_override: str | None = None,
     heavy_override: str | None = None,
+    emit_warnings: bool = False,
 ) -> tuple[str, str]:
     """Return (fast_model, heavy_model) for the given provider without hardcoded divergence."""
     provider = (provider_name or "").strip().lower()
@@ -35,10 +50,12 @@ def resolve_provider_models(
     elif provider == "anthropic":
         return (fast_override or "claude-3-5-haiku-latest", heavy_override or "claude-3-5-sonnet-latest")
     elif provider in ("gemini", "vertex"):
-        env_fast = os.getenv("ASTAKOS_GEMINI_FAST_MODEL", "").strip()
-        env_heavy = os.getenv("ASTAKOS_GEMINI_HEAVY_MODEL", "").strip()
-        fast = fast_override or env_fast or DEFAULT_GEMINI_FAST_MODEL
-        heavy = heavy_override or env_heavy or DEFAULT_GEMINI_HEAVY_MODEL
+        fast = fast_override or google_model_from_environment(
+            "ASTAKOS_GEMINI_FAST_MODEL", DEFAULT_GEMINI_FAST_MODEL, emit_warning=emit_warnings
+        )
+        heavy = heavy_override or google_model_from_environment(
+            "ASTAKOS_GEMINI_HEAVY_MODEL", DEFAULT_GEMINI_HEAVY_MODEL, emit_warning=emit_warnings
+        )
         return (fast, heavy)
     return (fast_override or "fast-model", heavy_override or "heavy-model")
 
