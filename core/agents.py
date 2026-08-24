@@ -383,10 +383,10 @@ def chat_agent_node(state: AgentState):
             latest_user_text = clean_message(getattr(msg, "content", ""))
             break
 
-    from services.messenger_intent import is_active_draft_edit_intent
+    from services.messenger_intent import is_unambiguous_active_draft_edit_intent
     active_draft_edit_context_isolated = (
         _has_active_messenger_draft()
-        and is_active_draft_edit_intent(latest_user_text)
+        and is_unambiguous_active_draft_edit_intent(latest_user_text)
     )
     prompt_history = (
         _isolate_active_draft_edit_history(history)
@@ -434,7 +434,7 @@ def chat_agent_node(state: AgentState):
         prompt_history,
         system_prompt_text,
         channel=state.get("channel"),
-        include_memory_context=not active_draft_edit_context_isolated,
+        include_persisted_context=not active_draft_edit_context_isolated,
     )
 
     safe_history = sanitize_history_for_gemini(prompt_history)
@@ -450,7 +450,6 @@ def chat_agent_node(state: AgentState):
     from tools.web import execute_local_pipeline, relay_local_payload, search_supermarket_prices
     from services.messenger_intent import (
         has_accepted_routine_draft_offer,
-        is_active_draft_edit_intent,
         is_create_draft_intent,
     )
 
@@ -805,11 +804,11 @@ def web_agent_node(state: AgentState):
             "current_agent": "Web_Agent",
         }
 
-    from services.messenger_intent import is_active_draft_edit_intent
+    from services.messenger_intent import is_unambiguous_active_draft_edit_intent
 
     active_draft_edit_context_isolated = (
         _has_active_messenger_draft()
-        and is_active_draft_edit_intent(latest_user_text)
+        and is_unambiguous_active_draft_edit_intent(latest_user_text)
     )
     prompt_history = (
         _isolate_active_draft_edit_history(history)
@@ -823,7 +822,7 @@ def web_agent_node(state: AgentState):
         prompt_history,
         system_base,
         channel=state.get("channel"),
-        include_memory_context=not active_draft_edit_context_isolated,
+        include_persisted_context=not active_draft_edit_context_isolated,
     )
 
     safe_history = sanitize_history_for_gemini(prompt_history)
@@ -847,7 +846,6 @@ def web_agent_node(state: AgentState):
     from tools.web import execute_local_pipeline
     from services.messenger_intent import (
         has_accepted_routine_draft_offer,
-        is_active_draft_edit_intent,
         is_create_draft_intent,
     )
     from astakos_skills.morning_briefing import morning_briefing

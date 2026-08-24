@@ -1,6 +1,7 @@
 from services.messenger_intent import (
     classify_messenger_intent,
     is_active_draft_edit_intent,
+    is_unambiguous_active_draft_edit_intent,
     is_draft_offer_acceptance,
     is_create_draft_intent,
     is_explicit_draft_creation_request,
@@ -99,6 +100,15 @@ def test_active_draft_edit_intent_requires_a_configured_revision_request() -> No
     assert is_active_draft_edit_intent("Change it to say I'm not coming") is True
     assert is_active_draft_edit_intent('Change it to "Don\'t wait for me"') is True
     assert is_active_draft_edit_intent("Σε τρεις μέρες φεύγουμε Γεωργία") is False
+
+
+def test_unambiguous_active_draft_edit_intent_keeps_generic_weather_questions_out() -> None:
+    """An active draft must not claim generic comparative questions."""
+    assert is_unambiguous_active_draft_edit_intent("Κάν' το πιο ζεστό") is True
+    assert is_unambiguous_active_draft_edit_intent("Άλλαξε το μήνυμα") is True
+    assert is_unambiguous_active_draft_edit_intent("Make it shorter") is True
+    assert is_unambiguous_active_draft_edit_intent("θα είναι πιο ζεστό αύριο;") is False
+    assert is_unambiguous_active_draft_edit_intent("Will it be warmer tomorrow?") is False
 
 
 def test_explicit_draft_creation_request_rejects_negated_requests() -> None:

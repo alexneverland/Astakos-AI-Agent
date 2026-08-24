@@ -623,7 +623,7 @@ def build_prompt(
     agent_role="",
     channel: str | None = None,
     *,
-    include_memory_context: bool = True,
+    include_persisted_context: bool = True,
 ) -> str:
     """The main Prompt synthesis engine."""
     from config import WORKING_MEMORY_FILE, BASE_DIR
@@ -651,7 +651,7 @@ def build_prompt(
     semantic_k = k_value if len(clean_text) > 10 and not is_routine_command and not has_skip_keyword else 0
     recent_limit = 6 if channel and not has_current_photo else 0
 
-    if include_memory_context and (semantic_k > 0 or recent_limit > 0):
+    if include_persisted_context and (semantic_k > 0 or recent_limit > 0):
         try:
             from memory.context_builder import build_memory_context
 
@@ -669,7 +669,7 @@ def build_prompt(
                 memory_context_str += "⚠️ Do not say 'according to my memory', just act based on it.\n"
         except Exception as e:
             print(f"\033[91m⚠️ Memory Context Error: {e}\033[0m")
-    elif has_skip_keyword:
+    elif include_persisted_context and has_skip_keyword:
         print("\033[93m[Mastro-Radar]: ⚡ Skipping Semantic Search due to Skip Keyword! (Live Data Mode)\033[0m")
 
     prompt = f"{identity}\n"
@@ -687,7 +687,7 @@ def build_prompt(
             "If past memories conflict with what you see, ignore the history.\n\n"
         )
 
-    session_hint = load_last_session_hint()
+    session_hint = load_last_session_hint() if include_persisted_context else ""
     if session_hint:
         prompt += f"[CONTINUED FROM PREVIOUS SESSION]\n{session_hint}\n\n"
 
@@ -705,7 +705,7 @@ def build_prompt(
     elif len(clean_text) > 15 and not is_routine_command:
         should_inject_goals = True
 
-    if should_inject_goals:
+    if include_persisted_context and should_inject_goals:
         try:
             from memory.vector_store import get_active_goals
             active_goals = get_active_goals()
@@ -733,11 +733,11 @@ def build_prompt(
         except Exception as _e:
             print(f"⚠️ [Goals Context Error]: {_e}")
 
-    cap_context = get_capability_context()
+    cap_context = get_capability_context() if include_persisted_context else ""
     if cap_context:
         prompt += f"[SELF-AWARENESS]\n{cap_context}\n\n"
 
-    if os.path.exists(WORKING_MEMORY_FILE):
+    if include_persisted_context and os.path.exists(WORKING_MEMORY_FILE):
         try:
             with open(WORKING_MEMORY_FILE, "r", encoding="utf-8") as f:
                 work_mem = json.load(f)

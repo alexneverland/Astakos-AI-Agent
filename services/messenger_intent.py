@@ -165,6 +165,21 @@ def is_active_draft_edit_intent(text: str) -> bool:
     return False
 
 
+def is_unambiguous_active_draft_edit_intent(text: str) -> bool:
+    """Return whether text clearly refers to revising the active Messenger draft."""
+    if not is_active_draft_edit_intent(text):
+        return False
+
+    normalized = _normalize(text)
+    explicit_references = (
+        "message", "μηνυμα", "draft", "προσχεδιο",
+        "αλλαξε το", "διορθωσε το", "καν το", "καντο",
+        "change it", "edit it", "rewrite it", "make it", "translate it",
+        "change the ending", "edit the ending",
+    )
+    return _has_token_or_phrase(normalized, explicit_references)
+
+
 def is_explicit_draft_creation_request(text: str) -> bool:
     """Return whether text has affirmative configured draft action and object terms."""
     normalized = _normalize(text)
