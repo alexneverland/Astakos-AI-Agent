@@ -60,6 +60,11 @@ def resolve_provider_models(
     return (fast_override or "fast-model", heavy_override or "heavy-model")
 
 
+def resolve_vertex_location(location: str | None = None) -> str:
+    """Return the legacy Vertex location, allowing an explicit adapter override."""
+    return os.getenv("LOCATION", "global") if location is None else location
+
+
 def resolve_gemini_safety_threshold() -> Any:
     """Return the configured HarmBlockThreshold, defaulting to BLOCK_NONE."""
     from langchain_google_genai import HarmBlockThreshold
@@ -487,8 +492,8 @@ class GeminiAPIAdapter(AIProviderAdapter):
         try:
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
             emb_client = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=self.api_key)
-            if is_query and len(texts) == 1:
-                return [emb_client.embed_query(texts[0])]
+            if is_query:
+                return [emb_client.embed_query(text) for text in texts]
             return emb_client.embed_documents(list(texts))
         except Exception as e:
             self._handle_exception(e)
@@ -497,7 +502,15 @@ class GeminiAPIAdapter(AIProviderAdapter):
         if isinstance(e, AIProviderError):
             raise e
         err_msg = str(e).lower()
-        if "401" in err_msg or "unauthorized" in err_msg or "permission_denied" in err_msg or "403" in err_msg:
+        if (
+            "401" in err_msg
+            or "unauthorized" in err_msg
+            or "permission_denied" in err_msg
+            or "403" in err_msg
+            or "api_key_invalid" in err_msg
+            or "api key not valid" in err_msg
+            or "invalid api key" in err_msg
+        ):
             raise ProviderAuthError("gemini", str(e), original_error=e) from e
         if "429" in err_msg or "quota" in err_msg or "resource_exhausted" in err_msg:
             raise RateLimitError("gemini", str(e), original_error=e) from e
@@ -518,7 +531,7 @@ class VertexAIAdapter(AIProviderAdapter):
         heavy_model: str | None = None,
     ):
         self.project_id = project_id or getattr(config, "PROJECT_ID", "your-gcp-project-id")
-        self.location = location or getattr(config, "LOCATION", "global")
+        self.location = resolve_vertex_location(location)
         self.fast_model, self.heavy_model = resolve_provider_models("vertex", fast_model, heavy_model)
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
@@ -640,8 +653,8 @@ class VertexAIAdapter(AIProviderAdapter):
                 project=self.project_id,
                 location=self.location,
             )
-            if is_query and len(texts) == 1:
-                return [emb_client.embed_query(texts[0])]
+            if is_query:
+                return [emb_client.embed_query(text) for text in texts]
             return emb_client.embed_documents(list(texts))
         except Exception as e:
             self._handle_exception(e)

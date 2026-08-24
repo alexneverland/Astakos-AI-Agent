@@ -24,6 +24,7 @@ from core.ai_provider import (
     google_model_from_environment,
     resolve_gemini_safety_threshold,
     resolve_provider_models,
+    resolve_vertex_location,
 )
 
 # 1. Base Model Definitions
@@ -50,6 +51,7 @@ _resolve_gemini_safety_threshold = resolve_gemini_safety_threshold
 
 # [MASTRO-SHIELD v3]: Safety for Google models
 custom_safety = get_gemini_safety_settings()
+VERTEX_LOCATION = resolve_vertex_location()
 
 vertex_client = None
 console = Console()
@@ -80,14 +82,14 @@ elif _provider == "gemini":
 else:  # default to vertex
     llm = ChatGoogleGenerativeAI(
         model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety,
-        vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
+        vertexai=True, project=config.PROJECT_ID, location=VERTEX_LOCATION
     )
     llm_heavy = ChatGoogleGenerativeAI(
         model=HEAVY_MODEL, temperature=0.1, safety_settings=custom_safety,
-        vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
+        vertexai=True, project=config.PROJECT_ID, location=VERTEX_LOCATION
     )
     vertex_client = genai.Client(
-        vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
+        vertexai=True, project=config.PROJECT_ID, location=VERTEX_LOCATION
     )
     print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI)\033[0m")
 

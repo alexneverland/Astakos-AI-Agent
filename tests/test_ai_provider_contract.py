@@ -25,6 +25,7 @@ from core.ai_provider import (
     get_gemini_safety_settings,
     resolve_gemini_safety_threshold,
     resolve_provider_models,
+    resolve_vertex_location,
 )
 from tests.fixtures.provider_mocks import (
     MockOpenAIAdapter,
@@ -102,6 +103,13 @@ class TestAIProviderContractAndResolution:
         settings = get_gemini_safety_settings()
         assert settings[HarmCategory.HARM_CATEGORY_HARASSMENT] == HarmBlockThreshold.BLOCK_ONLY_HIGH
         assert settings[HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY] == HarmBlockThreshold.BLOCK_ONLY_HIGH
+
+    def test_vertex_location_resolution_matches_legacy_environment_rule(self, monkeypatch):
+        monkeypatch.delenv("LOCATION", raising=False)
+        assert resolve_vertex_location() == "global"
+        monkeypatch.setenv("LOCATION", "europe-west4")
+        assert resolve_vertex_location() == "europe-west4"
+        assert resolve_vertex_location("us-central1") == "us-central1"
 
 
 class TestRealOpenAIAdapterBoundary:
@@ -282,6 +290,14 @@ class TestRealGeminiAPIAdapterBoundary:
         assert len(vecs) == 1
         assert len(vecs[0]) == 768
 
+    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_query")
+    def test_embed_query_batch_uses_query_mode_for_every_text(self, mock_query):
+        mock_query.side_effect = [[0.1] * 768, [0.2] * 768]
+        vecs = self.adapter.embed_text(["query one", "query two"], is_query=True)
+        assert vecs == [[0.1] * 768, [0.2] * 768]
+        assert mock_query.call_args_list[0].args == ("query one",)
+        assert mock_query.call_args_list[1].args == ("query two",)
+
     @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
     def test_auth_and_rate_limit_errors(self, mock_invoke):
         # 403 Permission Denied
@@ -293,6 +309,13 @@ class TestRealGeminiAPIAdapterBoundary:
         # 429 Quota Exceeded
         mock_invoke.side_effect = Exception("429 RESOURCE_EXHAUSTED: Quota exceeded")
         with pytest.raises(RateLimitError) as exc_info:
+            self.adapter.generate_text("test")
+        assert exc_info.value.provider == "gemini"
+
+    @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
+    def test_invalid_api_key_error_maps_to_auth_error(self, mock_invoke):
+        mock_invoke.side_effect = Exception("400 API_KEY_INVALID: API key not valid")
+        with pytest.raises(ProviderAuthError) as exc_info:
             self.adapter.generate_text("test")
         assert exc_info.value.provider == "gemini"
 
@@ -375,6 +398,14 @@ class TestRealVertexAIAdapterBoundary:
         vecs = self.adapter.embed_text(["single query"], is_query=True)
         assert len(vecs) == 1
         assert len(vecs[0]) == 768
+
+    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_query")
+    def test_embed_query_batch_uses_query_mode_for_every_text(self, mock_query):
+        mock_query.side_effect = [[0.1] * 768, [0.2] * 768]
+        vecs = self.adapter.embed_text(["query one", "query two"], is_query=True)
+        assert vecs == [[0.1] * 768, [0.2] * 768]
+        assert mock_query.call_args_list[0].args == ("query one",)
+        assert mock_query.call_args_list[1].args == ("query two",)
 
     @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_documents")
     def test_embed_text_auth_error(self, mock_embed):
