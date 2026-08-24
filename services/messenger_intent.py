@@ -184,9 +184,9 @@ def is_unambiguous_active_draft_edit_intent(text: str) -> bool:
 
 
 def has_immediately_preceding_messenger_draft_write(messages: Iterable[Any]) -> bool:
-    """Return whether the latest user turn directly follows a successful draft write."""
+    """Return whether the latest user turn directly follows a saved-draft display."""
     from core.untrusted_content import is_direct_user_message
-    from core.utils import clean_message, looks_like_terminal_messenger_draft_result
+    from core.utils import clean_message, looks_like_messenger_draft_ready_reply
 
     found_latest_user = False
     for message in reversed(list(messages)):
@@ -198,9 +198,8 @@ def has_immediately_preceding_messenger_draft_write(messages: Iterable[Any]) -> 
         if not found_latest_user:
             continue
         if (
-            getattr(message, "type", "") == "tool"
-            and getattr(message, "name", "") == "relay_local_payload"
-            and looks_like_terminal_messenger_draft_result(
+            getattr(message, "type", "") in {"ai", "assistant"}
+            and looks_like_messenger_draft_ready_reply(
                 clean_message(getattr(message, "content", "")),
             )
         ):

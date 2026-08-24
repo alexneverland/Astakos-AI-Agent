@@ -115,32 +115,34 @@ def test_unambiguous_active_draft_edit_intent_keeps_generic_weather_questions_ou
 
 def test_recent_draft_write_allows_immediate_shorthand_edit_only() -> None:
     """A shorthand edit is grounded only as the next user reply to a saved draft."""
-    from langchain_core.messages import HumanMessage, ToolMessage
+    from langchain_core.messages import AIMessage, HumanMessage
 
-    draft_write = ToolMessage(
-        content="✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: Καλημέρα",
-        name="relay_local_payload",
-        tool_call_id="tc-draft",
+    draft_display = AIMessage(
+        content=(
+            "Έτοιμο το προσχέδιο, μάστορα:\n\n"
+            "«Καλημέρα»\n\n"
+            "Το αποθήκευσα. Θέλεις αλλαγές ή να το στείλω;"
+        ),
     )
     immediate_edit = HumanMessage(content="Κάν' το πιο ζεστό")
     unrelated_turn = HumanMessage(content="Τι καιρό θα κάνει αύριο;")
 
     assert has_immediately_preceding_messenger_draft_write([
-        draft_write,
+        draft_display,
         immediate_edit,
     ]) is True
     assert is_contextually_grounded_active_draft_edit(
         "Κάν' το πιο ζεστό",
-        [draft_write, immediate_edit],
+        [draft_display, immediate_edit],
     ) is True
     assert has_immediately_preceding_messenger_draft_write([
-        draft_write,
+        draft_display,
         unrelated_turn,
         immediate_edit,
     ]) is False
     assert is_contextually_grounded_active_draft_edit(
         "Κάν' το πιο ζεστό",
-        [draft_write, unrelated_turn, immediate_edit],
+        [draft_display, unrelated_turn, immediate_edit],
     ) is False
 
 

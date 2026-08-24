@@ -331,6 +331,15 @@ def looks_like_terminal_messenger_draft_result(text: str) -> bool:
     return content.startswith(t("prompts.ext_draft_2")) or content.startswith(t("prompts.ext_draft_6"))
 
 
+def looks_like_messenger_draft_ready_reply(text: str) -> bool:
+    """Return whether an assistant reply is the standard saved-draft display."""
+    content = clean_message(text).strip()
+    return (
+        t("core.utils.draft_ready").strip() in content
+        and t("prompts.ext_draft_ask_send").strip() in content
+    )
+
+
 def build_messenger_draft_ready_reply(tool_results: list[str]) -> str:
     draft_message = ""
     for raw in tool_results:
