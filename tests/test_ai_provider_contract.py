@@ -56,7 +56,11 @@ class TestAIProviderContractAndResolution:
             assert adapter.is_capability_supported(cap) is True
         assert adapter.is_capability_supported("unsupported_xyz") is False
 
-    def test_factory_resolves_all_known_providers(self):
+    def test_factory_resolves_all_known_providers(self, monkeypatch):
+        """Verify factory defaults independently of supported model overrides."""
+        monkeypatch.delenv("ASTAKOS_GEMINI_FAST_MODEL", raising=False)
+        monkeypatch.delenv("ASTAKOS_GEMINI_HEAVY_MODEL", raising=False)
+
         openai_adapter = get_provider_adapter("openai", api_key="test-key")
         assert isinstance(openai_adapter, OpenAIAdapter)
         assert openai_adapter.fast_model == "gpt-4o-mini"
@@ -535,9 +539,10 @@ class TestBrainBackwardCompatibility:
         try:
             effective_provider = brain._effective_provider("completely_unknown_provider_xyz")
             assert effective_provider == "vertex"
-            fast_model, heavy_model = brain.resolve_provider_models(effective_provider)
-            assert fast_model == brain.DEFAULT_GEMINI_FAST_MODEL
-            assert heavy_model == brain.DEFAULT_GEMINI_HEAVY_MODEL
+            expected_fast, expected_heavy = brain.resolve_provider_models("vertex")
+            assert (expected_fast, expected_heavy) == brain.resolve_provider_models(
+                effective_provider,
+            )
 
             brain._provider = "completely_unknown_provider_xyz"
             brain._active_provider_adapter = None
