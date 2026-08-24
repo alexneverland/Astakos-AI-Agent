@@ -379,3 +379,17 @@ class TestBrainBackwardCompatibility:
         adapter2 = get_active_provider_adapter()
         assert adapter1 is adapter2
         assert isinstance(adapter1, AIProviderAdapter)
+
+    def test_unknown_provider_in_brain_defaults_to_vertex_adapter(self):
+        import core.brain as brain
+        orig_adapter = brain._active_provider_adapter
+        orig_provider = brain._provider
+        try:
+            brain._provider = "completely_unknown_provider_xyz"
+            brain._active_provider_adapter = None
+            adapter = brain.get_active_provider_adapter()
+            assert isinstance(adapter, VertexAIAdapter)
+            assert adapter.provider_name == "vertex"
+        finally:
+            brain._provider = orig_provider
+            brain._active_provider_adapter = orig_adapter

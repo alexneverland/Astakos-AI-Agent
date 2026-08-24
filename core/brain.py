@@ -104,10 +104,11 @@ _active_provider_adapter: AIProviderAdapter | None = None
 
 
 def get_active_provider_adapter() -> AIProviderAdapter:
-    """Return the active AIProviderAdapter singleton instance."""
+    """Return the active AIProviderAdapter singleton instance, defaulting unknown providers to vertex."""
     global _active_provider_adapter
     if _active_provider_adapter is None:
-        _active_provider_adapter = get_provider_adapter(_provider)
+        effective_provider = _provider if _provider in ("openai", "gemini", "anthropic", "vertex") else "vertex"
+        _active_provider_adapter = get_provider_adapter(effective_provider)
     return _active_provider_adapter
 
 
