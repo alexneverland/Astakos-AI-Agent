@@ -1,11 +1,12 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Tests for AI Provider Capability Adapter Contract
-# Description: Validates typed contracts, errors, and real adapter boundaries (offline)
+# Description: Validates typed contracts, errors, thread-safety, and real adapter boundaries (offline)
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import os
 import pytest
 from unittest.mock import MagicMock, patch
@@ -21,6 +22,8 @@ from core.ai_provider import (
     VertexAIAdapter,
     AnthropicAdapter,
     get_provider_adapter,
+    get_gemini_safety_settings,
+    resolve_gemini_safety_threshold,
     resolve_provider_models,
 )
 from tests.fixtures.provider_mocks import (
@@ -90,6 +93,16 @@ class TestAIProviderContractAndResolution:
         assert gemini_adapter.fast_model == "gemini-custom-fast"
         assert gemini_adapter.heavy_model == "gemini-custom-heavy"
 
+    def test_shared_gemini_safety_settings_resolution(self, monkeypatch):
+        from langchain_google_genai import HarmBlockThreshold, HarmCategory
+        monkeypatch.setenv("ASTAKOS_GEMINI_SAFETY_THRESHOLD", "BLOCK_ONLY_HIGH")
+        threshold = resolve_gemini_safety_threshold()
+        assert threshold == HarmBlockThreshold.BLOCK_ONLY_HIGH
+
+        settings = get_gemini_safety_settings()
+        assert settings[HarmCategory.HARM_CATEGORY_HARASSMENT] == HarmBlockThreshold.BLOCK_ONLY_HIGH
+        assert settings[HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY] == HarmBlockThreshold.BLOCK_ONLY_HIGH
+
 
 class TestRealOpenAIAdapterBoundary:
     """Offline SDK boundary tests for OpenAIAdapter."""
@@ -120,15 +133,40 @@ class TestRealOpenAIAdapterBoundary:
         assert result == "Transcribed test audio"
 
     @patch("requests.post")
-    def test_generate_image_success(self, mock_post):
+    def test_generate_image_aspect_ratios(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         raw_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00dalle_image"
         mock_resp.json.return_value = {"data": [{"b64_json": base64.b64encode(raw_bytes).decode("utf-8")}]}
         mock_post.return_value = mock_resp
 
-        img_bytes = self.adapter.generate_image("A cute lobster")
-        assert img_bytes == raw_bytes
+        # Square 1:1 -> 1024x1024
+        img1 = self.adapter.generate_image("A cute lobster", aspect_ratio="1:1")
+        assert img1 == raw_bytes
+        call_json1 = mock_post.call_args_list[-1][1]["json"]
+        assert call_json1["size"] == "1024x1024"
+
+        # Landscape 16:9 -> 1792x1024
+        img2 = self.adapter.generate_image("A wide landscape", aspect_ratio="16:9")
+        assert img2 == raw_bytes
+        call_json2 = mock_post.call_args_list[-1][1]["json"]
+        assert call_json2["size"] == "1792x1024"
+
+        # Portrait 9:16 -> 1024x1792
+        img3 = self.adapter.generate_image("A tall skyscraper", aspect_ratio="9:16")
+        assert img3 == raw_bytes
+        call_json3 = mock_post.call_args_list[-1][1]["json"]
+        assert call_json3["size"] == "1024x1792"
+
+    @patch("requests.post")
+    def test_generate_image_unsupported_aspect_ratio_raises(self, mock_post):
+        with pytest.raises(CapabilityNotSupportedError) as exc_info:
+            self.adapter.generate_image("A portrait photo", aspect_ratio="4:3")
+        assert exc_info.value.provider == "openai"
+        assert exc_info.value.capability == "image_gen"
+        assert "4:3" in str(exc_info.value)
+        # Ensure no HTTP request was made
+        mock_post.assert_not_called()
 
     @patch("langchain_openai.OpenAIEmbeddings.embed_documents")
     def test_embed_text_success(self, mock_embed):
@@ -151,6 +189,27 @@ class TestRealOpenAIAdapterBoundary:
             self.adapter.generate_text("test")
         assert exc_info.value.provider == "openai"
 
+    @patch("requests.post")
+    def test_explicit_empty_api_key_raises_auth_error(self, mock_post):
+        empty_adapter = OpenAIAdapter(api_key="")
+        with pytest.raises(ProviderAuthError) as exc_text:
+            empty_adapter.generate_text("test")
+        assert exc_text.value.provider == "openai"
+
+        with pytest.raises(ProviderAuthError) as exc_audio:
+            empty_adapter.transcribe_audio(b"audio")
+        assert exc_audio.value.provider == "openai"
+
+        with pytest.raises(ProviderAuthError) as exc_img:
+            empty_adapter.generate_image("prompt")
+        assert exc_img.value.provider == "openai"
+
+        with pytest.raises(ProviderAuthError) as exc_emb:
+            empty_adapter.embed_text(["text"])
+        assert exc_emb.value.provider == "openai"
+
+        mock_post.assert_not_called()
+
 
 class TestRealGeminiAPIAdapterBoundary:
     """Offline SDK boundary tests for GeminiAPIAdapter."""
@@ -169,6 +228,11 @@ class TestRealGeminiAPIAdapterBoundary:
 
         vision_out = self.adapter.analyze_vision("Look at this", b"fake_bytes")
         assert vision_out == "Gemini offline response"
+
+    def test_gemini_adapter_passes_resolved_safety_settings(self):
+        llm = self.adapter._get_llm()
+        assert hasattr(llm, "safety_settings")
+        assert llm.safety_settings is not None
 
     @patch("google.genai.Client")
     def test_transcribe_audio_success(self, mock_client_cls):
@@ -232,6 +296,24 @@ class TestRealGeminiAPIAdapterBoundary:
             self.adapter.generate_text("test")
         assert exc_info.value.provider == "gemini"
 
+    def test_explicit_empty_api_key_raises_auth_error(self):
+        empty_adapter = GeminiAPIAdapter(api_key="")
+        with pytest.raises(ProviderAuthError) as exc_text:
+            empty_adapter.generate_text("test")
+        assert exc_text.value.provider == "gemini"
+
+        with pytest.raises(ProviderAuthError) as exc_audio:
+            empty_adapter.transcribe_audio(b"audio")
+        assert exc_audio.value.provider == "gemini"
+
+        with pytest.raises(ProviderAuthError) as exc_img:
+            empty_adapter.generate_image("prompt")
+        assert exc_img.value.provider == "gemini"
+
+        with pytest.raises(ProviderAuthError) as exc_emb:
+            empty_adapter.embed_text(["text"])
+        assert exc_emb.value.provider == "gemini"
+
 
 class TestRealVertexAIAdapterBoundary:
     """Offline SDK boundary tests for VertexAIAdapter."""
@@ -250,6 +332,11 @@ class TestRealVertexAIAdapterBoundary:
 
         vision_out = self.adapter.analyze_vision("Analyze blueprint", b"fake_blueprint_bytes")
         assert vision_out == "Vertex AI response"
+
+    def test_vertex_adapter_passes_resolved_safety_settings(self):
+        llm = self.adapter._get_llm()
+        assert hasattr(llm, "safety_settings")
+        assert llm.safety_settings is not None
 
     @patch("google.genai.Client")
     def test_transcribe_audio_success(self, mock_client_cls):
@@ -357,6 +444,16 @@ class TestRealAnthropicAdapterBoundary:
             self.adapter.generate_text("test")
         assert exc_info.value.provider == "anthropic"
 
+    def test_explicit_empty_api_key_raises_auth_error(self):
+        empty_adapter = AnthropicAdapter(api_key="")
+        with pytest.raises(ProviderAuthError) as exc_text:
+            empty_adapter.generate_text("test")
+        assert exc_text.value.provider == "anthropic"
+
+        with pytest.raises(ProviderAuthError) as exc_vis:
+            empty_adapter.analyze_vision("look", b"fake_bytes")
+        assert exc_vis.value.provider == "anthropic"
+
 
 class TestBrainBackwardCompatibility:
     """Verifies that core/brain.py retains backward-compatible symbols and integration."""
@@ -370,6 +467,7 @@ class TestBrainBackwardCompatibility:
         assert hasattr(brain, "DEFAULT_GEMINI_FAST_MODEL")
         assert hasattr(brain, "DEFAULT_GEMINI_HEAVY_MODEL")
         assert hasattr(brain, "_google_model_from_environment")
+        assert hasattr(brain, "custom_safety")
         assert hasattr(brain, "safe_llm_invoke")
         assert hasattr(brain, "get_active_provider_adapter")
 
@@ -379,6 +477,25 @@ class TestBrainBackwardCompatibility:
         adapter2 = get_active_provider_adapter()
         assert adapter1 is adapter2
         assert isinstance(adapter1, AIProviderAdapter)
+
+    def test_get_active_provider_adapter_thread_safety(self):
+        import core.brain as brain
+        orig_adapter = brain._active_provider_adapter
+        try:
+            brain._active_provider_adapter = None
+            results = []
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(brain.get_active_provider_adapter) for _ in range(20)]
+                for f in futures:
+                    results.append(f.result())
+
+            # All 20 threads must obtain the exact same singleton instance
+            assert len(results) == 20
+            first_instance = results[0]
+            for inst in results:
+                assert inst is first_instance
+        finally:
+            brain._active_provider_adapter = orig_adapter
 
     def test_unknown_provider_in_brain_defaults_to_vertex_adapter(self):
         import core.brain as brain

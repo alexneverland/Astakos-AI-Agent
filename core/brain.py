@@ -7,6 +7,7 @@ import config
 import warnings
 import os
 import time
+import threading
 from langchain_google_genai import ChatGoogleGenerativeAI, HarmCategory, HarmBlockThreshold
 from rich.console import Console
 from google import genai
@@ -18,8 +19,10 @@ from core.ai_provider import (
     AIProviderAdapter,
     DEFAULT_GEMINI_FAST_MODEL,
     DEFAULT_GEMINI_HEAVY_MODEL,
+    get_gemini_safety_settings,
     get_provider_adapter,
     google_model_from_environment,
+    resolve_gemini_safety_threshold,
     resolve_provider_models,
 )
 
@@ -27,38 +30,11 @@ from core.ai_provider import (
 _provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
 _google_model_from_environment = google_model_from_environment
 FAST_MODEL, HEAVY_MODEL = resolve_provider_models(_provider, emit_warnings=True)
-
-
-def _resolve_gemini_safety_threshold() -> HarmBlockThreshold:
-    """Return the configured HarmBlockThreshold, defaulting to BLOCK_NONE."""
-    raw = os.getenv("ASTAKOS_GEMINI_SAFETY_THRESHOLD", "").strip().upper()
-    if not raw:
-        return HarmBlockThreshold.BLOCK_NONE
-    mapping = {
-        "BLOCK_NONE": HarmBlockThreshold.BLOCK_NONE,
-        "BLOCK_ONLY_HIGH": HarmBlockThreshold.BLOCK_ONLY_HIGH,
-        "BLOCK_MEDIUM_AND_ABOVE": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-        "BLOCK_LOW_AND_ABOVE": HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-    }
-    if raw in mapping:
-        if raw != "BLOCK_NONE":
-            print(f"\033[93m[Brain]: Gemini safety threshold active ({raw}).\033[0m")
-        return mapping[raw]
-    print(
-        f"\033[93m[Brain]: Unknown safety threshold {raw!r}, falling back to BLOCK_NONE.\033[0m"
-    )
-    return HarmBlockThreshold.BLOCK_NONE
-
+_resolve_gemini_safety_threshold = resolve_gemini_safety_threshold
 
 # [MASTRO-SHIELD v3]: Safety for Google models
-_selected_threshold = _resolve_gemini_safety_threshold()
-custom_safety = {
-    HarmCategory.HARM_CATEGORY_HARASSMENT:         _selected_threshold,
-    HarmCategory.HARM_CATEGORY_HATE_SPEECH:        _selected_threshold,
-    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT:  _selected_threshold,
-    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT:  _selected_threshold,
-    HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY:    _selected_threshold,
-}
+_selected_threshold = resolve_gemini_safety_threshold()
+custom_safety = get_gemini_safety_settings()
 
 vertex_client = None
 console = Console()
@@ -101,14 +77,17 @@ else:  # default to vertex
     print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI)\033[0m")
 
 _active_provider_adapter: AIProviderAdapter | None = None
+_adapter_lock = threading.Lock()
 
 
 def get_active_provider_adapter() -> AIProviderAdapter:
-    """Return the active AIProviderAdapter singleton instance, defaulting unknown providers to vertex."""
+    """Return the active AIProviderAdapter singleton instance, defaulting unknown providers to vertex (thread-safe)."""
     global _active_provider_adapter
     if _active_provider_adapter is None:
-        effective_provider = _provider if _provider in ("openai", "gemini", "anthropic", "vertex") else "vertex"
-        _active_provider_adapter = get_provider_adapter(effective_provider)
+        with _adapter_lock:
+            if _active_provider_adapter is None:
+                effective_provider = _provider if _provider in ("openai", "gemini", "anthropic", "vertex") else "vertex"
+                _active_provider_adapter = get_provider_adapter(effective_provider)
     return _active_provider_adapter
 
 

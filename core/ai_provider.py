@@ -16,7 +16,7 @@ import config
 
 
 # ────────────────────────────────────────────────────────────────
-# 1. SHARED MODEL RESOLUTION (Single Source of Truth)
+# 1. SHARED MODEL & SAFETY RESOLUTION (Single Source of Truth)
 # ────────────────────────────────────────────────────────────────
 
 DEFAULT_GEMINI_FAST_MODEL = "gemini-3.5-flash"
@@ -58,6 +58,41 @@ def resolve_provider_models(
         )
         return (fast, heavy)
     return (fast_override or "fast-model", heavy_override or "heavy-model")
+
+
+def resolve_gemini_safety_threshold() -> Any:
+    """Return the configured HarmBlockThreshold, defaulting to BLOCK_NONE."""
+    from langchain_google_genai import HarmBlockThreshold
+    raw = os.getenv("ASTAKOS_GEMINI_SAFETY_THRESHOLD", "").strip().upper()
+    if not raw:
+        return HarmBlockThreshold.BLOCK_NONE
+    mapping = {
+        "BLOCK_NONE": HarmBlockThreshold.BLOCK_NONE,
+        "BLOCK_ONLY_HIGH": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        "BLOCK_MEDIUM_AND_ABOVE": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        "BLOCK_LOW_AND_ABOVE": HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+    }
+    if raw in mapping:
+        if raw != "BLOCK_NONE":
+            print(f"\033[93m[Brain]: Gemini safety threshold active ({raw}).\033[0m")
+        return mapping[raw]
+    print(
+        f"\033[93m[Brain]: Unknown safety threshold {raw!r}, falling back to BLOCK_NONE.\033[0m"
+    )
+    return HarmBlockThreshold.BLOCK_NONE
+
+
+def get_gemini_safety_settings() -> dict[Any, Any]:
+    """Return the dictionary of safety categories mapped to the resolved threshold."""
+    from langchain_google_genai import HarmCategory
+    threshold = resolve_gemini_safety_threshold()
+    return {
+        HarmCategory.HARM_CATEGORY_HARASSMENT:         threshold,
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH:        threshold,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT:  threshold,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT:  threshold,
+        HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY:    threshold,
+    }
 
 
 # ────────────────────────────────────────────────────────────────
@@ -168,7 +203,7 @@ class OpenAIAdapter(AIProviderAdapter):
     supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
 
     def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
-        self.api_key = api_key or getattr(config, "OPENAI_API_KEY", "")
+        self.api_key = getattr(config, "OPENAI_API_KEY", "") if api_key is None else api_key
         self.fast_model, self.heavy_model = resolve_provider_models("openai", fast_model, heavy_model)
         self.embedding_model = "text-embedding-3-small"
 
@@ -255,13 +290,32 @@ class OpenAIAdapter(AIProviderAdapter):
     ) -> bytes:
         if not self.api_key:
             raise ProviderAuthError("openai", "OPENAI_API_KEY is not configured.")
+
+        ratio_map = {
+            "1:1": "1024x1024",
+            "16:9": "1792x1024",
+            "1792:1024": "1792x1024",
+            "9:16": "1024x1792",
+            "1024:1792": "1024x1792",
+        }
+        normalized_ratio = (aspect_ratio or "1:1").strip()
+        if normalized_ratio not in ratio_map:
+            raise CapabilityNotSupportedError(
+                provider="openai",
+                capability="image_gen",
+                message=(
+                    f"Aspect ratio '{aspect_ratio}' is not supported by OpenAI DALL-E 3. "
+                    f"Supported ratios are '1:1' (1024x1024), '16:9' (1792x1024), and '9:16' (1024x1792)."
+                ),
+            )
+        size = ratio_map[normalized_ratio]
+
         try:
             import requests
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             }
-            size = "1024x1024"
             data = {
                 "model": "dall-e-3",
                 "prompt": prompt,
@@ -318,7 +372,10 @@ class GeminiAPIAdapter(AIProviderAdapter):
     supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
 
     def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
-        self.api_key = api_key or getattr(config, "GEMINI_API_KEY", "") or getattr(config, "GOOGLE_API_KEY", "")
+        if api_key is None:
+            self.api_key = getattr(config, "GEMINI_API_KEY", "") or getattr(config, "GOOGLE_API_KEY", "")
+        else:
+            self.api_key = api_key
         self.fast_model, self.heavy_model = resolve_provider_models("gemini", fast_model, heavy_model)
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
@@ -327,7 +384,8 @@ class GeminiAPIAdapter(AIProviderAdapter):
         from langchain_google_genai import ChatGoogleGenerativeAI
         model = self.heavy_model if model_type == "heavy" else self.fast_model
         temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
-        return ChatGoogleGenerativeAI(model=model, temperature=temp, api_key=self.api_key)
+        safety_settings = get_gemini_safety_settings()
+        return ChatGoogleGenerativeAI(model=model, temperature=temp, safety_settings=safety_settings, api_key=self.api_key)
 
     def _get_genai_client(self):
         if not self.api_key:
@@ -467,9 +525,11 @@ class VertexAIAdapter(AIProviderAdapter):
         from langchain_google_genai import ChatGoogleGenerativeAI
         model = self.heavy_model if model_type == "heavy" else self.fast_model
         temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
+        safety_settings = get_gemini_safety_settings()
         return ChatGoogleGenerativeAI(
             model=model,
             temperature=temp,
+            safety_settings=safety_settings,
             vertexai=True,
             project=self.project_id,
             location=self.location,
@@ -604,7 +664,7 @@ class AnthropicAdapter(AIProviderAdapter):
     supported_capabilities = {"text", "vision"}
 
     def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
-        self.api_key = api_key or getattr(config, "ANTHROPIC_API_KEY", "")
+        self.api_key = getattr(config, "ANTHROPIC_API_KEY", "") if api_key is None else api_key
         self.fast_model, self.heavy_model = resolve_provider_models("anthropic", fast_model, heavy_model)
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
