@@ -123,16 +123,32 @@ def _is_trusted_active_messenger_draft_edit(
     tool_call: ToolCall,
     prior_messages: Sequence[BaseMessage],
 ) -> bool:
-    """Return whether a clean direct user message requests an active-draft revision."""
+    """Return whether a clean direct message safely revises the active draft."""
     if tool_call.get("name") != "relay_local_payload":
         return False
 
-    from core.messenger_draft import has_active_draft
+    from core.messenger_draft import active_draft_status
     from core.untrusted_content import external_content_source_names, is_direct_user_message
     from services.messenger_intent import is_active_draft_edit_intent
+    from tools.web import remove_accents
 
-    if not has_active_draft():
+    args = tool_call.get("args", {})
+    if not isinstance(args, dict):
         return False
+    active, _, draft = active_draft_status()
+    if not active or not isinstance(draft, dict):
+        return False
+
+    draft_target = remove_accents(str(draft.get("target_name", "")).strip())
+    requested_target = remove_accents(str(args.get("target_entity", "")).strip())
+    if not draft_target or requested_target != draft_target:
+        return False
+
+    existing_image = os.path.normcase(os.path.normpath(str(draft.get("image_path", "")).strip()))
+    requested_image = os.path.normcase(os.path.normpath(str(args.get("image_path", "")).strip()))
+    if requested_image != existing_image:
+        return False
+
     for message in reversed(prior_messages):
         if is_direct_user_message(message):
             if external_content_source_names(getattr(message, "additional_kwargs", {})):
@@ -603,7 +619,7 @@ def consume_successful_routine_draft_authorization(state: dict) -> dict:
                 clean_message(getattr(message, "content", "")),
             ):
                 return {"routine_draft_offer_authorized": False}
-            return {}
+            continue
         if message_type == "ai" and getattr(message, "tool_calls", None):
             break
     return {}

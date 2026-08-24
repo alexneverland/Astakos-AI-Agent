@@ -455,6 +455,35 @@ def test_routine_draft_authorization_is_consumed_only_after_successful_write():
     }
 
 
+def test_routine_draft_authorization_consumes_if_any_relay_in_batch_succeeds():
+    """A later failed relay cannot preserve authority after an earlier success."""
+    from langchain_core.messages import AIMessage, ToolMessage
+    from core.approval import consume_successful_routine_draft_authorization
+
+    tool_call = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "relay_local_payload", "args": {}, "id": "tc-first"},
+            {"name": "relay_local_payload", "args": {}, "id": "tc-second"},
+        ],
+    )
+    success = ToolMessage(
+        content="✅ DRAFT ΑΠΟΘΗΚΕΥΤΗΚΕ.\nmessage: Καλημέρα",
+        name="relay_local_payload",
+        tool_call_id="tc-first",
+    )
+    failure = ToolMessage(
+        content="❌ Δεν αποθήκευσα Messenger draft. Η εικόνα δεν βρέθηκε.",
+        name="relay_local_payload",
+        tool_call_id="tc-second",
+    )
+
+    assert consume_successful_routine_draft_authorization({
+        "routine_draft_offer_authorized": True,
+        "messages": [tool_call, success, failure],
+    }) == {"routine_draft_offer_authorized": False}
+
+
 def test_clean_active_draft_edit_skips_same_turn_memory_read_block(monkeypatch, tmp_path):
     """A direct revision of an active draft remains reversible after a memory read."""
     import config
@@ -500,6 +529,55 @@ def test_clean_active_draft_edit_skips_same_turn_memory_read_block(monkeypatch, 
         })
 
     assert result["approval_status"] == "ok"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
+def test_active_draft_edit_cannot_change_target_after_memory_read(monkeypatch, tmp_path):
+    """Untrusted content cannot redirect a direct revision to another contact."""
+    import config
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from core.approval import approval_check_node
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    draft_file.write_text(
+        json.dumps(
+            {
+                "target_name": "Sofia",
+                "message": "Παλιό μήνυμα",
+                "status": "pending",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "expires_at": (datetime.now() + timedelta(minutes=30)).isoformat(timespec="seconds"),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    user_message = HumanMessage(content="Άλλαξε το μήνυμα και κάν' το πιο σύντομο")
+    memory_result = ToolMessage(
+        content="[UNTRUSTED EXTERNAL TOOL RESULT] persisted memory reference",
+        name="search_memory",
+        tool_call_id="tc-memory-read",
+    )
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Alex", "payload_data": "Νέο μήνυμα"},
+            "id": "tc-draft-target-change",
+        }],
+    )
+
+    with (
+        patch("core.approval.save_pending") as save_pending,
+        patch("core.approval._notify_telegram") as notify,
+    ):
+        result = approval_check_node({
+            "messages": [user_message, memory_result, draft_call],
+        })
+
+    assert result["approval_status"] == "blocked"
     save_pending.assert_not_called()
     notify.assert_not_called()
 
