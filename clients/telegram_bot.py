@@ -2172,6 +2172,36 @@ def handle_message(user_text: str, chat_id: str):
                     from services.routine_completion_context import build_routine_completion_context
                     routine_completion_context = build_routine_completion_context()
                     routine_action_consumed = True
+            if not routine_action_consumed:
+                from memory.routine_db import get_active_routine_catalog
+                from services.routine_completion_helper import relevant_catalog_candidates
+
+                catalog = {
+                    routine["id"]: routine["event"]
+                    for routine in get_active_routine_catalog()
+                }
+                pause_candidates = relevant_catalog_candidates(clean_user_text, catalog)
+                decision = decide_completion(
+                    user_text=clean_user_text,
+                    candidates=pause_candidates,
+                    pool="catalog",
+                    semantic_selector=_completion_selector,
+                )
+                if decision.action == "pause" and decision.routine_id is not None:
+                    rid = decision.routine_id
+                    ev = pause_candidates[rid]
+                    pause_routine_indefinitely(rid)
+                    log_event(
+                        "routines", "routine_paused", routine_id=rid, event=ev,
+                        debug_type="manual_control",
+                        debug_source="user_message",
+                        debug_effect="paused",
+                    )
+                    print(f"⏸️ [Routine Paused]: #{rid} {ev}")
+                    bus.emit("routine_paused", routine_id=rid, event=ev, channel="telegram")
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
         except Exception as _preempt_err:
             print(f"[Telegram Pre-emptive Completion]: {_preempt_err}")
 

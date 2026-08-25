@@ -25,7 +25,7 @@ def test_legacy_nlp_family_aliases_are_generic() -> None:
 
 
 def test_custom_intents_example_documents_personal_routine_aliases() -> None:
-    """Ensure the personal overlay example shows each routine alias location."""
+    """Ensure the personal overlay example shows each remaining routine alias location."""
     example = _load_json("astakos_custom_intents.json.example")
     routines = example["routines"]
 
@@ -33,10 +33,6 @@ def test_custom_intents_example_documents_personal_routine_aliases() -> None:
         "your_partner_alias",
         "your_child_alias",
     ]
-    assert example["context_extractor"]["partner_names"] == [
-        "your_partner_alias"
-    ]
-    assert example["context_extractor"]["kid1_names"] == ["your_child_alias"]
     assert routines["tokens"]["_KID1_TOKENS"] == ["your_child_alias"]
     assert routines["tokens"]["_PARTNER_TOKENS"] == ["your_partner_alias"]
     assert routines["inline"]["kid1_aliases"] == ["your_child_alias"]

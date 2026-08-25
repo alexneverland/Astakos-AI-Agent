@@ -1,13 +1,7 @@
-import json
-import re
-import unicodedata
 import config
-from core import nl_config
-from core.i18n import t
 from services.gemini import safe_gemini_call
 from core.utils import clean_message, extract_json_from_text
-from memory.routine_db import set_context_state, get_context_state
-from memory.conversation_history import load_recent_context
+from memory.routine_db import set_context_state
 from datetime import datetime
 from services.routine_reconciler import (
     reconcile_fact_to_routines,
@@ -26,6 +20,9 @@ Available flags:
 5. "user_at_work": (boolean) The user is at work now.
 6. "kid1_with_user": (boolean) The kid1 is with the user now.
 7. "kid1_with_partner": (boolean) The kid1 is with the partner now, without necessarily meaning that the user is also with them.
+8. "current_shift": one of "morning", "afternoon", or "night" only when the user directly confirms their active work shift now.
+9. "partner_at_work": (boolean) The partner is at work now.
+10. "partner_work_mode": "office" or "remote" only when the user directly states that the partner is working at their workplace or remotely/from home.
 
 Rules:
 - Return ONLY a JSON object.
@@ -34,9 +31,13 @@ Rules:
 - DO NOT deduce unstated whereabouts. For example, if the user says the kids are alone, DO NOT deduce that the partner is with the user. Only update states explicitly stated.
 - DO NOT convert future intention into a current state.
 - If the user says they will leave in a bit, that they will go somewhere later, or that they are planning to go, this DOES NOT mean they are already out of the house.
+- Preparing, eating, drinking coffee, or getting ready in order to leave for work means the user is still at their current location until they explicitly say they left or arrived at work.
 - If the user is talking about a draft message, a plan, an idea, or what to write, this DOES NOT necessarily mean that the state is currently true.
 - If the user says they are all out together now, then user_out_of_home=true and partner_with_user=true may apply.
 - If the user is at work, then usually user_at_work=true and user_out_of_home=true.
+- If the user directly confirms they are at work now, their active shift may be current_shift="morning", current_shift="afternoon", or current_shift="night". Do not infer a shift from a routine name, a future plan, or a past shift.
+- An active work statement supersedes older co-presence: do not leave partner_with_user=true or kid1_with_user=true unless the user explicitly says they are also at work with the user.
+- If the user directly says the partner is at work now, set partner_at_work=true, partner_with_user=false, kid1_with_partner=false, and family_at_home=false. If the user says the partner is not at work, set only partner_at_work=false; do not assume that the partner is home or with the user.
 
 - If the user says they are with {kid1_name} now, then kid1_with_user=true may apply.
 - If the user says {kid1_name} is with {partner_name} now, then kid1_with_partner=true may apply.
@@ -86,89 +87,24 @@ Message: "I came back home after shopping and we are playing with the kid."
 Answer:
 {{"user_out_of_home": false, "user_at_work": false, "kid1_with_user": true}}
 
+Example 9:
+Message: "I have the kid here with me, I am having coffee and food before I leave for work. My partner is working today."
+Answer:
+{{"user_out_of_home": false, "user_at_work": false, "kid1_with_user": true, "partner_with_user": false}}
+
+Example 10:
+Message: "I am at work on the afternoon shift."
+Answer:
+{{"user_at_work": true, "user_out_of_home": true, "partner_with_user": false, "kid1_with_user": false, "current_shift": "afternoon"}}
+
+Example 11:
+Message: "The kids are home alone and my partner is at work."
+Answer:
+{{"partner_at_work": true, "partner_work_mode": "office", "partner_with_user": false, "kid1_with_partner": false, "family_at_home": false}}
+
 User Message: "{user_text}"
 AI Answer (recent/current): "{ai_text}"
 """
-
-
-def _has_communication_verb(text: str) -> bool:
-    """Return whether configured communication language appears in live text."""
-    t = _normalize_live_text(text)
-    return any(marker in t for marker in nl_config.CE_COMMUNICATION_VERBS)
-
-def _has_strong_presence(text: str) -> bool:
-    """Return whether configured explicit co-presence language appears in text."""
-    t = _normalize_live_text(text)
-    return any(marker in t for marker in nl_config.CE_STRONG_PRESENCE)
-
-def _looks_like_future_departure(text: str) -> bool:
-    t = clean_message(text or "").strip().lower()
-    future_markers = nl_config.CE_IN_A_WHILE
-    return any(marker in t for marker in future_markers)
-
-def _normalize_live_text(text: str) -> str:
-    return clean_message(text or "").strip().lower()
-
-
-def _normalize_person_name(text: str) -> str:
-    """Normalize a configured person name for accent- and final-sigma-insensitive matching."""
-    normalized = unicodedata.normalize("NFD", _normalize_live_text(text))
-    accentless = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-    return accentless.replace("ς", "σ")
-
-
-def _has_configured_person_name(text: str, names: tuple[str, ...]) -> bool:
-    """Return whether live text mentions a configured person under name variants."""
-    normalized_text = _normalize_person_name(text)
-    return any(
-        re.search(rf"(?<!\w){re.escape(normalized_name)}(?!\w)", normalized_text)
-        for name in names
-        if (normalized_name := _normalize_person_name(name))
-    )
-
-
-def _has_park_live_presence(text: str) -> bool:
-    t = _normalize_live_text(text)
-    park_tokens = nl_config.CE_PARK
-    live_tokens = nl_config.CE_NOW_SITTING
-    return any(p in t for p in park_tokens) and any(l in t for l in live_tokens)
-
-
-def _looks_like_found_them_reply(text: str) -> bool:
-    t = _normalize_live_text(text)
-    markers = nl_config.CE_FOUND_THEM
-    return any(m in t for m in markers)
-
-
-def _looks_like_everyone_together(text: str) -> bool:
-    t = _normalize_live_text(text)
-    markers = nl_config.CE_ALL_TOGETHER
-    return any(m in t for m in markers)
-
-
-def _looks_like_family_return_together(text: str) -> bool:
-    t = _normalize_live_text(text)
-    has_family_group = any(marker in t for marker in nl_config.CE_FAMILY_GROUP)
-    has_return_together = any(
-        marker in t for marker in nl_config.CE_RETURN_TOGETHER
-    )
-    return has_family_group and has_return_together
-
-
-def _recent_family_context_hint(channel: str = "telegram") -> str:
-    try:
-        entries = load_recent_context(limit=6, channel=channel) or []
-    except Exception:
-        return ""
-
-    parts = []
-    for item in entries[-6:]:
-        if not isinstance(item, dict):
-            continue
-        content = str(item.get("content") or "").strip()
-        if content:
-            parts.append(content.lower())
-    return "\n".join(parts)
 
 
 def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel: str = "telegram"):
@@ -209,7 +145,10 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             "user_at_work",
             "kid1_with_user",
             "kid1_with_partner",
+            "partner_at_work",
         }
+        valid_shifts = {"morning", "afternoon", "night"}
+        valid_partner_work_modes = {"office", "remote"}
         
         # Only update if the payload is a dictionary
         if not isinstance(payload, dict):
@@ -220,17 +159,42 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         # but for now, we just set them. The existing rules or nightly reset will clear them.
         today_str = datetime.now().strftime("%Y-%m-%d")
             
-        # Derived consistency rules for family presence
-        normalized_user = _normalize_live_text(user_text)
-        has_home_presence = any(
-            marker in normalized_user
-            for marker in nl_config.CE_HOME
-        )
+        current_shift = payload.get("current_shift")
+        if current_shift is not None:
+            normalized_shift = str(current_shift).strip().lower()
+            if normalized_shift in valid_shifts:
+                payload["current_shift"] = normalized_shift
+            else:
+                payload.pop("current_shift", None)
+
+        partner_work_mode = payload.get("partner_work_mode")
+        if partner_work_mode is not None:
+            normalized_work_mode = str(partner_work_mode).strip().lower()
+            if normalized_work_mode in valid_partner_work_modes:
+                payload["partner_work_mode"] = normalized_work_mode
+            else:
+                payload.pop("partner_work_mode", None)
+
+        # Derived consistency rules operate on the LLM's semantic state, rather
+        # than attempting to re-interpret user wording with phrase lists.
+        if payload.get("user_at_work") is True:
+            payload["user_out_of_home"] = True
+            payload["family_at_home"] = False
+            payload["partner_with_user"] = False
+            payload["kid1_with_user"] = False
+
+        if payload.get("partner_at_work") is True:
+            if payload.get("partner_work_mode") not in valid_partner_work_modes:
+                payload["partner_work_mode"] = "office"
+            if payload["partner_work_mode"] == "office":
+                payload["family_at_home"] = False
+                payload["partner_with_user"] = False
+                payload["kid1_with_partner"] = False
 
         if payload.get("kid1_with_user") is True:
             payload["kid1_away_from_home"] = False
             
-        if payload.get("family_at_home") is True:
+        if payload.get("family_at_home") is True and payload.get("user_at_work") is not True:
             payload["kid1_away_from_home"] = False
             payload["user_out_of_home"] = False
             payload["user_at_work"] = False
@@ -238,107 +202,27 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         if payload.get("kid1_with_user") is True and payload.get("partner_with_user") is True:
             payload["kid1_with_partner"] = True
 
-        # Context-aware enrichment for short live follow-up replies like:
-        # "I found them", "we are all together", "we are still at the park"
-        normalized_user = _normalize_live_text(user_text)
-
-        if _has_park_live_presence(user_text):
-            payload.setdefault("user_out_of_home", True)
-
-        is_everyone_together = _looks_like_everyone_together(user_text)
-        is_family_return_together = _looks_like_family_return_together(user_text)
-
-        if is_everyone_together or is_family_return_together:
-            payload["partner_with_user"] = True
-            payload["kid1_with_user"] = True
-            payload["kid1_with_partner"] = True
-            payload["kid1_away_from_home"] = False
-            if has_home_presence:
-                payload["family_at_home"] = True
-                payload["user_out_of_home"] = False
-                payload["user_at_work"] = False
-            elif is_everyone_together:
-                payload["user_out_of_home"] = True
-
-        elif _looks_like_found_them_reply(user_text) and _has_park_live_presence(user_text):
-            payload["user_out_of_home"] = True
-            payload["kid1_with_user"] = True
-            payload["kid1_away_from_home"] = False
-
-            recent_hint = _recent_family_context_hint(channel=channel)
-            has_recent_partner = (
-                _has_configured_person_name(user_text, nl_config.CE_PARTNER_NAMES)
-                or _has_configured_person_name(recent_hint, nl_config.CE_PARTNER_NAMES)
-            )
-            has_recent_kid1 = (
-                _has_configured_person_name(user_text, nl_config.CE_KID1_NAMES)
-                or _has_configured_person_name(recent_hint, nl_config.CE_KID1_NAMES)
-            )
-
-            if has_recent_partner:
-                payload["partner_with_user"] = True
-
-            if has_recent_partner and has_recent_kid1:
-                payload["kid1_with_partner"] = True
-
-
-        has_comm = _has_communication_verb(user_text)
-        has_strong = _has_strong_presence(user_text)
-        is_explicit_family = (
-            _looks_like_everyone_together(user_text)
-            or _looks_like_family_return_together(user_text)
-        )
-
-        # 1. Precedence guard: user_at_work beats weak presence
-        current_work = get_context_state("user_at_work")
-        is_at_work = current_work and current_work.get("value") == "true"
-        if is_at_work and not has_strong:
-            if payload.get("partner_with_user"):
-                print("[ContextExtractor] Ignored partner_with_user=true due to existing user_at_work=true and weak presence")
-                payload["partner_with_user"] = False
-
-        # Draft or communication wording alone cannot mutate relationship presence.
-        if has_comm and not has_strong and not is_at_work:
-            for key in (
-                "partner_with_user",
-                "kid1_with_user",
-                "kid1_with_partner",
-            ):
-                payload.pop(key, None)
-
-        # 3. Subject propagation logic cutoff for kid1
-        recent_hint_str = _recent_family_context_hint(channel=channel)
-        has_kid_in_recent = _has_configured_person_name(
-            recent_hint_str,
-            nl_config.CE_KID1_NAMES,
-        )
-        
-        has_kid_explicit = (
-            _has_configured_person_name(user_text, nl_config.CE_KID1_NAMES)
-            or is_explicit_family
-            or
-            (_looks_like_found_them_reply(user_text) and has_kid_in_recent)
-        )
-        
-        if not has_kid_explicit:
-            if payload.get("kid1_with_user"):
-                print("[ContextExtractor] Ignored kid1_with_user cascade due to lack of explicit mention")
-                payload.pop("kid1_with_user", None)
-            if payload.get("kid1_with_partner"):
-                print("[ContextExtractor] Ignored kid1_with_partner cascade due to lack of explicit mention")
-                payload.pop("kid1_with_partner", None)
-
         for key, value in payload.items():
             if key in valid_keys and isinstance(value, bool):
-                if key == "user_out_of_home" and value is True:
-                    if _looks_like_future_departure(user_text):
-                        print("[ContextExtractor] Ignored user_out_of_home=true due to future departure phrasing")
-                        continue
-                
                 # Save to database
                 str_val = "true" if value else "false"
                 set_context_state(key, str_val, expires_at=today_str)
                 print(f"[ContextExtractor] Updated {key} = {str_val}")
+
+        if "current_shift" in payload:
+            set_context_state("current_shift", payload["current_shift"], expires_at=today_str)
+            print(f"[ContextExtractor] Updated current_shift = {payload['current_shift']}")
+
+        if "partner_work_mode" in payload:
+            set_context_state(
+                "partner_work_mode",
+                payload["partner_work_mode"],
+                expires_at=today_str,
+            )
+            print(
+                "[ContextExtractor] Updated partner_work_mode = "
+                f"{payload['partner_work_mode']}"
+            )
 
         recon = reconcile_fact_to_routines(
             user_text,
@@ -347,11 +231,31 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             now=datetime.now(),
         )
 
+        # Live whereabouts and co-presence belong exclusively to the semantic
+        # extractor above.  The reconciler remains responsible for durable
+        # routine changes (for example a weekly shift), but must not overwrite
+        # a current-state decision through token matching.
+        llm_owned_live_state_keys = {
+            "user_out_of_home",
+            "family_at_home",
+            "partner_with_user",
+            "kid1_away_from_home",
+            "user_at_work",
+            "kid1_with_user",
+            "kid1_with_partner",
+            "partner_at_work",
+        }
         directives = []
         for item in recon.get("scored_directives", []):
             if item.get("decision") == "auto_apply":
                 directive = item.get("directive")
-                if directive:
+                if (
+                    directive
+                    and not (
+                        directive.get("kind") == "context_state_set"
+                        and directive.get("key") in llm_owned_live_state_keys
+                    )
+                ):
                     directives.append(directive)
 
         if directives:

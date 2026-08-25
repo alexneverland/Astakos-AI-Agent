@@ -5,27 +5,6 @@
             "your_child_alias"
         ]
     },
-    "context_extractor": {
-        "park_words": [
-            "park",
-            "playground"
-        ],
-        "home_words": [
-            "home",
-            "house",
-            "apartment"
-        ],
-        "work_words": [
-            "work",
-            "office"
-        ],
-        "partner_names": [
-            "your_partner_alias"
-        ],
-        "kid1_names": [
-            "your_child_alias"
-        ]
-    },
     "routines": {
         "tokens": {
             "_KID1_TOKENS": [

@@ -138,29 +138,6 @@ CB_DIRECT_WEB_RESEARCH_MARKERS = tuple(
 # Force preload on import
 load_intents()
 
-# Context Extractor Intents
-CE_IN_A_WHILE = tuple(get_intent_list('context_extractor', 'in_a_while_words'))
-CE_LEAVING = tuple(get_intent_list('context_extractor', 'leaving_words'))
-CE_PARK = tuple(get_intent_list('context_extractor', 'park_words'))
-CE_NOW_SITTING = tuple(get_intent_list('context_extractor', 'now_sitting_words'))
-CE_FOUND_THEM = tuple(get_intent_list('context_extractor', 'found_them_words'))
-CE_ALL_TOGETHER = tuple(get_intent_list('context_extractor', 'all_together_words'))
-CE_FAMILY_GROUP = tuple(
-    get_intent_list("context_extractor", "family_group_words")
-)
-CE_RETURN_TOGETHER = tuple(
-    get_intent_list("context_extractor", "return_together_words")
-)
-CE_HOME = tuple(get_intent_list('context_extractor', 'home_words'))
-CE_COMMUNICATION_VERBS = tuple(
-    get_live_input_guard_list("context_extractor", "communication_verbs")
-)
-CE_STRONG_PRESENCE = tuple(
-    get_live_input_guard_list("context_extractor", "strong_presence_phrases")
-)
-CE_PARTNER_NAMES = (config.PARTNER_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'partner_names'))
-CE_KID1_NAMES = (config.KID1_NAME.lower(),) + tuple(get_intent_list('context_extractor', 'kid1_names'))
-
 # Working-memory operational guards
 WM_ROUTINE_REFERENCE_MARKERS = tuple(
     get_live_input_guard_list("working_memory", "routine_reference_markers")

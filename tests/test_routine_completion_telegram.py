@@ -166,6 +166,7 @@ def _stub_modules():
         "cooldown_hours": None,
     })
     rdb.pause_routine_indefinitely         = MagicMock()
+    rdb.get_active_routine_catalog         = MagicMock(return_value=[])
     rdb.get_routine_muted_until           = MagicMock(return_value=None)
     rdb.set_routine_muted_until           = MagicMock()
     rdb.clear_routine_muted_until         = MagicMock()
@@ -328,6 +329,7 @@ def _reset_mocks():
     rdb = sys.modules["memory.routine_db"]
     for name in ("confirm_routine", "decay_routine", "mark_routine_responded",
                   "remove_pending_confirmation", "get_eligible_preemptive_routines_for_day",
+                  "get_active_routine_catalog",
                   "mark_routine_triggered_today", "mark_routine_acknowledged",
                  "acknowledge_pending_draft_offer",
                  "record_routine_skip_today", "pause_routine_indefinitely"):
@@ -347,6 +349,7 @@ def _run_handle_message(
     text,
     pending=None,
     today_routines=None,
+    catalog_routines=None,
     selector_return=None,
     selector_returns=None,
     pending_reflections=None,
@@ -364,6 +367,7 @@ def _run_handle_message(
 
     rdb = sys.modules["memory.routine_db"]
     rdb.get_eligible_preemptive_routines_for_day.return_value = today_routines or []
+    rdb.get_active_routine_catalog.return_value = catalog_routines or []
 
     selector_mod = sys.modules["services.routine_completion_selector"]
     if selector_returns is None:
@@ -719,6 +723,24 @@ def test_today_pause_is_reversible_and_does_not_complete_routine() -> None:
     rdb.pause_routine_indefinitely.assert_called_once_with(5)
     rdb.mark_routine_triggered_today.assert_not_called()
     rdb.confirm_routine.assert_not_called()
+
+
+def test_catalog_pause_handles_explicit_named_routine_outside_today() -> None:
+    """A named routine may be permanently paused even when it is not due today."""
+    from services.routine_completion_helper import RoutineSelection
+    rdb = sys.modules["memory.routine_db"]
+
+    _run_handle_message(
+        "natural permanent cancellation of dynamic routine",
+        today_routines=[{"id": 5, "event": "unrelated routine", "state": "active"}],
+        catalog_routines=[{"id": 9, "event": "dynamic routine"}],
+        selector_returns=[
+            RoutineSelection(action="none", routine_id=None),
+            RoutineSelection(action="pause", routine_id=9),
+        ],
+    )
+
+    rdb.pause_routine_indefinitely.assert_called_once_with(9)
 
 
 # ─────────────────────────────────────────────────────────────

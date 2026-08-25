@@ -40,6 +40,7 @@ def _post_chat(
     selector_returns: list[RoutineSelection] | None = None,
     *,
     message: str = "natural message",
+    catalog_routines: list[dict[str, object]] | None = None,
     accepted_draft_offer: object | None = None,
     active_draft_status: tuple[bool, str, dict | None] = (False, "missing", None),
 ) -> tuple[object, dict[str, MagicMock]]:
@@ -52,6 +53,7 @@ def _post_chat(
     )
     with (
         patch("memory.routine_db.get_eligible_preemptive_routines_for_day", return_value=[{"id": 5, "event": "dynamic routine"}]) as eligible,
+        patch("memory.routine_db.get_active_routine_catalog", return_value=catalog_routines or []),
         patch("memory.routine_db.mark_routine_triggered_today") as triggered,
         patch("memory.routine_db.confirm_routine") as confirmed,
         patch("memory.routine_db.mark_routine_responded"),
@@ -115,6 +117,7 @@ def test_web_empty_eligible_pool_does_not_call_selector(client: TestClient) -> N
     graph_runner = MagicMock(side_effect=_graph_result)
     with (
         patch("memory.routine_db.get_eligible_preemptive_routines_for_day", return_value=[]),
+        patch("memory.routine_db.get_active_routine_catalog", return_value=[]),
         patch("services.routine_completion_selector.select_routine") as selector,
         patch("api.server.append_to_chat_history", side_effect=_saved_message),
         patch("api.server._load_shared_context_messages", return_value=[]),
@@ -230,6 +233,21 @@ def test_web_pause_keeps_routine_reversible(client: TestClient) -> None:
     assert response.status_code == 200
     mocks["paused"].assert_called_once_with(5)
     mocks["triggered"].assert_not_called()
+
+
+def test_web_catalog_pause_handles_explicit_named_routine_outside_today(client: TestClient) -> None:
+    """A named routine may be permanently paused even when it is not due today."""
+    response, mocks = _post_chat(
+        client,
+        catalog_routines=[{"id": 9, "event": "dynamic routine"}],
+        message="natural permanent cancellation of dynamic routine",
+        selector_returns=[
+            RoutineSelection(action="none", routine_id=None),
+            RoutineSelection(action="pause", routine_id=9),
+        ],
+    )
+    assert response.status_code == 200
+    mocks["paused"].assert_called_once_with(9)
 
 
 def test_web_routine_action_does_not_confirm_pending_asset(client: TestClient) -> None:

@@ -73,6 +73,7 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
         "kid1_with_user": resolve_context_bool("kid1_with_user", current),
         "kid1_with_partner": resolve_context_bool("kid1_with_partner", current),
         "partner_with_user": resolve_context_bool("partner_with_user", current),
+        "partner_at_work": resolve_context_bool("partner_at_work", current),
         "football_season": resolve_football_season(current),
         "school_open": resolve_school_open(current),
         "current_shift": resolve_current_shift(current),

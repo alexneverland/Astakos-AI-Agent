@@ -33,17 +33,6 @@ MOCK_CUSTOM_INTENTS = {
         "partner_gift_words": ["σοφια", "ρολοι", "ρολόι", "δώρο", "παρτνερ", "partner"],
         "partner_gift_context": ["rosefield", "bangle", "δώρα", "ρολόι", "παρτνερ", "partner"]
     },
-    "context_extractor": {
-        "park_words": ["πάρκο", "παιδική χαρά", "πλατεία", "park"],
-        "home_words": ["σπίτι", "βρίσκομαι σπίτι", "γύρισα", "έφτασα", "home"],
-        "work_words": ["δουλειά", "γραφείο", "βάρδια", "work"],
-        "partner_names": ["Σοφία", "σοφία", "sofia", "partner"],
-        "kid1_names": ["Αλέξανδρος", "αλέξανδρος", "alexandros", "άλεξ", "kid1"],
-        "leaving_words": ["αναχώρηση", "έφυγα", "φεύγω"],
-        "now_sitting_words": ["κάθομαι", "άραξα"],
-        "found_them_words": ["βρήκα", "συνάντησα"],
-        "all_together_words": ["μαζί", "όλοι"]
-    },
     "routine_intent": {
         "control_verbs": ["παύση", "σταμάτα", "ακύρωση", "συνέχισε", "κοιμήθηκε", "ξύπνησε", "pause", "stop", "cancel", "continue"],
         "routine_nouns": ["πρόγραμμα", "ρουτίνα", "ειδοποιήσεις", "routine"],
