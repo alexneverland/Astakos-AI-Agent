@@ -121,6 +121,22 @@ class TestReflectionEngineMigration:
         result = ref_eng._analyze_with_llm([], [], [])
         assert result == []
 
+    def test_reflection_engine_brain_error_does_not_raise_unbound_local_error(self, monkeypatch):
+        import builtins
+        import services.reflection_engine as ref_eng
+
+        original_import = builtins.__import__
+
+        def fail_brain_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "core.brain":
+                raise ImportError("Simulated failure during core.brain import")
+            return original_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", fail_brain_import)
+
+        result = ref_eng._analyze_with_llm([], [], [])
+        assert result == []
+
 
 class TestStoryMakerMigration:
     """Validates astakos_skills/story_maker integration with AI provider adapter."""
@@ -227,6 +243,23 @@ class TestStoryMakerMigration:
                 raise AIProviderError("Service temporarily unavailable", provider="anthropic")
 
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: FailingAdapter())
+
+        result = sm._generate_story_and_prompts("dragons")
+        assert result["story"] is None
+        assert result["scenes"] == []
+
+    def test_story_maker_brain_error_does_not_raise_unbound_local_error(self, monkeypatch):
+        import builtins
+        import astakos_skills.story_maker as sm
+
+        original_import = builtins.__import__
+
+        def fail_brain_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "core.brain":
+                raise ImportError("Simulated failure during core.brain import")
+            return original_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", fail_brain_import)
 
         result = sm._generate_story_and_prompts("dragons")
         assert result["story"] is None

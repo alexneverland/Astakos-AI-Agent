@@ -40,13 +40,13 @@ def _generate_image(prompt: str, output_dir: str, index: int) -> str | None:
 def _generate_story_and_prompts(theme: str, characters: str = "") -> dict:
     """Calls the active AI provider for a fairy tale + 3 image prompts."""
     try:
-        from core.brain import get_active_provider_adapter
         from core.ai_provider import (
             CapabilityNotSupportedError,
             ProviderAuthError,
             RateLimitError,
             AIProviderError,
         )
+        from core.brain import get_active_provider_adapter
 
         char_hint = t("skills.story_maker.msg_char_hint", chars=characters) if characters else ""
         from core.utils import load_agent_prompt

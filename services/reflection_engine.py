@@ -276,13 +276,13 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
     {observation, action, confidence, lesson, source, routine_id?}
     """
     try:
-        from core.brain import get_active_provider_adapter
         from core.ai_provider import (
             CapabilityNotSupportedError,
             ProviderAuthError,
             RateLimitError,
             AIProviderError,
         )
+        from core.brain import get_active_provider_adapter
 
         # Summary of traces (conversations)
         trace_summary = []
