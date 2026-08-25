@@ -919,8 +919,9 @@ class LocalE5EmbeddingsAdapter:
                 original_error=exc,
             ) from exc
         except Exception as exc:
-            raise AIProviderError(
-                f"Could not initialize local embeddings model '{self.model_name}': {exc}",
+            raise EmbeddingsProviderSetupRequired(
+                f"Could not initialize local embeddings model '{self.model_name}': {exc}. "
+                "Repair or reinstall the local model before selecting local embeddings.",
                 provider="local",
                 original_error=exc,
             ) from exc

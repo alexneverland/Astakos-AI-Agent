@@ -7,7 +7,6 @@ import sys
 import pytest
 
 from core.ai_provider import (
-    AIProviderError,
     EmbeddingsProviderSetupRequired,
     LocalE5EmbeddingsAdapter,
     OpenAIAdapter,
@@ -69,5 +68,7 @@ class TestEmbeddingsProviderResolution:
         fake_module = type("_Module", (), {"SentenceTransformer": _BrokenSentenceTransformer})
         monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
 
-        with pytest.raises(AIProviderError, match="corrupt local model"):
+        with pytest.raises(EmbeddingsProviderSetupRequired, match="corrupt local model") as error:
             LocalE5EmbeddingsAdapter().embed_text("δοκιμή")
+
+        assert isinstance(error.value.original_error, RuntimeError)
