@@ -99,6 +99,14 @@ def test_load_recent_trusted_user_messages_skips_external_rows_before_limit(tmp_
     )
 
     db_path = str(tmp_path / "conversation.db")
+    append_message(
+        role="user",
+        content="old-session antecedent",
+        channel="telegram",
+        session_id="2026-05-01",
+        timestamp=datetime(2026, 5, 1, 10, 0),
+        db_path=db_path,
+    )
     for minute, content, metadata in (
         (0, "trusted antecedent", {}),
         (1, "external upload one", {"untrusted_external_tool_names": ["user_provided_asset"]}),
@@ -115,7 +123,7 @@ def test_load_recent_trusted_user_messages_skips_external_rows_before_limit(tmp_
         )
 
     messages = load_recent_trusted_user_messages(
-        channel="telegram", limit=2, db_path=db_path
+        channel="telegram", limit=2, session_id="2026-06-04", db_path=db_path
     )
     assert [message["content"] for message in messages] == [
         "trusted antecedent",

@@ -486,29 +486,33 @@ def load_recent_trusted_user_messages(
     *,
     channel: str,
     limit: int = 4,
+    session_id: str | None = None,
     db_path: str = CONVERSATION_DB_FILE,
 ) -> list[dict[str, Any]]:
-    """Return the newest trusted user messages for one channel in time order.
+    """Return trusted user messages from the current channel session in time order.
 
     Provenance-marked rows are skipped before counting toward ``limit``. This
     preserves a small trusted context window even when recent uploads or other
-    externally derived user rows are present in the conversation history.
+    externally derived user rows are present in the conversation history. By
+    default the current daily session is used, so older conversations cannot
+    masquerade as adjacent pronoun context.
     """
     if limit <= 0 or not channel:
         return []
 
     from core.untrusted_content import external_content_source_names
 
+    active_session_id = session_id or default_session_id()
     init_db(db_path)
     with _conn(db_path) as conn:
         cursor = conn.execute(
             """
             SELECT rowid, *
             FROM conversation_messages
-            WHERE channel = ? AND role = 'user'
+            WHERE channel = ? AND role = 'user' AND session_id = ?
             ORDER BY timestamp DESC, rowid DESC
             """,
-            (channel,),
+            (channel, active_session_id),
         )
         messages: list[dict[str, Any]] = []
         for row in cursor:
