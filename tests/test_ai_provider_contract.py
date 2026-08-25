@@ -21,6 +21,7 @@ from core.ai_provider import (
     GeminiAPIAdapter,
     VertexAIAdapter,
     AnthropicAdapter,
+    AUDIO_TRANSCRIPTION_PROMPT,
     get_provider_adapter,
     get_gemini_safety_settings,
     resolve_gemini_safety_threshold,
@@ -294,6 +295,8 @@ class TestRealGeminiAPIAdapterBoundary:
 
         out = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
         assert out == "Gemini transcribed voice"
+        assert mock_client.models.generate_content.call_args.kwargs["contents"][1] == AUDIO_TRANSCRIPTION_PROMPT
+        assert "[ΣΙΩΠΗ]" in AUDIO_TRANSCRIPTION_PROMPT
 
     @patch("google.genai.Client")
     def test_generate_image_success(self, mock_client_cls):
@@ -420,6 +423,8 @@ class TestRealVertexAIAdapterBoundary:
 
         out = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
         assert out == "Vertex transcribed audio"
+        assert mock_client.models.generate_content.call_args.kwargs["contents"][1] == AUDIO_TRANSCRIPTION_PROMPT
+        assert "[ΣΙΩΠΗ]" in AUDIO_TRANSCRIPTION_PROMPT
 
     @patch("google.genai.Client")
     def test_generate_image_success(self, mock_client_cls):

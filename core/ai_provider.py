@@ -26,6 +26,11 @@ DEFAULT_VERTEX_EMBEDDING_MODEL = "text-embedding-004"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "models/text-embedding-004"
 DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
+AUDIO_TRANSCRIPTION_PROMPT = (
+    "You are exclusively a speech-to-text tool. Transcribe only the spoken audio "
+    "accurately and verbatim, without commentary or a reply. If no intelligible "
+    "speech is audible, return exactly: [ΣΙΩΠΗ]."
+)
 
 
 def google_model_from_environment(variable_name: str, default_model: str, emit_warning: bool = False) -> str:
@@ -505,7 +510,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
                 model=self.fast_model,
                 contents=[
                     {"inline_data": {"mime_type": mime_type, "data": audio_bytes}},
-                    "Transcribe the spoken audio accurately into text without extra commentary.",
+                    AUDIO_TRANSCRIPTION_PROMPT,
                 ],
             )
             return getattr(response, "text", "").strip() if getattr(response, "text", None) else ""
@@ -665,7 +670,7 @@ class VertexAIAdapter(AIProviderAdapter):
                 model=self.fast_model,
                 contents=[
                     {"inline_data": {"mime_type": mime_type, "data": audio_bytes}},
-                    "Transcribe the spoken audio accurately into text without extra commentary.",
+                    AUDIO_TRANSCRIPTION_PROMPT,
                 ],
             )
             return getattr(response, "text", "").strip() if getattr(response, "text", None) else ""
