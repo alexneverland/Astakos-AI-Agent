@@ -51,7 +51,14 @@ step. Complete the work in this order:
    comments unless the user explicitly asks for that next action. A green
    review check is not evidence that a review has no comments.
 7. When the user asks to read comments, retrieve and summarize the completed
-   reviews from the requested PR. When the user asks to address comments,
+   reviews from the requested PR. A generic review summary, green check, or
+   reaction is never proof that there are no findings. Before saying a review
+   is clean, explicitly retrieve the PR's inline review comments as well as
+   its top-level reviews, and inspect every comment attached to the latest
+   reviewed commit. Do not filter comments by a shortened SHA, guessed time
+   window, or the review body alone. Report whether each latest-commit finding
+   is actionable, already addressed by a later commit, or intentionally
+   deferred with the user's agreement. When the user asks to address comments,
    resolve the actionable findings, verify the change, and update the PR.
 8. Only when the user explicitly asks to merge and delete may the agent merge
    the PR, after required checks pass and all known actionable review findings
