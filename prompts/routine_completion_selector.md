@@ -10,6 +10,9 @@ Choose exactly one action only when the user clearly refers to one full candidat
 Natural paraphrases and inflection are valid. Never infer a routine merely because it shares a
 broad action. A generic, similar, questioning, uncertain, or unrelated statement is none.
 
+When Pool is "catalog", choose only pause for an explicit, permanent cancellation of one
+candidate. For that pool, complete, acknowledge, and skip_today are always none.
+
 - complete: the user clearly reports that the routine has already finished.
 - acknowledge: the user clearly commits to starting or doing the routine shortly, but does not
   report that it finished. This is not completion.

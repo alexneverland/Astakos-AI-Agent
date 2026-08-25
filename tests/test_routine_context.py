@@ -9,6 +9,7 @@ def test_build_runtime_routine_context_returns_expected_keys(monkeypatch):
     monkeypatch.setattr(rc, "resolve_school_open", lambda now=None: False)
     monkeypatch.setattr(rc, "resolve_current_shift", lambda now=None: "afternoon")
     monkeypatch.setattr(rc, "resolve_partner_work_mode", lambda now=None: "home")
+    monkeypatch.setattr(rc, "resolve_context_bool", lambda key, now=None: True if key == "partner_at_work" else None)
     monkeypatch.setattr(rc, "resolve_user_at_work", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_quiet_hours", lambda now=None: False)
 
@@ -20,6 +21,7 @@ def test_build_runtime_routine_context_returns_expected_keys(monkeypatch):
     assert result["school_open"] is False
     assert result["current_shift"] == "afternoon"
     assert result["partner_work_mode"] == "home"
+    assert result["partner_at_work"] is True
     assert result["user_at_work"] is True
     assert result["quiet_hours"] is False
 

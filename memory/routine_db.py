@@ -833,6 +833,27 @@ def get_eligible_preemptive_routines_for_day(day: str) -> list:
     ]
 
 
+def get_active_routine_catalog() -> list[dict]:
+    """Return active, non-paused routines for an explicit permanent-pause check.
+
+    This is a catalogue rather than a scheduler query. Callers must still use
+    the semantic selector and accept only the ``pause`` action.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, event_name
+        FROM routines
+        WHERE state='active' AND COALESCE(paused_indefinitely, 0)=0
+        ORDER BY event_name COLLATE NOCASE ASC, id ASC
+        """
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"id": row[0], "event": row[1]} for row in rows]
+
+
 setup_db()
 
 # ────────────────────────────────────────────────────────────────
@@ -886,7 +907,12 @@ def mark_routine_triggered_today(routine_id: int):
 
 
 def mark_routine_acknowledged(routine_id: int) -> None:
-    """Record a near-future commitment without treating the routine as complete."""
+    """Record a near-future commitment without treating the routine as complete.
+
+    Clearing ``last_triggered`` keeps the routine eligible for a later, explicit
+    completion message on the same day. The notification cooldown still
+    prevents a second proactive prompt.
+    """
     current = get_routine_state(routine_id)
     if current == RoutineState.TRIGGER_PENDING:
         validate_transition(current, RoutineState.ACTIVE)
@@ -900,7 +926,7 @@ def mark_routine_acknowledged(routine_id: int) -> None:
     try:
         with db_write_lock:
             conn.execute(
-                "UPDATE routines SET last_notified_ts=?, unanswered_reminder_streak=0, state='active', is_active=1 WHERE id=?",
+                "UPDATE routines SET last_notified_ts=?, last_triggered=NULL, unanswered_reminder_streak=0, state='active', is_active=1 WHERE id=?",
                 (datetime.now().isoformat(timespec="seconds"), routine_id),
             )
             conn.commit()

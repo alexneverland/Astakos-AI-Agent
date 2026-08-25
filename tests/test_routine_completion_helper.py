@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from services.routine_completion_helper import RoutineSelection, decide_completion
+from services.routine_completion_helper import RoutineSelection, decide_completion, relevant_catalog_candidates
 from services.routine_completion_selector import select_routine
 
 
@@ -78,6 +78,27 @@ def test_valid_pause_selects_exact_candidate() -> None:
 
     assert decision.action == "pause"
     assert decision.routine_id == 7
+
+
+def test_catalog_only_allows_explicit_permanent_pause() -> None:
+    """A catalogue candidate cannot be completed or skipped by the pause path."""
+    decision = decide_completion(
+        "natural message",
+        {7: "dynamic routine"},
+        "catalog",
+        _selector(RoutineSelection(action="complete", routine_id=7)),
+    )
+    assert decision.action == "pass_through"
+    assert decision.debug_reason == "catalog_only_allows_pause"
+
+
+def test_catalog_candidates_are_derived_from_stored_routine_names() -> None:
+    """The catalogue prefilter contains no language-specific control triggers."""
+    candidates = relevant_catalog_candidates(
+        "Δεν θέλω άλλο καθάρισμα κλουβιού",
+        {7: "Καθάρισμα κλουβιού κουνελιού", 8: "Ψώνια στη λαϊκή"},
+    )
+    assert candidates == {7: "Καθάρισμα κλουβιού κουνελιού"}
 
 
 def test_legacy_dismiss_fails_closed() -> None:

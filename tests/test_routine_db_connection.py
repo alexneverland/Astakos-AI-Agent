@@ -291,11 +291,11 @@ def test_unanswered_reminder_decay_requires_three_delivered_expiries(
     assert routine_db.get_routine_state(routine_id).value == "decayed"
 
 
-def test_routine_response_resets_unanswered_reminder_streak(
+def test_routine_response_resets_unanswered_reminder_streak_and_keeps_later_completion_eligible(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An acknowledgement clears the unanswered reminder streak without completing the routine."""
+    """An acknowledgement clears the streak and preserves later same-day completion."""
     db_path = tmp_path / "routines.db"
     monkeypatch.setattr(routine_db, "DB_PATH", str(db_path))
     monkeypatch.setattr(routine_db, "_wal_enabled", False)
@@ -307,10 +307,10 @@ def test_routine_response_resets_unanswered_reminder_streak(
         """
         INSERT INTO routines (
             day_of_week, time_str, event_name, event_type, confidence,
-            state, is_active, unanswered_reminder_streak
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            state, is_active, unanswered_reminder_streak, last_triggered
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        ("Thursday", "09:00", "Dynamic routine", "general", 0.9, "trigger_pending", 0, 2),
+        ("Thursday", "09:00", "Dynamic routine", "general", 0.9, "trigger_pending", 0, 2, datetime.now().strftime("%Y-%m-%d")),
     )
     routine_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
     connection.commit()
@@ -319,12 +319,12 @@ def test_routine_response_resets_unanswered_reminder_streak(
     routine_db.mark_routine_acknowledged(routine_id)
 
     connection = routine_db.get_connection()
-    streak = connection.execute(
-        "SELECT unanswered_reminder_streak FROM routines WHERE id=?",
+    state = connection.execute(
+        "SELECT unanswered_reminder_streak, last_triggered FROM routines WHERE id=?",
         (routine_id,),
-    ).fetchone()[0]
+    ).fetchone()
     connection.close()
-    assert streak == 0
+    assert state == (0, None)
 
 
 def test_indefinite_pause_migration_blocks_scheduler_without_deleting_routine(

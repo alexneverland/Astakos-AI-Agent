@@ -1183,6 +1183,32 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     routine_completion_context = build_routine_completion_context()
                     routine_action_consumed = True
                 # pass_through → continue to normal processing.
+            if not routine_action_consumed:
+                from memory.routine_db import get_active_routine_catalog, pause_routine_indefinitely
+                from services.routine_completion_helper import relevant_catalog_candidates
+
+                catalog = {
+                    routine["id"]: routine["event"]
+                    for routine in get_active_routine_catalog()
+                }
+                pause_candidates = relevant_catalog_candidates(user_input, catalog)
+                decision = decide_completion(
+                    user_text=user_input,
+                    candidates=pause_candidates,
+                    pool="catalog",
+                    semantic_selector=_completion_selector,
+                )
+                if decision.action == "pause" and decision.routine_id is not None:
+                    from memory.event_log import log_event
+
+                    rid = decision.routine_id
+                    ev = pause_candidates[rid]
+                    pause_routine_indefinitely(rid)
+                    log_event("routines", "routine_paused", routine_id=rid, event=ev)
+                    print(f"[Web Routine Paused]: #{rid} {ev}")
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
     except Exception as _rce:
         print(f"[Web Routine Completion]: {_rce}")
 

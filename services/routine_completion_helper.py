@@ -7,11 +7,12 @@ and the allowed action for the supplied candidate pool.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Callable, Literal
 
 
 SelectorAction = Literal["complete", "acknowledge", "skip_today", "pause", "none"]
-CandidatePool = Literal["pending", "today"]
+CandidatePool = Literal["pending", "today", "catalog"]
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,32 @@ class CompletionDecision:
 
 
 Selector = Callable[[str, dict[int, str], CandidatePool], RoutineSelection]
+
+
+def relevant_catalog_candidates(user_text: str, catalog: dict[int, str]) -> dict[int, str]:
+    """Return catalogue routines structurally related to the user's own wording.
+
+    No fixed language trigger list is used. Candidate relevance comes solely
+    from names the user has already stored as routines; the LLM then decides
+    whether the message is an explicit permanent pause.
+    """
+    user_tokens = {
+        token.casefold()
+        for token in re.findall(r"\w+", user_text, flags=re.UNICODE)
+        if len(token) > 2
+    }
+    if not user_tokens:
+        return {}
+    relevant: dict[int, str] = {}
+    for routine_id, event_name in catalog.items():
+        event_tokens = {
+            token.casefold()
+            for token in re.findall(r"\w+", event_name, flags=re.UNICODE)
+            if len(token) > 2
+        }
+        if user_tokens & event_tokens:
+            relevant[routine_id] = event_name
+    return relevant
 
 
 def decide_completion(
@@ -65,6 +92,8 @@ def decide_completion(
         return CompletionDecision(action="pass_through", debug_reason="invalid_selector_action")
     if type(selection.routine_id) is not int or selection.routine_id not in candidates:
         return CompletionDecision(action="pass_through", debug_reason="invalid_selector_id")
+    if pool == "catalog" and selection.action != "pause":
+        return CompletionDecision(action="pass_through", debug_reason="catalog_only_allows_pause")
 
     return CompletionDecision(
         action=selection.action,
