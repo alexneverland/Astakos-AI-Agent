@@ -41,7 +41,7 @@ class TestGenerateImageToolMigration:
     def test_generate_image_tool_vertex_success(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Verifies successful 1:1 image generation with Vertex adapter."""
+        """Verifies successful 1:1 image generation with Vertex adapter and real JPEG output."""
         import tools.system as sys_tools
 
         monkeypatch.setattr("config.BASE_DIR", str(tmp_path))
@@ -53,13 +53,14 @@ class TestGenerateImageToolMigration:
         assert "[SEND_PHOTO:" in result
         out_path: str = result.split("[SEND_PHOTO:")[1].replace("]", "").strip()
         assert os.path.exists(out_path)
-        with open(out_path, "rb") as f:
-            assert f.read() == b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_vertex_image"
+        with Image.open(out_path) as img:
+            assert img.format == "JPEG"
+            assert img.mode == "RGB"
 
-    def test_generate_image_tool_openai_success(
+    def test_generate_image_tool_openai_png_converts_to_jpeg(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Verifies successful 1:1 image generation with OpenAI adapter."""
+        """Verifies PNG bytes from OpenAI adapter are safely converted to valid JPEG output."""
         import tools.system as sys_tools
 
         monkeypatch.setattr("config.BASE_DIR", str(tmp_path))
@@ -71,8 +72,56 @@ class TestGenerateImageToolMigration:
         assert "[SEND_PHOTO:" in result
         out_path: str = result.split("[SEND_PHOTO:")[1].replace("]", "").strip()
         assert os.path.exists(out_path)
-        with open(out_path, "rb") as f:
-            assert f.read() == b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_openai_image"
+        with Image.open(out_path) as img:
+            assert img.format == "JPEG"
+            assert img.mode == "RGB"
+
+    def test_generate_image_tool_transparent_png_conversion(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Verifies transparent RGBA PNG bytes are composited cleanly onto white JPEG background."""
+        import tools.system as sys_tools
+
+        transparent_png = Image.new("RGBA", (32, 32), color=(255, 0, 0, 100))
+        buf = io.BytesIO()
+        transparent_png.save(buf, format="PNG")
+        png_bytes: bytes = buf.getvalue()
+
+        class TransparentPngAdapter(MockOpenAIAdapter):
+            def generate_image(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
+                return png_bytes
+
+        monkeypatch.setattr("config.BASE_DIR", str(tmp_path))
+        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: TransparentPngAdapter())
+
+        result: str = sys_tools.generate_image_tool.invoke({"prompt": "transparent logo"})
+
+        assert result.startswith("✅ Ready! Image created.")
+        out_path: str = result.split("[SEND_PHOTO:")[1].replace("]", "").strip()
+        with Image.open(out_path) as img:
+            assert img.format == "JPEG"
+            assert img.mode == "RGB"
+
+    def test_generate_image_tool_invalid_bytes_fails_gracefully(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Verifies invalid non-image bytes fail gracefully without creating a misleading output file."""
+        import tools.system as sys_tools
+
+        class CorruptImageAdapter(MockVertexAIAdapter):
+            def generate_image(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
+                return b"corrupt_non_image_binary_data"
+
+        monkeypatch.setattr("config.BASE_DIR", str(tmp_path))
+        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: CorruptImageAdapter())
+
+        result: str = sys_tools.generate_image_tool.invoke({"prompt": "a painting"})
+
+        assert "❌ Image generation error (vertex): invalid or unreadable image data" in result
+        # Verify no file was created in outputs
+        output_dir = tmp_path / "outputs"
+        if output_dir.exists():
+            assert len(list(output_dir.glob("*.jpg"))) == 0
 
     def test_generate_image_tool_anthropic_unsupported(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -147,7 +196,7 @@ class TestStoryMakerImageMigration:
     def test_story_maker_generate_image_vertex_success(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Verifies scene artwork generation with Vertex adapter."""
+        """Verifies scene artwork generation with Vertex adapter produces valid JPEG."""
         import astakos_skills.story_maker as sm
 
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: MockVertexAIAdapter())
@@ -157,13 +206,14 @@ class TestStoryMakerImageMigration:
         assert path is not None
         assert os.path.exists(path)
         assert path.endswith(".jpg")
-        with open(path, "rb") as f:
-            assert f.read() == b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_vertex_image"
+        with Image.open(path) as img:
+            assert img.format == "JPEG"
+            assert img.mode == "RGB"
 
-    def test_story_maker_generate_image_openai_success(
+    def test_story_maker_generate_image_openai_png_converts_to_jpeg(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Verifies scene artwork generation with OpenAI adapter."""
+        """Verifies scene artwork generation with OpenAI adapter converts PNG to valid JPEG."""
         import astakos_skills.story_maker as sm
 
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: MockOpenAIAdapter())
@@ -172,8 +222,28 @@ class TestStoryMakerImageMigration:
 
         assert path is not None
         assert os.path.exists(path)
-        with open(path, "rb") as f:
-            assert f.read() == b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_openai_image"
+        assert path.endswith(".jpg")
+        with Image.open(path) as img:
+            assert img.format == "JPEG"
+            assert img.mode == "RGB"
+
+    def test_story_maker_generate_image_invalid_bytes_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Verifies invalid image bytes produce None without writing a corrupt file."""
+        import astakos_skills.story_maker as sm
+
+        class CorruptImageAdapter(MockVertexAIAdapter):
+            def generate_image(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
+                return b"corrupt_image_payload"
+
+        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: CorruptImageAdapter())
+
+        path: str | None = sm._generate_image("broken scene", str(tmp_path), 1)
+
+        assert path is None
+        assert len(list(tmp_path.glob("*.jpg"))) == 0
+
 
     def test_story_maker_generate_image_anthropic_unsupported_returns_none(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

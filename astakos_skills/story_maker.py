@@ -32,9 +32,26 @@ def _generate_image(prompt: str, output_dir: str, index: int) -> str | None:
         img_bytes = adapter.generate_image(styled, aspect_ratio="1:1")
         if img_bytes:
             fname = os.path.join(output_dir, f"story_img_{index}_{int(time.time())}.jpg")
-            with open(fname, "wb") as f:
-                f.write(img_bytes)
-            return fname
+            import io
+            from PIL import Image
+
+            try:
+                with Image.open(io.BytesIO(img_bytes)) as img:
+                    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                        rgba = img.convert("RGBA")
+                        background = Image.new("RGB", rgba.size, (255, 255, 255))
+                        background.paste(rgba, mask=rgba.split()[3])
+                        rgb_img = background
+                    elif img.mode != "RGB":
+                        rgb_img = img.convert("RGB")
+                    else:
+                        rgb_img = img
+
+                    rgb_img.save(fname, format="JPEG", quality=95)
+                return fname
+            except Exception as img_err:
+                print(f"⚠️ [StoryMaker] Image {index} invalid image data: {img_err}")
+                return None
     except CapabilityNotSupportedError as exc:
         print(f"⚠️ [StoryMaker] Image generation not supported by provider '{exc.provider}': {exc}")
     except (ProviderAuthError, RateLimitError, AIProviderError) as exc:

@@ -2111,8 +2111,24 @@ def generate_image_tool(prompt: str) -> str:
         if not img_bytes:
             return f"❌ Image generation error ({adapter.provider_name}): provider returned no image data."
 
-        with open(full_path, "wb") as f:
-            f.write(img_bytes)
+        import io
+        from PIL import Image
+
+        try:
+            with Image.open(io.BytesIO(img_bytes)) as img:
+                if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                    rgba = img.convert("RGBA")
+                    background = Image.new("RGB", rgba.size, (255, 255, 255))
+                    background.paste(rgba, mask=rgba.split()[3])
+                    rgb_img = background
+                elif img.mode != "RGB":
+                    rgb_img = img.convert("RGB")
+                else:
+                    rgb_img = img
+
+                rgb_img.save(full_path, format="JPEG", quality=95)
+        except Exception as img_err:
+            return f"❌ Image generation error ({adapter.provider_name}): invalid or unreadable image data ({img_err})."
 
         return f"✅ Ready! Image created.\n[SEND_PHOTO: {full_path}]"
 
