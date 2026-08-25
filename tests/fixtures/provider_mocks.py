@@ -11,6 +11,7 @@ from typing import Sequence
 from core.ai_provider import (
     AIProviderAdapter,
     CapabilityNotSupportedError,
+    normalize_embedding_texts,
     ProviderAuthError,
     RateLimitError,
 )
@@ -46,10 +47,10 @@ class MockOpenAIAdapter(AIProviderAdapter):
         self._check_faults()
         return b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_openai_image"
 
-    def embed_text(self, texts: Sequence[str], is_query: bool = False) -> list[list[float]]:
+    def embed_text(self, texts: str | Sequence[str], is_query: bool = False) -> list[list[float]]:
         self._check_faults()
         # Returns 1536-dimensional mock vectors
-        return [[0.01 * (i + 1) for i in range(1536)] for _ in texts]
+        return [[0.01 * (i + 1) for i in range(1536)] for _ in normalize_embedding_texts(texts)]
 
 
 class MockGeminiAPIAdapter(AIProviderAdapter):
@@ -82,10 +83,10 @@ class MockGeminiAPIAdapter(AIProviderAdapter):
         self._check_faults()
         return b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_gemini_image"
 
-    def embed_text(self, texts: Sequence[str], is_query: bool = False) -> list[list[float]]:
+    def embed_text(self, texts: str | Sequence[str], is_query: bool = False) -> list[list[float]]:
         self._check_faults()
         # Returns 768-dimensional mock vectors
-        return [[0.02 * (i + 1) for i in range(768)] for _ in texts]
+        return [[0.02 * (i + 1) for i in range(768)] for _ in normalize_embedding_texts(texts)]
 
 
 class MockVertexAIAdapter(AIProviderAdapter):
@@ -118,10 +119,10 @@ class MockVertexAIAdapter(AIProviderAdapter):
         self._check_faults()
         return b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_vertex_image"
 
-    def embed_text(self, texts: Sequence[str], is_query: bool = False) -> list[list[float]]:
+    def embed_text(self, texts: str | Sequence[str], is_query: bool = False) -> list[list[float]]:
         self._check_faults()
         # Returns 768-dimensional mock vectors
-        return [[0.03 * (i + 1) for i in range(768)] for _ in texts]
+        return [[0.03 * (i + 1) for i in range(768)] for _ in normalize_embedding_texts(texts)]
 
 
 class MockAnthropicAdapter(AIProviderAdapter):
@@ -160,7 +161,7 @@ class MockAnthropicAdapter(AIProviderAdapter):
             message="Image generation is not supported by Anthropic.",
         )
 
-    def embed_text(self, texts: Sequence[str], is_query: bool = False) -> list[list[float]]:
+    def embed_text(self, texts: str | Sequence[str], is_query: bool = False) -> list[list[float]]:
         raise CapabilityNotSupportedError(
             provider="anthropic",
             capability="embeddings",

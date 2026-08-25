@@ -65,6 +65,14 @@ def resolve_vertex_location(location: str | None = None) -> str:
     return os.getenv("LOCATION", "global") if location is None else location
 
 
+def normalize_embedding_texts(texts: str | Sequence[str]) -> list[str]:
+    """Normalize one text or a sequence of texts into provider-safe embedding input."""
+    normalized = [texts] if isinstance(texts, str) else list(texts)
+    if not all(isinstance(text, str) for text in normalized):
+        raise TypeError("Embedding input must contain only strings.")
+    return normalized
+
+
 def resolve_gemini_safety_threshold() -> Any:
     """Return the configured HarmBlockThreshold, defaulting to BLOCK_NONE."""
     from langchain_google_genai import HarmBlockThreshold
@@ -191,7 +199,7 @@ class AIProviderAdapter(ABC):
     @abstractmethod
     def embed_text(
         self,
-        texts: Sequence[str],
+        texts: str | Sequence[str],
         is_query: bool = False,
     ) -> list[list[float]]:
         """Generate dense vector embeddings for texts."""
@@ -368,17 +376,18 @@ class OpenAIAdapter(AIProviderAdapter):
 
     def embed_text(
         self,
-        texts: Sequence[str],
+        texts: str | Sequence[str],
         is_query: bool = False,
     ) -> list[list[float]]:
         if not self.api_key:
             raise ProviderAuthError("openai", "OPENAI_API_KEY is not configured.")
         try:
+            normalized_texts = normalize_embedding_texts(texts)
             from langchain_openai import OpenAIEmbeddings
             embeddings_client = OpenAIEmbeddings(model=self.embedding_model, api_key=self.api_key)
-            if is_query and len(texts) == 1:
-                return [embeddings_client.embed_query(texts[0])]
-            return embeddings_client.embed_documents(list(texts))
+            if is_query:
+                return [embeddings_client.embed_query(text) for text in normalized_texts]
+            return embeddings_client.embed_documents(normalized_texts)
         except Exception as e:
             self._handle_exception(e)
 
@@ -507,17 +516,18 @@ class GeminiAPIAdapter(AIProviderAdapter):
 
     def embed_text(
         self,
-        texts: Sequence[str],
+        texts: str | Sequence[str],
         is_query: bool = False,
     ) -> list[list[float]]:
         if not self.api_key:
             raise ProviderAuthError("gemini", "GEMINI_API_KEY is not configured.")
         try:
+            normalized_texts = normalize_embedding_texts(texts)
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
             emb_client = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=self.api_key)
             if is_query:
-                return [emb_client.embed_query(text) for text in texts]
-            return emb_client.embed_documents(list(texts))
+                return [emb_client.embed_query(text) for text in normalized_texts]
+            return emb_client.embed_documents(normalized_texts)
         except Exception as e:
             self._handle_exception(e)
 
@@ -665,10 +675,11 @@ class VertexAIAdapter(AIProviderAdapter):
 
     def embed_text(
         self,
-        texts: Sequence[str],
+        texts: str | Sequence[str],
         is_query: bool = False,
     ) -> list[list[float]]:
         try:
+            normalized_texts = normalize_embedding_texts(texts)
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
             emb_client = GoogleGenerativeAIEmbeddings(
                 model="text-embedding-004",
@@ -677,8 +688,8 @@ class VertexAIAdapter(AIProviderAdapter):
                 location=self.location,
             )
             if is_query:
-                return [emb_client.embed_query(text) for text in texts]
-            return emb_client.embed_documents(list(texts))
+                return [emb_client.embed_query(text) for text in normalized_texts]
+            return emb_client.embed_documents(normalized_texts)
         except Exception as e:
             self._handle_exception(e)
 
@@ -776,7 +787,7 @@ class AnthropicAdapter(AIProviderAdapter):
 
     def embed_text(
         self,
-        texts: Sequence[str],
+        texts: str | Sequence[str],
         is_query: bool = False,
     ) -> list[list[float]]:
         raise CapabilityNotSupportedError(

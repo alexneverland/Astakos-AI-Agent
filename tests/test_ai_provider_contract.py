@@ -26,6 +26,7 @@ from core.ai_provider import (
     resolve_gemini_safety_threshold,
     resolve_provider_models,
     resolve_vertex_location,
+    normalize_embedding_texts,
 )
 from tests.fixtures.provider_mocks import (
     MockOpenAIAdapter,
@@ -114,6 +115,9 @@ class TestAIProviderContractAndResolution:
         monkeypatch.setenv("LOCATION", "europe-west4")
         assert resolve_vertex_location() == "europe-west4"
         assert resolve_vertex_location("us-central1") == "us-central1"
+
+    def test_scalar_embedding_text_normalizes_to_one_item(self):
+        assert normalize_embedding_texts("hello") == ["hello"]
 
 
 class TestRealOpenAIAdapterBoundary:
@@ -213,6 +217,13 @@ class TestRealOpenAIAdapterBoundary:
         vecs = self.adapter.embed_text(["doc 1", "doc 2"])
         assert len(vecs) == 2
         assert len(vecs[0]) == 1536
+
+    @patch("langchain_openai.OpenAIEmbeddings.embed_documents")
+    def test_embed_text_scalar_is_one_document(self, mock_embed):
+        mock_embed.return_value = [[0.1] * 1536]
+        vecs = self.adapter.embed_text("one document")
+        assert len(vecs) == 1
+        mock_embed.assert_called_once_with(["one document"])
 
     @patch("langchain_openai.ChatOpenAI.invoke")
     def test_auth_and_rate_limit_errors(self, mock_invoke):
@@ -321,6 +332,13 @@ class TestRealGeminiAPIAdapterBoundary:
         assert len(vecs) == 1
         assert len(vecs[0]) == 768
 
+    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_documents")
+    def test_embed_text_scalar_is_one_document(self, mock_embed):
+        mock_embed.return_value = [[0.05] * 768]
+        vecs = self.adapter.embed_text("one document")
+        assert len(vecs) == 1
+        mock_embed.assert_called_once_with(["one document"])
+
     @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_query")
     def test_embed_query_batch_uses_query_mode_for_every_text(self, mock_query):
         mock_query.side_effect = [[0.1] * 768, [0.2] * 768]
@@ -422,6 +440,13 @@ class TestRealVertexAIAdapterBoundary:
         vecs = self.adapter.embed_text(["doc a", "doc b"])
         assert len(vecs) == 2
         assert len(vecs[0]) == 768
+
+    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_documents")
+    def test_embed_text_scalar_is_one_document(self, mock_embed):
+        mock_embed.return_value = [[0.03] * 768]
+        vecs = self.adapter.embed_text("one document")
+        assert len(vecs) == 1
+        mock_embed.assert_called_once_with(["one document"])
 
     @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_query")
     def test_embed_query_success(self, mock_query):
