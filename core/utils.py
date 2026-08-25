@@ -16,6 +16,10 @@ from typing_extensions import TypedDict, NotRequired
 from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 
+
+_embedding_setup_notifications: set[str] = set()
+_embedding_setup_notifications_lock = threading.Lock()
+
 # ────────────────────────────────────────────────────────────────
 # 1. STATE & TYPES
 # ────────────────────────────────────────────────────────────────
@@ -677,7 +681,25 @@ def build_prompt(
                 memory_context_str += rendered_context + "\n"
                 memory_context_str += "⚠️ Do not say 'according to my memory', just act based on it.\n"
         except Exception as e:
-            print(f"\033[91m⚠️ Memory Context Error: {e}\033[0m")
+            from core.ai_provider import EmbeddingsProviderSetupRequired
+
+            if isinstance(e, EmbeddingsProviderSetupRequired):
+                notification_key = f"{channel or 'telegram'}:{e.provider}:{e}"
+                with _embedding_setup_notifications_lock:
+                    first_notice = notification_key not in _embedding_setup_notifications
+                    if first_notice:
+                        _embedding_setup_notifications.add(notification_key)
+                if first_notice:
+                    memory_context_str = (
+                        "\n[SYSTEM STATUS — SEMANTIC MEMORY SETUP REQUIRED]\n"
+                        f"Semantic-memory retrieval is unavailable: {e}\n"
+                        "Tell the user concisely that semantic memory needs setup. "
+                        "Do not claim a semantic-memory search succeeded; continue answering "
+                        "the current request normally.\n"
+                    )
+                print(f"\033[93m[MemoryContext]: semantic memory setup required: {e}\033[0m")
+            else:
+                print(f"\033[91m⚠️ Memory Context Error: {e}\033[0m")
     elif include_persisted_context and has_skip_keyword:
         print("\033[93m[Mastro-Radar]: ⚡ Skipping Semantic Search due to Skip Keyword! (Live Data Mode)\033[0m")
 

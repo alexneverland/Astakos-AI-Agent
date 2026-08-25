@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import core.i18n
+import core.utils as utils
+from core.ai_provider import EmbeddingsProviderSetupRequired
 from core.i18n import load_locale, t
 from core.utils import build_prompt, load_agent_prompt
 
@@ -47,3 +49,31 @@ def test_dev_prompt_requires_prefix_and_no_tools_during_proposal() -> None:
     dev_prompt = load_agent_prompt("Dev_Agent")
     assert "You MUST start your response EXACTLY with the localized proposal prefix" in dev_prompt
     assert "CRITICAL: You must NOT call ANY tools during this proposal turn." in prompt
+
+
+def test_prompt_surfaces_embeddings_setup_once_without_blocking_chat(monkeypatch) -> None:
+    """Provider setup failures become one clear user-facing prompt status."""
+    utils._embedding_setup_notifications.clear()
+    setup_error = EmbeddingsProviderSetupRequired(
+        "Configure an embeddings provider.",
+        provider="anthropic",
+    )
+    monkeypatch.setattr(
+        "memory.context_builder.build_memory_context",
+        MagicMock(side_effect=setup_error),
+    )
+
+    first_prompt = build_prompt(
+        state_messages=[MockMessage("Πες μου κάτι χρήσιμο")],
+        agent_role="Chat_Agent",
+        channel="telegram",
+    )
+    second_prompt = build_prompt(
+        state_messages=[MockMessage("Πες μου κάτι χρήσιμο")],
+        agent_role="Chat_Agent",
+        channel="telegram",
+    )
+
+    assert "SEMANTIC MEMORY SETUP REQUIRED" in first_prompt
+    assert "Configure an embeddings provider." in first_prompt
+    assert "SEMANTIC MEMORY SETUP REQUIRED" not in second_prompt
