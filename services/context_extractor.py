@@ -184,10 +184,12 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             payload["kid1_with_user"] = False
 
         if payload.get("partner_at_work") is True:
-            payload["family_at_home"] = False
-            payload["partner_with_user"] = False
-            payload["kid1_with_partner"] = False
-            payload["partner_work_mode"] = "office"
+            if payload.get("partner_work_mode") not in valid_partner_work_modes:
+                payload["partner_work_mode"] = "office"
+            if payload["partner_work_mode"] == "office":
+                payload["family_at_home"] = False
+                payload["partner_with_user"] = False
+                payload["kid1_with_partner"] = False
 
         if payload.get("kid1_with_user") is True:
             payload["kid1_away_from_home"] = False

@@ -152,6 +152,24 @@ def test_context_extractor_records_partner_at_work_without_assuming_child_locati
     assert "kid1_away_from_home" not in calls
 
 
+def test_context_extractor_preserves_explicit_remote_partner_work_mode(
+    mocked_context_pipeline,
+):
+    """Remote work remains semantically distinct from working away from home."""
+    mock_llm, mock_set, _ = mocked_context_pipeline
+    mock_llm.return_value = MagicMock(
+        text='{"partner_at_work": true, "partner_work_mode": "remote"}'
+    )
+
+    extract_and_update_context_flags("Η σύντροφός μου δουλεύει σήμερα από το σπίτι.")
+
+    calls = _state_calls(mock_set)
+    assert calls["partner_at_work"] == "true"
+    assert calls["partner_work_mode"] == "remote"
+    assert "family_at_home" not in calls
+    assert "partner_with_user" not in calls
+
+
 def test_context_extractor_skips_visual_analysis_payload(mocked_context_pipeline):
     mock_llm, mock_set, _ = mocked_context_pipeline
 

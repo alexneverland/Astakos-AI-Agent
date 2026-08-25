@@ -840,17 +840,19 @@ def get_active_routine_catalog() -> list[dict]:
     the semantic selector and accept only the ``pause`` action.
     """
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT id, event_name
-        FROM routines
-        WHERE state='active' AND COALESCE(paused_indefinitely, 0)=0
-        ORDER BY event_name COLLATE NOCASE ASC, id ASC
-        """
-    )
-    rows = cursor.fetchall()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, event_name
+            FROM routines
+            WHERE state='active' AND COALESCE(paused_indefinitely, 0)=0
+            ORDER BY event_name COLLATE NOCASE ASC, id ASC
+            """
+        )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
     return [{"id": row[0], "event": row[1]} for row in rows]
 
 

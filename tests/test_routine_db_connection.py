@@ -49,6 +49,20 @@ def test_get_connection_uses_bounded_busy_timeout_without_repeating_wal(monkeypa
     assert fake_connection.statements == ["PRAGMA busy_timeout=5000"]
 
 
+def test_active_routine_catalog_closes_connection_when_query_fails(monkeypatch) -> None:
+    """A catalogue lookup must not leak a connection on a database exception."""
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.cursor.return_value = cursor
+    cursor.execute.side_effect = sqlite3.OperationalError("catalogue unavailable")
+    monkeypatch.setattr(routine_db, "get_connection", lambda: connection)
+
+    with pytest.raises(sqlite3.OperationalError, match="catalogue unavailable"):
+        routine_db.get_active_routine_catalog()
+
+    connection.close.assert_called_once()
+
+
 def test_enable_wal_retries_after_transient_startup_lock(monkeypatch):
     monkeypatch.setattr(routine_db, "_wal_enabled", False)
     monkeypatch.setattr(routine_db, "_wal_enabled_path", None)
