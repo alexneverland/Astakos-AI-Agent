@@ -484,6 +484,16 @@ class TestRealVertexAIAdapterBoundary:
             self.adapter.generate_text("test")
         assert exc_info.value.provider == "vertex"
 
+    @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
+    def test_google_credential_errors_map_to_auth_error(self, mock_invoke):
+        from google.auth.exceptions import DefaultCredentialsError, RefreshError
+
+        for error in (DefaultCredentialsError("Application Default Credentials unavailable"), RefreshError("Token refresh failed")):
+            mock_invoke.side_effect = error
+            with pytest.raises(ProviderAuthError) as exc_info:
+                self.adapter.generate_text("test")
+            assert exc_info.value.provider == "vertex"
+
 
 class TestRealAnthropicAdapterBoundary:
     """Offline SDK boundary tests for AnthropicAdapter."""

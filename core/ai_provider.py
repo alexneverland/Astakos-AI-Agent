@@ -696,6 +696,9 @@ class VertexAIAdapter(AIProviderAdapter):
     def _handle_exception(self, e: Exception) -> None:
         if isinstance(e, AIProviderError):
             raise e
+        from google.auth.exceptions import DefaultCredentialsError, RefreshError
+        if isinstance(e, (DefaultCredentialsError, RefreshError)):
+            raise ProviderAuthError("vertex", str(e), original_error=e) from e
         err_msg = str(e).lower()
         if "permission_denied" in err_msg or "403" in err_msg or "401" in err_msg or "unauthenticated" in err_msg:
             raise ProviderAuthError("vertex", str(e), original_error=e) from e
