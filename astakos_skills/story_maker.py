@@ -38,28 +38,30 @@ def _generate_image(prompt: str, output_dir: str, index: int) -> str | None:
 
 # ── LLM story + scene prompts ────────────────────────────────────
 def _generate_story_and_prompts(theme: str, characters: str = "") -> dict:
-    """Calls Gemini for a fairy tale + 3 image prompts."""
+    """Calls the active AI provider for a fairy tale + 3 image prompts."""
     try:
-        import config
-        import vertexai
-        from vertexai.generative_models import GenerativeModel
-        from core.brain import FAST_MODEL as MAIN_MODEL
-
-        vertexai.init(
-            project=os.getenv("PROJECT_ID", config.PROJECT_ID),
-            location=os.getenv("LOCATION", "global")
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            AIProviderError,
         )
-        model = GenerativeModel(MAIN_MODEL)
+        from core.brain import get_active_provider_adapter
 
         char_hint = t("skills.story_maker.msg_char_hint", chars=characters) if characters else ""
         from core.utils import load_agent_prompt
         base_prompt = load_agent_prompt("story_maker")
         system_prompt = base_prompt.format(char_hint=char_hint)
 
-        response = model.generate_content(
-            f"Story theme: {theme}\n\n{system_prompt}"
+        adapter = get_active_provider_adapter()
+        raw = adapter.generate_text(
+            f"Story theme: {theme}\n\n{system_prompt}",
+            model_type="fast",
         )
-        raw = response.text.strip()
+        if not raw:
+            return {"story": None, "scenes": []}
+
+        raw = raw.strip()
 
         # Split fairytale into scenes
         scenes = []
@@ -82,6 +84,9 @@ def _generate_story_and_prompts(theme: str, characters: str = "") -> dict:
 
         return {"story": story_text, "scenes": scenes[:3]}
 
+    except (CapabilityNotSupportedError, ProviderAuthError, RateLimitError, AIProviderError) as e:
+        print(f"❌ [StoryMaker] Provider error ({getattr(e, 'provider', 'unknown')}): {e}")
+        return {"story": None, "scenes": []}
     except Exception as e:
         print(f"❌ [StoryMaker] LLM error: {e}")
         return {"story": None, "scenes": []}
