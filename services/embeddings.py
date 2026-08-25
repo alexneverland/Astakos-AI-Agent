@@ -13,8 +13,8 @@ from datetime import datetime
 from time import perf_counter
 
 from langchain_core.embeddings import Embeddings
-import config
-from config import PROJECT_ID, LOCATION, EMBEDDINGS_CACHE_DB
+from config import EMBEDDINGS_CACHE_DB
+from core.ai_provider import EmbeddingsAdapter, get_embeddings_adapter
 
 
 # -- DB helpers --------------------------------------------------
@@ -41,28 +41,44 @@ def _init_db() -> int:
 
 
 # -- Base Embeddings Model -------------------------------------------
-_provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
 
-if _provider in ["openai", "anthropic"]:
-    from langchain_openai import OpenAIEmbeddings
-    base_embeddings = OpenAIEmbeddings(
-        model="text-embedding-3-small", 
-        api_key=config.OPENAI_API_KEY
-    )
-elif _provider == "gemini":
-    from langchain_google_genai import GoogleGenerativeAIEmbeddings
-    base_embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004", 
-        google_api_key=config.GEMINI_API_KEY
-    )
-else:
-    from langchain_google_genai import GoogleGenerativeAIEmbeddings
-    base_embeddings = GoogleGenerativeAIEmbeddings(
-        model="text-embedding-004",
-        vertexai=True,
-        project=PROJECT_ID,
-        location=LOCATION,
-    )
+class ProviderEmbeddings(Embeddings):
+    """LangChain adapter that resolves the semantic-memory provider lazily.
+
+    Delaying resolution keeps normal application startup available when a user
+    has selected a chat provider without native embeddings.  The first semantic
+    operation then returns one clear setup error instead of silently falling
+    back to another provider or downloading a local model.
+    """
+
+    def __init__(
+        self,
+        provider_name: str | None = None,
+        chat_provider_name: str | None = None,
+    ) -> None:
+        self.provider_name = provider_name
+        self.chat_provider_name = chat_provider_name
+        self._adapter: EmbeddingsAdapter | None = None
+        self._adapter_lock = threading.Lock()
+
+    def _get_adapter(self) -> EmbeddingsAdapter:
+        if self._adapter is None:
+            with self._adapter_lock:
+                if self._adapter is None:
+                    self._adapter = get_embeddings_adapter(
+                        self.provider_name,
+                        self.chat_provider_name,
+                    )
+        return self._adapter
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._get_adapter().embed_text(text, is_query=True)[0]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self._get_adapter().embed_text(texts, is_query=False)
+
+
+base_embeddings = ProviderEmbeddings()
 
 
 # -- Cache class -------------------------------------------------

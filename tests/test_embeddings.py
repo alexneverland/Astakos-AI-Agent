@@ -40,16 +40,13 @@ def test_embed_query_dimensions(embeddings):
     assert len(vec) == 768
 
 
-def test_vertex_provider_uses_unified_google_embeddings_adapter(embeddings):
-    """Vertex embeddings use LangChain's supported unified Google adapter."""
-    from config import LOCATION, PROJECT_ID
-    from langchain_google_genai import GoogleGenerativeAIEmbeddings
+def test_vertex_provider_uses_the_independent_embeddings_resolver(embeddings):
+    """Default Vertex deployments keep Vertex as their semantic-memory backend."""
+    from core.ai_provider import VertexAIAdapter
+    from services.embeddings import ProviderEmbeddings
 
-    assert isinstance(embeddings.base, GoogleGenerativeAIEmbeddings)
-    assert embeddings.base.model == "text-embedding-004"
-    assert embeddings.base.vertexai is True
-    assert embeddings.base.project == PROJECT_ID
-    assert embeddings.base.location == LOCATION
+    assert isinstance(embeddings.base, ProviderEmbeddings)
+    assert isinstance(embeddings.base._get_adapter(), VertexAIAdapter)
 
 
 def test_similar_phrases_high_similarity(embeddings):

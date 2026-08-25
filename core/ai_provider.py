@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Sequence
+from typing import Any, Protocol, Sequence
 
 import config
 
@@ -145,6 +145,23 @@ class RateLimitError(AIProviderError):
         self.retry_after = retry_after
         user_msg = message or f"Rate limit or quota exceeded for provider '{provider}'."
         super().__init__(user_msg, provider=provider, original_error=original_error)
+
+
+class EmbeddingsProviderSetupRequired(AIProviderError):
+    """Raised when semantic memory has no explicitly usable embeddings backend."""
+
+
+class EmbeddingsAdapter(Protocol):
+    """Minimal contract required by the semantic-memory embeddings layer."""
+
+    provider_name: str
+
+    def embed_text(
+        self,
+        texts: str | Sequence[str],
+        is_query: bool = False,
+    ) -> list[list[float]]:
+        """Generate dense vector embeddings for texts."""
 
 
 # ────────────────────────────────────────────────────────────────
@@ -796,7 +813,7 @@ class AnthropicAdapter(AIProviderAdapter):
         raise CapabilityNotSupportedError(
             provider="anthropic",
             capability="embeddings",
-            message="Embeddings are not natively supported by Anthropic API alone. Multilingual local E5 embeddings fallback will be configured in PR 2.",
+            message="Embeddings are not natively supported by Anthropic API alone. Configure a separate Vertex, Gemini, OpenAI, or optional local embeddings provider.",
         )
 
     def _handle_exception(self, e: Exception) -> None:
@@ -821,6 +838,93 @@ _ADAPTER_REGISTRY: dict[str, type[AIProviderAdapter]] = {
     "anthropic": AnthropicAdapter,
 }
 
+_EMBEDDINGS_PROVIDER_NAMES = frozenset({"vertex", "gemini", "openai", "local"})
+
+
+def resolve_embeddings_provider(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+) -> str:
+    """Resolve the embeddings backend independently from the chat provider.
+
+    ``auto`` deliberately uses the chat provider only when it exposes native
+    embeddings.  It never silently selects OpenAI or downloads a local model
+    for providers such as Anthropic.
+    """
+    configured = provider_name
+    if configured is None:
+        configured = os.getenv("EMBEDDINGS_PROVIDER", "auto")
+    resolved = configured.strip().lower()
+    if resolved == "auto":
+        chat_provider = (
+            chat_provider_name
+            or getattr(config, "LLM_PROVIDER", "vertex")
+        ).strip().lower()
+        adapter = get_provider_adapter(chat_provider)
+        if adapter.is_capability_supported("embeddings"):
+            return adapter.provider_name
+        raise EmbeddingsProviderSetupRequired(
+            "Semantic memory needs an embeddings provider. Configure "
+            "EMBEDDINGS_PROVIDER as vertex, gemini, openai, or local; "
+            "Anthropic does not provide native embeddings.",
+            provider=chat_provider,
+        )
+    if resolved not in _EMBEDDINGS_PROVIDER_NAMES:
+        valid = ", ".join(sorted(_EMBEDDINGS_PROVIDER_NAMES | {"auto"}))
+        raise EmbeddingsProviderSetupRequired(
+            f"Unknown embeddings provider '{resolved}'. Valid options: {valid}.",
+            provider=resolved,
+        )
+    return resolved
+
+
+class LocalE5EmbeddingsAdapter:
+    """Optional local multilingual E5 backend with no install or download side effects."""
+
+    provider_name = "local"
+    model_name = "intfloat/multilingual-e5-small"
+
+    def __init__(self, model_name: str | None = None):
+        self.model_name = model_name or os.getenv("ASTAKOS_LOCAL_EMBEDDING_MODEL", self.model_name)
+        self._model: Any | None = None
+
+    def _get_model(self) -> Any:
+        if self._model is not None:
+            return self._model
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise EmbeddingsProviderSetupRequired(
+                "Local embeddings are selected but sentence-transformers is not installed. "
+                "Install sentence-transformers before selecting local embeddings.",
+                provider="local",
+                original_error=exc,
+            ) from exc
+        try:
+            # Local-only prevents a background model download during normal use.
+            self._model = SentenceTransformer(self.model_name, local_files_only=True)
+            return self._model
+        except Exception as exc:
+            raise EmbeddingsProviderSetupRequired(
+                f"Local embeddings model '{self.model_name}' is not installed locally. "
+                "Download it explicitly during setup before selecting local embeddings.",
+                provider="local",
+                original_error=exc,
+            ) from exc
+
+    def embed_text(
+        self,
+        texts: str | Sequence[str],
+        is_query: bool = False,
+    ) -> list[list[float]]:
+        normalized_texts = normalize_embedding_texts(texts)
+        prefix = "query: " if is_query else "passage: "
+        vectors = self._get_model().encode(
+            [f"{prefix}{text}" for text in normalized_texts],
+            normalize_embeddings=True,
+        )
+        return [vector.tolist() for vector in vectors]
+
 
 def get_provider_adapter(provider_name: str | None = None, **kwargs: Any) -> AIProviderAdapter:
     """Factory function returning the configured AIProviderAdapter instance."""
@@ -829,3 +933,21 @@ def get_provider_adapter(provider_name: str | None = None, **kwargs: Any) -> AIP
     if not adapter_cls:
         raise AIProviderError(f"Unknown AI provider: '{resolved_name}'. Valid options: {list(_ADAPTER_REGISTRY.keys())}")
     return adapter_cls(**kwargs)
+
+
+def get_embeddings_adapter(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+    **kwargs: Any,
+) -> EmbeddingsAdapter:
+    """Return the explicitly resolved backend used only for semantic embeddings."""
+    resolved = resolve_embeddings_provider(provider_name, chat_provider_name)
+    if resolved == "local":
+        return LocalE5EmbeddingsAdapter(**kwargs)
+    adapter = get_provider_adapter(resolved, **kwargs)
+    if not adapter.is_capability_supported("embeddings"):
+        raise EmbeddingsProviderSetupRequired(
+            f"Provider '{resolved}' does not support embeddings.",
+            provider=resolved,
+        )
+    return adapter
