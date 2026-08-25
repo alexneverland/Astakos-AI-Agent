@@ -1376,6 +1376,18 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     handling_agent    = "Chat_Agent"
 
     try:
+        # ── Explicit canonical fail-closed containment check for photo_path ──
+        safe_photo_path = ""
+        if photo_path:
+            try:
+                base_dir = os.path.realpath(os.path.abspath(PHOTOS_DIR))
+                cand_path = os.path.realpath(os.path.abspath(photo_path))
+                if os.path.commonpath([cand_path, base_dir]) == base_dir and os.path.isfile(cand_path):
+                    safe_photo_path = cand_path
+            except Exception:
+                safe_photo_path = ""
+        photo_path = safe_photo_path
+
         # ── Multimodal message if a file exists ───────────
         if photo_path and os.path.exists(photo_path):
             filename = os.path.basename(photo_path)

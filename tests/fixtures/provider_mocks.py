@@ -21,19 +21,24 @@ import io
 from PIL import Image
 
 def _make_mock_jpeg() -> bytes:
+    """Generates deterministic in-memory JPEG bytes for provider image generation fixtures."""
     img = Image.new("RGB", (16, 16), color=(0, 128, 255))
     buf = io.BytesIO()
     img.save(buf, format="JPEG")
     return buf.getvalue()
 
+
 def _make_mock_png() -> bytes:
+    """Generates deterministic in-memory RGBA PNG bytes for provider image generation fixtures."""
     img = Image.new("RGBA", (16, 16), color=(255, 100, 50, 180))
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
 
+
 MOCK_JPEG_BYTES: bytes = _make_mock_jpeg()
 MOCK_PNG_BYTES: bytes = _make_mock_png()
+
 
 
 class MockOpenAIAdapter(AIProviderAdapter):

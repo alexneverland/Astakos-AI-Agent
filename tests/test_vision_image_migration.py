@@ -933,7 +933,6 @@ class TestAgentNodesVisionMigration:
             ],
             "channel": "web",
         }
-
         result: dict[str, Any] = agents.web_agent_node(state)
 
         assert result["current_agent"] == "Web_Agent"
@@ -992,15 +991,19 @@ class TestAgentNodesVisionMigration:
 # ────────────────────────────────────────────────────────────────
 
 class TestChatStreamPhotoVisionMigration:
-    """Validates api/server.py chat stream photo intake with AI provider adapter."""
+    """Validates api/server.py /chat endpoint photo intake with AI provider adapter."""
 
-    def test_chat_stream_with_photo_invokes_adapter_vision_and_cleans_message(
+    def test_chat_endpoint_processes_photo_via_adapter_and_forwards_text_analysis_to_graph(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Verifies chat streaming parses photo via adapter and attaches untrusted analysis."""
+        """Verifies /chat routes allowed image to adapter and feeds graph text-only untrusted analysis."""
+        from fastapi.testclient import TestClient
+        from api.server import server, LOCAL_TOKEN
         from langchain_core.messages import HumanMessage
 
-        photo_file: Path = tmp_path / "stream_photo.jpg"
+        mock_photos_dir: Path = tmp_path / "photos"
+        mock_photos_dir.mkdir(parents=True, exist_ok=True)
+        photo_file: Path = mock_photos_dir / "stream_photo.jpg"
         photo_file.write_bytes(b"stream_photo_data")
 
         captured_vision: dict[str, Any] = {}
@@ -1011,43 +1014,125 @@ class TestChatStreamPhotoVisionMigration:
             ) -> str:
                 captured_vision["prompt"] = prompt
                 captured_vision["bytes"] = image_bytes
+                captured_vision["mime_type"] = mime_type
                 return "Analysis: A dashboard screen showing 99.9% uptime."
 
+        monkeypatch.setattr("api.server.PHOTOS_DIR", str(mock_photos_dir))
+        monkeypatch.setattr("config.PHOTOS_DIR", str(mock_photos_dir))
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: StreamVisionAdapter())
 
-        # Simulate the exact logic in api/server.py
-        from core.untrusted_content import (
-            USER_PROVIDED_ASSET_SOURCE,
-            external_content_history_metadata,
-            format_untrusted_asset_vision_prompt,
-            format_untrusted_tool_result,
-        )
-        from core.brain import get_active_provider_adapter
+        captured_graph_messages: list[Any] = []
 
-        photo_path: str = str(photo_file)
-        isolated_user_input: str = "Explain the system status."
-        filename: str = os.path.basename(photo_path)
-        ext: str = os.path.splitext(filename)[1].lower()
+        def mock_run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace: Any) -> dict[str, Any]:
+            captured_graph_messages.extend(messages_for_graph)
+            return {
+                "final_ai_response": "Graph processed the uptime data successfully.",
+                "handling_agent": "Chat_Agent",
+                "tool_result_fallbacks": [],
+                "external_tool_names": [],
+                "graph_elapsed_ms": 10,
+            }
 
-        adapter = get_active_provider_adapter()
-        vision_prompt = format_untrusted_asset_vision_prompt(
-            f"Analyze this image and describe the visual content relevant to the user request:\n{isolated_user_input}"
-        )
-        vision_text = adapter.analyze_vision(vision_prompt, photo_file.read_bytes(), mime_type="image/jpeg").strip()
-        untrusted_analysis = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, vision_text)
-        enhanced_user_input = (
-            f"[USER_UPLOADED_FILE]: {filename}\n"
-            f"[PHOTO PATH]: {photo_path}\n"
-            f"[ANALYSIS]: {untrusted_analysis}\n"
-            f"{isolated_user_input}"
-        )
-        human_msg = HumanMessage(
-            content=f"[12:00] {enhanced_user_input}",
-            additional_kwargs=external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE]),
-        )
+        client = TestClient(server)
 
-        assert isinstance(human_msg.content, str)
-        assert "99.9% uptime" in human_msg.content
-        assert captured_vision["bytes"] == b"stream_photo_data"
-        assert "<untrusted-tool-result>" in human_msg.content
-        assert "[UNTRUSTED EXTERNAL TOOL RESULT]" in human_msg.content
+        with patch("api.server._run_web_graph_stream_sync", side_effect=mock_run_web_graph_stream_sync), \
+             patch("api.server.append_to_chat_history", return_value={"id": 1, "rowid": 1}), \
+             patch("api.server.enqueue_fast_task"), \
+             patch("api.server.enqueue_slow_task"):
+
+            response = client.post(
+                "/chat",
+                json={"message": "Explain the system status.", "photo_path": str(photo_file)},
+                headers={"Authorization": f"Bearer {LOCAL_TOKEN}"},
+            )
+
+            assert response.status_code == 200
+            json_resp = response.json()
+            assert json_resp["response"] == "Graph processed the uptime data successfully."
+
+            # Verify adapter received correct image bytes and mime type
+            assert captured_vision["bytes"] == b"stream_photo_data"
+            assert captured_vision["mime_type"] == "image/jpeg"
+
+            # Verify graph received clean text-only message with untrusted provenance
+            assert len(captured_graph_messages) > 0
+            human_msg = captured_graph_messages[-1]
+            assert isinstance(human_msg, HumanMessage)
+            assert isinstance(human_msg.content, str)
+            assert "99.9% uptime" in human_msg.content
+            assert "<untrusted-tool-result>" in human_msg.content
+            assert "[UNTRUSTED EXTERNAL TOOL RESULT]" in human_msg.content
+            assert human_msg.additional_kwargs.get("untrusted_external_tool_names") == ["user_provided_asset"]
+
+            # Verify no message in the graph contains raw image_url parts
+            for msg in captured_graph_messages:
+                if isinstance(msg.content, list):
+                    for part in msg.content:
+                        assert part.get("type") != "image_url"
+
+    def test_chat_endpoint_rejects_photo_path_outside_photos_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Verifies /chat rejects paths outside PHOTOS_DIR without reading them or invoking vision adapter."""
+        from fastapi.testclient import TestClient
+        from api.server import server, LOCAL_TOKEN
+        from langchain_core.messages import HumanMessage
+
+        mock_photos_dir: Path = tmp_path / "photos"
+        mock_photos_dir.mkdir(parents=True, exist_ok=True)
+
+        outside_dir: Path = tmp_path / "secret_store"
+        outside_dir.mkdir(parents=True, exist_ok=True)
+        outside_file: Path = outside_dir / "secret.jpg"
+        outside_file.write_bytes(b"confidential_secret_bytes")
+
+        captured_vision_calls: list[dict[str, Any]] = []
+
+        class GuardedVisionAdapter(MockVertexAIAdapter):
+            def analyze_vision(
+                self, prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg"
+            ) -> str:
+                captured_vision_calls.append({"prompt": prompt, "bytes": image_bytes})
+                return "Vision should not run on outside files."
+
+        monkeypatch.setattr("api.server.PHOTOS_DIR", str(mock_photos_dir))
+        monkeypatch.setattr("config.PHOTOS_DIR", str(mock_photos_dir))
+        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: GuardedVisionAdapter())
+
+        captured_graph_messages: list[Any] = []
+
+        def mock_run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace: Any) -> dict[str, Any]:
+            captured_graph_messages.extend(messages_for_graph)
+            return {
+                "final_ai_response": "Graph handled request as plain text.",
+                "handling_agent": "Chat_Agent",
+                "tool_result_fallbacks": [],
+                "external_tool_names": [],
+                "graph_elapsed_ms": 10,
+            }
+
+        client = TestClient(server)
+
+        with patch("api.server._run_web_graph_stream_sync", side_effect=mock_run_web_graph_stream_sync), \
+             patch("api.server.append_to_chat_history", return_value={"id": 1, "rowid": 1}), \
+             patch("api.server.enqueue_fast_task"), \
+             patch("api.server.enqueue_slow_task"):
+
+            response = client.post(
+                "/chat",
+                json={"message": "Try to read secret file.", "photo_path": str(outside_file)},
+                headers={"Authorization": f"Bearer {LOCAL_TOKEN}"},
+            )
+
+            assert response.status_code == 200
+
+            # Adapter was NEVER called for outside path
+            assert len(captured_vision_calls) == 0
+
+            # Graph received plain text message without injected file analysis or file path
+            assert len(captured_graph_messages) > 0
+            human_msg = captured_graph_messages[-1]
+            assert isinstance(human_msg, HumanMessage)
+            assert "[PHOTO PATH]" not in human_msg.content
+            assert "[ANALYSIS]" not in human_msg.content
+            assert "Try to read secret file." in human_msg.content
