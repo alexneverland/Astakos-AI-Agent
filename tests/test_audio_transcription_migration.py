@@ -214,7 +214,8 @@ class TestWebVoiceEndpointMigration:
             headers=self.auth_headers,
         )
         assert resp_auth.status_code == 401
-        assert "Authentication failed for provider 'gemini'" in resp_auth.json()["error"]
+        assert "Voice transcription authentication failed for provider 'gemini'" in resp_auth.json()["error"]
+        assert "Mock provider authentication failure" not in resp_auth.json()["error"]
 
         # 429 Quota / Rate Limit Failure
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: MockGeminiAPIAdapter(should_rate_limit=True))

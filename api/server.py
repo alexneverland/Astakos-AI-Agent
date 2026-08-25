@@ -1686,7 +1686,11 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
                 status_code=400,
             )
         except ProviderAuthError as exc:
-            return JSONResponse({"error": f"Authentication failed for provider '{adapter.provider_name}': {exc}"}, status_code=401)
+            print(f"\033[91m[Web Voice Auth Error]: {exc}\033[0m")
+            return JSONResponse(
+                {"error": f"Voice transcription authentication failed for provider '{adapter.provider_name}'. Please verify the provider credentials."},
+                status_code=401,
+            )
         except RateLimitError as exc:
             return JSONResponse({"error": f"Quota or rate limit exceeded for provider '{adapter.provider_name}'. Please retry shortly."}, status_code=429)
 
