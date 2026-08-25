@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 import memory.vector_store as vs
+from core.ai_provider import EmbeddingsProviderSetupRequired
 from memory.vector_store import AstakosMemoryManager
 
 @pytest.fixture
@@ -134,3 +135,16 @@ def test_similarity_search_uses_reopened_store_after_error_finding_id(monkeypatc
 
     assert vs.safe_similarity_search("test", k=3) == ["fresh result"]
     refreshed_store.similarity_search.assert_called_once_with("test", k=3)
+
+
+def test_similarity_search_propagates_embeddings_setup_errors(monkeypatch):
+    """A missing semantic-memory backend must not masquerade as no memories."""
+    store = MagicMock()
+    store.similarity_search.side_effect = EmbeddingsProviderSetupRequired(
+        "Configure an embeddings provider.",
+        provider="anthropic",
+    )
+    monkeypatch.setattr(vs, "vector_store", store)
+
+    with pytest.raises(EmbeddingsProviderSetupRequired, match="Configure an embeddings provider"):
+        vs.safe_similarity_search("test", k=3)

@@ -16,6 +16,7 @@ import sqlite3
 from langchain_chroma import Chroma
 from config import CHROMA_DB_DIR, PHOTOS_INDEX_FILE, SIM_THRESHOLD_DISTANCE, MEMORY_AUDIT_DIR, STATE_DB
 from services.embeddings import embeddings
+from core.ai_provider import EmbeddingsProviderSetupRequired, get_embeddings_collection_name
 
 _audit_lock = threading.Lock()
 
@@ -103,8 +104,28 @@ def _cross_process_lock():
         _release_cross_process_lock(f)
 
 
+def _resolve_collection_name() -> str:
+    """Choose an isolated collection without preventing startup on incomplete setup."""
+    try:
+        name = get_embeddings_collection_name()
+    except EmbeddingsProviderSetupRequired as exc:
+        # The actual semantic request re-raises this typed error.  An empty
+        # placeholder namespace lets chat and structured memory still start.
+        print(f"\033[93m[MemoryManager]: {exc}\033[0m")
+        return "astakos_vec_unconfigured"
+    if name != "astakos_long_term":
+        print(
+            "\033[93m[MemoryManager]: Semantic memory uses a new embeddings namespace "
+            f"({name}); existing semantic memories remain untouched and require "
+            "an optional re-index to be searched again.\033[0m"
+        )
+    return name
+
+
+_collection_name = _resolve_collection_name()
+
 vector_store = Chroma(
-    collection_name="astakos_long_term",
+    collection_name=_collection_name,
     embedding_function=embeddings,
     persist_directory=CHROMA_DB_DIR
 )
@@ -122,7 +143,7 @@ def _refresh_vector_store(reason: str = "") -> bool:
     global vector_store
     try:
         vector_store = Chroma(
-            collection_name="astakos_long_term",
+            collection_name=_collection_name,
             embedding_function=embeddings,
             persist_directory=CHROMA_DB_DIR,
         )
@@ -169,6 +190,8 @@ def _safe_chroma_query(*, query_embeddings, n_results, where=None, include=None)
     for attempt in range(2):
         try:
             return vector_store._collection.query(**kwargs)
+        except EmbeddingsProviderSetupRequired:
+            raise
         except Exception as e:
             if attempt == 0 and _should_retry_chroma_error(e) and _refresh_vector_store("query retry"):
                 continue
@@ -195,6 +218,8 @@ def safe_similarity_search(query: str, *, k: int, filter: dict | None = None) ->
             if filter is not None:
                 kwargs["filter"] = filter
             return vector_store.similarity_search(query, **kwargs)
+        except EmbeddingsProviderSetupRequired:
+            raise
         except Exception as e:
             if attempt == 0 and _should_retry_chroma_error(e) and _refresh_vector_store("similarity retry"):
                 continue

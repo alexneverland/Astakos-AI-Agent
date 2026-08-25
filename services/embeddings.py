@@ -5,7 +5,6 @@
 # L2: SQLite (persistent, WAL, per-row writes - no full rewrites)
 # ================================================================
 
-import hashlib
 import json
 import sqlite3
 import threading
@@ -14,7 +13,7 @@ from time import perf_counter
 
 from langchain_core.embeddings import Embeddings
 from config import EMBEDDINGS_CACHE_DB
-from core.ai_provider import EmbeddingsAdapter, get_embeddings_adapter
+from core.ai_provider import EmbeddingsAdapter, build_embeddings_cache_key, get_embeddings_adapter
 
 
 # -- DB helpers --------------------------------------------------
@@ -77,6 +76,12 @@ class ProviderEmbeddings(Embeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return self._get_adapter().embed_text(texts, is_query=False)
 
+    def backend_identity(self) -> str:
+        """Return the resolved provider/model identity without generating vectors."""
+        adapter = self._get_adapter()
+        model = getattr(adapter, "embedding_model", getattr(adapter, "model_name", "default"))
+        return f"{adapter.provider_name}:{model}"
+
 
 base_embeddings = ProviderEmbeddings()
 
@@ -100,9 +105,10 @@ class MastroEmbeddingsCache(Embeddings):
 
     # -- internal ------------------------------------------------
 
-    @staticmethod
-    def _key(text: str) -> str:
-        return hashlib.md5(text.strip().encode("utf-8")).hexdigest()
+    def _key(self, text: str, role: str) -> str:
+        """Build a cache key isolated by provider/model and embedding role."""
+        backend_identity = getattr(self.base, "backend_identity", lambda: "legacy")()
+        return build_embeddings_cache_key(backend_identity, role, text)
 
     def _l2_get(self, key: str):
         try:
@@ -130,7 +136,7 @@ class MastroEmbeddingsCache(Embeddings):
 
     def embed_query(self, text: str) -> list:
         started = perf_counter()
-        key = self._key(text)
+        key = self._key(text, "query")
 
         # L1
         with self._lock:
@@ -168,7 +174,7 @@ class MastroEmbeddingsCache(Embeddings):
         missing_idx = []
 
         for i, text in enumerate(texts):
-            key = self._key(text)
+            key = self._key(text, "document")
             # L1
             with self._lock:
                 if key in self._l1:
@@ -187,7 +193,7 @@ class MastroEmbeddingsCache(Embeddings):
         if missing_texts:
             new_embs = self.base.embed_documents(missing_texts)
             for j, text in enumerate(missing_texts):
-                key = self._key(text)
+                key = self._key(text, "document")
                 emb = new_embs[j]
                 with self._lock:
                     self._l1[key] = emb

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Protocol, Sequence
@@ -21,6 +22,10 @@ import config
 
 DEFAULT_GEMINI_FAST_MODEL = "gemini-3.5-flash"
 DEFAULT_GEMINI_HEAVY_MODEL = "gemini-3.1-pro-preview"
+DEFAULT_VERTEX_EMBEDDING_MODEL = "text-embedding-004"
+DEFAULT_GEMINI_EMBEDDING_MODEL = "models/text-embedding-004"
+DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 
 
 def google_model_from_environment(variable_name: str, default_model: str, emit_warning: bool = False) -> str:
@@ -235,7 +240,7 @@ class OpenAIAdapter(AIProviderAdapter):
     def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
         self.api_key = getattr(config, "OPENAI_API_KEY", "") if api_key is None else api_key
         self.fast_model, self.heavy_model = resolve_provider_models("openai", fast_model, heavy_model)
-        self.embedding_model = "text-embedding-3-small"
+        self.embedding_model = DEFAULT_OPENAI_EMBEDDING_MODEL
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
         if not self.api_key:
@@ -431,6 +436,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
         else:
             self.api_key = api_key
         self.fast_model, self.heavy_model = resolve_provider_models("gemini", fast_model, heavy_model)
+        self.embedding_model = DEFAULT_GEMINI_EMBEDDING_MODEL
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
         if not self.api_key:
@@ -541,7 +547,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
         try:
             normalized_texts = normalize_embedding_texts(texts)
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
-            emb_client = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=self.api_key)
+            emb_client = GoogleGenerativeAIEmbeddings(model=self.embedding_model, google_api_key=self.api_key)
             if is_query:
                 return [emb_client.embed_query(text) for text in normalized_texts]
             return emb_client.embed_documents(normalized_texts)
@@ -583,6 +589,7 @@ class VertexAIAdapter(AIProviderAdapter):
         self.project_id = project_id or getattr(config, "PROJECT_ID", "your-gcp-project-id")
         self.location = resolve_vertex_location(location)
         self.fast_model, self.heavy_model = resolve_provider_models("vertex", fast_model, heavy_model)
+        self.embedding_model = DEFAULT_VERTEX_EMBEDDING_MODEL
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -699,7 +706,7 @@ class VertexAIAdapter(AIProviderAdapter):
             normalized_texts = normalize_embedding_texts(texts)
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
             emb_client = GoogleGenerativeAIEmbeddings(
-                model="text-embedding-004",
+                model=self.embedding_model,
                 vertexai=True,
                 project=self.project_id,
                 location=self.location,
@@ -882,7 +889,7 @@ class LocalE5EmbeddingsAdapter:
     """Optional local multilingual E5 backend with no install or download side effects."""
 
     provider_name = "local"
-    model_name = "intfloat/multilingual-e5-small"
+    model_name = DEFAULT_LOCAL_EMBEDDING_MODEL
 
     def __init__(self, model_name: str | None = None):
         self.model_name = model_name or os.getenv("ASTAKOS_LOCAL_EMBEDDING_MODEL", self.model_name)
@@ -904,10 +911,16 @@ class LocalE5EmbeddingsAdapter:
             # Local-only prevents a background model download during normal use.
             self._model = SentenceTransformer(self.model_name, local_files_only=True)
             return self._model
-        except Exception as exc:
+        except FileNotFoundError as exc:
             raise EmbeddingsProviderSetupRequired(
                 f"Local embeddings model '{self.model_name}' is not installed locally. "
                 "Download it explicitly during setup before selecting local embeddings.",
+                provider="local",
+                original_error=exc,
+            ) from exc
+        except Exception as exc:
+            raise AIProviderError(
+                f"Could not initialize local embeddings model '{self.model_name}': {exc}",
                 provider="local",
                 original_error=exc,
             ) from exc
@@ -951,3 +964,37 @@ def get_embeddings_adapter(
             provider=resolved,
         )
     return adapter
+
+
+def get_embeddings_backend_identity(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+) -> str:
+    """Return a stable identity for cache and Chroma namespace selection."""
+    adapter = get_embeddings_adapter(provider_name, chat_provider_name)
+    model = getattr(adapter, "embedding_model", getattr(adapter, "model_name", "default"))
+    return f"{adapter.provider_name}:{model}"
+
+
+def build_embeddings_cache_key(backend_identity: str, role: str, text: str) -> str:
+    """Build a provider/model/role-scoped cache key for one embedding input."""
+    payload = f"{backend_identity}\0{role}\0{text.strip()}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def get_embeddings_collection_name(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+) -> str:
+    """Return the isolated Chroma collection for the selected embeddings backend.
+
+    The long-standing Vertex collection keeps its legacy name so existing
+    installations retain semantic retrieval. Every other backend begins in an
+    empty namespace; historical semantic memories can be re-indexed later by
+    an explicit user action.
+    """
+    identity = get_embeddings_backend_identity(provider_name, chat_provider_name)
+    if identity == f"vertex:{DEFAULT_VERTEX_EMBEDDING_MODEL}":
+        return "astakos_long_term"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+    return f"astakos_vec_{digest}"
