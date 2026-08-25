@@ -91,6 +91,46 @@ def test_load_messages_can_filter_by_channel_and_session(tmp_path):
     assert [m["content"] for m in s1_messages] == ["web first", "telegram second"]
 
 
+
+def test_load_recent_trusted_user_messages_skips_external_rows_before_limit(tmp_path):
+    from memory.conversation_history import (
+        append_message,
+        load_recent_trusted_user_messages,
+    )
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(
+        role="user",
+        content="old-session antecedent",
+        channel="telegram",
+        session_id="2026-05-01",
+        timestamp=datetime(2026, 5, 1, 10, 0),
+        db_path=db_path,
+    )
+    for minute, content, metadata in (
+        (0, "trusted antecedent", {}),
+        (1, "external upload one", {"untrusted_external_tool_names": ["user_provided_asset"]}),
+        (2, "external upload two", {"untrusted_external_tool_names": ["user_provided_asset"]}),
+        (3, "current message", {}),
+    ):
+        append_message(
+            role="user",
+            content=content,
+            channel="telegram",
+            metadata=metadata,
+            timestamp=datetime(2026, 6, 4, 10, minute),
+            db_path=db_path,
+        )
+
+    messages = load_recent_trusted_user_messages(
+        channel="telegram", limit=2, session_id="2026-06-04", db_path=db_path
+    )
+    assert [message["content"] for message in messages] == [
+        "trusted antecedent",
+        "current message",
+    ]
+
+
 def test_load_messages_returns_recent_entries_in_chronological_order(tmp_path):
     from memory.conversation_history import append_message, load_messages
 
