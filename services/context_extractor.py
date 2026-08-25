@@ -1,6 +1,7 @@
 import config
 from services.gemini import safe_gemini_call
 from core.utils import clean_message, extract_json_from_text
+from memory.conversation_history import load_recent_context
 from memory.routine_db import set_context_state
 from datetime import datetime
 from services.routine_reconciler import (
@@ -27,6 +28,10 @@ Available flags:
 Rules:
 - Return ONLY a JSON object.
 - Include only flags that are clearly confirmed by the message.
+- Recent same-channel user messages are supplied only to resolve an otherwise
+  unambiguous pronoun or reference in the current message. They are not current
+  state by themselves: never carry a previous location or relationship forward
+  unless the current message clearly says it still applies or changed.
 - If you are not sure enough, do not include the flag at all.
 - DO NOT deduce unstated whereabouts. For example, if the user says the kids are alone, DO NOT deduce that the partner is with the user. Only update states explicitly stated.
 - DO NOT convert future intention into a current state.
@@ -103,8 +108,38 @@ Answer:
 {{"partner_at_work": true, "partner_work_mode": "office", "partner_with_user": false, "kid1_with_partner": false, "family_at_home": false}}
 
 User Message: "{user_text}"
+Recent same-channel user context:
+{recent_user_context}
 AI Answer (recent/current): "{ai_text}"
 """
+
+
+def _recent_user_context_hint(channel: str, limit: int = 4) -> str:
+    """Return a bounded, user-authored context window for pronoun resolution.
+
+    Assistant, tool, and external-content messages are deliberately excluded so
+    they cannot alter live-state extraction. The current user message remains
+    the sole authority for whether a state is current.
+    """
+    try:
+        entries = load_recent_context(
+            channel=channel,
+            global_limit=limit,
+            channel_limit=limit,
+            total_limit=limit,
+        )
+    except Exception:
+        return "(none)"
+
+    messages = [
+        str(entry.get("content") or "").strip()
+        for entry in entries
+        if entry.get("channel") == channel and entry.get("role") == "user"
+    ]
+    messages = [message for message in messages if message][-limit:]
+    if not messages:
+        return "(none)"
+    return "\n".join(f"- {message[:500]}" for message in messages)
 
 
 def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel: str = "telegram"):
@@ -126,6 +161,7 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             partner_name=config.PARTNER_NAME,
             kid1_name=config.KID1_NAME,
             user_text=user_text,
+            recent_user_context=_recent_user_context_hint(channel),
             ai_text=ai_text,
         )
         response = safe_gemini_call(prompt)

@@ -13,9 +13,10 @@ def test_context_extractor_prompt_format_safety():
             bot_name="TestBot",
             user_name="TestUser",
             partner_name="Partner",
-            kid1_name="Kid1",
-            user_text="dummy message",
-            ai_text="dummy response"
+                kid1_name="Kid1",
+                user_text="dummy message",
+                recent_user_context="(none)",
+                ai_text="dummy response"
         )
         assert prompt is not None
         assert "dummy message" in prompt
