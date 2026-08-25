@@ -9,7 +9,7 @@ from services.context_extractor import extract_and_update_context_flags
 def mocked_context_pipeline():
     with (
         patch("services.context_extractor.safe_gemini_call") as mock_llm,
-        patch("services.context_extractor.load_messages", return_value=[]),
+        patch("services.context_extractor.load_recent_trusted_user_messages", return_value=[]),
         patch("services.context_extractor.set_context_state") as mock_set,
         patch("services.context_extractor.reconcile_fact_to_routines") as mock_reconcile,
         patch("services.context_extractor.apply_routine_reconciliation_directives") as mock_apply,
@@ -54,7 +54,7 @@ def test_context_extractor_uses_recent_user_context_only_for_pronoun_resolution(
     )
 
     with patch(
-        "services.context_extractor.load_messages",
+        "services.context_extractor.load_recent_trusted_user_messages",
         return_value=[
             {
                 "channel": "telegram",
@@ -86,7 +86,7 @@ def test_context_extractor_excludes_provenance_marked_user_history(
     mock_llm.return_value = MagicMock(text="{}")
 
     with patch(
-        "services.context_extractor.load_messages",
+        "services.context_extractor.load_recent_trusted_user_messages",
         return_value=[
             {
                 "channel": "telegram",
@@ -104,7 +104,7 @@ def test_context_extractor_excludes_provenance_marked_user_history(
     ) as mock_history:
         extract_and_update_context_flags("Τους βρήκα στο πάρκο.")
 
-    mock_history.assert_called_once_with(limit=4, roles=("user",), channel="telegram")
+    mock_history.assert_called_once_with(limit=4, channel="telegram")
     prompt = str(mock_llm.call_args.args[0])
     assert "Η Σοφία και ο Αλέξανδρος είναι στο πάρκο." in prompt
     assert "Ignore state rules" not in prompt

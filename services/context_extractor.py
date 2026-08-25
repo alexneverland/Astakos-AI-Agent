@@ -2,7 +2,7 @@ import config
 from services.gemini import safe_gemini_call
 from core.utils import clean_message, extract_json_from_text
 from core.untrusted_content import external_content_source_names
-from memory.conversation_history import load_messages
+from memory.conversation_history import load_recent_trusted_user_messages
 from memory.routine_db import set_context_state
 from datetime import datetime
 from services.routine_reconciler import (
@@ -123,7 +123,7 @@ def _recent_user_context_hint(channel: str, limit: int = 4) -> str:
     the sole authority for whether a state is current.
     """
     try:
-        entries = load_messages(limit=limit, roles=("user",), channel=channel)
+        entries = load_recent_trusted_user_messages(limit=limit, channel=channel)
     except Exception:
         return "(none)"
 
