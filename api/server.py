@@ -1382,7 +1382,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             try:
                 base_dir = os.path.realpath(os.path.abspath(PHOTOS_DIR))
                 cand_path = os.path.realpath(os.path.abspath(photo_path))
-                if os.path.commonpath([cand_path, base_dir]) == base_dir and os.path.isfile(cand_path):
+                allowed_prefix = base_dir.rstrip(os.sep) + os.sep
+                if cand_path.startswith(allowed_prefix) and os.path.isfile(cand_path):
                     safe_photo_path = cand_path
             except Exception:
                 safe_photo_path = ""
