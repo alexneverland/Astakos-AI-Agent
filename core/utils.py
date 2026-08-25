@@ -16,6 +16,40 @@ from typing_extensions import TypedDict, NotRequired
 from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 
+
+_embedding_setup_notifications: set[str] = set()
+_embedding_setup_notifications_lock = threading.Lock()
+
+
+def _embedding_memory_status_notice(error: Exception, channel: str) -> str:
+    """Return one user-facing semantic-memory configuration notice per process."""
+    from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+    if not isinstance(error, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+        return ""
+    notification_key = f"{channel or 'telegram'}:{error.provider}:{error}"
+    with _embedding_setup_notifications_lock:
+        if notification_key in _embedding_setup_notifications:
+            return ""
+        _embedding_setup_notifications.add(notification_key)
+    status = (
+        "SEMANTIC MEMORY AUTHENTICATION REQUIRED"
+        if isinstance(error, ProviderAuthError)
+        else "SEMANTIC MEMORY SETUP REQUIRED"
+    )
+    guidance = (
+        "semantic-memory provider credentials need verification"
+        if isinstance(error, ProviderAuthError)
+        else "semantic memory needs setup"
+    )
+    return (
+        f"\n[SYSTEM STATUS — {status}]\n"
+        f"Semantic-memory retrieval is unavailable: {error}\n"
+        f"Tell the user concisely that {guidance}. "
+        "Do not claim a semantic-memory search succeeded; continue answering "
+        "the current request normally.\n"
+    )
+
 # ────────────────────────────────────────────────────────────────
 # 1. STATE & TYPES
 # ────────────────────────────────────────────────────────────────
@@ -676,8 +710,19 @@ def build_prompt(
                 memory_context_str = "\n🧠 ═══ UNIFIED MEMORY CONTEXT ═══\n"
                 memory_context_str += rendered_context + "\n"
                 memory_context_str += "⚠️ Do not say 'according to my memory', just act based on it.\n"
+            status_notice = _embedding_memory_status_notice(
+                context.semantic_error,
+                channel or "telegram",
+            ) if context.semantic_error else ""
+            if status_notice:
+                memory_context_str += status_notice
         except Exception as e:
-            print(f"\033[91m⚠️ Memory Context Error: {e}\033[0m")
+            status_notice = _embedding_memory_status_notice(e, channel or "telegram")
+            if status_notice:
+                memory_context_str = status_notice
+                print(f"\033[93m[MemoryContext]: semantic memory configuration required: {e}\033[0m")
+            else:
+                print(f"\033[91m⚠️ Memory Context Error: {e}\033[0m")
     elif include_persisted_context and has_skip_keyword:
         print("\033[93m[Mastro-Radar]: ⚡ Skipping Semantic Search due to Skip Keyword! (Live Data Mode)\033[0m")
 

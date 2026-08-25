@@ -89,3 +89,36 @@ def test_delete_from_memory_surfaces_semantic_query_failure(monkeypatch):
     result = system.delete_from_memory.func("παλιά λάθος διεύθυνση")
 
     assert result == "Deletion error: Chroma search could not complete safely."
+
+
+def test_delete_from_memory_removes_profile_only_fact_without_embeddings(monkeypatch):
+    """Structured-only fallback facts remain erasable while semantic search is offline."""
+    from tools import system
+
+    monkeypatch.setattr(system, "vector_lock", threading.Lock())
+    monkeypatch.setattr(
+        system.vector_memory,
+        "_safe_chroma_get",
+        lambda **kwargs: {"ids": [], "documents": [], "metadatas": []},
+    )
+    monkeypatch.setattr(
+        system,
+        "get_profile_facts",
+        lambda limit=300: [{"fact": "[USER_FACT]: Η Σοφία δουλεύει εκτός σπιτιού"}],
+    )
+    deleted = []
+    monkeypatch.setattr(
+        system,
+        "delete_profile_facts_by_exact_fact",
+        lambda fact: deleted.append(fact) or 1,
+    )
+    monkeypatch.setattr(
+        system.embeddings,
+        "embed_query",
+        lambda _query: (_ for _ in ()).throw(AssertionError("semantic fallback must not run")),
+    )
+
+    result = system.delete_from_memory.func("Σοφία δουλεύει εκτός")
+
+    assert deleted == ["[USER_FACT]: Η Σοφία δουλεύει εκτός σπιτιού"]
+    assert "structured profile only" in result

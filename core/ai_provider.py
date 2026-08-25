@@ -8,9 +8,10 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Sequence
+from typing import Any, Protocol, Sequence
 
 import config
 
@@ -21,6 +22,10 @@ import config
 
 DEFAULT_GEMINI_FAST_MODEL = "gemini-3.5-flash"
 DEFAULT_GEMINI_HEAVY_MODEL = "gemini-3.1-pro-preview"
+DEFAULT_VERTEX_EMBEDDING_MODEL = "text-embedding-004"
+DEFAULT_GEMINI_EMBEDDING_MODEL = "models/text-embedding-004"
+DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 
 
 def google_model_from_environment(variable_name: str, default_model: str, emit_warning: bool = False) -> str:
@@ -147,6 +152,23 @@ class RateLimitError(AIProviderError):
         super().__init__(user_msg, provider=provider, original_error=original_error)
 
 
+class EmbeddingsProviderSetupRequired(AIProviderError):
+    """Raised when semantic memory has no explicitly usable embeddings backend."""
+
+
+class EmbeddingsAdapter(Protocol):
+    """Minimal contract required by the semantic-memory embeddings layer."""
+
+    provider_name: str
+
+    def embed_text(
+        self,
+        texts: str | Sequence[str],
+        is_query: bool = False,
+    ) -> list[list[float]]:
+        """Generate dense vector embeddings for texts."""
+
+
 # ────────────────────────────────────────────────────────────────
 # 3. ABSTRACT BASE ADAPTER CONTRACT
 # ────────────────────────────────────────────────────────────────
@@ -218,7 +240,7 @@ class OpenAIAdapter(AIProviderAdapter):
     def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
         self.api_key = getattr(config, "OPENAI_API_KEY", "") if api_key is None else api_key
         self.fast_model, self.heavy_model = resolve_provider_models("openai", fast_model, heavy_model)
-        self.embedding_model = "text-embedding-3-small"
+        self.embedding_model = DEFAULT_OPENAI_EMBEDDING_MODEL
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
         if not self.api_key:
@@ -414,6 +436,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
         else:
             self.api_key = api_key
         self.fast_model, self.heavy_model = resolve_provider_models("gemini", fast_model, heavy_model)
+        self.embedding_model = DEFAULT_GEMINI_EMBEDDING_MODEL
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
         if not self.api_key:
@@ -524,7 +547,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
         try:
             normalized_texts = normalize_embedding_texts(texts)
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
-            emb_client = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=self.api_key)
+            emb_client = GoogleGenerativeAIEmbeddings(model=self.embedding_model, google_api_key=self.api_key)
             if is_query:
                 return [emb_client.embed_query(text) for text in normalized_texts]
             return emb_client.embed_documents(normalized_texts)
@@ -566,6 +589,7 @@ class VertexAIAdapter(AIProviderAdapter):
         self.project_id = project_id or getattr(config, "PROJECT_ID", "your-gcp-project-id")
         self.location = resolve_vertex_location(location)
         self.fast_model, self.heavy_model = resolve_provider_models("vertex", fast_model, heavy_model)
+        self.embedding_model = DEFAULT_VERTEX_EMBEDDING_MODEL
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -682,7 +706,7 @@ class VertexAIAdapter(AIProviderAdapter):
             normalized_texts = normalize_embedding_texts(texts)
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
             emb_client = GoogleGenerativeAIEmbeddings(
-                model="text-embedding-004",
+                model=self.embedding_model,
                 vertexai=True,
                 project=self.project_id,
                 location=self.location,
@@ -796,7 +820,7 @@ class AnthropicAdapter(AIProviderAdapter):
         raise CapabilityNotSupportedError(
             provider="anthropic",
             capability="embeddings",
-            message="Embeddings are not natively supported by Anthropic API alone. Multilingual local E5 embeddings fallback will be configured in PR 2.",
+            message="Embeddings are not natively supported by Anthropic API alone. Configure a separate Vertex, Gemini, OpenAI, or optional local embeddings provider.",
         )
 
     def _handle_exception(self, e: Exception) -> None:
@@ -821,6 +845,100 @@ _ADAPTER_REGISTRY: dict[str, type[AIProviderAdapter]] = {
     "anthropic": AnthropicAdapter,
 }
 
+_EMBEDDINGS_PROVIDER_NAMES = frozenset({"vertex", "gemini", "openai", "local"})
+
+
+def resolve_embeddings_provider(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+) -> str:
+    """Resolve the embeddings backend independently from the chat provider.
+
+    ``auto`` deliberately uses the chat provider only when it exposes native
+    embeddings.  It never silently selects OpenAI or downloads a local model
+    for providers such as Anthropic.
+    """
+    configured = provider_name
+    if configured is None:
+        configured = os.getenv("EMBEDDINGS_PROVIDER", "auto")
+    resolved = configured.strip().lower()
+    if resolved == "auto":
+        chat_provider = (
+            chat_provider_name
+            or getattr(config, "LLM_PROVIDER", "vertex")
+        ).strip().lower()
+        adapter = get_provider_adapter(chat_provider)
+        if adapter.is_capability_supported("embeddings"):
+            return adapter.provider_name
+        raise EmbeddingsProviderSetupRequired(
+            "Semantic memory needs an embeddings provider. Configure "
+            "EMBEDDINGS_PROVIDER as vertex, gemini, openai, or local; "
+            "Anthropic does not provide native embeddings.",
+            provider=chat_provider,
+        )
+    if resolved not in _EMBEDDINGS_PROVIDER_NAMES:
+        valid = ", ".join(sorted(_EMBEDDINGS_PROVIDER_NAMES | {"auto"}))
+        raise EmbeddingsProviderSetupRequired(
+            f"Unknown embeddings provider '{resolved}'. Valid options: {valid}.",
+            provider=resolved,
+        )
+    return resolved
+
+
+class LocalE5EmbeddingsAdapter:
+    """Optional local multilingual E5 backend with no install or download side effects."""
+
+    provider_name = "local"
+    model_name = DEFAULT_LOCAL_EMBEDDING_MODEL
+
+    def __init__(self, model_name: str | None = None):
+        self.model_name = model_name or os.getenv("ASTAKOS_LOCAL_EMBEDDING_MODEL", self.model_name)
+        self._model: Any | None = None
+
+    def _get_model(self) -> Any:
+        if self._model is not None:
+            return self._model
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise EmbeddingsProviderSetupRequired(
+                "Local embeddings are selected but sentence-transformers is not installed. "
+                "Install sentence-transformers before selecting local embeddings.",
+                provider="local",
+                original_error=exc,
+            ) from exc
+        try:
+            # Local-only prevents a background model download during normal use.
+            self._model = SentenceTransformer(self.model_name, local_files_only=True)
+            return self._model
+        except FileNotFoundError as exc:
+            raise EmbeddingsProviderSetupRequired(
+                f"Local embeddings model '{self.model_name}' is not installed locally. "
+                "Download it explicitly during setup before selecting local embeddings.",
+                provider="local",
+                original_error=exc,
+            ) from exc
+        except Exception as exc:
+            raise EmbeddingsProviderSetupRequired(
+                f"Could not initialize local embeddings model '{self.model_name}': {exc}. "
+                "Repair or reinstall the local model before selecting local embeddings.",
+                provider="local",
+                original_error=exc,
+            ) from exc
+
+    def embed_text(
+        self,
+        texts: str | Sequence[str],
+        is_query: bool = False,
+    ) -> list[list[float]]:
+        normalized_texts = normalize_embedding_texts(texts)
+        prefix = "query: " if is_query else "passage: "
+        vectors = self._get_model().encode(
+            [f"{prefix}{text}" for text in normalized_texts],
+            normalize_embeddings=True,
+        )
+        return [vector.tolist() for vector in vectors]
+
 
 def get_provider_adapter(provider_name: str | None = None, **kwargs: Any) -> AIProviderAdapter:
     """Factory function returning the configured AIProviderAdapter instance."""
@@ -829,3 +947,55 @@ def get_provider_adapter(provider_name: str | None = None, **kwargs: Any) -> AIP
     if not adapter_cls:
         raise AIProviderError(f"Unknown AI provider: '{resolved_name}'. Valid options: {list(_ADAPTER_REGISTRY.keys())}")
     return adapter_cls(**kwargs)
+
+
+def get_embeddings_adapter(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+    **kwargs: Any,
+) -> EmbeddingsAdapter:
+    """Return the explicitly resolved backend used only for semantic embeddings."""
+    resolved = resolve_embeddings_provider(provider_name, chat_provider_name)
+    if resolved == "local":
+        return LocalE5EmbeddingsAdapter(**kwargs)
+    adapter = get_provider_adapter(resolved, **kwargs)
+    if not adapter.is_capability_supported("embeddings"):
+        raise EmbeddingsProviderSetupRequired(
+            f"Provider '{resolved}' does not support embeddings.",
+            provider=resolved,
+        )
+    return adapter
+
+
+def get_embeddings_backend_identity(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+) -> str:
+    """Return a stable identity for cache and Chroma namespace selection."""
+    adapter = get_embeddings_adapter(provider_name, chat_provider_name)
+    model = getattr(adapter, "embedding_model", getattr(adapter, "model_name", "default"))
+    return f"{adapter.provider_name}:{model}"
+
+
+def build_embeddings_cache_key(backend_identity: str, role: str, text: str) -> str:
+    """Build a provider/model/role-scoped cache key for one embedding input."""
+    payload = f"{backend_identity}\0{role}\0{text.strip()}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def get_embeddings_collection_name(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+) -> str:
+    """Return the isolated Chroma collection for the selected embeddings backend.
+
+    The long-standing Vertex collection keeps its legacy name so existing
+    installations retain semantic retrieval. Every other backend begins in an
+    empty namespace; historical semantic memories can be re-indexed later by
+    an explicit user action.
+    """
+    identity = get_embeddings_backend_identity(provider_name, chat_provider_name)
+    if identity == f"vertex:{DEFAULT_VERTEX_EMBEDDING_MODEL}":
+        return "astakos_long_term"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+    return f"astakos_vec_{digest}"

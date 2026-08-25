@@ -39,7 +39,12 @@ from config import (
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 from astakos_skills.research_last30days import research_last30days
 import memory.vector_store as vector_memory
-from memory.vector_store import vector_lock, memory, delete_profile_facts_by_exact_fact
+from memory.vector_store import (
+    vector_lock,
+    memory,
+    delete_profile_facts_by_exact_fact,
+    get_profile_facts,
+)
 _lexical_cache: dict = {}  # {cache_key: (timestamp, data)} — TTL 60s
 from services.embeddings import embeddings
 from tools.web import (
@@ -296,21 +301,28 @@ def search_memory(query: str, category: str = "") -> str:
                 seen_docs.add(key)
                 merged_results.append(doc)
             # [PERF]: 1 similarity_search instead of 3 — primary_query is sufficient (expanded queries do not improve significantly)
-            for search_query in search_queries[:1]:
-                if effective_category:
-                    batch = vector_memory.safe_similarity_search(
-                        search_query,
-                        k=6,
-                        filter={"category": effective_category},
-                    )
-                else:
-                    batch = vector_memory.safe_similarity_search(search_query, k=6)
-                for doc in batch:
-                    key = getattr(doc, "page_content", str(doc))
-                    if key in seen_docs:
-                        continue
-                    seen_docs.add(key)
-                    merged_results.append(doc)
+            try:
+                for search_query in search_queries[:1]:
+                    if effective_category:
+                        batch = vector_memory.safe_similarity_search(
+                            search_query,
+                            k=6,
+                            filter={"category": effective_category},
+                        )
+                    else:
+                        batch = vector_memory.safe_similarity_search(search_query, k=6)
+                    for doc in batch:
+                        key = getattr(doc, "page_content", str(doc))
+                        if key in seen_docs:
+                            continue
+                        seen_docs.add(key)
+                        merged_results.append(doc)
+            except Exception as exc:
+                from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+                if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                    raise
+                print(f"\033[93m[search_memory]: semantic search unavailable; using structured memory ({exc})\033[0m")
             results = merged_results[:8 if effective_category else 6]
 
         from memory.vector_store import (
@@ -569,7 +581,27 @@ def delete_from_memory(query: str) -> str:
                 f"Be more specific about which to delete:\n{previews}"
             )
 
-        # 2) Fallback: semantic search (embeddings), only when no
+        # 2) Structured-profile literal match. This keeps profile-only facts
+        # erasable while semantic embeddings are intentionally unavailable.
+        profile_literal_hits = [
+            str(doc.get("fact", ""))
+            for doc in get_profile_facts(limit=300)
+            if norm_query and norm_query in _norm(doc.get("fact", ""))
+        ]
+        if len(profile_literal_hits) == 1:
+            content = profile_literal_hits[0]
+            profile_deleted = delete_profile_facts_by_exact_fact(content)
+            print(f"\n🔥 [DATABASE ACTION]: DELETED structured-only record: {content}")
+            return f"Memory '{content}' deleted successfully (structured profile only)."
+
+        if len(profile_literal_hits) > 1:
+            previews = "\n".join(f"  • {content.strip()[:140]}" for content in profile_literal_hits[:6])
+            return (
+                f"⚠️ Found {len(profile_literal_hits)} structured records matching '{query}'. "
+                f"Be more specific about which to delete:\n{previews}"
+            )
+
+        # 3) Fallback: semantic search (embeddings), only when no
         # there is no literal match. u_00ad_ u_00ad__
         query_emb = embeddings.embed_query(query)
         with vector_lock:
@@ -613,8 +645,18 @@ def retrieve_photo(query: str) -> str:
     try:
         import numpy as np
 
-        with vector_lock:
-            results = vector_memory.safe_similarity_search(query, k=10)
+        semantic_error = None
+        try:
+            with vector_lock:
+                results = vector_memory.safe_similarity_search(query, k=10)
+        except Exception as exc:
+            from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+            if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                raise
+            results = []
+            semantic_error = exc
+            print(f"\033[93m[retrieve_photo]: semantic search unavailable; using photo archive ({exc})\033[0m")
 
         for doc in results:
             photo_path = doc.metadata.get("photo_path")
@@ -630,6 +672,18 @@ def retrieve_photo(query: str) -> str:
                 index = json.load(f)
 
             if index:
+                if semantic_error is not None:
+                    archive_match = _find_archived_photo_without_embeddings(index, query)
+                    if archive_match:
+                        entry, note = archive_match
+                        file_path = entry.get("file_path", "")
+                        if file_path and os.path.exists(file_path):
+                            return (
+                                f"Found archived photo from {entry.get('date', 'unknown date')}{note}\n"
+                                f"[SEND_PHOTO: {file_path}]"
+                            )
+                    return "System: No relevant photo found in the non-semantic archive."
+
                 query_emb = np.array(embeddings.embed_query(query))
                 best_score = -1.0
                 best_entry = None
@@ -668,6 +722,27 @@ def retrieve_photo(query: str) -> str:
 
     except Exception as e:
         return f"Error: Failed to retrieve photo: {str(e)}"
+
+
+def _find_archived_photo_without_embeddings(index: list[dict], query: str) -> tuple[dict, str] | None:
+    """Find a photo archive entry lexically when vector embeddings are unavailable."""
+    tokens = _memory_query_tokens(query)
+    if not tokens:
+        return None
+
+    scored: list[tuple[int, int, dict]] = []
+    for position, entry in enumerate(index):
+        candidate = _normalize_memory_query(
+            f"{entry.get('caption', '')} {entry.get('analysis', '')}",
+        )
+        score = sum(1 for token in tokens if _stem_token(token) in candidate)
+        if score:
+            scored.append((score, position, entry))
+    if not scored:
+        return None
+
+    _, _, entry = max(scored, key=lambda item: (item[0], item[1]))
+    return entry, " (matched from the local photo archive)"
 
 
 # ────────────────────────────────────────────────────────────────
