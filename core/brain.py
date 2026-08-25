@@ -7,6 +7,7 @@ import config
 import warnings
 import os
 import time
+import threading
 from langchain_google_genai import ChatGoogleGenerativeAI, HarmCategory, HarmBlockThreshold
 from rich.console import Console
 from google import genai
@@ -14,83 +15,60 @@ from google import genai
 # Ignore warnings to keep the terminal clean
 warnings.filterwarnings("ignore")
 
-# 1. Base Model Definitions
-_provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
+from core.ai_provider import (
+    AIProviderAdapter,
+    DEFAULT_GEMINI_FAST_MODEL,
+    DEFAULT_GEMINI_HEAVY_MODEL,
+    get_gemini_safety_settings,
+    get_provider_adapter,
+    google_model_from_environment,
+    resolve_gemini_safety_threshold,
+    resolve_provider_models,
+    resolve_vertex_location,
+)
 
-DEFAULT_GEMINI_FAST_MODEL = "gemini-3.5-flash"
-DEFAULT_GEMINI_HEAVY_MODEL = "gemini-3.1-pro-preview"
+# 1. Base Model Definitions
+_KNOWN_PROVIDERS = frozenset({"openai", "gemini", "anthropic", "vertex"})
+
+
+def _effective_provider(provider_name: str) -> str:
+    """Resolve unknown configured providers to the legacy Vertex fallback."""
+    return provider_name if provider_name in _KNOWN_PROVIDERS else "vertex"
 
 
 def _google_model_from_environment(variable_name: str, default_model: str) -> str:
-    """Return an optional Google-model override, surfacing active overrides at startup."""
-    configured_model = os.getenv(variable_name, "").strip()
-    if not configured_model:
-        return default_model
-    if configured_model != default_model:
-        print(
-            "\033[93m[Brain]: Google model override active "
-            f"({variable_name}={configured_model!r}; default={default_model!r}). "
-            "Verify that the configured Gemini model is available.\033[0m",
-        )
-    return configured_model
+    """Compatibility wrapper retaining the legacy override-warning behavior."""
+    return google_model_from_environment(variable_name, default_model, emit_warning=True)
 
-def _resolve_gemini_safety_threshold() -> HarmBlockThreshold:
-    """Return the configured HarmBlockThreshold, defaulting to BLOCK_NONE."""
-    raw = os.getenv("ASTAKOS_GEMINI_SAFETY_THRESHOLD", "").strip().upper()
-    if not raw:
-        return HarmBlockThreshold.BLOCK_NONE
-    mapping = {
-        "BLOCK_NONE": HarmBlockThreshold.BLOCK_NONE,
-        "BLOCK_ONLY_HIGH": HarmBlockThreshold.BLOCK_ONLY_HIGH,
-        "BLOCK_MEDIUM_AND_ABOVE": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-        "BLOCK_LOW_AND_ABOVE": HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-    }
-    if raw in mapping:
-        if raw != "BLOCK_NONE":
-            print(f"\033[93m[Brain]: Gemini safety threshold active ({raw}).\033[0m")
-        return mapping[raw]
-    print(
-        f"\033[93m[Brain]: Unknown safety threshold {raw!r}, falling back to BLOCK_NONE.\033[0m"
-    )
-    return HarmBlockThreshold.BLOCK_NONE
 
+_provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
+_effective_provider_name = _effective_provider(_provider)
+FAST_MODEL, HEAVY_MODEL = resolve_provider_models(
+    _effective_provider_name,
+    emit_warnings=True,
+)
+_resolve_gemini_safety_threshold = resolve_gemini_safety_threshold
 
 # [MASTRO-SHIELD v3]: Safety for Google models
-_selected_threshold = _resolve_gemini_safety_threshold()
-custom_safety = {
-    HarmCategory.HARM_CATEGORY_HARASSMENT:         _selected_threshold,
-    HarmCategory.HARM_CATEGORY_HATE_SPEECH:        _selected_threshold,
-    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT:  _selected_threshold,
-    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT:  _selected_threshold,
-    HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY:    _selected_threshold,
-}
+custom_safety = get_gemini_safety_settings()
+VERTEX_LOCATION = resolve_vertex_location()
 
 vertex_client = None
 console = Console()
 
 if _provider == "openai":
     from langchain_openai import ChatOpenAI
-    FAST_MODEL = "gpt-4o-mini"
-    HEAVY_MODEL = "gpt-4o"
     llm = ChatOpenAI(model=FAST_MODEL, temperature=0.7, api_key=config.OPENAI_API_KEY)
     llm_heavy = ChatOpenAI(model=HEAVY_MODEL, temperature=0.1, api_key=config.OPENAI_API_KEY)
     print("\033[92m[Brain]: OpenAI Engines Loaded\033[0m")
 
 elif _provider == "anthropic":
     from langchain_anthropic import ChatAnthropic
-    FAST_MODEL = "claude-3-5-haiku-latest"
-    HEAVY_MODEL = "claude-3-5-sonnet-latest"
     llm = ChatAnthropic(model=FAST_MODEL, temperature=0.7, api_key=config.ANTHROPIC_API_KEY)
     llm_heavy = ChatAnthropic(model=HEAVY_MODEL, temperature=0.1, api_key=config.ANTHROPIC_API_KEY)
     print("\033[92m[Brain]: Anthropic Engines Loaded\033[0m")
 
 elif _provider == "gemini":
-    FAST_MODEL = _google_model_from_environment(
-        "ASTAKOS_GEMINI_FAST_MODEL", DEFAULT_GEMINI_FAST_MODEL,
-    )
-    HEAVY_MODEL = _google_model_from_environment(
-        "ASTAKOS_GEMINI_HEAVY_MODEL", DEFAULT_GEMINI_HEAVY_MODEL,
-    )
     llm = ChatGoogleGenerativeAI(
         model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety, api_key=config.GEMINI_API_KEY
     )
@@ -102,24 +80,31 @@ elif _provider == "gemini":
     print("\033[92m[Brain]: Gemini Engines Loaded (API Key)\033[0m")
 
 else:  # default to vertex
-    FAST_MODEL = _google_model_from_environment(
-        "ASTAKOS_GEMINI_FAST_MODEL", DEFAULT_GEMINI_FAST_MODEL,
-    )
-    HEAVY_MODEL = _google_model_from_environment(
-        "ASTAKOS_GEMINI_HEAVY_MODEL", DEFAULT_GEMINI_HEAVY_MODEL,
-    )
     llm = ChatGoogleGenerativeAI(
         model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety,
-        vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
+        vertexai=True, project=config.PROJECT_ID, location=VERTEX_LOCATION
     )
     llm_heavy = ChatGoogleGenerativeAI(
         model=HEAVY_MODEL, temperature=0.1, safety_settings=custom_safety,
-        vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
+        vertexai=True, project=config.PROJECT_ID, location=VERTEX_LOCATION
     )
     vertex_client = genai.Client(
-        vertexai=True, project=config.PROJECT_ID, location=os.getenv("LOCATION", "global")
+        vertexai=True, project=config.PROJECT_ID, location=VERTEX_LOCATION
     )
     print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI)\033[0m")
+
+_active_provider_adapter: AIProviderAdapter | None = None
+_adapter_lock = threading.Lock()
+
+
+def get_active_provider_adapter() -> AIProviderAdapter:
+    """Return the active AIProviderAdapter singleton instance, defaulting unknown providers to vertex (thread-safe)."""
+    global _active_provider_adapter
+    if _active_provider_adapter is None:
+        with _adapter_lock:
+            if _active_provider_adapter is None:
+                _active_provider_adapter = get_provider_adapter(_effective_provider(_provider))
+    return _active_provider_adapter
 
 
 def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
