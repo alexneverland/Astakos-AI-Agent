@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 import pytest
@@ -208,3 +209,46 @@ def test_fact_save_preserves_structured_profile_without_embeddings(monkeypatch, 
     with sqlite3.connect(profile_db) as connection:
         rows = connection.execute("SELECT category, fact FROM profile_facts").fetchall()
     assert rows == [("family", "[USER_FACT]: Ο Αλέξανδρος αγαπά τις φακές")]
+
+
+@pytest.mark.parametrize(
+    ("memory_type", "entry_key"),
+    [
+        ("photo", "analysis"),
+        ("document", "summary"),
+    ],
+)
+def test_confirmed_asset_save_preserves_nonsemantic_archive_without_embeddings(
+    monkeypatch,
+    tmp_path,
+    memory_type,
+    entry_key,
+):
+    """Confirmed files remain archived if their optional semantic index is unavailable."""
+    index_path = tmp_path / f"{memory_type}_index.json"
+    if memory_type == "photo":
+        monkeypatch.setattr(vs, "PHOTOS_INDEX_FILE", str(index_path))
+    else:
+        monkeypatch.setattr("config.DOCS_INDEX_FILE", str(index_path))
+    monkeypatch.setattr(
+        vs.vector_store,
+        "add_texts",
+        MagicMock(
+            side_effect=EmbeddingsProviderSetupRequired(
+                "Configure an embeddings provider.",
+                provider="anthropic",
+            ),
+        ),
+    )
+
+    saved = AstakosMemoryManager().save(
+        memory_type,
+        file_path="C:/example/file.pdf",
+        analysis="Confirmed archive content",
+        caption="Example file",
+    )
+
+    assert saved is True
+    entries = json.loads(index_path.read_text(encoding="utf-8"))
+    assert entries[0]["file_path"] == "C:/example/file.pdf"
+    assert entries[0][entry_key] == "Confirmed archive content"

@@ -616,6 +616,18 @@ class AstakosMemoryManager:
                         external_content_sources=kwargs.get("external_content_sources"),
                     )
                     return saved
+                if memory_type == "photo":
+                    print(
+                        "\033[93m[MemoryManager]: Semantic photo indexing unavailable; "
+                        f"preserving photo archive only ({exc})\033[0m",
+                    )
+                    return self._append_photo_archive(**kwargs)
+                if memory_type == "document":
+                    print(
+                        "\033[93m[MemoryManager]: Semantic document indexing unavailable; "
+                        f"preserving document archive only ({exc})\033[0m",
+                    )
+                    return self._append_document_archive(**kwargs)
                 raise
             except Exception as e:
                 import traceback
@@ -1148,6 +1160,23 @@ class AstakosMemoryManager:
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Photo 'pinned' ({os.path.basename(file_path)})\033[0m")
 
+        self._append_photo_archive(
+            file_path=file_path,
+            analysis=analysis,
+            caption=caption,
+            external_content_sources=external_content_sources,
+        )
+        return True
+
+    def _append_photo_archive(
+        self,
+        *,
+        file_path: str,
+        analysis: str,
+        caption: str,
+        external_content_sources: list[str] | None = None,
+    ) -> bool:
+        """Append a confirmed photo to its non-semantic archive."""
         entry = {
             "file_path": file_path, "analysis": analysis, "caption": caption,
             "date": datetime.now().strftime("%Y-%m-%d"), "timestamp": datetime.now().isoformat(),
@@ -1190,22 +1219,39 @@ class AstakosMemoryManager:
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Document 'pinned' ({os.path.basename(file_path)})\033[0m")
 
+        self._append_document_archive(
+            file_path=file_path,
+            analysis=analysis,
+            caption=caption,
+            external_content_sources=external_content_sources,
+        )
+        return True
+
+    def _append_document_archive(
+        self,
+        *,
+        file_path: str,
+        analysis: str,
+        caption: str,
+        external_content_sources: list[str] | None = None,
+    ) -> bool:
+        """Append a confirmed document to its non-semantic archive."""
         from config import DOCS_INDEX_FILE
-        docs_index_file = DOCS_INDEX_FILE
+
         entry = {
             "file_path": file_path, "summary": analysis, "caption": caption,
             "date": datetime.now().strftime("%Y-%m-%d"), "timestamp": datetime.now().isoformat(),
             "external_content_sources": external_content_sources or [],
         }
         index = []
-        if os.path.exists(docs_index_file):
-            with open(docs_index_file, "r", encoding="utf-8") as f:
+        if os.path.exists(DOCS_INDEX_FILE):
+            with open(DOCS_INDEX_FILE, "r", encoding="utf-8") as f:
                 try:
                     index = json.load(f)
                 except:
                     pass
         index.append(entry)
-        with open(docs_index_file, "w", encoding="utf-8") as f:
+        with open(DOCS_INDEX_FILE, "w", encoding="utf-8") as f:
             json.dump(index, f, ensure_ascii=False, indent=2)
         return True
 
