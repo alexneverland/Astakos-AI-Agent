@@ -1666,7 +1666,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
 @server.post("/voice")
 async def process_web_voice(file: UploadFile = File(...), _=Depends(require_token)):
-    """Accepts audio from the Web UI, transcribes it to text using Gemini, and returns it."""
+    """Accepts audio from the Web UI, transcribes it to text using the active AI provider, and returns it."""
     try:
         audio_data = await file.read()
         debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "debug_voice.webm")
@@ -1674,37 +1674,25 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
             f.write(audio_data)
         print(f"\033[96m[Web Voice]: Decoding audio ({len(audio_data)} bytes)...\033[0m")
         import config
-        _provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
-        
-        if _provider in ["vertex", "gemini"]:
-            from core.brain import vertex_client
-            client = vertex_client
-            response = client.models.generate_content(
-                model=FAST_MODEL,
-                contents=[
-                    {"inline_data": {"mime_type": "audio/webm", "data": audio_data}},
-                    t("prompts.ext_speech_to_text")
-                ]
+        from core.brain import get_active_provider_adapter
+        from core.ai_provider import CapabilityNotSupportedError, ProviderAuthError, RateLimitError
+
+        adapter = get_active_provider_adapter()
+        try:
+            transcription = adapter.transcribe_audio(audio_data, mime_type="audio/webm")
+        except CapabilityNotSupportedError as exc:
+            return JSONResponse(
+                {"error": f"Voice input is not supported for active provider '{adapter.provider_name}'. Please use text or configure a provider with voice support."},
+                status_code=400,
             )
-            transcription = response.text.strip() if response.text else ""
-            if not transcription or "[SILENCE]" in transcription:
-                return JSONResponse({"error": t("api.server.no_audio_heard")})
-                
-        elif _provider == "openai":
-            import requests
-            headers = {"Authorization": f"Bearer {config.OPENAI_API_KEY}"}
-            files = {"file": ("audio.webm", audio_data, "audio/webm")}
-            data = {"model": "whisper-1"}
-            resp = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files=files, data=data)
-            resp_json = resp.json()
-            if "error" in resp_json:
-                return JSONResponse({"error": str(resp_json["error"])}, status_code=500)
-            transcription = resp_json.get("text", "").strip()
-            if not transcription:
-                return JSONResponse({"error": t("api.server.no_audio_heard")})
-                
-        else:
-            return JSONResponse({"error": "Voice input is not supported for this LLM Provider (Anthropic). Please use Text."})
+        except ProviderAuthError as exc:
+            return JSONResponse({"error": f"Authentication failed for provider '{adapter.provider_name}': {exc}"}, status_code=401)
+        except RateLimitError as exc:
+            return JSONResponse({"error": f"Quota or rate limit exceeded for provider '{adapter.provider_name}'. Please retry shortly."}, status_code=429)
+
+        if not transcription or "[SILENCE]" in transcription or "[ΣΙΩΠΗ]" in transcription:
+            return JSONResponse({"error": t("api.server.no_audio_heard")})
+
         print(f"\033[92m[Web Voice]: {config.USER_NAME} said -> {transcription}\033[0m")
         return JSONResponse({"transcription": transcription})
     except Exception as e:

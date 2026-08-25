@@ -1143,16 +1143,32 @@ def handle_voice(voice_obj: dict, chat_id: str):
 
         print(f"\033[96m[Voice]: Analyzing audio...\033[0m")
 
-        import base64 as _b64
-        import vertexai
-        from vertexai.generative_models import GenerativeModel, Part
-        from core.brain import FAST_MODEL
-        vertexai.init(project=config.PROJECT_ID, location=os.getenv("LOCATION", "global"))
-        stt_model = GenerativeModel(FAST_MODEL)
-        prompt = t("clients.telegram_bot.bot_msg_32a4bf")
-        audio_part = Part.from_data(data=audio_data, mime_type="audio/ogg")
-        stt_response = stt_model.generate_content([prompt, audio_part])
-        ai_reply = stt_response.text.strip() if stt_response and stt_response.text else t("clients.telegram_bot.bot_msg_dacaa2")
+        from core.brain import get_active_provider_adapter
+        from core.ai_provider import CapabilityNotSupportedError, ProviderAuthError, RateLimitError
+
+        adapter = get_active_provider_adapter()
+        try:
+            transcribed_text = adapter.transcribe_audio(audio_data, mime_type="audio/ogg")
+        except CapabilityNotSupportedError as exc:
+            print(f"\033[93m[Voice Capability]: {exc}\033[0m")
+            send_telegram_msg(
+                "⚠️ Voice transcription is not supported by the active AI provider. "
+                "Please send a text message or configure a provider with voice support."
+            )
+            return
+        except ProviderAuthError as exc:
+            print(f"\033[91m[Voice Auth Error]: {exc}\033[0m")
+            send_telegram_msg("⚠️ Voice transcription authentication failed. Please verify your provider credentials.")
+            return
+        except RateLimitError as exc:
+            print(f"\033[93m[Voice Rate Limit]: {exc}\033[0m")
+            send_telegram_msg("⚠️ Voice transcription quota or rate limit exceeded. Please retry shortly.")
+            return
+
+        if not transcribed_text or transcribed_text.strip() in ("[SILENCE]", "[ΣΙΩΠΗ]"):
+            ai_reply = t("clients.telegram_bot.bot_msg_dacaa2")
+        else:
+            ai_reply = transcribed_text.strip()
 
         print(f"\033[92m[Voice AI]: {ai_reply}\033[0m")
         if _handle_transcribed_voice(ai_reply):
