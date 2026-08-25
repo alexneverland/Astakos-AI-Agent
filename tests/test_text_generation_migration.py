@@ -6,14 +6,12 @@
 # ================================================================
 
 import json
+from typing import Any, Self
+
 import pytest
-from unittest.mock import MagicMock
 
 from core.ai_provider import (
     AIProviderError,
-    CapabilityNotSupportedError,
-    ProviderAuthError,
-    RateLimitError,
 )
 from tests.fixtures.provider_mocks import (
     MockOpenAIAdapter,
@@ -26,7 +24,8 @@ from tests.fixtures.provider_mocks import (
 class TestReflectionEngineMigration:
     """Validates reflection_engine._analyze_with_llm integration with AI provider adapter."""
 
-    def test_reflection_engine_vertex_success(self, monkeypatch):
+    def test_reflection_engine_vertex_success(self: Self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Routes a Vertex-style reflection response through the heavy adapter model."""
         import services.reflection_engine as ref_eng
 
         reflections_payload = [
@@ -39,10 +38,19 @@ class TestReflectionEngineMigration:
             }
         ]
 
-        captured_args = {}
+        captured_args: dict[str, str] = {}
 
         class CustomVertexAdapter(MockVertexAIAdapter):
-            def generate_text(self, prompt, model_type="fast", system_prompt=None, temperature=None):
+            """Returns deterministic reflection JSON while recording adapter arguments."""
+
+            def generate_text(
+                self: Self,
+                prompt: str,
+                model_type: str = "fast",
+                system_prompt: str | None = None,
+                temperature: float | None = None,
+            ) -> str:
+                """Return a deterministic reflection payload for this migration test."""
                 captured_args["prompt"] = prompt
                 captured_args["model_type"] = model_type
                 return json.dumps(reflections_payload)
@@ -61,7 +69,8 @@ class TestReflectionEngineMigration:
         assert "Morning alarm" in captured_args["prompt"]
         assert "Good morning" in captured_args["prompt"]
 
-    def test_reflection_engine_openai_success(self, monkeypatch):
+    def test_reflection_engine_openai_success(self: Self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Accepts a fenced OpenAI-style JSON reflection response."""
         import services.reflection_engine as ref_eng
 
         reflections_payload = [
@@ -77,7 +86,16 @@ class TestReflectionEngineMigration:
         ]
 
         class CustomOpenAIAdapter(MockOpenAIAdapter):
-            def generate_text(self, prompt, model_type="fast", system_prompt=None, temperature=None):
+            """Returns deterministic fenced JSON for the reflection parser."""
+
+            def generate_text(
+                self: Self,
+                prompt: str,
+                model_type: str = "fast",
+                system_prompt: str | None = None,
+                temperature: float | None = None,
+            ) -> str:
+                """Return a fenced JSON payload without contacting a provider."""
                 return f"```json\n{json.dumps(reflections_payload)}\n```"
 
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: CustomOpenAIAdapter())
@@ -87,7 +105,11 @@ class TestReflectionEngineMigration:
         assert result[0]["action"] == "increase_cooldown"
         assert result[0]["action_value"] == 48
 
-    def test_reflection_engine_auth_error_returns_empty_and_does_not_crash(self, monkeypatch):
+    def test_reflection_engine_auth_error_returns_empty_and_does_not_crash(
+        self: Self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Returns no findings when reflection-provider authentication fails."""
         import services.reflection_engine as ref_eng
 
         monkeypatch.setattr(
@@ -98,7 +120,11 @@ class TestReflectionEngineMigration:
         result = ref_eng._analyze_with_llm([], [], [])
         assert result == []
 
-    def test_reflection_engine_rate_limit_returns_empty_and_does_not_crash(self, monkeypatch):
+    def test_reflection_engine_rate_limit_returns_empty_and_does_not_crash(
+        self: Self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Returns no findings when the reflection provider is rate limited."""
         import services.reflection_engine as ref_eng
 
         monkeypatch.setattr(
@@ -109,11 +135,24 @@ class TestReflectionEngineMigration:
         result = ref_eng._analyze_with_llm([], [], [])
         assert result == []
 
-    def test_reflection_engine_generic_provider_error_returns_empty(self, monkeypatch):
+    def test_reflection_engine_generic_provider_error_returns_empty(
+        self: Self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Returns no findings for a non-typed provider failure."""
         import services.reflection_engine as ref_eng
 
         class FailingAdapter(MockVertexAIAdapter):
-            def generate_text(self, prompt, model_type="fast", system_prompt=None, temperature=None):
+            """Raises a deterministic generic provider error."""
+
+            def generate_text(
+                self: Self,
+                prompt: str,
+                model_type: str = "fast",
+                system_prompt: str | None = None,
+                temperature: float | None = None,
+            ) -> str:
+                """Raise the failure the reflection engine must handle safely."""
                 raise AIProviderError("Backend connection reset", provider="vertex")
 
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: FailingAdapter())
@@ -121,13 +160,24 @@ class TestReflectionEngineMigration:
         result = ref_eng._analyze_with_llm([], [], [])
         assert result == []
 
-    def test_reflection_engine_brain_error_does_not_raise_unbound_local_error(self, monkeypatch):
+    def test_reflection_engine_brain_error_does_not_raise_unbound_local_error(
+        self: Self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Handles a core.brain import failure without an unbound exception name."""
         import builtins
         import services.reflection_engine as ref_eng
 
         original_import = builtins.__import__
 
-        def fail_brain_import(name, globals=None, locals=None, fromlist=(), level=0):
+        def fail_brain_import(
+            name: str,
+            globals: dict[str, Any] | None = None,
+            locals: dict[str, Any] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
+        ) -> Any:
+            """Fail only the adapter import needed to reproduce the regression."""
             if name == "core.brain":
                 raise ImportError("Simulated failure during core.brain import")
             return original_import(name, globals, locals, fromlist, level)
@@ -141,13 +191,23 @@ class TestReflectionEngineMigration:
 class TestStoryMakerMigration:
     """Validates astakos_skills/story_maker integration with AI provider adapter."""
 
-    def test_story_maker_vertex_success(self, monkeypatch):
+    def test_story_maker_vertex_success(self: Self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Routes story generation through the fast active-provider model."""
         import astakos_skills.story_maker as sm
 
-        captured_args = {}
+        captured_args: dict[str, str] = {}
 
         class CustomVertexAdapter(MockVertexAIAdapter):
-            def generate_text(self, prompt, model_type="fast", system_prompt=None, temperature=None):
+            """Returns a deterministic story and three image-scene prompts."""
+
+            def generate_text(
+                self: Self,
+                prompt: str,
+                model_type: str = "fast",
+                system_prompt: str | None = None,
+                temperature: float | None = None,
+            ) -> str:
+                """Return the story fixture while recording adapter arguments."""
                 captured_args["prompt"] = prompt
                 captured_args["model_type"] = model_type
                 return (
@@ -169,11 +229,21 @@ class TestStoryMakerMigration:
         assert "magical forest" in captured_args["prompt"]
         assert "Astakos the crab" in captured_args["prompt"]
 
-    def test_story_maker_openai_success(self, monkeypatch):
+    def test_story_maker_openai_success(self: Self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Parses a successful OpenAI-style story response."""
         import astakos_skills.story_maker as sm
 
         class CustomOpenAIAdapter(MockOpenAIAdapter):
-            def generate_text(self, prompt, model_type="fast", system_prompt=None, temperature=None):
+            """Returns a deterministic story fixture for the active adapter."""
+
+            def generate_text(
+                self: Self,
+                prompt: str,
+                model_type: str = "fast",
+                system_prompt: str | None = None,
+                temperature: float | None = None,
+            ) -> str:
+                """Return a story response without invoking a real provider."""
                 return (
                     "In a sunny kingdom, there lived a curious kitten.\n"
                     "SCENE1: Kitten playing in the royal garden\n"
@@ -187,11 +257,24 @@ class TestStoryMakerMigration:
         assert result["story"] == "In a sunny kingdom, there lived a curious kitten."
         assert len(result["scenes"]) == 3
 
-    def test_story_maker_fallback_scenes_when_scene_markers_missing(self, monkeypatch):
+    def test_story_maker_fallback_scenes_when_scene_markers_missing(
+        self: Self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Builds fallback scene prompts when the text response lacks markers."""
         import astakos_skills.story_maker as sm
 
         class PlainStoryAdapter(MockVertexAIAdapter):
-            def generate_text(self, prompt, model_type="fast", system_prompt=None, temperature=None):
+            """Returns a story without scene markers."""
+
+            def generate_text(
+                self: Self,
+                prompt: str,
+                model_type: str = "fast",
+                system_prompt: str | None = None,
+                temperature: float | None = None,
+            ) -> str:
+                """Return a plain story to exercise fallback-scene construction."""
                 return "This is a simple bedtime story without scene tags."
 
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: PlainStoryAdapter())
@@ -201,7 +284,11 @@ class TestStoryMakerMigration:
         assert len(result["scenes"]) == 3
         assert "space adventure" in result["scenes"][0]
 
-    def test_story_maker_auth_error_handled_gracefully(self, monkeypatch):
+    def test_story_maker_auth_error_handled_gracefully(
+        self: Self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Returns the established structured story failure on authentication errors."""
         import astakos_skills.story_maker as sm
 
         monkeypatch.setattr(
@@ -219,7 +306,11 @@ class TestStoryMakerMigration:
         assert full_res["images"] == []
         assert full_res["error"] is not None
 
-    def test_story_maker_rate_limit_error_handled_gracefully(self, monkeypatch):
+    def test_story_maker_rate_limit_error_handled_gracefully(
+        self: Self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Returns the established structured story failure on rate limits."""
         import astakos_skills.story_maker as sm
 
         monkeypatch.setattr(
@@ -235,11 +326,24 @@ class TestStoryMakerMigration:
         assert full_res["story"] is None
         assert full_res["error"] is not None
 
-    def test_story_maker_generic_provider_error_handled_gracefully(self, monkeypatch):
+    def test_story_maker_generic_provider_error_handled_gracefully(
+        self: Self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Returns a structured failure for a generic provider exception."""
         import astakos_skills.story_maker as sm
 
         class FailingAdapter(MockAnthropicAdapter):
-            def generate_text(self, prompt, model_type="fast", system_prompt=None, temperature=None):
+            """Raises a deterministic generic provider error."""
+
+            def generate_text(
+                self: Self,
+                prompt: str,
+                model_type: str = "fast",
+                system_prompt: str | None = None,
+                temperature: float | None = None,
+            ) -> str:
+                """Raise the failure the Story Maker must handle gracefully."""
                 raise AIProviderError("Service temporarily unavailable", provider="anthropic")
 
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: FailingAdapter())
@@ -248,13 +352,24 @@ class TestStoryMakerMigration:
         assert result["story"] is None
         assert result["scenes"] == []
 
-    def test_story_maker_brain_error_does_not_raise_unbound_local_error(self, monkeypatch):
+    def test_story_maker_brain_error_does_not_raise_unbound_local_error(
+        self: Self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Handles a core.brain import failure without an unbound exception name."""
         import builtins
         import astakos_skills.story_maker as sm
 
         original_import = builtins.__import__
 
-        def fail_brain_import(name, globals=None, locals=None, fromlist=(), level=0):
+        def fail_brain_import(
+            name: str,
+            globals: dict[str, Any] | None = None,
+            locals: dict[str, Any] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
+        ) -> Any:
+            """Fail only the adapter import needed to reproduce the regression."""
             if name == "core.brain":
                 raise ImportError("Simulated failure during core.brain import")
             return original_import(name, globals, locals, fromlist, level)
