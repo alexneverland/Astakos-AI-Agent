@@ -16,7 +16,11 @@ import sqlite3
 from langchain_chroma import Chroma
 from config import CHROMA_DB_DIR, PHOTOS_INDEX_FILE, SIM_THRESHOLD_DISTANCE, MEMORY_AUDIT_DIR, STATE_DB
 from services.embeddings import embeddings
-from core.ai_provider import EmbeddingsProviderSetupRequired, get_embeddings_collection_name
+from core.ai_provider import (
+    EmbeddingsProviderSetupRequired,
+    ProviderAuthError,
+    get_embeddings_collection_name,
+)
 
 _audit_lock = threading.Lock()
 
@@ -190,7 +194,7 @@ def _safe_chroma_query(*, query_embeddings, n_results, where=None, include=None)
     for attempt in range(2):
         try:
             return vector_store._collection.query(**kwargs)
-        except EmbeddingsProviderSetupRequired:
+        except (EmbeddingsProviderSetupRequired, ProviderAuthError):
             raise
         except Exception as e:
             if attempt == 0 and _should_retry_chroma_error(e) and _refresh_vector_store("query retry"):
@@ -218,7 +222,7 @@ def safe_similarity_search(query: str, *, k: int, filter: dict | None = None) ->
             if filter is not None:
                 kwargs["filter"] = filter
             return vector_store.similarity_search(query, **kwargs)
-        except EmbeddingsProviderSetupRequired:
+        except (EmbeddingsProviderSetupRequired, ProviderAuthError):
             raise
         except Exception as e:
             if attempt == 0 and _should_retry_chroma_error(e) and _refresh_vector_store("similarity retry"):
@@ -598,6 +602,21 @@ class AstakosMemoryManager:
                     return self._save_event(**kwargs)
                 else:
                     print(f"⚠️ [MemoryManager]: Unknown memory type '{memory_type}'")
+            except (EmbeddingsProviderSetupRequired, ProviderAuthError) as exc:
+                if memory_type == "fact":
+                    print(
+                        "\033[93m[MemoryManager]: Semantic save unavailable; "
+                        f"preserving structured fact only ({exc})\033[0m",
+                    )
+                    saved = self._save_fact_profile_only(**kwargs)
+                    self._trigger_routine_reconciler(
+                        kwargs["fact"],
+                        kwargs["category"],
+                        kwargs.get("reason", "agent_inferred"),
+                        external_content_sources=kwargs.get("external_content_sources"),
+                    )
+                    return saved
+                raise
             except Exception as e:
                 import traceback
                 print(f"\033[91m[MemoryManager Error]: {e}\033[0m")
@@ -629,6 +648,114 @@ class AstakosMemoryManager:
         os.replace(tmp_file, WORKING_MEMORY_FILE)
         return True
 
+    def _save_fact_profile_only(
+        self,
+        *,
+        fact: str,
+        category: str,
+        agent_name: str,
+        photo_path: str = None,
+        source: str = "unknown",
+        reason: str = "agent_inferred",
+        confidence: float = 0.7,
+        tags: list[str] | None = None,
+        entities: list[str] | None = None,
+        topic: str = "",
+        topic_detail: str = "",
+        state_markers: list[str] | None = None,
+        time_scope: str = "",
+        relation_type: str = "",
+        external_content_sources: list[str] | None = None,
+        replace_old_fact_text: str | None = None,
+    ) -> bool:
+        """Persist a fact in structured storage when semantic indexing is unavailable."""
+        if category == "photos":
+            return False
+
+        from config import PROFILE_DB
+
+        tags = tags or []
+        entities = entities or []
+        state_markers = state_markers or []
+        external_content_sources = external_content_sources or []
+        conn = None
+        try:
+            conn = sqlite3.connect(PROFILE_DB)
+            cursor = conn.cursor()
+            _ensure_profile_fact_schema(cursor)
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            profile_metadata = {
+                "tags": tags,
+                "entities": entities,
+                "topic": topic or "",
+                "topic_detail": topic_detail or "",
+                "state_markers": state_markers,
+                "time_scope": time_scope or "",
+                "relation_type": relation_type or "",
+                "confidence": confidence,
+                "source": source,
+                "reason": reason,
+                "agent_name": agent_name,
+            }
+            if external_content_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+                profile_metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = external_content_sources
+            metadata_json = json.dumps(profile_metadata, ensure_ascii=False)
+
+            if replace_old_fact_text is not None:
+                cursor.execute(
+                    "SELECT id FROM profile_facts WHERE category=? AND fact=?",
+                    (category, replace_old_fact_text),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    normalized_old_fact = replace_old_fact_text.strip().lower()
+                    cursor.execute(
+                        "SELECT id, fact FROM profile_facts WHERE category=?",
+                        (category,),
+                    )
+                    for candidate_id, candidate_fact in cursor.fetchall():
+                        if candidate_fact.strip().lower() == normalized_old_fact:
+                            row = (candidate_id,)
+                            break
+                if row:
+                    cursor.execute(
+                        "UPDATE profile_facts SET fact=?, photo_path=?, date=?, metadata_json=?, "
+                        "created_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (fact, photo_path, date_str, metadata_json, row[0]),
+                    )
+                    print("\033[94m[DB Profile]: Replacing old entry (same as Chroma)\033[0m")
+                else:
+                    cursor.execute(
+                        "INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (category, fact, photo_path, date_str, metadata_json),
+                    )
+                    print("\033[92m[DB Profile]: New record added.\033[0m")
+            else:
+                cursor.execute(
+                    "SELECT 1 FROM profile_facts WHERE category=? AND fact=? LIMIT 1",
+                    (category, fact),
+                )
+                if cursor.fetchone():
+                    print("\033[90m[DB Profile]: Exact duplicate skipped.\033[0m")
+                else:
+                    cursor.execute(
+                        "INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (category, fact, photo_path, date_str, metadata_json),
+                    )
+                    print("\033[92m[DB Profile]: New record added.\033[0m")
+            conn.commit()
+            return True
+        except Exception as db_err:
+            print(f"\033[91m[DB Profile Error]: {db_err}\033[0m")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
     def _save_fact(
         self,
         fact: str,
@@ -647,8 +774,6 @@ class AstakosMemoryManager:
         relation_type: str = "",
         external_content_sources: list[str] | None = None,
     ):
-        from config import PROFILE_DB
-
         # ── Threshold per fact type ──────────────────────────────
         if "[LESSON]" in fact:
             dup_threshold = 0.82   # technical courses — strict
@@ -933,65 +1058,25 @@ class AstakosMemoryManager:
             relation_type=relation_type or "",
         )
 
-# 4. Save DB Profile — with smart OVERWRITE
-        if category != "photos":
-            import sqlite3
-            conn = None
-            try:
-                conn = sqlite3.connect(PROFILE_DB)
-                c = conn.cursor()
-                _ensure_profile_fact_schema(c)
-
-                date_str = datetime.now().strftime("%Y-%m-%d")
-                profile_metadata_json = json.dumps({
-                    "tags": tags,
-                    "entities": entities,
-                    "topic": topic or "",
-                    "topic_detail": topic_detail or "",
-                    "state_markers": state_markers,
-                    "time_scope": time_scope or "",
-                    "relation_type": relation_type or "",
-                    "confidence": confidence,
-                    "source": source,
-                    "reason": reason,
-                    "agent_name": agent_name,
-                }, ensure_ascii=False)
-                if external_content_sources:
-                    from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
-
-                    profile_metadata = json.loads(profile_metadata_json)
-                    profile_metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = external_content_sources
-                    profile_metadata_json = json.dumps(profile_metadata, ensure_ascii=False)
-                
-                if replace_old_fact_text is not None:
-                    c.execute("SELECT id FROM profile_facts WHERE category=? AND fact=?", (category, replace_old_fact_text))
-                    row = c.fetchone()
-                    
-                    if not row:
-                        # Fallback normalized match
-                        trimmed_old = replace_old_fact_text.strip().lower()
-                        c.execute("SELECT id, fact FROM profile_facts WHERE category=?", (category,))
-                        for r in c.fetchall():
-                            if r[1].strip().lower() == trimmed_old:
-                                row = (r[0],)
-                                break
-
-                    if row:
-                        print(f"\033[94m[DB Profile]: Replacing old entry (same as Chroma)\033[0m")
-                        c.execute("UPDATE profile_facts SET fact=?, photo_path=?, date=?, metadata_json=?, created_at=CURRENT_TIMESTAMP WHERE id=?", (fact, photo_path, date_str, profile_metadata_json, row[0]))
-                    else:
-                        print(f"\033[93m[DB Profile]: No matching old record found for replacement '{replace_old_fact_text}' — adding new to avoid silent loss.\033[0m")
-                        c.execute("INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) VALUES (?, ?, ?, ?, ?)", (category, fact, photo_path, date_str, profile_metadata_json))
-                else:
-                    print(f"\033[92m[DB Profile]: New record added.\033[0m")
-                    c.execute("INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) VALUES (?, ?, ?, ?, ?)", (category, fact, photo_path, date_str, profile_metadata_json))
-                
-                conn.commit()
-            except Exception as db_err:
-                print(f"\033[91m[DB Profile Error]: {db_err}\033[0m")
-            finally:
-                if conn:
-                    conn.close()
+# 4. Save DB Profile — with the same overwrite decision as semantic storage.
+        self._save_fact_profile_only(
+            fact=fact,
+            category=category,
+            agent_name=agent_name,
+            photo_path=photo_path,
+            source=source,
+            reason=reason,
+            confidence=confidence,
+            tags=tags,
+            entities=entities,
+            topic=topic,
+            topic_detail=topic_detail,
+            state_markers=state_markers,
+            time_scope=time_scope,
+            relation_type=relation_type,
+            external_content_sources=external_content_sources,
+            replace_old_fact_text=replace_old_fact_text,
+        )
 
         # 5. Automatic fact -> routine reconciliation
         self._trigger_routine_reconciler(

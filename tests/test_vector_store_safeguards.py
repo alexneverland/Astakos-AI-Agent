@@ -1,8 +1,10 @@
+import sqlite3
+
 import pytest
 from unittest.mock import patch, MagicMock
 
 import memory.vector_store as vs
-from core.ai_provider import EmbeddingsProviderSetupRequired
+from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
 from memory.vector_store import AstakosMemoryManager
 
 @pytest.fixture
@@ -148,3 +150,61 @@ def test_similarity_search_propagates_embeddings_setup_errors(monkeypatch):
 
     with pytest.raises(EmbeddingsProviderSetupRequired, match="Configure an embeddings provider"):
         vs.safe_similarity_search("test", k=3)
+
+
+def test_similarity_search_propagates_embeddings_auth_errors(monkeypatch):
+    """An invalid embeddings key must not look like an empty memory result."""
+    store = MagicMock()
+    store.similarity_search.side_effect = ProviderAuthError(
+        "openai",
+        "OPENAI_API_KEY is not configured.",
+    )
+    monkeypatch.setattr(vs, "vector_store", store)
+
+    with pytest.raises(ProviderAuthError, match="OPENAI_API_KEY"):
+        vs.safe_similarity_search("test", k=3)
+
+
+def test_chroma_query_propagates_embeddings_auth_errors(monkeypatch):
+    """Authentication failures must also escape the low-level query helper."""
+    collection = MagicMock()
+    collection.query.side_effect = ProviderAuthError(
+        "openai",
+        "OPENAI_API_KEY is not configured.",
+    )
+    store = MagicMock()
+    store._collection = collection
+    monkeypatch.setattr(vs, "vector_store", store)
+
+    with pytest.raises(ProviderAuthError, match="OPENAI_API_KEY"):
+        vs._safe_chroma_query(query_embeddings=[[0.1]], n_results=1)
+
+
+def test_fact_save_preserves_structured_profile_without_embeddings(monkeypatch, tmp_path):
+    """Facts remain available to structured retrieval if semantic setup is incomplete."""
+    profile_db = tmp_path / "profile.db"
+    monkeypatch.setattr("config.PROFILE_DB", str(profile_db))
+    monkeypatch.setattr(
+        vs.embeddings,
+        "embed_query",
+        MagicMock(
+            side_effect=EmbeddingsProviderSetupRequired(
+                "Configure an embeddings provider.",
+                provider="anthropic",
+            ),
+        ),
+    )
+    monkeypatch.setattr(vs.AstakosMemoryManager, "_trigger_routine_reconciler", lambda *args, **kwargs: None)
+
+    saved = AstakosMemoryManager().save(
+        "fact",
+        fact="[USER_FACT]: Ο Αλέξανδρος αγαπά τις φακές",
+        category="family",
+        agent_name="test_agent",
+        reason="user_stated",
+    )
+
+    assert saved is True
+    with sqlite3.connect(profile_db) as connection:
+        rows = connection.execute("SELECT category, fact FROM profile_facts").fetchall()
+    assert rows == [("family", "[USER_FACT]: Ο Αλέξανδρος αγαπά τις φακές")]
