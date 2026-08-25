@@ -1849,27 +1849,36 @@ async def upload_file(
             
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='JPEG')
-            img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
+            raw_img_bytes = img_byte_arr.getvalue()
             
             from core.untrusted_content import (
                 USER_PROVIDED_ASSET_SOURCE,
                 format_untrusted_asset_vision_prompt,
             )
+            from core.ai_provider import (
+                CapabilityNotSupportedError,
+                ProviderAuthError,
+                RateLimitError,
+                AIProviderError,
+            )
+            from core.brain import get_active_provider_adapter
 
             def analyze_img(prompt_text: str) -> str:
                 """Analyze an uploaded image with an explicit untrusted-data boundary."""
-                msg = HumanMessage(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": format_untrusted_asset_vision_prompt(prompt_text),
-                        },
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-                    ]
-                )
-                resp = llm.invoke([msg])
-                from core.utils import clean_message
-                return clean_message(resp.content) if resp and resp.content else ""
+                try:
+                    adapter = get_active_provider_adapter()
+                    return adapter.analyze_vision(
+                        format_untrusted_asset_vision_prompt(prompt_text),
+                        raw_img_bytes,
+                        mime_type="image/jpeg",
+                    )
+                except CapabilityNotSupportedError as exc:
+                    return f"Vision analysis is not supported by active provider '{exc.provider}'."
+                except (ProviderAuthError, RateLimitError, AIProviderError) as exc:
+                    return f"Vision analysis error ({getattr(exc, 'provider', 'unknown')}): {exc}"
+                except Exception:
+                    return ""
+
                 
             memory_analysis = analyze_img("Describe what you see in Greek, concisely, 1-2 sentences.")
             if not memory_analysis:

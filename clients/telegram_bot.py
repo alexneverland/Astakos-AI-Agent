@@ -1260,16 +1260,41 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         print(f"\033[92m[Photo]: Downloaded: {filename}\033[0m")
 
         # 3. Vision LLM — objective pixel analysis
-        img_b64 = base64.b64encode(img_data).decode("utf-8")
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            AIProviderError,
+        )
+        from core.brain import get_active_provider_adapter
+
         vision_prompt = t("clients.telegram_bot.bot_msg_dec305")
-        vision_msg = HumanMessage(content=[
-            {"type": "text",      "text": vision_prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-        ])
         print(f"\033[94m[Vision]: Visual analysis...\033[0m")
-        analysis_raw  = safe_llm_invoke(llm, [vision_msg])
-        memory_analysis = clean_message(analysis_raw.content)
+        try:
+            adapter = get_active_provider_adapter()
+            memory_analysis = adapter.analyze_vision(vision_prompt, img_data, mime_type="image/jpeg")
+            if not memory_analysis:
+                memory_analysis = "No visual analysis available."
+        except CapabilityNotSupportedError as exc:
+            print(f"\033[93m[Vision Capability]: {exc}\033[0m")
+            memory_analysis = f"Vision analysis is not supported by active provider '{exc.provider}'."
+        except ProviderAuthError as exc:
+            print(f"\033[91m[Vision Auth Error]: {exc}\033[0m")
+            send_telegram_msg("⚠️ Photo analysis authentication failed. Please verify provider credentials.")
+            return
+        except RateLimitError as exc:
+            print(f"\033[93m[Vision Rate Limit]: {exc}\033[0m")
+            send_telegram_msg("⚠️ Photo analysis quota or rate limit exceeded. Please retry shortly.")
+            return
+        except AIProviderError as exc:
+            print(f"\033[91m[Vision Error]: {exc}\033[0m")
+            memory_analysis = f"Vision analysis error ({exc.provider}): {exc}"
+        except Exception as exc:
+            print(f"\033[91m[Vision Error]: {exc}\033[0m")
+            memory_analysis = f"Vision analysis error: {exc}"
+
         print(f"\033[94m[Vision]: {memory_analysis[:120]}...\033[0m")
+
 
         # 4a. WITH caption → check for /nutrition, /receipt or normal question
         if caption:
