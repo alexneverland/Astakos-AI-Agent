@@ -123,7 +123,7 @@ def _recent_user_context_hint(channel: str, limit: int = 4) -> str:
     the sole authority for whether a state is current.
     """
     try:
-        entries = load_messages(limit=limit, channel=channel)
+        entries = load_messages(limit=limit, roles=("user",), channel=channel)
     except Exception:
         return "(none)"
 

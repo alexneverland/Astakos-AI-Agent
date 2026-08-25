@@ -90,6 +90,9 @@ def test_load_messages_can_filter_by_channel_and_session(tmp_path):
     s1_messages = load_messages(session_id="s1", db_path=db_path)
     assert [m["content"] for m in s1_messages] == ["web first", "telegram second"]
 
+    user_messages = load_messages(roles=("user",), db_path=db_path)
+    assert [m["content"] for m in user_messages] == ["web first", "web other session"]
+
 
 def test_load_messages_returns_recent_entries_in_chronological_order(tmp_path):
     from memory.conversation_history import append_message, load_messages

@@ -448,6 +448,7 @@ def mark_exchanges_summarized(
 def load_messages(
     *,
     limit: int = 50,
+    roles: list[str] | tuple[str, ...] | None = None,
     channel: str | None = None,
     session_id: str | None = None,
     db_path: str = CONVERSATION_DB_FILE,
@@ -455,6 +456,10 @@ def load_messages(
     init_db(db_path)
     clauses = []
     params: list[Any] = []
+    if roles:
+        placeholders = ",".join("?" for _ in roles)
+        clauses.append(f"role IN ({placeholders})")
+        params.extend(roles)
     if channel:
         clauses.append("channel = ?")
         params.append(channel)
