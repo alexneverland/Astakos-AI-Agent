@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from memory.context_builder import (
     MemoryContext,
     build_memory_context,
@@ -7,6 +9,7 @@ from memory.context_builder import (
     semantic_facts_for_query,
     temporal_history_for_query,
 )
+from core.ai_provider import EmbeddingsProviderSetupRequired
 
 
 class _Doc:
@@ -132,6 +135,37 @@ def test_build_memory_context_combines_recent_and_semantic():
     assert "[RELEVANT CHROMA MEMORIES]" in rendered
     assert "Πάμε πάρκο" in rendered
     assert "Ο Kid1 θέλει πάρκο" in rendered
+
+
+def test_build_memory_context_keeps_recent_and_history_when_semantic_setup_is_unavailable():
+    """Optional semantic retrieval must not discard non-semantic prompt context."""
+    context = build_memory_context(
+        "τι κάναμε χτες με τον Αλέξανδρο;",
+        recent_loader=lambda **_kwargs: [
+            {"channel": "telegram", "time": "12:30", "role": "user", "content": "Πήγαμε πάρκο"},
+        ],
+        temporal_loader=lambda **_kwargs: [
+            {
+                "channel": "telegram",
+                "date": (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d"),
+                "time": "18:00",
+                "role": "user",
+                "content": "Παίξαμε μπάλα με τον Αλέξανδρο.",
+            },
+        ],
+        semantic_search=lambda _query, _k: (_ for _ in ()).throw(
+            EmbeddingsProviderSetupRequired(
+                "Configure an embeddings provider.",
+                provider="anthropic",
+            ),
+        ),
+    )
+
+    rendered = context.render()
+    assert "Πήγαμε πάρκο" in rendered
+    assert "Παίξαμε μπάλα" in rendered
+    assert context.semantic_facts == []
+    assert isinstance(context.semantic_error, EmbeddingsProviderSetupRequired)
 
 
 def test_temporal_history_for_yesterday_morning_uses_sqlite_messages():

@@ -22,6 +22,7 @@ class MemoryContext:
     recent_lines: list[str]
     historical_lines: list[str]
     semantic_facts: list[str]
+    semantic_error: Exception | None = None
 
     def render(self) -> str:
         sections = []
@@ -772,13 +773,33 @@ def build_memory_context(
             semantic_adjust_reason = "low_complexity_query"
 
     t_sem_0 = perf_counter()
-    semantic_facts = semantic_facts_for_query(clean_query, k=effective_semantic_k, search_fn=semantic_search)
+    semantic_error = None
+    try:
+        semantic_facts = semantic_facts_for_query(
+            clean_query,
+            k=effective_semantic_k,
+            search_fn=semantic_search,
+        )
+    except Exception as exc:
+        from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+        if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+            raise
+        semantic_facts = []
+        semantic_error = exc
+        semantic_adjust_reason = (
+            "embeddings_auth_unavailable"
+            if isinstance(exc, ProviderAuthError)
+            else "embeddings_setup_unavailable"
+        )
+        print(f"\033[93m[MemoryContext]: semantic memory unavailable: {exc}\033[0m")
     semantic_ms = int((perf_counter() - t_sem_0) * 1000)
 
     context = MemoryContext(
         recent_lines=format_recent_messages(recent_messages, limit=recent_limit),
         historical_lines=historical_lines,
         semantic_facts=semantic_facts,
+        semantic_error=semantic_error,
     )
     if write_debug:
         _record_memory_context_debug(

@@ -296,21 +296,28 @@ def search_memory(query: str, category: str = "") -> str:
                 seen_docs.add(key)
                 merged_results.append(doc)
             # [PERF]: 1 similarity_search instead of 3 — primary_query is sufficient (expanded queries do not improve significantly)
-            for search_query in search_queries[:1]:
-                if effective_category:
-                    batch = vector_memory.safe_similarity_search(
-                        search_query,
-                        k=6,
-                        filter={"category": effective_category},
-                    )
-                else:
-                    batch = vector_memory.safe_similarity_search(search_query, k=6)
-                for doc in batch:
-                    key = getattr(doc, "page_content", str(doc))
-                    if key in seen_docs:
-                        continue
-                    seen_docs.add(key)
-                    merged_results.append(doc)
+            try:
+                for search_query in search_queries[:1]:
+                    if effective_category:
+                        batch = vector_memory.safe_similarity_search(
+                            search_query,
+                            k=6,
+                            filter={"category": effective_category},
+                        )
+                    else:
+                        batch = vector_memory.safe_similarity_search(search_query, k=6)
+                    for doc in batch:
+                        key = getattr(doc, "page_content", str(doc))
+                        if key in seen_docs:
+                            continue
+                        seen_docs.add(key)
+                        merged_results.append(doc)
+            except Exception as exc:
+                from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+                if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                    raise
+                print(f"\033[93m[search_memory]: semantic search unavailable; using structured memory ({exc})\033[0m")
             results = merged_results[:8 if effective_category else 6]
 
         from memory.vector_store import (

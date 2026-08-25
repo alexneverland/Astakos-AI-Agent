@@ -20,6 +20,36 @@ from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 _embedding_setup_notifications: set[str] = set()
 _embedding_setup_notifications_lock = threading.Lock()
 
+
+def _embedding_memory_status_notice(error: Exception, channel: str) -> str:
+    """Return one user-facing semantic-memory configuration notice per process."""
+    from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+    if not isinstance(error, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+        return ""
+    notification_key = f"{channel or 'telegram'}:{error.provider}:{error}"
+    with _embedding_setup_notifications_lock:
+        if notification_key in _embedding_setup_notifications:
+            return ""
+        _embedding_setup_notifications.add(notification_key)
+    status = (
+        "SEMANTIC MEMORY AUTHENTICATION REQUIRED"
+        if isinstance(error, ProviderAuthError)
+        else "SEMANTIC MEMORY SETUP REQUIRED"
+    )
+    guidance = (
+        "semantic-memory provider credentials need verification"
+        if isinstance(error, ProviderAuthError)
+        else "semantic memory needs setup"
+    )
+    return (
+        f"\n[SYSTEM STATUS — {status}]\n"
+        f"Semantic-memory retrieval is unavailable: {error}\n"
+        f"Tell the user concisely that {guidance}. "
+        "Do not claim a semantic-memory search succeeded; continue answering "
+        "the current request normally.\n"
+    )
+
 # ────────────────────────────────────────────────────────────────
 # 1. STATE & TYPES
 # ────────────────────────────────────────────────────────────────
@@ -680,33 +710,16 @@ def build_prompt(
                 memory_context_str = "\n🧠 ═══ UNIFIED MEMORY CONTEXT ═══\n"
                 memory_context_str += rendered_context + "\n"
                 memory_context_str += "⚠️ Do not say 'according to my memory', just act based on it.\n"
+            status_notice = _embedding_memory_status_notice(
+                context.semantic_error,
+                channel or "telegram",
+            ) if context.semantic_error else ""
+            if status_notice:
+                memory_context_str += status_notice
         except Exception as e:
-            from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
-
-            if isinstance(e, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
-                notification_key = f"{channel or 'telegram'}:{e.provider}:{e}"
-                with _embedding_setup_notifications_lock:
-                    first_notice = notification_key not in _embedding_setup_notifications
-                    if first_notice:
-                        _embedding_setup_notifications.add(notification_key)
-                if first_notice:
-                    status = (
-                        "SEMANTIC MEMORY AUTHENTICATION REQUIRED"
-                        if isinstance(e, ProviderAuthError)
-                        else "SEMANTIC MEMORY SETUP REQUIRED"
-                    )
-                    guidance = (
-                        "semantic-memory provider credentials need verification"
-                        if isinstance(e, ProviderAuthError)
-                        else "semantic memory needs setup"
-                    )
-                    memory_context_str = (
-                        f"\n[SYSTEM STATUS — {status}]\n"
-                        f"Semantic-memory retrieval is unavailable: {e}\n"
-                        f"Tell the user concisely that {guidance}. "
-                        "Do not claim a semantic-memory search succeeded; continue answering "
-                        "the current request normally.\n"
-                    )
+            status_notice = _embedding_memory_status_notice(e, channel or "telegram")
+            if status_notice:
+                memory_context_str = status_notice
                 print(f"\033[93m[MemoryContext]: semantic memory configuration required: {e}\033[0m")
             else:
                 print(f"\033[91m⚠️ Memory Context Error: {e}\033[0m")
