@@ -3,6 +3,7 @@
 # Description: Modular LLM-agnostic multi-agent framework
 # Copyright (c) 2026 - All Rights Reserved
 # ================================================================
+from typing import Any, Callable, TypeVar
 import config
 import warnings
 import os
@@ -11,6 +12,7 @@ import threading
 from langchain_google_genai import ChatGoogleGenerativeAI, HarmCategory, HarmBlockThreshold
 from rich.console import Console
 from google import genai
+
 
 # Ignore warnings to keep the terminal clean
 warnings.filterwarnings("ignore")
@@ -166,11 +168,23 @@ def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
                     f"retrying in {wait:.0f}s - {type(e).__name__}\033[0m"
                 )
             time.sleep(wait)
-def safe_adapter_call(func, *args, retries: int = 3, base_delay: float = 2.0, **kwargs):
+
+
+_T = TypeVar("_T")
+
+
+def safe_adapter_call(
+    func: Callable[..., _T],
+    *args: Any,
+    retries: int = 3,
+    base_delay: float = 2.0,
+    **kwargs: Any,
+) -> _T:
     """
     Mastro-Shield provider adapter executor: exponential backoff on network, quota,
     and transient server-side model failures.
     """
+
     from core.ai_provider import (
         CapabilityNotSupportedError,
         ProviderAuthError,
