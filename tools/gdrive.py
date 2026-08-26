@@ -1,37 +1,37 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Google Drive Uploader
-# Uses Application Default Credentials (same as Vertex AI).
-# Requires: gcloud auth application-default login with Drive scope,
-# or: gcloud auth application-default login --scopes=
-#   https://www.googleapis.com/auth/drive.file,
-#   https://www.googleapis.com/auth/cloud-platform
+# Uses Google Workspace user OAuth (token.json).
 # ================================================================
 
 import os
 import mimetypes
+from core.workspace_oauth import (
+    load_workspace_credentials,
+    WorkspaceAuthError,
+)
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+import config
 
 
 def upload_to_drive(file_path: str, folder_id: str = None) -> str:
     """
-    Uploads a file to Google Drive using Application Default Credentials.
+    Uploads a file to Google Drive using the authenticated user's Workspace OAuth credentials.
     Returns the shareable URL (viewable by anyone with the link),
-    or "" if it fails.
+    or "" if it fails or if Workspace OAuth is not configured.
     """
     try:
-        from google.auth import default as google_auth_default
-        from googleapiclient.discovery import build
-        from googleapiclient.http import MediaFileUpload
-
-        creds, _ = google_auth_default()
+        creds = load_workspace_credentials(scopes=["https://www.googleapis.com/auth/drive"])
         service = build("drive", "v3", credentials=creds, cache_discovery=False)
 
         filename  = os.path.basename(file_path)
         mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
 
         file_metadata = {"name": filename}
-        if folder_id:
-            file_metadata["parents"] = [folder_id]
+        target_folder = folder_id or getattr(config, "BACKUP_DRIVE_FOLDER_ID", "")
+        if target_folder and target_folder != "root":
+            file_metadata["parents"] = [target_folder]
 
         media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
         uploaded = service.files().create(
@@ -55,6 +55,9 @@ def upload_to_drive(file_path: str, folder_id: str = None) -> str:
         print(f"✅ [GDrive]: '{filename}' uploaded → {share_url}")
         return share_url
 
+    except WorkspaceAuthError as e:
+        print(f"⚠️ [GDrive]: Google Workspace OAuth not available — {e}")
+        return ""
     except Exception as e:
         print(f"⚠️ [GDrive]: Upload failed — {e}")
         return ""

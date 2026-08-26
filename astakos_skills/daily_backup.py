@@ -24,26 +24,12 @@ from core.i18n import t
 SCOPES = ['https://www.googleapis.com/auth/drive'] # Full access to Drive
 
 def authenticate_google_drive():
-    # print("Loading credentials...") # Keep prints concise to avoid cluttering the log
-    creds = None
-    # We use the absolute paths that were indicated
-    token_path = os.path.join(config.BASE_DIR, "credentials", "token.json")
-    credentials_path = os.path.join(config.BASE_DIR, "credentials", "credentials.json")
-
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-    
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            # print("Refreshing token...")_
-            creds.refresh(Request())
-        else:
-            # This is where the OAuth flow would happen if run in a real user environment
-            print(f"Authentication Error: The files 'token.json' or 'credentials.json' were not found or are invalid at paths: {token_path}, {credentials_path}.")
-            print("Please ensure you have configured Google API authentication on your computer.")
-            return None
-    # print("Credentials loaded successfully (or failed)...")
-    return creds
+    try:
+        from core.workspace_oauth import load_workspace_credentials, WorkspaceAuthError
+        return load_workspace_credentials(scopes=SCOPES)
+    except Exception as e:
+        print(f"Google Drive Authentication Error: {e}")
+        return None
 
 def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items):
     # --- [MASTRO-CONFIG]: File types that we DO NOT want in Drive ---
@@ -105,7 +91,7 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
 
 def daily_backup_to_drive():
     import config
-    DRIVE_FOLDER_ID = config.BACKUP_DRIVE_FOLDER_ID
+    DRIVE_FOLDER_ID = getattr(config, "BACKUP_DRIVE_FOLDER_ID", "")
     ASTAKOS_V2_PATH = config.BASE_DIR 
 
     print("Starting backup process...")
@@ -116,7 +102,7 @@ def daily_backup_to_drive():
 
     try:
         print("Connecting to Drive...")
-        service = build('drive', 'v3', credentials=creds)
+        service = build('drive', 'v3', credentials=creds, cache_discovery=False)
 
         # Create a folder with the date in Google Drive
         today = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -124,7 +110,11 @@ def daily_backup_to_drive():
         print(f"Creating/Finding backup folder in Drive: {backup_folder_name}")
 
         # Check if a folder with this name already exists
-        query = f"name = '{backup_folder_name}' and mimeType = 'application/vnd.google-apps.folder' and '{DRIVE_FOLDER_ID}' in parents"
+        if DRIVE_FOLDER_ID and DRIVE_FOLDER_ID != "root":
+            query = f"name = '{backup_folder_name}' and mimeType = 'application/vnd.google-apps.folder' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
+        else:
+            query = f"name = '{backup_folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+
         response = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
         files = response.get('files', [])
 
@@ -135,8 +125,10 @@ def daily_backup_to_drive():
             file_metadata = {
                 'name': backup_folder_name,
                 'mimeType': 'application/vnd.google-apps.folder',
-                'parents': [DRIVE_FOLDER_ID]
             }
+            if DRIVE_FOLDER_ID and DRIVE_FOLDER_ID != "root":
+                file_metadata['parents'] = [DRIVE_FOLDER_ID]
+
             backup_folder = service.files().create(body=file_metadata, fields='id').execute()
             backup_folder_id = backup_folder.get('id')
             print(f"Folder '{backup_folder_name}' created successfully (ID: {backup_folder_id}).")
@@ -155,6 +147,7 @@ def daily_backup_to_drive():
 
     except Exception as e:
         return t("skills.daily_backup.msg_backup_error", e=e)
+
 
 if __name__ == "__main__":
     print(daily_backup_to_drive())

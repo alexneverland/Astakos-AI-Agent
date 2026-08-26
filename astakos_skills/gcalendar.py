@@ -24,17 +24,15 @@ _CALENDAR_SCOPE  = "https://www.googleapis.com/auth/calendar"
 
 def _get_service():
     """Returns an authenticated Google Calendar service (via token.json)."""
-    creds = None
-    if os.path.exists(TOKEN_PATH):
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, [_CALENDAR_SCOPE])
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            raise Exception(
-                t("skills.gcalendar.msg_no_token") + " Delete credentials/token.json and login again (OAuth)."
-            )
-    return build("calendar", "v3", credentials=creds, cache_discovery=False)
+    try:
+        from core.workspace_oauth import load_workspace_credentials
+        creds = load_workspace_credentials(scopes=[_CALENDAR_SCOPE])
+        return build("calendar", "v3", credentials=creds, cache_discovery=False)
+    except Exception as exc:
+        raise Exception(
+            t("skills.gcalendar.msg_no_token") + f" ({exc}). Please reconnect Google Workspace."
+        ) from exc
+
 
 
 def _parse_dt(dt_str: str, tz: ZoneInfo) -> datetime:

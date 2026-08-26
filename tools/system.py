@@ -1944,11 +1944,17 @@ def google_tasks_tool(
     If the user simply says 'add a reminder' without specifying the topic, DO NOT call this tool. Ask them first what they want you to write!
     """
     try:
+        from core.workspace_oauth import (
+            load_workspace_credentials,
+            WorkspaceAuthError,
+            WorkspaceMissingCredentialsError,
+            WorkspaceTokenRevokedOrInvalidError,
+        )
         action = (action or "list").strip().lower()
         tasklist_id = tasklist_id or "@default"
         print(f"\033[93m[Tasks]: Action '{action}'...\033[0m")
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, ['https://www.googleapis.com/auth/tasks'])
-        service = build('tasks', 'v1', credentials=creds)
+        creds = load_workspace_credentials(scopes=['https://www.googleapis.com/auth/tasks'])
+        service = build('tasks', 'v1', credentials=creds, cache_discovery=False)
 
         if action == "list":
             result = service.tasks().list(
@@ -2011,6 +2017,12 @@ def google_tasks_tool(
             return f"🗑️ Google Task `{task_id}` deleted."
 
         return "❌ Unknown action. Try: list, create, complete, update, delete."
+    except WorkspaceMissingCredentialsError:
+        return "❌ Google Tasks: Google Workspace is not connected (token.json not found). Please authorize Google Workspace."
+    except WorkspaceTokenRevokedOrInvalidError as e:
+        return f"❌ Google Tasks: Google Workspace authorization expired or invalid ({e}). Please reconnect Google Workspace."
+    except WorkspaceAuthError as e:
+        return f"❌ Google Tasks auth error: {e}"
     except Exception as e:
         return f"Tasks Error: {str(e)}"
 
@@ -2152,7 +2164,7 @@ def drive_manager(
     action: str = "list_files",
     file_id: str = None,
     local_path: str = None,
-    folder_id: str = "12YrIZ3uAQWmmwIlEkIkDf-4gcz2P8Ktv",
+    folder_id: str = None,
     query: str = None,
     new_name: str = None,
     target_folder_id: str = None,
@@ -2162,7 +2174,7 @@ def drive_manager(
     """Manages {config.USER_NAME}'s Google Drive.
 
     Actions:
-      'list_files'   — List files in folder (default: root astakos folder)
+      'list_files'   — List files in folder (default: root My Drive or configured backup folder)
       'search'       — Search by name or keyword (requires query=)
       'download'     — Download file (requires file_id=)
       'upload'       — Upload file (requires local_path=)
@@ -2176,16 +2188,24 @@ def drive_manager(
     try:
         from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
         import io
+        from core.workspace_oauth import (
+            load_workspace_credentials,
+            WorkspaceAuthError,
+            WorkspaceMissingCredentialsError,
+            WorkspaceTokenRevokedOrInvalidError,
+        )
 
         action = (action or "list_files").strip().lower()
         print(f"\033[93m[Drive]: Action '{action}'...\033[0m")
-        creds   = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
-        service = build('drive', 'v3', credentials=creds)
+        creds = load_workspace_credentials(scopes=SCOPES)
+        service = build('drive', 'v3', credentials=creds, cache_discovery=False)
+
+        effective_folder_id = folder_id or getattr(config, "BACKUP_DRIVE_FOLDER_ID", "") or "root"
 
         # ── LIST FILES ───────────────────────────────────────────
         if action == "list_files":
             results = service.files().list(
-                q=f"'{folder_id}' in parents and trashed=false",
+                q=f"'{effective_folder_id}' in parents and trashed=false",
                 fields="files(id, name, mimeType, size, modifiedTime)",
                 orderBy="modifiedTime desc",
                 pageSize=50
@@ -2285,7 +2305,10 @@ def drive_manager(
             _lp_real = os.path.realpath(local_path)
             if not any(_lp_real.startswith(d + os.sep) or _lp_real == d for d in _upload_allowed):
                 return f"❌ Forbidden upload path: only from outputs/, telegram_uploads/, telegram_photos/, watch_folder/ allowed."
-            file_metadata = {'name': os.path.basename(local_path), 'parents': [folder_id]}
+            file_metadata = {'name': os.path.basename(local_path)}
+            target_parent = folder_id or getattr(config, "BACKUP_DRIVE_FOLDER_ID", "")
+            if target_parent and target_parent != "root":
+                file_metadata['parents'] = [target_parent]
             media = MediaFileUpload(local_path, resumable=True)
             file = service.files().create(body=file_metadata, media_body=media, fields='id,name').execute()
             return f"✅ '{file.get('name')}' uploaded! (ID: {file.get('id')})"
@@ -2336,8 +2359,10 @@ def drive_manager(
             metadata = {
                 "name": new_name,
                 "mimeType": "application/vnd.google-apps.folder",
-                "parents": [folder_id]
             }
+            target_parent = folder_id or getattr(config, "BACKUP_DRIVE_FOLDER_ID", "")
+            if target_parent and target_parent != "root":
+                metadata["parents"] = [target_parent]
             folder = service.files().create(body=metadata, fields="id, name").execute()
             return f"📁 Folder '{folder.get('name')}' created (ID: {folder.get('id')})."
 
@@ -2363,6 +2388,12 @@ def drive_manager(
 
         return "❌ Unknown action. See docstring for options."
 
+    except WorkspaceMissingCredentialsError:
+        return "❌ Google Drive: Google Workspace is not connected (token.json not found). Please authorize Google Workspace."
+    except WorkspaceTokenRevokedOrInvalidError as e:
+        return f"❌ Google Drive: Google Workspace authorization expired or invalid ({e}). Please reconnect Google Workspace."
+    except WorkspaceAuthError as e:
+        return f"❌ Google Drive auth error: {e}"
     except Exception as e:
         return f"❌ Drive Error: {str(e)}"
 
@@ -2824,6 +2855,9 @@ SCOPES = [
 _RECOVERABLE_GOOGLE_OAUTH_REFRESH_ERRORS = (
     "invalid_scope",
     "invalid_grant",
+    "invalid_client",
+    "unauthorized_client",
+    "deleted_client",
 )
 
 def get_gmail_service():
@@ -2834,7 +2868,7 @@ def get_gmail_service():
 
     if not creds or not creds.valid:
         if not os.path.exists(CREDS_PATH):
-            raise Exception("Missing credentials.json! Download it from Google Cloud.")
+            raise Exception("Google Workspace is not connected. Missing token.json or credentials.json! Please connect Google Workspace.")
 
         if creds and creds.expired and creds.refresh_token:
             from google.auth.transport.requests import Request
@@ -2857,7 +2891,8 @@ def get_gmail_service():
         with open(TOKEN_PATH, 'w') as token:
             token.write(creds.to_json())
 
-    return build('gmail', 'v1', credentials=creds)
+    return build('gmail', 'v1', credentials=creds, cache_discovery=False)
+
 
 
 def decode_base64(data):
@@ -3081,7 +3116,11 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         return f"❌ Unknown command: {action}"
 
     except Exception as e:
-        return f"Mail API Error: {str(e)}"
+        err_msg = str(e)
+        if "not connected" in err_msg.lower() or "missing credentials" in err_msg.lower() or "missing token" in err_msg.lower():
+            return f"❌ Gmail: Google Workspace is not connected. Please authorize or reconnect Google Workspace. ({e})"
+        return f"Mail API Error: {err_msg}"
+
 
 # ────────────────────────────────────────────────────────────────
 # GITHUB

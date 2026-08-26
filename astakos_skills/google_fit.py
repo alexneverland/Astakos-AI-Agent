@@ -113,16 +113,18 @@ def _get_credentials():
                     raise GoogleFitAuthError(
                         t("skills.google_fit.msg_auth_rejected")
                     ) from e
-                raise
+                raise GoogleFitAuthError(
+                    f"Google Fit authorization expired or revoked ({e}). Please reconnect Google Workspace."
+                ) from e
         else:
-            raise Exception(t("skills.google_fit.token_expired"))
+            raise GoogleFitAuthError(t("skills.google_fit.token_expired"))
     return creds
 
 
 def _fit_auth_summary(title: str) -> str | None:
     try:
         _get_credentials()
-    except GoogleFitAuthError as e:
+    except Exception as e:
         return "\n".join([
             title,
             "",
@@ -130,6 +132,7 @@ def _fit_auth_summary(title: str) -> str | None:
             t("skills.google_fit.msg_auth_other_tools_2"),
         ])
     return None
+
 
 
 def _ns_to_ms(ns: int) -> int:
