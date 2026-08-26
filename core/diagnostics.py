@@ -76,11 +76,50 @@ AVAILABLE_EMBEDDINGS_CHOICES: list[dict[str, str]] = [
 ]
 
 
+def find_offline_adc_credentials_path() -> str | None:
+    """
+    Discovers standard local Application Default Credentials (ADC) file path without network calls.
+    Returns path if file exists on disk, otherwise None.
+    """
+    gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if gac and os.path.exists(gac):
+        return gac
+
+    if os.name == "nt":
+        app_data = os.environ.get("APPDATA")
+        if app_data:
+            win_adc = os.path.join(app_data, "gcloud", "application_default_credentials.json")
+            if os.path.exists(win_adc):
+                return win_adc
+    else:
+        unix_adc = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
+        if os.path.exists(unix_adc):
+            return unix_adc
+
+    return None
+
+
+def resolve_local_embedding_model(
+    env_snapshot: dict[str, str] | None = None,
+) -> str:
+    """Resolves the configured local embedding model name without mutating environment."""
+    if env_snapshot is not None and "ASTAKOS_LOCAL_EMBEDDING_MODEL" in env_snapshot:
+        val = env_snapshot["ASTAKOS_LOCAL_EMBEDDING_MODEL"].strip()
+        if val:
+            return val
+    return (
+        os.getenv("ASTAKOS_LOCAL_EMBEDDING_MODEL")
+        or getattr(config, "LOCAL_EMBEDDING_MODEL", "")
+        or DEFAULT_LOCAL_EMBEDDING_MODEL
+    ).strip()
+
+
 @functools.lru_cache(maxsize=8)
 def _check_local_e5_readiness(model_name: str = DEFAULT_LOCAL_EMBEDDING_MODEL) -> tuple[str, str]:
     """
     Cached offline readiness check for local embeddings model.
     Never downloads or modifies model files, avoiding repeated expensive loads across polls.
+    Never exposes raw exception strings.
     """
     try:
         from sentence_transformers import SentenceTransformer
@@ -128,27 +167,40 @@ def is_chat_provider_configured(
     elif p == "gemini":
         return bool(_get_val("GEMINI_API_KEY") or _get_val("GOOGLE_API_KEY"))
     elif p == "vertex":
-        # Check explicit snapshot override first
+        # 1. Explicit snapshot override
         if env_snapshot is not None and "GOOGLE_APPLICATION_CREDENTIALS" in env_snapshot:
-            snap_cred = env_snapshot["GOOGLE_APPLICATION_CREDENTIALS"]
-            return bool(snap_cred and os.path.exists(snap_cred))
+            snap_cred = env_snapshot["GOOGLE_APPLICATION_CREDENTIALS"].strip()
+            if snap_cred:
+                return bool(os.path.exists(snap_cred))
 
-        # Check explicit environment variable
+        # 2. Explicit environment variable
         if "GOOGLE_APPLICATION_CREDENTIALS" in os.environ:
-            os_cred = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
-            return bool(os_cred and os.path.exists(os_cred))
+            os_cred = os.environ["GOOGLE_APPLICATION_CREDENTIALS"].strip()
+            if os_cred:
+                return bool(os.path.exists(os_cred))
 
-        # Check config and default paths only if not explicitly overridden
+        # 3. Config CREDENTIALS_PATH if explicitly configured
         config_cred = getattr(config, "CREDENTIALS_PATH", "")
-        if config_cred and os.path.exists(config_cred):
-            return True
+        if config_cred:
+            return bool(os.path.exists(config_cred))
 
+        # 4. Standard repository credentials.json
         root_cred = os.path.join(config.BASE_DIR, "credentials.json")
         nested_cred = os.path.join(config.BASE_DIR, "credentials", "credentials.json")
-        return bool(os.path.exists(root_cred) or os.path.exists(nested_cred))
+        if os.path.exists(root_cred) or os.path.exists(nested_cred):
+            return True
+
+        # 5. Offline ADC (Application Default Credentials)
+        adc_path = find_offline_adc_credentials_path()
+        if adc_path and os.path.exists(adc_path):
+            proj_id = _get_val("PROJECT_ID")
+            if proj_id and proj_id.strip().lower() not in ("", "your-gcp-project-id"):
+                return True
+
+        return False
+
 
     return False
-
 
 
 def get_chat_provider_diagnostics(
@@ -200,14 +252,14 @@ def get_embeddings_diagnostics(
 
     try:
         resolved = resolve_embeddings_provider(configured_raw, chat_provider)
-    except EmbeddingsProviderSetupRequired as exc:
+    except EmbeddingsProviderSetupRequired:
         if chat_provider == "anthropic" and configured_raw == "auto":
             msg = (
                 "Anthropic has no native embeddings. Semantic memory needs a separate "
                 "embeddings provider (Vertex, Gemini API, OpenAI, or Local Multilingual E5)."
             )
         else:
-            msg = str(exc)
+            msg = f"Embeddings provider '{configured_raw}' requires configuration. Please configure API keys or credentials."
         return {
             "configured_provider": configured_raw,
             "resolved_provider": None,
@@ -216,14 +268,24 @@ def get_embeddings_diagnostics(
             "status_message": msg,
             "available_choices": AVAILABLE_EMBEDDINGS_CHOICES,
         }
+    except Exception:
+        return {
+            "configured_provider": configured_raw,
+            "resolved_provider": None,
+            "backend_identity": None,
+            "status": "unavailable",
+            "status_message": f"Embeddings provider '{configured_raw}' is currently unavailable.",
+            "available_choices": AVAILABLE_EMBEDDINGS_CHOICES,
+        }
 
-    # If resolved to local, use cached readiness check
+    # If resolved to local, use cached readiness check with resolved model
     if resolved == "local":
-        status, status_message = _check_local_e5_readiness(DEFAULT_LOCAL_EMBEDDING_MODEL)
+        local_model = resolve_local_embedding_model(env_snapshot=env_snapshot)
+        status, status_message = _check_local_e5_readiness(local_model)
         return {
             "configured_provider": configured_raw,
             "resolved_provider": "local",
-            "backend_identity": f"local:{DEFAULT_LOCAL_EMBEDDING_MODEL}",
+            "backend_identity": f"local:{local_model}",
             "status": status,
             "status_message": status_message,
             "available_choices": AVAILABLE_EMBEDDINGS_CHOICES,
@@ -256,12 +318,38 @@ def get_embeddings_diagnostics(
         }
 
 
+def inspect_semantic_memory_inventory(
+    chroma_dir: str | None = None,
+) -> dict[str, int] | None:
+    """
+    Safely inspects the local Chroma database collections and their vector counts in read-only mode.
+    Returns a mapping of {collection_name: count}, or None if Chroma is not initialized / accessible.
+    """
+    db_dir = chroma_dir or getattr(config, "CHROMA_DB_DIR", None)
+    if not db_dir or not os.path.exists(db_dir):
+        return {}
+    try:
+        import chromadb
+        client = chromadb.PersistentClient(path=db_dir)
+        collections = client.list_collections()
+        inventory: dict[str, int] = {}
+        for c in collections:
+            try:
+                inventory[c.name] = c.count()
+            except Exception:
+                inventory[c.name] = 0
+        return inventory
+    except Exception:
+        return None
+
+
 def get_semantic_memory_diagnostics(
     embeddings_provider_name: str | None = None,
     chat_provider_name: str | None = None,
     env_snapshot: dict[str, str] | None = None,
+    collection_inventory: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """Evaluates semantic memory collection status and reindex requirements."""
+    """Evaluates semantic memory collection status and reindex requirements based on actual collection inventory."""
     configured_raw = embeddings_provider_name
     if configured_raw is None:
         if env_snapshot is not None and "EMBEDDINGS_PROVIDER" in env_snapshot:
@@ -294,30 +382,50 @@ def get_semantic_memory_diagnostics(
             "status": "degraded",
             "reindex_needed": False,
             "status_message": (
-                f"Semantic memory is degraded ({emb_diag['status_message']}). "
+                "Semantic memory is degraded because the embeddings provider is not ready. "
                 "Basic chat and tools remain operational."
             ),
         }
 
-    is_legacy_vertex = (collection_name == "astakos_long_term")
-    reindex_needed = not is_legacy_vertex
+    # Inventory inspection
+    inventory = collection_inventory if collection_inventory is not None else inspect_semantic_memory_inventory()
 
-    if is_legacy_vertex:
-        msg = "Semantic memory is connected to the primary Vertex collection."
-        status = "ready"
-    else:
-        msg = (
-            f"Semantic memory is using an isolated collection ('{collection_name}'). "
-            "Historical memories from other providers are preserved and require an "
-            "explicit user-triggered reindex to be searched with the new embeddings model."
-        )
-        status = "reindex_needed"
+    if inventory is None:
+        return {
+            "collection_name": collection_name,
+            "status": "ready",
+            "reindex_needed": False,
+            "status_message": f"Semantic memory collection is '{collection_name}'.",
+        }
+
+    target_count = inventory.get(collection_name, 0)
+    other_populated = {k: v for k, v in inventory.items() if k != collection_name and v > 0}
+
+    if other_populated and target_count == 0:
+        other_desc = ", ".join(f"'{k}' ({v} memories)" for k, v in sorted(other_populated.items()))
+        return {
+            "collection_name": collection_name,
+            "status": "reindex_needed",
+            "reindex_needed": True,
+            "status_message": (
+                f"Historical memories exist in {other_desc}. A reindex is recommended "
+                "to make past memories searchable with the current embeddings model."
+            ),
+        }
+
+    if target_count > 0:
+        return {
+            "collection_name": collection_name,
+            "status": "ready",
+            "reindex_needed": False,
+            "status_message": f"Semantic memory collection '{collection_name}' is active ({target_count} memories indexed).",
+        }
 
     return {
         "collection_name": collection_name,
-        "status": status,
-        "reindex_needed": reindex_needed,
-        "status_message": msg,
+        "status": "ready",
+        "reindex_needed": False,
+        "status_message": f"Semantic memory collection '{collection_name}' is ready.",
     }
 
 
@@ -386,11 +494,17 @@ def get_system_diagnostics_summary(
     chat_provider: str | None = None,
     embeddings_provider: str | None = None,
     env_snapshot: dict[str, str] | None = None,
+    collection_inventory: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Aggregates all subsystem diagnostics for setup wizard and runtime observability."""
     chat = get_chat_provider_diagnostics(chat_provider, env_snapshot=env_snapshot)
     embeddings = get_embeddings_diagnostics(embeddings_provider, chat["provider"], env_snapshot=env_snapshot)
-    memory = get_semantic_memory_diagnostics(embeddings_provider, chat["provider"], env_snapshot=env_snapshot)
+    memory = get_semantic_memory_diagnostics(
+        embeddings_provider,
+        chat["provider"],
+        env_snapshot=env_snapshot,
+        collection_inventory=collection_inventory,
+    )
     workspace = get_workspace_diagnostics()
 
     return {
@@ -399,7 +513,6 @@ def get_system_diagnostics_summary(
         "semantic_memory": memory,
         "workspace": workspace,
     }
-
 
 
 def format_boot_diagnostics_text(

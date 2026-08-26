@@ -251,6 +251,15 @@ async def save_setup(payload: SetupPayload):
 
             if basic.get("embeddings_provider"):
                 env_map["EMBEDDINGS_PROVIDER"] = basic["embeddings_provider"]
+                emb_provider = basic["embeddings_provider"]
+                emb_api_key = basic.get("embeddings_api_key")
+                if emb_api_key:
+                    if emb_provider == "openai":
+                        _set_secret("OPENAI_API_KEY", emb_api_key)
+                    elif emb_provider == "gemini":
+                        _set_secret("GEMINI_API_KEY", emb_api_key)
+                    elif emb_provider == "vertex":
+                        _set_secret("GOOGLE_APPLICATION_CREDENTIALS", emb_api_key)
 
             if basic.get("telegram_token"):
                 _set_secret("TELEGRAM_TOKEN", basic["telegram_token"])
@@ -271,7 +280,7 @@ async def save_setup(payload: SetupPayload):
 
         write_file_content(ENV_FILE, new_env)
 
-        # Write Settings (preserve unedited existing settings)
+        # Write Settings (preserve unedited existing settings while removing cleared child names)
         import json
         if basic.get("settings") is not None:
             existing_settings_raw = get_file_content(SETTINGS_FILE)
@@ -280,7 +289,12 @@ async def save_setup(payload: SetupPayload):
             except Exception:
                 existing_settings = {}
             merged_settings = {**existing_settings, **basic["settings"]}
+            if "kid1_name" not in basic["settings"]:
+                merged_settings.pop("kid1_name", None)
+            if "kid2_name" not in basic["settings"]:
+                merged_settings.pop("kid2_name", None)
             write_file_content(SETTINGS_FILE, json.dumps(merged_settings, indent=4))
+
 
         # Write other basics
         if basic.get("persona"):

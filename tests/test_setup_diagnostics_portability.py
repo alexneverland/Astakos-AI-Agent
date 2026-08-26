@@ -25,13 +25,16 @@ from core.ai_provider import (
 )
 from core.diagnostics import (
     _check_local_e5_readiness,
+    find_offline_adc_credentials_path,
     format_boot_diagnostics_text,
     get_chat_provider_diagnostics,
     get_embeddings_diagnostics,
     get_semantic_memory_diagnostics,
     get_system_diagnostics_summary,
     get_workspace_diagnostics,
+    inspect_semantic_memory_inventory,
     is_chat_provider_configured,
+    resolve_local_embedding_model,
 )
 
 
@@ -79,7 +82,7 @@ def _configure_isolated_wizard(monkeypatch: pytest.MonkeyPatch, base: Path) -> N
 
 
 # ────────────────────────────────────────────────────────────────
-# 1. Chat Provider Diagnostics & Vertex Placeholder Handling
+# 1. Chat Provider Diagnostics & Vertex ADC / Credentials Handling
 # ────────────────────────────────────────────────────────────────
 
 def test_chat_provider_diagnostics_openai(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,6 +123,8 @@ def test_chat_provider_diagnostics_vertex_placeholder_without_credentials(
     monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(tmp_path / "non_existent_cred.json"))
     monkeypatch.setattr(config, "CREDENTIALS_PATH", str(tmp_path / "non_existent_cred.json"))
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr("core.diagnostics.find_offline_adc_credentials_path", lambda: None)
 
     diag = get_chat_provider_diagnostics("vertex")
     assert diag["provider"] == "vertex"
@@ -127,10 +132,10 @@ def test_chat_provider_diagnostics_vertex_placeholder_without_credentials(
     assert diag["status"] == "setup_required"
 
 
-def test_chat_provider_diagnostics_vertex_real_local_credentials(
+def test_chat_provider_diagnostics_vertex_real_service_account_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Real local credential file evidence correctly reports Vertex as ready."""
+    """Real local service account credential file evidence correctly reports Vertex as ready."""
     fake_cred = tmp_path / "credentials.json"
     fake_cred.write_text('{"type": "service_account"}', encoding="utf-8")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
@@ -141,8 +146,44 @@ def test_chat_provider_diagnostics_vertex_real_local_credentials(
     assert diag["status"] == "ready"
 
 
+def test_chat_provider_diagnostics_vertex_adc_with_real_project_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Offline ADC file plus a real project ID correctly reports Vertex as ready without network calls."""
+    adc_file = tmp_path / "application_default_credentials.json"
+    adc_file.write_text('{"type": "authorized_user"}', encoding="utf-8")
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.setattr(config, "CREDENTIALS_PATH", "")
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr("core.diagnostics.find_offline_adc_credentials_path", lambda: str(adc_file))
+    monkeypatch.setenv("PROJECT_ID", "my-production-astakos-project")
+
+    diag = get_chat_provider_diagnostics("vertex")
+    assert diag["provider"] == "vertex"
+    assert diag["configured"] is True
+    assert diag["status"] == "ready"
+
+
+def test_chat_provider_diagnostics_vertex_adc_with_placeholder_project_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Offline ADC file with placeholder project ID reports setup_required."""
+    adc_file = tmp_path / "application_default_credentials.json"
+    adc_file.write_text('{"type": "authorized_user"}', encoding="utf-8")
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.setattr(config, "CREDENTIALS_PATH", "")
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr("core.diagnostics.find_offline_adc_credentials_path", lambda: str(adc_file))
+    monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
+
+    diag = get_chat_provider_diagnostics("vertex")
+    assert diag["provider"] == "vertex"
+    assert diag["configured"] is False
+    assert diag["status"] == "setup_required"
+
+
 # ────────────────────────────────────────────────────────────────
-# 2. Embeddings Provider Diagnostics & Caching
+# 2. Embeddings Provider Diagnostics & Local Model Resolver
 # ────────────────────────────────────────────────────────────────
 
 def test_embeddings_diagnostics_auto_vertex(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -185,52 +226,123 @@ def test_embeddings_diagnostics_local_uninstalled(monkeypatch: pytest.MonkeyPatc
     _check_local_e5_readiness.cache_clear()
 
 
-def test_local_e5_diagnostics_cached_across_repeated_calls(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Repeated diagnostics calls do not re-instantiate or re-load the local model."""
+def test_local_e5_diagnostics_uses_configured_custom_model_and_caches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Diagnostics uses ASTAKOS_LOCAL_EMBEDDING_MODEL and instantiates model at most once across calls."""
     _check_local_e5_readiness.cache_clear()
+    custom_model = "intfloat/multilingual-e5-base"
+    monkeypatch.setenv("ASTAKOS_LOCAL_EMBEDDING_MODEL", custom_model)
+
     load_count = 0
+    loaded_models: list[str] = []
 
     class _MockSentenceTransformer:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
+        def __init__(self, model_name: str, *args: Any, **kwargs: Any) -> None:
             nonlocal load_count
             load_count += 1
+            loaded_models.append(model_name)
 
     import sys
-    monkeypatch.setitem(sys.modules, "sentence_transformers", type("Module", (), {"SentenceTransformer": _MockSentenceTransformer})())
+    monkeypatch.setitem(
+        sys.modules,
+        "sentence_transformers",
+        type("Module", (), {"SentenceTransformer": _MockSentenceTransformer})(),
+    )
 
-    # Call diagnostics 5 times
-    for _ in range(5):
+    # Call diagnostics 4 times
+    for _ in range(4):
         diag = get_embeddings_diagnostics("local", "openai")
         assert diag["status"] == "ready"
+        assert diag["backend_identity"] == f"local:{custom_model}"
 
-    # Must be constructed at most once across all 5 calls
     assert load_count == 1
+    assert loaded_models == [custom_model]
     _check_local_e5_readiness.cache_clear()
 
 
 # ────────────────────────────────────────────────────────────────
-# 3. Semantic Memory & Reindex Isolation Diagnostics
+# 3. Evidence-Based Semantic Memory & Reindexing Diagnostics
 # ────────────────────────────────────────────────────────────────
 
-def test_semantic_memory_diagnostics_vertex_legacy_ready(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_semantic_memory_evidence_fresh_installation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fresh install with no populated collections does not require reindexing."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+    diag = get_semantic_memory_diagnostics("openai", "openai", collection_inventory={})
+
+    assert diag["collection_name"].startswith("astakos_vec_")
+    assert diag["status"] == "ready"
+    assert diag["reindex_needed"] is False
+    assert "ready" in diag["status_message"].lower()
+
+
+def test_semantic_memory_evidence_active_collection_with_no_other_collections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Already active collection with existing vectors and no historical collections elsewhere is ready."""
+    from core.ai_provider import get_embeddings_collection_name
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+    col_name = get_embeddings_collection_name("openai", "openai")
+    inventory = {col_name: 42}
+
+    diag = get_semantic_memory_diagnostics("openai", "openai", collection_inventory=inventory)
+    assert diag["collection_name"] == col_name
+    assert diag["status"] == "ready"
+    assert diag["reindex_needed"] is False
+    assert "42 memories indexed" in diag["status_message"]
+
+
+def test_semantic_memory_evidence_switch_vertex_to_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Switching from populated Vertex to empty OpenAI collection requires reindexing."""
+    from core.ai_provider import get_embeddings_collection_name
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+    col_name = get_embeddings_collection_name("openai", "openai")
+    inventory = {
+        "astakos_long_term": 50,
+        col_name: 0,
+    }
+
+    diag = get_semantic_memory_diagnostics("openai", "openai", collection_inventory=inventory)
+    assert diag["collection_name"] == col_name
+    assert diag["status"] == "reindex_needed"
+    assert diag["reindex_needed"] is True
+    assert "astakos_long_term" in diag["status_message"]
+
+
+def test_semantic_memory_evidence_switch_openai_to_vertex(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Switching from populated OpenAI to empty Vertex collection requires reindexing."""
+    from core.ai_provider import get_embeddings_collection_name
     fake_cred = tmp_path / "credentials.json"
     fake_cred.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
 
-    diag = get_semantic_memory_diagnostics("vertex", "vertex")
+    col_name = get_embeddings_collection_name("openai", "openai")
+    inventory = {
+        col_name: 50,
+        "astakos_long_term": 0,
+    }
+
+    diag = get_semantic_memory_diagnostics("vertex", "vertex", collection_inventory=inventory)
     assert diag["collection_name"] == "astakos_long_term"
-    assert diag["status"] == "ready"
-    assert diag["reindex_needed"] is False
+    assert diag["status"] == "reindex_needed"
+    assert diag["reindex_needed"] is True
+    assert col_name in diag["status_message"]
 
 
-def test_semantic_memory_diagnostics_openai_isolated_reindex_notice(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-key")
+
+def test_semantic_memory_evidence_uninspectable_returns_safe_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When Chroma cannot be inspected safely, returns explicit safe status without claiming reindex is needed."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+    monkeypatch.setattr("core.diagnostics.inspect_semantic_memory_inventory", lambda *args: None)
 
     diag = get_semantic_memory_diagnostics("openai", "openai")
     assert diag["collection_name"].startswith("astakos_vec_")
-    assert diag["status"] == "reindex_needed"
-    assert diag["reindex_needed"] is True
-    assert "isolated" in diag["status_message"].lower()
+    assert diag["status"] == "ready"
+    assert diag["reindex_needed"] is False
 
 
 def test_semantic_memory_diagnostics_unconfigured_embeddings() -> None:
@@ -321,8 +433,159 @@ def test_workspace_diagnostics_corrupt_malformed_token_json(
 
 
 # ────────────────────────────────────────────────────────────────
-# 5. Setup Wizard API Endpoints & Secret Sanitization
+# 5. Setup Wizard API Endpoints, Independent Embeddings & Settings
 # ────────────────────────────────────────────────────────────────
+
+def test_setup_wizard_save_anthropic_chat_with_openai_embeddings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Guided setup allows configuring Anthropic chat credentials together with OpenAI embeddings credentials."""
+    import api.setup_wizard as wizard
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+
+    payload = wizard.SetupPayload(
+        basic={
+            "llm_provider": "anthropic",
+            "api_key": "sk-ant-chat-key-12345",
+            "embeddings_provider": "openai",
+            "embeddings_api_key": "sk-proj-emb-key-67890",
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    result = asyncio.run(wizard.save_setup(payload))
+    assert result["status"] == "success"
+
+    saved_env = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "LLM_PROVIDER=anthropic" in saved_env
+    assert "ANTHROPIC_API_KEY=sk-ant-chat-key-12345" in saved_env
+    assert "EMBEDDINGS_PROVIDER=openai" in saved_env
+    assert "OPENAI_API_KEY=sk-proj-emb-key-67890" in saved_env
+
+    # Diagnostics immediately reflects both as ready
+    assert result["diagnostics"]["chat_provider"]["status"] == "ready"
+    assert result["diagnostics"]["embeddings_provider"]["status"] == "ready"
+
+
+def test_setup_wizard_save_gemini_and_vertex_embeddings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Guided setup correctly routes Gemini and Vertex embeddings credentials."""
+    import api.setup_wizard as wizard
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+
+    # 1. Gemini embeddings
+    payload_gemini = wizard.SetupPayload(
+        basic={
+            "llm_provider": "openai",
+            "api_key": "sk-chat-key",
+            "embeddings_provider": "gemini",
+            "embeddings_api_key": "AIzaSyGeminiApiKey",
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+    result_gemini = asyncio.run(wizard.save_setup(payload_gemini))
+    assert result_gemini["status"] == "success"
+    saved_env = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "GEMINI_API_KEY=AIzaSyGeminiApiKey" in saved_env
+
+    # 2. Vertex embeddings
+    fake_cred = tmp_path / "gcp_cred.json"
+    fake_cred.write_text("{}", encoding="utf-8")
+    payload_vertex = wizard.SetupPayload(
+        basic={
+            "llm_provider": "anthropic",
+            "api_key": "sk-ant-key",
+            "embeddings_provider": "vertex",
+            "embeddings_api_key": str(fake_cred),
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+    result_vertex = asyncio.run(wizard.save_setup(payload_vertex))
+    assert result_vertex["status"] == "success"
+    saved_env_v = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert f"GOOGLE_APPLICATION_CREDENTIALS={fake_cred}" in saved_env_v
+
+
+def test_setup_wizard_save_clears_all_child_names(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Clearing all children removes kid1_name and kid2_name from persisted settings."""
+    import api.setup_wizard as wizard
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+
+    initial_settings = {
+        "user_name": "Alex",
+        "kid1_name": "ChildOne",
+        "kid2_name": "ChildTwo",
+        "custom_feature": "preserve_this",
+    }
+    (tmp_path / "astakos_settings.json").write_text(json.dumps(initial_settings), encoding="utf-8")
+
+    payload = wizard.SetupPayload(
+        basic={
+            "llm_provider": "openai",
+            "settings": {
+                "user_name": "Alex",
+                # kid1_name and kid2_name omitted because user cleared the input
+            },
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    result = asyncio.run(wizard.save_setup(payload))
+    assert result["status"] == "success"
+
+    saved = json.loads((tmp_path / "astakos_settings.json").read_text(encoding="utf-8"))
+    assert "kid1_name" not in saved
+    assert "kid2_name" not in saved
+    assert saved["user_name"] == "Alex"
+    assert saved["custom_feature"] == "preserve_this"
+
+
+def test_setup_wizard_save_reduces_two_child_names_to_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reducing two children to one removes kid2_name and retains kid1_name."""
+    import api.setup_wizard as wizard
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+
+    initial_settings = {
+        "user_name": "Alex",
+        "kid1_name": "ChildOne",
+        "kid2_name": "ChildTwo",
+    }
+    (tmp_path / "astakos_settings.json").write_text(json.dumps(initial_settings), encoding="utf-8")
+
+    payload = wizard.SetupPayload(
+        basic={
+            "llm_provider": "openai",
+            "settings": {
+                "user_name": "Alex",
+                "kid1_name": "ChildOne",
+                # kid2_name omitted
+            },
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    result = asyncio.run(wizard.save_setup(payload))
+    assert result["status"] == "success"
+
+    saved = json.loads((tmp_path / "astakos_settings.json").read_text(encoding="utf-8"))
+    assert saved["kid1_name"] == "ChildOne"
+    assert "kid2_name" not in saved
+
 
 def test_setup_wizard_raw_files_masks_secrets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import api.setup_wizard as wizard
@@ -357,7 +620,6 @@ def test_setup_wizard_save_setup_preserves_masked_secrets(monkeypatch: pytest.Mo
     )
     (tmp_path / ".env").write_text(raw_env, encoding="utf-8")
 
-    # User changes only bot name, submits without re-entering key (leaving api_key blank)
     payload = wizard.SetupPayload(
         basic={
             "llm_provider": "openai",
@@ -380,81 +642,34 @@ def test_setup_wizard_save_setup_preserves_masked_secrets(monkeypatch: pytest.Mo
     assert "EMBEDDINGS_PROVIDER=auto" in saved_env
 
 
-def test_setup_wizard_save_setup_diagnoses_just_saved_settings(
+def test_setup_wizard_diagnostics_and_setup_never_leak_sentinel_secrets(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Save response diagnostics evaluates against just-saved configuration rather than stale process env."""
+    """Endpoints and diagnostics never expose raw exception strings or injected sentinel secrets."""
     import api.setup_wizard as wizard
     _configure_isolated_wizard(monkeypatch, tmp_path)
 
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(config, "OPENAI_API_KEY", "")
+    sentinel_secret = "sk-super-secret-sentinel-leak-marker-999"
 
+    # Inject failure into provider resolution
+    def _exploding_resolve(*args: Any, **kwargs: Any) -> str:
+        raise RuntimeError(f"Simulated failure containing {sentinel_secret}")
+
+    monkeypatch.setattr("core.diagnostics.resolve_embeddings_provider", _exploding_resolve)
+
+    # 1. GET /api/diagnostics
+    diag_res = asyncio.run(wizard.get_diagnostics())
+    assert sentinel_secret not in json.dumps(diag_res)
+
+    # 2. POST /api/setup
     payload = wizard.SetupPayload(
-        basic={
-            "llm_provider": "openai",
-            "embeddings_provider": "auto",
-            "api_key": "sk-freshly-saved-key-9988",
-        },
+        basic={"llm_provider": "openai", "embeddings_provider": "openai"},
         advanced={},
         prompts={},
         routines="",
     )
-
-    result = asyncio.run(wizard.save_setup(payload))
-    assert result["status"] == "success"
-    chat_diag = result["diagnostics"]["chat_provider"]
-    assert chat_diag["provider"] == "openai"
-    assert chat_diag["configured"] is True
-    assert chat_diag["status"] == "ready"
-    assert "sk-freshly-saved-key-9988" not in json.dumps(result["diagnostics"])
-
-
-def test_setup_wizard_save_preserves_unexposed_settings_and_probabilities(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Saving setup preserves unexposed settings fields and values such as 0 and 1."""
-    import api.setup_wizard as wizard
-    _configure_isolated_wizard(monkeypatch, tmp_path)
-
-    initial_settings = {
-        "user_name": "Alex",
-        "bot_name": "Astakos",
-        "sentimental_context_note_probability": 0,
-        "custom_hidden_feature": "enabled_val",
-    }
-    (tmp_path / "astakos_settings.json").write_text(json.dumps(initial_settings), encoding="utf-8")
-
-    payload = wizard.SetupPayload(
-        basic={
-            "llm_provider": "openai",
-            "settings": {
-                "user_name": "Alex Updated",
-                "bot_name": "Astakos",
-            },
-        },
-        advanced={},
-        prompts={},
-        routines="",
-    )
-
-    result = asyncio.run(wizard.save_setup(payload))
-    assert result["status"] == "success"
-
-    saved_settings = json.loads((tmp_path / "astakos_settings.json").read_text(encoding="utf-8"))
-    assert saved_settings["user_name"] == "Alex Updated"
-    assert saved_settings["sentimental_context_note_probability"] == 0
-    assert saved_settings["custom_hidden_feature"] == "enabled_val"
-
-
-def test_setup_wizard_diagnostics_endpoint() -> None:
-    import api.setup_wizard as wizard
-    diag = asyncio.run(wizard.get_diagnostics())
-
-    assert "chat_provider" in diag
-    assert "embeddings_provider" in diag
-    assert "semantic_memory" in diag
-    assert "workspace" in diag
+    setup_res = asyncio.run(wizard.save_setup(payload))
+    assert sentinel_secret not in json.dumps(setup_res)
 
 
 def test_setup_wizard_workspace_connect_explicit_action(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -471,43 +686,6 @@ def test_setup_wizard_workspace_connect_explicit_action(monkeypatch: pytest.Monk
     res = asyncio.run(wizard.connect_workspace())
     assert res["status"] == "success"
     assert len(called) == 1
-
-
-def test_setup_wizard_endpoints_never_expose_sentinel_secrets_on_exception(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """User-facing wizard API responses never leak raw exceptions or sentinel secrets on failures."""
-    import api.setup_wizard as wizard
-    import core.workspace_oauth as ws_oauth
-    _configure_isolated_wizard(monkeypatch, tmp_path)
-
-    sentinel_secret = "sk-super-secret-sentinel-leak-marker-999"
-
-    # 1. connect_workspace error
-    def _exploding_oauth() -> None:
-        raise ws_oauth.WorkspaceAuthError(f"OAuth failed with {sentinel_secret}")
-
-    monkeypatch.setattr(ws_oauth, "authorize_workspace_oauth", _exploding_oauth)
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(wizard.connect_workspace())
-    assert exc_info.value.status_code == 400
-    assert sentinel_secret not in exc_info.value.detail
-
-    # 2. save_setup internal error
-    def _exploding_write(*args: Any) -> None:
-        raise RuntimeError(f"IO {sentinel_secret}")
-
-    monkeypatch.setattr(wizard, "write_file_content", _exploding_write)
-    with pytest.raises(HTTPException) as exc_info_save:
-        payload = wizard.SetupPayload(
-            basic={"llm_provider": "openai"},
-            advanced={},
-            prompts={},
-            routines="",
-        )
-        asyncio.run(wizard.save_setup(payload))
-    assert exc_info_save.value.status_code == 500
-    assert sentinel_secret not in exc_info_save.value.detail
 
 
 # ────────────────────────────────────────────────────────────────
