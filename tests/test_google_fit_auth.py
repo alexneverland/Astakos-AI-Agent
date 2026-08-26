@@ -1,8 +1,10 @@
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
 from astakos_skills import google_fit
+
 
 
 def _write_token(path, scopes):
@@ -90,3 +92,77 @@ def test_cli_auth_failure_does_not_leak_raw_exception_or_traceback(capsys: pytes
     assert "Google Fit authorization failed. Please reconnect Google Workspace." in captured
     assert secret_payload not in captured
     assert "Traceback" not in captured
+
+
+def test_cli_steps_success_and_failure_prints_fixed_safe_messages(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Success path
+    monkeypatch.setattr(google_fit, "get_steps", lambda days_ago: 99999)
+    google_fit.run_cli(["steps", "1"])
+    out = capsys.readouterr().out
+    assert "Google Fit steps summary retrieved." in out
+    assert "99999" not in out
+
+    # Failure path
+    monkeypatch.setattr(google_fit, "get_steps", MagicMock(side_effect=RuntimeError("STEPS_ERR_SECRET")))
+    google_fit.run_cli(["steps", "1"])
+    out_err = capsys.readouterr().out
+    assert "Google Fit steps summary unavailable." in out_err
+    assert "STEPS_ERR_SECRET" not in out_err
+
+
+def test_cli_sleep_success_and_failure_prints_fixed_safe_messages(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Success path
+    monkeypatch.setattr(google_fit, "get_sleep", lambda days_ago: {"deep_minutes": 120})
+    google_fit.run_cli(["sleep", "1"])
+    out = capsys.readouterr().out
+    assert "Google Fit sleep summary retrieved." in out
+    assert "120" not in out
+    assert "deep_minutes" not in out
+
+    # Failure path
+    monkeypatch.setattr(google_fit, "get_sleep", MagicMock(side_effect=RuntimeError("SLEEP_ERR_SECRET")))
+    google_fit.run_cli(["sleep", "1"])
+    out_err = capsys.readouterr().out
+    assert "Google Fit sleep summary unavailable." in out_err
+    assert "SLEEP_ERR_SECRET" not in out_err
+
+
+def test_cli_heart_success_and_failure_prints_fixed_safe_messages(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Success path
+    monkeypatch.setattr(google_fit, "get_heart_rate", lambda days_ago: {"avg_bpm": 72, "max_bpm": 130})
+    google_fit.run_cli(["heart", "1"])
+    out = capsys.readouterr().out
+    assert "Google Fit heart-rate summary retrieved." in out
+    assert "72" not in out
+    assert "130" not in out
+
+    # Failure path
+    monkeypatch.setattr(google_fit, "get_heart_rate", MagicMock(side_effect=RuntimeError("HEART_ERR_SECRET")))
+    google_fit.run_cli(["heart", "1"])
+    out_err = capsys.readouterr().out
+    assert "Google Fit heart-rate summary unavailable." in out_err
+    assert "HEART_ERR_SECRET" not in out_err
+
+
+def test_cli_summary_success_and_failure_prints_fixed_safe_messages(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Success path
+    monkeypatch.setattr(google_fit, "get_daily_summary", lambda days_ago: "📊 Summary with secret HR 75 bpm")
+    google_fit.run_cli(["summary", "1"])
+    out = capsys.readouterr().out
+    assert "Google Fit daily summary retrieved." in out
+    assert "75 bpm" not in out
+
+    # Failure path
+    monkeypatch.setattr(google_fit, "get_daily_summary", MagicMock(side_effect=RuntimeError("SUMMARY_ERR_SECRET")))
+    google_fit.run_cli([])
+    out_err = capsys.readouterr().out
+    assert "Google Fit daily summary unavailable." in out_err
+    assert "SUMMARY_ERR_SECRET" not in out_err

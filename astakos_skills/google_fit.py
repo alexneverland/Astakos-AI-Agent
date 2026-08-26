@@ -405,21 +405,28 @@ def run_cli(args: list[str] | None = None) -> None:
             print("Google Fit authorization failed. Please reconnect Google Workspace.")
     elif cmd == "steps":
         try:
-            print(f"Steps: {get_steps(days_ago)}")
+            get_steps(days_ago)
+            print("Google Fit steps summary retrieved.")
         except Exception:
-            print("Steps: unavailable")
+            print("Google Fit steps summary unavailable.")
     elif cmd == "sleep":
         try:
-            print(get_sleep(days_ago))
+            get_sleep(days_ago)
+            print("Google Fit sleep summary retrieved.")
         except Exception:
-            print("Sleep: unavailable")
+            print("Google Fit sleep summary unavailable.")
     elif cmd == "heart":
         try:
-            print(get_heart_rate(days_ago))
+            get_heart_rate(days_ago)
+            print("Google Fit heart-rate summary retrieved.")
         except Exception:
-            print("Heart rate: unavailable")
+            print("Google Fit heart-rate summary unavailable.")
     else:
-        print(get_daily_summary(days_ago))
+        try:
+            get_daily_summary(days_ago)
+            print("Google Fit daily summary retrieved.")
+        except Exception:
+            print("Google Fit daily summary unavailable.")
 
 
 if __name__ == "__main__":
