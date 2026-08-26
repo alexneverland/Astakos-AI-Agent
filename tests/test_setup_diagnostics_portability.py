@@ -24,6 +24,7 @@ from core.ai_provider import (
     DEFAULT_VERTEX_EMBEDDING_MODEL,
 )
 from core.diagnostics import (
+    _check_local_e5_readiness,
     format_boot_diagnostics_text,
     get_chat_provider_diagnostics,
     get_embeddings_diagnostics,
@@ -53,7 +54,6 @@ def guard_outbound_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
 
 
-
 class _NoOpThread:
     """Prevents setup endpoint tests from terminating the test process."""
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -79,7 +79,7 @@ def _configure_isolated_wizard(monkeypatch: pytest.MonkeyPatch, base: Path) -> N
 
 
 # ────────────────────────────────────────────────────────────────
-# 1. Chat Provider Diagnostics
+# 1. Chat Provider Diagnostics & Vertex Placeholder Handling
 # ────────────────────────────────────────────────────────────────
 
 def test_chat_provider_diagnostics_openai(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -113,8 +113,36 @@ def test_chat_provider_diagnostics_missing_key(monkeypatch: pytest.MonkeyPatch) 
     assert "missing" in diag["status_message"].lower()
 
 
+def test_chat_provider_diagnostics_vertex_placeholder_without_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """PROJECT_ID alone (e.g. 'your-gcp-project-id') must never report Vertex as ready without credential files."""
+    monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(tmp_path / "non_existent_cred.json"))
+    monkeypatch.setattr(config, "CREDENTIALS_PATH", str(tmp_path / "non_existent_cred.json"))
+
+    diag = get_chat_provider_diagnostics("vertex")
+    assert diag["provider"] == "vertex"
+    assert diag["configured"] is False
+    assert diag["status"] == "setup_required"
+
+
+def test_chat_provider_diagnostics_vertex_real_local_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Real local credential file evidence correctly reports Vertex as ready."""
+    fake_cred = tmp_path / "credentials.json"
+    fake_cred.write_text('{"type": "service_account"}', encoding="utf-8")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
+
+    diag = get_chat_provider_diagnostics("vertex")
+    assert diag["provider"] == "vertex"
+    assert diag["configured"] is True
+    assert diag["status"] == "ready"
+
+
 # ────────────────────────────────────────────────────────────────
-# 2. Embeddings Provider Diagnostics & Separation
+# 2. Embeddings Provider Diagnostics & Caching
 # ────────────────────────────────────────────────────────────────
 
 def test_embeddings_diagnostics_auto_vertex(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -147,12 +175,37 @@ def test_embeddings_diagnostics_anthropic_with_openai_embeddings(monkeypatch: py
 
 def test_embeddings_diagnostics_local_uninstalled(monkeypatch: pytest.MonkeyPatch) -> None:
     import importlib.util
+    _check_local_e5_readiness.cache_clear()
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
 
     diag = get_embeddings_diagnostics("local", "openai")
     assert diag["resolved_provider"] == "local"
     assert diag["status"] == "unavailable"
     assert "sentence-transformers" in diag["status_message"]
+    _check_local_e5_readiness.cache_clear()
+
+
+def test_local_e5_diagnostics_cached_across_repeated_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Repeated diagnostics calls do not re-instantiate or re-load the local model."""
+    _check_local_e5_readiness.cache_clear()
+    load_count = 0
+
+    class _MockSentenceTransformer:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            nonlocal load_count
+            load_count += 1
+
+    import sys
+    monkeypatch.setitem(sys.modules, "sentence_transformers", type("Module", (), {"SentenceTransformer": _MockSentenceTransformer})())
+
+    # Call diagnostics 5 times
+    for _ in range(5):
+        diag = get_embeddings_diagnostics("local", "openai")
+        assert diag["status"] == "ready"
+
+    # Must be constructed at most once across all 5 calls
+    assert load_count == 1
+    _check_local_e5_readiness.cache_clear()
 
 
 # ────────────────────────────────────────────────────────────────
@@ -188,7 +241,7 @@ def test_semantic_memory_diagnostics_unconfigured_embeddings() -> None:
 
 
 # ────────────────────────────────────────────────────────────────
-# 4. Google Workspace Diagnostics
+# 4. Google Workspace Diagnostics & Token Corruption Handling
 # ────────────────────────────────────────────────────────────────
 
 def test_workspace_diagnostics_missing_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -253,6 +306,20 @@ def test_workspace_diagnostics_legacy_token_without_scopes_metadata(
     assert ws["services"]["drive"] == "connected"
 
 
+def test_workspace_diagnostics_corrupt_malformed_token_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A corrupted/malformed token file reports needs_reconnect rather than connected."""
+    token_file = tmp_path / "token.json"
+    token_file.write_text("{corrupt-invalid-json-content", encoding="utf-8")
+    monkeypatch.setenv("ASTAKOS_TOKEN_PATH", str(token_file))
+
+    ws = get_workspace_diagnostics()
+    assert ws["connected"] is False
+    assert ws["status"] == "needs_reconnect"
+    assert all(status == "needs_reconnect" for status in ws["services"].values())
+
+
 # ────────────────────────────────────────────────────────────────
 # 5. Setup Wizard API Endpoints & Secret Sanitization
 # ────────────────────────────────────────────────────────────────
@@ -313,6 +380,72 @@ def test_setup_wizard_save_setup_preserves_masked_secrets(monkeypatch: pytest.Mo
     assert "EMBEDDINGS_PROVIDER=auto" in saved_env
 
 
+def test_setup_wizard_save_setup_diagnoses_just_saved_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Save response diagnostics evaluates against just-saved configuration rather than stale process env."""
+    import api.setup_wizard as wizard
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "")
+
+    payload = wizard.SetupPayload(
+        basic={
+            "llm_provider": "openai",
+            "embeddings_provider": "auto",
+            "api_key": "sk-freshly-saved-key-9988",
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    result = asyncio.run(wizard.save_setup(payload))
+    assert result["status"] == "success"
+    chat_diag = result["diagnostics"]["chat_provider"]
+    assert chat_diag["provider"] == "openai"
+    assert chat_diag["configured"] is True
+    assert chat_diag["status"] == "ready"
+    assert "sk-freshly-saved-key-9988" not in json.dumps(result["diagnostics"])
+
+
+def test_setup_wizard_save_preserves_unexposed_settings_and_probabilities(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Saving setup preserves unexposed settings fields and values such as 0 and 1."""
+    import api.setup_wizard as wizard
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+
+    initial_settings = {
+        "user_name": "Alex",
+        "bot_name": "Astakos",
+        "sentimental_context_note_probability": 0,
+        "custom_hidden_feature": "enabled_val",
+    }
+    (tmp_path / "astakos_settings.json").write_text(json.dumps(initial_settings), encoding="utf-8")
+
+    payload = wizard.SetupPayload(
+        basic={
+            "llm_provider": "openai",
+            "settings": {
+                "user_name": "Alex Updated",
+                "bot_name": "Astakos",
+            },
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    result = asyncio.run(wizard.save_setup(payload))
+    assert result["status"] == "success"
+
+    saved_settings = json.loads((tmp_path / "astakos_settings.json").read_text(encoding="utf-8"))
+    assert saved_settings["user_name"] == "Alex Updated"
+    assert saved_settings["sentimental_context_note_probability"] == 0
+    assert saved_settings["custom_hidden_feature"] == "enabled_val"
+
 
 def test_setup_wizard_diagnostics_endpoint() -> None:
     import api.setup_wizard as wizard
@@ -338,6 +471,43 @@ def test_setup_wizard_workspace_connect_explicit_action(monkeypatch: pytest.Monk
     res = asyncio.run(wizard.connect_workspace())
     assert res["status"] == "success"
     assert len(called) == 1
+
+
+def test_setup_wizard_endpoints_never_expose_sentinel_secrets_on_exception(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """User-facing wizard API responses never leak raw exceptions or sentinel secrets on failures."""
+    import api.setup_wizard as wizard
+    import core.workspace_oauth as ws_oauth
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+
+    sentinel_secret = "sk-super-secret-sentinel-leak-marker-999"
+
+    # 1. connect_workspace error
+    def _exploding_oauth() -> None:
+        raise ws_oauth.WorkspaceAuthError(f"OAuth failed with {sentinel_secret}")
+
+    monkeypatch.setattr(ws_oauth, "authorize_workspace_oauth", _exploding_oauth)
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(wizard.connect_workspace())
+    assert exc_info.value.status_code == 400
+    assert sentinel_secret not in exc_info.value.detail
+
+    # 2. save_setup internal error
+    def _exploding_write(*args: Any) -> None:
+        raise RuntimeError(f"IO {sentinel_secret}")
+
+    monkeypatch.setattr(wizard, "write_file_content", _exploding_write)
+    with pytest.raises(HTTPException) as exc_info_save:
+        payload = wizard.SetupPayload(
+            basic={"llm_provider": "openai"},
+            advanced={},
+            prompts={},
+            routines="",
+        )
+        asyncio.run(wizard.save_setup(payload))
+    assert exc_info_save.value.status_code == 500
+    assert sentinel_secret not in exc_info_save.value.detail
 
 
 # ────────────────────────────────────────────────────────────────

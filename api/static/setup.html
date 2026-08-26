@@ -335,6 +335,7 @@
         let promptsData = {};
         let currentPromptFile = "";
         let setupGuideRaw = "";
+        let loadedSettings = {};
 
         function openInstructions() {
             document.getElementById('instructionsModal').classList.remove('hidden');
@@ -505,7 +506,8 @@
                 onProviderChanged();
 
                 // Populate Settings basics
-                const s = data.settings || {};
+                loadedSettings = data.settings || {};
+                const s = loadedSettings;
                 if(s.user_name) document.getElementById('user_name').value = s.user_name;
                 if(s.bot_name) document.getElementById('bot_name').value = s.bot_name;
                 if(s.default_city) document.getElementById('default_city').value = s.default_city;
@@ -558,20 +560,23 @@
             btn.innerHTML = '<span class="animate-pulse">Saving...</span>';
             btn.disabled = true;
             
-            // Build Settings JSON
+            // Build Settings JSON preserving originally loaded fields
             const kidsStr = document.getElementById('kids_names').value;
             const kids = kidsStr.split(',').map(k => k.trim()).filter(k => k);
             
-            const settingsObj = {
+            const settingsObj = Object.assign({}, loadedSettings, {
                 user_name: document.getElementById('user_name').value,
                 bot_name: document.getElementById('bot_name').value,
                 default_city: document.getElementById('default_city').value,
                 response_language: document.getElementById('response_language').value,
                 partner_name: document.getElementById('partner_name').value,
-                sentimental_context_note_probability: 0.7
-            };
-            if(kids.length > 0) settingsObj.kid1_name = kids[0];
-            if(kids.length > 1) settingsObj.kid2_name = kids[1];
+            });
+            if (kids.length > 0) settingsObj.kid1_name = kids[0];
+            if (kids.length > 1) settingsObj.kid2_name = kids[1];
+            if (settingsObj.sentimental_context_note_probability === undefined || settingsObj.sentimental_context_note_probability === null) {
+                settingsObj.sentimental_context_note_probability = 0.7;
+            }
+
 
             const payload = {
                 basic: {

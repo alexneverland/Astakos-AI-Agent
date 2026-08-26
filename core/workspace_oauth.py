@@ -112,25 +112,49 @@ def is_workspace_connected() -> bool:
     return bool(os.path.exists(token_path) and os.path.getsize(token_path) > 0)
 
 
-def read_stored_token_scopes(token_path: str | None = None) -> list[str]:
-    """Reads the granted scopes from token.json, supporting either 'scopes' list or 'scope' space-separated string."""
-    target_path = token_path or get_token_path()
+def inspect_workspace_token_metadata(token_path: str | None = None) -> tuple[str, list[str]]:
+    """
+    Safely inspects token.json structure offline without network calls.
 
+    Returns:
+        tuple[status, scopes]:
+          - ("missing", []) if file does not exist or is empty
+          - ("malformed", []) if JSON cannot be parsed or is not a dict
+          - ("legacy", []) if valid JSON dict but has no scopes/scope metadata
+          - ("valid", scopes_list) if valid JSON dict with explicit scopes list/string
+    """
+    target_path = token_path or get_token_path()
     if not os.path.exists(target_path) or os.path.getsize(target_path) == 0:
-        return []
+        return ("missing", [])
+
     try:
         with open(target_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception as exc:
-        logger.warning(f"Could not parse token.json for scopes: {exc}")
-        return []
+    except Exception:
+        return ("malformed", [])
 
-    raw_scopes = data.get("scopes") or data.get("scope") or []
+    if not isinstance(data, dict):
+        return ("malformed", [])
+
+    raw_scopes = data.get("scopes") or data.get("scope")
+    if raw_scopes is None:
+        return ("legacy", [])
+
     if isinstance(raw_scopes, str):
-        return [s for s in raw_scopes.split() if s]
+        parsed = [s for s in raw_scopes.split() if s]
+        return ("valid" if parsed else "legacy", parsed)
     if isinstance(raw_scopes, list):
-        return [str(s) for s in raw_scopes if s]
-    return []
+        parsed = [str(s) for s in raw_scopes if s]
+        return ("valid" if parsed else "legacy", parsed)
+
+    return ("legacy", [])
+
+
+def read_stored_token_scopes(token_path: str | None = None) -> list[str]:
+    """Reads the granted scopes from token.json, supporting either 'scopes' list or 'scope' space-separated string."""
+    status, scopes = inspect_workspace_token_metadata(token_path)
+    return scopes if status == "valid" else []
+
 
 
 def check_missing_scopes(
