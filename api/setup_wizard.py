@@ -123,10 +123,8 @@ async def connect_workspace(request: Request):
     )
     try:
         if os.getenv("ASTAKOS_CONTAINER") == "1":
-            base_url = str(request.base_url).rstrip('/')
-            flow = get_workspace_oauth_flow(redirect_uri=f"{base_url}/api/workspace/oauth/callback")
-            auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline", include_granted_scopes="true")
-            return {"status": "redirect", "auth_url": auth_url}
+            start_res = await start_workspace_oauth(request)
+            return {"status": "redirect", "auth_url": start_res["auth_url"]}
 
         authorize_workspace_oauth()
         return {"status": "success", "message": "Google Workspace connected successfully."}

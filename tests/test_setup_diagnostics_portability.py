@@ -500,7 +500,7 @@ def test_workspace_diagnostics_legacy_token_without_scopes_metadata(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     token_file = tmp_path / "token.json"
-    token_file.write_text(json.dumps({"token": "fake-tok", "client_id": "cid", "client_secret": "csec"}), encoding="utf-8")
+    token_file.write_text(json.dumps({"refresh_token": "fake-rt", "client_id": "cid", "client_secret": "csec"}), encoding="utf-8")
     monkeypatch.setenv("ASTAKOS_TOKEN_PATH", str(token_file))
 
     ws = get_workspace_diagnostics()
@@ -831,27 +831,38 @@ def test_setup_wizard_workspace_oauth_endpoints(monkeypatch: pytest.MonkeyPatch,
     assert token_target.exists()
     assert "client_id" in token_target.read_text(encoding="utf-8")
 
-    # 4. POST /api/workspace/connect with ASTAKOS_CONTAINER=1
+    # 4. POST /api/workspace/connect with ASTAKOS_CONTAINER=1 registers valid state
     monkeypatch.setenv("ASTAKOS_CONTAINER", "1")
     conn_res = asyncio.run(wizard.connect_workspace(mock_request))
     assert conn_res["status"] == "redirect"
     assert "auth_url" in conn_res
+    conn_parsed = urllib.parse.urlparse(conn_res["auth_url"])
+    conn_state = urllib.parse.parse_qs(conn_parsed.query)["state"][0]
+    conn_cb = asyncio.run(wizard.workspace_oauth_callback(mock_request, code="test_auth_code", state=conn_state))
+    assert conn_cb.status_code == 200
 
 
-def test_vertex_ai_adapter_resolves_project_id_from_credentials(
+def test_vertex_ai_adapter_resolves_project_id_and_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """VertexAIAdapter resolves real project_id from credentials JSON when config.PROJECT_ID is placeholder."""
-    from core.ai_provider import VertexAIAdapter, resolve_vertex_project_id
+    """VertexAIAdapter resolves real project_id and loads credentials from discovered credentials JSON."""
+    from unittest.mock import MagicMock
+    from core.ai_provider import VertexAIAdapter, resolve_vertex_project_id, resolve_vertex_credentials_path
     fake_cred = tmp_path / "credentials.json"
     fake_cred.write_text('{"type": "service_account", "project_id": "discovered-vertex-project"}', encoding="utf-8")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
     monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
     monkeypatch.setattr(config, "PROJECT_ID", "your-gcp-project-id")
 
+    mock_creds = MagicMock()
+    monkeypatch.setattr("core.ai_provider.get_vertex_credentials", lambda path: mock_creds)
+
+    assert resolve_vertex_credentials_path() == str(fake_cred)
     assert resolve_vertex_project_id() == "discovered-vertex-project"
     adapter = VertexAIAdapter()
     assert adapter.project_id == "discovered-vertex-project"
+    assert adapter.credentials_path == str(fake_cred)
+    assert adapter._credentials is mock_creds
 
 
 def test_setup_wizard_save_populates_vertex_project_id_from_credentials(

@@ -149,10 +149,10 @@ def inspect_workspace_token_metadata(token_path: str | None = None) -> tuple[str
 
     # When scope metadata is absent or empty (legacy token candidate),
     # require complete authorized-user credential structure:
-    # Credentials.from_authorized_user_file requires client_id + client_secret + (refresh_token or token)
+    # Credentials.from_authorized_user_file strictly requires client_id + client_secret + refresh_token
     has_client = bool(data.get("client_id") and data.get("client_secret"))
-    has_token = bool(data.get("refresh_token") or data.get("token"))
-    if has_client and has_token:
+    has_refresh = bool(data.get("refresh_token"))
+    if has_client and has_refresh:
         return ("legacy", [])
 
     return ("malformed", [])
