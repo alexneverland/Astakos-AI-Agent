@@ -7,6 +7,49 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v2.6.0] — 2026-08-26
+
+**Released: 2026-08-26**
+
+Headline: **Astakos is now genuinely provider-portable: chat, semantic memory, media, and Google Workspace can be configured independently for a new installation.**
+
+### Added
+
+- A typed AI provider adapter shared across chat, voice transcription, text generation, vision, and image generation. Astakos now supports Vertex AI, Gemini API, OpenAI, and Anthropic through one capability-aware boundary.
+- Independent embeddings configuration for semantic memory: automatic matching for compatible chat providers, explicit Vertex/Gemini/OpenAI selection, and optional locally prepared Multilingual E5 embeddings.
+- Safe, separate vector collections for each embeddings backend and model, preventing incompatible vectors from being mixed when a user changes provider.
+- First-run Setup Wizard diagnostics for chat, embeddings, semantic memory, Vertex credentials, and Google Workspace readiness.
+- Guided Google Workspace OAuth connection for Gmail, Drive, Calendar, Tasks, Google Fit, and Daily Backup, independent of Vertex service-account credentials.
+- Clear beginner documentation for provider choices, Local E5, Workspace OAuth, and provider-switch behavior.
+
+### Changed
+
+- Audio, reflection, story text, receipt/photo vision, and image generation now use the active provider adapter instead of provider-specific call paths.
+- Semantic-memory storage preserves structured facts and photo archives when embeddings are unavailable, so the assistant remains useful in a degraded configuration.
+- Drive and daily backup default to the authenticated user's My Drive when no custom folder is configured.
+- The Setup Wizard now keeps existing secrets when fields are unchanged, masks sensitive values, and reports configuration status without exposing credentials.
+
+### Fixed
+
+- Hardened API, WebSocket logs, generated assets, Telegram approval callbacks, custom-tool creation, and local command classification against unauthorized or unsafe actions.
+- Restored reliable semantic retrieval after a Chroma handle refresh and retained recent context when embeddings are unavailable.
+- Improved live family/context extraction, weekly shift handling, routine lifecycle decisions, and Messenger draft revision handling.
+- Preserved valid Google Workspace token scopes during refresh and made missing, malformed, revoked, or incomplete authorization states actionable.
+- Made image handling resilient across provider image formats and prevented vision work from blocking the Web API event loop.
+
+### Upgrade notes
+
+1. Back up `.env`, `credentials/`, SQLite databases, `chroma_db/`, uploads, and custom prompts before updating.
+2. Existing Gemini, OpenAI, or Vertex users can keep `EMBEDDINGS_PROVIDER=auto`. Anthropic users must select a separate embeddings provider if they want semantic memory.
+3. Changing an embeddings provider or model starts a separate semantic collection. Existing vectors are retained but are not searched automatically by the new backend.
+4. Google Workspace integrations now use personal OAuth files: keep `credentials/client_secrets.json` for consent and allow the Setup Wizard to create `credentials/token.json`. Reconnect from the Wizard if an integration requests it.
+5. Docker release users can pull the new image and restart:
+
+   ```bash
+   docker compose -f docker-compose.release.yml pull
+   docker compose -f docker-compose.release.yml up -d
+   ```
+
 ## [v2.5.0] — 2026-08-14
 
 **Released: 2026-08-14**
