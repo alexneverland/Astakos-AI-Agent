@@ -77,7 +77,11 @@ class WorkspaceTokenRevokedOrInvalidError(WorkspaceAuthError):
 
 def get_token_path() -> str:
     """Returns the absolute path to the user's Workspace OAuth token.json."""
+    env_path = os.environ.get("ASTAKOS_TOKEN_PATH") or os.environ.get("WORKSPACE_TOKEN_PATH")
+    if env_path:
+        return env_path
     return getattr(config, "TOKEN_PATH", os.path.join(config.BASE_DIR, "credentials", "token.json"))
+
 
 
 def get_oauth_client_secrets_path() -> str:

@@ -43,25 +43,54 @@
                     <!-- 1. AI Brain -->
                     <div>
                         <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-blue-500/20 text-blue-400 p-2 rounded-lg mr-3">🧠</span> 1. AI Brain & APIs</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
-                                    LLM Provider
+                                    Chat Provider (LLM)
                                     <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
                                     <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
-                                        Choose the AI engine that powers Astakos. Vertex AI is free up to limits on GCP.
+                                        Choose the AI engine that powers Astakos conversations and agents.
                                     </div>
                                 </label>
-                                <select id="llm_provider" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="updateApiLabel()">
+                                <select id="llm_provider" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="onProviderChanged()">
                                     <option value="vertex" selected>Google Cloud Vertex AI</option>
-                                    <option value="gemini">Google Gemini</option>
-                                    <option value="openai">OpenAI (ChatGPT)</option>
-                                    <option value="anthropic">Anthropic (Claude)</option>
+                                    <option value="gemini">Google Gemini API</option>
+                                    <option value="openai">OpenAI (GPT-4o)</option>
+                                    <option value="anthropic">Anthropic (Claude 3.5)</option>
                                 </select>
                             </div>
                             <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
+                                    Embeddings Provider (Semantic Memory)
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
+                                        Vector embeddings for long-term memory retrieval. Can be configured independently from chat.
+                                    </div>
+                                </label>
+                                <select id="embeddings_provider" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="onProviderChanged()">
+                                    <option value="auto" selected>Auto (Match Chat Provider)</option>
+                                    <option value="vertex">Google Cloud Vertex AI (text-embedding-004)</option>
+                                    <option value="gemini">Google Gemini API (models/text-embedding-004)</option>
+                                    <option value="openai">OpenAI (text-embedding-3-small)</option>
+                                    <option value="local">Local Multilingual E5 (intfloat/multilingual-e5-small)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Provider Advisories -->
+                        <div id="anthropic_emb_warning" class="hidden mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-300 text-xs flex items-start">
+                            <span class="mr-2">⚠️</span>
+                            <div><strong>Anthropic Notice:</strong> Anthropic does not provide a native embeddings API. Semantic memory requires an independent embeddings provider (Vertex AI, Gemini API, OpenAI, or Local E5).</div>
+                        </div>
+                        <div id="local_emb_info" class="hidden mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-300 text-xs flex items-start">
+                            <span class="mr-2">ℹ️</span>
+                            <div><strong>Local E5 Notice:</strong> Local multilingual E5 runs offline on your machine. It requires manual installation (<code>pip install sentence-transformers</code> and downloading <code>intfloat/multilingual-e5-small</code>). Astakos will not automatically download or install it.</div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                            <div>
                                 <label id="api_key_label" class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
-                                    API Key (or JSON Path for Vertex)
+                                    Chat API Key / GCP Credentials
                                     <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
                                     <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
                                         Your secret key for the selected AI. Never shared with anyone. Stored securely in .env.
@@ -69,11 +98,9 @@
                                 </label>
                                 <input type="password" id="api_key" placeholder="..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                 <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
-                                    Telegram Token
+                                    Telegram Bot Token
                                     <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
                                     <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
                                         Create a bot via @BotFather on Telegram and paste the HTTP API Token here.
@@ -83,7 +110,7 @@
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
-                                    Your Telegram Chat ID
+                                    Telegram Chat ID
                                     <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
                                     <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
                                         Your personal Telegram User ID, so the bot only talks to you.
@@ -95,6 +122,7 @@
                     </div>
 
                     <hr class="border-gray-700">
+
 
                     <!-- 2. Personalization -->
                     <div>
@@ -156,9 +184,40 @@
 
                     <hr class="border-gray-700">
 
-                    <!-- 3. Core Files -->
+                    <!-- 3. Google Workspace -->
                     <div>
-                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-orange-500/20 text-orange-400 p-2 rounded-lg mr-3">⚙️</span> 3. Core Config Files</h2>
+                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center justify-between">
+                            <span class="flex items-center"><span class="bg-indigo-500/20 text-indigo-400 p-2 rounded-lg mr-3">🌐</span> 3. Google Workspace & Integrations</span>
+                            <span id="ws_status_badge" class="text-xs px-3 py-1 rounded-full bg-gray-800 text-gray-400 border border-gray-700">Checking status...</span>
+                        </h2>
+                        <div class="bg-gray-800/60 border border-gray-700 rounded-xl p-5 mb-4">
+                            <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4">
+                                <div>
+                                    <div class="text-sm font-medium text-white" id="ws_summary_text">Google Workspace OAuth</div>
+                                    <div class="text-xs text-gray-400 mt-1" id="ws_detail_text">Enables Gmail, Google Calendar, Tasks, Google Drive, Google Fit, and Daily Backup using your user OAuth client secrets.</div>
+                                </div>
+                                <button type="button" id="ws_connect_btn" onclick="connectWorkspace()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm py-2 px-4 rounded-lg transition-all flex items-center shrink-0">
+                                    <span>Connect / Reconnect</span>
+                                </button>
+                            </div>
+                            <div id="ws_service_grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 pt-2 border-t border-gray-700/60">
+                                <div class="p-2 bg-gray-900/50 rounded-lg text-center"><div class="text-xs text-gray-400">Drive</div><div id="svc_drive" class="text-xs font-semibold text-gray-500 mt-1">—</div></div>
+                                <div class="p-2 bg-gray-900/50 rounded-lg text-center"><div class="text-xs text-gray-400">Gmail</div><div id="svc_gmail" class="text-xs font-semibold text-gray-500 mt-1">—</div></div>
+                                <div class="p-2 bg-gray-900/50 rounded-lg text-center"><div class="text-xs text-gray-400">Calendar</div><div id="svc_calendar" class="text-xs font-semibold text-gray-500 mt-1">—</div></div>
+                                <div class="p-2 bg-gray-900/50 rounded-lg text-center"><div class="text-xs text-gray-400">Tasks</div><div id="svc_tasks" class="text-xs font-semibold text-gray-500 mt-1">—</div></div>
+                                <div class="p-2 bg-gray-900/50 rounded-lg text-center"><div class="text-xs text-gray-400">Fit</div><div id="svc_google_fit" class="text-xs font-semibold text-gray-500 mt-1">—</div></div>
+                                <div class="p-2 bg-gray-900/50 rounded-lg text-center"><div class="text-xs text-gray-400">Backup</div><div id="svc_daily_backup" class="text-xs font-semibold text-gray-500 mt-1">—</div></div>
+                            </div>
+                            <div id="ws_connect_feedback" class="hidden mt-3 text-xs p-2 rounded"></div>
+                        </div>
+                    </div>
+
+                    <hr class="border-gray-700">
+
+                    <!-- 4. Core Files -->
+                    <div>
+                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-orange-500/20 text-orange-400 p-2 rounded-lg mr-3">⚙️</span> 4. Core Config Files</h2>
+
                         <div class="space-y-6">
                             <div>
                                 <label class="block text-sm font-medium text-blue-400 mb-2 flex items-center group relative cursor-help">
@@ -298,13 +357,109 @@
             });
         }
 
-        function updateApiLabel() {
-            const provider = document.getElementById('llm_provider').value;
+        function onProviderChanged() {
+            const llm = document.getElementById('llm_provider').value;
+            const emb = document.getElementById('embeddings_provider').value;
             const label = document.getElementById('api_key_label').childNodes[0];
-            if(provider === 'openai') label.nodeValue = 'OpenAI API Key ';
-            else if(provider === 'anthropic') label.nodeValue = 'Anthropic API Key ';
-            else if(provider === 'gemini') label.nodeValue = 'Gemini API Key ';
-            else if(provider === 'vertex') label.nodeValue = 'Vertex AI (Usually GCP Credentials JSON) ';
+
+            if (llm === 'openai') label.nodeValue = 'OpenAI API Key ';
+            else if (llm === 'anthropic') label.nodeValue = 'Anthropic API Key ';
+            else if (llm === 'gemini') label.nodeValue = 'Gemini API Key ';
+            else if (llm === 'vertex') label.nodeValue = 'Vertex AI (Usually GCP Credentials JSON) ';
+
+            const anthropicWarning = document.getElementById('anthropic_emb_warning');
+            if (llm === 'anthropic' && emb === 'auto') {
+                anthropicWarning.classList.remove('hidden');
+            } else {
+                anthropicWarning.classList.add('hidden');
+            }
+
+            const localInfo = document.getElementById('local_emb_info');
+            if (emb === 'local') {
+                localInfo.classList.remove('hidden');
+            } else {
+                localInfo.classList.add('hidden');
+            }
+        }
+
+        async function fetchDiagnostics() {
+            try {
+                const res = await fetch('/api/diagnostics');
+                if (!res.ok) return;
+                const diag = await res.json();
+
+                const ws = diag.workspace || {};
+                const badge = document.getElementById('ws_status_badge');
+                if (ws.connected && ws.status === 'connected') {
+                    badge.className = 'text-xs px-3 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/40';
+                    badge.textContent = 'Connected';
+                } else if (ws.connected) {
+                    badge.className = 'text-xs px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40';
+                    badge.textContent = 'Missing Permissions';
+                } else {
+                    badge.className = 'text-xs px-3 py-1 rounded-full bg-gray-800 text-gray-400 border border-gray-700';
+                    badge.textContent = 'Not Connected';
+                }
+
+                if (ws.status_message) {
+                    document.getElementById('ws_detail_text').textContent = ws.status_message;
+                }
+
+                const svcs = ws.services || {};
+                const updateSvc = (id, status) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    if (status === 'connected') {
+                        el.className = 'text-xs font-semibold text-green-400 mt-1';
+                        el.textContent = 'Ready';
+                    } else if (status === 'missing_scope') {
+                        el.className = 'text-xs font-semibold text-amber-400 mt-1';
+                        el.textContent = 'Scope Missing';
+                    } else {
+                        el.className = 'text-xs font-semibold text-gray-500 mt-1';
+                        el.textContent = 'Not Linked';
+                    }
+                };
+
+                updateSvc('svc_drive', svcs.drive);
+                updateSvc('svc_gmail', svcs.gmail);
+                updateSvc('svc_calendar', svcs.calendar);
+                updateSvc('svc_tasks', svcs.tasks);
+                updateSvc('svc_google_fit', svcs.google_fit);
+                updateSvc('svc_daily_backup', svcs.daily_backup);
+
+            } catch (err) {
+                console.warn('Diagnostics fetch failed:', err);
+            }
+        }
+
+        async function connectWorkspace() {
+            const btn = document.getElementById('ws_connect_btn');
+            const feedback = document.getElementById('ws_connect_feedback');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="animate-pulse">Authorizing in browser...</span>';
+            feedback.classList.remove('hidden');
+            feedback.className = 'mt-3 text-xs p-2 rounded bg-blue-500/20 border border-blue-500/30 text-blue-300';
+            feedback.textContent = 'Launching Google OAuth flow. Please complete authentication in your browser window...';
+
+            try {
+                const res = await fetch('/api/workspace/connect', { method: 'POST' });
+                const data = await res.json();
+                if (res.ok) {
+                    feedback.className = 'mt-3 text-xs p-2 rounded bg-green-500/20 border border-green-500/30 text-green-300';
+                    feedback.textContent = data.message || 'Google Workspace authorized successfully!';
+                    await fetchDiagnostics();
+                } else {
+                    feedback.className = 'mt-3 text-xs p-2 rounded bg-red-500/20 border border-red-500/30 text-red-300';
+                    feedback.textContent = data.detail || 'Authorization failed. Ensure client_secrets.json is present.';
+                }
+            } catch (err) {
+                feedback.className = 'mt-3 text-xs p-2 rounded bg-red-500/20 border border-red-500/30 text-red-300';
+                feedback.textContent = 'Connection error: ' + err.message;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>Connect / Reconnect</span>';
+            }
         }
 
         async function fetchInitialData() {
@@ -333,7 +488,6 @@
                     });
                     if (envMap['LLM_PROVIDER']) {
                         document.getElementById('llm_provider').value = envMap['LLM_PROVIDER'].toLowerCase();
-                        updateApiLabel();
                         
                         let key = '';
                         if(envMap['LLM_PROVIDER'].toLowerCase() === 'openai') key = envMap['OPENAI_API_KEY'];
@@ -341,10 +495,15 @@
                         else if(envMap['LLM_PROVIDER'].toLowerCase() === 'gemini') key = envMap['GEMINI_API_KEY'];
                         if(key) document.getElementById('api_key').value = key;
                     }
+                    if (envMap['EMBEDDINGS_PROVIDER']) {
+                        document.getElementById('embeddings_provider').value = envMap['EMBEDDINGS_PROVIDER'].toLowerCase();
+                    }
                     if (envMap['TELEGRAM_TOKEN']) document.getElementById('telegram_token').value = envMap['TELEGRAM_TOKEN'];
                     if (envMap['TELEGRAM_CHAT_ID']) document.getElementById('telegram_chat_id').value = envMap['TELEGRAM_CHAT_ID'];
                 }
                 
+                onProviderChanged();
+
                 // Populate Settings basics
                 const s = data.settings || {};
                 if(s.user_name) document.getElementById('user_name').value = s.user_name;
@@ -361,6 +520,7 @@
                 // Populate Prompts
                 promptsData = data.prompts || {};
                 const selector = document.getElementById('prompt_selector');
+                selector.innerHTML = '';
                 Object.keys(promptsData).sort().forEach(key => {
                     const opt = document.createElement('option');
                     opt.value = key;
@@ -370,6 +530,8 @@
                 if(Object.keys(promptsData).length > 0) {
                     loadPrompt();
                 }
+
+                await fetchDiagnostics();
                 
             } catch (err) {
                 console.error("Failed to load initial data", err);
@@ -406,8 +568,7 @@
                 default_city: document.getElementById('default_city').value,
                 response_language: document.getElementById('response_language').value,
                 partner_name: document.getElementById('partner_name').value,
-                sentimental_context_note_probability:
-                    s.sentimental_context_note_probability ?? 0.7
+                sentimental_context_note_probability: 0.7
             };
             if(kids.length > 0) settingsObj.kid1_name = kids[0];
             if(kids.length > 1) settingsObj.kid2_name = kids[1];
@@ -415,6 +576,7 @@
             const payload = {
                 basic: {
                     llm_provider: document.getElementById('llm_provider').value,
+                    embeddings_provider: document.getElementById('embeddings_provider').value,
                     api_key: document.getElementById('api_key').value,
                     telegram_token: document.getElementById('telegram_token').value,
                     telegram_chat_id: document.getElementById('telegram_chat_id').value,
@@ -423,7 +585,7 @@
                     env: document.getElementById('env_content').value,
                     settings: settingsObj
                 },
-                advanced: {}, // Not used anymore directly
+                advanced: {},
                 prompts: promptsData,
                 routines: document.getElementById('routines_content').value
             };
@@ -444,6 +606,14 @@
                             : 'Saved the routine file; existing routines were left unchanged.')
                         : 'No routine file was changed.';
                     document.getElementById('routineImportResult').textContent = importText;
+
+                    if (result.diagnostics?.semantic_memory?.reindex_needed) {
+                        const reindexNotice = document.createElement('div');
+                        reindexNotice.className = 'mt-3 text-xs bg-blue-500/20 border border-blue-500/30 text-blue-300 p-3 rounded-lg text-left';
+                        reindexNotice.textContent = 'ℹ️ Note: Existing memories are safely isolated in their collection. To search historical memories with the new embeddings provider, a reindex can be run.';
+                        document.getElementById('successMsg').appendChild(reindexNotice);
+                    }
+
                     document.getElementById('setupForm').classList.add('hidden');
                     document.getElementById('successMsg').classList.remove('hidden');
                     document.getElementById('errorMsg').classList.add('hidden');

@@ -36,6 +36,49 @@ class SetupPayload(BaseModel):
     prompts: dict
     routines: str = ""
 
+_SENSITIVE_ENV_KEYS = frozenset({
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "TELEGRAM_TOKEN",
+    "TELEGRAM_CHAT_ID",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "SPOTIFY_CLIENT_SECRET",
+    "SPOTIFY_CLIENT_ID",
+    "SPOTIPY_CLIENT_SECRET",
+    "SPOTIPY_CLIENT_ID",
+    "GITHUB_TOKEN",
+    "EMAIL_PASSWORD",
+    "VACUUM_TOKEN",
+})
+
+def sanitize_env_text(raw_env: str) -> str:
+    """Masks secret values in .env so raw keys/tokens are never exposed over the API/UI."""
+    if not raw_env:
+        return ""
+    lines = []
+    for line in raw_env.splitlines():
+        trimmed = line.strip()
+        if trimmed and not trimmed.startswith("#") and "=" in line:
+            key, val = line.split("=", 1)
+            key_clean = key.strip()
+            val_clean = val.strip()
+            if (
+                key_clean in _SENSITIVE_ENV_KEYS
+                or key_clean.endswith("_KEY")
+                or key_clean.endswith("_SECRET")
+                or key_clean.endswith("_TOKEN")
+                or key_clean.endswith("_PASSWORD")
+            ):
+                if val_clean:
+                    lines.append(f"{key_clean}=********")
+                else:
+                    lines.append(f"{key_clean}=")
+                continue
+        lines.append(line)
+    return "\n".join(lines)
+
 def get_file_content(filepath, fallback_filepath=None):
     if os.path.exists(filepath):
         with open(filepath, "r", encoding="utf-8") as f:
@@ -57,12 +100,31 @@ async def serve_setup_page():
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="Error: setup.html not found.")
 
+@app.get("/api/diagnostics")
+async def get_diagnostics():
+    """Returns non-sensitive runtime health and provider readiness."""
+    from core.diagnostics import get_system_diagnostics_summary
+    return get_system_diagnostics_summary()
+
+@app.post("/api/workspace/connect")
+async def connect_workspace():
+    """Explicit user-triggered Google Workspace OAuth authorization."""
+    from core.workspace_oauth import WorkspaceAuthError, authorize_workspace_oauth
+    try:
+        msg = authorize_workspace_oauth()
+        return {"status": "success", "message": msg}
+    except WorkspaceAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Google Workspace authorization failed.") from e
+
 @app.get("/api/raw_files")
 async def get_raw_files():
     env_content = get_file_content(ENV_FILE)
     if not env_content:
         env_content = """# --- LLM Provider Selection ---
 LLM_PROVIDER=openai
+EMBEDDINGS_PROVIDER=auto
 
 # --- API Keys ---
 OPENAI_API_KEY=
@@ -95,7 +157,7 @@ TELEGRAM_CHAT_ID=
         "persona": get_file_content(PERSONA_FILE, PERSONA_EXAMPLE),
         "intents": get_file_content(INTENTS_FILE, INTENTS_EXAMPLE),
         "routines": get_file_content(ROUTINES_FILE, ROUTINES_EXAMPLE),
-        "env": env_content,
+        "env": sanitize_env_text(env_content),
         "settings": settings_json,
         "prompts": prompts_data,
         "setup_guide": get_file_content(SETUP_GUIDE_FILE)
@@ -120,7 +182,15 @@ async def save_setup(payload: SetupPayload):
     
     # Process ENV
     new_env = basic.get("env", "").strip()
-    if basic.get("llm_provider") or basic.get("telegram_token"):
+    existing_env_raw = get_file_content(ENV_FILE)
+    existing_env_map: dict[str, str] = {}
+    if existing_env_raw:
+        for line in existing_env_raw.splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                k, v = line.split("=", 1)
+                existing_env_map[k.strip()] = v.strip()
+
+    if basic.get("llm_provider") or basic.get("embeddings_provider") or basic.get("telegram_token") or new_env:
         env_lines = new_env.split('\n') if new_env else []
         env_map = {}
         for line in env_lines:
@@ -128,23 +198,45 @@ async def save_setup(payload: SetupPayload):
                 k, v = line.split('=', 1)
                 env_map[k.strip()] = v.strip()
         
+        # Merge unmentioned existing env keys
+        for k, v in existing_env_map.items():
+            if k not in env_map:
+                env_map[k] = v
+
+        def _set_secret(key: str, new_val: str | None):
+            if new_val and new_val != "********":
+                env_map[key] = new_val
+            elif key not in env_map and key in existing_env_map:
+                env_map[key] = existing_env_map[key]
+            elif env_map.get(key) == "********":
+                env_map[key] = existing_env_map.get(key, "")
+
         if basic.get("llm_provider"):
             env_map["LLM_PROVIDER"] = basic["llm_provider"]
             provider = basic["llm_provider"]
+            api_key = basic.get("api_key")
             if provider == "openai":
-                env_map["OPENAI_API_KEY"] = basic.get("api_key", "")
+                _set_secret("OPENAI_API_KEY", api_key)
             elif provider == "anthropic":
-                env_map["ANTHROPIC_API_KEY"] = basic.get("api_key", "")
+                _set_secret("ANTHROPIC_API_KEY", api_key)
             elif provider == "gemini":
-                env_map["GEMINI_API_KEY"] = basic.get("api_key", "")
+                _set_secret("GEMINI_API_KEY", api_key)
             elif provider == "vertex":
-                env_map["GOOGLE_APPLICATION_CREDENTIALS"] = basic.get("api_key", "")
+                _set_secret("GOOGLE_APPLICATION_CREDENTIALS", api_key)
                 
+        if basic.get("embeddings_provider"):
+            env_map["EMBEDDINGS_PROVIDER"] = basic["embeddings_provider"]
+
         if basic.get("telegram_token"):
-            env_map["TELEGRAM_TOKEN"] = basic["telegram_token"]
+            _set_secret("TELEGRAM_TOKEN", basic["telegram_token"])
         if basic.get("telegram_chat_id"):
-            env_map["TELEGRAM_CHAT_ID"] = basic["telegram_chat_id"]
-            
+            _set_secret("TELEGRAM_CHAT_ID", basic["telegram_chat_id"])
+
+        # Resolve any remaining masked keys
+        for k, v in list(env_map.items()):
+            if v == "********":
+                env_map[k] = existing_env_map.get(k, "")
+
         output_env = ""
         for k, v in env_map.items():
             output_env += f"{k}={v}\n"
@@ -182,13 +274,24 @@ async def save_setup(payload: SetupPayload):
             full_path = os.path.join(PROMPTS_DIR, fname)
             write_file_content(full_path, content)
 
+    from core.diagnostics import get_system_diagnostics_summary
+    diagnostics = get_system_diagnostics_summary(
+        chat_provider=basic.get("llm_provider"),
+        embeddings_provider=basic.get("embeddings_provider"),
+    )
+
     def shutdown():
         time.sleep(2)
         os._exit(0)
     
     threading.Thread(target=shutdown).start()
 
-    return {"status": "success", "routine_import": routine_import}
+    return {
+        "status": "success",
+        "routine_import": routine_import,
+        "diagnostics": diagnostics,
+    }
+
 
 def run_wizard():
     host = os.getenv("ASTAKOS_SETUP_HOST", "127.0.0.1")

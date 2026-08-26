@@ -2587,9 +2587,16 @@ async def debug_runtime(_=Depends(require_token)):
     pending_actions = _get_pending_actions()
     messenger_draft = _get_messenger_draft_debug()
 
+    try:
+        from core.diagnostics import get_system_diagnostics_summary
+        system_diagnostics = get_system_diagnostics_summary()
+    except Exception:
+        system_diagnostics = {}
+
     return JSONResponse({
         "snapshot_age_s":  snap_age,
         "scheduler_alive": scheduler_alive,
+        "diagnostics":     system_diagnostics,
         "channel_sessions": channel_sessions,
         "conversation": conversation_debug,
         "session": session_debug,
@@ -2598,6 +2605,7 @@ async def debug_runtime(_=Depends(require_token)):
             "pending_count": len(pending_actions),
             "pending_tools": [a.get("tool_name") for a in pending_actions],
         },
+
         "messenger_draft": messenger_draft,
         "scheduler": {
             "written_at":         snapshot.get("written_at"),
