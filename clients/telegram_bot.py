@@ -1266,13 +1266,18 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
             RateLimitError,
             AIProviderError,
         )
-        from core.brain import get_active_provider_adapter
+        from core.brain import get_active_provider_adapter, safe_adapter_call
 
         vision_prompt = t("clients.telegram_bot.bot_msg_dec305")
         print(f"\033[94m[Vision]: Visual analysis...\033[0m")
         try:
             adapter = get_active_provider_adapter()
-            memory_analysis = adapter.analyze_vision(vision_prompt, img_data, mime_type="image/jpeg")
+            memory_analysis = safe_adapter_call(
+                adapter.analyze_vision,
+                vision_prompt,
+                img_data,
+                mime_type="image/jpeg",
+            )
             if not memory_analysis:
                 memory_analysis = "No visual analysis available."
         except CapabilityNotSupportedError as exc:

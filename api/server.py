@@ -1416,19 +1416,25 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     RateLimitError,
                     AIProviderError,
                 )
-                from core.brain import get_active_provider_adapter
+                from core.brain import get_active_provider_adapter, safe_adapter_call
 
                 vision_prompt = format_untrusted_asset_vision_prompt(
                     f"Analyze this image and describe the visual content relevant to the user request:\n{isolated_user_input or 'Describe the image.'}"
                 )
 
-                try:
+                def _run_vision_analysis() -> str:
                     with open(photo_path, "rb") as f:
                         img_bytes = f.read()
                     adapter = get_active_provider_adapter()
-                    vision_text = adapter.analyze_vision(vision_prompt, img_bytes, mime_type=mime).strip()
-                    if not vision_text:
-                        vision_text = "No visual analysis returned."
+                    return safe_adapter_call(
+                        adapter.analyze_vision,
+                        vision_prompt,
+                        img_bytes,
+                        mime_type=mime,
+                    ).strip()
+
+                try:
+                    vision_text = (await asyncio.to_thread(_run_vision_analysis)) or "No visual analysis returned."
                 except CapabilityNotSupportedError as exc:
                     vision_text = f"Vision analysis is not supported by active provider '{exc.provider}'."
                 except (ProviderAuthError, RateLimitError, AIProviderError) as exc:
@@ -1881,18 +1887,22 @@ async def upload_file(
                 RateLimitError,
                 AIProviderError,
             )
-            from core.brain import get_active_provider_adapter
+            from core.brain import get_active_provider_adapter, safe_adapter_call
 
             adapter = get_active_provider_adapter()
             vision_error_msg = None
             detailed_analysis = ""
 
-            try:
-                detailed_analysis = adapter.analyze_vision(
+            def _run_upload_vision() -> str:
+                return safe_adapter_call(
+                    adapter.analyze_vision,
                     format_untrusted_asset_vision_prompt("Analyze the photo in detail in Greek, with humor and liveliness."),
                     raw_img_bytes,
                     mime_type="image/jpeg",
                 ).strip()
+
+            try:
+                detailed_analysis = await asyncio.to_thread(_run_upload_vision)
                 if not detailed_analysis:
                     vision_error_msg = "Η οπτική ανάλυση δεν επέστρεψε περιγραφή."
             except CapabilityNotSupportedError as exc:

@@ -88,3 +88,74 @@ def test_resolve_gemini_safety_threshold_falls_back_on_invalid_option(monkeypatc
     threshold = brain._resolve_gemini_safety_threshold()
     assert threshold == brain.HarmBlockThreshold.BLOCK_NONE
     assert "Unknown safety threshold 'INVALID_SETTING', falling back to BLOCK_NONE" in capsys.readouterr().out
+
+
+def test_safe_adapter_call_retries_on_transient_error_then_succeeds():
+    """Verifies safe_adapter_call retries transient network/timeout errors with backoff."""
+    calls = []
+
+    def mock_fn(val: str) -> str:
+        calls.append(val)
+        if len(calls) == 1:
+            raise ConnectionResetError("Connection reset by peer (10054)")
+        return f"result: {val}"
+
+    with patch("core.brain.time.sleep") as sleep_mock:
+        res = brain.safe_adapter_call(mock_fn, "test_input", retries=3, base_delay=0.01)
+
+    assert res == "result: test_input"
+    assert len(calls) == 2
+    sleep_mock.assert_called_once()
+
+
+def test_safe_adapter_call_retries_on_rate_limit_error_then_succeeds():
+    """Verifies safe_adapter_call retries RateLimitError and uses retry_after when provided."""
+    from core.ai_provider import RateLimitError
+
+    calls = []
+
+    def mock_fn() -> str:
+        calls.append(1)
+        if len(calls) == 1:
+            raise RateLimitError("openai", "Rate limit reached", retry_after=0.5)
+        return "success"
+
+    with patch("core.brain.time.sleep") as sleep_mock:
+        res = brain.safe_adapter_call(mock_fn, retries=3, base_delay=0.01)
+
+    assert res == "success"
+    assert len(calls) == 2
+    sleep_mock.assert_called_once_with(0.5)
+
+
+def test_safe_adapter_call_raises_immediately_on_auth_or_unsupported_error():
+    """Verifies safe_adapter_call does NOT retry fatal ProviderAuthError or CapabilityNotSupportedError."""
+    from core.ai_provider import ProviderAuthError, CapabilityNotSupportedError
+
+    auth_calls = []
+    def auth_fail():
+        auth_calls.append(1)
+        raise ProviderAuthError("vertex", "Invalid credentials")
+
+    with patch("core.brain.time.sleep") as sleep_mock:
+        try:
+            brain.safe_adapter_call(auth_fail, retries=3)
+        except ProviderAuthError:
+            pass
+
+    assert len(auth_calls) == 1
+    sleep_mock.assert_not_called()
+
+    cap_calls = []
+    def cap_fail():
+        cap_calls.append(1)
+        raise CapabilityNotSupportedError("anthropic", "image_gen")
+
+    with patch("core.brain.time.sleep") as sleep_mock:
+        try:
+            brain.safe_adapter_call(cap_fail, retries=3)
+        except CapabilityNotSupportedError:
+            pass
+
+    assert len(cap_calls) == 1
+    sleep_mock.assert_not_called()

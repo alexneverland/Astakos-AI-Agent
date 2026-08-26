@@ -668,6 +668,53 @@ class TestTelegramPhotoHandlerMigration:
         assert len(sent_messages) == 1
         assert "authentication failed" in sent_messages[0]
 
+    def test_handle_photo_retries_transient_error_and_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Verifies Telegram photo handler retries transient errors and succeeds when next attempt works."""
+        import clients.telegram_bot as tb
+
+        monkeypatch.setattr("clients.telegram_bot.PHOTOS_DIR", str(tmp_path))
+        monkeypatch.setattr("clients.telegram_bot.TELEGRAM_TOKEN", "fake_bot_token")
+
+        def mock_get(url: str, *args: Any, **kwargs: Any) -> MagicMock:
+            resp = MagicMock()
+            if "getFile" in url:
+                resp.json.return_value = {"result": {"file_path": "photos/file_retry.jpg"}}
+            else:
+                resp.content = b"retry_photo_bytes"
+            return resp
+
+        monkeypatch.setattr("requests.get", mock_get)
+
+        vision_calls: list[int] = []
+
+        class FlakyVisionAdapter(MockVertexAIAdapter):
+            def analyze_vision(
+                self, prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg"
+            ) -> str:
+                vision_calls.append(len(vision_calls) + 1)
+                if len(vision_calls) == 1:
+                    raise ConnectionResetError("Remote disconnected (10054)")
+                return "Successfully analyzed after transient network glitch."
+
+        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: FlakyVisionAdapter())
+        monkeypatch.setattr("core.brain.time.sleep", lambda seconds: None)
+
+        processed_calls: list[tuple[str, str, str, str, str]] = []
+        monkeypatch.setattr(
+            "clients.telegram_bot._process_photo_with_question",
+            lambda fn, lp, analysis, cap, cid: processed_calls.append((fn, lp, analysis, cap, cid)),
+        )
+
+        photo_list: list[dict[str, Any]] = [{"file_id": "photo_retry_1", "file_size": 3000}]
+        tb.handle_photo(photo_list, caption="What happened?", chat_id="chat_999")
+
+        assert len(vision_calls) == 2
+        assert len(processed_calls) == 1
+        assert "Successfully analyzed after transient network glitch." in processed_calls[0][2]
+
+
 
 # ────────────────────────────────────────────────────────────────
 # 6. WEB API UPLOAD PHOTO TESTS & FAILURE SEMANTICS

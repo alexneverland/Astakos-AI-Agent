@@ -166,3 +166,58 @@ def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
                     f"retrying in {wait:.0f}s - {type(e).__name__}\033[0m"
                 )
             time.sleep(wait)
+def safe_adapter_call(func, *args, retries: int = 3, base_delay: float = 2.0, **kwargs):
+    """
+    Mastro-Shield provider adapter executor: exponential backoff on network, quota,
+    and transient server-side model failures.
+    """
+    from core.ai_provider import (
+        CapabilityNotSupportedError,
+        ProviderAuthError,
+        RateLimitError,
+    )
+
+    _TRANSIENT = (
+        "timeout",
+        "transport",
+        "connection refused",
+        "connection reset",
+        "remote disconnected",
+        "eof occurred",
+        "10060",
+        "10054",
+    )
+
+    for attempt in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err = str(e).lower()
+            is_transient = any(t in err for t in _TRANSIENT)
+            is_quota = isinstance(e, RateLimitError) or "429" in err or "quota" in err or "resource exhausted" in err
+            is_server = any(code in err for code in ("500", "502", "503"))
+            is_fatal = isinstance(e, (CapabilityNotSupportedError, ProviderAuthError)) or any(
+                c in err for c in ("400", "401", "403", "invalid")
+            )
+
+            if is_fatal or not (is_transient or is_quota or is_server):
+                raise
+
+            if attempt >= retries - 1:
+                print(f"\033[91m[Brain]: Provider operation fatal after {retries} attempts: {e}\033[0m")
+                raise
+
+            if is_quota:
+                retry_after = getattr(e, "retry_after", None)
+                wait = float(retry_after) if retry_after is not None else base_delay * (4 ** attempt)
+                print(
+                    f"\033[93m[Brain]: Quota limit (attempt {attempt+1}/{retries}), "
+                    f"retrying in {wait:.1f}s - {type(e).__name__}\033[0m"
+                )
+            else:
+                wait = base_delay * (2 ** attempt)
+                print(
+                    f"\033[93m[Brain]: Network/server error (attempt {attempt+1}/{retries}), "
+                    f"retrying in {wait:.0f}s - {type(e).__name__}\033[0m"
+                )
+            time.sleep(wait)
