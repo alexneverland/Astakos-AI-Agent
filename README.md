@@ -190,6 +190,8 @@ You control the machine, credentials, enabled integrations, and stored runtime s
 
 Only one provider is required to start.
 
+Semantic memory is configured independently in the Setup Wizard. Leave **Embeddings Provider** on **Auto** for Gemini API, OpenAI, or Vertex AI. Anthropic needs a separate Vertex, Gemini, OpenAI, or manually prepared Local E5 embeddings backend for long-term semantic memory. The complete choices, Google Workspace connection, and provider-switch behavior are in the [Beginner Setup Guide](SETUP_GUIDE.md).
+
 ### Optional Gemini model selection
 
 Gemini API and Vertex AI use `gemini-3.5-flash` for everyday interactions and
