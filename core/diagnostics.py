@@ -208,25 +208,25 @@ def is_chat_provider_configured(
             if os_cred:
                 return _is_valid_vertex_target(os_cred)
 
-        # 3. Config CREDENTIALS_PATH if explicitly configured
+        # 3. Config CREDENTIALS_PATH if configured and exists on disk
         config_cred = getattr(config, "CREDENTIALS_PATH", "")
-        if config_cred:
-            if os.path.exists(config_cred):
-                return _is_valid_vertex_target(config_cred)
-            return False
+        if config_cred and os.path.exists(config_cred):
+            if _is_valid_vertex_target(config_cred):
+                return True
 
         # 4. Standard repository credentials.json
-        root_cred = os.path.join(config.BASE_DIR, "credentials.json")
-        nested_cred = os.path.join(config.BASE_DIR, "credentials", "credentials.json")
-        if os.path.exists(root_cred):
-            return _is_valid_vertex_target(root_cred)
-        if os.path.exists(nested_cred):
-            return _is_valid_vertex_target(nested_cred)
+        base_dir = getattr(config, "BASE_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        root_cred = os.path.join(base_dir, "credentials.json")
+        nested_cred = os.path.join(base_dir, "credentials", "credentials.json")
+        if os.path.exists(root_cred) and _is_valid_vertex_target(root_cred):
+            return True
+        if os.path.exists(nested_cred) and _is_valid_vertex_target(nested_cred):
+            return True
 
         # 5. Offline ADC (Application Default Credentials)
         adc_path = find_offline_adc_credentials_path()
-        if adc_path and os.path.exists(adc_path):
-            return _is_valid_vertex_target(adc_path)
+        if adc_path and os.path.exists(adc_path) and _is_valid_vertex_target(adc_path):
+            return True
 
         return False
 

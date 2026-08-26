@@ -297,7 +297,12 @@ def test_inspect_workspace_token_metadata_rejects_structurally_incomplete_tokens
     p_inc.write_text(json.dumps({"token": "only-token"}), encoding="utf-8")
     assert inspect_workspace_token_metadata(str(p_inc)) == ("malformed", [])
 
-    # 3. Valid authorized user structure without scope metadata -> legacy
+    # 3. Incomplete dict with refresh_token alone but missing client_id/client_secret
+    p_rt_only = tmp_path / "rt_only.json"
+    p_rt_only.write_text(json.dumps({"refresh_token": "only-refresh-token"}), encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_rt_only)) == ("malformed", [])
+
+    # 4. Valid authorized user structure without scope metadata -> legacy
     p_leg = tmp_path / "legacy.json"
     p_leg.write_text(json.dumps({"refresh_token": "rt", "client_id": "cid", "client_secret": "csec"}), encoding="utf-8")
     assert inspect_workspace_token_metadata(str(p_leg)) == ("legacy", [])

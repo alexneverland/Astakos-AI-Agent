@@ -140,15 +140,19 @@ def inspect_workspace_token_metadata(token_path: str | None = None) -> tuple[str
     if raw_scopes is not None:
         if isinstance(raw_scopes, list):
             parsed = [str(s).strip() for s in raw_scopes if str(s).strip()]
-            return ("valid" if parsed else "legacy", parsed)
+            if parsed:
+                return ("valid", parsed)
         elif isinstance(raw_scopes, str):
             parsed = [s.strip() for s in raw_scopes.split() if s.strip()]
-            return ("valid" if parsed else "legacy", parsed)
+            if parsed:
+                return ("valid", parsed)
 
-    # When no scope metadata exists (legacy token candidate), ensure minimum credential structure exists
-    has_refresh = bool(data.get("refresh_token"))
+    # When scope metadata is absent or empty (legacy token candidate),
+    # require complete authorized-user credential structure:
+    # Credentials.from_authorized_user_file requires client_id + client_secret + (refresh_token or token)
     has_client = bool(data.get("client_id") and data.get("client_secret"))
-    if has_refresh or (has_client and bool(data.get("token"))):
+    has_token = bool(data.get("refresh_token") or data.get("token"))
+    if has_client and has_token:
         return ("legacy", [])
 
     return ("malformed", [])

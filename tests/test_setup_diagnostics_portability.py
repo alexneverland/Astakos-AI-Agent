@@ -198,6 +198,24 @@ def test_chat_provider_diagnostics_vertex_adc_with_placeholder_project_id(
     assert diag["status"] == "setup_required"
 
 
+def test_chat_provider_diagnostics_vertex_falls_back_to_root_credentials_when_credentials_path_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When config.CREDENTIALS_PATH does not exist, vertex readiness falls back to root credentials.json."""
+    root_cred = tmp_path / "credentials.json"
+    root_cred.write_text('{"type": "service_account", "project_id": "root-fallback-project"}', encoding="utf-8")
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.setattr(config, "CREDENTIALS_PATH", str(tmp_path / "credentials" / "credentials.json"))
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("PROJECT_ID", "root-fallback-project")
+
+    diag = get_chat_provider_diagnostics("vertex")
+    assert diag["provider"] == "vertex"
+    assert diag["configured"] is True
+    assert diag["status"] == "ready"
+
+
+
 def test_boot_is_configured_reuses_canonical_vertex_readiness(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
