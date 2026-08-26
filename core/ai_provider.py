@@ -26,6 +26,7 @@ DEFAULT_VERTEX_EMBEDDING_MODEL = "text-embedding-004"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "models/text-embedding-004"
 DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
+VERTEX_OAUTH_SCOPES: tuple[str, ...] = ("https://www.googleapis.com/auth/cloud-platform",)
 AUDIO_TRANSCRIPTION_PROMPT = (
     "You are exclusively a speech-to-text tool. Transcribe only the spoken audio "
     "accurately and verbatim, without commentary or a reply. If no intelligible "
@@ -129,6 +130,7 @@ def resolve_vertex_credentials_path(explicit_path: str | None = None) -> str:
 def get_vertex_credentials(credentials_path: str | None = None) -> Any:
     """
     Loads Google auth credentials for Vertex AI if a credentials file is configured or discovered.
+    Explicit service-account credentials are scoped with VERTEX_OAUTH_SCOPES ('https://www.googleapis.com/auth/cloud-platform').
     Returns google.auth.credentials.Credentials or None.
     """
     import json
@@ -141,7 +143,10 @@ def get_vertex_credentials(credentials_path: str | None = None) -> Any:
                 cred_type = data.get("type")
                 if cred_type == "service_account":
                     from google.oauth2 import service_account
-                    return service_account.Credentials.from_service_account_info(data)
+                    return service_account.Credentials.from_service_account_info(
+                        data,
+                        scopes=list(VERTEX_OAUTH_SCOPES),
+                    )
                 elif cred_type == "authorized_user":
                     from google.oauth2 import credentials as user_credentials
                     return user_credentials.Credentials.from_authorized_user_info(data)

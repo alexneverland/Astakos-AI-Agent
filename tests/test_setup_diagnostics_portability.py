@@ -998,6 +998,63 @@ def test_vertex_ai_adapter_preserves_configured_project_id_over_credentials_file
     assert adapter.project_id == "my-target-project-456"
 
 
+def test_vertex_service_account_credentials_scoped_correctly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Proves that service-account credentials loaded for Vertex are scoped with cloud-platform."""
+    from core.ai_provider import VERTEX_OAUTH_SCOPES, get_vertex_credentials
+    fake_sa = tmp_path / "sa.json"
+    fake_sa.write_text(json.dumps(_make_test_sa_dict("test-sa-proj")), encoding="utf-8")
+
+    creds = get_vertex_credentials(str(fake_sa))
+    assert creds is not None
+    assert getattr(creds, "scopes", None) == list(VERTEX_OAUTH_SCOPES)
+    assert creds.scopes == ["https://www.googleapis.com/auth/cloud-platform"]
+
+
+def test_vertex_ai_adapter_and_brain_receive_scoped_service_account_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Proves VertexAIAdapter and core/brain.py primary clients receive scoped service account credentials."""
+    import importlib
+    from unittest.mock import MagicMock
+    from core.ai_provider import VERTEX_OAUTH_SCOPES, VertexAIAdapter
+
+    fake_sa = tmp_path / "credentials.json"
+    fake_sa.write_text(json.dumps(_make_test_sa_dict("test-scoped-proj")), encoding="utf-8")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_sa))
+    monkeypatch.setenv("PROJECT_ID", "test-scoped-proj")
+    monkeypatch.setattr(config, "PROJECT_ID", "test-scoped-proj")
+    monkeypatch.setattr(config, "LLM_PROVIDER", "vertex")
+
+    # 1. Verify VertexAIAdapter
+    adapter = VertexAIAdapter()
+    assert adapter._credentials is not None
+    assert adapter._credentials.scopes == list(VERTEX_OAUTH_SCOPES)
+
+    # 2. Verify core/brain.py client initialization
+    mock_chat_cls = MagicMock()
+    mock_genai_client_cls = MagicMock()
+    monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", mock_chat_cls)
+    monkeypatch.setattr("google.genai.Client", mock_genai_client_cls)
+
+    import core.brain
+    importlib.reload(core.brain)
+
+    assert mock_chat_cls.call_count >= 2
+    fast_kwargs = mock_chat_cls.call_args_list[0].kwargs
+    assert "credentials" in fast_kwargs
+    assert fast_kwargs["credentials"].scopes == ["https://www.googleapis.com/auth/cloud-platform"]
+
+    heavy_kwargs = mock_chat_cls.call_args_list[1].kwargs
+    assert "credentials" in heavy_kwargs
+    assert heavy_kwargs["credentials"].scopes == ["https://www.googleapis.com/auth/cloud-platform"]
+
+    client_kwargs = mock_genai_client_cls.call_args.kwargs
+    assert "credentials" in client_kwargs
+    assert client_kwargs["credentials"].scopes == ["https://www.googleapis.com/auth/cloud-platform"]
+
+
 def test_setup_wizard_save_populates_vertex_project_id_from_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
