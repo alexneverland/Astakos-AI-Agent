@@ -19,9 +19,11 @@ from google.oauth2.credentials import Credentials
 
 from astakos_skills import daily_backup, gcalendar, google_fit
 from core.workspace_oauth import (
+    DEFAULT_WORKSPACE_SCOPES,
     WorkspaceAuthError,
     WorkspaceMissingCredentialsError,
     WorkspaceTokenRevokedOrInvalidError,
+    _build_effective_scopes,
     is_workspace_connected,
     load_workspace_credentials,
 )
@@ -49,14 +51,38 @@ def guard_outbound_calls(monkeypatch: pytest.MonkeyPatch) -> None:
         raising=False,
     )
 
+    # Guard real Google Auth HTTP transport
+    monkeypatch.setattr(
+        "google.auth.transport.requests.Request.__call__",
+        _fail_outbound,
+        raising=False,
+    )
 
-def _create_mock_creds(valid: bool = True, expired: bool = False, refresh_token: str | None = None) -> MagicMock:
+    # Guard real Google API Client HTTP execution
+    monkeypatch.setattr(
+        "googleapiclient.http.HttpRequest.execute",
+        _fail_outbound,
+        raising=False,
+    )
+
+
+def _create_mock_creds(
+    valid: bool = True,
+    expired: bool = False,
+    refresh_token: str | None = None,
+    scopes: list[str] | None = None,
+) -> MagicMock:
     """Helper to construct a typed MagicMock of google.oauth2.credentials.Credentials."""
     creds = MagicMock(spec=Credentials)
     creds.valid = valid
     creds.expired = expired
     creds.refresh_token = refresh_token
-    creds.to_json.return_value = json.dumps({"token": "fake-token", "refresh_token": refresh_token})
+    creds.scopes = scopes or list(DEFAULT_WORKSPACE_SCOPES)
+    creds.to_json.return_value = json.dumps({
+        "token": "fake-token",
+        "refresh_token": refresh_token,
+        "scopes": creds.scopes,
+    })
     return creds
 
 
@@ -66,6 +92,17 @@ def test_outbound_safety_guard_blocks_unexpected_telegram_calls() -> None:
 
     with pytest.raises(RuntimeError) as exc_info:
         _notify_telegram({"name": "write_custom_tool", "id": "tc-test", "args": {}})
+
+    assert "Unexpected outbound network or Telegram call" in str(exc_info.value)
+
+
+def test_outbound_safety_guard_blocks_live_http_calls() -> None:
+    """Proves the safety guard raises RuntimeError if an unmocked Google HTTP transport call is attempted."""
+    from google.auth.transport.requests import Request
+
+    req = Request()
+    with pytest.raises(RuntimeError) as exc_info:
+        req("https://oauth2.googleapis.com/token", "POST")
 
     assert "Unexpected outbound network or Telegram call" in str(exc_info.value)
 
@@ -124,6 +161,51 @@ def test_load_workspace_credentials_refresh_revoked_raises_actionable_error(
             load_workspace_credentials()
 
         assert "reconnect your Google" in str(exc_info.value) or "expired or revoked" in str(exc_info.value)
+
+
+def test_load_workspace_credentials_preserves_shared_scopes_on_narrow_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Proves that when a single integration (like Calendar) requests a narrow scope,
+    load_workspace_credentials combines DEFAULT_WORKSPACE_SCOPES so the saved token
+    never shrinks its scope metadata upon refresh.
+    """
+    token_file = tmp_path / "token.json"
+    token_file.write_text(json.dumps({
+        "token": "expired-token",
+        "refresh_token": "valid-refresh",
+        "scopes": DEFAULT_WORKSPACE_SCOPES,
+    }), encoding="utf-8")
+    monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
+
+    requested_effective_scopes: list[list[str]] = []
+
+    def _mock_from_authorized_user_file(path: str, scopes: list[str] | None = None) -> MagicMock:
+        requested_effective_scopes.append(scopes or [])
+        creds = _create_mock_creds(valid=False, expired=True, refresh_token="valid-refresh", scopes=scopes)
+        # simulate successful refresh
+        def _do_refresh(request: Any) -> None:
+            creds.valid = True
+            creds.expired = False
+        creds.refresh.side_effect = _do_refresh
+        return creds
+
+    with patch("google.oauth2.credentials.Credentials.from_authorized_user_file", side_effect=_mock_from_authorized_user_file):
+        # Caller only asked for calendar scope
+        creds = load_workspace_credentials(scopes=["https://www.googleapis.com/auth/calendar"], auto_refresh=True)
+        assert creds.valid
+
+        # Verify that the loaded scopes contained all DEFAULT_WORKSPACE_SCOPES (gmail, drive, tasks, fit...)
+        assert requested_effective_scopes
+        for default_scope in DEFAULT_WORKSPACE_SCOPES:
+            assert default_scope in requested_effective_scopes[0]
+
+        # Verify that persisted token retains all DEFAULT_WORKSPACE_SCOPES
+        saved_data = json.loads(token_file.read_text(encoding="utf-8"))
+        saved_scopes = saved_data.get("scopes", [])
+        for default_scope in DEFAULT_WORKSPACE_SCOPES:
+            assert default_scope in saved_scopes
 
 
 def test_gmail_and_fit_use_shared_workspace_loader(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -238,28 +320,37 @@ def test_daily_backup_to_drive_unauthenticated_returns_fail_string(
     assert result is not None
 
 
-def test_daily_backup_defaults_to_root_when_backup_folder_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_daily_backup_root_lookup_consistency(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Proves that when BACKUP_DRIVE_FOLDER_ID is empty or 'root', query uses 'root' in parents."""
     mock_creds = _create_mock_creds(valid=True)
     monkeypatch.setattr("astakos_skills.daily_backup.authenticate_google_drive", lambda: mock_creds)
-    monkeypatch.setattr("config.BACKUP_DRIVE_FOLDER_ID", "")
 
+    # 1. When BACKUP_DRIVE_FOLDER_ID is empty string
+    monkeypatch.setattr("config.BACKUP_DRIVE_FOLDER_ID", "")
     mock_service = MagicMock()
     mock_list = MagicMock()
     mock_list.execute.return_value = {"files": []}
     mock_service.files().list.return_value = mock_list
 
     mock_create = MagicMock()
-    mock_create.execute.return_value = {"id": "new_created_backup_folder_id", "name": "astakos_v2_backup_today"}
+    mock_create.execute.return_value = {"id": "new_root_backup_id", "name": "astakos_v2_backup_today"}
     mock_service.files().create.return_value = mock_create
 
     with patch("astakos_skills.daily_backup.build", return_value=mock_service), \
          patch("astakos_skills.daily_backup.upload_folder_recursive", return_value=["item1"]):
-        res = daily_backup.daily_backup_to_drive()
-        assert "astakos_v2_backup" in res
-        # Verify query does NOT contain broken "'' in parents"
+        daily_backup.daily_backup_to_drive()
         list_kwargs = mock_service.files().list.call_args[1]
-        assert "'' in parents" not in list_kwargs.get("q", "")
-        # Verify folder metadata does not have parents=['']
+        assert "'root' in parents" in list_kwargs.get("q", "")
+        create_kwargs = mock_service.files().create.call_args[1]
+        assert "parents" not in create_kwargs.get("body", {})
+
+    # 2. When BACKUP_DRIVE_FOLDER_ID is explicitly "root"
+    monkeypatch.setattr("config.BACKUP_DRIVE_FOLDER_ID", "root")
+    with patch("astakos_skills.daily_backup.build", return_value=mock_service), \
+         patch("astakos_skills.daily_backup.upload_folder_recursive", return_value=["item1"]):
+        daily_backup.daily_backup_to_drive()
+        list_kwargs = mock_service.files().list.call_args[1]
+        assert "'root' in parents" in list_kwargs.get("q", "")
         create_kwargs = mock_service.files().create.call_args[1]
         assert "parents" not in create_kwargs.get("body", {})
 
@@ -281,12 +372,82 @@ def test_daily_backup_uses_explicit_backup_folder_setting_when_configured(monkey
     with patch("astakos_skills.daily_backup.build", return_value=mock_service), \
          patch("astakos_skills.daily_backup.upload_folder_recursive", return_value=["item1"]):
         daily_backup.daily_backup_to_drive()
-        # Verify query contains configured_backup_folder_777
         list_kwargs = mock_service.files().list.call_args[1]
         assert "'configured_backup_folder_777' in parents" in list_kwargs.get("q", "")
-        # Verify folder metadata has parents=['configured_backup_folder_777']
         create_kwargs = mock_service.files().create.call_args[1]
         assert create_kwargs.get("body", {}).get("parents") == ["configured_backup_folder_777"]
+
+
+def test_daily_backup_excludes_env_and_credentials_directory(tmp_path: Path) -> None:
+    """
+    Proves that .env and the entire credentials/ directory are excluded recursively
+    from daily backup, while normal allowed project files are uploaded.
+    """
+    # Create test directory structure
+    root = tmp_path / "project_root"
+    root.mkdir()
+
+    # Sensitive items that must NOT be uploaded
+    env_file = root / ".env"
+    env_file.write_text("SECRET_KEY=supersecret\n", encoding="utf-8")
+
+    creds_dir = root / "credentials"
+    creds_dir.mkdir()
+    (creds_dir / "token.json").write_text("{}", encoding="utf-8")
+    (creds_dir / "service_account.json").write_text("{}", encoding="utf-8")
+    (creds_dir / "client_secrets.json").write_text("{}", encoding="utf-8")
+
+    venv_dir = root / "venv"
+    venv_dir.mkdir()
+    (venv_dir / "lib.py").write_text("# venv code", encoding="utf-8")
+
+    # Permitted items that SHOULD be uploaded
+    main_py = root / "main.py"
+    main_py.write_text("# project entry", encoding="utf-8")
+
+    src_dir = root / "src"
+    src_dir.mkdir()
+    utils_py = src_dir / "utils.py"
+    utils_py.write_text("# utils code", encoding="utf-8")
+
+    uploaded_files: list[str] = []
+    created_folders: list[str] = []
+
+    mock_service = MagicMock()
+
+    def _mock_create(body: dict[str, Any], **kwargs: Any) -> MagicMock:
+        req = MagicMock()
+        name = body.get("name", "")
+        if body.get("mimeType") == "application/vnd.google-apps.folder":
+            created_folders.append(name)
+            req.execute.return_value = {"id": f"folder_id_{name}", "name": name}
+        else:
+            uploaded_files.append(name)
+            req.execute.return_value = {"id": f"file_id_{name}", "name": name}
+        return req
+
+    mock_service.files().create.side_effect = _mock_create
+
+    daily_backup.upload_folder_recursive(
+        mock_service,
+        str(root),
+        "drive_backup_parent_id",
+        daily_backup.BACKUP_EXCLUDE_ITEMS,
+    )
+
+    # 1. Permitted files were uploaded
+    assert "main.py" in uploaded_files
+    assert "utils.py" in uploaded_files
+    assert "src" in created_folders
+
+    # 2. Sensitive files and directories were NEVER touched or uploaded
+    assert ".env" not in uploaded_files
+    assert "credentials" not in created_folders
+    assert "token.json" not in uploaded_files
+    assert "service_account.json" not in uploaded_files
+    assert "client_secrets.json" not in uploaded_files
+    assert "venv" not in created_folders
+    assert "lib.py" not in uploaded_files
 
 
 def test_gcalendar_tool_missing_credentials_returns_error_message(

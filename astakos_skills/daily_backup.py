@@ -23,6 +23,9 @@ from core.i18n import t
 
 SCOPES = ['https://www.googleapis.com/auth/drive'] # Full access to Drive
 
+BACKUP_EXCLUDE_ITEMS = {'venv', '__pycache__', '.git', 'messenger_profile', '.env', 'credentials'}
+
+
 def authenticate_google_drive():
     try:
         from core.workspace_oauth import load_workspace_credentials, WorkspaceAuthError
@@ -42,7 +45,7 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
         return uploaded_items
 
     for item_name in os.listdir(local_path):
-        # 1. Check for names (folders like 'venv' or 'messenger_profile')
+        # 1. Check for names (folders like 'venv', 'credentials' or files like '.env')
         if item_name in exclude_items:
             print(f"  [Skip] Excluded by name: {item_name}")
             continue
@@ -113,7 +116,7 @@ def daily_backup_to_drive():
         if DRIVE_FOLDER_ID and DRIVE_FOLDER_ID != "root":
             query = f"name = '{backup_folder_name}' and mimeType = 'application/vnd.google-apps.folder' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
         else:
-            query = f"name = '{backup_folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+            query = f"name = '{backup_folder_name}' and mimeType = 'application/vnd.google-apps.folder' and 'root' in parents and trashed = false"
 
         response = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
         files = response.get('files', [])
@@ -136,9 +139,10 @@ def daily_backup_to_drive():
         print(f"Starting recursive backup from folder '{ASTAKOS_V2_PATH}'...")
 
         # List of folders/files to exclude (only in the initial call)
-        EXCLUDE_ITEMS = ['venv', '__pycache__', '.git', 'messenger_profile']
+        EXCLUDE_ITEMS = list(BACKUP_EXCLUDE_ITEMS)
         
         uploaded_items = upload_folder_recursive(service, ASTAKOS_V2_PATH, backup_folder_id, EXCLUDE_ITEMS)
+
 
         if not uploaded_items:
             return t("skills.daily_backup.msg_no_files_exc", path=ASTAKOS_V2_PATH, exc=', '.join(EXCLUDE_ITEMS))

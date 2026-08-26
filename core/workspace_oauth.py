@@ -65,6 +65,20 @@ def is_workspace_connected() -> bool:
 
 
 
+def _build_effective_scopes(scopes: Sequence[str] | None = None) -> list[str]:
+    """
+    Builds the effective scopes combining DEFAULT_WORKSPACE_SCOPES and any additional
+    requested scopes with deterministic order preservation, ensuring that refreshing credentials
+    for a single tool does not shrink the shared token's scope metadata.
+    """
+    combined: list[str] = list(DEFAULT_WORKSPACE_SCOPES)
+    if scopes:
+        for scope in scopes:
+            if scope and scope not in combined:
+                combined.append(scope)
+    return combined
+
+
 def load_workspace_credentials(
     scopes: Sequence[str] | None = None,
     auto_refresh: bool = True,
@@ -83,7 +97,7 @@ def load_workspace_credentials(
             "Please connect your Google Workspace account in settings or authorize OAuth."
         )
 
-    effective_scopes = list(scopes) if scopes else DEFAULT_WORKSPACE_SCOPES
+    effective_scopes = _build_effective_scopes(scopes)
 
     try:
         creds = Credentials.from_authorized_user_file(token_path, scopes=effective_scopes)
@@ -91,6 +105,7 @@ def load_workspace_credentials(
         raise WorkspaceTokenRevokedOrInvalidError(
             f"Google Workspace token is invalid: {exc}. Please reconnect your Google account."
         ) from exc
+
 
     if not creds:
         raise WorkspaceMissingCredentialsError(
