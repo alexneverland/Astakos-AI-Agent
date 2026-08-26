@@ -309,6 +309,36 @@ def test_authorize_workspace_oauth_uses_client_secrets_path_and_never_vertex_cre
         assert token_file.exists()
 
 
+def test_authorize_workspace_oauth_requests_full_default_scopes_and_caller_extras(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Proves that new explicit consent flow always includes all DEFAULT_WORKSPACE_SCOPES
+    plus any extra scopes requested by callers (like Fit), deterministically deduplicated.
+    """
+    client_secrets_file = tmp_path / "client_secrets.json"
+    client_secrets_file.write_text(json.dumps({"installed": {"client_id": "cid"}}), encoding="utf-8")
+    token_file = tmp_path / "token.json"
+
+    monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
+    monkeypatch.setattr("core.workspace_oauth.get_oauth_client_secrets_path", lambda: str(client_secrets_file))
+
+    mock_flow = MagicMock()
+    mock_flow_creds = _create_mock_creds(valid=True)
+    mock_flow.run_local_server.return_value = mock_flow_creds
+
+    with patch("google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file", return_value=mock_flow) as mock_from_secrets:
+        extra_scope = "https://www.googleapis.com/auth/custom.extra.scope"
+        authorize_workspace_oauth(scopes=[extra_scope, "https://www.googleapis.com/auth/drive"])
+
+        assert mock_from_secrets.call_count == 1
+        call_scopes = mock_from_secrets.call_args[0][1]
+        for default_scope in DEFAULT_WORKSPACE_SCOPES:
+            assert default_scope in call_scopes
+        assert extra_scope in call_scopes
+        assert call_scopes.count("https://www.googleapis.com/auth/drive") == 1
+
+
 def test_authorize_workspace_oauth_missing_client_secrets_fails_cleanly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -319,6 +349,7 @@ def test_authorize_workspace_oauth_missing_client_secrets_fails_cleanly(
         authorize_workspace_oauth()
 
     assert "client secrets file not found" in str(exc_info.value)
+
 
 
 def test_authorize_google_fit_delegates_to_authorize_workspace_oauth(monkeypatch: pytest.MonkeyPatch) -> None:

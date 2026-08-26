@@ -131,7 +131,8 @@ def authorize_workspace_oauth(
 ) -> str:
     """
     Initiates an explicit interactive OAuth consent flow in the browser.
-    Writes the resulting user token to token.json with the requested (or DEFAULT_WORKSPACE_SCOPES) scopes.
+    Requests all DEFAULT_WORKSPACE_SCOPES plus any caller-provided additional scopes,
+    deterministically deduplicated, and writes the resulting user token to token.json.
     Never uses credentials.json (Vertex service account).
     """
     from google_auth_oauthlib.flow import InstalledAppFlow
@@ -144,8 +145,13 @@ def authorize_workspace_oauth(
             "or set WORKSPACE_CLIENT_SECRETS_PATH."
         )
 
-    target_scopes = list(scopes) if scopes else list(DEFAULT_WORKSPACE_SCOPES)
-    flow = InstalledAppFlow.from_client_secrets_file(target_secrets, target_scopes)
+    consent_scopes: list[str] = list(DEFAULT_WORKSPACE_SCOPES)
+    if scopes:
+        for scope in scopes:
+            if scope and scope not in consent_scopes:
+                consent_scopes.append(scope)
+
+    flow = InstalledAppFlow.from_client_secrets_file(target_secrets, consent_scopes)
     creds = flow.run_local_server(port=port, prompt="consent", access_type="offline")
 
     token_path = get_token_path()
@@ -154,6 +160,7 @@ def authorize_workspace_oauth(
         f.write(creds.to_json())
 
     return f"Google Workspace authorization successful. Token saved to '{token_path}'."
+
 
 
 def load_workspace_credentials(

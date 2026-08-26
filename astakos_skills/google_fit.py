@@ -75,7 +75,7 @@ def authorize_google_fit() -> str:
         from core.workspace_oauth import authorize_workspace_oauth
         return authorize_workspace_oauth(scopes=SCOPES)
     except Exception as e:
-        raise GoogleFitAuthError(f"Google Fit OAuth authorization failed: {e}") from e
+        raise GoogleFitAuthError("Google Fit OAuth authorization failed. Please reconnect Google Workspace.") from e
 
 
 def _get_credentials():
@@ -92,27 +92,27 @@ def _get_credentials():
     except WorkspaceMissingCredentialsError as e:
         raise GoogleFitAuthError(t("skills.google_fit.token_expired")) from e
     except WorkspaceMissingScopeError as e:
-        raise GoogleFitAuthError(str(e)) from e
+        raise GoogleFitAuthError("Google Fit requires additional permissions. Please reconnect Google Workspace.") from e
     except (WorkspaceTokenRevokedOrInvalidError, WorkspaceAuthError) as e:
         raise GoogleFitAuthError(
-            f"Google Fit authorization expired or revoked ({e}). Please reconnect Google Workspace."
+            "Google Fit authorization expired or revoked. Please reconnect Google Workspace."
         ) from e
     except Exception as e:
-        raise GoogleFitAuthError(f"Google Fit authorization failed ({e}). Please reconnect Google Workspace.") from e
-
+        raise GoogleFitAuthError("Google Fit authorization failed. Please reconnect Google Workspace.") from e
 
 
 def _fit_auth_summary(title: str) -> str | None:
     try:
         _get_credentials()
-    except Exception as e:
+    except Exception:
         return "\n".join([
             title,
             "",
-            f"⚠️ Google Fit auth: {e}",
+            "⚠️ Google Fit auth: authorization is unavailable; reconnect Google Workspace.",
             t("skills.google_fit.msg_auth_other_tools_2"),
         ])
     return None
+
 
 
 
@@ -306,8 +306,8 @@ def get_morning_summary() -> str:
             lines.append(f"{emoji} " + t("skills.google_fit.msg_steps_yest", steps=f"{steps:,}"))
         else:
             lines.append(t("skills.google_fit.msg_steps_yest_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_steps_yest_err", e=e))
+    except Exception:
+        lines.append(t("skills.google_fit.msg_steps_yest_err", e="unavailable"))
 
     try:
         sleep = get_sleep(1)
@@ -324,8 +324,8 @@ def get_morning_summary() -> str:
             lines.append(f"{emoji} " + t("skills.google_fit.msg_sleep_yest", h=h, m=m, detail=detail_str))
         else:
             lines.append(t("skills.google_fit.msg_sleep_yest_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_sleep_yest_err", e=e))
+    except Exception:
+        lines.append(t("skills.google_fit.msg_sleep_yest_err", e="unavailable"))
 
     try:
         hr = get_heart_rate(1)
@@ -335,8 +335,8 @@ def get_morning_summary() -> str:
             lines.append(t("skills.google_fit.msg_hr_yest", avg=hr["avg_bpm"], max=hr["max_bpm"]))
         else:
             lines.append(t("skills.google_fit.msg_hr_yest_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_hr_yest_err", e=e))
+    except Exception:
+        lines.append(t("skills.google_fit.msg_hr_yest_err", e="unavailable"))
 
     return "\n".join(lines)
 
@@ -357,8 +357,8 @@ def get_daily_summary(days_ago: int = 1) -> str:
             lines.append(f"{emoji} " + t("skills.google_fit.msg_steps_today", steps=f"{steps:,}"))
         else:
             lines.append(t("skills.google_fit.msg_steps_today_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_steps_today_err", e=e))
+    except Exception:
+        lines.append(t("skills.google_fit.msg_steps_today_err", e="unavailable"))
 
     try:
         sleep = get_sleep(days_ago if days_ago > 0 else 1)
@@ -375,8 +375,8 @@ def get_daily_summary(days_ago: int = 1) -> str:
             lines.append(f"{emoji} " + t("skills.google_fit.msg_sleep_yest", h=h, m=m, detail=detail_str))
         else:
             lines.append(t("skills.google_fit.msg_sleep_yest_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_sleep_yest_err", e=e))
+    except Exception:
+        lines.append(t("skills.google_fit.msg_sleep_yest_err", e="unavailable"))
 
     try:
         hr = get_heart_rate(days_ago)
@@ -384,10 +384,11 @@ def get_daily_summary(days_ago: int = 1) -> str:
             lines.append(t("skills.google_fit.msg_hr_today", avg=hr["avg_bpm"], max=hr["max_bpm"]))
         else:
             lines.append(t("skills.google_fit.msg_hr_yest_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_hr_yest_err", e=e))
+    except Exception:
+        lines.append(t("skills.google_fit.msg_hr_today_err", e="unavailable"))
 
     return "\n".join(lines)
+
 
 
 if __name__ == "__main__":
