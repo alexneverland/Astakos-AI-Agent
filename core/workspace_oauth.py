@@ -159,7 +159,8 @@ def authorize_workspace_oauth(
     with open(token_path, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
 
-    return f"Google Workspace authorization successful. Token saved to '{token_path}'."
+    return "Google Workspace authorization successful."
+
 
 
 

@@ -391,17 +391,36 @@ def get_daily_summary(days_ago: int = 1) -> str:
 
 
 
-if __name__ == "__main__":
+def run_cli(args: list[str] | None = None) -> None:
     import sys
-    cmd      = sys.argv[1] if len(sys.argv) > 1 else "summary"
-    days_ago = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    raw_args = args if args is not None else sys.argv[1:]
+    cmd = raw_args[0] if len(raw_args) > 0 else "summary"
+    days_ago = int(raw_args[1]) if len(raw_args) > 1 else 1
+
     if cmd == "auth":
-        print(authorize_google_fit())
+        try:
+            authorize_google_fit()
+            print("Google Fit authorization completed.")
+        except Exception:
+            print("Google Fit authorization failed. Please reconnect Google Workspace.")
     elif cmd == "steps":
-        print(f"Steps: {get_steps(days_ago)}")
+        try:
+            print(f"Steps: {get_steps(days_ago)}")
+        except Exception:
+            print("Steps: unavailable")
     elif cmd == "sleep":
-        print(get_sleep(days_ago))
+        try:
+            print(get_sleep(days_ago))
+        except Exception:
+            print("Sleep: unavailable")
     elif cmd == "heart":
-        print(get_heart_rate(days_ago))
+        try:
+            print(get_heart_rate(days_ago))
+        except Exception:
+            print("Heart rate: unavailable")
     else:
         print(get_daily_summary(days_ago))
+
+
+if __name__ == "__main__":
+    run_cli()

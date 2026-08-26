@@ -304,9 +304,12 @@ def test_authorize_workspace_oauth_uses_client_secrets_path_and_never_vertex_cre
 
     with patch("google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file", return_value=mock_flow) as mock_from_secrets:
         msg = authorize_workspace_oauth()
-        assert "successful" in msg
+        assert msg == "Google Workspace authorization successful."
+        assert str(token_file) not in msg
+        assert token_file.name not in msg
         mock_from_secrets.assert_called_once_with(str(client_secrets_file), list(DEFAULT_WORKSPACE_SCOPES))
         assert token_file.exists()
+
 
 
 def test_authorize_workspace_oauth_requests_full_default_scopes_and_caller_extras(
