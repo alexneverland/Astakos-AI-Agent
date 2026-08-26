@@ -15,35 +15,50 @@ import io
 import datetime
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 from core.i18n import t
 
 
 
-SCOPES = ['https://www.googleapis.com/auth/drive'] # Full access to Drive
+
+SCOPES: list[str] = ["https://www.googleapis.com/auth/drive"]
+
+BACKUP_EXCLUDE_ITEMS = {
+    'venv',
+    '.venv',
+    '__pycache__',
+    '.git',
+    'messenger_profile',
+    'credentials',
+    'credentials.json',
+    'token.json',
+    '.astakos_token',
+    'client_secrets.json',
+    '.env',
+}
+
+
+def is_excluded_backup_item(item_name: str, exclude_items: set[str] | list[str] | None = None) -> bool:
+    """
+    Determines whether a file or directory should be excluded from daily backup.
+    Excludes .env, all .env.* variants, credentials/, credentials.json, token.json,
+    .astakos_token, client_secrets.json, and standard ignored directories (venv, .venv, .git, etc.).
+    """
+    if exclude_items and item_name in exclude_items:
+        return True
+    if item_name in BACKUP_EXCLUDE_ITEMS:
+        return True
+    if item_name == ".env" or item_name.startswith(".env."):
+        return True
+    return False
+
 
 def authenticate_google_drive():
-    # print("Loading credentials...") # Keep prints concise to avoid cluttering the log
-    creds = None
-    # We use the absolute paths that were indicated
-    token_path = os.path.join(config.BASE_DIR, "credentials", "token.json")
-    credentials_path = os.path.join(config.BASE_DIR, "credentials", "credentials.json")
-
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-    
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            # print("Refreshing token...")_
-            creds.refresh(Request())
-        else:
-            # This is where the OAuth flow would happen if run in a real user environment
-            print(f"Authentication Error: The files 'token.json' or 'credentials.json' were not found or are invalid at paths: {token_path}, {credentials_path}.")
-            print("Please ensure you have configured Google API authentication on your computer.")
-            return None
-    # print("Credentials loaded successfully (or failed)...")
-    return creds
+    try:
+        from core.workspace_oauth import load_workspace_credentials, WorkspaceAuthError
+        return load_workspace_credentials(scopes=SCOPES)
+    except Exception as e:
+        print(f"Google Drive Authentication Error: {e}")
+        return None
 
 def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items):
     # --- [MASTRO-CONFIG]: File types that we DO NOT want in Drive ---
@@ -56,15 +71,21 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
         return uploaded_items
 
     for item_name in os.listdir(local_path):
-        # 1. Check for names (folders like 'venv' or 'messenger_profile')
-        if item_name in exclude_items:
+        # 1. Check for excluded items (secrets, .env*, credentials, venv, .venv, etc.)
+        if is_excluded_backup_item(item_name, exclude_items):
             print(f"  [Skip] Excluded by name: {item_name}")
             continue
 
         current_local_path = os.path.join(local_path, item_name)
 
-        # 2. Case: File
+        # 2. Reject symlinks to prevent following links to secrets or escaping backup root
+        if os.path.islink(current_local_path):
+            print(f"  [Skip] Excluded symlink: {item_name}")
+            continue
+
+        # 3. Case: File
         if os.path.isfile(current_local_path):
+
             # We get the extension (e.g. .pdf)
             ext = os.path.splitext(item_name)[1].lower()
             
@@ -105,7 +126,7 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
 
 def daily_backup_to_drive():
     import config
-    DRIVE_FOLDER_ID = config.BACKUP_DRIVE_FOLDER_ID
+    DRIVE_FOLDER_ID = getattr(config, "BACKUP_DRIVE_FOLDER_ID", "")
     ASTAKOS_V2_PATH = config.BASE_DIR 
 
     print("Starting backup process...")
@@ -116,7 +137,7 @@ def daily_backup_to_drive():
 
     try:
         print("Connecting to Drive...")
-        service = build('drive', 'v3', credentials=creds)
+        service = build('drive', 'v3', credentials=creds, cache_discovery=False)
 
         # Create a folder with the date in Google Drive
         today = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -124,7 +145,11 @@ def daily_backup_to_drive():
         print(f"Creating/Finding backup folder in Drive: {backup_folder_name}")
 
         # Check if a folder with this name already exists
-        query = f"name = '{backup_folder_name}' and mimeType = 'application/vnd.google-apps.folder' and '{DRIVE_FOLDER_ID}' in parents"
+        if DRIVE_FOLDER_ID and DRIVE_FOLDER_ID != "root":
+            query = f"name = '{backup_folder_name}' and mimeType = 'application/vnd.google-apps.folder' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
+        else:
+            query = f"name = '{backup_folder_name}' and mimeType = 'application/vnd.google-apps.folder' and 'root' in parents and trashed = false"
+
         response = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
         files = response.get('files', [])
 
@@ -135,8 +160,10 @@ def daily_backup_to_drive():
             file_metadata = {
                 'name': backup_folder_name,
                 'mimeType': 'application/vnd.google-apps.folder',
-                'parents': [DRIVE_FOLDER_ID]
             }
+            if DRIVE_FOLDER_ID and DRIVE_FOLDER_ID != "root":
+                file_metadata['parents'] = [DRIVE_FOLDER_ID]
+
             backup_folder = service.files().create(body=file_metadata, fields='id').execute()
             backup_folder_id = backup_folder.get('id')
             print(f"Folder '{backup_folder_name}' created successfully (ID: {backup_folder_id}).")
@@ -144,9 +171,10 @@ def daily_backup_to_drive():
         print(f"Starting recursive backup from folder '{ASTAKOS_V2_PATH}'...")
 
         # List of folders/files to exclude (only in the initial call)
-        EXCLUDE_ITEMS = ['venv', '__pycache__', '.git', 'messenger_profile']
+        EXCLUDE_ITEMS = list(BACKUP_EXCLUDE_ITEMS)
         
         uploaded_items = upload_folder_recursive(service, ASTAKOS_V2_PATH, backup_folder_id, EXCLUDE_ITEMS)
+
 
         if not uploaded_items:
             return t("skills.daily_backup.msg_no_files_exc", path=ASTAKOS_V2_PATH, exc=', '.join(EXCLUDE_ITEMS))
@@ -155,6 +183,7 @@ def daily_backup_to_drive():
 
     except Exception as e:
         return t("skills.daily_backup.msg_backup_error", e=e)
+
 
 if __name__ == "__main__":
     print(daily_backup_to_drive())

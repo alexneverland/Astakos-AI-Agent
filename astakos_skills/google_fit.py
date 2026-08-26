@@ -11,16 +11,12 @@
 import datetime
 import json
 import os
-from google.auth.exceptions import RefreshError
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from core.i18n import t
 
 import config
-TOKEN_PATH       = config.TOKEN_PATH
-CREDENTIALS_PATH = config.CREDENTIALS_PATH
+TOKEN_PATH = config.TOKEN_PATH
+
 
 SHARED_GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
@@ -43,23 +39,13 @@ class GoogleFitAuthError(RuntimeError):
 
 
 def _read_token_scopes() -> set[str]:
-    if not os.path.exists(TOKEN_PATH):
-        return set()
-
-    try:
-        with open(TOKEN_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return set()
-
-    scopes = data.get("scopes") or data.get("scope") or []
-    if isinstance(scopes, str):
-        scopes = scopes.split()
-    return {scope for scope in scopes if isinstance(scope, str)}
+    from core.workspace_oauth import read_stored_token_scopes
+    return set(read_stored_token_scopes(TOKEN_PATH))
 
 
 def _missing_fit_scopes(token_scopes: set[str]) -> list[str]:
-    return [scope for scope in FIT_SCOPES if scope not in token_scopes]
+    from core.workspace_oauth import check_missing_scopes
+    return check_missing_scopes(FIT_SCOPES, token_scopes)
 
 
 def _ensure_fit_token_scopes() -> None:
@@ -83,53 +69,52 @@ def _ensure_fit_token_scopes() -> None:
     )
 
 
-def _save_credentials(creds: Credentials) -> None:
-    with open(TOKEN_PATH, "w", encoding="utf-8") as token:
-        token.write(creds.to_json())
-
-
 def authorize_google_fit() -> str:
-    if not os.path.exists(CREDENTIALS_PATH):
-        raise GoogleFitAuthError(t("skills.google_fit.missing_creds"))
-
-    flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-    creds = flow.run_local_server(port=0, prompt="consent", access_type="offline")
-    _save_credentials(creds)
-    return t("skills.google_fit.token_updated")
+    """Initiates explicit Google Workspace OAuth consent flow for Fit."""
+    try:
+        from core.workspace_oauth import authorize_workspace_oauth
+        return authorize_workspace_oauth(scopes=SCOPES)
+    except Exception as e:
+        raise GoogleFitAuthError("Google Fit OAuth authorization failed. Please reconnect Google Workspace.") from e
 
 
 def _get_credentials():
-    creds = None
-    if os.path.exists(TOKEN_PATH):
-        _ensure_fit_token_scopes()
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-                _save_credentials(creds)
-            except RefreshError as e:
-                if "invalid_scope" in str(e).lower():
-                    raise GoogleFitAuthError(
-                        t("skills.google_fit.msg_auth_rejected")
-                    ) from e
-                raise
-        else:
-            raise Exception(t("skills.google_fit.token_expired"))
-    return creds
+    _ensure_fit_token_scopes()
+    try:
+        from core.workspace_oauth import (
+            load_workspace_credentials,
+            WorkspaceAuthError,
+            WorkspaceMissingCredentialsError,
+            WorkspaceMissingScopeError,
+            WorkspaceTokenRevokedOrInvalidError,
+        )
+        return load_workspace_credentials(scopes=SCOPES)
+    except WorkspaceMissingCredentialsError as e:
+        raise GoogleFitAuthError(t("skills.google_fit.token_expired")) from e
+    except WorkspaceMissingScopeError as e:
+        raise GoogleFitAuthError("Google Fit requires additional permissions. Please reconnect Google Workspace.") from e
+    except (WorkspaceTokenRevokedOrInvalidError, WorkspaceAuthError) as e:
+        raise GoogleFitAuthError(
+            "Google Fit authorization expired or revoked. Please reconnect Google Workspace."
+        ) from e
+    except Exception as e:
+        raise GoogleFitAuthError("Google Fit authorization failed. Please reconnect Google Workspace.") from e
 
 
 def _fit_auth_summary(title: str) -> str | None:
     try:
         _get_credentials()
-    except GoogleFitAuthError as e:
+    except Exception:
         return "\n".join([
             title,
             "",
-            f"⚠️ Google Fit auth: {e}",
+            "⚠️ Google Fit auth: authorization is unavailable; reconnect Google Workspace.",
             t("skills.google_fit.msg_auth_other_tools_2"),
         ])
     return None
+
+
+
 
 
 def _ns_to_ms(ns: int) -> int:
@@ -321,8 +306,8 @@ def get_morning_summary() -> str:
             lines.append(f"{emoji} " + t("skills.google_fit.msg_steps_yest", steps=f"{steps:,}"))
         else:
             lines.append(t("skills.google_fit.msg_steps_yest_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_steps_yest_err", e=e))
+    except Exception:
+        lines.append(t("skills.google_fit.msg_steps_yest_err", e="unavailable"))
 
     try:
         sleep = get_sleep(1)
@@ -339,8 +324,8 @@ def get_morning_summary() -> str:
             lines.append(f"{emoji} " + t("skills.google_fit.msg_sleep_yest", h=h, m=m, detail=detail_str))
         else:
             lines.append(t("skills.google_fit.msg_sleep_yest_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_sleep_yest_err", e=e))
+    except Exception:
+        lines.append(t("skills.google_fit.msg_sleep_yest_err", e="unavailable"))
 
     try:
         hr = get_heart_rate(1)
@@ -350,20 +335,21 @@ def get_morning_summary() -> str:
             lines.append(t("skills.google_fit.msg_hr_yest", avg=hr["avg_bpm"], max=hr["max_bpm"]))
         else:
             lines.append(t("skills.google_fit.msg_hr_yest_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_hr_yest_err", e=e))
+    except Exception:
+        lines.append(t("skills.google_fit.msg_hr_yest_err", e="unavailable"))
 
     return "\n".join(lines)
 
 
-def get_daily_summary(days_ago: int = 1) -> str:
+def _generate_daily_summary(days_ago: int = 1) -> tuple[str, bool]:
     label = t("skills.google_fit.label_today") if days_ago == 0 else t("skills.google_fit.label_yest")
     title = t("skills.google_fit.msg_summary_title", label=label)
     auth_problem = _fit_auth_summary(title)
     if auth_problem:
-        return auth_problem
+        return auth_problem, False
 
     lines = [f"{title}\n"]
+    has_errors = False
 
     try:
         steps = get_steps(days_ago)
@@ -372,8 +358,9 @@ def get_daily_summary(days_ago: int = 1) -> str:
             lines.append(f"{emoji} " + t("skills.google_fit.msg_steps_today", steps=f"{steps:,}"))
         else:
             lines.append(t("skills.google_fit.msg_steps_today_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_steps_today_err", e=e))
+    except Exception:
+        has_errors = True
+        lines.append(t("skills.google_fit.msg_steps_today_err", e="unavailable"))
 
     try:
         sleep = get_sleep(days_ago if days_ago > 0 else 1)
@@ -390,8 +377,9 @@ def get_daily_summary(days_ago: int = 1) -> str:
             lines.append(f"{emoji} " + t("skills.google_fit.msg_sleep_yest", h=h, m=m, detail=detail_str))
         else:
             lines.append(t("skills.google_fit.msg_sleep_yest_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_sleep_yest_err", e=e))
+    except Exception:
+        has_errors = True
+        lines.append(t("skills.google_fit.msg_sleep_yest_err", e="unavailable"))
 
     try:
         hr = get_heart_rate(days_ago)
@@ -399,23 +387,60 @@ def get_daily_summary(days_ago: int = 1) -> str:
             lines.append(t("skills.google_fit.msg_hr_today", avg=hr["avg_bpm"], max=hr["max_bpm"]))
         else:
             lines.append(t("skills.google_fit.msg_hr_yest_none"))
-    except Exception as e:
-        lines.append(t("skills.google_fit.msg_hr_yest_err", e=e))
+    except Exception:
+        has_errors = True
+        lines.append(t("skills.google_fit.msg_hr_today_err", e="unavailable"))
 
-    return "\n".join(lines)
+    return "\n".join(lines), not has_errors
+
+
+
+def get_daily_summary(days_ago: int = 1) -> str:
+    summary_text, _ = _generate_daily_summary(days_ago)
+    return summary_text
+
+
+
+def run_cli(args: list[str] | None = None) -> None:
+    import sys
+    raw_args = args if args is not None else sys.argv[1:]
+    cmd = raw_args[0] if len(raw_args) > 0 else "summary"
+    days_ago = int(raw_args[1]) if len(raw_args) > 1 else 1
+
+    if cmd == "auth":
+        try:
+            authorize_google_fit()
+            print("Google Fit authorization completed.")
+        except Exception:
+            print("Google Fit authorization failed. Please reconnect Google Workspace.")
+    elif cmd == "steps":
+        try:
+            get_steps(days_ago)
+            print("Google Fit steps summary retrieved.")
+        except Exception:
+            print("Google Fit steps summary unavailable.")
+    elif cmd == "sleep":
+        try:
+            get_sleep(days_ago)
+            print("Google Fit sleep summary retrieved.")
+        except Exception:
+            print("Google Fit sleep summary unavailable.")
+    elif cmd == "heart":
+        try:
+            get_heart_rate(days_ago)
+            print("Google Fit heart-rate summary retrieved.")
+        except Exception:
+            print("Google Fit heart-rate summary unavailable.")
+    else:
+        try:
+            _, success = _generate_daily_summary(days_ago)
+            if success:
+                print("Google Fit daily summary retrieved.")
+            else:
+                print("Google Fit daily summary unavailable.")
+        except Exception:
+            print("Google Fit daily summary unavailable.")
 
 
 if __name__ == "__main__":
-    import sys
-    cmd      = sys.argv[1] if len(sys.argv) > 1 else "summary"
-    days_ago = int(sys.argv[2]) if len(sys.argv) > 2 else 1
-    if cmd == "auth":
-        print(authorize_google_fit())
-    elif cmd == "steps":
-        print(f"Steps: {get_steps(days_ago)}")
-    elif cmd == "sleep":
-        print(get_sleep(days_ago))
-    elif cmd == "heart":
-        print(get_heart_rate(days_ago))
-    else:
-        print(get_daily_summary(days_ago))
+    run_cli()
