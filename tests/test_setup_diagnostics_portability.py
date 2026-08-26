@@ -345,6 +345,34 @@ def test_semantic_memory_evidence_uninspectable_returns_safe_status(
     assert diag["reindex_needed"] is False
 
 
+def test_semantic_memory_inventory_uses_managed_vector_store_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """inspect_semantic_memory_inventory uses existing managed vector_store handle without opening duplicate client."""
+    import memory.vector_store as m_vs
+
+    class _MockCollection:
+        def __init__(self, name: str, count: int) -> None:
+            self.name = name
+            self._count = count
+
+        def count(self) -> int:
+            return self._count
+
+    class _MockClient:
+        def list_collections(self) -> list[Any]:
+            return [_MockCollection("astakos_long_term", 10), _MockCollection("astakos_vec_test", 5)]
+
+    class _MockVectorStore:
+        def __init__(self) -> None:
+            self._client = _MockClient()
+
+    monkeypatch.setattr(m_vs, "vector_store", _MockVectorStore())
+    inv = inspect_semantic_memory_inventory()
+    assert inv == {"astakos_long_term": 10, "astakos_vec_test": 5}
+
+
+
 def test_semantic_memory_diagnostics_unconfigured_embeddings() -> None:
     diag = get_semantic_memory_diagnostics("auto", "anthropic")
     assert diag["collection_name"] == "astakos_vec_unconfigured"

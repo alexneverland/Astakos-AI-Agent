@@ -318,29 +318,18 @@ def get_embeddings_diagnostics(
         }
 
 
-def inspect_semantic_memory_inventory(
-    chroma_dir: str | None = None,
-) -> dict[str, int] | None:
+def inspect_semantic_memory_inventory() -> dict[str, int] | None:
     """
-    Safely inspects the local Chroma database collections and their vector counts in read-only mode.
-    Returns a mapping of {collection_name: count}, or None if Chroma is not initialized / accessible.
+    Safely inspects the Chroma database collections and their document counts in read-only mode,
+    reusing the existing managed vector store handle without opening a parallel Chroma client.
     """
-    db_dir = chroma_dir or getattr(config, "CHROMA_DB_DIR", None)
-    if not db_dir or not os.path.exists(db_dir):
-        return {}
     try:
-        import chromadb
-        client = chromadb.PersistentClient(path=db_dir)
-        collections = client.list_collections()
-        inventory: dict[str, int] = {}
-        for c in collections:
-            try:
-                inventory[c.name] = c.count()
-            except Exception:
-                inventory[c.name] = 0
-        return inventory
+        from memory.vector_store import get_collections_inventory
+
+        return get_collections_inventory()
     except Exception:
         return None
+
 
 
 def get_semantic_memory_diagnostics(

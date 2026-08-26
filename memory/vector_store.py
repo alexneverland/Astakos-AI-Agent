@@ -165,7 +165,7 @@ def close_vector_store():
     if not acquired:
         print("\033[93m[VectorStore]: Timeout acquiring lock during shutdown. Skipping close to prevent corruption.\033[0m")
         return
-        
+
     try:
         if vector_store is not None and hasattr(vector_store, "_client"):
             try:
@@ -175,6 +175,31 @@ def close_vector_store():
                 print(f"\033[91m[VectorStore]: Error closing ChromaDB: {e}\033[0m")
     finally:
         vector_lock.release()
+
+
+def get_collections_inventory() -> dict[str, int] | None:
+    """
+    Safely inspects the Chroma database collections and their document counts in read-only mode,
+    reusing the existing managed Chroma handle and thread lock without opening duplicate handles.
+    """
+    if vector_store is None:
+        return None
+    try:
+        with vector_lock:
+            client = getattr(vector_store, "_client", None)
+            if client is None:
+                return None
+            collections = client.list_collections()
+            inventory: dict[str, int] = {}
+            for col in collections:
+                try:
+                    inventory[col.name] = col.count()
+                except Exception:
+                    inventory[col.name] = 0
+            return inventory
+    except Exception:
+        return None
+
 
 
 def _should_retry_chroma_error(exc: Exception) -> bool:
@@ -362,19 +387,19 @@ def memory_has_date(text: str) -> bool:
     low = text_str.lower()
     if t("prompts.ext_str_730") in low:
         return True
-    
+
     # We are looking for years e.g. 2024, 1998
     if re.search(r"\b(19|20)\d{2}\b", text_str):
         return True
-        
+
     # Looking for dates e.g. 12/05, 12/05/2024, 12-05
     if re.search(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", text_str):
         return True
-        
+
     # Keywords
     if any(word in low for word in [t("prompts.ext_str_524"), t("prompts.ext_str_588"), t("prompts.ext_str_655"), t("prompts.ext_str_727"), t("prompts.ext_str_679"), t("prompts.ext_str_565"), t("prompts.ext_str_606"), t("prompts.ext_str_627"), t("prompts.ext_str_443")]):
         return True
-        
+
     return False
 
 
@@ -845,13 +870,13 @@ class AstakosMemoryManager:
                 cross_documents = cross.get("documents") or [[]]
 
                 if (
-                    cross_ids and cross_ids[0] 
-                    and cross_distances and cross_distances[0] 
+                    cross_ids and cross_ids[0]
+                    and cross_distances and cross_distances[0]
                     and cross_distances[0][0] < 0.20
                 ):
                     c_meta = _meta_of(cross)
                     c_doc = cross_documents[0][0]
-                    
+
                     if memory_has_meaningful_overlap(fact, c_doc):
                         print(
                             f"\033[93m[MemoryManager]: ⚠️ Close memory in another category "
@@ -1269,10 +1294,10 @@ class AstakosMemoryManager:
         try:
             conn = sqlite3.connect(STATE_DB)
             cursor = conn.cursor()
-            
+
             completed = json.dumps(summary.get("completed", []), ensure_ascii=False)
             pending = json.dumps(summary.get("pending", []), ensure_ascii=False)
-            
+
             cursor.execute('''
                 INSERT INTO sessions (session_date, channel, summary, completed, pending, next_session_hint, mood)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1285,19 +1310,19 @@ class AstakosMemoryManager:
                 summary.get("next_session_hint", ""),
                 summary.get("mood", "")
             ))
-            
+
             cursor.execute("SELECT id FROM sessions ORDER BY id DESC LIMIT -1 OFFSET 30")
             old_ids = cursor.fetchall()
             for (old_id,) in old_ids:
                 cursor.execute("DELETE FROM sessions WHERE id=?", (old_id,))
-                
+
             conn.commit()
         except Exception as e:
             print(f"Error saving session to DB: {e}")
         finally:
             if conn:
                 conn.close()
-            
+
         return True
 
 
