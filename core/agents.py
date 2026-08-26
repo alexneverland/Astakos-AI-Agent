@@ -399,10 +399,7 @@ def chat_agent_node(state: AgentState):
 
     pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
 
-    detailed_keywords = config.NLP_CONFIG.get("tools", {}).get("detailed_keywords", [])
-    needs_pixels = any(word in last_msg_text.lower() for word in detailed_keywords)
-
-    if path_match and (not pre_baked_analysis or needs_pixels):
+    if path_match and not pre_baked_analysis:
         try:
             filename = os.path.basename(path_match.group(1).strip().replace("]", ""))
             file_path = os.path.join(PHOTOS_DIR, filename)
@@ -998,10 +995,7 @@ def tech_agent_node(state: AgentState):
 
     pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
 
-    tech_keywords = config.NLP_CONFIG.get("tools", {}).get("tech_keywords", [])
-    needs_pixels = any(word in last_msg_text.lower() for word in tech_keywords)
-
-    if path_match and (not pre_baked_analysis or needs_pixels):
+    if path_match and not pre_baked_analysis:
         try:
             filename = os.path.basename(path_match.group(1).strip().replace("]", ""))
             file_path = os.path.join(PHOTOS_DIR, filename)

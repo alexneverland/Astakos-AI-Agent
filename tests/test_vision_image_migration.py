@@ -1032,6 +1032,63 @@ class TestAgentNodesVisionMigration:
                 for part in msg.content:
                     assert part.get("type") != "image_url"
 
+    @pytest.mark.parametrize(
+        ("node_name", "llm_name", "keyword_config"),
+        [
+            ("chat_agent_node", "llm", "detailed_keywords"),
+            ("tech_agent_node", "llm_heavy", "tech_keywords"),
+        ],
+    )
+    def test_agent_reuses_existing_chat_photo_analysis(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        node_name: str,
+        llm_name: str,
+        keyword_config: str,
+    ) -> None:
+        """Ensures keyword requests reuse /chat vision analysis instead of reprocessing pixels."""
+        import core.agents as agents
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        photo_file: Path = tmp_path / "already_analyzed.jpg"
+        photo_file.write_bytes(b"photo_bytes")
+
+        class ReanalysisForbiddenAdapter(MockVertexAIAdapter):
+            def analyze_vision(
+                self, prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg"
+            ) -> str:
+                raise AssertionError("existing /chat analysis must be reused")
+
+        monkeypatch.setattr("core.agents.PHOTOS_DIR", str(tmp_path))
+        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: ReanalysisForbiddenAdapter())
+        monkeypatch.setitem(agents.config.NLP_CONFIG["tools"], keyword_config, ["analyze"])
+        monkeypatch.setattr(agents, "build_prompt", lambda *_args, **_kwargs: "isolated test prompt")
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = AIMessage(content="Used the supplied analysis.")
+        mock_llm.bind_tools.return_value = mock_llm
+        monkeypatch.setattr(agents, llm_name, mock_llm)
+
+        state: dict[str, Any] = {
+            "messages": [
+                HumanMessage(
+                    content=(
+                        f"[USER_UPLOADED_PHOTO]: already_analyzed.jpg\n"
+                        f"[PHOTO PATH]: {photo_file}\n"
+                        "[ANALYSIS]: Existing visual result.\n"
+                        "Please analyze it."
+                    )
+                )
+            ],
+            "channel": "web",
+        }
+
+        result: dict[str, Any] = getattr(agents, node_name)(state)
+
+        assert result["current_agent"] in {"Chat_Agent", "Tech_Agent"}
+        assert mock_llm.invoke.called
+
 
 # ────────────────────────────────────────────────────────────────
 # 8. CHAT STREAM PHOTO VISION MIGRATION TESTS
