@@ -79,6 +79,8 @@ def _configure_isolated_wizard(monkeypatch: pytest.MonkeyPatch, base: Path) -> N
     monkeypatch.setattr(wizard, "SETTINGS_FILE", str(base / "astakos_settings.json"))
     monkeypatch.setattr(wizard, "PROMPTS_DIR", str(prompts_dir))
     monkeypatch.setattr(wizard.threading, "Thread", _NoOpThread)
+    monkeypatch.setattr(config, "PROJECT_ID", "your-gcp-project-id")
+    monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
 
 
 def _make_test_sa_dict(project_id: str = "test-project") -> dict[str, str]:
@@ -978,6 +980,22 @@ def test_vertex_ai_adapter_resolves_project_id_and_credentials_from_adc(
     assert adapter.project_id == "discovered-adc-project"
     assert adapter.credentials_path == str(adc_file)
     assert adapter._credentials is not None
+
+
+def test_vertex_ai_adapter_preserves_configured_project_id_over_credentials_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Configured PROJECT_ID takes precedence over the credential file's project ID."""
+    from core.ai_provider import VertexAIAdapter, resolve_vertex_project_id
+    fake_cred = tmp_path / "credentials.json"
+    fake_cred.write_text(json.dumps(_make_test_sa_dict("credential-owning-project")), encoding="utf-8")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
+    monkeypatch.setenv("PROJECT_ID", "my-target-project-456")
+    monkeypatch.setattr(config, "PROJECT_ID", "my-target-project-456")
+
+    assert resolve_vertex_project_id() == "my-target-project-456"
+    adapter = VertexAIAdapter()
+    assert adapter.project_id == "my-target-project-456"
 
 
 def test_setup_wizard_save_populates_vertex_project_id_from_credentials(

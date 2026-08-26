@@ -153,17 +153,22 @@ def get_vertex_credentials(credentials_path: str | None = None) -> Any:
 def resolve_vertex_project_id(explicit_project: str | None = None, cred_file: str | None = None) -> str:
     """
     Resolves the Google Cloud project ID for Vertex AI.
-    If explicit_project or configured PROJECT_ID is the placeholder 'your-gcp-project-id'
-    or empty, discovers the actual project ID from configured credentials files.
+    Prefers explicit_project or configured PROJECT_ID. If configured PROJECT_ID is empty
+    or the default placeholder 'your-gcp-project-id', falls back to discovering the project ID
+    from configured/ambient credentials files.
     """
     import json
-    # 1. If explicit non-placeholder project provided, use it
+    # 1. Explicit project if non-placeholder and non-empty
     if explicit_project and explicit_project.strip().lower() != "your-gcp-project-id":
         return explicit_project.strip()
 
-    # 2. Check credentials JSON if available
-    target_cred = resolve_vertex_credentials_path(cred_file)
+    # 2. Configured PROJECT_ID or env PROJECT_ID if non-placeholder and non-empty
+    proj = (getattr(config, "PROJECT_ID", "") or os.environ.get("PROJECT_ID", "")).strip()
+    if proj and proj.lower() != "your-gcp-project-id":
+        return proj
 
+    # 3. Fallback to credentials JSON (service account project_id or ADC quota_project_id)
+    target_cred = resolve_vertex_credentials_path(cred_file)
     if target_cred and os.path.exists(target_cred):
         try:
             with open(target_cred, "r", encoding="utf-8") as f:
@@ -175,9 +180,7 @@ def resolve_vertex_project_id(explicit_project: str | None = None, cred_file: st
         except Exception:
             pass
 
-    # 3. Fallback to config.PROJECT_ID or env PROJECT_ID
-    proj = (getattr(config, "PROJECT_ID", "") or os.environ.get("PROJECT_ID", "")).strip()
-    return proj or "your-gcp-project-id"
+    return "your-gcp-project-id"
 
 
 
