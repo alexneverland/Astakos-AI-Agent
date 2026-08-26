@@ -1018,6 +1018,7 @@ def test_vertex_ai_adapter_and_brain_receive_scoped_service_account_credentials(
     """Proves VertexAIAdapter and core/brain.py primary clients receive scoped service account credentials."""
     import importlib
     from unittest.mock import MagicMock
+    import core.brain
     from core.ai_provider import VERTEX_OAUTH_SCOPES, VertexAIAdapter
 
     fake_sa = tmp_path / "credentials.json"
@@ -1038,21 +1039,24 @@ def test_vertex_ai_adapter_and_brain_receive_scoped_service_account_credentials(
     monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", mock_chat_cls)
     monkeypatch.setattr("google.genai.Client", mock_genai_client_cls)
 
-    import core.brain
-    importlib.reload(core.brain)
+    try:
+        importlib.reload(core.brain)
 
-    assert mock_chat_cls.call_count >= 2
-    fast_kwargs = mock_chat_cls.call_args_list[0].kwargs
-    assert "credentials" in fast_kwargs
-    assert fast_kwargs["credentials"].scopes == ["https://www.googleapis.com/auth/cloud-platform"]
+        assert mock_chat_cls.call_count >= 2
+        fast_kwargs = mock_chat_cls.call_args_list[0].kwargs
+        assert "credentials" in fast_kwargs
+        assert fast_kwargs["credentials"].scopes == ["https://www.googleapis.com/auth/cloud-platform"]
 
-    heavy_kwargs = mock_chat_cls.call_args_list[1].kwargs
-    assert "credentials" in heavy_kwargs
-    assert heavy_kwargs["credentials"].scopes == ["https://www.googleapis.com/auth/cloud-platform"]
+        heavy_kwargs = mock_chat_cls.call_args_list[1].kwargs
+        assert "credentials" in heavy_kwargs
+        assert heavy_kwargs["credentials"].scopes == ["https://www.googleapis.com/auth/cloud-platform"]
 
-    client_kwargs = mock_genai_client_cls.call_args.kwargs
-    assert "credentials" in client_kwargs
-    assert client_kwargs["credentials"].scopes == ["https://www.googleapis.com/auth/cloud-platform"]
+        client_kwargs = mock_genai_client_cls.call_args.kwargs
+        assert "credentials" in client_kwargs
+        assert client_kwargs["credentials"].scopes == ["https://www.googleapis.com/auth/cloud-platform"]
+    finally:
+        monkeypatch.undo()
+        importlib.reload(core.brain)
 
 
 def test_setup_wizard_save_populates_vertex_project_id_from_credentials(
