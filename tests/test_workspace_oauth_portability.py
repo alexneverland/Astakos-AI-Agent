@@ -283,6 +283,34 @@ def test_read_stored_token_scopes_supports_string_and_list(tmp_path: Path) -> No
     assert read_stored_token_scopes(str(p2)) == ["https://a", "https://b"]
 
 
+def test_load_workspace_credentials_without_stored_scopes_loads_caller_requested_scopes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Proves that when a legacy token.json lacks embedded scope metadata (neither 'scopes' nor 'scope'),
+    load_workspace_credentials loads credentials using caller-requested scopes without raising
+    WorkspaceMissingScopeError.
+    """
+    token_file = tmp_path / "token.json"
+    token_file.write_text(json.dumps({
+        "token": "legacy-token-no-scopes",
+        "refresh_token": "legacy-refresh",
+    }), encoding="utf-8")
+    monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
+
+    requested_loader_scopes: list[list[str] | None] = []
+
+    def _mock_from_authorized_user_file(path: str, scopes: list[str] | None = None) -> MagicMock:
+        requested_loader_scopes.append(scopes)
+        return _create_mock_creds(valid=True, scopes=scopes)
+
+    with patch("google.oauth2.credentials.Credentials.from_authorized_user_file", side_effect=_mock_from_authorized_user_file):
+        creds = load_workspace_credentials(scopes=["https://www.googleapis.com/auth/calendar"])
+        assert creds.valid
+        assert requested_loader_scopes == [["https://www.googleapis.com/auth/calendar"]]
+
+
+
 def test_authorize_workspace_oauth_uses_client_secrets_path_and_never_vertex_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

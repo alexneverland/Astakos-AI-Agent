@@ -341,12 +341,12 @@ def get_morning_summary() -> str:
     return "\n".join(lines)
 
 
-def get_daily_summary(days_ago: int = 1) -> str:
+def _generate_daily_summary(days_ago: int = 1) -> tuple[str, bool]:
     label = t("skills.google_fit.label_today") if days_ago == 0 else t("skills.google_fit.label_yest")
     title = t("skills.google_fit.msg_summary_title", label=label)
     auth_problem = _fit_auth_summary(title)
     if auth_problem:
-        return auth_problem
+        return auth_problem, False
 
     lines = [f"{title}\n"]
 
@@ -387,7 +387,12 @@ def get_daily_summary(days_ago: int = 1) -> str:
     except Exception:
         lines.append(t("skills.google_fit.msg_hr_today_err", e="unavailable"))
 
-    return "\n".join(lines)
+    return "\n".join(lines), True
+
+
+def get_daily_summary(days_ago: int = 1) -> str:
+    summary_text, _ = _generate_daily_summary(days_ago)
+    return summary_text
 
 
 
@@ -423,8 +428,11 @@ def run_cli(args: list[str] | None = None) -> None:
             print("Google Fit heart-rate summary unavailable.")
     else:
         try:
-            get_daily_summary(days_ago)
-            print("Google Fit daily summary retrieved.")
+            _, success = _generate_daily_summary(days_ago)
+            if success:
+                print("Google Fit daily summary retrieved.")
+            else:
+                print("Google Fit daily summary unavailable.")
         except Exception:
             print("Google Fit daily summary unavailable.")
 

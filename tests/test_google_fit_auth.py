@@ -153,16 +153,34 @@ def test_cli_heart_success_and_failure_prints_fixed_safe_messages(
 def test_cli_summary_success_and_failure_prints_fixed_safe_messages(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Success path
-    monkeypatch.setattr(google_fit, "get_daily_summary", lambda days_ago: "📊 Summary with secret HR 75 bpm")
+    # 1. Success path (auth succeeds, queries succeed)
+    monkeypatch.setattr(google_fit, "_fit_auth_summary", lambda title: None)
+    monkeypatch.setattr(google_fit, "get_steps", lambda days_ago: 8000)
+    monkeypatch.setattr(google_fit, "get_sleep", lambda days_ago: {"total_minutes": 420, "deep_minutes": 60, "rem_minutes": 60})
+    monkeypatch.setattr(google_fit, "get_heart_rate", lambda days_ago: {"avg_bpm": 65, "max_bpm": 110})
+
     google_fit.run_cli(["summary", "1"])
     out = capsys.readouterr().out
     assert "Google Fit daily summary retrieved." in out
-    assert "75 bpm" not in out
+    assert "8000" not in out
+    assert "65" not in out
 
-    # Failure path
-    monkeypatch.setattr(google_fit, "get_daily_summary", MagicMock(side_effect=RuntimeError("SUMMARY_ERR_SECRET")))
+    # 2. Failure path when _fit_auth_summary returns an auth problem string
+    auth_warning_text = "⚠️ Google Fit auth: authorization is unavailable"
+    monkeypatch.setattr(google_fit, "_fit_auth_summary", lambda title: auth_warning_text)
+
+    # Note that get_daily_summary still returns the auth warning text for Telegram/UI
+    assert auth_warning_text in google_fit.get_daily_summary()
+
+    # But run_cli truthfully prints unavailable without leaking any text
     google_fit.run_cli([])
     out_err = capsys.readouterr().out
     assert "Google Fit daily summary unavailable." in out_err
-    assert "SUMMARY_ERR_SECRET" not in out_err
+    assert auth_warning_text not in out_err
+
+    # 3. Failure path when an unexpected exception is raised
+    monkeypatch.setattr(google_fit, "_generate_daily_summary", MagicMock(side_effect=RuntimeError("SUMMARY_ERR_SECRET")))
+    google_fit.run_cli([])
+    out_err2 = capsys.readouterr().out
+    assert "Google Fit daily summary unavailable." in out_err2
+    assert "SUMMARY_ERR_SECRET" not in out_err2

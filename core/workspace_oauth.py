@@ -186,8 +186,8 @@ def load_workspace_credentials(
 
     stored_scopes = read_stored_token_scopes(token_path)
 
-    # Validate caller's requested scopes against granted scopes
-    if scopes:
+    # Validate caller's requested scopes against granted scopes only when stored scope metadata is present
+    if stored_scopes and scopes:
         missing = check_missing_scopes(scopes, stored_scopes)
         if missing:
             raise WorkspaceMissingScopeError(
@@ -195,9 +195,12 @@ def load_workspace_credentials(
                 "Please reconnect your Google Workspace account to grant access."
             )
 
+    load_scopes = stored_scopes if stored_scopes else (list(scopes) if scopes else None)
+
     try:
-        creds = Credentials.from_authorized_user_file(token_path, scopes=stored_scopes or None)
+        creds = Credentials.from_authorized_user_file(token_path, scopes=load_scopes)
     except Exception as exc:
+
         raise WorkspaceTokenRevokedOrInvalidError(
             f"Google Workspace token is invalid: {exc}. Please reconnect your Google account."
         ) from exc
