@@ -19,6 +19,7 @@ from core.ai_provider import (
     DEFAULT_OPENAI_EMBEDDING_MODEL,
     DEFAULT_VERTEX_EMBEDDING_MODEL,
     EmbeddingsProviderSetupRequired,
+    find_offline_adc_credentials_path,
     get_embeddings_backend_identity,
     get_embeddings_collection_name,
     resolve_embeddings_provider,
@@ -76,32 +77,7 @@ AVAILABLE_EMBEDDINGS_CHOICES: list[dict[str, str]] = [
 ]
 
 
-def find_offline_adc_credentials_path() -> str | None:
-    """
-    Discovers standard local Application Default Credentials (ADC) file path without network calls.
-    Returns path if file exists on disk, otherwise None.
-    """
-    gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if gac and os.path.exists(gac):
-        return gac
 
-    if os.name == "nt":
-        app_data = os.environ.get("APPDATA")
-        if app_data:
-            win_adc = os.path.join(app_data, "gcloud", "application_default_credentials.json")
-            if os.path.exists(win_adc):
-                return win_adc
-    else:
-        xdg_config = os.environ.get("XDG_CONFIG_HOME")
-        if xdg_config:
-            xdg_adc = os.path.join(xdg_config, "gcloud", "application_default_credentials.json")
-            if os.path.exists(xdg_adc):
-                return xdg_adc
-        unix_adc = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
-        if os.path.exists(unix_adc):
-            return unix_adc
-
-    return None
 
 
 def resolve_local_embedding_model(

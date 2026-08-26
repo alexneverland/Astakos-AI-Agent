@@ -317,10 +317,35 @@ def test_inspect_workspace_token_metadata_rejects_structurally_incomplete_tokens
     p_scoped_inc.write_text(json.dumps({"scopes": ["https://www.googleapis.com/auth/drive"]}), encoding="utf-8")
     assert inspect_workspace_token_metadata(str(p_scoped_inc)) == ("malformed", [])
 
-    # 6. Valid authorized user structure without scope metadata -> legacy
+    # 6. Valid authorized user structure with explicit empty scopes -> valid with empty list
+    p_empty_scopes = tmp_path / "empty_scopes.json"
+    p_empty_scopes.write_text(json.dumps({"refresh_token": "rt", "client_id": "cid", "client_secret": "csec", "scopes": []}), encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_empty_scopes)) == ("valid", [])
+
+    # 7. Valid authorized user structure without scope metadata -> legacy
     p_leg = tmp_path / "legacy.json"
     p_leg.write_text(json.dumps({"refresh_token": "rt", "client_id": "cid", "client_secret": "csec"}), encoding="utf-8")
     assert inspect_workspace_token_metadata(str(p_leg)) == ("legacy", [])
+
+
+def test_load_workspace_credentials_with_explicit_empty_scopes_raises_missing_scope_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proves that a token with 'scopes': [] is treated as having no permissions and raises WorkspaceMissingScopeError."""
+    token_file = tmp_path / "token.json"
+    token_file.write_text(json.dumps({
+        "token": "valid-token",
+        "client_id": "cid",
+        "client_secret": "csec",
+        "refresh_token": "rt",
+        "scopes": [],
+    }), encoding="utf-8")
+    monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
+
+    with pytest.raises(WorkspaceMissingScopeError) as exc_info:
+        load_workspace_credentials(scopes=["https://www.googleapis.com/auth/calendar"])
+
+    assert "lacks required permissions" in str(exc_info.value)
 
 
 

@@ -75,6 +75,34 @@ def resolve_vertex_location(location: str | None = None) -> str:
     return os.getenv("LOCATION", "global") if location is None else location
 
 
+def find_offline_adc_credentials_path() -> str | None:
+    """
+    Discovers standard local Application Default Credentials (ADC) file path without network calls.
+    Returns path if file exists on disk, otherwise None.
+    """
+    gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if gac and os.path.exists(gac):
+        return gac
+
+    if os.name == "nt":
+        app_data = os.environ.get("APPDATA")
+        if app_data:
+            win_adc = os.path.join(app_data, "gcloud", "application_default_credentials.json")
+            if os.path.exists(win_adc):
+                return win_adc
+    else:
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config:
+            xdg_adc = os.path.join(xdg_config, "gcloud", "application_default_credentials.json")
+            if os.path.exists(xdg_adc):
+                return xdg_adc
+        unix_adc = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
+        if os.path.exists(unix_adc):
+            return unix_adc
+
+    return None
+
+
 def resolve_vertex_credentials_path(explicit_path: str | None = None) -> str:
     """Discovers configured Vertex AI credentials file path without mutating environment."""
     if explicit_path and os.path.exists(explicit_path):
@@ -92,6 +120,9 @@ def resolve_vertex_credentials_path(explicit_path: str | None = None) -> str:
     nested_cred = os.path.join(base_dir, "credentials", "credentials.json")
     if os.path.exists(nested_cred):
         return nested_cred
+    adc_path = find_offline_adc_credentials_path()
+    if adc_path and os.path.exists(adc_path):
+        return adc_path
     return ""
 
 
@@ -100,11 +131,20 @@ def get_vertex_credentials(credentials_path: str | None = None) -> Any:
     Loads Google auth credentials for Vertex AI if a credentials file is configured or discovered.
     Returns google.auth.credentials.Credentials or None.
     """
+    import json
     cred_file = resolve_vertex_credentials_path(credentials_path)
     if cred_file and os.path.exists(cred_file):
         try:
-            from google.oauth2 import service_account
-            return service_account.Credentials.from_service_account_file(cred_file)
+            with open(cred_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                cred_type = data.get("type")
+                if cred_type == "service_account":
+                    from google.oauth2 import service_account
+                    return service_account.Credentials.from_service_account_info(data)
+                elif cred_type == "authorized_user":
+                    from google.oauth2 import credentials as user_credentials
+                    return user_credentials.Credentials.from_authorized_user_info(data)
         except Exception:
             pass
     return None

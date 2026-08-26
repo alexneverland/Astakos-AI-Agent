@@ -143,16 +143,20 @@ def inspect_workspace_token_metadata(token_path: str | None = None) -> tuple[str
     if not (has_client and has_refresh):
         return ("malformed", [])
 
-    raw_scopes = data.get("scopes") or data.get("scope")
-    if raw_scopes is not None:
+    has_scopes_field = "scopes" in data
+    has_scope_field = "scope" in data
+
+    if has_scopes_field or has_scope_field:
+        raw_scopes = data["scopes"] if has_scopes_field else data["scope"]
         if isinstance(raw_scopes, list):
             parsed = [str(s).strip() for s in raw_scopes if str(s).strip()]
-            if parsed:
-                return ("valid", parsed)
+            return ("valid", parsed)
         elif isinstance(raw_scopes, str):
             parsed = [s.strip() for s in raw_scopes.split() if s.strip()]
-            if parsed:
-                return ("valid", parsed)
+            return ("valid", parsed)
+        elif raw_scopes is None:
+            return ("valid", [])
+        return ("malformed", [])
 
     return ("legacy", [])
 
@@ -190,10 +194,15 @@ def get_workspace_oauth_flow(
 
 
 
-def read_stored_token_scopes(token_path: str | None = None) -> list[str]:
-    """Reads the granted scopes from token.json, supporting either 'scopes' list or 'scope' space-separated string."""
+def read_stored_token_scopes(token_path: str | None = None) -> list[str] | None:
+    """
+    Reads the granted scopes from token.json.
+    Returns:
+      - list[str] (which may be empty) if explicit scope metadata was present in token.json
+      - None if token.json lacks scope metadata (legacy token)
+    """
     status, scopes = inspect_workspace_token_metadata(token_path)
-    return scopes if status == "valid" else []
+    return scopes if status == "valid" else None
 
 
 
@@ -202,7 +211,11 @@ def check_missing_scopes(
     token_scopes: Sequence[str] | None = None,
 ) -> list[str]:
     """Returns any required scopes that are not present in the token's granted scopes."""
-    granted_set = set(token_scopes if token_scopes is not None else read_stored_token_scopes())
+    if token_scopes is not None:
+        granted_set = set(token_scopes)
+    else:
+        scopes = read_stored_token_scopes()
+        granted_set = set(scopes) if scopes is not None else set()
     return [req for req in required_scopes if req and req not in granted_set]
 
 
@@ -267,7 +280,7 @@ def load_workspace_credentials(
     stored_scopes = read_stored_token_scopes(token_path)
 
     # Validate caller's requested scopes against granted scopes only when stored scope metadata is present
-    if stored_scopes and scopes:
+    if stored_scopes is not None and scopes:
         missing = check_missing_scopes(scopes, stored_scopes)
         if missing:
             raise WorkspaceMissingScopeError(
@@ -295,7 +308,7 @@ def load_workspace_credentials(
                     refreshed_json = creds.to_json()
                     # If original token omitted scope metadata, ensure we do not persist
                     # a caller scope subset as the full token grant set.
-                    if not stored_scopes:
+                    if stored_scopes is None:
                         try:
                             token_dict = json.loads(refreshed_json)
                             token_dict.pop("scopes", None)

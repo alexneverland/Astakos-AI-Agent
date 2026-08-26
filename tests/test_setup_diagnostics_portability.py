@@ -566,6 +566,29 @@ def test_workspace_diagnostics_missing_fit_scopes(monkeypatch: pytest.MonkeyPatc
     assert ws["services"]["google_fit"] == "missing_scope"
 
 
+def test_workspace_diagnostics_explicit_empty_scopes_reports_missing_scope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Explicitly empty scopes list (e.g. 'scopes': []) reports missing_scope rather than legacy connected."""
+    token_file = tmp_path / "token.json"
+    token_file.write_text(
+        json.dumps({
+            "token": "fake-tok",
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "rt",
+            "scopes": [],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASTAKOS_TOKEN_PATH", str(token_file))
+
+    ws = get_workspace_diagnostics()
+    assert ws["connected"] is True
+    assert ws["status"] == "missing_scope"
+    assert all(status == "missing_scope" for status in ws["services"].values())
+
+
 def test_workspace_diagnostics_legacy_token_without_scopes_metadata(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -933,6 +956,28 @@ def test_vertex_ai_adapter_resolves_project_id_and_credentials(
     assert adapter.project_id == "discovered-vertex-project"
     assert adapter.credentials_path == str(fake_cred)
     assert adapter._credentials is mock_creds
+
+
+def test_vertex_ai_adapter_resolves_project_id_and_credentials_from_adc(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """VertexAIAdapter resolves quota_project_id from ADC file when config.PROJECT_ID is placeholder."""
+    from core.ai_provider import VertexAIAdapter, resolve_vertex_project_id, resolve_vertex_credentials_path
+    adc_file = tmp_path / "application_default_credentials.json"
+    adc_file.write_text(json.dumps(_make_test_adc_dict("discovered-adc-project")), encoding="utf-8")
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.setattr(config, "CREDENTIALS_PATH", "")
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr("core.ai_provider.find_offline_adc_credentials_path", lambda: str(adc_file))
+    monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
+    monkeypatch.setattr(config, "PROJECT_ID", "your-gcp-project-id")
+
+    assert resolve_vertex_credentials_path() == str(adc_file)
+    assert resolve_vertex_project_id() == "discovered-adc-project"
+    adapter = VertexAIAdapter()
+    assert adapter.project_id == "discovered-adc-project"
+    assert adapter.credentials_path == str(adc_file)
+    assert adapter._credentials is not None
 
 
 def test_setup_wizard_save_populates_vertex_project_id_from_credentials(
