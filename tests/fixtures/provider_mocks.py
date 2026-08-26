@@ -17,6 +17,30 @@ from core.ai_provider import (
 )
 
 
+import io
+from PIL import Image
+
+def _make_mock_jpeg() -> bytes:
+    """Generates deterministic in-memory JPEG bytes for provider image generation fixtures."""
+    img = Image.new("RGB", (16, 16), color=(0, 128, 255))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def _make_mock_png() -> bytes:
+    """Generates deterministic in-memory RGBA PNG bytes for provider image generation fixtures."""
+    img = Image.new("RGBA", (16, 16), color=(255, 100, 50, 180))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+MOCK_JPEG_BYTES: bytes = _make_mock_jpeg()
+MOCK_PNG_BYTES: bytes = _make_mock_png()
+
+
+
 class MockOpenAIAdapter(AIProviderAdapter):
     provider_name = "openai"
     supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
@@ -45,7 +69,8 @@ class MockOpenAIAdapter(AIProviderAdapter):
 
     def generate_image(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
         self._check_faults()
-        return b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_openai_image"
+        return MOCK_PNG_BYTES
+
 
     def embed_text(self, texts: str | Sequence[str], is_query: bool = False) -> list[list[float]]:
         self._check_faults()
@@ -81,7 +106,7 @@ class MockGeminiAPIAdapter(AIProviderAdapter):
 
     def generate_image(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
         self._check_faults()
-        return b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_gemini_image"
+        return MOCK_JPEG_BYTES
 
     def embed_text(self, texts: str | Sequence[str], is_query: bool = False) -> list[list[float]]:
         self._check_faults()
@@ -117,7 +142,8 @@ class MockVertexAIAdapter(AIProviderAdapter):
 
     def generate_image(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
         self._check_faults()
-        return b"\xff\xd8\xff\xe0\x00\x10JFIF\x00mock_vertex_image"
+        return MOCK_JPEG_BYTES
+
 
     def embed_text(self, texts: str | Sequence[str], is_query: bool = False) -> list[list[float]]:
         self._check_faults()

@@ -1376,9 +1376,21 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     handling_agent    = "Chat_Agent"
 
     try:
+        # ── Explicit canonical fail-closed containment check for photo_path ──
+        safe_photo_path = ""
+        if photo_path:
+            try:
+                base_dir = os.path.realpath(os.path.abspath(PHOTOS_DIR))
+                cand_path = os.path.realpath(os.path.abspath(photo_path))
+                allowed_prefix = base_dir.rstrip(os.sep) + os.sep
+                if cand_path.startswith(allowed_prefix) and os.path.isfile(cand_path):
+                    safe_photo_path = cand_path
+            except Exception:
+                safe_photo_path = ""
+        photo_path = safe_photo_path
+
         # ── Multimodal message if a file exists ───────────
         if photo_path and os.path.exists(photo_path):
-            import base64
             filename = os.path.basename(photo_path)
             ext = os.path.splitext(filename)[1].lower()
             image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
@@ -1388,12 +1400,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             # We inject the isolated input into the enhanced string
             enhanced_user_input = f"[USER_UPLOADED_FILE]: {filename}\n{isolated_user_input}"
 
-            # If it is an IMAGE, we convert it to Base64 and send it as image_url
             if ext in image_exts:
-                print(f"\033[94m[Vision]: Encoding image to base64 ({ext})...\033[0m")
-                with open(photo_path, "rb") as f:
-                    img_b64 = base64.b64encode(f.read()).decode("utf-8")
-
                 mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                         ".gif": "image/gif", ".webp": "image/webp"}.get(ext, "image/jpeg")
 
@@ -1401,46 +1408,65 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     USER_PROVIDED_ASSET_SOURCE,
                     external_content_history_metadata,
                     format_untrusted_asset_vision_prompt,
+                    format_untrusted_tool_result,
                 )
-                human_msg = HumanMessage(content=[
-                    {
-                        "type": "text",
-                        "text": format_untrusted_asset_vision_prompt(enhanced_user_input),
-                    },
-                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_b64}"}}
-                ], additional_kwargs=external_content_history_metadata([
-                    USER_PROVIDED_ASSET_SOURCE,
-                ]))
-                print(f"\033[92m[Chat]: Multimodal message (Image): {filename}\033[0m")
-                print(f"\033[94m[Vision]: Ready for analysis by LLM — message: '{isolated_user_input[:120]}'\033[0m")
+                from core.ai_provider import (
+                    CapabilityNotSupportedError,
+                    ProviderAuthError,
+                    RateLimitError,
+                    AIProviderError,
+                )
+                from core.brain import get_active_provider_adapter, safe_adapter_call
 
-            # If it is a DOCUMENT (PDF, Word, Excel), we send it only as text/name
+                vision_prompt = format_untrusted_asset_vision_prompt(
+                    f"Analyze this image and describe the visual content relevant to the user request:\n{isolated_user_input or 'Describe the image.'}"
+                )
+
+                def _run_vision_analysis() -> str:
+                    with open(photo_path, "rb") as f:
+                        img_bytes = f.read()
+                    adapter = get_active_provider_adapter()
+                    return safe_adapter_call(
+                        adapter.analyze_vision,
+                        vision_prompt,
+                        img_bytes,
+                        mime_type=mime,
+                    ).strip()
+
+                try:
+                    vision_text = (await asyncio.to_thread(_run_vision_analysis)) or "No visual analysis returned."
+                except CapabilityNotSupportedError as exc:
+                    vision_text = f"Vision analysis is not supported by active provider '{exc.provider}'."
+                except (ProviderAuthError, RateLimitError, AIProviderError) as exc:
+                    vision_text = f"Vision analysis error ({getattr(exc, 'provider', 'unknown')}): {exc}"
+                except Exception as exc:
+                    vision_text = f"Vision analysis error: {exc}"
+
+                untrusted_analysis = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, vision_text)
+                enhanced_user_input = (
+                    f"[USER_UPLOADED_FILE]: {filename}\n"
+                    f"[PHOTO PATH]: {photo_path}\n"
+                    f"[ANALYSIS]: {untrusted_analysis}\n"
+                    f"{isolated_user_input}"
+                )
+                human_msg = HumanMessage(
+                    content=enhanced_user_input,
+                    additional_kwargs=external_content_history_metadata([
+                        USER_PROVIDED_ASSET_SOURCE,
+                    ]),
+                )
+                print(f"\033[92m[Chat]: Processed image with adapter vision: {filename}\033[0m")
             else:
                 human_msg = HumanMessage(content=enhanced_user_input)
                 print(f"\033[94m[Chat]: Text message with document reference: {filename}\033[0m")
-
-        # ── Standard text message ────────────────────────────────
         else:
-            # We feed the LangGraph state the isolated XML payload
             human_msg = HumanMessage(content=isolated_user_input)
 
-        # Timestamp on the current message
         now_ts = datetime.now().strftime("%H:%M")
-        if isinstance(human_msg.content, str):
-            human_msg = HumanMessage(
-                content=f"[{now_ts}] {human_msg.content}",
-                additional_kwargs=human_msg.additional_kwargs,
-            )
-        elif isinstance(human_msg.content, list):
-            parts = list(human_msg.content)
-            for i, p in enumerate(parts):
-                if isinstance(p, dict) and p.get("type") == "text":
-                    parts[i] = {"type": "text", "text": f"[{now_ts}] {p['text']}"}
-                    break
-            human_msg = HumanMessage(
-                content=parts,
-                additional_kwargs=human_msg.additional_kwargs,
-            )
+        human_msg = HumanMessage(
+            content=f"[{now_ts}] {human_msg.content}",
+            additional_kwargs=human_msg.additional_kwargs,
+        )
         # ── Running LangGraph ─────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "web"
         if photo_path and os.path.exists(photo_path):
@@ -1849,42 +1875,64 @@ async def upload_file(
             
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='JPEG')
-            img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
+            raw_img_bytes = img_byte_arr.getvalue()
             
             from core.untrusted_content import (
                 USER_PROVIDED_ASSET_SOURCE,
                 format_untrusted_asset_vision_prompt,
             )
-
-            def analyze_img(prompt_text: str) -> str:
-                """Analyze an uploaded image with an explicit untrusted-data boundary."""
-                msg = HumanMessage(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": format_untrusted_asset_vision_prompt(prompt_text),
-                        },
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-                    ]
-                )
-                resp = llm.invoke([msg])
-                from core.utils import clean_message
-                return clean_message(resp.content) if resp and resp.content else ""
-                
-            memory_analysis = analyze_img("Describe what you see in Greek, concisely, 1-2 sentences.")
-            if not memory_analysis:
-                memory_analysis = "No analysis available."
-                
-            detailed_analysis = analyze_img("Analyze the photo in detail in Greek, with humor and liveliness.")
-            if not detailed_analysis:
-                detailed_analysis = memory_analysis
-            chat_ai_msg = (
-                t("api.server.photo_received", filename=filename) +
-                f"{detailed_analysis}\n\n" +
-                t("api.server.save_prompt").split("\n")[0] + "\n" +
-                t("api.server.save_prompt").split("\n")[1]
+            from core.ai_provider import (
+                CapabilityNotSupportedError,
+                ProviderAuthError,
+                RateLimitError,
+                AIProviderError,
             )
-            user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
+            from core.brain import get_active_provider_adapter, safe_adapter_call
+
+            adapter = get_active_provider_adapter()
+            vision_error_msg = None
+            detailed_analysis = ""
+
+            def _run_upload_vision() -> str:
+                return safe_adapter_call(
+                    adapter.analyze_vision,
+                    format_untrusted_asset_vision_prompt("Analyze the photo in detail in Greek, with humor and liveliness."),
+                    raw_img_bytes,
+                    mime_type="image/jpeg",
+                ).strip()
+
+            try:
+                detailed_analysis = await asyncio.to_thread(_run_upload_vision)
+                if not detailed_analysis:
+                    vision_error_msg = "Η οπτική ανάλυση δεν επέστρεψε περιγραφή."
+            except CapabilityNotSupportedError as exc:
+                vision_error_msg = f"Η ανάλυση εικόνας δεν υποστηρίζεται από τον πάροχο '{exc.provider}'."
+            except ProviderAuthError as exc:
+                vision_error_msg = f"Η αυθεντικοποίηση ανάλυσης εικόνας απέτυχε για τον πάροχο '{exc.provider}'."
+            except RateLimitError as exc:
+                vision_error_msg = f"Ξεπέρασες το όριο κλήσεων/quota για την ανάλυση εικόνας ({exc.provider})."
+            except AIProviderError as exc:
+                vision_error_msg = f"Σφάλμα κατά την ανάλυση εικόνας ({exc.provider}): {exc}"
+            except Exception as exc:
+                vision_error_msg = f"Σφάλμα κατά την ανάλυση εικόνας: {exc}"
+
+            if vision_error_msg:
+                memory_analysis = ""
+                chat_ai_msg = (
+                    t("api.server.photo_received", filename=filename) +
+                    f"⚠️ {vision_error_msg}\n\n" +
+                    "Η φωτογραφία αποθηκεύτηκε τοπικά, αλλά η οπτική ανάλυση δεν είναι διαθέσιμη."
+                )
+                user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS_UNAVAILABLE]: {vision_error_msg}"
+            else:
+                memory_analysis = detailed_analysis
+                chat_ai_msg = (
+                    t("api.server.photo_received", filename=filename) +
+                    f"{detailed_analysis}\n\n" +
+                    t("api.server.save_prompt").split("\n")[0] + "\n" +
+                    t("api.server.save_prompt").split("\n")[1]
+                )
+                user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
         elif file_ext in doc_exts:
             # We read the content of the document
             doc_text = _read_document_text_for_analysis(file_path, file_ext)

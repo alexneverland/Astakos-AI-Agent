@@ -2084,12 +2084,19 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
 @tool
 def generate_image_tool(prompt: str) -> str:
     """
-    Creates an image based on a description (prompt) via Vertex AI Imagen.
+    Creates an image based on a description (prompt) via the active AI provider.
     """
     import os
     import time
     from slugify import slugify
     from config import BASE_DIR
+    from core.ai_provider import (
+        CapabilityNotSupportedError,
+        ProviderAuthError,
+        RateLimitError,
+        AIProviderError,
+    )
+    from core.brain import get_active_provider_adapter
 
     output_dir = os.path.join(BASE_DIR, "outputs")
     os.makedirs(output_dir, exist_ok=True)
@@ -2098,38 +2105,44 @@ def generate_image_tool(prompt: str) -> str:
     filename = f"{safe_filename}_{int(time.time())}.jpg"
     full_path = os.path.join(output_dir, filename)
 
-    # ── Vertex AI Imagen ──────────────────────────────────────────
     try:
-        from google import genai
-        from google.genai import types
+        adapter = get_active_provider_adapter()
+        img_bytes = adapter.generate_image(prompt, aspect_ratio="1:1")
+        if not img_bytes:
+            return f"❌ Image generation error ({adapter.provider_name}): provider returned no image data."
 
-        api_key = config.GEMINI_API_KEY
-        if api_key:
-            client = genai.Client(api_key=api_key)
-        else:
-            client = genai.Client(
-                vertexai=True,
-                project=config.PROJECT_ID,
-                location=config.LOCATION or "us-central1"
-            )
-            
-        response = client.models.generate_images(
-            model='imagen-3.0-generate-001',
-            prompt=prompt,
-            config=types.GenerateImagesConfig(
-                number_of_images=1,
-                aspect_ratio="1:1"
-            )
-        )
-        
-        if not response.generated_images:
-            return "❌ Vertex AI Imagen returned no image."
-            
-        response.generated_images[0].image.save(full_path)
+        import io
+        from PIL import Image
+
+        try:
+            with Image.open(io.BytesIO(img_bytes)) as img:
+                if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                    rgba = img.convert("RGBA")
+                    background = Image.new("RGB", rgba.size, (255, 255, 255))
+                    background.paste(rgba, mask=rgba.split()[3])
+                    rgb_img = background
+                elif img.mode != "RGB":
+                    rgb_img = img.convert("RGB")
+                else:
+                    rgb_img = img
+
+                rgb_img.save(full_path, format="JPEG", quality=95)
+        except Exception as img_err:
+            return f"❌ Image generation error ({adapter.provider_name}): invalid or unreadable image data ({img_err})."
+
         return f"✅ Ready! Image created.\n[SEND_PHOTO: {full_path}]"
 
+    except CapabilityNotSupportedError as exc:
+        return f"❌ Image generation is not supported by provider '{exc.provider}': {exc}"
+    except ProviderAuthError as exc:
+        return f"❌ Image generation authentication failed for provider '{exc.provider}': {exc}"
+    except RateLimitError as exc:
+        return f"❌ Image generation quota or rate limit exceeded for provider '{exc.provider}': {exc}"
+    except AIProviderError as exc:
+        return f"❌ Image generation error ({exc.provider}): {exc}"
     except Exception as e:
-        return f"❌ Error Vertex AI Imagen: {str(e)}"
+        return f"❌ Error during image creation: {str(e)}"
+
 def _escape_drive_query_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 

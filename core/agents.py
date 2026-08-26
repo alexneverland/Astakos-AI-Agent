@@ -398,12 +398,8 @@ def chat_agent_node(state: AgentState):
     path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
 
     pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
-    image_part = None
 
-    detailed_keywords = config.NLP_CONFIG.get("tools", {}).get("detailed_keywords", [])
-    needs_pixels = any(word in last_msg_text.lower() for word in detailed_keywords)
-
-    if path_match and (not pre_baked_analysis or needs_pixels):
+    if path_match and not pre_baked_analysis:
         try:
             filename = os.path.basename(path_match.group(1).strip().replace("]", ""))
             file_path = os.path.join(PHOTOS_DIR, filename)
@@ -411,15 +407,37 @@ def chat_agent_node(state: AgentState):
             image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
 
             if os.path.exists(file_path) and ext in image_exts:
+                from core.ai_provider import (
+                    CapabilityNotSupportedError,
+                    ProviderAuthError,
+                    RateLimitError,
+                    AIProviderError,
+                )
+                from core.brain import get_active_provider_adapter
+                from core.untrusted_content import (
+                    USER_PROVIDED_ASSET_SOURCE,
+                    format_untrusted_asset_vision_prompt,
+                    format_untrusted_tool_result,
+                )
+
+                mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                        ".gif": "image/gif", ".webp": "image/webp"}.get(ext, "image/jpeg")
+
                 with open(file_path, "rb") as image_file:
-                    image_data = base64.b64encode(image_file.read()).decode("utf-8")
-                    image_part = {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}
-                    }
-                print(f"\033[92m[Vision]: Pixels loaded for re-analysis: {filename}\033[0m")
+                    image_bytes = image_file.read()
+
+                adapter = get_active_provider_adapter()
+                vision_prompt = format_untrusted_asset_vision_prompt(
+                    f"Analyze this image and describe visual details relevant to the conversation:\n{last_msg_text}"
+                )
+                raw_vision = adapter.analyze_vision(vision_prompt, image_bytes, mime_type=mime).strip()
+                pre_baked_analysis = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, raw_vision)
+                print(f"\033[92m[Chat-Vision]: Visual analysis produced via adapter: {filename}\033[0m")
             elif os.path.exists(file_path):
                 print(f"\033[94m[Agent Logic]: The {filename} is a document. Bypassing Vision.\033[0m")
+        except (CapabilityNotSupportedError, ProviderAuthError, RateLimitError, AIProviderError) as e:
+            print(f"⚠️ [Chat-Vision Provider Error]: {e}")
+            pre_baked_analysis = f"Image analysis unavailable ({e})"
         except Exception as e:
             print(f"⚠️ [Vision/File Error]: {e}")
 
@@ -440,11 +458,6 @@ def chat_agent_node(state: AgentState):
     safe_history = sanitize_history_for_gemini(prompt_history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
 
-    if image_part:
-        final_messages[-1] = HumanMessage(content=[
-            {"type": "text", "text": last_msg_text},
-            image_part
-        ])
 
     from tools.system import archive_file, retrieve_photo, save_to_memory, delete_from_memory, search_memory, control_spotify, get_current_location, read_local_file
     from tools.web import execute_local_pipeline, relay_local_payload, search_supermarket_prices
@@ -777,20 +790,44 @@ def web_agent_node(state: AgentState):
             break
 
     path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
-    image_part = None
+    analysis_match = re.search(r"\[ANALYSIS\]:\s*(.*)", last_msg_text)
+    pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
 
-    if path_match:
+    if path_match and not pre_baked_analysis:
         try:
             filename = os.path.basename(path_match.group(1).strip().replace("]", ""))
             file_path = os.path.join(PHOTOS_DIR, filename)
-            if os.path.exists(file_path) and filename.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+            ext = os.path.splitext(filename)[1].lower()
+            if os.path.exists(file_path) and ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif'):
+                from core.ai_provider import (
+                    CapabilityNotSupportedError,
+                    ProviderAuthError,
+                    RateLimitError,
+                    AIProviderError,
+                )
+                from core.brain import get_active_provider_adapter
+                from core.untrusted_content import (
+                    USER_PROVIDED_ASSET_SOURCE,
+                    format_untrusted_asset_vision_prompt,
+                    format_untrusted_tool_result,
+                )
+
+                mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                        ".gif": "image/gif", ".webp": "image/webp"}.get(ext, "image/jpeg")
+
                 with open(file_path, "rb") as f:
-                    img_base64 = base64.b64encode(f.read()).decode("utf-8")
-                    image_part = {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
-                    }
-                print(f"\033[92m[Web-Vision]: Pixels loaded for analysis: {filename}\033[0m")
+                    img_bytes = f.read()
+
+                adapter = get_active_provider_adapter()
+                vision_prompt = format_untrusted_asset_vision_prompt(
+                    f"Analyze this web/image asset in detail:\n{latest_user_text or last_msg_text}"
+                )
+                raw_vision = adapter.analyze_vision(vision_prompt, img_bytes, mime_type=mime).strip()
+                pre_baked_analysis = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, raw_vision)
+                print(f"\033[92m[Web-Vision]: Visual analysis produced via adapter: {filename}\033[0m")
+        except (CapabilityNotSupportedError, ProviderAuthError, RateLimitError, AIProviderError) as e:
+            print(f"⚠️ [Web-Vision Provider Error]: {e}")
+            pre_baked_analysis = f"Image analysis unavailable ({e})"
         except Exception as e:
             print(f"⚠️ Web Vision Error: {e}")
 
@@ -827,11 +864,13 @@ def web_agent_node(state: AgentState):
         else history
     )
 
+    vision_info = f"\n[FILE/PHOTO CONTEXT]: You already have this analysis: '{pre_baked_analysis}'.\n" if pre_baked_analysis else ""
     system_base = load_agent_prompt("Web_Agent", "You are the Web_Agent.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
+    system_prompt_text = f"{system_base}{vision_info}"
     system_prompt = build_prompt(
         prompt_history,
-        system_base,
+        system_prompt_text,
         channel=state.get("channel"),
         include_persisted_context=not active_draft_edit_context_isolated,
     )
@@ -839,11 +878,6 @@ def web_agent_node(state: AgentState):
     safe_history = sanitize_history_for_gemini(prompt_history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
 
-    if image_part:
-        final_messages[-1] = HumanMessage(content=[
-            {"type": "text", "text": last_msg_text},
-            image_part
-        ])
 
     from tools.system import (
         retrieve_photo, read_local_file, post_to_linkedin,
@@ -960,12 +994,8 @@ def tech_agent_node(state: AgentState):
     path_match = re.search(r"\[(?:PHOTO PATH|USER_UPLOADED_PHOTO|USER_UPLOADED_FILE)\]:\s*([^\s\n\]]+)", last_msg_text)
 
     pre_baked_analysis = analysis_match.group(1).strip() if analysis_match else None
-    image_part = None
 
-    tech_keywords = config.NLP_CONFIG.get("tools", {}).get("tech_keywords", [])
-    needs_pixels = any(word in last_msg_text.lower() for word in tech_keywords)
-
-    if path_match and (not pre_baked_analysis or needs_pixels):
+    if path_match and not pre_baked_analysis:
         try:
             filename = os.path.basename(path_match.group(1).strip().replace("]", ""))
             file_path = os.path.join(PHOTOS_DIR, filename)
@@ -973,15 +1003,37 @@ def tech_agent_node(state: AgentState):
             image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
 
             if os.path.exists(file_path) and ext in image_exts:
-                with open(file_path, "rb") as f:
-                    img_base64 = base64.b64encode(f.read()).decode("utf-8")
-                    image_part = {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}
-                    }
-                print(f"\033[94m[Tech-Vision]: Pixels loaded for technical analysis: {filename}\033[0m")
+                from core.ai_provider import (
+                    CapabilityNotSupportedError,
+                    ProviderAuthError,
+                    RateLimitError,
+                    AIProviderError,
+                )
+                from core.brain import get_active_provider_adapter
+                from core.untrusted_content import (
+                    USER_PROVIDED_ASSET_SOURCE,
+                    format_untrusted_asset_vision_prompt,
+                    format_untrusted_tool_result,
+                )
+
+                mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                        ".gif": "image/gif", ".webp": "image/webp"}.get(ext, "image/jpeg")
+
+                with open(file_path, "rb") as image_file:
+                    image_bytes = image_file.read()
+
+                adapter = get_active_provider_adapter()
+                vision_prompt = format_untrusted_asset_vision_prompt(
+                    f"Analyze this technical image/screenshot/diagram in detail:\n{last_msg_text}"
+                )
+                raw_vision = adapter.analyze_vision(vision_prompt, image_bytes, mime_type=mime).strip()
+                pre_baked_analysis = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, raw_vision)
+                print(f"\033[94m[Tech-Vision]: Technical analysis produced via adapter: {filename}\033[0m")
             elif os.path.exists(file_path):
                 print(f"\033[94m[Agent Logic]: The {filename} is a document. Bypassing Vision.\033[0m")
+        except (CapabilityNotSupportedError, ProviderAuthError, RateLimitError, AIProviderError) as e:
+            print(f"⚠️ [Tech-Vision Provider Error]: {e}")
+            pre_baked_analysis = f"Technical image analysis unavailable ({e})"
         except Exception as e:
             print(f"⚠️ Tech Vision Error: {e}")
 
@@ -993,11 +1045,6 @@ def tech_agent_node(state: AgentState):
 
     safe_history = sanitize_history_for_gemini(history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
-    if image_part:
-        final_messages[-1] = HumanMessage(content=[
-            {"type": "text", "text": last_msg_text},
-            image_part
-        ])
 
     from tools.system import (
         read_local_file, drive_manager, archive_file, search_memory,
