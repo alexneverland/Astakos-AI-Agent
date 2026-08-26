@@ -349,6 +349,7 @@ def _generate_daily_summary(days_ago: int = 1) -> tuple[str, bool]:
         return auth_problem, False
 
     lines = [f"{title}\n"]
+    has_errors = False
 
     try:
         steps = get_steps(days_ago)
@@ -358,6 +359,7 @@ def _generate_daily_summary(days_ago: int = 1) -> tuple[str, bool]:
         else:
             lines.append(t("skills.google_fit.msg_steps_today_none"))
     except Exception:
+        has_errors = True
         lines.append(t("skills.google_fit.msg_steps_today_err", e="unavailable"))
 
     try:
@@ -376,6 +378,7 @@ def _generate_daily_summary(days_ago: int = 1) -> tuple[str, bool]:
         else:
             lines.append(t("skills.google_fit.msg_sleep_yest_none"))
     except Exception:
+        has_errors = True
         lines.append(t("skills.google_fit.msg_sleep_yest_err", e="unavailable"))
 
     try:
@@ -385,9 +388,11 @@ def _generate_daily_summary(days_ago: int = 1) -> tuple[str, bool]:
         else:
             lines.append(t("skills.google_fit.msg_hr_yest_none"))
     except Exception:
+        has_errors = True
         lines.append(t("skills.google_fit.msg_hr_today_err", e="unavailable"))
 
-    return "\n".join(lines), True
+    return "\n".join(lines), not has_errors
+
 
 
 def get_daily_summary(days_ago: int = 1) -> str:

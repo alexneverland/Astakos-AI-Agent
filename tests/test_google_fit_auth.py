@@ -184,3 +184,29 @@ def test_cli_summary_success_and_failure_prints_fixed_safe_messages(
     out_err2 = capsys.readouterr().out
     assert "Google Fit daily summary unavailable." in out_err2
     assert "SUMMARY_ERR_SECRET" not in out_err2
+
+
+def test_cli_summary_partial_fit_query_failure_returns_unavailable_status(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Auth is fine, but heart-rate query fails
+    monkeypatch.setattr(google_fit, "_fit_auth_summary", lambda title: None)
+    monkeypatch.setattr(google_fit, "get_steps", lambda days_ago: 8000)
+    monkeypatch.setattr(google_fit, "get_sleep", lambda days_ago: {"total_minutes": 420, "deep_minutes": 60, "rem_minutes": 60})
+    monkeypatch.setattr(google_fit, "get_heart_rate", MagicMock(side_effect=RuntimeError("HR_QUERY_ERR")))
+
+    # 1. Internal status helper returns success=False
+    text, success = google_fit._generate_daily_summary(1)
+    assert success is False
+    assert "8,000" in text  # Briefing text still contains available data and error notice
+    assert "unavailable" in text
+
+    # 2. Public get_daily_summary still returns the formatted string for UI/Telegram
+    assert "8,000" in google_fit.get_daily_summary(1)
+
+    # 3. CLI evaluates status and outputs unavailable without leaking
+    google_fit.run_cli(["summary", "1"])
+    out = capsys.readouterr().out
+    assert "Google Fit daily summary unavailable." in out
+    assert "Google Fit daily summary retrieved." not in out
+    assert "HR_QUERY_ERR" not in out
