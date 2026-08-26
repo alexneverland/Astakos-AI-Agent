@@ -24,8 +24,8 @@ from core.i18n import t
 SCOPES: list[str] = ["https://www.googleapis.com/auth/drive"]
 
 BACKUP_EXCLUDE_ITEMS = {
-
     'venv',
+    '.venv',
     '__pycache__',
     '.git',
     'messenger_profile',
@@ -42,7 +42,7 @@ def is_excluded_backup_item(item_name: str, exclude_items: set[str] | list[str] 
     """
     Determines whether a file or directory should be excluded from daily backup.
     Excludes .env, all .env.* variants, credentials/, credentials.json, token.json,
-    .astakos_token, client_secrets.json, and standard ignored directories (venv, .git, etc.).
+    .astakos_token, client_secrets.json, and standard ignored directories (venv, .venv, .git, etc.).
     """
     if exclude_items and item_name in exclude_items:
         return True
@@ -72,16 +72,21 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
         return uploaded_items
 
     for item_name in os.listdir(local_path):
-        # 1. Check for excluded items (secrets, .env*, credentials, venv, etc.)
+        # 1. Check for excluded items (secrets, .env*, credentials, venv, .venv, etc.)
         if is_excluded_backup_item(item_name, exclude_items):
             print(f"  [Skip] Excluded by name: {item_name}")
             continue
 
-
         current_local_path = os.path.join(local_path, item_name)
 
-        # 2. Case: File
+        # 2. Reject symlinks to prevent following links to secrets or escaping backup root
+        if os.path.islink(current_local_path):
+            print(f"  [Skip] Excluded symlink: {item_name}")
+            continue
+
+        # 3. Case: File
         if os.path.isfile(current_local_path):
+
             # We get the extension (e.g. .pdf)
             ext = os.path.splitext(item_name)[1].lower()
             

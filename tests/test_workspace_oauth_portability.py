@@ -581,6 +581,10 @@ def test_daily_backup_excludes_all_secret_layouts(tmp_path: Path) -> None:
     venv_dir.mkdir()
     (venv_dir / "lib.py").write_text("# venv code", encoding="utf-8")
 
+    dot_venv_dir = root / ".venv"
+    dot_venv_dir.mkdir()
+    (dot_venv_dir / "lib2.py").write_text("# .venv code", encoding="utf-8")
+
     # 3. Permitted files that SHOULD be uploaded
     main_py = root / "main.py"
     main_py.write_text("# project entry", encoding="utf-8")
@@ -631,7 +635,56 @@ def test_daily_backup_excludes_all_secret_layouts(tmp_path: Path) -> None:
     assert "credentials" not in created_folders
     assert "service_account.json" not in uploaded_files
     assert "venv" not in created_folders
+    assert ".venv" not in created_folders
     assert "lib.py" not in uploaded_files
+    assert "lib2.py" not in uploaded_files
+
+
+def test_daily_backup_rejects_symlinks_pointing_to_secrets_or_outside_tree(tmp_path: Path) -> None:
+    """Proves that symlinks to .env or outside files are skipped before reading or uploading."""
+    root = tmp_path / "backup_root"
+    root.mkdir()
+
+    # Secret file outside or inside
+    secret_target = root / ".env"
+    secret_target.write_text("SECRET_OAUTH=xyz", encoding="utf-8")
+
+    # Permitted real file
+    real_file = root / "app.py"
+    real_file.write_text("# real app", encoding="utf-8")
+
+    # Symlink with innocent name pointing to secret target
+    innocent_link = root / "safe_notes.txt"
+    try:
+        os.symlink(str(secret_target), str(innocent_link))
+        symlink_created = True
+    except OSError:
+        symlink_created = False
+
+    uploaded_files: list[str] = []
+    mock_service = MagicMock()
+
+    def _mock_create(body: dict[str, Any], **kwargs: Any) -> MagicMock:
+        req = MagicMock()
+        name = body.get("name", "")
+        uploaded_files.append(name)
+        req.execute.return_value = {"id": f"file_id_{name}", "name": name}
+        return req
+
+    mock_service.files().create.side_effect = _mock_create
+
+    daily_backup.upload_folder_recursive(
+        mock_service,
+        str(root),
+        "drive_backup_parent_id",
+        daily_backup.BACKUP_EXCLUDE_ITEMS,
+    )
+
+    assert "app.py" in uploaded_files
+    assert ".env" not in uploaded_files
+    if symlink_created:
+        assert "safe_notes.txt" not in uploaded_files
+
 
 
 def test_gcalendar_tool_missing_credentials_returns_error_message(
