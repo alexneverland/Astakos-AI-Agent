@@ -92,6 +92,11 @@ def find_offline_adc_credentials_path() -> str | None:
             if os.path.exists(win_adc):
                 return win_adc
     else:
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config:
+            xdg_adc = os.path.join(xdg_config, "gcloud", "application_default_credentials.json")
+            if os.path.exists(xdg_adc):
+                return xdg_adc
         unix_adc = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
         if os.path.exists(unix_adc):
             return unix_adc

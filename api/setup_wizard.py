@@ -150,8 +150,11 @@ async def start_workspace_oauth(request: Request):
         flow = get_workspace_oauth_flow(redirect_uri=f"{base_url}/api/workspace/oauth/callback")
         auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline", include_granted_scopes="true")
         return {"auth_url": auth_url}
-    except WorkspaceAuthError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except WorkspaceAuthError:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Workspace OAuth client secrets file not found. Please check credentials/client_secrets.json.",
+        ) from None
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to initiate Google Workspace OAuth flow.") from None
 

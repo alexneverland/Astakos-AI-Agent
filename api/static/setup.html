@@ -626,7 +626,7 @@
                 Object.keys(promptsData).sort().forEach(key => {
                     const opt = document.createElement('option');
                     opt.value = key;
-                    opt.innerHTML = key;
+                    opt.textContent = key;
                     selector.appendChild(opt);
                 });
                 if(Object.keys(promptsData).length > 0) {
