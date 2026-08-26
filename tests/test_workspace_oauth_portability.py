@@ -283,13 +283,12 @@ def test_read_stored_token_scopes_supports_string_and_list(tmp_path: Path) -> No
     assert read_stored_token_scopes(str(p2)) == ["https://a", "https://b"]
 
 
-def test_load_workspace_credentials_without_stored_scopes_loads_caller_requested_scopes(
+def test_load_workspace_credentials_without_stored_scopes_loads_successfully(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """
     Proves that when a legacy token.json lacks embedded scope metadata (neither 'scopes' nor 'scope'),
-    load_workspace_credentials loads credentials using caller-requested scopes without raising
-    WorkspaceMissingScopeError.
+    load_workspace_credentials loads credentials without raising WorkspaceMissingScopeError.
     """
     token_file = tmp_path / "token.json"
     token_file.write_text(json.dumps({
@@ -307,7 +306,52 @@ def test_load_workspace_credentials_without_stored_scopes_loads_caller_requested
     with patch("google.oauth2.credentials.Credentials.from_authorized_user_file", side_effect=_mock_from_authorized_user_file):
         creds = load_workspace_credentials(scopes=["https://www.googleapis.com/auth/calendar"])
         assert creds.valid
-        assert requested_loader_scopes == [["https://www.googleapis.com/auth/calendar"]]
+        assert requested_loader_scopes == [None]
+
+
+def test_load_workspace_credentials_without_stored_scopes_refresh_preserves_metadata_absent_structure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Proves that refreshing a token without stored scope metadata does not write a single-caller
+    scope subset into token.json, so subsequent requests for other features (e.g. Gmail) succeed.
+    """
+    token_file = tmp_path / "token.json"
+    token_file.write_text(json.dumps({
+        "token": "legacy-token-no-scopes",
+        "refresh_token": "legacy-refresh",
+    }), encoding="utf-8")
+    monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
+
+    mock_creds = _create_mock_creds(valid=False, scopes=None)
+    mock_creds.expired = True
+    mock_creds.refresh_token = "legacy-refresh"
+
+    def _mock_refresh(request: Any) -> None:
+        mock_creds.valid = True
+        mock_creds.token = "new-refreshed-token"
+
+    mock_creds.refresh.side_effect = _mock_refresh
+    mock_creds.to_json.return_value = json.dumps({
+        "token": "new-refreshed-token",
+        "refresh_token": "legacy-refresh",
+        "scopes": ["https://www.googleapis.com/auth/calendar"],  # subset returned by some mock/lib
+    })
+
+    with patch("google.oauth2.credentials.Credentials.from_authorized_user_file", return_value=mock_creds):
+        # 1. Calendar triggers refresh
+        creds = load_workspace_credentials(scopes=["https://www.googleapis.com/auth/calendar"])
+        assert creds.valid
+
+        # 2. Verify token on disk does NOT retain the caller's subset as the full grant
+        saved_data = json.loads(token_file.read_text(encoding="utf-8"))
+        assert "scopes" not in saved_data
+
+        # 3. Subsequent call for Gmail does not fail preflight check
+        mock_creds.valid = True
+        gmail_creds = load_workspace_credentials(scopes=["https://www.googleapis.com/auth/gmail.readonly"])
+        assert gmail_creds.valid
+
 
 
 

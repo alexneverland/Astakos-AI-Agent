@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+
 from typing import Any, Sequence
 
 from google.auth.exceptions import RefreshError
@@ -96,8 +98,8 @@ def is_workspace_connected() -> bool:
 
 def read_stored_token_scopes(token_path: str | None = None) -> list[str]:
     """Reads the granted scopes from token.json, supporting either 'scopes' list or 'scope' space-separated string."""
-    import json
     target_path = token_path or get_token_path()
+
     if not os.path.exists(target_path) or os.path.getsize(target_path) == 0:
         return []
     try:
@@ -195,12 +197,9 @@ def load_workspace_credentials(
                 "Please reconnect your Google Workspace account to grant access."
             )
 
-    load_scopes = stored_scopes if stored_scopes else (list(scopes) if scopes else None)
-
     try:
-        creds = Credentials.from_authorized_user_file(token_path, scopes=load_scopes)
+        creds = Credentials.from_authorized_user_file(token_path, scopes=stored_scopes or None)
     except Exception as exc:
-
         raise WorkspaceTokenRevokedOrInvalidError(
             f"Google Workspace token is invalid: {exc}. Please reconnect your Google account."
         ) from exc
@@ -215,8 +214,19 @@ def load_workspace_credentials(
             try:
                 creds.refresh(Request())
                 try:
+                    refreshed_json = creds.to_json()
+                    # If original token omitted scope metadata, ensure we do not persist
+                    # a caller scope subset as the full token grant set.
+                    if not stored_scopes:
+                        try:
+                            token_dict = json.loads(refreshed_json)
+                            if "scopes" in token_dict:
+                                del token_dict["scopes"]
+                            refreshed_json = json.dumps(token_dict, indent=2)
+                        except Exception:
+                            pass
                     with open(token_path, "w", encoding="utf-8") as f:
-                        f.write(creds.to_json())
+                        f.write(refreshed_json)
                 except Exception as write_exc:
                     logger.warning(f"Could not persist refreshed token: {write_exc}")
             except RefreshError as exc:
