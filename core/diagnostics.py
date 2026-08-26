@@ -351,12 +351,11 @@ def get_embeddings_diagnostics(
 def inspect_semantic_memory_inventory(chroma_dir: str | None = None) -> dict[str, int] | None:
     """
     Safely inspects the local Chroma database collections and their vector counts in read-only mode,
-    reusing the existing managed Chroma handle if memory.vector_store is already loaded, or
-    querying the persist directory read-only without executing top-level vector_store/embeddings initialization.
+    reusing the existing managed Chroma handle if memory.vector_store is already loaded by the running application.
+    If memory.vector_store is not loaded (e.g. during Setup Wizard), returns None without touching Chroma or creating files.
     """
     import sys
 
-    # 1. Reuse managed handle if memory.vector_store is already loaded in-process
     m_vs = sys.modules.get("memory.vector_store")
     if m_vs is not None:
         getter = getattr(m_vs, "get_collections_inventory", None)
@@ -365,28 +364,28 @@ def inspect_semantic_memory_inventory(chroma_dir: str | None = None) -> dict[str
                 return getter(chroma_dir)
             except Exception:
                 pass
-
-    # 2. Standalone execution (e.g. during Setup Wizard): inspect directory directly without importing vector_store
-    db_dir = chroma_dir or getattr(config, "CHROMA_DB_DIR", None)
-    if not db_dir or not os.path.exists(db_dir):
-        return {}
-    try:
-        import chromadb
-        from chromadb.config import Settings
-        client = chromadb.PersistentClient(
-            path=db_dir,
-            settings=Settings(anonymized_telemetry=False, is_persistent=True),
-        )
-        collections = client.list_collections()
-        inventory = {}
-        for col in collections:
+        vs = getattr(m_vs, "vector_store", None)
+        lock = getattr(m_vs, "vector_lock", None)
+        if vs is not None and hasattr(vs, "_client") and vs._client is not None:
             try:
-                inventory[col.name] = col.count()
+                def _read(client):
+                    inv = {}
+                    for col in client.list_collections():
+                        try:
+                            inv[col.name] = col.count()
+                        except Exception:
+                            inv[col.name] = 0
+                    return inv
+
+                if lock is not None:
+                    with lock:
+                        return _read(vs._client)
+                return _read(vs._client)
             except Exception:
-                inventory[col.name] = 0
-        return inventory
-    except Exception:
-        return None
+                pass
+
+    return None
+
 
 
 

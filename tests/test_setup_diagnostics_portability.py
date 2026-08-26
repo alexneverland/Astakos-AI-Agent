@@ -407,11 +407,22 @@ def test_semantic_memory_inventory_uses_managed_vector_store_handle(
     assert inv == {"astakos_long_term": 10, "astakos_vec_test": 5}
 
 
+def test_semantic_memory_inventory_returns_none_when_vector_store_not_loaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When memory.vector_store is not loaded in sys.modules, inspect_semantic_memory_inventory returns None without importing or opening Chroma."""
+    import sys
+    monkeypatch.setitem(sys.modules, "memory.vector_store", None)
+    inv = inspect_semantic_memory_inventory()
+    assert inv is None
+
+
 def test_semantic_memory_diagnostics_unconfigured_embeddings() -> None:
     diag = get_semantic_memory_diagnostics("auto", "anthropic")
     assert diag["collection_name"] == "astakos_vec_unconfigured"
     assert diag["status"] == "degraded"
     assert diag["reindex_needed"] is False
+
 
 
 # ────────────────────────────────────────────────────────────────
