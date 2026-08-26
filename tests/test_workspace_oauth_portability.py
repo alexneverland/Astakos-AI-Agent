@@ -314,7 +314,7 @@ def test_load_workspace_credentials_without_stored_scopes_refresh_preserves_meta
 ) -> None:
     """
     Proves that refreshing a token without stored scope metadata does not write a single-caller
-    scope subset into token.json, so subsequent requests for other features (e.g. Gmail) succeed.
+    scope subset (neither 'scopes' list nor 'scope' string) into token.json, so subsequent requests for other features (e.g. Gmail) succeed.
     """
     token_file = tmp_path / "token.json"
     token_file.write_text(json.dumps({
@@ -335,7 +335,8 @@ def test_load_workspace_credentials_without_stored_scopes_refresh_preserves_meta
     mock_creds.to_json.return_value = json.dumps({
         "token": "new-refreshed-token",
         "refresh_token": "legacy-refresh",
-        "scopes": ["https://www.googleapis.com/auth/calendar"],  # subset returned by some mock/lib
+        "scopes": ["https://www.googleapis.com/auth/calendar"],
+        "scope": "https://www.googleapis.com/auth/calendar",
     })
 
     with patch("google.oauth2.credentials.Credentials.from_authorized_user_file", return_value=mock_creds):
@@ -343,14 +344,16 @@ def test_load_workspace_credentials_without_stored_scopes_refresh_preserves_meta
         creds = load_workspace_credentials(scopes=["https://www.googleapis.com/auth/calendar"])
         assert creds.valid
 
-        # 2. Verify token on disk does NOT retain the caller's subset as the full grant
+        # 2. Verify token on disk does NOT retain the caller's subset (neither scopes nor scope)
         saved_data = json.loads(token_file.read_text(encoding="utf-8"))
         assert "scopes" not in saved_data
+        assert "scope" not in saved_data
 
         # 3. Subsequent call for Gmail does not fail preflight check
         mock_creds.valid = True
         gmail_creds = load_workspace_credentials(scopes=["https://www.googleapis.com/auth/gmail.readonly"])
         assert gmail_creds.valid
+
 
 
 

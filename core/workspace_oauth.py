@@ -230,11 +230,12 @@ def load_workspace_credentials(
                     if not stored_scopes:
                         try:
                             token_dict = json.loads(refreshed_json)
-                            if "scopes" in token_dict:
-                                del token_dict["scopes"]
+                            token_dict.pop("scopes", None)
+                            token_dict.pop("scope", None)
                             refreshed_json = json.dumps(token_dict, indent=2)
                         except Exception:
                             pass
+
                     _write_token_file_atomic(token_path, refreshed_json)
                 except Exception as write_exc:
                     logger.warning(f"Could not persist refreshed token: {write_exc}")
