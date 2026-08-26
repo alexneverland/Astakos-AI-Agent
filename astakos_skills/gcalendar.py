@@ -8,10 +8,9 @@ import os
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 from langchain_core.tools import tool
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from core.i18n import t
+
 
 TIMEZONE = "Europe/Athens"
 CALENDAR_ID = "primary"

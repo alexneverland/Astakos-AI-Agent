@@ -34,16 +34,28 @@ DEFAULT_WORKSPACE_SCOPES: list[str] = [
     "https://www.googleapis.com/auth/fitness.heart_rate.read",
 ]
 
-_RECOVERABLE_REFRESH_ERRORS: tuple[str, ...] = (
-    "invalid_grant",
-    "invalid_client",
-    "unauthorized_client",
-    "invalid_scope",
-    "deleted_client",
-)
+def _write_token_file_atomic(token_path: str, content: str) -> None:
+    """Writes token content atomically to avoid partial writes and sets secure permissions."""
+    import stat
+    import tempfile
+
+    dir_name = os.path.dirname(token_path)
+    os.makedirs(dir_name, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, encoding="utf-8") as tmp:
+        tmp.write(content)
+        tmp_name = tmp.name
+    try:
+        if hasattr(os, "chmod"):
+            os.chmod(tmp_name, stat.S_IRUSR | stat.S_IWUSR)
+        os.replace(tmp_name, token_path)
+    except Exception:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+        raise
 
 
 class WorkspaceAuthError(Exception):
+
     """Base error for Google Workspace user OAuth operations."""
 
 
@@ -157,9 +169,7 @@ def authorize_workspace_oauth(
     creds = flow.run_local_server(port=port, prompt="consent", access_type="offline")
 
     token_path = get_token_path()
-    os.makedirs(os.path.dirname(token_path), exist_ok=True)
-    with open(token_path, "w", encoding="utf-8") as f:
-        f.write(creds.to_json())
+    _write_token_file_atomic(token_path, creds.to_json())
 
     return "Google Workspace authorization successful."
 
@@ -225,13 +235,12 @@ def load_workspace_credentials(
                             refreshed_json = json.dumps(token_dict, indent=2)
                         except Exception:
                             pass
-                    with open(token_path, "w", encoding="utf-8") as f:
-                        f.write(refreshed_json)
+                    _write_token_file_atomic(token_path, refreshed_json)
                 except Exception as write_exc:
                     logger.warning(f"Could not persist refreshed token: {write_exc}")
             except RefreshError as exc:
-                err_msg = str(exc).lower()
                 logger.warning(f"[WorkspaceOAuth] Token refresh failed: {exc}")
+
                 raise WorkspaceTokenRevokedOrInvalidError(
                     f"Google Workspace authorization expired or revoked ({exc}). "
                     "Please reconnect your Google Workspace account."
