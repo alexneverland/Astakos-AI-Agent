@@ -23,11 +23,10 @@ from config import NLP_CONFIG
 from services.routine_intent import classify_routine_intent
 from langchain_core.tools import tool
 from pypdf import PdfReader
-from google.oauth2.credentials import Credentials
-from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
 import spotipy
+
+
 from spotipy.oauth2 import SpotifyOAuth
 import docx
 import pandas as pd
@@ -2197,10 +2196,11 @@ def drive_manager(
 
         action = (action or "list_files").strip().lower()
         print(f"\033[93m[Drive]: Action '{action}'...\033[0m")
-        creds = load_workspace_credentials(scopes=SCOPES)
+        creds = load_workspace_credentials(scopes=['https://www.googleapis.com/auth/drive'])
         service = build('drive', 'v3', credentials=creds, cache_discovery=False)
 
-        effective_folder_id = folder_id or getattr(config, "BACKUP_DRIVE_FOLDER_ID", "") or "root"
+
+        effective_folder_id = folder_id or "root"
 
         # ── LIST FILES ───────────────────────────────────────────
         if action == "list_files":
@@ -2306,9 +2306,8 @@ def drive_manager(
             if not any(_lp_real.startswith(d + os.sep) or _lp_real == d for d in _upload_allowed):
                 return f"❌ Forbidden upload path: only from outputs/, telegram_uploads/, telegram_photos/, watch_folder/ allowed."
             file_metadata = {'name': os.path.basename(local_path)}
-            target_parent = folder_id or getattr(config, "BACKUP_DRIVE_FOLDER_ID", "")
-            if target_parent and target_parent != "root":
-                file_metadata['parents'] = [target_parent]
+            if folder_id and folder_id != "root":
+                file_metadata['parents'] = [folder_id]
             media = MediaFileUpload(local_path, resumable=True)
             file = service.files().create(body=file_metadata, media_body=media, fields='id,name').execute()
             return f"✅ '{file.get('name')}' uploaded! (ID: {file.get('id')})"
@@ -2360,11 +2359,11 @@ def drive_manager(
                 "name": new_name,
                 "mimeType": "application/vnd.google-apps.folder",
             }
-            target_parent = folder_id or getattr(config, "BACKUP_DRIVE_FOLDER_ID", "")
-            if target_parent and target_parent != "root":
-                metadata["parents"] = [target_parent]
+            if folder_id and folder_id != "root":
+                metadata["parents"] = [folder_id]
             folder = service.files().create(body=metadata, fields="id, name").execute()
             return f"📁 Folder '{folder.get('name')}' created (ID: {folder.get('id')})."
+
 
         # ── INFO ─────────────────────────────────────────────────
         elif action == "info":
@@ -2838,60 +2837,14 @@ if __name__ == "__main__":
 # ────────────────────────────────────────────────────────────────
 # EMAIL
 # ────────────────────────────────────────────────────────────────
-import config
-TOKEN_PATH = config.TOKEN_PATH
-CREDS_PATH = config.CREDENTIALS_PATH
-
-SCOPES = [
-    'https://www.googleapis.com/auth/gmail.modify',
-    'https://www.googleapis.com/auth/drive',
-    'https://www.googleapis.com/auth/calendar',
-    'https://www.googleapis.com/auth/tasks',
-    'https://www.googleapis.com/auth/fitness.activity.read',
-    'https://www.googleapis.com/auth/fitness.sleep.read',
-    'https://www.googleapis.com/auth/fitness.heart_rate.read',
-]
-
-_RECOVERABLE_GOOGLE_OAUTH_REFRESH_ERRORS = (
-    "invalid_scope",
-    "invalid_grant",
-    "invalid_client",
-    "unauthorized_client",
-    "deleted_client",
-)
-
 def get_gmail_service():
-    """Creates the Gmail API service using OAuth."""
-    creds = None
-    if os.path.exists(TOKEN_PATH):
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+    """Creates the Gmail API service using the shared Workspace OAuth loader."""
+    try:
+        from core.workspace_oauth import get_workspace_service
+        return get_workspace_service("gmail", "v1", scopes=['https://www.googleapis.com/auth/gmail.modify'])
+    except Exception as exc:
+        raise Exception(f"Google Workspace is not connected. Please connect Google Workspace. ({exc})") from exc
 
-    if not creds or not creds.valid:
-        if not os.path.exists(CREDS_PATH):
-            raise Exception("Google Workspace is not connected. Missing token.json or credentials.json! Please connect Google Workspace.")
-
-        if creds and creds.expired and creds.refresh_token:
-            from google.auth.transport.requests import Request
-            try:
-                creds.refresh(Request())
-            except RefreshError as e:
-                refresh_error = str(e).lower()
-                if not any(
-                    marker in refresh_error
-                    for marker in _RECOVERABLE_GOOGLE_OAUTH_REFRESH_ERRORS
-                ):
-                    raise
-                print("[GoogleAuth] token refresh rejected - forcing fresh OAuth consent.")
-                creds = None
-
-        if not creds or not creds.valid:
-            flow = InstalledAppFlow.from_client_secrets_file(CREDS_PATH, SCOPES)
-            creds = flow.run_local_server(port=0, prompt='consent', access_type='offline')
-
-        with open(TOKEN_PATH, 'w') as token:
-            token.write(creds.to_json())
-
-    return build('gmail', 'v1', credentials=creds, cache_discovery=False)
 
 
 

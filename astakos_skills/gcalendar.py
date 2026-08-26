@@ -296,4 +296,3 @@ def google_calendar_tool(
 
     except Exception as e:
         return t("skills.gcalendar.msg_error", e=str(e))
-

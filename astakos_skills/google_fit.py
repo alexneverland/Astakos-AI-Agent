@@ -11,16 +11,12 @@
 import datetime
 import json
 import os
-from google.auth.exceptions import RefreshError
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from core.i18n import t
 
 import config
-TOKEN_PATH       = config.TOKEN_PATH
-CREDENTIALS_PATH = config.CREDENTIALS_PATH
+TOKEN_PATH = config.TOKEN_PATH
+
 
 SHARED_GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
@@ -83,42 +79,30 @@ def _ensure_fit_token_scopes() -> None:
     )
 
 
-def _save_credentials(creds: Credentials) -> None:
-    with open(TOKEN_PATH, "w", encoding="utf-8") as token:
-        token.write(creds.to_json())
-
-
 def authorize_google_fit() -> str:
-    if not os.path.exists(CREDENTIALS_PATH):
-        raise GoogleFitAuthError(t("skills.google_fit.missing_creds"))
-
-    flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-    creds = flow.run_local_server(port=0, prompt="consent", access_type="offline")
-    _save_credentials(creds)
-    return t("skills.google_fit.token_updated")
+    raise GoogleFitAuthError(
+        "Google Workspace OAuth authorization must be configured via settings (token.json)."
+    )
 
 
 def _get_credentials():
-    creds = None
-    if os.path.exists(TOKEN_PATH):
-        _ensure_fit_token_scopes()
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-                _save_credentials(creds)
-            except RefreshError as e:
-                if "invalid_scope" in str(e).lower():
-                    raise GoogleFitAuthError(
-                        t("skills.google_fit.msg_auth_rejected")
-                    ) from e
-                raise GoogleFitAuthError(
-                    f"Google Fit authorization expired or revoked ({e}). Please reconnect Google Workspace."
-                ) from e
-        else:
-            raise GoogleFitAuthError(t("skills.google_fit.token_expired"))
-    return creds
+    _ensure_fit_token_scopes()
+    try:
+        from core.workspace_oauth import (
+            load_workspace_credentials,
+            WorkspaceAuthError,
+            WorkspaceMissingCredentialsError,
+            WorkspaceTokenRevokedOrInvalidError,
+        )
+        return load_workspace_credentials(scopes=SCOPES)
+    except WorkspaceMissingCredentialsError as e:
+        raise GoogleFitAuthError(t("skills.google_fit.token_expired")) from e
+    except (WorkspaceTokenRevokedOrInvalidError, WorkspaceAuthError) as e:
+        raise GoogleFitAuthError(
+            f"Google Fit authorization expired or revoked ({e}). Please reconnect Google Workspace."
+        ) from e
+    except Exception as e:
+        raise GoogleFitAuthError(f"Google Fit authorization failed ({e}). Please reconnect Google Workspace.") from e
 
 
 def _fit_auth_summary(title: str) -> str | None:
@@ -132,6 +116,7 @@ def _fit_auth_summary(title: str) -> str | None:
             t("skills.google_fit.msg_auth_other_tools_2"),
         ])
     return None
+
 
 
 

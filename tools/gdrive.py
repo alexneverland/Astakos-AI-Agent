@@ -29,9 +29,8 @@ def upload_to_drive(file_path: str, folder_id: str = None) -> str:
         mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
 
         file_metadata = {"name": filename}
-        target_folder = folder_id or getattr(config, "BACKUP_DRIVE_FOLDER_ID", "")
-        if target_folder and target_folder != "root":
-            file_metadata["parents"] = [target_folder]
+        if folder_id and folder_id != "root":
+            file_metadata["parents"] = [folder_id]
 
         media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
         uploaded = service.files().create(

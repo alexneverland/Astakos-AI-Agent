@@ -58,15 +58,11 @@ def get_token_path() -> str:
     return getattr(config, "TOKEN_PATH", os.path.join(config.BASE_DIR, "credentials", "token.json"))
 
 
-def get_credentials_path() -> str:
-    """Returns the absolute path to the OAuth client secrets credentials.json."""
-    return getattr(config, "CREDENTIALS_PATH", os.path.join(config.BASE_DIR, "credentials", "credentials.json"))
-
-
 def is_workspace_connected() -> bool:
     """Checks whether a valid token.json exists for Google Workspace."""
     token_path = get_token_path()
     return bool(os.path.exists(token_path) and os.path.getsize(token_path) > 0)
+
 
 
 def load_workspace_credentials(
