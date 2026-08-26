@@ -15,18 +15,11 @@ def is_configured(run_mode="cli"):
     # Load env temporarily to check keys
     load_dotenv(env_path)
 
-    # We need an API Key for the chosen provider
-    provider = os.getenv("LLM_PROVIDER", "vertex").lower()
-    if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-        return False
-    if provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
-        return False
-    if provider == "gemini" and not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
-        return False
-    if provider == "vertex" and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-        return False
+    from core.diagnostics import is_chat_provider_configured
 
-    return True
+    provider = os.getenv("LLM_PROVIDER", "vertex").lower()
+    return is_chat_provider_configured(provider)
+
 
 
 if __name__ == "__main__":

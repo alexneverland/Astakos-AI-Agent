@@ -177,28 +177,49 @@ def close_vector_store():
         vector_lock.release()
 
 
-def get_collections_inventory() -> dict[str, int] | None:
+def get_collections_inventory(chroma_dir: str | None = None) -> dict[str, int] | None:
     """
     Safely inspects the Chroma database collections and their document counts in read-only mode,
-    reusing the existing managed Chroma handle and thread lock without opening duplicate handles.
+    reusing the existing managed Chroma handle and thread lock when available, or querying the
+    persist directory read-only in standalone setups without initializing embedding functions.
     """
-    if vector_store is None:
-        return None
+    # 1. Reuse managed vector store handle if already active in this process
+    if vector_store is not None and hasattr(vector_store, "_client") and vector_store._client is not None:
+        try:
+            with vector_lock:
+                collections = vector_store._client.list_collections()
+                inventory: dict[str, int] = {}
+                for col in collections:
+                    try:
+                        inventory[col.name] = col.count()
+                    except Exception:
+                        inventory[col.name] = 0
+                return inventory
+        except Exception:
+            pass
+
+    # 2. Standalone execution (e.g. setup wizard subprocess)
+    db_dir = chroma_dir or getattr(config, "CHROMA_DB_DIR", None)
+    if not db_dir or not os.path.exists(db_dir):
+        return {}
     try:
-        with vector_lock:
-            client = getattr(vector_store, "_client", None)
-            if client is None:
-                return None
-            collections = client.list_collections()
-            inventory: dict[str, int] = {}
-            for col in collections:
-                try:
-                    inventory[col.name] = col.count()
-                except Exception:
-                    inventory[col.name] = 0
-            return inventory
+        import chromadb
+        from chromadb.config import Settings
+        client = chromadb.PersistentClient(
+            path=db_dir,
+            settings=Settings(anonymized_telemetry=False, is_persistent=True),
+        )
+        collections = client.list_collections()
+        inventory = {}
+        for col in collections:
+            try:
+                inventory[col.name] = col.count()
+            except Exception:
+                inventory[col.name] = 0
+        return inventory
     except Exception:
         return None
+
 
 
 

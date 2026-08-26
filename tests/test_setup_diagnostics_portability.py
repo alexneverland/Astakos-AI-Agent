@@ -135,15 +135,31 @@ def test_chat_provider_diagnostics_vertex_placeholder_without_credentials(
 def test_chat_provider_diagnostics_vertex_real_service_account_credentials(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Real local service account credential file evidence correctly reports Vertex as ready."""
+    """Real local service account credential file with project_id correctly reports Vertex as ready."""
     fake_cred = tmp_path / "credentials.json"
-    fake_cred.write_text('{"type": "service_account"}', encoding="utf-8")
+    fake_cred.write_text('{"type": "service_account", "project_id": "my-gcp-prod-123"}', encoding="utf-8")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
+    monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
 
     diag = get_chat_provider_diagnostics("vertex")
     assert diag["provider"] == "vertex"
     assert diag["configured"] is True
     assert diag["status"] == "ready"
+
+
+def test_chat_provider_diagnostics_vertex_credential_file_with_placeholder_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Credential file without project_id when PROJECT_ID is placeholder reports setup_required."""
+    fake_cred = tmp_path / "credentials.json"
+    fake_cred.write_text('{"type": "service_account"}', encoding="utf-8")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
+    monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
+
+    diag = get_chat_provider_diagnostics("vertex")
+    assert diag["provider"] == "vertex"
+    assert diag["configured"] is False
+    assert diag["status"] == "setup_required"
 
 
 def test_chat_provider_diagnostics_vertex_adc_with_real_project_id(
@@ -182,19 +198,38 @@ def test_chat_provider_diagnostics_vertex_adc_with_placeholder_project_id(
     assert diag["status"] == "setup_required"
 
 
+def test_boot_is_configured_reuses_canonical_vertex_readiness(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """boot.is_configured reuses canonical Vertex readiness logic for ADC and service accounts."""
+    import boot
+    env_file = tmp_path / ".env"
+    env_file.write_text("LLM_PROVIDER=vertex\nPROJECT_ID=my-boot-project\n", encoding="utf-8")
+    monkeypatch.setattr(boot, "__file__", str(tmp_path / "boot.py"))
+
+    adc_file = tmp_path / "application_default_credentials.json"
+    adc_file.write_text('{"type": "authorized_user"}', encoding="utf-8")
+    monkeypatch.setattr("core.diagnostics.find_offline_adc_credentials_path", lambda: str(adc_file))
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+
+    assert boot.is_configured() is True
+
+
 # ────────────────────────────────────────────────────────────────
 # 2. Embeddings Provider Diagnostics & Local Model Resolver
 # ────────────────────────────────────────────────────────────────
 
 def test_embeddings_diagnostics_auto_vertex(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     fake_cred = tmp_path / "credentials.json"
-    fake_cred.write_text("{}", encoding="utf-8")
+    fake_cred.write_text('{"type": "service_account", "project_id": "my-vertex-proj"}', encoding="utf-8")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
+    monkeypatch.setenv("PROJECT_ID", "my-vertex-proj")
 
     diag = get_embeddings_diagnostics("auto", "vertex")
     assert diag["resolved_provider"] == "vertex"
     assert diag["status"] == "ready"
     assert diag["backend_identity"] == f"vertex:{DEFAULT_VERTEX_EMBEDDING_MODEL}"
+
 
 
 def test_embeddings_diagnostics_auto_anthropic_requires_setup() -> None:
@@ -372,19 +407,6 @@ def test_semantic_memory_inventory_uses_managed_vector_store_handle(
     assert inv == {"astakos_long_term": 10, "astakos_vec_test": 5}
 
 
-def test_semantic_memory_inventory_skips_import_when_vector_store_not_loaded(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When memory.vector_store is not yet loaded (e.g. during Setup Wizard), diagnostics does not trigger its import."""
-    import sys
-    monkeypatch.delitem(sys.modules, "memory.vector_store", raising=False)
-    inv = inspect_semantic_memory_inventory()
-    assert inv is None
-    assert "memory.vector_store" not in sys.modules
-
-
-
-
 def test_semantic_memory_diagnostics_unconfigured_embeddings() -> None:
     diag = get_semantic_memory_diagnostics("auto", "anthropic")
     assert diag["collection_name"] == "astakos_vec_unconfigured"
@@ -449,7 +471,7 @@ def test_workspace_diagnostics_legacy_token_without_scopes_metadata(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     token_file = tmp_path / "token.json"
-    token_file.write_text(json.dumps({"token": "fake-tok"}), encoding="utf-8")
+    token_file.write_text(json.dumps({"token": "fake-tok", "client_id": "cid", "client_secret": "csec"}), encoding="utf-8")
     monkeypatch.setenv("ASTAKOS_TOKEN_PATH", str(token_file))
 
     ws = get_workspace_diagnostics()
@@ -713,6 +735,7 @@ def test_setup_wizard_diagnostics_and_setup_never_leak_sentinel_secrets(
 
 
 def test_setup_wizard_workspace_connect_explicit_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import MagicMock
     import api.setup_wizard as wizard
     import core.workspace_oauth as ws_oauth
 
@@ -722,10 +745,57 @@ def test_setup_wizard_workspace_connect_explicit_action(monkeypatch: pytest.Monk
         "authorize_workspace_oauth",
         lambda: called.append(True) or "Google Workspace authorized successfully.",
     )
+    mock_request = MagicMock()
+    mock_request.base_url = "http://localhost:8000"
 
-    res = asyncio.run(wizard.connect_workspace())
+    res = asyncio.run(wizard.connect_workspace(mock_request))
     assert res["status"] == "success"
     assert len(called) == 1
+
+
+def test_setup_wizard_workspace_oauth_endpoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """OAuth start and callback endpoints handle container-reachable flows and persist token."""
+    from unittest.mock import MagicMock
+    import api.setup_wizard as wizard
+    import core.workspace_oauth as ws_oauth
+
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+    token_target = tmp_path / "token.json"
+    monkeypatch.setattr(ws_oauth, "get_token_path", lambda: str(token_target))
+
+    class _MockFlow:
+        def __init__(self) -> None:
+            self.credentials = MagicMock()
+            self.credentials.to_json.return_value = '{"token": "xyz", "client_id": "cid", "client_secret": "csec"}'
+
+        def authorization_url(self, **kwargs: Any) -> tuple[str, str]:
+            return ("https://accounts.google.com/o/oauth2/auth?client_id=123", "state123")
+
+        def fetch_token(self, code: str) -> None:
+            assert code == "test_auth_code"
+
+    monkeypatch.setattr(ws_oauth, "get_workspace_oauth_flow", lambda **kwargs: _MockFlow())
+
+    mock_request = MagicMock()
+    mock_request.base_url = "http://localhost:8000"
+
+    # 1. GET /api/workspace/oauth/start
+    start_res = asyncio.run(wizard.start_workspace_oauth(mock_request))
+    assert "auth_url" in start_res
+    assert "https://accounts.google.com" in start_res["auth_url"]
+
+    # 2. GET /api/workspace/oauth/callback
+    cb_res = asyncio.run(wizard.workspace_oauth_callback(mock_request, code="test_auth_code"))
+    assert cb_res.status_code == 200
+    assert token_target.exists()
+    assert "client_id" in token_target.read_text(encoding="utf-8")
+
+    # 3. POST /api/workspace/connect with ASTAKOS_CONTAINER=1
+    monkeypatch.setenv("ASTAKOS_CONTAINER", "1")
+    conn_res = asyncio.run(wizard.connect_workspace(mock_request))
+    assert conn_res["status"] == "redirect"
+    assert "auth_url" in conn_res
+
 
 
 # ────────────────────────────────────────────────────────────────

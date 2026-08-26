@@ -167,38 +167,63 @@ def is_chat_provider_configured(
     elif p == "gemini":
         return bool(_get_val("GEMINI_API_KEY") or _get_val("GOOGLE_API_KEY"))
     elif p == "vertex":
+        import json
+
+        def _extract_project_id(file_path: str) -> str:
+            if not file_path or not os.path.exists(file_path):
+                return ""
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    return (data.get("project_id") or data.get("quota_project_id") or "").strip()
+            except Exception:
+                pass
+            return ""
+
+        configured_proj = _get_val("PROJECT_ID").strip()
+        is_placeholder = configured_proj.lower() in ("", "your-gcp-project-id")
+
+        def _is_valid_vertex_target(file_path: str | None) -> bool:
+            if not file_path or not os.path.exists(file_path):
+                return False
+            file_proj = _extract_project_id(file_path)
+            effective_proj = configured_proj if not is_placeholder else file_proj
+            return bool(effective_proj and effective_proj.lower() != "your-gcp-project-id")
+
         # 1. Explicit snapshot override
         if env_snapshot is not None and "GOOGLE_APPLICATION_CREDENTIALS" in env_snapshot:
             snap_cred = env_snapshot["GOOGLE_APPLICATION_CREDENTIALS"].strip()
             if snap_cred:
-                return bool(os.path.exists(snap_cred))
+                return _is_valid_vertex_target(snap_cred)
 
         # 2. Explicit environment variable
         if "GOOGLE_APPLICATION_CREDENTIALS" in os.environ:
             os_cred = os.environ["GOOGLE_APPLICATION_CREDENTIALS"].strip()
             if os_cred:
-                return bool(os.path.exists(os_cred))
+                return _is_valid_vertex_target(os_cred)
 
         # 3. Config CREDENTIALS_PATH if explicitly configured
         config_cred = getattr(config, "CREDENTIALS_PATH", "")
         if config_cred:
-            return bool(os.path.exists(config_cred))
+            if os.path.exists(config_cred):
+                return _is_valid_vertex_target(config_cred)
+            return False
 
         # 4. Standard repository credentials.json
         root_cred = os.path.join(config.BASE_DIR, "credentials.json")
         nested_cred = os.path.join(config.BASE_DIR, "credentials", "credentials.json")
-        if os.path.exists(root_cred) or os.path.exists(nested_cred):
-            return True
+        if os.path.exists(root_cred):
+            return _is_valid_vertex_target(root_cred)
+        if os.path.exists(nested_cred):
+            return _is_valid_vertex_target(nested_cred)
 
         # 5. Offline ADC (Application Default Credentials)
         adc_path = find_offline_adc_credentials_path()
         if adc_path and os.path.exists(adc_path):
-            proj_id = _get_val("PROJECT_ID")
-            if proj_id and proj_id.strip().lower() not in ("", "your-gcp-project-id"):
-                return True
+            return _is_valid_vertex_target(adc_path)
 
         return False
-
 
     return False
 
@@ -320,20 +345,13 @@ def get_embeddings_diagnostics(
 
 def inspect_semantic_memory_inventory() -> dict[str, int] | None:
     """
-    Safely inspects the Chroma database collections and their document counts in read-only mode,
-    reusing the existing managed vector store handle ONLY if memory.vector_store is already loaded
-    by the running application. Never triggers top-level import of vector_store during setup.
+    Safely inspects Chroma database collections and their document counts in read-only mode
+    via the canonical memory abstraction.
     """
-    import sys
-
-    m_vs = sys.modules.get("memory.vector_store")
-    if m_vs is None:
-        return None
     try:
-        getter = getattr(m_vs, "get_collections_inventory", None)
-        if callable(getter):
-            return getter()
-        return None
+        from memory.vector_store import get_collections_inventory
+
+        return get_collections_inventory()
     except Exception:
         return None
 

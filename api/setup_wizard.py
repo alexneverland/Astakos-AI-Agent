@@ -113,10 +113,20 @@ async def get_diagnostics():
         raise HTTPException(status_code=500, detail="Failed to retrieve system diagnostics.") from None
 
 @app.post("/api/workspace/connect")
-async def connect_workspace():
+async def connect_workspace(request: Request):
     """Explicit user-triggered Google Workspace OAuth authorization."""
-    from core.workspace_oauth import WorkspaceAuthError, authorize_workspace_oauth
+    from core.workspace_oauth import (
+        WorkspaceAuthError,
+        authorize_workspace_oauth,
+        get_workspace_oauth_flow,
+    )
     try:
+        if os.getenv("ASTAKOS_CONTAINER") == "1":
+            base_url = str(request.base_url).rstrip('/')
+            flow = get_workspace_oauth_flow(redirect_uri=f"{base_url}/api/workspace/oauth/callback")
+            auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline", include_granted_scopes="true")
+            return {"status": "redirect", "auth_url": auth_url}
+
         authorize_workspace_oauth()
         return {"status": "success", "message": "Google Workspace connected successfully."}
     except WorkspaceAuthError:
@@ -129,6 +139,62 @@ async def connect_workspace():
             status_code=500,
             detail="Google Workspace authorization encountered an internal error.",
         ) from None
+
+
+@app.get("/api/workspace/oauth/start")
+async def start_workspace_oauth(request: Request):
+    """Starts browser-based OAuth consent flow routed through setup wizard port."""
+    from core.workspace_oauth import WorkspaceAuthError, get_workspace_oauth_flow
+    try:
+        base_url = str(request.base_url).rstrip('/')
+        flow = get_workspace_oauth_flow(redirect_uri=f"{base_url}/api/workspace/oauth/callback")
+        auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline", include_granted_scopes="true")
+        return {"auth_url": auth_url}
+    except WorkspaceAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to initiate Google Workspace OAuth flow.") from None
+
+
+@app.get("/api/workspace/oauth/callback", response_class=HTMLResponse)
+async def workspace_oauth_callback(request: Request, code: str = ""):
+    """Handles OAuth redirect callback and persists token.json."""
+    if not code:
+        return HTMLResponse("<h3>Missing authorization code. Please try again.</h3>", status_code=400)
+    from core.workspace_oauth import (
+        _write_token_file_atomic,
+        get_token_path,
+        get_workspace_oauth_flow,
+    )
+    try:
+        base_url = str(request.base_url).rstrip('/')
+        flow = get_workspace_oauth_flow(redirect_uri=f"{base_url}/api/workspace/oauth/callback")
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        token_path = get_token_path()
+        _write_token_file_atomic(token_path, creds.to_json())
+        return HTMLResponse(
+            """<!DOCTYPE html>
+<html>
+<head><title>Authorization Successful</title></head>
+<body style="font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:50px 20px;background:#181825;color:#cdd6f4;">
+  <div style="max-width:450px;margin:0 auto;background:#1e1e2e;padding:30px;border-radius:12px;border:1px solid #313244;">
+    <h2 style="color:#a6e3a1;margin-top:0;">✅ Google Workspace Connected!</h2>
+    <p style="color:#bac2de;font-size:14px;line-height:1.5;">Your authorization token has been saved successfully.</p>
+    <p style="color:#6c7086;font-size:12px;">This window will close automatically...</p>
+  </div>
+  <script>
+    if (window.opener) {
+      try { window.opener.postMessage("oauth_complete", "*"); } catch(e) {}
+    }
+    setTimeout(() => window.close(), 1500);
+  </script>
+</body>
+</html>"""
+        )
+    except Exception:
+        return HTMLResponse("<h3>Authorization failed. Please verify credentials/client_secrets.json.</h3>", status_code=400)
+
 
 @app.get("/api/raw_files")
 async def get_raw_files():

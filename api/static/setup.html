@@ -483,22 +483,66 @@
             }
         }
 
+        window.addEventListener('message', async (event) => {
+            if (event.data === 'oauth_complete') {
+                const feedback = document.getElementById('ws_connect_feedback');
+                if (feedback) {
+                    feedback.classList.remove('hidden');
+                    feedback.className = 'mt-3 text-xs p-2 rounded bg-green-500/20 border border-green-500/30 text-green-300';
+                    feedback.textContent = 'Google Workspace connected successfully!';
+                }
+                await fetchDiagnostics();
+            }
+        });
+
         async function connectWorkspace() {
             const btn = document.getElementById('ws_connect_btn');
             const feedback = document.getElementById('ws_connect_feedback');
             btn.disabled = true;
-            btn.innerHTML = '<span class="animate-pulse">Authorizing in browser...</span>';
+            btn.innerHTML = '<span class="animate-pulse">Authorizing...</span>';
             feedback.classList.remove('hidden');
             feedback.className = 'mt-3 text-xs p-2 rounded bg-blue-500/20 border border-blue-500/30 text-blue-300';
-            feedback.textContent = 'Launching Google OAuth flow. Please complete authentication in your browser window...';
+            feedback.textContent = 'Initiating Google OAuth flow. Please complete authentication in the popup window...';
 
             try {
+                // Try container/browser-routed oauth start endpoint
+                const startRes = await fetch('/api/workspace/oauth/start');
+                if (startRes.ok) {
+                    const startData = await startRes.json();
+                    if (startData.auth_url) {
+                        window.open(startData.auth_url, 'astakos_oauth', 'width=600,height=700');
+                        let attempts = 0;
+                        const pollInterval = setInterval(async () => {
+                            attempts++;
+                            await fetchDiagnostics();
+                            const statusElem = document.getElementById('ws_status_badge');
+                            if (statusElem && statusElem.textContent.includes('Connected')) {
+                                clearInterval(pollInterval);
+                                feedback.className = 'mt-3 text-xs p-2 rounded bg-green-500/20 border border-green-500/30 text-green-300';
+                                feedback.textContent = 'Google Workspace authorized successfully!';
+                                btn.disabled = false;
+                                btn.innerHTML = '<span>Connect / Reconnect</span>';
+                            } else if (attempts > 60) {
+                                clearInterval(pollInterval);
+                                btn.disabled = false;
+                                btn.innerHTML = '<span>Connect / Reconnect</span>';
+                            }
+                        }, 2000);
+                        return;
+                    }
+                }
+
+                // Fallback to direct connect POST
                 const res = await fetch('/api/workspace/connect', { method: 'POST' });
                 const data = await res.json();
                 if (res.ok) {
-                    feedback.className = 'mt-3 text-xs p-2 rounded bg-green-500/20 border border-green-500/30 text-green-300';
-                    feedback.textContent = data.message || 'Google Workspace authorized successfully!';
-                    await fetchDiagnostics();
+                    if (data.status === 'redirect' && data.auth_url) {
+                        window.open(data.auth_url, 'astakos_oauth', 'width=600,height=700');
+                    } else {
+                        feedback.className = 'mt-3 text-xs p-2 rounded bg-green-500/20 border border-green-500/30 text-green-300';
+                        feedback.textContent = data.message || 'Google Workspace authorized successfully!';
+                        await fetchDiagnostics();
+                    }
                 } else {
                     feedback.className = 'mt-3 text-xs p-2 rounded bg-red-500/20 border border-red-500/30 text-red-300';
                     feedback.textContent = data.detail || 'Authorization failed. Ensure client_secrets.json is present.';
@@ -511,6 +555,7 @@
                 btn.innerHTML = '<span>Connect / Reconnect</span>';
             }
         }
+
 
         async function fetchInitialData() {
             try {

@@ -133,21 +133,58 @@ def inspect_workspace_token_metadata(token_path: str | None = None) -> tuple[str
     except Exception:
         return ("malformed", [])
 
-    if not isinstance(data, dict):
+    if not isinstance(data, dict) or not data:
         return ("malformed", [])
 
     raw_scopes = data.get("scopes") or data.get("scope")
-    if raw_scopes is None:
+    if raw_scopes is not None:
+        if isinstance(raw_scopes, list):
+            parsed = [str(s).strip() for s in raw_scopes if str(s).strip()]
+            return ("valid" if parsed else "legacy", parsed)
+        elif isinstance(raw_scopes, str):
+            parsed = [s.strip() for s in raw_scopes.split() if s.strip()]
+            return ("valid" if parsed else "legacy", parsed)
+
+    # When no scope metadata exists (legacy token candidate), ensure minimum credential structure exists
+    has_refresh = bool(data.get("refresh_token"))
+    has_client = bool(data.get("client_id") and data.get("client_secret"))
+    if has_refresh or (has_client and bool(data.get("token"))):
         return ("legacy", [])
 
-    if isinstance(raw_scopes, str):
-        parsed = [s for s in raw_scopes.split() if s]
-        return ("valid" if parsed else "legacy", parsed)
-    if isinstance(raw_scopes, list):
-        parsed = [str(s) for s in raw_scopes if s]
-        return ("valid" if parsed else "legacy", parsed)
+    return ("malformed", [])
 
-    return ("legacy", [])
+
+
+
+def get_workspace_oauth_flow(
+    client_secrets_path: str | None = None,
+    scopes: Sequence[str] | None = None,
+    redirect_uri: str | None = None,
+):
+    """Creates a configured google_auth_oauthlib Flow without launching an interactive server."""
+    from google_auth_oauthlib.flow import Flow
+
+    target_secrets = client_secrets_path or get_oauth_client_secrets_path()
+    if not os.path.exists(target_secrets) or os.path.getsize(target_secrets) == 0:
+        raise WorkspaceMissingOAuthClientSecretsError(
+            f"Google Workspace OAuth client secrets file not found at '{target_secrets}'. "
+            "Please place your OAuth client secrets JSON at 'credentials/client_secrets.json' "
+            "or set WORKSPACE_CLIENT_SECRETS_PATH."
+        )
+
+    consent_scopes: list[str] = list(DEFAULT_WORKSPACE_SCOPES)
+    if scopes:
+        for scope in scopes:
+            if scope and scope not in consent_scopes:
+                consent_scopes.append(scope)
+
+    flow = Flow.from_client_secrets_file(
+        target_secrets,
+        scopes=consent_scopes,
+        redirect_uri=redirect_uri or "http://localhost:8000/api/workspace/oauth/callback",
+    )
+    return flow
+
 
 
 def read_stored_token_scopes(token_path: str | None = None) -> list[str]:

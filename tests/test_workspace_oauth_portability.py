@@ -275,12 +275,33 @@ def test_feature_requiring_missing_scope_raises_workspace_missing_scope_error(
 def test_read_stored_token_scopes_supports_string_and_list(tmp_path: Path) -> None:
     """Proves read_stored_token_scopes parses both list format and space-separated string format."""
     p1 = tmp_path / "token_list.json"
-    p1.write_text(json.dumps({"scopes": ["https://a", "https://b"]}), encoding="utf-8")
+    p1.write_text(json.dumps({"token": "tok", "client_id": "cid", "client_secret": "csec", "scopes": ["https://a", "https://b"]}), encoding="utf-8")
     assert read_stored_token_scopes(str(p1)) == ["https://a", "https://b"]
 
     p2 = tmp_path / "token_str.json"
-    p2.write_text(json.dumps({"scope": "https://a https://b"}), encoding="utf-8")
+    p2.write_text(json.dumps({"token": "tok", "client_id": "cid", "client_secret": "csec", "scope": "https://a https://b"}), encoding="utf-8")
     assert read_stored_token_scopes(str(p2)) == ["https://a", "https://b"]
+
+
+def test_inspect_workspace_token_metadata_rejects_structurally_incomplete_tokens(tmp_path: Path) -> None:
+    """Proves that structurally incomplete JSON objects (e.g. empty or missing keys) are marked malformed."""
+    from core.workspace_oauth import inspect_workspace_token_metadata
+
+    # 1. Empty dict
+    p_empty = tmp_path / "empty.json"
+    p_empty.write_text("{}", encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_empty)) == ("malformed", [])
+
+    # 2. Incomplete dict without client credentials or refresh token
+    p_inc = tmp_path / "incomplete.json"
+    p_inc.write_text(json.dumps({"token": "only-token"}), encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_inc)) == ("malformed", [])
+
+    # 3. Valid authorized user structure without scope metadata -> legacy
+    p_leg = tmp_path / "legacy.json"
+    p_leg.write_text(json.dumps({"refresh_token": "rt", "client_id": "cid", "client_secret": "csec"}), encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_leg)) == ("legacy", [])
+
 
 
 def test_load_workspace_credentials_without_stored_scopes_loads_successfully(
