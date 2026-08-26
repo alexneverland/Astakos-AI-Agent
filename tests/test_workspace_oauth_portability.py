@@ -477,6 +477,25 @@ def test_daily_backup_to_drive_unauthenticated_returns_fail_string(
     assert result is not None
 
 
+def test_daily_backup_authenticate_google_drive_success_and_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proves authenticate_google_drive loads credentials successfully using the defined Drive scope."""
+    token_file = tmp_path / "token.json"
+    token_file.write_text(json.dumps({
+        "token": "valid-token",
+        "scopes": ["https://www.googleapis.com/auth/drive"],
+    }), encoding="utf-8")
+    monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
+
+    mock_creds = _create_mock_creds(valid=True, scopes=["https://www.googleapis.com/auth/drive"])
+    with patch("google.oauth2.credentials.Credentials.from_authorized_user_file", return_value=mock_creds):
+        creds = daily_backup.authenticate_google_drive()
+        assert creds == mock_creds
+        assert "https://www.googleapis.com/auth/drive" in daily_backup.SCOPES
+
+
+
 def test_daily_backup_root_lookup_consistency(monkeypatch: pytest.MonkeyPatch) -> None:
     """Proves that when BACKUP_DRIVE_FOLDER_ID is empty or 'root', query uses 'root' in parents."""
     mock_creds = _create_mock_creds(valid=True)

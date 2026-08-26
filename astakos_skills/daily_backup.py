@@ -21,7 +21,10 @@ from core.i18n import t
 
 
 
+SCOPES: list[str] = ["https://www.googleapis.com/auth/drive"]
+
 BACKUP_EXCLUDE_ITEMS = {
+
     'venv',
     '__pycache__',
     '.git',
