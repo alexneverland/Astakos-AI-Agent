@@ -372,6 +372,18 @@ def test_semantic_memory_inventory_uses_managed_vector_store_handle(
     assert inv == {"astakos_long_term": 10, "astakos_vec_test": 5}
 
 
+def test_semantic_memory_inventory_skips_import_when_vector_store_not_loaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When memory.vector_store is not yet loaded (e.g. during Setup Wizard), diagnostics does not trigger its import."""
+    import sys
+    monkeypatch.delitem(sys.modules, "memory.vector_store", raising=False)
+    inv = inspect_semantic_memory_inventory()
+    assert inv is None
+    assert "memory.vector_store" not in sys.modules
+
+
+
 
 def test_semantic_memory_diagnostics_unconfigured_embeddings() -> None:
     diag = get_semantic_memory_diagnostics("auto", "anthropic")

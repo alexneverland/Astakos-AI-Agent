@@ -321,15 +321,21 @@ def get_embeddings_diagnostics(
 def inspect_semantic_memory_inventory() -> dict[str, int] | None:
     """
     Safely inspects the Chroma database collections and their document counts in read-only mode,
-    reusing the existing managed vector store handle without opening a parallel Chroma client.
+    reusing the existing managed vector store handle ONLY if memory.vector_store is already loaded
+    by the running application. Never triggers top-level import of vector_store during setup.
     """
-    try:
-        from memory.vector_store import get_collections_inventory
+    import sys
 
-        return get_collections_inventory()
+    m_vs = sys.modules.get("memory.vector_store")
+    if m_vs is None:
+        return None
+    try:
+        getter = getattr(m_vs, "get_collections_inventory", None)
+        if callable(getter):
+            return getter()
+        return None
     except Exception:
         return None
-
 
 
 def get_semantic_memory_diagnostics(
@@ -384,8 +390,9 @@ def get_semantic_memory_diagnostics(
             "collection_name": collection_name,
             "status": "ready",
             "reindex_needed": False,
-            "status_message": f"Semantic memory collection is '{collection_name}'.",
+            "status_message": f"Semantic memory will use collection '{collection_name}' when Astakos starts.",
         }
+
 
     target_count = inventory.get(collection_name, 0)
     other_populated = {k: v for k, v in inventory.items() if k != collection_name and v > 0}
