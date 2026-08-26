@@ -82,17 +82,45 @@ elif _provider == "gemini":
     print("\033[92m[Brain]: Gemini Engines Loaded (API Key)\033[0m")
 
 else:  # default to vertex
-    llm = ChatGoogleGenerativeAI(
-        model=FAST_MODEL, temperature=0.7, safety_settings=custom_safety,
-        vertexai=True, project=config.PROJECT_ID, location=VERTEX_LOCATION
+    from core.ai_provider import (
+        get_vertex_credentials,
+        resolve_vertex_credentials_path,
+        resolve_vertex_project_id,
     )
-    llm_heavy = ChatGoogleGenerativeAI(
-        model=HEAVY_MODEL, temperature=0.1, safety_settings=custom_safety,
-        vertexai=True, project=config.PROJECT_ID, location=VERTEX_LOCATION
-    )
-    vertex_client = genai.Client(
-        vertexai=True, project=config.PROJECT_ID, location=VERTEX_LOCATION
-    )
+
+    _vertex_cred_path = resolve_vertex_credentials_path()
+    _vertex_project = resolve_vertex_project_id(cred_file=_vertex_cred_path)
+    _vertex_creds = get_vertex_credentials(_vertex_cred_path)
+
+    _chat_kwargs = {
+        "model": FAST_MODEL,
+        "temperature": 0.7,
+        "safety_settings": custom_safety,
+        "vertexai": True,
+        "project": _vertex_project,
+        "location": VERTEX_LOCATION,
+    }
+    _heavy_kwargs = {
+        "model": HEAVY_MODEL,
+        "temperature": 0.1,
+        "safety_settings": custom_safety,
+        "vertexai": True,
+        "project": _vertex_project,
+        "location": VERTEX_LOCATION,
+    }
+    _client_kwargs = {
+        "vertexai": True,
+        "project": _vertex_project,
+        "location": VERTEX_LOCATION,
+    }
+    if _vertex_creds is not None:
+        _chat_kwargs["credentials"] = _vertex_creds
+        _heavy_kwargs["credentials"] = _vertex_creds
+        _client_kwargs["credentials"] = _vertex_creds
+
+    llm = ChatGoogleGenerativeAI(**_chat_kwargs)
+    llm_heavy = ChatGoogleGenerativeAI(**_heavy_kwargs)
+    vertex_client = genai.Client(**_client_kwargs)
     print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI)\033[0m")
 
 _active_provider_adapter: AIProviderAdapter | None = None

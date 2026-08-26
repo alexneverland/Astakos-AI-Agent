@@ -8,7 +8,15 @@ from astakos_skills import google_fit
 
 
 def _write_token(path, scopes):
-    path.write_text(json.dumps({"scopes": scopes}), encoding="utf-8")
+    path.write_text(
+        json.dumps({
+            "scopes": scopes,
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "rt",
+        }),
+        encoding="utf-8",
+    )
 
 
 def test_fit_scope_guard_accepts_classic_fit_scopes(tmp_path, monkeypatch):

@@ -192,6 +192,23 @@ def is_chat_provider_configured(
         def _is_valid_vertex_target(file_path: str | None) -> bool:
             if not file_path or not os.path.exists(file_path):
                 return False
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if not isinstance(data, dict):
+                    return False
+                cred_type = data.get("type")
+                if cred_type == "service_account":
+                    from google.oauth2 import service_account
+                    service_account.Credentials.from_service_account_info(data)
+                elif cred_type == "authorized_user":
+                    from google.oauth2 import credentials as user_credentials
+                    user_credentials.Credentials.from_authorized_user_info(data)
+                else:
+                    return False
+            except Exception:
+                return False
+
             file_proj = _extract_project_id(file_path)
             effective_proj = configured_proj if not is_placeholder else file_proj
             return bool(effective_proj and effective_proj.lower() != "your-gcp-project-id")

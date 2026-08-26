@@ -81,6 +81,37 @@ def _configure_isolated_wizard(monkeypatch: pytest.MonkeyPatch, base: Path) -> N
     monkeypatch.setattr(wizard.threading, "Thread", _NoOpThread)
 
 
+def _make_test_sa_dict(project_id: str = "test-project") -> dict[str, str]:
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    ).decode("utf-8")
+    return {
+        "type": "service_account",
+        "project_id": project_id,
+        "private_key_id": "key123",
+        "private_key": pem,
+        "client_email": f"sa@{project_id}.iam.gserviceaccount.com",
+        "client_id": "123456789",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+
+
+def _make_test_adc_dict(project_id: str = "test-project") -> dict[str, str]:
+    return {
+        "type": "authorized_user",
+        "client_id": "cid-123.apps.googleusercontent.com",
+        "client_secret": "csec-secret",
+        "refresh_token": "1//refresh-token-val",
+        "quota_project_id": project_id,
+    }
+
+
 # ────────────────────────────────────────────────────────────────
 # 1. Chat Provider Diagnostics & Vertex ADC / Credentials Handling
 # ────────────────────────────────────────────────────────────────
@@ -137,7 +168,7 @@ def test_chat_provider_diagnostics_vertex_real_service_account_credentials(
 ) -> None:
     """Real local service account credential file with project_id correctly reports Vertex as ready."""
     fake_cred = tmp_path / "credentials.json"
-    fake_cred.write_text('{"type": "service_account", "project_id": "my-gcp-prod-123"}', encoding="utf-8")
+    fake_cred.write_text(json.dumps(_make_test_sa_dict("my-gcp-prod-123")), encoding="utf-8")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
     monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
 
@@ -152,7 +183,9 @@ def test_chat_provider_diagnostics_vertex_credential_file_with_placeholder_proje
 ) -> None:
     """Credential file without project_id when PROJECT_ID is placeholder reports setup_required."""
     fake_cred = tmp_path / "credentials.json"
-    fake_cred.write_text('{"type": "service_account"}', encoding="utf-8")
+    sa_dict = _make_test_sa_dict("")
+    sa_dict.pop("project_id", None)
+    fake_cred.write_text(json.dumps(sa_dict), encoding="utf-8")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
     monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
 
@@ -162,12 +195,31 @@ def test_chat_provider_diagnostics_vertex_credential_file_with_placeholder_proje
     assert diag["status"] == "setup_required"
 
 
+def test_chat_provider_diagnostics_vertex_rejects_truncated_or_non_credential_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Non-credential JSON or truncated service accounts with a project_id report setup_required."""
+    fake_cred = tmp_path / "credentials.json"
+    fake_cred.write_text('{"project_id": "real-project-id"}', encoding="utf-8")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
+    monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
+
+    diag = get_chat_provider_diagnostics("vertex")
+    assert diag["configured"] is False
+    assert diag["status"] == "setup_required"
+
+    fake_cred.write_text('{"type": "service_account", "project_id": "real-project-id"}', encoding="utf-8")
+    diag = get_chat_provider_diagnostics("vertex")
+    assert diag["configured"] is False
+    assert diag["status"] == "setup_required"
+
+
 def test_chat_provider_diagnostics_vertex_adc_with_real_project_id(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Offline ADC file plus a real project ID correctly reports Vertex as ready without network calls."""
     adc_file = tmp_path / "application_default_credentials.json"
-    adc_file.write_text('{"type": "authorized_user"}', encoding="utf-8")
+    adc_file.write_text(json.dumps(_make_test_adc_dict("my-production-astakos-project")), encoding="utf-8")
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.setattr(config, "CREDENTIALS_PATH", "")
     monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
@@ -185,7 +237,7 @@ def test_chat_provider_diagnostics_vertex_adc_with_placeholder_project_id(
 ) -> None:
     """Offline ADC file with placeholder project ID reports setup_required."""
     adc_file = tmp_path / "application_default_credentials.json"
-    adc_file.write_text('{"type": "authorized_user"}', encoding="utf-8")
+    adc_file.write_text(json.dumps(_make_test_adc_dict("")), encoding="utf-8")
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.setattr(config, "CREDENTIALS_PATH", "")
     monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
@@ -203,7 +255,7 @@ def test_chat_provider_diagnostics_vertex_falls_back_to_root_credentials_when_cr
 ) -> None:
     """When config.CREDENTIALS_PATH does not exist, vertex readiness falls back to root credentials.json."""
     root_cred = tmp_path / "credentials.json"
-    root_cred.write_text('{"type": "service_account", "project_id": "root-fallback-project"}', encoding="utf-8")
+    root_cred.write_text(json.dumps(_make_test_sa_dict("root-fallback-project")), encoding="utf-8")
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.setattr(config, "CREDENTIALS_PATH", str(tmp_path / "credentials" / "credentials.json"))
     monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
@@ -213,7 +265,6 @@ def test_chat_provider_diagnostics_vertex_falls_back_to_root_credentials_when_cr
     assert diag["provider"] == "vertex"
     assert diag["configured"] is True
     assert diag["status"] == "ready"
-
 
 
 def test_boot_is_configured_reuses_canonical_vertex_readiness(
@@ -226,7 +277,7 @@ def test_boot_is_configured_reuses_canonical_vertex_readiness(
     monkeypatch.setattr(boot, "__file__", str(tmp_path / "boot.py"))
 
     adc_file = tmp_path / "application_default_credentials.json"
-    adc_file.write_text('{"type": "authorized_user"}', encoding="utf-8")
+    adc_file.write_text(json.dumps(_make_test_adc_dict("my-boot-project")), encoding="utf-8")
     monkeypatch.setattr("core.diagnostics.find_offline_adc_credentials_path", lambda: str(adc_file))
     monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
 
@@ -239,7 +290,7 @@ def test_boot_is_configured_reuses_canonical_vertex_readiness(
 
 def test_embeddings_diagnostics_auto_vertex(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     fake_cred = tmp_path / "credentials.json"
-    fake_cred.write_text('{"type": "service_account", "project_id": "my-vertex-proj"}', encoding="utf-8")
+    fake_cred.write_text(json.dumps(_make_test_sa_dict("my-vertex-proj")), encoding="utf-8")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
     monkeypatch.setenv("PROJECT_ID", "my-vertex-proj")
 
@@ -368,8 +419,9 @@ def test_semantic_memory_evidence_switch_openai_to_vertex(
     """Switching from populated OpenAI to empty Vertex collection requires reindexing."""
     from core.ai_provider import get_embeddings_collection_name
     fake_cred = tmp_path / "credentials.json"
-    fake_cred.write_text("{}", encoding="utf-8")
+    fake_cred.write_text(json.dumps(_make_test_sa_dict("vertex-test-project")), encoding="utf-8")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
+    monkeypatch.setenv("PROJECT_ID", "vertex-test-project")
 
     col_name = get_embeddings_collection_name("openai", "openai")
     inventory = {
@@ -469,7 +521,16 @@ def test_workspace_diagnostics_connected_with_all_scopes(monkeypatch: pytest.Mon
         "https://www.googleapis.com/auth/fitness.sleep.read",
         "https://www.googleapis.com/auth/fitness.heart_rate.read",
     ]
-    token_file.write_text(json.dumps({"token": "fake-tok", "scopes": all_scopes}), encoding="utf-8")
+    token_file.write_text(
+        json.dumps({
+            "token": "fake-tok",
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "rt",
+            "scopes": all_scopes,
+        }),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("ASTAKOS_TOKEN_PATH", str(token_file))
 
     ws = get_workspace_diagnostics()
@@ -486,7 +547,16 @@ def test_workspace_diagnostics_missing_fit_scopes(monkeypatch: pytest.MonkeyPatc
         "https://www.googleapis.com/auth/calendar",
         "https://www.googleapis.com/auth/tasks",
     ]
-    token_file.write_text(json.dumps({"token": "fake-tok", "scopes": partial_scopes}), encoding="utf-8")
+    token_file.write_text(
+        json.dumps({
+            "token": "fake-tok",
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "rt",
+            "scopes": partial_scopes,
+        }),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("ASTAKOS_TOKEN_PATH", str(token_file))
 
     ws = get_workspace_diagnostics()
@@ -795,7 +865,7 @@ def test_setup_wizard_workspace_oauth_endpoints(monkeypatch: pytest.MonkeyPatch,
     class _MockFlow:
         def __init__(self) -> None:
             self.credentials = MagicMock()
-            self.credentials.to_json.return_value = '{"token": "xyz", "client_id": "cid", "client_secret": "csec"}'
+            self.credentials.to_json.return_value = '{"token": "xyz", "client_id": "cid", "client_secret": "csec", "refresh_token": "rt"}'
 
         def authorization_url(self, **kwargs: Any) -> tuple[str, str]:
             state = kwargs.get("state", "test_state")

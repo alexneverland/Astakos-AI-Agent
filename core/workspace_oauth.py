@@ -136,6 +136,13 @@ def inspect_workspace_token_metadata(token_path: str | None = None) -> tuple[str
     if not isinstance(data, dict) or not data:
         return ("malformed", [])
 
+    # Complete authorized-user credential fields required by google.oauth2.credentials.Credentials:
+    # Credentials.from_authorized_user_file strictly requires client_id + client_secret + refresh_token
+    has_client = bool(data.get("client_id") and data.get("client_secret"))
+    has_refresh = bool(data.get("refresh_token"))
+    if not (has_client and has_refresh):
+        return ("malformed", [])
+
     raw_scopes = data.get("scopes") or data.get("scope")
     if raw_scopes is not None:
         if isinstance(raw_scopes, list):
@@ -147,15 +154,7 @@ def inspect_workspace_token_metadata(token_path: str | None = None) -> tuple[str
             if parsed:
                 return ("valid", parsed)
 
-    # When scope metadata is absent or empty (legacy token candidate),
-    # require complete authorized-user credential structure:
-    # Credentials.from_authorized_user_file strictly requires client_id + client_secret + refresh_token
-    has_client = bool(data.get("client_id") and data.get("client_secret"))
-    has_refresh = bool(data.get("refresh_token"))
-    if has_client and has_refresh:
-        return ("legacy", [])
-
-    return ("malformed", [])
+    return ("legacy", [])
 
 
 

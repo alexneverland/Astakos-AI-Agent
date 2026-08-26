@@ -215,6 +215,8 @@ def test_load_workspace_credentials_preserves_granted_scopes_and_never_expands_o
     token_file = tmp_path / "token.json"
     token_file.write_text(json.dumps({
         "token": "expired-legacy-token",
+        "client_id": "cid",
+        "client_secret": "csec",
         "refresh_token": "legacy-refresh",
         "scopes": legacy_scopes,
     }), encoding="utf-8")
@@ -261,6 +263,9 @@ def test_feature_requiring_missing_scope_raises_workspace_missing_scope_error(
     token_file = tmp_path / "token.json"
     token_file.write_text(json.dumps({
         "token": "valid-token",
+        "client_id": "cid",
+        "client_secret": "csec",
+        "refresh_token": "rt",
         "scopes": ["https://www.googleapis.com/auth/drive"],
     }), encoding="utf-8")
     monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
@@ -275,11 +280,11 @@ def test_feature_requiring_missing_scope_raises_workspace_missing_scope_error(
 def test_read_stored_token_scopes_supports_string_and_list(tmp_path: Path) -> None:
     """Proves read_stored_token_scopes parses both list format and space-separated string format."""
     p1 = tmp_path / "token_list.json"
-    p1.write_text(json.dumps({"token": "tok", "client_id": "cid", "client_secret": "csec", "scopes": ["https://a", "https://b"]}), encoding="utf-8")
+    p1.write_text(json.dumps({"token": "tok", "client_id": "cid", "client_secret": "csec", "refresh_token": "rt", "scopes": ["https://a", "https://b"]}), encoding="utf-8")
     assert read_stored_token_scopes(str(p1)) == ["https://a", "https://b"]
 
     p2 = tmp_path / "token_str.json"
-    p2.write_text(json.dumps({"token": "tok", "client_id": "cid", "client_secret": "csec", "scope": "https://a https://b"}), encoding="utf-8")
+    p2.write_text(json.dumps({"token": "tok", "client_id": "cid", "client_secret": "csec", "refresh_token": "rt", "scope": "https://a https://b"}), encoding="utf-8")
     assert read_stored_token_scopes(str(p2)) == ["https://a", "https://b"]
 
 
@@ -307,7 +312,12 @@ def test_inspect_workspace_token_metadata_rejects_structurally_incomplete_tokens
     p_access_only.write_text(json.dumps({"token": "only-access-token", "client_id": "cid", "client_secret": "csec"}), encoding="utf-8")
     assert inspect_workspace_token_metadata(str(p_access_only)) == ("malformed", [])
 
-    # 5. Valid authorized user structure without scope metadata -> legacy
+    # 5. Incomplete dict with scopes but missing client credentials / refresh_token
+    p_scoped_inc = tmp_path / "scoped_inc.json"
+    p_scoped_inc.write_text(json.dumps({"scopes": ["https://www.googleapis.com/auth/drive"]}), encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_scoped_inc)) == ("malformed", [])
+
+    # 6. Valid authorized user structure without scope metadata -> legacy
     p_leg = tmp_path / "legacy.json"
     p_leg.write_text(json.dumps({"refresh_token": "rt", "client_id": "cid", "client_secret": "csec"}), encoding="utf-8")
     assert inspect_workspace_token_metadata(str(p_leg)) == ("legacy", [])
@@ -324,6 +334,8 @@ def test_load_workspace_credentials_without_stored_scopes_loads_successfully(
     token_file = tmp_path / "token.json"
     token_file.write_text(json.dumps({
         "token": "legacy-token-no-scopes",
+        "client_id": "cid",
+        "client_secret": "csec",
         "refresh_token": "legacy-refresh",
     }), encoding="utf-8")
     monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
@@ -350,6 +362,8 @@ def test_load_workspace_credentials_without_stored_scopes_refresh_preserves_meta
     token_file = tmp_path / "token.json"
     token_file.write_text(json.dumps({
         "token": "legacy-token-no-scopes",
+        "client_id": "cid",
+        "client_secret": "csec",
         "refresh_token": "legacy-refresh",
     }), encoding="utf-8")
     monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
