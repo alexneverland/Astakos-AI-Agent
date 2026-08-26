@@ -199,7 +199,7 @@ credentials/client_secrets.json
 
 4. Open the Setup Wizard and select **Connect / Reconnect Google Workspace**. Complete Google's consent screen in the popup.
 
-Astakos creates `credentials/token.json` after successful consent. Keep both files private. If the token is revoked, the diagnostics page will say **Reconnect**; use the same button to authorize again. Do not replace a Vertex service-account JSON with the Workspace OAuth files: they serve different purposes.
+Astakos creates `credentials/token.json` after successful consent. Keep both files private. If a Workspace action later reports that authorization has expired, been revoked, or lacks a permission, use the same **Connect / Reconnect Google Workspace** button to authorize again. Do not replace a Vertex service-account JSON with the Workspace OAuth files: they serve different purposes.
 
 The wizard writes local configuration such as `.env`, `astakos_settings.json`, and customized prompts into your Astakos folder. These runtime files are excluded from Git.
 
