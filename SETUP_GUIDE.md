@@ -23,7 +23,7 @@ Astakos supports these model providers:
 - **Anthropic** — requires an Anthropic API key.
 - **Vertex AI** — intended for Google Cloud users; requires a project and credentials JSON.
 
-You only need **one** provider to start.
+You only need **one chat provider** to start. Gemini API, OpenAI, and Vertex AI can also provide semantic-memory embeddings automatically. Anthropic can run chat by itself, but semantic memory needs a second embeddings provider or the optional local model described below.
 
 > Want automatic Docker image updates instead of building from source? Download `docker-compose.release.yml` from the [latest release](https://github.com/alexneverland/Astakos-AI-Agent/releases/latest), place it in an empty folder, and run `docker compose -f docker-compose.release.yml up -d`. The full release-image instructions are in the [README](README.md#recommended-docker-with-automatic-updates).
 
@@ -79,7 +79,13 @@ Astakos will show the Web Setup Wizard when it has not been configured yet.
 
 ## Step 4 — Complete the Setup Wizard
 
-Choose your AI provider and enter the required credentials.
+Choose a **Chat Provider** and enter its credential. Then choose an **Embeddings Provider** for long-term semantic memory:
+
+- For Gemini API, OpenAI, or Vertex AI, leave Embeddings Provider on **Auto** for the simplest setup.
+- For Anthropic, choose Vertex AI, Gemini API, OpenAI, or Local Multilingual E5 explicitly. Anthropic does not offer native embeddings.
+- Telegram is optional. You can save and use the Web UI first, then add a BotFather token and your Telegram chat ID later.
+
+The wizard's diagnostics show whether chat, semantic memory, and optional Google Workspace integrations are ready. A missing embeddings provider does not stop basic chat and tools, but long-term semantic recall remains unavailable until it is configured.
 
 ### Optional: declare your weekly routines
 
@@ -117,6 +123,39 @@ LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=your-key
 ```
 
+Also select a separate embeddings provider in the Setup Wizard. See **Semantic Memory / Embeddings** below.
+
+### Semantic Memory / Embeddings
+
+Embeddings power meaning-based recall of saved facts, conversations, documents, and photos. They are independent from the chat provider.
+
+| Choice | Best for | What it needs |
+|---|---|---|
+| **Auto** | Gemini API, OpenAI, or Vertex AI chat | Uses that provider's native embeddings. |
+| **Vertex AI** | Google Cloud users | The same valid Vertex credentials JSON. |
+| **Gemini API** | Gemini API users | A Gemini API key. |
+| **OpenAI** | OpenAI or Anthropic chat users | An OpenAI API key. |
+| **Local Multilingual E5** | Advanced manual installations that require local embeddings | `sentence-transformers` plus a model downloaded locally. |
+
+Astakos never silently chooses a different cloud provider and never downloads a local model by itself.
+
+#### Local Multilingual E5 (advanced, manual Python setup)
+
+Use this only when you intentionally want semantic embeddings to run on the computer. The normal Docker release image does not include this optional dependency or model; choose a cloud embeddings provider unless you maintain a custom Docker image.
+
+For a manual Python installation, while the virtual environment is active:
+
+```powershell
+pip install sentence-transformers
+python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/multilingual-e5-small')"
+```
+
+Then select **Local Multilingual E5** in the Wizard and save. Astakos checks only whether the package and model already exist locally; it will not install or download them during startup.
+
+#### Changing embeddings later
+
+Changing the embeddings provider or model creates a separate semantic-memory collection so incompatible vectors are never mixed. Astakos keeps the old collection intact, but its old entries are not searched by the new backend automatically. Keep the current provider if immediate recall of existing semantic memories matters; the diagnostics page reports when historical memory belongs to another collection.
+
 ### Vertex AI
 
 Vertex AI in Docker requires a real Google service-account JSON file that is mounted into the container.
@@ -145,6 +184,22 @@ ASTAKOS_GEMINI_FAST_MODEL=
 ```
 
 If `GOOGLE_APPLICATION_CREDENTIALS` is empty, or points to a host-only path that does not exist inside the container, Astakos will return to the Setup Wizard instead of booting.
+
+### Optional: Google Workspace integrations
+
+Google Workspace is separate from both your chat provider and Vertex service-account credentials. It enables Gmail, Google Drive, Calendar, Tasks, Google Fit, and Daily Backup with **your personal Google account**.
+
+1. In Google Cloud Console, enable the Google APIs you intend to use (Gmail, Drive, Calendar, Tasks, and Fitness for Google Fit).
+2. Create a Google OAuth 2.0 client that allows the local callback `http://localhost:8000/api/workspace/oauth/callback`, then download its client-secrets JSON.
+3. Save it as:
+
+```text
+credentials/client_secrets.json
+```
+
+4. Open the Setup Wizard and select **Connect / Reconnect Google Workspace**. Complete Google's consent screen in the popup.
+
+Astakos creates `credentials/token.json` after successful consent. Keep both files private. If a Workspace action later reports that authorization has expired, been revoked, or lacks a permission, use the same **Connect / Reconnect Google Workspace** button to authorize again. Do not replace a Vertex service-account JSON with the Workspace OAuth files: they serve different purposes.
 
 The wizard writes local configuration such as `.env`, `astakos_settings.json`, and customized prompts into your Astakos folder. These runtime files are excluded from Git.
 
