@@ -65,6 +65,13 @@ def guard_outbound_calls(monkeypatch: pytest.MonkeyPatch) -> None:
         raising=False,
     )
 
+    # Guard requests HTTP transport
+    monkeypatch.setattr("requests.sessions.Session.request", _fail_outbound, raising=False)
+    monkeypatch.setattr("requests.request", _fail_outbound, raising=False)
+
+    # Guard httplib2 HTTP transport
+    monkeypatch.setattr("httplib2.Http.request", _fail_outbound, raising=False)
+
 
 def _create_mock_creds(
     valid: bool = True,
@@ -105,6 +112,25 @@ def test_outbound_safety_guard_blocks_live_http_calls() -> None:
         req("https://oauth2.googleapis.com/token", "POST")
 
     assert "Unexpected outbound network or Telegram call" in str(exc_info.value)
+
+
+def test_outbound_safety_guard_blocks_generic_http_transports() -> None:
+    """Proves the safety guard blocks generic requests and httplib2 HTTP calls."""
+    import httplib2
+    import requests
+
+    with pytest.raises(RuntimeError) as exc_info_requests:
+        requests.get("https://example.com")
+    assert "Unexpected outbound network or Telegram call" in str(exc_info_requests.value)
+
+    with pytest.raises(RuntimeError) as exc_info_session:
+        requests.Session().request("GET", "https://example.com")
+    assert "Unexpected outbound network or Telegram call" in str(exc_info_session.value)
+
+    with pytest.raises(RuntimeError) as exc_info_httplib2:
+        httplib2.Http().request("https://example.com")
+    assert "Unexpected outbound network or Telegram call" in str(exc_info_httplib2.value)
+
 
 
 def test_is_workspace_connected_when_token_present_and_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
