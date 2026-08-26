@@ -1,4 +1,5 @@
 import os
+import secrets
 import threading
 import time
 
@@ -141,14 +142,31 @@ async def connect_workspace(request: Request):
         ) from None
 
 
+_OAUTH_STATES: dict[str, float] = {}
+_OAUTH_STATE_LOCK = threading.Lock()
+
+
 @app.get("/api/workspace/oauth/start")
 async def start_workspace_oauth(request: Request):
-    """Starts browser-based OAuth consent flow routed through setup wizard port."""
+    """Starts browser-based OAuth consent flow routed through setup wizard port with CSRF state protection."""
     from core.workspace_oauth import WorkspaceAuthError, get_workspace_oauth_flow
     try:
         base_url = str(request.base_url).rstrip('/')
         flow = get_workspace_oauth_flow(redirect_uri=f"{base_url}/api/workspace/oauth/callback")
-        auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline", include_granted_scopes="true")
+        state = secrets.token_urlsafe(32)
+        with _OAUTH_STATE_LOCK:
+            now = time.time()
+            expired = [k for k, v in _OAUTH_STATES.items() if now - v > 900]
+            for k in expired:
+                _OAUTH_STATES.pop(k, None)
+            _OAUTH_STATES[state] = now
+
+        auth_url, _ = flow.authorization_url(
+            state=state,
+            prompt="consent",
+            access_type="offline",
+            include_granted_scopes="true",
+        )
         return {"auth_url": auth_url}
     except WorkspaceAuthError:
         raise HTTPException(
@@ -160,10 +178,21 @@ async def start_workspace_oauth(request: Request):
 
 
 @app.get("/api/workspace/oauth/callback", response_class=HTMLResponse)
-async def workspace_oauth_callback(request: Request, code: str = ""):
-    """Handles OAuth redirect callback and persists token.json."""
+async def workspace_oauth_callback(request: Request, code: str = "", state: str = ""):
+    """Handles OAuth redirect callback, verifies CSRF state, and persists token.json."""
     if not code:
-        return HTMLResponse("<h3>Missing authorization code. Please try again.</h3>", status_code=400)
+        return HTMLResponse("<h3>Missing authorization code. Please try again from the Setup Wizard.</h3>", status_code=400)
+
+    # Verify CSRF state parameter
+    with _OAUTH_STATE_LOCK:
+        valid_state = _OAUTH_STATES.pop(state, None)
+
+    if not valid_state or (time.time() - valid_state > 900):
+        return HTMLResponse(
+            "<h3>Invalid or expired OAuth state parameter. Please restart authorization from the Setup Wizard.</h3>",
+            status_code=400,
+        )
+
     from core.workspace_oauth import (
         _write_token_file_atomic,
         get_token_path,
@@ -197,6 +226,7 @@ async def workspace_oauth_callback(request: Request, code: str = ""):
         )
     except Exception:
         return HTMLResponse("<h3>Authorization failed. Please verify credentials/client_secrets.json.</h3>", status_code=400)
+
 
 
 @app.get("/api/raw_files")
@@ -334,6 +364,16 @@ async def save_setup(payload: SetupPayload):
                 _set_secret("TELEGRAM_TOKEN", basic["telegram_token"])
             if basic.get("telegram_chat_id"):
                 _set_secret("TELEGRAM_CHAT_ID", basic["telegram_chat_id"])
+
+            # If Vertex is selected (chat or embeddings), resolve actual project ID if placeholder or empty
+            if env_map.get("LLM_PROVIDER") == "vertex" or env_map.get("EMBEDDINGS_PROVIDER") == "vertex":
+                current_proj = env_map.get("PROJECT_ID", "").strip()
+                if not current_proj or current_proj.lower() == "your-gcp-project-id":
+                    from core.ai_provider import resolve_vertex_project_id
+                    cred_target = env_map.get("GOOGLE_APPLICATION_CREDENTIALS")
+                    resolved_proj = resolve_vertex_project_id(cred_file=cred_target)
+                    if resolved_proj and resolved_proj.lower() != "your-gcp-project-id":
+                        env_map["PROJECT_ID"] = resolved_proj
 
             # Resolve any remaining masked keys
             for k, v in list(env_map.items()):

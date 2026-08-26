@@ -75,6 +75,43 @@ def resolve_vertex_location(location: str | None = None) -> str:
     return os.getenv("LOCATION", "global") if location is None else location
 
 
+def resolve_vertex_project_id(explicit_project: str | None = None, cred_file: str | None = None) -> str:
+    """
+    Resolves the Google Cloud project ID for Vertex AI.
+    If explicit_project or configured PROJECT_ID is the placeholder 'your-gcp-project-id'
+    or empty, discovers the actual project ID from configured credentials files.
+    """
+    import json
+    # 1. If explicit non-placeholder project provided, use it
+    if explicit_project and explicit_project.strip().lower() != "your-gcp-project-id":
+        return explicit_project.strip()
+
+    # 2. Check credentials JSON if available
+    target_cred = cred_file or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or getattr(config, "CREDENTIALS_PATH", "")
+    if not target_cred:
+        base_dir = getattr(config, "BASE_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        root_cred = os.path.join(base_dir, "credentials.json")
+        nested_cred = os.path.join(base_dir, "credentials", "credentials.json")
+        target_cred = root_cred if os.path.exists(root_cred) else (nested_cred if os.path.exists(nested_cred) else "")
+
+    if target_cred and os.path.exists(target_cred):
+        try:
+            with open(target_cred, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                discovered = (data.get("project_id") or data.get("quota_project_id") or "").strip()
+                if discovered and discovered.lower() != "your-gcp-project-id":
+                    return discovered
+        except Exception:
+            pass
+
+    # 3. Fallback to config.PROJECT_ID or env PROJECT_ID
+    proj = (getattr(config, "PROJECT_ID", "") or os.environ.get("PROJECT_ID", "")).strip()
+    return proj or "your-gcp-project-id"
+
+
+
+
 def normalize_embedding_texts(texts: str | Sequence[str]) -> list[str]:
     """Normalize one text or a sequence of texts into provider-safe embedding input."""
     normalized = [texts] if isinstance(texts, str) else list(texts)
@@ -591,7 +628,7 @@ class VertexAIAdapter(AIProviderAdapter):
         fast_model: str | None = None,
         heavy_model: str | None = None,
     ):
-        self.project_id = project_id or getattr(config, "PROJECT_ID", "your-gcp-project-id")
+        self.project_id = resolve_vertex_project_id(project_id)
         self.location = resolve_vertex_location(location)
         self.fast_model, self.heavy_model = resolve_provider_models("vertex", fast_model, heavy_model)
         self.embedding_model = DEFAULT_VERTEX_EMBEDDING_MODEL

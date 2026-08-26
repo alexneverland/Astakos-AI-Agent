@@ -754,7 +754,7 @@ def test_setup_wizard_workspace_connect_explicit_action(monkeypatch: pytest.Monk
 
 
 def test_setup_wizard_workspace_oauth_endpoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """OAuth start and callback endpoints handle container-reachable flows and persist token."""
+    """OAuth start and callback endpoints handle container-reachable flows, verify state, and persist token."""
     from unittest.mock import MagicMock
     import api.setup_wizard as wizard
     import core.workspace_oauth as ws_oauth
@@ -769,7 +769,8 @@ def test_setup_wizard_workspace_oauth_endpoints(monkeypatch: pytest.MonkeyPatch,
             self.credentials.to_json.return_value = '{"token": "xyz", "client_id": "cid", "client_secret": "csec"}'
 
         def authorization_url(self, **kwargs: Any) -> tuple[str, str]:
-            return ("https://accounts.google.com/o/oauth2/auth?client_id=123", "state123")
+            state = kwargs.get("state", "test_state")
+            return (f"https://accounts.google.com/o/oauth2/auth?client_id=123&state={state}", state)
 
         def fetch_token(self, code: str) -> None:
             assert code == "test_auth_code"
@@ -779,22 +780,79 @@ def test_setup_wizard_workspace_oauth_endpoints(monkeypatch: pytest.MonkeyPatch,
     mock_request = MagicMock()
     mock_request.base_url = "http://localhost:8000"
 
-    # 1. GET /api/workspace/oauth/start
+    # 1. GET /api/workspace/oauth/start returns auth_url containing state
     start_res = asyncio.run(wizard.start_workspace_oauth(mock_request))
     assert "auth_url" in start_res
-    assert "https://accounts.google.com" in start_res["auth_url"]
+    auth_url = start_res["auth_url"]
+    assert "state=" in auth_url
 
-    # 2. GET /api/workspace/oauth/callback
-    cb_res = asyncio.run(wizard.workspace_oauth_callback(mock_request, code="test_auth_code"))
+    # Extract state parameter from auth_url
+    import urllib.parse
+    parsed = urllib.parse.urlparse(auth_url)
+    qs = urllib.parse.parse_qs(parsed.query)
+    state = qs["state"][0]
+
+    # 2. Callback with invalid state is rejected with 400
+    invalid_cb = asyncio.run(wizard.workspace_oauth_callback(mock_request, code="test_auth_code", state="invalid_state"))
+    assert invalid_cb.status_code == 400
+
+    # 3. Callback with valid state succeeds and persists token
+    cb_res = asyncio.run(wizard.workspace_oauth_callback(mock_request, code="test_auth_code", state=state))
     assert cb_res.status_code == 200
     assert token_target.exists()
     assert "client_id" in token_target.read_text(encoding="utf-8")
 
-    # 3. POST /api/workspace/connect with ASTAKOS_CONTAINER=1
+    # 4. POST /api/workspace/connect with ASTAKOS_CONTAINER=1
     monkeypatch.setenv("ASTAKOS_CONTAINER", "1")
     conn_res = asyncio.run(wizard.connect_workspace(mock_request))
     assert conn_res["status"] == "redirect"
     assert "auth_url" in conn_res
+
+
+def test_vertex_ai_adapter_resolves_project_id_from_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """VertexAIAdapter resolves real project_id from credentials JSON when config.PROJECT_ID is placeholder."""
+    from core.ai_provider import VertexAIAdapter, resolve_vertex_project_id
+    fake_cred = tmp_path / "credentials.json"
+    fake_cred.write_text('{"type": "service_account", "project_id": "discovered-vertex-project"}', encoding="utf-8")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
+    monkeypatch.setenv("PROJECT_ID", "your-gcp-project-id")
+    monkeypatch.setattr(config, "PROJECT_ID", "your-gcp-project-id")
+
+    assert resolve_vertex_project_id() == "discovered-vertex-project"
+    adapter = VertexAIAdapter()
+    assert adapter.project_id == "discovered-vertex-project"
+
+
+def test_setup_wizard_save_populates_vertex_project_id_from_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """save_setup automatically fills in discovered project ID when saving Vertex setup."""
+    import api.setup_wizard as wizard
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+
+    fake_cred = tmp_path / "credentials.json"
+    fake_cred.write_text('{"type": "service_account", "project_id": "auto-filled-project-id"}', encoding="utf-8")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(fake_cred))
+
+    payload = wizard.SetupPayload(
+        basic={
+            "llm_provider": "vertex",
+            "embeddings_provider": "vertex",
+            "api_key": str(fake_cred),
+            "env": "LLM_PROVIDER=vertex\nPROJECT_ID=your-gcp-project-id\n",
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    result = asyncio.run(wizard.save_setup(payload))
+    assert result["status"] == "success"
+    saved_env = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "PROJECT_ID=auto-filled-project-id" in saved_env
+
 
 
 

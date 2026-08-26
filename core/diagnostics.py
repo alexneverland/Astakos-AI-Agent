@@ -348,17 +348,46 @@ def get_embeddings_diagnostics(
         }
 
 
-def inspect_semantic_memory_inventory() -> dict[str, int] | None:
+def inspect_semantic_memory_inventory(chroma_dir: str | None = None) -> dict[str, int] | None:
     """
-    Safely inspects Chroma database collections and their document counts in read-only mode
-    via the canonical memory abstraction.
+    Safely inspects the local Chroma database collections and their vector counts in read-only mode,
+    reusing the existing managed Chroma handle if memory.vector_store is already loaded, or
+    querying the persist directory read-only without executing top-level vector_store/embeddings initialization.
     """
-    try:
-        from memory.vector_store import get_collections_inventory
+    import sys
 
-        return get_collections_inventory()
+    # 1. Reuse managed handle if memory.vector_store is already loaded in-process
+    m_vs = sys.modules.get("memory.vector_store")
+    if m_vs is not None:
+        getter = getattr(m_vs, "get_collections_inventory", None)
+        if callable(getter):
+            try:
+                return getter(chroma_dir)
+            except Exception:
+                pass
+
+    # 2. Standalone execution (e.g. during Setup Wizard): inspect directory directly without importing vector_store
+    db_dir = chroma_dir or getattr(config, "CHROMA_DB_DIR", None)
+    if not db_dir or not os.path.exists(db_dir):
+        return {}
+    try:
+        import chromadb
+        from chromadb.config import Settings
+        client = chromadb.PersistentClient(
+            path=db_dir,
+            settings=Settings(anonymized_telemetry=False, is_persistent=True),
+        )
+        collections = client.list_collections()
+        inventory = {}
+        for col in collections:
+            try:
+                inventory[col.name] = col.count()
+            except Exception:
+                inventory[col.name] = 0
+        return inventory
     except Exception:
         return None
+
 
 
 def get_semantic_memory_diagnostics(
