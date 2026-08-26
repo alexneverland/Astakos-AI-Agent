@@ -21,9 +21,33 @@ from core.i18n import t
 
 
 
-SCOPES = ['https://www.googleapis.com/auth/drive'] # Full access to Drive
+BACKUP_EXCLUDE_ITEMS = {
+    'venv',
+    '__pycache__',
+    '.git',
+    'messenger_profile',
+    'credentials',
+    'credentials.json',
+    'token.json',
+    '.astakos_token',
+    'client_secrets.json',
+    '.env',
+}
 
-BACKUP_EXCLUDE_ITEMS = {'venv', '__pycache__', '.git', 'messenger_profile', '.env', 'credentials'}
+
+def is_excluded_backup_item(item_name: str, exclude_items: set[str] | list[str] | None = None) -> bool:
+    """
+    Determines whether a file or directory should be excluded from daily backup.
+    Excludes .env, all .env.* variants, credentials/, credentials.json, token.json,
+    .astakos_token, client_secrets.json, and standard ignored directories (venv, .git, etc.).
+    """
+    if exclude_items and item_name in exclude_items:
+        return True
+    if item_name in BACKUP_EXCLUDE_ITEMS:
+        return True
+    if item_name == ".env" or item_name.startswith(".env."):
+        return True
+    return False
 
 
 def authenticate_google_drive():
@@ -45,10 +69,11 @@ def upload_folder_recursive(service, local_path, drive_parent_id, exclude_items)
         return uploaded_items
 
     for item_name in os.listdir(local_path):
-        # 1. Check for names (folders like 'venv', 'credentials' or files like '.env')
-        if item_name in exclude_items:
+        # 1. Check for excluded items (secrets, .env*, credentials, venv, etc.)
+        if is_excluded_backup_item(item_name, exclude_items):
             print(f"  [Skip] Excluded by name: {item_name}")
             continue
+
 
         current_local_path = os.path.join(local_path, item_name)
 

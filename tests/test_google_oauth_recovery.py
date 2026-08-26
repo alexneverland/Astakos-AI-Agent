@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 
 import pytest
 from google.auth.exceptions import RefreshError
@@ -37,7 +39,8 @@ def test_workspace_oauth_refresh_failure_raises_actionable_error(
 ) -> None:
     """Verifies that recoverable OAuth refresh failures raise WorkspaceTokenRevokedOrInvalidError without touching credentials.json."""
     token_path = tmp_path / "token.json"
-    token_path.write_text("{}", encoding="utf-8")
+    token_path.write_text(json.dumps({"scopes": ["https://www.googleapis.com/auth/gmail.modify"]}), encoding="utf-8")
+
 
     stale_creds = MagicMock(valid=False, expired=True, refresh_token="revoked")
     stale_creds.refresh.side_effect = RefreshError(refresh_error)

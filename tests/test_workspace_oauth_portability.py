@@ -22,10 +22,15 @@ from core.workspace_oauth import (
     DEFAULT_WORKSPACE_SCOPES,
     WorkspaceAuthError,
     WorkspaceMissingCredentialsError,
+    WorkspaceMissingOAuthClientSecretsError,
+    WorkspaceMissingScopeError,
     WorkspaceTokenRevokedOrInvalidError,
-    _build_effective_scopes,
+    authorize_workspace_oauth,
+    check_missing_scopes,
+    get_oauth_client_secrets_path,
     is_workspace_connected,
     load_workspace_credentials,
+    read_stored_token_scopes,
 )
 from tools import gdrive, system
 
@@ -132,7 +137,6 @@ def test_outbound_safety_guard_blocks_generic_http_transports() -> None:
     assert "Unexpected outbound network or Telegram call" in str(exc_info_httplib2.value)
 
 
-
 def test_is_workspace_connected_when_token_present_and_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     token_file = tmp_path / "token.json"
     monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
@@ -158,7 +162,7 @@ def test_load_workspace_credentials_isolated_from_adc_and_vertex(
 ) -> None:
     """Proves Workspace credentials load from user token.json and NEVER touch google.auth.default / ADC."""
     token_file = tmp_path / "token.json"
-    token_file.write_text(json.dumps({"token": "user-oauth-token"}), encoding="utf-8")
+    token_file.write_text(json.dumps({"token": "user-oauth-token", "scopes": DEFAULT_WORKSPACE_SCOPES}), encoding="utf-8")
 
     monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "vertex_service_account.json")
@@ -176,7 +180,11 @@ def test_load_workspace_credentials_refresh_revoked_raises_actionable_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     token_file = tmp_path / "token.json"
-    token_file.write_text(json.dumps({"token": "expired-token", "refresh_token": "refresh-tok"}), encoding="utf-8")
+    token_file.write_text(json.dumps({
+        "token": "expired-token",
+        "refresh_token": "refresh-tok",
+        "scopes": DEFAULT_WORKSPACE_SCOPES,
+    }), encoding="utf-8")
     monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
 
     mock_creds = _create_mock_creds(valid=False, expired=True, refresh_token="refresh-tok")
@@ -189,49 +197,138 @@ def test_load_workspace_credentials_refresh_revoked_raises_actionable_error(
         assert "reconnect your Google" in str(exc_info.value) or "expired or revoked" in str(exc_info.value)
 
 
-def test_load_workspace_credentials_preserves_shared_scopes_on_narrow_refresh(
+def test_load_workspace_credentials_preserves_granted_scopes_and_never_expands_on_refresh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """
-    Proves that when a single integration (like Calendar) requests a narrow scope,
-    load_workspace_credentials combines DEFAULT_WORKSPACE_SCOPES so the saved token
-    never shrinks its scope metadata upon refresh.
+    Proves that an existing token with a legacy scope set (missing fitness.body.read)
+    refreshes using only its granted scopes, never requests fitness.body.read, and
+    persists the original granted scope set unchanged.
     """
+    legacy_scopes = [
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/tasks",
+        "https://www.googleapis.com/auth/fitness.activity.read",
+    ]
     token_file = tmp_path / "token.json"
     token_file.write_text(json.dumps({
-        "token": "expired-token",
-        "refresh_token": "valid-refresh",
-        "scopes": DEFAULT_WORKSPACE_SCOPES,
+        "token": "expired-legacy-token",
+        "refresh_token": "legacy-refresh",
+        "scopes": legacy_scopes,
     }), encoding="utf-8")
     monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
 
-    requested_effective_scopes: list[list[str]] = []
+    requested_loader_scopes: list[list[str]] = []
 
     def _mock_from_authorized_user_file(path: str, scopes: list[str] | None = None) -> MagicMock:
-        requested_effective_scopes.append(scopes or [])
-        creds = _create_mock_creds(valid=False, expired=True, refresh_token="valid-refresh", scopes=scopes)
-        # simulate successful refresh
+        requested_loader_scopes.append(scopes or [])
+        creds = _create_mock_creds(valid=False, expired=True, refresh_token="legacy-refresh", scopes=scopes)
+
         def _do_refresh(request: Any) -> None:
             creds.valid = True
             creds.expired = False
+            # When creds.to_json() is called, it should retain the granted legacy scopes
+            creds.to_json.return_value = json.dumps({
+                "token": "fresh-token",
+                "refresh_token": "legacy-refresh",
+                "scopes": creds.scopes,
+            })
         creds.refresh.side_effect = _do_refresh
         return creds
 
     with patch("google.oauth2.credentials.Credentials.from_authorized_user_file", side_effect=_mock_from_authorized_user_file):
-        # Caller only asked for calendar scope
+        # Caller requests Calendar
         creds = load_workspace_credentials(scopes=["https://www.googleapis.com/auth/calendar"], auto_refresh=True)
         assert creds.valid
 
-        # Verify that the loaded scopes contained all DEFAULT_WORKSPACE_SCOPES (gmail, drive, tasks, fit...)
-        assert requested_effective_scopes
-        for default_scope in DEFAULT_WORKSPACE_SCOPES:
-            assert default_scope in requested_effective_scopes[0]
+        # 1. Verify loader requested ONLY the granted legacy scopes, not the new fitness.body.read
+        assert requested_loader_scopes
+        assert requested_loader_scopes[0] == legacy_scopes
+        assert "https://www.googleapis.com/auth/fitness.body.read" not in requested_loader_scopes[0]
 
-        # Verify that persisted token retains all DEFAULT_WORKSPACE_SCOPES
+        # 2. Verify persisted token retains the original granted scopes unchanged
         saved_data = json.loads(token_file.read_text(encoding="utf-8"))
-        saved_scopes = saved_data.get("scopes", [])
-        for default_scope in DEFAULT_WORKSPACE_SCOPES:
-            assert default_scope in saved_scopes
+        assert saved_data.get("scopes") == legacy_scopes
+        assert "https://www.googleapis.com/auth/fitness.body.read" not in saved_data.get("scopes", [])
+
+
+def test_feature_requiring_missing_scope_raises_workspace_missing_scope_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proves that requesting credentials with a scope not in the token raises WorkspaceMissingScopeError."""
+    token_file = tmp_path / "token.json"
+    token_file.write_text(json.dumps({
+        "token": "valid-token",
+        "scopes": ["https://www.googleapis.com/auth/drive"],
+    }), encoding="utf-8")
+    monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
+
+    with pytest.raises(WorkspaceMissingScopeError) as exc_info:
+        load_workspace_credentials(scopes=["https://www.googleapis.com/auth/fitness.body.read"])
+
+    assert "lacks required permissions" in str(exc_info.value)
+    assert "fitness.body.read" in str(exc_info.value)
+
+
+def test_read_stored_token_scopes_supports_string_and_list(tmp_path: Path) -> None:
+    """Proves read_stored_token_scopes parses both list format and space-separated string format."""
+    p1 = tmp_path / "token_list.json"
+    p1.write_text(json.dumps({"scopes": ["https://a", "https://b"]}), encoding="utf-8")
+    assert read_stored_token_scopes(str(p1)) == ["https://a", "https://b"]
+
+    p2 = tmp_path / "token_str.json"
+    p2.write_text(json.dumps({"scope": "https://a https://b"}), encoding="utf-8")
+    assert read_stored_token_scopes(str(p2)) == ["https://a", "https://b"]
+
+
+def test_authorize_workspace_oauth_uses_client_secrets_path_and_never_vertex_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Proves that authorize_workspace_oauth uses the dedicated client_secrets.json,
+    never touches credentials.json / Vertex service account, and writes resulting token.
+    """
+    client_secrets_file = tmp_path / "client_secrets.json"
+    client_secrets_file.write_text(json.dumps({"installed": {"client_id": "cid"}}), encoding="utf-8")
+    token_file = tmp_path / "token.json"
+
+    monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
+    monkeypatch.setattr("core.workspace_oauth.get_oauth_client_secrets_path", lambda: str(client_secrets_file))
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "vertex_service_account.json")
+
+    mock_flow = MagicMock()
+    mock_flow_creds = _create_mock_creds(valid=True)
+    mock_flow.run_local_server.return_value = mock_flow_creds
+
+    with patch("google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file", return_value=mock_flow) as mock_from_secrets:
+        msg = authorize_workspace_oauth()
+        assert "successful" in msg
+        mock_from_secrets.assert_called_once_with(str(client_secrets_file), list(DEFAULT_WORKSPACE_SCOPES))
+        assert token_file.exists()
+
+
+def test_authorize_workspace_oauth_missing_client_secrets_fails_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    non_existent = tmp_path / "missing_client_secrets.json"
+    monkeypatch.setattr("core.workspace_oauth.get_oauth_client_secrets_path", lambda: str(non_existent))
+
+    with pytest.raises(WorkspaceMissingOAuthClientSecretsError) as exc_info:
+        authorize_workspace_oauth()
+
+    assert "client secrets file not found" in str(exc_info.value)
+
+
+def test_authorize_google_fit_delegates_to_authorize_workspace_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Proves google_fit.authorize_google_fit delegates to the shared authorize_workspace_oauth."""
+    mock_authorize = MagicMock(return_value="Auth success")
+    monkeypatch.setattr("core.workspace_oauth.authorize_workspace_oauth", mock_authorize)
+
+    res = google_fit.authorize_google_fit()
+    assert res == "Auth success"
+    mock_authorize.assert_called_once_with(scopes=google_fit.SCOPES)
 
 
 def test_gmail_and_fit_use_shared_workspace_loader(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -404,30 +501,34 @@ def test_daily_backup_uses_explicit_backup_folder_setting_when_configured(monkey
         assert create_kwargs.get("body", {}).get("parents") == ["configured_backup_folder_777"]
 
 
-def test_daily_backup_excludes_env_and_credentials_directory(tmp_path: Path) -> None:
+def test_daily_backup_excludes_all_secret_layouts(tmp_path: Path) -> None:
     """
-    Proves that .env and the entire credentials/ directory are excluded recursively
-    from daily backup, while normal allowed project files are uploaded.
+    Proves that .env, all .env.* variants, credentials/, root-level credentials.json,
+    root-level token.json, root-level .astakos_token, and root-level client_secrets.json
+    are all excluded from backup, while permitted project files are uploaded.
     """
-    # Create test directory structure
     root = tmp_path / "project_root"
     root.mkdir()
 
-    # Sensitive items that must NOT be uploaded
-    env_file = root / ".env"
-    env_file.write_text("SECRET_KEY=supersecret\n", encoding="utf-8")
+    # 1. Sensitive files at root
+    (root / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    (root / ".env.local").write_text("SECRET=2\n", encoding="utf-8")
+    (root / ".env.production").write_text("SECRET=3\n", encoding="utf-8")
+    (root / "credentials.json").write_text("{}", encoding="utf-8")
+    (root / "token.json").write_text("{}", encoding="utf-8")
+    (root / ".astakos_token").write_text("tok", encoding="utf-8")
+    (root / "client_secrets.json").write_text("{}", encoding="utf-8")
 
+    # 2. Sensitive directory
     creds_dir = root / "credentials"
     creds_dir.mkdir()
-    (creds_dir / "token.json").write_text("{}", encoding="utf-8")
     (creds_dir / "service_account.json").write_text("{}", encoding="utf-8")
-    (creds_dir / "client_secrets.json").write_text("{}", encoding="utf-8")
 
     venv_dir = root / "venv"
     venv_dir.mkdir()
     (venv_dir / "lib.py").write_text("# venv code", encoding="utf-8")
 
-    # Permitted items that SHOULD be uploaded
+    # 3. Permitted files that SHOULD be uploaded
     main_py = root / "main.py"
     main_py.write_text("# project entry", encoding="utf-8")
 
@@ -466,12 +567,16 @@ def test_daily_backup_excludes_env_and_credentials_directory(tmp_path: Path) -> 
     assert "utils.py" in uploaded_files
     assert "src" in created_folders
 
-    # 2. Sensitive files and directories were NEVER touched or uploaded
+    # 2. All secret files and directories were skipped
     assert ".env" not in uploaded_files
-    assert "credentials" not in created_folders
+    assert ".env.local" not in uploaded_files
+    assert ".env.production" not in uploaded_files
+    assert "credentials.json" not in uploaded_files
     assert "token.json" not in uploaded_files
-    assert "service_account.json" not in uploaded_files
+    assert ".astakos_token" not in uploaded_files
     assert "client_secrets.json" not in uploaded_files
+    assert "credentials" not in created_folders
+    assert "service_account.json" not in uploaded_files
     assert "venv" not in created_folders
     assert "lib.py" not in uploaded_files
 

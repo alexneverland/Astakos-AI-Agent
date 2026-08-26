@@ -49,6 +49,14 @@ class WorkspaceMissingCredentialsError(WorkspaceAuthError):
     """Raised when Google Workspace has not been authorized (token.json missing)."""
 
 
+class WorkspaceMissingScopeError(WorkspaceAuthError):
+    """Raised when an authorized token lacks a required scope for the requested feature."""
+
+
+class WorkspaceMissingOAuthClientSecretsError(WorkspaceAuthError):
+    """Raised when the dedicated OAuth client secrets file (client_secrets.json) is missing."""
+
+
 class WorkspaceTokenRevokedOrInvalidError(WorkspaceAuthError):
     """Raised when the user OAuth token is revoked, expired without valid refresh, or the OAuth client changed."""
 
@@ -58,25 +66,94 @@ def get_token_path() -> str:
     return getattr(config, "TOKEN_PATH", os.path.join(config.BASE_DIR, "credentials", "token.json"))
 
 
+def get_oauth_client_secrets_path() -> str:
+    """
+    Returns the path to the dedicated Google Workspace OAuth client secrets file.
+    Optionally configured via WORKSPACE_CLIENT_SECRETS_PATH env var.
+    Defaults to credentials/client_secrets.json (or client_secrets.json in root).
+    Never uses credentials.json (which may be a Vertex service account).
+    """
+    env_path = os.environ.get("WORKSPACE_CLIENT_SECRETS_PATH") or os.environ.get("GOOGLE_WORKSPACE_CLIENT_SECRETS_PATH")
+    if env_path:
+        return env_path
+
+    cred_client_secrets = os.path.join(config.BASE_DIR, "credentials", "client_secrets.json")
+    if os.path.exists(cred_client_secrets):
+        return cred_client_secrets
+
+    root_client_secrets = os.path.join(config.BASE_DIR, "client_secrets.json")
+    if os.path.exists(root_client_secrets):
+        return root_client_secrets
+
+    return cred_client_secrets
+
+
 def is_workspace_connected() -> bool:
     """Checks whether a valid token.json exists for Google Workspace."""
     token_path = get_token_path()
     return bool(os.path.exists(token_path) and os.path.getsize(token_path) > 0)
 
 
+def read_stored_token_scopes(token_path: str | None = None) -> list[str]:
+    """Reads the granted scopes from token.json, supporting either 'scopes' list or 'scope' space-separated string."""
+    import json
+    target_path = token_path or get_token_path()
+    if not os.path.exists(target_path) or os.path.getsize(target_path) == 0:
+        return []
+    try:
+        with open(target_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        logger.warning(f"Could not parse token.json for scopes: {exc}")
+        return []
 
-def _build_effective_scopes(scopes: Sequence[str] | None = None) -> list[str]:
+    raw_scopes = data.get("scopes") or data.get("scope") or []
+    if isinstance(raw_scopes, str):
+        return [s for s in raw_scopes.split() if s]
+    if isinstance(raw_scopes, list):
+        return [str(s) for s in raw_scopes if s]
+    return []
+
+
+def check_missing_scopes(
+    required_scopes: Sequence[str],
+    token_scopes: Sequence[str] | None = None,
+) -> list[str]:
+    """Returns any required scopes that are not present in the token's granted scopes."""
+    granted_set = set(token_scopes if token_scopes is not None else read_stored_token_scopes())
+    return [req for req in required_scopes if req and req not in granted_set]
+
+
+def authorize_workspace_oauth(
+    client_secrets_path: str | None = None,
+    scopes: Sequence[str] | None = None,
+    port: int = 0,
+) -> str:
     """
-    Builds the effective scopes combining DEFAULT_WORKSPACE_SCOPES and any additional
-    requested scopes with deterministic order preservation, ensuring that refreshing credentials
-    for a single tool does not shrink the shared token's scope metadata.
+    Initiates an explicit interactive OAuth consent flow in the browser.
+    Writes the resulting user token to token.json with the requested (or DEFAULT_WORKSPACE_SCOPES) scopes.
+    Never uses credentials.json (Vertex service account).
     """
-    combined: list[str] = list(DEFAULT_WORKSPACE_SCOPES)
-    if scopes:
-        for scope in scopes:
-            if scope and scope not in combined:
-                combined.append(scope)
-    return combined
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    target_secrets = client_secrets_path or get_oauth_client_secrets_path()
+    if not os.path.exists(target_secrets) or os.path.getsize(target_secrets) == 0:
+        raise WorkspaceMissingOAuthClientSecretsError(
+            f"Google Workspace OAuth client secrets file not found at '{target_secrets}'. "
+            "Please place your OAuth client secrets JSON at 'credentials/client_secrets.json' "
+            "or set WORKSPACE_CLIENT_SECRETS_PATH."
+        )
+
+    target_scopes = list(scopes) if scopes else list(DEFAULT_WORKSPACE_SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(target_secrets, target_scopes)
+    creds = flow.run_local_server(port=port, prompt="consent", access_type="offline")
+
+    token_path = get_token_path()
+    os.makedirs(os.path.dirname(token_path), exist_ok=True)
+    with open(token_path, "w", encoding="utf-8") as f:
+        f.write(creds.to_json())
+
+    return f"Google Workspace authorization successful. Token saved to '{token_path}'."
 
 
 def load_workspace_credentials(
@@ -85,9 +162,11 @@ def load_workspace_credentials(
 ) -> Credentials:
     """
     Loads and optionally refreshes the user's Google Workspace OAuth credentials.
+    Preserves existing granted scopes and never injects new ungranted default scopes.
 
     Raises:
         WorkspaceMissingCredentialsError: If token.json is not found.
+        WorkspaceMissingScopeError: If token.json lacks a requested scope.
         WorkspaceTokenRevokedOrInvalidError: If the token is invalid or refresh fails.
     """
     token_path = get_token_path()
@@ -97,15 +176,23 @@ def load_workspace_credentials(
             "Please connect your Google Workspace account in settings or authorize OAuth."
         )
 
-    effective_scopes = _build_effective_scopes(scopes)
+    stored_scopes = read_stored_token_scopes(token_path)
+
+    # Validate caller's requested scopes against granted scopes
+    if scopes:
+        missing = check_missing_scopes(scopes, stored_scopes)
+        if missing:
+            raise WorkspaceMissingScopeError(
+                f"Google Workspace authorization lacks required permissions ({', '.join(missing)}). "
+                "Please reconnect your Google Workspace account to grant access."
+            )
 
     try:
-        creds = Credentials.from_authorized_user_file(token_path, scopes=effective_scopes)
+        creds = Credentials.from_authorized_user_file(token_path, scopes=stored_scopes or None)
     except Exception as exc:
         raise WorkspaceTokenRevokedOrInvalidError(
             f"Google Workspace token is invalid: {exc}. Please reconnect your Google account."
         ) from exc
-
 
     if not creds:
         raise WorkspaceMissingCredentialsError(
@@ -139,6 +226,7 @@ def load_workspace_credentials(
             )
 
     return creds
+
 
 
 def get_workspace_service(

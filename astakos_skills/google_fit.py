@@ -39,23 +39,13 @@ class GoogleFitAuthError(RuntimeError):
 
 
 def _read_token_scopes() -> set[str]:
-    if not os.path.exists(TOKEN_PATH):
-        return set()
-
-    try:
-        with open(TOKEN_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return set()
-
-    scopes = data.get("scopes") or data.get("scope") or []
-    if isinstance(scopes, str):
-        scopes = scopes.split()
-    return {scope for scope in scopes if isinstance(scope, str)}
+    from core.workspace_oauth import read_stored_token_scopes
+    return set(read_stored_token_scopes(TOKEN_PATH))
 
 
 def _missing_fit_scopes(token_scopes: set[str]) -> list[str]:
-    return [scope for scope in FIT_SCOPES if scope not in token_scopes]
+    from core.workspace_oauth import check_missing_scopes
+    return check_missing_scopes(FIT_SCOPES, token_scopes)
 
 
 def _ensure_fit_token_scopes() -> None:
@@ -80,9 +70,12 @@ def _ensure_fit_token_scopes() -> None:
 
 
 def authorize_google_fit() -> str:
-    raise GoogleFitAuthError(
-        "Google Workspace OAuth authorization must be configured via settings (token.json)."
-    )
+    """Initiates explicit Google Workspace OAuth consent flow for Fit."""
+    try:
+        from core.workspace_oauth import authorize_workspace_oauth
+        return authorize_workspace_oauth(scopes=SCOPES)
+    except Exception as e:
+        raise GoogleFitAuthError(f"Google Fit OAuth authorization failed: {e}") from e
 
 
 def _get_credentials():
@@ -92,17 +85,21 @@ def _get_credentials():
             load_workspace_credentials,
             WorkspaceAuthError,
             WorkspaceMissingCredentialsError,
+            WorkspaceMissingScopeError,
             WorkspaceTokenRevokedOrInvalidError,
         )
         return load_workspace_credentials(scopes=SCOPES)
     except WorkspaceMissingCredentialsError as e:
         raise GoogleFitAuthError(t("skills.google_fit.token_expired")) from e
+    except WorkspaceMissingScopeError as e:
+        raise GoogleFitAuthError(str(e)) from e
     except (WorkspaceTokenRevokedOrInvalidError, WorkspaceAuthError) as e:
         raise GoogleFitAuthError(
             f"Google Fit authorization expired or revoked ({e}). Please reconnect Google Workspace."
         ) from e
     except Exception as e:
         raise GoogleFitAuthError(f"Google Fit authorization failed ({e}). Please reconnect Google Workspace.") from e
+
 
 
 def _fit_auth_summary(title: str) -> str | None:
