@@ -75,6 +75,116 @@ def resolve_vertex_location(location: str | None = None) -> str:
     return os.getenv("LOCATION", "global") if location is None else location
 
 
+def find_offline_adc_credentials_path() -> str | None:
+    """
+    Discovers standard local Application Default Credentials (ADC) file path without network calls.
+    Returns path if file exists on disk, otherwise None.
+    """
+    gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if gac and os.path.exists(gac):
+        return gac
+
+    if os.name == "nt":
+        app_data = os.environ.get("APPDATA")
+        if app_data:
+            win_adc = os.path.join(app_data, "gcloud", "application_default_credentials.json")
+            if os.path.exists(win_adc):
+                return win_adc
+    else:
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config:
+            xdg_adc = os.path.join(xdg_config, "gcloud", "application_default_credentials.json")
+            if os.path.exists(xdg_adc):
+                return xdg_adc
+        unix_adc = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
+        if os.path.exists(unix_adc):
+            return unix_adc
+
+    return None
+
+
+def resolve_vertex_credentials_path(explicit_path: str | None = None) -> str:
+    """Discovers configured Vertex AI credentials file path without mutating environment."""
+    if explicit_path and os.path.exists(explicit_path):
+        return explicit_path
+    env_cred = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if env_cred and os.path.exists(env_cred):
+        return env_cred
+    config_cred = getattr(config, "CREDENTIALS_PATH", "")
+    if config_cred and os.path.exists(config_cred):
+        return config_cred
+    base_dir = getattr(config, "BASE_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    root_cred = os.path.join(base_dir, "credentials.json")
+    if os.path.exists(root_cred):
+        return root_cred
+    nested_cred = os.path.join(base_dir, "credentials", "credentials.json")
+    if os.path.exists(nested_cred):
+        return nested_cred
+    adc_path = find_offline_adc_credentials_path()
+    if adc_path and os.path.exists(adc_path):
+        return adc_path
+    return ""
+
+
+def get_vertex_credentials(credentials_path: str | None = None) -> Any:
+    """
+    Loads Google auth credentials for Vertex AI if a credentials file is configured or discovered.
+    Returns google.auth.credentials.Credentials or None.
+    """
+    import json
+    cred_file = resolve_vertex_credentials_path(credentials_path)
+    if cred_file and os.path.exists(cred_file):
+        try:
+            with open(cred_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                cred_type = data.get("type")
+                if cred_type == "service_account":
+                    from google.oauth2 import service_account
+                    return service_account.Credentials.from_service_account_info(data)
+                elif cred_type == "authorized_user":
+                    from google.oauth2 import credentials as user_credentials
+                    return user_credentials.Credentials.from_authorized_user_info(data)
+        except Exception:
+            pass
+    return None
+
+
+def resolve_vertex_project_id(explicit_project: str | None = None, cred_file: str | None = None) -> str:
+    """
+    Resolves the Google Cloud project ID for Vertex AI.
+    Prefers explicit_project or configured PROJECT_ID. If configured PROJECT_ID is empty
+    or the default placeholder 'your-gcp-project-id', falls back to discovering the project ID
+    from configured/ambient credentials files.
+    """
+    import json
+    # 1. Explicit project if non-placeholder and non-empty
+    if explicit_project and explicit_project.strip().lower() != "your-gcp-project-id":
+        return explicit_project.strip()
+
+    # 2. Configured PROJECT_ID or env PROJECT_ID if non-placeholder and non-empty
+    proj = (getattr(config, "PROJECT_ID", "") or os.environ.get("PROJECT_ID", "")).strip()
+    if proj and proj.lower() != "your-gcp-project-id":
+        return proj
+
+    # 3. Fallback to credentials JSON (service account project_id or ADC quota_project_id)
+    target_cred = resolve_vertex_credentials_path(cred_file)
+    if target_cred and os.path.exists(target_cred):
+        try:
+            with open(target_cred, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                discovered = (data.get("project_id") or data.get("quota_project_id") or "").strip()
+                if discovered and discovered.lower() != "your-gcp-project-id":
+                    return discovered
+        except Exception:
+            pass
+
+    return "your-gcp-project-id"
+
+
+
+
 def normalize_embedding_texts(texts: str | Sequence[str]) -> list[str]:
     """Normalize one text or a sequence of texts into provider-safe embedding input."""
     normalized = [texts] if isinstance(texts, str) else list(texts)
@@ -590,33 +700,42 @@ class VertexAIAdapter(AIProviderAdapter):
         location: str | None = None,
         fast_model: str | None = None,
         heavy_model: str | None = None,
+        credentials_path: str | None = None,
     ):
-        self.project_id = project_id or getattr(config, "PROJECT_ID", "your-gcp-project-id")
+        self.credentials_path = resolve_vertex_credentials_path(credentials_path)
+        self.project_id = resolve_vertex_project_id(project_id, cred_file=self.credentials_path)
         self.location = resolve_vertex_location(location)
         self.fast_model, self.heavy_model = resolve_provider_models("vertex", fast_model, heavy_model)
         self.embedding_model = DEFAULT_VERTEX_EMBEDDING_MODEL
+        self._credentials = get_vertex_credentials(self.credentials_path)
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
         from langchain_google_genai import ChatGoogleGenerativeAI
         model = self.heavy_model if model_type == "heavy" else self.fast_model
         temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
         safety_settings = get_gemini_safety_settings()
-        return ChatGoogleGenerativeAI(
-            model=model,
-            temperature=temp,
-            safety_settings=safety_settings,
-            vertexai=True,
-            project=self.project_id,
-            location=self.location,
-        )
+        kwargs = {
+            "model": model,
+            "temperature": temp,
+            "safety_settings": safety_settings,
+            "vertexai": True,
+            "project": self.project_id,
+            "location": self.location,
+        }
+        if self._credentials is not None:
+            kwargs["credentials"] = self._credentials
+        return ChatGoogleGenerativeAI(**kwargs)
 
     def _get_genai_client(self):
         from google import genai
-        return genai.Client(
-            vertexai=True,
-            project=self.project_id,
-            location=self.location,
-        )
+        kwargs = {
+            "vertexai": True,
+            "project": self.project_id,
+            "location": self.location,
+        }
+        if self._credentials is not None:
+            kwargs["credentials"] = self._credentials
+        return genai.Client(**kwargs)
 
     def generate_text(
         self,
@@ -710,12 +829,15 @@ class VertexAIAdapter(AIProviderAdapter):
         try:
             normalized_texts = normalize_embedding_texts(texts)
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
-            emb_client = GoogleGenerativeAIEmbeddings(
-                model=self.embedding_model,
-                vertexai=True,
-                project=self.project_id,
-                location=self.location,
-            )
+            kwargs = {
+                "model": self.embedding_model,
+                "vertexai": True,
+                "project": self.project_id,
+                "location": self.location,
+            }
+            if self._credentials is not None:
+                kwargs["credentials"] = self._credentials
+            emb_client = GoogleGenerativeAIEmbeddings(**kwargs)
             if is_query:
                 return [emb_client.embed_query(text) for text in normalized_texts]
             return emb_client.embed_documents(normalized_texts)

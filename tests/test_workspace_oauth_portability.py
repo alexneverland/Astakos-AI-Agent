@@ -215,6 +215,8 @@ def test_load_workspace_credentials_preserves_granted_scopes_and_never_expands_o
     token_file = tmp_path / "token.json"
     token_file.write_text(json.dumps({
         "token": "expired-legacy-token",
+        "client_id": "cid",
+        "client_secret": "csec",
         "refresh_token": "legacy-refresh",
         "scopes": legacy_scopes,
     }), encoding="utf-8")
@@ -261,6 +263,9 @@ def test_feature_requiring_missing_scope_raises_workspace_missing_scope_error(
     token_file = tmp_path / "token.json"
     token_file.write_text(json.dumps({
         "token": "valid-token",
+        "client_id": "cid",
+        "client_secret": "csec",
+        "refresh_token": "rt",
         "scopes": ["https://www.googleapis.com/auth/drive"],
     }), encoding="utf-8")
     monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
@@ -275,12 +280,73 @@ def test_feature_requiring_missing_scope_raises_workspace_missing_scope_error(
 def test_read_stored_token_scopes_supports_string_and_list(tmp_path: Path) -> None:
     """Proves read_stored_token_scopes parses both list format and space-separated string format."""
     p1 = tmp_path / "token_list.json"
-    p1.write_text(json.dumps({"scopes": ["https://a", "https://b"]}), encoding="utf-8")
+    p1.write_text(json.dumps({"token": "tok", "client_id": "cid", "client_secret": "csec", "refresh_token": "rt", "scopes": ["https://a", "https://b"]}), encoding="utf-8")
     assert read_stored_token_scopes(str(p1)) == ["https://a", "https://b"]
 
     p2 = tmp_path / "token_str.json"
-    p2.write_text(json.dumps({"scope": "https://a https://b"}), encoding="utf-8")
+    p2.write_text(json.dumps({"token": "tok", "client_id": "cid", "client_secret": "csec", "refresh_token": "rt", "scope": "https://a https://b"}), encoding="utf-8")
     assert read_stored_token_scopes(str(p2)) == ["https://a", "https://b"]
+
+
+def test_inspect_workspace_token_metadata_rejects_structurally_incomplete_tokens(tmp_path: Path) -> None:
+    """Proves that structurally incomplete JSON objects (e.g. empty or missing keys) are marked malformed."""
+    from core.workspace_oauth import inspect_workspace_token_metadata
+
+    # 1. Empty dict
+    p_empty = tmp_path / "empty.json"
+    p_empty.write_text("{}", encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_empty)) == ("malformed", [])
+
+    # 2. Incomplete dict without client credentials or refresh token
+    p_inc = tmp_path / "incomplete.json"
+    p_inc.write_text(json.dumps({"token": "only-token"}), encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_inc)) == ("malformed", [])
+
+    # 3. Incomplete dict with refresh_token alone but missing client_id/client_secret
+    p_rt_only = tmp_path / "rt_only.json"
+    p_rt_only.write_text(json.dumps({"refresh_token": "only-refresh-token"}), encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_rt_only)) == ("malformed", [])
+
+    # 4. Incomplete dict with client credentials and access token but missing refresh_token
+    p_access_only = tmp_path / "access_only.json"
+    p_access_only.write_text(json.dumps({"token": "only-access-token", "client_id": "cid", "client_secret": "csec"}), encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_access_only)) == ("malformed", [])
+
+    # 5. Incomplete dict with scopes but missing client credentials / refresh_token
+    p_scoped_inc = tmp_path / "scoped_inc.json"
+    p_scoped_inc.write_text(json.dumps({"scopes": ["https://www.googleapis.com/auth/drive"]}), encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_scoped_inc)) == ("malformed", [])
+
+    # 6. Valid authorized user structure with explicit empty scopes -> valid with empty list
+    p_empty_scopes = tmp_path / "empty_scopes.json"
+    p_empty_scopes.write_text(json.dumps({"refresh_token": "rt", "client_id": "cid", "client_secret": "csec", "scopes": []}), encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_empty_scopes)) == ("valid", [])
+
+    # 7. Valid authorized user structure without scope metadata -> legacy
+    p_leg = tmp_path / "legacy.json"
+    p_leg.write_text(json.dumps({"refresh_token": "rt", "client_id": "cid", "client_secret": "csec"}), encoding="utf-8")
+    assert inspect_workspace_token_metadata(str(p_leg)) == ("legacy", [])
+
+
+def test_load_workspace_credentials_with_explicit_empty_scopes_raises_missing_scope_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proves that a token with 'scopes': [] is treated as having no permissions and raises WorkspaceMissingScopeError."""
+    token_file = tmp_path / "token.json"
+    token_file.write_text(json.dumps({
+        "token": "valid-token",
+        "client_id": "cid",
+        "client_secret": "csec",
+        "refresh_token": "rt",
+        "scopes": [],
+    }), encoding="utf-8")
+    monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
+
+    with pytest.raises(WorkspaceMissingScopeError) as exc_info:
+        load_workspace_credentials(scopes=["https://www.googleapis.com/auth/calendar"])
+
+    assert "lacks required permissions" in str(exc_info.value)
+
 
 
 def test_load_workspace_credentials_without_stored_scopes_loads_successfully(
@@ -293,6 +359,8 @@ def test_load_workspace_credentials_without_stored_scopes_loads_successfully(
     token_file = tmp_path / "token.json"
     token_file.write_text(json.dumps({
         "token": "legacy-token-no-scopes",
+        "client_id": "cid",
+        "client_secret": "csec",
         "refresh_token": "legacy-refresh",
     }), encoding="utf-8")
     monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))
@@ -319,6 +387,8 @@ def test_load_workspace_credentials_without_stored_scopes_refresh_preserves_meta
     token_file = tmp_path / "token.json"
     token_file.write_text(json.dumps({
         "token": "legacy-token-no-scopes",
+        "client_id": "cid",
+        "client_secret": "csec",
         "refresh_token": "legacy-refresh",
     }), encoding="utf-8")
     monkeypatch.setattr("core.workspace_oauth.get_token_path", lambda: str(token_file))

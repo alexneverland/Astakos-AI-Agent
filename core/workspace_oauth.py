@@ -77,7 +77,11 @@ class WorkspaceTokenRevokedOrInvalidError(WorkspaceAuthError):
 
 def get_token_path() -> str:
     """Returns the absolute path to the user's Workspace OAuth token.json."""
+    env_path = os.environ.get("ASTAKOS_TOKEN_PATH") or os.environ.get("WORKSPACE_TOKEN_PATH")
+    if env_path:
+        return env_path
     return getattr(config, "TOKEN_PATH", os.path.join(config.BASE_DIR, "credentials", "token.json"))
+
 
 
 def get_oauth_client_secrets_path() -> str:
@@ -108,25 +112,98 @@ def is_workspace_connected() -> bool:
     return bool(os.path.exists(token_path) and os.path.getsize(token_path) > 0)
 
 
-def read_stored_token_scopes(token_path: str | None = None) -> list[str]:
-    """Reads the granted scopes from token.json, supporting either 'scopes' list or 'scope' space-separated string."""
-    target_path = token_path or get_token_path()
+def inspect_workspace_token_metadata(token_path: str | None = None) -> tuple[str, list[str]]:
+    """
+    Safely inspects token.json structure offline without network calls.
 
+    Returns:
+        tuple[status, scopes]:
+          - ("missing", []) if file does not exist or is empty
+          - ("malformed", []) if JSON cannot be parsed or is not a dict
+          - ("legacy", []) if valid JSON dict but has no scopes/scope metadata
+          - ("valid", scopes_list) if valid JSON dict with explicit scopes list/string
+    """
+    target_path = token_path or get_token_path()
     if not os.path.exists(target_path) or os.path.getsize(target_path) == 0:
-        return []
+        return ("missing", [])
+
     try:
         with open(target_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception as exc:
-        logger.warning(f"Could not parse token.json for scopes: {exc}")
-        return []
+    except Exception:
+        return ("malformed", [])
 
-    raw_scopes = data.get("scopes") or data.get("scope") or []
-    if isinstance(raw_scopes, str):
-        return [s for s in raw_scopes.split() if s]
-    if isinstance(raw_scopes, list):
-        return [str(s) for s in raw_scopes if s]
-    return []
+    if not isinstance(data, dict) or not data:
+        return ("malformed", [])
+
+    # Complete authorized-user credential fields required by google.oauth2.credentials.Credentials:
+    # Credentials.from_authorized_user_file strictly requires client_id + client_secret + refresh_token
+    has_client = bool(data.get("client_id") and data.get("client_secret"))
+    has_refresh = bool(data.get("refresh_token"))
+    if not (has_client and has_refresh):
+        return ("malformed", [])
+
+    has_scopes_field = "scopes" in data
+    has_scope_field = "scope" in data
+
+    if has_scopes_field or has_scope_field:
+        raw_scopes = data["scopes"] if has_scopes_field else data["scope"]
+        if isinstance(raw_scopes, list):
+            parsed = [str(s).strip() for s in raw_scopes if str(s).strip()]
+            return ("valid", parsed)
+        elif isinstance(raw_scopes, str):
+            parsed = [s.strip() for s in raw_scopes.split() if s.strip()]
+            return ("valid", parsed)
+        elif raw_scopes is None:
+            return ("valid", [])
+        return ("malformed", [])
+
+    return ("legacy", [])
+
+
+
+
+def get_workspace_oauth_flow(
+    client_secrets_path: str | None = None,
+    scopes: Sequence[str] | None = None,
+    redirect_uri: str | None = None,
+):
+    """Creates a configured google_auth_oauthlib Flow without launching an interactive server."""
+    from google_auth_oauthlib.flow import Flow
+
+    target_secrets = client_secrets_path or get_oauth_client_secrets_path()
+    if not os.path.exists(target_secrets) or os.path.getsize(target_secrets) == 0:
+        raise WorkspaceMissingOAuthClientSecretsError(
+            f"Google Workspace OAuth client secrets file not found at '{target_secrets}'. "
+            "Please place your OAuth client secrets JSON at 'credentials/client_secrets.json' "
+            "or set WORKSPACE_CLIENT_SECRETS_PATH."
+        )
+
+    consent_scopes: list[str] = list(DEFAULT_WORKSPACE_SCOPES)
+    if scopes:
+        for scope in scopes:
+            if scope and scope not in consent_scopes:
+                consent_scopes.append(scope)
+
+    flow = Flow.from_client_secrets_file(
+        target_secrets,
+        scopes=consent_scopes,
+        redirect_uri=redirect_uri or "http://localhost:8000/api/workspace/oauth/callback",
+    )
+    return flow
+
+
+
+def read_stored_token_scopes(token_path: str | None = None) -> list[str] | None:
+    """
+    Reads the granted scopes from token.json.
+    Returns:
+      - list[str] (which may be empty) if explicit scope metadata was present in token.json
+      - None if token.json lacks scope metadata (legacy token)
+    """
+    status, scopes = inspect_workspace_token_metadata(token_path)
+    return scopes if status == "valid" else None
+
 
 
 def check_missing_scopes(
@@ -134,7 +211,11 @@ def check_missing_scopes(
     token_scopes: Sequence[str] | None = None,
 ) -> list[str]:
     """Returns any required scopes that are not present in the token's granted scopes."""
-    granted_set = set(token_scopes if token_scopes is not None else read_stored_token_scopes())
+    if token_scopes is not None:
+        granted_set = set(token_scopes)
+    else:
+        scopes = read_stored_token_scopes()
+        granted_set = set(scopes) if scopes is not None else set()
     return [req for req in required_scopes if req and req not in granted_set]
 
 
@@ -199,7 +280,7 @@ def load_workspace_credentials(
     stored_scopes = read_stored_token_scopes(token_path)
 
     # Validate caller's requested scopes against granted scopes only when stored scope metadata is present
-    if stored_scopes and scopes:
+    if stored_scopes is not None and scopes:
         missing = check_missing_scopes(scopes, stored_scopes)
         if missing:
             raise WorkspaceMissingScopeError(
@@ -227,7 +308,7 @@ def load_workspace_credentials(
                     refreshed_json = creds.to_json()
                     # If original token omitted scope metadata, ensure we do not persist
                     # a caller scope subset as the full token grant set.
-                    if not stored_scopes:
+                    if stored_scopes is None:
                         try:
                             token_dict = json.loads(refreshed_json)
                             token_dict.pop("scopes", None)

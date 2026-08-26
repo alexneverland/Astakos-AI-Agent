@@ -209,10 +209,17 @@ def main():
     threading.Thread(target=proactive_worker, daemon=True).start()
     threading.Thread(target=queue_worker,     daemon=True).start()
 
+    try:
+        from core.diagnostics import format_boot_diagnostics_text
+        print("\n" + format_boot_diagnostics_text())
+    except Exception:
+        pass
+
     print("\n" + "━" * 52)
     print("  🦞  Astakos — CLI Mode")
     print("  Type 'exit' or press Ctrl+C to quit.")
     print("━" * 52 + "\n")
+
 
     try:
         while not shutdown_event.is_set():
