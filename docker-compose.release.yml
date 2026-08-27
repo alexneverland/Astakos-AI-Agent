@@ -8,13 +8,13 @@ services:
     volumes:
       - astakos_data:/app
       - ./credentials:/app/credentials:ro
-      - astakos_workspace:/app/workspace
+      - astakos_workspace:/workspace
     environment:
       PYTHONUNBUFFERED: "1"
       ASTAKOS_CHECK_UPDATES: "0"
       ASTAKOS_SETUP_HOST: "0.0.0.0"
       ASTAKOS_CONTAINER: "1"
-      ASTAKOS_TOKEN_PATH: "/app/workspace/token.json"
+      ASTAKOS_TOKEN_PATH: "/workspace/token.json"
     labels:
       com.centurylinklabs.watchtower.enable: "true"
 
