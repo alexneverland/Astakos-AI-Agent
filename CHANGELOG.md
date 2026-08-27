@@ -7,11 +7,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v2.6.1] — 2026-08-27
+
+**Released: 2026-08-27**
+
+### Fixed
+
+- Docker release deployments now store Google Workspace OAuth tokens in a dedicated writable volume while keeping the host `credentials/` directory read-only.
+- Clarified that embeddings and Google Workspace are configured independently; voice and image generation use the active chat provider's supported capabilities.
+
 ## [v2.6.0] — 2026-08-26
 
 **Released: 2026-08-26**
 
-Headline: **Astakos is now genuinely provider-portable: chat, semantic memory, media, and Google Workspace can be configured independently for a new installation.**
+Headline: **Astakos now supports provider-portable chat and media, independently configured semantic-memory embeddings, and separately authorized Google Workspace integrations for a new installation.**
 
 ### Added
 
