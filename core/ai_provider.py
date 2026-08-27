@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Protocol, Sequence
 
 import config
+
+logger = logging.getLogger(__name__)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -22,6 +25,8 @@ import config
 
 DEFAULT_GEMINI_FAST_MODEL = "gemini-3.5-flash"
 DEFAULT_GEMINI_HEAVY_MODEL = "gemini-3.1-pro-preview"
+DEFAULT_GEMINI_TRANSCRIPTION_MODEL = "gemini-3.5-transcribe"
+DEFAULT_VERTEX_TRANSCRIPTION_MODEL = "gemini-3.5-transcribe-preview"
 DEFAULT_VERTEX_EMBEDDING_MODEL = "text-embedding-004"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "models/text-embedding-004"
 DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -32,6 +37,23 @@ AUDIO_TRANSCRIPTION_PROMPT = (
     "accurately and verbatim, without commentary or a reply. If no intelligible "
     "speech is audible, return exactly: [ΣΙΩΠΗ]."
 )
+
+
+def _is_model_unavailable_error(err_str: str) -> bool:
+    """Determine whether an error string represents an explicit model-absence condition.
+
+    Matches HTTP 404, NOT_FOUND, publisher model not found, unknown model,
+    or explicit model unavailable / not supported indicators.
+    """
+    return (
+        "404" in err_str
+        or "not_found" in err_str
+        or "not found" in err_str
+        or "publisher model" in err_str
+        or "unknown model" in err_str
+        or "does not exist" in err_str
+        or ("model" in err_str and ("not found" in err_str or "not available" in err_str or "unavailable" in err_str or "not supported" in err_str))
+    )
 
 
 def google_model_from_environment(variable_name: str, default_model: str, emit_warning: bool = False) -> str:
@@ -556,6 +578,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
         else:
             self.api_key = api_key
         self.fast_model, self.heavy_model = resolve_provider_models("gemini", fast_model, heavy_model)
+        self.transcription_model = DEFAULT_GEMINI_TRANSCRIPTION_MODEL
         self.embedding_model = DEFAULT_GEMINI_EMBEDDING_MODEL
 
     def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
@@ -619,18 +642,127 @@ class GeminiAPIAdapter(AIProviderAdapter):
         audio_bytes: bytes,
         mime_type: str = "audio/ogg",
     ) -> str:
+        uploaded_file = None
+        client = None
         try:
             client = self._get_genai_client()
-            response = client.models.generate_content(
-                model=self.fast_model,
-                contents=[
-                    {"inline_data": {"mime_type": mime_type, "data": audio_bytes}},
-                    AUDIO_TRANSCRIPTION_PROMPT,
-                ],
+            import io
+            from google.genai import types
+
+            # 1. Upload in-memory audio bytes via Gemini Files API
+            uploaded_file = client.files.upload(
+                file=io.BytesIO(audio_bytes),
+                config=types.UploadFileConfig(mime_type=mime_type),
             )
-            return getattr(response, "text", "").strip() if getattr(response, "text", None) else ""
+
+            # 2. Call Interactions API with dedicated model and explicit verbatim transcription mode
+            file_uri = getattr(uploaded_file, "uri", None) or getattr(uploaded_file, "name", "")
+            interaction = client.interactions.create(
+                model=self.transcription_model,
+                input=[
+                    {
+                        "type": "audio",
+                        "uri": file_uri,
+                        "mime_type": mime_type,
+                    }
+                ],
+                generation_config={
+                    "transcription_config": {
+                        "mode": {
+                            "type": "verbatim",
+                        },
+                    },
+                },
+            )
+            text = getattr(interaction, "output_text", "").strip() if getattr(interaction, "output_text", None) else ""
+            return text or "[ΣΙΩΠΗ]"
         except Exception as e:
+            err_str = str(e).lower()
+
+            # 1. Non-fallback categories: Auth, API keys, permissions
+            if (
+                "401" in err_str
+                or "403" in err_str
+                or "unauthenticated" in err_str
+                or "unauthorized" in err_str
+                or "permission_denied" in err_str
+                or "api_key_invalid" in err_str
+                or "api key not valid" in err_str
+                or "invalid api key" in err_str
+                or "credentials" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 2. Non-fallback categories: Quota, Rate Limit
+            if (
+                "429" in err_str
+                or "quota" in err_str
+                or "resource_exhausted" in err_str
+                or "rate_limit" in err_str
+                or "rate limit" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 3. Non-fallback categories: Bad request, invalid audio / mime input, 4xx validation errors
+            if (
+                "400" in err_str
+                or "invalid_argument" in err_str
+                or "invalid argument" in err_str
+                or "bad request" in err_str
+                or "mime" in err_str
+                or "malformed" in err_str
+                or "audio format" in err_str
+                or "codec" in err_str
+                or "sample rate" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 4. Dedicated Model Absence: Fall back to generic Flash using generate_content + prompt
+            if _is_model_unavailable_error(err_str):
+                logger.warning(
+                    f"[Gemini] Dedicated transcription model '{self.transcription_model}' unavailable ({e}). "
+                    f"Falling back to generic Flash transcription ({self.fast_model})."
+                )
+                try:
+                    fallback_client = client or self._get_genai_client()
+                    fallback_response = fallback_client.models.generate_content(
+                        model=self.fast_model,
+                        contents=[
+                            {"inline_data": {"mime_type": mime_type, "data": audio_bytes}},
+                            AUDIO_TRANSCRIPTION_PROMPT,
+                        ],
+                    )
+                    fallback_text = getattr(fallback_response, "text", "").strip() if getattr(fallback_response, "text", None) else ""
+                    return fallback_text or "[ΣΙΩΠΗ]"
+                except Exception as fb_exc:
+                    self._handle_exception(fb_exc)
+
+            # 5. Non-fallback categories: Transient 5xx / Network / Service Unavailable
+            if (
+                "500" in err_str
+                or "502" in err_str
+                or "503" in err_str
+                or "504" in err_str
+                or "internal server error" in err_str
+                or "service unavailable" in err_str
+                or "temporarily unavailable" in err_str
+                or "server unavailable" in err_str
+                or "backend unavailable" in err_str
+                or "deadline_exceeded" in err_str
+                or "timeout" in err_str
+                or "timed out" in err_str
+                or "connection" in err_str
+                or "econnreset" in err_str
+            ):
+                self._handle_exception(e)
+
             self._handle_exception(e)
+        finally:
+            if uploaded_file is not None and getattr(uploaded_file, "name", None) and client is not None:
+                try:
+                    client.files.delete(name=uploaded_file.name)
+                except Exception as del_err:
+                    logger.warning(f"[Gemini] Failed to delete temporary uploaded audio file '{uploaded_file.name}': {del_err}")
 
     def generate_image(
         self,
@@ -688,7 +820,14 @@ class GeminiAPIAdapter(AIProviderAdapter):
             or "invalid api key" in err_msg
         ):
             raise ProviderAuthError("gemini", str(e), original_error=e) from e
-        if "429" in err_msg or "quota" in err_msg or "resource_exhausted" in err_msg:
+        if (
+            "429" in err_msg
+            or "quota" in err_msg
+            or "resource_exhausted" in err_msg
+            or "rate_limit" in err_msg
+            or "rate limit" in err_msg
+            or "too_many_requests" in err_msg
+        ):
             raise RateLimitError("gemini", str(e), original_error=e) from e
         raise AIProviderError(str(e), provider="gemini", original_error=e) from e
 
@@ -711,6 +850,7 @@ class VertexAIAdapter(AIProviderAdapter):
         self.project_id = resolve_vertex_project_id(project_id, cred_file=self.credentials_path)
         self.location = resolve_vertex_location(location)
         self.fast_model, self.heavy_model = resolve_provider_models("vertex", fast_model, heavy_model)
+        self.transcription_model = DEFAULT_VERTEX_TRANSCRIPTION_MODEL
         self.embedding_model = DEFAULT_VERTEX_EMBEDDING_MODEL
         self._credentials = get_vertex_credentials(self.credentials_path)
 
@@ -731,12 +871,12 @@ class VertexAIAdapter(AIProviderAdapter):
             kwargs["credentials"] = self._credentials
         return ChatGoogleGenerativeAI(**kwargs)
 
-    def _get_genai_client(self):
+    def _get_genai_client(self, location: str | None = None):
         from google import genai
         kwargs = {
             "vertexai": True,
             "project": self.project_id,
-            "location": self.location,
+            "location": location or self.location,
         }
         if self._credentials is not None:
             kwargs["credentials"] = self._credentials
@@ -789,16 +929,94 @@ class VertexAIAdapter(AIProviderAdapter):
         mime_type: str = "audio/ogg",
     ) -> str:
         try:
-            client = self._get_genai_client()
+            # The dedicated transcription preview model is hosted on Vertex global endpoint.
+            # We rely on the model's default transcription behavior using standard documented parameters.
+            client = self._get_genai_client(location="global")
             response = client.models.generate_content(
-                model=self.fast_model,
+                model=self.transcription_model,
                 contents=[
                     {"inline_data": {"mime_type": mime_type, "data": audio_bytes}},
-                    AUDIO_TRANSCRIPTION_PROMPT,
                 ],
             )
-            return getattr(response, "text", "").strip() if getattr(response, "text", None) else ""
+            text = getattr(response, "text", "").strip() if getattr(response, "text", None) else ""
+            return text or "[ΣΙΩΠΗ]"
         except Exception as e:
+            err_str = str(e).lower()
+
+            # 1. Non-fallback categories: Auth, permissions, scopes
+            if (
+                "401" in err_str
+                or "403" in err_str
+                or "unauthenticated" in err_str
+                or "permission_denied" in err_str
+                or "invalid_scope" in err_str
+                or "credentials" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 2. Non-fallback categories: Quota, Rate Limit
+            if (
+                "429" in err_str
+                or "quota" in err_str
+                or "resource_exhausted" in err_str
+                or "rate_limit" in err_str
+                or "rate limit" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 3. Non-fallback categories: Bad request, invalid audio / mime input, 4xx validation errors
+            if (
+                "400" in err_str
+                or "invalid_argument" in err_str
+                or "invalid argument" in err_str
+                or "bad request" in err_str
+                or "mime" in err_str
+                or "malformed" in err_str
+                or "audio format" in err_str
+                or "codec" in err_str
+                or "sample rate" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 4. Dedicated Model Absence: Fall back to generic Flash using normal Vertex location
+            if _is_model_unavailable_error(err_str):
+                logger.warning(
+                    f"[VertexAI] Dedicated transcription model '{self.transcription_model}' unavailable ({e}). "
+                    f"Falling back to generic Flash transcription ({self.fast_model})."
+                )
+                try:
+                    fallback_client = self._get_genai_client()
+                    fallback_response = fallback_client.models.generate_content(
+                        model=self.fast_model,
+                        contents=[
+                            {"inline_data": {"mime_type": mime_type, "data": audio_bytes}},
+                            AUDIO_TRANSCRIPTION_PROMPT,
+                        ],
+                    )
+                    fallback_text = getattr(fallback_response, "text", "").strip() if getattr(fallback_response, "text", None) else ""
+                    return fallback_text or "[ΣΙΩΠΗ]"
+                except Exception as fb_exc:
+                    self._handle_exception(fb_exc)
+
+            # 5. Non-fallback categories: Transient 5xx / Network / Service Unavailable
+            if (
+                "500" in err_str
+                or "502" in err_str
+                or "503" in err_str
+                or "504" in err_str
+                or "internal server error" in err_str
+                or "service unavailable" in err_str
+                or "temporarily unavailable" in err_str
+                or "server unavailable" in err_str
+                or "backend unavailable" in err_str
+                or "deadline_exceeded" in err_str
+                or "timeout" in err_str
+                or "timed out" in err_str
+                or "connection" in err_str
+                or "econnreset" in err_str
+            ):
+                self._handle_exception(e)
+
             self._handle_exception(e)
 
     def generate_image(
@@ -856,9 +1074,16 @@ class VertexAIAdapter(AIProviderAdapter):
         if isinstance(e, (DefaultCredentialsError, RefreshError)):
             raise ProviderAuthError("vertex", str(e), original_error=e) from e
         err_msg = str(e).lower()
-        if "permission_denied" in err_msg or "403" in err_msg or "401" in err_msg or "unauthenticated" in err_msg:
+        if "permission_denied" in err_msg or "403" in err_msg or "401" in err_msg or "unauthenticated" in err_msg or "invalid_scope" in err_msg:
             raise ProviderAuthError("vertex", str(e), original_error=e) from e
-        if "429" in err_msg or "quota" in err_msg or "resource_exhausted" in err_msg:
+        if (
+            "429" in err_msg
+            or "quota" in err_msg
+            or "resource_exhausted" in err_msg
+            or "rate_limit" in err_msg
+            or "rate limit" in err_msg
+            or "too_many_requests" in err_msg
+        ):
             raise RateLimitError("vertex", str(e), original_error=e) from e
         raise AIProviderError(str(e), provider="vertex", original_error=e) from e
 
