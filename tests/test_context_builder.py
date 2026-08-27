@@ -94,7 +94,7 @@ def test_semantic_facts_uses_refresh_aware_chroma_search(monkeypatch):
     monkeypatch.setattr(
         vector_memory,
         "safe_similarity_search",
-        lambda query, *, k: [_Doc("[USER_FACT] Η Σοφία είναι σπίτι.")],
+        lambda query, *, k, **kwargs: [_Doc("[USER_FACT] Η Σοφία είναι σπίτι.")],
     )
 
     assert semantic_facts_for_query("τι κάνει η Σοφία", k=3) == [

@@ -233,7 +233,13 @@ def _safe_chroma_query(*, query_embeddings, n_results, where=None, include=None)
             }
 
 
-def safe_similarity_search(query: str, *, k: int, filter: dict | None = None) -> list:
+def safe_similarity_search(
+    query: str,
+    *,
+    k: int,
+    filter: dict | None = None,
+    query_embedding: list[float] | None = None,
+) -> list:
     """Search Chroma through the current handle and retry once after a refresh.
 
     Consumers must use this helper instead of retaining an imported ``vector_store``
@@ -245,6 +251,8 @@ def safe_similarity_search(query: str, *, k: int, filter: dict | None = None) ->
             kwargs = {"k": k}
             if filter is not None:
                 kwargs["filter"] = filter
+            if query_embedding is not None:
+                return vector_store.similarity_search_by_vector(query_embedding, **kwargs)
             return vector_store.similarity_search(query, **kwargs)
         except (EmbeddingsProviderSetupRequired, ProviderAuthError):
             raise
@@ -253,6 +261,49 @@ def safe_similarity_search(query: str, *, k: int, filter: dict | None = None) ->
                 continue
             print(f"\033[93m[MemoryManager]: Chroma similarity error (graceful skip): {e}\033[0m")
             return []
+
+
+def _safe_chroma_add_texts(
+    texts: list[str],
+    *,
+    metadatas: list[dict] | None = None,
+    embeddings: list[list[float]] | None = None,
+    ids: list[str] | None = None,
+) -> list[str]:
+    """Safely add or upsert texts and embeddings into Chroma with refresh/retry handling.
+
+    Matches LangChain Chroma add_texts semantics (UUID generation, upsert) while
+    allowing precomputed embedding vectors to bypass redundant network roundtrips.
+    """
+    if not texts:
+        return []
+    if ids is None:
+        ids = [str(uuid.uuid4()) for _ in texts]
+    else:
+        ids = [id_ if id_ is not None else str(uuid.uuid4()) for id_ in ids]
+
+    if metadatas:
+        length_diff = len(texts) - len(metadatas)
+        if length_diff > 0:
+            metadatas = metadatas + [{}] * length_diff
+
+    for attempt in range(2):
+        try:
+            vector_store._collection.upsert(
+                ids=ids,
+                documents=texts,
+                embeddings=embeddings,
+                metadatas=metadatas,
+            )
+            return ids
+        except (EmbeddingsProviderSetupRequired, ProviderAuthError):
+            raise
+        except Exception as e:
+            if attempt == 0 and _should_retry_chroma_error(e) and _refresh_vector_store("upsert retry"):
+                continue
+            print(f"\033[93m[MemoryManager]: Chroma upsert error: {e}\033[0m")
+            raise
+
 
 def _safe_chroma_delete(ids: list[str]) -> bool:
     if not ids:
@@ -608,11 +659,59 @@ class AstakosMemoryManager:
     """Central Memory Manager — the ONE and ONLY write point."""
 
     def save(self, memory_type: str, **kwargs):
+        if memory_type == "fact":
+            fact = kwargs.get("fact", "")
+            query_emb = None
+            doc_emb = None
+            try:
+                # Precompute both query and document embeddings outside all locks to avoid holding locks during network calls
+                query_emb = embeddings.embed_query(fact)
+                doc_embs = embeddings.embed_documents([fact])
+                doc_emb = doc_embs[0] if doc_embs else None
+            except (EmbeddingsProviderSetupRequired, ProviderAuthError) as exc:
+                print(
+                    "\033[93m[MemoryManager]: Semantic save unavailable; "
+                    f"preserving structured fact only ({exc})\033[0m",
+                )
+                saved = self._save_fact_profile_only(**kwargs)
+                self._trigger_routine_reconciler(
+                    kwargs["fact"],
+                    kwargs["category"],
+                    kwargs.get("reason", "agent_inferred"),
+                    external_content_sources=kwargs.get("external_content_sources"),
+                )
+                return saved
+            except Exception as e:
+                import traceback
+                print(f"\033[91m[MemoryManager Error]: {e}\033[0m")
+                traceback.print_exc()
+                return False
+
+            with vector_lock, memory_lock, _cross_process_lock():
+                try:
+                    return self._save_fact(query_emb=query_emb, doc_emb=doc_emb, **kwargs)
+                except (EmbeddingsProviderSetupRequired, ProviderAuthError) as exc:
+                    print(
+                        "\033[93m[MemoryManager]: Semantic save unavailable; "
+                        f"preserving structured fact only ({exc})\033[0m",
+                    )
+                    saved = self._save_fact_profile_only(**kwargs)
+                    self._trigger_routine_reconciler(
+                        kwargs["fact"],
+                        kwargs["category"],
+                        kwargs.get("reason", "agent_inferred"),
+                        external_content_sources=kwargs.get("external_content_sources"),
+                    )
+                    return saved
+                except Exception as e:
+                    import traceback
+                    print(f"\033[91m[MemoryManager Error]: {e}\033[0m")
+                    traceback.print_exc()
+                    return False
+
         with vector_lock, memory_lock, _cross_process_lock():
             try:
-                if memory_type == "fact":
-                    return self._save_fact(**kwargs)
-                elif memory_type == "photo":
+                if memory_type == "photo":
                     return self._save_photo(**kwargs)
                 elif memory_type == "document":
                     return self._save_document(**kwargs)
@@ -627,19 +726,6 @@ class AstakosMemoryManager:
                 else:
                     print(f"⚠️ [MemoryManager]: Unknown memory type '{memory_type}'")
             except (EmbeddingsProviderSetupRequired, ProviderAuthError) as exc:
-                if memory_type == "fact":
-                    print(
-                        "\033[93m[MemoryManager]: Semantic save unavailable; "
-                        f"preserving structured fact only ({exc})\033[0m",
-                    )
-                    saved = self._save_fact_profile_only(**kwargs)
-                    self._trigger_routine_reconciler(
-                        kwargs["fact"],
-                        kwargs["category"],
-                        kwargs.get("reason", "agent_inferred"),
-                        external_content_sources=kwargs.get("external_content_sources"),
-                    )
-                    return saved
                 if memory_type == "photo":
                     print(
                         "\033[93m[MemoryManager]: Semantic photo indexing unavailable; "
@@ -809,7 +895,15 @@ class AstakosMemoryManager:
         time_scope: str = "",
         relation_type: str = "",
         external_content_sources: list[str] | None = None,
+        query_emb: list[float] | None = None,
+        doc_emb: list[float] | None = None,
     ):
+        if query_emb is None:
+            query_emb = embeddings.embed_query(fact)
+        if doc_emb is None:
+            doc_embs = embeddings.embed_documents([fact])
+            doc_emb = doc_embs[0] if doc_embs else None
+
         # ── Threshold per fact type ──────────────────────────────
         if "[LESSON]" in fact:
             dup_threshold = 0.82   # technical courses — strict
@@ -828,8 +922,6 @@ class AstakosMemoryManager:
 
         # 1. Semantic Overwrite for [LESSON] / [USER_FACT] — category-safe first
         if "[LESSON]" in fact or "[USER_FACT]" in fact:
-            query_emb = embeddings.embed_query(fact)
-
             def _meta_of(res):
                 try:
                     return (res.get('metadatas') or [[]])[0][0] or {}
@@ -970,7 +1062,32 @@ class AstakosMemoryManager:
                     replace_old_fact_text = old_content
 
         # 2. Duplicate check with dynamic threshold
-        results = vector_store.similarity_search_with_score(fact, k=1)
+        results = []
+        dup_results = _safe_chroma_query(
+            query_embeddings=[query_emb],
+            n_results=1,
+            include=["documents", "metadatas", "distances"],
+        )
+        if dup_results.get("_error"):
+            print(
+                f"\033[93m[MemoryManager]: Duplicate check query failed ({dup_results['_error']}); "
+                "aborting fact save (fail-closed).\033[0m"
+            )
+            return False
+
+        if (
+            dup_results.get("ids")
+            and dup_results["ids"][0]
+            and dup_results.get("distances")
+            and dup_results["distances"][0]
+        ):
+            from langchain_core.documents import Document
+
+            doc_text = dup_results["documents"][0][0]
+            doc_meta = dup_results["metadatas"][0][0] or {}
+            score = dup_results["distances"][0][0]
+            results.append((Document(page_content=doc_text, metadata=doc_meta), score))
+
         for doc, score in results:
             if score >= SIM_THRESHOLD_DISTANCE:
                 continue
@@ -1077,7 +1194,8 @@ class AstakosMemoryManager:
                 photo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", photo_path)
             metadata["photo_path"] = photo_path
 
-        vector_store.add_texts([fact], metadatas=[metadata])
+        embeddings_list = [doc_emb] if doc_emb is not None else None
+        _safe_chroma_add_texts([fact], metadatas=[metadata], embeddings=embeddings_list)
         _audit_log(
             "add",
             category=category,

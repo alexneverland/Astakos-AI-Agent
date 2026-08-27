@@ -80,8 +80,22 @@ def _run_save_fact(tmp_path, fact, category, decision, same_cat_result,
     m = AstakosMemoryManager()
 
     mock_collection = MagicMock()
-    mock_collection.query.return_value = same_cat_result
     mock_collection.delete = MagicMock()
+
+    def _query_side_effect(*args, **kwargs):
+        if kwargs.get("where"):
+            return same_cat_result
+        if dup_results:
+            doc, score = dup_results[0]
+            return {
+                "ids": [["dup-id"]],
+                "documents": [[doc.page_content]],
+                "metadatas": [[doc.metadata]],
+                "distances": [[score]],
+            }
+        return _empty_query_result()
+
+    mock_collection.query.side_effect = _query_side_effect
 
     with patch("memory.vector_store.decide_memory_overwrite", return_value=decision), \
          patch("memory.vector_store.embeddings") as mock_embeddings, \
@@ -91,9 +105,17 @@ def _run_save_fact(tmp_path, fact, category, decision, same_cat_result,
          patch("config.PROFILE_DB", profile_path):
 
         mock_embeddings.embed_query.return_value = [0.1, 0.2, 0.3]
+        mock_embeddings.embed_documents.return_value = [[0.1, 0.2, 0.3]]
         mock_vs._collection = mock_collection
         mock_vs.similarity_search_with_score.return_value = dup_results or []
         mock_vs.add_texts = MagicMock()
+
+        def _on_upsert(*args, **kwargs):
+            docs = kwargs.get("documents") or (args[1] if len(args) > 1 else [])
+            metas = kwargs.get("metadatas") or (args[3] if len(args) > 3 else None)
+            mock_vs.add_texts(docs, metadatas=metas)
+
+        mock_collection.upsert.side_effect = _on_upsert
 
         result = m._save_fact(fact=fact, category=category, agent_name="Chat_Agent",
                               source="user_stated", reason="user_stated")

@@ -620,20 +620,30 @@ def semantic_facts_for_query(
 
     if search_fn is None:
         import memory.vector_store as vector_memory
+        from services.embeddings import embeddings
+        from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
 
         def search_fn(q: str, n: int):
+            try:
+                query_emb = embeddings.embed_query(q)
+            except (EmbeddingsProviderSetupRequired, ProviderAuthError):
+                raise
+            except Exception as e:
+                print(f"\033[93m[ContextBuilder]: Query embedding error (graceful skip): {e}\033[0m")
+                return []
+
             lock_started = perf_counter()
             with vector_memory.vector_lock:
                 lock_wait_ms = int((perf_counter() - lock_started) * 1000)
                 search_started = perf_counter()
-                results = vector_memory.safe_similarity_search(q, k=n)
+                results = vector_memory.safe_similarity_search(q, k=n, query_embedding=query_emb)
                 search_ms = int((perf_counter() - search_started) * 1000)
 
             if lock_wait_ms >= 1000 or search_ms >= 1000:
                 print(
                     "[MemoryContextPerf]: "
-                    f"semantic_lock_wait={lock_wait_ms}ms "
-                    f"semantic_search={search_ms}ms k={n}"
+                    f"semantic_lock_wait={lock_wait_ms}ms semantic_search={search_ms}ms "
+                    f"chars={len(q)} facts_found={len(results)}"
                 )
             return results
 
