@@ -673,13 +673,14 @@ class AstakosMemoryManager:
                     "\033[93m[MemoryManager]: Semantic save unavailable; "
                     f"preserving structured fact only ({exc})\033[0m",
                 )
-                saved = self._save_fact_profile_only(**kwargs)
-                self._trigger_routine_reconciler(
-                    kwargs["fact"],
-                    kwargs["category"],
-                    kwargs.get("reason", "agent_inferred"),
-                    external_content_sources=kwargs.get("external_content_sources"),
-                )
+                with memory_lock, _cross_process_lock():
+                    saved = self._save_fact_profile_only(**kwargs)
+                    self._trigger_routine_reconciler(
+                        kwargs["fact"],
+                        kwargs["category"],
+                        kwargs.get("reason", "agent_inferred"),
+                        external_content_sources=kwargs.get("external_content_sources"),
+                    )
                 return saved
             except Exception as e:
                 import traceback

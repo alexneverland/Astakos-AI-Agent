@@ -281,3 +281,38 @@ def test_failed_duplicate_query_aborts_fact_save_fail_closed(tmp_path, monkeypat
     mock_add.assert_not_called()
     # Profile facts DB must NOT have been written to
     mock_profile_save.assert_not_called()
+
+
+def test_structured_fallback_write_holds_memory_lock_without_vector_lock(tmp_path, monkeypatch):
+    """
+    Prove that when embeddings are unavailable, the structured profile fallback write
+    serializes under memory_lock without acquiring vector_lock.
+    """
+    from core.ai_provider import EmbeddingsProviderSetupRequired
+    from services.embeddings import embeddings as s_embeddings
+
+    memory_mgr = AstakosMemoryManager()
+    profile_db_path = str(tmp_path / "test_profile_fallback_locks.db")
+    monkeypatch.setattr("config.PROFILE_DB", profile_db_path)
+
+    fact_text = "[USER_FACT] Fallback profile lock test fact."
+
+    def failing_embed_query(text: str):
+        raise EmbeddingsProviderSetupRequired("Embeddings unconfigured")
+
+    monkeypatch.setattr(s_embeddings, "embed_query", failing_embed_query)
+
+    lock_states_during_write = {}
+
+    def tracking_profile_save(**kwargs):
+        lock_states_during_write["memory_lock_held"] = vs.memory_lock.locked()
+        lock_states_during_write["vector_lock_held"] = vs.vector_lock.locked()
+        return True
+
+    monkeypatch.setattr(memory_mgr, "_save_fact_profile_only", tracking_profile_save)
+    monkeypatch.setattr(memory_mgr, "_trigger_routine_reconciler", lambda *args, **kwargs: None)
+
+    saved = memory_mgr.save("fact", fact=fact_text, category="general", agent_name="Chat_Agent")
+    assert saved is True
+    assert lock_states_during_write["memory_lock_held"] is True, "memory_lock should be held during profile write"
+    assert lock_states_during_write["vector_lock_held"] is False, "vector_lock must NOT be held during fallback write"
