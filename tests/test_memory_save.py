@@ -15,7 +15,13 @@ def test_save_fact_calls_save_fact():
     m = AstakosMemoryManager()
     with patch.object(m, '_save_fact', return_value=True) as mock:
         m.save(memory_type="fact", fact="test", category="general", agent_name="Chat_Agent")
-        mock.assert_called_once_with(fact="test", category="general", agent_name="Chat_Agent")
+        mock.assert_called_once()
+        kwargs = mock.call_args.kwargs
+        assert kwargs["fact"] == "test"
+        assert kwargs["category"] == "general"
+        assert kwargs["agent_name"] == "Chat_Agent"
+        assert "query_emb" in kwargs
+        assert "doc_emb" in kwargs
 
 def test_save_reflection_calls_save_reflection():
     from memory.vector_store import AstakosMemoryManager
