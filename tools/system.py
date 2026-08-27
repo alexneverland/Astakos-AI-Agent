@@ -672,12 +672,12 @@ def retrieve_photo(query: str) -> str:
         try:
             query_emb = embeddings.embed_query(query)
         except Exception as exc:
+            semantic_error = exc
             from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
 
             if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
                 print(f"\033[93m[retrieve_photo]: Query embedding error (graceful skip): {exc}\033[0m")
             else:
-                semantic_error = exc
                 print(f"\033[93m[retrieve_photo]: semantic search unavailable; using photo archive ({exc})\033[0m")
 
         results = []
@@ -708,7 +708,7 @@ def retrieve_photo(query: str) -> str:
                 index = json.load(f)
 
             if index:
-                if semantic_error is not None:
+                if semantic_error is not None or query_emb is None:
                     archive_match = _find_archived_photo_without_embeddings(index, query)
                     if archive_match:
                         entry, note = archive_match
@@ -720,7 +720,7 @@ def retrieve_photo(query: str) -> str:
                             )
                     return "System: No relevant photo found in the non-semantic archive."
 
-                query_emb = np.array(embeddings.embed_query(query))
+                query_emb = np.array(query_emb)
                 best_score = -1.0
                 best_entry = None
 

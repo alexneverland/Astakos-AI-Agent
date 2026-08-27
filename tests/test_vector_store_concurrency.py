@@ -423,11 +423,13 @@ def test_retrieve_photo_never_invokes_embed_query_under_vector_lock(tmp_path, mo
     assert captured_search_kwargs["k"] == 10
 
 
-def test_search_memory_and_retrieve_photo_graceful_on_generic_embedding_error(monkeypatch):
+def test_search_memory_and_retrieve_photo_graceful_on_generic_embedding_error(tmp_path, monkeypatch):
     """
     Prove that ordinary non-provider embedding errors (e.g. network timeout)
-    gracefully skip semantic search without crashing search_memory or retrieve_photo.
+    gracefully skip semantic search without crashing search_memory and route
+    retrieve_photo to the non-semantic photo archive fallback.
     """
+    import json
     from tools import system
     from services.embeddings import embeddings as s_embeddings
 
@@ -443,5 +445,23 @@ def test_search_memory_and_retrieve_photo_graceful_on_generic_embedding_error(mo
     search_result = system.search_memory.func("test query")
     assert "Lexical fallback match" in search_result
 
-    photo_result = system.retrieve_photo.func("test photo")
-    assert "System: No relevant photo found" in photo_result or "Found" not in photo_result
+    # Set up photo archive with matching entry
+    photo_path = tmp_path / "alexander-park.jpg"
+    photo_path.write_bytes(b"photo")
+    index_path = tmp_path / "photos_index.json"
+    index_path.write_text(
+        json.dumps([
+            {
+                "file_path": str(photo_path),
+                "caption": "Ο Αλέξανδρος στο πάρκο",
+                "analysis": "Ο Αλέξανδρος παίζει μπάλα στο πάρκο.",
+                "date": "2026-08-25",
+            },
+        ], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(system, "PHOTOS_INDEX_FILE", str(index_path))
+
+    photo_result = system.retrieve_photo.func("φωτογραφία Αλέξανδρος πάρκο")
+    assert "matched from the local photo archive" in photo_result
+    assert f"[SEND_PHOTO: {photo_path}]" in photo_result
