@@ -538,6 +538,12 @@ class TestRealGeminiAPIAdapterBoundary:
             self.adapter.generate_text("test")
         assert exc_info.value.provider == "gemini"
 
+        # Symbolic-only RATE_LIMIT_EXCEEDED without numeric 429
+        mock_invoke.side_effect = Exception("RATE_LIMIT_EXCEEDED: Too many requests per minute")
+        with pytest.raises(RateLimitError) as exc_rate_sym:
+            self.adapter.generate_text("test")
+        assert exc_rate_sym.value.provider == "gemini"
+
     @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
     def test_invalid_api_key_error_maps_to_auth_error(self, mock_invoke):
         mock_invoke.side_effect = Exception("400 API_KEY_INVALID: API key not valid")
@@ -790,6 +796,12 @@ class TestRealVertexAIAdapterBoundary:
         with pytest.raises(RateLimitError) as exc_info:
             self.adapter.generate_text("test")
         assert exc_info.value.provider == "vertex"
+
+        # Symbolic-only RATE_LIMIT_EXCEEDED without numeric 429
+        mock_invoke.side_effect = Exception("RATE_LIMIT_EXCEEDED: Vertex project rate limit exceeded")
+        with pytest.raises(RateLimitError) as exc_rate_sym:
+            self.adapter.generate_text("test")
+        assert exc_rate_sym.value.provider == "vertex"
 
     @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
     def test_google_credential_errors_map_to_auth_error(self, mock_invoke):

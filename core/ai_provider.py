@@ -40,6 +40,11 @@ AUDIO_TRANSCRIPTION_PROMPT = (
 
 
 def _is_model_unavailable_error(err_str: str) -> bool:
+    """Determine whether an error string represents an explicit model-absence condition.
+
+    Matches HTTP 404, NOT_FOUND, publisher model not found, unknown model,
+    or explicit model unavailable / not supported indicators.
+    """
     return (
         "404" in err_str
         or "not_found" in err_str
@@ -815,7 +820,14 @@ class GeminiAPIAdapter(AIProviderAdapter):
             or "invalid api key" in err_msg
         ):
             raise ProviderAuthError("gemini", str(e), original_error=e) from e
-        if "429" in err_msg or "quota" in err_msg or "resource_exhausted" in err_msg:
+        if (
+            "429" in err_msg
+            or "quota" in err_msg
+            or "resource_exhausted" in err_msg
+            or "rate_limit" in err_msg
+            or "rate limit" in err_msg
+            or "too_many_requests" in err_msg
+        ):
             raise RateLimitError("gemini", str(e), original_error=e) from e
         raise AIProviderError(str(e), provider="gemini", original_error=e) from e
 
@@ -1064,7 +1076,14 @@ class VertexAIAdapter(AIProviderAdapter):
         err_msg = str(e).lower()
         if "permission_denied" in err_msg or "403" in err_msg or "401" in err_msg or "unauthenticated" in err_msg or "invalid_scope" in err_msg:
             raise ProviderAuthError("vertex", str(e), original_error=e) from e
-        if "429" in err_msg or "quota" in err_msg or "resource_exhausted" in err_msg:
+        if (
+            "429" in err_msg
+            or "quota" in err_msg
+            or "resource_exhausted" in err_msg
+            or "rate_limit" in err_msg
+            or "rate limit" in err_msg
+            or "too_many_requests" in err_msg
+        ):
             raise RateLimitError("vertex", str(e), original_error=e) from e
         raise AIProviderError(str(e), provider="vertex", original_error=e) from e
 
