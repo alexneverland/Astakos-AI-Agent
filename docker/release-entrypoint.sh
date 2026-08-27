@@ -9,14 +9,18 @@ mkdir -p /app
 legacy_token_path="/app/credentials/token.json"
 if [ -n "${ASTAKOS_TOKEN_PATH:-}" ]; then
   workspace_token_path="$ASTAKOS_TOKEN_PATH"
-  if [ ! -s "$workspace_token_path" ] && [ -s "$legacy_token_path" ]; then
-    mkdir -p "$(dirname "$workspace_token_path")"
-    (
-      umask 077
-      cp "$legacy_token_path" "$workspace_token_path"
-    )
-    chmod 600 "$workspace_token_path"
-  fi
+else
+  workspace_token_path="/app/workspace_oauth/token.json"
+fi
+export ASTAKOS_TOKEN_PATH="$workspace_token_path"
+
+if [ ! -s "$workspace_token_path" ] && [ -s "$legacy_token_path" ]; then
+  mkdir -p "$(dirname "$workspace_token_path")"
+  (
+    umask 077
+    cp "$legacy_token_path" "$workspace_token_path"
+  )
+  chmod 600 "$workspace_token_path"
 fi
 
 # Refresh application code from the immutable image while preserving user data.
@@ -36,6 +40,7 @@ rsync -a --delete \
   --exclude 'tmp/' \
   --exclude '_cleaner_backups/' \
   --exclude 'credentials/' \
+  --exclude 'workspace_oauth/' \
   --exclude 'credentials*.json' \
   --exclude 'token*.json' \
   --exclude 'astakos_settings.json' \

@@ -22,4 +22,7 @@ def test_release_compose_keeps_workspace_token_storage_writable() -> None:
     assert 'legacy_token_path="/app/credentials/token.json"' in entrypoint
     assert 'if [ -n "${ASTAKOS_TOKEN_PATH:-}" ]; then' in entrypoint
     assert 'workspace_token_path="$ASTAKOS_TOKEN_PATH"' in entrypoint
+    assert 'workspace_token_path="/app/workspace_oauth/token.json"' in entrypoint
+    assert 'export ASTAKOS_TOKEN_PATH="$workspace_token_path"' in entrypoint
     assert 'cp "$legacy_token_path" "$workspace_token_path"' in entrypoint
+    assert "--exclude 'workspace_oauth/'" in entrypoint
