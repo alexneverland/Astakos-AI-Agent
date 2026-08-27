@@ -286,17 +286,191 @@ class TestRealGeminiAPIAdapterBoundary:
         assert llm.safety_settings is not None
 
     @patch("google.genai.Client")
-    def test_transcribe_audio_success(self, mock_client_cls):
+    def test_transcribe_audio_dedicated_success(self, mock_client_cls):
         mock_client = MagicMock()
-        mock_resp = MagicMock()
-        mock_resp.text = "Gemini transcribed voice"
-        mock_client.models.generate_content.return_value = mock_resp
+        mock_file = MagicMock(name="files/sample_audio_file", uri="https://generativelanguage.googleapis.com/v1beta/files/sample_audio_file")
+        mock_file.name = "files/sample_audio_file"
+        mock_client.files.upload.return_value = mock_file
+
+        mock_interaction = MagicMock(output_text="Gemini transcribed voice verbatim")
+        mock_client.interactions.create.return_value = mock_interaction
         mock_client_cls.return_value = mock_client
 
-        out = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
-        assert out == "Gemini transcribed voice"
-        assert mock_client.models.generate_content.call_args.kwargs["contents"][1] == AUDIO_TRANSCRIPTION_PROMPT
-        assert "[ΣΙΩΠΗ]" in AUDIO_TRANSCRIPTION_PROMPT
+        out = self.adapter.transcribe_audio(b"sample_audio_bytes", mime_type="audio/ogg")
+        assert out == "Gemini transcribed voice verbatim"
+
+        # 1. Verify Files API upload was called with in-memory stream and mime_type
+        upload_kwargs = mock_client.files.upload.call_args.kwargs
+        upload_file_obj = upload_kwargs["file"]
+        assert upload_file_obj.read() == b"sample_audio_bytes"
+        assert upload_kwargs["config"].mime_type == "audio/ogg"
+
+        # 2. Verify Interactions API create call
+        create_kwargs = mock_client.interactions.create.call_args.kwargs
+        assert create_kwargs["model"] == "gemini-3.5-transcribe"
+        assert create_kwargs["input"] == [
+            {
+                "type": "audio",
+                "uri": "https://generativelanguage.googleapis.com/v1beta/files/sample_audio_file",
+                "mime_type": "audio/ogg",
+            }
+        ]
+        assert create_kwargs["generation_config"] == {
+            "transcription_config": {
+                "mode": {
+                    "type": "verbatim",
+                },
+            },
+        }
+
+        # 3. Verify remote file deletion
+        mock_client.files.delete.assert_called_once_with(name="files/sample_audio_file")
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_silence_returns_silence_token(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_file = MagicMock()
+        mock_file.name = "files/silent_audio_file"
+        mock_file.uri = "files/silent_audio_file"
+        mock_client.files.upload.return_value = mock_file
+
+        mock_interaction = MagicMock(output_text="")  # Empty output indicates silence
+        mock_client.interactions.create.return_value = mock_interaction
+        mock_client_cls.return_value = mock_client
+
+        out = self.adapter.transcribe_audio(b"silent_bytes", mime_type="audio/webm")
+        assert out == "[ΣΙΩΠΗ]"
+        mock_client.files.delete.assert_called_once_with(name="files/silent_audio_file")
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_deletion_failure_preserves_successful_transcript(self, mock_client_cls, caplog):
+        mock_client = MagicMock()
+        mock_file = MagicMock()
+        mock_file.name = "files/audio_file_del_fail"
+        mock_file.uri = "files/audio_file_del_fail"
+        mock_client.files.upload.return_value = mock_file
+
+        mock_interaction = MagicMock(output_text="Valid transcript text")
+        mock_client.interactions.create.return_value = mock_interaction
+        mock_client.files.delete.side_effect = Exception("Remote file delete network failure")
+        mock_client_cls.return_value = mock_client
+
+        import logging
+        with caplog.at_level(logging.WARNING):
+            out = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
+
+        assert out == "Valid transcript text"
+        assert "Failed to delete temporary uploaded audio file" in caplog.text
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_remote_file_deleted_on_transcription_failure(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_file = MagicMock()
+        mock_file.name = "files/fail_audio_file"
+        mock_file.uri = "files/fail_audio_file"
+        mock_client.files.upload.return_value = mock_file
+
+        mock_client.interactions.create.side_effect = Exception("403 PERMISSION_DENIED: API key not valid")
+        mock_client_cls.return_value = mock_client
+
+        with pytest.raises(ProviderAuthError) as exc_info:
+            self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
+
+        assert exc_info.value.provider == "gemini"
+        mock_client.files.delete.assert_called_once_with(name="files/fail_audio_file")
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_fallback_on_unsupported_model(self, mock_client_cls, caplog):
+        mock_client = MagicMock()
+        mock_file = MagicMock()
+        mock_file.name = "files/fallback_audio_file"
+        mock_file.uri = "files/fallback_audio_file"
+        mock_client.files.upload.return_value = mock_file
+
+        # Interactions create raises 404 model not found
+        mock_client.interactions.create.side_effect = Exception("404 NOT_FOUND: Publisher Model gemini-3.5-transcribe not found")
+        mock_resp_fallback = MagicMock()
+        mock_resp_fallback.text = "Fallback Gemini Flash transcribed voice"
+        mock_client.models.generate_content.return_value = mock_resp_fallback
+        mock_client_cls.return_value = mock_client
+
+        import logging
+        with caplog.at_level(logging.WARNING):
+            out = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
+
+        assert out == "Fallback Gemini Flash transcribed voice"
+        mock_client.models.generate_content.assert_called_once()
+        fallback_kwargs = mock_client.models.generate_content.call_args.kwargs
+        assert fallback_kwargs["model"] == self.adapter.fast_model
+        assert fallback_kwargs["contents"][1] == AUDIO_TRANSCRIPTION_PROMPT
+        mock_client.files.delete.assert_called_once_with(name="files/fallback_audio_file")
+        assert "Falling back to generic Flash transcription" in caplog.text
+
+        # Second scenario: Model unavailable phrase triggers Flash fallback
+        caplog.clear()
+        mock_client.models.generate_content.reset_mock()
+        mock_client.files.delete.reset_mock()
+        mock_client.interactions.create.side_effect = Exception("Model 'gemini-3.5-transcribe' is unavailable")
+        with caplog.at_level(logging.WARNING):
+            out_unavail = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
+
+        assert out_unavail == "Fallback Gemini Flash transcribed voice"
+        mock_client.models.generate_content.assert_called_once()
+        mock_client.files.delete.assert_called_once_with(name="files/fallback_audio_file")
+        assert "Falling back to generic Flash transcription" in caplog.text
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_auth_and_quota_errors_never_fallback(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_file = MagicMock()
+        mock_file.name = "files/test_file"
+        mock_file.uri = "files/test_file"
+        mock_client.files.upload.return_value = mock_file
+        mock_client_cls.return_value = mock_client
+
+        # 1. Auth error -> raises ProviderAuthError, no fallback to models.generate_content
+        mock_client.interactions.create.side_effect = Exception("403 PERMISSION_DENIED: API key not valid")
+        with pytest.raises(ProviderAuthError) as exc_auth:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_auth.value.provider == "gemini"
+        assert mock_client.models.generate_content.call_count == 0
+
+        # 2. Quota error -> raises RateLimitError, no fallback to models.generate_content
+        mock_client.interactions.create.side_effect = Exception("429 RESOURCE_EXHAUSTED: Daily quota exceeded")
+        with pytest.raises(RateLimitError) as exc_rate:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_rate.value.provider == "gemini"
+        assert mock_client.models.generate_content.call_count == 0
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_validation_and_transient_errors_never_fallback(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_file = MagicMock()
+        mock_file.name = "files/test_file"
+        mock_file.uri = "files/test_file"
+        mock_client.files.upload.return_value = mock_file
+        mock_client_cls.return_value = mock_client
+
+        # 1. 400 Bad Request / Invalid Audio format -> raises AIProviderError, no fallback
+        mock_client.interactions.create.side_effect = Exception("400 INVALID_ARGUMENT: Unsupported audio codec")
+        with pytest.raises(AIProviderError) as exc_val:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_val.value.provider == "gemini"
+        assert mock_client.models.generate_content.call_count == 0
+
+        # 2. 503 Transient Service Unavailable -> raises AIProviderError, no fallback
+        mock_client.interactions.create.side_effect = Exception("503 UNAVAILABLE: Service temporarily overloaded")
+        with pytest.raises(AIProviderError) as exc_503:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_503.value.provider == "gemini"
+        assert mock_client.models.generate_content.call_count == 0
+
+        # 3. Timeout / Connection error -> raises AIProviderError, no fallback
+        mock_client.interactions.create.side_effect = TimeoutError("Connection timed out")
+        with pytest.raises(AIProviderError) as exc_to:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_to.value.provider == "gemini"
+        assert mock_client.models.generate_content.call_count == 0
 
     @patch("google.genai.Client")
     def test_generate_image_success(self, mock_client_cls):
@@ -394,7 +568,7 @@ class TestRealVertexAIAdapterBoundary:
     """Offline SDK boundary tests for VertexAIAdapter."""
 
     def setup_method(self):
-        self.adapter = VertexAIAdapter(project_id="test-proj", location="global")
+        self.adapter = VertexAIAdapter(project_id="test-proj", location="europe-west1")
 
     @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
     def test_generate_text_and_vision_success(self, mock_invoke):
@@ -404,6 +578,7 @@ class TestRealVertexAIAdapterBoundary:
 
         text_out = self.adapter.generate_text("Hello Vertex")
         assert text_out == "Vertex AI response"
+        assert self.adapter.location == "europe-west1"
 
         vision_out = self.adapter.analyze_vision("Analyze blueprint", b"fake_blueprint_bytes")
         assert vision_out == "Vertex AI response"
@@ -412,19 +587,146 @@ class TestRealVertexAIAdapterBoundary:
         llm = self.adapter._get_llm()
         assert hasattr(llm, "safety_settings")
         assert llm.safety_settings is not None
+        assert self.adapter.location == "europe-west1"
 
     @patch("google.genai.Client")
-    def test_transcribe_audio_success(self, mock_client_cls):
+    def test_transcribe_audio_dedicated_success(self, mock_client_cls):
         mock_client = MagicMock()
         mock_resp = MagicMock()
-        mock_resp.text = "Vertex transcribed audio"
+        mock_resp.text = "Vertex transcribed audio verbatim"
         mock_client.models.generate_content.return_value = mock_resp
         mock_client_cls.return_value = mock_client
 
         out = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
-        assert out == "Vertex transcribed audio"
-        assert mock_client.models.generate_content.call_args.kwargs["contents"][1] == AUDIO_TRANSCRIPTION_PROMPT
-        assert "[ΣΙΩΠΗ]" in AUDIO_TRANSCRIPTION_PROMPT
+        assert out == "Vertex transcribed audio verbatim"
+
+        # 1. Verify dedicated transcription client is initialized with location='global'
+        assert mock_client_cls.call_args.kwargs["location"] == "global"
+        assert mock_client_cls.call_args.kwargs["project"] == "test-proj"
+        assert mock_client_cls.call_args.kwargs["vertexai"] is True
+        # 2. Verify normal adapter location is unchanged
+        assert self.adapter.location == "europe-west1"
+
+        # 3. Verify request uses dedicated model with raw audio and relies on default transcription behavior
+        kwargs = mock_client.models.generate_content.call_args.kwargs
+        assert kwargs["model"] == "gemini-3.5-transcribe-preview"
+        assert kwargs["contents"] == [{"inline_data": {"mime_type": "audio/ogg", "data": b"audio_bytes"}}]
+        # No artificial config fields or prompts are passed
+        assert kwargs.get("config") is None
+        assert AUDIO_TRANSCRIPTION_PROMPT not in str(kwargs["contents"])
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_silence_returns_silence_token(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = ""  # Empty text indicates silence
+        mock_client.models.generate_content.return_value = mock_resp
+        mock_client_cls.return_value = mock_client
+
+        out = self.adapter.transcribe_audio(b"silent_audio_bytes", mime_type="audio/ogg")
+        assert out == "[ΣΙΩΠΗ]"
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_fallback_on_unsupported_model(self, mock_client_cls, caplog):
+        mock_dedicated_client = MagicMock()
+        mock_fallback_client = MagicMock()
+
+        # 1. First scenario: 404 NOT_FOUND on dedicated global client -> falls back to Flash
+        mock_dedicated_client.models.generate_content.side_effect = Exception("404 NOT_FOUND: Publisher Model gemini-3.5-transcribe-preview not found")
+        mock_resp_fallback = MagicMock()
+        mock_resp_fallback.text = "Fallback Flash transcribed voice"
+        mock_fallback_client.models.generate_content.return_value = mock_resp_fallback
+
+        def _client_factory(**kwargs):
+            if kwargs.get("location") == "global":
+                return mock_dedicated_client
+            return mock_fallback_client
+
+        mock_client_cls.side_effect = _client_factory
+
+        import logging
+        with caplog.at_level(logging.WARNING):
+            out = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
+
+        assert out == "Fallback Flash transcribed voice"
+        assert mock_dedicated_client.models.generate_content.call_count == 1
+        assert mock_fallback_client.models.generate_content.call_count == 1
+
+        # Verify fallback call uses fast_model, normal location, and AUDIO_TRANSCRIPTION_PROMPT
+        fallback_kwargs = mock_fallback_client.models.generate_content.call_args.kwargs
+        assert fallback_kwargs["model"] == self.adapter.fast_model
+        assert fallback_kwargs["contents"][1] == AUDIO_TRANSCRIPTION_PROMPT
+        assert "Falling back to generic Flash transcription" in caplog.text
+
+        # 2. Second scenario: Model unavailable phrasing -> also triggers Flash fallback
+        caplog.clear()
+        mock_dedicated_client.models.generate_content.side_effect = Exception("Model 'gemini-3.5-transcribe-preview' is unavailable in region global")
+        with caplog.at_level(logging.WARNING):
+            out_unavail = self.adapter.transcribe_audio(b"audio_bytes", mime_type="audio/ogg")
+
+        assert out_unavail == "Fallback Flash transcribed voice"
+        assert mock_dedicated_client.models.generate_content.call_count == 2
+        assert mock_fallback_client.models.generate_content.call_count == 2
+        assert "Falling back to generic Flash transcription" in caplog.text
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_auth_and_quota_errors_never_fallback(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+
+        # 1. Auth Error -> raises ProviderAuthError and never attempts fallback
+        mock_client.models.generate_content.side_effect = Exception("403 PERMISSION_DENIED: Vertex AI IAM permission denied")
+        with pytest.raises(ProviderAuthError) as exc_auth:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_auth.value.provider == "vertex"
+        assert mock_client.models.generate_content.call_count == 1
+
+        # 2. Invalid Scope -> raises ProviderAuthError and never attempts fallback
+        mock_client.models.generate_content.side_effect = Exception("invalid_scope: Invalid OAuth scope")
+        with pytest.raises(ProviderAuthError) as exc_scope:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_scope.value.provider == "vertex"
+        assert mock_client.models.generate_content.call_count == 2
+
+        # 3. Quota Error -> raises RateLimitError and never attempts fallback
+        mock_client.models.generate_content.side_effect = Exception("429 RESOURCE_EXHAUSTED: Vertex AI quota exceeded")
+        with pytest.raises(RateLimitError) as exc_rate:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_rate.value.provider == "vertex"
+        assert mock_client.models.generate_content.call_count == 3
+
+    @patch("google.genai.Client")
+    def test_transcribe_audio_validation_and_transient_errors_never_fallback(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+
+        # 1. 400 Bad Request / Invalid Audio format -> raises AIProviderError, no fallback
+        mock_client.models.generate_content.side_effect = Exception("400 INVALID_ARGUMENT: Unsupported MIME type audio/invalid")
+        with pytest.raises(AIProviderError) as exc_val:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_val.value.provider == "vertex"
+        assert mock_client.models.generate_content.call_count == 1
+
+        # 2. 503 Transient Service Unavailable -> raises AIProviderError, no fallback
+        mock_client.models.generate_content.side_effect = Exception("503 UNAVAILABLE: Service temporarily overloaded")
+        with pytest.raises(AIProviderError) as exc_503:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_503.value.provider == "vertex"
+        assert mock_client.models.generate_content.call_count == 2
+
+        # 3. General service unavailable phrase -> raises AIProviderError, no fallback
+        mock_client.models.generate_content.side_effect = Exception("503: Backend service unavailable")
+        with pytest.raises(AIProviderError) as exc_srv:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_srv.value.provider == "vertex"
+        assert mock_client.models.generate_content.call_count == 3
+
+        # 4. Timeout / Connection error -> raises AIProviderError, no fallback
+        mock_client.models.generate_content.side_effect = TimeoutError("Connection timed out")
+        with pytest.raises(AIProviderError) as exc_to:
+            self.adapter.transcribe_audio(b"audio_bytes")
+        assert exc_to.value.provider == "vertex"
+        assert mock_client.models.generate_content.call_count == 4
 
     @patch("google.genai.Client")
     def test_generate_image_success(self, mock_client_cls):
