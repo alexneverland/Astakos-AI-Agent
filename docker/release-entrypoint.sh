@@ -4,16 +4,19 @@ set -eu
 mkdir -p /app
 
 # Preserve a token supplied by an older release configuration before switching
-# Workspace OAuth persistence to its dedicated writable volume.
-workspace_token_path="${ASTAKOS_TOKEN_PATH:-/workspace/token.json}"
+# Workspace OAuth persistence to the dedicated volume configured by new Compose.
+# Image-only upgrades keep using their existing credential path unchanged.
 legacy_token_path="/app/credentials/token.json"
-if [ ! -s "$workspace_token_path" ] && [ -s "$legacy_token_path" ]; then
-  mkdir -p "$(dirname "$workspace_token_path")"
-  (
-    umask 077
-    cp "$legacy_token_path" "$workspace_token_path"
-  )
-  chmod 600 "$workspace_token_path"
+if [ -n "${ASTAKOS_TOKEN_PATH:-}" ]; then
+  workspace_token_path="$ASTAKOS_TOKEN_PATH"
+  if [ ! -s "$workspace_token_path" ] && [ -s "$legacy_token_path" ]; then
+    mkdir -p "$(dirname "$workspace_token_path")"
+    (
+      umask 077
+      cp "$legacy_token_path" "$workspace_token_path"
+    )
+    chmod 600 "$workspace_token_path"
+  fi
 fi
 
 # Refresh application code from the immutable image while preserving user data.
