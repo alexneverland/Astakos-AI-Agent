@@ -290,6 +290,18 @@ def search_memory(query: str, category: str = "") -> str:
         except Exception:
             sql_lines = []
 
+        query_embeddings_map = {}
+        for search_query in search_queries[:1]:
+            try:
+                query_embeddings_map[search_query] = embeddings.embed_query(search_query)
+            except Exception as exc:
+                from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+                if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                    print(f"\033[93m[search_memory]: Query embedding error (graceful skip): {exc}\033[0m")
+                else:
+                    print(f"\033[93m[search_memory]: semantic search unavailable; using structured memory ({exc})\033[0m")
+
         with vector_lock:
             merged_results = []
             seen_docs = set()
@@ -302,14 +314,22 @@ def search_memory(query: str, category: str = "") -> str:
             # [PERF]: 1 similarity_search instead of 3 — primary_query is sufficient (expanded queries do not improve significantly)
             try:
                 for search_query in search_queries[:1]:
+                    query_emb = query_embeddings_map.get(search_query)
+                    if query_emb is None:
+                        continue
                     if effective_category:
                         batch = vector_memory.safe_similarity_search(
                             search_query,
                             k=6,
                             filter={"category": effective_category},
+                            query_embedding=query_emb,
                         )
                     else:
-                        batch = vector_memory.safe_similarity_search(search_query, k=6)
+                        batch = vector_memory.safe_similarity_search(
+                            search_query,
+                            k=6,
+                            query_embedding=query_emb,
+                        )
                     for doc in batch:
                         key = getattr(doc, "page_content", str(doc))
                         if key in seen_docs:
@@ -344,12 +364,15 @@ def search_memory(query: str, category: str = "") -> str:
             def _bump_async():
                 try:
                     from memory.vector_store import bump_retrieval_count
+                    bump_emb = query_embeddings_map.get(primary_query)
+                    if bump_emb is None:
+                        bump_emb = embeddings.embed_query(primary_query)
                     with vector_lock:
                         kwargs = {"n_results": min(6, len(results))}
                         if effective_category:
                             kwargs["where"] = {"category": effective_category}
                         raw = vector_memory._safe_chroma_query(
-                            query_embeddings=[embeddings.embed_query(primary_query)],
+                            query_embeddings=[bump_emb],
                             **kwargs,
                         )
                     if raw.get("ids") and raw["ids"][0]:
@@ -645,17 +668,31 @@ def retrieve_photo(query: str) -> str:
         import numpy as np
 
         semantic_error = None
+        query_emb = None
         try:
-            with vector_lock:
-                results = vector_memory.safe_similarity_search(query, k=10)
+            query_emb = embeddings.embed_query(query)
         except Exception as exc:
+            semantic_error = exc
             from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
 
             if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
-                raise
-            results = []
-            semantic_error = exc
-            print(f"\033[93m[retrieve_photo]: semantic search unavailable; using photo archive ({exc})\033[0m")
+                print(f"\033[93m[retrieve_photo]: Query embedding error (graceful skip): {exc}\033[0m")
+            else:
+                print(f"\033[93m[retrieve_photo]: semantic search unavailable; using photo archive ({exc})\033[0m")
+
+        results = []
+        if query_emb is not None:
+            try:
+                with vector_lock:
+                    results = vector_memory.safe_similarity_search(query, k=10, query_embedding=query_emb)
+            except Exception as exc:
+                from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+                if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                    raise
+                results = []
+                semantic_error = exc
+                print(f"\033[93m[retrieve_photo]: semantic search unavailable; using photo archive ({exc})\033[0m")
 
         for doc in results:
             photo_path = doc.metadata.get("photo_path")
@@ -671,7 +708,7 @@ def retrieve_photo(query: str) -> str:
                 index = json.load(f)
 
             if index:
-                if semantic_error is not None:
+                if semantic_error is not None or query_emb is None:
                     archive_match = _find_archived_photo_without_embeddings(index, query)
                     if archive_match:
                         entry, note = archive_match
@@ -683,7 +720,7 @@ def retrieve_photo(query: str) -> str:
                             )
                     return "System: No relevant photo found in the non-semantic archive."
 
-                query_emb = np.array(embeddings.embed_query(query))
+                query_emb = np.array(query_emb)
                 best_score = -1.0
                 best_entry = None
 

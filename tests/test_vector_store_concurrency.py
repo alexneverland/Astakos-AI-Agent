@@ -316,3 +316,152 @@ def test_structured_fallback_write_holds_memory_lock_without_vector_lock(tmp_pat
     assert saved is True
     assert lock_states_during_write["memory_lock_held"] is True, "memory_lock should be held during profile write"
     assert lock_states_during_write["vector_lock_held"] is False, "vector_lock must NOT be held during fallback write"
+
+
+def test_search_memory_never_invokes_embed_query_under_vector_lock(monkeypatch):
+    """
+    Prove that search_memory() and its asynchronous retrieval bump never invoke
+    embeddings.embed_query() while vector_lock is held, and pass query_embedding to Chroma.
+    """
+    from tools import system
+    import memory.vector_store as vector_store_module
+    from services.embeddings import embeddings as s_embeddings
+
+    query_text = "Lazaros coffee"
+    expected_emb = [0.12, 0.34, 0.56]
+    embed_calls = []
+
+    def tracking_embed_query(text: str) -> list[float]:
+        assert not vector_store_module.vector_lock.locked(), (
+            f"vector_lock was held during embed_query('{text}') in search_memory/bump!"
+        )
+        embed_calls.append(text)
+        return expected_emb
+
+    monkeypatch.setattr(s_embeddings, "embed_query", tracking_embed_query)
+    monkeypatch.setattr(system, "embeddings", s_embeddings)
+
+    captured_search_kwargs = {}
+
+    def mock_safe_similarity_search(query: str, *, k: int, filter: dict | None = None, query_embedding=None):
+        assert vector_store_module.vector_lock.locked(), "safe_similarity_search expected vector_lock to be held"
+        captured_search_kwargs["query"] = query
+        captured_search_kwargs["k"] = k
+        captured_search_kwargs["filter"] = filter
+        captured_search_kwargs["query_embedding"] = query_embedding
+        return [_MockDoc("[USER_FACT] Lazaros likes double espresso", {"category": "lazaros"})]
+
+    monkeypatch.setattr(system.vector_memory, "safe_similarity_search", mock_safe_similarity_search)
+    monkeypatch.setattr(system, "_lexical_memory_matches", lambda *a, **k: [])
+
+    bump_event = threading.Event()
+    captured_bump_kwargs = {}
+
+    def mock_safe_chroma_query(*args, **kwargs):
+        assert vector_store_module.vector_lock.locked(), "_safe_chroma_query in bump expected vector_lock to be held"
+        captured_bump_kwargs.update(kwargs)
+        bump_event.set()
+        return {"ids": [["doc-1"]], "documents": [["text"]], "metadatas": [[{}]], "distances": [[0.1]]}
+
+    monkeypatch.setattr(system.vector_memory, "_safe_chroma_query", mock_safe_chroma_query)
+    monkeypatch.setattr(vector_store_module, "bump_retrieval_count", lambda *a: None)
+
+    result = system.search_memory.func(query_text, category="lazaros")
+
+    assert "double espresso" in result
+    assert captured_search_kwargs["query_embedding"] == expected_emb
+    assert captured_search_kwargs["filter"] == {"category": "lazaros"}
+
+    # Verify async bump completed and used precomputed embedding
+    assert bump_event.wait(timeout=2.0), "Async retrieval bump did not run"
+    assert captured_bump_kwargs["query_embeddings"] == [expected_emb]
+
+
+def test_retrieve_photo_never_invokes_embed_query_under_vector_lock(tmp_path, monkeypatch):
+    """
+    Prove that retrieve_photo() computes its query embedding before vector_lock is acquired
+    and passes query_embedding to safe_similarity_search.
+    """
+    from tools import system
+    import memory.vector_store as vector_store_module
+    from services.embeddings import embeddings as s_embeddings
+
+    query_text = "family park photo"
+    expected_emb = [0.88, 0.77, 0.66]
+    embed_calls = []
+
+    photo_file = tmp_path / "park.jpg"
+    photo_file.write_bytes(b"photo")
+
+    def tracking_embed_query(text: str) -> list[float]:
+        assert not vector_store_module.vector_lock.locked(), (
+            f"vector_lock was held during embed_query('{text}') in retrieve_photo!"
+        )
+        embed_calls.append(text)
+        return expected_emb
+
+    monkeypatch.setattr(s_embeddings, "embed_query", tracking_embed_query)
+    monkeypatch.setattr(system, "embeddings", s_embeddings)
+    monkeypatch.setattr(system, "PHOTOS_INDEX_FILE", str(tmp_path / "photos_nonexistent.json"))
+
+    captured_search_kwargs = {}
+
+    def mock_safe_similarity_search(query: str, *, k: int, filter: dict | None = None, query_embedding=None):
+        assert vector_store_module.vector_lock.locked(), "safe_similarity_search expected vector_lock to be held"
+        captured_search_kwargs["query"] = query
+        captured_search_kwargs["k"] = k
+        captured_search_kwargs["query_embedding"] = query_embedding
+        return [_MockDoc("family park photo", {"photo_path": str(photo_file)})]
+
+    monkeypatch.setattr(system.vector_memory, "safe_similarity_search", mock_safe_similarity_search)
+
+    res = system.retrieve_photo.func(query_text)
+
+    assert "Found the photo!" in res
+    assert embed_calls == [query_text]
+    assert captured_search_kwargs["query_embedding"] == expected_emb
+    assert captured_search_kwargs["k"] == 10
+
+
+def test_search_memory_and_retrieve_photo_graceful_on_generic_embedding_error(tmp_path, monkeypatch):
+    """
+    Prove that ordinary non-provider embedding errors (e.g. network timeout)
+    gracefully skip semantic search without crashing search_memory and route
+    retrieve_photo to the non-semantic photo archive fallback.
+    """
+    import json
+    from tools import system
+    from services.embeddings import embeddings as s_embeddings
+
+    def failing_embed(text: str):
+        raise RuntimeError("Transient network timeout")
+
+    monkeypatch.setattr(s_embeddings, "embed_query", failing_embed)
+    monkeypatch.setattr(system, "embeddings", s_embeddings)
+    monkeypatch.setattr(system, "_lexical_memory_matches", lambda *a, **k: [
+        _MockDoc("[USER_FACT] Lexical fallback match", {"category": "general"})
+    ])
+
+    search_result = system.search_memory.func("test query")
+    assert "Lexical fallback match" in search_result
+
+    # Set up photo archive with matching entry
+    photo_path = tmp_path / "alexander-park.jpg"
+    photo_path.write_bytes(b"photo")
+    index_path = tmp_path / "photos_index.json"
+    index_path.write_text(
+        json.dumps([
+            {
+                "file_path": str(photo_path),
+                "caption": "Ο Αλέξανδρος στο πάρκο",
+                "analysis": "Ο Αλέξανδρος παίζει μπάλα στο πάρκο.",
+                "date": "2026-08-25",
+            },
+        ], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(system, "PHOTOS_INDEX_FILE", str(index_path))
+
+    photo_result = system.retrieve_photo.func("φωτογραφία Αλέξανδρος πάρκο")
+    assert "matched from the local photo archive" in photo_result
+    assert f"[SEND_PHOTO: {photo_path}]" in photo_result

@@ -14,6 +14,10 @@ class _VectorStore:
         self.calls.append({"query": query, "k": k, "filter": filter})
         return self.results
 
+    def similarity_search_by_vector(self, embedding, k=6, filter=None):
+        self.calls.append({"query": embedding, "k": k, "filter": filter})
+        return self.results
+
     def query(self, **kwargs):
         return {"ids": [[]]}
 
