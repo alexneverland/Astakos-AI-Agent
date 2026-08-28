@@ -148,3 +148,20 @@ def test_relay_local_payload_overwrites_draft_with_conversational_text(monkeypat
     assert "DRAFT" in result
     data = json.loads(draft_file.read_text(encoding="utf-8"))
     assert data["message"] == "Ποιο draft λες; Θα το δω μετά."
+
+
+def test_relay_local_payload_accepts_bidirectional_greek_latin_contact_alias(monkeypatch, tmp_path):
+    """The draft writer resolves a Greek request against a Latin contact alias."""
+    import config
+    from tools.web import relay_local_payload
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"sofia": "123"})
+
+    result = relay_local_payload.func("Σοφία", "Νέο μήνυμα")
+
+    assert "DRAFT" in result
+    data = json.loads(draft_file.read_text(encoding="utf-8"))
+    assert data["target_name"] == "Σοφία"
+    assert data["message"] == "Νέο μήνυμα"

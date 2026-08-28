@@ -134,7 +134,7 @@ def _is_trusted_active_messenger_draft_edit(
     from core.messenger_draft import active_draft_status
     from core.untrusted_content import external_content_source_names, is_direct_user_message
     from services.messenger_intent import is_contextually_grounded_active_draft_edit
-    from tools.web import _greek_to_latin, remove_accents
+    from tools.web import _messenger_target_aliases
 
     args = tool_call.get("args", {})
     if not isinstance(args, dict):
@@ -143,11 +143,9 @@ def _is_trusted_active_messenger_draft_edit(
     if not active or not isinstance(draft, dict):
         return False
 
-    draft_target = remove_accents(str(draft.get("target_name", "")).strip())
-    requested_target = remove_accents(str(args.get("target_entity", "")).strip())
-    draft_aliases = {draft_target, _greek_to_latin(draft_target)}
-    requested_aliases = {requested_target, _greek_to_latin(requested_target)}
-    if not draft_target or not (draft_aliases & requested_aliases):
+    draft_aliases = _messenger_target_aliases(draft.get("target_name", ""))
+    requested_aliases = _messenger_target_aliases(args.get("target_entity", ""))
+    if not draft_aliases or not (draft_aliases & requested_aliases):
         return False
 
     existing_image = os.path.normcase(os.path.normpath(str(draft.get("image_path", "")).strip()))

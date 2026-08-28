@@ -67,7 +67,7 @@ def _has_token_or_phrase(text: str, patterns: tuple[str, ...]) -> bool:
 
 
 def _has_leading_draft_creation_verb(text: str) -> bool:
-    """Return whether a creation verb follows conversational filler, not another subject."""
+    """Return whether a creation verb begins the request after constrained filler."""
     action_verbs = {
         token
         for pattern in _DRAFT_REQUEST_ACTION_VERBS
@@ -78,6 +78,20 @@ def _has_leading_draft_creation_verb(text: str) -> bool:
         prefix = " ".join(tokens[:index])
         if (
             token in action_verbs
+            and (
+                index == 0
+                or (
+                    index == 1
+                    and (
+                        len(tokens[0]) <= 2
+                        or is_draft_offer_acceptance(tokens[0])
+                    )
+                )
+                or (
+                    index == 2
+                    and is_draft_offer_acceptance(tokens[0])
+                )
+            )
             and not _has_token_or_phrase(prefix, _DRAFT_REQUEST_NEGATIONS)
             and not _has_token_or_phrase(prefix, _DRAFT_REQUEST_OBJECTS)
         ):

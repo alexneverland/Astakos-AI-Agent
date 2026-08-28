@@ -47,6 +47,14 @@ def _greek_to_latin(s: str) -> str:
     return ''.join(_MAP.get(c, c) for c in s.lower())
 
 
+def _messenger_target_aliases(target_entity: str) -> set[str]:
+    """Return normalized Greek and Latin aliases for one Messenger recipient."""
+    normalized = remove_accents(str(target_entity or "").strip())
+    if not normalized:
+        return set()
+    return {normalized, _greek_to_latin(normalized)}
+
+
 _AMBIGUOUS_MESSENGER_TARGETS = set(NLP_CONFIG.get("web", {}).get("ambiguous_messenger_targets", []))
 
 
@@ -92,29 +100,17 @@ def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
         return True, "direct target"
 
     contacts = _load_messenger_contacts()
-    # 1) Exact match (accent-normalized)
-    if normalized in contacts:
-        return True, "known contact"
-    # 2) Partial alias match
-    if any(alias and (alias in normalized or normalized in alias) for alias in contacts):
-        return True, "known contact"
-    # 3) Greek↔Latin transliteration fallback:
-    #    If the query is in Latin characters (e.g. "Sophia"), transliterate the Greek contact keys
-    #    and compare. Also, "ph" → "f" phonetic equivalence (sophia → sofia).
-    _is_latin_query = all(ord(c) < 0x0370 or c.isdigit() or not c.isalpha() for c in normalized)
-    if _is_latin_query:
-        # phonetic variants: ph→f, ck→k, c→k (before a/o/u/l/r)
-        def _phonetic(s: str) -> str:
-            s = s.replace("ph", "f").replace("ck", "k").replace("th", "th")
-            return s
-        normalized_ph = _phonetic(normalized)
-        for alias in contacts:
-            alias_latin = _greek_to_latin(alias)
-            alias_latin_ph = _phonetic(alias_latin)
-            if alias_latin == normalized or alias_latin_ph == normalized_ph:
-                return True, "known contact"
-            if alias_latin in normalized or normalized in alias_latin:
-                return True, "known contact"
+    target_aliases = _messenger_target_aliases(target)
+    for alias in contacts:
+        alias_forms = _messenger_target_aliases(alias)
+        if target_aliases & alias_forms:
+            return True, "known contact"
+        if any(
+            candidate and (candidate in other or other in candidate)
+            for candidate in target_aliases
+            for other in alias_forms
+        ):
+            return True, "known contact"
     return False, f"unknown Messenger contact '{target_entity}'"
 
 
