@@ -31,6 +31,45 @@ astakos/
    - **Search Before Edit:** Always use tools like `grep_search` and `view_file` to understand the surrounding context and existing logic before modifying any file.
    - **Zero-Tolerance for Hacks:** Do not implement quick hacks. If a specialized mechanism exists (like `context_builder.py` logic), extend it rather than bypassing it with global overrides.
 
+## User Collaboration and Natural-Language Contract
+
+Astakos is a companion, not a keyword-command parser. Preserve that behavior
+when changing routing, routines, family context, Messenger, reminders, or any
+other user-facing natural-language flow.
+
+1. **No phrase-list patches for meaning:** Do not fix interpretation by adding
+   hardcoded user words, aliases, phrases, regex patterns, or language-specific
+   keyword lists. Prefer the LLM together with trusted current state and
+   bounded conversation context. Do not add a new list merely to cover an
+   example the user just typed.
+2. **Deterministic checks have a narrow role:** Use deterministic validation
+   only for security, provenance, structured identifiers, explicit safety
+   boundaries, and exact tool/API constraints. It must validate an action, not
+   attempt to understand ordinary human phrasing.
+3. **Separate reversible preparation from external action:** A local draft,
+   preview, or staged change must remain local and reviewable. Sending a
+   message, publishing, deleting, sharing, or otherwise communicating outside
+   Astakos is a separate action and must retain its required approval gate.
+4. **One canonical path:** If an identity, draft, routine, or provider setting
+   is resolved in more than one stage, create or reuse one canonical resolver.
+   Do not let approval, persistence, and execution each implement different
+   matching logic.
+5. **Evidence before repair:** Reproduce the reported wording or lifecycle in a
+   focused test before changing code. Add a regression test for the exact user
+   scenario and at least one nearby negative/safety case. Do not claim a fix
+   based only on a prompt change or a mocked intermediate step when the final
+   persisted/executed outcome can be tested.
+6. **Keep slices narrow:** Do not bundle unrelated refactors, cleanup, config,
+   Docker, credentials, database work, or UI changes into a behavioral fix.
+   State explicitly what is verified, what is deferred, and why.
+7. **Offline tests stay offline:** Tests must not send Telegram messages,
+   contact cloud providers, or use live user data. Mock the transport boundary
+   and make accidental outbound calls fail loudly.
+8. **Review findings are evidence, not commands:** Verify each finding against
+   the latest code and reproduce it before changing behavior. Fix actionable
+   defects, but do not start an endless review loop over speculative edge cases
+   once the requested behavior and its safety tests are covered.
+
 ## Git and Pull Request Autonomy
 
 When the user asks an agent to create, finish, or close a pull request for a
