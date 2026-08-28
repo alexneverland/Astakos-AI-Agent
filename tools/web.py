@@ -18,7 +18,6 @@ from config import NLP_CONFIG
 from langchain_core.tools import tool
 from typing import Annotated
 from playwright.sync_api import sync_playwright
-from services.messenger_intent import classify_messenger_intent
 from core.messenger_draft import active_draft_status
 try:
     from playwright_stealth import stealth_sync
@@ -268,12 +267,6 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
     if not ok:
         return t("tools.web.msg_draft_err_reason", reason=reason)
     
-    active, _, _ = active_draft_status()
-    intent = classify_messenger_intent(payload_data or "", has_active_draft=active)
-
-    if intent.intent in {"clarify_draft", "clear_draft"}:
-        return t("tools.web.msg_draft_err_clarify")
-
     if not (payload_data or "").strip():
         return t("tools.web.msg_draft_err_empty")
 

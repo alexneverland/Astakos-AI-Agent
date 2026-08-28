@@ -130,3 +130,21 @@ def test_relay_local_payload_accepts_known_contact(monkeypatch, tmp_path):
     data = json.loads(draft_file.read_text(encoding="utf-8"))
     assert data["target_name"] == "Sofia"
     assert data["message"] == "hello"
+
+
+def test_relay_local_payload_overwrites_draft_with_conversational_text(monkeypatch, tmp_path):
+    """Draft payload remains message content and overwrites the active draft."""
+    import config
+    from core.messenger_draft import save_draft
+    from tools.web import relay_local_payload
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    monkeypatch.setattr("tools.web._messenger_target_status", lambda target: (True, ""))
+    save_draft("Sofia", "Παλιό μήνυμα")
+
+    result = relay_local_payload.func("Sofia", "Ποιο draft λες; Θα το δω μετά.")
+
+    assert "DRAFT" in result
+    data = json.loads(draft_file.read_text(encoding="utf-8"))
+    assert data["message"] == "Ποιο draft λες; Θα το δω μετά."

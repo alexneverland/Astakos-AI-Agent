@@ -156,3 +156,8 @@ def test_explicit_draft_creation_request_rejects_negated_requests() -> None:
     assert is_explicit_draft_creation_request("How do I write a message?") is False
     assert is_explicit_draft_creation_request("Write a message saying I can do nothing today") is True
     assert is_explicit_draft_creation_request('Write a message asking "Are you coming?"') is True
+
+
+def test_explicit_draft_creation_allows_conversational_filler_before_action() -> None:
+    """Natural filler before a direct draft action does not need a phrase-list entry."""
+    assert is_explicit_draft_creation_request("νε φτιαξε draft να στειλεις") is True
