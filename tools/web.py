@@ -18,7 +18,6 @@ from config import NLP_CONFIG
 from langchain_core.tools import tool
 from typing import Annotated
 from playwright.sync_api import sync_playwright
-from services.messenger_intent import classify_messenger_intent
 from core.messenger_draft import active_draft_status
 try:
     from playwright_stealth import stealth_sync
@@ -46,6 +45,16 @@ def _greek_to_latin(s: str) -> str:
     """
     _MAP = NLP_CONFIG.get("general", {}).get("greek_to_latin_map", {})
     return ''.join(_MAP.get(c, c) for c in s.lower())
+
+
+def _messenger_target_aliases(target_entity: str) -> set[str]:
+    """Return normalized Greek and Latin aliases for one Messenger recipient."""
+    normalized = remove_accents(str(target_entity or "").strip())
+    if not normalized:
+        return set()
+    latin = _greek_to_latin(normalized)
+    phonetic = lambda value: value.replace("ph", "f").replace("ck", "k")
+    return {normalized, latin, phonetic(normalized), phonetic(latin)}
 
 
 _AMBIGUOUS_MESSENGER_TARGETS = set(NLP_CONFIG.get("web", {}).get("ambiguous_messenger_targets", []))
@@ -82,41 +91,45 @@ def _load_messenger_contacts() -> dict[str, str]:
         return {}
 
 
-def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
+def _resolve_messenger_target(target_entity: str) -> tuple[str | None, str]:
+    """Resolve a supplied recipient to the canonical Messenger destination."""
     target = (target_entity or "").strip()
     normalized = remove_accents(target)
     if not target:
-        return False, "missing target"
+        return None, "missing target"
     if normalized in _AMBIGUOUS_MESSENGER_TARGETS:
-        return False, f"ambiguous target '{target_entity}'"
+        return None, f"ambiguous target '{target_entity}'"
     if target.startswith("http") or target.isdigit():
-        return True, "direct target"
+        return target, "direct target"
 
     contacts = _load_messenger_contacts()
-    # 1) Exact match (accent-normalized)
-    if normalized in contacts:
-        return True, "known contact"
-    # 2) Partial alias match
-    if any(alias and (alias in normalized or normalized in alias) for alias in contacts):
-        return True, "known contact"
-    # 3) Greek↔Latin transliteration fallback:
-    #    If the query is in Latin characters (e.g. "Sophia"), transliterate the Greek contact keys
-    #    and compare. Also, "ph" → "f" phonetic equivalence (sophia → sofia).
-    _is_latin_query = all(ord(c) < 0x0370 or c.isdigit() or not c.isalpha() for c in normalized)
-    if _is_latin_query:
-        # phonetic variants: ph→f, ck→k, c→k (before a/o/u/l/r)
-        def _phonetic(s: str) -> str:
-            s = s.replace("ph", "f").replace("ck", "k").replace("th", "th")
-            return s
-        normalized_ph = _phonetic(normalized)
-        for alias in contacts:
-            alias_latin = _greek_to_latin(alias)
-            alias_latin_ph = _phonetic(alias_latin)
-            if alias_latin == normalized or alias_latin_ph == normalized_ph:
-                return True, "known contact"
-            if alias_latin in normalized or normalized in alias_latin:
-                return True, "known contact"
-    return False, f"unknown Messenger contact '{target_entity}'"
+    target_aliases = _messenger_target_aliases(target)
+    for alias in contacts:
+        alias_forms = _messenger_target_aliases(alias)
+        if target_aliases & alias_forms:
+            return str(contacts[alias]), "known contact"
+        if any(
+            candidate and (candidate in other or other in candidate)
+            for candidate in target_aliases
+            for other in alias_forms
+        ):
+            return str(contacts[alias]), "known contact"
+    return None, f"unknown Messenger contact '{target_entity}'"
+
+
+def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
+    """Return whether one recipient resolves to a safe Messenger destination."""
+    destination, reason = _resolve_messenger_target(target_entity)
+    return destination is not None, reason
+
+
+def _messenger_targets_match(left: str, right: str) -> bool:
+    """Return whether two recipient spellings resolve to the same destination."""
+    left_destination, _ = _resolve_messenger_target(left)
+    right_destination, _ = _resolve_messenger_target(right)
+    if left_destination is not None and right_destination is not None:
+        return left_destination == right_destination
+    return bool(_messenger_target_aliases(left) & _messenger_target_aliases(right))
 
 
 _CHATBOT_NOISE_PATTERNS = NLP_CONFIG.get("web", {}).get("chatbot_noise_patterns", [])
@@ -264,16 +277,10 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
     """
     from core.messenger_draft import save_draft
 
-    ok, reason = _messenger_target_status(target_entity)
-    if not ok:
+    destination, reason = _resolve_messenger_target(target_entity)
+    if destination is None:
         return t("tools.web.msg_draft_err_reason", reason=reason)
     
-    active, _, _ = active_draft_status()
-    intent = classify_messenger_intent(payload_data or "", has_active_draft=active)
-
-    if intent.intent in {"clarify_draft", "clear_draft"}:
-        return t("tools.web.msg_draft_err_clarify")
-
     if not (payload_data or "").strip():
         return t("tools.web.msg_draft_err_empty")
 
@@ -288,7 +295,7 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
     if not clean_payload:
         return t("tools.web.msg_draft_err_sanitized")
 
-    save_draft(target_entity, clean_payload, image_path=image_path)
+    save_draft(destination, clean_payload, image_path=image_path)
 
     # We return clean output — the display instructions are in prompts.md
     img_info = f"\nimage: {image_path}" if image_path else ""

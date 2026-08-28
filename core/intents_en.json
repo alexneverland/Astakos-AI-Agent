@@ -691,12 +691,6 @@
             "make",
             "create"
         ],
-        "draft_request_leading_tokens": [
-            "yes",
-            "ok",
-            "okay",
-            "please"
-        ],
         "draft_request_objects": [
             "message",
             "draft"

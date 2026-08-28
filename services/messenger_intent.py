@@ -23,8 +23,6 @@ _DRAFT_REQUEST_NEGATIONS = nl_config.MI_DRAFT_REQUEST_NEGATIONS
 
 _DRAFT_REQUEST_ACTION_VERBS = nl_config.MI_DRAFT_REQUEST_ACTION_VERBS
 
-_DRAFT_REQUEST_LEADING_TOKENS = nl_config.MI_DRAFT_REQUEST_LEADING_TOKENS
-
 _DRAFT_REQUEST_OBJECTS = nl_config.MI_DRAFT_REQUEST_OBJECTS
 
 _DRAFT_EDIT_PATTERNS = nl_config.MI_DRAFT_EDIT_PATTERNS
@@ -69,12 +67,7 @@ def _has_token_or_phrase(text: str, patterns: tuple[str, ...]) -> bool:
 
 
 def _has_leading_draft_creation_verb(text: str) -> bool:
-    """Return whether a configured creation verb follows only configured leading tokens."""
-    leading_tokens = {
-        token
-        for pattern in _DRAFT_REQUEST_LEADING_TOKENS
-        for token in _normalize(pattern).split()
-    }
+    """Return whether a creation verb begins the request after constrained filler."""
     action_verbs = {
         token
         for pattern in _DRAFT_REQUEST_ACTION_VERBS
@@ -82,7 +75,26 @@ def _has_leading_draft_creation_verb(text: str) -> bool:
     }
     tokens = text.split()
     for index, token in enumerate(tokens):
-        if token in action_verbs and all(prefix in leading_tokens for prefix in tokens[:index]):
+        prefix = " ".join(tokens[:index])
+        if (
+            token in action_verbs
+            and (
+                index == 0
+                or (
+                    index == 1
+                    and (
+                        is_draft_offer_acceptance(tokens[0])
+                        or (len(tokens[0]) <= 2 and not tokens[0].isascii())
+                    )
+                )
+                or (
+                    index == 2
+                    and is_draft_offer_acceptance(tokens[0])
+                )
+            )
+            and not _has_token_or_phrase(prefix, _DRAFT_REQUEST_NEGATIONS)
+            and not _has_token_or_phrase(prefix, _DRAFT_REQUEST_OBJECTS)
+        ):
             return True
     return False
 
@@ -223,6 +235,12 @@ def is_contextually_grounded_active_draft_edit(
 
 def is_explicit_draft_creation_request(text: str) -> bool:
     """Return whether text has affirmative configured draft action and object terms."""
+    raw_text = str(text).strip()
+    question_text = raw_text.rstrip("\"'”’ ")
+    if question_text.endswith(("?", ";")) and not any(
+        quote in raw_text for quote in ("\"", "'", "“", "”", "‘", "’")
+    ):
+        return False
     normalized = _normalize(text)
     if _has_token_or_phrase(normalized, _DRAFT_REQUEST_NEGATIONS):
         return False

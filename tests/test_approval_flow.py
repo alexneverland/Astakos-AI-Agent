@@ -175,6 +175,37 @@ def test_explicit_messenger_draft_creation_skips_stale_external_approval():
     notify.assert_not_called()
 
 
+def test_natural_draft_request_skips_stale_external_approval_without_phrase_list():
+    """A direct natural request may save a reversible draft without word-list matching."""
+    from langchain_core.messages import AIMessage, HumanMessage
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+
+    external_reply = AIMessage(
+        content="A prior news summary.",
+        additional_kwargs=external_content_history_metadata(["get_news"]),
+    )
+    user_message = HumanMessage(content="νε φτιαξε draft να στειλεις")
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Sofia", "payload_data": "Καλημέρα"},
+            "id": "tc-natural-draft",
+        }],
+    )
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({
+            "messages": [external_reply, user_message, draft_call],
+        })
+
+    assert result["approval_status"] == "ok"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
 def test_accepted_routine_offer_draft_creation_skips_stale_external_approval():
     """A trusted accepted routine offer may create its reviewable draft."""
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -575,6 +606,51 @@ def test_active_draft_edit_after_untrusted_read_allows_isolated_context(monkeypa
     ):
         result = approval_check_node({
             "messages": [user_message, memory_result, draft_call],
+            "active_draft_edit_context_isolated": True,
+        })
+
+    assert result["approval_status"] == "ok"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
+def test_active_draft_edit_allows_greek_latin_recipient_alias(monkeypatch, tmp_path):
+    """A direct revision may preserve its recipient across Greek and Latin spelling."""
+    import config
+    from langchain_core.messages import AIMessage, HumanMessage
+    from core.approval import approval_check_node
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    draft_file.write_text(
+        json.dumps(
+            {
+                "target_name": "Sofia",
+                "message": "Παλιό μήνυμα",
+                "status": "pending",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "expires_at": (datetime.now() + timedelta(minutes=30)).isoformat(timespec="seconds"),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    user_message = HumanMessage(content="Άλλαξε το μήνυμα και κάν' το πιο σύντομο")
+    draft_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "relay_local_payload",
+            "args": {"target_entity": "Σοφία", "payload_data": "Νέο σύντομο μήνυμα"},
+            "id": "tc-greek-alias-edit",
+        }],
+    )
+
+    with (
+        patch("core.approval.save_pending") as save_pending,
+        patch("core.approval._notify_telegram") as notify,
+    ):
+        result = approval_check_node({
+            "messages": [user_message, draft_call],
             "active_draft_edit_context_isolated": True,
         })
 
