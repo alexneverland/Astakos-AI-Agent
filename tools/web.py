@@ -52,7 +52,9 @@ def _messenger_target_aliases(target_entity: str) -> set[str]:
     normalized = remove_accents(str(target_entity or "").strip())
     if not normalized:
         return set()
-    return {normalized, _greek_to_latin(normalized)}
+    latin = _greek_to_latin(normalized)
+    phonetic = lambda value: value.replace("ph", "f").replace("ck", "k")
+    return {normalized, latin, phonetic(normalized), phonetic(latin)}
 
 
 _AMBIGUOUS_MESSENGER_TARGETS = set(NLP_CONFIG.get("web", {}).get("ambiguous_messenger_targets", []))
@@ -89,29 +91,45 @@ def _load_messenger_contacts() -> dict[str, str]:
         return {}
 
 
-def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
+def _resolve_messenger_target(target_entity: str) -> tuple[str | None, str]:
+    """Resolve a supplied recipient to the canonical Messenger destination."""
     target = (target_entity or "").strip()
     normalized = remove_accents(target)
     if not target:
-        return False, "missing target"
+        return None, "missing target"
     if normalized in _AMBIGUOUS_MESSENGER_TARGETS:
-        return False, f"ambiguous target '{target_entity}'"
+        return None, f"ambiguous target '{target_entity}'"
     if target.startswith("http") or target.isdigit():
-        return True, "direct target"
+        return target, "direct target"
 
     contacts = _load_messenger_contacts()
     target_aliases = _messenger_target_aliases(target)
     for alias in contacts:
         alias_forms = _messenger_target_aliases(alias)
         if target_aliases & alias_forms:
-            return True, "known contact"
+            return str(contacts[alias]), "known contact"
         if any(
             candidate and (candidate in other or other in candidate)
             for candidate in target_aliases
             for other in alias_forms
         ):
-            return True, "known contact"
-    return False, f"unknown Messenger contact '{target_entity}'"
+            return str(contacts[alias]), "known contact"
+    return None, f"unknown Messenger contact '{target_entity}'"
+
+
+def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
+    """Return whether one recipient resolves to a safe Messenger destination."""
+    destination, reason = _resolve_messenger_target(target_entity)
+    return destination is not None, reason
+
+
+def _messenger_targets_match(left: str, right: str) -> bool:
+    """Return whether two recipient spellings resolve to the same destination."""
+    left_destination, _ = _resolve_messenger_target(left)
+    right_destination, _ = _resolve_messenger_target(right)
+    if left_destination is not None and right_destination is not None:
+        return left_destination == right_destination
+    return bool(_messenger_target_aliases(left) & _messenger_target_aliases(right))
 
 
 _CHATBOT_NOISE_PATTERNS = NLP_CONFIG.get("web", {}).get("chatbot_noise_patterns", [])
@@ -259,8 +277,8 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
     """
     from core.messenger_draft import save_draft
 
-    ok, reason = _messenger_target_status(target_entity)
-    if not ok:
+    destination, reason = _resolve_messenger_target(target_entity)
+    if destination is None:
         return t("tools.web.msg_draft_err_reason", reason=reason)
     
     if not (payload_data or "").strip():
@@ -277,7 +295,7 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
     if not clean_payload:
         return t("tools.web.msg_draft_err_sanitized")
 
-    save_draft(target_entity, clean_payload, image_path=image_path)
+    save_draft(destination, clean_payload, image_path=image_path)
 
     # We return clean output — the display instructions are in prompts.md
     img_info = f"\nimage: {image_path}" if image_path else ""

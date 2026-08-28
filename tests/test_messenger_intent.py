@@ -163,3 +163,4 @@ def test_explicit_draft_creation_allows_conversational_filler_before_action() ->
     assert is_explicit_draft_creation_request("νε φτιαξε draft να στειλεις") is True
     assert is_explicit_draft_creation_request("Alice will write a message tomorrow") is False
     assert is_explicit_draft_creation_request("I learned to write a message") is False
+    assert is_explicit_draft_creation_request("I write a message every day") is False

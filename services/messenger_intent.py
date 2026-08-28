@@ -83,8 +83,8 @@ def _has_leading_draft_creation_verb(text: str) -> bool:
                 or (
                     index == 1
                     and (
-                        len(tokens[0]) <= 2
-                        or is_draft_offer_acceptance(tokens[0])
+                        is_draft_offer_acceptance(tokens[0])
+                        or (len(tokens[0]) <= 2 and not tokens[0].isascii())
                     )
                 )
                 or (

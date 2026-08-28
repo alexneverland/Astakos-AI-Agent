@@ -128,7 +128,7 @@ def test_relay_local_payload_accepts_known_contact(monkeypatch, tmp_path):
     assert "DRAFT" in result
     import json
     data = json.loads(draft_file.read_text(encoding="utf-8"))
-    assert data["target_name"] == "Sofia"
+    assert data["target_name"] == "123"
     assert data["message"] == "hello"
 
 
@@ -163,5 +163,14 @@ def test_relay_local_payload_accepts_bidirectional_greek_latin_contact_alias(mon
 
     assert "DRAFT" in result
     data = json.loads(draft_file.read_text(encoding="utf-8"))
-    assert data["target_name"] == "Σοφία"
+    assert data["target_name"] == "123"
     assert data["message"] == "Νέο μήνυμα"
+
+
+def test_messenger_target_resolver_preserves_sophia_phonetic_alias(monkeypatch):
+    """Greek contact aliases retain the established Sophia-to-Sofia matching."""
+    from tools.web import _resolve_messenger_target
+
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
+
+    assert _resolve_messenger_target("Sophia") == ("123", "known contact")
