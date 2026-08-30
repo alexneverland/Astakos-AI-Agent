@@ -217,7 +217,7 @@ def _is_direct_user_meal_log(
     tool_call: ToolCall,
     prior_messages: Sequence[BaseMessage],
 ) -> bool:
-    """Allow only a grounded direct meal report to bypass stale provenance."""
+    """Allow a direct trusted meal log to bypass stale provenance only."""
     if tool_call.get("name") != "log_meal":
         return False
 
@@ -233,8 +233,7 @@ def _is_direct_user_meal_log(
             continue
         if external_content_source_names(getattr(message, "additional_kwargs", {})):
             return False
-        user_text = str(getattr(message, "content", ""))
-        return is_meal_report(user_text) and meal_name.casefold() in user_text.casefold()
+        return is_meal_report(str(getattr(message, "content", "")))
     return False
 
 def is_critical(tc: dict) -> bool:
