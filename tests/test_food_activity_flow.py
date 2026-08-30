@@ -26,6 +26,22 @@ def test_meal_report_exposes_only_the_local_history_tool() -> None:
     assert [tool.name for tool in selected] == ["log_meal", "search_memory"]
 
 
+def test_reported_pasta_meal_exposes_the_log_tool_before_approval() -> None:
+    """The reported production wording reaches the meal-log capability gate."""
+    from core.agents import _food_tools_for_latest_user_text
+
+    tools = [_NamedTool("recipe_expert"), _NamedTool("log_meal"), _NamedTool("search_memory")]
+    selected = _food_tools_for_latest_user_text(
+        tools,
+        (
+            "Δεν έκαναμε φασολάκια. Έκανα μακαρόνια με σάλτσα λουκάνικα "
+            "και λίγο στήθος κοτόπουλο που είχε μείνει από χθες και φάγαμε όλοι."
+        ),
+    )
+
+    assert [tool.name for tool in selected] == ["log_meal", "search_memory"]
+
+
 def test_recipe_request_exposes_recipe_tool_but_not_meal_logging() -> None:
     """A request for ideas may generate recipes without recording a meal."""
     from core.agents import _food_tools_for_latest_user_text

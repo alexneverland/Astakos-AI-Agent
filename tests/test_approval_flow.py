@@ -106,7 +106,7 @@ def test_direct_meal_log_skips_stale_external_approval_when_tool_text_is_normali
     user_message = HumanMessage(
         content=(
             "Δεν έκαναμε φασολάκια. Έκανα μακαρόνια με σάλτσα λουκάνικα "
-            "και λίγο στήθος κοτόπουλο που είχε μείνει από χθες."
+            "και λίγο στήθος κοτόπουλο που είχε μείνει από χθες και φάγαμε όλοι."
         ),
     )
     meal_call = AIMessage(
@@ -153,6 +153,37 @@ def test_provenance_marked_meal_log_stays_approval_gated():
     with patch("core.approval.save_pending") as save_pending, \
          patch("core.approval._notify_telegram") as notify:
         result = approval_check_node({"messages": [user_message, meal_call]})
+
+    assert result["approval_status"] == "pending"
+    save_pending.assert_called_once()
+    notify.assert_called_once()
+
+
+def test_unrelated_direct_message_cannot_bypass_stale_meal_approval():
+    """A tool call cannot turn unrelated trusted text into a meal record."""
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    external_reply = AIMessage(
+        content="A prior news summary.",
+        additional_kwargs=external_content_history_metadata(["get_news"]),
+    )
+    user_message = HumanMessage(content="Τι καιρό κάνει αύριο;")
+    meal_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "log_meal",
+            "args": {"meal_name": "Φακές"},
+            "id": "tc-unrelated-meal",
+        }],
+    )
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({
+            "messages": [external_reply, user_message, meal_call],
+        })
 
     assert result["approval_status"] == "pending"
     save_pending.assert_called_once()

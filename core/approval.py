@@ -222,6 +222,7 @@ def _is_direct_user_meal_log(
         return False
 
     from core.untrusted_content import external_content_source_names, is_direct_user_message
+    from services.food_intent import is_meal_report
 
     meal_name = str((tool_call.get("args") or {}).get("meal_name", "")).strip()
     if not meal_name:
@@ -232,7 +233,7 @@ def _is_direct_user_meal_log(
             continue
         if external_content_source_names(getattr(message, "additional_kwargs", {})):
             return False
-        return True
+        return is_meal_report(str(getattr(message, "content", "")))
     return False
 
 def is_critical(tc: dict) -> bool:
