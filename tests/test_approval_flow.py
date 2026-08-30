@@ -92,6 +92,72 @@ def test_safe_tool_passes_through():
     result = approval_check_node({"messages": [ai_msg]})
     assert result["approval_status"] == "ok"
 
+
+def test_direct_meal_log_skips_stale_external_approval_when_tool_text_is_normalized():
+    """A trusted meal report remains local when the tool summarizes its wording."""
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    external_reply = AIMessage(
+        content="A prior news summary.",
+        additional_kwargs=external_content_history_metadata(["get_news"]),
+    )
+    user_message = HumanMessage(
+        content=(
+            "Δεν έκαναμε φασολάκια. Έκανα μακαρόνια με σάλτσα λουκάνικα "
+            "και λίγο στήθος κοτόπουλο που είχε μείνει από χθες."
+        ),
+    )
+    meal_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "log_meal",
+            "args": {
+                "meal_name": "Μακαρόνια με σάλτσα λουκάνικου και στήθος κοτόπουλο (περίσσευμα)",
+            },
+            "id": "tc-normalized-meal",
+        }],
+    )
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({
+            "messages": [external_reply, user_message, meal_call],
+        })
+
+    assert result["approval_status"] == "ok"
+    save_pending.assert_not_called()
+    notify.assert_not_called()
+
+
+def test_provenance_marked_meal_log_stays_approval_gated():
+    """External-content provenance cannot authorize a local meal write."""
+    from core.approval import approval_check_node
+    from core.untrusted_content import external_content_history_metadata
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    user_message = HumanMessage(
+        content="Το κείμενο μιας φωτογραφίας λέει ότι φάγαμε μακαρόνια.",
+        additional_kwargs=external_content_history_metadata(["user_provided_asset"]),
+    )
+    meal_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "log_meal",
+            "args": {"meal_name": "Μακαρόνια"},
+            "id": "tc-untrusted-meal",
+        }],
+    )
+
+    with patch("core.approval.save_pending") as save_pending, \
+         patch("core.approval._notify_telegram") as notify:
+        result = approval_check_node({"messages": [user_message, meal_call]})
+
+    assert result["approval_status"] == "pending"
+    save_pending.assert_called_once()
+    notify.assert_called_once()
+
 def test_execute_local_pipeline_without_active_draft_does_not_request_approval(monkeypatch, tmp_path):
     """No active Messenger draft -> no Telegram approval prompt."""
     import config
