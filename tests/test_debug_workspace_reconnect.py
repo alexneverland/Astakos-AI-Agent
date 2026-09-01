@@ -33,9 +33,12 @@ def test_debug_workspace_reconnect_completes_the_shared_oauth_flow(
     token_path = tmp_path / "token.json"
     monkeypatch.setattr(workspace_oauth, "get_token_path", lambda: str(token_path))
     workspace_oauth._oauth_states.clear()
+    flow_calls: list[dict[str, str]] = []
 
     class _MockFlow:
         """Offline stand-in for Google's OAuth flow boundary."""
+
+        code_verifier = "pkce-test-verifier"
 
         def __init__(self) -> None:
             self.credentials = MagicMock()
@@ -50,11 +53,12 @@ def test_debug_workspace_reconnect_completes_the_shared_oauth_flow(
         def fetch_token(self, code: str) -> None:
             assert code == "authorized-code"
 
-    monkeypatch.setattr(
-        workspace_oauth,
-        "get_workspace_oauth_flow",
-        lambda **_kwargs: _MockFlow(),
-    )
+    def _mock_flow_factory(**kwargs: str) -> _MockFlow:
+        """Record OAuth flow construction without contacting Google."""
+        flow_calls.append(kwargs)
+        return _MockFlow()
+
+    monkeypatch.setattr(workspace_oauth, "get_workspace_oauth_flow", _mock_flow_factory)
 
     client = TestClient(server)
     state = _start_debug_workspace_oauth(client)
@@ -71,6 +75,7 @@ def test_debug_workspace_reconnect_completes_the_shared_oauth_flow(
     assert callback_response.status_code == 200
     assert token_path.exists()
     assert "workspace_oauth_complete" in callback_response.text
+    assert flow_calls[1]["code_verifier"] == "pkce-test-verifier"
 
 
 def test_debug_workspace_reconnect_reports_google_code_exchange_failure(
@@ -87,6 +92,7 @@ def test_debug_workspace_reconnect_reports_google_code_exchange_failure(
     class _FailingFlow:
         """Offline OAuth flow that rejects the one-time authorization code."""
 
+        code_verifier = "pkce-rejected-verifier"
         credentials = MagicMock()
 
         def authorization_url(self, **kwargs: str) -> tuple[str, str]:

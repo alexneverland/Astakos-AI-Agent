@@ -38,7 +38,7 @@ DEFAULT_WORKSPACE_SCOPES: list[str] = [
 ]
 
 _OAUTH_STATE_TTL_SECONDS = 900
-_oauth_states: dict[str, float] = {}
+_oauth_states: dict[str, tuple[float, str]] = {}
 _oauth_state_lock = threading.Lock()
 
 def _write_token_file_atomic(token_path: str, content: str) -> None:
@@ -186,6 +186,7 @@ def get_workspace_oauth_flow(
     client_secrets_path: str | None = None,
     scopes: Sequence[str] | None = None,
     redirect_uri: str | None = None,
+    code_verifier: str | None = None,
 ):
     """Creates a configured google_auth_oauthlib Flow without launching an interactive server."""
     from google_auth_oauthlib.flow import Flow
@@ -208,6 +209,7 @@ def get_workspace_oauth_flow(
         target_secrets,
         scopes=consent_scopes,
         redirect_uri=redirect_uri or "http://localhost:8000/api/workspace/oauth/callback",
+        code_verifier=code_verifier,
     )
     return flow
 
@@ -219,22 +221,26 @@ def create_workspace_oauth_authorization_url(redirect_uri: str) -> str:
 
     flow = get_workspace_oauth_flow(redirect_uri=redirect_uri)
     state = secrets.token_urlsafe(32)
-    with _oauth_state_lock:
-        now = time.time()
-        expired_states = [
-            value for value, created_at in _oauth_states.items()
-            if now - created_at > _OAUTH_STATE_TTL_SECONDS
-        ]
-        for expired_state in expired_states:
-            _oauth_states.pop(expired_state, None)
-        _oauth_states[state] = now
-
     auth_url, _ = flow.authorization_url(
         state=state,
         prompt="consent",
         access_type="offline",
         include_granted_scopes="true",
     )
+    code_verifier = flow.code_verifier
+    if not code_verifier:
+        raise WorkspaceOAuthStateError("OAuth PKCE verifier could not be created.")
+
+    with _oauth_state_lock:
+        now = time.time()
+        expired_states = [
+            value for value, (created_at, _) in _oauth_states.items()
+            if now - created_at > _OAUTH_STATE_TTL_SECONDS
+        ]
+        for expired_state in expired_states:
+            _oauth_states.pop(expired_state, None)
+        _oauth_states[state] = (now, code_verifier)
+
     return auth_url
 
 
@@ -248,12 +254,16 @@ def complete_workspace_oauth_authorization(
         raise WorkspaceOAuthStateError("OAuth authorization code is required.")
 
     with _oauth_state_lock:
-        created_at = _oauth_states.pop(state, None)
+        state_data = _oauth_states.pop(state, None)
 
-    if not created_at or time.time() - created_at > _OAUTH_STATE_TTL_SECONDS:
+    if not state_data or time.time() - state_data[0] > _OAUTH_STATE_TTL_SECONDS:
         raise WorkspaceOAuthStateError("OAuth state is invalid or expired.")
 
-    flow = get_workspace_oauth_flow(redirect_uri=redirect_uri)
+    _, code_verifier = state_data
+    flow = get_workspace_oauth_flow(
+        redirect_uri=redirect_uri,
+        code_verifier=code_verifier,
+    )
     try:
         flow.fetch_token(code=code)
     except Exception as exc:

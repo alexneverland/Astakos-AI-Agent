@@ -888,6 +888,8 @@ def test_setup_wizard_workspace_oauth_endpoints(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(ws_oauth, "get_token_path", lambda: str(token_target))
 
     class _MockFlow:
+        code_verifier = "setup-wizard-pkce-verifier"
+
         def __init__(self) -> None:
             self.credentials = MagicMock()
             self.credentials.to_json.return_value = '{"token": "xyz", "client_id": "cid", "client_secret": "csec", "refresh_token": "rt"}'
