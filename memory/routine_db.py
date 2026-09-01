@@ -1743,6 +1743,31 @@ def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | N
     log_event("routines", "paused", routine_id=routine_id, paused_until=paused_until, reason=reason)
 
 
+def normalize_legacy_paused_routine_state(routine_id: int) -> bool:
+    """Restore a legacy lifecycle-paused routine without changing its pause metadata.
+
+    Older seasonal records used ``state='paused'`` as their temporary pause
+    marker.  Current scheduling relies on the pause metadata instead, so this
+    narrowly restores those legacy rows to an active lifecycle state while
+    preserving their existing ``paused_until`` date and reason.
+    """
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            cursor = conn.execute(
+                """
+                UPDATE routines
+                SET state='active', is_active=1
+                WHERE id=? AND state='paused'
+                """,
+                (routine_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def clear_routine_paused_until(routine_id: int) -> None:
     """Resume a temporarily or indefinitely paused routine.
 

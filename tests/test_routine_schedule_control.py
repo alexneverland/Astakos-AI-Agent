@@ -59,7 +59,7 @@ def test_pause_applies_to_all_exact_name_matches(monkeypatch):
 
 
 def test_pause_is_idempotent_when_already_paused_later(monkeypatch):
-    """If it is already frozen until a LATER date, it does nothing."""
+    """An idempotent pause also normalizes a legacy lifecycle-paused routine."""
     import tools.system as system
     import memory.routine_db as rdb
 
@@ -69,7 +69,9 @@ def test_pause_is_idempotent_when_already_paused_later(monkeypatch):
         "resume_rule": None, "pause_reason": "already_set",
     })
     called = []
+    normalized = []
     monkeypatch.setattr(rdb, "set_routine_paused_until", lambda routine_id, until, reason=None: called.append(routine_id))
+    monkeypatch.setattr(rdb, "normalize_legacy_paused_routine_state", lambda routine_id: normalized.append(routine_id))
 
     result = system.control_routine_schedule.func(
         event_name="ποδόσφαιρο Αλέξανδρου",
@@ -78,6 +80,7 @@ def test_pause_is_idempotent_when_already_paused_later(monkeypatch):
     )
 
     assert called == []
+    assert normalized == [13, 14]
     assert "ήδη στην επιθυμητή κατάσταση" in result
 
 
@@ -185,6 +188,47 @@ def test_set_routine_paused_until_restores_legacy_paused_state_after_expiry(tmp_
     ).fetchone()
     conn.close()
     assert row == ("active", 1, "2026-12-01", 0, "extended_break")
+
+
+def test_normalize_legacy_paused_routine_state_preserves_existing_pause_metadata(tmp_path, monkeypatch):
+    """Idempotent pause recovery keeps the saved seasonal pause date and reason."""
+    import sqlite3
+
+    import memory.routine_db as rdb
+
+    db_path = tmp_path / "routines.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE routines (
+            id INTEGER PRIMARY KEY,
+            state TEXT,
+            is_active INTEGER,
+            paused_until TEXT,
+            paused_indefinitely INTEGER,
+            pause_reason TEXT
+        )
+        """,
+    )
+    conn.execute(
+        """
+        INSERT INTO routines (id, state, is_active, paused_until, paused_indefinitely, pause_reason)
+        VALUES (13, 'paused', 0, '2026-12-01', 0, 'summer_break')
+        """,
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(rdb, "get_connection", lambda: sqlite3.connect(db_path))
+
+    assert rdb.normalize_legacy_paused_routine_state(13) is True
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT state, is_active, paused_until, paused_indefinitely, pause_reason FROM routines WHERE id=13",
+    ).fetchone()
+    conn.close()
+    assert row == ("active", 1, "2026-12-01", 0, "summer_break")
 
 
 # ─────────────────────────────────────────────────────────────
