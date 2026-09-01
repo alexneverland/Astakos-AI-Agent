@@ -443,24 +443,33 @@ async function reconnectGoogleWorkspace() {
     button.textContent = '…';
   }
 
+  const popup = window.open(
+    '',
+    'astakos_workspace_oauth',
+    'width=560,height=720,resizable=yes,scrollbars=yes',
+  );
+  if (!popup) {
+    alert('Your browser blocked the Google authorization window. Please allow popups for Astakos and try again.');
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Google';
+    }
+    return;
+  }
+
   try {
-    const response = await fetch('/api/workspace/oauth/start');
+    const storedToken = localStorage.getItem('astakos_token');
+    const headers = storedToken ? {'Authorization': `Bearer ${storedToken}`} : {};
+    const response = await fetch('/api/workspace/oauth/start', {headers});
     const payload = await response.json();
     if (!response.ok || !payload.auth_url) {
       throw new Error('Could not start Google Workspace authorization.');
     }
 
-    const popup = window.open(
-      payload.auth_url,
-      'astakos_workspace_oauth',
-      'width=560,height=720,resizable=yes,scrollbars=yes',
-    );
-    if (!popup) {
-      window.location.assign(payload.auth_url);
-      return;
-    }
+    popup.location.replace(payload.auth_url);
     popup.focus();
   } catch (error) {
+    popup.close();
     alert(error instanceof Error ? error.message : 'Could not start Google Workspace authorization.');
   } finally {
     if (button) {

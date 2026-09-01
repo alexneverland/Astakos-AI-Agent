@@ -121,11 +121,15 @@ def test_debug_workspace_reconnect_reports_google_code_exchange_failure(
 
 
 def test_debug_dashboard_exposes_an_explicit_workspace_reconnect_control() -> None:
-    """The dashboard opens consent only after the user clicks its reconnect control."""
+    """The dashboard opens a protected consent popup directly from the user click."""
     dashboard_path = Path(__file__).parents[1] / "api" / "debug_dashboard.html"
     dashboard = dashboard_path.read_text(encoding="utf-8")
 
     assert 'id="workspace-reconnect-btn"' in dashboard
     assert "async function reconnectGoogleWorkspace()" in dashboard
-    assert "fetch('/api/workspace/oauth/start')" in dashboard
+    assert "localStorage.getItem('astakos_token')" in dashboard
+    assert "'Authorization': `Bearer ${storedToken}`" in dashboard
+    assert "fetch('/api/workspace/oauth/start', {headers})" in dashboard
+    assert dashboard.index("window.open(") < dashboard.index("await fetch('/api/workspace/oauth/start'")
+    assert "popup.location.replace(payload.auth_url)" in dashboard
     assert "workspace_oauth_complete" in dashboard
