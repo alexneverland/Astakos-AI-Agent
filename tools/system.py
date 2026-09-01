@@ -1164,6 +1164,7 @@ def edit_routine(
             event_name,
             day_of_week=day_of_week if day_of_week else None,
             time_str=time_str if time_str else None,
+            include_paused=True,
         )
 
         if not routines:
@@ -1231,7 +1232,7 @@ def search_routines(event_name: str) -> str:
     """
     try:
         from memory.routine_db import find_routines_for_schedule_control
-        routines = find_routines_for_schedule_control(event_name)
+        routines = find_routines_for_schedule_control(event_name, include_paused=True)
         if not routines:
             return f"No existing routines found matching '{event_name}'."
         
@@ -1564,6 +1565,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
     from datetime import datetime
     from memory.routine_db import (
         find_routines_for_schedule_control, set_routine_paused_until, clear_routine_paused_until,
+        normalize_legacy_paused_routine_state,
         set_routine_active_window, set_routine_resume_rule, get_routine_schedule_meta,
         normalize_event
     )
@@ -1588,7 +1590,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
     already_ok = 0
 
     try:
-        routines = find_routines_for_schedule_control(event_name)
+        routines = find_routines_for_schedule_control(event_name, include_paused=True)
     except Exception as e:
         return t("tools.system.routine_search_err", e=str(e))
 
@@ -1612,6 +1614,9 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
                 meta = get_routine_schedule_meta(r_id)
                 existing_until = meta.get("paused_until")
                 if existing_until and existing_until >= until_date:
+                    # Preserve idempotence while repairing legacy rows that used
+                    # lifecycle state='paused' for a time-bound seasonal pause.
+                    normalize_legacy_paused_routine_state(r_id)
                     results.append(t("tools.system.routine_already_frozen", day=day, label=label, existing_until=existing_until))
                     already_ok += 1
                     continue

@@ -1471,19 +1471,27 @@ def find_routines_for_schedule_control(
     *, 
     min_similarity: float = 0.82,
     day_of_week: str | None = None,
-    time_str: str | None = None
+    time_str: str | None = None,
+    include_paused: bool = False,
 ) -> list[dict]:
     """
     Very strict matching for the schedule control tool.
     Does not use embeddings. Requires either exact match or high string similarity
     WITH lexical overlap to prevent tool hallucination on irrelevant routines.
+
+    ``include_paused`` is reserved for explicit schedule discovery, editing,
+    and resume actions. Other routine controls keep their active/learned-only
+    behavior so a paused routine cannot be changed incidentally.
     """
     conn   = get_connection()
     cursor = conn.cursor()
+    states = ("active", "learned", "paused") if include_paused else ("active", "learned")
+    placeholders = ", ".join("?" for _ in states)
     cursor.execute(
-        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state,
-                  external_content_sources_json
-           FROM routines WHERE state IN ('active', 'learned')"""
+        f"""SELECT id, day_of_week, time_str, event_name, event_type, confidence, state,
+                    external_content_sources_json
+             FROM routines WHERE state IN ({placeholders})""",
+        states,
     )
     rows = cursor.fetchall()
     conn.close()
@@ -1709,16 +1717,24 @@ def get_routine_schedule_meta(routine_id: int) -> dict:
 def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | None = None) -> None:
     """
     Temporarily pauses the routine until paused_until (YYYY-MM-DD) — e.g., summer
-    break, camp. Does NOT touch confidence/state; the routine remains
-    as is, it simply does not "count" in the scheduler until the date has passed
-    (see is_routine_temporarily_inactive_meta).
+    break, camp. Current routines retain their lifecycle state; legacy
+    ``state='paused'`` records are restored to ACTIVE while the time-bound pause
+    keeps them out of the scheduler until the date has passed.
     """
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET paused_until=?, paused_indefinitely=0, pause_reason=? WHERE id=?",
-            (paused_until, reason, routine_id)
+            """
+            UPDATE routines
+            SET paused_until=?,
+                paused_indefinitely=0,
+                pause_reason=?,
+                state=CASE WHEN state='paused' THEN 'active' ELSE state END,
+                is_active=CASE WHEN state='paused' THEN 1 ELSE is_active END
+            WHERE id=?
+            """,
+            (paused_until, reason, routine_id),
         )
         conn.commit()
     conn.close()
@@ -1727,13 +1743,50 @@ def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | N
     log_event("routines", "paused", routine_id=routine_id, paused_until=paused_until, reason=reason)
 
 
+def normalize_legacy_paused_routine_state(routine_id: int) -> bool:
+    """Restore a legacy lifecycle-paused routine without changing its pause metadata.
+
+    Older seasonal records used ``state='paused'`` as their temporary pause
+    marker.  Current scheduling relies on the pause metadata instead, so this
+    narrowly restores those legacy rows to an active lifecycle state while
+    preserving their existing ``paused_until`` date and reason.
+    """
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            cursor = conn.execute(
+                """
+                UPDATE routines
+                SET state='active', is_active=1
+                WHERE id=? AND state='paused'
+                """,
+                (routine_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def clear_routine_paused_until(routine_id: int) -> None:
-    """Resume a temporarily or indefinitely paused routine."""
+    """Resume a temporarily or indefinitely paused routine.
+
+    Legacy records persisted with ``state='paused'`` are restored to ACTIVE;
+    current seasonal pauses already retain their original lifecycle state.
+    """
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET paused_until=NULL, paused_indefinitely=0, pause_reason=NULL WHERE id=?",
+            """
+            UPDATE routines
+            SET paused_until=NULL,
+                paused_indefinitely=0,
+                pause_reason=NULL,
+                state=CASE WHEN state='paused' THEN 'active' ELSE state END,
+                is_active=CASE WHEN state='paused' THEN 1 ELSE is_active END
+            WHERE id=?
+            """,
             (routine_id,)
         )
         conn.commit()
