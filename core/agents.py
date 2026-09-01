@@ -282,9 +282,17 @@ class HomeContinuationDecision(BaseModel):
     action_summary: str = ""
 
 
+_HOME_TRANSPORT_TIMESTAMP_RE = re.compile(r"^\[\d{2}:\d{2}\]\s*")
+
+
+def _strip_home_transport_timestamp(user_text: str) -> str:
+    """Remove only the known Web transport timestamp from a Home-Agent turn."""
+    return _HOME_TRANSPORT_TIMESTAMP_RE.sub("", clean_message(user_text).strip())
+
+
 def _is_brief_home_continuation_candidate(user_text: str) -> bool:
     """Return whether a structurally brief Home-Agent turn may need context resolution."""
-    normalized = clean_message(user_text).strip()
+    normalized = _strip_home_transport_timestamp(user_text)
     return bool(normalized) and len(normalized.split()) <= 3
 
 
@@ -315,6 +323,9 @@ def _resolve_brief_home_continuation(history: list, user_text: str) -> HomeConti
         resolver_llm = llm.with_structured_output(HomeContinuationDecision)
         decision = safe_llm_invoke(resolver_llm, resolver_prompt)
         if isinstance(decision, HomeContinuationDecision):
+            if decision.outcome == "single_unresolved" and not clean_message(decision.action_summary).strip():
+                print("[HomeContinuation]: unresolved decision lacks an action summary; clarifying safely")
+                return HomeContinuationDecision(outcome="clarify")
             return decision
     except Exception as exc:
         print(f"[HomeContinuation]: resolver failed; clarifying safely ({exc})")

@@ -172,3 +172,52 @@ def test_tool_result_is_not_treated_as_a_brief_user_followup(monkeypatch) -> Non
     assert result["messages"][0].content == "Έγινε, η μουσική σταμάτησε."
     assert fake_llm.resolver_calls == 0
     assert {tool.name for tool in fake_llm.bound_tools[0]} >= {"control_spotify"}
+
+
+def test_unresolved_decision_without_summary_requires_clarification(monkeypatch) -> None:
+    """An incomplete semantic decision cannot leave Home mutation tools available."""
+    import core.agents as agents
+
+    fake_llm = _prepare_home_agent(
+        monkeypatch,
+        agents.HomeContinuationDecision(outcome="single_unresolved"),
+        AIMessage(content="Ποια ενέργεια εννοείς να συνεχίσω;"),
+    )
+    state = {
+        "channel": "telegram",
+        "messages": [
+            HumanMessage(content="Θύμισέ μου να πάρω το δέμα."),
+            AIMessage(content="Δεν ολοκληρώθηκε ακόμη η υπενθύμιση."),
+            HumanMessage(content="Βάλε"),
+        ],
+    }
+
+    result = agents.home_agent_node(state)
+
+    assert result["messages"][0].content == "Ποια ενέργεια εννοείς να συνεχίσω;"
+    assert fake_llm.bound_tools == [[]]
+
+
+def test_timestamped_web_followup_is_resolved_before_tool_binding(monkeypatch) -> None:
+    """Known Web transport metadata does not make a brief continuation look long."""
+    import core.agents as agents
+
+    fake_llm = _prepare_home_agent(
+        monkeypatch,
+        agents.HomeContinuationDecision(outcome="clarify"),
+        AIMessage(content="Ποια ενέργεια εννοείς να συνεχίσω;"),
+    )
+    state = {
+        "channel": "web",
+        "messages": [
+            HumanMessage(content="Άλλαξα ήδη τις routines ποδοσφαίρου."),
+            AIMessage(content="Έγινε, οι routines ενεργοποιήθηκαν."),
+            HumanMessage(content="[18:05] Add that too"),
+        ],
+    }
+
+    result = agents.home_agent_node(state)
+
+    assert result["messages"][0].content == "Ποια ενέργεια εννοείς να συνεχίσω;"
+    assert fake_llm.bound_tools == [[]]
+    assert fake_llm.resolver_calls == 1
