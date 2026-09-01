@@ -1164,6 +1164,7 @@ def edit_routine(
             event_name,
             day_of_week=day_of_week if day_of_week else None,
             time_str=time_str if time_str else None,
+            include_paused=True,
         )
 
         if not routines:
@@ -1231,7 +1232,7 @@ def search_routines(event_name: str) -> str:
     """
     try:
         from memory.routine_db import find_routines_for_schedule_control
-        routines = find_routines_for_schedule_control(event_name)
+        routines = find_routines_for_schedule_control(event_name, include_paused=True)
         if not routines:
             return f"No existing routines found matching '{event_name}'."
         
@@ -1588,7 +1589,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
     already_ok = 0
 
     try:
-        routines = find_routines_for_schedule_control(event_name)
+        routines = find_routines_for_schedule_control(event_name, include_paused=True)
     except Exception as e:
         return t("tools.system.routine_search_err", e=str(e))
 

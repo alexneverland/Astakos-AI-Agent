@@ -126,7 +126,12 @@ def test_find_routines_for_schedule_control_includes_paused_seasonal_routines(tm
     conn.close()
 
     with patch.object(rdb, "get_connection", side_effect=lambda: sqlite3.connect(db_path)):
-        matches = rdb.find_routines_for_schedule_control("ποδόσφαιρο Αλέξανδρου")
+        default_matches = rdb.find_routines_for_schedule_control("ποδόσφαιρο Αλέξανδρου")
+        matches = rdb.find_routines_for_schedule_control(
+            "ποδόσφαιρο Αλέξανδρου",
+            include_paused=True,
+        )
 
+    assert default_matches == []
     assert [match["id"] for match in matches] == [13]
 

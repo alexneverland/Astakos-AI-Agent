@@ -1471,23 +1471,27 @@ def find_routines_for_schedule_control(
     *, 
     min_similarity: float = 0.82,
     day_of_week: str | None = None,
-    time_str: str | None = None
+    time_str: str | None = None,
+    include_paused: bool = False,
 ) -> list[dict]:
     """
     Very strict matching for the schedule control tool.
     Does not use embeddings. Requires either exact match or high string similarity
     WITH lexical overlap to prevent tool hallucination on irrelevant routines.
 
-    Includes legacy ``paused`` records so an explicit user request can find,
-    reschedule, and resume an existing seasonal routine. This remains an exact
-    schedule-control matcher; it does not broaden automatic reconciliation.
+    ``include_paused`` is reserved for explicit schedule discovery, editing,
+    and resume actions. Other routine controls keep their active/learned-only
+    behavior so a paused routine cannot be changed incidentally.
     """
     conn   = get_connection()
     cursor = conn.cursor()
+    states = ("active", "learned", "paused") if include_paused else ("active", "learned")
+    placeholders = ", ".join("?" for _ in states)
     cursor.execute(
-        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state,
-                  external_content_sources_json
-           FROM routines WHERE state IN ('active', 'learned', 'paused')"""
+        f"""SELECT id, day_of_week, time_str, event_name, event_type, confidence, state,
+                    external_content_sources_json
+             FROM routines WHERE state IN ({placeholders})""",
+        states,
     )
     rows = cursor.fetchall()
     conn.close()
@@ -1713,16 +1717,24 @@ def get_routine_schedule_meta(routine_id: int) -> dict:
 def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | None = None) -> None:
     """
     Temporarily pauses the routine until paused_until (YYYY-MM-DD) — e.g., summer
-    break, camp. Does NOT touch confidence/state; the routine remains
-    as is, it simply does not "count" in the scheduler until the date has passed
-    (see is_routine_temporarily_inactive_meta).
+    break, camp. Current routines retain their lifecycle state; legacy
+    ``state='paused'`` records are restored to ACTIVE while the time-bound pause
+    keeps them out of the scheduler until the date has passed.
     """
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET paused_until=?, paused_indefinitely=0, pause_reason=? WHERE id=?",
-            (paused_until, reason, routine_id)
+            """
+            UPDATE routines
+            SET paused_until=?,
+                paused_indefinitely=0,
+                pause_reason=?,
+                state=CASE WHEN state='paused' THEN 'active' ELSE state END,
+                is_active=CASE WHEN state='paused' THEN 1 ELSE is_active END
+            WHERE id=?
+            """,
+            (paused_until, reason, routine_id),
         )
         conn.commit()
     conn.close()
