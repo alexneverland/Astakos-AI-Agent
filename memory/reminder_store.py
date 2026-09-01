@@ -25,7 +25,8 @@ def init_reminder_store(db_path: str = STATE_DB) -> None:
                 time TEXT,
                 status TEXT DEFAULT 'pending',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                external_content_sources_json TEXT NOT NULL DEFAULT '[]'
+                external_content_sources_json TEXT NOT NULL DEFAULT '[]',
+                provenance_known INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -34,6 +35,11 @@ def init_reminder_store(db_path: str = STATE_DB) -> None:
             conn.execute(
                 "ALTER TABLE reminders "
                 "ADD COLUMN external_content_sources_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "provenance_known" not in columns:
+            conn.execute(
+                "ALTER TABLE reminders "
+                "ADD COLUMN provenance_known INTEGER NOT NULL DEFAULT 0"
             )
         conn.commit()
     except Exception:

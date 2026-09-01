@@ -213,6 +213,14 @@ def is_untrusted_external_tool_result_content(
     normalized_name = str(tool_name or "")
     if normalized_name in PERSISTED_PROVENANCE_RESULT_TOOL_NAMES:
         return UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER in str(content or "")
+    if normalized_name == "set_local_reminder":
+        action = str((tool_args or {}).get("action", "")).strip().lower()
+        if action in REMINDER_EXTERNAL_READ_ACTIONS:
+            # Reminder reads expose only rows that carry explicit current
+            # provenance. Legacy rows are rendered with the same untrusted
+            # envelope as external rows, so non-empty trusted local reads can
+            # remain usable without granting trust to unknown old content.
+            return UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER in str(content or "")
     return is_untrusted_external_tool_call(
         normalized_name,
         tool_args,
