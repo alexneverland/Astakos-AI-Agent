@@ -856,14 +856,14 @@ def set_local_reminder(
         # ── READ: Returns ONLY pending ──────────────────────
         if action == "read":
             cursor.execute(
-                "SELECT task, time, external_content_sources_json "
+                "SELECT task, time, external_content_sources_json, provenance_known "
                 "FROM reminders WHERE status='pending'"
             )
             pending = cursor.fetchall()
             if not pending:
                 return t("tools.system.reminders_read_empty")
             lines = []
-            for rtask, tm, sources_json in pending:
+            for rtask, tm, sources_json, provenance_known in pending:
                 from core.untrusted_content import (
                     external_content_sources_from_json,
                     format_untrusted_tool_result,
@@ -873,6 +873,11 @@ def set_local_reminder(
                 if sources:
                     rtask = format_untrusted_tool_result(
                         f"persisted reminder sources: {', '.join(sources)}",
+                        rtask,
+                    )
+                elif not provenance_known:
+                    rtask = format_untrusted_tool_result(
+                        "persisted reminder with unknown legacy provenance",
                         rtask,
                     )
                 if tm and tm.startswith("loc:"):
@@ -939,7 +944,7 @@ def set_local_reminder(
             existing_sources = external_content_sources_from_json(existing_sources_json or "")
             new_sources = external_content_sources_from_json(external_content_sources_json)
             cursor.execute(
-                "UPDATE reminders SET task=?, external_content_sources_json=? WHERE id=?",
+                "UPDATE reminders SET task=?, external_content_sources_json=?, provenance_known=1 WHERE id=?",
                 (task, json.dumps(sorted(set(existing_sources) | set(new_sources))), reminder_id),
             )
             conn.commit()
@@ -994,8 +999,8 @@ def set_local_reminder(
                     related_reminders.append((existing_task, existing_time))
 
             cursor.execute(
-                "INSERT INTO reminders (task, time, status, external_content_sources_json) "
-                "VALUES (?, ?, 'pending', ?)",
+                "INSERT INTO reminders (task, time, status, external_content_sources_json, provenance_known) "
+                "VALUES (?, ?, 'pending', ?, 1)",
                 (task, target_time, provenance_json),
             )
             if current_location is not None:

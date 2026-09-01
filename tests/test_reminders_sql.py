@@ -30,7 +30,8 @@ def _make_reminders_db(path, rows):
             time TEXT,
             status TEXT DEFAULT 'pending',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            external_content_sources_json TEXT NOT NULL DEFAULT '[]'
+            external_content_sources_json TEXT NOT NULL DEFAULT '[]',
+            provenance_known INTEGER NOT NULL DEFAULT 0
         )
         """
     )
@@ -89,6 +90,94 @@ def test_read_wraps_reminders_saved_from_external_content() -> None:
     assert "Updated external reminder" in result
 
 
+def test_read_distinguishes_new_local_reminders_from_legacy_unknown_rows() -> None:
+    """A current local reminder read is trusted while legacy source-unknown content stays marked."""
+    import tools.system as system
+    from core.untrusted_content import is_untrusted_external_tool_result_content
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = os.path.join(tmp, "astakos_state.db")
+        _make_reminders_db(db_path, [{"task": "Legacy reminder", "time": FUTURE_TIME}])
+        with patch.object(system, "STATE_DB", db_path):
+            system.set_local_reminder.invoke({
+                "task": "Current local reminder",
+                "exact_time": "2099-01-01 19:00",
+            })
+            result = system.set_local_reminder.invoke({"task": "", "action": "read"})
+
+    assert "Legacy reminder" in result
+    assert "Current local reminder" in result
+    assert "[UNTRUSTED EXTERNAL TOOL RESULT]" in result
+    assert is_untrusted_external_tool_result_content(
+        "set_local_reminder",
+        {"action": "read"},
+        result,
+    )
+
+
+def test_read_of_only_current_local_reminders_remains_trusted() -> None:
+    """A normal populated reminder list may precede a user-requested local write."""
+    import tools.system as system
+    from core.untrusted_content import is_untrusted_external_tool_result_content
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = os.path.join(tmp, "astakos_state.db")
+        _make_reminders_db(db_path, [])
+        with patch.object(system, "STATE_DB", db_path):
+            system.set_local_reminder.invoke({
+                "task": "Current local reminder",
+                "exact_time": FUTURE_TIME,
+            })
+            result = system.set_local_reminder.invoke({"task": "", "action": "read"})
+
+    assert "Current local reminder" in result
+    assert not is_untrusted_external_tool_result_content(
+        "set_local_reminder",
+        {"action": "read"},
+        result,
+    )
+
+
+def test_trusted_populated_reminder_read_allows_same_turn_user_requested_add() -> None:
+    """A real local reminder read does not block the user's next reminder write."""
+    import tools.system as system
+    from core.approval import approval_check_node
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = os.path.join(tmp, "astakos_state.db")
+        _make_reminders_db(db_path, [])
+        with patch.object(system, "STATE_DB", db_path):
+            system.set_local_reminder.invoke({
+                "task": "Current local reminder",
+                "exact_time": FUTURE_TIME,
+            })
+            read_result = system.set_local_reminder.invoke({"task": "", "action": "read"})
+
+    state = {
+        "messages": [
+            HumanMessage(content="Θύμισέ μου και στις 18:05 να πάρω το δέμα."),
+            AIMessage(content="", tool_calls=[{
+                "name": "set_local_reminder",
+                "args": {"action": "read", "task": ""},
+                "id": "reminder-read",
+            }]),
+            ToolMessage(
+                tool_call_id="reminder-read",
+                name="set_local_reminder",
+                content=read_result,
+            ),
+            AIMessage(content="", tool_calls=[{
+                "name": "set_local_reminder",
+                "args": {"action": "add", "task": "Παραλαβή δέματος", "exact_time": "18:05"},
+                "id": "reminder-add",
+            }]),
+        ],
+    }
+
+    assert approval_check_node(state)["approval_status"] == "ok"
+
+
 def test_reminder_store_initialization_migrates_legacy_schema(tmp_path: Path) -> None:
     """Startup storage migration adds reminder provenance before tool calls run."""
     from memory.reminder_store import init_reminder_store
@@ -107,6 +196,7 @@ def test_reminder_store_initialization_migrates_legacy_schema(tmp_path: Path) ->
     columns = {row[1] for row in conn.execute("PRAGMA table_info(reminders)")}
     conn.close()
     assert "external_content_sources_json" in columns
+    assert "provenance_known" in columns
 
 
 class TestReminderCreateAndUpdate:
