@@ -106,17 +106,14 @@ def test_empty_local_reminder_read_does_not_activate_external_provenance() -> No
     )
 
 
-def test_provenance_marked_reminder_read_stays_untrusted() -> None:
-    """A reminder containing external-origin text remains protected on later reads."""
-    from core.untrusted_content import (
-        UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER,
-        is_untrusted_external_tool_result_content,
-    )
+def test_nonempty_legacy_reminder_read_stays_untrusted() -> None:
+    """A legacy reminder without provenance metadata remains conservatively protected."""
+    from core.untrusted_content import is_untrusted_external_tool_result_content
 
     assert is_untrusted_external_tool_result_content(
         "set_local_reminder",
         {"action": "read"},
-        f"{UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER} persisted reminder source",
+        "Παλιό reminder χωρίς καταγεγραμμένη προέλευση.",
     )
 
 

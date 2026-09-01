@@ -216,9 +216,12 @@ def is_untrusted_external_tool_result_content(
     if normalized_name == "set_local_reminder":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         if action in REMINDER_EXTERNAL_READ_ACTIONS:
-            # Local reminder reads are trusted unless a stored reminder carries
-            # explicit provenance wrapping from an external source.
-            return UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER in str(content or "")
+            # Only the tool's known empty result is trusted. Legacy reminder
+            # rows predate provenance metadata, so every non-empty read stays
+            # conservative until its origin can be proven.
+            from core.i18n import t
+
+            return str(content or "").strip() != t("tools.system.reminders_read_empty").strip()
     return is_untrusted_external_tool_call(
         normalized_name,
         tool_args,
