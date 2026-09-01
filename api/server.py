@@ -2133,6 +2133,8 @@ async def debug_workspace_oauth_callback(
     """Completes an explicit Debug Dashboard OAuth reconnect after CSRF validation."""
     from core.workspace_oauth import (
         WorkspaceOAuthStateError,
+        WorkspaceOAuthTokenExchangeError,
+        WorkspaceOAuthTokenPersistenceError,
         complete_workspace_oauth_authorization,
     )
 
@@ -2148,9 +2150,19 @@ async def debug_workspace_oauth_callback(
             "<h3>Invalid or expired OAuth state. Please restart authorization from the Debug Dashboard.</h3>",
             status_code=400,
         )
+    except WorkspaceOAuthTokenExchangeError:
+        return HTMLResponse(
+            "<h3>Google could not complete authorization. Please start reconnect again and finish the Google consent screen.</h3>",
+            status_code=400,
+        )
+    except WorkspaceOAuthTokenPersistenceError:
+        return HTMLResponse(
+            "<h3>Google approved access, but Astakos could not save the token. Please check the local credentials folder permissions.</h3>",
+            status_code=500,
+        )
     except Exception:
         return HTMLResponse(
-            "<h3>Authorization failed. Please verify credentials/client_secrets.json.</h3>",
+            "<h3>Authorization could not be completed. Please restart reconnect from the Debug Dashboard.</h3>",
             status_code=400,
         )
 

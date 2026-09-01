@@ -7,8 +7,20 @@ from urllib.parse import parse_qs, urlparse
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
+import pytest
 
 from api.server import LOCAL_TOKEN, server
+
+
+def _start_debug_workspace_oauth(
+    client: TestClient,
+) -> str:
+    """Start the protected Debug OAuth flow and return its one-time state."""
+    headers = {"Authorization": f"Bearer {LOCAL_TOKEN}"}
+    start_response = client.get("/api/workspace/oauth/start", headers=headers)
+
+    assert start_response.status_code == 200
+    return parse_qs(urlparse(start_response.json()["auth_url"]).query)["state"][0]
 
 
 def test_debug_workspace_reconnect_completes_the_shared_oauth_flow(
@@ -45,11 +57,7 @@ def test_debug_workspace_reconnect_completes_the_shared_oauth_flow(
     )
 
     client = TestClient(server)
-    headers = {"Authorization": f"Bearer {LOCAL_TOKEN}"}
-    start_response = client.get("/api/workspace/oauth/start", headers=headers)
-
-    assert start_response.status_code == 200
-    state = parse_qs(urlparse(start_response.json()["auth_url"]).query)["state"][0]
+    state = _start_debug_workspace_oauth(client)
 
     invalid_response = client.get(
         "/api/workspace/oauth/callback?code=authorized-code&state=wrong-state",
@@ -63,6 +71,47 @@ def test_debug_workspace_reconnect_completes_the_shared_oauth_flow(
     assert callback_response.status_code == 200
     assert token_path.exists()
     assert "workspace_oauth_complete" in callback_response.text
+
+
+def test_debug_workspace_reconnect_reports_google_code_exchange_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A Google exchange failure is not misreported as a missing client secrets file."""
+    import core.workspace_oauth as workspace_oauth
+
+    token_path = tmp_path / "token.json"
+    monkeypatch.setattr(workspace_oauth, "get_token_path", lambda: str(token_path))
+    workspace_oauth._oauth_states.clear()
+
+    class _FailingFlow:
+        """Offline OAuth flow that rejects the one-time authorization code."""
+
+        credentials = MagicMock()
+
+        def authorization_url(self, **kwargs: str) -> tuple[str, str]:
+            state = kwargs["state"]
+            return (f"https://accounts.google.com/o/oauth2/auth?state={state}", state)
+
+        def fetch_token(self, code: str) -> None:
+            assert code == "rejected-code"
+            raise RuntimeError("invalid_grant")
+
+    monkeypatch.setattr(
+        workspace_oauth,
+        "get_workspace_oauth_flow",
+        lambda **_kwargs: _FailingFlow(),
+    )
+
+    client = TestClient(server)
+    state = _start_debug_workspace_oauth(client)
+    response = client.get(
+        f"/api/workspace/oauth/callback?code=rejected-code&state={state}",
+    )
+
+    assert response.status_code == 400
+    assert "Google could not complete authorization" in response.text
+    assert "client_secrets.json" not in response.text
 
 
 def test_debug_dashboard_exposes_an_explicit_workspace_reconnect_control() -> None:

@@ -86,6 +86,14 @@ class WorkspaceOAuthStateError(WorkspaceAuthError):
     """Raised when a browser OAuth callback has missing, invalid, or expired state."""
 
 
+class WorkspaceOAuthTokenExchangeError(WorkspaceAuthError):
+    """Raised when Google rejects or cannot complete a consent-code exchange."""
+
+
+class WorkspaceOAuthTokenPersistenceError(WorkspaceAuthError):
+    """Raised when a newly authorized Workspace token cannot be saved locally."""
+
+
 def get_token_path() -> str:
     """Returns the absolute path to the user's Workspace OAuth token.json."""
     env_path = os.environ.get("ASTAKOS_TOKEN_PATH") or os.environ.get("WORKSPACE_TOKEN_PATH")
@@ -246,8 +254,21 @@ def complete_workspace_oauth_authorization(
         raise WorkspaceOAuthStateError("OAuth state is invalid or expired.")
 
     flow = get_workspace_oauth_flow(redirect_uri=redirect_uri)
-    flow.fetch_token(code=code)
-    _write_token_file_atomic(get_token_path(), flow.credentials.to_json())
+    try:
+        flow.fetch_token(code=code)
+    except Exception as exc:
+        logger.warning("[WorkspaceOAuth] Consent-code exchange failed: %s", exc)
+        raise WorkspaceOAuthTokenExchangeError(
+            "Google could not complete the Workspace authorization.",
+        ) from exc
+
+    try:
+        _write_token_file_atomic(get_token_path(), flow.credentials.to_json())
+    except Exception as exc:
+        logger.warning("[WorkspaceOAuth] Authorized token could not be saved: %s", exc)
+        raise WorkspaceOAuthTokenPersistenceError(
+            "Google authorization completed, but the Workspace token could not be saved.",
+        ) from exc
 
 
 

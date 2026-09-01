@@ -166,6 +166,8 @@ async def workspace_oauth_callback(request: Request, code: str = "", state: str 
     """Handles OAuth redirect callback, verifies CSRF state, and persists token.json."""
     from core.workspace_oauth import (
         WorkspaceOAuthStateError,
+        WorkspaceOAuthTokenExchangeError,
+        WorkspaceOAuthTokenPersistenceError,
         complete_workspace_oauth_authorization,
     )
     try:
@@ -199,8 +201,18 @@ async def workspace_oauth_callback(request: Request, code: str = "", state: str 
             "<h3>Invalid or expired OAuth state. Please restart authorization from the Setup Wizard.</h3>",
             status_code=400,
         )
+    except WorkspaceOAuthTokenExchangeError:
+        return HTMLResponse(
+            "<h3>Google could not complete authorization. Please restart connection and finish the Google consent screen.</h3>",
+            status_code=400,
+        )
+    except WorkspaceOAuthTokenPersistenceError:
+        return HTMLResponse(
+            "<h3>Google approved access, but Astakos could not save the token. Please check the local credentials folder permissions.</h3>",
+            status_code=500,
+        )
     except Exception:
-        return HTMLResponse("<h3>Authorization failed. Please verify credentials/client_secrets.json.</h3>", status_code=400)
+        return HTMLResponse("<h3>Authorization could not be completed. Please restart connection and try again.</h3>", status_code=400)
 
 
 
