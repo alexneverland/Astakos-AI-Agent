@@ -103,6 +103,48 @@ def test_resume_clears_paused_state_for_all_matches(monkeypatch):
     assert "[Thursday]" in result
 
 
+def test_clear_routine_paused_until_restores_legacy_paused_state(tmp_path, monkeypatch):
+    """Resuming a legacy paused record clears its pause metadata and makes it active."""
+    import sqlite3
+
+    import memory.routine_db as rdb
+
+    db_path = tmp_path / "routines.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE routines (
+            id INTEGER PRIMARY KEY,
+            state TEXT,
+            is_active INTEGER,
+            paused_until TEXT,
+            paused_indefinitely INTEGER,
+            pause_reason TEXT
+        )
+        """,
+    )
+    conn.execute(
+        """
+        INSERT INTO routines (id, state, is_active, paused_until, paused_indefinitely, pause_reason)
+        VALUES (13, 'paused', 0, '2026-09-01', 0, 'summer_break')
+        """,
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(rdb, "get_connection", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr("memory.event_log.log_event", lambda *args, **kwargs: None)
+
+    rdb.clear_routine_paused_until(13)
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT state, is_active, paused_until, paused_indefinitely, pause_reason FROM routines WHERE id=13",
+    ).fetchone()
+    conn.close()
+    assert row == ("active", 1, None, 0, None)
+
+
 # ─────────────────────────────────────────────────────────────
 # set_window / clear_window
 # ─────────────────────────────────────────────────────────────

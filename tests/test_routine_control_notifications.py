@@ -92,3 +92,41 @@ def test_find_routines_for_schedule_control_returns_all_exact_duplicates(tmp_pat
 
     assert [m["id"] for m in matches] == [13, 14]
 
+
+def test_find_routines_for_schedule_control_includes_paused_seasonal_routines(tmp_path):
+    """An explicit schedule search can recover a legacy paused routine by name."""
+    import sqlite3
+    from unittest.mock import patch
+
+    import memory.routine_db as rdb
+
+    db_path = tmp_path / "routines.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE routines (
+            id INTEGER PRIMARY KEY,
+            day_of_week TEXT,
+            time_str TEXT,
+            event_name TEXT,
+            event_type TEXT,
+            confidence REAL,
+            state TEXT,
+            external_content_sources_json TEXT NOT NULL DEFAULT '[]'
+        )
+        """,
+    )
+    conn.execute(
+        """
+        INSERT INTO routines (id, day_of_week, time_str, event_name, event_type, confidence, state)
+        VALUES (13, 'Monday', '17:00', 'ποδόσφαιρο Αλέξανδρου', 'event', 0.3, 'paused')
+        """,
+    )
+    conn.commit()
+    conn.close()
+
+    with patch.object(rdb, "get_connection", side_effect=lambda: sqlite3.connect(db_path)):
+        matches = rdb.find_routines_for_schedule_control("ποδόσφαιρο Αλέξανδρου")
+
+    assert [match["id"] for match in matches] == [13]
+

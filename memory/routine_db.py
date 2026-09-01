@@ -1477,13 +1477,17 @@ def find_routines_for_schedule_control(
     Very strict matching for the schedule control tool.
     Does not use embeddings. Requires either exact match or high string similarity
     WITH lexical overlap to prevent tool hallucination on irrelevant routines.
+
+    Includes legacy ``paused`` records so an explicit user request can find,
+    reschedule, and resume an existing seasonal routine. This remains an exact
+    schedule-control matcher; it does not broaden automatic reconciliation.
     """
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state,
                   external_content_sources_json
-           FROM routines WHERE state IN ('active', 'learned')"""
+           FROM routines WHERE state IN ('active', 'learned', 'paused')"""
     )
     rows = cursor.fetchall()
     conn.close()
@@ -1728,12 +1732,24 @@ def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | N
 
 
 def clear_routine_paused_until(routine_id: int) -> None:
-    """Resume a temporarily or indefinitely paused routine."""
+    """Resume a temporarily or indefinitely paused routine.
+
+    Legacy records persisted with ``state='paused'`` are restored to ACTIVE;
+    current seasonal pauses already retain their original lifecycle state.
+    """
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET paused_until=NULL, paused_indefinitely=0, pause_reason=NULL WHERE id=?",
+            """
+            UPDATE routines
+            SET paused_until=NULL,
+                paused_indefinitely=0,
+                pause_reason=NULL,
+                state=CASE WHEN state='paused' THEN 'active' ELSE state END,
+                is_active=CASE WHEN state='paused' THEN 1 ELSE is_active END
+            WHERE id=?
+            """,
             (routine_id,)
         )
         conn.commit()
