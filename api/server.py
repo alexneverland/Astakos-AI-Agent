@@ -34,7 +34,7 @@ from starlette.responses import Response
 from starlette.types import Scope
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, HTTPException, Depends, Form, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from rich.console import Console
@@ -2094,6 +2094,75 @@ async def websocket_logs(websocket: WebSocket):
 # ────────────────────────────────────────────────────────────────
 # OBSERVABILITY: /debug/runtime + /debug + /debug/traces
 # ────────────────────────────────────────────────────────────────
+
+@server.get("/api/workspace/oauth/start")
+async def start_debug_workspace_oauth(
+    request: Request,
+    _: None = Depends(require_token),
+) -> dict[str, str]:
+    """Starts Google Workspace reconnect from an explicit Debug Dashboard action."""
+    from core.workspace_oauth import (
+        WorkspaceAuthError,
+        create_workspace_oauth_authorization_url,
+    )
+
+    try:
+        base_url = str(request.base_url).rstrip("/")
+        auth_url = create_workspace_oauth_authorization_url(
+            f"{base_url}/api/workspace/oauth/callback",
+        )
+        return {"auth_url": auth_url}
+    except WorkspaceAuthError:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Workspace OAuth client secrets file not found. Please check credentials/client_secrets.json.",
+        ) from None
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to initiate Google Workspace authorization.",
+        ) from None
+
+
+@server.get("/api/workspace/oauth/callback", response_class=HTMLResponse)
+async def debug_workspace_oauth_callback(
+    request: Request,
+    code: str = "",
+    state: str = "",
+) -> HTMLResponse:
+    """Completes an explicit Debug Dashboard OAuth reconnect after CSRF validation."""
+    from core.workspace_oauth import (
+        WorkspaceOAuthStateError,
+        complete_workspace_oauth_authorization,
+    )
+
+    try:
+        base_url = str(request.base_url).rstrip("/")
+        complete_workspace_oauth_authorization(
+            f"{base_url}/api/workspace/oauth/callback",
+            code,
+            state,
+        )
+    except WorkspaceOAuthStateError:
+        return HTMLResponse(
+            "<h3>Invalid or expired OAuth state. Please restart authorization from the Debug Dashboard.</h3>",
+            status_code=400,
+        )
+    except Exception:
+        return HTMLResponse(
+            "<h3>Authorization failed. Please verify credentials/client_secrets.json.</h3>",
+            status_code=400,
+        )
+
+    return HTMLResponse(
+        """<!DOCTYPE html>
+<html><head><title>Authorization Successful</title></head>
+<body><h3>Google Workspace connected successfully.</h3>
+<script>
+if (window.opener) { try { window.opener.postMessage("workspace_oauth_complete", "*"); } catch(e) {} }
+setTimeout(() => window.close(), 1500);
+</script></body></html>""",
+    )
 
 def _read_json_file(path: str, default):
     try:

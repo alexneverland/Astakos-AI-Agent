@@ -10,6 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
+import threading
+import time
 
 from typing import Any, Sequence
 
@@ -33,6 +36,10 @@ DEFAULT_WORKSPACE_SCOPES: list[str] = [
     "https://www.googleapis.com/auth/fitness.sleep.read",
     "https://www.googleapis.com/auth/fitness.heart_rate.read",
 ]
+
+_OAUTH_STATE_TTL_SECONDS = 900
+_oauth_states: dict[str, float] = {}
+_oauth_state_lock = threading.Lock()
 
 def _write_token_file_atomic(token_path: str, content: str) -> None:
     """Writes token content atomically to avoid partial writes and sets secure permissions."""
@@ -73,6 +80,10 @@ class WorkspaceMissingOAuthClientSecretsError(WorkspaceAuthError):
 
 class WorkspaceTokenRevokedOrInvalidError(WorkspaceAuthError):
     """Raised when the user OAuth token is revoked, expired without valid refresh, or the OAuth client changed."""
+
+
+class WorkspaceOAuthStateError(WorkspaceAuthError):
+    """Raised when a browser OAuth callback has missing, invalid, or expired state."""
 
 
 def get_token_path() -> str:
@@ -191,6 +202,52 @@ def get_workspace_oauth_flow(
         redirect_uri=redirect_uri or "http://localhost:8000/api/workspace/oauth/callback",
     )
     return flow
+
+
+def create_workspace_oauth_authorization_url(redirect_uri: str) -> str:
+    """Create a state-protected Google Workspace consent URL for an explicit user action."""
+    if not redirect_uri:
+        raise WorkspaceOAuthStateError("OAuth redirect URI is required.")
+
+    flow = get_workspace_oauth_flow(redirect_uri=redirect_uri)
+    state = secrets.token_urlsafe(32)
+    with _oauth_state_lock:
+        now = time.time()
+        expired_states = [
+            value for value, created_at in _oauth_states.items()
+            if now - created_at > _OAUTH_STATE_TTL_SECONDS
+        ]
+        for expired_state in expired_states:
+            _oauth_states.pop(expired_state, None)
+        _oauth_states[state] = now
+
+    auth_url, _ = flow.authorization_url(
+        state=state,
+        prompt="consent",
+        access_type="offline",
+        include_granted_scopes="true",
+    )
+    return auth_url
+
+
+def complete_workspace_oauth_authorization(
+    redirect_uri: str,
+    code: str,
+    state: str,
+) -> None:
+    """Verify a browser callback and atomically persist the shared Workspace token."""
+    if not code:
+        raise WorkspaceOAuthStateError("OAuth authorization code is required.")
+
+    with _oauth_state_lock:
+        created_at = _oauth_states.pop(state, None)
+
+    if not created_at or time.time() - created_at > _OAUTH_STATE_TTL_SECONDS:
+        raise WorkspaceOAuthStateError("OAuth state is invalid or expired.")
+
+    flow = get_workspace_oauth_flow(redirect_uri=redirect_uri)
+    flow.fetch_token(code=code)
+    _write_token_file_atomic(get_token_path(), flow.credentials.to_json())
 
 
 

@@ -431,9 +431,51 @@ function renderStatusStrip(d) {
     <div class="status-item" data-search="updated refresh"><div class="label">Updated</div><div class="value">${new Date().toLocaleTimeString('el-GR')}</div></div>
     <div class="status-actions">
       <button class="icon-btn" onclick="fetchAllNow()" title="Refresh now">↻</button>
+      <button class="icon-btn" id="workspace-reconnect-btn" onclick="reconnectGoogleWorkspace()" title="Reconnect Google Workspace">Google</button>
       <button class="icon-btn" onclick="openCharts()" title="Open charts">▥</button>
     </div>`;
 }
+
+async function reconnectGoogleWorkspace() {
+  const button = document.getElementById('workspace-reconnect-btn');
+  if (button) {
+    button.disabled = true;
+    button.textContent = '…';
+  }
+
+  try {
+    const response = await fetch('/api/workspace/oauth/start');
+    const payload = await response.json();
+    if (!response.ok || !payload.auth_url) {
+      throw new Error('Could not start Google Workspace authorization.');
+    }
+
+    const popup = window.open(
+      payload.auth_url,
+      'astakos_workspace_oauth',
+      'width=560,height=720,resizable=yes,scrollbars=yes',
+    );
+    if (!popup) {
+      window.location.assign(payload.auth_url);
+      return;
+    }
+    popup.focus();
+  } catch (error) {
+    alert(error instanceof Error ? error.message : 'Could not start Google Workspace authorization.');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Google';
+    }
+  }
+}
+
+window.addEventListener('message', (event) => {
+  if (event.origin !== window.location.origin || event.data !== 'workspace_oauth_complete') {
+    return;
+  }
+  fetchData();
+});
 
 function latencyColor(ms) {
   if (ms == null) return 'var(--text-muted)';

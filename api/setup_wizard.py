@@ -1,5 +1,4 @@
 import os
-import secrets
 import threading
 import time
 
@@ -140,30 +139,17 @@ async def connect_workspace(request: Request):
         ) from None
 
 
-_OAUTH_STATES: dict[str, float] = {}
-_OAUTH_STATE_LOCK = threading.Lock()
-
-
 @app.get("/api/workspace/oauth/start")
 async def start_workspace_oauth(request: Request):
     """Starts browser-based OAuth consent flow routed through setup wizard port with CSRF state protection."""
-    from core.workspace_oauth import WorkspaceAuthError, get_workspace_oauth_flow
+    from core.workspace_oauth import (
+        WorkspaceAuthError,
+        create_workspace_oauth_authorization_url,
+    )
     try:
         base_url = str(request.base_url).rstrip('/')
-        flow = get_workspace_oauth_flow(redirect_uri=f"{base_url}/api/workspace/oauth/callback")
-        state = secrets.token_urlsafe(32)
-        with _OAUTH_STATE_LOCK:
-            now = time.time()
-            expired = [k for k, v in _OAUTH_STATES.items() if now - v > 900]
-            for k in expired:
-                _OAUTH_STATES.pop(k, None)
-            _OAUTH_STATES[state] = now
-
-        auth_url, _ = flow.authorization_url(
-            state=state,
-            prompt="consent",
-            access_type="offline",
-            include_granted_scopes="true",
+        auth_url = create_workspace_oauth_authorization_url(
+            f"{base_url}/api/workspace/oauth/callback",
         )
         return {"auth_url": auth_url}
     except WorkspaceAuthError:
@@ -178,31 +164,17 @@ async def start_workspace_oauth(request: Request):
 @app.get("/api/workspace/oauth/callback", response_class=HTMLResponse)
 async def workspace_oauth_callback(request: Request, code: str = "", state: str = ""):
     """Handles OAuth redirect callback, verifies CSRF state, and persists token.json."""
-    if not code:
-        return HTMLResponse("<h3>Missing authorization code. Please try again from the Setup Wizard.</h3>", status_code=400)
-
-    # Verify CSRF state parameter
-    with _OAUTH_STATE_LOCK:
-        valid_state = _OAUTH_STATES.pop(state, None)
-
-    if not valid_state or (time.time() - valid_state > 900):
-        return HTMLResponse(
-            "<h3>Invalid or expired OAuth state parameter. Please restart authorization from the Setup Wizard.</h3>",
-            status_code=400,
-        )
-
     from core.workspace_oauth import (
-        _write_token_file_atomic,
-        get_token_path,
-        get_workspace_oauth_flow,
+        WorkspaceOAuthStateError,
+        complete_workspace_oauth_authorization,
     )
     try:
         base_url = str(request.base_url).rstrip('/')
-        flow = get_workspace_oauth_flow(redirect_uri=f"{base_url}/api/workspace/oauth/callback")
-        flow.fetch_token(code=code)
-        creds = flow.credentials
-        token_path = get_token_path()
-        _write_token_file_atomic(token_path, creds.to_json())
+        complete_workspace_oauth_authorization(
+            f"{base_url}/api/workspace/oauth/callback",
+            code,
+            state,
+        )
         return HTMLResponse(
             """<!DOCTYPE html>
 <html>
@@ -221,6 +193,11 @@ async def workspace_oauth_callback(request: Request, code: str = "", state: str 
   </script>
 </body>
 </html>"""
+        )
+    except WorkspaceOAuthStateError:
+        return HTMLResponse(
+            "<h3>Invalid or expired OAuth state. Please restart authorization from the Setup Wizard.</h3>",
+            status_code=400,
         )
     except Exception:
         return HTMLResponse("<h3>Authorization failed. Please verify credentials/client_secrets.json.</h3>", status_code=400)
