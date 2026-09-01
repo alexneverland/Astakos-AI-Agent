@@ -285,7 +285,7 @@ class HomeContinuationDecision(BaseModel):
 def _is_brief_home_continuation_candidate(user_text: str) -> bool:
     """Return whether a structurally brief Home-Agent turn may need context resolution."""
     normalized = clean_message(user_text).strip()
-    return bool(normalized) and "?" not in normalized and len(normalized.split()) <= 3
+    return bool(normalized) and len(normalized.split()) <= 3
 
 
 def _resolve_brief_home_continuation(history: list, user_text: str) -> HomeContinuationDecision:
@@ -629,8 +629,12 @@ def home_agent_node(state):
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
     system_prompt = build_prompt(history, system_base, channel=state.get("channel"))
 
-    latest_user_text = clean_message(getattr(history[-1], "content", "")) if history else ""
-    if _is_brief_home_continuation_candidate(latest_user_text):
+    latest_message = history[-1] if history else None
+    latest_user_text = clean_message(getattr(latest_message, "content", ""))
+    if (
+        getattr(latest_message, "type", "") == "human"
+        and _is_brief_home_continuation_candidate(latest_user_text)
+    ):
         continuation = _resolve_brief_home_continuation(history, latest_user_text)
         if continuation.outcome == "clarify":
             tools_to_bind = []
