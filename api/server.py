@@ -3077,7 +3077,7 @@ async def delete_goal(project: str, _=Depends(require_token)):
         from memory.vector_store import vector_store, vector_lock
         with vector_lock:
             existing = vector_store._collection.get(
-                where={"category": "goal", "project": project}
+                where={"$and": [{"category": "goal"}, {"project": project}]}
             )
             if not existing["ids"]:
                 return {"ok": False, "error": f"Goal not found"}
