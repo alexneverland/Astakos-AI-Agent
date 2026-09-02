@@ -84,6 +84,55 @@ def test_aggregator_groups_case_variants_under_one_deterministic_signature():
     }]
 
 
+def test_aggregator_groups_named_observations_despite_taxonomy_drift():
+    """Repeated named observations remain visible when extractor labels evolve."""
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(
+            event_type="consumption",
+            category="alcohol",
+            item="beer",
+            status="ongoing",
+            event_date="2026-08-01",
+        ),
+        _event(
+            event_type="consume",
+            category="food_and_drink",
+            item="beer",
+            status="completed",
+            event_date="2026-08-04",
+        ),
+        _event(
+            event_type="alcohol_consumption",
+            category="substance_use",
+            item="beer",
+            status="completed",
+            event_date="2026-08-07",
+        ),
+    ])
+
+    assert candidates == [{
+        "event_type": "alcohol_consumption",
+        "category": "substance_use",
+        "subject": "user",
+        "item": "beer",
+        "status": "completed",
+        "occurrence_count": 3,
+        "first_date": "2026-08-01",
+        "last_date": "2026-08-07",
+    }]
+
+
+def test_aggregator_does_not_merge_named_observations_for_different_subjects():
+    """A shared item alone is never enough to form a cross-person pattern."""
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(item="beer", subject="user", event_date="2026-08-01"),
+        _event(item="beer", subject="partner", event_date="2026-08-04"),
+        _event(item="beer", subject="user", event_date="2026-08-07"),
+    ])
+
+    assert candidates == []
+
+
 def test_aggregator_excludes_candidate_and_incomplete_events():
     candidates = aggregate_behavioral_pattern_candidates([
         _event(event_date="2026-08-01"),
