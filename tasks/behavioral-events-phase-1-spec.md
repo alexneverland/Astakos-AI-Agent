@@ -36,7 +36,8 @@ later analysis.
 
 Required fields for a confirmed event:
 
-- `event_type`, `category`, `subject`, `status`, `event_date`, `confidence`
+- `event_type`, `action_kind`, `category`, `subject`, `status`, `event_date`,
+  `confidence`
 - `negated`, `hypothetical`, `reported_by_user`
 - `source_message_id`, `source_rowid`, `source_channel`
 
@@ -44,6 +45,11 @@ An event is confirmed only when `subject == "user"`, it is user-reported,
 not negated, not hypothetical, and confidence meets the configured threshold.
 All other structurally valid extractor results are retained as candidates and
 cannot affect later behavior until a future phase explicitly promotes them.
+
+`action_kind` is a bounded canonical semantic action identity supplied by the
+extractor, independent of category or lifecycle status. Unknown actions are
+stored as `other` rather than creating a free-form identity. Existing records
+from before this field was introduced remain unchanged and are never backfilled.
 
 ## Commands
 

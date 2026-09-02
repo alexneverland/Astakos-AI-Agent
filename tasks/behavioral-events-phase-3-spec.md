@@ -10,7 +10,15 @@ changing the assistant's behavior.
 
 - Read only `record_state="confirmed"` events from the existing behavioral
   event store.
-- Group matching events by event type, category, subject, item, and status.
+- Add the nullable `action_kind` compatibility column needed by new event
+  extraction. This migration preserves every existing record and performs no
+  historic reclassification or backfill.
+- Group a new named observation by its subject, normalized item, and canonical
+  action kind. Retain the strict event-type/category/subject/item/status
+  grouping for unnamed, legacy, or `other` action-kind events. This prevents
+  harmless extractor taxonomy drift from hiding repeated named observations,
+  while avoiding cross-person grouping, action conflation, or semantic guesses
+  about historical records.
 - Return a candidate only after at least three distinct event dates.
 - Return evidence only: occurrence count, first date, last date, and the
   grouping fields.
@@ -18,7 +26,7 @@ changing the assistant's behavior.
 
 ## Out of scope
 
-- No new database schema, migrations, dependencies, or background jobs.
+- No unrelated database schema migrations, dependencies, or background jobs.
 - No LLM call, prompt/context injection, Chroma write, profile write, or
   memory write.
 - No routine, reminder, goal, follow-up, notification, or user-visible chat
@@ -38,7 +46,8 @@ changing the assistant's behavior.
 
 Each candidate contains only:
 
-- `event_type`, `category`, `subject`, `item`, `status`
+- `event_type`, `action_kind`, `category`, `subject`, `item`, `status` (for a named-item
+  candidate, these are the deterministic latest-event display fields)
 - `occurrence_count`, `first_date`, `last_date`
 
 Candidates are observations, not facts about the user. A missing optional
