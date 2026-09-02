@@ -10,6 +10,9 @@ changing the assistant's behavior.
 
 - Read only `record_state="confirmed"` events from the existing behavioral
   event store.
+- Add the nullable `action_kind` compatibility column needed by new event
+  extraction. This migration preserves every existing record and performs no
+  historic reclassification or backfill.
 - Group a new named observation by its subject, normalized item, and canonical
   action kind. Retain the strict event-type/category/subject/item/status
   grouping for unnamed, legacy, or `other` action-kind events. This prevents
@@ -23,7 +26,7 @@ changing the assistant's behavior.
 
 ## Out of scope
 
-- No new database schema, migrations, dependencies, or background jobs.
+- No unrelated database schema migrations, dependencies, or background jobs.
 - No LLM call, prompt/context injection, Chroma write, profile write, or
   memory write.
 - No routine, reminder, goal, follow-up, notification, or user-visible chat

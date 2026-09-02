@@ -58,6 +58,21 @@ def _read_only_conn(db_path: str = DB_PATH) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _ensure_action_kind_column(conn: sqlite3.Connection) -> None:
+    """Add the nullable action-kind column while tolerating an upgrade race."""
+    columns = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(behavioral_events)").fetchall()
+    }
+    if "action_kind" in columns:
+        return
+    try:
+        conn.execute("ALTER TABLE behavioral_events ADD COLUMN action_kind TEXT")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name: action_kind" not in str(exc).lower():
+            raise
+
+
 def init_db(db_path: str = DB_PATH) -> None:
     """Create the isolated behavioral-event schema if it does not exist."""
     with _conn(db_path) as conn:
@@ -86,12 +101,7 @@ def init_db(db_path: str = DB_PATH) -> None:
             )
             """
         )
-        columns = {
-            str(row["name"])
-            for row in conn.execute("PRAGMA table_info(behavioral_events)").fetchall()
-        }
-        if "action_kind" not in columns:
-            conn.execute("ALTER TABLE behavioral_events ADD COLUMN action_kind TEXT")
+        _ensure_action_kind_column(conn)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS behavioral_event_progress (

@@ -99,6 +99,41 @@ def test_store_adds_nullable_action_kind_to_an_existing_event_store(tmp_path):
     assert events[0]["action_kind"] is None
 
 
+def test_action_kind_schema_upgrade_tolerates_concurrent_duplicate_column_race():
+    """A second process completing the same migration does not abort intake."""
+    class ColumnCursor:
+        def fetchall(self):
+            return [{"name": "id"}]
+
+    class DuplicateColumnConnection:
+        def execute(self, statement: str):
+            if statement.startswith("PRAGMA table_info"):
+                return ColumnCursor()
+            if statement.startswith("ALTER TABLE"):
+                raise sqlite3.OperationalError("duplicate column name: action_kind")
+            raise AssertionError(f"Unexpected statement: {statement}")
+
+    behavioral_event_state._ensure_action_kind_column(DuplicateColumnConnection())
+
+
+def test_action_kind_schema_upgrade_surfaces_unrelated_database_errors():
+    """Only the expected duplicate-column race is suppressed."""
+    class ColumnCursor:
+        def fetchall(self):
+            return [{"name": "id"}]
+
+    class BrokenConnection:
+        def execute(self, statement: str):
+            if statement.startswith("PRAGMA table_info"):
+                return ColumnCursor()
+            if statement.startswith("ALTER TABLE"):
+                raise sqlite3.OperationalError("database is locked")
+            raise AssertionError(f"Unexpected statement: {statement}")
+
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        behavioral_event_state._ensure_action_kind_column(BrokenConnection())
+
+
 def test_store_keeps_candidate_separate_from_confirmed_events(tmp_path):
     db_path = str(tmp_path / "behavioral_events.db")
 
