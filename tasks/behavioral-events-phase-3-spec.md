@@ -11,11 +11,11 @@ changing the assistant's behavior.
 - Read only `record_state="confirmed"` events from the existing behavioral
   event store.
 - Group a new named observation by its subject, normalized item, and canonical
-  action kind. Retain the strict event-type/category/subject/status grouping
-  for unnamed or legacy events lacking an action kind. This prevents harmless
-  extractor taxonomy drift from hiding repeated named observations, while
-  avoiding cross-person grouping, action conflation, or semantic guesses about
-  historical records.
+  action kind. Retain the strict event-type/category/subject/item/status
+  grouping for unnamed or legacy events lacking an action kind. This prevents
+  harmless extractor taxonomy drift from hiding repeated named observations,
+  while avoiding cross-person grouping, action conflation, or semantic guesses
+  about historical records.
 - Return a candidate only after at least three distinct event dates.
 - Return evidence only: occurrence count, first date, last date, and the
   grouping fields.

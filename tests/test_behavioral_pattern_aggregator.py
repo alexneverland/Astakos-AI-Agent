@@ -184,6 +184,17 @@ def test_aggregator_keeps_legacy_named_events_under_strict_taxonomy_grouping():
     assert candidates[0]["action_kind"] is None
 
 
+def test_aggregator_does_not_merge_distinct_legacy_named_items():
+    """Legacy events retain item identity when no action kind was stored."""
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(action_kind=None, item="pasta", event_date="2026-08-01"),
+        _event(action_kind=None, item="salad", event_date="2026-08-04"),
+        _event(action_kind=None, item="beer", event_date="2026-08-07"),
+    ])
+
+    assert candidates == []
+
+
 def test_aggregator_excludes_candidate_and_incomplete_events():
     candidates = aggregate_behavioral_pattern_candidates([
         _event(event_date="2026-08-01"),

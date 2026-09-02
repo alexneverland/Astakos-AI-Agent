@@ -56,7 +56,7 @@ def _event_pattern_key(event: Mapping[str, Any]) -> tuple[str, ...] | None:
         action_kind = _signature_text(event.get("action_kind"))
         if action_kind:
             return "named", required[2], item, action_kind
-    return "taxonomy", required[0], required[1], required[2], required[3]
+    return "taxonomy", required[0], required[1], required[2], item or "", required[3]
 
 
 def _event_display_fields(event: Mapping[str, Any]) -> tuple[str, str | None, str, str, str | None, str]:
