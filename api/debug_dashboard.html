@@ -1577,6 +1577,7 @@ function renderBehavioralPatterns(candidates) {
   }
   const rows = candidates.map(pattern => '<tr>'
     + '<td><strong>' + escapeHtml(pattern.event_type || '') + '</strong></td>'
+    + '<td>' + escapeHtml(pattern.action_kind || 'legacy') + '</td>'
     + '<td>' + escapeHtml(pattern.category || '') + '</td>'
     + '<td>' + escapeHtml(pattern.subject || '') + '</td>'
     + '<td>' + escapeHtml(pattern.item || '—') + '</td>'
@@ -1588,7 +1589,7 @@ function renderBehavioralPatterns(candidates) {
   container.innerHTML = '<div class="card" style="grid-column:span 2">'
     + '<h2>🔎 BEHAVIORAL PATTERNS (' + candidates.length + ')</h2>'
     + '<p style="color:var(--muted);font-size:12px">Read-only observations from confirmed events; they do not change routines, memory, or prompts.</p>'
-    + '<div style="overflow-x:auto"><table><tr><th>Type</th><th>Category</th><th>Subject</th><th>Item</th><th>Status</th><th>Events</th><th>First</th><th>Last</th></tr>'
+    + '<div style="overflow-x:auto"><table><tr><th>Type</th><th>Action</th><th>Category</th><th>Subject</th><th>Item</th><th>Status</th><th>Events</th><th>First</th><th>Last</th></tr>'
     + rows + '</table></div></div>';
   enhanceRenderedDashboard(container);
 }

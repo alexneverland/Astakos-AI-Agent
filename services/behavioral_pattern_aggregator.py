@@ -38,12 +38,11 @@ def _canonical_event_date(value: Any) -> str | None:
 def _event_pattern_key(event: Mapping[str, Any]) -> tuple[str, ...] | None:
     """Return a conservative, stable grouping key for a valid confirmed event.
 
-    A named observation is identified by its subject, named item, and recorded
-    status. Extractor taxonomy is retained for validation and display, but is
-    not an identity for named observations because equivalent facts may receive
-    evolving labels. Status remains part of identity so distinct observation
-    outcomes cannot inflate each other. Events without an item retain the
-    stricter full-taxonomy grouping.
+    A named observation is identified by its subject, named item, and canonical
+    action kind. Extractor taxonomy is retained for validation and display, but
+    is not an identity for named observations because equivalent facts may
+    receive evolving labels. Legacy events without an action kind retain the
+    stricter full-taxonomy grouping rather than being semantically guessed.
     """
     if _signature_text(event.get("record_state")) != "confirmed":
         return None
@@ -54,14 +53,17 @@ def _event_pattern_key(event: Mapping[str, Any]) -> tuple[str, ...] | None:
         return None
     item = _signature_text(event.get("item")) or None
     if item is not None:
-        return "named", required[2], item, required[3]
+        action_kind = _signature_text(event.get("action_kind"))
+        if action_kind:
+            return "named", required[2], item, action_kind
     return "taxonomy", required[0], required[1], required[2], required[3]
 
 
-def _event_display_fields(event: Mapping[str, Any]) -> tuple[str, str, str, str | None, str]:
+def _event_display_fields(event: Mapping[str, Any]) -> tuple[str, str | None, str, str, str | None, str]:
     """Return normalized candidate fields from one structurally valid event."""
     return (
         _signature_text(event.get("event_type")),
+        _signature_text(event.get("action_kind")) or None,
         _signature_text(event.get("category")),
         _signature_text(event.get("subject")),
         _signature_text(event.get("item")) or None,
@@ -97,9 +99,10 @@ def aggregate_behavioral_pattern_candidates(
             grouped,
             key=lambda record: (record[0], _event_display_fields(record[1])),
         )
-        event_type, category, subject, item, status = _event_display_fields(representative_event)
+        event_type, action_kind, category, subject, item, status = _event_display_fields(representative_event)
         candidates.append({
             "event_type": event_type,
+            "action_kind": action_kind,
             "category": category,
             "subject": subject,
             "item": item,
@@ -115,6 +118,7 @@ def aggregate_behavioral_pattern_candidates(
             int(candidate["occurrence_count"]),
             str(candidate["last_date"]),
             str(candidate["event_type"]),
+            str(candidate["action_kind"] or ""),
             str(candidate["category"]),
             str(candidate["subject"]),
             str(candidate["item"] or ""),

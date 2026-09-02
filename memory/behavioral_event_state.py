@@ -66,6 +66,7 @@ def init_db(db_path: str = DB_PATH) -> None:
             CREATE TABLE IF NOT EXISTS behavioral_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_type TEXT NOT NULL,
+                action_kind TEXT,
                 category TEXT NOT NULL,
                 subject TEXT NOT NULL,
                 item TEXT,
@@ -85,6 +86,12 @@ def init_db(db_path: str = DB_PATH) -> None:
             )
             """
         )
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(behavioral_events)").fetchall()
+        }
+        if "action_kind" not in columns:
+            conn.execute("ALTER TABLE behavioral_events ADD COLUMN action_kind TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS behavioral_event_progress (
@@ -140,6 +147,7 @@ def _event_values(event: Mapping[str, Any]) -> tuple[Any, ...]:
 
     return (
         _required_text(event, "event_type"),
+        _required_text(event, "action_kind"),
         _required_text(event, "category"),
         _required_text(event, "subject"),
         _optional_text(event, "item"),
@@ -183,11 +191,11 @@ def record_event(event: Mapping[str, Any], *, db_path: str = DB_PATH) -> dict[st
         cursor = conn.execute(
             """
             INSERT INTO behavioral_events (
-                event_type, category, subject, item, item_detail, status,
+                event_type, action_kind, category, subject, item, item_detail, status,
                 event_date, confidence, negated, hypothetical, reported_by_user,
                 record_state, source_message_id, source_rowid, source_channel,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             values,
         )

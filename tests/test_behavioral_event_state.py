@@ -10,6 +10,7 @@ from memory import behavioral_event_state
 def _event(**overrides):
     event = {
         "event_type": "substance_use",
+        "action_kind": "consume",
         "category": "health",
         "subject": "user",
         "item": "alcohol",
@@ -46,6 +47,56 @@ def test_store_records_confirmed_event_and_rejects_source_replay(tmp_path):
     assert len(events) == 1
     assert events[0]["record_state"] == "confirmed"
     assert events[0]["item_detail"] == "tsipouro"
+    assert events[0]["action_kind"] == "consume"
+
+
+def test_store_adds_nullable_action_kind_to_an_existing_event_store(tmp_path):
+    """Schema upgrades preserve old event rows without attempting a backfill."""
+    db_path = str(tmp_path / "behavioral_events.db")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE behavioral_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                category TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                item TEXT,
+                item_detail TEXT,
+                status TEXT NOT NULL,
+                event_date TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                negated INTEGER NOT NULL,
+                hypothetical INTEGER NOT NULL,
+                reported_by_user INTEGER NOT NULL,
+                record_state TEXT NOT NULL,
+                source_message_id TEXT NOT NULL,
+                source_rowid INTEGER NOT NULL,
+                source_channel TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """,
+        )
+        connection.execute(
+            """
+            INSERT INTO behavioral_events (
+                event_type, category, subject, item, item_detail, status,
+                event_date, confidence, negated, hypothetical, reported_by_user,
+                record_state, source_message_id, source_rowid, source_channel,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "meal", "food", "user", "pasta", None, "consumed",
+                "2026-08-01", 0.9, 0, 0, 1, "confirmed", "telegram:1", 1,
+                "telegram", "2026-08-01T10:00:00",
+            ),
+        )
+
+    behavioral_event_state.init_db(db_path)
+
+    events = behavioral_event_state.list_events(db_path=db_path)
+    assert events[0]["action_kind"] is None
 
 
 def test_store_keeps_candidate_separate_from_confirmed_events(tmp_path):
