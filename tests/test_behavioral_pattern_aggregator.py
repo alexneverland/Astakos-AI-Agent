@@ -91,7 +91,7 @@ def test_aggregator_groups_named_observations_despite_taxonomy_drift():
             event_type="consumption",
             category="alcohol",
             item="beer",
-            status="ongoing",
+            status="completed",
             event_date="2026-08-01",
         ),
         _event(
@@ -128,6 +128,35 @@ def test_aggregator_does_not_merge_named_observations_for_different_subjects():
         _event(item="beer", subject="user", event_date="2026-08-01"),
         _event(item="beer", subject="partner", event_date="2026-08-04"),
         _event(item="beer", subject="user", event_date="2026-08-07"),
+    ])
+
+    assert candidates == []
+
+
+def test_aggregator_does_not_merge_named_observations_with_different_statuses():
+    """Different completed observation states do not inflate one pattern."""
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(
+            event_type="purchase",
+            category="shopping",
+            item="beer",
+            status="completed",
+            event_date="2026-08-01",
+        ),
+        _event(
+            event_type="acquisition",
+            category="errand",
+            item="beer",
+            status="completed",
+            event_date="2026-08-04",
+        ),
+        _event(
+            event_type="consumption",
+            category="alcohol",
+            item="beer",
+            status="consumed",
+            event_date="2026-08-07",
+        ),
     ])
 
     assert candidates == []

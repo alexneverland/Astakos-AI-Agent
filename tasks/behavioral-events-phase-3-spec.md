@@ -10,10 +10,11 @@ changing the assistant's behavior.
 
 - Read only `record_state="confirmed"` events from the existing behavioral
   event store.
-- Group a named observation by its subject and normalized item. Retain the
-  strict event-type/category/subject/status grouping only when no item exists.
-  This prevents harmless extractor taxonomy drift from hiding repeated named
-  observations while avoiding cross-person grouping.
+- Group a named observation by its subject, normalized item, and recorded
+  status. Retain the strict event-type/category/subject/status grouping only
+  when no item exists. This prevents harmless extractor taxonomy drift from
+  hiding repeated named observations, while avoiding cross-person grouping or
+  merging distinct observation outcomes.
 - Return a candidate only after at least three distinct event dates.
 - Return evidence only: occurrence count, first date, last date, and the
   grouping fields.

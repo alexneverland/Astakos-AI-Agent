@@ -38,10 +38,12 @@ def _canonical_event_date(value: Any) -> str | None:
 def _event_pattern_key(event: Mapping[str, Any]) -> tuple[str, ...] | None:
     """Return a conservative, stable grouping key for a valid confirmed event.
 
-    A named observation is identified by its subject and named item. Extractor
-    taxonomy is retained for validation and display, but is not an identity for
-    named observations because equivalent facts may receive evolving labels.
-    Events without an item retain the stricter full-taxonomy grouping.
+    A named observation is identified by its subject, named item, and recorded
+    status. Extractor taxonomy is retained for validation and display, but is
+    not an identity for named observations because equivalent facts may receive
+    evolving labels. Status remains part of identity so distinct observation
+    outcomes cannot inflate each other. Events without an item retain the
+    stricter full-taxonomy grouping.
     """
     if _signature_text(event.get("record_state")) != "confirmed":
         return None
@@ -52,7 +54,7 @@ def _event_pattern_key(event: Mapping[str, Any]) -> tuple[str, ...] | None:
         return None
     item = _signature_text(event.get("item")) or None
     if item is not None:
-        return "named", required[2], item
+        return "named", required[2], item, required[3]
     return "taxonomy", required[0], required[1], required[2], required[3]
 
 
