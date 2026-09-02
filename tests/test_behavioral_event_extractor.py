@@ -80,8 +80,15 @@ def test_extractor_results_require_one_unique_indexed_entry_per_message():
 def test_missing_identity_or_required_event_fields_are_rejected():
     assert normalize_extracted_event(_extraction(event_type=""), _source()) is None
     assert normalize_extracted_event(_extraction(action_kind=""), _source()) is None
-    assert normalize_extracted_event(_extraction(action_kind="consume food"), _source()) is None
     assert normalize_extracted_event(_extraction(), {"channel": "telegram"}) is None
+
+
+def test_unknown_action_kind_is_preserved_as_non_grouping_other():
+    """A free-form synonym cannot silently create a new pattern identity."""
+    event = normalize_extracted_event(_extraction(action_kind="purchase"), _source())
+
+    assert event is not None
+    assert event["action_kind"] == "other"
 
 
 def test_first_intake_sets_watermark_without_backfill(tmp_path):

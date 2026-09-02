@@ -22,18 +22,33 @@ CONFIRMABLE_EVENT_STATUSES = frozenset({
     "occurred",
     "ongoing",
 })
+CANONICAL_ACTION_KINDS = frozenset({
+    "acquire",
+    "attend",
+    "communicate",
+    "consume",
+    "create",
+    "discard",
+    "exercise",
+    "maintain",
+    "other",
+    "prepare",
+    "rest",
+    "socialize",
+    "travel",
+    "use",
+    "work",
+})
 
 
 def _nonempty_text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _canonical_action_kind(value: Any) -> str | None:
-    """Return a validated lowercase action identifier from extractor output."""
+def _canonical_action_kind(value: Any) -> str:
+    """Return a bounded canonical action kind, preserving unknowns as ``other``."""
     action_kind = _nonempty_text(value).lower()
-    if not action_kind or not action_kind.isascii() or not action_kind.isidentifier():
-        return None
-    return action_kind
+    return action_kind if action_kind in CANONICAL_ACTION_KINDS else "other"
 
 
 def _valid_source(source: Mapping[str, Any]) -> bool:
@@ -111,8 +126,6 @@ def normalize_extracted_event(
     subject = _nonempty_text(extraction["subject"]).lower()
     status = _nonempty_text(extraction["status"]).lower()
     action_kind = _canonical_action_kind(extraction["action_kind"])
-    if action_kind is None:
-        return None
     event_date = _nonempty_text(extraction.get("event_date")) or _nonempty_text(source["date"])
     if not _valid_event_date(event_date):
         return None
@@ -162,10 +175,10 @@ order. Each entry must be either null or an object with its matching `idx` plus
 these fields when applicable:
 event_type, action_kind, category, subject, item, item_detail, status, event_date,
 confidence (0..1), negated, hypothetical, reported_by_user.
-Set action_kind to one concise, stable lower_snake_case semantic action identity
-(for example acquire, prepare, consume, discard, travel, work, rest, or use).
-It describes what happened, not a lifecycle state or category. Reuse the same
-action_kind for synonymous descriptions of the same action.
+Set action_kind to exactly one of: acquire, attend, communicate, consume,
+create, discard, exercise, maintain, other, prepare, rest, socialize, travel,
+use, work. It describes what happened, not a lifecycle state or category. Use
+other when none applies; do not invent a synonym or a new label.
 Use subject `user` only for the user's own completed/current report. Do not infer
 facts from questions, plans, third-party reports, quoted text, or ambiguity.
 Use null for a message with no event.

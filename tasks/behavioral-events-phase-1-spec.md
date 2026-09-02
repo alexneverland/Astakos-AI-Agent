@@ -46,9 +46,10 @@ not negated, not hypothetical, and confidence meets the configured threshold.
 All other structurally valid extractor results are retained as candidates and
 cannot affect later behavior until a future phase explicitly promotes them.
 
-`action_kind` is a concise, canonical semantic action identity supplied by the
-extractor, independent of category or lifecycle status. Existing records from
-before this field was introduced remain unchanged and are never backfilled.
+`action_kind` is a bounded canonical semantic action identity supplied by the
+extractor, independent of category or lifecycle status. Unknown actions are
+stored as `other` rather than creating a free-form identity. Existing records
+from before this field was introduced remain unchanged and are never backfilled.
 
 ## Commands
 

@@ -12,7 +12,7 @@ changing the assistant's behavior.
   event store.
 - Group a new named observation by its subject, normalized item, and canonical
   action kind. Retain the strict event-type/category/subject/item/status
-  grouping for unnamed or legacy events lacking an action kind. This prevents
+  grouping for unnamed, legacy, or `other` action-kind events. This prevents
   harmless extractor taxonomy drift from hiding repeated named observations,
   while avoiding cross-person grouping, action conflation, or semantic guesses
   about historical records.

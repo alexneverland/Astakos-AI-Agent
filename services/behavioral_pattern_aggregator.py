@@ -54,7 +54,7 @@ def _event_pattern_key(event: Mapping[str, Any]) -> tuple[str, ...] | None:
     item = _signature_text(event.get("item")) or None
     if item is not None:
         action_kind = _signature_text(event.get("action_kind"))
-        if action_kind:
+        if action_kind and action_kind != "other":
             return "named", required[2], item, action_kind
     return "taxonomy", required[0], required[1], required[2], item or "", required[3]
 

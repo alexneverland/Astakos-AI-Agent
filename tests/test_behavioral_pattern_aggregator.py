@@ -173,6 +173,32 @@ def test_aggregator_does_not_merge_named_observations_with_different_action_kind
     assert candidates == []
 
 
+def test_aggregator_does_not_group_other_action_kinds_by_named_item():
+    """Unknown actions use the strict path rather than an unsafe broad group."""
+    candidates = aggregate_behavioral_pattern_candidates([
+        _event(
+            event_type="purchase",
+            action_kind="other",
+            item="pasta",
+            event_date="2026-08-01",
+        ),
+        _event(
+            event_type="prepare",
+            action_kind="other",
+            item="pasta",
+            event_date="2026-08-04",
+        ),
+        _event(
+            event_type="discard",
+            action_kind="other",
+            item="pasta",
+            event_date="2026-08-07",
+        ),
+    ])
+
+    assert candidates == []
+
+
 def test_aggregator_keeps_legacy_named_events_under_strict_taxonomy_grouping():
     """Events stored before action kinds existed are never semantically guessed."""
     candidates = aggregate_behavioral_pattern_candidates([
