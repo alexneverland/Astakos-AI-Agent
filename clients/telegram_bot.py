@@ -2103,7 +2103,8 @@ def handle_message(user_text: str, chat_id: str):
             )
             print(f"✅ [Routine Acknowledged]: {pdata}")
             bus.emit("routine_acknowledged", routine_id=rid, event=ev, channel="telegram")
-            pending_routine_confirmations.pop(rid, None)
+            if routine_draft_offer_to_consume is None:
+                pending_routine_confirmations.pop(rid, None)
             from services.routine_completion_context import build_routine_completion_context
             routine_completion_context = build_routine_completion_context()
             if accepted_draft_offer is not None and accepted_draft_offer.routine_id == rid:
@@ -2725,7 +2726,8 @@ def handle_message(user_text: str, chat_id: str):
             draft_routine_id, draft_sent_at = routine_draft_offer_to_consume
             from memory.routine_db import acknowledge_pending_draft_offer
 
-            acknowledge_pending_draft_offer(draft_routine_id, draft_sent_at)
+            if acknowledge_pending_draft_offer(draft_routine_id, draft_sent_at):
+                pending_routine_confirmations.pop(draft_routine_id, None)
 
         graph_stream_ms = int((perf_counter() - t_graph_0) * 1000)
         _trace.mark_phase("graph_stream_ms", graph_stream_ms)

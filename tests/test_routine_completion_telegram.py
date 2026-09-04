@@ -561,6 +561,7 @@ def test_pending_messenger_offer_natural_acceptance_adds_trusted_draft_context()
     build_draft_context.assert_called_once_with("Dinner with Partner")
     graph_state = graph_mock.stream.call_args.args[0]
     assert graph_state["routine_draft_offer_authorized"] is True
+    assert 5 in bot.pending_routine_confirmations
 
 
 def test_active_draft_keeps_bare_yes_out_of_pending_offer_path() -> None:
