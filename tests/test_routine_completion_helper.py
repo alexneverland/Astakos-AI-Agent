@@ -40,6 +40,29 @@ def test_valid_pending_skip_selects_exact_candidate() -> None:
     assert decision.routine_id == 7
 
 
+def test_pending_draft_requires_the_exact_structured_offer() -> None:
+    """A selector may authorize a local draft only for a marked pending offer."""
+    selection = _selector(RoutineSelection(action="draft", routine_id=7))
+
+    allowed = decide_completion(
+        "Ναι φίλε κάνε το πιο γλυκό",
+        {7: "Morning message\n[MESSENGER_DRAFT_OFFER]"},
+        "pending",
+        selection,
+        draft_offer_ids=frozenset({7}),
+    )
+    blocked = decide_completion(
+        "Ναι φίλε κάνε το πιο γλυκό",
+        {7: "Morning message"},
+        "pending",
+        selection,
+    )
+
+    assert allowed.action == "draft"
+    assert blocked.action == "pass_through"
+    assert blocked.debug_reason == "draft_requires_pending_offer"
+
+
 def test_valid_acknowledgement_selects_exact_today_candidate() -> None:
     """A clear future commitment records one routine without completing it."""
     decision = decide_completion(
@@ -165,6 +188,27 @@ def test_selector_accepts_strict_acknowledgement_json() -> None:
     ):
         selection = select_routine("natural message", {7: "dynamic routine"}, "today")
     assert selection == RoutineSelection(action="acknowledge", routine_id=7)
+
+
+def test_selector_accepts_draft_only_for_marked_offer() -> None:
+    """The selector protocol cannot turn an ordinary pending routine into a draft."""
+    response = MagicMock(text='{"action":"draft","routine_id":7}')
+    with patch("services.routine_completion_selector.load_prompt", return_value="{pool} {routines_block} {user_text}"), patch(
+        "services.routine_completion_selector.safe_gemini_call", return_value=response
+    ):
+        marked = select_routine(
+            "Ναι φίλε κάνε το πιο γλυκό",
+            {7: "Morning message\n[MESSENGER_DRAFT_OFFER]"},
+            "pending",
+        )
+        ordinary = select_routine(
+            "Ναι φίλε κάνε το πιο γλυκό",
+            {7: "Ordinary routine"},
+            "pending",
+        )
+
+    assert marked == RoutineSelection(action="draft", routine_id=7)
+    assert ordinary == RoutineSelection(action="none", routine_id=None)
 
 
 def test_selector_rejects_malformed_or_extra_json() -> None:

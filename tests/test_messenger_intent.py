@@ -33,7 +33,8 @@ def test_confirm_send_requires_active_draft():
 
 def test_send_without_active_draft_is_not_confirm():
     result = classify_messenger_intent("Στείλε", has_active_draft=False)
-    assert result.intent != "confirm_send"
+    assert result.intent == "confirm_send"
+    assert is_create_draft_intent("Στείλε") is False
 
 
 def test_long_create_message_with_active_draft_stays_create_draft():

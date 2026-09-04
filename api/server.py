@@ -993,6 +993,18 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
                 for rid, pdata in pending_routine_confirmations.items()
             }
+            draft_offer_ids = frozenset(
+                rid
+                for rid, pdata in pending_routine_confirmations.items()
+                if isinstance(pdata, dict) and pdata.get("draft_offer") is True
+            )
+            selector_candidates = {
+                rid: (
+                    f"{event_name}\n[MESSENGER_DRAFT_OFFER]"
+                    if rid in draft_offer_ids else event_name
+                )
+                for rid, event_name in pending_candidates.items()
+            }
             active_draft, _, _ = active_draft_status()
             accepted_draft_offer = None
             draft_offer_consumed = False
@@ -1022,10 +1034,37 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             else:
                 decision = decide_completion(
                     user_text=user_input,
-                    candidates=pending_candidates,
+                    candidates=selector_candidates,
                     pool="pending",
                     semantic_selector=_completion_selector,
+                    draft_offer_ids=draft_offer_ids,
                 )
+
+            if decision.action == "draft" and decision.routine_id is not None:
+                from services.routine_completion_context import get_pending_messenger_draft_offer
+
+                accepted_draft_offer = get_pending_messenger_draft_offer(
+                    pending_routine_confirmations,
+                    decision.routine_id,
+                )
+                if accepted_draft_offer is not None:
+                    pending_data = pending_routine_confirmations.get(decision.routine_id, {})
+                    draft_offer_consumed = acknowledge_pending_draft_offer(
+                        decision.routine_id,
+                        pending_data.get("sent_at"),
+                    )
+                if accepted_draft_offer is None or not draft_offer_consumed:
+                    accepted_draft_offer = None
+                    from services.routine_completion_helper import RoutineSelection
+
+                    decision = RoutineSelection(action="none", routine_id=None)
+                else:
+                    from services.routine_completion_helper import RoutineSelection
+
+                    decision = RoutineSelection(
+                        action="acknowledge",
+                        routine_id=decision.routine_id,
+                    )
 
             if decision.action == "complete" and decision.routine_id is not None:
                 from memory.routine_db import (

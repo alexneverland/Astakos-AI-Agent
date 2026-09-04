@@ -563,13 +563,13 @@ def chat_agent_node(state: AgentState):
         draft_tool_reason = "active_draft_edit"
     if draft_tool_reason:
         print(f"[Messenger Tool Gate]: Chat_Agent enabled relay_local_payload ({draft_tool_reason}).")
-        if draft_tool_reason == "active_draft_edit":
+        if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
             static_chat_tools = [relay_local_payload]
         else:
             static_chat_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     chat_tools = get_registered_tools_for_agent("Chat_Agent", static_chat_tools)
-    if draft_tool_reason == "active_draft_edit":
+    if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
         chat_tools = _draft_edit_tools_only(chat_tools)
 
     bind_started = perf_counter()
@@ -993,13 +993,13 @@ def web_agent_node(state: AgentState):
         draft_tool_reason = "active_draft_edit"
     if draft_tool_reason:
         print(f"[Messenger Tool Gate]: Web_Agent enabled relay_local_payload ({draft_tool_reason}).")
-        if draft_tool_reason == "active_draft_edit":
+        if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
             static_web_tools = [relay_local_payload]
         else:
             static_web_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)
-    if draft_tool_reason == "active_draft_edit":
+    if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
         web_tools = _draft_edit_tools_only(web_tools)
 
     if web_errors and not web_successes:

@@ -523,6 +523,45 @@ def test_pending_messenger_offer_bare_yes_adds_trusted_draft_context() -> None:
     assert draft_context in graph_messages
 
 
+def test_pending_messenger_offer_natural_acceptance_adds_trusted_draft_context() -> None:
+    """A natural reply to one offer authorizes a local draft through the selector."""
+    from services.routine_completion_helper import RoutineSelection
+
+    graph_mock = sys.modules["core.graph"].graph
+    selector_mock = sys.modules["services.routine_completion_selector"].select_routine
+    draft_context = types.SimpleNamespace(
+        content="[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]",
+        type="system",
+    )
+
+    with (
+        patch(
+            "services.messenger_intent.is_draft_offer_acceptance",
+            return_value=False,
+        ),
+        patch(
+            "services.routine_completion_context.build_messenger_draft_offer_context",
+            return_value=draft_context,
+        ) as build_draft_context,
+    ):
+        _run_handle_message(
+            "Ναι φίλε κάνε το πιο γλυκό",
+            pending={
+                5: {
+                    "event": "Dinner with Partner",
+                    "draft_offer": True,
+                }
+            },
+            selector_return=RoutineSelection(action="draft", routine_id=5),
+        )
+
+    selector_mock.assert_called_once()
+    sys.modules["memory.routine_db"].acknowledge_pending_draft_offer.assert_called_once()
+    build_draft_context.assert_called_once_with("Dinner with Partner")
+    graph_messages = graph_mock.stream.call_args.args[0]["messages"]
+    assert draft_context in graph_messages
+
+
 def test_active_draft_keeps_bare_yes_out_of_pending_offer_path() -> None:
     """An active draft takes precedence over an unrelated pending draft offer."""
     selector_mock = sys.modules["services.routine_completion_selector"].select_routine

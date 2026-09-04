@@ -139,8 +139,11 @@ def classify_messenger_intent(text: str, has_active_draft: bool = False) -> Mess
         return MessengerIntentResult("clarify_draft", 0.96, ["clarify_phrase"])
 
     word_count = len(normalized.split())
-    if has_active_draft and word_count <= 4 and _has_any(normalized, _DRAFT_CONFIRM_PATTERNS):
-        return MessengerIntentResult("confirm_send", 0.95, ["confirm_phrase", "active_draft", "short_confirm"])
+    if word_count <= 4 and _has_any(normalized, _DRAFT_CONFIRM_PATTERNS):
+        signals = ["confirm_phrase", "short_confirm"]
+        if has_active_draft:
+            signals.append("active_draft")
+        return MessengerIntentResult("confirm_send", 0.95, signals)
 
     has_create = _has_any(normalized, _DRAFT_CREATE_PATTERNS)
     has_message_shape = any(w in normalized for w in ("draft",) + nl_config.MI_COMPOSE_WORDS)

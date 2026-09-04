@@ -175,6 +175,27 @@ def test_web_bare_draft_offer_acceptance_loads_persisted_offer(client: TestClien
     assert draft_context in graph_messages
 
 
+def test_web_semantic_draft_offer_acceptance_saves_a_draft_before_any_send(client: TestClient) -> None:
+    """A natural response to one persisted offer grants only the local-draft path."""
+    response, mocks = _post_chat(
+        client,
+        pending={5: {"event": "Morning message", "draft_offer": True}},
+        message="Ναι φίλε κάνε το πιο γλυκό",
+        selector_returns=[RoutineSelection(action="draft", routine_id=5)],
+    )
+
+    assert response.status_code == 200
+    mocks["selector"].assert_called_once()
+    mocks["consume_offer"].assert_called_once_with(5, ANY)
+    mocks["acknowledged"].assert_not_called()
+    graph_messages = mocks["graph"].call_args.args[0]
+    assert any(
+        "[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]" in str(message.content)
+        for message in graph_messages
+        if isinstance(message, SystemMessage)
+    )
+
+
 def test_web_active_draft_keeps_bare_yes_out_of_pending_offer_path(client: TestClient) -> None:
     """An active draft takes precedence over a pending routine draft offer."""
     draft_context = SystemMessage(content="[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]")

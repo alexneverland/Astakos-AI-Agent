@@ -827,6 +827,7 @@ def test_web_agent_exposes_messenger_draft_tool_for_explicit_request(monkeypatch
     })
 
     assert "relay_local_payload" in bound_tool_names
+    assert "execute_local_pipeline" not in bound_tool_names
 
 
 def test_web_agent_exposes_messenger_draft_tool_for_accepted_routine_offer(monkeypatch: Any) -> None:
@@ -863,6 +864,7 @@ def test_web_agent_exposes_messenger_draft_tool_for_accepted_routine_offer(monke
     })
 
     assert "relay_local_payload" in bound_tool_names
+    assert "execute_local_pipeline" not in bound_tool_names
 
 
 def test_web_agent_exposes_messenger_draft_tool_for_active_draft_edit(monkeypatch: Any) -> None:
