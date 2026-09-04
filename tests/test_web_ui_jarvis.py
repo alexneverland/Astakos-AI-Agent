@@ -144,7 +144,7 @@ def test_core_states_tied_to_real_lifecycle(index_html_content: str) -> None:
     # Speaking: real Audio playback lifecycle
     assert "setCoreState('speaking')" in index_html_content
     assert "new Audio(audioUrl);" in index_html_content
-    assert "await currentAudio.play();" in index_html_content
+    assert "await audio.play();" in index_html_content
 
     # Error: real network / catch or audio failures
     assert "setCoreState('error')" in index_html_content
