@@ -2094,16 +2094,16 @@ def handle_message(user_text: str, chat_id: str):
             if not draft_offer_consumed and routine_draft_offer_to_consume is None:
                 mark_routine_acknowledged(rid)
                 remove_pending_confirmation(rid)
-            log_event(
-                "routines", "routine_acknowledged",
-                routine_id=rid, event=ev,
-                debug_type="manual_control",
-                debug_source="user_message",
-                debug_effect="routine_changed",
-            )
-            print(f"✅ [Routine Acknowledged]: {pdata}")
-            bus.emit("routine_acknowledged", routine_id=rid, event=ev, channel="telegram")
             if routine_draft_offer_to_consume is None:
+                log_event(
+                    "routines", "routine_acknowledged",
+                    routine_id=rid, event=ev,
+                    debug_type="manual_control",
+                    debug_source="user_message",
+                    debug_effect="routine_changed",
+                )
+                print(f"✅ [Routine Acknowledged]: {pdata}")
+                bus.emit("routine_acknowledged", routine_id=rid, event=ev, channel="telegram")
                 pending_routine_confirmations.pop(rid, None)
             from services.routine_completion_context import build_routine_completion_context
             routine_completion_context = build_routine_completion_context()
@@ -2727,6 +2727,24 @@ def handle_message(user_text: str, chat_id: str):
             from memory.routine_db import acknowledge_pending_draft_offer
 
             if acknowledge_pending_draft_offer(draft_routine_id, draft_sent_at):
+                draft_data = pending_routine_confirmations.get(draft_routine_id, {})
+                draft_event = draft_data.get("event", "?") if isinstance(draft_data, dict) else str(draft_data)
+                log_event(
+                    "routines",
+                    "routine_acknowledged",
+                    routine_id=draft_routine_id,
+                    event=draft_event,
+                    debug_type="manual_control",
+                    debug_source="user_message",
+                    debug_effect="routine_changed",
+                )
+                print(f"✅ [Routine Acknowledged]: {draft_data}")
+                bus.emit(
+                    "routine_acknowledged",
+                    routine_id=draft_routine_id,
+                    event=draft_event,
+                    channel="telegram",
+                )
                 pending_routine_confirmations.pop(draft_routine_id, None)
 
         graph_stream_ms = int((perf_counter() - t_graph_0) * 1000)

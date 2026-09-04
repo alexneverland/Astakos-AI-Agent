@@ -1113,11 +1113,13 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 if not draft_offer_consumed and routine_draft_offer_to_consume is None:
                     mark_routine_acknowledged(rid)
                     remove_pending_confirmation(rid)
-                log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
-                print(f"[Web Routine Acknowledged]: {pdata}")
-                pending_routine_confirmations.pop(rid, None)
-                from services.routine_completion_context import build_routine_completion_context
-                routine_completion_context = build_routine_completion_context()
+                if routine_draft_offer_to_consume is None:
+                    log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
+                    print(f"[Web Routine Acknowledged]: {pdata}")
+                    pending_routine_confirmations.pop(rid, None)
+                    from services.routine_completion_context import build_routine_completion_context
+
+                    routine_completion_context = build_routine_completion_context()
                 if accepted_draft_offer is not None and accepted_draft_offer.routine_id == rid:
                     routine_draft_offer_context = accepted_draft_offer.context
                 routine_action_consumed = True
@@ -1611,7 +1613,19 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             )
             if routine_draft_offer_to_consume and graph_result.get("saved_local_draft"):
                 draft_routine_id, draft_sent_at = routine_draft_offer_to_consume
-                acknowledge_pending_draft_offer(draft_routine_id, draft_sent_at)
+                if acknowledge_pending_draft_offer(draft_routine_id, draft_sent_at):
+                    from memory.event_log import log_event
+
+                    draft_data = pending_routine_confirmations.get(draft_routine_id, {})
+                    draft_event = draft_data.get("event", "?") if isinstance(draft_data, dict) else str(draft_data)
+                    log_event(
+                        "routines",
+                        "routine_acknowledged",
+                        routine_id=draft_routine_id,
+                        event=draft_event,
+                    )
+                    print(f"[Web Routine Acknowledged]: {draft_data}")
+                    pending_routine_confirmations.pop(draft_routine_id, None)
             final_ai_response = graph_result["final_ai_response"]
             handling_agent = graph_result["handling_agent"]
             tool_result_fallbacks = graph_result["tool_result_fallbacks"]

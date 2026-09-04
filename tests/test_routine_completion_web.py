@@ -72,7 +72,7 @@ def _post_chat(
             "memory.routine_db.load_pending_confirmations",
             return_value=pending or {},
         ) as load_pending,
-        patch("memory.event_log.log_event"),
+        patch("memory.event_log.log_event") as logged,
         patch("services.routine_completion_selector.select_routine", selector),
         patch(
             "services.routine_completion_context.accept_pending_messenger_draft_offer",
@@ -99,6 +99,7 @@ def _post_chat(
             "skipped": skipped,
             "paused": paused,
             "load_pending": load_pending,
+            "logged": logged,
             "selector": selector,
             "accepted_offer": accepted_offer,
             "graph": graph_runner,
@@ -203,6 +204,12 @@ def test_web_semantic_draft_offer_acceptance_saves_a_draft_before_any_send(clien
     }
     mocks["consume_offer"].assert_called_once_with(5, ANY)
     mocks["acknowledged"].assert_not_called()
+    mocks["logged"].assert_any_call(
+        "routines",
+        "routine_acknowledged",
+        routine_id=5,
+        event="Morning message",
+    )
     graph_messages = mocks["graph"].call_args.args[0]
     assert any(
         "[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]" in str(message.content)
@@ -229,6 +236,7 @@ def test_web_semantic_draft_offer_survives_a_failed_draft_write(client: TestClie
 
     assert response.status_code == 200
     mocks["consume_offer"].assert_not_called()
+    mocks["logged"].assert_not_called()
 
 
 def test_web_active_draft_keeps_bare_yes_out_of_pending_offer_path(client: TestClient) -> None:
