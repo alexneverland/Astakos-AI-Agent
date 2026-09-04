@@ -513,6 +513,7 @@ def test_pending_messenger_offer_bare_yes_adds_trusted_draft_context() -> None:
                 5: {
                     "event": "Dinner with Partner",
                     "draft_offer": True,
+                    "sent_at": datetime.now(),
                 }
             },
         )
@@ -521,6 +522,47 @@ def test_pending_messenger_offer_bare_yes_adds_trusted_draft_context() -> None:
     selector_mock.assert_not_called()
     graph_messages = graph_mock.stream.call_args.args[0]["messages"]
     assert draft_context in graph_messages
+
+
+def test_pending_messenger_offer_natural_acceptance_adds_trusted_draft_context() -> None:
+    """A natural reply to one offer authorizes a local draft through the selector."""
+    from services.routine_completion_helper import RoutineSelection
+
+    graph_mock = sys.modules["core.graph"].graph
+    selector_mock = sys.modules["services.routine_completion_selector"].select_routine
+    draft_context = types.SimpleNamespace(
+        content="[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]",
+        type="system",
+    )
+
+    with (
+        patch(
+            "services.messenger_intent.is_draft_offer_acceptance",
+            return_value=False,
+        ),
+        patch(
+            "services.routine_completion_context.build_messenger_draft_offer_context",
+            return_value=draft_context,
+        ) as build_draft_context,
+    ):
+        _run_handle_message(
+            "Ναι φίλε κάνε το πιο γλυκό",
+            pending={
+                5: {
+                    "event": "Dinner with Partner",
+                    "draft_offer": True,
+                    "sent_at": datetime.now(),
+                }
+            },
+            selector_return=RoutineSelection(action="draft", routine_id=5),
+        )
+
+    selector_mock.assert_called_once()
+    sys.modules["memory.routine_db"].acknowledge_pending_draft_offer.assert_not_called()
+    build_draft_context.assert_called_once_with("Dinner with Partner")
+    graph_state = graph_mock.stream.call_args.args[0]
+    assert graph_state["routine_draft_offer_authorized"] is True
+    assert 5 in bot.pending_routine_confirmations
 
 
 def test_active_draft_keeps_bare_yes_out_of_pending_offer_path() -> None:

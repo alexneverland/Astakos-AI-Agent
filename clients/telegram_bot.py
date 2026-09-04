@@ -1935,6 +1935,7 @@ def handle_message(user_text: str, chat_id: str):
     routine_completion_context: SystemMessage | None = None
     routine_draft_offer_context: SystemMessage | None = None
     routine_draft_offer_authorized = False
+    routine_draft_offer_to_consume: tuple[int, object] | None = None
     routine_action_consumed = False
 
     if pending_routine_confirmations:
@@ -1982,6 +1983,18 @@ def handle_message(user_text: str, chat_id: str):
             for rid, pdata in pending_routine_confirmations.items()
         }
         active_draft, _, _ = _safe_active_draft_status()
+        draft_offer_ids = frozenset(
+            rid
+            for rid, pdata in pending_routine_confirmations.items()
+            if not active_draft and isinstance(pdata, dict) and pdata.get("draft_offer") is True
+        )
+        selector_candidates = {
+            rid: (
+                f"{event_name}\n[MESSENGER_DRAFT_OFFER]"
+                if rid in draft_offer_ids else event_name
+            )
+            for rid, event_name in pending_candidates.items()
+        }
         accepted_draft_offer = None
         draft_offer_consumed = False
         if not active_draft:
@@ -1990,18 +2003,18 @@ def handle_message(user_text: str, chat_id: str):
                 clean_user_text,
             )
             if accepted_draft_offer is not None:
-                from memory.routine_db import acknowledge_pending_draft_offer
-
                 pending_data = pending_routine_confirmations.get(
                     accepted_draft_offer.routine_id,
                     {},
                 )
-                draft_offer_consumed = acknowledge_pending_draft_offer(
-                    accepted_draft_offer.routine_id,
-                    pending_data.get("sent_at"),
-                )
-                if not draft_offer_consumed:
+                sent_at = pending_data.get("sent_at")
+                if sent_at is None:
                     accepted_draft_offer = None
+                else:
+                    routine_draft_offer_to_consume = (
+                        accepted_draft_offer.routine_id,
+                        sent_at,
+                    )
         if accepted_draft_offer is not None:
             decision = RoutineSelection(
                 action="acknowledge",
@@ -2010,10 +2023,33 @@ def handle_message(user_text: str, chat_id: str):
         else:
             decision = decide_completion(
                 user_text=clean_user_text,
-                candidates=pending_candidates,
+                candidates=selector_candidates,
                 pool="pending",
                 semantic_selector=_completion_selector,
+                draft_offer_ids=draft_offer_ids,
             )
+
+        if decision.action == "draft" and decision.routine_id is not None:
+            from memory.routine_db import acknowledge_pending_draft_offer
+            from services.routine_completion_context import get_pending_messenger_draft_offer
+
+            accepted_draft_offer = get_pending_messenger_draft_offer(
+                pending_routine_confirmations,
+                decision.routine_id,
+            )
+            if accepted_draft_offer is not None:
+                pending_data = pending_routine_confirmations.get(decision.routine_id, {})
+                sent_at = pending_data.get("sent_at")
+                if sent_at is not None:
+                    routine_draft_offer_to_consume = (decision.routine_id, sent_at)
+            if accepted_draft_offer is None or routine_draft_offer_to_consume is None:
+                accepted_draft_offer = None
+                decision = RoutineSelection(action="none", routine_id=None)
+            else:
+                decision = RoutineSelection(
+                    action="acknowledge",
+                    routine_id=decision.routine_id,
+                )
 
         if decision.action == "complete" and decision.routine_id is not None:
             from memory.routine_db import (
@@ -2055,19 +2091,20 @@ def handle_message(user_text: str, chat_id: str):
             pdata = pending_routine_confirmations.get(rid, {})
             ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
 
-            if not draft_offer_consumed:
+            if not draft_offer_consumed and routine_draft_offer_to_consume is None:
                 mark_routine_acknowledged(rid)
                 remove_pending_confirmation(rid)
-            log_event(
-                "routines", "routine_acknowledged",
-                routine_id=rid, event=ev,
-                debug_type="manual_control",
-                debug_source="user_message",
-                debug_effect="routine_changed",
-            )
-            print(f"✅ [Routine Acknowledged]: {pdata}")
-            bus.emit("routine_acknowledged", routine_id=rid, event=ev, channel="telegram")
-            pending_routine_confirmations.pop(rid, None)
+            if routine_draft_offer_to_consume is None:
+                log_event(
+                    "routines", "routine_acknowledged",
+                    routine_id=rid, event=ev,
+                    debug_type="manual_control",
+                    debug_source="user_message",
+                    debug_effect="routine_changed",
+                )
+                print(f"✅ [Routine Acknowledged]: {pdata}")
+                bus.emit("routine_acknowledged", routine_id=rid, event=ev, channel="telegram")
+                pending_routine_confirmations.pop(rid, None)
             from services.routine_completion_context import build_routine_completion_context
             routine_completion_context = build_routine_completion_context()
             if accepted_draft_offer is not None and accepted_draft_offer.routine_id == rid:
@@ -2681,6 +2718,34 @@ def handle_message(user_text: str, chat_id: str):
                                 tool_result_fallbacks.append(tool_content)
         tool_message_collect_ms = int((perf_counter() - tool_collect_started) * 1000)
         _trace.mark_phase("tool_message_collect_ms", tool_message_collect_ms)
+
+        if routine_draft_offer_to_consume and any(
+            looks_like_terminal_messenger_draft_result(result)
+            for result in tool_result_fallbacks
+        ):
+            draft_routine_id, draft_sent_at = routine_draft_offer_to_consume
+            from memory.routine_db import acknowledge_pending_draft_offer
+
+            if acknowledge_pending_draft_offer(draft_routine_id, draft_sent_at):
+                draft_data = pending_routine_confirmations.get(draft_routine_id, {})
+                draft_event = draft_data.get("event", "?") if isinstance(draft_data, dict) else str(draft_data)
+                log_event(
+                    "routines",
+                    "routine_acknowledged",
+                    routine_id=draft_routine_id,
+                    event=draft_event,
+                    debug_type="manual_control",
+                    debug_source="user_message",
+                    debug_effect="routine_changed",
+                )
+                print(f"✅ [Routine Acknowledged]: {draft_data}")
+                bus.emit(
+                    "routine_acknowledged",
+                    routine_id=draft_routine_id,
+                    event=draft_event,
+                    channel="telegram",
+                )
+                pending_routine_confirmations.pop(draft_routine_id, None)
 
         graph_stream_ms = int((perf_counter() - t_graph_0) * 1000)
         _trace.mark_phase("graph_stream_ms", graph_stream_ms)

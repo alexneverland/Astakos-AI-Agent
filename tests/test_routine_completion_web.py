@@ -1,6 +1,7 @@
 """Web integration coverage for natural routine completion and graph continuity."""
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, patch
 
@@ -31,6 +32,7 @@ def _graph_result(*_args: object, **_kwargs: object) -> dict[str, object]:
         "tool_result_fallbacks": [],
         "external_tool_names": [],
         "graph_elapsed_ms": 1,
+        "saved_local_draft": False,
     }
 
 
@@ -43,9 +45,13 @@ def _post_chat(
     catalog_routines: list[dict[str, object]] | None = None,
     accepted_draft_offer: object | None = None,
     active_draft_status: tuple[bool, str, dict | None] = (False, "missing", None),
+    saved_local_draft: bool = False,
 ) -> tuple[object, dict[str, MagicMock]]:
     """Run one Web message under isolated completion and graph dependencies."""
-    graph_runner = MagicMock(side_effect=_graph_result)
+    graph_runner = MagicMock(side_effect=lambda *args, **kwargs: {
+        **_graph_result(*args, **kwargs),
+        "saved_local_draft": saved_local_draft,
+    })
     selector = MagicMock(
         side_effect=selector_returns
         if selector_returns is not None
@@ -66,7 +72,7 @@ def _post_chat(
             "memory.routine_db.load_pending_confirmations",
             return_value=pending or {},
         ) as load_pending,
-        patch("memory.event_log.log_event"),
+        patch("memory.event_log.log_event") as logged,
         patch("services.routine_completion_selector.select_routine", selector),
         patch(
             "services.routine_completion_context.accept_pending_messenger_draft_offer",
@@ -93,6 +99,7 @@ def _post_chat(
             "skipped": skipped,
             "paused": paused,
             "load_pending": load_pending,
+            "logged": logged,
             "selector": selector,
             "accepted_offer": accepted_offer,
             "graph": graph_runner,
@@ -160,9 +167,16 @@ def test_web_bare_draft_offer_acceptance_loads_persisted_offer(client: TestClien
 
     response, mocks = _post_chat(
         client,
-        pending={5: {"event": "Message routine", "draft_offer": True}},
+        pending={
+            5: {
+                "event": "Message routine",
+                "draft_offer": True,
+                "sent_at": datetime.now(),
+            }
+        },
         message="yes",
         accepted_draft_offer=accepted_offer,
+        saved_local_draft=True,
     )
 
     assert response.status_code == 200
@@ -173,6 +187,87 @@ def test_web_bare_draft_offer_acceptance_loads_persisted_offer(client: TestClien
     mocks["acknowledged"].assert_not_called()
     graph_messages = mocks["graph"].call_args.args[0]
     assert draft_context in graph_messages
+
+
+def test_web_bare_draft_offer_survives_a_failed_draft_write(client: TestClient) -> None:
+    """Bare consent leaves the offer retryable until a local draft is saved."""
+    draft_context = SystemMessage(content="[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]")
+    accepted_offer = SimpleNamespace(routine_id=5, context=draft_context)
+
+    response, mocks = _post_chat(
+        client,
+        pending={
+            5: {
+                "event": "Message routine",
+                "draft_offer": True,
+                "sent_at": datetime.now(),
+            }
+        },
+        message="yes",
+        accepted_draft_offer=accepted_offer,
+        saved_local_draft=False,
+    )
+
+    assert response.status_code == 200
+    mocks["consume_offer"].assert_not_called()
+    mocks["logged"].assert_not_called()
+
+
+def test_web_semantic_draft_offer_acceptance_saves_a_draft_before_any_send(client: TestClient) -> None:
+    """A natural response to one persisted offer grants only the local-draft path."""
+    response, mocks = _post_chat(
+        client,
+        pending={
+            5: {
+                "event": "Morning message",
+                "draft_offer": True,
+                "sent_at": datetime.now(),
+            }
+        },
+        message="Ναι φίλε κάνε το πιο γλυκό",
+        selector_returns=[RoutineSelection(action="draft", routine_id=5)],
+        saved_local_draft=True,
+    )
+
+    assert response.status_code == 200
+    assert mocks["selector"].call_args_list[0].args[1] == {
+        5: "Morning message\n[MESSENGER_DRAFT_OFFER]",
+    }
+    mocks["consume_offer"].assert_called_once_with(5, ANY)
+    mocks["acknowledged"].assert_not_called()
+    mocks["logged"].assert_any_call(
+        "routines",
+        "routine_acknowledged",
+        routine_id=5,
+        event="Morning message",
+    )
+    graph_messages = mocks["graph"].call_args.args[0]
+    assert any(
+        "[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]" in str(message.content)
+        for message in graph_messages
+        if isinstance(message, SystemMessage)
+    )
+
+
+def test_web_semantic_draft_offer_survives_a_failed_draft_write(client: TestClient) -> None:
+    """A failed graph run leaves the persisted offer available for a retry."""
+    response, mocks = _post_chat(
+        client,
+        pending={
+            5: {
+                "event": "Morning message",
+                "draft_offer": True,
+                "sent_at": datetime.now(),
+            }
+        },
+        message="Ναι φίλε κάνε το πιο γλυκό",
+        selector_returns=[RoutineSelection(action="draft", routine_id=5)],
+        saved_local_draft=False,
+    )
+
+    assert response.status_code == 200
+    mocks["consume_offer"].assert_not_called()
+    mocks["logged"].assert_not_called()
 
 
 def test_web_active_draft_keeps_bare_yes_out_of_pending_offer_path(client: TestClient) -> None:
@@ -194,6 +289,30 @@ def test_web_active_draft_keeps_bare_yes_out_of_pending_offer_path(client: TestC
 
     assert response.status_code == 200
     mocks["accepted_offer"].assert_not_called()
+    mocks["consume_offer"].assert_not_called()
+
+
+def test_web_active_draft_blocks_semantic_offer_replacement(client: TestClient) -> None:
+    """A pending offer cannot replace an already saved draft through semantic selection."""
+    response, mocks = _post_chat(
+        client,
+        pending={
+            5: {
+                "event": "Morning message",
+                "draft_offer": True,
+                "sent_at": datetime.now(),
+            }
+        },
+        message="Ναι φίλε κάνε το πιο γλυκό",
+        active_draft_status=(True, "active", {"message": "Existing draft"}),
+        selector_returns=[
+            RoutineSelection(action="draft", routine_id=5),
+            RoutineSelection(action="none", routine_id=None),
+        ],
+    )
+
+    assert response.status_code == 200
+    assert mocks["selector"].call_args_list[0].args[1] == {5: "Morning message"}
     mocks["consume_offer"].assert_not_called()
 
 

@@ -8,6 +8,9 @@ from services.gemini import safe_gemini_call
 from services.routine_completion_helper import CandidatePool, RoutineSelection
 
 
+_DRAFT_OFFER_MARKER = "[MESSENGER_DRAFT_OFFER]"
+
+
 def _build_routines_block(candidates: dict[int, str]) -> str:
     """Format the dynamic candidate map for the external selector prompt."""
     return "\n".join(f'- ID {candidate_id}: "{event_name}"' for candidate_id, event_name in candidates.items())
@@ -66,9 +69,11 @@ def select_routine(
     routine_id = parsed["routine_id"]
     if action == "none" and routine_id is None:
         return _none_selection()
-    if action not in ("complete", "acknowledge", "skip_today", "pause"):
+    if action not in ("complete", "acknowledge", "draft", "skip_today", "pause"):
         return _none_selection()
     if type(routine_id) is not int or routine_id not in candidates:
+        return _none_selection()
+    if action == "draft" and _DRAFT_OFFER_MARKER not in candidates[routine_id]:
         return _none_selection()
 
     return RoutineSelection(action=action, routine_id=routine_id)

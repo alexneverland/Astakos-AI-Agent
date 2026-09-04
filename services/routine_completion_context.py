@@ -46,7 +46,20 @@ def accept_pending_messenger_draft_offer(
     if len(pending_confirmations) != 1:
         return None
 
-    routine_id, pending_data = next(iter(pending_confirmations.items()))
+    routine_id, _pending_data = next(iter(pending_confirmations.items()))
+    from services.messenger_intent import is_draft_offer_acceptance
+
+    if not is_draft_offer_acceptance(user_text):
+        return None
+    return get_pending_messenger_draft_offer(pending_confirmations, routine_id)
+
+
+def get_pending_messenger_draft_offer(
+    pending_confirmations: Mapping[int, object],
+    routine_id: int,
+) -> AcceptedMessengerDraftOffer | None:
+    """Return trusted local-draft context for one persisted structured offer."""
+    pending_data = pending_confirmations.get(routine_id)
     if type(routine_id) is not int or not isinstance(pending_data, Mapping):
         return None
     if pending_data.get("draft_offer") is not True:
@@ -55,10 +68,6 @@ def accept_pending_messenger_draft_offer(
     if not isinstance(event_name, str) or not event_name.strip():
         return None
 
-    from services.messenger_intent import is_draft_offer_acceptance
-
-    if not is_draft_offer_acceptance(user_text):
-        return None
     return AcceptedMessengerDraftOffer(
         routine_id=routine_id,
         context=build_messenger_draft_offer_context(event_name.strip()),
