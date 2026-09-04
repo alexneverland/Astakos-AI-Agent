@@ -1027,12 +1027,14 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                         accepted_draft_offer.routine_id,
                         {},
                     )
-                    draft_offer_consumed = acknowledge_pending_draft_offer(
-                        accepted_draft_offer.routine_id,
-                        pending_data.get("sent_at"),
-                    )
-                    if not draft_offer_consumed:
+                    sent_at = pending_data.get("sent_at")
+                    if sent_at is None:
                         accepted_draft_offer = None
+                    else:
+                        routine_draft_offer_to_consume = (
+                            accepted_draft_offer.routine_id,
+                            sent_at,
+                        )
             if accepted_draft_offer is not None:
                 from services.routine_completion_helper import RoutineSelection
 

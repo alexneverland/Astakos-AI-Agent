@@ -513,6 +513,7 @@ def test_pending_messenger_offer_bare_yes_adds_trusted_draft_context() -> None:
                 5: {
                     "event": "Dinner with Partner",
                     "draft_offer": True,
+                    "sent_at": datetime.now(),
                 }
             },
         )

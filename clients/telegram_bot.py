@@ -2003,18 +2003,18 @@ def handle_message(user_text: str, chat_id: str):
                 clean_user_text,
             )
             if accepted_draft_offer is not None:
-                from memory.routine_db import acknowledge_pending_draft_offer
-
                 pending_data = pending_routine_confirmations.get(
                     accepted_draft_offer.routine_id,
                     {},
                 )
-                draft_offer_consumed = acknowledge_pending_draft_offer(
-                    accepted_draft_offer.routine_id,
-                    pending_data.get("sent_at"),
-                )
-                if not draft_offer_consumed:
+                sent_at = pending_data.get("sent_at")
+                if sent_at is None:
                     accepted_draft_offer = None
+                else:
+                    routine_draft_offer_to_consume = (
+                        accepted_draft_offer.routine_id,
+                        sent_at,
+                    )
         if accepted_draft_offer is not None:
             decision = RoutineSelection(
                 action="acknowledge",

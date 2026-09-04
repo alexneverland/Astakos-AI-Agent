@@ -167,9 +167,16 @@ def test_web_bare_draft_offer_acceptance_loads_persisted_offer(client: TestClien
 
     response, mocks = _post_chat(
         client,
-        pending={5: {"event": "Message routine", "draft_offer": True}},
+        pending={
+            5: {
+                "event": "Message routine",
+                "draft_offer": True,
+                "sent_at": datetime.now(),
+            }
+        },
         message="yes",
         accepted_draft_offer=accepted_offer,
+        saved_local_draft=True,
     )
 
     assert response.status_code == 200
@@ -180,6 +187,30 @@ def test_web_bare_draft_offer_acceptance_loads_persisted_offer(client: TestClien
     mocks["acknowledged"].assert_not_called()
     graph_messages = mocks["graph"].call_args.args[0]
     assert draft_context in graph_messages
+
+
+def test_web_bare_draft_offer_survives_a_failed_draft_write(client: TestClient) -> None:
+    """Bare consent leaves the offer retryable until a local draft is saved."""
+    draft_context = SystemMessage(content="[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]")
+    accepted_offer = SimpleNamespace(routine_id=5, context=draft_context)
+
+    response, mocks = _post_chat(
+        client,
+        pending={
+            5: {
+                "event": "Message routine",
+                "draft_offer": True,
+                "sent_at": datetime.now(),
+            }
+        },
+        message="yes",
+        accepted_draft_offer=accepted_offer,
+        saved_local_draft=False,
+    )
+
+    assert response.status_code == 200
+    mocks["consume_offer"].assert_not_called()
+    mocks["logged"].assert_not_called()
 
 
 def test_web_semantic_draft_offer_acceptance_saves_a_draft_before_any_send(client: TestClient) -> None:
