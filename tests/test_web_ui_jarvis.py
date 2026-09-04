@@ -143,7 +143,7 @@ def test_core_states_tied_to_real_lifecycle(index_html_content: str) -> None:
 
     # Speaking: real Audio playback lifecycle
     assert "setCoreState('speaking')" in index_html_content
-    assert "currentAudio = new Audio(audioUrl);" in index_html_content
+    assert "new Audio(audioUrl);" in index_html_content
     assert "await currentAudio.play();" in index_html_content
 
     # Error: real network / catch or audio failures
@@ -176,6 +176,16 @@ def test_live_voice_mode_supports_automatic_turns_and_user_interruption(
     assert "echoCancellation: true" in index_html_content
     assert "noiseSuppression: true" in index_html_content
     assert "window.addEventListener('keydown'" in index_html_content
+
+
+def test_tts_playback_cancels_stale_requests_and_live_replies(index_html_content: str) -> None:
+    """Stopping or replacing speech must not leave stale audio playing."""
+    assert "let ttsPlaybackGeneration = 0;" in index_html_content
+    assert "new AbortController()" in index_html_content
+    assert "stopOnDemandSpeech" in index_html_content
+    assert "URL.revokeObjectURL(activeAudioUrl)" in index_html_content
+    assert "playbackGeneration !== ttsPlaybackGeneration" in index_html_content
+    assert "if (!isLiveVoiceMode || sessionId !== liveSessionId)" in index_html_content
 
 
 def test_fastapi_serves_jarvis_index_html() -> None:

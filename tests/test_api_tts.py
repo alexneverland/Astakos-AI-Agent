@@ -79,3 +79,46 @@ def test_tts_passes_the_active_english_locale_to_google_tts_without_network(
     assert response.content == b"offline-test-audio"
     assert response.headers["content-type"] == "audio/mpeg"
     assert captured == {"text": "Hello", "locale": "en"}
+
+
+def test_google_tts_chunks_utf8_text_that_exceeds_the_request_limit(monkeypatch) -> None:
+    """Cloud TTS requests remain within the byte limit for long Greek replies."""
+    import api.server as api_server
+
+    captured_inputs: list[str] = []
+
+    class FakeTextToSpeech:
+        """Offline substitute for the Cloud TTS module types."""
+
+        class AudioEncoding:
+            MP3 = "mp3"
+
+        @staticmethod
+        def SynthesisInput(*, text: str) -> dict[str, str]:
+            return {"text": text}
+
+        @staticmethod
+        def VoiceSelectionParams(**kwargs: str) -> dict[str, str]:
+            return kwargs
+
+        @staticmethod
+        def AudioConfig(**kwargs: str) -> dict[str, str]:
+            return kwargs
+
+    class FakeClient:
+        """Offline substitute that records each Cloud TTS request."""
+
+        def synthesize_speech(self, *, input, voice, audio_config):
+            captured_inputs.append(input["text"])
+            return SimpleNamespace(audio_content=f"audio-{len(captured_inputs)}".encode())
+
+    monkeypatch.setattr(
+        api_server,
+        "_get_text_to_speech_client",
+        lambda: (FakeTextToSpeech, FakeClient()),
+    )
+    text = "α" * 3_000
+
+    assert api_server._synthesize_speech(text, "el") == b"audio-1audio-2"
+    assert "".join(captured_inputs) == text
+    assert all(len(chunk.encode("utf-8")) <= api_server.MAX_TTS_INPUT_BYTES for chunk in captured_inputs)

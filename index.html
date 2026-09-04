@@ -1070,28 +1070,39 @@
     /* ── TTS Playback Control (On-Demand) ── */
     let currentAudio = null;
     let activeSpeechBtn = null;
+    let activeAudioUrl = null;
+    let activeTtsController = null;
+    let ttsPlaybackGeneration = 0;
+
+    function resetOnDemandSpeechButton() {
+        if (!activeSpeechBtn) return;
+        activeSpeechBtn.innerHTML = '🔊';
+        activeSpeechBtn.classList.remove('speaking-active');
+        activeSpeechBtn = null;
+    }
+
+    function stopOnDemandSpeech(setIdle = true) {
+        ttsPlaybackGeneration += 1;
+        if (activeTtsController) activeTtsController.abort();
+        activeTtsController = null;
+        if (currentAudio && activeSpeechBtn) {
+            currentAudio.pause();
+            currentAudio.onended = null;
+            currentAudio.onerror = null;
+            currentAudio = null;
+        }
+        if (activeAudioUrl) {
+            URL.revokeObjectURL(activeAudioUrl);
+            activeAudioUrl = null;
+        }
+        resetOnDemandSpeechButton();
+        if (setIdle) setCoreState('idle');
+    }
 
     async function toggleSpeakMessage(text, btn) {
-        if (currentAudio && activeSpeechBtn === btn) {
-            currentAudio.pause();
-            currentAudio = null;
-            if (activeSpeechBtn) {
-                activeSpeechBtn.innerHTML = '🔊';
-                activeSpeechBtn.classList.remove('speaking-active');
-                activeSpeechBtn = null;
-            }
-            setCoreState('idle');
+        if (activeSpeechBtn === btn) {
+            stopOnDemandSpeech();
             return;
-        }
-
-        if (currentAudio) {
-            currentAudio.pause();
-            currentAudio = null;
-            if (activeSpeechBtn) {
-                activeSpeechBtn.innerHTML = '🔊';
-                activeSpeechBtn.classList.remove('speaking-active');
-                activeSpeechBtn = null;
-            }
         }
 
         let cleanText = String(text || "")
@@ -1103,6 +1114,10 @@
             .trim();
         if (!cleanText) return;
 
+        stopOnDemandSpeech(false);
+        const playbackGeneration = ++ttsPlaybackGeneration;
+        const controller = new AbortController();
+        activeTtsController = controller;
         activeSpeechBtn = btn;
         btn.innerHTML = '⏹️';
         btn.classList.add('speaking-active');
@@ -1112,41 +1127,36 @@
             const response = await fetch('/tts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: cleanText })
+                body: JSON.stringify({ text: cleanText }),
+                signal: controller.signal,
             });
-            if (!response.ok) {
-                btn.innerHTML = '🔊';
-                btn.classList.remove('speaking-active');
-                activeSpeechBtn = null;
-                setCoreState('error');
-                setTimeout(() => setCoreState('idle'), 3000);
+            if (!response.ok) throw new Error('TTS request failed');
+            const audioBlob = await response.blob();
+            if (playbackGeneration !== ttsPlaybackGeneration) return;
+            const audioUrl = URL.createObjectURL(audioBlob);
+            if (playbackGeneration !== ttsPlaybackGeneration) {
+                URL.revokeObjectURL(audioUrl);
                 return;
             }
-            const audioBlob = await response.blob();
-            const audioUrl = URL.createObjectURL(audioBlob);
-            currentAudio = new Audio(audioUrl);
-            currentAudio.onended = () => {
-                btn.innerHTML = '🔊';
-                btn.classList.remove('speaking-active');
-                activeSpeechBtn = null;
-                URL.revokeObjectURL(audioUrl);
-                currentAudio = null;
+            activeAudioUrl = audioUrl;
+            const audio = new Audio(audioUrl);
+            currentAudio = audio;
+            audio.onended = () => {
+                if (playbackGeneration !== ttsPlaybackGeneration) return;
+                stopOnDemandSpeech(false);
                 setCoreState('idle');
             };
-            currentAudio.onerror = () => {
-                btn.innerHTML = '🔊';
-                btn.classList.remove('speaking-active');
-                activeSpeechBtn = null;
-                currentAudio = null;
+            audio.onerror = () => {
+                if (playbackGeneration !== ttsPlaybackGeneration) return;
+                stopOnDemandSpeech(false);
                 setCoreState('error');
                 setTimeout(() => setCoreState('idle'), 3000);
             };
-            await currentAudio.play();
+            await audio.play();
         } catch (err) {
+            if (playbackGeneration !== ttsPlaybackGeneration || controller.signal.aborted) return;
             console.error('[TTS Error]:', err);
-            btn.innerHTML = '🔊';
-            btn.classList.remove('speaking-active');
-            activeSpeechBtn = null;
+            stopOnDemandSpeech(false);
             setCoreState('error');
             setTimeout(() => setCoreState('idle'), 3000);
         }
@@ -1665,6 +1675,7 @@
     }
 
     function stopCurrentAudioForLiveMode() {
+        stopOnDemandSpeech(false);
         if (!currentAudio) return;
         currentAudio.pause();
         currentAudio.onended = null;
@@ -1728,7 +1739,13 @@
                 body: JSON.stringify({ text }),
             });
             if (!response.ok) throw new Error('TTS request failed');
-            const audioUrl = URL.createObjectURL(await response.blob());
+            const audioBlob = await response.blob();
+            if (!isLiveVoiceMode || sessionId !== liveSessionId) return;
+            const audioUrl = URL.createObjectURL(audioBlob);
+            if (!isLiveVoiceMode || sessionId !== liveSessionId) {
+                URL.revokeObjectURL(audioUrl);
+                return;
+            }
             const audio = new Audio(audioUrl);
             currentAudio = audio;
             audio.onended = () => {
