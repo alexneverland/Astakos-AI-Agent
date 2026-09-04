@@ -3,31 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Astakos — Control Center</title>
+    <title>Astakos — AI Companion</title>
     <style>
         /* ══════════════════════════════════════════════════════
-           RESET & BASE
+           RESET & BASE COLOR PALETTE (Futuristic Companion)
         ══════════════════════════════════════════════════════ */
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         :root {
-            --bg:         #0b0d12;
-            --surface:    #111318;
-            --surface2:   #181c24;
-            --surface3:   #1e2330;
-            --border:     #252b38;
-            --accent:     #00b4d8;
-            --accent2:    #0077b6;
-            --lobster:    #e8380a;
-            --lobster-hi: #ff6a3d;
-            --green:      #4EC9B0;
-            --yellow:     #DCDCAA;
-            --red:        #F44747;
-            --text:       #c8cdd8;
-            --text-dim:   #6b7280;
+            --bg:            #080c14;
+            --surface:       #0e1422;
+            --surface2:      #131b2e;
+            --surface3:      #1a243c;
+            --border:        #212e47;
+            --border-subtle: rgba(42, 58, 88, 0.45);
+            --accent:        #38bdf8;
+            --accent-glow:   rgba(56, 189, 248, 0.4);
+            --accent2:       #0ea5e9;
+            --violet:        #818cf8;
+            --violet-glow:   rgba(129, 140, 248, 0.35);
+            --green:         #34d399;
+            --yellow:        #fbbf24;
+            --red:           #fb7185;
+            --text:          #e2e8f0;
+            --text-dim:      #8190a6;
+            --bubble-ai:     #111827;
+            --bubble-user:   #0f769e;
+            --shadow-soft:   0 14px 36px rgba(0, 0, 0, 0.32);
+            --shadow-core:   0 0 25px rgba(56, 189, 248, 0.25);
         }
 
-        html, body { height: 100%; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
+        html, body {
+            height: 100%;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+        }
         body { display: flex; flex-direction: column; }
 
         /* ══ HEADER ══════════════════════════════════════════ */
@@ -35,23 +47,36 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 16px;
-            height: 48px;
-            background: var(--surface);
+            padding: 0 18px;
+            height: 52px;
+            background: rgba(14, 20, 34, 0.96);
             border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(12px);
             flex-shrink: 0;
             gap: 12px;
+            z-index: 30;
         }
-        #header-left { display: flex; align-items: center; gap: 10px; }
-        #header-logo { font-size: 22px; line-height: 1; }
-        #header-title { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: 0.04em; }
-        #header-subtitle { font-size: 10px; color: var(--text-dim); letter-spacing: 0.06em; }
+        #header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        #header-logo {
+            display: grid;
+            place-items: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: radial-gradient(circle at 35% 35%, rgba(56,189,248,0.25), rgba(129,140,248,0.1) 80%);
+            border: 1px solid rgba(56,189,248,0.35);
+            box-shadow: 0 0 12px rgba(56,189,248,0.2);
+            flex-shrink: 0;
+        }
+        #header-logo svg { width: 20px; height: 20px; }
+        #header-title { font-size: 14px; font-weight: 750; color: #f8fafc; letter-spacing: 0.08em; line-height: 1.1; }
+        #header-subtitle { font-size: 10px; color: var(--text-dim); letter-spacing: 0.06em; margin-top: 2px; }
 
         #ws-status {
-            display: flex; align-items: center; gap: 5px;
+            display: flex; align-items: center; gap: 6px;
             font-size: 11px; color: var(--text-dim);
             padding: 3px 10px; border-radius: 99px;
-            background: var(--surface2); border: 1px solid var(--border);
+            background: rgba(19, 27, 46, 0.8); border: 1px solid var(--border);
         }
         #ws-dot { width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; transition: background 0.3s; }
 
@@ -59,148 +84,443 @@
 
         .hbtn {
             display: flex; align-items: center; gap: 5px;
-            padding: 5px 12px; border-radius: 6px;
+            padding: 5px 12px; height: 32px; border-radius: 6px;
             border: 1px solid var(--border); background: var(--surface2);
             color: var(--text); font-size: 12px; font-weight: 600;
             cursor: pointer; transition: all 0.18s; white-space: nowrap;
         }
-        #toggle-logs-btn:hover { background: #1e2d3d; border-color: var(--accent); color: var(--accent); }
-        #debug-btn { border-color: #3a2d14; color: #f5a623; }
-        #debug-btn:hover { background: #2a1f0a; border-color: #f5a623; }
-        #end-session-btn { border-color: #3d1414; color: var(--red); }
-        #end-session-btn:hover { background: #2a0f0f; border-color: var(--red); }
+        .hbtn:hover { background: var(--surface3); border-color: var(--accent); color: var(--accent); }
+        #end-session-btn { border-color: #3e1616; color: var(--red); }
+        #end-session-btn:hover { background: #290d0d; border-color: var(--red); }
 
         /* ══ MAIN ROW ════════════════════════════════════════ */
-        #main-row { display: flex; flex: 1; overflow: hidden; }
+        #main-row {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            background: radial-gradient(ellipse at 50% 0%, rgba(56,189,248,0.04) 0%, transparent 60%), var(--bg);
+        }
 
         /* ── CHAT PANEL ── */
-        #chat-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        #chat-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 
-        #chat-box {
-            flex: 1; overflow-y: auto;
-            padding: 20px 24px;
-            display: flex; flex-direction: column; gap: 14px;
+        /* ── COMPANION HUD (Astakos Core Focal Point) ── */
+        #companion-hud {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 148px;
+            padding: 14px clamp(16px, 4vw, 48px);
+            background: linear-gradient(180deg, rgba(14,20,34,0.94) 0%, rgba(10,14,24,0.85) 100%);
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(12px);
+            flex-shrink: 0;
+            gap: 16px;
+            z-index: 15;
+            position: relative;
+            overflow: hidden;
         }
-        #chat-box::-webkit-scrollbar { width: 4px; }
+        #companion-hud::before,
+        #companion-hud::after {
+            content: '';
+            position: absolute;
+            pointer-events: none;
+        }
+        #companion-hud::before {
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(56,189,248,0.045) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(56,189,248,0.045) 1px, transparent 1px);
+            background-size: 22px 22px;
+            mask-image: linear-gradient(90deg, transparent, black 20%, black 80%, transparent);
+        }
+        #companion-hud::after {
+            width: min(940px, 92%);
+            height: 1px;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(90deg, transparent, rgba(56,189,248,0.55) 20%, rgba(129,140,248,0.55) 80%, transparent);
+        }
+
+        #core-pod {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            cursor: pointer;
+            user-select: none;
+            transition: transform 0.2s ease;
+            outline: none;
+            border-radius: 12px;
+            padding: 8px 14px;
+            position: relative;
+            z-index: 1;
+        }
+        #core-pod:hover {
+            transform: scale(1.02);
+        }
+        #core-pod:focus-visible {
+            box-shadow: 0 0 0 2px var(--accent);
+        }
+
+        #core-orb-wrapper {
+            position: relative;
+            width: 112px;
+            height: 112px;
+            display: grid;
+            place-items: center;
+            flex-shrink: 0;
+        }
+
+        #core-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            min-width: 0;
+        }
+        #core-title-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #core-name {
+            font-size: 15px;
+            font-weight: 750;
+            letter-spacing: 0.08em;
+            color: #f1f5f9;
+        }
+        #core-mode-badge {
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            padding: 2px 7px;
+            border-radius: 99px;
+            text-transform: uppercase;
+            background: rgba(56,189,248,0.12);
+            color: var(--accent);
+            border: 1px solid rgba(56,189,248,0.3);
+            transition: all 0.25s ease;
+        }
+        #core-mode-badge.badge-listening {
+            background: rgba(45,212,191,0.15);
+            color: #2dd4bf;
+            border-color: rgba(45,212,191,0.45);
+            box-shadow: 0 0 10px rgba(45,212,191,0.25);
+        }
+        #core-mode-badge.badge-processing {
+            background: rgba(245,158,11,0.15);
+            color: #fbbf24;
+            border-color: rgba(245,158,11,0.45);
+            box-shadow: 0 0 10px rgba(245,158,11,0.2);
+        }
+        #core-mode-badge.badge-speaking {
+            background: rgba(129,140,248,0.15);
+            color: #a5b4fc;
+            border-color: rgba(129,140,248,0.45);
+            box-shadow: 0 0 10px rgba(129,140,248,0.25);
+        }
+        #core-mode-badge.badge-error {
+            background: rgba(244,63,94,0.15);
+            color: #fda4af;
+            border-color: rgba(244,63,94,0.45);
+        }
+        #core-subtitle {
+            font-size: 11px;
+            color: var(--text-dim);
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+        }
+        #core-hint {
+            font-size: 10px;
+            color: rgba(125,211,252,0.78);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        /* ── CHAT BOX & MESSAGES ── */
+        #chat-box {
+            flex: 1;
+            overflow-y: auto;
+            padding: 22px clamp(16px, 4vw, 54px);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            scroll-behavior: smooth;
+        }
+        #chat-box::before { content: ""; margin-top: auto; }
+        #chat-box::-webkit-scrollbar { width: 5px; }
         #chat-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 
         .msg {
-            max-width: 82%; padding: 10px 14px; border-radius: 12px;
-            line-height: 1.55; font-size: 14px; position: relative; word-break: break-word;
+            width: fit-content;
+            max-width: min(76ch, 80%);
+            padding: 12px 16px;
+            border-radius: 10px;
+            line-height: 1.58;
+            font-size: 14px;
+            position: relative;
+            word-break: break-word;
+            box-shadow: var(--shadow-soft);
         }
         .msg-user {
             align-self: flex-end;
-            background: linear-gradient(135deg, var(--accent2) 0%, var(--accent) 100%);
-            color: #fff; border-bottom-right-radius: 3px;
+            background: linear-gradient(145deg, var(--bubble-user), #0891b2);
+            color: #ffffff;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-bottom-right-radius: 3px;
         }
         .msg-ai {
             align-self: flex-start;
-            background: var(--surface2); color: var(--text);
-            border: 1px solid var(--border); border-bottom-left-radius: 3px;
+            background: var(--bubble-ai);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-bottom-left-radius: 3px;
+            padding-right: 64px; /* room for action buttons */
         }
+        .msg strong { color: #ffffff; font-weight: 700; }
+        .msg a { color: #7dd3fc; text-decoration: none; border-bottom: 1px solid rgba(125,211,252,0.4); }
+        .msg a:hover { border-bottom-color: #7dd3fc; }
+
         .agent-label {
-            display: block; font-size: 10px; font-weight: 700;
-            letter-spacing: 0.08em; color: var(--accent);
-            margin-bottom: 4px; text-transform: uppercase;
+            display: inline-flex;
+            width: auto;
+            margin: 0 0 8px;
+            padding: 2px 7px;
+            border-radius: 999px;
+            background: rgba(56,189,248,0.09);
+            color: var(--accent);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
         }
-        .msg-user .agent-label { color: rgba(255,255,255,0.65); }
+        .msg-user .agent-label { color: rgba(255,255,255,0.75); background: rgba(255,255,255,0.12); }
 
-        .copy-btn {
-            position: absolute; top: 6px; right: 6px;
-            background: rgba(0,0,0,0.4); color: #fff; border: none;
-            border-radius: 4px; padding: 2px 6px; font-size: 11px;
-            cursor: pointer; opacity: 0; transition: opacity 0.2s;
+        /* Message Action Buttons (Speaker & Copy) */
+        .msg-action-group {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            opacity: 0.4;
+            transition: opacity 0.2s ease;
         }
-        .msg:hover .copy-btn { opacity: 1; }
-        .copy-btn:hover { background: var(--accent2); }
+        .msg:hover .msg-action-group,
+        .msg:focus-within .msg-action-group {
+            opacity: 1;
+        }
+        .msg-action-btn {
+            width: 26px;
+            height: 24px;
+            display: grid;
+            place-items: center;
+            border-radius: 5px;
+            background: rgba(3, 7, 18, 0.7);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: var(--text);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .msg-action-btn:hover {
+            background: var(--surface3);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .msg-action-btn.speaking-active {
+            background: rgba(129,140,248,0.25);
+            border-color: #818cf8;
+            color: #c4b5fd;
+            animation: speakBtnPulse 0.8s ease-in-out infinite alternate;
+        }
+        @keyframes speakBtnPulse {
+            0% { transform: scale(0.96); box-shadow: 0 0 6px rgba(129,140,248,0.3); }
+            100% { transform: scale(1.06); box-shadow: 0 0 12px rgba(129,140,248,0.7); }
+        }
 
-        .chat-img { max-width: 100%; border-radius: 8px; margin-top: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+        .chat-img { max-width: 100%; border-radius: 8px; margin-top: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.45); }
 
         .loading {
-            align-self: flex-start; font-size: 13px; color: var(--text-dim);
-            font-style: italic; display: flex; align-items: center; gap: 7px;
+            align-self: flex-start;
+            font-size: 13px;
+            color: var(--text-dim);
+            margin-left: clamp(4px, 2vw, 20px);
+            padding: 8px 14px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: rgba(17, 24, 39, 0.85);
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         .loading::before {
             content: ''; width: 8px; height: 8px; border-radius: 50%;
             background: var(--accent); display: inline-block;
+            box-shadow: 0 0 8px var(--accent);
             animation: pulse-dot 1s infinite;
         }
-        @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
+        @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.35;transform:scale(0.7)} }
 
         /* ── INPUT CONTAINER ── */
         #input-container {
-            padding: 12px 16px;
-            background: var(--surface);
-            border-top: 1px solid var(--border);
+            padding: 12px clamp(14px, 3vw, 48px) 16px;
+            background: linear-gradient(180deg, rgba(8,12,20,0) 0%, rgba(8,12,20,0.92) 22%, var(--surface) 100%);
+            border-top: 1px solid rgba(33, 46, 71, 0.8);
             flex-shrink: 0;
         }
-
-        #astakos-drawer {
-            display: none;
-            align-items: center; justify-content: center;
-            position: relative;
-            background: linear-gradient(to bottom, var(--surface2), var(--surface));
-            border: 1px solid var(--border); border-radius: 10px;
-            margin-bottom: 10px; height: 300px; overflow: hidden;
+        #input-area {
+            max-width: 1180px;
+            margin: 0 auto;
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
         }
-        #astakos-drawer::before {
-            content: ''; position: absolute; inset: 0;
-            background: radial-gradient(ellipse at 50% 80%, rgba(232,56,10,0.07) 0%, transparent 65%);
-            pointer-events: none;
-        }
-
-        #lobster-svg { height: 290px; width: auto; transition: all 0.3s; position: relative; z-index: 1; }
-
-        #voice-btn-large {
-            position: absolute; bottom: 12px; left: 14px;
-            width: 44px; height: 44px; border-radius: 50%;
-            background: var(--accent2); color: white; border: none;
-            font-size: 20px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 4px 14px rgba(0,119,182,0.5);
-            transition: all 0.2s; z-index: 2;
-        }
-        #voice-btn-large:hover { background: var(--accent); transform: scale(1.06); }
-
-        #input-area { display: flex; align-items: center; gap: 8px; }
 
         .input-btn {
-            background: var(--surface2); color: var(--text);
-            border: 1px solid var(--border); padding: 0 13px;
-            height: 42px; border-radius: 8px; cursor: pointer;
-            font-size: 16px; transition: all 0.18s;
-            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+            height: 44px;
+            min-width: 44px;
+            padding: 0;
+            background: var(--surface2);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.18s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
         }
         .input-btn:hover { border-color: var(--accent); background: var(--surface3); }
-        #trigger-voice-btn.active { background: rgba(244,71,71,0.15); border-color: var(--red); color: var(--red); }
+
+        #live-voice-btn.live-active {
+            background: rgba(45, 212, 191, 0.16);
+            border-color: #2dd4bf;
+            color: #99f6e4;
+        }
+
+        #trigger-voice-btn.mic-recording {
+            background: rgba(244,63,94,0.2) !important;
+            border-color: var(--red) !important;
+            color: var(--red) !important;
+            animation: micPulse 1.2s ease-in-out infinite;
+        }
+
+        #live-voice-exit-btn {
+            display: none;
+        }
+
+        body.live-voice-active {
+            overflow: hidden;
+        }
+        body.live-voice-active #companion-hud {
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+            min-height: 100dvh;
+            background: rgba(3, 7, 18, 0.96);
+        }
+        body.live-voice-active #core-pod {
+            transform: scale(1.35);
+            cursor: default;
+        }
+        body.live-voice-active #core-hint {
+            color: #99f6e4;
+        }
+        body.live-voice-active #live-voice-exit-btn {
+            display: inline-flex;
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            align-items: center;
+            justify-content: center;
+            min-height: 40px;
+            padding: 0 14px;
+            border: 1px solid rgba(148, 163, 184, 0.5);
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.88);
+            color: var(--text);
+            font: inherit;
+            cursor: pointer;
+        }
+        body.live-voice-active #live-voice-exit-btn:hover,
+        body.live-voice-active #live-voice-exit-btn:focus-visible {
+            border-color: #fda4af;
+            color: #fecdd3;
+        }
+        body.live-voice-active #chat-box,
+        body.live-voice-active #input-container {
+            opacity: 0.18;
+            pointer-events: none;
+        }
+        @keyframes micPulse {
+            0% { box-shadow: 0 0 0 0 rgba(244,63,94,0.7); }
+            70% { box-shadow: 0 0 0 12px rgba(244,63,94,0); }
+            100% { box-shadow: 0 0 0 0 rgba(244,63,94,0); }
+        }
 
         #user-input {
-            flex: 1; min-height: 42px; max-height: 200px; padding: 10px 14px;
-            background: var(--surface2); border: 1px solid var(--border);
-            border-radius: 8px; color: var(--text); font-size: 14px;
-            outline: none; transition: border-color 0.2s; min-width: 0;
-            resize: none; overflow-y: hidden; line-height: 1.4;
+            flex: 1;
+            min-height: 44px;
+            max-height: 200px;
+            padding: 11px 14px;
+            background: #0b101c;
+            border: 1px solid #24324d;
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            min-width: 0;
+            resize: none;
+            overflow-y: hidden;
+            line-height: 1.45;
             font-family: inherit;
         }
-        #user-input:focus { border-color: var(--accent); }
+        #user-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
+        }
         #user-input::placeholder { color: var(--text-dim); }
 
         #send-btn {
-            height: 42px; padding: 0 18px;
-            background: var(--accent2); color: #fff; border: none;
-            border-radius: 8px; cursor: pointer; font-weight: 700;
-            font-size: 13px; letter-spacing: 0.04em;
-            transition: all 0.18s; flex-shrink: 0;
+            height: 44px;
+            min-width: 110px;
+            padding: 0 18px;
+            background: linear-gradient(145deg, #0284c7, #0ea5e9);
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: 0.04em;
+            transition: all 0.18s;
+            flex-shrink: 0;
         }
-        #send-btn:hover { background: var(--accent); }
+        #send-btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
 
-        #file-label { font-size: 11px; color: var(--green); margin-top: 6px; margin-left: 4px; font-style: italic; }
+        #file-label {
+            max-width: 1180px;
+            margin: 7px auto 0;
+            font-size: 11px;
+            color: var(--green);
+            font-style: italic;
+        }
 
-        /* ── TERMINAL PANEL ── */
+        /* ── TERMINAL PANEL (Logs Sidebar) ── */
         #terminal-panel {
-            width: 360px; flex-shrink: 0; display: flex; flex-direction: column;
-            background: #070a0f; border-left: 1px solid var(--border);
-            transition: width 0.25s ease; overflow: hidden;
+            width: 420px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            background: #05080f;
+            border-left: 1px solid var(--border);
+            transition: width 0.25s ease;
+            overflow: hidden;
         }
         #terminal-panel.hidden-panel { width: 0 !important; border: none !important; }
 
@@ -219,401 +539,238 @@
         }
         #log-box {
             flex: 1; padding: 12px; overflow-y: auto;
-            font-family: 'Consolas', monospace; font-size: 12px;
-            color: #9ca3af; white-space: pre-wrap; word-wrap: break-word; line-height: 1.5;
+            font-family: 'Consolas', monospace; font-size: 11px;
+            color: #94a3b8; white-space: pre-wrap; word-wrap: break-word; line-height: 1.5;
         }
         #log-box::-webkit-scrollbar { width: 4px; }
-        #log-box::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 99px; }
+        #log-box::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 99px; }
 
-        /* ══ SVG ANIMATIONS ══════════════════════════════════ */
-        @keyframes blink { 0%,85%,100%{transform:scaleY(1)} 90%{transform:scaleY(0.06)} }
-        .eye-blink { animation: blink 3.8s infinite; transform-box:fill-box; transform-origin:center; }
-
-        @keyframes ant-l { 0%,100%{transform:rotate(0deg)} 50%{transform:rotate(5deg)} }
-        @keyframes ant-r { 0%,100%{transform:rotate(0deg)} 50%{transform:rotate(-5deg)} }
-        .ant-idle-l { animation: ant-l 2.6s infinite ease-in-out; transform-box:fill-box; transform-origin:bottom center; }
-        .ant-idle-r { animation: ant-r 2.6s 0.5s infinite ease-in-out; transform-box:fill-box; transform-origin:bottom center; }
-
-        @keyframes bow-shine { 0%,100%{opacity:1} 50%{opacity:0.75} }
-        .bow-idle { animation: bow-shine 3s infinite ease-in-out; }
-
-        @keyframes ant-wob-l { 0%,100%{transform:rotate(0deg)} 25%{transform:rotate(-12deg)} 75%{transform:rotate(10deg)} }
-        @keyframes ant-wob-r { 0%,100%{transform:rotate(0deg)} 25%{transform:rotate(12deg)} 75%{transform:rotate(-10deg)} }
-        .ant-listen-l { animation: ant-wob-l 0.65s infinite ease-in-out; transform-box:fill-box; transform-origin:bottom center; }
-        .ant-listen-r { animation: ant-wob-r 0.65s 0.1s infinite ease-in-out; transform-box:fill-box; transform-origin:bottom center; }
-
-        @keyframes ring-out { 0%{r:8px;opacity:0.9} 100%{r:22px;opacity:0} }
-        .ear-ring1 { animation: ring-out 1.1s 0s infinite ease-out; }
-        .ear-ring2 { animation: ring-out 1.1s 0.4s infinite ease-out; }
-
-        @keyframes claw-raise { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
-        .claw-listen-l { animation: claw-raise 0.8s 0s infinite ease-in-out; transform-box:fill-box; transform-origin:center; }
-        .claw-listen-r { animation: claw-raise 0.8s 0.3s infinite ease-in-out; transform-box:fill-box; transform-origin:center; }
-
-        @keyframes look-up { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-4px)} }
-        .pupil-think { animation: look-up 1.8s infinite; transform-box:fill-box; transform-origin:center; }
-
-        @keyframes bubble-up { 0%,100%{transform:translateY(0);opacity:0.8} 50%{transform:translateY(-8px);opacity:1} }
-        .think-group { animation: bubble-up 1.8s infinite ease-in-out; transform-box:fill-box; transform-origin:center; }
-
-        @keyframes mouth-speak { 0%,100%{d:path("M 108 196 Q 140 202 172 196")} 50%{d:path("M 108 196 Q 140 218 172 196")} }
-        .mouth-speak { animation: mouth-speak 0.38s infinite ease-in-out; }
-
-        @keyframes wave-out { 0%{opacity:0.9;transform:scaleX(1)} 100%{opacity:0;transform:scaleX(1.5)} }
-        .sw1 { animation: wave-out 0.8s 0s infinite ease-out; transform-box:fill-box; transform-origin:left center; }
-        .sw2 { animation: wave-out 0.8s 0.27s infinite ease-out; transform-box:fill-box; transform-origin:left center; }
-        .sw3 { animation: wave-out 0.8s 0.54s infinite ease-out; transform-box:fill-box; transform-origin:left center; }
-
-        @keyframes body-bonce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
-        .speak-body { animation: body-bonce 0.38s infinite ease-in-out; transform-box:fill-box; transform-origin:center; }
-
-        @keyframes claw-wave-l { 0%,100%{transform:rotate(0deg)} 50%{transform:rotate(-10deg)} }
-        @keyframes claw-wave-r { 0%,100%{transform:rotate(0deg)} 50%{transform:rotate(10deg)} }
-        .claw-speak-l { animation: claw-wave-l 0.38s infinite ease-in-out; transform-box:fill-box; transform-origin:right bottom; }
-        .claw-speak-r { animation: claw-wave-r 0.38s infinite ease-in-out; transform-box:fill-box; transform-origin:left bottom; }
-
-        #lobster-svg .s { display: none; }
-        #lobster-svg .s.on { display: block; }
-
-        @keyframes glow-idle   { 0%,100%{filter:drop-shadow(0 0 6px #007acc88)} 50%{filter:drop-shadow(0 0 12px #007acccc)} }
-        @keyframes glow-listen { 0%,100%{filter:drop-shadow(0 0 8px #4EC9B088)} 50%{filter:drop-shadow(0 0 18px #4EC9B0dd)} }
-        @keyframes glow-think  { 0%,100%{filter:drop-shadow(0 0 6px #DCDCAA66)} 50%{filter:drop-shadow(0 0 16px #DCDCAAcc)} }
-        @keyframes glow-speak  { 0%,100%{filter:drop-shadow(0 0 8px #f0502088)} 50%{filter:drop-shadow(0 0 20px #f05020dd)} }
-
-        #lobster-svg.idle      { animation: glow-idle   2s infinite ease-in-out; }
-        #lobster-svg.listening { animation: glow-listen 0.9s infinite ease-in-out; }
-        #lobster-svg.thinking  { animation: glow-think  1.8s infinite ease-in-out; }
-        #lobster-svg.speaking  { animation: glow-speak  0.38s infinite ease-in-out; }
-
-        .recording-pulse { background: var(--red) !important; animation: rec-pulse 1.5s infinite; }
-        @keyframes rec-pulse {
-            0%   { box-shadow: 0 0 0 0 rgba(244,71,71,0.7); }
-            70%  { box-shadow: 0 0 0 18px rgba(244,71,71,0); }
-            100% { box-shadow: 0 0 0 0 rgba(244,71,71,0); }
+        /* ══════════════════════════════════════════════════════
+           ASTAKOS CORE SVG & STATE ANIMATIONS
+        ══════════════════════════════════════════════════════ */
+        .core-orbit {
+            transform-origin: 60px 60px;
+        }
+        .core-particles-outer, .core-particles-middle {
+            transform-origin: 60px 60px;
+        }
+        .core-nucleus {
+            transform-origin: 60px 60px;
+            transition: fill 0.4s ease, filter 0.4s ease;
         }
 
-        /* ── 2026 conversational workspace refresh ── */
-        :root {
-            --bg: #090d14;
-            --surface: #101620;
-            --surface2: #151d2a;
-            --surface3: #1b2636;
-            --border: #263245;
-            --accent: #38bdf8;
-            --accent2: #0f8fc0;
-            --lobster: #f0522a;
-            --lobster-hi: #ff8a5f;
-            --green: #34d399;
-            --yellow: #fbbf24;
-            --red: #fb7185;
-            --text: #e5edf7;
-            --text-dim: #8b99ad;
-            --bubble-ai: #141c29;
-            --bubble-user: #0e8fc0;
-            --shadow-soft: 0 14px 36px rgba(0,0,0,.24);
+        /* State 1: IDLE */
+        .state-idle .core-orbit-outer {
+            animation: coreRotateCW 26s linear infinite;
+        }
+        .state-idle .core-particles-outer {
+            animation: coreRotateCW 26s linear infinite;
+        }
+        .state-idle .core-orbit-middle {
+            animation: coreRotateCCW 18s linear infinite;
+        }
+        .state-idle .core-particles-middle {
+            animation: coreRotateCCW 18s linear infinite;
+        }
+        .state-idle .core-orbit-inner {
+            animation: coreRotateCW 12s linear infinite;
+        }
+        .state-idle .core-nucleus {
+            animation: coreBreathe 4.5s ease-in-out infinite;
+            fill: url(#nucleusGradIdle);
+        }
+        .state-idle .core-aura {
+            animation: auraPulse 4.5s ease-in-out infinite;
+            fill: url(#nucleusGradIdle);
         }
 
-        html, body {
-            background: var(--bg);
-            color: var(--text);
+        /* State 2: LISTENING */
+        .state-listening .core-orbit-outer {
+            stroke: #2dd4bf;
+            animation: coreRotateCW 8s linear infinite;
+        }
+        .state-listening .core-orbit-middle {
+            stroke: #38bdf8;
+            animation: coreRotateCCW 6s linear infinite;
+        }
+        .state-listening .core-nucleus {
+            fill: url(#nucleusGradListen);
+            animation: coreListenPulse 1.1s ease-in-out infinite alternate;
+        }
+        .state-listening .core-aura {
+            fill: url(#nucleusGradListen);
+            animation: auraListen 1.1s ease-in-out infinite alternate;
+        }
+        .state-listening .core-sonar-ring {
+            animation: coreSonar 1.4s ease-out infinite;
         }
 
-        #header {
-            height: 58px;
-            padding: 0 18px;
-            background: rgba(16,22,32,.96);
-            border-bottom: 1px solid var(--border);
-            box-shadow: 0 8px 26px rgba(0,0,0,.24);
-            z-index: 20;
+        /* State 3: PROCESSING */
+        .state-processing .core-orbit-outer {
+            stroke: #38bdf8;
+            stroke-dasharray: 16 8 8 8;
+            animation: coreRotateCW 2.4s linear infinite;
         }
-        #header-left {
-            min-width: 0;
+        .state-processing .core-orbit-middle {
+            stroke: #f59e0b;
+            stroke-dasharray: 24 12 12 12;
+            animation: coreRotateCCW 1.8s linear infinite;
         }
-        #header-logo {
-            display: grid;
-            place-items: center;
-            width: 34px;
-            height: 34px;
-            border-radius: 8px;
-            background: rgba(240,82,42,.1);
-            border: 1px solid rgba(240,82,42,.22);
-            font-size: 20px;
+        .state-processing .core-particles-outer,
+        .state-processing .core-particles-middle {
+            animation: coreRotateCW 2.4s linear infinite;
         }
-        #header-title {
-            color: var(--text);
-            letter-spacing: .03em;
-            line-height: 1.1;
+        .state-processing .core-nucleus {
+            fill: url(#nucleusGradProcess);
+            animation: coreProcessPulse 1.1s ease-in-out infinite alternate;
         }
-        #header-subtitle {
-            margin-top: 3px;
-            color: var(--text-dim);
-            letter-spacing: .04em;
-        }
-        #ws-status {
-            background: #0b1220;
-            border-color: var(--border);
-            color: var(--text-dim);
-        }
-        #header-buttons {
-            gap: 8px;
-        }
-        .hbtn {
-            height: 34px;
-            padding: 0 12px;
-            border-radius: 8px;
-            background: #111a28;
-            box-shadow: none;
+        .state-processing .core-aura {
+            fill: url(#nucleusGradProcess);
+            opacity: 0.6;
         }
 
-        #main-row {
-            background:
-                linear-gradient(180deg, rgba(56,189,248,.04), transparent 180px),
-                var(--bg);
+        /* State 4: SPEAKING */
+        .state-speaking .core-orbit-outer {
+            stroke: #818cf8;
+            animation: coreRotateCW 12s linear infinite;
+        }
+        .state-speaking .core-orbit-middle {
+            stroke: #38bdf8;
+            animation: coreRotateCCW 9s linear infinite;
+        }
+        .state-speaking .core-nucleus {
+            fill: url(#nucleusGradSpeak);
+            animation: coreSpeakPulse 0.8s ease-in-out infinite alternate;
+        }
+        .state-speaking .core-aura {
+            fill: url(#nucleusGradSpeak);
+        }
+        .state-speaking .core-waveform {
+            opacity: 1;
+            transition: opacity 0.3s ease;
+        }
+        .state-speaking .wb1 { animation: waveOscillate 0.5s ease-in-out infinite alternate; }
+        .state-speaking .wb2 { animation: waveOscillate 0.65s ease-in-out 0.1s infinite alternate; }
+        .state-speaking .wb3 { animation: waveOscillate 0.45s ease-in-out 0.05s infinite alternate; }
+        .state-speaking .wb4 { animation: waveOscillate 0.6s ease-in-out 0.15s infinite alternate; }
+        .state-speaking .wb5 { animation: waveOscillate 0.52s ease-in-out 0.2s infinite alternate; }
+
+        /* State 5: ERROR */
+        .state-error .core-orbit-outer {
+            stroke: #f43f5e;
+            animation: coreRotateCW 32s linear infinite;
+        }
+        .state-error .core-orbit-middle {
+            stroke: #fb7185;
+        }
+        .state-error .core-nucleus {
+            fill: url(#nucleusGradError);
+            animation: coreErrorGlow 2s ease-in-out infinite;
+        }
+        .state-error .core-aura {
+            fill: url(#nucleusGradError);
+            opacity: 0.5;
         }
 
-        #chat-panel {
-            min-width: 0;
-            background:
-                radial-gradient(circle at 18% 0%, rgba(240,82,42,.07), transparent 28%),
-                radial-gradient(circle at 80% 0%, rgba(56,189,248,.08), transparent 32%);
+        /* Keyframe definitions */
+        @keyframes coreRotateCW { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes coreRotateCCW { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+        @keyframes coreBreathe {
+            0%, 100% { transform: scale(0.95); opacity: 0.88; }
+            50% { transform: scale(1.05); opacity: 1; filter: drop-shadow(0 0 10px rgba(56,189,248,0.7)); }
+        }
+        @keyframes auraPulse {
+            0%, 100% { transform: scale(0.92); opacity: 0.35; }
+            50% { transform: scale(1.08); opacity: 0.6; }
+        }
+        @keyframes coreListenPulse {
+            0% { transform: scale(0.92); filter: drop-shadow(0 0 8px rgba(45,212,191,0.6)); }
+            100% { transform: scale(1.12); filter: drop-shadow(0 0 18px rgba(45,212,191,0.95)); }
+        }
+        @keyframes auraListen {
+            0% { transform: scale(0.9); opacity: 0.4; }
+            100% { transform: scale(1.15); opacity: 0.75; }
+        }
+        @keyframes coreSonar {
+            0% { r: 24px; opacity: 0.9; stroke-width: 2px; }
+            100% { r: 52px; opacity: 0; stroke-width: 0.5px; }
+        }
+        @keyframes coreProcessPulse {
+            0% { transform: scale(0.94); filter: drop-shadow(0 0 8px rgba(245,158,11,0.6)); }
+            100% { transform: scale(1.08); filter: drop-shadow(0 0 16px rgba(56,189,248,0.85)); }
+        }
+        @keyframes coreSpeakPulse {
+            0% { transform: scale(0.96); filter: drop-shadow(0 0 8px rgba(129,140,248,0.6)); }
+            100% { transform: scale(1.08); filter: drop-shadow(0 0 18px rgba(129,140,248,0.9)); }
+        }
+        @keyframes waveOscillate {
+            0% { y1: 56px; y2: 64px; }
+            100% { y1: 44px; y2: 76px; }
+        }
+        @keyframes coreErrorGlow {
+            0%, 100% { transform: scale(0.98); filter: drop-shadow(0 0 8px rgba(244,63,94,0.6)); }
+            50% { transform: scale(1.04); filter: drop-shadow(0 0 14px rgba(244,63,94,0.9)); }
         }
 
-        #chat-box {
-            gap: 16px;
-            padding: 22px clamp(16px, 4vw, 58px);
-            scroll-behavior: smooth;
-        }
-        #chat-box::before {
-            content: "";
-            margin-top: auto;
-        }
-
-        .msg {
-            width: fit-content;
-            max-width: min(76ch, 78%);
-            padding: 12px 14px;
-            border-radius: 10px;
-            line-height: 1.58;
-            font-size: 14px;
-            box-shadow: var(--shadow-soft);
-        }
-        .msg-user {
-            background: linear-gradient(145deg, var(--bubble-user), #0aa7d4);
-            border: 1px solid rgba(255,255,255,.16);
-            border-bottom-right-radius: 4px;
-        }
-        .msg-ai {
-            background: var(--bubble-ai);
-            border: 1px solid var(--border);
-            border-bottom-left-radius: 4px;
-        }
-        .msg strong {
-            color: #ffffff;
-            font-weight: 750;
-        }
-        .msg a {
-            color: #7dd3fc;
-            text-decoration: none;
-            border-bottom: 1px solid rgba(125,211,252,.45);
-        }
-        .msg a:hover {
-            border-bottom-color: #7dd3fc;
-        }
-        .agent-label {
-            display: inline-flex;
-            width: auto;
-            margin: 0 0 7px;
-            padding: 2px 7px;
-            border-radius: 999px;
-            background: rgba(56,189,248,.09);
-            color: var(--accent);
-            font-size: 10px;
-            letter-spacing: .06em;
-        }
-        .msg-user .agent-label {
-            color: rgba(255,255,255,.78);
-            background: rgba(255,255,255,.13);
-        }
-        .copy-btn {
-            top: 7px;
-            right: 7px;
-            border-radius: 6px;
-            background: rgba(2,6,23,.62);
+        /* Reduced Motion Media Query */
+        @media (prefers-reduced-motion: reduce) {
+            .core-orbit,
+            .core-particles-outer,
+            .core-particles-middle,
+            .core-nucleus,
+            .core-aura,
+            .core-sonar-ring,
+            .wave-bar,
+            .loading::before,
+            #trigger-voice-btn.mic-recording,
+            .msg-action-btn.speaking-active {
+                animation: none !important;
+                transition: none !important;
+            }
         }
 
-        .loading {
-            margin-left: clamp(4px, 2vw, 20px);
-            padding: 9px 12px;
-            border: 1px solid var(--border);
-            border-radius: 999px;
-            background: rgba(16,22,32,.8);
-            font-style: normal;
-        }
-
-        #input-container {
-            padding: 12px clamp(14px, 4vw, 58px) 16px;
-            background: linear-gradient(180deg, rgba(9,13,20,0), rgba(9,13,20,.88) 18%, var(--surface) 100%);
-            border-top: 1px solid rgba(38,50,69,.75);
-        }
-        #input-area {
-            max-width: 1180px;
-            margin: 0 auto;
-            align-items: flex-end;
-            gap: 9px;
-        }
-        .input-btn,
-        #send-btn {
-            height: 46px;
-            border-radius: 8px;
-            box-shadow: none;
-        }
-        .input-btn {
-            min-width: 46px;
-            background: #101827;
-        }
-        #user-input {
-            min-height: 46px;
-            max-height: 190px;
-            padding: 12px 14px;
-            border-radius: 8px;
-            background: #0d1420;
-            border-color: #2b3850;
-            color: var(--text);
-        }
-        #user-input:focus {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(56,189,248,.12);
-        }
-        #send-btn {
-            min-width: 124px;
-            background: linear-gradient(145deg, #0e8fc0, #0ba8d5);
-        }
-        #send-btn:hover {
-            transform: none;
-            filter: brightness(1.06);
-        }
-        #file-label {
-            max-width: 1180px;
-            margin: 7px auto 0;
-            color: var(--green);
-        }
-
-        #astakos-drawer {
-            max-width: 1180px;
-            margin: 0 auto 12px;
-            border-radius: 8px;
-            height: 260px;
-            background: #0f1724;
-        }
-        #lobster-svg {
-            height: 248px;
-        }
-
-        #terminal-panel {
-            width: 430px;
-            background: #070b12;
-            border-left-color: var(--border);
-        }
-        #terminal-header {
-            height: 44px;
-            background: #101620;
-        }
-        #log-box {
-            font-size: 11px;
-            line-height: 1.45;
-        }
-
+        /* ── RESPONSIVE STYLES ── */
         @media (max-width: 980px) {
-            #header {
-                height: auto;
-                min-height: 58px;
-                padding: 9px 10px;
-                flex-wrap: wrap;
-            }
-            #ws-status {
-                order: 3;
-                width: 100%;
-                justify-content: center;
-            }
-            #header-buttons {
-                margin-left: auto;
-            }
-            .hbtn {
-                padding: 0 10px;
-                font-size: 11px;
-            }
+            #companion-hud { min-height: 128px; }
             #terminal-panel {
                 position: fixed;
                 right: 0;
-                top: 58px;
+                top: 52px;
                 bottom: 0;
                 width: min(92vw, 420px);
-                z-index: 30;
-                box-shadow: -18px 0 40px rgba(0,0,0,.35);
+                z-index: 40;
+                box-shadow: -18px 0 40px rgba(0,0,0,0.45);
             }
-            #terminal-panel.hidden-panel {
-                width: 0 !important;
-            }
-            .msg {
-                max-width: 88%;
-            }
+            #terminal-panel.hidden-panel { width: 0 !important; }
+            .msg { max-width: 88%; }
         }
 
-        @media (max-width: 640px) {
-            #header-title {
-                font-size: 13px;
-            }
-            #header-subtitle {
-                display: none;
-            }
-            #header-buttons {
-                width: 100%;
-                justify-content: stretch;
-            }
-            .hbtn {
-                flex: 1;
-                justify-content: center;
-            }
-            #chat-box {
-                padding: 14px 10px;
-                gap: 11px;
-            }
-            .msg {
-                max-width: 94%;
-                font-size: 13px;
-                padding: 10px 11px;
-            }
-            #input-container {
-                padding: 9px 9px 11px;
-            }
-            #input-area {
-                gap: 6px;
-            }
-            .input-btn {
-                min-width: 42px;
-                width: 42px;
-                padding: 0;
-            }
-            #send-btn {
-                min-width: 48px;
-                width: 48px;
-                padding: 0;
-                font-size: 0;
-            }
-            #send-btn::before {
-                content: "▶";
-                font-size: 15px;
-            }
-            #user-input {
-                font-size: 13px;
-                padding: 11px 12px;
-            }
-            #astakos-drawer {
-                height: 210px;
-            }
-            #lobster-svg {
-                height: 205px;
-            }
+        @media (max-width: 560px) {
+            #header { height: auto; min-height: 52px; padding: 8px 12px; flex-wrap: wrap; }
+            #header-subtitle { display: none; }
+            #ws-status { order: 3; width: 100%; justify-content: center; }
+            #header-buttons { margin-left: auto; }
+            .hbtn { padding: 0 9px; font-size: 11px; }
+
+            #companion-hud { min-height: 106px; padding: 8px 12px; }
+            #core-pod { gap: 11px; padding: 5px; }
+            #core-orb-wrapper { width: 82px; height: 82px; }
+            #core-orb-wrapper svg { width: 82px; height: 82px; }
+            #core-name { font-size: 13px; }
+            #core-hint { font-size: 9px; letter-spacing: 0.05em; }
+            body.live-voice-active #core-pod { transform: scale(1.08); }
+            body.live-voice-active #live-voice-exit-btn { top: 12px; right: 12px; }
+
+            #chat-box { padding: 12px 10px; gap: 12px; }
+            .msg { max-width: 94%; font-size: 13.5px; padding: 10px 12px; }
+            .msg-ai { padding-right: 58px; }
+            .msg-action-group { opacity: 0.9; } /* touch-friendly on mobile */
+
+            #input-container { padding: 8px 10px 12px; }
+            #input-area { gap: 6px; }
+            .input-btn { min-width: 42px; width: 42px; }
+            #send-btn { min-width: 52px; width: 52px; padding: 0; font-size: 0; }
+            #send-btn::before { content: "▶"; font-size: 16px; }
         }
     </style>
 </head>
@@ -622,10 +779,16 @@
 <!-- ══ HEADER ══════════════════════════════════════════════ -->
 <div id="header">
     <div id="header-left">
-        <span id="header-logo">🦞</span>
+        <div id="header-logo" title="Astakos Core">
+            <svg viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="42" fill="none" stroke="#38bdf8" stroke-width="6" stroke-dasharray="24 12"/>
+                <circle cx="50" cy="50" r="26" fill="none" stroke="#818cf8" stroke-width="4"/>
+                <circle cx="50" cy="50" r="14" fill="#38bdf8"/>
+            </svg>
+        </div>
         <div>
             <div id="header-title">ASTAKOS</div>
-            <div id="header-subtitle">CONTROL CENTER · PISTON-7</div>
+            <div id="header-subtitle">AI COMPANION · JARVIS SYSTEM</div>
         </div>
     </div>
 
@@ -636,7 +799,6 @@
 
     <div id="header-buttons">
         <button class="hbtn" id="toggle-logs-btn">🖥️ Logs</button>
-        <button class="hbtn" id="debug-btn" onclick="window.open('http://127.0.0.1:8000/debug','_blank')">🐛 Debug</button>
         <button class="hbtn" id="end-session-btn">🛑 End</button>
     </div>
 </div>
@@ -646,220 +808,125 @@
 
     <!-- ── CHAT PANEL ── -->
     <div id="chat-panel">
+
+        <!-- ── COMPANION HUD: Astakos Core ── -->
+        <div id="companion-hud">
+            <div id="core-pod" title="Astakos Core — Click to speak" tabindex="0" role="button" aria-label="Astakos Core — Click to speak">
+                <div id="core-orb-wrapper">
+                    <svg id="astakos-core-svg" class="state-idle" viewBox="0 0 120 120" width="58" height="58" aria-hidden="true">
+                        <defs>
+                            <filter id="coreGlow" x="-30%" y="-30%" width="160%" height="160%">
+                                <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
+                                <feMerge>
+                                    <feMergeNode in="blur"/>
+                                    <feMergeNode in="SourceGraphic"/>
+                                </feMerge>
+                            </filter>
+                            <filter id="auraGlow" x="-50%" y="-50%" width="200%" height="200%">
+                                <feGaussianBlur in="SourceGraphic" stdDeviation="5"/>
+                            </filter>
+                            <radialGradient id="nucleusGradIdle" cx="50%" cy="50%" r="50%">
+                                <stop offset="0%" stop-color="#bae6fd" stop-opacity="1"/>
+                                <stop offset="45%" stop-color="#38bdf8" stop-opacity="0.85"/>
+                                <stop offset="75%" stop-color="#6366f1" stop-opacity="0.6"/>
+                                <stop offset="100%" stop-color="#080c14" stop-opacity="0"/>
+                            </radialGradient>
+                            <radialGradient id="nucleusGradListen" cx="50%" cy="50%" r="50%">
+                                <stop offset="0%" stop-color="#a7f3d0" stop-opacity="1"/>
+                                <stop offset="40%" stop-color="#2dd4bf" stop-opacity="0.9"/>
+                                <stop offset="75%" stop-color="#0284c7" stop-opacity="0.7"/>
+                                <stop offset="100%" stop-color="#04121e" stop-opacity="0"/>
+                            </radialGradient>
+                            <radialGradient id="nucleusGradProcess" cx="50%" cy="50%" r="50%">
+                                <stop offset="0%" stop-color="#fef08a" stop-opacity="1"/>
+                                <stop offset="35%" stop-color="#f59e0b" stop-opacity="0.9"/>
+                                <stop offset="70%" stop-color="#38bdf8" stop-opacity="0.7"/>
+                                <stop offset="100%" stop-color="#14112e" stop-opacity="0"/>
+                            </radialGradient>
+                            <radialGradient id="nucleusGradSpeak" cx="50%" cy="50%" r="50%">
+                                <stop offset="0%" stop-color="#e0e7ff" stop-opacity="1"/>
+                                <stop offset="40%" stop-color="#818cf8" stop-opacity="0.9"/>
+                                <stop offset="75%" stop-color="#38bdf8" stop-opacity="0.7"/>
+                                <stop offset="100%" stop-color="#110e2b" stop-opacity="0"/>
+                            </radialGradient>
+                            <radialGradient id="nucleusGradError" cx="50%" cy="50%" r="50%">
+                                <stop offset="0%" stop-color="#fecdd3" stop-opacity="1"/>
+                                <stop offset="45%" stop-color="#f43f5e" stop-opacity="0.9"/>
+                                <stop offset="80%" stop-color="#881337" stop-opacity="0.6"/>
+                                <stop offset="100%" stop-color="#1a060d" stop-opacity="0"/>
+                            </radialGradient>
+                        </defs>
+
+                        <!-- Ambient Aura -->
+                        <circle class="core-aura" cx="60" cy="60" r="48" fill="url(#nucleusGradIdle)" opacity="0.45" filter="url(#auraGlow)"/>
+
+                        <!-- Outer Tech Orbit Ring -->
+                        <circle class="core-orbit core-orbit-outer" cx="60" cy="60" r="46" fill="none" stroke="#38bdf8" stroke-width="1" stroke-dasharray="8 14 2 14" opacity="0.65"/>
+
+                        <!-- Orbital Particles -->
+                        <g class="core-particles-outer">
+                            <circle cx="60" cy="14" r="2" fill="#7dd3fc" filter="url(#coreGlow)"/>
+                            <circle cx="106" cy="60" r="1.5" fill="#a5b4fc" opacity="0.8"/>
+                            <circle cx="60" cy="106" r="2" fill="#38bdf8" opacity="0.7"/>
+                            <circle cx="14" cy="60" r="1.5" fill="#a5b4fc" opacity="0.8"/>
+                        </g>
+
+                        <!-- Middle Segmented Ring -->
+                        <circle class="core-orbit core-orbit-middle" cx="60" cy="60" r="36" fill="none" stroke="#818cf8" stroke-width="1.2" stroke-dasharray="32 16 12 16" opacity="0.75"/>
+                        <g class="core-particles-middle">
+                            <circle cx="34.5" cy="34.5" r="2" fill="#38bdf8" filter="url(#coreGlow)"/>
+                            <circle cx="85.5" cy="85.5" r="2" fill="#818cf8" filter="url(#coreGlow)"/>
+                        </g>
+
+                        <!-- Inner Reticle Ring -->
+                        <circle class="core-orbit core-orbit-inner" cx="60" cy="60" r="26" fill="none" stroke="#38bdf8" stroke-width="1" stroke-dasharray="4 6" opacity="0.5"/>
+
+                        <!-- Listening Sonar Ripple -->
+                        <circle class="core-sonar-ring" cx="60" cy="60" r="24" fill="none" stroke="#2dd4bf" stroke-width="2" opacity="0"/>
+
+                        <!-- Nucleus Center -->
+                        <circle class="core-nucleus" cx="60" cy="60" r="18" fill="url(#nucleusGradIdle)" filter="url(#coreGlow)"/>
+
+                        <!-- Center Waveform (Active in Speaking) -->
+                        <g class="core-waveform" opacity="0">
+                            <line class="wave-bar wb1" x1="50" y1="60" x2="50" y2="60" stroke="#e0f2fe" stroke-width="2" stroke-linecap="round"/>
+                            <line class="wave-bar wb2" x1="55" y1="60" x2="55" y2="60" stroke="#7dd3fc" stroke-width="2" stroke-linecap="round"/>
+                            <line class="wave-bar wb3" x1="60" y1="60" x2="60" y2="60" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+                            <line class="wave-bar wb4" x1="65" y1="60" x2="65" y2="60" stroke="#7dd3fc" stroke-width="2" stroke-linecap="round"/>
+                            <line class="wave-bar wb5" x1="70" y1="60" x2="70" y2="60" stroke="#e0f2fe" stroke-width="2" stroke-linecap="round"/>
+                        </g>
+                    </svg>
+                </div>
+                <div id="core-meta">
+                    <div id="core-title-row">
+                        <span id="core-name">ASTAKOS CORE</span>
+                        <span id="core-mode-badge">IDLE</span>
+                    </div>
+                    <div id="core-subtitle">Ready for input</div>
+                    <div id="core-hint">Click core to speak</div>
+                </div>
+            </div>
+            <button id="live-voice-exit-btn" type="button" aria-label="End live voice conversation">End Live</button>
+        </div>
+
+        <!-- ── CHAT BOX ── -->
         <div id="chat-box"></div>
 
+        <!-- ── INPUT CONTAINER ── -->
         <div id="input-container">
-            <!-- Astakos Drawer -->
-            <div id="astakos-drawer">
-                <svg id="lobster-svg" class="idle" width="280" height="360" viewBox="0 0 280 360" xmlns="http://www.w3.org/2000/svg">
-                    <defs>
-                        <radialGradient id="bodyGrad" cx="45%" cy="35%" r="60%">
-                            <stop offset="0%"   stop-color="#ff6a3d"/>
-                            <stop offset="60%"  stop-color="#e8380a"/>
-                            <stop offset="100%" stop-color="#b02206"/>
-                        </radialGradient>
-                        <radialGradient id="headGrad" cx="40%" cy="35%" r="60%">
-                            <stop offset="0%"   stop-color="#ff7848"/>
-                            <stop offset="60%"  stop-color="#e84010"/>
-                            <stop offset="100%" stop-color="#b82408"/>
-                        </radialGradient>
-                        <radialGradient id="clawGrad" cx="40%" cy="35%" r="65%">
-                            <stop offset="0%"   stop-color="#ff6030"/>
-                            <stop offset="100%" stop-color="#a02008"/>
-                        </radialGradient>
-                        <radialGradient id="eyeWhite" cx="38%" cy="35%" r="60%">
-                            <stop offset="0%"   stop-color="#ffffff"/>
-                            <stop offset="100%" stop-color="#e8e8f0"/>
-                        </radialGradient>
-                        <linearGradient id="bowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%"   stop-color="#4db8ff"/>
-                            <stop offset="50%"  stop-color="#1a8ad4"/>
-                            <stop offset="100%" stop-color="#0d5f9e"/>
-                        </linearGradient>
-                        <radialGradient id="eyeHighlight" cx="30%" cy="28%" r="55%">
-                            <stop offset="0%"   stop-color="#ffffff" stop-opacity="1"/>
-                            <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-                        </radialGradient>
-                    </defs>
-
-                    <ellipse cx="140" cy="338" rx="28" ry="10" fill="#9e2206" opacity="0.7"/>
-                    <ellipse cx="140" cy="328" rx="36" ry="13" fill="#b02608"/>
-                    <ellipse cx="140" cy="315" rx="44" ry="15" fill="#bf2c08"/>
-                    <ellipse cx="112" cy="336" rx="16" ry="7" fill="#a02206" transform="rotate(-18 112 336)"/>
-                    <ellipse cx="140" cy="340" rx="14" ry="6" fill="#952005"/>
-                    <ellipse cx="168" cy="336" rx="16" ry="7" fill="#a02206" transform="rotate(18 168 336)"/>
-                    <g opacity="0.9">
-                        <line x1="100" y1="268" x2="72"  y2="305" stroke="#8a2006" stroke-width="2.2" stroke-linecap="round"/>
-                        <line x1="110" y1="282" x2="84"  y2="316" stroke="#8a2006" stroke-width="2"   stroke-linecap="round"/>
-                        <line x1="120" y1="295" x2="98"  y2="326" stroke="#8a2006" stroke-width="1.8" stroke-linecap="round"/>
-                        <line x1="180" y1="268" x2="208" y2="305" stroke="#8a2006" stroke-width="2.2" stroke-linecap="round"/>
-                        <line x1="170" y1="282" x2="196" y2="316" stroke="#8a2006" stroke-width="2"   stroke-linecap="round"/>
-                        <line x1="160" y1="295" x2="182" y2="326" stroke="#8a2006" stroke-width="1.8" stroke-linecap="round"/>
-                    </g>
-                    <ellipse cx="140" cy="260" rx="70" ry="75" fill="url(#bodyGrad)" stroke="#8a1a04" stroke-width="1.5"/>
-                    <path d="M 72 235 Q 140 228 208 235" fill="none" stroke="#8a1a04" stroke-width="1" opacity="0.4"/>
-                    <path d="M 72 255 Q 140 248 208 255" fill="none" stroke="#8a1a04" stroke-width="1" opacity="0.4"/>
-                    <path d="M 75 274 Q 140 268 205 274" fill="none" stroke="#8a1a04" stroke-width="1" opacity="0.35"/>
-                    <path d="M 80 292 Q 140 286 200 292" fill="none" stroke="#8a1a04" stroke-width="1" opacity="0.3"/>
-                    <ellipse cx="140" cy="255" rx="28" ry="35" fill="#ff8050" opacity="0.12"/>
-                    <ellipse cx="140" cy="168" rx="62" ry="60" fill="url(#headGrad)" stroke="#8a1a04" stroke-width="1.5"/>
-                    <ellipse cx="122" cy="148" rx="22" ry="18" fill="#ff9060" opacity="0.18"/>
-                    <path d="M 98 138 Q 112 131 124 136"  fill="none" stroke="#6a1204" stroke-width="3" stroke-linecap="round"/>
-                    <path d="M 156 136 Q 168 131 182 138" fill="none" stroke="#6a1204" stroke-width="3" stroke-linecap="round"/>
-                    <circle cx="112" cy="158" r="22" fill="url(#eyeWhite)" stroke="#6a1204" stroke-width="1.5"/>
-                    <circle cx="168" cy="158" r="22" fill="url(#eyeWhite)" stroke="#6a1204" stroke-width="1.5"/>
-                    <g class="bow-idle">
-                        <path d="M 118 222 L 134 228 L 118 234 Z" fill="url(#bowGrad)" stroke="#0a5080" stroke-width="0.8"/>
-                        <path d="M 162 222 L 146 228 L 162 234 Z" fill="url(#bowGrad)" stroke="#0a5080" stroke-width="0.8"/>
-                        <ellipse cx="140" cy="228" rx="8" ry="7" fill="#1a8ad4" stroke="#0a5080" stroke-width="0.8"/>
-                        <ellipse cx="137" cy="225" rx="3" ry="2" fill="#aaddff" opacity="0.5"/>
-                    </g>
-                    <path d="M 78 195 Q 52 210 44 230" fill="none" stroke="#b02608" stroke-width="8" stroke-linecap="round"/>
-                    <path d="M 202 195 Q 228 210 236 230" fill="none" stroke="#b02608" stroke-width="8" stroke-linecap="round"/>
-
-                    <g class="s on" id="s-idle">
-                        <g class="eye-blink">
-                            <circle cx="112" cy="160" r="13" fill="#1a1010"/>
-                            <circle cx="116" cy="155" r="5"  fill="url(#eyeHighlight)"/>
-                            <circle cx="116" cy="155" r="4"  fill="white" opacity="0.9"/>
-                        </g>
-                        <g class="eye-blink">
-                            <circle cx="168" cy="160" r="13" fill="#1a1010"/>
-                            <circle cx="172" cy="155" r="5"  fill="url(#eyeHighlight)"/>
-                            <circle cx="172" cy="155" r="4"  fill="white" opacity="0.9"/>
-                        </g>
-                        <path d="M 114 196 Q 140 212 166 196" fill="none" stroke="#6a1204" stroke-width="3" stroke-linecap="round"/>
-                        <circle cx="114" cy="196" r="2.5" fill="#6a1204"/>
-                        <circle cx="166" cy="196" r="2.5" fill="#6a1204"/>
-                        <g class="ant-idle-l">
-                            <path d="M 110 112 Q 88 80 72 52" fill="none" stroke="#8a1a04" stroke-width="3" stroke-linecap="round"/>
-                            <circle cx="72" cy="52" r="6" fill="#e84010"/>
-                            <circle cx="73" cy="51" r="2" fill="#ff8060" opacity="0.6"/>
-                        </g>
-                        <g class="ant-idle-r">
-                            <path d="M 170 112 Q 192 80 208 52" fill="none" stroke="#8a1a04" stroke-width="3" stroke-linecap="round"/>
-                            <circle cx="208" cy="52" r="6" fill="#e84010"/>
-                            <circle cx="209" cy="51" r="2" fill="#ff8060" opacity="0.6"/>
-                        </g>
-                        <g>
-                            <ellipse cx="36"  cy="242" rx="22" ry="16" fill="url(#clawGrad)" stroke="#8a1a04" stroke-width="1.5"/>
-                            <path d="M 18 234 Q 24 242 18 250" fill="none" stroke="#6a1204" stroke-width="2" stroke-linecap="round"/>
-                            <ellipse cx="22"  cy="235" rx="9"  ry="6"  fill="url(#clawGrad)" stroke="#6a1204" stroke-width="1" transform="rotate(-30 22 235)"/>
-                            <ellipse cx="244" cy="242" rx="22" ry="16" fill="url(#clawGrad)" stroke="#8a1a04" stroke-width="1.5"/>
-                            <path d="M 262 234 Q 256 242 262 250" fill="none" stroke="#6a1204" stroke-width="2" stroke-linecap="round"/>
-                            <ellipse cx="258" cy="235" rx="9"  ry="6"  fill="url(#clawGrad)" stroke="#6a1204" stroke-width="1" transform="rotate(30 258 235)"/>
-                        </g>
-                    </g>
-
-                    <g class="s" id="s-listening">
-                        <circle cx="112" cy="160" r="14" fill="#1a1010"/>
-                        <circle cx="116" cy="155" r="5"  fill="white" opacity="0.9"/>
-                        <circle cx="168" cy="160" r="14" fill="#1a1010"/>
-                        <circle cx="172" cy="155" r="5"  fill="white" opacity="0.9"/>
-                        <path d="M 118 196 Q 140 204 162 196" fill="none" stroke="#6a1204" stroke-width="2.5" stroke-linecap="round"/>
-                        <circle cx="80"  cy="162" r="8" fill="none" stroke="#4EC9B0" stroke-width="2"   class="ear-ring1"/>
-                        <circle cx="80"  cy="162" r="8" fill="none" stroke="#4EC9B0" stroke-width="1.5" class="ear-ring2"/>
-                        <circle cx="200" cy="162" r="8" fill="none" stroke="#4EC9B0" stroke-width="2"   class="ear-ring1"/>
-                        <circle cx="200" cy="162" r="8" fill="none" stroke="#4EC9B0" stroke-width="1.5" class="ear-ring2"/>
-                        <g class="ant-listen-l">
-                            <path d="M 110 112 Q 82 76 60 44" fill="none" stroke="#8a1a04" stroke-width="3" stroke-linecap="round"/>
-                            <circle cx="60" cy="44" r="7" fill="#e84010"/>
-                            <circle cx="61" cy="43" r="2.5" fill="#ff8060" opacity="0.6"/>
-                        </g>
-                        <g class="ant-listen-r">
-                            <path d="M 170 112 Q 198 76 220 44" fill="none" stroke="#8a1a04" stroke-width="3" stroke-linecap="round"/>
-                            <circle cx="220" cy="44" r="7" fill="#e84010"/>
-                            <circle cx="221" cy="43" r="2.5" fill="#ff8060" opacity="0.6"/>
-                        </g>
-                        <g class="claw-listen-l">
-                            <ellipse cx="30" cy="218" rx="22" ry="16" fill="url(#clawGrad)" stroke="#8a1a04" stroke-width="1.5" transform="rotate(-25 30 218)"/>
-                            <path d="M 13 208 Q 20 218 13 228" fill="none" stroke="#6a1204" stroke-width="2" stroke-linecap="round"/>
-                            <ellipse cx="16" cy="209" rx="9" ry="6" fill="url(#clawGrad)" stroke="#6a1204" stroke-width="1" transform="rotate(-50 16 209)"/>
-                        </g>
-                        <g class="claw-listen-r">
-                            <ellipse cx="250" cy="218" rx="22" ry="16" fill="url(#clawGrad)" stroke="#8a1a04" stroke-width="1.5" transform="rotate(25 250 218)"/>
-                            <path d="M 267 208 Q 260 218 267 228" fill="none" stroke="#6a1204" stroke-width="2" stroke-linecap="round"/>
-                            <ellipse cx="264" cy="209" rx="9" ry="6" fill="url(#clawGrad)" stroke="#6a1204" stroke-width="1" transform="rotate(50 264 209)"/>
-                        </g>
-                    </g>
-
-                    <g class="s" id="s-thinking">
-                        <g class="pupil-think">
-                            <circle cx="114" cy="156" r="13" fill="#1a1010"/>
-                            <circle cx="117" cy="152" r="4.5" fill="white" opacity="0.9"/>
-                        </g>
-                        <g class="pupil-think">
-                            <circle cx="170" cy="156" r="13" fill="#1a1010"/>
-                            <circle cx="173" cy="152" r="4.5" fill="white" opacity="0.9"/>
-                        </g>
-                        <path d="M 118 200 Q 140 196 162 200" fill="none" stroke="#6a1204" stroke-width="2.5" stroke-linecap="round"/>
-                        <g class="think-group">
-                            <circle cx="185" cy="100" r="5"  fill="#e84010" opacity="0.5"/>
-                            <circle cx="198" cy="82"  r="8"  fill="#e84010" opacity="0.65"/>
-                            <circle cx="214" cy="60"  r="13" fill="#e84010" opacity="0.82"/>
-                            <text x="214" y="65" text-anchor="middle" font-size="14">💡</text>
-                        </g>
-                        <path d="M 110 112 Q 90 82 74 56"  fill="none" stroke="#8a1a04" stroke-width="3" stroke-linecap="round"/>
-                        <circle cx="74"  cy="56" r="6" fill="#e84010"/>
-                        <path d="M 170 112 Q 190 82 206 56" fill="none" stroke="#8a1a04" stroke-width="3" stroke-linecap="round"/>
-                        <circle cx="206" cy="56" r="6" fill="#e84010"/>
-                        <ellipse cx="36"  cy="238" rx="22" ry="16" fill="url(#clawGrad)" stroke="#8a1a04" stroke-width="1.5"/>
-                        <path d="M 18 230 Q 24 238 18 246" fill="none" stroke="#6a1204" stroke-width="2" stroke-linecap="round"/>
-                        <ellipse cx="22"  cy="231" rx="9" ry="6" fill="url(#clawGrad)" stroke="#6a1204" stroke-width="1" transform="rotate(-30 22 231)"/>
-                        <ellipse cx="244" cy="238" rx="22" ry="16" fill="url(#clawGrad)" stroke="#8a1a04" stroke-width="1.5"/>
-                        <path d="M 262 230 Q 256 238 262 246" fill="none" stroke="#6a1204" stroke-width="2" stroke-linecap="round"/>
-                        <ellipse cx="258" cy="231" rx="9" ry="6" fill="url(#clawGrad)" stroke="#6a1204" stroke-width="1" transform="rotate(30 258 231)"/>
-                    </g>
-
-                    <g class="s" id="s-speaking">
-                        <g class="speak-body">
-                            <circle cx="112" cy="160" r="13" fill="#1a1010"/>
-                            <circle cx="116" cy="155" r="4.5" fill="white" opacity="0.9"/>
-                            <circle cx="168" cy="160" r="13" fill="#1a1010"/>
-                            <circle cx="172" cy="155" r="4.5" fill="white" opacity="0.9"/>
-                            <path class="mouth-speak" d="M 108 196 Q 140 202 172 196" fill="none" stroke="#6a1204" stroke-width="3" stroke-linecap="round"/>
-                            <clipPath id="mouthClip">
-                                <path d="M 108 196 Q 140 218 172 196 Q 140 196 108 196 Z"/>
-                            </clipPath>
-                            <rect x="118" y="197" width="44" height="12" fill="white" opacity="0.7" clip-path="url(#mouthClip)" rx="3"/>
-                        </g>
-                        <path d="M 110 112 Q 86 74 66 42"  fill="none" stroke="#8a1a04" stroke-width="3" stroke-linecap="round"/>
-                        <circle cx="66" cy="42" r="7" fill="#e84010"/>
-                        <circle cx="67" cy="41" r="2.5" fill="#ff8060" opacity="0.6"/>
-                        <path d="M 170 112 Q 194 74 214 42" fill="none" stroke="#8a1a04" stroke-width="3" stroke-linecap="round"/>
-                        <circle cx="214" cy="42" r="7" fill="#e84010"/>
-                        <circle cx="215" cy="41" r="2.5" fill="#ff8060" opacity="0.6"/>
-                        <g class="claw-speak-l">
-                            <ellipse cx="30"  cy="228" rx="24" ry="17" fill="url(#clawGrad)" stroke="#8a1a04" stroke-width="1.5" transform="rotate(15 30 228)"/>
-                            <path d="M 10 218 Q 18 228 10 238" fill="none" stroke="#6a1204" stroke-width="2" stroke-linecap="round"/>
-                            <ellipse cx="14"  cy="219" rx="10" ry="6"  fill="url(#clawGrad)" stroke="#6a1204" stroke-width="1" transform="rotate(-40 14 219)"/>
-                        </g>
-                        <g class="claw-speak-r">
-                            <ellipse cx="250" cy="228" rx="24" ry="17" fill="url(#clawGrad)" stroke="#8a1a04" stroke-width="1.5" transform="rotate(-15 250 228)"/>
-                            <path d="M 270 218 Q 262 228 270 238" fill="none" stroke="#6a1204" stroke-width="2" stroke-linecap="round"/>
-                            <ellipse cx="266" cy="219" rx="10" ry="6"  fill="url(#clawGrad)" stroke="#6a1204" stroke-width="1" transform="rotate(40 266 219)"/>
-                        </g>
-                        <path class="sw1" d="M 230 210 Q 244 228 230 246" fill="none" stroke="#f05020" stroke-width="2.5" stroke-linecap="round"/>
-                        <path class="sw2" d="M 244 200 Q 262 228 244 256" fill="none" stroke="#f05020" stroke-width="2"   stroke-linecap="round"/>
-                        <path class="sw3" d="M 258 190 Q 280 228 258 266" fill="none" stroke="#f05020" stroke-width="1.5" stroke-linecap="round"/>
-                    </g>
-                </svg>
-                <button id="voice-btn-large" title="Press to speak">🎙️</button>
-            </div>
-
-            <!-- Input row -->
             <div id="input-area">
                 <input type="file" id="file-input" style="display:none">
-                <button class="input-btn" id="attach-btn"        title="Attach file">📎</button>
-                <button class="input-btn" id="trigger-voice-btn" title="Open Astakos">🎙️</button>
-                <textarea id="user-input" placeholder="Give command or send file..." autocomplete="off" rows="1"></textarea>
-                <button id="send-btn">▶ Send</button>
+                <button class="input-btn" id="attach-btn" title="Attach file" aria-label="Attach file">📎</button>
+                <button class="input-btn" id="live-voice-btn" title="Start live voice conversation" aria-label="Start live voice conversation">LIVE</button>
+                <button class="input-btn" id="trigger-voice-btn" title="Speak to Astakos" aria-label="Speak to Astakos">🎙️</button>
+                <textarea id="user-input" placeholder="Ask Astakos or provide instructions..." autocomplete="off" rows="1"></textarea>
+                <button id="send-btn" aria-label="Send message">▶ Send</button>
             </div>
             <div id="file-label"></div>
         </div>
     </div>
 
-    <!-- ── TERMINAL PANEL ── -->
+    <!-- ── TERMINAL PANEL (Logs Sidebar) ── -->
     <div id="terminal-panel" class="hidden-panel">
         <div id="terminal-header">
             <div id="terminal-header-title">LIVE LOGS</div>
@@ -890,7 +957,7 @@
     endSessionBtn.addEventListener('click', async () => {
         if (!confirm("Everything will be archived and the UI will be cleared. Are you sure?")) return;
         try {
-            await fetch('http://127.0.0.1:8000/end_session', { method: 'POST' });
+            await fetch('/end_session', { method: 'POST' });
             chatBox.innerHTML = '';
             appendMessage("✅ Session archived. Starting a new page!", "ai", "System");
             currentPhotoPath = null;
@@ -925,7 +992,7 @@
         processedText = processedText.replace(photoRegex, (match, filepath) => {
             const cleanPath = filepath.replace(/&amp;/g, "&");
             const filename = cleanPath.split('\\').pop().split('/').pop();
-            return `<br><img src="http://127.0.0.1:8000/photos/${encodeURIComponent(filename)}" class="chat-img" />`;
+            return `<br><img src="/photos/${encodeURIComponent(filename)}" class="chat-img" />`;
         });
 
         const linkRegex = /\[(.*?)\]\((https?:\/\/.*?)\)/g;
@@ -936,19 +1003,183 @@
         return processedText;
     }
 
+    /* ── Astakos Core State Engine ── */
+    const coreSvg       = document.getElementById('astakos-core-svg');
+    const coreModeBadge = document.getElementById('core-mode-badge');
+    const coreSubtitle  = document.getElementById('core-subtitle');
+    const corePod       = document.getElementById('core-pod');
+    let currentCoreState = 'idle';
+
+    const CORE_STATE_DETAILS = {
+        idle: {
+            badge: 'IDLE',
+            badgeClass: '',
+            subtitle: 'Ready for input',
+        },
+        listening: {
+            badge: 'LISTENING',
+            badgeClass: 'badge-listening',
+            subtitle: 'Receiving voice stream…',
+        },
+        processing: {
+            badge: 'PROCESSING',
+            badgeClass: 'badge-processing',
+            subtitle: 'Synthesizing response…',
+        },
+        speaking: {
+            badge: 'SPEAKING',
+            badgeClass: 'badge-speaking',
+            subtitle: 'Transmitting audio…',
+        },
+        error: {
+            badge: 'ATTENTION',
+            badgeClass: 'badge-error',
+            subtitle: 'Operation error',
+        },
+    };
+
+    function setCoreState(state) {
+        if (!CORE_STATE_DETAILS[state]) state = 'idle';
+        currentCoreState = state;
+        const details = CORE_STATE_DETAILS[state];
+
+        if (coreSvg) {
+            coreSvg.setAttribute('class', `state-${state}`);
+        }
+        if (coreModeBadge) {
+            coreModeBadge.textContent = details.badge;
+            coreModeBadge.className = details.badgeClass;
+        }
+        if (coreSubtitle) {
+            coreSubtitle.textContent = details.subtitle;
+        }
+    }
+
+    // Backward-compatibility alias
+    function setAvatar(state) {
+        const mapping = {
+            'idle': 'idle',
+            'listening': 'listening',
+            'thinking': 'processing',
+            'speaking': 'speaking',
+            'error': 'error'
+        };
+        setCoreState(mapping[state] || 'idle');
+    }
+
+    /* ── TTS Playback Control (On-Demand) ── */
+    let currentAudio = null;
+    let activeSpeechBtn = null;
+
+    async function toggleSpeakMessage(text, btn) {
+        if (currentAudio && activeSpeechBtn === btn) {
+            currentAudio.pause();
+            currentAudio = null;
+            if (activeSpeechBtn) {
+                activeSpeechBtn.innerHTML = '🔊';
+                activeSpeechBtn.classList.remove('speaking-active');
+                activeSpeechBtn = null;
+            }
+            setCoreState('idle');
+            return;
+        }
+
+        if (currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
+            if (activeSpeechBtn) {
+                activeSpeechBtn.innerHTML = '🔊';
+                activeSpeechBtn.classList.remove('speaking-active');
+                activeSpeechBtn = null;
+            }
+        }
+
+        let cleanText = String(text || "")
+            .replace(/[*#`]/g, '')
+            .replace(/\[SEND_PHOTO:.*?\]/g, '')
+            .replace(/\[ASTAKOS_ASSET_URL:.*?\]/g, '')
+            .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+            .replace(/^\[.*?\]:\s*/g, '')
+            .trim();
+        if (!cleanText) return;
+
+        activeSpeechBtn = btn;
+        btn.innerHTML = '⏹️';
+        btn.classList.add('speaking-active');
+        setCoreState('speaking');
+
+        try {
+            const response = await fetch('/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: cleanText })
+            });
+            if (!response.ok) {
+                btn.innerHTML = '🔊';
+                btn.classList.remove('speaking-active');
+                activeSpeechBtn = null;
+                setCoreState('error');
+                setTimeout(() => setCoreState('idle'), 3000);
+                return;
+            }
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            currentAudio = new Audio(audioUrl);
+            currentAudio.onended = () => {
+                btn.innerHTML = '🔊';
+                btn.classList.remove('speaking-active');
+                activeSpeechBtn = null;
+                URL.revokeObjectURL(audioUrl);
+                currentAudio = null;
+                setCoreState('idle');
+            };
+            currentAudio.onerror = () => {
+                btn.innerHTML = '🔊';
+                btn.classList.remove('speaking-active');
+                activeSpeechBtn = null;
+                currentAudio = null;
+                setCoreState('error');
+                setTimeout(() => setCoreState('idle'), 3000);
+            };
+            await currentAudio.play();
+        } catch (err) {
+            console.error('[TTS Error]:', err);
+            btn.innerHTML = '🔊';
+            btn.classList.remove('speaking-active');
+            activeSpeechBtn = null;
+            setCoreState('error');
+            setTimeout(() => setCoreState('idle'), 3000);
+        }
+    }
+
     function appendMessage(text, sender, agentName = "") {
         const div = document.createElement('div');
         div.className = `msg ${sender === 'user' ? 'msg-user' : 'msg-ai'}`;
 
         let innerHTML = '';
-        if (agentName) innerHTML += `<span class="agent-label">${agentName}</span>`;
+        if (agentName) innerHTML += `<span class="agent-label">${escapeHtml(agentName)}</span>`;
 
         innerHTML += renderMessageText(text);
         div.innerHTML = innerHTML;
 
+        // Action Group
+        const actionGroup = document.createElement('div');
+        actionGroup.className = 'msg-action-group';
+
+        if (sender === 'ai') {
+            const speakBtn = document.createElement('button');
+            speakBtn.className = 'msg-action-btn speak-btn';
+            speakBtn.title = "Read message aloud";
+            speakBtn.setAttribute('aria-label', "Read message aloud");
+            speakBtn.innerHTML = '🔊';
+            speakBtn.onclick = () => toggleSpeakMessage(text, speakBtn);
+            actionGroup.appendChild(speakBtn);
+        }
+
         const copyBtn = document.createElement('button');
-        copyBtn.className = 'copy-btn';
+        copyBtn.className = 'msg-action-btn copy-btn';
         copyBtn.title = "Copy message";
+        copyBtn.setAttribute('aria-label', "Copy message");
         copyBtn.innerHTML = '📋';
         copyBtn.onclick = () => {
             navigator.clipboard.writeText(text).then(() => {
@@ -956,12 +1187,14 @@
                 setTimeout(() => { copyBtn.innerHTML = '📋'; }, 2000);
             }).catch(err => console.error("Failed to copy:", err));
         };
-        div.appendChild(copyBtn);
+        actionGroup.appendChild(copyBtn);
+
+        div.appendChild(actionGroup);
         chatBox.appendChild(div);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    /* ── Telegram live refresh ── */
+    /* ── Telegram Live Refresh & History ── */
     let lastKnownMsgId = 0;
     const renderedHistoryRowIds = new Set();
     const pendingLocalEchoes = [];
@@ -1060,18 +1293,14 @@
     }
 
     function appendAssistantResponseOnce(text, agentName = "") {
-        if (wasRecentlyRendered('ai', text)) {
-            return;
-        }
+        if (wasRecentlyRendered('ai', text)) return;
         pushLocalEcho('ai', text);
         appendMessage(text, 'ai', agentName);
         markRecentlyRendered('ai', text);
     }
 
     function appendUserMessageOnce(text) {
-        if (wasRecentlyRendered('user', text)) {
-            return;
-        }
+        if (wasRecentlyRendered('user', text)) return;
         pushLocalEcho('user', text);
         appendMessage(text, 'user');
         markRecentlyRendered('user', text);
@@ -1079,9 +1308,7 @@
 
     function renderHistoryMsg(msg) {
         const stableId = getMessageStableId(msg);
-        if (stableId && renderedHistoryRowIds.has(stableId)) {
-            return;
-        }
+        if (stableId && renderedHistoryRowIds.has(stableId)) return;
 
         const sender = (msg.role === 'user' || msg.role === 'Human') ? 'user' : 'ai';
         const defaultName = sender === 'user' ? 'User' : 'Astakos';
@@ -1105,7 +1332,7 @@
         if (isFetchingMessages) return;
         isFetchingMessages = true;
         try {
-            const res = await fetch(`http://127.0.0.1:8000/messages/poll?after_id=${lastKnownMsgId}`);
+            const res = await fetch(`/messages/poll?after_id=${lastKnownMsgId}`);
             if (!res.ok) return;
             const data = await res.json();
             if (data.messages && data.messages.length > 0) {
@@ -1113,25 +1340,24 @@
                 data.messages.forEach(renderHistoryMsg);
             }
             if (data.max_id && data.max_id > lastKnownMsgId) lastKnownMsgId = data.max_id;
-        } catch (e) { /* server offline, skip */ }
+        } catch (e) { /* skip when offline */ }
         finally { isFetchingMessages = false; }
     }
 
     window.addEventListener('DOMContentLoaded', async () => {
         try {
-            const data = await fetchJsonWithTimeout('http://127.0.0.1:8000/history', INITIAL_HISTORY_TIMEOUT_MS);
+            const data = await fetchJsonWithTimeout('/history', INITIAL_HISTORY_TIMEOUT_MS);
             if (data.history && data.history.length > 0) {
                 data.history.sort((a, b) => (Number(a.rowid) || 0) - (Number(b.rowid) || 0));
                 data.history.forEach(msg => renderHistoryMsg(msg));
                 const historyMaxRowId = Math.max(0, ...data.history.map(msg => Number(msg.rowid) || 0));
                 if (historyMaxRowId > lastKnownMsgId) lastKnownMsgId = historyMaxRowId;
             } else {
-                appendMessage("Good morning! Ready for work?", "ai", "System");
+                appendMessage("Astakos Jarvis System online. How may I assist you today?", "ai", "System");
             }
-            // Load max_id so polling starts from here
             if (!lastKnownMsgId) {
                 try {
-                    const pd = await fetchJsonWithTimeout('http://127.0.0.1:8000/messages/poll?after_id=0', INITIAL_HISTORY_TIMEOUT_MS);
+                    const pd = await fetchJsonWithTimeout('/messages/poll?after_id=0', INITIAL_HISTORY_TIMEOUT_MS);
                     if (pd.max_id) lastKnownMsgId = pd.max_id;
                 } catch(e) {}
             }
@@ -1143,7 +1369,7 @@
                 let recoveryMaxId = 0;
                 while (true) {
                     const pollData = await fetchJsonWithTimeout(
-                        `http://127.0.0.1:8000/messages/poll?after_id=${recoveryAfterId}`,
+                        `/messages/poll?after_id=${recoveryAfterId}`,
                         INITIAL_HISTORY_TIMEOUT_MS
                     );
                     if (!recoveryMaxId) recoveryMaxId = Number(pollData.max_id) || 0;
@@ -1242,14 +1468,14 @@
         appendUserMessageOnce(displayUserMsg);
         userInput.value = '';
         clearPendingAttachmentUI();
-        if (!isRecording) userInput.focus();
+        if (!isRecording && !isLiveVoiceMode) userInput.focus();
 
         const loadingDiv = document.createElement('div');
         loadingDiv.className = 'loading';
         loadingDiv.innerText = 'Astakos is processing...';
         chatBox.appendChild(loadingDiv);
         chatBox.scrollTop = chatBox.scrollHeight;
-        setAvatar('thinking');
+        setCoreState('processing');
 
         let isVoice = text.startsWith("[Voice Message]:");
         let apiText = text;
@@ -1264,33 +1490,34 @@
                 const formData = new FormData();
                 formData.append('file', file);
                 formData.append('message', apiText);
-                response = await fetch('http://127.0.0.1:8000/upload', { method: 'POST', body: formData });
+                response = await fetch('/upload', { method: 'POST', body: formData });
                 const data = await response.json();
-                chatBox.removeChild(loadingDiv);
+                if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
                 appendAssistantResponseOnce(data.ai_message, 'Chat_Agent');
-                if (isDrawerOpen) speakText(data.ai_message);
+                currentPhotoPath = null;
+                setCoreState('idle');
+                return data.ai_message;
             } else {
-                response = await fetch('http://127.0.0.1:8000/chat', {
+                response = await fetch('/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message: apiText, photo_path: currentPhotoPath })
                 });
                 const data = await response.json();
-                chatBox.removeChild(loadingDiv);
+                if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
                 markRenderedRowId(data.user_rowid);
                 markRenderedRowId(data.assistant_rowid);
                 appendAssistantResponseOnce(data.response, data.agent);
-                if (isDrawerOpen) speakText(data.response);
+                currentPhotoPath = null;
+                setCoreState('idle');
+                return data.response;
             }
-            
-            // Clear the photo path so we don't keep sending it on every subsequent message
-            currentPhotoPath = null;
-            setAvatar('speaking');
-            setTimeout(() => setAvatar('idle'), 4000);
         } catch (error) {
             if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
-            appendMessage("Error connecting to Server.", 'ai', 'System');
-            setAvatar('idle');
+            appendMessage("Error connecting to Astakos server.", 'ai', 'System');
+            setCoreState('error');
+            setTimeout(() => setCoreState('idle'), 4000);
+            return null;
         }
     }
 
@@ -1303,42 +1530,302 @@
         userInput.style.height = Math.min(userInput.scrollHeight, 200) + 'px';
     });
 
-    /* ── DRAWER & AVATAR ── */
-    const drawer        = document.getElementById('astakos-drawer');
-    const triggerBtn    = document.getElementById('trigger-voice-btn');
-    const voiceBtnLarge = document.getElementById('voice-btn-large');
-
-    let isDrawerOpen = false;
+    /* ── Voice Recording & Interaction ── */
+    const triggerBtn = document.getElementById('trigger-voice-btn');
+    const liveVoiceBtn = document.getElementById('live-voice-btn');
+    const liveVoiceExitBtn = document.getElementById('live-voice-exit-btn');
+    const LIVE_SILENCE_DURATION_MS = 900;
+    const LIVE_SPEECH_THRESHOLD = 0.018;
     let mediaRecorder;
     let audioChunks = [];
     let isRecording = false;
+    let isLiveVoiceMode = false;
+    let liveSessionId = 0;
+    let liveInputStream = null;
+    let liveAudioContext = null;
+    let liveSpeechAnimationFrame = null;
+    let liveInterruptionStream = null;
+    let liveInterruptionContext = null;
+    let liveInterruptionAnimationFrame = null;
 
-    triggerBtn.addEventListener('click', () => {
-        isDrawerOpen = !isDrawerOpen;
-        if (isDrawerOpen) {
-            drawer.style.display = 'flex';
-            triggerBtn.classList.add('active');
-            triggerBtn.innerHTML = "✕";
-            setAvatar('idle');
-        } else {
-            drawer.style.display = 'none';
-            triggerBtn.classList.remove('active');
-            triggerBtn.innerHTML = "🎙️";
-            if (isRecording) toggleRecording();
+    function setLiveVoiceModeUi(isActive) {
+        document.body.classList.toggle('live-voice-active', isActive);
+        liveVoiceBtn.classList.toggle('live-active', isActive);
+        liveVoiceBtn.textContent = isActive ? 'STOP' : 'LIVE';
+        liveVoiceBtn.setAttribute('aria-label', isActive ? 'End live voice conversation' : 'Start live voice conversation');
+        corePod.setAttribute('aria-label', isActive ? 'End live voice conversation' : 'Astakos Core — Click to speak');
+        document.getElementById('core-hint').textContent = isActive ? 'Live voice · Say something, or press End Live' : 'Click core to speak';
+    }
+
+    function getLiveAudioConstraints() {
+        return {
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+            },
+        };
+    }
+
+    function stopMediaStream(stream) {
+        if (stream) stream.getTracks().forEach(track => track.stop());
+    }
+
+    function closeAudioContext(context) {
+        if (context && context.state !== 'closed') context.close();
+    }
+
+    function stopLiveSpeechMonitor() {
+        if (liveSpeechAnimationFrame) cancelAnimationFrame(liveSpeechAnimationFrame);
+        liveSpeechAnimationFrame = null;
+        closeAudioContext(liveAudioContext);
+        liveAudioContext = null;
+    }
+
+    function stopLiveInterruptionMonitor() {
+        if (liveInterruptionAnimationFrame) cancelAnimationFrame(liveInterruptionAnimationFrame);
+        liveInterruptionAnimationFrame = null;
+        closeAudioContext(liveInterruptionContext);
+        liveInterruptionContext = null;
+        stopMediaStream(liveInterruptionStream);
+        liveInterruptionStream = null;
+    }
+
+    function getAudioLevel(analyser) {
+        const samples = new Uint8Array(analyser.fftSize);
+        analyser.getByteTimeDomainData(samples);
+        let sum = 0;
+        for (const sample of samples) {
+            const value = (sample - 128) / 128;
+            sum += value * value;
         }
-    });
+        return Math.sqrt(sum / samples.length);
+    }
 
-    function setAvatar(state) {
-        const states = ['idle', 'listening', 'thinking', 'speaking'];
-        if (!states.includes(state)) return;
-        states.forEach(st => { const el = document.getElementById('s-' + st); if (el) el.classList.remove('on'); });
-        const active = document.getElementById('s-' + state);
-        if (active) active.classList.add('on');
-        document.getElementById('lobster-svg').setAttribute('class', state);
-        console.log(`[Astakos UI State]: ${state}`);
+    function startLiveSpeechMonitor(analyser, sessionId) {
+        let heardSpeech = false;
+        let lastSpeechAt = performance.now();
+
+        function monitor() {
+            if (!isLiveVoiceMode || sessionId !== liveSessionId || !isRecording) return;
+            const audioLevel = getAudioLevel(analyser);
+            const now = performance.now();
+            if (audioLevel >= LIVE_SPEECH_THRESHOLD) {
+                heardSpeech = true;
+                lastSpeechAt = now;
+            } else if (heardSpeech && now - lastSpeechAt >= LIVE_SILENCE_DURATION_MS) {
+                stopLiveRecording(sessionId);
+                return;
+            }
+            liveSpeechAnimationFrame = requestAnimationFrame(monitor);
+        }
+
+        liveSpeechAnimationFrame = requestAnimationFrame(monitor);
+    }
+
+    async function startLiveInterruptionMonitor(audio, sessionId) {
+        try {
+            liveInterruptionStream = await navigator.mediaDevices.getUserMedia(getLiveAudioConstraints());
+            if (!isLiveVoiceMode || sessionId !== liveSessionId || currentAudio !== audio) {
+                stopLiveInterruptionMonitor();
+                return;
+            }
+            liveInterruptionContext = new AudioContext();
+            const source = liveInterruptionContext.createMediaStreamSource(liveInterruptionStream);
+            const analyser = liveInterruptionContext.createAnalyser();
+            analyser.fftSize = 1024;
+            source.connect(analyser);
+            let speechFrames = 0;
+
+            function monitor() {
+                if (!isLiveVoiceMode || sessionId !== liveSessionId || currentAudio !== audio) return;
+                speechFrames = getAudioLevel(analyser) >= LIVE_SPEECH_THRESHOLD ? speechFrames + 1 : 0;
+                if (speechFrames >= 3) {
+                    pauseLiveReplyForInterruption(audio, sessionId);
+                    return;
+                }
+                liveInterruptionAnimationFrame = requestAnimationFrame(monitor);
+            }
+
+            liveInterruptionAnimationFrame = requestAnimationFrame(monitor);
+        } catch (error) {
+            // Reply playback remains usable when the browser cannot grant a second microphone stream.
+        }
+    }
+
+    function pauseLiveReplyForInterruption(audio, sessionId) {
+        if (!isLiveVoiceMode || sessionId !== liveSessionId || currentAudio !== audio) return;
+        audio.pause();
+        audio.onended = null;
+        audio.onerror = null;
+        currentAudio = null;
+        stopLiveInterruptionMonitor();
+        URL.revokeObjectURL(audio.src);
+        startLiveListening(sessionId);
+    }
+
+    function stopCurrentAudioForLiveMode() {
+        if (!currentAudio) return;
+        currentAudio.pause();
+        currentAudio.onended = null;
+        currentAudio.onerror = null;
+        URL.revokeObjectURL(currentAudio.src);
+        currentAudio = null;
+        if (activeSpeechBtn) {
+            activeSpeechBtn.innerHTML = '🔊';
+            activeSpeechBtn.classList.remove('speaking-active');
+            activeSpeechBtn = null;
+        }
+    }
+
+    async function transcribeVoiceBlob(audioBlob) {
+        if (audioBlob.size < 800) return null;
+        setCoreState('processing');
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'loading';
+        loadingDiv.innerText = '🎙️ Transcribing voice...';
+        chatBox.appendChild(loadingDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+
+        const formData = new FormData();
+        formData.append('file', audioBlob, 'web_voice.webm');
+        try {
+            const res = await fetch('/voice', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
+            if (data.transcription) return data.transcription;
+            appendMessage('❌ Voice error: ' + (data.error || 'Unable to transcribe'), 'ai', 'System');
+        } catch (error) {
+            if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
+            appendMessage('❌ Connection failure during voice transcription.', 'ai', 'System');
+        }
+        return null;
+    }
+
+    async function processLiveRecording(audioBlob, sessionId) {
+        const transcription = await transcribeVoiceBlob(audioBlob);
+        if (!isLiveVoiceMode || sessionId !== liveSessionId) return;
+        if (!transcription) {
+            stopLiveVoiceMode();
+            return;
+        }
+        userInput.value = '[Voice Message]: ' + transcription;
+        const reply = await sendMessage();
+        if (!isLiveVoiceMode || sessionId !== liveSessionId) return;
+        if (!reply) {
+            stopLiveVoiceMode();
+            return;
+        }
+        await playLiveReply(reply, sessionId);
+    }
+
+    async function playLiveReply(text, sessionId) {
+        setCoreState('speaking');
+        try {
+            const response = await fetch('/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text }),
+            });
+            if (!response.ok) throw new Error('TTS request failed');
+            const audioUrl = URL.createObjectURL(await response.blob());
+            const audio = new Audio(audioUrl);
+            currentAudio = audio;
+            audio.onended = () => {
+                URL.revokeObjectURL(audioUrl);
+                if (currentAudio === audio) currentAudio = null;
+                stopLiveInterruptionMonitor();
+                if (isLiveVoiceMode && sessionId === liveSessionId) startLiveListening(sessionId);
+            };
+            audio.onerror = () => {
+                URL.revokeObjectURL(audioUrl);
+                if (currentAudio === audio) currentAudio = null;
+                stopLiveInterruptionMonitor();
+                if (isLiveVoiceMode && sessionId === liveSessionId) stopLiveVoiceMode();
+            };
+            await audio.play();
+            startLiveInterruptionMonitor(audio, sessionId);
+        } catch (error) {
+            if (isLiveVoiceMode && sessionId === liveSessionId) stopLiveVoiceMode();
+        }
+    }
+
+    function stopLiveRecording(sessionId) {
+        if (sessionId !== liveSessionId || !isRecording) return;
+        stopLiveSpeechMonitor();
+        if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+        stopMediaStream(liveInputStream);
+        liveInputStream = null;
+        isRecording = false;
+    }
+
+    async function startLiveListening(sessionId) {
+        if (!isLiveVoiceMode || sessionId !== liveSessionId || isRecording || currentAudio) return;
+        try {
+            liveInputStream = await navigator.mediaDevices.getUserMedia(getLiveAudioConstraints());
+            if (!isLiveVoiceMode || sessionId !== liveSessionId) {
+                stopMediaStream(liveInputStream);
+                liveInputStream = null;
+                return;
+            }
+            mediaRecorder = new MediaRecorder(liveInputStream);
+            audioChunks = [];
+            mediaRecorder.ondataavailable = event => {
+                if (event.data.size > 0) audioChunks.push(event.data);
+            };
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+                if (isLiveVoiceMode && sessionId === liveSessionId) processLiveRecording(audioBlob, sessionId);
+            };
+            liveAudioContext = new AudioContext();
+            const source = liveAudioContext.createMediaStreamSource(liveInputStream);
+            const analyser = liveAudioContext.createAnalyser();
+            analyser.fftSize = 1024;
+            source.connect(analyser);
+            mediaRecorder.start();
+            isRecording = true;
+            setCoreState('listening');
+            startLiveSpeechMonitor(analyser, sessionId);
+        } catch (error) {
+            if (isLiveVoiceMode && sessionId === liveSessionId) stopLiveVoiceMode();
+        }
+    }
+
+    function startLiveVoiceMode() {
+        if (isLiveVoiceMode || isRecording) return;
+        stopCurrentAudioForLiveMode();
+        isLiveVoiceMode = true;
+        liveSessionId += 1;
+        setLiveVoiceModeUi(true);
+        startLiveListening(liveSessionId);
+    }
+
+    function stopLiveVoiceMode() {
+        if (!isLiveVoiceMode) return;
+        isLiveVoiceMode = false;
+        liveSessionId += 1;
+        stopLiveSpeechMonitor();
+        stopLiveInterruptionMonitor();
+        if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+        stopMediaStream(liveInputStream);
+        liveInputStream = null;
+        isRecording = false;
+        if (currentAudio) {
+            currentAudio.pause();
+            currentAudio.onended = null;
+            currentAudio.onerror = null;
+            URL.revokeObjectURL(currentAudio.src);
+            currentAudio = null;
+        }
+        setLiveVoiceModeUi(false);
+        setCoreState('idle');
     }
 
     async function toggleRecording() {
+        if (isLiveVoiceMode) {
+            stopLiveVoiceMode();
+            return;
+        }
         if (!isRecording) {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1348,57 +1835,67 @@
                 mediaRecorder.onstop = async () => {
                     const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
                     if (audioBlob.size < 800) {
-                        alert("❌ Error: The microphone sent no audio! (" + audioBlob.size + " bytes). Check Windows settings.");
-                        setAvatar('idle'); return;
+                        alert("❌ Error: The microphone sent no audio! (" + audioBlob.size + " bytes). Check audio input settings.");
+                        setCoreState('idle');
+                        return;
                     }
-                    setAvatar('thinking');
-                    const loadingDiv = document.createElement('div');
-                    loadingDiv.className = 'loading';
-                    loadingDiv.innerText = '🎙️ Converting voice to text...';
-                    chatBox.appendChild(loadingDiv);
-                    chatBox.scrollTop = chatBox.scrollHeight;
-                    const formData = new FormData();
-                    formData.append('file', audioBlob, 'web_voice.webm');
-                    try {
-                        const res = await fetch('http://127.0.0.1:8000/voice', { method: 'POST', body: formData });
-                        const data = await res.json();
-                        chatBox.removeChild(loadingDiv);
-                        if (data.transcription) {
-                            userInput.value = "[Voice Message]: " + data.transcription;
-                            sendMessage();
-                        } else {
-                            appendMessage("❌ Error: " + data.error, 'ai', 'System');
-                            setAvatar('idle');
-                        }
-                    } catch (err) {
-                        if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
-                        appendMessage("❌ Connection failure for voice.", 'ai', 'System');
-                        setAvatar('idle');
+                    const transcription = await transcribeVoiceBlob(audioBlob);
+                    if (transcription) {
+                        userInput.value = "[Voice Message]: " + transcription;
+                        sendMessage();
+                    } else {
+                        setCoreState('error');
+                        setTimeout(() => setCoreState('idle'), 4000);
                     }
                 };
                 mediaRecorder.start();
                 isRecording = true;
-                voiceBtnLarge.classList.add('recording-pulse');
-                voiceBtnLarge.innerHTML = "⏹️";
-                setAvatar('listening');
-            } catch (err) { alert("❌ Microphone problem!"); }
+                triggerBtn.classList.add('mic-recording');
+                triggerBtn.innerHTML = "⏹️";
+                setCoreState('listening');
+            } catch (err) {
+                alert("❌ Microphone access denied or unavailable.");
+                setCoreState('error');
+                setTimeout(() => setCoreState('idle'), 3000);
+            }
         } else {
             if (mediaRecorder && mediaRecorder.state === 'recording') {
                 mediaRecorder.stop();
                 mediaRecorder.stream.getTracks().forEach(t => t.stop());
             }
             isRecording = false;
-            voiceBtnLarge.classList.remove('recording-pulse');
-            voiceBtnLarge.innerHTML = "🎙️";
+            triggerBtn.classList.remove('mic-recording');
+            triggerBtn.innerHTML = "🎙️";
         }
     }
-    voiceBtnLarge.addEventListener('click', toggleRecording);
 
-    /* ── WebSocket Logs ── */
+    triggerBtn.addEventListener('click', toggleRecording);
+    liveVoiceBtn.addEventListener('click', () => {
+        if (isLiveVoiceMode) stopLiveVoiceMode();
+        else startLiveVoiceMode();
+    });
+    liveVoiceExitBtn.addEventListener('click', stopLiveVoiceMode);
+    window.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && isLiveVoiceMode) stopLiveVoiceMode();
+    });
+    if (corePod) {
+        corePod.addEventListener('click', toggleRecording);
+        corePod.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleRecording();
+            }
+        });
+    }
+
+    /* ── WebSocket Live Logs ── */
     const logBox  = document.getElementById('log-box');
     const wsDot   = document.getElementById('ws-dot');
     const wsLabel = document.getElementById('ws-label');
-    const ws = new WebSocket('ws://127.0.0.1:8000/ws/logs');
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = window.location.host || '127.0.0.1:8000';
+    const ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/logs`);
 
     let _pollInterval = null;
     function _startPolling() {
@@ -1406,23 +1903,22 @@
         fetchNewMessages();
         _pollInterval = setInterval(fetchNewMessages, 5000);
     }
-    ws.onopen  = () => { wsDot.style.background = '#4EC9B0'; wsLabel.textContent = 'Online'; _startPolling(); };
-    ws.onclose = () => { wsDot.style.background = '#F44747'; wsLabel.textContent = 'Offline'; _startPolling(); };
+    ws.onopen  = () => { wsDot.style.background = '#34d399'; wsLabel.textContent = 'Online'; _startPolling(); };
+    ws.onclose = () => { wsDot.style.background = '#fb7185'; wsLabel.textContent = 'Offline'; _startPolling(); };
 
     function parseANSI(text) {
         return text
             .replace(/\x1b\[90m/g, '<span style="color:#808080;">')
-            .replace(/\x1b\[91m/g, '<span style="color:#F44747;">')
-            .replace(/\x1b\[92m/g, '<span style="color:#4EC9B0;">')
-            .replace(/\x1b\[93m/g, '<span style="color:#DCDCAA;">')
-            .replace(/\x1b\[94m/g, '<span style="color:#569CD6;">')
-            .replace(/\x1b\[95m/g, '<span style="color:#C586C0;">')
-            .replace(/\x1b\[96m/g, '<span style="color:#4fc1ff;">')
+            .replace(/\x1b\[91m/g, '<span style="color:#fb7185;">')
+            .replace(/\x1b\[92m/g, '<span style="color:#34d399;">')
+            .replace(/\x1b\[93m/g, '<span style="color:#fbbf24;">')
+            .replace(/\x1b\[94m/g, '<span style="color:#60a5fa;">')
+            .replace(/\x1b\[95m/g, '<span style="color:#c084fc;">')
+            .replace(/\x1b\[96m/g, '<span style="color:#38bdf8;">')
             .replace(/\x1b\[0m/g,  '</span>');
     }
 
     ws.onmessage = function(event) {
-        // Test: if it is a JSON event from _broadcast_ws, handle accordingly
         try {
             const evt = JSON.parse(event.data);
             if (evt.type === 'new_message' && (evt.channel === 'telegram' || evt.channel === 'web')) {
@@ -1433,55 +1929,24 @@
                 }
                 return;
             }
-        } catch(e) { /* plain text log line, continue normally */ }
+        } catch(e) { /* standard text log line */ }
 
         const span = document.createElement('span');
         span.innerHTML = parseANSI(event.data);
         logBox.appendChild(span);
         logBox.scrollTop = logBox.scrollHeight;
+
         const logLine = event.data;
         if (logLine.includes("[Vision]: Image analysis") ||
             logLine.includes("LangGraph is executing") ||
             logLine.includes("[Dev]: Executing") ||
             logLine.includes("[LinkedIn]:")) {
-            setAvatar('thinking');
+            if (currentCoreState === 'idle') {
+                setCoreState('processing');
+                setTimeout(() => { if (currentCoreState === 'processing') setCoreState('idle'); }, 4000);
+            }
         }
     };
-
-    /* ── TTS ── */
-    let availableVoices = [];
-    function populateVoices() { availableVoices = window.speechSynthesis.getVoices(); }
-    populateVoices();
-    if (speechSynthesis.onvoiceschanged !== undefined) { speechSynthesis.onvoiceschanged = populateVoices; }
-
-    let currentAudio = null;
-
-    async function speakText(text) {
-        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-        let cleanText = text
-            .replace(/[*#`]/g, '')
-            .replace(/\[SEND_PHOTO:.*?\]/g, '')
-            .replace(/\[ASTAKOS_ASSET_URL:.*?\]/g, '')
-            .replace(/\[(.*?)\]\(.*?\)/g, '$1')
-            .replace(/^\[.*?\]:\s*/g, '')
-            .trim();
-        if (!cleanText) return;
-        setAvatar('speaking');
-        try {
-            const response = await fetch('http://127.0.0.1:8000/tts', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: cleanText })
-            });
-            if (!response.ok) { console.error('[TTS Error]:', await response.json()); setAvatar('idle'); return; }
-            const audioBlob = await response.blob();
-            const audioUrl  = URL.createObjectURL(audioBlob);
-            currentAudio = new Audio(audioUrl);
-            currentAudio.onended = () => { setAvatar('idle'); URL.revokeObjectURL(audioUrl); currentAudio = null; };
-            currentAudio.onerror = () => { setAvatar('idle'); currentAudio = null; };
-            await currentAudio.play();
-        } catch (err) { console.error('[TTS Fetch Error]:', err); setAvatar('idle'); }
-    }
 
     // ── Google Drive upload on-demand ──────────────────────────
     async function astakosOpenDrive(btn) {
@@ -1497,33 +1962,31 @@
             });
             const d = await r.json();
             if (d.ok) {
-                // Button -> Open
                 btn.textContent = '📂 Open';
-                btn.style.background = '#0f5132';
+                btn.style.background = '#065f46';
                 btn.disabled = false;
                 btn.onclick = () => window.open(d.url, '_blank');
 
-                // Preview iframe under the card
                 const card = btn.closest('div');
                 if (card) {
                     const fileId = d.url.match(/\/d\/([^/]+)\//)?.[1];
                     if (fileId) {
                         const previewUrl = `https://drive.google.com/file/d/${fileId}/preview`;
                         const wrap = document.createElement('div');
-                        wrap.style.cssText = 'margin-top:8px;border-radius:8px;overflow:hidden;border:1px solid #dee2e6;';
+                        wrap.style.cssText = 'margin-top:8px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);';
                         wrap.innerHTML = `<iframe src="${previewUrl}" width="100%" height="400"
                             frameborder="0" allowfullscreen
-                            style="display:block;background:#f8f9fa;"></iframe>`;
+                            style="display:block;background:#0b101c;"></iframe>`;
                         card.parentNode.insertBefore(wrap, card.nextSibling);
                     }
                 }
             } else {
                 btn.textContent = '❌ ' + (d.error || 'Error');
-                btn.style.background = '#dc3545';
+                btn.style.background = '#9f1239';
             }
         } catch (e) {
             btn.textContent = '❌ Error';
-            btn.style.background = '#dc3545';
+            btn.style.background = '#9f1239';
         }
     }
     window.astakosOpenDrive = astakosOpenDrive;
