@@ -1935,6 +1935,7 @@ def handle_message(user_text: str, chat_id: str):
     routine_completion_context: SystemMessage | None = None
     routine_draft_offer_context: SystemMessage | None = None
     routine_draft_offer_authorized = False
+    routine_draft_offer_to_consume: tuple[int, object] | None = None
     routine_action_consumed = False
 
     if pending_routine_confirmations:
@@ -1981,10 +1982,11 @@ def handle_message(user_text: str, chat_id: str):
             rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
             for rid, pdata in pending_routine_confirmations.items()
         }
+        active_draft, _, _ = _safe_active_draft_status()
         draft_offer_ids = frozenset(
             rid
             for rid, pdata in pending_routine_confirmations.items()
-            if isinstance(pdata, dict) and pdata.get("draft_offer") is True
+            if not active_draft and isinstance(pdata, dict) and pdata.get("draft_offer") is True
         )
         selector_candidates = {
             rid: (
@@ -1993,7 +1995,6 @@ def handle_message(user_text: str, chat_id: str):
             )
             for rid, event_name in pending_candidates.items()
         }
-        active_draft, _, _ = _safe_active_draft_status()
         accepted_draft_offer = None
         draft_offer_consumed = False
         if not active_draft:
@@ -2038,11 +2039,10 @@ def handle_message(user_text: str, chat_id: str):
             )
             if accepted_draft_offer is not None:
                 pending_data = pending_routine_confirmations.get(decision.routine_id, {})
-                draft_offer_consumed = acknowledge_pending_draft_offer(
-                    decision.routine_id,
-                    pending_data.get("sent_at"),
-                )
-            if accepted_draft_offer is None or not draft_offer_consumed:
+                sent_at = pending_data.get("sent_at")
+                if sent_at is not None:
+                    routine_draft_offer_to_consume = (decision.routine_id, sent_at)
+            if accepted_draft_offer is None or routine_draft_offer_to_consume is None:
                 accepted_draft_offer = None
                 decision = RoutineSelection(action="none", routine_id=None)
             else:
@@ -2091,7 +2091,7 @@ def handle_message(user_text: str, chat_id: str):
             pdata = pending_routine_confirmations.get(rid, {})
             ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
 
-            if not draft_offer_consumed:
+            if not draft_offer_consumed and routine_draft_offer_to_consume is None:
                 mark_routine_acknowledged(rid)
                 remove_pending_confirmation(rid)
             log_event(
@@ -2717,6 +2717,15 @@ def handle_message(user_text: str, chat_id: str):
                                 tool_result_fallbacks.append(tool_content)
         tool_message_collect_ms = int((perf_counter() - tool_collect_started) * 1000)
         _trace.mark_phase("tool_message_collect_ms", tool_message_collect_ms)
+
+        if routine_draft_offer_to_consume and any(
+            looks_like_terminal_messenger_draft_result(result)
+            for result in tool_result_fallbacks
+        ):
+            draft_routine_id, draft_sent_at = routine_draft_offer_to_consume
+            from memory.routine_db import acknowledge_pending_draft_offer
+
+            acknowledge_pending_draft_offer(draft_routine_id, draft_sent_at)
 
         graph_stream_ms = int((perf_counter() - t_graph_0) * 1000)
         _trace.mark_phase("graph_stream_ms", graph_stream_ms)

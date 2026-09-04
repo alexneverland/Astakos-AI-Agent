@@ -37,6 +37,13 @@ def test_send_without_active_draft_is_not_confirm():
     assert is_create_draft_intent("Στείλε") is False
 
 
+def test_full_send_message_request_still_creates_a_draft() -> None:
+    """A recipient-bearing request remains a draft request before any send approval."""
+    result = classify_messenger_intent("Στείλε μήνυμα στη Σοφία", has_active_draft=False)
+    assert result.intent == "create_draft"
+    assert is_create_draft_intent("Στείλε μήνυμα στη Σοφία") is True
+
+
 def test_long_create_message_with_active_draft_stays_create_draft():
     result = classify_messenger_intent(
         "Φτιάξε ένα ωραίο messenger μήνυμα για τη Partner να της δώσουμε δύναμη στη δουλειά",

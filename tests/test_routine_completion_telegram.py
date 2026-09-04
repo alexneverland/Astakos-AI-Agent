@@ -550,16 +550,17 @@ def test_pending_messenger_offer_natural_acceptance_adds_trusted_draft_context()
                 5: {
                     "event": "Dinner with Partner",
                     "draft_offer": True,
+                    "sent_at": datetime.now(),
                 }
             },
             selector_return=RoutineSelection(action="draft", routine_id=5),
         )
 
     selector_mock.assert_called_once()
-    sys.modules["memory.routine_db"].acknowledge_pending_draft_offer.assert_called_once()
+    sys.modules["memory.routine_db"].acknowledge_pending_draft_offer.assert_not_called()
     build_draft_context.assert_called_once_with("Dinner with Partner")
-    graph_messages = graph_mock.stream.call_args.args[0]["messages"]
-    assert draft_context in graph_messages
+    graph_state = graph_mock.stream.call_args.args[0]
+    assert graph_state["routine_draft_offer_authorized"] is True
 
 
 def test_active_draft_keeps_bare_yes_out_of_pending_offer_path() -> None:

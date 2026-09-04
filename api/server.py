@@ -635,6 +635,7 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
     tool_result_fallbacks: list[str] = []
     external_tool_names: set[str] = set()
     tool_args_by_id: dict[str, dict] = {}
+    saved_local_draft = False
 
     t_graph_0 = perf_counter()
     for event in graph.stream(
@@ -661,6 +662,12 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
                             is_untrusted_external_tool_call,
                         )
                         tool_name = str(getattr(msg, "name", ""))
+                        if tool_name == "relay_local_payload":
+                            from core.utils import looks_like_terminal_messenger_draft_result
+
+                            saved_local_draft = saved_local_draft or looks_like_terminal_messenger_draft_result(
+                                clean_message(getattr(msg, "content", "")),
+                            )
                         tool_args = tool_args_by_id.get(str(getattr(msg, "tool_call_id", "")), {})
                         is_external = is_untrusted_external_tool_call(tool_name, tool_args)
                         if is_external:
@@ -704,6 +711,7 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
         "tool_result_fallbacks": tool_result_fallbacks,
         "external_tool_names": sorted(external_tool_names),
         "graph_elapsed_ms": graph_elapsed_ms,
+        "saved_local_draft": saved_local_draft,
     }
 
 # ────────────────────────────────────────────────────────────────
@@ -922,6 +930,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     user_input = body.get("message", "").strip()
     routine_completion_context: SystemMessage | None = None
     routine_draft_offer_context: SystemMessage | None = None
+    routine_draft_offer_to_consume: tuple[int, object] | None = None
     routine_action_consumed = False
 
     # (Mastro-Shield): Avoid null or strange paths
@@ -993,10 +1002,11 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
                 for rid, pdata in pending_routine_confirmations.items()
             }
+            active_draft, _, _ = active_draft_status()
             draft_offer_ids = frozenset(
                 rid
                 for rid, pdata in pending_routine_confirmations.items()
-                if isinstance(pdata, dict) and pdata.get("draft_offer") is True
+                if not active_draft and isinstance(pdata, dict) and pdata.get("draft_offer") is True
             )
             selector_candidates = {
                 rid: (
@@ -1005,7 +1015,6 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 )
                 for rid, event_name in pending_candidates.items()
             }
-            active_draft, _, _ = active_draft_status()
             accepted_draft_offer = None
             draft_offer_consumed = False
             if not active_draft:
@@ -1049,11 +1058,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 )
                 if accepted_draft_offer is not None:
                     pending_data = pending_routine_confirmations.get(decision.routine_id, {})
-                    draft_offer_consumed = acknowledge_pending_draft_offer(
-                        decision.routine_id,
-                        pending_data.get("sent_at"),
-                    )
-                if accepted_draft_offer is None or not draft_offer_consumed:
+                    sent_at = pending_data.get("sent_at")
+                    if sent_at is not None:
+                        routine_draft_offer_to_consume = (decision.routine_id, sent_at)
+                if accepted_draft_offer is None or routine_draft_offer_to_consume is None:
                     accepted_draft_offer = None
                     from services.routine_completion_helper import RoutineSelection
 
@@ -1102,7 +1110,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 pdata = pending_routine_confirmations.get(rid, {})
                 ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
 
-                if not draft_offer_consumed:
+                if not draft_offer_consumed and routine_draft_offer_to_consume is None:
                     mark_routine_acknowledged(rid)
                     remove_pending_confirmation(rid)
                 log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
@@ -1601,6 +1609,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 limit,
                 _trace,
             )
+            if routine_draft_offer_to_consume and graph_result.get("saved_local_draft"):
+                draft_routine_id, draft_sent_at = routine_draft_offer_to_consume
+                acknowledge_pending_draft_offer(draft_routine_id, draft_sent_at)
             final_ai_response = graph_result["final_ai_response"]
             handling_agent = graph_result["handling_agent"]
             tool_result_fallbacks = graph_result["tool_result_fallbacks"]
