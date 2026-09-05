@@ -30,6 +30,7 @@ def _make_routines_db(path, rows):
             event_type TEXT,
             confidence REAL,
             state TEXT,
+            is_active BOOLEAN DEFAULT 1,
             muted_until TEXT,
             muted_from TEXT,
             sentimental_last_sent TEXT,

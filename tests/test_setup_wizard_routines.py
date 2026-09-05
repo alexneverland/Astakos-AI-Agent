@@ -107,7 +107,10 @@ def test_setup_wizard_rejects_invalid_routines_before_writing(
 
     _configure_isolated_setup_files(monkeypatch, tmp_path)
 
-    with pytest.raises(HTTPException, match="routines\\[0\\]\\.time"):
+    with pytest.raises(
+        HTTPException,
+        match="Routine validation failed. Please check routine definitions.",
+    ):
         asyncio.run(wizard.save_setup(wizard.SetupPayload(
             basic={},
             advanced={},

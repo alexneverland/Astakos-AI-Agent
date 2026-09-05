@@ -4,14 +4,27 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import core.approval as approval
 from core.approval import approval_check_node
 from core.capability_draft import has_capability_draft_authorization
 import core.i18n as i18n
 
 @pytest.fixture(autouse=True)
-def restore_locale():
-    # Save the current language and restore it after each test
+def isolate_approval_side_effects(monkeypatch, tmp_path):
+    """Keep approval tests away from the real pending store and Telegram."""
     current_lang = i18n.LANG
+    notifications = []
+    monkeypatch.setattr(approval, "PENDING_FILE", str(tmp_path / "pending.json"))
+    monkeypatch.setattr(
+        approval,
+        "_notify_telegram",
+        lambda tool_call: notifications.append(("critical", tool_call)),
+    )
+    monkeypatch.setattr(
+        approval,
+        "_notify_telegram_notify",
+        lambda tool_call: notifications.append(("notify", tool_call)),
+    )
     yield
     i18n.load_locale(current_lang)
 
@@ -22,8 +35,7 @@ def test_draft_authorization_exact():
     ai_msg = AIMessage(content="", tool_calls=[{"name": "write_custom_tool", "args": {}, "id": "tc-1"}])
     state = {"messages": [ai_proposal, human_msg, ai_msg]}
     result = approval_check_node(state)
-    assert result["approval_status"] == "ok"
-    assert "messages" not in result
+    assert result["approval_status"] == "pending"
 
 def test_draft_authorization_with_suffix():
     i18n.load_locale("en")
@@ -32,7 +44,7 @@ def test_draft_authorization_with_suffix():
     ai_msg = AIMessage(content="", tool_calls=[{"name": "write_custom_tool", "args": {}, "id": "tc-1"}])
     state = {"messages": [ai_proposal, human_msg, ai_msg]}
     result = approval_check_node(state)
-    assert result["approval_status"] == "ok"
+    assert result["approval_status"] == "pending"
 
 def test_draft_authorization_with_exclamation():
     i18n.load_locale("en")
@@ -41,7 +53,7 @@ def test_draft_authorization_with_exclamation():
     ai_msg = AIMessage(content="", tool_calls=[{"name": "write_custom_tool", "args": {}, "id": "tc-1"}])
     state = {"messages": [ai_proposal, human_msg, ai_msg]}
     result = approval_check_node(state)
-    assert result["approval_status"] == "ok"
+    assert result["approval_status"] == "pending"
 
 def test_draft_authorization_with_question_mark_blocks():
     i18n.load_locale("en")
@@ -95,7 +107,7 @@ def test_draft_authorization_greek_exact():
     ai_msg = AIMessage(content="", tool_calls=[{"name": "write_custom_tool", "args": {}, "id": "tc-1"}])
     state = {"messages": [ai_proposal, human_msg, ai_msg]}
     result = approval_check_node(state)
-    assert result["approval_status"] == "ok"
+    assert result["approval_status"] == "pending"
 
 def test_draft_command_without_prefix_blocks():
     i18n.load_locale("en")
@@ -168,7 +180,7 @@ def test_draft_authorization_with_transport_metadata():
     ai_msg = AIMessage(content="", tool_calls=[{"name": "write_custom_tool", "args": {}, "id": "tc-1"}])
     state = {"messages": [ai_proposal, human_msg, ai_msg]}
     result = approval_check_node(state)
-    assert result["approval_status"] == "ok"
+    assert result["approval_status"] == "pending"
 
 def test_draft_authorization_with_history_metadata_consecutive():
     i18n.load_locale("en")
@@ -177,7 +189,7 @@ def test_draft_authorization_with_history_metadata_consecutive():
     ai_msg = AIMessage(content="", tool_calls=[{"name": "write_custom_tool", "args": {}, "id": "tc-1"}])
     state = {"messages": [ai_proposal, human_msg, ai_msg]}
     result = approval_check_node(state)
-    assert result["approval_status"] == "ok"
+    assert result["approval_status"] == "pending"
 
 def test_draft_authorization_rejects_arbitrary_brackets():
     i18n.load_locale("en")
