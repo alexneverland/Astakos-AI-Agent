@@ -5,6 +5,7 @@ from typing import Any, Iterable
 import unicodedata
 import re
 from core import nl_config
+from core.utils import strip_transport_metadata
 
 @dataclass
 class MessengerIntentResult:
@@ -37,7 +38,7 @@ MESSENGER_ROUTINE_DRAFT_OFFER_MARKER = "[MESSENGER_ROUTINE_DRAFT_OFFER_ACCEPTED]
 
 
 def _normalize(text: str) -> str:
-    raw = str(text or "").strip().lower()
+    raw = strip_transport_metadata(text).lower()
     normalized = unicodedata.normalize("NFD", raw)
     normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
     normalized = re.sub(r"[^\w\s]", " ", normalized)

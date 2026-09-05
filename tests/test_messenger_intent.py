@@ -37,6 +37,14 @@ def test_send_without_active_draft_is_not_confirm():
     assert is_create_draft_intent("Στείλε") is False
 
 
+def test_transport_timestamp_does_not_turn_bare_send_into_draft_creation() -> None:
+    """Astakos-added transport metadata must not change Messenger intent."""
+    result = classify_messenger_intent("[11:03] στειλε", has_active_draft=False)
+
+    assert result.intent == "confirm_send"
+    assert is_create_draft_intent("[11:03] στειλε") is False
+
+
 def test_full_send_message_request_still_creates_a_draft() -> None:
     """A recipient-bearing request remains a draft request before any send approval."""
     result = classify_messenger_intent("Στείλε μήνυμα στη Σοφία", has_active_draft=False)
@@ -172,3 +180,10 @@ def test_explicit_draft_creation_allows_conversational_filler_before_action() ->
     assert is_explicit_draft_creation_request("Alice will write a message tomorrow") is False
     assert is_explicit_draft_creation_request("I learned to write a message") is False
     assert is_explicit_draft_creation_request("I write a message every day") is False
+
+
+def test_transport_timestamp_preserves_explicit_draft_creation_authorization() -> None:
+    """A Web timestamp must not escalate a reversible draft write to approval."""
+    assert is_explicit_draft_creation_request(
+        "[11:03] Γράψε ένα μήνυμα στη Σοφία",
+    ) is True

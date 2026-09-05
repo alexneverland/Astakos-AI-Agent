@@ -214,6 +214,37 @@ def test_authorized_user_approve_callback_executes_tool() -> None:
         assert mock_exec.call_args.args[0] == "call-valid-1"
 
 
+def test_web_origin_messenger_approval_confirms_actual_send_in_telegram() -> None:
+    """A Web-origin Messenger approval reports the external send clearly."""
+    cq = _build_callback_query(
+        action="approve",
+        tool_call_id="call-web-messenger",
+        from_id="12345678",
+        chat_id="12345678",
+    )
+
+    with patch("core.approval.get_pending") as mock_get, \
+         patch("core.approval.execute_approved_pending") as mock_exec, \
+         patch.object(bot, "send_telegram_msg") as mock_send, \
+         patch.object(bot, "t", side_effect=lambda key, **_kwargs: key), \
+         patch("api.server.append_to_chat_history"), \
+         patch("requests.post"):
+
+        mock_get.return_value = {
+            "tool_name": "execute_local_pipeline",
+            "channel": "web",
+        }
+        mock_exec.return_value = {
+            "ok": True,
+            "status": "executed",
+            "result": "Messenger send completed",
+        }
+
+        bot._handle_approval_callback(cq)
+
+    mock_send.assert_called_once_with("clients.telegram_bot.bot_msg_df3588")
+
+
 def test_authorized_user_reject_callback_pops_pending() -> None:
     """Proves that a callback query from the authorized user/chat pops and rejects the pending tool."""
     cq = _build_callback_query(

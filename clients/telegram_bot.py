@@ -3255,7 +3255,10 @@ def _handle_approval_callback(cq: dict) -> None:
             
             if origin_channel == "web":
                 if execution["ok"]:
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_success_web", tool=tool_name))
+                    if tool_name == "execute_local_pipeline":
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_df3588"))
+                    else:
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_success_web", tool=tool_name))
                     
                     try:
                         from api.server import append_to_chat_history
