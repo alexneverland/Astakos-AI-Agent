@@ -1,31 +1,74 @@
-import pytest
-from unittest.mock import patch, MagicMock
-
-# This test ensures that audio does not trigger pending asset logic.
-
 def test_audio_transcript_flow():
-    # Simulate what telegram_bot handle_voice does:
-    ai_reply = "Καλημέρα"
-    # It passes it as a text message
-    user_text = f"[ΦΩΝΗΤΙΚΟ]: [VOICE_INPUT] {ai_reply}"
-    
-    # Check that it's NOT considered a pending asset confirm
+    """Telegram voice metadata stays trusted and out of the user transcript."""
+    from clients.telegram_bot import _prepare_telegram_message
     from memory.pending_assets import looks_like_asset_confirmation_prompt
-    assert looks_like_asset_confirmation_prompt(user_text) is False
-    
-    # Check the parsing logic used in Telegram's handle_message
-    is_voice_mode = "[ΦΩΝΗΤΙΚΟ]" in user_text or "[VOICE_MESSAGE]" in user_text
-    is_voice_input = "[VOICE_INPUT]" in user_text
-    
-    assert is_voice_mode is True
-    assert is_voice_input is True
-    
-    clean_user_text = user_text.replace("/voice", "").replace("[ΦΩΝΗΤΙΚΟ]:", "").replace("[VOICE_MESSAGE]:", "").strip()
-    if is_voice_input:
-        clean_user_text = clean_user_text.replace("[VOICE_INPUT]", "").strip()
-        
+
+    clean_user_text, is_voice_mode, voice_context = _prepare_telegram_message(
+        "Καλημέρα",
+        voice_input=True,
+    )
+
     assert clean_user_text == "Καλημέρα"
-    
-    # Because there's no logic to create pending_asset_archive for audio, it simply bypasses
-    # We just ensure the parsing doesn't leave garbage and doesn't trigger the confirmation helper
-    pass
+    assert is_voice_mode is False
+    assert voice_context is not None
+    assert "voice message" not in clean_user_text.casefold()
+    assert looks_like_asset_confirmation_prompt(clean_user_text) is False
+
+
+def test_legacy_voice_transport_markers_are_removed() -> None:
+    """Old queued Telegram voice messages remain compatible without prompt leakage."""
+    from clients.telegram_bot import _prepare_telegram_message
+
+    clean_user_text, is_voice_mode, voice_context = _prepare_telegram_message(
+        "[VOICE]: [VOICE_INPUT] Καλημέρα",
+    )
+
+    assert clean_user_text == "Καλημέρα"
+    assert is_voice_mode is False
+    assert voice_context is not None
+
+
+def test_voice_reply_requires_enabled_telegram_voice_mode(monkeypatch) -> None:
+    """Voice input alone stays text; the /voice toggle enables spoken replies."""
+    import clients.telegram_bot as bot
+
+    monkeypatch.setattr(bot, "voice_mode_enabled", True)
+    clean_user_text, is_voice_mode, voice_context = bot._prepare_telegram_message(
+        "Καλημέρα",
+        voice_input=True,
+    )
+
+    assert clean_user_text == "Καλημέρα"
+    assert is_voice_mode is True
+    assert voice_context is not None
+
+
+def test_telegram_tts_uses_the_configured_locale(monkeypatch) -> None:
+    """Telegram voice delivery must synthesize and send audio without stale i18n names."""
+    import asyncio
+    from types import SimpleNamespace
+
+    import config
+    import core.i18n as i18n
+    import tools.telegram as telegram
+
+    synthesis_calls = []
+    sent = []
+    monkeypatch.setattr(telegram, "_suppress_test_delivery", lambda reason: False)
+    monkeypatch.setattr(config, "TELEGRAM_TOKEN", "test-token")
+    monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "test-chat")
+    monkeypatch.setattr(
+        "core.text_to_speech.synthesize_speech",
+        lambda text, locale: synthesis_calls.append((text, locale)) or b"voice-bytes",
+    )
+    monkeypatch.setattr(
+        telegram.requests,
+        "post",
+        lambda *args, **kwargs: sent.append((args, kwargs))
+        or SimpleNamespace(status_code=200, text="ok"),
+    )
+
+    asyncio.run(telegram.send_telegram_voice("Καλημέρα"))
+
+    assert synthesis_calls == [("Καλημέρα", i18n.LANG)]
+    assert len(sent) == 1

@@ -317,6 +317,8 @@ class TestRealGeminiAPIAdapterBoundary:
         ]
         assert create_kwargs["generation_config"] == {
             "transcription_config": {
+                "language_codes": ["el-GR"],
+                "custom_vocabulary": ["Αστακέ", "Astakos"],
                 "mode": {
                     "type": "verbatim",
                 },
@@ -613,12 +615,13 @@ class TestRealVertexAIAdapterBoundary:
         # 2. Verify normal adapter location is unchanged
         assert self.adapter.location == "europe-west1"
 
-        # 3. Verify request uses dedicated model with raw audio and relies on default transcription behavior
+        # 3. Verify request uses the dedicated model with locale and proper-name hints.
         kwargs = mock_client.models.generate_content.call_args.kwargs
         assert kwargs["model"] == "gemini-3.5-transcribe-preview"
         assert kwargs["contents"] == [{"inline_data": {"mime_type": "audio/ogg", "data": b"audio_bytes"}}]
-        # No artificial config fields or prompts are passed
-        assert kwargs.get("config") is None
+        transcription_config = kwargs["config"].audio_transcription_config
+        assert transcription_config.language_codes == ["el-GR"]
+        assert transcription_config.custom_vocabulary == ["Αστακέ", "Astakos"]
         assert AUDIO_TRANSCRIPTION_PROMPT not in str(kwargs["contents"])
 
     @patch("google.genai.Client")

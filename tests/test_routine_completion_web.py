@@ -7,7 +7,7 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from api.server import LOCAL_TOKEN, server
 from services.routine_completion_helper import RoutineSelection
@@ -46,6 +46,7 @@ def _post_chat(
     accepted_draft_offer: object | None = None,
     active_draft_status: tuple[bool, str, dict | None] = (False, "missing", None),
     saved_local_draft: bool = False,
+    voice_mode: bool = False,
 ) -> tuple[object, dict[str, MagicMock]]:
     """Run one Web message under isolated completion and graph dependencies."""
     graph_runner = MagicMock(side_effect=lambda *args, **kwargs: {
@@ -89,7 +90,11 @@ def _post_chat(
         patch("api.server.enqueue_fast_task"),
         patch("api.server.enqueue_slow_task"),
     ):
-        response = client.post("/chat", json={"message": message}, headers={"Authorization": f"Bearer {LOCAL_TOKEN}"})
+        response = client.post(
+            "/chat",
+            json={"message": message, "voice_mode": voice_mode},
+            headers={"Authorization": f"Bearer {LOCAL_TOKEN}"},
+        )
         return response, {
             "eligible": eligible,
             "triggered": triggered,
@@ -137,6 +142,34 @@ def test_web_empty_eligible_pool_does_not_call_selector(client: TestClient) -> N
     assert response.status_code == 200
     selector.assert_not_called()
     assert not any(isinstance(message, SystemMessage) for message in graph_runner.call_args.args[0])
+
+
+def test_web_voice_turn_keeps_transcript_clean_and_adds_delivery_context(
+    client: TestClient,
+) -> None:
+    """A live weather turn reaches the graph as user text plus server context."""
+    transcript = "Ας δούμε, ο καιρός πώς θα είναι σήμερα;"
+
+    response, mocks = _post_chat(
+        client,
+        message=transcript,
+        voice_mode=True,
+    )
+
+    assert response.status_code == 200
+    graph_messages = mocks["graph"].call_args.args[0]
+    human_messages = [
+        message for message in graph_messages if isinstance(message, HumanMessage)
+    ]
+    system_messages = [
+        message for message in graph_messages if isinstance(message, SystemMessage)
+    ]
+    assert human_messages[-1].content.endswith(transcript)
+    assert "HIDDEN INSTRUCTION" not in human_messages[-1].content
+    assert any(
+        "live spoken conversation" in str(message.content).lower()
+        for message in system_messages
+    )
 
 
 def test_web_pending_confirmation_marks_routine_triggered_today(client: TestClient) -> None:

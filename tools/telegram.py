@@ -197,17 +197,13 @@ def send_telegram_document(file_path: str, caption: str = "", drive_url: str = "
 
 
 async def send_telegram_voice(text: str):
-    """
-    [MASTRO-FIX]: Uses edge-tts instead of gTTS.
-    Same voice as the Web UI (el-GR-NestorasNeural), much better quality.
-    """
+    """Synthesize with the shared Google Cloud TTS voice and send to Telegram."""
     if _suppress_test_delivery("voice delivery"):
         return
 
     import re
-    import edge_tts
-    import io
     from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+    from core.text_to_speech import synthesize_speech
     
     token = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
@@ -228,21 +224,13 @@ async def send_telegram_voice(text: str):
 
         print(f"\033[95m[TTS Telegram]: Creating voice for: {clean_text[:50]}...\033[0m")
 
-        # edge-tts — voice based on locale
-        from core.i18n import CURRENT_LOCALE
-        voice = "el-GR-NestorasNeural" if CURRENT_LOCALE == "el" else "en-US-ChristopherNeural"
-        communicate = edge_tts.Communicate(clean_text, voice, rate="+15%", volume="+10%")
-        
-        audio_buffer = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_buffer.write(chunk["data"])
-        
-        audio_buffer.seek(0)
-        audio_bytes = audio_buffer.read()
+        from core.i18n import LANG
+        import asyncio
+
+        audio_bytes = await asyncio.to_thread(synthesize_speech, clean_text, LANG)
         
         if not audio_bytes:
-            print("❌ edge-tts: No audio produced.")
+            print("❌ Google Cloud TTS: No audio produced.")
             return
 
         # Send to Telegram as voice

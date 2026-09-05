@@ -32,11 +32,27 @@ DEFAULT_GEMINI_EMBEDDING_MODEL = "models/text-embedding-004"
 DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 VERTEX_OAUTH_SCOPES: tuple[str, ...] = ("https://www.googleapis.com/auth/cloud-platform",)
+TRANSCRIPTION_LANGUAGE_CODES_BY_LOCALE: dict[str, tuple[str, ...]] = {
+    "el": ("el-GR",),
+    "en": ("en-US",),
+}
+ASTAKOS_TRANSCRIPTION_VOCABULARY: tuple[str, str] = ("Αστακέ", "Astakos")
 AUDIO_TRANSCRIPTION_PROMPT = (
     "You are exclusively a speech-to-text tool. Transcribe only the spoken audio "
     "accurately and verbatim, without commentary or a reply. If no intelligible "
     "speech is audible, return exactly: [ΣΙΩΠΗ]."
 )
+
+
+def _get_transcription_hints() -> tuple[list[str], list[str]]:
+    """Return bounded Gemini STT hints ordered by Astakos' active locale."""
+    from core.i18n import LANG
+
+    language_codes = TRANSCRIPTION_LANGUAGE_CODES_BY_LOCALE.get(
+        LANG,
+        TRANSCRIPTION_LANGUAGE_CODES_BY_LOCALE["en"],
+    )
+    return list(language_codes), list(ASTAKOS_TRANSCRIPTION_VOCABULARY)
 
 
 def _is_model_unavailable_error(err_str: str) -> bool:
@@ -657,6 +673,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
 
             # 2. Call Interactions API with dedicated model and explicit verbatim transcription mode
             file_uri = getattr(uploaded_file, "uri", None) or getattr(uploaded_file, "name", "")
+            language_codes, custom_vocabulary = _get_transcription_hints()
             interaction = client.interactions.create(
                 model=self.transcription_model,
                 input=[
@@ -668,6 +685,8 @@ class GeminiAPIAdapter(AIProviderAdapter):
                 ],
                 generation_config={
                     "transcription_config": {
+                        "language_codes": language_codes,
+                        "custom_vocabulary": custom_vocabulary,
                         "mode": {
                             "type": "verbatim",
                         },
@@ -929,14 +948,22 @@ class VertexAIAdapter(AIProviderAdapter):
         mime_type: str = "audio/ogg",
     ) -> str:
         try:
-            # The dedicated transcription preview model is hosted on Vertex global endpoint.
-            # We rely on the model's default transcription behavior using standard documented parameters.
+            # The dedicated transcription preview model and its locale hints use Vertex global.
+            from google.genai import types
+
             client = self._get_genai_client(location="global")
+            language_codes, custom_vocabulary = _get_transcription_hints()
             response = client.models.generate_content(
                 model=self.transcription_model,
                 contents=[
                     {"inline_data": {"mime_type": mime_type, "data": audio_bytes}},
                 ],
+                config=types.GenerateContentConfig(
+                    audio_transcription_config=types.AudioTranscriptionConfig(
+                        language_codes=language_codes,
+                        custom_vocabulary=custom_vocabulary,
+                    ),
+                ),
             )
             text = getattr(response, "text", "").strip() if getattr(response, "text", None) else ""
             return text or "[ΣΙΩΠΗ]"

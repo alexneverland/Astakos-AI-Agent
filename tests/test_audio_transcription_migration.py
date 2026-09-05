@@ -39,7 +39,11 @@ class TestTelegramVoiceHandlerMigration:
 
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: mock_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: messages_sent.append(text))
-        monkeypatch.setattr(bot, "handle_message", lambda text, chat_id: handled_messages.append((text, chat_id)))
+        monkeypatch.setattr(
+            bot,
+            "handle_message",
+            lambda text, chat_id, **metadata: handled_messages.append((text, chat_id, metadata)),
+        )
         monkeypatch.setattr(bot, "_handle_transcribed_voice", lambda transcript: False)
 
         # Mock Telegram getFile and download
@@ -58,10 +62,10 @@ class TestTelegramVoiceHandlerMigration:
         bot.handle_voice({"file_id": "voice_123"}, "chat_456")
 
         assert len(handled_messages) == 1
-        msg_text, chat_id = handled_messages[0]
+        msg_text, chat_id, metadata = handled_messages[0]
         assert chat_id == "chat_456"
-        assert "[VOICE]: [VOICE_INPUT]" in msg_text
-        assert "[Vertex Mock Audio]: Transcribed test voice" in msg_text
+        assert msg_text == "[Vertex Mock Audio]: Transcribed test voice"
+        assert metadata == {"voice_input": True}
 
     def test_telegram_handle_voice_real_vertex_adapter_dedicated_transcribe(self, monkeypatch):
         import clients.telegram_bot as bot
@@ -83,7 +87,11 @@ class TestTelegramVoiceHandlerMigration:
         handled_messages = []
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: None)
-        monkeypatch.setattr(bot, "handle_message", lambda text, chat_id: handled_messages.append((text, chat_id)))
+        monkeypatch.setattr(
+            bot,
+            "handle_message",
+            lambda text, chat_id, **metadata: handled_messages.append((text, chat_id, metadata)),
+        )
         monkeypatch.setattr(bot, "_handle_transcribed_voice", lambda transcript: False)
 
         mock_get_resp = MagicMock()
@@ -99,9 +107,10 @@ class TestTelegramVoiceHandlerMigration:
         bot.handle_voice({"file_id": "voice_123"}, "chat_456")
 
         assert len(handled_messages) == 1
-        msg_text, chat_id = handled_messages[0]
+        msg_text, chat_id, metadata = handled_messages[0]
         assert chat_id == "chat_456"
-        assert "[VOICE]: [VOICE_INPUT] Στείλε μήνυμα στον Γιώργο" == msg_text
+        assert msg_text == "Στείλε μήνυμα στον Γιώργο"
+        assert metadata == {"voice_input": True}
 
         # Verify dedicated client requested 'global' location while adapter preserves 'europe-west1'
         assert get_client_locations == ["global"]
@@ -110,7 +119,9 @@ class TestTelegramVoiceHandlerMigration:
         call_kwargs = mock_genai_client.models.generate_content.call_args.kwargs
         assert call_kwargs["model"] == "gemini-3.5-transcribe-preview"
         assert call_kwargs["contents"] == [{"inline_data": {"mime_type": "audio/ogg", "data": b"fake_ogg_bytes"}}]
-        assert call_kwargs.get("config") is None
+        transcription_config = call_kwargs["config"].audio_transcription_config
+        assert transcription_config.language_codes == ["el-GR"]
+        assert transcription_config.custom_vocabulary == ["Αστακέ", "Astakos"]
 
     def test_telegram_handle_voice_real_vertex_adapter_silence_replies_politely(self, monkeypatch):
         import clients.telegram_bot as bot
@@ -127,7 +138,11 @@ class TestTelegramVoiceHandlerMigration:
         handled_messages = []
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: None)
-        monkeypatch.setattr(bot, "handle_message", lambda text, chat_id: handled_messages.append((text, chat_id)))
+        monkeypatch.setattr(
+            bot,
+            "handle_message",
+            lambda text, chat_id, **metadata: handled_messages.append((text, chat_id, metadata)),
+        )
         monkeypatch.setattr(bot, "_handle_transcribed_voice", lambda transcript: False)
 
         mock_get_resp = MagicMock()
@@ -160,7 +175,11 @@ class TestTelegramVoiceHandlerMigration:
         handled_messages = []
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: None)
-        monkeypatch.setattr(bot, "handle_message", lambda text, chat_id: handled_messages.append((text, chat_id)))
+        monkeypatch.setattr(
+            bot,
+            "handle_message",
+            lambda text, chat_id, **metadata: handled_messages.append((text, chat_id, metadata)),
+        )
         monkeypatch.setattr(bot, "_handle_transcribed_voice", lambda transcript: False)
 
         mock_get_resp = MagicMock()
@@ -176,9 +195,10 @@ class TestTelegramVoiceHandlerMigration:
         bot.handle_voice({"file_id": "voice_123"}, "chat_456")
 
         assert len(handled_messages) == 1
-        msg_text, chat_id = handled_messages[0]
+        msg_text, chat_id, metadata = handled_messages[0]
         assert chat_id == "chat_456"
-        assert "[VOICE]: [VOICE_INPUT] Στείλε μήνυμα στον Γιώργο" == msg_text
+        assert msg_text == "Στείλε μήνυμα στον Γιώργο"
+        assert metadata == {"voice_input": True}
 
         # Verify Files upload and Interactions create calls
         assert mock_genai_client.files.upload.call_args.kwargs["config"].mime_type == "audio/ogg"
@@ -206,7 +226,11 @@ class TestTelegramVoiceHandlerMigration:
         handled_messages = []
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: None)
-        monkeypatch.setattr(bot, "handle_message", lambda text, chat_id: handled_messages.append((text, chat_id)))
+        monkeypatch.setattr(
+            bot,
+            "handle_message",
+            lambda text, chat_id, **metadata: handled_messages.append((text, chat_id, metadata)),
+        )
         monkeypatch.setattr(bot, "_handle_transcribed_voice", lambda transcript: False)
 
         mock_get_resp = MagicMock()
@@ -222,8 +246,9 @@ class TestTelegramVoiceHandlerMigration:
         bot.handle_voice({"file_id": "voice_123"}, "chat_456")
 
         assert len(handled_messages) == 1
-        msg_text, chat_id = handled_messages[0]
+        msg_text, chat_id, metadata = handled_messages[0]
         assert t("clients.telegram_bot.bot_msg_dacaa2") in msg_text
+        assert metadata == {"voice_input": True}
         mock_genai_client.files.delete.assert_called_once_with(name="files/silent_ogg_file")
 
     def test_telegram_handle_voice_openai_success(self, monkeypatch):
@@ -235,7 +260,11 @@ class TestTelegramVoiceHandlerMigration:
 
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: mock_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: None)
-        monkeypatch.setattr(bot, "handle_message", lambda text, chat_id: handled_messages.append((text, chat_id)))
+        monkeypatch.setattr(
+            bot,
+            "handle_message",
+            lambda text, chat_id, **metadata: handled_messages.append((text, chat_id, metadata)),
+        )
         monkeypatch.setattr(bot, "_handle_transcribed_voice", lambda transcript: False)
 
         mock_get_resp = MagicMock()
@@ -264,7 +293,11 @@ class TestTelegramVoiceHandlerMigration:
 
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: mock_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: messages_sent.append(text))
-        monkeypatch.setattr(bot, "handle_message", lambda text, chat_id: handled_messages.append((text, chat_id)))
+        monkeypatch.setattr(
+            bot,
+            "handle_message",
+            lambda text, chat_id, **metadata: handled_messages.append((text, chat_id, metadata)),
+        )
 
         mock_get_resp = MagicMock()
         mock_get_resp.json.return_value = {"result": {"file_path": "voice/test.ogg"}}
@@ -419,6 +452,74 @@ class TestWebVoiceEndpointMigration:
         assert create_kwargs["generation_config"]["transcription_config"]["mode"]["type"] == "verbatim"
         mock_genai_client.files.delete.assert_called_once_with(name="files/test_webm_file")
 
+    @pytest.mark.parametrize(
+        ("locale", "expected_language_codes"),
+        [
+            ("el", ["el-GR"]),
+            ("en", ["en-US"]),
+        ],
+    )
+    def test_gemini_transcription_hints_follow_the_active_locale(
+        self,
+        monkeypatch,
+        locale,
+        expected_language_codes,
+    ):
+        """Short audio must prefer Astakos' languages and recognize its proper name."""
+        import core.i18n as i18n
+
+        real_adapter = GeminiAPIAdapter(api_key="test-api-key")
+        mock_genai_client = MagicMock()
+        mock_file = MagicMock()
+        mock_file.name = "files/short_wake_word"
+        mock_file.uri = "https://generativelanguage.googleapis.com/v1beta/files/short_wake_word"
+        mock_genai_client.files.upload.return_value = mock_file
+        mock_genai_client.interactions.create.return_value = MagicMock(output_text="Αστακέ")
+        monkeypatch.setattr(i18n, "LANG", locale)
+        monkeypatch.setattr(real_adapter, "_get_genai_client", lambda: mock_genai_client)
+
+        assert real_adapter.transcribe_audio(b"short_wake_audio", mime_type="audio/webm") == "Αστακέ"
+
+        transcription_config = mock_genai_client.interactions.create.call_args.kwargs[
+            "generation_config"
+        ]["transcription_config"]
+        assert transcription_config["language_codes"] == expected_language_codes
+        assert transcription_config["custom_vocabulary"] == ["Αστακέ", "Astakos"]
+        mock_genai_client.files.delete.assert_called_once_with(name="files/short_wake_word")
+
+    @pytest.mark.parametrize(
+        ("locale", "expected_language_codes"),
+        [
+            ("el", ["el-GR"]),
+            ("en", ["en-US"]),
+        ],
+    )
+    def test_vertex_transcribe_applies_locale_and_astakos_vocabulary(
+        self,
+        monkeypatch,
+        locale,
+        expected_language_codes,
+    ):
+        """Vertex transcription must not guess another language for the wake name."""
+        import core.i18n as i18n
+
+        real_adapter = VertexAIAdapter(project_id="test-proj", location="europe-west1")
+        mock_genai_client = MagicMock()
+        mock_genai_client.models.generate_content.return_value = MagicMock(text="Αστακέ")
+        monkeypatch.setattr(i18n, "LANG", locale)
+        monkeypatch.setattr(
+            real_adapter,
+            "_get_genai_client",
+            lambda location=None: mock_genai_client,
+        )
+
+        assert real_adapter.transcribe_audio(b"short_wake_audio", mime_type="audio/webm") == "Αστακέ"
+
+        generate_kwargs = mock_genai_client.models.generate_content.call_args.kwargs
+        transcription_config = generate_kwargs["config"].audio_transcription_config
+        assert transcription_config.language_codes == expected_language_codes
+        assert transcription_config.custom_vocabulary == ["Αστακέ", "Astakos"]
+
     def test_web_voice_real_gemini_adapter_silence_returns_no_audio_heard(self, client, monkeypatch):
         from core.i18n import t
         real_adapter = GeminiAPIAdapter(api_key="test-api-key")
@@ -506,4 +607,6 @@ class TestWebVoiceEndpointMigration:
         )
 
         assert response.status_code == 200
-        assert "error" in response.json()
+        data = response.json()
+        assert "error" in data
+        assert data["no_speech"] is True

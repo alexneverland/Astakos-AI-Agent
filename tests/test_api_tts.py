@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 def test_google_tts_uses_the_greek_chirp_voice_without_network(monkeypatch) -> None:
     """Greek speech uses the configured Cloud TTS voice without a live request."""
-    import api.server as api_server
+    import core.text_to_speech as tts
 
     captured: dict[str, object] = {}
 
@@ -41,12 +41,12 @@ def test_google_tts_uses_the_greek_chirp_voice_without_network(monkeypatch) -> N
             return SimpleNamespace(audio_content=b"offline-test-audio")
 
     monkeypatch.setattr(
-        api_server,
+        tts,
         "_get_text_to_speech_client",
         lambda: (FakeTextToSpeech, FakeClient()),
     )
 
-    assert api_server._synthesize_speech("Γεια σου", "el") == b"offline-test-audio"
+    assert tts.synthesize_speech("Γεια σου", "el") == b"offline-test-audio"
     assert captured == {
         "input": {"text": "Γεια σου"},
         "voice": {"language_code": "el-GR", "name": "el-GR-Chirp3-HD-Fenrir"},
@@ -83,7 +83,7 @@ def test_tts_passes_the_active_english_locale_to_google_tts_without_network(
 
 def test_google_tts_chunks_utf8_text_that_exceeds_the_request_limit(monkeypatch) -> None:
     """Cloud TTS requests remain within the byte limit for long Greek replies."""
-    import api.server as api_server
+    import core.text_to_speech as tts
 
     captured_inputs: list[str] = []
 
@@ -113,12 +113,12 @@ def test_google_tts_chunks_utf8_text_that_exceeds_the_request_limit(monkeypatch)
             return SimpleNamespace(audio_content=f"audio-{len(captured_inputs)}".encode())
 
     monkeypatch.setattr(
-        api_server,
+        tts,
         "_get_text_to_speech_client",
         lambda: (FakeTextToSpeech, FakeClient()),
     )
     text = "α" * 3_000
 
-    assert api_server._synthesize_speech(text, "el") == b"audio-1audio-2"
+    assert tts.synthesize_speech(text, "el") == b"audio-1audio-2"
     assert "".join(captured_inputs) == text
-    assert all(len(chunk.encode("utf-8")) <= api_server.MAX_TTS_INPUT_BYTES for chunk in captured_inputs)
+    assert all(len(chunk.encode("utf-8")) <= tts.MAX_TTS_INPUT_BYTES for chunk in captured_inputs)
