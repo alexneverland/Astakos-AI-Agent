@@ -197,7 +197,7 @@ def send_telegram_document(file_path: str, caption: str = "", drive_url: str = "
 
 
 async def send_telegram_voice(text: str):
-    """Synthesize with the shared Google Cloud TTS voice and send to Telegram."""
+    """Synthesize with the configured voice provider and send to Telegram."""
     if _suppress_test_delivery("voice delivery"):
         return
 
@@ -230,8 +230,7 @@ async def send_telegram_voice(text: str):
         audio_bytes = await asyncio.to_thread(synthesize_speech, clean_text, LANG)
         
         if not audio_bytes:
-            print("❌ Google Cloud TTS: No audio produced.")
-            return
+            raise RuntimeError("The configured voice provider produced no audio.")
 
         # Send to Telegram as voice
         url = f"https://api.telegram.org/bot{token}/sendVoice"
@@ -245,7 +244,8 @@ async def send_telegram_voice(text: str):
         if response.status_code == 200:
             print(f"\033[92m[TTS Telegram]: ✅ Voice sent ({len(audio_bytes)} bytes)\033[0m")
         else:
-            print(f"⚠️ Telegram Voice Error: {response.status_code} - {response.text}")
+            raise RuntimeError(f"Telegram rejected voice output ({response.status_code}).")
             
     except Exception as e:
         print(f"❌ Voice Output Error: {e}")
+        send_telegram_msg(text)

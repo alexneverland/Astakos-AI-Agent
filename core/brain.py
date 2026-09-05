@@ -26,6 +26,7 @@ from core.ai_provider import (
     google_model_from_environment,
     resolve_gemini_safety_threshold,
     resolve_provider_models,
+    resolve_voice_provider,
     resolve_vertex_location,
 )
 
@@ -125,6 +126,8 @@ else:  # default to vertex
 
 _active_provider_adapter: AIProviderAdapter | None = None
 _adapter_lock = threading.Lock()
+_voice_provider_adapter: AIProviderAdapter | None = None
+_voice_adapter_lock = threading.Lock()
 
 
 def get_active_provider_adapter() -> AIProviderAdapter:
@@ -135,6 +138,26 @@ def get_active_provider_adapter() -> AIProviderAdapter:
             if _active_provider_adapter is None:
                 _active_provider_adapter = get_provider_adapter(_effective_provider(_provider))
     return _active_provider_adapter
+
+
+def get_voice_provider_adapter() -> AIProviderAdapter:
+    """Return the single configured adapter used for speech input and output."""
+    global _voice_provider_adapter
+    provider_name = resolve_voice_provider(chat_provider_name=_provider)
+    active_adapter = get_active_provider_adapter()
+    if active_adapter.provider_name == provider_name:
+        return active_adapter
+    if (
+        _voice_provider_adapter is None
+        or _voice_provider_adapter.provider_name != provider_name
+    ):
+        with _voice_adapter_lock:
+            if (
+                _voice_provider_adapter is None
+                or _voice_provider_adapter.provider_name != provider_name
+            ):
+                _voice_provider_adapter = get_provider_adapter(provider_name)
+    return _voice_provider_adapter
 
 
 def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):

@@ -43,7 +43,7 @@ MOCK_PNG_BYTES: bytes = _make_mock_png()
 
 class MockOpenAIAdapter(AIProviderAdapter):
     provider_name = "openai"
-    supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
+    supported_capabilities = {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}
 
     def __init__(self, should_fail_auth: bool = False, should_rate_limit: bool = False):
         self.should_fail_auth = should_fail_auth
@@ -80,7 +80,7 @@ class MockOpenAIAdapter(AIProviderAdapter):
 
 class MockGeminiAPIAdapter(AIProviderAdapter):
     provider_name = "gemini"
-    supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
+    supported_capabilities = {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}
 
     def __init__(self, should_fail_auth: bool = False, should_rate_limit: bool = False):
         self.should_fail_auth = should_fail_auth
@@ -116,7 +116,7 @@ class MockGeminiAPIAdapter(AIProviderAdapter):
 
 class MockVertexAIAdapter(AIProviderAdapter):
     provider_name = "vertex"
-    supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
+    supported_capabilities = {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}
 
     def __init__(self, should_fail_auth: bool = False, should_rate_limit: bool = False):
         self.should_fail_auth = should_fail_auth

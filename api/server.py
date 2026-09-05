@@ -1796,12 +1796,22 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
             f.write(audio_data)
         print(f"\033[96m[Web Voice]: Decoding audio ({len(audio_data)} bytes)...\033[0m")
         import config
-        from core.brain import get_active_provider_adapter
-        from core.ai_provider import CapabilityNotSupportedError, ProviderAuthError, RateLimitError
+        from core.brain import get_voice_provider_adapter
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            VoiceProviderSetupRequired,
+        )
 
-        adapter = get_active_provider_adapter()
         try:
+            adapter = get_voice_provider_adapter()
             transcription = adapter.transcribe_audio(audio_data, mime_type="audio/webm")
+        except VoiceProviderSetupRequired as exc:
+            return JSONResponse(
+                {"error": str(exc), "setup_required": True},
+                status_code=400,
+            )
         except CapabilityNotSupportedError as exc:
             return JSONResponse(
                 {"error": f"Voice input is not supported for active provider '{adapter.provider_name}'. Please use text or configure a provider with voice support."},
@@ -1825,7 +1835,11 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
             )
 
         print(f"\033[92m[Web Voice]: {config.USER_NAME} said -> {transcription}\033[0m")
-        return JSONResponse({"transcription": transcription})
+        wake_name = str(
+            getattr(config, "VOICE_WAKE_NAME", "")
+            or getattr(config, "BOT_NAME", "Astakos")
+        ).strip()
+        return JSONResponse({"transcription": transcription, "wake_name": wake_name})
     except Exception as e:
         return JSONResponse({"error": _api_internal_error("voice")}, status_code=500)
 
@@ -1844,7 +1858,49 @@ async def text_to_speech(request: Request, _=Depends(require_token)):
         text = _replace_bracketed_markers(text, "[ASTAKOS_ASSET_URL:", lambda _: "")
         text = text.strip()
         from core.i18n import LANG
-        audio_bytes = await asyncio.to_thread(_synthesize_speech, text, LANG)
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            VoiceProviderSetupRequired,
+        )
+        try:
+            audio_bytes = await asyncio.to_thread(_synthesize_speech, text, LANG)
+        except VoiceProviderSetupRequired as exc:
+            return JSONResponse(
+                {"error": str(exc), "setup_required": True},
+                status_code=400,
+            )
+        except CapabilityNotSupportedError as exc:
+            return JSONResponse(
+                {
+                    "error": (
+                        f"Voice synthesis is not supported for provider "
+                        f"'{exc.provider}'. Configure a provider with voice support."
+                    )
+                },
+                status_code=400,
+            )
+        except ProviderAuthError as exc:
+            return JSONResponse(
+                {
+                    "error": (
+                        f"Voice synthesis authentication failed for provider "
+                        f"'{exc.provider}'. Please verify the provider credentials."
+                    )
+                },
+                status_code=401,
+            )
+        except RateLimitError as exc:
+            return JSONResponse(
+                {
+                    "error": (
+                        f"Voice synthesis quota or rate limit exceeded for provider "
+                        f"'{exc.provider}'. Please retry shortly."
+                    )
+                },
+                status_code=429,
+            )
         if not audio_bytes:
             return JSONResponse({"error": t("api.server.tts_creation_failed")}, status_code=500)
         print(f"\033[95m[TTS]: Voice generated ({len(audio_bytes)} bytes)\033[0m")

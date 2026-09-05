@@ -72,3 +72,29 @@ def test_telegram_tts_uses_the_configured_locale(monkeypatch) -> None:
 
     assert synthesis_calls == [("Καλημέρα", i18n.LANG)]
     assert len(sent) == 1
+
+
+def test_telegram_tts_failure_falls_back_to_the_text_reply(monkeypatch) -> None:
+    """A provider failure never makes the user's Telegram reply disappear."""
+    import asyncio
+
+    import config
+    import tools.telegram as telegram
+
+    text_replies: list[str] = []
+    monkeypatch.setattr(telegram, "_suppress_test_delivery", lambda reason: False)
+    monkeypatch.setattr(config, "TELEGRAM_TOKEN", "test-token")
+    monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "test-chat")
+    monkeypatch.setattr(
+        "core.text_to_speech.synthesize_speech",
+        lambda text, locale: (_ for _ in ()).throw(RuntimeError("offline failure")),
+    )
+    monkeypatch.setattr(
+        telegram,
+        "send_telegram_msg",
+        lambda text: text_replies.append(text),
+    )
+
+    asyncio.run(telegram.send_telegram_voice("Καλημέρα"))
+
+    assert text_replies == ["Καλημέρα"]

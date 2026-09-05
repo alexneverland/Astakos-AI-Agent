@@ -31,12 +31,17 @@ DEFAULT_VERTEX_EMBEDDING_MODEL = "text-embedding-004"
 DEFAULT_GEMINI_EMBEDDING_MODEL = "models/text-embedding-004"
 DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
+DEFAULT_OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+DEFAULT_GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview"
 VERTEX_OAUTH_SCOPES: tuple[str, ...] = ("https://www.googleapis.com/auth/cloud-platform",)
 TRANSCRIPTION_LANGUAGE_CODES_BY_LOCALE: dict[str, tuple[str, ...]] = {
     "el": ("el-GR",),
     "en": ("en-US",),
 }
-ASTAKOS_TRANSCRIPTION_VOCABULARY: tuple[str, str] = ("Αστακέ", "Astakos")
+TTS_LANGUAGE_BY_LOCALE: dict[str, tuple[str, str]] = {
+    "el": ("Greek", "el-GR"),
+    "en": ("English", "en-US"),
+}
 AUDIO_TRANSCRIPTION_PROMPT = (
     "You are exclusively a speech-to-text tool. Transcribe only the spoken audio "
     "accurately and verbatim, without commentary or a reply. If no intelligible "
@@ -52,7 +57,11 @@ def _get_transcription_hints() -> tuple[list[str], list[str]]:
         LANG,
         TRANSCRIPTION_LANGUAGE_CODES_BY_LOCALE["en"],
     )
-    return list(language_codes), list(ASTAKOS_TRANSCRIPTION_VOCABULARY)
+    wake_name = str(
+        getattr(config, "VOICE_WAKE_NAME", "")
+        or getattr(config, "BOT_NAME", "Astakos")
+    ).strip()
+    return list(language_codes), [wake_name] if wake_name else []
 
 
 def _is_model_unavailable_error(err_str: str) -> bool:
@@ -314,6 +323,10 @@ class EmbeddingsProviderSetupRequired(AIProviderError):
     """Raised when semantic memory has no explicitly usable embeddings backend."""
 
 
+class VoiceProviderSetupRequired(AIProviderError):
+    """Raised when speech needs a separately configured provider or credential."""
+
+
 class EmbeddingsAdapter(Protocol):
     """Minimal contract required by the semantic-memory embeddings layer."""
 
@@ -332,7 +345,7 @@ class EmbeddingsAdapter(Protocol):
 # ────────────────────────────────────────────────────────────────
 
 class AIProviderAdapter(ABC):
-    """Abstract interface defining the 5 standard provider operations."""
+    """Abstract interface defining the standard provider operations."""
 
     provider_name: str = "base"
     supported_capabilities: set[str] = set()
@@ -368,6 +381,14 @@ class AIProviderAdapter(ABC):
     ) -> str:
         """Transcribe speech audio bytes to text."""
 
+    def synthesize_speech(self, text: str, locale: str) -> bytes:
+        """Generate MP3 speech or report that the provider lacks native TTS."""
+        raise CapabilityNotSupportedError(
+            provider=self.provider_name,
+            capability="audio_tts",
+            message=f"Speech synthesis is not supported by provider '{self.provider_name}'.",
+        )
+
     @abstractmethod
     def generate_image(
         self,
@@ -393,7 +414,7 @@ class OpenAIAdapter(AIProviderAdapter):
     """Adapter for OpenAI (GPT-4o, Whisper, DALL-E, Embeddings)."""
 
     provider_name = "openai"
-    supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
+    supported_capabilities = {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}
 
     def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
         self.api_key = getattr(config, "OPENAI_API_KEY", "") if api_key is None else api_key
@@ -407,6 +428,14 @@ class OpenAIAdapter(AIProviderAdapter):
         model = self.heavy_model if model_type == "heavy" else self.fast_model
         temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
         return ChatOpenAI(model=model, temperature=temp, api_key=self.api_key)
+
+    def _get_openai_client(self):
+        """Return the native OpenAI client using this adapter's credential."""
+        if not self.api_key:
+            raise ProviderAuthError("openai", "OPENAI_API_KEY is not configured.")
+        from openai import OpenAI
+
+        return OpenAI(api_key=self.api_key)
 
     def generate_text(
         self,
@@ -499,6 +528,27 @@ class OpenAIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    def synthesize_speech(self, text: str, locale: str) -> bytes:
+        """Generate an MP3 response through OpenAI's speech endpoint."""
+        language_name, _ = TTS_LANGUAGE_BY_LOCALE.get(
+            locale,
+            TTS_LANGUAGE_BY_LOCALE["en"],
+        )
+        try:
+            response = self._get_openai_client().audio.speech.create(
+                model=DEFAULT_OPENAI_TTS_MODEL,
+                voice="cedar",
+                input=text,
+                instructions=f"Speak naturally in {language_name}.",
+                response_format="mp3",
+            )
+            content = getattr(response, "content", None)
+            if content is None and hasattr(response, "read"):
+                content = response.read()
+            return bytes(content or b"")
+        except Exception as e:
+            self._handle_exception(e)
+
     def generate_image(
         self,
         prompt: str,
@@ -586,7 +636,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
     """Adapter for Google AI Studio Gemini (API Key)."""
 
     provider_name = "gemini"
-    supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
+    supported_capabilities = {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}
 
     def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
         if api_key is None:
@@ -783,6 +833,39 @@ class GeminiAPIAdapter(AIProviderAdapter):
                 except Exception as del_err:
                     logger.warning(f"[Gemini] Failed to delete temporary uploaded audio file '{uploaded_file.name}': {del_err}")
 
+    def synthesize_speech(self, text: str, locale: str) -> bytes:
+        """Generate MP3 speech through Gemini using the configured API key."""
+        _, language_code = TTS_LANGUAGE_BY_LOCALE.get(
+            locale,
+            TTS_LANGUAGE_BY_LOCALE["en"],
+        )
+        try:
+            interaction = self._get_genai_client().interactions.create(
+                model=DEFAULT_GEMINI_TTS_MODEL,
+                input=(
+                    "Synthesize natural speech for the following transcript. "
+                    "Speak only the transcript.\n\n"
+                    f"Spoken transcript:\n{text}"
+                ),
+                response_format={
+                    "type": "audio",
+                    "mime_type": "audio/mp3",
+                    "delivery": "inline",
+                },
+                generation_config={
+                    "speech_config": [
+                        {"voice": "Charon", "language": language_code},
+                    ],
+                },
+            )
+            output_audio = getattr(interaction, "output_audio", None)
+            data = getattr(output_audio, "data", None)
+            if isinstance(data, str):
+                return base64.b64decode(data)
+            return bytes(data or b"")
+        except Exception as e:
+            self._handle_exception(e)
+
     def generate_image(
         self,
         prompt: str,
@@ -855,7 +938,7 @@ class VertexAIAdapter(AIProviderAdapter):
     """Adapter for Google Cloud Vertex AI (Service Account)."""
 
     provider_name = "vertex"
-    supported_capabilities = {"text", "vision", "audio_stt", "image_gen", "embeddings"}
+    supported_capabilities = {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}
 
     def __init__(
         self,
@@ -1046,6 +1129,19 @@ class VertexAIAdapter(AIProviderAdapter):
 
             self._handle_exception(e)
 
+    def synthesize_speech(self, text: str, locale: str) -> bytes:
+        """Generate MP3 speech through Cloud TTS with Vertex credentials."""
+        try:
+            from core.text_to_speech import _synthesize_google_cloud_chunk
+
+            return _synthesize_google_cloud_chunk(
+                text,
+                locale,
+                credentials=self._credentials,
+            )
+        except Exception as e:
+            self._handle_exception(e)
+
     def generate_image(
         self,
         prompt: str,
@@ -1230,6 +1326,36 @@ _ADAPTER_REGISTRY: dict[str, type[AIProviderAdapter]] = {
 }
 
 _EMBEDDINGS_PROVIDER_NAMES = frozenset({"vertex", "gemini", "openai", "local"})
+_VOICE_PROVIDER_NAMES = frozenset({"vertex", "gemini", "openai"})
+
+
+def resolve_voice_provider(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+) -> str:
+    """Resolve one explicit provider for both speech input and output."""
+    configured = provider_name
+    if configured is None:
+        configured = getattr(config, "VOICE_PROVIDER", "auto")
+    resolved = str(configured).strip().lower()
+    if resolved == "auto":
+        chat_provider = str(
+            chat_provider_name or getattr(config, "LLM_PROVIDER", "vertex")
+        ).strip().lower()
+        if chat_provider in _VOICE_PROVIDER_NAMES:
+            return chat_provider
+        raise VoiceProviderSetupRequired(
+            "Voice input and output need a provider. Configure VOICE_PROVIDER "
+            "as vertex, gemini, or openai; Anthropic does not provide native speech.",
+            provider=chat_provider,
+        )
+    if resolved not in _VOICE_PROVIDER_NAMES:
+        valid = ", ".join(sorted(_VOICE_PROVIDER_NAMES | {"auto"}))
+        raise VoiceProviderSetupRequired(
+            f"Unknown voice provider '{resolved}'. Valid options: {valid}.",
+            provider=resolved,
+        )
+    return resolved
 
 
 def resolve_embeddings_provider(

@@ -1144,12 +1144,21 @@ def handle_voice(voice_obj: dict, chat_id: str):
 
         print(f"\033[96m[Voice]: Analyzing audio...\033[0m")
 
-        from core.brain import get_active_provider_adapter
-        from core.ai_provider import CapabilityNotSupportedError, ProviderAuthError, RateLimitError
+        from core.brain import get_voice_provider_adapter
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            VoiceProviderSetupRequired,
+        )
 
-        adapter = get_active_provider_adapter()
         try:
+            adapter = get_voice_provider_adapter()
             transcribed_text = adapter.transcribe_audio(audio_data, mime_type="audio/ogg")
+        except VoiceProviderSetupRequired as exc:
+            print(f"\033[93m[Voice Setup]: {exc}\033[0m")
+            send_telegram_msg(f"⚠️ {exc}")
+            return
         except CapabilityNotSupportedError as exc:
             print(f"\033[93m[Voice Capability]: {exc}\033[0m")
             send_telegram_msg(

@@ -10,6 +10,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
+import config
+
 from api.server import server, LOCAL_TOKEN
 from core.ai_provider import (
     CapabilityNotSupportedError,
@@ -37,7 +39,7 @@ class TestTelegramVoiceHandlerMigration:
         messages_sent = []
         handled_messages = []
 
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: mock_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: mock_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: messages_sent.append(text))
         monkeypatch.setattr(
             bot,
@@ -85,7 +87,7 @@ class TestTelegramVoiceHandlerMigration:
         monkeypatch.setattr(real_adapter, "_get_genai_client", _mock_get_client)
 
         handled_messages = []
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: real_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: None)
         monkeypatch.setattr(
             bot,
@@ -121,7 +123,7 @@ class TestTelegramVoiceHandlerMigration:
         assert call_kwargs["contents"] == [{"inline_data": {"mime_type": "audio/ogg", "data": b"fake_ogg_bytes"}}]
         transcription_config = call_kwargs["config"].audio_transcription_config
         assert transcription_config.language_codes == ["el-GR"]
-        assert transcription_config.custom_vocabulary == ["Αστακέ", "Astakos"]
+        assert transcription_config.custom_vocabulary == [config.VOICE_WAKE_NAME]
 
     def test_telegram_handle_voice_real_vertex_adapter_silence_replies_politely(self, monkeypatch):
         import clients.telegram_bot as bot
@@ -136,7 +138,7 @@ class TestTelegramVoiceHandlerMigration:
         monkeypatch.setattr(real_adapter, "_get_genai_client", lambda location=None: mock_genai_client)
 
         handled_messages = []
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: real_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: None)
         monkeypatch.setattr(
             bot,
@@ -173,7 +175,7 @@ class TestTelegramVoiceHandlerMigration:
         monkeypatch.setattr(real_adapter, "_get_genai_client", lambda: mock_genai_client)
 
         handled_messages = []
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: real_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: None)
         monkeypatch.setattr(
             bot,
@@ -224,7 +226,7 @@ class TestTelegramVoiceHandlerMigration:
         monkeypatch.setattr(real_adapter, "_get_genai_client", lambda: mock_genai_client)
 
         handled_messages = []
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: real_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: None)
         monkeypatch.setattr(
             bot,
@@ -258,7 +260,7 @@ class TestTelegramVoiceHandlerMigration:
         mock_adapter = MockOpenAIAdapter()
         handled_messages = []
 
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: mock_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: mock_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: None)
         monkeypatch.setattr(
             bot,
@@ -291,7 +293,7 @@ class TestTelegramVoiceHandlerMigration:
         messages_sent = []
         handled_messages = []
 
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: mock_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: mock_adapter)
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: messages_sent.append(text))
         monkeypatch.setattr(
             bot,
@@ -335,7 +337,7 @@ class TestTelegramVoiceHandlerMigration:
 
         # 1. Auth error
         messages_auth = []
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: MockVertexAIAdapter(should_fail_auth=True))
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: MockVertexAIAdapter(should_fail_auth=True))
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: messages_auth.append(text))
         bot.handle_voice({"file_id": "voice_123"}, "chat_456")
         assert len(messages_auth) == 1
@@ -343,7 +345,7 @@ class TestTelegramVoiceHandlerMigration:
 
         # 2. Rate limit error
         messages_quota = []
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: MockVertexAIAdapter(should_rate_limit=True))
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: MockVertexAIAdapter(should_rate_limit=True))
         monkeypatch.setattr(telegram_tools, "send_telegram_msg", lambda text: messages_quota.append(text))
         bot.handle_voice({"file_id": "voice_123"}, "chat_456")
         assert len(messages_quota) == 1
@@ -363,7 +365,7 @@ class TestWebVoiceEndpointMigration:
 
     def test_web_voice_vertex_success(self, client, monkeypatch):
         mock_adapter = MockVertexAIAdapter()
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: mock_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: mock_adapter)
 
         response = client.post(
             "/voice",
@@ -374,6 +376,7 @@ class TestWebVoiceEndpointMigration:
         assert response.status_code == 200
         data = response.json()
         assert data["transcription"] == "[Vertex Mock Audio]: Transcribed test voice"
+        assert data["wake_name"] == config.VOICE_WAKE_NAME
 
     def test_web_voice_real_vertex_adapter_dedicated_transcribe(self, client, monkeypatch):
         real_adapter = VertexAIAdapter(project_id="test-proj", location="europe-west1")
@@ -388,7 +391,7 @@ class TestWebVoiceEndpointMigration:
             return mock_genai_client
 
         monkeypatch.setattr(real_adapter, "_get_genai_client", _mock_get_client)
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: real_adapter)
 
         response = client.post(
             "/voice",
@@ -410,7 +413,7 @@ class TestWebVoiceEndpointMigration:
         mock_resp.text = ""
         mock_genai_client.models.generate_content.return_value = mock_resp
         monkeypatch.setattr(real_adapter, "_get_genai_client", lambda location=None: mock_genai_client)
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: real_adapter)
 
         response = client.post(
             "/voice",
@@ -433,7 +436,7 @@ class TestWebVoiceEndpointMigration:
         mock_interaction = MagicMock(output_text="Σημείωσε ραντεβού αύριο στις 10")
         mock_genai_client.interactions.create.return_value = mock_interaction
         monkeypatch.setattr(real_adapter, "_get_genai_client", lambda: mock_genai_client)
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: real_adapter)
 
         response = client.post(
             "/voice",
@@ -484,7 +487,7 @@ class TestWebVoiceEndpointMigration:
             "generation_config"
         ]["transcription_config"]
         assert transcription_config["language_codes"] == expected_language_codes
-        assert transcription_config["custom_vocabulary"] == ["Αστακέ", "Astakos"]
+        assert transcription_config["custom_vocabulary"] == [config.VOICE_WAKE_NAME]
         mock_genai_client.files.delete.assert_called_once_with(name="files/short_wake_word")
 
     @pytest.mark.parametrize(
@@ -518,7 +521,7 @@ class TestWebVoiceEndpointMigration:
         generate_kwargs = mock_genai_client.models.generate_content.call_args.kwargs
         transcription_config = generate_kwargs["config"].audio_transcription_config
         assert transcription_config.language_codes == expected_language_codes
-        assert transcription_config.custom_vocabulary == ["Αστακέ", "Astakos"]
+        assert transcription_config.custom_vocabulary == [config.VOICE_WAKE_NAME]
 
     def test_web_voice_real_gemini_adapter_silence_returns_no_audio_heard(self, client, monkeypatch):
         from core.i18n import t
@@ -532,7 +535,7 @@ class TestWebVoiceEndpointMigration:
         mock_interaction = MagicMock(output_text="")
         mock_genai_client.interactions.create.return_value = mock_interaction
         monkeypatch.setattr(real_adapter, "_get_genai_client", lambda: mock_genai_client)
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: real_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: real_adapter)
 
         response = client.post(
             "/voice",
@@ -547,7 +550,7 @@ class TestWebVoiceEndpointMigration:
 
     def test_web_voice_openai_success(self, client, monkeypatch):
         mock_adapter = MockOpenAIAdapter()
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: mock_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: mock_adapter)
 
         response = client.post(
             "/voice",
@@ -561,7 +564,7 @@ class TestWebVoiceEndpointMigration:
 
     def test_web_voice_anthropic_unsupported_returns_400(self, client, monkeypatch):
         mock_adapter = MockAnthropicAdapter()
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: mock_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: mock_adapter)
 
         response = client.post(
             "/voice",
@@ -575,7 +578,7 @@ class TestWebVoiceEndpointMigration:
 
     def test_web_voice_auth_and_rate_limit_status_codes(self, client, monkeypatch):
         # 401 Auth Failure
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: MockGeminiAPIAdapter(should_fail_auth=True))
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: MockGeminiAPIAdapter(should_fail_auth=True))
         resp_auth = client.post(
             "/voice",
             files={"file": ("test.webm", b"mock_webm_audio_bytes", "audio/webm")},
@@ -586,7 +589,7 @@ class TestWebVoiceEndpointMigration:
         assert "Mock provider authentication failure" not in resp_auth.json()["error"]
 
         # 429 Quota / Rate Limit Failure
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: MockGeminiAPIAdapter(should_rate_limit=True))
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: MockGeminiAPIAdapter(should_rate_limit=True))
         resp_quota = client.post(
             "/voice",
             files={"file": ("test.webm", b"mock_webm_audio_bytes", "audio/webm")},
@@ -598,7 +601,7 @@ class TestWebVoiceEndpointMigration:
     def test_web_voice_silence_returns_user_friendly_error(self, client, monkeypatch):
         mock_adapter = MagicMock()
         mock_adapter.transcribe_audio.return_value = "[SILENCE]"
-        monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: mock_adapter)
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", lambda: mock_adapter)
 
         response = client.post(
             "/voice",

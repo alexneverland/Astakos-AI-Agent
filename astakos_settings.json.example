@@ -1,6 +1,7 @@
 {
     "user_name": "YourName",
     "bot_name": "YourBotName",
+    "voice_wake_name": "YourBotName",
     "developer_name": "YourDevAlias",
     "default_city": "London",
     "response_language": "English",

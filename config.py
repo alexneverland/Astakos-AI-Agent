@@ -24,6 +24,7 @@ def get_custom_intents_path() -> str:
 # 1. CREDENTIALS & API KEYS
 # ==========================================
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "vertex").lower()
+VOICE_PROVIDER = os.getenv("VOICE_PROVIDER", "auto").lower()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
@@ -112,6 +113,7 @@ PARTNER_NAME = "Partner"
 KID1_NAME = "Kid1"
 KID2_NAME = "Kid2"
 BOT_NAME = "Astakos"
+VOICE_WAKE_NAME = "Astakos"
 DEVELOPER_NAME = "LocalUser"
 DEFAULT_CITY = "London"
 SENTIMENTAL_OVERRIDE_KEYWORDS = ()
@@ -127,6 +129,7 @@ if os.path.exists(SETTINGS_FILE):
             KID1_NAME = _settings.get("kid1_name", "Kid1")
             KID2_NAME = _settings.get("kid2_name", "Kid2")
             BOT_NAME = _settings.get("bot_name", "Astakos")
+            VOICE_WAKE_NAME = _settings.get("voice_wake_name", BOT_NAME)
             DEVELOPER_NAME = _settings.get("developer_name", "LocalUser")
             DEFAULT_CITY = _settings.get("default_city", "London")
             BACKUP_DRIVE_FOLDER_ID = _settings.get("backup_drive_folder_id", "")

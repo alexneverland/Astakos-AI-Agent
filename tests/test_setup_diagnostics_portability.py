@@ -622,6 +622,19 @@ def test_workspace_diagnostics_corrupt_malformed_token_json(
 # 5. Setup Wizard API Endpoints, Independent Embeddings & Settings
 # ────────────────────────────────────────────────────────────────
 
+def test_setup_wizard_exposes_voice_provider_credentials_and_wake_name() -> None:
+    """The guided UI exposes the full provider-aware voice configuration."""
+    setup_html = (Path(config.BASE_DIR) / "api" / "static" / "setup.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'id="voice_provider"' in setup_html
+    assert 'id="voice_api_key"' in setup_html
+    assert 'id="voice_wake_name"' in setup_html
+    assert "voice_provider: document.getElementById('voice_provider').value" in setup_html
+    assert "voice_api_key: document.getElementById('voice_api_key').value" in setup_html
+    assert "voice_wake_name: document.getElementById('voice_wake_name').value" in setup_html
+
 def test_setup_wizard_save_anthropic_chat_with_openai_embeddings(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -697,6 +710,83 @@ def test_setup_wizard_save_gemini_and_vertex_embeddings(
     assert result_vertex["status"] == "success"
     saved_env_v = (tmp_path / ".env").read_text(encoding="utf-8")
     assert f"GOOGLE_APPLICATION_CREDENTIALS={fake_cred}" in saved_env_v
+
+
+def test_setup_wizard_saves_independent_gemini_voice_for_anthropic_chat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A chat provider without speech can use a separately configured voice provider."""
+    import api.setup_wizard as wizard
+
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+    payload = wizard.SetupPayload(
+        basic={
+            "llm_provider": "anthropic",
+            "api_key": "sk-ant-chat-key",
+            "embeddings_provider": "auto",
+            "voice_provider": "gemini",
+            "voice_api_key": "AIzaSyVoiceKey",
+            "settings": {
+                "bot_name": "Astakos",
+                "voice_wake_name": "Astakos",
+            },
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    result = asyncio.run(wizard.save_setup(payload))
+    assert result["status"] == "success"
+
+    saved_env = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "LLM_PROVIDER=anthropic" in saved_env
+    assert "VOICE_PROVIDER=gemini" in saved_env
+    assert "ANTHROPIC_API_KEY=sk-ant-chat-key" in saved_env
+    assert "GEMINI_API_KEY=AIzaSyVoiceKey" in saved_env
+
+    saved_settings = json.loads(
+        (tmp_path / "astakos_settings.json").read_text(encoding="utf-8")
+    )
+    assert saved_settings["voice_wake_name"] == "Astakos"
+
+
+def test_setup_wizard_preserves_masked_independent_voice_secret(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Re-saving the wizard never replaces a stored voice secret with its mask."""
+    import api.setup_wizard as wizard
+
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+    (tmp_path / ".env").write_text(
+        "LLM_PROVIDER=anthropic\n"
+        "VOICE_PROVIDER=openai\n"
+        "ANTHROPIC_API_KEY=sk-ant-existing\n"
+        "OPENAI_API_KEY=sk-openai-voice-existing\n",
+        encoding="utf-8",
+    )
+    payload = wizard.SetupPayload(
+        basic={
+            "llm_provider": "anthropic",
+            "embeddings_provider": "auto",
+            "voice_provider": "openai",
+            "voice_api_key": "********",
+            "env": (
+                "LLM_PROVIDER=anthropic\n"
+                "VOICE_PROVIDER=openai\n"
+                "ANTHROPIC_API_KEY=********\n"
+                "OPENAI_API_KEY=********\n"
+            ),
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    result = asyncio.run(wizard.save_setup(payload))
+    assert result["status"] == "success"
+    saved_env = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY=sk-openai-voice-existing" in saved_env
 
 
 def test_setup_wizard_save_clears_all_child_names(

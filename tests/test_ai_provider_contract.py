@@ -11,6 +11,8 @@ import os
 import pytest
 from unittest.mock import MagicMock, patch
 
+import config
+
 from core.ai_provider import (
     AIProviderAdapter,
     AIProviderError,
@@ -43,9 +45,9 @@ class TestAIProviderContractAndResolution:
     @pytest.mark.parametrize(
         "adapter_cls,expected_name,expected_caps",
         [
-            (OpenAIAdapter, "openai", {"text", "vision", "audio_stt", "image_gen", "embeddings"}),
-            (GeminiAPIAdapter, "gemini", {"text", "vision", "audio_stt", "image_gen", "embeddings"}),
-            (VertexAIAdapter, "vertex", {"text", "vision", "audio_stt", "image_gen", "embeddings"}),
+            (OpenAIAdapter, "openai", {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}),
+            (GeminiAPIAdapter, "gemini", {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}),
+            (VertexAIAdapter, "vertex", {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}),
             (AnthropicAdapter, "anthropic", {"text", "vision"}),
         ],
     )
@@ -318,7 +320,7 @@ class TestRealGeminiAPIAdapterBoundary:
         assert create_kwargs["generation_config"] == {
             "transcription_config": {
                 "language_codes": ["el-GR"],
-                "custom_vocabulary": ["Αστακέ", "Astakos"],
+                "custom_vocabulary": [config.VOICE_WAKE_NAME],
                 "mode": {
                     "type": "verbatim",
                 },
@@ -621,7 +623,7 @@ class TestRealVertexAIAdapterBoundary:
         assert kwargs["contents"] == [{"inline_data": {"mime_type": "audio/ogg", "data": b"audio_bytes"}}]
         transcription_config = kwargs["config"].audio_transcription_config
         assert transcription_config.language_codes == ["el-GR"]
-        assert transcription_config.custom_vocabulary == ["Αστακέ", "Astakos"]
+        assert transcription_config.custom_vocabulary == [config.VOICE_WAKE_NAME]
         assert AUDIO_TRANSCRIPTION_PROMPT not in str(kwargs["contents"])
 
     @patch("google.genai.Client")

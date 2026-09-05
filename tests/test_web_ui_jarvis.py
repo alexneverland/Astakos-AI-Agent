@@ -202,16 +202,17 @@ def test_live_voice_silence_restarts_listening_without_a_system_error(
 def test_live_voice_wake_word_opens_one_continuous_conversation(
     index_html_content: str,
 ) -> None:
-    """Standby requires the wake word once, then follow-up turns stay natural."""
-    assert "const LIVE_WAKE_WORD = 'αστακε';" in index_html_content
+    """Standby uses the trusted configured wake name once, then stays natural."""
+    assert "const LIVE_WAKE_WORD" not in index_html_content
     assert "function normalizeLiveWakeText" in index_html_content
     assert "function liveWakeWordEditDistance" in index_html_content
-    assert "liveWakeWordEditDistance(word, LIVE_WAKE_WORD) <= 1" in index_html_content
     assert "function hasLiveWakeWord" in index_html_content
+    assert "wakeName: data.wake_name" in index_html_content
+    assert "hasLiveWakeWord(result.transcription, result.wakeName)" in index_html_content
     assert "let isLiveConversationActive = false;" in index_html_content
     assert "if (!isLiveConversationActive)" in index_html_content
     assert "activateLiveConversation(sessionId);" in index_html_content
-    assert "Standby · Say «Αστακέ»" in index_html_content
+    assert "Standby · Say" in index_html_content
 
 
 def test_bare_live_wake_word_is_sent_before_listening_for_the_follow_up(

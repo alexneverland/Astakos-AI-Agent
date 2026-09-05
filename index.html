@@ -1551,7 +1551,6 @@
     const LIVE_SILENCE_DURATION_MS = 1500;
     const LIVE_SPEECH_CONFIRMATION_MS = 180;
     const LIVE_SPEECH_THRESHOLD = 0.018;
-    const LIVE_WAKE_WORD = 'αστακε';
     const LIVE_CONVERSATION_IDLE_MS = 45000;
     const LIVE_STANDBY_PREROLL_CHUNKS = 3;
     let mediaRecorder;
@@ -1565,6 +1564,7 @@
     let isLiveConversationActive = false;
     let liveConversationTimeout = null;
     let liveHasConfirmedSpeech = false;
+    let liveWakeName = '';
 
     function setLiveVoiceModeUi(isActive) {
         document.body.classList.toggle('live-voice-active', isActive);
@@ -1572,14 +1572,16 @@
         liveVoiceBtn.textContent = isActive ? 'STOP' : 'LIVE';
         liveVoiceBtn.setAttribute('aria-label', isActive ? 'End live voice conversation' : 'Start live voice conversation');
         corePod.setAttribute('aria-label', isActive ? 'End live voice conversation' : 'Astakos Core — Click to speak');
-        document.getElementById('core-hint').textContent = isActive ? 'Standby · Say «Αστακέ»' : 'Click core to speak';
+        document.getElementById('core-hint').textContent = isActive
+            ? (liveWakeName ? `Standby · Say «${liveWakeName}»` : 'Standby · Say the wake name')
+            : 'Click core to speak';
     }
 
     function normalizeLiveWakeText(text) {
         return text
             .normalize('NFD')
             .replace(/[\u0300-\u036f]/g, '')
-            .toLocaleLowerCase('el-GR');
+            .toLocaleLowerCase();
     }
 
     function getLiveWakeWords(text) {
@@ -1603,13 +1605,22 @@
         return previous[right.length];
     }
 
-    function isLiveWakeWord(word) {
-        if (Math.abs(word.length - LIVE_WAKE_WORD.length) > 1) return false;
-        return liveWakeWordEditDistance(word, LIVE_WAKE_WORD) <= 1;
+    function isLiveWakeWord(word, wakeWord) {
+        const maxDistance = wakeWord.length >= 6 ? 2 : 1;
+        if (Math.abs(word.length - wakeWord.length) > maxDistance) return false;
+        return liveWakeWordEditDistance(word, wakeWord) <= maxDistance;
     }
 
-    function hasLiveWakeWord(text) {
-        return getLiveWakeWords(text).some(word => isLiveWakeWord(word));
+    function hasLiveWakeWord(text, wakeName) {
+        const heardWords = getLiveWakeWords(text);
+        const wakeWords = getLiveWakeWords(wakeName || '');
+        if (wakeWords.length === 0 || heardWords.length < wakeWords.length) return false;
+        return heardWords.some((_, startIndex) => (
+            startIndex + wakeWords.length <= heardWords.length
+            && wakeWords.every((wakeWord, offset) => (
+                isLiveWakeWord(heardWords[startIndex + offset], wakeWord)
+            ))
+        ));
     }
 
     function clearLiveConversationTimeout() {
@@ -1621,8 +1632,12 @@
         setCoreState('idle');
         coreModeBadge.textContent = 'STANDBY';
         coreModeBadge.className = 'badge-listening';
-        coreSubtitle.textContent = 'Waiting for “Αστακέ”…';
-        document.getElementById('core-hint').textContent = 'Standby · Say «Αστακέ»';
+        coreSubtitle.textContent = liveWakeName
+            ? `Waiting for “${liveWakeName}”…`
+            : 'Waiting for the wake name…';
+        document.getElementById('core-hint').textContent = liveWakeName
+            ? `Standby · Say «${liveWakeName}»`
+            : 'Standby · Say the wake name';
     }
 
     function activateLiveConversation(sessionId) {
@@ -1744,7 +1759,13 @@
             const res = await fetch('/voice', { method: 'POST', body: formData });
             const data = await res.json();
             if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
-            if (data.transcription) return { status: 'ok', transcription: data.transcription };
+            if (data.transcription) {
+                return {
+                    status: 'ok',
+                    transcription: data.transcription,
+                    wakeName: data.wake_name,
+                };
+            }
             if (data.no_speech === true) {
                 if (!suppressNoSpeechError) {
                     appendMessage('❌ Voice error: ' + (data.error || 'Unable to transcribe'), 'ai', 'System');
@@ -1770,8 +1791,9 @@
             stopLiveVoiceMode();
             return;
         }
+        liveWakeName = result.wakeName || liveWakeName;
         if (!isLiveConversationActive) {
-            if (!hasLiveWakeWord(result.transcription)) {
+            if (!hasLiveWakeWord(result.transcription, result.wakeName)) {
                 showLiveStandby();
                 startLiveListening(sessionId);
                 return;
