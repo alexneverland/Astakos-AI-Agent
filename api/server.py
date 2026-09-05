@@ -23,6 +23,7 @@ import sys
 import re
 import secrets
 import logging
+from typing import Any
 from collections.abc import Callable, Mapping
 from urllib.parse import quote, unquote, urlencode
 from api.path_security import resolve_allowed_file
@@ -1795,8 +1796,58 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
         return JSONResponse({"error": _api_internal_error("voice")}, status_code=500)
 
 
-import edge_tts
-import io
+TTS_VOICES: dict[str, tuple[str, str]] = {
+    "el": ("el-GR", "el-GR-Chirp3-HD-Fenrir"),
+    "en": ("en-US", "en-US-Chirp3-HD-Charon"),
+}
+MAX_TTS_INPUT_BYTES = 4_500
+
+
+def _get_text_to_speech_client() -> tuple[Any, Any]:
+    """Build a Cloud Text-to-Speech client with Astakos' existing Google credentials."""
+    from google.cloud import texttospeech
+    from core.ai_provider import get_vertex_credentials
+
+    return texttospeech, texttospeech.TextToSpeechClient(
+        credentials=get_vertex_credentials(),
+    )
+
+
+def _split_text_for_tts(text: str, max_bytes: int = MAX_TTS_INPUT_BYTES) -> list[str]:
+    """Split text into UTF-8-safe chunks accepted by Cloud TTS."""
+    chunks: list[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining.encode("utf-8")) <= max_bytes:
+            chunks.append(remaining)
+            break
+        truncated = remaining.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
+        split_at = max(truncated.rfind(" "), truncated.rfind("\n"))
+        chunk_length = split_at + 1 if split_at > 0 else len(truncated)
+        chunks.append(remaining[:chunk_length])
+        remaining = remaining[chunk_length:]
+    return chunks
+
+
+def _synthesize_speech(text: str, locale: str) -> bytes:
+    """Generate an MP3 response with locale voice settings and bounded requests."""
+    language_code, voice_name = TTS_VOICES.get(locale, TTS_VOICES["en"])
+    texttospeech, client = _get_text_to_speech_client()
+    voice = texttospeech.VoiceSelectionParams(
+        language_code=language_code,
+        name=voice_name,
+    )
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3,
+    )
+    return b"".join(
+        client.synthesize_speech(
+            input=texttospeech.SynthesisInput(text=chunk),
+            voice=voice,
+            audio_config=audio_config,
+        ).audio_content
+        for chunk in _split_text_for_tts(text)
+    )
 
 @server.post("/tts")
 async def text_to_speech(request: Request, _=Depends(require_token)):
@@ -1811,15 +1862,8 @@ async def text_to_speech(request: Request, _=Depends(require_token)):
         text = _replace_bracketed_markers(text, "[ASTAKOS_ASSET:", lambda _: "")
         text = _replace_bracketed_markers(text, "[ASTAKOS_ASSET_URL:", lambda _: "")
         text = text.strip()
-        from core.i18n import CURRENT_LOCALE
-        voice = "el-GR-NestorasNeural" if CURRENT_LOCALE == "el" else "en-US-ChristopherNeural"
-        communicate = edge_tts.Communicate(text, voice, rate="-10%", volume="+10%")
-        audio_buffer = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_buffer.write(chunk["data"])
-        audio_buffer.seek(0)
-        audio_bytes = audio_buffer.read()
+        from core.i18n import LANG
+        audio_bytes = await asyncio.to_thread(_synthesize_speech, text, LANG)
         if not audio_bytes:
             return JSONResponse({"error": t("api.server.tts_creation_failed")}, status_code=500)
         print(f"\033[95m[TTS]: Voice generated ({len(audio_bytes)} bytes)\033[0m")
