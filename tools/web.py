@@ -507,6 +507,16 @@ def search_goldmall_offers(query: str) -> str:
                 pass
 
 
+_MESSENGER_SEND_SUCCESS_PREFIX = "✅"
+
+
+def messenger_send_result_succeeded(result: object) -> bool:
+    """Return whether ``execute_local_pipeline`` reported a completed send."""
+    return isinstance(result, str) and result.lstrip().startswith(
+        _MESSENGER_SEND_SUCCESS_PREFIX
+    )
+
+
 @tool
 def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
     """Sends a message on Facebook Messenger by reading the saved draft.

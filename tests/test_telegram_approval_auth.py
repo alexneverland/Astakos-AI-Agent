@@ -237,12 +237,48 @@ def test_web_origin_messenger_approval_confirms_actual_send_in_telegram() -> Non
         mock_exec.return_value = {
             "ok": True,
             "status": "executed",
-            "result": "Messenger send completed",
+            "result": "✅ Messenger send completed",
         }
 
         bot._handle_approval_callback(cq)
 
     mock_send.assert_called_once_with("clients.telegram_bot.bot_msg_df3588")
+
+
+def test_web_origin_messenger_approval_reports_returned_send_failure() -> None:
+    """A returned Messenger error must not be announced as a successful send."""
+    cq = _build_callback_query(
+        action="approve",
+        tool_call_id="call-web-messenger-failure",
+        from_id="12345678",
+        chat_id="12345678",
+    )
+
+    with patch("core.approval.get_pending") as mock_get, \
+         patch("core.approval.execute_approved_pending") as mock_exec, \
+         patch.object(bot, "send_telegram_msg") as mock_send, \
+         patch.object(bot, "t", side_effect=lambda key, **_kwargs: key), \
+         patch("api.server.append_to_chat_history") as mock_append, \
+         patch("requests.post"):
+
+        mock_get.return_value = {
+            "tool_name": "execute_local_pipeline",
+            "channel": "web",
+        }
+        mock_exec.return_value = {
+            "ok": True,
+            "status": "executed",
+            "result": "❌ Error Messenger: browser unavailable",
+        }
+
+        bot._handle_approval_callback(cq)
+
+    mock_send.assert_called_once_with("clients.telegram_bot.bot_msg_tool_fail_web")
+    mock_append.assert_called_once_with(
+        "assistant",
+        "clients.telegram_bot.bot_msg_tool_fail_web_hist",
+        agent="Web_Agent",
+    )
 
 
 def test_authorized_user_reject_callback_pops_pending() -> None:
