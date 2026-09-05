@@ -19,6 +19,15 @@ from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 
 _embedding_setup_notifications: set[str] = set()
 _embedding_setup_notifications_lock = threading.Lock()
+_TRANSPORT_METADATA_PREFIX_RE = re.compile(
+    r"^(?:\[\d{2}:\d{2}\]\s*|"
+    r"\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+/\s+\w+\]\s*)+",
+)
+
+
+def strip_transport_metadata(text: str) -> str:
+    """Remove only Astakos-added leading timestamp metadata."""
+    return _TRANSPORT_METADATA_PREFIX_RE.sub("", str(text or "")).strip()
 
 
 def _embedding_memory_status_notice(error: Exception, channel: str) -> str:

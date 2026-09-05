@@ -3252,10 +3252,28 @@ def _handle_approval_callback(cq: dict) -> None:
                 send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_exec", tool=tool_name))
 
             execution = execute_approved_pending(tool_call_id, all_tools)
+
+            if execution.get("ok") and tool_name == "execute_local_pipeline":
+                from tools.web import messenger_send_result_succeeded
+
+                if not messenger_send_result_succeeded(execution.get("result")):
+                    returned_error = clean_message(
+                        str(execution.get("result") or "")
+                    ).strip()
+                    execution = {
+                        **execution,
+                        "ok": False,
+                        "status": "failed",
+                        "error": returned_error
+                        or t("clients.telegram_bot.bot_msg_e8006a"),
+                    }
             
             if origin_channel == "web":
                 if execution["ok"]:
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_success_web", tool=tool_name))
+                    if tool_name == "execute_local_pipeline":
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_df3588"))
+                    else:
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_success_web", tool=tool_name))
                     
                     try:
                         from api.server import append_to_chat_history
