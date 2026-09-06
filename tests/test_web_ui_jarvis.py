@@ -13,8 +13,40 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import Page, sync_playwright
 
 INDEX_HTML_PATH = Path(__file__).resolve().parent.parent / "index.html"
+
+
+@pytest.fixture
+def jarvis_browser_page(index_html_content: str) -> Page:
+    """Load the real Jarvis page in an offline Chromium context."""
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except PlaywrightError as exc:
+            pytest.skip(f"Chromium is unavailable for browser regression coverage: {exc}")
+        context = browser.new_context()
+        context.add_init_script(
+            """
+            window.fetch = async () => ({
+                ok: true,
+                status: 200,
+                json: async () => ({ history: [], messages: [], max_id: 0 }),
+                blob: async () => new Blob(),
+            });
+            window.WebSocket = class OfflineWebSocket {
+                constructor() { this.readyState = 1; }
+                close() {}
+            };
+            """
+        )
+        page = context.new_page()
+        page.set_content(index_html_content, wait_until="domcontentloaded")
+        yield page
+        context.close()
+        browser.close()
 
 
 @pytest.fixture
@@ -252,19 +284,90 @@ def test_live_voice_standby_keeps_only_bounded_audio_preroll(
     """Leaving live mode armed must not accumulate an unbounded silent recording."""
     assert "const LIVE_STANDBY_PREROLL_CHUNKS = 3;" in index_html_content
     assert "let liveHasConfirmedSpeech = false;" in index_html_content
-    assert (
-        "audioChunks.length > LIVE_STANDBY_PREROLL_CHUNKS + 1"
-        in index_html_content
-    )
-    assert "mediaRecorder.start(1000);" in index_html_content
+    assert "segmentChunks.length > LIVE_STANDBY_PREROLL_CHUNKS" in index_html_content
+    assert "recorder.start(1000);" in index_html_content
 
 
-def test_live_voice_standby_preserves_webm_initialization_chunk(
-    index_html_content: str,
+def test_live_voice_rotated_segment_decodes_after_long_standby(
+    jarvis_browser_page: Page,
 ) -> None:
-    """Bounded standby audio must retain the first chunk required to decode WebM."""
-    assert "audioChunks.splice(1, 1);" in index_html_content
-    assert "audioChunks.shift();" not in index_html_content
+    """A recording produced after standby rotation remains a short, decodable WebM."""
+    jarvis_browser_page.evaluate(
+        """
+        async () => {
+            const sourceContext = new AudioContext();
+            const oscillator = sourceContext.createOscillator();
+            const destination = sourceContext.createMediaStreamDestination();
+            oscillator.connect(destination);
+            oscillator.start();
+            window.__testSourceContext = sourceContext;
+            window.__testOscillator = oscillator;
+            Object.defineProperty(navigator, 'mediaDevices', {
+                configurable: true,
+                value: { getUserMedia: async () => destination.stream },
+            });
+            startLiveSpeechMonitor = () => {};
+            window.__recordedBlobPromise = new Promise(resolve => {
+                processLiveRecording = blob => resolve(blob);
+            });
+            isLiveVoiceMode = true;
+            liveSessionId = 41;
+            await startLiveListening(41);
+        }
+        """
+    )
+    jarvis_browser_page.wait_for_timeout(5200)
+    result = jarvis_browser_page.evaluate(
+        """
+        async () => {
+            liveHasConfirmedSpeech = true;
+            await new Promise(resolve => setTimeout(resolve, 500));
+            stopLiveRecording(41);
+            const blob = await window.__recordedBlobPromise;
+            const decodeContext = new AudioContext();
+            const decoded = await decodeContext.decodeAudioData(await blob.arrayBuffer());
+            const result = { size: blob.size, duration: decoded.duration };
+            await decodeContext.close();
+            window.__testOscillator.stop();
+            await window.__testSourceContext.close();
+            return result;
+        }
+        """
+    )
+
+    assert result["size"] > 800
+    assert 0.2 < result["duration"] < 4
+
+
+def test_live_voice_surfaces_tts_provider_error_and_keeps_listening(
+    jarvis_browser_page: Page,
+) -> None:
+    """A failed TTS provider is visible and live mode falls back to text conversation."""
+    result = jarvis_browser_page.evaluate(
+        """
+        async () => {
+            window.fetch = async () => ({
+                ok: false,
+                status: 401,
+                json: async () => ({ error: 'Verify the configured voice credentials.' }),
+            });
+            window.__listenRestarts = 0;
+            startLiveListening = async () => { window.__listenRestarts += 1; };
+            isLiveVoiceMode = true;
+            liveSessionId = 73;
+            await playLiveReply('Visible text reply', 73);
+            return {
+                liveMode: isLiveVoiceMode,
+                listenRestarts: window.__listenRestarts,
+                messages: document.getElementById('chat-box').innerText,
+            };
+        }
+        """
+    )
+
+    assert result["liveMode"] is True
+    assert result["listenRestarts"] == 1
+    assert "Verify the configured voice credentials." in result["messages"]
 
 
 def test_voice_transcript_is_separate_from_voice_delivery_metadata(

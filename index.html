@@ -1819,7 +1819,19 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text }),
             });
-            if (!response.ok) throw new Error('TTS request failed');
+            if (!response.ok) {
+                let errorMessage = 'Voice synthesis is unavailable. Check the configured voice provider.';
+                try {
+                    const errorPayload = await response.json();
+                    if (typeof errorPayload.error === 'string' && errorPayload.error.trim()) {
+                        errorMessage = errorPayload.error.trim();
+                    }
+                } catch (_) { /* Keep the safe fallback for a non-JSON response. */ }
+                if (!isLiveVoiceMode || sessionId !== liveSessionId) return;
+                appendMessage('❌ Voice playback: ' + errorMessage, 'ai', 'System');
+                startLiveListening(sessionId);
+                return;
+            }
             const audioBlob = await response.blob();
             if (!isLiveVoiceMode || sessionId !== liveSessionId) return;
             const audioUrl = URL.createObjectURL(audioBlob);
@@ -1845,6 +1857,39 @@
         }
     }
 
+    function startLiveRecorderSegment(sessionId) {
+        if (!isLiveVoiceMode || sessionId !== liveSessionId || !isRecording || !liveInputStream) return;
+        const recorder = new MediaRecorder(liveInputStream);
+        const segmentChunks = [];
+        let rotateOnStop = false;
+        mediaRecorder = recorder;
+
+        recorder.ondataavailable = event => {
+            if (event.data.size <= 0) return;
+            segmentChunks.push(event.data);
+            if (
+                !rotateOnStop
+                && !liveHasConfirmedSpeech
+                && segmentChunks.length > LIVE_STANDBY_PREROLL_CHUNKS
+                && recorder.state === 'recording'
+            ) {
+                rotateOnStop = true;
+                recorder.stop();
+            }
+        };
+        recorder.onstop = () => {
+            if (rotateOnStop) {
+                if (isLiveVoiceMode && sessionId === liveSessionId && isRecording) {
+                    startLiveRecorderSegment(sessionId);
+                }
+                return;
+            }
+            const audioBlob = new Blob(segmentChunks, { type: 'audio/webm;codecs=opus' });
+            if (isLiveVoiceMode && sessionId === liveSessionId) processLiveRecording(audioBlob, sessionId);
+        };
+        recorder.start(1000);
+    }
+
     function stopLiveRecording(sessionId) {
         if (sessionId !== liveSessionId || !isRecording) return;
         clearLiveConversationTimeout();
@@ -1864,29 +1909,14 @@
                 liveInputStream = null;
                 return;
             }
-            mediaRecorder = new MediaRecorder(liveInputStream);
-            audioChunks = [];
             liveHasConfirmedSpeech = false;
-            mediaRecorder.ondataavailable = event => {
-                if (event.data.size > 0) {
-                    audioChunks.push(event.data);
-                    if (!liveHasConfirmedSpeech && audioChunks.length > LIVE_STANDBY_PREROLL_CHUNKS + 1) {
-                        // Keep chunk 0: it carries the WebM initialization data required by decoders.
-                        audioChunks.splice(1, 1);
-                    }
-                }
-            };
-            mediaRecorder.onstop = () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
-                if (isLiveVoiceMode && sessionId === liveSessionId) processLiveRecording(audioBlob, sessionId);
-            };
             liveAudioContext = new AudioContext();
             const source = liveAudioContext.createMediaStreamSource(liveInputStream);
             const analyser = liveAudioContext.createAnalyser();
             analyser.fftSize = 1024;
             source.connect(analyser);
-            mediaRecorder.start(1000);
             isRecording = true;
+            startLiveRecorderSegment(sessionId);
             if (isLiveConversationActive) {
                 setCoreState('listening');
                 document.getElementById('core-hint').textContent = 'Live conversation · Listening';
