@@ -98,3 +98,36 @@ def test_telegram_tts_failure_falls_back_to_the_text_reply(monkeypatch) -> None:
     asyncio.run(telegram.send_telegram_voice("Καλημέρα"))
 
     assert text_replies == ["Καλημέρα"]
+
+
+def test_telegram_tts_setup_failure_warns_then_preserves_text(monkeypatch) -> None:
+    """A voice setup failure is actionable and never exposes exception details."""
+    import asyncio
+
+    import config
+    import tools.telegram as telegram
+    from core.ai_provider import VoiceProviderSetupRequired
+    from core.i18n import t
+
+    delivered: list[str] = []
+    monkeypatch.setattr(telegram, "_suppress_test_delivery", lambda reason: False)
+    monkeypatch.setattr(config, "TELEGRAM_TOKEN", "test-token")
+    monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "test-chat")
+    monkeypatch.setattr(
+        "core.text_to_speech.synthesize_speech",
+        lambda text, locale: (_ for _ in ()).throw(
+            VoiceProviderSetupRequired(
+                "setup failed with secret-value",
+                provider="anthropic",
+            )
+        ),
+    )
+    monkeypatch.setattr(telegram, "send_telegram_msg", delivered.append)
+
+    asyncio.run(telegram.send_telegram_voice("Καλημέρα"))
+
+    assert delivered == [
+        t("clients.telegram_bot.voice_output_setup_required"),
+        "Καλημέρα",
+    ]
+    assert "secret-value" not in " ".join(delivered)

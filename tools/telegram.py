@@ -203,6 +203,12 @@ async def send_telegram_voice(text: str):
 
     import re
     from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+    from core.ai_provider import (
+        CapabilityNotSupportedError,
+        ProviderAuthError,
+        RateLimitError,
+        VoiceProviderSetupRequired,
+    )
     from core.text_to_speech import synthesize_speech
     
     token = TELEGRAM_TOKEN
@@ -246,6 +252,30 @@ async def send_telegram_voice(text: str):
         else:
             raise RuntimeError(f"Telegram rejected voice output ({response.status_code}).")
             
+    except VoiceProviderSetupRequired as e:
+        from core.i18n import t
+
+        print(f"❌ Voice Output Setup Error: {e}")
+        send_telegram_msg(t("clients.telegram_bot.voice_output_setup_required"))
+        send_telegram_msg(text)
+    except ProviderAuthError as e:
+        from core.i18n import t
+
+        print(f"❌ Voice Output Auth Error: {e}")
+        send_telegram_msg(t("clients.telegram_bot.voice_output_auth_failed"))
+        send_telegram_msg(text)
+    except RateLimitError as e:
+        from core.i18n import t
+
+        print(f"❌ Voice Output Rate Limit: {e}")
+        send_telegram_msg(t("clients.telegram_bot.voice_output_rate_limited"))
+        send_telegram_msg(text)
+    except CapabilityNotSupportedError as e:
+        from core.i18n import t
+
+        print(f"❌ Voice Output Capability Error: {e}")
+        send_telegram_msg(t("clients.telegram_bot.voice_output_unsupported"))
+        send_telegram_msg(text)
     except Exception as e:
         print(f"❌ Voice Output Error: {e}")
         send_telegram_msg(text)

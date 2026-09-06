@@ -1807,9 +1807,12 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
         try:
             adapter = get_voice_provider_adapter()
             transcription = adapter.transcribe_audio(audio_data, mime_type="audio/webm")
-        except VoiceProviderSetupRequired as exc:
+        except VoiceProviderSetupRequired:
             return JSONResponse(
-                {"error": str(exc), "setup_required": True},
+                {
+                    "error": t("api.server.voice_provider_setup_required"),
+                    "setup_required": True,
+                },
                 status_code=400,
             )
         except CapabilityNotSupportedError as exc:
@@ -1866,9 +1869,12 @@ async def text_to_speech(request: Request, _=Depends(require_token)):
         )
         try:
             audio_bytes = await asyncio.to_thread(_synthesize_speech, text, LANG)
-        except VoiceProviderSetupRequired as exc:
+        except VoiceProviderSetupRequired:
             return JSONResponse(
-                {"error": str(exc), "setup_required": True},
+                {
+                    "error": t("api.server.voice_provider_setup_required"),
+                    "setup_required": True,
+                },
                 status_code=400,
             )
         except CapabilityNotSupportedError as exc:

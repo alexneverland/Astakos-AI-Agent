@@ -378,6 +378,32 @@ class TestWebVoiceEndpointMigration:
         assert data["transcription"] == "[Vertex Mock Audio]: Transcribed test voice"
         assert data["wake_name"] == config.VOICE_WAKE_NAME
 
+    def test_web_voice_setup_failure_is_actionable_without_exception_details(
+        self, client, monkeypatch
+    ):
+        from core.ai_provider import VoiceProviderSetupRequired
+        from core.i18n import t
+
+        def require_setup():
+            raise VoiceProviderSetupRequired(
+                "setup failed with secret-value",
+                provider="anthropic",
+            )
+
+        monkeypatch.setattr("core.brain.get_voice_provider_adapter", require_setup)
+        response = client.post(
+            "/voice",
+            files={"file": ("test.webm", b"mock_webm_audio_bytes", "audio/webm")},
+            headers=self.auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json() == {
+            "error": t("api.server.voice_provider_setup_required"),
+            "setup_required": True,
+        }
+        assert "secret-value" not in response.text
+
     def test_web_voice_real_vertex_adapter_dedicated_transcribe(self, client, monkeypatch):
         real_adapter = VertexAIAdapter(project_id="test-proj", location="europe-west1")
         mock_genai_client = MagicMock()

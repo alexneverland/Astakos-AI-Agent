@@ -11,6 +11,7 @@ def test_tts_endpoint_reports_required_voice_setup(monkeypatch) -> None:
     """A missing separate voice provider is returned as an actionable setup error."""
     import api.server as api_server
     from core.ai_provider import VoiceProviderSetupRequired
+    from core.i18n import t
 
     def require_voice_setup(text: str, locale: str) -> bytes:
         raise VoiceProviderSetupRequired("Configure VOICE_PROVIDER.", provider="anthropic")
@@ -22,7 +23,7 @@ def test_tts_endpoint_reports_required_voice_setup(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert response.json() == {
-        "error": "Configure VOICE_PROVIDER.",
+        "error": t("api.server.voice_provider_setup_required"),
         "setup_required": True,
     }
 
