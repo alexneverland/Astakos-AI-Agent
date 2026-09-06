@@ -751,6 +751,66 @@ def test_setup_wizard_saves_independent_gemini_voice_for_anthropic_chat(
     assert saved_settings["voice_wake_name"] == "Astakos"
 
 
+@pytest.mark.parametrize("provider", ["openai", "gemini", "vertex"])
+def test_setup_wizard_rejects_conflicting_shared_provider_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, provider: str
+) -> None:
+    """Two features sharing a provider cannot silently overwrite each other's credential."""
+    import api.setup_wizard as wizard
+
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("KEEP_EXISTING=value\n", encoding="utf-8")
+    payload = wizard.SetupPayload(
+        basic={
+            "llm_provider": "anthropic",
+            "api_key": "sk-ant-chat-key",
+            "embeddings_provider": provider,
+            "embeddings_api_key": "embedding-credential",
+            "voice_provider": provider,
+            "voice_api_key": "voice-credential",
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(wizard.save_setup(payload))
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "Services sharing a provider must use the same credential."
+    assert env_file.read_text(encoding="utf-8") == "KEEP_EXISTING=value\n"
+
+
+def test_setup_wizard_reuses_shared_provider_credential(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Embeddings and voice persist one credential when they share a provider."""
+    import api.setup_wizard as wizard
+
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+    payload = wizard.SetupPayload(
+        basic={
+            "llm_provider": "anthropic",
+            "api_key": "sk-ant-chat-key",
+            "embeddings_provider": "openai",
+            "embeddings_api_key": "sk-shared-openai-key",
+            "voice_provider": "openai",
+            "voice_api_key": "sk-shared-openai-key",
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    result = asyncio.run(wizard.save_setup(payload))
+
+    assert result["status"] == "success"
+    saved_env = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert saved_env.count("OPENAI_API_KEY=sk-shared-openai-key") == 1
+
+
 def test_setup_wizard_preserves_masked_independent_voice_secret(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
