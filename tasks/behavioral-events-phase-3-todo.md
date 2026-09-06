@@ -17,6 +17,13 @@
 
 ## Checkpoint
 
-- [ ] Review real candidate output manually before considering any user-facing
+- [x] Review real candidate output manually before considering any user-facing
   use.
-- [ ] Keep all routines, messages, reminders, memory, and prompts unchanged.
+- [x] Keep all routines, messages, reminders, memory, and prompts unchanged.
+
+## Task 3: Debug progress visibility
+
+- [x] Return confirmed-event count, required dates, and strongest signature
+  progress from the existing read-only debug endpoint.
+- [x] Show that summary in both empty and populated dashboard states.
+- [x] Verify focused aggregation, endpoint, and static dashboard tests.

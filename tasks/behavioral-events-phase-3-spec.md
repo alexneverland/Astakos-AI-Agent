@@ -74,3 +74,11 @@ Candidates are observations, not facts about the user. A missing optional
 - Fewer than three distinct dates never yield a candidate.
 - Candidate ordering and evidence are stable for the same input.
 - The aggregation is pure and has no runtime side effects.
+
+## Debug progress enhancement
+
+- The existing debug endpoint reports the number of confirmed events inspected,
+  the required distinct-date threshold, and the strongest current signature.
+- The debug dashboard shows this progress even when no pattern qualifies yet.
+- The summary remains read-only and must not change grouping, thresholds, stored
+  events, routines, memory, prompts, or notifications.
