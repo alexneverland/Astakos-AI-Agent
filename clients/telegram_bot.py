@@ -1280,11 +1280,13 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         print(f"\033[94m[Vision]: Visual analysis...\033[0m")
         try:
             adapter = get_active_provider_adapter()
-            memory_analysis = safe_adapter_call(
-                adapter.analyze_vision,
-                vision_prompt,
-                img_data,
-                mime_type="image/jpeg",
+            memory_analysis = clean_message(
+                safe_adapter_call(
+                    adapter.analyze_vision,
+                    vision_prompt,
+                    img_data,
+                    mime_type="image/jpeg",
+                )
             )
             if not memory_analysis:
                 memory_analysis = "No visual analysis available."
@@ -1357,7 +1359,7 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         f"[{now_ts}] "
         f"[USER_UPLOADED_PHOTO]: {filename}\n"
         f"[PHOTO PATH]: {local_path}\n"
-        f"[VISUAL ANALYSIS]: {format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, analysis)}\n"
+        f"[ANALYSIS]: {format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, analysis)}\n"
         f"Question: {question}"
     )
     print(f"\033[94m[Photo->Graph]: {user_log_msg[:200]}\033[0m")
@@ -1415,7 +1417,7 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         now = datetime.now()
         append_message(
             role="user",
-            content=user_log_msg,
+            content=question,
             channel="telegram",
             agent=None,
             metadata=external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE]),

@@ -624,8 +624,12 @@ class TestTelegramPhotoHandlerMigration:
         class FlowerVisionAdapter(MockOpenAIAdapter):
             def analyze_vision(
                 self, prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg"
-            ) -> str:
-                return "A vibrant yellow sunflower in full bloom."
+            ) -> list[dict[str, Any]]:
+                return [{
+                    "type": "text",
+                    "text": "A vibrant yellow sunflower in full bloom.",
+                    "extras": {"signature": "provider-internal-signature"},
+                }]
 
         monkeypatch.setattr("core.brain.get_active_provider_adapter", lambda: FlowerVisionAdapter())
 
@@ -633,7 +637,8 @@ class TestTelegramPhotoHandlerMigration:
         tb.handle_photo(photo_list, caption="", chat_id="chat_999")
 
         assert tb.pending_photo is not None
-        assert "sunflower" in tb.pending_photo["analysis"]
+        assert tb.pending_photo["analysis"] == "A vibrant yellow sunflower in full bloom."
+        assert "signature" not in tb.pending_photo["analysis"]
 
     def test_handle_photo_auth_error_sends_safe_telegram_message(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

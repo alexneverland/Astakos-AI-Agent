@@ -756,6 +756,7 @@ def test_photo_reply_uses_current_asset_provenance_only(
         additional_kwargs=external_content_history_metadata(["get_news"]),
     )
     saved_messages: list[dict[str, object]] = []
+    graph_messages: list[object] = []
 
     class FakeTrace:
         """Minimal trace sink that keeps the photo handler isolated from storage."""
@@ -777,13 +778,13 @@ def test_photo_reply_uses_current_asset_provenance_only(
         "_load_shared_context_messages",
         lambda _channel: [persisted_source],
     )
-    monkeypatch.setattr(
-        telegram_bot.graph,
-        "stream",
-        lambda *_args, **_kwargs: iter([{
+    def _stream_photo(state: dict[str, object], *_args: object, **_kwargs: object):
+        graph_messages.extend(state["messages"])
+        return iter([{
             "Chat_Agent": {"messages": [AIMessage(content="The deadline is Friday.")]},
-        }]),
-    )
+        }])
+
+    monkeypatch.setattr(telegram_bot.graph, "stream", _stream_photo)
     monkeypatch.setattr("memory.execution_trace.ExecutionTrace", FakeTrace)
     monkeypatch.setattr(telegram_bot, "send_telegram_msg", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(telegram_bot, "enqueue_fast_task", lambda *_args, **_kwargs: None)
@@ -806,6 +807,12 @@ def test_photo_reply_uses_current_asset_provenance_only(
     )
 
     assistant_entry = next(entry for entry in saved_messages if entry["role"] == "assistant")
+    user_entry = next(entry for entry in saved_messages if entry["role"] == "user")
+    current_photo_message = graph_messages[-1]
+
+    assert user_entry["content"] == "What does this mean?"
+    assert "[ANALYSIS]:" in current_photo_message.content
+    assert "[VISUAL ANALYSIS]:" not in current_photo_message.content
     assert assistant_entry["metadata"] == external_content_history_metadata([
         "user_provided_asset",
     ])
