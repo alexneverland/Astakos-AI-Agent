@@ -71,6 +71,32 @@ def _event_display_fields(event: Mapping[str, Any]) -> tuple[str, str | None, st
     )
 
 
+def summarize_behavioral_pattern_progress(
+    events: Iterable[Mapping[str, Any]],
+) -> dict[str, int]:
+    """Summarize read-only evidence progress without creating candidates."""
+    confirmed_event_count = 0
+    grouped_dates: dict[tuple[str, ...], set[str]] = defaultdict(set)
+
+    for event in events:
+        if _signature_text(event.get("record_state")) == "confirmed":
+            confirmed_event_count += 1
+        key = _event_pattern_key(event)
+        event_date = _canonical_event_date(event.get("event_date"))
+        if key is not None and event_date is not None:
+            grouped_dates[key].add(event_date)
+
+    strongest_distinct_dates = max(
+        (len(event_dates) for event_dates in grouped_dates.values()),
+        default=0,
+    )
+    return {
+        "confirmed_event_count": confirmed_event_count,
+        "required_distinct_dates": MINIMUM_DISTINCT_EVENT_DATES,
+        "strongest_distinct_dates": strongest_distinct_dates,
+    }
+
+
 def aggregate_behavioral_pattern_candidates(
     events: Iterable[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:

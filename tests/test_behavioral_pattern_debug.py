@@ -52,6 +52,11 @@ def test_debug_behavioral_patterns_exposes_read_only_confirmed_candidates(monkey
             "last_date": "2026-08-07",
         }],
         "count": 1,
+        "summary": {
+            "confirmed_event_count": 3,
+            "required_distinct_dates": 3,
+            "strongest_distinct_dates": 3,
+        },
     }
 
 
@@ -81,6 +86,11 @@ def test_debug_dashboard_fetches_and_renders_behavioral_patterns():
     assert 'id="behavioral-patterns-section"' in dashboard
     assert "fetch('/debug/behavioral-patterns')" in dashboard
     assert "renderBehavioralPatterns" in dashboard
+    assert "renderBehavioralPatterns(pj.candidates || [], pj.summary || {})" in dashboard
+    assert "function renderBehavioralPatterns(candidates, summary)" in dashboard
+    assert "summary.confirmed_event_count" in dashboard
+    assert "summary.strongest_distinct_dates" in dashboard
+    assert "summary.required_distinct_dates" in dashboard
     assert "pattern.action_kind" in dashboard
     assert "<th>Action</th>" in dashboard
     assert "renderBehavioralPatternLoadError" in dashboard

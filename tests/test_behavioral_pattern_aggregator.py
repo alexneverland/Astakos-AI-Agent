@@ -1,4 +1,7 @@
-from services.behavioral_pattern_aggregator import aggregate_behavioral_pattern_candidates
+from services.behavioral_pattern_aggregator import (
+    aggregate_behavioral_pattern_candidates,
+    summarize_behavioral_pattern_progress,
+)
 
 
 def _event(**overrides):
@@ -44,6 +47,35 @@ def test_aggregator_requires_three_distinct_dates_not_three_events():
     ])
 
     assert candidates == []
+
+
+def test_progress_reports_confirmed_events_and_strongest_distinct_date_count():
+    progress = summarize_behavioral_pattern_progress([
+        _event(event_date="2026-08-01"),
+        _event(event_date="2026-08-01"),
+        _event(event_date="2026-08-04"),
+        _event(item="salad", event_date="2026-08-07"),
+    ])
+
+    assert progress == {
+        "confirmed_event_count": 4,
+        "required_distinct_dates": 3,
+        "strongest_distinct_dates": 2,
+    }
+
+
+def test_progress_ignores_unconfirmed_or_invalid_events_for_evidence():
+    progress = summarize_behavioral_pattern_progress([
+        _event(event_date="2026-08-01"),
+        _event(event_date="2026-08-04", record_state="candidate"),
+        _event(event_date="not-a-date"),
+    ])
+
+    assert progress == {
+        "confirmed_event_count": 2,
+        "required_distinct_dates": 3,
+        "strongest_distinct_dates": 1,
+    }
 
 
 def test_aggregator_canonicalizes_equivalent_iso_dates_before_counting():

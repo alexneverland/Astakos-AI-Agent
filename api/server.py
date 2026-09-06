@@ -3290,12 +3290,17 @@ async def debug_behavioral_patterns(
         from memory.behavioral_event_state import list_events
         from services.behavioral_pattern_aggregator import (
             aggregate_behavioral_pattern_candidates,
+            summarize_behavioral_pattern_progress,
         )
 
-        candidates = aggregate_behavioral_pattern_candidates(
-            list_events(record_state="confirmed", initialize=False),
-        )
-        return {"candidates": candidates, "count": len(candidates)}
+        events = list_events(record_state="confirmed", initialize=False)
+        candidates = aggregate_behavioral_pattern_candidates(events)
+        summary = summarize_behavioral_pattern_progress(events)
+        return {
+            "candidates": candidates,
+            "count": len(candidates),
+            "summary": summary,
+        }
     except Exception:
         return {
             "candidates": [],
