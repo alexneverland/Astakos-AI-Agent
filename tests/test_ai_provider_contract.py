@@ -593,6 +593,22 @@ class TestRealVertexAIAdapterBoundary:
         vision_out = self.adapter.analyze_vision("Analyze blueprint", b"fake_blueprint_bytes")
         assert vision_out == "Vertex AI response"
 
+    @patch("langchain_google_genai.ChatGoogleGenerativeAI.invoke")
+    def test_vision_extracts_text_without_provider_signature_metadata(self, mock_invoke):
+        """Multimodal content blocks satisfy the adapter's plain-text vision contract."""
+        mock_resp = MagicMock()
+        mock_resp.content = [{
+            "type": "text",
+            "text": "A Vespa orientalis on concrete.",
+            "extras": {"signature": "provider-internal-signature"},
+        }]
+        mock_invoke.return_value = mock_resp
+
+        vision_out = self.adapter.analyze_vision("Identify it", b"photo_bytes")
+
+        assert vision_out == "A Vespa orientalis on concrete."
+        assert "signature" not in vision_out
+
     def test_vertex_adapter_passes_resolved_safety_settings(self):
         llm = self.adapter._get_llm()
         assert hasattr(llm, "safety_settings")

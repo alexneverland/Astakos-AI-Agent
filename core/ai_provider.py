@@ -49,6 +49,25 @@ AUDIO_TRANSCRIPTION_PROMPT = (
 )
 
 
+def normalize_provider_text_content(content: Any) -> str:
+    """Extract user-facing text from scalar or multimodal provider content."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, dict):
+        return str(content.get("text") or "").strip()
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                text_parts.append(item)
+            elif isinstance(item, dict) and item.get("text"):
+                text_parts.append(str(item["text"]))
+        return " ".join(text_parts).strip()
+    return str(content).strip()
+
+
 def _get_transcription_hints() -> tuple[list[str], list[str]]:
     """Return bounded Gemini STT hints ordered by Astakos' active locale."""
     from core.i18n import LANG
@@ -474,7 +493,7 @@ class OpenAIAdapter(AIProviderAdapter):
                 ]
             )
             response = llm.invoke([message])
-            return getattr(response, "content", "") or ""
+            return normalize_provider_text_content(getattr(response, "content", ""))
         except Exception as e:
             self._handle_exception(e)
 
@@ -699,7 +718,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
                 ]
             )
             response = llm.invoke([message])
-            return getattr(response, "content", "") or ""
+            return normalize_provider_text_content(getattr(response, "content", ""))
         except Exception as e:
             self._handle_exception(e)
 
@@ -1021,7 +1040,7 @@ class VertexAIAdapter(AIProviderAdapter):
                 ]
             )
             response = llm.invoke([message])
-            return getattr(response, "content", "") or ""
+            return normalize_provider_text_content(getattr(response, "content", ""))
         except Exception as e:
             self._handle_exception(e)
 
@@ -1266,7 +1285,7 @@ class AnthropicAdapter(AIProviderAdapter):
                 ]
             )
             response = llm.invoke([message])
-            return getattr(response, "content", "") or ""
+            return normalize_provider_text_content(getattr(response, "content", ""))
         except Exception as e:
             self._handle_exception(e)
 

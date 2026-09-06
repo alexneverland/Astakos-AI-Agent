@@ -687,7 +687,16 @@ def build_prompt(
 
     # clean_message already did its job correctly here, we leave it as is.
     last_msg = clean_message(state_messages[-1].content) if state_messages else ""
-    is_vision = "[VISUAL ANALYSIS]" in last_msg or t("prompts.ext_str_116") in last_msg or "[CURRENT_PHOTO_PATH]" in last_msg
+    has_photo_marker = any(
+        marker in last_msg
+        for marker in ("[USER_UPLOADED_PHOTO]", "[PHOTO PATH]", "[CURRENT_PHOTO_PATH]")
+    )
+    is_vision = (
+        "[VISUAL ANALYSIS]" in last_msg
+        or t("prompts.ext_str_116") in last_msg
+        or "[CURRENT_PHOTO_PATH]" in last_msg
+        or (has_photo_marker and "[ANALYSIS]" in last_msg)
+    )
     has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
     
     memory_context_str = ""

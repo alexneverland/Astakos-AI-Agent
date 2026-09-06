@@ -96,3 +96,33 @@ def test_prompt_can_exclude_all_persisted_context(monkeypatch: pytest.MonkeyPatc
     assert "CONTINUED FROM PREVIOUS SESSION" not in prompt
     assert "GOALS IN PROGRESS" not in prompt
     assert "External capability context" not in prompt
+
+
+def test_build_prompt_treats_canonical_photo_analysis_as_current_vision() -> None:
+    """A precomputed photo analysis must retain the current-reality guard."""
+    prompt = build_prompt(
+        [MockMessage(
+            "[USER_UPLOADED_PHOTO]: photo.jpg\n"
+            "[PHOTO PATH]: C:/photos/photo.jpg\n"
+            "[ANALYSIS]: A yellow insect on concrete.\n"
+            "What is it?"
+        )],
+        agent_role="Chat_Agent",
+        channel="telegram",
+        include_persisted_context=False,
+    )
+
+    assert "REALITY RULE (CRITICAL)" in prompt
+    assert "CURRENT reality" in prompt
+
+
+def test_build_prompt_does_not_treat_plain_analysis_as_vision() -> None:
+    """The canonical analysis marker alone must not classify a document as a photo."""
+    prompt = build_prompt(
+        [MockMessage("[ANALYSIS]: A document summary.\nExplain it.")],
+        agent_role="Chat_Agent",
+        channel="telegram",
+        include_persisted_context=False,
+    )
+
+    assert "REALITY RULE (CRITICAL)" not in prompt

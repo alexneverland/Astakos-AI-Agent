@@ -53,6 +53,7 @@ SYNTHETIC_MESSAGE_ORIGIN_KEY = "astakos_message_origin"
 PLANNER_STEP_MESSAGE_ORIGIN = "plan_step"
 ACTIVE_TOOL_CONTEXT_MESSAGE_LIMIT = 40
 EXTERNAL_CONTENT_HISTORY_METADATA_KEY = "untrusted_external_tool_names"
+MODEL_ASSET_CONTEXT_METADATA_KEY = "astakos_model_asset_context"
 USER_PROVIDED_ASSET_SOURCE = "user_provided_asset"
 UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER = "[UNTRUSTED EXTERNAL TOOL RESULT]"
 MAIL_EXTERNAL_READ_ACTIONS: frozenset[str] = frozenset({
@@ -316,6 +317,24 @@ def external_content_history_metadata(
     return {EXTERNAL_CONTENT_HISTORY_METADATA_KEY: external_names}
 
 
+def user_asset_history_metadata(
+    *,
+    filename: str,
+    file_path: str,
+    analysis: str,
+) -> dict[str, Any]:
+    """Persist untrusted photo context separately from user-visible chat text."""
+    metadata = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
+    asset_context = {
+        "filename": str(filename or "").strip()[:255],
+        "file_path": str(file_path or "").strip()[:1024],
+        "analysis": str(analysis or "").strip()[:8000],
+    }
+    if any(asset_context.values()):
+        metadata[MODEL_ASSET_CONTEXT_METADATA_KEY] = asset_context
+    return metadata
+
+
 def history_message_additional_kwargs(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """Restore validated external-source provenance into a graph history message."""
     raw_names = (metadata or {}).get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, [])
@@ -357,6 +376,48 @@ def format_untrusted_persisted_content(
         return str(content or "")
     source_label = "persisted external sources: " + ", ".join(source_names)
     return format_untrusted_tool_result(source_label, str(content or ""))
+
+
+def format_model_history_content(
+    content: str,
+    metadata: Mapping[str, Any] | None,
+) -> str:
+    """Restore validated model-only photo context before wrapping persisted text."""
+    source_names = history_message_additional_kwargs(metadata).get(
+        EXTERNAL_CONTENT_HISTORY_METADATA_KEY,
+        [],
+    )
+    if USER_PROVIDED_ASSET_SOURCE not in source_names:
+        return format_untrusted_persisted_content(content, metadata)
+
+    raw_context = (metadata or {}).get(MODEL_ASSET_CONTEXT_METADATA_KEY)
+    if not isinstance(raw_context, Mapping):
+        return format_untrusted_persisted_content(content, metadata)
+
+    filename = raw_context.get("filename")
+    file_path = raw_context.get("file_path")
+    analysis = raw_context.get("analysis")
+    if not all(isinstance(value, str) for value in (filename, file_path, analysis)):
+        return format_untrusted_persisted_content(content, metadata)
+
+    model_content = (
+        f"[USER_UPLOADED_PHOTO]: {filename[:255]}\n"
+        f"[PHOTO PATH]: {file_path[:1024]}\n"
+        f"[ANALYSIS]: {analysis[:8000]}\n"
+        f"Question: {str(content or '')}"
+    )
+    return format_untrusted_persisted_content(model_content, metadata)
+
+
+def public_history_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Remove model-only fields before conversation history reaches a client."""
+    if not isinstance(metadata, Mapping):
+        return {}
+    return {
+        str(key): value
+        for key, value in metadata.items()
+        if key != MODEL_ASSET_CONTEXT_METADATA_KEY
+    }
 
 
 def external_content_source_names(metadata: Mapping[str, Any] | None) -> set[str]:
