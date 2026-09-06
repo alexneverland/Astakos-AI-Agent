@@ -339,6 +339,59 @@ def test_live_voice_rotated_segment_decodes_after_long_standby(
     assert 0.2 < result["duration"] < 4
 
 
+def test_live_voice_preserves_speech_starting_at_rotation_boundary(
+    jarvis_browser_page: Page,
+) -> None:
+    """A speech candidate just before rotation keeps the complete decodable segment."""
+    jarvis_browser_page.evaluate(
+        """
+        async () => {
+            const sourceContext = new AudioContext();
+            const oscillator = sourceContext.createOscillator();
+            const destination = sourceContext.createMediaStreamDestination();
+            oscillator.connect(destination);
+            oscillator.start();
+            window.__testSourceContext = sourceContext;
+            window.__testOscillator = oscillator;
+            Object.defineProperty(navigator, 'mediaDevices', {
+                configurable: true,
+                value: { getUserMedia: async () => destination.stream },
+            });
+            startLiveSpeechMonitor = () => {};
+            window.__recordedBlobPromise = new Promise(resolve => {
+                processLiveRecording = blob => resolve(blob);
+            });
+            isLiveVoiceMode = true;
+            liveSessionId = 42;
+            await startLiveListening(42);
+        }
+        """
+    )
+    jarvis_browser_page.wait_for_timeout(3850)
+    result = jarvis_browser_page.evaluate(
+        """
+        async () => {
+            liveHasSpeechCandidate = true;
+            await new Promise(resolve => setTimeout(resolve, 170));
+            liveHasConfirmedSpeech = true;
+            await new Promise(resolve => setTimeout(resolve, 500));
+            stopLiveRecording(42);
+            const blob = await window.__recordedBlobPromise;
+            const decodeContext = new AudioContext();
+            const decoded = await decodeContext.decodeAudioData(await blob.arrayBuffer());
+            const result = { size: blob.size, duration: decoded.duration };
+            await decodeContext.close();
+            window.__testOscillator.stop();
+            await window.__testSourceContext.close();
+            return result;
+        }
+        """
+    )
+
+    assert result["size"] > 800
+    assert result["duration"] > 4
+
+
 def test_live_voice_surfaces_tts_provider_error_and_keeps_listening(
     jarvis_browser_page: Page,
 ) -> None:

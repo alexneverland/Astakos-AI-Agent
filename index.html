@@ -1563,6 +1563,7 @@
     let liveSpeechAnimationFrame = null;
     let isLiveConversationActive = false;
     let liveConversationTimeout = null;
+    let liveHasSpeechCandidate = false;
     let liveHasConfirmedSpeech = false;
     let liveWakeName = '';
 
@@ -1710,6 +1711,7 @@
             const audioLevel = getAudioLevel(analyser);
             const now = performance.now();
             if (audioLevel >= LIVE_SPEECH_THRESHOLD) {
+                liveHasSpeechCandidate = true;
                 if (speechCandidateStartedAt === null) speechCandidateStartedAt = now;
                 if (heardSpeech || now - speechCandidateStartedAt >= LIVE_SPEECH_CONFIRMATION_MS) {
                     heardSpeech = true;
@@ -1721,6 +1723,7 @@
                 stopLiveRecording(sessionId);
                 return;
             } else if (!heardSpeech) {
+                liveHasSpeechCandidate = false;
                 speechCandidateStartedAt = null;
             }
             liveSpeechAnimationFrame = requestAnimationFrame(monitor);
@@ -1869,6 +1872,7 @@
             segmentChunks.push(event.data);
             if (
                 !rotateOnStop
+                && !liveHasSpeechCandidate
                 && !liveHasConfirmedSpeech
                 && segmentChunks.length > LIVE_STANDBY_PREROLL_CHUNKS
                 && recorder.state === 'recording'
@@ -1909,6 +1913,7 @@
                 liveInputStream = null;
                 return;
             }
+            liveHasSpeechCandidate = false;
             liveHasConfirmedSpeech = false;
             liveAudioContext = new AudioContext();
             const source = liveAudioContext.createMediaStreamSource(liveInputStream);
