@@ -43,7 +43,7 @@
                     <!-- 1. AI Brain -->
                     <div>
                         <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-blue-500/20 text-blue-400 p-2 rounded-lg mr-3">🧠</span> 1. AI Brain & APIs</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
                                     Chat Provider (LLM)
@@ -75,6 +75,21 @@
                                     <option value="local">Local Multilingual E5 (intfloat/multilingual-e5-small)</option>
                                 </select>
                             </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
+                                    Voice Provider (Listening & Speech)
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
+                                        Auto uses your chat provider and its existing credentials. Choose a separate provider only when needed.
+                                    </div>
+                                </label>
+                                <select id="voice_provider" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="onProviderChanged()">
+                                    <option value="auto" selected>Auto (Match Chat Provider)</option>
+                                    <option value="vertex">Google Cloud Voice</option>
+                                    <option value="gemini">Google Gemini API Voice</option>
+                                    <option value="openai">OpenAI Voice</option>
+                                </select>
+                            </div>
                         </div>
 
                         <!-- Provider Advisories -->
@@ -85,6 +100,10 @@
                         <div id="local_emb_info" class="hidden mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-300 text-xs flex items-start">
                             <span class="mr-2">ℹ️</span>
                             <div><strong>Local E5 Notice:</strong> Local multilingual E5 runs offline on your machine. It requires manual installation (<code>pip install sentence-transformers</code> and downloading <code>intfloat/multilingual-e5-small</code>). Astakos will not automatically download or install it.</div>
+                        </div>
+                        <div id="anthropic_voice_warning" class="hidden mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-300 text-xs flex items-start" role="status">
+                            <span class="mr-2">⚠️</span>
+                            <div><strong>Voice setup needed:</strong> Anthropic does not provide speech input or output. Select OpenAI, Gemini API, or Google Cloud for voice.</div>
                         </div>
 
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
@@ -131,6 +150,16 @@
                             </label>
                             <input type="password" id="embeddings_api_key" placeholder="..." class="w-full md:w-1/2 bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
+                        <div id="voice_api_key_container" class="hidden mb-6">
+                            <label id="voice_api_key_label" for="voice_api_key" class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
+                                Voice API Key / Credentials
+                                <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
+                                    Only needed when voice uses a different provider from chat.
+                                </div>
+                            </label>
+                            <input type="password" id="voice_api_key" placeholder="..." class="w-full md:w-1/2 bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
                     </div>
 
 
@@ -156,6 +185,14 @@
                                     <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-48 p-2 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">How the bot identifies itself.</div>
                                 </label>
                                 <input type="text" id="bot_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
+                            </div>
+                            <div>
+                                <label for="voice_wake_name" class="block text-sm text-gray-400 mb-1 flex items-center group relative cursor-help">
+                                    Voice Wake Name
+                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-48 p-2 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">The name that wakes Live Voice, for example Astakos.</div>
+                                </label>
+                                <input type="text" id="voice_wake_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
                             </div>
                             <div>
                                 <label class="block text-sm text-gray-400 mb-1 flex items-center group relative cursor-help">
@@ -349,6 +386,7 @@
         let currentPromptFile = "";
         let setupGuideRaw = "";
         let loadedSettings = {};
+        let previousVoiceProvider = null;
 
         function openInstructions() {
             document.getElementById('instructionsModal').classList.remove('hidden');
@@ -374,6 +412,7 @@
         function onProviderChanged() {
             const llm = document.getElementById('llm_provider').value;
             const emb = document.getElementById('embeddings_provider').value;
+            const voice = document.getElementById('voice_provider').value;
             const keyLabel = document.getElementById('api_key_label');
             const keyInput = document.getElementById('api_key');
 
@@ -405,6 +444,9 @@
                 localInfo.classList.add('hidden');
             }
 
+            const anthropicVoiceWarning = document.getElementById('anthropic_voice_warning');
+            anthropicVoiceWarning.classList.toggle('hidden', !(llm === 'anthropic' && voice === 'auto'));
+
             const embContainer = document.getElementById('emb_api_key_container');
             const embLabel = document.getElementById('emb_api_key_label');
             const embInput = document.getElementById('embeddings_api_key');
@@ -428,6 +470,33 @@
                 }
             } else {
                 embContainer.classList.add('hidden');
+            }
+
+            const voiceContainer = document.getElementById('voice_api_key_container');
+            const voiceLabel = document.getElementById('voice_api_key_label');
+            const voiceInput = document.getElementById('voice_api_key');
+            const needsSeparateVoiceCred = voice !== 'auto' && voice !== llm;
+            const voiceProviderChanged = previousVoiceProvider !== null && voice !== previousVoiceProvider;
+
+            if (voiceProviderChanged || !needsSeparateVoiceCred) {
+                voiceInput.value = '';
+            }
+            previousVoiceProvider = voice;
+
+            if (needsSeparateVoiceCred) {
+                voiceContainer.classList.remove('hidden');
+                if (voice === 'openai') {
+                    voiceLabel.childNodes[0].nodeValue = 'OpenAI API Key (Voice) ';
+                    voiceInput.placeholder = 'sk-proj-...';
+                } else if (voice === 'gemini') {
+                    voiceLabel.childNodes[0].nodeValue = 'Google Gemini API Key (Voice) ';
+                    voiceInput.placeholder = 'AIzaSy...';
+                } else if (voice === 'vertex') {
+                    voiceLabel.childNodes[0].nodeValue = 'Google Cloud Credentials Path (Voice) ';
+                    voiceInput.placeholder = 'credentials/credentials.json or ADC';
+                }
+            } else {
+                voiceContainer.classList.add('hidden');
             }
         }
 
@@ -599,6 +668,15 @@
                         else if (embVal === 'vertex') embKey = envMap['GOOGLE_APPLICATION_CREDENTIALS'];
                         if (embKey) document.getElementById('embeddings_api_key').value = embKey;
                     }
+                    const voiceVal = (envMap['VOICE_PROVIDER'] || 'auto').toLowerCase();
+                    document.getElementById('voice_provider').value = voiceVal;
+                    if (voiceVal !== 'auto') {
+                        let voiceKey = '';
+                        if (voiceVal === 'openai') voiceKey = envMap['OPENAI_API_KEY'];
+                        else if (voiceVal === 'gemini') voiceKey = envMap['GEMINI_API_KEY'] || envMap['GOOGLE_API_KEY'];
+                        else if (voiceVal === 'vertex') voiceKey = envMap['GOOGLE_APPLICATION_CREDENTIALS'];
+                        if (voiceKey) document.getElementById('voice_api_key').value = voiceKey;
+                    }
                     if (envMap['TELEGRAM_TOKEN']) document.getElementById('telegram_token').value = envMap['TELEGRAM_TOKEN'];
                     if (envMap['TELEGRAM_CHAT_ID']) document.getElementById('telegram_chat_id').value = envMap['TELEGRAM_CHAT_ID'];
                 }
@@ -610,6 +688,7 @@
                 const s = loadedSettings;
                 if(s.user_name) document.getElementById('user_name').value = s.user_name;
                 if(s.bot_name) document.getElementById('bot_name').value = s.bot_name;
+                document.getElementById('voice_wake_name').value = s.voice_wake_name || s.bot_name || 'Astakos';
                 if(s.default_city) document.getElementById('default_city').value = s.default_city;
                 if(s.response_language) document.getElementById('response_language').value = s.response_language;
                 if(s.partner_name) document.getElementById('partner_name').value = s.partner_name;
@@ -667,6 +746,7 @@
             const settingsObj = Object.assign({}, loadedSettings, {
                 user_name: document.getElementById('user_name').value,
                 bot_name: document.getElementById('bot_name').value,
+                voice_wake_name: document.getElementById('voice_wake_name').value,
                 default_city: document.getElementById('default_city').value,
                 response_language: document.getElementById('response_language').value,
                 partner_name: document.getElementById('partner_name').value,
@@ -689,8 +769,10 @@
                 basic: {
                     llm_provider: document.getElementById('llm_provider').value,
                     embeddings_provider: document.getElementById('embeddings_provider').value,
+                    voice_provider: document.getElementById('voice_provider').value,
                     api_key: document.getElementById('api_key').value,
                     embeddings_api_key: document.getElementById('embeddings_api_key').value,
+                    voice_api_key: document.getElementById('voice_api_key').value,
                     telegram_token: document.getElementById('telegram_token').value,
                     telegram_chat_id: document.getElementById('telegram_chat_id').value,
                     persona: document.getElementById('persona_content').value,

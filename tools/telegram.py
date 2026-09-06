@@ -197,17 +197,19 @@ def send_telegram_document(file_path: str, caption: str = "", drive_url: str = "
 
 
 async def send_telegram_voice(text: str):
-    """
-    [MASTRO-FIX]: Uses edge-tts instead of gTTS.
-    Same voice as the Web UI (el-GR-NestorasNeural), much better quality.
-    """
+    """Synthesize with the configured voice provider and send to Telegram."""
     if _suppress_test_delivery("voice delivery"):
         return
 
     import re
-    import edge_tts
-    import io
     from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+    from core.ai_provider import (
+        CapabilityNotSupportedError,
+        ProviderAuthError,
+        RateLimitError,
+        VoiceProviderSetupRequired,
+    )
+    from core.text_to_speech import synthesize_speech
     
     token = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
@@ -228,22 +230,13 @@ async def send_telegram_voice(text: str):
 
         print(f"\033[95m[TTS Telegram]: Creating voice for: {clean_text[:50]}...\033[0m")
 
-        # edge-tts — voice based on locale
-        from core.i18n import CURRENT_LOCALE
-        voice = "el-GR-NestorasNeural" if CURRENT_LOCALE == "el" else "en-US-ChristopherNeural"
-        communicate = edge_tts.Communicate(clean_text, voice, rate="+15%", volume="+10%")
-        
-        audio_buffer = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_buffer.write(chunk["data"])
-        
-        audio_buffer.seek(0)
-        audio_bytes = audio_buffer.read()
+        from core.i18n import LANG
+        import asyncio
+
+        audio_bytes = await asyncio.to_thread(synthesize_speech, clean_text, LANG)
         
         if not audio_bytes:
-            print("❌ edge-tts: No audio produced.")
-            return
+            raise RuntimeError("The configured voice provider produced no audio.")
 
         # Send to Telegram as voice
         url = f"https://api.telegram.org/bot{token}/sendVoice"
@@ -257,7 +250,32 @@ async def send_telegram_voice(text: str):
         if response.status_code == 200:
             print(f"\033[92m[TTS Telegram]: ✅ Voice sent ({len(audio_bytes)} bytes)\033[0m")
         else:
-            print(f"⚠️ Telegram Voice Error: {response.status_code} - {response.text}")
+            raise RuntimeError(f"Telegram rejected voice output ({response.status_code}).")
             
+    except VoiceProviderSetupRequired as e:
+        from core.i18n import t
+
+        print(f"❌ Voice Output Setup Error: {e}")
+        send_telegram_msg(t("clients.telegram_bot.voice_output_setup_required"))
+        send_telegram_msg(text)
+    except ProviderAuthError as e:
+        from core.i18n import t
+
+        print(f"❌ Voice Output Auth Error: {e}")
+        send_telegram_msg(t("clients.telegram_bot.voice_output_auth_failed"))
+        send_telegram_msg(text)
+    except RateLimitError as e:
+        from core.i18n import t
+
+        print(f"❌ Voice Output Rate Limit: {e}")
+        send_telegram_msg(t("clients.telegram_bot.voice_output_rate_limited"))
+        send_telegram_msg(text)
+    except CapabilityNotSupportedError as e:
+        from core.i18n import t
+
+        print(f"❌ Voice Output Capability Error: {e}")
+        send_telegram_msg(t("clients.telegram_bot.voice_output_unsupported"))
+        send_telegram_msg(text)
     except Exception as e:
         print(f"❌ Voice Output Error: {e}")
+        send_telegram_msg(text)

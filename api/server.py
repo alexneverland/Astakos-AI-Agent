@@ -67,6 +67,11 @@ from fastapi.staticfiles import StaticFiles
 from config import PHOTOS_DIR
 from core.brain import vertex_client, FAST_MODEL, llm
 from core.utils import detect_prompt_injection
+from core.text_to_speech import (
+    MAX_TTS_INPUT_BYTES,
+    synthesize_speech as _synthesize_speech,
+)
+from core.voice_delivery import build_voice_delivery_context as _build_voice_delivery_context
 console = Console()
 from core.brain import FAST_MODEL
 # ────────────────────────────────────────────────────────────────
@@ -929,6 +934,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
     body       = await request.json()
     user_input = body.get("message", "").strip()
+    is_voice_mode = body.get("voice_mode") is True
     routine_completion_context: SystemMessage | None = None
     routine_draft_offer_context: SystemMessage | None = None
     routine_draft_offer_to_consume: tuple[int, object] | None = None
@@ -951,6 +957,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             "agent": "Security_Firewall",
             "response": "🛡️ [SECURITY OVERRIDE]: Prohibited command detected."
         })
+
+    voice_delivery_context = _build_voice_delivery_context(is_voice_mode)
 
     # 2. --- XML CONTEXT ISOLATION ---
     # Web/Telegram are trusted local user channels.
@@ -1591,19 +1599,40 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             _trace.mark_phase("medium_path_candidate", 1 if medium_path_used else 0)
             _trace.mark_phase("medium_path_used", 1 if medium_path_used else 0)
             from services.routine_completion_context import append_routine_completion_context
+            voice_context_messages = (
+                [voice_delivery_context]
+                if voice_delivery_context is not None
+                else []
+            )
 
             if pending_plan_confirmation:
                 limit = 100
-                messages_for_graph = append_routine_completion_context(context_msgs, routine_completion_context, routine_draft_offer_context) + [human_msg]
+                messages_for_graph = append_routine_completion_context(
+                    context_msgs,
+                    routine_completion_context,
+                    routine_draft_offer_context,
+                ) + voice_context_messages + [human_msg]
             elif fast_path_used:
                 limit = 12
-                messages_for_graph = append_routine_completion_context(context_msgs[-6:], routine_completion_context, routine_draft_offer_context) + [human_msg]
+                messages_for_graph = append_routine_completion_context(
+                    context_msgs[-6:],
+                    routine_completion_context,
+                    routine_draft_offer_context,
+                ) + voice_context_messages + [human_msg]
             elif medium_path_used:
                 limit = 24
-                messages_for_graph = append_routine_completion_context(context_msgs[-8:], routine_completion_context, routine_draft_offer_context) + [human_msg]
+                messages_for_graph = append_routine_completion_context(
+                    context_msgs[-8:],
+                    routine_completion_context,
+                    routine_draft_offer_context,
+                ) + voice_context_messages + [human_msg]
             else:
                 limit = 100
-                messages_for_graph = append_routine_completion_context(context_msgs, routine_completion_context, routine_draft_offer_context) + [human_msg]
+                messages_for_graph = append_routine_completion_context(
+                    context_msgs,
+                    routine_completion_context,
+                    routine_draft_offer_context,
+                ) + voice_context_messages + [human_msg]
 
             _trace.mark_phase("web_graph_budget", limit)
 
@@ -1767,12 +1796,25 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
             f.write(audio_data)
         print(f"\033[96m[Web Voice]: Decoding audio ({len(audio_data)} bytes)...\033[0m")
         import config
-        from core.brain import get_active_provider_adapter
-        from core.ai_provider import CapabilityNotSupportedError, ProviderAuthError, RateLimitError
+        from core.brain import get_voice_provider_adapter
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            VoiceProviderSetupRequired,
+        )
 
-        adapter = get_active_provider_adapter()
         try:
+            adapter = get_voice_provider_adapter()
             transcription = adapter.transcribe_audio(audio_data, mime_type="audio/webm")
+        except VoiceProviderSetupRequired:
+            return JSONResponse(
+                {
+                    "error": t("api.server.voice_provider_setup_required"),
+                    "setup_required": True,
+                },
+                status_code=400,
+            )
         except CapabilityNotSupportedError as exc:
             return JSONResponse(
                 {"error": f"Voice input is not supported for active provider '{adapter.provider_name}'. Please use text or configure a provider with voice support."},
@@ -1788,66 +1830,22 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
             return JSONResponse({"error": f"Quota or rate limit exceeded for provider '{adapter.provider_name}'. Please retry shortly."}, status_code=429)
 
         if not transcription or "[SILENCE]" in transcription or "[ΣΙΩΠΗ]" in transcription:
-            return JSONResponse({"error": t("api.server.no_audio_heard")})
+            return JSONResponse(
+                {
+                    "error": t("api.server.no_audio_heard"),
+                    "no_speech": True,
+                }
+            )
 
         print(f"\033[92m[Web Voice]: {config.USER_NAME} said -> {transcription}\033[0m")
-        return JSONResponse({"transcription": transcription})
+        wake_name = str(
+            getattr(config, "VOICE_WAKE_NAME", "")
+            or getattr(config, "BOT_NAME", "Astakos")
+        ).strip()
+        return JSONResponse({"transcription": transcription, "wake_name": wake_name})
     except Exception as e:
         return JSONResponse({"error": _api_internal_error("voice")}, status_code=500)
 
-
-TTS_VOICES: dict[str, tuple[str, str]] = {
-    "el": ("el-GR", "el-GR-Chirp3-HD-Fenrir"),
-    "en": ("en-US", "en-US-Chirp3-HD-Charon"),
-}
-MAX_TTS_INPUT_BYTES = 4_500
-
-
-def _get_text_to_speech_client() -> tuple[Any, Any]:
-    """Build a Cloud Text-to-Speech client with Astakos' existing Google credentials."""
-    from google.cloud import texttospeech
-    from core.ai_provider import get_vertex_credentials
-
-    return texttospeech, texttospeech.TextToSpeechClient(
-        credentials=get_vertex_credentials(),
-    )
-
-
-def _split_text_for_tts(text: str, max_bytes: int = MAX_TTS_INPUT_BYTES) -> list[str]:
-    """Split text into UTF-8-safe chunks accepted by Cloud TTS."""
-    chunks: list[str] = []
-    remaining = text
-    while remaining:
-        if len(remaining.encode("utf-8")) <= max_bytes:
-            chunks.append(remaining)
-            break
-        truncated = remaining.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
-        split_at = max(truncated.rfind(" "), truncated.rfind("\n"))
-        chunk_length = split_at + 1 if split_at > 0 else len(truncated)
-        chunks.append(remaining[:chunk_length])
-        remaining = remaining[chunk_length:]
-    return chunks
-
-
-def _synthesize_speech(text: str, locale: str) -> bytes:
-    """Generate an MP3 response with locale voice settings and bounded requests."""
-    language_code, voice_name = TTS_VOICES.get(locale, TTS_VOICES["en"])
-    texttospeech, client = _get_text_to_speech_client()
-    voice = texttospeech.VoiceSelectionParams(
-        language_code=language_code,
-        name=voice_name,
-    )
-    audio_config = texttospeech.AudioConfig(
-        audio_encoding=texttospeech.AudioEncoding.MP3,
-    )
-    return b"".join(
-        client.synthesize_speech(
-            input=texttospeech.SynthesisInput(text=chunk),
-            voice=voice,
-            audio_config=audio_config,
-        ).audio_content
-        for chunk in _split_text_for_tts(text)
-    )
 
 @server.post("/tts")
 async def text_to_speech(request: Request, _=Depends(require_token)):
@@ -1863,7 +1861,52 @@ async def text_to_speech(request: Request, _=Depends(require_token)):
         text = _replace_bracketed_markers(text, "[ASTAKOS_ASSET_URL:", lambda _: "")
         text = text.strip()
         from core.i18n import LANG
-        audio_bytes = await asyncio.to_thread(_synthesize_speech, text, LANG)
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            VoiceProviderSetupRequired,
+        )
+        try:
+            audio_bytes = await asyncio.to_thread(_synthesize_speech, text, LANG)
+        except VoiceProviderSetupRequired:
+            return JSONResponse(
+                {
+                    "error": t("api.server.voice_provider_setup_required"),
+                    "setup_required": True,
+                },
+                status_code=400,
+            )
+        except CapabilityNotSupportedError as exc:
+            return JSONResponse(
+                {
+                    "error": (
+                        f"Voice synthesis is not supported for provider "
+                        f"'{exc.provider}'. Configure a provider with voice support."
+                    )
+                },
+                status_code=400,
+            )
+        except ProviderAuthError as exc:
+            return JSONResponse(
+                {
+                    "error": (
+                        f"Voice synthesis authentication failed for provider "
+                        f"'{exc.provider}'. Please verify the provider credentials."
+                    )
+                },
+                status_code=401,
+            )
+        except RateLimitError as exc:
+            return JSONResponse(
+                {
+                    "error": (
+                        f"Voice synthesis quota or rate limit exceeded for provider "
+                        f"'{exc.provider}'. Please retry shortly."
+                    )
+                },
+                status_code=429,
+            )
         if not audio_bytes:
             return JSONResponse({"error": t("api.server.tts_creation_failed")}, status_code=500)
         print(f"\033[95m[TTS]: Voice generated ({len(audio_bytes)} bytes)\033[0m")

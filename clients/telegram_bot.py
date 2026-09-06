@@ -38,6 +38,7 @@ from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FI
 import config
 import core.i18n
 from core.i18n import t
+from core.voice_delivery import build_voice_delivery_context
 
 
 logger = logging.getLogger(__name__)
@@ -1143,12 +1144,21 @@ def handle_voice(voice_obj: dict, chat_id: str):
 
         print(f"\033[96m[Voice]: Analyzing audio...\033[0m")
 
-        from core.brain import get_active_provider_adapter
-        from core.ai_provider import CapabilityNotSupportedError, ProviderAuthError, RateLimitError
+        from core.brain import get_voice_provider_adapter
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            VoiceProviderSetupRequired,
+        )
 
-        adapter = get_active_provider_adapter()
         try:
+            adapter = get_voice_provider_adapter()
             transcribed_text = adapter.transcribe_audio(audio_data, mime_type="audio/ogg")
+        except VoiceProviderSetupRequired as exc:
+            print(f"\033[93m[Voice Setup]: {exc}\033[0m")
+            send_telegram_msg(f"⚠️ {exc}")
+            return
         except CapabilityNotSupportedError as exc:
             print(f"\033[93m[Voice Capability]: {exc}\033[0m")
             send_telegram_msg(
@@ -1173,9 +1183,7 @@ def handle_voice(voice_obj: dict, chat_id: str):
         print(f"\033[92m[Voice AI]: {ai_reply}\033[0m")
         if _handle_transcribed_voice(ai_reply):
             return
-        # We send the flag [VOICE] + [VOICE_INPUT] so that handle_message knows to reply with audio
-        # and the Lobster that the message came from voice (to reply more briefly and colloquially)
-        handle_message(f"[VOICE]: [VOICE_INPUT] {ai_reply}", chat_id)
+        handle_message(ai_reply, chat_id, voice_input=True)
 
     except Exception as e:
         print(f"\033[91m[Voice Error]: {e}\033[0m")
@@ -1907,25 +1915,69 @@ def _run_fast_chat_path(
     )
 
 
-def handle_message(user_text: str, chat_id: str):
+def _prepare_telegram_message(
+    user_text: str,
+    *,
+    voice_input: bool = False,
+    voice_mode: bool = False,
+) -> tuple[str, bool, SystemMessage | None]:
+    """Separate Telegram transport metadata from the user's message text."""
+    legacy_voice_input = any(
+        marker in user_text
+        for marker in (
+            "[VOICE_INPUT]",
+            "[VOICE]",
+        )
+    )
+    legacy_voice_mode = any(
+        marker in user_text
+        for marker in (
+            t("clients.telegram_bot.bot_msg_ad207c"),
+            "[VOICE_MESSAGE]",
+        )
+    )
+    resolved_voice_input = voice_input or legacy_voice_input
+    resolved_voice_mode = voice_mode or legacy_voice_mode or voice_mode_enabled
+
+    clean_user_text = user_text.replace("/voice", "")
+    for marker in (
+        t("clients.telegram_bot.bot_msg_d42a74"),
+        t("clients.telegram_bot.bot_msg_ad207c"),
+        "[VOICE_MESSAGE]:",
+        "[VOICE_MESSAGE]",
+        "[VOICE_INPUT]",
+        "[VOICE]:",
+        "[VOICE]",
+    ):
+        clean_user_text = clean_user_text.replace(marker, "")
+    clean_user_text = clean_user_text.strip()
+    if not clean_user_text:
+        clean_user_text = t("clients.telegram_bot.bot_msg_630052")
+
+    return (
+        clean_user_text,
+        resolved_voice_mode,
+        build_voice_delivery_context(resolved_voice_input or resolved_voice_mode),
+    )
+
+
+def handle_message(
+    user_text: str,
+    chat_id: str,
+    *,
+    voice_input: bool = False,
+    voice_mode: bool = False,
+):
     """Sends the message to Lobster and replies (Text or Audio)."""
     global last_interaction_time
     from tools.telegram import send_telegram_voice, send_telegram_msg
     import re
 
-    # 1. Check if voice was requested (from audio, /voice command, or global toggle)
-    is_voice_mode = t("clients.telegram_bot.bot_msg_ad207c") in user_text or "[VOICE_MESSAGE]" in user_text or voice_mode_enabled
-    is_voice_input = "[VOICE_INPUT]" in user_text  # the message came from voice
-
-    # 2. We clean the tags before they go to the brain
-    clean_user_text = user_text.replace("/voice", "").replace(t("clients.telegram_bot.bot_msg_d42a74"), "").replace("[VOICE_MESSAGE]:", "").strip()
-    # /plan is maintained so that the graph router can recognize it
-    # If it is a voice input, we keep the hint for Lobster but remove the tag
-    if is_voice_input:
-        clean_user_text = clean_user_text.replace("[VOICE_INPUT]", "").strip()
-        clean_user_text = f"[Voice message — reply short and casually]: {clean_user_text}"
-    if not clean_user_text: 
-        clean_user_text = t("clients.telegram_bot.bot_msg_630052")
+    clean_user_text, is_voice_mode, voice_delivery_context = _prepare_telegram_message(
+        user_text,
+        voice_input=voice_input,
+        voice_mode=voice_mode,
+    )
     # ── ROUTINE COMPLETION DECISION ────────────────────────────────
     # Pending routines get first priority; a pass-through still checks today's pool.
     from memory.event_log import log_event
@@ -2569,6 +2621,8 @@ def handle_message(user_text: str, chat_id: str):
             routine_completion_context,
             routine_draft_offer_context,
         )
+        if voice_delivery_context is not None:
+            context_msgs.append(voice_delivery_context)
         context_load_ms = int((perf_counter() - t_context_0) * 1000)
         # ── Flow via LangGraph ───────────────────────────────────_
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"

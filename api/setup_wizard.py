@@ -53,6 +53,39 @@ _SENSITIVE_ENV_KEYS = frozenset({
     "VACUUM_TOKEN",
 })
 
+_PROVIDER_SECRET_KEYS = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "vertex": "GOOGLE_APPLICATION_CREDENTIALS",
+}
+
+
+def _resolve_provider_secrets(basic: dict) -> dict[str, str]:
+    """Return one unambiguous submitted credential for each selected provider."""
+    provider_values: dict[str, set[str]] = {}
+    selections = (
+        (basic.get("llm_provider"), basic.get("api_key")),
+        (basic.get("embeddings_provider"), basic.get("embeddings_api_key")),
+        (basic.get("voice_provider"), basic.get("voice_api_key")),
+    )
+
+    for provider, value in selections:
+        if provider not in _PROVIDER_SECRET_KEYS or not value or value == "********":
+            continue
+        provider_values.setdefault(provider, set()).add(value)
+
+    if any(len(values) > 1 for values in provider_values.values()):
+        raise HTTPException(
+            status_code=422,
+            detail="Services sharing a provider must use the same credential.",
+        )
+
+    return {
+        _PROVIDER_SECRET_KEYS[provider]: next(iter(values))
+        for provider, values in provider_values.items()
+    }
+
 def sanitize_env_text(raw_env: str) -> str:
     """Masks secret values in .env so raw keys/tokens are never exposed over the API/UI."""
     if not raw_env:
@@ -224,6 +257,7 @@ async def get_raw_files():
             env_content = """# --- LLM Provider Selection ---
 LLM_PROVIDER=openai
 EMBEDDINGS_PROVIDER=auto
+VOICE_PROVIDER=auto
 
 # --- API Keys ---
 OPENAI_API_KEY=
@@ -296,7 +330,13 @@ async def save_setup(payload: SetupPayload):
                     existing_env_map[k.strip()] = v.strip()
 
         env_map: dict[str, str] = {}
-        if basic.get("llm_provider") or basic.get("embeddings_provider") or basic.get("telegram_token") or new_env:
+        if (
+            basic.get("llm_provider")
+            or basic.get("embeddings_provider")
+            or basic.get("voice_provider")
+            or basic.get("telegram_token")
+            or new_env
+        ):
             env_lines = new_env.split('\n') if new_env else []
             for line in env_lines:
                 if '=' in line and not line.strip().startswith('#'):
@@ -322,38 +362,40 @@ async def save_setup(payload: SetupPayload):
                 elif env_map.get(key) == "********":
                     env_map[key] = existing_env_map.get(key, "")
 
+            provider_secrets = _resolve_provider_secrets(basic)
+
             if basic.get("llm_provider"):
                 env_map["LLM_PROVIDER"] = basic["llm_provider"]
-                provider = basic["llm_provider"]
-                api_key = basic.get("api_key")
-                if provider == "openai":
-                    _set_secret("OPENAI_API_KEY", api_key)
-                elif provider == "anthropic":
-                    _set_secret("ANTHROPIC_API_KEY", api_key)
-                elif provider == "gemini":
-                    _set_secret("GEMINI_API_KEY", api_key)
-                elif provider == "vertex":
-                    _set_secret("GOOGLE_APPLICATION_CREDENTIALS", api_key)
 
             if basic.get("embeddings_provider"):
                 env_map["EMBEDDINGS_PROVIDER"] = basic["embeddings_provider"]
-                emb_provider = basic["embeddings_provider"]
-                emb_api_key = basic.get("embeddings_api_key")
-                if emb_api_key:
-                    if emb_provider == "openai":
-                        _set_secret("OPENAI_API_KEY", emb_api_key)
-                    elif emb_provider == "gemini":
-                        _set_secret("GEMINI_API_KEY", emb_api_key)
-                    elif emb_provider == "vertex":
-                        _set_secret("GOOGLE_APPLICATION_CREDENTIALS", emb_api_key)
+
+            if basic.get("voice_provider"):
+                env_map["VOICE_PROVIDER"] = basic["voice_provider"]
+
+            selected_secret_keys = {
+                _PROVIDER_SECRET_KEYS[provider]
+                for provider in (
+                    basic.get("llm_provider"),
+                    basic.get("embeddings_provider"),
+                    basic.get("voice_provider"),
+                )
+                if provider in _PROVIDER_SECRET_KEYS
+            }
+            for secret_key in selected_secret_keys:
+                _set_secret(secret_key, provider_secrets.get(secret_key))
 
             if basic.get("telegram_token"):
                 _set_secret("TELEGRAM_TOKEN", basic["telegram_token"])
             if basic.get("telegram_chat_id"):
                 _set_secret("TELEGRAM_CHAT_ID", basic["telegram_chat_id"])
 
-            # If Vertex is selected (chat or embeddings), resolve actual project ID if placeholder or empty
-            if env_map.get("LLM_PROVIDER") == "vertex" or env_map.get("EMBEDDINGS_PROVIDER") == "vertex":
+            # If Vertex is selected anywhere, resolve the project ID from its credentials.
+            if (
+                env_map.get("LLM_PROVIDER") == "vertex"
+                or env_map.get("EMBEDDINGS_PROVIDER") == "vertex"
+                or env_map.get("VOICE_PROVIDER") == "vertex"
+            ):
                 current_proj = env_map.get("PROJECT_ID", "").strip()
                 if not current_proj or current_proj.lower() == "your-gcp-project-id":
                     from core.ai_provider import resolve_vertex_project_id

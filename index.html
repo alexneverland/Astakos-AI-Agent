@@ -1491,7 +1491,7 @@
         let apiText = text;
         if (isVoice) {
             let cleanMsg = text.replace("[Voice Message]:", "").trim();
-            apiText = "🔊 [HIDDEN INSTRUCTION: The user is speaking to you. The system reads your answers aloud. YOU HAVE A VOICE! IT IS STRICTLY FORBIDDEN to say you do not have ears, or that you are a text model. Answer 100% naturally and verbally like a human.]\n\nMessage: " + cleanMsg;
+            apiText = cleanMsg;
         }
 
         try {
@@ -1511,7 +1511,11 @@
                 response = await fetch('/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: apiText, photo_path: currentPhotoPath })
+                    body: JSON.stringify({
+                        message: apiText,
+                        photo_path: currentPhotoPath,
+                        voice_mode: isVoice,
+                    })
                 });
                 const data = await response.json();
                 if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
@@ -1544,8 +1548,11 @@
     const triggerBtn = document.getElementById('trigger-voice-btn');
     const liveVoiceBtn = document.getElementById('live-voice-btn');
     const liveVoiceExitBtn = document.getElementById('live-voice-exit-btn');
-    const LIVE_SILENCE_DURATION_MS = 900;
+    const LIVE_SILENCE_DURATION_MS = 1500;
+    const LIVE_SPEECH_CONFIRMATION_MS = 180;
     const LIVE_SPEECH_THRESHOLD = 0.018;
+    const LIVE_CONVERSATION_IDLE_MS = 45000;
+    const LIVE_STANDBY_PREROLL_CHUNKS = 3;
     let mediaRecorder;
     let audioChunks = [];
     let isRecording = false;
@@ -1554,9 +1561,11 @@
     let liveInputStream = null;
     let liveAudioContext = null;
     let liveSpeechAnimationFrame = null;
-    let liveInterruptionStream = null;
-    let liveInterruptionContext = null;
-    let liveInterruptionAnimationFrame = null;
+    let isLiveConversationActive = false;
+    let liveConversationTimeout = null;
+    let liveHasSpeechCandidate = false;
+    let liveHasConfirmedSpeech = false;
+    let liveWakeName = '';
 
     function setLiveVoiceModeUi(isActive) {
         document.body.classList.toggle('live-voice-active', isActive);
@@ -1564,7 +1573,96 @@
         liveVoiceBtn.textContent = isActive ? 'STOP' : 'LIVE';
         liveVoiceBtn.setAttribute('aria-label', isActive ? 'End live voice conversation' : 'Start live voice conversation');
         corePod.setAttribute('aria-label', isActive ? 'End live voice conversation' : 'Astakos Core — Click to speak');
-        document.getElementById('core-hint').textContent = isActive ? 'Live voice · Say something, or press End Live' : 'Click core to speak';
+        document.getElementById('core-hint').textContent = isActive
+            ? (liveWakeName ? `Standby · Say «${liveWakeName}»` : 'Standby · Say the wake name')
+            : 'Click core to speak';
+    }
+
+    function normalizeLiveWakeText(text) {
+        return text
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLocaleLowerCase();
+    }
+
+    function getLiveWakeWords(text) {
+        return normalizeLiveWakeText(text).match(/\p{L}+/gu) || [];
+    }
+
+    function liveWakeWordEditDistance(left, right) {
+        const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+        for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+            const current = [leftIndex];
+            for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+                const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+                current[rightIndex] = Math.min(
+                    current[rightIndex - 1] + 1,
+                    previous[rightIndex] + 1,
+                    previous[rightIndex - 1] + substitutionCost,
+                );
+            }
+            previous.splice(0, previous.length, ...current);
+        }
+        return previous[right.length];
+    }
+
+    function isLiveWakeWord(word, wakeWord) {
+        const maxDistance = wakeWord.length >= 6 ? 2 : 1;
+        if (Math.abs(word.length - wakeWord.length) > maxDistance) return false;
+        return liveWakeWordEditDistance(word, wakeWord) <= maxDistance;
+    }
+
+    function hasLiveWakeWord(text, wakeName) {
+        const heardWords = getLiveWakeWords(text);
+        const wakeWords = getLiveWakeWords(wakeName || '');
+        if (wakeWords.length === 0 || heardWords.length < wakeWords.length) return false;
+        return heardWords.some((_, startIndex) => (
+            startIndex + wakeWords.length <= heardWords.length
+            && wakeWords.every((wakeWord, offset) => (
+                isLiveWakeWord(heardWords[startIndex + offset], wakeWord)
+            ))
+        ));
+    }
+
+    function clearLiveConversationTimeout() {
+        if (liveConversationTimeout) clearTimeout(liveConversationTimeout);
+        liveConversationTimeout = null;
+    }
+
+    function showLiveStandby() {
+        setCoreState('idle');
+        coreModeBadge.textContent = 'STANDBY';
+        coreModeBadge.className = 'badge-listening';
+        coreSubtitle.textContent = liveWakeName
+            ? `Waiting for “${liveWakeName}”…`
+            : 'Waiting for the wake name…';
+        document.getElementById('core-hint').textContent = liveWakeName
+            ? `Standby · Say «${liveWakeName}»`
+            : 'Standby · Say the wake name';
+    }
+
+    function activateLiveConversation(sessionId) {
+        if (!isLiveVoiceMode || sessionId !== liveSessionId) return;
+        clearLiveConversationTimeout();
+        isLiveConversationActive = true;
+        setCoreState('listening');
+        document.getElementById('core-hint').textContent = 'Live conversation · Listening';
+    }
+
+    function returnLiveConversationToStandby(sessionId) {
+        if (!isLiveVoiceMode || sessionId !== liveSessionId) return;
+        clearLiveConversationTimeout();
+        isLiveConversationActive = false;
+        showLiveStandby();
+    }
+
+    function armLiveConversationTimeout(sessionId) {
+        clearLiveConversationTimeout();
+        if (!isLiveConversationActive || !isLiveVoiceMode || sessionId !== liveSessionId) return;
+        liveConversationTimeout = setTimeout(
+            () => returnLiveConversationToStandby(sessionId),
+            LIVE_CONVERSATION_IDLE_MS,
+        );
     }
 
     function getLiveAudioConstraints() {
@@ -1592,15 +1690,6 @@
         liveAudioContext = null;
     }
 
-    function stopLiveInterruptionMonitor() {
-        if (liveInterruptionAnimationFrame) cancelAnimationFrame(liveInterruptionAnimationFrame);
-        liveInterruptionAnimationFrame = null;
-        closeAudioContext(liveInterruptionContext);
-        liveInterruptionContext = null;
-        stopMediaStream(liveInterruptionStream);
-        liveInterruptionStream = null;
-    }
-
     function getAudioLevel(analyser) {
         const samples = new Uint8Array(analyser.fftSize);
         analyser.getByteTimeDomainData(samples);
@@ -1614,6 +1703,7 @@
 
     function startLiveSpeechMonitor(analyser, sessionId) {
         let heardSpeech = false;
+        let speechCandidateStartedAt = null;
         let lastSpeechAt = performance.now();
 
         function monitor() {
@@ -1621,57 +1711,25 @@
             const audioLevel = getAudioLevel(analyser);
             const now = performance.now();
             if (audioLevel >= LIVE_SPEECH_THRESHOLD) {
-                heardSpeech = true;
-                lastSpeechAt = now;
+                liveHasSpeechCandidate = true;
+                if (speechCandidateStartedAt === null) speechCandidateStartedAt = now;
+                if (heardSpeech || now - speechCandidateStartedAt >= LIVE_SPEECH_CONFIRMATION_MS) {
+                    heardSpeech = true;
+                    liveHasConfirmedSpeech = true;
+                    clearLiveConversationTimeout();
+                    lastSpeechAt = now;
+                }
             } else if (heardSpeech && now - lastSpeechAt >= LIVE_SILENCE_DURATION_MS) {
                 stopLiveRecording(sessionId);
                 return;
+            } else if (!heardSpeech) {
+                liveHasSpeechCandidate = false;
+                speechCandidateStartedAt = null;
             }
             liveSpeechAnimationFrame = requestAnimationFrame(monitor);
         }
 
         liveSpeechAnimationFrame = requestAnimationFrame(monitor);
-    }
-
-    async function startLiveInterruptionMonitor(audio, sessionId) {
-        try {
-            liveInterruptionStream = await navigator.mediaDevices.getUserMedia(getLiveAudioConstraints());
-            if (!isLiveVoiceMode || sessionId !== liveSessionId || currentAudio !== audio) {
-                stopLiveInterruptionMonitor();
-                return;
-            }
-            liveInterruptionContext = new AudioContext();
-            const source = liveInterruptionContext.createMediaStreamSource(liveInterruptionStream);
-            const analyser = liveInterruptionContext.createAnalyser();
-            analyser.fftSize = 1024;
-            source.connect(analyser);
-            let speechFrames = 0;
-
-            function monitor() {
-                if (!isLiveVoiceMode || sessionId !== liveSessionId || currentAudio !== audio) return;
-                speechFrames = getAudioLevel(analyser) >= LIVE_SPEECH_THRESHOLD ? speechFrames + 1 : 0;
-                if (speechFrames >= 3) {
-                    pauseLiveReplyForInterruption(audio, sessionId);
-                    return;
-                }
-                liveInterruptionAnimationFrame = requestAnimationFrame(monitor);
-            }
-
-            liveInterruptionAnimationFrame = requestAnimationFrame(monitor);
-        } catch (error) {
-            // Reply playback remains usable when the browser cannot grant a second microphone stream.
-        }
-    }
-
-    function pauseLiveReplyForInterruption(audio, sessionId) {
-        if (!isLiveVoiceMode || sessionId !== liveSessionId || currentAudio !== audio) return;
-        audio.pause();
-        audio.onended = null;
-        audio.onerror = null;
-        currentAudio = null;
-        stopLiveInterruptionMonitor();
-        URL.revokeObjectURL(audio.src);
-        startLiveListening(sessionId);
     }
 
     function stopCurrentAudioForLiveMode() {
@@ -1689,8 +1747,8 @@
         }
     }
 
-    async function transcribeVoiceBlob(audioBlob) {
-        if (audioBlob.size < 800) return null;
+    async function transcribeVoiceBlob(audioBlob, { suppressNoSpeechError = false } = {}) {
+        if (audioBlob.size < 800) return { status: 'no_speech' };
         setCoreState('processing');
         const loadingDiv = document.createElement('div');
         loadingDiv.className = 'loading';
@@ -1704,23 +1762,49 @@
             const res = await fetch('/voice', { method: 'POST', body: formData });
             const data = await res.json();
             if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
-            if (data.transcription) return data.transcription;
+            if (data.transcription) {
+                return {
+                    status: 'ok',
+                    transcription: data.transcription,
+                    wakeName: data.wake_name,
+                };
+            }
+            if (data.no_speech === true) {
+                if (!suppressNoSpeechError) {
+                    appendMessage('❌ Voice error: ' + (data.error || 'Unable to transcribe'), 'ai', 'System');
+                }
+                return { status: 'no_speech' };
+            }
             appendMessage('❌ Voice error: ' + (data.error || 'Unable to transcribe'), 'ai', 'System');
         } catch (error) {
             if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
             appendMessage('❌ Connection failure during voice transcription.', 'ai', 'System');
         }
-        return null;
+        return { status: 'error' };
     }
 
     async function processLiveRecording(audioBlob, sessionId) {
-        const transcription = await transcribeVoiceBlob(audioBlob);
+        const result = await transcribeVoiceBlob(audioBlob, { suppressNoSpeechError: true });
         if (!isLiveVoiceMode || sessionId !== liveSessionId) return;
-        if (!transcription) {
+        if (result.status === 'no_speech') {
+            startLiveListening(sessionId);
+            return;
+        }
+        if (result.status !== 'ok') {
             stopLiveVoiceMode();
             return;
         }
-        userInput.value = '[Voice Message]: ' + transcription;
+        liveWakeName = result.wakeName || liveWakeName;
+        if (!isLiveConversationActive) {
+            if (!hasLiveWakeWord(result.transcription, result.wakeName)) {
+                showLiveStandby();
+                startLiveListening(sessionId);
+                return;
+            }
+            activateLiveConversation(sessionId);
+        }
+        clearLiveConversationTimeout();
+        userInput.value = '[Voice Message]: ' + result.transcription;
         const reply = await sendMessage();
         if (!isLiveVoiceMode || sessionId !== liveSessionId) return;
         if (!reply) {
@@ -1738,7 +1822,19 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text }),
             });
-            if (!response.ok) throw new Error('TTS request failed');
+            if (!response.ok) {
+                let errorMessage = 'Voice synthesis is unavailable. Check the configured voice provider.';
+                try {
+                    const errorPayload = await response.json();
+                    if (typeof errorPayload.error === 'string' && errorPayload.error.trim()) {
+                        errorMessage = errorPayload.error.trim();
+                    }
+                } catch (_) { /* Keep the safe fallback for a non-JSON response. */ }
+                if (!isLiveVoiceMode || sessionId !== liveSessionId) return;
+                appendMessage('❌ Voice playback: ' + errorMessage, 'ai', 'System');
+                startLiveListening(sessionId);
+                return;
+            }
             const audioBlob = await response.blob();
             if (!isLiveVoiceMode || sessionId !== liveSessionId) return;
             const audioUrl = URL.createObjectURL(audioBlob);
@@ -1751,24 +1847,56 @@
             audio.onended = () => {
                 URL.revokeObjectURL(audioUrl);
                 if (currentAudio === audio) currentAudio = null;
-                stopLiveInterruptionMonitor();
                 if (isLiveVoiceMode && sessionId === liveSessionId) startLiveListening(sessionId);
             };
             audio.onerror = () => {
                 URL.revokeObjectURL(audioUrl);
                 if (currentAudio === audio) currentAudio = null;
-                stopLiveInterruptionMonitor();
                 if (isLiveVoiceMode && sessionId === liveSessionId) stopLiveVoiceMode();
             };
             await audio.play();
-            startLiveInterruptionMonitor(audio, sessionId);
         } catch (error) {
             if (isLiveVoiceMode && sessionId === liveSessionId) stopLiveVoiceMode();
         }
     }
 
+    function startLiveRecorderSegment(sessionId) {
+        if (!isLiveVoiceMode || sessionId !== liveSessionId || !isRecording || !liveInputStream) return;
+        const recorder = new MediaRecorder(liveInputStream);
+        const segmentChunks = [];
+        let rotateOnStop = false;
+        mediaRecorder = recorder;
+
+        recorder.ondataavailable = event => {
+            if (event.data.size <= 0) return;
+            segmentChunks.push(event.data);
+            if (
+                !rotateOnStop
+                && !liveHasSpeechCandidate
+                && !liveHasConfirmedSpeech
+                && segmentChunks.length > LIVE_STANDBY_PREROLL_CHUNKS
+                && recorder.state === 'recording'
+            ) {
+                rotateOnStop = true;
+                recorder.stop();
+            }
+        };
+        recorder.onstop = () => {
+            if (rotateOnStop) {
+                if (isLiveVoiceMode && sessionId === liveSessionId && isRecording) {
+                    startLiveRecorderSegment(sessionId);
+                }
+                return;
+            }
+            const audioBlob = new Blob(segmentChunks, { type: 'audio/webm;codecs=opus' });
+            if (isLiveVoiceMode && sessionId === liveSessionId) processLiveRecording(audioBlob, sessionId);
+        };
+        recorder.start(1000);
+    }
+
     function stopLiveRecording(sessionId) {
         if (sessionId !== liveSessionId || !isRecording) return;
+        clearLiveConversationTimeout();
         stopLiveSpeechMonitor();
         if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
         stopMediaStream(liveInputStream);
@@ -1785,23 +1913,22 @@
                 liveInputStream = null;
                 return;
             }
-            mediaRecorder = new MediaRecorder(liveInputStream);
-            audioChunks = [];
-            mediaRecorder.ondataavailable = event => {
-                if (event.data.size > 0) audioChunks.push(event.data);
-            };
-            mediaRecorder.onstop = () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
-                if (isLiveVoiceMode && sessionId === liveSessionId) processLiveRecording(audioBlob, sessionId);
-            };
+            liveHasSpeechCandidate = false;
+            liveHasConfirmedSpeech = false;
             liveAudioContext = new AudioContext();
             const source = liveAudioContext.createMediaStreamSource(liveInputStream);
             const analyser = liveAudioContext.createAnalyser();
             analyser.fftSize = 1024;
             source.connect(analyser);
-            mediaRecorder.start();
             isRecording = true;
-            setCoreState('listening');
+            startLiveRecorderSegment(sessionId);
+            if (isLiveConversationActive) {
+                setCoreState('listening');
+                document.getElementById('core-hint').textContent = 'Live conversation · Listening';
+                armLiveConversationTimeout(sessionId);
+            } else {
+                showLiveStandby();
+            }
             startLiveSpeechMonitor(analyser, sessionId);
         } catch (error) {
             if (isLiveVoiceMode && sessionId === liveSessionId) stopLiveVoiceMode();
@@ -1812,6 +1939,7 @@
         if (isLiveVoiceMode || isRecording) return;
         stopCurrentAudioForLiveMode();
         isLiveVoiceMode = true;
+        isLiveConversationActive = false;
         liveSessionId += 1;
         setLiveVoiceModeUi(true);
         startLiveListening(liveSessionId);
@@ -1820,9 +1948,10 @@
     function stopLiveVoiceMode() {
         if (!isLiveVoiceMode) return;
         isLiveVoiceMode = false;
+        isLiveConversationActive = false;
         liveSessionId += 1;
+        clearLiveConversationTimeout();
         stopLiveSpeechMonitor();
-        stopLiveInterruptionMonitor();
         if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
         stopMediaStream(liveInputStream);
         liveInputStream = null;
@@ -1856,9 +1985,9 @@
                         setCoreState('idle');
                         return;
                     }
-                    const transcription = await transcribeVoiceBlob(audioBlob);
-                    if (transcription) {
-                        userInput.value = "[Voice Message]: " + transcription;
+                    const result = await transcribeVoiceBlob(audioBlob);
+                    if (result.status === 'ok') {
+                        userInput.value = "[Voice Message]: " + result.transcription;
                         sendMessage();
                     } else {
                         setCoreState('error');
