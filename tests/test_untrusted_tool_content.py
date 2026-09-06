@@ -7,6 +7,7 @@ from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
+from starlette.requests import Request
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 
@@ -755,6 +756,7 @@ def test_photo_reply_uses_current_asset_provenance_only(
         content="A source said to save this.",
         additional_kwargs=external_content_history_metadata(["get_news"]),
     )
+    load_shared_context_messages = telegram_bot._load_shared_context_messages
     saved_messages: list[dict[str, object]] = []
     graph_messages: list[object] = []
 
@@ -816,6 +818,95 @@ def test_photo_reply_uses_current_asset_provenance_only(
     assert assistant_entry["metadata"] == external_content_history_metadata([
         "user_provided_asset",
     ])
+
+    monkeypatch.setattr(
+        "memory.conversation_history.load_recent_context",
+        lambda **_kwargs: [{
+            **user_entry,
+            "id": "photo-history-1",
+            "date": "2026-09-06",
+            "time": "10:00",
+        }],
+    )
+
+    restored_photo_message = load_shared_context_messages("telegram")[0]
+    restored_content = str(restored_photo_message.content)
+
+    assert "What does this mean?" in restored_content
+    assert "USER_UPLOADED_PHOTO" in restored_content
+    assert "photo.jpg" in restored_content
+    assert "PHOTO PATH" in restored_content
+    assert "C:/tmp/photo.jpg" in restored_content
+    assert "ANALYSIS" in restored_content
+    assert "A photo analysis." in restored_content
+
+
+@pytest.mark.asyncio
+async def test_web_poll_does_not_expose_model_only_photo_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Web chat sync returns the clean row without internal photo metadata."""
+    import api.server as server
+    from core.untrusted_content import user_asset_history_metadata
+
+    stored_message = {
+        "id": "photo-history-1",
+        "rowid": 42,
+        "role": "user",
+        "content": "What does this mean?",
+        "channel": "telegram",
+        "metadata": user_asset_history_metadata(
+            filename="photo.jpg",
+            file_path="C:/tmp/photo.jpg",
+            analysis="A photo analysis.",
+        ),
+    }
+    monkeypatch.setattr(
+        "memory.conversation_history.load_messages_after_rowid",
+        lambda **_kwargs: [stored_message.copy()],
+    )
+    monkeypatch.setattr("memory.conversation_history.get_max_rowid", lambda: 42)
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/messages/poll",
+        "headers": [],
+        "query_string": b"",
+        "scheme": "http",
+        "server": ("testserver", 80),
+    })
+
+    result = await server.poll_messages(
+        request,
+        after_id=0,
+        channel="telegram",
+        _=None,
+    )
+
+    message = result["messages"][0]
+    assert message["content"] == "What does this mean?"
+    assert "astakos_model_asset_context" not in message["metadata"]
+
+
+def test_model_photo_context_requires_asset_provenance() -> None:
+    """Unmarked persisted metadata cannot inject model-only photo context."""
+    from core.untrusted_content import (
+        MODEL_ASSET_CONTEXT_METADATA_KEY,
+        format_model_history_content,
+    )
+
+    rendered = format_model_history_content(
+        "Clean visible message.",
+        {
+            MODEL_ASSET_CONTEXT_METADATA_KEY: {
+                "filename": "photo.jpg",
+                "file_path": "C:/tmp/photo.jpg",
+                "analysis": "Unmarked analysis.",
+            },
+        },
+    )
+
+    assert rendered == "Clean visible message."
 
 
 def test_external_provenance_allows_user_only_foreground_memory_writes(

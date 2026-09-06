@@ -543,7 +543,7 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
 
     context_msgs = []
     from core.untrusted_content import (
-        format_untrusted_persisted_content,
+        format_model_history_content,
         history_message_additional_kwargs,
     )
     for entry in entries:
@@ -553,7 +553,7 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
         if not content:
             continue
         prefix = f"[{entry.get('date', '')} {entry.get('time', '')} / {entry.get('channel', '')}] "
-        content = format_untrusted_persisted_content(
+        content = format_model_history_content(
             f"{prefix}{content}",
             entry.get("metadata"),
         )
@@ -2205,12 +2205,14 @@ async def poll_messages(request: Request, after_id: int = 0, channel: str | None
     """
     try:
         from memory.conversation_history import load_messages_after_rowid, get_max_rowid
+        from core.untrusted_content import public_history_metadata
         messages = load_messages_after_rowid(after_rowid=after_id, channel=channel or None, limit=50)
         for message in messages:
             message["content"] = _render_persisted_asset_markers(
                 str(message.get("content", "")),
                 request,
             )
+            message["metadata"] = public_history_metadata(message.get("metadata"))
         current_max = get_max_rowid()
         return {"messages": messages, "max_id": current_max}
     except Exception as e:

@@ -1405,6 +1405,7 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         derived_external_content_history_metadata,
         external_content_source_names,
         external_tool_names_from_events,
+        user_asset_history_metadata,
     )
     current_external_tool_names = external_tool_names_from_events(events)
     assistant_metadata = derived_external_content_history_metadata(
@@ -1420,7 +1421,11 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
             content=question,
             channel="telegram",
             agent=None,
-            metadata=external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE]),
+            metadata=user_asset_history_metadata(
+                filename=filename,
+                file_path=local_path,
+                analysis=analysis,
+            ),
             timestamp=now,
         )
         append_message(
@@ -1808,7 +1813,7 @@ def _load_shared_context_messages(channel: str) -> list:
 
     context_msgs = []
     from core.untrusted_content import (
-        format_untrusted_persisted_content,
+        format_model_history_content,
         history_message_additional_kwargs,
     )
     for entry in entries:
@@ -1816,7 +1821,7 @@ def _load_shared_context_messages(channel: str) -> list:
         if not content:
             continue
         prefix = f"[{entry.get('date', '')} {entry.get('time', '')} / {entry.get('channel', '')}] "
-        content = format_untrusted_persisted_content(
+        content = format_model_history_content(
             f"{prefix}{content}",
             entry.get("metadata"),
         )
