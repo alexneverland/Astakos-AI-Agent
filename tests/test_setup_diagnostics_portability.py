@@ -15,6 +15,8 @@ from typing import Any
 
 import pytest
 from fastapi import HTTPException
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import sync_playwright
 
 import config
 from core.ai_provider import (
@@ -634,6 +636,39 @@ def test_setup_wizard_exposes_voice_provider_credentials_and_wake_name() -> None
     assert "voice_provider: document.getElementById('voice_provider').value" in setup_html
     assert "voice_api_key: document.getElementById('voice_api_key').value" in setup_html
     assert "voice_wake_name: document.getElementById('voice_wake_name').value" in setup_html
+
+
+def test_setup_wizard_clears_stale_voice_credentials_when_provider_changes() -> None:
+    """Changing or sharing the voice provider never submits the previous provider's key."""
+    setup_html = (Path(config.BASE_DIR) / "api" / "static" / "setup.html").read_text(
+        encoding="utf-8"
+    )
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except PlaywrightError as exc:
+            pytest.skip(f"Chromium is unavailable for browser regression coverage: {exc}")
+        context = browser.new_context()
+        context.add_init_script(
+            "window.fetch = async () => ({ ok: true, json: async () => ({}) });"
+        )
+        page = context.new_page()
+        page.set_content(setup_html, wait_until="load")
+
+        page.select_option("#llm_provider", "vertex")
+        page.select_option("#voice_provider", "gemini")
+        page.fill("#voice_api_key", "gemini-voice-key")
+        page.select_option("#voice_provider", "openai")
+        assert page.locator("#voice_api_key").input_value() == ""
+
+        page.fill("#voice_api_key", "openai-voice-key")
+        page.select_option("#llm_provider", "openai")
+        assert page.locator("#voice_api_key").input_value() == ""
+        assert "hidden" in page.locator("#voice_api_key_container").get_attribute("class")
+
+        context.close()
+        browser.close()
+
 
 def test_setup_wizard_save_anthropic_chat_with_openai_embeddings(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path

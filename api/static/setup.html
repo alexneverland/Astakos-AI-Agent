@@ -386,6 +386,7 @@
         let currentPromptFile = "";
         let setupGuideRaw = "";
         let loadedSettings = {};
+        let previousVoiceProvider = null;
 
         function openInstructions() {
             document.getElementById('instructionsModal').classList.remove('hidden');
@@ -475,6 +476,12 @@
             const voiceLabel = document.getElementById('voice_api_key_label');
             const voiceInput = document.getElementById('voice_api_key');
             const needsSeparateVoiceCred = voice !== 'auto' && voice !== llm;
+            const voiceProviderChanged = previousVoiceProvider !== null && voice !== previousVoiceProvider;
+
+            if (voiceProviderChanged || !needsSeparateVoiceCred) {
+                voiceInput.value = '';
+            }
+            previousVoiceProvider = voice;
 
             if (needsSeparateVoiceCred) {
                 voiceContainer.classList.remove('hidden');
