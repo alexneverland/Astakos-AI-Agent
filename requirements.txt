@@ -26,7 +26,7 @@ protobuf==5.29.6
 pydantic==2.13.4
 pypdf==6.15.0
 PyGithub==2.9.1
-pytest==9.0.3
+pytest==9.1.1
 python-multipart==0.0.31
 python-dotenv==1.2.2
 python-slugify==8.0.4
