@@ -1142,6 +1142,8 @@ def tech_agent_node(state: AgentState):
         memory_review,
         run_officecli,
         duckduckgo_search,
+        list_project_files,
+        read_project_file,
         grep_project_files,
         list_recent_files
     ]
