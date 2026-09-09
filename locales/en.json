@@ -390,6 +390,8 @@
       "grep_no_results": "🔍 Κανένα αποτέλεσμα για `{pattern}` (pattern: {file_pattern}) στο '{folder_path}'.",
       "grep_header": "🔍 **grep** `{pattern}` — {total_matches} αποτελέσματα σε {files_count} αρχεία (folder: {folder_name}/)",
       "grep_truncated": "⚠️ Αποτελέσματα περικόπηκαν στα 200. Χρησιμοποίησε πιο συγκεκριμένο pattern.",
+      "sensitive_file_blocked": "❌ Access to credential and sensitive project files is blocked.",
+      "list_truncated": "⚠️ File listing truncated (max {result_limit} results / {scan_limit} scanned files). Use a narrower folder or pattern.",
       "target_folder_not_found": "❌ Ο φάκελος '{target}' δεν υπάρχει.",
       "no_recent_files": "⚠️ Δεν βρέθηκαν αρχεία στο '{target}'.",
       "recent_header": "🕒 {label} — {top_count}/{total_count} πιο πρόσφατα τροποποιημένα αρχεία:\n",
