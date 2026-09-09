@@ -123,6 +123,32 @@ def test_read_project_file_no_permission(tmp_path):
     assert "❌" in result
 
 
+@pytest.mark.parametrize(
+    "relative_path",
+    [".env", ".env.local", "credentials.json", "credentials/service.pem"],
+)
+def test_project_tools_hide_sensitive_files_inside_approved_project(tmp_path, relative_path):
+    """A folder grant must not expose credentials through read/list/grep."""
+    from tools.project_tools import grep_project_files, list_project_files, read_project_file
+
+    access_file = _make_access_file(tmp_path, tmp_path)
+    sensitive = tmp_path / relative_path
+    sensitive.parent.mkdir(parents=True, exist_ok=True)
+    sensitive.write_text("PRIVATE_MARKER=never-expose\n", encoding="utf-8")
+
+    with patch("tools.project_tools.PROJECT_ACCESS_FILE", access_file):
+        read_result = read_project_file.func(file_path=str(sensitive))
+        list_result = list_project_files.func(folder_path=str(tmp_path), pattern="*")
+        grep_result = grep_project_files.func(
+            folder_path=str(tmp_path), pattern="PRIVATE_MARKER", file_pattern="*"
+        )
+
+    assert "PRIVATE_MARKER" not in read_result
+    assert relative_path.replace("/", os.sep) not in list_result
+    assert "never-expose" not in grep_result
+    assert relative_path.replace("/", os.sep) not in grep_result
+
+
 # ── edit_project_file ─────────────────────────────────────────────
 
 def test_edit_project_file_basic(tmp_path):
@@ -216,6 +242,25 @@ def test_list_project_files_returns_py_files(tmp_path):
         result = list_project_files.func(folder_path=str(tmp_path), pattern="**/*.py")
     assert "models.py" in result
     assert "views.py" in result
+
+
+def test_list_project_files_is_bounded_and_reports_truncation(tmp_path):
+    from tools import project_tools
+
+    access_file = _make_access_file(tmp_path, tmp_path)
+    for index in range(4):
+        _make_py_file(tmp_path, f"module_{index}.py", "")
+
+    with (
+        patch("tools.project_tools.PROJECT_ACCESS_FILE", access_file),
+        patch.object(project_tools, "PROJECT_FILE_RESULT_LIMIT", 2),
+    ):
+        result = project_tools.list_project_files.func(
+            folder_path=str(tmp_path), pattern="**/*.py"
+        )
+
+    assert result.count("module_") == 2
+    assert "⚠️" in result
 
 
 # ── tool_risk for project tools ───────────────────────────────────

@@ -38,6 +38,17 @@ CORE_FILES = {
     "tool_risk.py", "prompts.md", "config.py",
 }
 
+PROJECT_FILE_SCAN_LIMIT = 8000
+PROJECT_FILE_RESULT_LIMIT = 500
+
+_SENSITIVE_PROJECT_FILENAMES = {
+    ".env", "credentials.json", "secrets.py", "token.json",
+}
+_SENSITIVE_PROJECT_EXTENSIONS = {
+    ".db", ".sqlite", ".sqlite3", ".key", ".pem", ".p12", ".pfx",
+}
+_SENSITIVE_PROJECT_DIRS = {"credentials"}
+
 
 # ── Helpers ──────────────────────────────────────────────────────
 
@@ -60,12 +71,28 @@ def _normalize(path: str) -> str:
     return os.path.normcase(os.path.realpath(path.strip().strip("'\"")))
 
 
+def _is_sensitive_project_path(path: str) -> bool:
+    """Return True for credential or local-data paths that tools must not expose."""
+    normalized = os.path.normpath(path)
+    parts = [part.casefold() for part in normalized.split(os.sep) if part]
+    name = os.path.basename(normalized).casefold()
+    extension = os.path.splitext(name)[1]
+    return (
+        name in _SENSITIVE_PROJECT_FILENAMES
+        or name.startswith(".env.")
+        or extension in _SENSITIVE_PROJECT_EXTENSIONS
+        or any(part in _SENSITIVE_PROJECT_DIRS for part in parts[:-1])
+    )
+
+
 def _check_permission(file_path: str, need_edit: bool = False) -> tuple[bool, str]:
     """
     Checks if the file_path is within a permitted project.
     Returns (ok, error_message).
     """
     real = _normalize(file_path)
+    if _is_sensitive_project_path(real):
+        return False, t("tools.project_tools.sensitive_file_blocked")
     access = _load_access()
     for folder, perms in access.items():
         norm_folder = _normalize(folder)
@@ -185,17 +212,35 @@ def list_project_files(folder_path: str, pattern: str = "**/*.py") -> str:
     }
 
     matches = []
+    scanned = 0
+    truncated = False
     # We support ** with os.walk
     for root, dirs, files in os.walk(folder_path):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
-        for fname in files:
+        dirs[:] = sorted(
+            d for d in dirs
+            if d not in _SKIP_DIRS
+            and not d.startswith(".")
+            and not _is_sensitive_project_path(os.path.join(root, d, "_"))
+        )
+        for fname in sorted(files):
             full = os.path.join(root, fname)
+            if _is_sensitive_project_path(full):
+                continue
+            scanned += 1
+            if scanned > PROJECT_FILE_SCAN_LIMIT:
+                truncated = True
+                break
             rel  = os.path.relpath(full, folder_path)
             # fnmatch with ** emulation: if pattern has **, we simply check fname and rel
             flat_pattern = pattern.replace("**/", "").replace("**\\", "")
             if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(fname, flat_pattern):
+                if len(matches) >= PROJECT_FILE_RESULT_LIMIT:
+                    truncated = True
+                    break
                 size = os.path.getsize(full)
                 matches.append((rel, size))
+        if truncated:
+            break
 
     if not matches:
         return t("tools.project_tools.no_files_pattern", pattern=pattern, folder_path=folder_path)
@@ -205,6 +250,15 @@ def list_project_files(folder_path: str, pattern: str = "**/*.py") -> str:
     for rel, size in matches:
         kb = size / 1024
         lines.append(f"  {rel}  ({kb:.1f} KB)")
+
+    if truncated:
+        lines.append(
+            t(
+                "tools.project_tools.list_truncated",
+                result_limit=PROJECT_FILE_RESULT_LIMIT,
+                scan_limit=PROJECT_FILE_SCAN_LIMIT,
+            )
+        )
 
     return "\n".join(lines)
 
@@ -379,11 +433,18 @@ def grep_project_files(folder_path: str, pattern: str, file_pattern: str = "*.py
     total_matches = 0
 
     for root, dirs, files in os.walk(folder_path):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
+        dirs[:] = [
+            d for d in dirs
+            if d not in _SKIP_DIRS
+            and not d.startswith(".")
+            and not _is_sensitive_project_path(os.path.join(root, d, "_"))
+        ]
         for fname in sorted(files):
             if not fnmatch.fnmatch(fname, flat_pattern):
                 continue
             full = os.path.join(root, fname)
+            if _is_sensitive_project_path(full):
+                continue
             rel  = os.path.relpath(full, folder_path)
             try:
                 with open(full, "r", encoding="utf-8", errors="replace") as f:
@@ -443,9 +504,6 @@ _RECENT_SKIP_DIRS = {
     "chroma_db", "telegram_photos", "telegram_uploads",
     "outputs", "avatars", ".ruff_cache", "credentials",
 }
-_RECENT_SKIP_FILES = {".env", "secrets.py"}
-
-
 @tool
 def list_recent_files(folder_path: str = "", top_n: int = 15) -> str:
     """
@@ -491,15 +549,20 @@ def list_recent_files(folder_path: str = "", top_n: int = 15) -> str:
     stopped_early = False
 
     for root, dirs, files in os.walk(target):
-        dirs[:] = [d for d in dirs if d not in _RECENT_SKIP_DIRS and not d.startswith(".")]
+        dirs[:] = [
+            d for d in dirs
+            if d not in _RECENT_SKIP_DIRS
+            and not d.startswith(".")
+            and not _is_sensitive_project_path(os.path.join(root, d, "_"))
+        ]
         for fname in files:
-            if fname in _RECENT_SKIP_FILES:
+            full = os.path.join(root, fname)
+            if _is_sensitive_project_path(full):
                 continue
             scanned += 1
             if scanned > SAFETY_CAP:
                 stopped_early = True
                 break
-            full = os.path.join(root, fname)
             try:
                 mtime = os.path.getmtime(full)
             except OSError:
