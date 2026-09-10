@@ -525,7 +525,12 @@ def chat_agent_node(state: AgentState):
 
 
     from tools.system import archive_file, retrieve_photo, save_to_memory, delete_from_memory, search_memory, control_spotify, get_current_location, read_local_file
-    from tools.web import execute_local_pipeline, relay_local_payload, search_supermarket_prices
+    from tools.web import (
+        execute_local_pipeline,
+        has_known_messenger_contact_reference,
+        relay_local_payload,
+        search_supermarket_prices,
+    )
     from services.messenger_intent import (
         classify_messenger_intent,
         has_accepted_routine_draft_offer,
@@ -573,7 +578,10 @@ def chat_agent_node(state: AgentState):
     elif (
         latest_user_text
         and getattr(history[-1], "type", "") == "human"
-        and not active_messenger_draft
+        and (
+            not active_messenger_draft
+            or has_known_messenger_contact_reference(latest_user_text)
+        )
         and classify_messenger_intent(latest_user_text).intent == "general_chat"
     ):
         # Leave semantic interpretation to the canonical Chat agent while
@@ -982,7 +990,8 @@ def web_agent_node(state: AgentState):
     )
     from tools.web import (
         get_news, get_weather_forecast, get_navigation_info,
-        relay_local_payload, search_google_places, browse_url, search_supermarket_prices
+        has_known_messenger_contact_reference, relay_local_payload,
+        search_google_places, browse_url, search_supermarket_prices
     )
 
     from tools.web import execute_local_pipeline
@@ -1014,7 +1023,10 @@ def web_agent_node(state: AgentState):
     elif (
         latest_user_text
         and getattr(history[-1], "type", "") == "human"
-        and not active_messenger_draft
+        and (
+            not active_messenger_draft
+            or has_known_messenger_contact_reference(latest_user_text)
+        )
         and classify_messenger_intent(latest_user_text).intent == "general_chat"
     ):
         # Let the LLM understand naturally phrased, reversible draft requests.

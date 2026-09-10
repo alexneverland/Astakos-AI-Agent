@@ -3,6 +3,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from core.utils import (
     looks_like_web_tool_error,
     filter_recent_web_tool_results,
@@ -873,11 +875,13 @@ def test_web_agent_exposes_reversible_draft_tool_for_natural_recipient_request(
     assert "execute_local_pipeline" in bound_tool_names
 
 
+@pytest.mark.parametrize("existing_message", [None, "Παλιό μήνυμα"])
 def test_natural_recipient_request_persists_draft_through_chat_graph(
     monkeypatch: Any,
     tmp_path: Path,
+    existing_message: str | None,
 ) -> None:
-    """The canonical Chat route executes the reversible draft writer end to end."""
+    """The canonical Chat route creates or replaces a draft end to end."""
     import config
     from core.graph import build_graph
     from services.messenger_intent import classify_messenger_intent
@@ -928,6 +932,11 @@ def test_natural_recipient_request_persists_draft_through_chat_graph(
     monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
 
     assert classify_messenger_intent(request).intent == "general_chat"
+    if existing_message:
+        draft_file.write_text(
+            json.dumps({"target_name": "old", "message": existing_message, "status": "pending"}),
+            encoding="utf-8",
+        )
 
     build_graph().invoke({
         "messages": [HumanMessage(content=request)],
@@ -1037,7 +1046,6 @@ def test_web_agent_exposes_messenger_draft_tool_for_active_draft_edit(monkeypatc
         "core.messenger_draft.active_draft_status",
         lambda: (True, "active", {"message": "Initial draft"}),
     )
-
     web_agent_node({
         "messages": [
             HumanMessage(content="Γράψε ένα μήνυμα"),
@@ -1083,6 +1091,7 @@ def test_web_agent_hides_messenger_draft_tool_for_unrelated_active_draft_turn(mo
         "core.messenger_draft.active_draft_status",
         lambda: (True, "active", {"message": "Initial draft"}),
     )
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
 
     web_agent_node({
         "messages": [HumanMessage(content="Σε τρεις μέρες φεύγουμε Γεωργία")],
@@ -1119,6 +1128,7 @@ def test_chat_agent_hides_messenger_draft_tool_for_unrelated_active_draft_turn(m
         "core.messenger_draft.active_draft_status",
         lambda: (True, "active", {"message": "Initial draft"}),
     )
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
 
     chat_agent_node({
         "messages": [HumanMessage(content="Σε τρεις μέρες φεύγουμε Γεωργία")],

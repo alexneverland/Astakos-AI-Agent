@@ -123,6 +123,22 @@ def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
     return destination is not None, reason
 
 
+def has_known_messenger_contact_reference(text: str) -> bool:
+    """Return whether text names a configured Messenger contact as a whole term."""
+    normalized_text = remove_accents(str(text or ""))
+    if not normalized_text:
+        return False
+    text_forms = {normalized_text, _greek_to_latin(normalized_text)}
+    for contact_name in _load_messenger_contacts():
+        for alias in _messenger_target_aliases(contact_name):
+            if alias and any(
+                re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", form)
+                for form in text_forms
+            ):
+                return True
+    return False
+
+
 def _messenger_targets_match(left: str, right: str) -> bool:
     """Return whether two recipient spellings resolve to the same destination."""
     left_destination, _ = _resolve_messenger_target(left)
