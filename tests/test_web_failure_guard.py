@@ -765,8 +765,10 @@ def test_web_research_trim_supports_object_calls_without_model_copy():
     assert [call.id for call in trimmed.tool_calls] == ["t3"]
 
 
-def test_web_agent_hides_messenger_draft_tool_for_ordinary_turn(monkeypatch: Any) -> None:
-    """An ordinary Web turn cannot create a Messenger draft from conversational context."""
+def test_web_agent_keeps_reversible_draft_tool_available_for_natural_language(
+    monkeypatch: Any,
+) -> None:
+    """The Web LLM may interpret natural language without forcing a draft write."""
     from core.agents import web_agent_node
 
     bound_tool_names: list[str] = []
@@ -794,7 +796,8 @@ def test_web_agent_hides_messenger_draft_tool_for_ordinary_turn(monkeypatch: Any
         "channel": "telegram",
     })
 
-    assert "relay_local_payload" not in bound_tool_names
+    assert "relay_local_payload" in bound_tool_names
+    assert "execute_local_pipeline" in bound_tool_names
 
 
 def test_web_agent_exposes_messenger_draft_tool_for_explicit_request(monkeypatch: Any) -> None:
@@ -828,6 +831,43 @@ def test_web_agent_exposes_messenger_draft_tool_for_explicit_request(monkeypatch
 
     assert "relay_local_payload" in bound_tool_names
     assert "execute_local_pipeline" not in bound_tool_names
+
+
+def test_web_agent_exposes_reversible_draft_tool_for_natural_recipient_request(
+    monkeypatch: Any,
+) -> None:
+    """The Web LLM can persist a naturally phrased recipient-specific draft request."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Web agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    web_agent_node({
+        "messages": [
+            HumanMessage(content="φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"),
+        ],
+        "channel": "web",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+    assert "execute_local_pipeline" in bound_tool_names
 
 
 def test_web_agent_does_not_recreate_draft_for_timestamped_bare_send(monkeypatch: Any) -> None:

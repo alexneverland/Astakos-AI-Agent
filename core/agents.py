@@ -939,8 +939,9 @@ def web_agent_node(state: AgentState):
 
     from services.messenger_intent import is_contextually_grounded_active_draft_edit
 
+    active_messenger_draft = _has_active_messenger_draft()
     active_draft_edit_context_isolated = (
-        _has_active_messenger_draft()
+        active_messenger_draft
         and is_contextually_grounded_active_draft_edit(latest_user_text, history)
     )
     prompt_history = (
@@ -975,6 +976,7 @@ def web_agent_node(state: AgentState):
 
     from tools.web import execute_local_pipeline
     from services.messenger_intent import (
+        classify_messenger_intent,
         has_accepted_routine_draft_offer,
         is_create_draft_intent,
     )
@@ -998,6 +1000,16 @@ def web_agent_node(state: AgentState):
         draft_tool_reason = "accepted_routine_offer"
     elif active_draft_edit_context_isolated:
         draft_tool_reason = "active_draft_edit"
+    elif (
+        latest_user_text
+        and not active_messenger_draft
+        and classify_messenger_intent(latest_user_text).intent == "general_chat"
+    ):
+        # Let the LLM understand naturally phrased, reversible draft requests.
+        # Deterministic intent remains responsible only for exact lifecycle
+        # boundaries such as a bare send confirmation, which must never create
+        # a replacement draft when none exists.
+        draft_tool_reason = "natural_language_choice"
     if draft_tool_reason:
         print(f"[Messenger Tool Gate]: Web_Agent enabled relay_local_payload ({draft_tool_reason}).")
         if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
