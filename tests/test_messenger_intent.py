@@ -107,6 +107,21 @@ def test_is_create_draft_intent_rejects_unrelated_messages():
     assert not is_create_draft_intent("Έχει δουλειά σήμερα δεύτερα φίλε")
 
 
+def test_image_creation_is_not_misclassified_as_messenger_draft():
+    """A general creation verb cannot hide the image tool behind the draft gate."""
+    request = (
+        "φτιαξε μου μια φωτογραφια ενα γραφιο με υπολογιστη "
+        "και χυμα χαρτια γυρω γυρω"
+    )
+
+    assert classify_messenger_intent(request).intent == "general_chat"
+    assert is_create_draft_intent(request) is False
+
+
+def test_non_message_creation_is_not_misclassified_as_messenger_draft():
+    assert is_create_draft_intent("φτιάξε μου ένα πρόγραμμα γυμναστικής") is False
+
+
 def test_active_draft_edit_intent_requires_a_configured_revision_request() -> None:
     """Only a revision request may expose persistence for an existing draft."""
     assert is_active_draft_edit_intent("Κάν' το πιο ζεστό") is True

@@ -33,6 +33,7 @@ DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 DEFAULT_OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
 DEFAULT_GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview"
+DEFAULT_GOOGLE_IMAGE_MODEL = "gemini-3.1-flash-image"
 VERTEX_OAUTH_SCOPES: tuple[str, ...] = ("https://www.googleapis.com/auth/cloud-platform",)
 TRANSCRIPTION_LANGUAGE_CODES_BY_LOCALE: dict[str, tuple[str, ...]] = {
     "el": ("el-GR",),
@@ -47,6 +48,29 @@ AUDIO_TRANSCRIPTION_PROMPT = (
     "accurately and verbatim, without commentary or a reply. If no intelligible "
     "speech is audible, return exactly: [ΣΙΩΠΗ]."
 )
+
+
+def _extract_google_image_bytes(response: Any, provider: str) -> bytes:
+    """Extract the first inline image returned by a Gemini image model."""
+    parts = getattr(response, "parts", None)
+    if parts is None:
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            content = getattr(candidates[0], "content", None)
+            parts = getattr(content, "parts", None)
+
+    for part in parts or []:
+        inline_data = getattr(part, "inline_data", None)
+        data = getattr(inline_data, "data", None)
+        if isinstance(data, str):
+            return base64.b64decode(data)
+        if data:
+            return bytes(data)
+
+    raise AIProviderError(
+        "Gemini image model returned no image data.",
+        provider=provider,
+    )
 
 
 def normalize_provider_text_content(content: Any) -> str:
@@ -893,20 +917,18 @@ class GeminiAPIAdapter(AIProviderAdapter):
         try:
             client = self._get_genai_client()
             from google.genai import types
-            response = client.models.generate_images(
-                model="imagen-3.0-generate-001",
-                prompt=prompt,
-                config=types.GenerateImagesConfig(number_of_images=1, aspect_ratio=aspect_ratio),
+            response = client.models.generate_content(
+                model=google_model_from_environment(
+                    "ASTAKOS_GOOGLE_IMAGE_MODEL",
+                    DEFAULT_GOOGLE_IMAGE_MODEL,
+                ),
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=[types.Modality.TEXT, types.Modality.IMAGE],
+                    image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
+                ),
             )
-            if not response.generated_images:
-                raise AIProviderError("Gemini Imagen returned no generated images.", provider="gemini")
-            img_obj = response.generated_images[0].image
-            if hasattr(img_obj, "image_bytes"):
-                return img_obj.image_bytes
-            import io
-            buf = io.BytesIO()
-            img_obj.save(buf, format="JPEG")
-            return buf.getvalue()
+            return _extract_google_image_bytes(response, "gemini")
         except Exception as e:
             self._handle_exception(e)
 
@@ -1169,20 +1191,18 @@ class VertexAIAdapter(AIProviderAdapter):
         try:
             client = self._get_genai_client()
             from google.genai import types
-            response = client.models.generate_images(
-                model="imagen-3.0-generate-001",
-                prompt=prompt,
-                config=types.GenerateImagesConfig(number_of_images=1, aspect_ratio=aspect_ratio),
+            response = client.models.generate_content(
+                model=google_model_from_environment(
+                    "ASTAKOS_GOOGLE_IMAGE_MODEL",
+                    DEFAULT_GOOGLE_IMAGE_MODEL,
+                ),
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=[types.Modality.TEXT, types.Modality.IMAGE],
+                    image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
+                ),
             )
-            if not response.generated_images:
-                raise AIProviderError("Vertex AI Imagen returned no generated images.", provider="vertex")
-            img_obj = response.generated_images[0].image
-            if hasattr(img_obj, "image_bytes"):
-                return img_obj.image_bytes
-            import io
-            buf = io.BytesIO()
-            img_obj.save(buf, format="JPEG")
-            return buf.getvalue()
+            return _extract_google_image_bytes(response, "vertex")
         except Exception as e:
             self._handle_exception(e)
 

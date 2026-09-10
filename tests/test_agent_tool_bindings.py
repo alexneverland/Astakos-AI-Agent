@@ -34,3 +34,11 @@ def test_tech_agent_binds_observability_tools():
     assert "tool_stats" in source
     assert "system_doctor" in source
     assert "memory_review" in source
+
+
+def test_image_generation_tool_stays_with_web_not_tech_agent():
+    web_source = _function_source("web_agent_node")
+    tech_source = _function_source("tech_agent_node")
+
+    assert "generate_image_tool" in web_source
+    assert "generate_image_tool" not in tech_source
