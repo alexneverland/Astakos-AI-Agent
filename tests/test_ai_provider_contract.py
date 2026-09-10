@@ -480,14 +480,18 @@ class TestRealGeminiAPIAdapterBoundary:
     def test_generate_image_success(self, mock_client_cls):
         mock_client = MagicMock()
         mock_resp = MagicMock()
-        mock_img = MagicMock()
-        mock_img.image_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00imagen_bytes"
-        mock_resp.generated_images = [MagicMock(image=mock_img)]
-        mock_client.models.generate_images.return_value = mock_resp
+        image_part = MagicMock()
+        image_part.inline_data.data = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00gemini_image_bytes"
+        mock_resp.parts = [image_part]
+        mock_client.models.generate_content.return_value = mock_resp
         mock_client_cls.return_value = mock_client
 
         out = self.adapter.generate_image("A scenic sunset")
-        assert out == b"\xff\xd8\xff\xe0\x00\x10JFIF\x00imagen_bytes"
+        assert out == b"\xff\xd8\xff\xe0\x00\x10JFIF\x00gemini_image_bytes"
+        call = mock_client.models.generate_content.call_args
+        assert call.kwargs["model"] == "gemini-3.1-flash-image"
+        assert call.kwargs["config"].image_config.aspect_ratio == "1:1"
+        mock_client.models.generate_images.assert_not_called()
 
     @patch("google.genai.Client")
     def test_generate_image_auth_and_rate_limit_errors(self, mock_client_cls):
@@ -495,13 +499,13 @@ class TestRealGeminiAPIAdapterBoundary:
         mock_client_cls.return_value = mock_client
 
         # Auth Error
-        mock_client.models.generate_images.side_effect = Exception("403 PERMISSION_DENIED: Imagen API access denied")
+        mock_client.models.generate_content.side_effect = Exception("403 PERMISSION_DENIED: image API access denied")
         with pytest.raises(ProviderAuthError) as exc_auth:
             self.adapter.generate_image("prompt")
         assert exc_auth.value.provider == "gemini"
 
         # Rate Limit Error
-        mock_client.models.generate_images.side_effect = Exception("429 RESOURCE_EXHAUSTED: Daily quota exceeded")
+        mock_client.models.generate_content.side_effect = Exception("429 RESOURCE_EXHAUSTED: Daily quota exceeded")
         with pytest.raises(RateLimitError) as exc_rate:
             self.adapter.generate_image("prompt")
         assert exc_rate.value.provider == "gemini"
@@ -759,14 +763,18 @@ class TestRealVertexAIAdapterBoundary:
     def test_generate_image_success(self, mock_client_cls):
         mock_client = MagicMock()
         mock_resp = MagicMock()
-        mock_img = MagicMock()
-        mock_img.image_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00vertex_imagen_bytes"
-        mock_resp.generated_images = [MagicMock(image=mock_img)]
-        mock_client.models.generate_images.return_value = mock_resp
+        image_part = MagicMock()
+        image_part.inline_data.data = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00vertex_gemini_bytes"
+        mock_resp.parts = [image_part]
+        mock_client.models.generate_content.return_value = mock_resp
         mock_client_cls.return_value = mock_client
 
         out = self.adapter.generate_image("A futuristic city")
-        assert out == b"\xff\xd8\xff\xe0\x00\x10JFIF\x00vertex_imagen_bytes"
+        assert out == b"\xff\xd8\xff\xe0\x00\x10JFIF\x00vertex_gemini_bytes"
+        call = mock_client.models.generate_content.call_args
+        assert call.kwargs["model"] == "gemini-3.1-flash-image"
+        assert call.kwargs["config"].image_config.aspect_ratio == "1:1"
+        mock_client.models.generate_images.assert_not_called()
 
     @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings.embed_documents")
     def test_embed_text_success(self, mock_embed):

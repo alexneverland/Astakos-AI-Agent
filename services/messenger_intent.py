@@ -69,9 +69,14 @@ def _has_token_or_phrase(text: str, patterns: tuple[str, ...]) -> bool:
 
 def _has_leading_draft_creation_verb(text: str) -> bool:
     """Return whether a creation verb begins the request after constrained filler."""
+    object_terms = {
+        _normalize(pattern)
+        for pattern in _DRAFT_REQUEST_OBJECTS
+    }
     action_verbs = {
         token
-        for pattern in _DRAFT_REQUEST_ACTION_VERBS
+        for pattern in _DRAFT_REQUEST_ACTION_VERBS + _DRAFT_CREATE_PATTERNS
+        if _normalize(pattern) not in object_terms
         for token in _normalize(pattern).split()
     }
     tokens = text.split()
@@ -147,10 +152,7 @@ def classify_messenger_intent(text: str, has_active_draft: bool = False) -> Mess
     ):
         return MessengerIntentResult("confirm_send", 0.95, ["bare_confirm_phrase"])
 
-    has_create = _has_any(normalized, _DRAFT_CREATE_PATTERNS)
-    has_message_shape = any(w in normalized for w in ("draft",) + nl_config.MI_COMPOSE_WORDS)
-
-    if has_create and has_message_shape:
+    if is_explicit_draft_creation_request(text):
         return MessengerIntentResult("create_draft", 0.90, ["draft_create_phrase"])
 
     if normalized in _GENERAL_SHORT:
