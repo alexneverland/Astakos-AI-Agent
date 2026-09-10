@@ -360,9 +360,6 @@ def supervisor_node(state):
     # ── Capability Registry: first filter before the LLM ───────────
     registry_agent = lookup_agent(str(last_content))
     if registry_agent:
-        if pending_capability_proposal and registry_agent == "Dev_Agent":
-            print("\033[95m[Router]: -> Chat_Agent (capability draft not authorized)\033[0m")
-            return {"next_agent": "Chat_Agent"}
         print(f"\033[95m[Router]: -> {registry_agent} (registry)\033[0m")
         return {"next_agent": registry_agent}
 

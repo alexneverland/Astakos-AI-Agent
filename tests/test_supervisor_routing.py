@@ -115,6 +115,27 @@ def test_supervisor_preserves_registry_routing_after_capability_proposal(
 
 @patch("core.capability_lookup.lookup_agent")
 @patch("core.agents.safe_llm_invoke")
+def test_supervisor_preserves_standalone_dev_registry_route_after_proposal(
+    mock_safe_llm_invoke, mock_lookup_agent
+):
+    """A new registered Dev request is not mistaken for proposal authorization."""
+    i18n.load_locale("el")
+    mock_lookup_agent.return_value = "Dev_Agent"
+    state = {
+        "messages": [
+            AIMessage(content="Πρόταση νέου εργαλείου: εργαλείο παραγωγής βίντεο."),
+            HumanMessage(content="Όχι, αντί γι' αυτό διόρθωσε αυτό το Python error."),
+        ]
+    }
+
+    result = supervisor_node(state)
+
+    assert result["next_agent"] == "Dev_Agent"
+    mock_safe_llm_invoke.assert_not_called()
+
+
+@patch("core.capability_lookup.lookup_agent")
+@patch("core.agents.safe_llm_invoke")
 def test_supervisor_accepts_explicit_greek_draft_authorization_after_proposal(
     mock_safe_llm_invoke, mock_lookup_agent
 ):
