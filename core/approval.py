@@ -470,12 +470,63 @@ def approval_check_node(state):
         active_external_content_tool_names,
         has_untrusted_result_in_active_history,
         has_untrusted_result_since_latest_user_message,
+        is_direct_user_message,
         is_read_only_external_followup_tool,
+        is_untrusted_external_tool_result,
     )
+
+    def is_authorized_draft_after_required_skill_read(tc: ToolCall) -> bool:
+        """Allow only the guarded draft write required by the canonical skill flow."""
+        if tc["name"] != "write_custom_tool":
+            return False
+        if not has_capability_draft_authorization(state):
+            return False
+
+        messages = state["messages"]
+        fresh_sources: set[str] = set()
+        fresh_skill_names: set[str] = set()
+        for index in range(len(messages) - 1, -1, -1):
+            message = messages[index]
+            if is_direct_user_message(message):
+                break
+            if (
+                getattr(message, "type", "") == "tool"
+                and is_untrusted_external_tool_result(message, messages)
+            ):
+                source_name = str(getattr(message, "name", ""))
+                fresh_sources.add(source_name)
+                if source_name != "read_agent_skill":
+                    continue
+
+                result_call_id = str(getattr(message, "tool_call_id", ""))
+                for prior_message in reversed(messages[:index]):
+                    matching_call = next(
+                        (
+                            call
+                            for call in (getattr(prior_message, "tool_calls", []) or [])
+                            if str(call.get("id", "")) == result_call_id
+                            and call.get("name") == "read_agent_skill"
+                        ),
+                        None,
+                    )
+                    if matching_call is None:
+                        continue
+                    skill_name = str(
+                        (matching_call.get("args") or {}).get("skill_name", "")
+                    ).strip()
+                    if skill_name:
+                        fresh_skill_names.add(skill_name)
+                    break
+        return (
+            fresh_sources == {"read_agent_skill"}
+            and fresh_skill_names == {"astakos-skill-authoring"}
+        )
+
     if has_untrusted_result_since_latest_user_message(state["messages"]):
         for tc in tool_calls:
             if (
                 not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
+                and not is_authorized_draft_after_required_skill_read(tc)
                 and not _is_accepted_routine_messenger_draft_creation(
                     tc,
                     prior_messages,

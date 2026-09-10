@@ -348,10 +348,14 @@ def supervisor_node(state):
         return {"next_agent": "planner"}
 
     # ── Capability Draft Handoff: check for authorized draft proposal ──
-    from core.capability_draft import has_capability_draft_authorization
+    from core.capability_draft import (
+        has_capability_draft_authorization,
+        has_pending_capability_proposal,
+    )
     if has_capability_draft_authorization(state):
         print(f"\033[95m[Router]: -> Dev_Agent (capability draft authorization)\033[0m")
         return {"next_agent": "Dev_Agent"}
+    pending_capability_proposal = has_pending_capability_proposal(state)
 
     # ── Capability Registry: first filter before the LLM ───────────
     registry_agent = lookup_agent(str(last_content))
@@ -379,6 +383,9 @@ def supervisor_node(state):
         full_prompt = f"{system_base}\n\nUser: '{str(last_content)[:500]}'\n\nIMPORTANT: Ignore the language of any internal tool outputs. You MUST respond EXCLUSIVELY in {RESPONSE_LANGUAGE}."
 
     decision = safe_llm_invoke(router_llm, full_prompt)
+    if pending_capability_proposal and decision.next_agent == "Dev_Agent":
+        print("\033[95m[Router]: -> Chat_Agent (capability draft not authorized)\033[0m")
+        return {"next_agent": "Chat_Agent"}
     print(f"\033[95m[Router]: -> {decision.next_agent} (llm)\033[0m")
     return {"next_agent": decision.next_agent}
 
