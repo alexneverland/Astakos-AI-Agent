@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -838,8 +839,10 @@ def test_web_agent_exposes_reversible_draft_tool_for_natural_recipient_request(
 ) -> None:
     """The Web LLM can persist a naturally phrased recipient-specific draft request."""
     from core.agents import web_agent_node
+    from services.messenger_intent import classify_messenger_intent
 
     bound_tool_names: list[str] = []
+    request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
 
     class FakeBoundLLM:
         """Return a plain reply without issuing tool calls."""
@@ -859,15 +862,82 @@ def test_web_agent_exposes_reversible_draft_tool_for_natural_recipient_request(
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
 
+    assert classify_messenger_intent(request).intent == "general_chat"
+
     web_agent_node({
-        "messages": [
-            HumanMessage(content="φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"),
-        ],
+        "messages": [HumanMessage(content=request)],
         "channel": "web",
     })
 
     assert "relay_local_payload" in bound_tool_names
     assert "execute_local_pipeline" in bound_tool_names
+
+
+def test_natural_recipient_request_persists_draft_through_chat_graph(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    """The canonical Chat route executes the reversible draft writer end to end."""
+    import config
+    from core.graph import build_graph
+    from services.messenger_intent import classify_messenger_intent
+
+    request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
+    draft_file = tmp_path / "messenger_draft.json"
+    draft_requested = False
+
+    class FakeBoundLLM:
+        """Issue one deterministic Messenger draft tool call, then finish."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a tool call only on the first Chat-agent invocation."""
+            nonlocal draft_requested
+            if draft_requested:
+                return AIMessage(content="Το αποθήκευσα.")
+            draft_requested = True
+            return AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "relay_local_payload",
+                    "args": {
+                        "target_entity": "Σοφία",
+                        "payload_data": "Καλημέρα αγάπη μου! Καλή δύναμη στη δουλειά.",
+                    },
+                    "id": "natural-draft",
+                }],
+            )
+
+    class FakeLLM:
+        """Provide deterministic routing and Chat tool selection."""
+
+        def with_structured_output(self, _schema: Any) -> "FakeLLM":
+            """Return self because registry routing avoids LLM routing output."""
+            return self
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Require the canonical Chat path to expose the draft writer."""
+            if not draft_requested:
+                assert "relay_local_payload" in {tool.name for tool in tools}
+            return FakeBoundLLM()
+
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr("core.capability_lookup.lookup_agent", lambda _text: "Chat_Agent")
+    monkeypatch.setattr("core.plan_judge.should_auto_plan", lambda _text: False)
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
+
+    assert classify_messenger_intent(request).intent == "general_chat"
+
+    build_graph().invoke({
+        "messages": [HumanMessage(content=request)],
+        "channel": "web",
+    })
+
+    draft = json.loads(draft_file.read_text(encoding="utf-8"))
+    assert draft["target_name"] == "123"
+    assert draft["message"] == "Καλημέρα αγάπη μου! Καλή δύναμη στη δουλειά."
+    assert draft["status"] == "pending"
 
 
 def test_web_agent_does_not_recreate_draft_for_timestamped_bare_send(monkeypatch: Any) -> None:
