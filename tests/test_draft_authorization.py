@@ -231,6 +231,36 @@ def test_authorized_draft_can_follow_required_skill_read():
     assert result["approval_status"] == "pending"
 
 
+def test_authorized_draft_rejects_unrelated_skill_read():
+    """An unrelated skill read cannot unlock the custom-tool draft write."""
+    i18n.load_locale("el")
+    state = {
+        "messages": [
+            AIMessage(content="Πρόταση νέου εργαλείου: εργαλείο παραγωγής βίντεο."),
+            HumanMessage(content="φτιάξε draft"),
+            AIMessage(content="", tool_calls=[{
+                "name": "read_agent_skill",
+                "args": {"skill_name": "unrelated-skill"},
+                "id": "skill-read",
+            }]),
+            ToolMessage(
+                content="Unrelated skill rules",
+                name="read_agent_skill",
+                tool_call_id="skill-read",
+            ),
+            AIMessage(content="", tool_calls=[{
+                "name": "write_custom_tool",
+                "args": {"tool_name": "video_tool", "tool_code": "draft"},
+                "id": "draft-write",
+            }]),
+        ]
+    }
+
+    result = approval_check_node(state)
+
+    assert result["approval_status"] == "blocked"
+
+
 def test_terminal_stays_blocked_after_authorized_draft_skill_read():
     """Draft authorization never expands into arbitrary terminal authority."""
     i18n.load_locale("el")

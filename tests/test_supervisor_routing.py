@@ -89,6 +89,27 @@ def test_supervisor_keeps_ambiguous_reply_out_of_dev_after_capability_proposal(
     result = supervisor_node(state)
 
     assert result["next_agent"] == "Chat_Agent"
+    mock_safe_llm_invoke.assert_called_once()
+
+
+@patch("core.capability_lookup.lookup_agent")
+@patch("core.agents.safe_llm_invoke")
+def test_supervisor_preserves_registry_routing_after_capability_proposal(
+    mock_safe_llm_invoke, mock_lookup_agent
+):
+    """An unrelated reply after a proposal keeps its normal specialized route."""
+    i18n.load_locale("el")
+    mock_lookup_agent.return_value = "Web_Agent"
+    state = {
+        "messages": [
+            AIMessage(content="Πρόταση νέου εργαλείου: εργαλείο παραγωγής βίντεο."),
+            HumanMessage(content="Όχι, δείξε μου τον αυριανό καιρό."),
+        ]
+    }
+
+    result = supervisor_node(state)
+
+    assert result["next_agent"] == "Web_Agent"
     mock_safe_llm_invoke.assert_not_called()
 
 
