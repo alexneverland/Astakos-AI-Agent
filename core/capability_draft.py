@@ -5,6 +5,35 @@ from langchain_core.messages import AIMessage, HumanMessage
 from core.i18n import t
 from core.utils import clean_message, strip_transport_metadata
 
+
+def is_capability_proposal_text(content: object) -> bool:
+    """Return whether content starts with the canonical localized proposal prefix."""
+    proposal_prefix = t("core.approval.capability_proposal_prefix")
+    if not isinstance(proposal_prefix, str) or not proposal_prefix.strip():
+        return False
+
+    text = strip_transport_metadata(clean_message(content)).casefold()
+    return text.startswith(proposal_prefix.strip().casefold())
+
+
+def has_pending_capability_proposal(state: dict) -> bool:
+    """Return whether the newest user turn immediately follows a capability proposal."""
+    messages = state.get("messages", [])
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if getattr(message, "type", "") == "human" or isinstance(message, HumanMessage):
+            if index == 0:
+                return False
+            preceding = messages[index - 1]
+            if not (
+                getattr(preceding, "type", "") == "ai"
+                or isinstance(preceding, AIMessage)
+            ):
+                return False
+            return is_capability_proposal_text(getattr(preceding, "content", ""))
+    return False
+
+
 def has_capability_draft_authorization(state: dict) -> bool:
     """Return whether the newest user message explicitly authorizes a skill draft
     following a canonical capability-gap proposal.
@@ -71,14 +100,7 @@ def has_capability_draft_authorization(state: dict) -> bool:
     if not (getattr(preceding_msg, "type", "") == "ai" or isinstance(preceding_msg, AIMessage)):
         return False
 
-    raw_ai_text = clean_message(getattr(preceding_msg, "content", ""))
-    ai_text = strip_transport_metadata(raw_ai_text).casefold()
-    proposal_prefix = t("core.approval.capability_proposal_prefix")
-    if not isinstance(proposal_prefix, str) or not proposal_prefix.strip():
-        return False
-
-    prefix_lower = proposal_prefix.strip().casefold()
-    if not ai_text.startswith(prefix_lower):
+    if not is_capability_proposal_text(getattr(preceding_msg, "content", "")):
         return False
 
     return True

@@ -1,7 +1,7 @@
 import os
 import sys
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import core.approval as approval
@@ -198,4 +198,64 @@ def test_draft_authorization_rejects_arbitrary_brackets():
     ai_msg = AIMessage(content="", tool_calls=[{"name": "write_custom_tool", "args": {}, "id": "tc-1"}])
     state = {"messages": [ai_proposal, human_msg, ai_msg]}
     result = approval_check_node(state)
+    assert result["approval_status"] == "blocked"
+
+
+def test_authorized_draft_can_follow_required_skill_read():
+    """The canonical skill workflow may reach its separately approved draft write."""
+    i18n.load_locale("el")
+    state = {
+        "messages": [
+            AIMessage(content="Πρόταση νέου εργαλείου: εργαλείο παραγωγής βίντεο."),
+            HumanMessage(content="φτιάξε draft"),
+            AIMessage(content="", tool_calls=[{
+                "name": "read_agent_skill",
+                "args": {"skill_name": "astakos-skill-authoring"},
+                "id": "skill-read",
+            }]),
+            ToolMessage(
+                content="Skill authoring rules",
+                name="read_agent_skill",
+                tool_call_id="skill-read",
+            ),
+            AIMessage(content="", tool_calls=[{
+                "name": "write_custom_tool",
+                "args": {"tool_name": "video_tool", "tool_code": "draft"},
+                "id": "draft-write",
+            }]),
+        ]
+    }
+
+    result = approval_check_node(state)
+
+    assert result["approval_status"] == "pending"
+
+
+def test_terminal_stays_blocked_after_authorized_draft_skill_read():
+    """Draft authorization never expands into arbitrary terminal authority."""
+    i18n.load_locale("el")
+    state = {
+        "messages": [
+            AIMessage(content="Πρόταση νέου εργαλείου: εργαλείο παραγωγής βίντεο."),
+            HumanMessage(content="φτιάξε draft"),
+            AIMessage(content="", tool_calls=[{
+                "name": "read_agent_skill",
+                "args": {"skill_name": "astakos-skill-authoring"},
+                "id": "skill-read",
+            }]),
+            ToolMessage(
+                content="Skill authoring rules",
+                name="read_agent_skill",
+                tool_call_id="skill-read",
+            ),
+            AIMessage(content="", tool_calls=[{
+                "name": "run_terminal_command",
+                "args": {"command": "echo unsafe"},
+                "id": "terminal-write",
+            }]),
+        ]
+    }
+
+    result = approval_check_node(state)
+
     assert result["approval_status"] == "blocked"

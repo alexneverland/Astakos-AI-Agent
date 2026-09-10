@@ -470,12 +470,34 @@ def approval_check_node(state):
         active_external_content_tool_names,
         has_untrusted_result_in_active_history,
         has_untrusted_result_since_latest_user_message,
+        is_direct_user_message,
         is_read_only_external_followup_tool,
+        is_untrusted_external_tool_result,
     )
+
+    def is_authorized_draft_after_required_skill_read(tc: ToolCall) -> bool:
+        """Allow only the guarded draft write required by the canonical skill flow."""
+        if tc["name"] != "write_custom_tool":
+            return False
+        if not has_capability_draft_authorization(state):
+            return False
+
+        fresh_sources: set[str] = set()
+        for message in reversed(state["messages"]):
+            if is_direct_user_message(message):
+                break
+            if (
+                getattr(message, "type", "") == "tool"
+                and is_untrusted_external_tool_result(message, state["messages"])
+            ):
+                fresh_sources.add(str(getattr(message, "name", "")))
+        return fresh_sources == {"read_agent_skill"}
+
     if has_untrusted_result_since_latest_user_message(state["messages"]):
         for tc in tool_calls:
             if (
                 not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
+                and not is_authorized_draft_after_required_skill_read(tc)
                 and not _is_accepted_routine_messenger_draft_creation(
                     tc,
                     prior_messages,

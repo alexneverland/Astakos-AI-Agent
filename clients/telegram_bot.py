@@ -1585,6 +1585,10 @@ def _enqueue_capability_gap_telegram(user_text: str, ai_text: str, agent: str, c
     if not description:
         return
 
+    from core.capability_draft import is_capability_proposal_text
+    if is_capability_proposal_text(ai_text):
+        return
+
     from memory.conversation_history import load_messages_after_rowid
     newer = load_messages_after_rowid(after_rowid=correlation_rowid, channel=channel)
     if any(m.get("role") == "user" for m in newer):

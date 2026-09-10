@@ -21,6 +21,7 @@ def mock_dependencies(monkeypatch):
     monkeypatch.setattr("api.server.append_to_chat_history", mocks["append_chat"])
     monkeypatch.setattr("clients.telegram_bot._send_and_record_assistant", mocks["send_and_record"])
     monkeypatch.setattr("core.i18n.t", mocks["t"])
+    monkeypatch.setattr("core.capability_draft.t", mocks["t"])
     return mocks
 
 def test_web_wrapper_emits_proposal_when_no_newer_user_message(mock_dependencies):
@@ -37,6 +38,18 @@ def test_web_wrapper_emits_nothing_when_newer_user_message_exists(mock_dependenc
     mock_dependencies["load_messages"].return_value = [{"role": "user", "content": "newer"}]
     _enqueue_capability_gap_web("user text", "ai text", "Chat_Agent", "web", 100)
     mock_dependencies["load_messages"].assert_called_once_with(after_rowid=100, channel="web")
+    mock_dependencies["append_chat"].assert_not_called()
+
+
+def test_web_wrapper_does_not_duplicate_an_agent_capability_proposal(mock_dependencies):
+    _enqueue_capability_gap_web(
+        "βιντεο μπορεις?",
+        "[23:47] New tool proposal: I can build a video generator.",
+        "Chat_Agent",
+        "web",
+        100,
+    )
+
     mock_dependencies["append_chat"].assert_not_called()
 
 def test_telegram_wrapper_records_only_after_send_success(mock_dependencies):
@@ -59,6 +72,19 @@ def test_telegram_wrapper_emits_nothing_for_duplicate_or_stale(mock_dependencies
     mock_dependencies["load_messages"].return_value = []
     mock_dependencies["update_caps"].return_value = None
     _enqueue_capability_gap_telegram("user text", "ai text", "Chat_Agent", "telegram", 100, "chat123")
+    mock_dependencies["send_and_record"].assert_not_called()
+
+
+def test_telegram_wrapper_does_not_duplicate_an_agent_capability_proposal(mock_dependencies):
+    _enqueue_capability_gap_telegram(
+        "can you make videos?",
+        "[23:47] New tool proposal: I can build a video generator.",
+        "Chat_Agent",
+        "telegram",
+        100,
+        "chat123",
+    )
+
     mock_dependencies["send_and_record"].assert_not_called()
 
 def test_detector_returns_description_only_for_newly_inserted_cannot_do(monkeypatch):

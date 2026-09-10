@@ -69,6 +69,51 @@ def test_supervisor_routes_to_dev_agent_with_timestamp_prefix(mock_safe_llm_invo
 
 @patch("core.capability_lookup.lookup_agent")
 @patch("core.agents.safe_llm_invoke")
+def test_supervisor_keeps_ambiguous_reply_out_of_dev_after_capability_proposal(
+    mock_safe_llm_invoke, mock_lookup_agent
+):
+    """Only the canonical draft authorization may continue a capability proposal."""
+    i18n.load_locale("el")
+    mock_lookup_agent.return_value = None
+    mock_safe_llm_invoke.return_value = Router(next_agent="Dev_Agent")
+    state = {
+        "messages": [
+            AIMessage(content=(
+                "[23:47] Πρόταση νέου εργαλείου: Μπορούμε να φτιάξουμε "
+                "ένα εργαλείο παραγωγής βίντεο."
+            )),
+            HumanMessage(content="για γραψε να σε δω"),
+        ]
+    }
+
+    result = supervisor_node(state)
+
+    assert result["next_agent"] == "Chat_Agent"
+    mock_safe_llm_invoke.assert_not_called()
+
+
+@patch("core.capability_lookup.lookup_agent")
+@patch("core.agents.safe_llm_invoke")
+def test_supervisor_accepts_explicit_greek_draft_authorization_after_proposal(
+    mock_safe_llm_invoke, mock_lookup_agent
+):
+    i18n.load_locale("el")
+    mock_lookup_agent.return_value = None
+    state = {
+        "messages": [
+            AIMessage(content="Πρόταση νέου εργαλείου: εργαλείο παραγωγής βίντεο."),
+            HumanMessage(content="φτιάξε draft"),
+        ]
+    }
+
+    result = supervisor_node(state)
+
+    assert result["next_agent"] == "Dev_Agent"
+    mock_safe_llm_invoke.assert_not_called()
+
+
+@patch("core.capability_lookup.lookup_agent")
+@patch("core.agents.safe_llm_invoke")
 def test_supervisor_fallback_knows_natural_image_creation_uses_existing_web_tool(
     mock_safe_llm_invoke, mock_lookup_agent
 ):
