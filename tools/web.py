@@ -91,7 +91,11 @@ def _load_messenger_contacts() -> dict[str, str]:
         return {}
 
 
-def _resolve_messenger_target(target_entity: str) -> tuple[str | None, str]:
+def _resolve_messenger_target(
+    target_entity: str,
+    *,
+    contacts: dict[str, str] | None = None,
+) -> tuple[str | None, str]:
     """Resolve a supplied recipient to the canonical Messenger destination."""
     target = (target_entity or "").strip()
     normalized = remove_accents(target)
@@ -102,7 +106,7 @@ def _resolve_messenger_target(target_entity: str) -> tuple[str | None, str]:
     if target.startswith("http") or target.isdigit():
         return target, "direct target"
 
-    contacts = _load_messenger_contacts()
+    contacts = contacts if contacts is not None else _load_messenger_contacts()
     target_aliases = _messenger_target_aliases(target)
     for alias in contacts:
         alias_forms = _messenger_target_aliases(alias)
@@ -121,6 +125,22 @@ def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
     """Return whether one recipient resolves to a safe Messenger destination."""
     destination, reason = _resolve_messenger_target(target_entity)
     return destination is not None, reason
+
+
+def has_known_messenger_contact_reference(text: str) -> bool:
+    """Return whether text contains a recipient accepted by the canonical resolver."""
+    raw_text = str(text or "").strip()
+    if not raw_text:
+        return False
+    contacts = _load_messenger_contacts()
+    candidates = [raw_text] + [
+        token for token in re.findall(r"\w+", raw_text)
+        if len(remove_accents(token)) >= 3
+    ]
+    return any(
+        _resolve_messenger_target(candidate, contacts=contacts)[1] == "known contact"
+        for candidate in candidates
+    )
 
 
 def _messenger_targets_match(left: str, right: str) -> bool:

@@ -174,3 +174,16 @@ def test_messenger_target_resolver_preserves_sophia_phonetic_alias(monkeypatch):
     monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
 
     assert _resolve_messenger_target("Sophia") == ("123", "known contact")
+
+
+def test_contact_reference_reuses_canonical_partial_alias_matching(monkeypatch):
+    """Natural requests accept the same inflected contact form as draft persistence."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"νικος παπαδοπουλος": "123"},
+    )
+
+    assert has_known_messenger_contact_reference("Φτιάξε ένα όμορφο καλημέρα για τον Νίκο")
+    assert not has_known_messenger_contact_reference("Σε τρεις μέρες φεύγουμε Γεωργία")

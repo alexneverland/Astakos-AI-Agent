@@ -1,6 +1,9 @@
+import json
 import re
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from core.utils import (
     looks_like_web_tool_error,
@@ -765,8 +768,10 @@ def test_web_research_trim_supports_object_calls_without_model_copy():
     assert [call.id for call in trimmed.tool_calls] == ["t3"]
 
 
-def test_web_agent_hides_messenger_draft_tool_for_ordinary_turn(monkeypatch: Any) -> None:
-    """An ordinary Web turn cannot create a Messenger draft from conversational context."""
+def test_web_agent_keeps_reversible_draft_tool_available_for_natural_language(
+    monkeypatch: Any,
+) -> None:
+    """The Web LLM may interpret natural language without forcing a draft write."""
     from core.agents import web_agent_node
 
     bound_tool_names: list[str] = []
@@ -794,7 +799,8 @@ def test_web_agent_hides_messenger_draft_tool_for_ordinary_turn(monkeypatch: Any
         "channel": "telegram",
     })
 
-    assert "relay_local_payload" not in bound_tool_names
+    assert "relay_local_payload" in bound_tool_names
+    assert "execute_local_pipeline" in bound_tool_names
 
 
 def test_web_agent_exposes_messenger_draft_tool_for_explicit_request(monkeypatch: Any) -> None:
@@ -828,6 +834,119 @@ def test_web_agent_exposes_messenger_draft_tool_for_explicit_request(monkeypatch
 
     assert "relay_local_payload" in bound_tool_names
     assert "execute_local_pipeline" not in bound_tool_names
+
+
+def test_web_agent_exposes_reversible_draft_tool_for_natural_recipient_request(
+    monkeypatch: Any,
+) -> None:
+    """The Web LLM can persist a naturally phrased recipient-specific draft request."""
+    from core.agents import web_agent_node
+    from services.messenger_intent import classify_messenger_intent
+
+    bound_tool_names: list[str] = []
+    request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Web agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    assert classify_messenger_intent(request).intent == "general_chat"
+
+    web_agent_node({
+        "messages": [HumanMessage(content=request)],
+        "channel": "web",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+    assert "execute_local_pipeline" in bound_tool_names
+
+
+@pytest.mark.parametrize("existing_message", [None, "Παλιό μήνυμα"])
+def test_natural_recipient_request_persists_draft_through_chat_graph(
+    monkeypatch: Any,
+    tmp_path: Path,
+    existing_message: str | None,
+) -> None:
+    """The canonical Chat route creates or replaces a draft end to end."""
+    import config
+    from core.graph import build_graph
+    from services.messenger_intent import classify_messenger_intent
+
+    request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
+    draft_file = tmp_path / "messenger_draft.json"
+    draft_requested = False
+
+    class FakeBoundLLM:
+        """Issue one deterministic Messenger draft tool call, then finish."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a tool call only on the first Chat-agent invocation."""
+            nonlocal draft_requested
+            if draft_requested:
+                return AIMessage(content="Το αποθήκευσα.")
+            draft_requested = True
+            return AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "relay_local_payload",
+                    "args": {
+                        "target_entity": "Σοφία",
+                        "payload_data": "Καλημέρα αγάπη μου! Καλή δύναμη στη δουλειά.",
+                    },
+                    "id": "natural-draft",
+                }],
+            )
+
+    class FakeLLM:
+        """Provide deterministic routing and Chat tool selection."""
+
+        def with_structured_output(self, _schema: Any) -> "FakeLLM":
+            """Return self because registry routing avoids LLM routing output."""
+            return self
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Require the canonical Chat path to expose the draft writer."""
+            if not draft_requested:
+                assert "relay_local_payload" in {tool.name for tool in tools}
+            return FakeBoundLLM()
+
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr("core.capability_lookup.lookup_agent", lambda _text: "Chat_Agent")
+    monkeypatch.setattr("core.plan_judge.should_auto_plan", lambda _text: False)
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
+
+    assert classify_messenger_intent(request).intent == "general_chat"
+    if existing_message:
+        draft_file.write_text(
+            json.dumps({"target_name": "old", "message": existing_message, "status": "pending"}),
+            encoding="utf-8",
+        )
+
+    build_graph().invoke({
+        "messages": [HumanMessage(content=request)],
+        "channel": "web",
+    })
+
+    draft = json.loads(draft_file.read_text(encoding="utf-8"))
+    assert draft["target_name"] == "123"
+    assert draft["message"] == "Καλημέρα αγάπη μου! Καλή δύναμη στη δουλειά."
+    assert draft["status"] == "pending"
 
 
 def test_web_agent_does_not_recreate_draft_for_timestamped_bare_send(monkeypatch: Any) -> None:
@@ -927,7 +1046,6 @@ def test_web_agent_exposes_messenger_draft_tool_for_active_draft_edit(monkeypatc
         "core.messenger_draft.active_draft_status",
         lambda: (True, "active", {"message": "Initial draft"}),
     )
-
     web_agent_node({
         "messages": [
             HumanMessage(content="Γράψε ένα μήνυμα"),
@@ -973,6 +1091,7 @@ def test_web_agent_hides_messenger_draft_tool_for_unrelated_active_draft_turn(mo
         "core.messenger_draft.active_draft_status",
         lambda: (True, "active", {"message": "Initial draft"}),
     )
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
 
     web_agent_node({
         "messages": [HumanMessage(content="Σε τρεις μέρες φεύγουμε Γεωργία")],
@@ -1009,6 +1128,7 @@ def test_chat_agent_hides_messenger_draft_tool_for_unrelated_active_draft_turn(m
         "core.messenger_draft.active_draft_status",
         lambda: (True, "active", {"message": "Initial draft"}),
     )
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
 
     chat_agent_node({
         "messages": [HumanMessage(content="Σε τρεις μέρες φεύγουμε Γεωργία")],
