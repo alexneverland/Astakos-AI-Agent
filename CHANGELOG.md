@@ -29,7 +29,7 @@ Headline: **Astakos adds hands-free Jarvis-style conversations, provider-aware v
 ### Fixed
 
 - Kept long-running WebM microphone recordings structurally decodable and prevented Live Voice from listening over or interrupting Astakos playback.
-- Made silence, provider authentication, quota, and synthesis failures visible without unexpectedly ending an otherwise active Live Voice session.
+- Kept no-speech turns and text-to-speech HTTP failures from ending Live Voice, while surfacing provider authentication and quota errors to the user.
 - Corrected Telegram voice reply behavior, locale resolution, and provider-specific transcription handling.
 - Restored natural Messenger draft creation, replacement, routine-offer follow-ups, and approved send flows.
 - Reduced SQLite/semantic-memory lock contention and corrected behavioral observation retention, reminder/routine approvals, and local goal deletion.
