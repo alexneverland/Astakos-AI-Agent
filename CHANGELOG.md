@@ -15,8 +15,8 @@ Headline: **Astakos adds hands-free Jarvis-style conversations, provider-aware v
 
 - Jarvis-style Live Voice in the Web UI, with a configurable wake name, standby listening, and continuous conversation after wake-up.
 - Dedicated transcription and speech-synthesis paths for Vertex AI, Gemini API, and OpenAI. Voice can use a provider independently from chat, including when Anthropic powers chat.
-- Provider-routed image generation for supported Google and OpenAI configurations, with approval before generation.
-- Bounded, permission-aware tools that list recent project files and read approved source files while excluding secrets and runtime data.
+- Provider-routed image generation for supported Google and OpenAI configurations.
+- Bounded, permission-aware tools that list recent project files and read approved source files while blocking known credential, environment, database, and private-key paths.
 - Behavioral-pattern progress in the runtime dashboard, plus a Workspace reconnect control for expired or incomplete Google authorization.
 
 ### Changed
