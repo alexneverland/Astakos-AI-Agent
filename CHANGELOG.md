@@ -9,8 +9,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [v2.7.0] — 2026-09-11
 
-**Released: 2026-09-11**
-
 Headline: **Astakos adds hands-free Jarvis-style conversations, provider-aware voice and image generation, and safer access to approved local projects.**
 
 ### Added

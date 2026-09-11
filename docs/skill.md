@@ -32,7 +32,8 @@ Here is an example of how an AI Agent can use the native Astakos tools to intera
 ```python
 from tools.project_tools import list_project_files
 
-# Project tools require an approved root and keep reads bounded.
+# The user must first approve this root for read access through Astakos.
+# Project tools then keep reads bounded.
 result = list_project_files.invoke({
     "folder_path": r"C:\projects\example",
     "pattern": "**/*.py",
