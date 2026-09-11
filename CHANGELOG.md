@@ -7,6 +7,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v2.7.0] — 2026-09-11
+
+Headline: **Astakos adds hands-free Jarvis-style conversations, provider-aware voice and image generation, and safer access to approved local projects.**
+
+### Added
+
+- Jarvis-style Live Voice in the Web UI, with a configurable wake name, standby listening, and continuous conversation after wake-up.
+- Dedicated transcription and speech-synthesis paths for Vertex AI, Gemini API, and OpenAI. Voice can use a provider independently from chat, including when Anthropic powers chat.
+- Provider-routed image generation for supported Google and OpenAI configurations.
+- Bounded, permission-aware tools that list recent project files and read approved source files while blocking known credential, environment, database, and private-key paths.
+- Behavioral-pattern progress in the runtime dashboard, plus a Workspace reconnect control for expired or incomplete Google authorization.
+
+### Changed
+
+- The Setup Wizard now resolves chat, embeddings, and voice credentials independently and preserves valid shared credentials when providers change.
+- Telegram photo follow-ups keep visual analysis as bounded, untrusted context instead of exposing raw provider metadata in the conversation.
+- Capability proposals and development routing distinguish a new standalone request from an unapproved continuation of a proposed tool.
+- Messenger drafts can be created and revised through natural conversation while external delivery remains a separately approved action.
+
+### Fixed
+
+- Kept long-running WebM microphone recordings structurally decodable and prevented Live Voice from listening over or interrupting Astakos playback.
+- Kept no-speech turns and text-to-speech HTTP failures from ending Live Voice, while surfacing provider authentication and quota errors to the user.
+- Corrected Telegram voice reply behavior, locale resolution, and provider-specific transcription handling.
+- Restored natural Messenger draft creation, replacement, routine-offer follow-ups, and approved send flows.
+- Reduced SQLite/semantic-memory lock contention and corrected behavioral observation retention, reminder/routine approvals, and local goal deletion.
+- Updated `pypdf` to 6.16.1 for its September 2026 security fixes.
+- Excluded local Chromium profiles, debug recordings, and isolated pytest directories from Docker build contexts.
+
+### Security
+
+- Project-reading tools enforce approved roots, bounded output, and sensitive-path exclusions.
+- ChromaDB remains embedded and local in the supported Astakos deployment. Do not expose a Chroma HTTP server; upstream `chromadb` 1.5.9 advisories remain open without a patched PyPI release as of this release date.
+
+### Upgrade notes
+
+1. Back up `.env`, `credentials/`, SQLite databases, `chroma_db/`, uploads, and custom prompts before updating.
+2. Existing chat configuration continues to work. Leave **Voice Provider** on **Auto** to reuse Vertex, Gemini, or OpenAI chat credentials; Anthropic chat users must choose one of those providers explicitly for voice.
+3. Vertex voice synthesis uses Google Cloud Text-to-Speech. Enable that API for the configured project and service account.
+4. Release Docker users can pull the new image and restart:
+
+   ```bash
+   docker compose -f docker-compose.release.yml pull
+   docker compose -f docker-compose.release.yml up -d
+   ```
+
 ## [v2.6.1] — 2026-08-27
 
 **Released: 2026-08-27**

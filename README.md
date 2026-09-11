@@ -6,7 +6,7 @@
 
 **Download it, start it with Docker, choose your AI provider, and chat through the Web UI or Telegram.**
 
-Astakos remembers useful context, learns recurring routines, follows up naturally, creates files, uses tools, and keeps its long-term memory and runtime state on your machine.
+Astakos remembers useful context, learns recurring routines, follows up naturally, creates files and images, uses tools, supports Jarvis-style live voice, and keeps its long-term memory and runtime state on your machine.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Docker](https://img.shields.io/badge/Docker-Automatic_Updates-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
@@ -23,7 +23,7 @@ Astakos remembers useful context, learns recurring routines, follows up naturall
 
 The release deployment uses the official GHCR image and Watchtower. Watchtower checks for a newer image every five minutes, replaces only the application container, and preserves the Astakos data volume.
 
-Download `docker-compose.release.yml` from the **[Latest Release](https://github.com/alexneverland/Astakos-AI-Agent/releases/latest)**, place it in an empty folder, and run:
+Download the `docker-compose.release.yml` asset from the **[Latest Release](https://github.com/alexneverland/Astakos-AI-Agent/releases/latest)**, place it in an empty folder, and run:
 
 ```bash
 docker compose -f docker-compose.release.yml up -d
@@ -118,6 +118,7 @@ Most assistants wait for a prompt, forget the conversation, and start from zero 
 | **Uses real tools** | Files, Gmail, Calendar, web research, GitHub, local projects, reminders, and more. |
 | **Asks before risky actions** | SAFE, WARNING, NOTIFY, and CRITICAL approval levels control execution. |
 | **Works with multiple providers** | Vertex AI, Gemini API, OpenAI, and Anthropic. |
+| **Talks hands-free** | Live Voice waits for your chosen wake name, then continues the conversation naturally. |
 
 Astakos combines memory, agents, schedulers, approvals, analytics, and tools into one local-first system.
 
@@ -159,7 +160,17 @@ LangGraph routes work to specialized Chat, Home, Web, Tech, Git, Mail, and Dev a
 - Google Calendar and Drive workflows
 - web research, weather, places, and navigation
 - local project and GitHub actions
-- reminders, routines, files, documents, images, voice, receipts, stories, and health summaries
+- bounded reading of explicitly approved local projects
+- provider-aware image generation and voice input/output
+- reminders, routines, files, documents, receipts, stories, and health summaries
+
+### Live Voice
+
+Select **LIVE** in the Web UI to enter hands-free mode. While in standby,
+Astakos waits for the wake name configured in the Setup Wizard (for example,
+“Astakos”). After waking, you can continue the conversation without repeating
+the name before every sentence. Astakos pauses microphone capture while its own
+reply is playing so background audio does not interrupt it.
 
 ### Planning and safety
 
@@ -191,6 +202,13 @@ You control the machine, credentials, enabled integrations, and stored runtime s
 Only one provider is required to start.
 
 Semantic memory is configured independently in the Setup Wizard. Leave **Embeddings Provider** on **Auto** for Gemini API, OpenAI, or Vertex AI. Anthropic needs a separate Vertex, Gemini, OpenAI, or manually prepared Local E5 embeddings backend for long-term semantic memory. The complete choices, Google Workspace connection, and provider-switch behavior are in the [Beginner Setup Guide](SETUP_GUIDE.md).
+
+Voice is configured independently too. Leave **Voice Provider** on **Auto** to
+reuse Vertex AI, Gemini API, or OpenAI chat credentials. If Anthropic is your
+chat provider, select Vertex AI, Gemini API, or OpenAI for voice and provide
+that provider's credential. Vertex speech output uses Google Cloud
+Text-to-Speech, so that API must be enabled for the configured Google Cloud
+project. Gemini API and OpenAI voice use their corresponding API keys.
 
 ### Optional Gemini model selection
 

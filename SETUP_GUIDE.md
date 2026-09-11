@@ -23,7 +23,7 @@ Astakos supports these model providers:
 - **Anthropic** — requires an Anthropic API key.
 - **Vertex AI** — intended for Google Cloud users; requires a project and credentials JSON.
 
-You only need **one chat provider** to start. Gemini API, OpenAI, and Vertex AI can also provide semantic-memory embeddings automatically. Anthropic can run chat by itself, but semantic memory needs a second embeddings provider or the optional local model described below.
+You only need **one chat provider** to start. Gemini API, OpenAI, and Vertex AI can also provide semantic-memory embeddings and voice automatically. Anthropic can run chat by itself, but semantic memory and voice need a compatible second provider as described below.
 
 > Want automatic Docker image updates instead of building from source? Download `docker-compose.release.yml` from the [latest release](https://github.com/alexneverland/Astakos-AI-Agent/releases/latest), place it in an empty folder, and run `docker compose -f docker-compose.release.yml up -d`. The full release-image instructions are in the [README](README.md#recommended-docker-with-automatic-updates).
 
@@ -79,10 +79,11 @@ Astakos will show the Web Setup Wizard when it has not been configured yet.
 
 ## Step 4 — Complete the Setup Wizard
 
-Choose a **Chat Provider** and enter its credential. Then choose an **Embeddings Provider** for long-term semantic memory:
+Choose a **Chat Provider** and enter its credential. Then choose an **Embeddings Provider** for long-term semantic memory and a **Voice Provider** for transcription and spoken replies:
 
 - For Gemini API, OpenAI, or Vertex AI, leave Embeddings Provider on **Auto** for the simplest setup.
 - For Anthropic, choose Vertex AI, Gemini API, OpenAI, or Local Multilingual E5 explicitly. Anthropic does not offer native embeddings.
+- Leave Voice Provider on **Auto** when chat uses Vertex AI, Gemini API, or OpenAI. With Anthropic chat, explicitly choose one of those three voice providers and provide its credential.
 - Telegram is optional. You can save and use the Web UI first, then add a BotFather token and your Telegram chat ID later.
 
 The wizard's diagnostics show whether chat, semantic memory, and optional Google Workspace integrations are ready. A missing embeddings provider does not stop basic chat and tools, but long-term semantic recall remains unavailable until it is configured.
@@ -138,6 +139,27 @@ Embeddings power meaning-based recall of saved facts, conversations, documents, 
 | **Local Multilingual E5** | Advanced manual installations that require local embeddings | `sentence-transformers` plus a model downloaded locally. |
 
 Astakos never silently chooses a different cloud provider and never downloads a local model by itself.
+
+### Voice and Live Voice
+
+Voice input and spoken replies are independent from semantic-memory embeddings.
+
+| Choice | Credentials and behavior |
+|---|---|
+| **Auto** | Reuses Vertex AI, Gemini API, or OpenAI when that provider powers chat. |
+| **Vertex AI** | Uses dedicated Google transcription and Google Cloud Text-to-Speech with the mounted service-account JSON. Enable the Cloud Text-to-Speech API for the project. |
+| **Gemini API** | Uses the Gemini API key for transcription and speech synthesis. |
+| **OpenAI** | Uses the OpenAI API key for transcription and speech synthesis. |
+
+The Setup Wizard also lets you choose the **Live Voice wake name**. In the Web
+UI, select **LIVE** and say that name once while Astakos is in standby. After it
+wakes, the conversation continues without requiring the name before every
+sentence. Microphone capture pauses while Astakos speaks and resumes afterward.
+
+If a provider is unauthorized, over quota, or missing a required API, Web Live
+Voice shows the provider error and keeps the text reply available. For Vertex
+speech failures, first verify the mounted service-account path, project,
+location, permissions, and that Cloud Text-to-Speech is enabled.
 
 #### Local Multilingual E5 (advanced, manual Python setup)
 
