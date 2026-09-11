@@ -44,8 +44,11 @@ tmp/
 _cleaner_backups/
 .pytest_cache/
 .pytest_tmp/
+.pytest_tmp*/
 __pycache__/
 *.backup
+debug_voice.webm
+astakos_skills/messenger_profile/
 
 # MacOS
 .DS_Store

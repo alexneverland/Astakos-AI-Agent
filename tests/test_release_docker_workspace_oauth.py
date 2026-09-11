@@ -26,3 +26,17 @@ def test_release_compose_keeps_workspace_token_storage_writable() -> None:
     assert 'export ASTAKOS_TOKEN_PATH="$workspace_token_path"' in entrypoint
     assert 'cp "$legacy_token_path" "$workspace_token_path"' in entrypoint
     assert "--exclude 'workspace_oauth/'" in entrypoint
+
+
+def test_docker_build_context_excludes_local_browser_and_voice_artifacts() -> None:
+    """Docker images must never receive local browser state or debug recordings."""
+    dockerignore_path = Path(__file__).resolve().parents[1] / ".dockerignore"
+    ignored = {
+        line.strip()
+        for line in dockerignore_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert "astakos_skills/messenger_profile/" in ignored
+    assert "debug_voice.webm" in ignored
+    assert ".pytest_tmp*/" in ignored

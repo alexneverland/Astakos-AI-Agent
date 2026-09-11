@@ -10,8 +10,10 @@ description: A modular, local-first, LLM-agnostic multi-agent companion framewor
 - Smart Integrations: Control IoT devices (Vacuum), manage Google Calendar, generate/upload files to Google Drive, and parse receipts/product labels.
 
 ## Required inputs
-- API Keys: GEMINI_API_KEY, TELEGRAM_TOKEN
-- Local Configuration: `.env` setup with standard tokens
+- One chat provider: Vertex AI credentials, `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`
+- Local configuration completed through the Setup Wizard or `.env`
+- Optional: `TELEGRAM_TOKEN` and `TELEGRAM_CHAT_ID` for Telegram
+- Optional: a separate embeddings or voice provider when the chat provider does not supply that capability
 
 ## Constraints
 - Local-first execution: All `.db` and memory states reside strictly on the local machine.
@@ -19,18 +21,21 @@ description: A modular, local-first, LLM-agnostic multi-agent companion framewor
 - Approval Gates: All CRITICAL operations (e.g. `write_code`, `push_git`) require explicit Telegram approval before execution.
 
 ## Key documentation
-- [README.md](/README.md): Full overview of the architecture and roadmap
-- [AGENTS.md](/AGENTS.md): Coding rules and AI workflow instructions
-- [llms.txt](/llms.txt): Discovery map for AI agents
+- [README.md](../README.md): Full overview of the architecture and setup
+- [SETUP_GUIDE.md](../SETUP_GUIDE.md): Provider, voice, Docker, and integration setup
+- [AGENTS.md](../AGENTS.md): Coding rules and AI workflow instructions
+- [llms.txt](../llms.txt): Discovery map for AI agents
 
 ## Example Usage
 Here is an example of how an AI Agent can use the native Astakos tools to interact with the project:
 
 ```python
-from tools.system import execute_shell_command
+from tools.project_tools import list_project_files
 
-# DO NOT use raw sqlite3 to touch memory! Use the abstractions:
-# The following is just an example of executing a safe command via Astakos.
-result = execute_shell_command("echo 'Hello Astakos'")
+# Project tools require an approved root and keep reads bounded.
+result = list_project_files.invoke({
+    "folder_path": r"C:\projects\example",
+    "pattern": "**/*.py",
+})
 print(result)
 ```

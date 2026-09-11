@@ -3,7 +3,10 @@
 > A local-first, LLM-agnostic multi-agent framework orchestrating proactive habits, routines, and a hybrid memory model (ChromaDB + SQLite).
 
 ## Overview
-- [README.md](/README.md): Architecture, features, and setup instructions
+- [README.md](/README.md): Architecture, current features, and Docker quick start
+- [Beginner Setup Guide](/SETUP_GUIDE.md): Chat, embeddings, voice, Workspace, Docker, and manual setup
+- [Changelog](/CHANGELOG.md): Versioned user-visible changes and upgrade notes
+- [Security Policy](/SECURITY.md): Supported versions, deployment boundary, and private reporting
 
 ## Architecture
 - [Core Framework](/core): LangGraph state machine, Agent definitions, Planner v2, and Event Bus
@@ -16,3 +19,8 @@
 
 ## Configuration
 - [Config](/config.py): Environment variables, path definitions, and feature toggles (DO NOT EDIT directly unless asked)
+
+Chat supports Vertex AI, Gemini API, OpenAI, and Anthropic. Embeddings and voice
+are separate capabilities selected in the Setup Wizard. Live Voice supports a
+configurable wake name; Anthropic chat requires Vertex, Gemini, or OpenAI for
+voice input and output.
