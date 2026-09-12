@@ -120,6 +120,43 @@ def test_web_agent_node_overrides_hallucinated_answer_when_all_web_tools_fail(mo
     assert "δεν θέλω να σου πω" in reply
     assert "αξιόπιστο αποτέλεσμα" in reply
 
+
+def test_web_agent_node_surfaces_unverified_search_links_without_llm_synthesis(monkeypatch):
+    """Link-only search fallback is shown directly and never treated as evidence."""
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="Βρήκα επιβεβαιωμένες ενεργές αγγελίες.")
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *a, **k: "test prompt", raising=False)
+
+    fallback = (
+        "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]\n"
+        "Δεν μπόρεσα να επιβεβαιώσω αποτελέσματα.\n"
+        "Ζωντανή αναζήτηση Google: https://www.google.com/search?q=test\n"
+        "Ζωντανή αναζήτηση Bing: https://www.bing.com/search?q=test"
+    )
+    state = {
+        "messages": [
+            HumanMessage(content="Βρες μου αγγελίες"),
+            AIMessage(content="", tool_calls=[{"name": "duckduckgo_search", "args": {}, "id": "t1"}]),
+            ToolMessage(tool_call_id="t1", name="duckduckgo_search", content=fallback),
+        ],
+        "channel": "telegram",
+    }
+
+    result = web_agent_node(state)
+    reply = result["messages"][-1].content
+
+    assert "επιβεβαιωμένες ενεργές αγγελίες" not in reply
+    assert "https://www.google.com/search?q=test" in reply
+    assert "https://www.bing.com/search?q=test" in reply
+    assert "[WEB_TOOL_ERROR]" not in reply
+
 def test_web_agent_node_does_not_override_when_one_web_tool_succeeds(monkeypatch):
     class FakeBoundLLM:
         def invoke(self, messages):

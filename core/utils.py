@@ -1019,6 +1019,13 @@ def filter_recent_web_tool_results(messages: list) -> list:
     return results
 
 def build_web_failure_reply(user_text: str, tool_results: list) -> str:
+    fallback_marker = "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]"
+    for _, result_text in tool_results:
+        if fallback_marker in result_text:
+            _, separator, visible_text = result_text.partition("\n")
+            if separator and visible_text.strip():
+                return visible_text.strip()
+
     qty_intents = list(UTILS_QTY_INTENTS)
     is_qty = any(w in user_text.lower() for w in qty_intents)
     kind = t("prompts.ext_str_115") if is_qty else t("prompts.ext_str_243")

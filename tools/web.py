@@ -758,15 +758,16 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
 
     Use the requested count, capped at 10.
     Use 10 only when no smaller count was specified. For a specific URL always
-    use ``browse_url``.
+    use ``browse_url``. If providers cannot verify results, return clearly
+    marked unverified live search links instead of treating links as evidence.
     """
     from ddgs import DDGS
     from ddgs.exceptions import RatelimitException, TimeoutException, DDGSException
     from services.gemini import safe_gemini_call
 
-    # Avoid the unbounded ``auto`` cascade while retaining independent recovery
-    # engines. Each attempt has a short timeout and stops once enough results exist.
-    backends_to_try = ["duckduckgo", "google", "bing", "brave"]
+    # Keep one fixed four-attempt budget across the original and alternate query.
+    primary_backends = ["duckduckgo", "google"]
+    recovery_backends = ["bing", "brave"]
 
     try:
         requested_count = max(1, min(int(max_results), 10))
@@ -784,7 +785,7 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
             (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
         )
 
-    def _run_ddgs(q: str, phase: str) -> bool:
+    def _run_ddgs(q: str, phase: str, backends: list[str]) -> bool:
         """
         Executes search queries against pinned DDGS backends.
 
@@ -796,7 +797,7 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
             Whether at least one backend responded, even if it had no results.
         """
         had_backend_response = False
-        for backend in backends_to_try:
+        for backend in backends:
             if len(collected) >= requested_count:
                 break
             try:
@@ -867,18 +868,26 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
     def _format_fallback_links() -> str:
         """Return honest live-search links when result providers are unavailable."""
         encoded_query = urllib.parse.quote_plus(query)
-        return t(
+        links = t(
             "tools.web.search_fallback_links",
             query=query,
             google_url=f"https://www.google.com/search?q={encoded_query}",
             bing_url=f"https://www.bing.com/search?q={encoded_query}",
         )
+        return (
+            "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]\n"
+            f"{links}"
+        )
 
-    original_responded = _run_ddgs(query, "Original")
+    original_responded = _run_ddgs(query, "Original", primary_backends)
     if len(collected) >= requested_count:
         return _format_collected()
-    if not original_responded and not collected:
-        print("[Web Search]: All original DDGS backends failed; returning live search links.")
+    if not original_responded:
+        print("[Web Search]: Primary DDGS backends failed; trying recovery backends directly.")
+        _run_ddgs(query, "Original recovery", recovery_backends)
+        if collected:
+            return _format_collected()
+        print("[Web Search]: All DDGS backends failed; returning live search links.")
         return _format_fallback_links()
 
     try:
@@ -904,7 +913,7 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
             print("[Web Search]: English fallback skipped because Gemini returned invalid JSON.")
             if collected:
                 return _format_collected()
-            return _format_fallback_links()
+            raise ValueError("Invalid JSON")
 
         if not isinstance(data, dict) or len(data) != 1 or "query" not in data:
             print("[Web Search]: English fallback skipped because Gemini returned an invalid JSON structure.")
@@ -924,11 +933,14 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
 
         print("[Web Search]: Gemini produced an English fallback query; retrying DDGS.")
         before_fallback = len(collected)
-        _run_ddgs(english_query, "English fallback")
+        _run_ddgs(english_query, "English fallback", recovery_backends)
         if len(collected) == before_fallback:
             print("[Web Search]: English fallback DDGS retry produced no valid results.")
     except Exception as exc:
         print(f"[Web Search]: English fallback failed before retry ({type(exc).__name__}).")
+        if not collected:
+            print("[Web Search]: Trying recovery backends with the original query.")
+            _run_ddgs(query, "Original recovery", recovery_backends)
 
     if collected:
         return _format_collected()

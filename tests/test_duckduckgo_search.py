@@ -90,7 +90,7 @@ def test_ddgs_preserves_partial_results_when_later_attempts_fail() -> None:
 
         assert "Only result" in res
         assert "WEB_TOOL_ERROR" not in res
-        assert mock_instance.text.call_count == 8
+        assert mock_instance.text.call_count == 4
         mock_gemini.assert_called_once()
 
 
@@ -122,25 +122,21 @@ def test_ddgs_placeholder_only_triggers_fallback(capsys: Any) -> None:
 
         mock_gemini.assert_called_once()
 
-        assert mock_instance.text.call_count == 8
+        assert mock_instance.text.call_count == 4
         calls = mock_instance.text.call_args_list
-        # original pass
+        # Two primary attempts, then two recovery attempts for the rewrite.
         assert calls[0][0][0] == "δοκιμή"
         assert calls[0][1]["backend"] == "duckduckgo"
         assert calls[1][0][0] == "δοκιμή"
         assert calls[1][1]["backend"] == "google"
+        assert calls[2][0][0] == "test"
         assert calls[2][1]["backend"] == "bing"
+        assert calls[3][0][0] == "test"
         assert calls[3][1]["backend"] == "brave"
-        # fallback pass aggregates the same bounded recovery backends
-        assert calls[4][0][0] == "test"
-        assert calls[4][1]["backend"] == "duckduckgo"
-        assert calls[5][1]["backend"] == "google"
-        assert calls[6][1]["backend"] == "bing"
-        assert calls[7][1]["backend"] == "brave"
         output = capsys.readouterr().out
         assert "Original query incomplete; requesting an alternate English search query." in output
         assert "Gemini produced an English fallback query; retrying DDGS." in output
-        assert "English fallback DDGS search succeeded via duckduckgo" in output
+        assert "English fallback DDGS search succeeded via bing" in output
 
 
 def test_ddgs_fallback_failure_returns_live_search_links(capsys: Any) -> None:
@@ -158,10 +154,10 @@ def test_ddgs_fallback_failure_returns_live_search_links(capsys: Any) -> None:
 
         assert "https://www.google.com/search" in res
         assert "https://www.bing.com/search" in res
-        assert "WEB_TOOL_ERROR" not in res
+        assert "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]" in res
 
-        # 4 original backend attempts + 4 fallback backend attempts
-        assert mock_instance.text.call_count == 8
+        # Two primary attempts plus two rewritten-query recovery attempts.
+        assert mock_instance.text.call_count == 4
         assert "English fallback DDGS retry produced no valid results." in capsys.readouterr().out
 
 
@@ -209,11 +205,11 @@ def test_ddgs_gemini_strict_validation_fails_closed(
 
         res = duckduckgo_search.invoke({"query": "δοκιμή"})
 
-        # 4 original attempts only, no fallback attempts
+        # Two primary attempts plus two direct recovery attempts.
         assert mock_instance.text.call_count == 4
         mock_gemini.assert_called_once()
         assert "https://www.google.com/search" in res
-        assert "WEB_TOOL_ERROR" not in res
+        assert "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]" in res
         assert expected_log in capsys.readouterr().out
 
 
@@ -230,7 +226,7 @@ def test_ddgs_same_query_gemini_fails_closed(capsys: Any) -> None:
 
         res = duckduckgo_search.invoke({"query": "δοκιμή"})
 
-        # 4 original attempts only
+        # Two primary attempts plus two direct recovery attempts.
         assert mock_instance.text.call_count == 4
         mock_gemini.assert_called_once()
         assert "https://www.google.com/search" in res
@@ -273,7 +269,7 @@ def test_ddgs_rewrites_latin_query_when_all_original_attempts_are_empty() -> Non
         mock_instance = MagicMock()
 
         def mock_text(query: str, max_results: int, backend: str) -> list[dict[str, str]]:
-            if query == "warehouse logistics jobs Thessaloniki" and backend == "duckduckgo":
+            if query == "warehouse logistics jobs Thessaloniki" and backend == "bing":
                 return [{
                     "title": "Alternate result",
                     "href": "https://example.com/alternate",
@@ -311,6 +307,31 @@ def test_ddgs_returns_live_search_links_after_complete_provider_failure() -> Non
 
         assert "https://www.google.com/search?q=logistics+manager+Thessaloniki" in res
         assert "https://www.bing.com/search?q=logistics+manager+Thessaloniki" in res
-        assert "WEB_TOOL_ERROR" not in res
+        assert "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]" in res
         assert mock_instance.text.call_count == 4
         mock_gemini.assert_not_called()
+
+
+def test_ddgs_caps_backend_attempts_across_original_and_rewritten_queries() -> None:
+    """The alternate-query path shares one four-attempt backend budget."""
+    with patch("ddgs.DDGS") as mock_ddgs, \
+         patch("services.gemini.safe_gemini_call") as mock_gemini:
+
+        mock_instance = MagicMock()
+        mock_instance.text.return_value = []
+        mock_ddgs.return_value.__enter__.return_value = mock_instance
+        mock_gemini.return_value = MockMastroResponse(
+            json.dumps({"query": "warehouse logistics jobs Thessaloniki"})
+        )
+
+        duckduckgo_search.invoke({
+            "query": "linkedin logistic manager thessaloniki",
+            "max_results": 10,
+        })
+
+        assert mock_instance.text.call_count == 4
+
+
+def test_ddgs_docstring_documents_unverified_live_link_fallback() -> None:
+    """Tool metadata tells callers that provider failure returns unverified links."""
+    assert "unverified live search links" in duckduckgo_search.description
