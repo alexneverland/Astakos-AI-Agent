@@ -163,3 +163,27 @@ def test_plain_price_query_keeps_supermarket_price_route() -> None:
     reload_registry()
 
     assert lookup_agent("Πες μου τιμή για καρέκλα γραφείου.") == "Home_Agent"
+
+
+def test_linkedin_job_search_is_safe_web_search(capsys) -> None:
+    """A platform mention in a job search must not select post publication."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent(
+        "βρεσ μου αγγελιεσ στο linkedin gia logistic manager θεσσαλονικι"
+    ) == "Web_Agent"
+    output = capsys.readouterr().out
+    assert "(web_search)" in output
+    assert "(linkedin_post)" not in output
+
+
+def test_linkedin_post_creation_still_routes_to_post_capability(capsys) -> None:
+    """An explicit LinkedIn post request retains the publication workflow."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent("γράψε post στο linkedin για τη νέα έκδοση") == "Web_Agent"
+    assert "(linkedin_post)" in capsys.readouterr().out

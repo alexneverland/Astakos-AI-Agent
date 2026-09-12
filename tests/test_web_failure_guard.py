@@ -803,6 +803,37 @@ def test_web_agent_keeps_reversible_draft_tool_available_for_natural_language(
     assert "execute_local_pipeline" in bound_tool_names
 
 
+def test_web_agent_hides_messenger_draft_tool_for_registered_web_search(
+    monkeypatch: Any,
+) -> None:
+    """A safe Web-search route must not expose an unrelated draft mutation."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        def invoke(self, messages: Any) -> AIMessage:
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    web_agent_node({
+        "messages": [HumanMessage(
+            content="βρεσ μου αγγελιεσ στο linkedin gia logistic manager θεσσαλονικι"
+        )],
+        "channel": "web",
+    })
+
+    assert "duckduckgo_search" in bound_tool_names
+    assert "relay_local_payload" not in bound_tool_names
+
+
 def test_web_agent_exposes_messenger_draft_tool_for_explicit_request(monkeypatch: Any) -> None:
     """A direct request to compose a message retains the Messenger draft flow."""
     from core.agents import web_agent_node

@@ -725,9 +725,12 @@ def browse_url(url: str) -> str:
     except Exception as e:
         return t("tools.web.browse_error", error=str(e)) 
 @tool
-def duckduckgo_search(query: str) -> str:
-    """Web search.
-    FOR A SPECIFIC URL ALWAYS use browse_url."""
+def duckduckgo_search(query: str, max_results: int = 5) -> str:
+    """Search the Web and return up to 10 unique results.
+
+    Use ``max_results=10`` when the user asks for a list or as many useful
+    results as possible. For a specific URL always use ``browse_url``.
+    """
     from ddgs import DDGS
     from ddgs.exceptions import RatelimitException, TimeoutException, DDGSException
     from services.gemini import safe_gemini_call
@@ -737,7 +740,23 @@ def duckduckgo_search(query: str) -> str:
     # verified backends (verified live: duckduckgo ~1s, google ~0.5s) with 1 fallback.
     backends_to_try = ["duckduckgo", "google"]
 
-    def _run_ddgs(q: str, phase: str) -> tuple[str | None, str | None]:
+    try:
+        requested_count = max(1, min(int(max_results), 10))
+    except (TypeError, ValueError):
+        requested_count = 5
+
+    collected: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+
+    def _canonical_url(url: str) -> str:
+        """Normalize a result URL for cross-backend deduplication."""
+        parts = urllib.parse.urlsplit(url.strip())
+        path = parts.path.rstrip("/") or "/"
+        return urllib.parse.urlunsplit(
+            (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
+        )
+
+    def _run_ddgs(q: str, phase: str) -> str | None:
         """
         Executes search queries against pinned DDGS backends.
 
@@ -746,18 +765,24 @@ def duckduckgo_search(query: str) -> str:
             phase: A diagnostic label for the original or fallback attempt.
 
         Returns:
-            A tuple of (formatted_results, error_message).
-            If successful, error_message is None. If failed, formatted_results is None.
+            The last backend error, or ``None`` when no backend failed.
         """
         last_error = t("tools.web.search_err_unknown")
         for backend in backends_to_try:
+            if len(collected) >= requested_count:
+                break
             try:
                 with DDGS(timeout=8) as ddgs:
-                    results = list(ddgs.text(q, max_results=5, backend=backend))
+                    results = list(ddgs.text(
+                        q,
+                        max_results=requested_count,
+                        backend=backend,
+                    ))
                 if results:
-                    output = []
                     valid_count = 0
                     for r in results:
+                        if len(collected) >= requested_count:
+                            break
                         if not isinstance(r, dict):
                             continue
                         title = r.get("title")
@@ -768,18 +793,26 @@ def duckduckgo_search(query: str) -> str:
                             href = href.strip()
                             body = body.strip()
                             if title and href and body:
+                                canonical_url = _canonical_url(href)
+                                if canonical_url in seen_urls:
+                                    continue
+                                seen_urls.add(canonical_url)
                                 valid_count += 1
-                                output.append(t("tools.web.search_format_result", title=title, href=href, body=body))
+                                collected.append({
+                                    "title": title,
+                                    "href": href,
+                                    "body": body,
+                                })
                     if valid_count > 0:
                         print(
                             f"[Web Search]: {phase} DDGS search succeeded via "
                             f"{backend} ({valid_count} valid results)."
                         )
-                        return "\n---\n".join(output), None
-                    print(
-                        f"[Web Search]: {phase} DDGS result from {backend} "
-                        "contained no valid entries."
-                    )
+                    else:
+                        print(
+                            f"[Web Search]: {phase} DDGS result from {backend} "
+                            "contained no valid entries."
+                        )
                 last_error = t("tools.web.search_err_empty")
             except RatelimitException:
                 last_error = "rate limit"
@@ -793,14 +826,28 @@ def duckduckgo_search(query: str) -> str:
             except Exception as e:
                 last_error = str(e)
                 print(f"[Web Search]: {phase} DDGS backend {backend} failed unexpectedly.")
-        return None, last_error
+        return last_error
 
-    result_text, err = _run_ddgs(query, "Original")
-    if result_text is not None:
-        return result_text
+    def _format_collected() -> str:
+        """Format collected results through the existing localized template."""
+        return "\n---\n".join(
+            t(
+                "tools.web.search_format_result",
+                title=result["title"],
+                href=result["href"],
+                body=result["body"],
+            )
+            for result in collected[:requested_count]
+        )
+
+    err = _run_ddgs(query, "Original")
+    if len(collected) >= requested_count:
+        return _format_collected()
 
     if not re.search(r'[\u0370-\u03FF\u1F00-\u1FFF]', query):
         print("[Web Search]: English fallback skipped because the original query has no Greek characters.")
+        if collected:
+            return _format_collected()
         return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
 
     try:
@@ -823,6 +870,8 @@ def duckduckgo_search(query: str) -> str:
             data = json.loads(json_payload)
         except json.JSONDecodeError:
             print("[Web Search]: English fallback skipped because Gemini returned invalid JSON.")
+            if collected:
+                return _format_collected()
             return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
 
         if not isinstance(data, dict) or len(data) != 1 or "query" not in data:
@@ -842,14 +891,15 @@ def duckduckgo_search(query: str) -> str:
             raise ValueError("Same query")
 
         print("[Web Search]: Gemini produced an English fallback query; retrying DDGS.")
-        fallback_text, fallback_err = _run_ddgs(english_query, "English fallback")
-        if fallback_text is not None:
-            return fallback_text
-        err = fallback_err
-        print("[Web Search]: English fallback DDGS retry produced no valid results.")
+        before_fallback = len(collected)
+        err = _run_ddgs(english_query, "English fallback")
+        if len(collected) == before_fallback:
+            print("[Web Search]: English fallback DDGS retry produced no valid results.")
     except Exception as exc:
         print(f"[Web Search]: English fallback failed before retry ({type(exc).__name__}).")
 
+    if collected:
+        return _format_collected()
     return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
 @tool
 def search_supermarket_prices(query: str) -> str:

@@ -1011,6 +1011,12 @@ def web_agent_node(state: AgentState):
         morning_briefing, hn_briefing,
     ]
     draft_tool_reason = None
+    from core.capability_lookup import resolve_capability
+    resolved_capability = resolve_capability(latest_user_text)
+    is_registered_web_search = (
+        resolved_capability is not None
+        and resolved_capability.get("name") == "web_search"
+    )
     if is_create_draft_intent(latest_user_text):
         draft_tool_reason = "explicit_create"
     elif has_accepted_routine_draft_offer(
@@ -1022,6 +1028,7 @@ def web_agent_node(state: AgentState):
         draft_tool_reason = "active_draft_edit"
     elif (
         latest_user_text
+        and not is_registered_web_search
         and getattr(history[-1], "type", "") == "human"
         and (
             not active_messenger_draft

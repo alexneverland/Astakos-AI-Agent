@@ -10,24 +10,30 @@ class MockMastroResponse:
         """Initializes a mock response with the given text payload."""
         self.text = text
 
-def test_ddgs_valid_original_returns_directly() -> None:
-    """Ensures valid DDGS results are returned directly without calling Gemini."""
+def test_ddgs_aggregates_unique_results_until_requested_count() -> None:
+    """Collect unique results across backends until the requested count is met."""
     with patch("ddgs.DDGS") as mock_ddgs, \
          patch("services.gemini.safe_gemini_call") as mock_gemini:
 
         mock_instance = MagicMock()
-        mock_instance.text.return_value = [
-            {"title": "Test Title", "href": "http://test.com", "body": "Test body"}
+        mock_instance.text.side_effect = [
+            [{"title": "First", "href": "https://example.com/jobs/1", "body": "One"}],
+            [
+                {"title": "Duplicate", "href": "https://example.com/jobs/1/", "body": "Same"},
+                {"title": "Second", "href": "https://example.com/jobs/2", "body": "Two"},
+            ],
         ]
         mock_ddgs.return_value.__enter__.return_value = mock_instance
 
-        res = duckduckgo_search.invoke({"query": "δοκιμή"})
+        res = duckduckgo_search.invoke({"query": "jobs", "max_results": 2})
 
-        assert "Test Title" in res
+        assert "First" in res
+        assert "Second" in res
+        assert "Duplicate" not in res
         mock_gemini.assert_not_called()
-
-        # Only called once (duckduckgo first backend)
-        mock_instance.text.assert_called_once_with("δοκιμή", max_results=5, backend="duckduckgo")
+        assert mock_instance.text.call_count == 2
+        mock_instance.text.assert_any_call("jobs", max_results=2, backend="duckduckgo")
+        mock_instance.text.assert_any_call("jobs", max_results=2, backend="google")
 
 
 def test_ddgs_malformed_entry_ignored_and_later_valid_succeeds() -> None:
@@ -36,18 +42,52 @@ def test_ddgs_malformed_entry_ignored_and_later_valid_succeeds() -> None:
          patch("services.gemini.safe_gemini_call") as mock_gemini:
 
         mock_instance = MagicMock()
-        mock_instance.text.return_value = [
+        mock_instance.text.side_effect = [[
             "not a dict",
             {"title": None, "href": "http://test.com", "body": "body"},
-            {"title": "Valid Title", "href": "http://valid.com", "body": "Valid body"}
-        ]
+            {"title": "Valid Title", "href": "http://valid.com", "body": "Valid body"},
+            {"title": "Second Title", "href": "http://second.com", "body": "Second body"},
+        ]]
         mock_ddgs.return_value.__enter__.return_value = mock_instance
 
-        res = duckduckgo_search.invoke({"query": "δοκιμή"})
+        res = duckduckgo_search.invoke({"query": "δοκιμή", "max_results": 2})
 
         assert "Valid Title" in res
+        assert "Second Title" in res
         mock_gemini.assert_not_called()
-        mock_instance.text.assert_called_once()
+        mock_instance.text.assert_called_once_with(
+            "δοκιμή", max_results=2, backend="duckduckgo"
+        )
+
+
+def test_ddgs_preserves_partial_results_when_later_attempts_fail() -> None:
+    """A later backend failure must not discard an earlier valid result."""
+    from ddgs.exceptions import DDGSException
+
+    with patch("ddgs.DDGS") as mock_ddgs, \
+         patch("services.gemini.safe_gemini_call") as mock_gemini:
+
+        mock_instance = MagicMock()
+        mock_instance.text.side_effect = [
+            [{"title": "Only result", "href": "https://example.com/1", "body": "One"}],
+            DDGSException("backend unavailable"),
+            DDGSException("fallback unavailable"),
+            DDGSException("fallback unavailable"),
+        ]
+        mock_ddgs.return_value.__enter__.return_value = mock_instance
+        mock_gemini.return_value = MockMastroResponse(
+            json.dumps({"query": "logistics manager Thessaloniki"})
+        )
+
+        res = duckduckgo_search.invoke({
+            "query": "αγγελίες logistics manager Θεσσαλονίκη",
+            "max_results": 5,
+        })
+
+        assert "Only result" in res
+        assert "WEB_TOOL_ERROR" not in res
+        assert mock_instance.text.call_count == 4
+        mock_gemini.assert_called_once()
 
 
 def test_ddgs_placeholder_only_triggers_fallback(capsys: Any) -> None:
@@ -78,16 +118,18 @@ def test_ddgs_placeholder_only_triggers_fallback(capsys: Any) -> None:
 
         mock_gemini.assert_called_once()
 
-        assert mock_instance.text.call_count == 3
+        assert mock_instance.text.call_count == 4
         calls = mock_instance.text.call_args_list
         # original pass
         assert calls[0][0][0] == "δοκιμή"
         assert calls[0][1]["backend"] == "duckduckgo"
         assert calls[1][0][0] == "δοκιμή"
         assert calls[1][1]["backend"] == "google"
-        # fallback pass returns early on first backend
+        # fallback pass aggregates both bounded backends
         assert calls[2][0][0] == "test"
         assert calls[2][1]["backend"] == "duckduckgo"
+        assert calls[3][0][0] == "test"
+        assert calls[3][1]["backend"] == "google"
         output = capsys.readouterr().out
         assert "Original Greek query failed; requesting an English fallback query." in output
         assert "Gemini produced an English fallback query; retrying DDGS." in output

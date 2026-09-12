@@ -271,8 +271,6 @@
     "risk_level": "CRITICAL",
     "priority": 15,
     "triggers": [
-      "linkedin",
-      "linked in",
       "ανάρτηση",
       "ανέβασε στο linkedin",
       "γράψε post",
@@ -335,6 +333,8 @@
       "άνοιξε το site",
       "browse",
       "open url",
+      "linkedin",
+      "linked in",
       "αναζήτησε",
       "ψάξε",
       "βρες πληροφορίες"
