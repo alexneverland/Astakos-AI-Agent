@@ -827,8 +827,8 @@ def test_web_agent_hides_messenger_draft_tool_for_contextual_web_search(
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
     monkeypatch.setattr(
-        "tools.web.has_known_messenger_contact_reference",
-        lambda _text: False,
+        "tools.web._load_messenger_contacts",
+        lambda: {"γυναικάρα μου": "123"},
     )
 
     web_agent_node({
@@ -862,8 +862,8 @@ def test_web_agent_keeps_draft_tool_for_mixed_search_and_known_recipient(
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
     monkeypatch.setattr(
-        "tools.web.has_known_messenger_contact_reference",
-        lambda _text: True,
+        "tools.web._load_messenger_contacts",
+        lambda: {"σοφία": "123"},
     )
 
     web_agent_node({
