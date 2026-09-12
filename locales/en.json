@@ -116,6 +116,7 @@
       "search_format_result": "Τίτλος: {title}\nURL: {href}\nΠερίληψη: {body}\n",
       "search_err_empty": "κενό αποτέλεσμα",
       "search_all_failed": "[WEB_TOOL_ERROR][duckduckgo_search][reason={last_error}] Web search returned no result after {count} backend attempts.",
+      "search_fallback_links": "I could not verify results from the available engines for: {query}\nLive Google search: {google_url}\nLive Bing search: {bing_url}",
       "ekat_not_found": "❌ Δεν βρέθηκε '{query}' στο e-katanalotis.",
       "ekat_no_prices": "❌ Δεν βρέθηκαν τιμές.",
       "places_missing_api": "❌ Λείπει το GOOGLE_PLACES_API_KEY from το .env",
