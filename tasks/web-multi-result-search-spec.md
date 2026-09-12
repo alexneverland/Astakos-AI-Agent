@@ -8,8 +8,9 @@ LinkedIn post creation.
 
 ## Acceptance criteria
 
-- A LinkedIn job-search request resolves to the safe `web_search` capability;
-  an explicit LinkedIn post-creation request still resolves to `linkedin_post`.
+- A bare LinkedIn mention is not assigned deterministic search or publication
+  meaning; the Supervisor resolves it contextually. An explicit LinkedIn
+  post-creation request still resolves to `linkedin_post`.
 - `duckduckgo_search` accepts a bounded requested result count, aggregates valid
   results across its existing backends, and deduplicates canonical URLs.
 - Partial successful results are returned even if a later backend or translated
@@ -17,8 +18,9 @@ LinkedIn post creation.
 - Greek fallback is attempted only when the requested result count has not been
   reached, and work remains bounded to the two configured backends for the
   original query plus those same backends for one translated query.
-- A Web request already classified as `web_search` does not expose the unrelated
-  reversible Messenger draft tool. Existing Messenger draft flows remain intact.
+- A contextual Web request without a known recipient does not expose the
+  reversible Messenger draft tool. Existing recipient-backed draft flows remain
+  intact.
 - Web synthesis must not call a result active, current, or recent unless the
   retrieved evidence establishes that status.
 

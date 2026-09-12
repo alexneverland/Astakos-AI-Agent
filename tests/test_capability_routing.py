@@ -165,18 +165,15 @@ def test_plain_price_query_keeps_supermarket_price_route() -> None:
     assert lookup_agent("Πες μου τιμή για καρέκλα γραφείου.") == "Home_Agent"
 
 
-def test_linkedin_job_search_is_safe_web_search(capsys) -> None:
-    """A platform mention in a job search must not select post publication."""
+def test_linkedin_job_search_is_not_deterministically_classified() -> None:
+    """A bare platform mention leaves contextual meaning to the Supervisor."""
     from core.capability_lookup import lookup_agent, reload_registry
 
     reload_registry()
 
     assert lookup_agent(
         "βρεσ μου αγγελιεσ στο linkedin gia logistic manager θεσσαλονικι"
-    ) == "Web_Agent"
-    output = capsys.readouterr().out
-    assert "(web_search)" in output
-    assert "(linkedin_post)" not in output
+    ) is None
 
 
 def test_linkedin_post_creation_still_routes_to_post_capability(capsys) -> None:

@@ -728,8 +728,9 @@ def browse_url(url: str) -> str:
 def duckduckgo_search(query: str, max_results: int = 5) -> str:
     """Search the Web and return up to 10 unique results.
 
-    Use ``max_results=10`` when the user asks for a list or as many useful
-    results as possible. For a specific URL always use ``browse_url``.
+    Use the requested count, capped at 10.
+    Use 10 only when no smaller count was specified. For a specific URL always
+    use ``browse_url``.
     """
     from ddgs import DDGS
     from ddgs.exceptions import RatelimitException, TimeoutException, DDGSException

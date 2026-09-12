@@ -60,8 +60,13 @@ def _matches_trigger(msg: str, trigger: str) -> bool:
     # Word boundary only — we avoid substring matches (e.g., "git" inside "github")
     return bool(re.search(r'(?<!\w)' + re.escape(t) + r'(?!\w)', msg))
 
-def resolve_capability(user_message: str) -> dict | None:
-    """Resolve one canonical capability match without emitting diagnostics."""
+def lookup_agent(user_message: str) -> str | None:
+    """
+    Searches the registry for a keyword match.
+    Returns the agent name (e.g., 'Home_Agent') or None if not found.
+
+    Uses priority for disambiguation if there are multiple matches.
+    """
     _load_registry()
     if not _registry:
         return None
@@ -72,45 +77,20 @@ def resolve_capability(user_message: str) -> dict | None:
     if _matches_trigger(msg, "linkedin"):
         for ct in config.NLP_CONFIG.get("capabilities", {}).get("linkedin_creation", []):
             if _matches_trigger(msg, ct):
-                return {
-                    "name": "linkedin_post",
-                    "agent": "Web_Agent",
-                    "trigger": f"linkedin+{ct}",
-                    "diagnostic": (
-                        f"🎯 [CapabilityRegistry]: 'linkedin+{ct}' → "
-                        "Web_Agent (linkedin_post)"
-                    ),
-                }
+                print(f"🎯 [CapabilityRegistry]: 'linkedin+{ct}' → Web_Agent (linkedin_post)")
+                return "Web_Agent"
 
     # Place-finding queries should prefer Web_Agent over generic food/home routing.
     if _looks_like_place_search(msg):
-        return {
-            "name": "maps_places",
-            "agent": "Web_Agent",
-            "trigger": "place-search heuristic",
-            "diagnostic": (
-                "🎯 [CapabilityRegistry]: place-search heuristic → "
-                "Web_Agent (maps_places)"
-            ),
-        }
+        print("🎯 [CapabilityRegistry]: place-search heuristic → Web_Agent (maps_places)")
+        return "Web_Agent"
 
     if _looks_like_arrival_navigation_follow_up(msg):
-        return {
-            "name": "navigation",
-            "agent": "Web_Agent",
-            "trigger": "arrival-navigation follow-up",
-        }
+        return "Web_Agent"
 
     if _looks_like_specific_web_target(msg):
-        return {
-            "name": "web_search",
-            "agent": "Web_Agent",
-            "trigger": "supplied website target",
-            "diagnostic": (
-                "[CapabilityRegistry]: supplied website target → "
-                "Web_Agent (web_search)"
-            ),
-        }
+        print("[CapabilityRegistry]: supplied website target → Web_Agent (web_search)")
+        return "Web_Agent"
 
     # Explicit intent overrides are opt-in registry metadata. They precede Git
     # and normal priority routing only when the registry declares one.
@@ -125,26 +105,16 @@ def resolve_capability(user_message: str) -> dict | None:
         ):
             agent = capability.get("agent")
             if agent:
-                return {
-                    "name": capability.get("name"),
-                    "agent": agent,
-                    "trigger": "explicit intent override",
-                    "diagnostic": (
-                        f"🎯 [CapabilityRegistry]: explicit intent override → {agent} "
-                        f"({capability.get('name')})"
-                    ),
-                }
+                print(
+                    f"🎯 [CapabilityRegistry]: explicit intent override → {agent} "
+                    f"({capability.get('name')})"
+                )
+                return agent
 
     for trigger in config.NLP_CONFIG.get("capabilities", {}).get("git_triggers", []):
         if _matches_trigger(msg, trigger):
-            return {
-                "name": "git_ops",
-                "agent": "Git_Agent",
-                "trigger": trigger,
-                "diagnostic": (
-                    f"🎯 [CapabilityRegistry]: '{trigger}' → Git_Agent (git_ops)"
-                ),
-            }
+            print(f"🎯 [CapabilityRegistry]: '{trigger}' → Git_Agent (git_ops)")
+            return "Git_Agent"
 
     matches = []
 
@@ -166,22 +136,8 @@ def resolve_capability(user_message: str) -> dict | None:
 
     # If there are multiple matches, we take the one with the highest priority
     best = sorted(matches, key=lambda x: x["priority"], reverse=True)[0]
-    best["diagnostic"] = (
-        f"🎯 [CapabilityRegistry]: '{best['trigger']}' → "
-        f"{best['agent']} ({best['name']})"
-    )
-    return best
-
-
-def lookup_agent(user_message: str) -> str | None:
-    """Return the resolved agent name and emit the existing route diagnostic."""
-    match = resolve_capability(user_message)
-    if not match:
-        return None
-    diagnostic = match.get("diagnostic")
-    if diagnostic:
-        print(diagnostic)
-    return match.get("agent")
+    print(f"🎯 [CapabilityRegistry]: '{best['trigger']}' → {best['agent']} ({best['name']})")
+    return best["agent"]
 
 
 def get_all_capabilities() -> list[dict]:
