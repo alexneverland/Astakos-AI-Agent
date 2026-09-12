@@ -768,10 +768,10 @@ def test_web_research_trim_supports_object_calls_without_model_copy():
     assert [call.id for call in trimmed.tool_calls] == ["t3"]
 
 
-def test_web_agent_keeps_reversible_draft_tool_available_for_natural_language(
+def test_web_agent_hides_draft_tool_without_known_recipient(
     monkeypatch: Any,
 ) -> None:
-    """The Web LLM may interpret natural language without forcing a draft write."""
+    """Unrelated natural language must not expose a Messenger mutation tool."""
     from core.agents import web_agent_node
 
     bound_tool_names: list[str] = []
@@ -793,14 +793,103 @@ def test_web_agent_keeps_reversible_draft_tool_available_for_natural_language(
 
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr(
+        "tools.web.has_known_messenger_contact_reference",
+        lambda _text: False,
+    )
 
     web_agent_node({
         "messages": [HumanMessage(content="Ο Πασσιάς έχει και κρέας εκτός από αλλαντικά.")],
         "channel": "telegram",
     })
 
-    assert "relay_local_payload" in bound_tool_names
+    assert "relay_local_payload" not in bound_tool_names
     assert "execute_local_pipeline" in bound_tool_names
+
+
+def test_web_agent_hides_messenger_draft_tool_for_contextual_web_search(
+    monkeypatch: Any,
+) -> None:
+    """A contextual Web search must not expose an unrelated draft mutation."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        def invoke(self, messages: Any) -> AIMessage:
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr(
+        "tools.web.has_known_messenger_contact_reference",
+        lambda _text: False,
+    )
+
+    web_agent_node({
+        "messages": [HumanMessage(
+            content="βρεσ μου αγγελιεσ στο linkedin gia logistic manager θεσσαλονικι"
+        )],
+        "channel": "web",
+    })
+
+    assert "duckduckgo_search" in bound_tool_names
+    assert "relay_local_payload" not in bound_tool_names
+
+
+def test_web_agent_keeps_draft_tool_for_mixed_search_and_known_recipient(
+    monkeypatch: Any,
+) -> None:
+    """A mixed Web mention may still create a reversible recipient draft."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        def invoke(self, messages: Any) -> AIMessage:
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr(
+        "tools.web.has_known_messenger_contact_reference",
+        lambda _text: True,
+    )
+
+    web_agent_node({
+        "messages": [HumanMessage(content="Πες στη Σοφία ότι ενημέρωσα το LinkedIn.")],
+        "channel": "web",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+
+
+def test_web_multi_result_prompt_honors_explicit_count() -> None:
+    """The Web contract must prefer an explicit count over the maximum ten."""
+    from core.utils import load_agent_prompt
+
+    prompt = load_agent_prompt("Web_Agent")
+
+    assert "requested count, capped at 10" in prompt
+    assert "use 10 only when no smaller count was specified" in prompt
+
+
+def test_web_search_tool_description_honors_explicit_count() -> None:
+    """The bound tool schema must agree with the Web-agent count contract."""
+    from tools.web import duckduckgo_search
+
+    assert "requested count, capped at 10" in duckduckgo_search.description
+    assert "Use 10 only when no smaller count was specified" in duckduckgo_search.description
 
 
 def test_web_agent_exposes_messenger_draft_tool_for_explicit_request(monkeypatch: Any) -> None:

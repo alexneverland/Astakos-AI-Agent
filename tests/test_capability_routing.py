@@ -163,3 +163,24 @@ def test_plain_price_query_keeps_supermarket_price_route() -> None:
     reload_registry()
 
     assert lookup_agent("Πες μου τιμή για καρέκλα γραφείου.") == "Home_Agent"
+
+
+def test_linkedin_job_search_is_not_deterministically_classified() -> None:
+    """A bare platform mention leaves contextual meaning to the Supervisor."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent(
+        "βρεσ μου αγγελιεσ στο linkedin gia logistic manager θεσσαλονικι"
+    ) is None
+
+
+def test_linkedin_post_creation_still_routes_to_post_capability(capsys) -> None:
+    """An explicit LinkedIn post request retains the publication workflow."""
+    from core.capability_lookup import lookup_agent, reload_registry
+
+    reload_registry()
+
+    assert lookup_agent("γράψε post στο linkedin για τη νέα έκδοση") == "Web_Agent"
+    assert "(linkedin_post)" in capsys.readouterr().out
