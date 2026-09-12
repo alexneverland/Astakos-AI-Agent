@@ -187,3 +187,72 @@ def test_contact_reference_reuses_canonical_partial_alias_matching(monkeypatch):
 
     assert has_known_messenger_contact_reference("Φτιάξε ένα όμορφο καλημέρα για τον Νίκο")
     assert not has_known_messenger_contact_reference("Σε τρεις μέρες φεύγουμε Γεωργία")
+
+
+def test_contact_reference_ignores_short_word_inside_multiword_alias(monkeypatch):
+    """An unrelated short word must not match one component of a saved alias."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"γυναικάρα μου": "123"},
+    )
+
+    assert not has_known_messenger_contact_reference(
+        "βρεσ μου αγγελιεσ στο linkedin gia logistic manager θεσσαλονικι"
+    )
+    assert has_known_messenger_contact_reference(
+        "Στείλε ένα όμορφο μήνυμα στη γυναικάρα μου"
+    )
+
+
+def test_contact_reference_rejects_saved_ambiguous_alias(monkeypatch):
+    """Saved contacts cannot bypass the canonical ambiguous-target guard."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"friend": "123"},
+    )
+
+    assert not has_known_messenger_contact_reference("Πες στον friend ότι θα αργήσω")
+
+
+def test_contact_reference_preserves_short_leading_name_component(monkeypatch):
+    """A short leading name still identifies its saved multiword contact."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"sam smith": "123"},
+    )
+
+    assert has_known_messenger_contact_reference(
+        "Πες στον Sam ότι ενημέρωσα το LinkedIn"
+    )
+
+
+def test_contact_reference_rejects_lowercase_short_leading_alias_component(monkeypatch):
+    """A lowercase short alias component is not sufficient recipient evidence."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"my wife": "123"},
+    )
+
+    assert not has_known_messenger_contact_reference("Show my LinkedIn jobs")
+
+
+def test_contact_reference_preserves_capitalized_short_nonleading_name(monkeypatch):
+    """A capitalized short name may identify any component of a saved alias."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"smith sam": "123"},
+    )
+
+    assert has_known_messenger_contact_reference(
+        "Πες στον Sam ότι ενημέρωσα το LinkedIn"
+    )
