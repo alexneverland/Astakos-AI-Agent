@@ -19,6 +19,7 @@ from langchain_core.tools import tool
 from typing import Annotated
 from playwright.sync_api import sync_playwright
 from core.messenger_draft import active_draft_status
+from core.utils import WEB_SEARCH_UNVERIFIED_LINKS_MARKER
 try:
     from playwright_stealth import stealth_sync
 except ImportError:
@@ -758,16 +759,16 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
 
     Use the requested count, capped at 10.
     Use 10 only when no smaller count was specified. For a specific URL always
-    use ``browse_url``.
+    use ``browse_url``. If providers cannot verify results, return clearly
+    marked unverified live search links instead of treating links as evidence.
     """
     from ddgs import DDGS
     from ddgs.exceptions import RatelimitException, TimeoutException, DDGSException
     from services.gemini import safe_gemini_call
 
-    # backend="auto" (the default) tries sequential/batched ALL engines (up to 8),
-    # something that in fail-cascades reached 20-30+ sec. per call. Pin to 2 fast ones,
-    # verified backends (verified live: duckduckgo ~1s, google ~0.5s) with 1 fallback.
-    backends_to_try = ["duckduckgo", "google"]
+    # Keep one fixed four-attempt budget across the original and alternate query.
+    primary_backends = ["duckduckgo", "google"]
+    recovery_backends = ["bing", "brave"]
 
     try:
         requested_count = max(1, min(int(max_results), 10))
@@ -785,7 +786,7 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
             (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
         )
 
-    def _run_ddgs(q: str, phase: str) -> str:
+    def _run_ddgs(q: str, phase: str, backends: list[str]) -> bool:
         """
         Executes search queries against pinned DDGS backends.
 
@@ -794,20 +795,20 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
             phase: A diagnostic label for the original or fallback attempt.
 
         Returns:
-            The last backend error, or the localized empty-search sentinel when
-            the final backend attempt completes without raising.
+            Whether at least one backend responded, even if it had no results.
         """
-        last_error = t("tools.web.search_err_unknown")
-        for backend in backends_to_try:
+        had_backend_response = False
+        for backend in backends:
             if len(collected) >= requested_count:
                 break
             try:
-                with DDGS(timeout=8) as ddgs:
+                with DDGS(timeout=5) as ddgs:
                     results = list(ddgs.text(
                         q,
                         max_results=requested_count,
                         backend=backend,
                     ))
+                had_backend_response = True
                 if results:
                     valid_count = 0
                     for r in results:
@@ -843,20 +844,15 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
                             f"[Web Search]: {phase} DDGS result from {backend} "
                             "contained no valid entries."
                         )
-                last_error = t("tools.web.search_err_empty")
             except RatelimitException:
-                last_error = "rate limit"
                 print(f"[Web Search]: {phase} DDGS backend {backend} was rate limited.")
             except TimeoutException:
-                last_error = "timeout"
                 print(f"[Web Search]: {phase} DDGS backend {backend} timed out.")
-            except DDGSException as e:
-                last_error = str(e)
+            except DDGSException:
                 print(f"[Web Search]: {phase} DDGS backend {backend} failed with DDGSException.")
-            except Exception as e:
-                last_error = str(e)
+            except Exception:
                 print(f"[Web Search]: {phase} DDGS backend {backend} failed unexpectedly.")
-        return last_error
+        return had_backend_response
 
     def _format_collected() -> str:
         """Format collected results through the existing localized template."""
@@ -870,20 +866,36 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
             for result in collected[:requested_count]
         )
 
-    err = _run_ddgs(query, "Original")
+    def _format_fallback_links() -> str:
+        """Return honest live-search links when result providers are unavailable."""
+        encoded_query = urllib.parse.quote_plus(query)
+        links = t(
+            "tools.web.search_fallback_links",
+            query=query,
+            google_url=f"https://www.google.com/search?q={encoded_query}",
+            bing_url=f"https://www.bing.com/search?q={encoded_query}",
+        )
+        return (
+            f"{WEB_SEARCH_UNVERIFIED_LINKS_MARKER}\n"
+            f"{links}"
+        )
+
+    original_responded = _run_ddgs(query, "Original", primary_backends)
     if len(collected) >= requested_count:
         return _format_collected()
-
-    if not re.search(r'[\u0370-\u03FF\u1F00-\u1FFF]', query):
-        print("[Web Search]: English fallback skipped because the original query has no Greek characters.")
+    if not original_responded:
+        print("[Web Search]: Primary DDGS backends failed; trying recovery backends directly.")
+        _run_ddgs(query, "Original recovery", recovery_backends)
         if collected:
             return _format_collected()
-        return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
+        print("[Web Search]: All DDGS backends failed; returning live search links.")
+        return _format_fallback_links()
 
     try:
-        print("[Web Search]: Original Greek query failed; requesting an English fallback query.")
+        print("[Web Search]: Original query incomplete; requesting an alternate English search query.")
         prompt = (
-            "Translate this search query into a short English search query. "
+            "Rewrite or translate this into a different, short English search query. "
+            "Preserve requested websites, role names, and locations. "
             "Return STRICT JSON with exactly one key 'query'.\n"
             f"Original query: {query}"
         )
@@ -902,7 +914,7 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
             print("[Web Search]: English fallback skipped because Gemini returned invalid JSON.")
             if collected:
                 return _format_collected()
-            return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
+            raise ValueError("Invalid JSON")
 
         if not isinstance(data, dict) or len(data) != 1 or "query" not in data:
             print("[Web Search]: English fallback skipped because Gemini returned an invalid JSON structure.")
@@ -922,15 +934,18 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
 
         print("[Web Search]: Gemini produced an English fallback query; retrying DDGS.")
         before_fallback = len(collected)
-        err = _run_ddgs(english_query, "English fallback")
+        _run_ddgs(english_query, "English fallback", recovery_backends)
         if len(collected) == before_fallback:
             print("[Web Search]: English fallback DDGS retry produced no valid results.")
     except Exception as exc:
         print(f"[Web Search]: English fallback failed before retry ({type(exc).__name__}).")
+        if not collected:
+            print("[Web Search]: Trying recovery backends with the original query.")
+            _run_ddgs(query, "Original recovery", recovery_backends)
 
     if collected:
         return _format_collected()
-    return t("tools.web.search_all_failed", last_error=err, count=len(backends_to_try))
+    return _format_fallback_links()
 @tool
 def search_supermarket_prices(query: str) -> str:
     """Searches for product prices from all supermarkets (e-katanalotis.gov.gr).

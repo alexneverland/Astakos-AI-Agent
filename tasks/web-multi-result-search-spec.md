@@ -15,9 +15,12 @@ LinkedIn post creation.
   results across its existing backends, and deduplicates canonical URLs.
 - Partial successful results are returned even if a later backend or translated
   fallback fails.
-- Greek fallback is attempted only when the requested result count has not been
-  reached, and work remains bounded to the two configured backends for the
-  original query plus those same backends for one translated query.
+- Alternate-query fallback is attempted only when a primary backend responded
+  but the requested result count was not reached. Work remains bounded to four
+  backend attempts total: two primary engines for the original query and two
+  recovery engines for either the rewritten query or direct outage recovery.
+- When no provider returns usable evidence, the tool returns clearly marked,
+  unverified live-search links that the Web Agent surfaces without synthesis.
 - A contextual Web request without a known recipient does not expose the
   reversible Messenger draft tool. Existing recipient-backed draft flows remain
   intact.

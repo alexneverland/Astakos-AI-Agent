@@ -19,6 +19,9 @@ from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 
 _embedding_setup_notifications: set[str] = set()
 _embedding_setup_notifications_lock = threading.Lock()
+WEB_SEARCH_UNVERIFIED_LINKS_MARKER = (
+    "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]"
+)
 _TRANSPORT_METADATA_PREFIX_RE = re.compile(
     r"^(?:\[\d{2}:\d{2}\]\s*|"
     r"\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+/\s+\w+\]\s*)+",
@@ -986,6 +989,11 @@ def looks_like_web_tool_error(text: str) -> bool:
             return True
     return False
 
+
+def is_unverified_search_fallback(text: str) -> bool:
+    """Return whether a search result contains links but no verified evidence."""
+    return WEB_SEARCH_UNVERIFIED_LINKS_MARKER in str(text or "")
+
 def collect_recent_tool_messages_since_last_user(messages: list) -> list:
     recent_tools = []
     for msg in reversed(messages):
@@ -1019,10 +1027,36 @@ def filter_recent_web_tool_results(messages: list) -> list:
     return results
 
 def build_web_failure_reply(user_text: str, tool_results: list) -> str:
+    for _, result_text in tool_results:
+        if is_unverified_search_fallback(result_text):
+            _, separator, visible_text = result_text.partition("\n")
+            if separator and visible_text.strip():
+                return visible_text.strip()
+
     qty_intents = list(UTILS_QTY_INTENTS)
     is_qty = any(w in user_text.lower() for w in qty_intents)
     kind = t("prompts.ext_str_115") if is_qty else t("prompts.ext_str_243")
     return t("core.utils.web_failure_reply", kind=kind)
+
+
+def build_unverified_search_boundary_reply(messages: list) -> str | None:
+    """Build a terminal reply when search returned links without evidence."""
+    recent_results = filter_recent_web_tool_results(messages)
+    fallback_results = [
+        (name, text)
+        for name, text in recent_results
+        if is_unverified_search_fallback(text)
+    ]
+    if not fallback_results:
+        return None
+
+    successful_results = [
+        text
+        for _, text in recent_results
+        if text and not looks_like_web_tool_error(text)
+    ]
+    successful_results.append(build_web_failure_reply("", fallback_results))
+    return "\n\n".join(part for part in successful_results if part)
 
 def parse_linkedin_draft_result(text: str) -> dict | None:
     content = clean_message(text).strip()
