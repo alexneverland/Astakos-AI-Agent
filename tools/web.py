@@ -19,6 +19,7 @@ from langchain_core.tools import tool
 from typing import Annotated
 from playwright.sync_api import sync_playwright
 from core.messenger_draft import active_draft_status
+from core.utils import WEB_SEARCH_UNVERIFIED_LINKS_MARKER
 try:
     from playwright_stealth import stealth_sync
 except ImportError:
@@ -875,7 +876,7 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
             bing_url=f"https://www.bing.com/search?q={encoded_query}",
         )
         return (
-            "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]\n"
+            f"{WEB_SEARCH_UNVERIFIED_LINKS_MARKER}\n"
             f"{links}"
         )
 

@@ -157,6 +157,50 @@ def test_web_agent_node_surfaces_unverified_search_links_without_llm_synthesis(m
     assert "https://www.bing.com/search?q=test" in reply
     assert "[WEB_TOOL_ERROR]" not in reply
 
+
+def test_web_agent_node_handles_unverified_links_alongside_successful_web_tool(monkeypatch):
+    """A successful companion tool cannot make link-only search evidence trustworthy."""
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="Βρήκα επιβεβαιωμένες ενεργές αγγελίες.")
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *a, **k: "test prompt", raising=False)
+
+    fallback = (
+        "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]\n"
+        "Δεν μπόρεσα να επιβεβαιώσω αγγελίες.\n"
+        "Ζωντανή αναζήτηση Google: https://www.google.com/search?q=jobs"
+    )
+    state = {
+        "messages": [
+            HumanMessage(content="Πες μου τον καιρό και βρες αγγελίες"),
+            AIMessage(content="", tool_calls=[
+                {"name": "get_weather_forecast", "args": {}, "id": "t1"},
+                {"name": "duckduckgo_search", "args": {}, "id": "t2"},
+            ]),
+            ToolMessage(
+                tool_call_id="t1",
+                name="get_weather_forecast",
+                content="Ο καιρός σήμερα είναι αίθριος.",
+            ),
+            ToolMessage(tool_call_id="t2", name="duckduckgo_search", content=fallback),
+        ],
+        "channel": "telegram",
+    }
+
+    result = web_agent_node(state)
+    reply = result["messages"][-1].content
+
+    assert "Ο καιρός σήμερα είναι αίθριος." in reply
+    assert "https://www.google.com/search?q=jobs" in reply
+    assert "επιβεβαιωμένες ενεργές αγγελίες" not in reply
+    assert "[WEB_TOOL_ERROR]" not in reply
+
 def test_web_agent_node_does_not_override_when_one_web_tool_succeeds(monkeypatch):
     class FakeBoundLLM:
         def invoke(self, messages):

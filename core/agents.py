@@ -873,6 +873,7 @@ def web_agent_node(state: AgentState):
         clean_message,
         filter_recent_web_tool_results,
         looks_like_web_tool_error,
+        is_unverified_search_fallback,
         build_web_failure_reply,
         looks_like_terminal_linkedin_draft_result,
         build_linkedin_draft_ready_reply,
@@ -938,6 +939,11 @@ def web_agent_node(state: AgentState):
     recent_web_tool_results = filter_recent_web_tool_results(history)
     web_errors = [(name, text) for name, text in recent_web_tool_results if looks_like_web_tool_error(text)]
     web_successes = [(name, text) for name, text in recent_web_tool_results if not looks_like_web_tool_error(text)]
+    unverified_search_fallbacks = [
+        (name, text)
+        for name, text in web_errors
+        if is_unverified_search_fallback(text)
+    ]
     linkedin_terminal_results = [
         text for _, text in recent_web_tool_results
         if looks_like_terminal_linkedin_draft_result(text)
@@ -1045,6 +1051,19 @@ def web_agent_node(state: AgentState):
     web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)
     if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
         web_tools = _draft_edit_tools_only(web_tools)
+
+    if unverified_search_fallbacks:
+        guarded_parts = [text for _, text in web_successes if text]
+        guarded_parts.append(build_web_failure_reply(
+            last_msg_text,
+            unverified_search_fallbacks,
+        ))
+        guarded_reply = "\n\n".join(part for part in guarded_parts if part)
+        from langchain_core.messages import AIMessage as _AIMsg
+        return {
+            "messages": [_AIMsg(content=guarded_reply)],
+            "current_agent": "Web_Agent",
+        }
 
     if web_errors and not web_successes:
         guarded_reply = build_web_failure_reply(

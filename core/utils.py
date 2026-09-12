@@ -19,6 +19,9 @@ from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 
 _embedding_setup_notifications: set[str] = set()
 _embedding_setup_notifications_lock = threading.Lock()
+WEB_SEARCH_UNVERIFIED_LINKS_MARKER = (
+    "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]"
+)
 _TRANSPORT_METADATA_PREFIX_RE = re.compile(
     r"^(?:\[\d{2}:\d{2}\]\s*|"
     r"\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+/\s+\w+\]\s*)+",
@@ -986,6 +989,11 @@ def looks_like_web_tool_error(text: str) -> bool:
             return True
     return False
 
+
+def is_unverified_search_fallback(text: str) -> bool:
+    """Return whether a search result contains links but no verified evidence."""
+    return WEB_SEARCH_UNVERIFIED_LINKS_MARKER in str(text or "")
+
 def collect_recent_tool_messages_since_last_user(messages: list) -> list:
     recent_tools = []
     for msg in reversed(messages):
@@ -1019,9 +1027,8 @@ def filter_recent_web_tool_results(messages: list) -> list:
     return results
 
 def build_web_failure_reply(user_text: str, tool_results: list) -> str:
-    fallback_marker = "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]"
     for _, result_text in tool_results:
-        if fallback_marker in result_text:
+        if is_unverified_search_fallback(result_text):
             _, separator, visible_text = result_text.partition("\n")
             if separator and visible_text.strip():
                 return visible_text.strip()
