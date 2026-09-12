@@ -204,3 +204,29 @@ def test_contact_reference_ignores_short_word_inside_multiword_alias(monkeypatch
     assert has_known_messenger_contact_reference(
         "Στείλε ένα όμορφο μήνυμα στη γυναικάρα μου"
     )
+
+
+def test_contact_reference_rejects_saved_ambiguous_alias(monkeypatch):
+    """Saved contacts cannot bypass the canonical ambiguous-target guard."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"friend": "123"},
+    )
+
+    assert not has_known_messenger_contact_reference("Πες στον friend ότι θα αργήσω")
+
+
+def test_contact_reference_preserves_short_leading_name_component(monkeypatch):
+    """A short leading name still identifies its saved multiword contact."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"sam smith": "123"},
+    )
+
+    assert has_known_messenger_contact_reference(
+        "Πες στον Sam ότι ενημέρωσα το LinkedIn"
+    )

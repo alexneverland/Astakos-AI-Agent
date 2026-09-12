@@ -133,20 +133,33 @@ def has_known_messenger_contact_reference(text: str) -> bool:
     if not raw_text:
         return False
     contacts = _load_messenger_contacts()
+    valid_aliases = [
+        alias for alias in contacts
+        if _resolve_messenger_target(alias, contacts=contacts)[1] == "known contact"
+    ]
 
     text_forms = _messenger_target_aliases(raw_text)
     if any(
         re.search(rf"(?<!\w){re.escape(alias_form)}(?!\w)", text_form)
-        for alias in contacts
+        for alias in valid_aliases
         for alias_form in _messenger_target_aliases(alias)
         for text_form in text_forms
         if alias_form
     ):
         return True
 
+    leading_alias_forms = {
+        form
+        for alias in valid_aliases
+        for leading_token in re.findall(r"\w+", alias)[:1]
+        for form in _messenger_target_aliases(leading_token)
+    }
     candidates = [
         token for token in re.findall(r"\w+", raw_text)
-        if len(remove_accents(token)) >= 4
+        if (
+            len(remove_accents(token)) >= 4
+            or bool(_messenger_target_aliases(token) & leading_alias_forms)
+        )
     ]
     return any(
         _resolve_messenger_target(candidate, contacts=contacts)[1] == "known contact"
