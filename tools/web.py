@@ -756,7 +756,7 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
             (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
         )
 
-    def _run_ddgs(q: str, phase: str) -> str | None:
+    def _run_ddgs(q: str, phase: str) -> str:
         """
         Executes search queries against pinned DDGS backends.
 
@@ -765,7 +765,8 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
             phase: A diagnostic label for the original or fallback attempt.
 
         Returns:
-            The last backend error, or ``None`` when no backend failed.
+            The last backend error, or the localized empty-search sentinel when
+            the final backend attempt completes without raising.
         """
         last_error = t("tools.web.search_err_unknown")
         for backend in backends_to_try:

@@ -241,7 +241,8 @@ Use this brief only to choose focused tool calls and evaluate the evidence. Do n
 
 [MULTI-RESULT SEARCH]:
 When the user asks for listings, options, examples, or as many useful results as possible, call
-`duckduckgo_search` once with `max_results=10`. The tool already aggregates its bounded backends and removes
+`duckduckgo_search` once with the requested count, capped at 10; use 10 only when no smaller count was specified.
+The tool already aggregates its bounded backends and removes
 duplicate URLs, so do not repeat substantially similar searches merely to increase the count. Return every useful
 result found, preserve its URL, and say plainly when fewer than requested were available. Never describe a result
 as active, current, recent, open, or available unless retrieved evidence directly establishes that status.

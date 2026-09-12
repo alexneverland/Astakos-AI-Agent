@@ -1028,7 +1028,10 @@ def web_agent_node(state: AgentState):
         draft_tool_reason = "active_draft_edit"
     elif (
         latest_user_text
-        and not is_registered_web_search
+        and (
+            not is_registered_web_search
+            or has_known_messenger_contact_reference(latest_user_text)
+        )
         and getattr(history[-1], "type", "") == "human"
         and (
             not active_messenger_draft
