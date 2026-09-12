@@ -148,17 +148,21 @@ def has_known_messenger_contact_reference(text: str) -> bool:
     ):
         return True
 
-    leading_alias_forms = {
+    alias_component_forms = {
         form
         for alias in valid_aliases
-        for leading_token in re.findall(r"\w+", alias)[:1]
-        for form in _messenger_target_aliases(leading_token)
+        for alias_token in re.findall(r"\w+", alias)
+        for form in _messenger_target_aliases(alias_token)
     }
     candidates = [
         token for token in re.findall(r"\w+", raw_text)
         if (
             len(remove_accents(token)) >= 4
-            or bool(_messenger_target_aliases(token) & leading_alias_forms)
+            or (
+                len(remove_accents(token)) == 3
+                and token[:1].isupper()
+                and bool(_messenger_target_aliases(token) & alias_component_forms)
+            )
         )
     ]
     return any(

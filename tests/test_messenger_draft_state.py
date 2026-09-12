@@ -230,3 +230,29 @@ def test_contact_reference_preserves_short_leading_name_component(monkeypatch):
     assert has_known_messenger_contact_reference(
         "Πες στον Sam ότι ενημέρωσα το LinkedIn"
     )
+
+
+def test_contact_reference_rejects_lowercase_short_leading_alias_component(monkeypatch):
+    """A lowercase short alias component is not sufficient recipient evidence."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"my wife": "123"},
+    )
+
+    assert not has_known_messenger_contact_reference("Show my LinkedIn jobs")
+
+
+def test_contact_reference_preserves_capitalized_short_nonleading_name(monkeypatch):
+    """A capitalized short name may identify any component of a saved alias."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"smith sam": "123"},
+    )
+
+    assert has_known_messenger_contact_reference(
+        "Πες στον Sam ότι ενημέρωσα το LinkedIn"
+    )
