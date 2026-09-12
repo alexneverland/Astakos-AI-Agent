@@ -394,12 +394,30 @@ def supervisor_node(state):
 # AGENT NODES
 # ────────────────────────────────────────────────────────────────
 
+def _unverified_search_boundary_response(
+    history: list[Any],
+    agent_name: str,
+) -> dict[str, Any] | None:
+    """Stop any search-consuming agent from synthesizing link-only evidence."""
+    from core.utils import build_unverified_search_boundary_reply
+
+    guarded_reply = build_unverified_search_boundary_reply(history)
+    if guarded_reply is None:
+        return None
+    return {
+        "current_agent": agent_name,
+        "messages": [AIMessage(content=guarded_reply)],
+    }
+
 def dev_agent_node(state):
     from core.utils import load_agent_prompt
     from config import BASE_DIR
 
     # [MASTRO-SHIELD]: Cleanup of orphan tool_calls — same for all agents
     history = clean_orphan_tool_calls(state["messages"], k=40)
+    boundary_response = _unverified_search_boundary_response(history, "Dev_Agent")
+    if boundary_response:
+        return boundary_response
 
     system_base = load_agent_prompt("Dev_Agent", f"You are the Dev_Agent, {config.BOT_NAME}' Chief Developer.")
     system_base = system_base.replace("{BASE_DIR}", BASE_DIR)
@@ -440,6 +458,9 @@ def chat_agent_node(state: AgentState):
 
     # [MASTRO-SHIELD]: Cleanup of orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
+    boundary_response = _unverified_search_boundary_response(history, "Chat_Agent")
+    if boundary_response:
+        return boundary_response
     last_msg_text = clean_message(history[-1].content) if history else ""
     latest_user_text = ""
     for msg in reversed(history):
@@ -873,7 +894,6 @@ def web_agent_node(state: AgentState):
         clean_message,
         filter_recent_web_tool_results,
         looks_like_web_tool_error,
-        is_unverified_search_fallback,
         build_web_failure_reply,
         looks_like_terminal_linkedin_draft_result,
         build_linkedin_draft_ready_reply,
@@ -887,6 +907,9 @@ def web_agent_node(state: AgentState):
 
     # [MASTRO-SHIELD]: Cleanup of orphan tool_calls
     history = clean_orphan_tool_calls(state["messages"], k=40)
+    boundary_response = _unverified_search_boundary_response(history, "Web_Agent")
+    if boundary_response:
+        return boundary_response
     last_msg_text = clean_message(history[-1].content) if history else ""
     latest_user_text = ""
     for msg in reversed(history):
@@ -939,11 +962,6 @@ def web_agent_node(state: AgentState):
     recent_web_tool_results = filter_recent_web_tool_results(history)
     web_errors = [(name, text) for name, text in recent_web_tool_results if looks_like_web_tool_error(text)]
     web_successes = [(name, text) for name, text in recent_web_tool_results if not looks_like_web_tool_error(text)]
-    unverified_search_fallbacks = [
-        (name, text)
-        for name, text in web_errors
-        if is_unverified_search_fallback(text)
-    ]
     linkedin_terminal_results = [
         text for _, text in recent_web_tool_results
         if looks_like_terminal_linkedin_draft_result(text)
@@ -1052,19 +1070,6 @@ def web_agent_node(state: AgentState):
     if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
         web_tools = _draft_edit_tools_only(web_tools)
 
-    if unverified_search_fallbacks:
-        guarded_parts = [text for _, text in web_successes if text]
-        guarded_parts.append(build_web_failure_reply(
-            last_msg_text,
-            unverified_search_fallbacks,
-        ))
-        guarded_reply = "\n\n".join(part for part in guarded_parts if part)
-        from langchain_core.messages import AIMessage as _AIMsg
-        return {
-            "messages": [_AIMsg(content=guarded_reply)],
-            "current_agent": "Web_Agent",
-        }
-
     if web_errors and not web_successes:
         guarded_reply = build_web_failure_reply(
             last_msg_text,
@@ -1129,6 +1134,9 @@ def tech_agent_node(state: AgentState):
 
     # [MASTRO-SHIELD]: Cleaning orphan tool_calls — this resolved the 400 error
     history = clean_orphan_tool_calls(state["messages"], k=40)
+    boundary_response = _unverified_search_boundary_response(history, "Tech_Agent")
+    if boundary_response:
+        return boundary_response
     last_msg_text = clean_message(history[-1].content) if history else ""
 
     analysis_match = re.search(r"\[ANALYSIS\]:\s*(.*)", last_msg_text)

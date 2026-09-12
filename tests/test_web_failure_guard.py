@@ -86,7 +86,7 @@ def test_guard_ignores_old_failures():
     assert len(web_successes) == 1
 
 
-from core.agents import web_agent_node
+from core.agents import chat_agent_node, web_agent_node
 
 def test_web_agent_node_overrides_hallucinated_answer_when_all_web_tools_fail(monkeypatch):
     class FakeBoundLLM:
@@ -197,6 +197,42 @@ def test_web_agent_node_handles_unverified_links_alongside_successful_web_tool(m
     reply = result["messages"][-1].content
 
     assert "Ο καιρός σήμερα είναι αίθριος." in reply
+    assert "https://www.google.com/search?q=jobs" in reply
+    assert "επιβεβαιωμένες ενεργές αγγελίες" not in reply
+    assert "[WEB_TOOL_ERROR]" not in reply
+
+
+def test_chat_agent_node_surfaces_unverified_search_links_without_synthesis(monkeypatch):
+    """The shared fallback boundary protects a non-Web search consumer."""
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="Βρήκα επιβεβαιωμένες ενεργές αγγελίες.")
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents._has_active_messenger_draft", lambda: False)
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *a, **k: "test prompt", raising=False)
+
+    fallback = (
+        "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]\n"
+        "Δεν μπόρεσα να επιβεβαιώσω αγγελίες.\n"
+        "Ζωντανή αναζήτηση Google: https://www.google.com/search?q=jobs"
+    )
+    result = chat_agent_node({
+        "messages": [
+            HumanMessage(content="Βρες μου αγγελίες"),
+            AIMessage(content="", tool_calls=[
+                {"name": "duckduckgo_search", "args": {}, "id": "t1"},
+            ]),
+            ToolMessage(tool_call_id="t1", name="duckduckgo_search", content=fallback),
+        ],
+        "channel": "telegram",
+    })
+    reply = result["messages"][-1].content
+
     assert "https://www.google.com/search?q=jobs" in reply
     assert "επιβεβαιωμένες ενεργές αγγελίες" not in reply
     assert "[WEB_TOOL_ERROR]" not in reply

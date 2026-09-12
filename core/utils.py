@@ -1038,6 +1038,26 @@ def build_web_failure_reply(user_text: str, tool_results: list) -> str:
     kind = t("prompts.ext_str_115") if is_qty else t("prompts.ext_str_243")
     return t("core.utils.web_failure_reply", kind=kind)
 
+
+def build_unverified_search_boundary_reply(messages: list) -> str | None:
+    """Build a terminal reply when search returned links without evidence."""
+    recent_results = filter_recent_web_tool_results(messages)
+    fallback_results = [
+        (name, text)
+        for name, text in recent_results
+        if is_unverified_search_fallback(text)
+    ]
+    if not fallback_results:
+        return None
+
+    successful_results = [
+        text
+        for _, text in recent_results
+        if text and not looks_like_web_tool_error(text)
+    ]
+    successful_results.append(build_web_failure_reply("", fallback_results))
+    return "\n\n".join(part for part in successful_results if part)
+
 def parse_linkedin_draft_result(text: str) -> dict | None:
     content = clean_message(text).strip()
     if not content:
