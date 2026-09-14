@@ -1,6 +1,7 @@
 """Regression coverage for historical capability-memory presentation."""
 
 from collections.abc import Iterator
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -39,6 +40,57 @@ def test_prompt_includes_draft_verification_rule_for_historical_memory() -> None
 
     assert "[CAPABILITY]" in prompt
     assert t("core.approval.draft_verification_rule") in prompt
+
+
+def test_prompt_skips_persisted_memory_for_structured_tool_output(monkeypatch) -> None:
+    """A routine lookup result must not trigger another semantic-memory search."""
+    build_memory_context = MagicMock()
+    monkeypatch.setattr(
+        "memory.context_builder.build_memory_context",
+        build_memory_context,
+    )
+
+    build_prompt(
+        state_messages=[
+            SimpleNamespace(
+                type="tool",
+                content=(
+                    "Found 1 matching routines: - ID: 2 | Event: "
+                    "Ύπνος Αλέξανδρου | Day: Everyday | Time: 23:00"
+                ),
+            )
+        ],
+        agent_role="Home_Agent",
+        channel="web",
+    )
+
+    build_memory_context.assert_not_called()
+
+
+def test_prompt_keeps_persisted_memory_for_human_text_that_resembles_tool_output(
+    monkeypatch,
+) -> None:
+    """Tool provenance, not matching prose, controls the memory skip."""
+    context = MagicMock()
+    context.render.return_value = ""
+    build_memory_context = MagicMock(return_value=context)
+    monkeypatch.setattr(
+        "memory.context_builder.build_memory_context",
+        build_memory_context,
+    )
+
+    build_prompt(
+        state_messages=[
+            SimpleNamespace(
+                type="human",
+                content="Found 1 matching routines in the notes I pasted here",
+            )
+        ],
+        agent_role="Home_Agent",
+        channel="web",
+    )
+
+    build_memory_context.assert_called_once()
 
 
 def test_dev_prompt_requires_prefix_and_no_tools_during_proposal() -> None:

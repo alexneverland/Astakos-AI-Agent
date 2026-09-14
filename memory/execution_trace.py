@@ -59,6 +59,7 @@ class ExecutionTrace:
         self.error          = None
         self.loop_guard     = False
         self.phase_timings  = {}            # extra per-turn timing breakdown
+        self._phase_timing_counts: dict[str, int] = {}
         self._pending: dict = {}            # tool_call_id → {name, args, t0}
 
     # ── Stream event processor ───────────────────────────────────
@@ -70,6 +71,13 @@ class ExecutionTrace:
                 self.loop_guard = True
             if data is None:
                 continue
+            node_phase_timings = data.get("trace_phase_timings", {})
+            if isinstance(node_phase_timings, dict):
+                for key, value in node_phase_timings.items():
+                    try:
+                        self._record_phase_timing(key, int(value))
+                    except Exception:
+                        continue
             msgs = data.get("messages", [])
             for msg in msgs:
                 self._process_message(node, msg)
@@ -82,7 +90,7 @@ class ExecutionTrace:
         if phase_timings:
             for key, value in phase_timings.items():
                 try:
-                    self.phase_timings[key] = int(value)
+                    self._record_phase_timing(key, int(value))
                 except Exception:
                     continue
 
@@ -123,6 +131,22 @@ class ExecutionTrace:
                 "duration_ms": duration_ms,
                 "error":       result_str.startswith("❌") or "Error" in result_str[:80],
             })
+
+    def _record_phase_timing(self, key: str, value: int) -> None:
+        """Retain individual samples when an agent phase repeats in one turn."""
+        previous = self.phase_timings.get(key)
+        count = self._phase_timing_counts.get(key, 0) + 1
+        self._phase_timing_counts[key] = count
+
+        if previous is not None and key.endswith("_ms"):
+            stem = key[:-3]
+            if count == 2:
+                self.phase_timings[f"{stem}_1_ms"] = previous
+                self.phase_timings[f"{stem}_total_ms"] = previous
+            self.phase_timings[f"{stem}_{count}_ms"] = value
+            self.phase_timings[f"{stem}_total_ms"] += value
+
+        self.phase_timings[key] = value
 
     # ── Finalize & Save ──────────────────────────────────────────
 

@@ -71,6 +71,7 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     next_agent: NotRequired[str]
     current_agent: NotRequired[str]
+    trace_phase_timings: NotRequired[dict[str, int]]
     approval_status: NotRequired[str]   # "ok" | "pending" | "blocked"
     plan_active: NotRequired[bool]                  # True if a plan is running
     plan_awaiting_confirmation: NotRequired[bool]   # True if waiting for "yes/no"
@@ -689,7 +690,9 @@ def build_prompt(
     identity = identity.replace("{BASE_DIR}", BASE_DIR)
 
     # clean_message already did its job correctly here, we leave it as is.
-    last_msg = clean_message(state_messages[-1].content) if state_messages else ""
+    latest_message = state_messages[-1] if state_messages else None
+    last_msg = clean_message(latest_message.content) if latest_message else ""
+    latest_is_tool_output = getattr(latest_message, "type", "") == "tool"
     has_photo_marker = any(
         marker in last_msg
         for marker in ("[USER_UPLOADED_PHOTO]", "[PHOTO PATH]", "[CURRENT_PHOTO_PATH]")
@@ -715,7 +718,11 @@ def build_prompt(
     semantic_k = k_value if len(clean_text) > 10 and not is_routine_command and not has_skip_keyword else 0
     recent_limit = 6 if channel and not has_current_photo else 0
 
-    if include_persisted_context and (semantic_k > 0 or recent_limit > 0):
+    if (
+        include_persisted_context
+        and not latest_is_tool_output
+        and (semantic_k > 0 or recent_limit > 0)
+    ):
         try:
             from memory.context_builder import build_memory_context
 
