@@ -497,6 +497,89 @@ def test_default_research_registry_includes_youtube_provider() -> None:
     assert "youtube" in registry._providers
 
 
+def test_linkedin_provider_discovers_and_normalizes_only_linkedin_urls() -> None:
+    """LinkedIn discovery rejects lookalikes and preserves provenance."""
+    from services.web_providers import LinkedInResearchProvider
+
+    web = MagicMock()
+    web.search.return_value = [
+        SearchResult(
+            title="Logistics Manager",
+            url="https://www.linkedin.com/jobs/view/logistics-manager-at-example-123",
+            content="Public job listing",
+            source="web",
+            metadata={"backend": "bing"},
+        ),
+        SearchResult(
+            title="Greek LinkedIn result",
+            url="https://gr.linkedin.com/jobs/view/another-role-456",
+            content="Localized public listing",
+            source="web",
+        ),
+        SearchResult(
+            title="Lookalike",
+            url="https://linkedin.com.example.com/jobs/view/bad",
+            content="Not LinkedIn",
+            source="web",
+        ),
+    ]
+
+    results = LinkedInResearchProvider(web_provider=web).search(
+        "logistics manager Thessaloniki",
+        10,
+    )
+
+    assert results == [
+        SearchResult(
+            title="Logistics Manager",
+            url="https://www.linkedin.com/jobs/view/logistics-manager-at-example-123",
+            content="Public job listing",
+            source="linkedin",
+            metadata={"backend": "bing", "discovered_via": "web_search"},
+        ),
+        SearchResult(
+            title="Greek LinkedIn result",
+            url="https://gr.linkedin.com/jobs/view/another-role-456",
+            content="Localized public listing",
+            source="linkedin",
+            metadata={"discovered_via": "web_search"},
+        ),
+    ]
+    args, kwargs = web.search.call_args
+    assert args == ("site:linkedin.com logistics manager Thessaloniki", 10)
+    url_filter = kwargs["url_filter"]
+    assert url_filter("https://linkedin.com/in/example") is True
+    assert url_filter("https://www.linkedin.com/jobs/view/123") is True
+    assert url_filter("https://gr.linkedin.com/company/example") is True
+    assert url_filter("https://linkedin.com.example.com/jobs/view/bad") is False
+    assert url_filter("javascript://linkedin.com/jobs/view/bad") is False
+    assert url_filter("https://[invalid/jobs/view/bad") is False
+
+
+def test_linkedin_provider_maps_web_unavailability_to_linkedin() -> None:
+    """A failed discovery backend reports the selected provider as LinkedIn."""
+    from services.web_providers import LinkedInResearchProvider
+
+    web = MagicMock()
+    web.check.return_value = ProviderHealth("web", False, "DDGS unavailable")
+    provider = LinkedInResearchProvider(web_provider=web)
+
+    assert provider.check() == ProviderHealth(
+        "linkedin",
+        False,
+        "LinkedIn discovery unavailable: DDGS unavailable",
+    )
+
+
+def test_default_research_registry_includes_linkedin_provider() -> None:
+    """The canonical research skill accepts LinkedIn as a selectable source."""
+    from astakos_skills.research_web import _default_research_registry
+
+    registry = _default_research_registry()
+
+    assert "linkedin" in registry._providers
+
+
 def test_web_agent_guidance_describes_reddit_discovery_boundary() -> None:
     """Agent guidance advertises Reddit without promising full thread access."""
     root = Path(__file__).resolve().parents[1]
@@ -531,6 +614,24 @@ def test_web_agent_guidance_describes_youtube_discovery_boundary() -> None:
     assert "Use `youtube` for public YouTube video discovery" in prompt
     assert "not transcript or comment retrieval" in prompt
     assert "Web/GitHub/Reddit/YouTube" in web_search["description"]
+
+
+def test_web_agent_guidance_describes_linkedin_discovery_boundary() -> None:
+    """Agent guidance keeps LinkedIn discovery separate from publishing auth."""
+    root = Path(__file__).resolve().parents[1]
+    prompt = (root / "core" / "prompts.md").read_text(encoding="utf-8")
+    capabilities = json.loads(
+        (root / "core" / "capability_registry.json").read_text(encoding="utf-8")
+    )
+    web_search = next(
+        capability
+        for capability in capabilities
+        if capability.get("name") == "web_search"
+    )
+
+    assert "Use `linkedin` for public LinkedIn discovery" in prompt
+    assert "does not use the authenticated publishing token" in prompt
+    assert "Web/GitHub/Reddit/YouTube/LinkedIn" in web_search["description"]
 
 
 def test_research_web_tool_serializes_results_and_provider_status(monkeypatch) -> None:
@@ -601,3 +702,34 @@ def test_research_web_tool_preserves_healthy_provider_zero_matches(monkeypatch) 
     marker, payload_text = raw.split("\n", 1)
     assert marker == "[RESEARCH_RESULTS]"
     assert json.loads(payload_text)["results"] == []
+
+
+def test_linkedin_zero_matches_do_not_escape_to_general_web() -> None:
+    """Filtered LinkedIn zero matches remain healthy and source-restricted."""
+    from astakos_skills.research_web import research_web
+
+    alternate = MagicMock(text='{"query": "alternate LinkedIn search"}')
+    with patch("ddgs.DDGS") as mock_ddgs, patch(
+        "services.gemini.safe_gemini_call",
+        return_value=alternate,
+    ):
+        instance = MagicMock()
+        instance.text.return_value = [{
+            "title": "Unrelated result",
+            "href": "https://example.com/not-linkedin",
+            "body": "Search backend responded, but this is outside LinkedIn.",
+        }]
+        mock_ddgs.return_value.__enter__.return_value = instance
+
+        raw = research_web.invoke({
+            "query": "logistics manager Thessaloniki",
+            "sources": ["linkedin"],
+            "max_results": 10,
+        })
+
+    marker, payload_text = raw.split("\n", 1)
+    payload = json.loads(payload_text)
+    assert marker == "[RESEARCH_RESULTS]"
+    assert payload["results"] == []
+    assert payload["providers"]["linkedin"]["available"] is True
+    assert payload["fallback_used"] is False

@@ -93,3 +93,53 @@ constraint, accept only Reddit result URLs, and normalize them with
 - Authenticated Reddit API access and full post/comment retrieval.
 - Browser sessions, cookies, OpenCLI, and `rdt-cli`.
 - Concurrent provider execution, persistent health state, and new UI/settings.
+
+---
+
+# Spec and Implementation Plan: LinkedIn Research Provider, Slice 4
+
+## Objective
+
+Add zero-credential public LinkedIn discovery to the existing `research_web`
+skill so the Web Agent can return up to 10 normalized LinkedIn results, including
+job listings, while preserving the separate authenticated post-publishing flow.
+
+## Commands
+
+- Focused tests: `venv\Scripts\python.exe -m pytest tests/test_web_research.py tests/test_web_failure_guard.py -q --basetemp=<isolated-dir>`
+- Diff validation: `git diff --check`
+
+## Project Structure and Code Style
+
+- Extend the existing provider pattern in `services/web_providers.py`.
+- Register the provider through `astakos_skills/research_web.py` and document its
+  selection in `core/prompts.md`.
+- Return the existing typed `SearchResult` contract with `source="linkedin"`;
+  do not introduce a parallel search tool or dependency.
+
+## Testing Strategy
+
+- Write offline failing tests before implementation.
+- Mock the Web-provider boundary and verify exact query, result limit, normalized
+  provenance, accepted LinkedIn hosts, and rejected lookalike domains.
+- Verify registry selection and Web Agent prompt/tool behavior remain compatible.
+
+## Boundaries
+
+- Always: use bounded public Web discovery and strict LinkedIn hostname checks.
+- Ask first: any future authenticated LinkedIn/Talent API integration.
+- Never: read or reuse `LINKEDIN_TOKEN`, browser cookies, private pages, or alter
+  post publishing, credentials, Setup Wizard, Docker, runtime, or databases.
+- Treat snippets as discovery evidence; do not claim a listing is active unless
+  the returned public evidence establishes that.
+
+## Success Criteria
+
+- `research_web(..., sources=["linkedin"], max_results=10)` is valid.
+- Only `linkedin.com` and its real subdomains are returned; lookalikes are dropped.
+- Results use normalized LinkedIn provenance and remain isolated from provider failures.
+- Existing Web, GitHub, Reddit, YouTube, and LinkedIn publishing behavior is unchanged.
+
+## Open Questions
+
+- None for this public-discovery slice. Official Talent API access remains deferred.

@@ -48,8 +48,13 @@ class WebSearchProvider:
         max_results: int,
         *,
         url_filter: Callable[[str], bool] | None = None,
+        empty_result_is_success: bool = False,
     ) -> list[SearchResult]:
-        """Search bounded DDGS backends while preserving partial successes."""
+        """Search bounded DDGS backends while preserving partial successes.
+
+        ``empty_result_is_success`` lets a domain-scoped provider distinguish a
+        healthy zero-match response from complete backend unavailability.
+        """
         from ddgs import DDGS
         from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
         from services.gemini import safe_gemini_call
@@ -110,9 +115,15 @@ class WebSearchProvider:
 
         if not original_responded:
             print("[Web Search]: Primary DDGS backends failed; trying recovery backends directly.")
-            run_backends(query, "Original recovery", self._RECOVERY_BACKENDS)
+            recovery_responded = run_backends(
+                query,
+                "Original recovery",
+                self._RECOVERY_BACKENDS,
+            )
             if collected:
                 return collected[:limit]
+            if empty_result_is_success and recovery_responded:
+                return []
             raise self._unavailable(query)
 
         try:
@@ -145,6 +156,8 @@ class WebSearchProvider:
 
         if collected:
             return collected[:limit]
+        if empty_result_is_success:
+            return []
         raise self._unavailable(query)
 
     @staticmethod
@@ -379,6 +392,76 @@ class YouTubeResearchProvider:
         return any(
             parsed.path.startswith(prefix) and bool(parsed.path[len(prefix):].strip("/"))
             for prefix in ("/shorts/", "/live/")
+        )
+
+
+class LinkedInResearchProvider:
+    """Discover public LinkedIn pages through bounded Web search results."""
+
+    name = "linkedin"
+
+    def __init__(self, web_provider: WebSearchProvider | None = None) -> None:
+        self._web_provider = web_provider or WebSearchProvider()
+
+    def check(self) -> ProviderHealth:
+        """Map Web-search readiness to the LinkedIn discovery capability."""
+        health = self._web_provider.check()
+        if not health.available:
+            return ProviderHealth(
+                self.name,
+                False,
+                f"LinkedIn discovery unavailable: {health.detail}",
+            )
+        return ProviderHealth(
+            self.name,
+            True,
+            "LinkedIn discovery via Web search ready",
+        )
+
+    def search(self, query: str, max_results: int) -> list[SearchResult]:
+        """Return only LinkedIn-hosted results with normalized provenance."""
+        query = str(query or "").strip()
+        if not query:
+            return []
+        limit = _bounded_result_limit(max_results)
+        discovered = self._web_provider.search(
+            f"site:linkedin.com {query}",
+            limit,
+            url_filter=self._is_linkedin_url,
+            empty_result_is_success=True,
+        )
+        results: list[SearchResult] = []
+        for result in discovered:
+            if not self._is_linkedin_url(result.url):
+                continue
+            results.append(SearchResult(
+                title=result.title,
+                url=result.url,
+                content=result.content,
+                source=self.name,
+                author=result.author,
+                published_at=result.published_at,
+                score=result.score,
+                metadata={
+                    **result.metadata,
+                    "discovered_via": "web_search",
+                },
+            ))
+            if len(results) >= limit:
+                break
+        return results
+
+    @staticmethod
+    def _is_linkedin_url(url: str) -> bool:
+        """Accept public LinkedIn hosts and reject non-Web or lookalike URLs."""
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return False
+        hostname = (parsed.hostname or "").lower()
+        return (
+            parsed.scheme.lower() in {"http", "https"}
+            and (hostname == "linkedin.com" or hostname.endswith(".linkedin.com"))
         )
 
 
