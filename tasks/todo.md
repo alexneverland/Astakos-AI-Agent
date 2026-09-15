@@ -15,6 +15,6 @@
   - Verify: Web Agent binding, budget, and failure regression tests.
   - Files: `core/agents.py`, `core/tool_risk.py`, `tools/system.py`, `core/capability_registry.json`, `core/prompts.md`, tests.
 
-- [ ] Final verification and PR.
+- [x] Final verification and PR.
   - Acceptance: relevant and full test suites pass, `git diff --check` is clean, staged diff contains only this slice.
   - Verify: commands in `tasks/plan.md`.
