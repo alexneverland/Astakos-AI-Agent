@@ -64,6 +64,7 @@ TOOL_RISK: dict[str, str] = {
     "get_news":                 "SAFE",
     "get_weather_forecast":     "SAFE",
     "duckduckgo_search":        "SAFE",
+    "research_web":             "SAFE",
     "browse_url":               "SAFE",
     "morning_briefing":         "SAFE",
     "hn_briefing":              "SAFE",

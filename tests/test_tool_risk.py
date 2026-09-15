@@ -45,6 +45,9 @@ def test_search_memory_is_safe():
 def test_get_news_is_safe():
     assert get_risk("get_news") == "SAFE"
 
+def test_research_web_is_safe():
+    assert get_risk("research_web") == "SAFE"
+
 def test_unknown_tool_defaults_to_warning():
     # Unknown tool → WARNING (safe default)
     assert get_risk("some_unknown_tool_xyz") == "WARNING"

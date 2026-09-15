@@ -42,3 +42,13 @@ def test_image_generation_tool_stays_with_web_not_tech_agent():
 
     assert "generate_image_tool" in web_source
     assert "generate_image_tool" not in tech_source
+
+
+def test_multi_source_research_stays_with_web_not_git_agent():
+    """Read-only internet research belongs to Web without exposing Git mutations."""
+    web_source = _function_source("web_agent_node")
+    git_source = _function_source("git_agent_node")
+
+    assert "research_web" in web_source
+    assert "github_manager" not in web_source
+    assert "research_web" not in git_source

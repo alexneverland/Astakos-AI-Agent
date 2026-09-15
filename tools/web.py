@@ -762,190 +762,45 @@ def duckduckgo_search(query: str, max_results: int = 5) -> str:
     use ``browse_url``. If providers cannot verify results, return clearly
     marked unverified live search links instead of treating links as evidence.
     """
-    from ddgs import DDGS
-    from ddgs.exceptions import RatelimitException, TimeoutException, DDGSException
-    from services.gemini import safe_gemini_call
-
-    # Keep one fixed four-attempt budget across the original and alternate query.
-    primary_backends = ["duckduckgo", "google"]
-    recovery_backends = ["bing", "brave"]
+    from services.web_providers import WebSearchProvider
+    from services.web_research import ProviderUnavailableError
 
     try:
-        requested_count = max(1, min(int(max_results), 10))
-    except (TypeError, ValueError):
-        requested_count = 5
-
-    collected: list[dict[str, str]] = []
-    seen_urls: set[str] = set()
-
-    def _canonical_url(url: str) -> str:
-        """Normalize a result URL for cross-backend deduplication."""
-        parts = urllib.parse.urlsplit(url.strip())
-        path = parts.path.rstrip("/") or "/"
-        return urllib.parse.urlunsplit(
-            (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
-        )
-
-    def _run_ddgs(q: str, phase: str, backends: list[str]) -> bool:
-        """
-        Executes search queries against pinned DDGS backends.
-
-        Args:
-            q: The search query string.
-            phase: A diagnostic label for the original or fallback attempt.
-
-        Returns:
-            Whether at least one backend responded, even if it had no results.
-        """
-        had_backend_response = False
-        for backend in backends:
-            if len(collected) >= requested_count:
-                break
-            try:
-                with DDGS(timeout=5) as ddgs:
-                    results = list(ddgs.text(
-                        q,
-                        max_results=requested_count,
-                        backend=backend,
-                    ))
-                had_backend_response = True
-                if results:
-                    valid_count = 0
-                    for r in results:
-                        if len(collected) >= requested_count:
-                            break
-                        if not isinstance(r, dict):
-                            continue
-                        title = r.get("title")
-                        href = r.get("href")
-                        body = r.get("body")
-                        if isinstance(title, str) and isinstance(href, str) and isinstance(body, str):
-                            title = title.strip()
-                            href = href.strip()
-                            body = body.strip()
-                            if title and href and body:
-                                canonical_url = _canonical_url(href)
-                                if canonical_url in seen_urls:
-                                    continue
-                                seen_urls.add(canonical_url)
-                                valid_count += 1
-                                collected.append({
-                                    "title": title,
-                                    "href": href,
-                                    "body": body,
-                                })
-                    if valid_count > 0:
-                        print(
-                            f"[Web Search]: {phase} DDGS search succeeded via "
-                            f"{backend} ({valid_count} valid results)."
-                        )
-                    else:
-                        print(
-                            f"[Web Search]: {phase} DDGS result from {backend} "
-                            "contained no valid entries."
-                        )
-            except RatelimitException:
-                print(f"[Web Search]: {phase} DDGS backend {backend} was rate limited.")
-            except TimeoutException:
-                print(f"[Web Search]: {phase} DDGS backend {backend} timed out.")
-            except DDGSException:
-                print(f"[Web Search]: {phase} DDGS backend {backend} failed with DDGSException.")
-            except Exception:
-                print(f"[Web Search]: {phase} DDGS backend {backend} failed unexpectedly.")
-        return had_backend_response
-
-    def _format_collected() -> str:
-        """Format collected results through the existing localized template."""
-        return "\n---\n".join(
-            t(
-                "tools.web.search_format_result",
-                title=result["title"],
-                href=result["href"],
-                body=result["body"],
-            )
-            for result in collected[:requested_count]
-        )
-
-    def _format_fallback_links() -> str:
-        """Return honest live-search links when result providers are unavailable."""
-        encoded_query = urllib.parse.quote_plus(query)
-        links = t(
-            "tools.web.search_fallback_links",
-            query=query,
-            google_url=f"https://www.google.com/search?q={encoded_query}",
-            bing_url=f"https://www.bing.com/search?q={encoded_query}",
-        )
-        return (
-            f"{WEB_SEARCH_UNVERIFIED_LINKS_MARKER}\n"
-            f"{links}"
-        )
-
-    original_responded = _run_ddgs(query, "Original", primary_backends)
-    if len(collected) >= requested_count:
-        return _format_collected()
-    if not original_responded:
-        print("[Web Search]: Primary DDGS backends failed; trying recovery backends directly.")
-        _run_ddgs(query, "Original recovery", recovery_backends)
-        if collected:
-            return _format_collected()
+        results = WebSearchProvider().search(query, max_results)
+    except ProviderUnavailableError as exc:
         print("[Web Search]: All DDGS backends failed; returning live search links.")
-        return _format_fallback_links()
+        return _format_unverified_search_fallback(query, exc.fallback_urls)
+    return _format_legacy_web_results(results)
 
-    try:
-        print("[Web Search]: Original query incomplete; requesting an alternate English search query.")
-        prompt = (
-            "Rewrite or translate this into a different, short English search query. "
-            "Preserve requested websites, role names, and locations. "
-            "Return STRICT JSON with exactly one key 'query'.\n"
-            f"Original query: {query}"
+
+def _format_legacy_web_results(results) -> str:
+    """Preserve the established localized Web-search tool response."""
+    return "\n---\n".join(
+        t(
+            "tools.web.search_format_result",
+            title=result.title,
+            href=result.url,
+            body=result.content,
         )
-        # Call Gemini exactly once
-        resp = safe_gemini_call(prompt, retries=1)
-        raw_response = resp.text.strip()
-        fenced_match = re.fullmatch(
-            r"```(?:json)?\s*(.*?)\s*```",
-            raw_response,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        json_payload = fenced_match.group(1) if fenced_match else raw_response
-        try:
-            data = json.loads(json_payload)
-        except json.JSONDecodeError:
-            print("[Web Search]: English fallback skipped because Gemini returned invalid JSON.")
-            if collected:
-                return _format_collected()
-            raise ValueError("Invalid JSON")
+        for result in results
+    )
 
-        if not isinstance(data, dict) or len(data) != 1 or "query" not in data:
-            print("[Web Search]: English fallback skipped because Gemini returned an invalid JSON structure.")
-            raise ValueError("Invalid JSON structure")
 
-        english_query = data["query"]
+def _format_unverified_search_fallback(query: str, fallback_urls) -> str:
+    """Render navigation links without presenting them as verified evidence."""
+    urls = list(fallback_urls)
+    encoded_query = urllib.parse.quote_plus(query)
+    google_url = urls[0] if urls else f"https://www.google.com/search?q={encoded_query}"
+    bing_url = urls[1] if len(urls) > 1 else f"https://www.bing.com/search?q={encoded_query}"
+    links = t(
+        "tools.web.search_fallback_links",
+        query=query,
+        google_url=google_url,
+        bing_url=bing_url,
+    )
+    return f"{WEB_SEARCH_UNVERIFIED_LINKS_MARKER}\n{links}"
 
-        if not isinstance(english_query, str) or not english_query.strip():
-            print("[Web Search]: English fallback skipped because Gemini returned an empty or non-string query.")
-            raise ValueError("Invalid query")
 
-        english_query = english_query.strip()
-
-        if remove_accents(english_query) == remove_accents(query).strip():
-            print("[Web Search]: English fallback skipped because Gemini returned the original query.")
-            raise ValueError("Same query")
-
-        print("[Web Search]: Gemini produced an English fallback query; retrying DDGS.")
-        before_fallback = len(collected)
-        _run_ddgs(english_query, "English fallback", recovery_backends)
-        if len(collected) == before_fallback:
-            print("[Web Search]: English fallback DDGS retry produced no valid results.")
-    except Exception as exc:
-        print(f"[Web Search]: English fallback failed before retry ({type(exc).__name__}).")
-        if not collected:
-            print("[Web Search]: Trying recovery backends with the original query.")
-            _run_ddgs(query, "Original recovery", recovery_backends)
-
-    if collected:
-        return _format_collected()
-    return _format_fallback_links()
 @tool
 def search_supermarket_prices(query: str) -> str:
     """Searches for product prices from all supermarkets (e-katanalotis.gov.gr).

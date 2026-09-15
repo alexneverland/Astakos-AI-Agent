@@ -33,6 +33,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
         "read_agent_skill",
         "read_project_file",
         "repo_mapper",
+        "research_web",
         "research_last30days",
         "retrieve_photo",
         "run_code",

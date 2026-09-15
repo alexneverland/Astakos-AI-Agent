@@ -117,6 +117,7 @@ from tools.web import (
     get_news, get_weather_forecast,
     search_goldmall_offers, execute_local_pipeline, get_navigation_info, relay_local_payload, search_google_places, browse_url, duckduckgo_search, search_supermarket_prices
 )
+from astakos_skills.research_web import research_web
 from tools.project_tools import (
     grant_project_access, list_project_files, read_project_file,
     edit_project_file, write_project_file, grep_project_files,
@@ -742,6 +743,7 @@ def home_agent_node(state):
 
 _WEB_RESEARCH_TOOL_NAMES = frozenset({
     "duckduckgo_search",
+    "research_web",
     "browse_url",
 })
 _WEB_RESEARCH_CALL_BUDGET = 3
@@ -1037,7 +1039,7 @@ def web_agent_node(state: AgentState):
     from astakos_skills.hn_briefing import hn_briefing
     static_web_tools = [
         get_current_location,
-        get_news, get_weather_forecast, duckduckgo_search,
+        get_news, get_weather_forecast, duckduckgo_search, research_web,
         search_memory, get_navigation_info, retrieve_photo, read_local_file,
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
         process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices,
