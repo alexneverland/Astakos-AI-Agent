@@ -178,7 +178,7 @@ def test_repeated_phase_timings_preserve_each_agent_pass_and_total():
     t._process_message("Home_Agent", first)
     t._process_message("Home_Agent", second)
 
-    assert t.phase_timings["home_invoke_ms"] == 8_117
+    assert t.phase_timings["home_invoke_ms"] == 153_117
     assert t.phase_timings["home_invoke_1_ms"] == 145_000
     assert t.phase_timings["home_invoke_2_ms"] == 8_117
     assert t.phase_timings["home_invoke_total_ms"] == 153_117

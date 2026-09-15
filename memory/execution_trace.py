@@ -145,6 +145,8 @@ class ExecutionTrace:
                 self.phase_timings[f"{stem}_total_ms"] = previous
             self.phase_timings[f"{stem}_{count}_ms"] = value
             self.phase_timings[f"{stem}_total_ms"] += value
+            self.phase_timings[key] = self.phase_timings[f"{stem}_total_ms"]
+            return
 
         self.phase_timings[key] = value
 
