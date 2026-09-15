@@ -138,6 +138,109 @@ def test_tts_speaker_control_per_assistant_message(index_html_content: str) -> N
     assert "if (isDrawerOpen) speakText" not in index_html_content
 
 
+def test_message_renderer_makes_bare_search_urls_clickable_and_keeps_unsafe_text_inert(
+    jarvis_browser_page: Page,
+) -> None:
+    """Search-result URLs are safe links even when the model returns bare URLs."""
+    result = jarvis_browser_page.evaluate(
+        """
+        () => {
+            appendMessage(
+                'Πηγή: https://github.com/example/project/issues/42\\n' +
+                'Μη ασφαλές: javascript:alert(1) <img src=x onerror=alert(1)>',
+                'ai',
+                'Web_Agent',
+            );
+            const messages = document.querySelectorAll('#chat-box .msg-ai');
+            const message = messages[messages.length - 1];
+            const link = message.querySelector('a');
+            return {
+                href: link?.getAttribute('href'),
+                target: link?.getAttribute('target'),
+                rel: link?.getAttribute('rel'),
+                linkCount: message.querySelectorAll('a').length,
+                imageCount: message.querySelectorAll('img').length,
+                text: message.innerText,
+            };
+        }
+        """
+    )
+
+    assert result["href"] == "https://github.com/example/project/issues/42"
+    assert result["target"] == "_blank"
+    assert result["rel"] == "noopener noreferrer"
+    assert result["linkCount"] == 1
+    assert result["imageCount"] == 0
+    assert "javascript:alert(1)" in result["text"]
+
+
+def test_message_renderer_keeps_sentence_punctuation_outside_bare_links(
+    jarvis_browser_page: Page,
+) -> None:
+    """Ordinary punctuation after a bare URL must not become part of its target."""
+    result = jarvis_browser_page.evaluate(
+        """
+        () => {
+            appendMessage('Δες https://example.com.', 'ai', 'Web_Agent');
+            const messages = document.querySelectorAll('#chat-box .msg-ai');
+            const message = messages[messages.length - 1];
+            const link = message.querySelector('a');
+            return { href: link?.getAttribute('href'), text: message.innerText };
+        }
+        """
+    )
+
+    assert result["href"] == "https://example.com"
+    assert "Δες https://example.com." in result["text"]
+
+
+def test_message_renderer_keeps_urls_inside_inline_code_inert(
+    jarvis_browser_page: Page,
+) -> None:
+    """A URL presented as inline code remains code rather than a clickable link."""
+    result = jarvis_browser_page.evaluate(
+        """
+        () => {
+            appendMessage('Command: `https://example.com`', 'ai', 'Tech_Agent');
+            const messages = document.querySelectorAll('#chat-box .msg-ai');
+            const message = messages[messages.length - 1];
+            return {
+                linkCount: message.querySelectorAll('a').length,
+                codeText: message.querySelector('code')?.innerText,
+            };
+        }
+        """
+    )
+
+    assert result["linkCount"] == 0
+    assert result["codeText"] == "https://example.com"
+
+
+def test_message_renderer_keeps_bold_delimiters_outside_bare_links(
+    jarvis_browser_page: Page,
+) -> None:
+    """A bare URL inside bold text must not consume its Markdown delimiters."""
+    result = jarvis_browser_page.evaluate(
+        """
+        () => {
+            appendMessage('**Source: https://example.com/article**', 'ai', 'Web_Agent');
+            const messages = document.querySelectorAll('#chat-box .msg-ai');
+            const message = messages[messages.length - 1];
+            const link = message.querySelector('a');
+            return {
+                href: link?.getAttribute('href'),
+                linkText: link?.innerText,
+                strongText: message.querySelector('strong')?.innerText,
+            };
+        }
+        """
+    )
+
+    assert result["href"] == "https://example.com/article"
+    assert result["linkText"] == "https://example.com/article"
+    assert result["strongText"] == "Source: https://example.com/article"
+
+
 def test_no_debug_urls_in_normal_frontend(index_html_content: str) -> None:
     """Normal frontend must not reference or call protected /debug endpoints."""
     # Ensure no /debug endpoint is queried or linked

@@ -995,10 +995,20 @@
             return `<br><img src="/photos/${encodeURIComponent(filename)}" class="chat-img" />`;
         });
 
-        const linkRegex = /\[(.*?)\]\((https?:\/\/.*?)\)/g;
-        processedText = processedText.replace(linkRegex, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        const inlineContentRegex = /`([^`\r\n]+)`|\[([^\]\r\n]+)\]\((https?:\/\/[^\s<>"']+?)\)|(https?:\/\/[^\s<>"'()*\[\]`]+)/g;
+        processedText = processedText.replace(
+            inlineContentRegex,
+            (match, codeText, label, markdownUrl, bareUrl) => {
+                if (codeText !== undefined) {
+                    return `<code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;color:#dbeafe">${codeText}</code>`;
+                }
+                const trailingPunctuation = bareUrl?.match(/[.,!?;:]+$/)?.[0] || '';
+                const url = markdownUrl || bareUrl;
+                const cleanUrl = trailingPunctuation ? url.slice(0, -trailingPunctuation.length) : url;
+                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer">${label || cleanUrl}</a>${trailingPunctuation}`;
+            },
+        );
         processedText = processedText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        processedText = processedText.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;color:#dbeafe">$1</code>');
         processedText = processedText.replace(/\n/g, '<br>');
         return processedText;
     }
