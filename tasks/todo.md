@@ -26,7 +26,7 @@
   - Verify: focused offline provider tests written before implementation.
   - Files: `services/web_providers.py`, `tests/test_web_research.py`.
 
-- [ ] Register Reddit in the existing research skill and Web Agent guidance.
+- [x] Register Reddit in the existing research skill and Web Agent guidance.
   - Acceptance: `sources=["reddit"]` is valid without changing agent ownership.
   - Verify: registry/tool boundary tests.
   - Files: `astakos_skills/research_web.py`, `core/prompts.md`, `core/capability_registry.json`, tests.

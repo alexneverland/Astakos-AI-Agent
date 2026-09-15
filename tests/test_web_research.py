@@ -1,6 +1,7 @@
 """Offline tests for the Web Agent research-provider layer."""
 
 import json
+from pathlib import Path
 
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
@@ -372,6 +373,24 @@ def test_default_research_registry_includes_reddit_provider() -> None:
     registry = _default_research_registry()
 
     assert "reddit" in registry._providers
+
+
+def test_web_agent_guidance_describes_reddit_discovery_boundary() -> None:
+    """Agent guidance advertises Reddit without promising full thread access."""
+    root = Path(__file__).resolve().parents[1]
+    prompt = (root / "core" / "prompts.md").read_text(encoding="utf-8")
+    capabilities = json.loads(
+        (root / "core" / "capability_registry.json").read_text(encoding="utf-8")
+    )
+    web_search = next(
+        capability
+        for capability in capabilities
+        if capability.get("name") == "web_search"
+    )
+
+    assert "Use `reddit` for public Reddit discussion discovery" in prompt
+    assert "not full post/comment retrieval" in prompt
+    assert "Web/GitHub/Reddit" in web_search["description"]
 
 
 def test_research_web_tool_serializes_results_and_provider_status(monkeypatch) -> None:
