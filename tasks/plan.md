@@ -58,3 +58,38 @@ read-only public GitHub search without changing Supervisor ownership or current
 - GitHub rate limiting: use one bounded request, expose availability/failure honestly, and fall back to Web results.
 - Tool loops: count `research_web` within the existing three-call research budget.
 - Untrusted content: retain provider provenance and pass results through existing external-content boundaries.
+
+---
+
+# Spec and Implementation Plan: Reddit Research Provider, Slice 2
+
+## Objective
+
+Add a zero-credential Reddit discovery provider to the existing `research_web`
+skill. It will reuse the established Web-search adapter with a Reddit site
+constraint, accept only Reddit result URLs, and normalize them with
+`source="reddit"`.
+
+## Boundaries
+
+- Keep Supervisor and Web Agent ownership unchanged.
+- Do not call Reddit's direct Data API without approved access/OAuth.
+- Do not read browser cookies, install CLIs, scrape post bodies/comments, or
+  modify credentials, config, Setup Wizard, Docker, runtime, or databases.
+- Treat search snippets as discovery evidence, not complete Reddit threads.
+
+## Success Criteria
+
+- `research_web(..., sources=["reddit"])` selects only the Reddit provider.
+- The provider issues a bounded Reddit-site Web query and returns only absolute
+  `reddit.com` or `redd.it` URLs with normalized Reddit provenance.
+- Non-Reddit results are discarded, provider failures remain isolated, and a
+  failed Reddit provider can use the existing Web fallback.
+- Existing Web and GitHub behavior remains unchanged and all network tests are
+  offline.
+
+## Deferred
+
+- Authenticated Reddit API access and full post/comment retrieval.
+- Browser sessions, cookies, OpenCLI, and `rdt-cli`.
+- Concurrent provider execution, persistent health state, and new UI/settings.
