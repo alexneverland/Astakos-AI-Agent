@@ -256,6 +256,37 @@ def test_web_provider_clamps_explicit_zero_limit_to_one() -> None:
     assert instance.text.call_args.kwargs["max_results"] == 1
 
 
+def test_web_provider_filters_results_before_backend_quota_is_exhausted() -> None:
+    """Rejected URLs do not prevent a later backend from supplying evidence."""
+    with patch("ddgs.DDGS") as mock_ddgs:
+        instance = MagicMock()
+
+        def results_for_backend(*args, **kwargs):
+            if kwargs["backend"] == "duckduckgo":
+                return [{
+                    "title": "Off domain",
+                    "href": "https://example.com/not-reddit",
+                    "body": "Irrelevant",
+                }]
+            return [{
+                "title": "Reddit discussion",
+                "href": "https://www.reddit.com/r/python/comments/abc/topic/",
+                "body": "Relevant",
+            }]
+
+        instance.text.side_effect = results_for_backend
+        mock_ddgs.return_value.__enter__.return_value = instance
+
+        results = WebSearchProvider().search(
+            "reddit topic",
+            1,
+            url_filter=lambda url: "reddit.com" in url,
+        )
+
+    assert [result.title for result in results] == ["Reddit discussion"]
+    assert instance.text.call_count == 2
+
+
 def test_github_provider_normalizes_public_issue_results(monkeypatch) -> None:
     """GitHub's raw issue response is hidden behind the shared result contract."""
     response = MagicMock()
@@ -347,7 +378,12 @@ def test_reddit_provider_discovers_and_normalizes_only_reddit_urls() -> None:
         source="reddit",
         metadata={"backend": "bing", "discovered_via": "web_search"},
     )]
-    web.search.assert_called_once_with("site:reddit.com voice agents", 5)
+    web.search.assert_called_once()
+    args, kwargs = web.search.call_args
+    assert args == ("(site:reddit.com OR site:redd.it) voice agents", 5)
+    url_filter = kwargs["url_filter"]
+    assert url_filter("https://redd.it/abc") is True
+    assert url_filter("https://example.com/not-reddit") is False
 
 
 def test_reddit_provider_maps_web_unavailability_to_reddit() -> None:
