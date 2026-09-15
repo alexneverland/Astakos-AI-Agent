@@ -174,6 +174,48 @@ def test_message_renderer_makes_bare_search_urls_clickable_and_keeps_unsafe_text
     assert "javascript:alert(1)" in result["text"]
 
 
+def test_message_renderer_keeps_sentence_punctuation_outside_bare_links(
+    jarvis_browser_page: Page,
+) -> None:
+    """Ordinary punctuation after a bare URL must not become part of its target."""
+    result = jarvis_browser_page.evaluate(
+        """
+        () => {
+            appendMessage('Δες https://example.com.', 'ai', 'Web_Agent');
+            const messages = document.querySelectorAll('#chat-box .msg-ai');
+            const message = messages[messages.length - 1];
+            const link = message.querySelector('a');
+            return { href: link?.getAttribute('href'), text: message.innerText };
+        }
+        """
+    )
+
+    assert result["href"] == "https://example.com"
+    assert "Δες https://example.com." in result["text"]
+
+
+def test_message_renderer_keeps_urls_inside_inline_code_inert(
+    jarvis_browser_page: Page,
+) -> None:
+    """A URL presented as inline code remains code rather than a clickable link."""
+    result = jarvis_browser_page.evaluate(
+        """
+        () => {
+            appendMessage('Command: `https://example.com`', 'ai', 'Tech_Agent');
+            const messages = document.querySelectorAll('#chat-box .msg-ai');
+            const message = messages[messages.length - 1];
+            return {
+                linkCount: message.querySelectorAll('a').length,
+                codeText: message.querySelector('code')?.innerText,
+            };
+        }
+        """
+    )
+
+    assert result["linkCount"] == 0
+    assert result["codeText"] == "https://example.com"
+
+
 def test_no_debug_urls_in_normal_frontend(index_html_content: str) -> None:
     """Normal frontend must not reference or call protected /debug endpoints."""
     # Ensure no /debug endpoint is queried or linked
