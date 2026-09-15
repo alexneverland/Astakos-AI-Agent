@@ -6,7 +6,11 @@ import json
 
 from langchain_core.tools import tool
 
-from services.web_providers import GitHubResearchProvider, WebSearchProvider
+from services.web_providers import (
+    GitHubResearchProvider,
+    RedditResearchProvider,
+    WebSearchProvider,
+)
 from services.web_research import ResearchProviderRegistry
 
 
@@ -15,6 +19,7 @@ def _default_research_registry() -> ResearchProviderRegistry:
     return ResearchProviderRegistry([
         WebSearchProvider(),
         GitHubResearchProvider(),
+        RedditResearchProvider(),
     ])
 
 
@@ -26,10 +31,11 @@ def research_web(
 ) -> str:
     """Research selected read-only sources with normalized provenance.
 
-    Valid sources in this first slice are ``web`` and ``github``. Select only
+    Valid sources are ``web``, ``github``, and ``reddit``. Select only
     sources relevant to the request. Use GitHub search qualifiers such as
     ``repo:owner/name`` and ``is:issue`` for repository-specific research.
-    The total result count is capped at 10.
+    Reddit provides discovery snippets and links through bounded Web search,
+    not full post/comment retrieval. The total result count is capped at 10.
     """
     from tools.web import _format_unverified_search_fallback
 

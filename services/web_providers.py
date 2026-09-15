@@ -6,7 +6,7 @@ import json
 import re
 import unicodedata
 from typing import Any
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 import requests
 
@@ -224,6 +224,71 @@ class WebSearchProvider:
                 f"https://www.google.com/search?q={encoded}",
                 f"https://www.bing.com/search?q={encoded}",
             ),
+        )
+
+
+class RedditResearchProvider:
+    """Discover public Reddit discussions through bounded Web search results."""
+
+    name = "reddit"
+
+    def __init__(self, web_provider: WebSearchProvider | None = None) -> None:
+        self._web_provider = web_provider or WebSearchProvider()
+
+    def check(self) -> ProviderHealth:
+        """Map Web-search readiness to the Reddit discovery capability."""
+        health = self._web_provider.check()
+        if not health.available:
+            return ProviderHealth(
+                self.name,
+                False,
+                f"Reddit discovery unavailable: {health.detail}",
+            )
+        return ProviderHealth(
+            self.name,
+            True,
+            "Reddit discovery via Web search ready",
+        )
+
+    def search(self, query: str, max_results: int) -> list[SearchResult]:
+        """Return only Reddit-hosted results with normalized provenance."""
+        query = str(query or "").strip()
+        if not query:
+            return []
+        limit = _bounded_result_limit(max_results)
+        discovered = self._web_provider.search(
+            f"site:reddit.com {query}",
+            limit,
+        )
+        results: list[SearchResult] = []
+        for result in discovered:
+            if not self._is_reddit_url(result.url):
+                continue
+            results.append(SearchResult(
+                title=result.title,
+                url=result.url,
+                content=result.content,
+                source=self.name,
+                author=result.author,
+                published_at=result.published_at,
+                score=result.score,
+                metadata={
+                    **result.metadata,
+                    "discovered_via": "web_search",
+                },
+            ))
+            if len(results) >= limit:
+                break
+        return results
+
+    @staticmethod
+    def _is_reddit_url(url: str) -> bool:
+        """Accept canonical Reddit hosts and reject lookalike domains."""
+        hostname = (urlsplit(url).hostname or "").lower()
+        return (
+            hostname == "reddit.com"
+            or hostname.endswith(".reddit.com")
+            or hostname == "redd.it"
         )
 
 

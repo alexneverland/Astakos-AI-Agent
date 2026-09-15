@@ -317,6 +317,63 @@ def test_github_provider_reports_rate_limit_without_retrying(monkeypatch) -> Non
     get.assert_called_once()
 
 
+def test_reddit_provider_discovers_and_normalizes_only_reddit_urls() -> None:
+    """Reddit discovery rejects unrelated Web results and keeps provenance."""
+    from services.web_providers import RedditResearchProvider
+
+    web = MagicMock()
+    web.search.return_value = [
+        SearchResult(
+            title="Useful discussion",
+            url="https://www.reddit.com/r/LocalLLaMA/comments/abc/topic/",
+            content="Community feedback",
+            source="web",
+            metadata={"backend": "bing"},
+        ),
+        SearchResult(
+            title="Unrelated result",
+            url="https://example.com/not-reddit",
+            content="Not Reddit",
+            source="web",
+        ),
+    ]
+
+    results = RedditResearchProvider(web_provider=web).search("voice agents", 5)
+
+    assert results == [SearchResult(
+        title="Useful discussion",
+        url="https://www.reddit.com/r/LocalLLaMA/comments/abc/topic/",
+        content="Community feedback",
+        source="reddit",
+        metadata={"backend": "bing", "discovered_via": "web_search"},
+    )]
+    web.search.assert_called_once_with("site:reddit.com voice agents", 5)
+
+
+def test_reddit_provider_maps_web_unavailability_to_reddit() -> None:
+    """A failed discovery backend reports the selected provider as Reddit."""
+    from services.web_providers import RedditResearchProvider
+
+    web = MagicMock()
+    web.check.return_value = ProviderHealth("web", False, "DDGS unavailable")
+    provider = RedditResearchProvider(web_provider=web)
+
+    assert provider.check() == ProviderHealth(
+        "reddit",
+        False,
+        "Reddit discovery unavailable: DDGS unavailable",
+    )
+
+
+def test_default_research_registry_includes_reddit_provider() -> None:
+    """The canonical research skill accepts Reddit as a selectable source."""
+    from astakos_skills.research_web import _default_research_registry
+
+    registry = _default_research_registry()
+
+    assert "reddit" in registry._providers
+
+
 def test_research_web_tool_serializes_results_and_provider_status(monkeypatch) -> None:
     """The agent-facing tool preserves provenance and partial-provider status."""
     from astakos_skills.research_web import research_web

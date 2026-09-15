@@ -21,7 +21,7 @@
 
 ## Slice 2: Reddit discovery
 
-- [ ] Add the Reddit provider with URL filtering and normalized provenance.
+- [x] Add the Reddit provider with URL filtering and normalized provenance.
   - Acceptance: bounded site search returns only Reddit URLs and isolates failures.
   - Verify: focused offline provider tests written before implementation.
   - Files: `services/web_providers.py`, `tests/test_web_research.py`.
