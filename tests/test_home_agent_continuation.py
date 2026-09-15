@@ -226,12 +226,12 @@ def test_timestamped_web_followup_is_resolved_before_tool_binding(monkeypatch) -
 
 
 def test_ambiguous_standalone_food_word_asks_before_searching(monkeypatch) -> None:
-    """A standalone one-word Home request must clarify without model classification."""
+    """An underspecified new Home request must clarify without retrieval tools."""
     import core.agents as agents
 
     fake_llm = _prepare_home_agent(
         monkeypatch,
-        agents.HomeContinuationDecision(outcome="not_continuation"),
+        agents.HomeContinuationDecision(outcome="ambiguous_standalone"),
         AIMessage(content="Φακές για βραδινό ή θέλεις συνταγή;"),
     )
     state = {
@@ -243,7 +243,35 @@ def test_ambiguous_standalone_food_word_asks_before_searching(monkeypatch) -> No
 
     assert result["messages"][0].content == "Φακές για βραδινό ή θέλεις συνταγή;"
     assert fake_llm.bound_tools == [[]]
-    assert fake_llm.resolver_calls == 0
+    assert fake_llm.resolver_calls == 1
+
+
+def test_complete_one_word_home_command_uses_semantic_resolution(monkeypatch) -> None:
+    """A complete one-word command must retain the tool chosen by semantic resolution."""
+    import core.agents as agents
+
+    fake_llm = _prepare_home_agent(
+        monkeypatch,
+        agents.HomeContinuationDecision(outcome="not_continuation"),
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "control_vacuum",
+                "args": {"action": "start"},
+                "id": "start-vacuum",
+            }],
+        ),
+    )
+    state = {
+        "channel": "web",
+        "messages": [HumanMessage(content="Σκούπισε")],
+    }
+
+    result = agents.home_agent_node(state)
+
+    assert result["messages"][0].tool_calls[0]["name"] == "control_vacuum"
+    assert {tool.name for tool in fake_llm.bound_tools[0]} >= {"control_vacuum"}
+    assert fake_llm.resolver_calls == 1
 
 
 def test_clear_standalone_home_command_keeps_required_tools(monkeypatch) -> None:

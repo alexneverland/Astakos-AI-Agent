@@ -303,17 +303,6 @@ def _is_brief_home_continuation_candidate(user_text: str) -> bool:
     return bool(normalized) and len(normalized.split()) <= 3
 
 
-def _is_standalone_single_token_home_request(history: list, user_text: str) -> bool:
-    """Return whether a one-token Home request has no conversation to continue."""
-    normalized = _strip_home_transport_timestamp(user_text)
-    prior_dialogue = any(
-        getattr(message, "type", "") in {"human", "ai"}
-        and clean_message(getattr(message, "content", "")).strip()
-        for message in history[:-1]
-    )
-    return bool(normalized) and len(normalized.split()) == 1 and not prior_dialogue
-
-
 def _resolve_brief_home_continuation(history: list, user_text: str) -> HomeContinuationDecision:
     """Use bounded recent conversation to resolve a short Home-Agent continuation safely."""
     context_lines = []
@@ -722,10 +711,7 @@ def home_agent_node(state):
         getattr(latest_message, "type", "") == "human"
         and _is_brief_home_continuation_candidate(latest_user_text)
     ):
-        if _is_standalone_single_token_home_request(history, latest_user_text):
-            continuation = HomeContinuationDecision(outcome="ambiguous_standalone")
-        else:
-            continuation = _resolve_brief_home_continuation(history, latest_user_text)
+        continuation = _resolve_brief_home_continuation(history, latest_user_text)
         if continuation.outcome == "clarify":
             tools_to_bind = []
             system_prompt += (
