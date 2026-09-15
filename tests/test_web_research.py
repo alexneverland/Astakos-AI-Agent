@@ -702,3 +702,34 @@ def test_research_web_tool_preserves_healthy_provider_zero_matches(monkeypatch) 
     marker, payload_text = raw.split("\n", 1)
     assert marker == "[RESEARCH_RESULTS]"
     assert json.loads(payload_text)["results"] == []
+
+
+def test_linkedin_zero_matches_do_not_escape_to_general_web() -> None:
+    """Filtered LinkedIn zero matches remain healthy and source-restricted."""
+    from astakos_skills.research_web import research_web
+
+    alternate = MagicMock(text='{"query": "alternate LinkedIn search"}')
+    with patch("ddgs.DDGS") as mock_ddgs, patch(
+        "services.gemini.safe_gemini_call",
+        return_value=alternate,
+    ):
+        instance = MagicMock()
+        instance.text.return_value = [{
+            "title": "Unrelated result",
+            "href": "https://example.com/not-linkedin",
+            "body": "Search backend responded, but this is outside LinkedIn.",
+        }]
+        mock_ddgs.return_value.__enter__.return_value = instance
+
+        raw = research_web.invoke({
+            "query": "logistics manager Thessaloniki",
+            "sources": ["linkedin"],
+            "max_results": 10,
+        })
+
+    marker, payload_text = raw.split("\n", 1)
+    payload = json.loads(payload_text)
+    assert marker == "[RESEARCH_RESULTS]"
+    assert payload["results"] == []
+    assert payload["providers"]["linkedin"]["available"] is True
+    assert payload["fallback_used"] is False
