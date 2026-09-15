@@ -382,6 +382,75 @@ class YouTubeResearchProvider:
         )
 
 
+class LinkedInResearchProvider:
+    """Discover public LinkedIn pages through bounded Web search results."""
+
+    name = "linkedin"
+
+    def __init__(self, web_provider: WebSearchProvider | None = None) -> None:
+        self._web_provider = web_provider or WebSearchProvider()
+
+    def check(self) -> ProviderHealth:
+        """Map Web-search readiness to the LinkedIn discovery capability."""
+        health = self._web_provider.check()
+        if not health.available:
+            return ProviderHealth(
+                self.name,
+                False,
+                f"LinkedIn discovery unavailable: {health.detail}",
+            )
+        return ProviderHealth(
+            self.name,
+            True,
+            "LinkedIn discovery via Web search ready",
+        )
+
+    def search(self, query: str, max_results: int) -> list[SearchResult]:
+        """Return only LinkedIn-hosted results with normalized provenance."""
+        query = str(query or "").strip()
+        if not query:
+            return []
+        limit = _bounded_result_limit(max_results)
+        discovered = self._web_provider.search(
+            f"site:linkedin.com {query}",
+            limit,
+            url_filter=self._is_linkedin_url,
+        )
+        results: list[SearchResult] = []
+        for result in discovered:
+            if not self._is_linkedin_url(result.url):
+                continue
+            results.append(SearchResult(
+                title=result.title,
+                url=result.url,
+                content=result.content,
+                source=self.name,
+                author=result.author,
+                published_at=result.published_at,
+                score=result.score,
+                metadata={
+                    **result.metadata,
+                    "discovered_via": "web_search",
+                },
+            ))
+            if len(results) >= limit:
+                break
+        return results
+
+    @staticmethod
+    def _is_linkedin_url(url: str) -> bool:
+        """Accept public LinkedIn hosts and reject non-Web or lookalike URLs."""
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return False
+        hostname = (parsed.hostname or "").lower()
+        return (
+            parsed.scheme.lower() in {"http", "https"}
+            and (hostname == "linkedin.com" or hostname.endswith(".linkedin.com"))
+        )
+
+
 class GitHubResearchProvider:
     """Search public GitHub issues and pull requests without mutation access."""
 

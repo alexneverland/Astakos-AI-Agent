@@ -34,3 +34,19 @@
 - [x] Final verification and PR.
   - Acceptance: focused/full suites pass and the diff contains only this slice.
   - Verify: isolated pytest basetemp and `git diff --check`.
+
+## Slice 4: LinkedIn discovery
+
+- [x] Add a bounded LinkedIn discovery provider.
+  - Acceptance: only real LinkedIn hosts normalize with `source="linkedin"`; lookalikes are rejected.
+  - Verify: focused offline provider tests written before implementation.
+  - Files: `services/web_providers.py`, `tests/test_web_research.py`.
+
+- [x] Register LinkedIn in the aggregate research tool and Web Agent guidance.
+  - Acceptance: `sources=["linkedin"]` is valid and publishing remains separate.
+  - Verify: registry and Web Agent regression tests.
+  - Files: `astakos_skills/research_web.py`, `core/prompts.md`, tests.
+
+- [x] Final verification and PR.
+  - Acceptance: focused suites pass and the diff contains only this slice.
+  - Verify: isolated pytest basetemp and `git diff --check`.
