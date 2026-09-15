@@ -412,6 +412,90 @@ def test_default_research_registry_includes_reddit_provider() -> None:
     assert "reddit" in registry._providers
 
 
+def test_youtube_provider_discovers_and_normalizes_only_youtube_urls() -> None:
+    """YouTube discovery rejects unrelated results and preserves provenance."""
+    from services.web_providers import YouTubeResearchProvider
+
+    web = MagicMock()
+    web.search.return_value = [
+        SearchResult(
+            title="Useful video",
+            url="https://www.youtube.com/watch?v=abc123",
+            content="Video summary",
+            source="web",
+            metadata={"backend": "bing"},
+        ),
+        SearchResult(
+            title="Short link",
+            url="https://youtu.be/xyz789",
+            content="Another video summary",
+            source="web",
+        ),
+        SearchResult(
+            title="Lookalike",
+            url="https://youtube.com.example.com/watch?v=bad",
+            content="Not YouTube",
+            source="web",
+        ),
+        SearchResult(
+            title="Channel page",
+            url="https://www.youtube.com/@example",
+            content="Not a video",
+            source="web",
+        ),
+    ]
+
+    results = YouTubeResearchProvider(web_provider=web).search("Gemini CLI", 5)
+
+    assert results == [
+        SearchResult(
+            title="Useful video",
+            url="https://www.youtube.com/watch?v=abc123",
+            content="Video summary",
+            source="youtube",
+            metadata={"backend": "bing", "discovered_via": "web_search"},
+        ),
+        SearchResult(
+            title="Short link",
+            url="https://youtu.be/xyz789",
+            content="Another video summary",
+            source="youtube",
+            metadata={"discovered_via": "web_search"},
+        ),
+    ]
+    args, kwargs = web.search.call_args
+    assert args == ("(site:youtube.com OR site:youtu.be) Gemini CLI", 5)
+    url_filter = kwargs["url_filter"]
+    assert url_filter("https://m.youtube.com/shorts/abc") is True
+    assert url_filter("https://www.youtube.com/live/abc") is True
+    assert url_filter("https://www.youtube.com/playlist?list=abc") is False
+    assert url_filter("https://youtube.com.example.com/watch?v=bad") is False
+
+
+def test_youtube_provider_maps_web_unavailability_to_youtube() -> None:
+    """A failed discovery backend reports the selected provider as YouTube."""
+    from services.web_providers import YouTubeResearchProvider
+
+    web = MagicMock()
+    web.check.return_value = ProviderHealth("web", False, "DDGS unavailable")
+    provider = YouTubeResearchProvider(web_provider=web)
+
+    assert provider.check() == ProviderHealth(
+        "youtube",
+        False,
+        "YouTube discovery unavailable: DDGS unavailable",
+    )
+
+
+def test_default_research_registry_includes_youtube_provider() -> None:
+    """The canonical research skill accepts YouTube as a selectable source."""
+    from astakos_skills.research_web import _default_research_registry
+
+    registry = _default_research_registry()
+
+    assert "youtube" in registry._providers
+
+
 def test_web_agent_guidance_describes_reddit_discovery_boundary() -> None:
     """Agent guidance advertises Reddit without promising full thread access."""
     root = Path(__file__).resolve().parents[1]
@@ -427,7 +511,25 @@ def test_web_agent_guidance_describes_reddit_discovery_boundary() -> None:
 
     assert "Use `reddit` for public Reddit discussion discovery" in prompt
     assert "not full post/comment retrieval" in prompt
-    assert "Web/GitHub/Reddit" in web_search["description"]
+    assert "Web/GitHub/Reddit/YouTube" in web_search["description"]
+
+
+def test_web_agent_guidance_describes_youtube_discovery_boundary() -> None:
+    """Agent guidance advertises YouTube without promising content retrieval."""
+    root = Path(__file__).resolve().parents[1]
+    prompt = (root / "core" / "prompts.md").read_text(encoding="utf-8")
+    capabilities = json.loads(
+        (root / "core" / "capability_registry.json").read_text(encoding="utf-8")
+    )
+    web_search = next(
+        capability
+        for capability in capabilities
+        if capability.get("name") == "web_search"
+    )
+
+    assert "Use `youtube` for public YouTube video discovery" in prompt
+    assert "not transcript or comment retrieval" in prompt
+    assert "Web/GitHub/Reddit/YouTube" in web_search["description"]
 
 
 def test_research_web_tool_serializes_results_and_provider_status(monkeypatch) -> None:

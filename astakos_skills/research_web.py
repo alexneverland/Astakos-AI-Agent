@@ -10,6 +10,7 @@ from services.web_providers import (
     GitHubResearchProvider,
     RedditResearchProvider,
     WebSearchProvider,
+    YouTubeResearchProvider,
 )
 from services.web_research import ResearchProviderRegistry
 
@@ -20,6 +21,7 @@ def _default_research_registry() -> ResearchProviderRegistry:
         WebSearchProvider(),
         GitHubResearchProvider(),
         RedditResearchProvider(),
+        YouTubeResearchProvider(),
     ])
 
 
@@ -31,11 +33,13 @@ def research_web(
 ) -> str:
     """Research selected read-only sources with normalized provenance.
 
-    Valid sources are ``web``, ``github``, and ``reddit``. Select only
+    Valid sources are ``web``, ``github``, ``reddit``, and ``youtube``. Select only
     sources relevant to the request. Use GitHub search qualifiers such as
     ``repo:owner/name`` and ``is:issue`` for repository-specific research.
     Reddit provides discovery snippets and links through bounded Web search,
-    not full post/comment retrieval. The total result count is capped at 10.
+    not full post/comment retrieval. YouTube similarly provides video discovery
+    snippets and links, not transcript or comment retrieval. The total result
+    count is capped at 10.
     """
     from tools.web import _format_unverified_search_fallback
 
