@@ -47,8 +47,8 @@ Instead, the agent must internally follow this lifecycle:
 For every request:
 
 1. Determine if any skill applies (even 1% chance)
-2. Invoke the appropriate skill using the `skill` tool
-3. Select the smallest set of workflows that covers the task's actual scope and risk
+2. Select the smallest set of workflows that covers the task's actual scope and risk
+3. Invoke the selected skills using the `skill` tool
 4. Follow each selected skill workflow strictly
 5. For behavioral code, implement each planned slice with a failing test first, the minimal change, and focused verification
 6. Only proceed to implementation after the required specification and planning steps are complete
