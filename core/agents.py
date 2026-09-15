@@ -800,6 +800,16 @@ def _research_web_filled_requested_limit(messages: list) -> bool:
                     args = getattr(tool_call, "args", {}) or {}
                 if not call_id or not isinstance(args, dict):
                     continue
+                sources = args.get("sources") or ["web"]
+                if not isinstance(sources, (list, tuple, set)):
+                    return False
+                normalized_sources = {
+                    str(source).strip().lower()
+                    for source in sources
+                    if str(source).strip()
+                }
+                if len(normalized_sources) != 1:
+                    return False
                 try:
                     requested_limits[str(call_id)] = max(
                         1,

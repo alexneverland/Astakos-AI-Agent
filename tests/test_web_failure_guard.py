@@ -657,24 +657,27 @@ def test_multi_source_research_counts_toward_existing_budget():
 
 
 @pytest.mark.parametrize(
-    ("result_counts", "requested_limits", "search_tools_expected"),
+    ("result_counts", "requested_limits", "sources_by_call", "search_tools_expected"),
     [
-        ([8], [8], False),
-        ([6], [8], True),
-        ([1, 0], [1, 2], True),
-        ([1, 2], [1, 2], False),
+        ([8], [8], [["reddit"]], False),
+        ([6], [8], [["reddit"]], True),
+        ([1, 0], [1, 2], [["reddit"], ["reddit"]], True),
+        ([1, 2], [1, 2], [["reddit"], ["reddit"]], False),
+        ([8], [8], [["web", "github"]], True),
     ],
     ids=[
         "full-result-cap",
         "partial-results",
         "independent-partial-subquery",
         "all-independent-subqueries-full",
+        "multi-source-global-cap",
     ],
 )
 def test_web_agent_hides_new_search_only_after_research_web_fills_limit(
     monkeypatch,
     result_counts,
     requested_limits,
+    sources_by_call,
     search_tools_expected,
 ):
     """Full bounded results stop new searches; partial results may be supplemented."""
@@ -700,8 +703,8 @@ def test_web_agent_hides_new_search_only_after_research_web_fills_limit(
     monkeypatch.setattr("core.utils.load_agent_prompt", lambda *args, **kwargs: "test prompt")
 
     messages = [HumanMessage(content="Find Reddit discussions for each subquestion.")]
-    for call_index, (result_count, requested_limit) in enumerate(
-        zip(result_counts, requested_limits)
+    for call_index, (result_count, requested_limit, sources) in enumerate(
+        zip(result_counts, requested_limits, sources_by_call)
     ):
         call_id = f"research-{call_index}"
         payload = {
@@ -715,7 +718,7 @@ def test_web_agent_hides_new_search_only_after_research_web_fills_limit(
         messages.extend([
             AIMessage(content="", tool_calls=[{
                 "name": "research_web",
-                "args": {"query": f"subquestion {call_index}", "sources": ["reddit"], "max_results": requested_limit},
+                "args": {"query": f"subquestion {call_index}", "sources": sources, "max_results": requested_limit},
                 "id": call_id,
             }]),
             ToolMessage(
