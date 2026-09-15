@@ -778,8 +778,10 @@ def _has_exhausted_web_research_budget(messages: list) -> bool:
 
 
 def _research_web_filled_requested_limit(messages: list) -> bool:
-    """Return true when a completed aggregate search reached its own result cap."""
+    """Return true when every aggregate search in the turn reached its result cap."""
     requested_limits: dict[str, int] = {}
+    completed_call_ids: set[str] = set()
+    filled_call_ids: set[str] = set()
     turn_start = 0
     for index, message in enumerate(messages or []):
         if getattr(message, "type", "") == "human":
@@ -822,10 +824,14 @@ def _research_web_filled_requested_limit(messages: list) -> bool:
                 results = json.loads(payload_text).get("results", [])
             except (AttributeError, json.JSONDecodeError, TypeError):
                 continue
+            completed_call_ids.add(call_id)
             if isinstance(results, list) and len(results) >= requested_limit:
-                return True
+                filled_call_ids.add(call_id)
 
-    return False
+    expected_call_ids = set(requested_limits)
+    return bool(expected_call_ids) and (
+        expected_call_ids == completed_call_ids == filled_call_ids
+    )
 
 
 def _trim_web_research_tool_calls(response, messages: list):

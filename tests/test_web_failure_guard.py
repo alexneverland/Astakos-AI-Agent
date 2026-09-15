@@ -657,13 +657,24 @@ def test_multi_source_research_counts_toward_existing_budget():
 
 
 @pytest.mark.parametrize(
-    ("result_count", "search_tools_expected"),
-    [(8, False), (6, True)],
-    ids=["full-result-cap", "partial-results"],
+    ("result_counts", "requested_limits", "search_tools_expected"),
+    [
+        ([8], [8], False),
+        ([6], [8], True),
+        ([1, 0], [1, 2], True),
+        ([1, 2], [1, 2], False),
+    ],
+    ids=[
+        "full-result-cap",
+        "partial-results",
+        "independent-partial-subquery",
+        "all-independent-subqueries-full",
+    ],
 )
 def test_web_agent_hides_new_search_only_after_research_web_fills_limit(
     monkeypatch,
-    result_count,
+    result_counts,
+    requested_limits,
     search_tools_expected,
 ):
     """Full bounded results stop new searches; partial results may be supplemented."""
@@ -688,28 +699,34 @@ def test_web_agent_hides_new_search_only_after_research_web_fills_limit(
     monkeypatch.setattr("core.agents.llm", fake_llm)
     monkeypatch.setattr("core.utils.load_agent_prompt", lambda *args, **kwargs: "test prompt")
 
-    payload = {
-        "results": [
-            {"title": f"Thread {index}", "url": f"https://reddit.com/r/test/{index}", "content": "", "source": "reddit"}
-            for index in range(result_count)
-        ],
-        "providers": {"reddit": {"available": True, "detail": "ready"}},
-        "fallback_used": False,
-    }
-    result = web_agent_node({
-        "messages": [
-            HumanMessage(content="Find up to 8 Reddit discussions."),
+    messages = [HumanMessage(content="Find Reddit discussions for each subquestion.")]
+    for call_index, (result_count, requested_limit) in enumerate(
+        zip(result_counts, requested_limits)
+    ):
+        call_id = f"research-{call_index}"
+        payload = {
+            "results": [
+                {"title": f"Thread {call_index}-{index}", "url": f"https://reddit.com/r/test/{call_index}-{index}", "content": "", "source": "reddit"}
+                for index in range(result_count)
+            ],
+            "providers": {"reddit": {"available": True, "detail": "ready"}},
+            "fallback_used": False,
+        }
+        messages.extend([
             AIMessage(content="", tool_calls=[{
                 "name": "research_web",
-                "args": {"query": "Gemini CLI Windows", "sources": ["reddit"], "max_results": 8},
-                "id": "research-1",
+                "args": {"query": f"subquestion {call_index}", "sources": ["reddit"], "max_results": requested_limit},
+                "id": call_id,
             }]),
             ToolMessage(
-                tool_call_id="research-1",
+                tool_call_id=call_id,
                 name="research_web",
                 content="[RESEARCH_RESULTS]\n" + json.dumps(payload),
             ),
-        ],
+        ])
+
+    result = web_agent_node({
+        "messages": messages,
         "channel": "web",
     })
 
