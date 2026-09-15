@@ -90,7 +90,10 @@ def test_registry_normalizes_result_contract() -> None:
 
 def test_registry_falls_back_to_web_when_requested_provider_is_unavailable() -> None:
     """An unavailable requested source degrades to the registered Web provider."""
-    web = FakeProvider("web", [_result("Fallback", "https://example.com/fallback", "web")])
+    web = FakeProvider(
+        "web",
+        [_result("Fallback", "https://example.com/fallback", "web")],
+    )
     github = FakeProvider("github", [], available=False)
     registry = ResearchProviderRegistry([web, github])
 
@@ -101,6 +104,21 @@ def test_registry_falls_back_to_web_when_requested_provider_is_unavailable() -> 
     assert response.fallback_used is True
     assert web.calls == 1
     assert github.calls == 0
+
+
+def test_registry_does_not_fall_back_when_requested_provider_has_no_matches() -> None:
+    """A healthy provider's empty result is authoritative for explicit selection."""
+    web = FakeProvider("web", [_result("Fallback", "https://example.com/fallback", "web")])
+    github = FakeProvider("github", [])
+    registry = ResearchProviderRegistry([web, github])
+
+    response = registry.search("no matching issue", sources=["github"], max_results=5)
+
+    assert response.results == []
+    assert response.fallback_used is False
+    assert response.statuses["github"].available is True
+    assert web.calls == 0
+    assert github.calls == 1
 
 
 def test_registry_deduplicates_canonical_urls_across_providers() -> None:
@@ -146,6 +164,17 @@ def test_registry_rejects_unknown_provider_without_calling_known_sources() -> No
         registry.search("voice bug", sources=["reddit"], max_results=5)
 
     assert web.calls == 0
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["", "not-a-url", "/relative", "ftp://example.com/file"],
+)
+def test_canonical_result_url_rejects_non_http_absolute_urls(url: str) -> None:
+    """Only navigable absolute Web URLs can become verified evidence."""
+    from services.web_research import canonical_result_url
+
+    assert canonical_result_url(url) == ""
 
 
 def test_web_provider_normalizes_ddgs_results() -> None:
@@ -205,6 +234,26 @@ def test_web_provider_treats_accent_only_rewrite_as_same_query(capsys) -> None:
 
     assert instance.text.call_count == 4
     assert "Gemini returned the original query." in capsys.readouterr().out
+
+
+def test_web_provider_clamps_explicit_zero_limit_to_one() -> None:
+    """The provider preserves the legacy minimum of one requested result."""
+    with patch("ddgs.DDGS") as mock_ddgs:
+        instance = MagicMock()
+        instance.text.return_value = [
+            {
+                "title": f"Example {index}",
+                "href": f"https://example.com/{index}",
+                "body": "Summary",
+            }
+            for index in range(5)
+        ]
+        mock_ddgs.return_value.__enter__.return_value = instance
+
+        results = WebSearchProvider().search("example", 0)
+
+    assert len(results) == 1
+    assert instance.text.call_args.kwargs["max_results"] == 1
 
 
 def test_github_provider_normalizes_public_issue_results(monkeypatch) -> None:
@@ -270,7 +319,7 @@ def test_github_provider_reports_rate_limit_without_retrying(monkeypatch) -> Non
 
 def test_research_web_tool_serializes_results_and_provider_status(monkeypatch) -> None:
     """The agent-facing tool preserves provenance and partial-provider status."""
-    from tools.web import research_web
+    from astakos_skills.research_web import research_web
 
     registry = MagicMock()
     registry.search.return_value = ResearchResponse(
@@ -280,7 +329,10 @@ def test_research_web_tool_serializes_results_and_provider_status(monkeypatch) -
             "web": ProviderHealth("web", False, "offline"),
         },
     )
-    monkeypatch.setattr("tools.web._default_research_registry", lambda: registry)
+    monkeypatch.setattr(
+        "astakos_skills.research_web._default_research_registry",
+        lambda: registry,
+    )
 
     raw = research_web.invoke({
         "query": "audio bug",
@@ -301,3 +353,35 @@ def test_research_web_tool_serializes_results_and_provider_status(monkeypatch) -
         sources=["github", "web"],
         max_results=4,
     )
+
+
+def test_research_web_tool_uses_canonical_skill_module() -> None:
+    """New agent-facing capabilities live under ``astakos_skills``."""
+    from tools.system import research_web
+
+    assert research_web.func.__module__ == "astakos_skills.research_web"
+
+
+def test_research_web_tool_preserves_healthy_provider_zero_matches(monkeypatch) -> None:
+    """A healthy explicit source returns an empty aggregate, not Web links."""
+    from astakos_skills.research_web import research_web
+
+    registry = MagicMock()
+    registry.search.return_value = ResearchResponse(
+        results=[],
+        statuses={"github": ProviderHealth("github", True, "ready")},
+    )
+    monkeypatch.setattr(
+        "astakos_skills.research_web._default_research_registry",
+        lambda: registry,
+    )
+
+    raw = research_web.invoke({
+        "query": "no matching issue",
+        "sources": ["github"],
+        "max_results": 5,
+    })
+
+    marker, payload_text = raw.split("\n", 1)
+    assert marker == "[RESEARCH_RESULTS]"
+    assert json.loads(payload_text)["results"] == []

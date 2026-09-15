@@ -77,6 +77,8 @@ class ResearchProvider(Protocol):
 def canonical_result_url(url: str) -> str:
     """Normalize a URL for cross-provider duplicate detection."""
     parts = urlsplit((url or "").strip())
+    if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
+        return ""
     path = parts.path.rstrip("/") or "/"
     return urlunsplit(
         (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
@@ -122,7 +124,16 @@ class ResearchProviderRegistry:
                 batches.append(batch)
 
         fallback_used = False
-        if not batches and "web" not in selected and "web" in self._providers:
+        selected_unavailable = any(
+            not statuses[name].available
+            for name in selected
+        )
+        if (
+            not batches
+            and selected_unavailable
+            and "web" not in selected
+            and "web" in self._providers
+        ):
             fallback_used = True
             batch, status, provider_fallbacks = self._search_one(
                 self._providers["web"], query, limit

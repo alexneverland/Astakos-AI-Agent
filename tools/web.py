@@ -801,58 +801,6 @@ def _format_unverified_search_fallback(query: str, fallback_urls) -> str:
     return f"{WEB_SEARCH_UNVERIFIED_LINKS_MARKER}\n{links}"
 
 
-def _default_research_registry():
-    """Build the small first-slice provider registry for one request."""
-    from services.web_providers import GitHubResearchProvider, WebSearchProvider
-    from services.web_research import ResearchProviderRegistry
-
-    return ResearchProviderRegistry([
-        WebSearchProvider(),
-        GitHubResearchProvider(),
-    ])
-
-
-@tool
-def research_web(
-    query: str,
-    sources: list[str] | None = None,
-    max_results: int = 10,
-) -> str:
-    """Research with selected read-only providers and normalized provenance.
-
-    Valid sources in this first slice are ``web`` and ``github``. Select only
-    sources relevant to the request. Use GitHub search qualifiers such as
-    ``repo:owner/name`` and ``is:issue`` when the user asks about a repository's
-    bugs or discussions. The total result count is capped at 10.
-    """
-    try:
-        response = _default_research_registry().search(
-            query,
-            sources=sources,
-            max_results=max_results,
-        )
-    except ValueError as exc:
-        return f"[WEB_TOOL_ERROR][research_web][reason=invalid_sources] {exc}"
-
-    if not response.results:
-        return _format_unverified_search_fallback(query, response.fallback_urls)
-
-    payload = {
-        "results": [result.to_dict() for result in response.results],
-        "providers": {
-            name: {
-                "available": status.available,
-                "detail": status.detail,
-            }
-            for name, status in response.statuses.items()
-        },
-        "fallback_used": response.fallback_used,
-    }
-    return "[RESEARCH_RESULTS]\n" + json.dumps(
-        payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
 @tool
 def search_supermarket_prices(query: str) -> str:
     """Searches for product prices from all supermarkets (e-katanalotis.gov.gr).

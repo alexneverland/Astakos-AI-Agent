@@ -18,6 +18,15 @@ from services.web_research import (
 )
 
 
+def _bounded_result_limit(value: Any, *, default: int = 5) -> int:
+    """Clamp a provider result limit while preserving an explicit zero."""
+    try:
+        parsed = default if value is None else int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(parsed, 10))
+
+
 class WebSearchProvider:
     """Adapt the existing bounded DDGS strategy to normalized results."""
 
@@ -42,7 +51,7 @@ class WebSearchProvider:
         query = str(query or "").strip()
         if not query:
             return []
-        limit = max(1, min(int(max_results or 5), 10))
+        limit = _bounded_result_limit(max_results)
         collected: list[SearchResult] = []
         seen_urls: set[str] = set()
 
@@ -233,7 +242,7 @@ class GitHubResearchProvider:
         query = str(query or "").strip()
         if not query:
             return []
-        limit = max(1, min(int(max_results or 5), 10))
+        limit = _bounded_result_limit(max_results)
         try:
             response = requests.get(
                 self._SEARCH_URL,

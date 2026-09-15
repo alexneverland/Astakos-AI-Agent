@@ -50,8 +50,8 @@ from tools.web import (
     get_news, get_weather_forecast, search_supermarket_prices,
     search_goldmall_offers, execute_local_pipeline, get_navigation_info,
     relay_local_payload, search_google_places, browse_url, duckduckgo_search,
-    research_web,
 )
+from astakos_skills.research_web import research_web
 from astakos_skills.morning_briefing import morning_briefing
 from astakos_skills.hn_briefing import hn_briefing
 from astakos_skills.search_flights import search_flights

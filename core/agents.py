@@ -115,8 +115,9 @@ from tools.system import (
 )
 from tools.web import (
     get_news, get_weather_forecast,
-    search_goldmall_offers, execute_local_pipeline, get_navigation_info, relay_local_payload, search_google_places, browse_url, duckduckgo_search, research_web, search_supermarket_prices
+    search_goldmall_offers, execute_local_pipeline, get_navigation_info, relay_local_payload, search_google_places, browse_url, duckduckgo_search, search_supermarket_prices
 )
+from astakos_skills.research_web import research_web
 from tools.project_tools import (
     grant_project_access, list_project_files, read_project_file,
     edit_project_file, write_project_file, grep_project_files,
