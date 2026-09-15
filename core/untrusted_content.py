@@ -33,6 +33,7 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "read_agent_skill",
     "read_project_file",
     "repo_mapper",
+    "research_web",
     "research_last30days",
     "retrieve_photo",
     "run_code",

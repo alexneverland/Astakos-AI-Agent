@@ -49,7 +49,8 @@ from services.embeddings import embeddings
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_prices,
     search_goldmall_offers, execute_local_pipeline, get_navigation_info,
-    relay_local_payload, search_google_places, browse_url, duckduckgo_search
+    relay_local_payload, search_google_places, browse_url, duckduckgo_search,
+    research_web,
 )
 from astakos_skills.morning_briefing import morning_briefing
 from astakos_skills.hn_briefing import hn_briefing
@@ -4140,7 +4141,7 @@ all_tools = [
     create_file_tool, get_current_location,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
     search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url,
-    duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, update_goal_progress_tool, update_goal_milestones_tool, tool_stats, system_doctor, memory_review,
+    duckduckgo_search, research_web, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, update_goal_progress_tool, update_goal_milestones_tool, tool_stats, system_doctor, memory_review,
     repo_mapper,
     scan_receipt,
     text_stats,

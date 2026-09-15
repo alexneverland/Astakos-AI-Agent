@@ -312,7 +312,7 @@
   },
   {
     "name": "web_search",
-    "description": "Αναζήτηση στο internet με DuckDuckGo ή άνοιγμα URL.",
+    "description": "Αναζήτηση στο internet και επιλεκτική έρευνα σε Web/GitHub με κοινό result contract.",
     "agent": "Web_Agent",
     "risk_level": "SAFE",
     "priority": 8,

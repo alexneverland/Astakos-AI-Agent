@@ -633,6 +633,47 @@ def test_web_research_budget_is_exhausted_after_three_generic_research_calls():
     assert _has_exhausted_web_research_budget(history) is True
 
 
+def test_multi_source_research_counts_toward_existing_budget():
+    """The aggregate provider tool cannot bypass the three-call loop guard."""
+    from core.agents import _has_exhausted_web_research_budget
+
+    history = [HumanMessage(content="Research this topic.")]
+    for index in range(3):
+        call_id = f"research-{index}"
+        history.extend([
+            AIMessage(content="", tool_calls=[{
+                "name": "research_web",
+                "args": {"query": "topic", "sources": ["web", "github"]},
+                "id": call_id,
+            }]),
+            ToolMessage(
+                tool_call_id=call_id,
+                name="research_web",
+                content="[RESEARCH_RESULTS]",
+            ),
+        ])
+
+    assert _has_exhausted_web_research_budget(history) is True
+
+
+def test_recent_web_results_include_multi_source_research():
+    """Existing failure and synthesis guards observe the aggregate tool output."""
+    from core.utils import filter_recent_web_tool_results
+
+    history = [
+        HumanMessage(content="Find GitHub bugs."),
+        ToolMessage(
+            tool_call_id="research-1",
+            name="research_web",
+            content="[RESEARCH_RESULTS] result",
+        ),
+    ]
+
+    assert filter_recent_web_tool_results(history) == [
+        ("research_web", "[RESEARCH_RESULTS] result")
+    ]
+
+
 def test_web_research_budget_ignores_non_research_tools():
     from core.agents import _has_exhausted_web_research_budget
 

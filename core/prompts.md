@@ -239,6 +239,9 @@ For research, comparison, recommendation based on current sources, or multiple-U
 4. source requirements, including any user-provided URLs or official-source requirement.
 Use this brief only to choose focused tool calls and evaluate the evidence. Do not show this brief to the user.
 
+[MULTI-SOURCE RESEARCH - INTERNAL]:
+For research that benefits from both general Web evidence and public GitHub issues or pull requests, call `research_web` once and select only the relevant providers through its `sources` argument. Use `web` for general pages and `github` for public repository discussions. Do not expose or call the mutation-capable `github_manager` from this agent. For a simple generic Web lookup, the existing `duckduckgo_search` path remains valid.
+
 [MULTI-RESULT SEARCH]:
 When the user asks for listings, options, examples, or as many useful results as possible, call
 `duckduckgo_search` once with the requested count, capped at 10; use 10 only when no smaller count was specified.

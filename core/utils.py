@@ -1029,6 +1029,7 @@ def filter_recent_web_tool_results(messages: list) -> list:
     recent_tools = collect_recent_tool_messages_since_last_user(messages)
     web_tools = {
         'duckduckgo_search',
+        'research_web',
         'browse_url',
         'search_google_places',
         'get_news',

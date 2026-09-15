@@ -1,5 +1,7 @@
 """Offline tests for the Web Agent research-provider layer."""
 
+import json
+
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +11,7 @@ from services.web_providers import GitHubResearchProvider, WebSearchProvider
 from services.web_research import (
     ProviderHealth,
     ProviderUnavailableError,
+    ResearchResponse,
     ResearchProviderRegistry,
     SearchResult,
 )
@@ -263,3 +266,38 @@ def test_github_provider_reports_rate_limit_without_retrying(monkeypatch) -> Non
         GitHubResearchProvider().search("audio decoder is:issue", 5)
 
     get.assert_called_once()
+
+
+def test_research_web_tool_serializes_results_and_provider_status(monkeypatch) -> None:
+    """The agent-facing tool preserves provenance and partial-provider status."""
+    from tools.web import research_web
+
+    registry = MagicMock()
+    registry.search.return_value = ResearchResponse(
+        results=[_result("Issue", "https://github.com/example/repo/issues/1", "github")],
+        statuses={
+            "github": ProviderHealth("github", True, "ready"),
+            "web": ProviderHealth("web", False, "offline"),
+        },
+    )
+    monkeypatch.setattr("tools.web._default_research_registry", lambda: registry)
+
+    raw = research_web.invoke({
+        "query": "audio bug",
+        "sources": ["github", "web"],
+        "max_results": 4,
+    })
+
+    marker, payload_text = raw.split("\n", 1)
+    payload = json.loads(payload_text)
+    assert marker == "[RESEARCH_RESULTS]"
+    assert payload["results"][0]["source"] == "github"
+    assert payload["providers"]["web"] == {
+        "available": False,
+        "detail": "offline",
+    }
+    registry.search.assert_called_once_with(
+        "audio bug",
+        sources=["github", "web"],
+        max_results=4,
+    )

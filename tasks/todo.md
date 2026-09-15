@@ -10,7 +10,7 @@
   - Verify: provider tests plus unchanged `tests/test_duckduckgo_search.py`.
   - Files: `services/web_providers.py`, `tools/web.py`, `tests/test_web_research.py`.
 
-- [ ] Bind the aggregate tool to the existing Web Agent.
+- [x] Bind the aggregate tool to the existing Web Agent.
   - Acceptance: `research_web` is safe, registered, budgeted, and visible only through the existing Web Agent ownership path.
   - Verify: Web Agent binding, budget, and failure regression tests.
   - Files: `core/agents.py`, `core/tool_risk.py`, `tools/system.py`, `core/capability_registry.json`, `core/prompts.md`, tests.
