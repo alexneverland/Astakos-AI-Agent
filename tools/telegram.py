@@ -36,6 +36,59 @@ def send_telegram_msg_full(text: str, prefix: str = "", max_len: int = 3500, dis
     return last_id
 
 
+def _replace_markdown_links(text: str) -> str:
+    """Convert safe Markdown links to Telegram HTML in linear time."""
+    rendered: list[str] = []
+    cursor = 0
+
+    while cursor < len(text):
+        link_start = text.find("[", cursor)
+        if link_start < 0:
+            rendered.append(text[cursor:])
+            break
+
+        rendered.append(text[cursor:link_start])
+        label_end = text.find("](", link_start + 1)
+        if label_end < 0:
+            rendered.append(text[link_start:])
+            break
+
+        label = text[link_start + 1:label_end]
+        url_start = label_end + 2
+        if not label or "\n" in label or "\r" in label:
+            rendered.append(text[link_start:url_start])
+            cursor = url_start
+            continue
+        if not text.startswith(("http://", "https://"), url_start):
+            rendered.append(text[link_start:url_start])
+            cursor = url_start
+            continue
+
+        depth = 0
+        position = url_start
+        while position < len(text):
+            character = text[position]
+            if character.isspace() or character in '<>\"\'[]':
+                rendered.append(text[link_start:position])
+                cursor = position
+                break
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                if depth == 0:
+                    url = text[url_start:position]
+                    rendered.append(f'<a href="{url}">{label}</a>')
+                    cursor = position + 1
+                    break
+                depth -= 1
+            position += 1
+        else:
+            rendered.append(text[link_start:])
+            break
+
+    return "".join(rendered)
+
+
 def format_for_telegram(text: str) -> str:
     """Mastro-Fix: Converts LLM Markdown into safe HTML for Telegram."""
     if not text:
@@ -65,12 +118,7 @@ def format_for_telegram(text: str) -> str:
     for tag, placeholder in allowed_tags.items():
         text = text.replace(placeholder, tag)
 
-    text = re.sub(
-        r'\[([^\]\r\n]+)\]\('
-        r'(https?://(?:[^\s<>()\[\]"\']+|\([^()\s<>]*\))+)\)',
-        r'<a href="\2">\1</a>',
-        text,
-    )
+    text = _replace_markdown_links(text)
     text = re.sub(r'^#{1,3}\s+(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'^[\*\-]\s+', r'• ', text, flags=re.MULTILINE)

@@ -56,6 +56,14 @@ def test_format_for_telegram_leaves_unbalanced_parenthesis_links_inert():
     assert result == text
 
 
+def test_format_for_telegram_handles_adversarial_unclosed_links_in_linear_time():
+    text = r"[\](http://" + ("!" * 20_000)
+
+    result = format_for_telegram(text)
+
+    assert result == text
+
+
 def test_plain_fallback_removes_telegram_tags():
     result = _plain_telegram_fallback(
         '<b>Τίτλος</b> <a href="https://example.com">Πηγή</a> &lt;0,5g'
