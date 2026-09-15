@@ -21,7 +21,7 @@ OpenCode uses a **skill-driven execution model** powered by the `skill` tool and
 
 The agent should automatically map user intent to skills:
 
-- Feature / new functionality → `spec-driven-development`, then `incremental-implementation`, `test-driven-development`
+- Feature / new functionality → `spec-driven-development`, then `planning-and-task-breakdown`, then `incremental-implementation` + `test-driven-development` per behavioral slice
 - Planning / breakdown → `planning-and-task-breakdown`
 - Bug / failure / unexpected behavior → `debugging-and-error-recovery`
 - Code review → `code-review-and-quality`
@@ -38,7 +38,7 @@ Instead, the agent must internally follow this lifecycle:
 - DEFINE → `spec-driven-development`
 - PLAN → `planning-and-task-breakdown`
 - BUILD → `incremental-implementation` + `test-driven-development`
-- VERIFY → `debugging-and-error-recovery`
+- VERIFY → acceptance criteria, relevant checks, and the project-wide Definition of Done; use `debugging-and-error-recovery` when verification exposes a failure
 - REVIEW → `code-review-and-quality`
 - SHIP → `shipping-and-launch`
 
@@ -47,21 +47,27 @@ Instead, the agent must internally follow this lifecycle:
 For every request:
 
 1. Determine if any skill applies (even 1% chance)
-2. Invoke the appropriate skill using the `skill` tool
-3. Follow the skill workflow strictly
-4. Only proceed to implementation after required steps (spec, plan, etc.) are complete
+2. Select the smallest set of workflows that covers the task's actual scope and risk
+3. Invoke the selected skills using the `skill` tool
+4. Follow each selected skill workflow strictly
+5. For behavioral code, implement each planned slice with a failing test first, the minimal change, and focused verification
+6. Only proceed to implementation after the required specification and planning steps are complete
+
+Skill selection is mandatory; running the entire feature lifecycle for every task is not. A small bug may need only reproduction, a failing regression test, a minimal fix, and focused verification. A substantial feature needs a specification, plan, incremental slices, tests, review, and shipping checks. Use the project-wide [Definition of Done](references/definition-of-done.md) as the final gate in both cases.
 
 ### Anti-Rationalization
 
 The following thoughts are incorrect and must be ignored:
 
-- "This is too small for a skill"
+- "This is too small to check for an applicable skill"
 - "I can just quickly implement this"
-- "I’ll gather context first"
+- "The tests pass, so no other verification is needed"
 
 Correct behavior:
 
-- Always check for and use skills first
+- Always check for and select applicable skills before acting
+- Apply the selected workflow in proportion to the task; do not invent lifecycle stages that do not apply
+- Once a skill is selected, gather the context and evidence its workflow requires before editing
 
 This ensures OpenCode behaves similarly to Claude Code with full workflow enforcement.
 
