@@ -27,12 +27,14 @@ class _HomeLLM:
         self._response = response
         self.bound_tools: list[list] = []
         self.resolver_calls = 0
+        self.resolver_prompts: list[str] = []
 
     def with_structured_output(self, _schema: object) -> object:
         """Return a structured-output double for the continuation resolver."""
-        def invoke(_prompt: str) -> object:
+        def invoke(prompt: str) -> object:
             """Record one resolver invocation and return the configured decision."""
             self.resolver_calls += 1
+            self.resolver_prompts.append(prompt)
             return self._decision
 
         return SimpleNamespace(invoke=invoke)
@@ -221,3 +223,106 @@ def test_timestamped_web_followup_is_resolved_before_tool_binding(monkeypatch) -
     assert result["messages"][0].content == "Ποια ενέργεια εννοείς να συνεχίσω;"
     assert fake_llm.bound_tools == [[]]
     assert fake_llm.resolver_calls == 1
+
+
+def test_ambiguous_standalone_food_word_asks_before_searching(monkeypatch) -> None:
+    """An underspecified new Home request must clarify without retrieval tools."""
+    import core.agents as agents
+
+    fake_llm = _prepare_home_agent(
+        monkeypatch,
+        agents.HomeContinuationDecision(outcome="ambiguous_standalone"),
+        AIMessage(content="Φακές για βραδινό ή θέλεις συνταγή;"),
+    )
+    state = {
+        "channel": "web",
+        "messages": [HumanMessage(content="φακεσ")],
+    }
+
+    result = agents.home_agent_node(state)
+
+    assert result["messages"][0].content == "Φακές για βραδινό ή θέλεις συνταγή;"
+    assert fake_llm.bound_tools == [[]]
+    assert fake_llm.resolver_calls == 1
+
+
+def test_complete_one_word_home_command_uses_semantic_resolution(monkeypatch) -> None:
+    """A complete one-word command must retain the tool chosen by semantic resolution."""
+    import core.agents as agents
+
+    fake_llm = _prepare_home_agent(
+        monkeypatch,
+        agents.HomeContinuationDecision(outcome="not_continuation"),
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "control_vacuum",
+                "args": {"action": "start"},
+                "id": "start-vacuum",
+            }],
+        ),
+    )
+    state = {
+        "channel": "web",
+        "messages": [HumanMessage(content="Σκούπισε")],
+    }
+
+    result = agents.home_agent_node(state)
+
+    assert result["messages"][0].tool_calls[0]["name"] == "control_vacuum"
+    assert {tool.name for tool in fake_llm.bound_tools[0]} >= {"control_vacuum"}
+    assert fake_llm.resolver_calls == 1
+
+
+def test_clear_standalone_home_command_keeps_required_tools(monkeypatch) -> None:
+    """A short but complete new command must retain its legitimate Home tools."""
+    import core.agents as agents
+
+    fake_llm = _prepare_home_agent(
+        monkeypatch,
+        agents.HomeContinuationDecision(outcome="not_continuation"),
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "control_spotify",
+                "args": {"action": "pause"},
+                "id": "pause-music",
+            }],
+        ),
+    )
+    state = {
+        "channel": "web",
+        "messages": [HumanMessage(content="Σταμάτα Spotify")],
+    }
+
+    result = agents.home_agent_node(state)
+
+    assert result["messages"][0].tool_calls[0]["name"] == "control_spotify"
+    assert {tool.name for tool in fake_llm.bound_tools[0]} >= {"control_spotify"}
+
+
+def test_specific_short_memory_request_keeps_search_memory(monkeypatch) -> None:
+    """A concise request with a clear memory intent must retain retrieval."""
+    import core.agents as agents
+
+    fake_llm = _prepare_home_agent(
+        monkeypatch,
+        agents.HomeContinuationDecision(outcome="not_continuation"),
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "search_memory",
+                "args": {"query": "φακές"},
+                "id": "memory-search",
+            }],
+        ),
+    )
+    state = {
+        "channel": "web",
+        "messages": [HumanMessage(content="Θυμάσαι τις φακές;")],
+    }
+
+    result = agents.home_agent_node(state)
+
+    assert result["messages"][0].tool_calls[0]["name"] == "search_memory"
+    assert {tool.name for tool in fake_llm.bound_tools[0]} >= {"search_memory"}
