@@ -312,7 +312,7 @@
   },
   {
     "name": "web_search",
-    "description": "Αναζήτηση στο internet και επιλεκτική έρευνα σε Web/GitHub/Reddit με κοινό result contract.",
+    "description": "Αναζήτηση στο internet και επιλεκτική έρευνα σε Web/GitHub/Reddit/YouTube με κοινό result contract.",
     "agent": "Web_Agent",
     "risk_level": "SAFE",
     "priority": 8,

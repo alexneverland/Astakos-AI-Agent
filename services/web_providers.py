@@ -6,7 +6,7 @@ import json
 import re
 import unicodedata
 from typing import Any, Callable
-from urllib.parse import quote_plus, urlsplit
+from urllib.parse import parse_qs, quote_plus, urlsplit
 
 import requests
 
@@ -304,6 +304,81 @@ class RedditResearchProvider:
             hostname == "reddit.com"
             or hostname.endswith(".reddit.com")
             or hostname == "redd.it"
+        )
+
+
+class YouTubeResearchProvider:
+    """Discover public YouTube videos through bounded Web search results."""
+
+    name = "youtube"
+
+    def __init__(self, web_provider: WebSearchProvider | None = None) -> None:
+        self._web_provider = web_provider or WebSearchProvider()
+
+    def check(self) -> ProviderHealth:
+        """Map Web-search readiness to the YouTube discovery capability."""
+        health = self._web_provider.check()
+        if not health.available:
+            return ProviderHealth(
+                self.name,
+                False,
+                f"YouTube discovery unavailable: {health.detail}",
+            )
+        return ProviderHealth(
+            self.name,
+            True,
+            "YouTube discovery via Web search ready",
+        )
+
+    def search(self, query: str, max_results: int) -> list[SearchResult]:
+        """Return only YouTube-hosted results with normalized provenance."""
+        query = str(query or "").strip()
+        if not query:
+            return []
+        limit = _bounded_result_limit(max_results)
+        discovered = self._web_provider.search(
+            f"(site:youtube.com OR site:youtu.be) {query}",
+            limit,
+            url_filter=self._is_youtube_url,
+        )
+        results: list[SearchResult] = []
+        for result in discovered:
+            if not self._is_youtube_url(result.url):
+                continue
+            results.append(SearchResult(
+                title=result.title,
+                url=result.url,
+                content=result.content,
+                source=self.name,
+                author=result.author,
+                published_at=result.published_at,
+                score=result.score,
+                metadata={
+                    **result.metadata,
+                    "discovered_via": "web_search",
+                },
+            ))
+            if len(results) >= limit:
+                break
+        return results
+
+    @staticmethod
+    def _is_youtube_url(url: str) -> bool:
+        """Accept canonical YouTube video URLs and reject pages or lookalikes."""
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return False
+        hostname = (parsed.hostname or "").lower()
+        if hostname == "youtu.be":
+            return bool(parsed.path.strip("/").split("/", 1)[0])
+        if hostname != "youtube.com" and not hostname.endswith(".youtube.com"):
+            return False
+        if parsed.path.rstrip("/") == "/watch":
+            return bool(parse_qs(parsed.query).get("v"))
+        return any(
+            parsed.path.startswith(prefix) and bool(parsed.path[len(prefix):].strip("/"))
+            for prefix in ("/shorts/", "/live/")
         )
 
 
