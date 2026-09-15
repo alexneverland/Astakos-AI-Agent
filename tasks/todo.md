@@ -31,6 +31,6 @@
   - Verify: registry/tool boundary tests.
   - Files: `astakos_skills/research_web.py`, `core/prompts.md`, `core/capability_registry.json`, tests.
 
-- [ ] Final verification and PR.
+- [x] Final verification and PR.
   - Acceptance: focused/full suites pass and the diff contains only this slice.
   - Verify: isolated pytest basetemp and `git diff --check`.
