@@ -226,12 +226,12 @@ def test_timestamped_web_followup_is_resolved_before_tool_binding(monkeypatch) -
 
 
 def test_ambiguous_standalone_food_word_asks_before_searching(monkeypatch) -> None:
-    """An underspecified new Home request must clarify without retrieval tools."""
+    """A standalone one-word Home request must clarify without model classification."""
     import core.agents as agents
 
     fake_llm = _prepare_home_agent(
         monkeypatch,
-        agents.HomeContinuationDecision(outcome="ambiguous_standalone"),
+        agents.HomeContinuationDecision(outcome="not_continuation"),
         AIMessage(content="Φακές για βραδινό ή θέλεις συνταγή;"),
     )
     state = {
@@ -243,7 +243,7 @@ def test_ambiguous_standalone_food_word_asks_before_searching(monkeypatch) -> No
 
     assert result["messages"][0].content == "Φακές για βραδινό ή θέλεις συνταγή;"
     assert fake_llm.bound_tools == [[]]
-    assert "too underspecified" in fake_llm.resolver_prompts[0]
+    assert fake_llm.resolver_calls == 0
 
 
 def test_clear_standalone_home_command_keeps_required_tools(monkeypatch) -> None:
