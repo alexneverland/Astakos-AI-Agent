@@ -656,6 +656,69 @@ def test_multi_source_research_counts_toward_existing_budget():
     assert _has_exhausted_web_research_budget(history) is True
 
 
+@pytest.mark.parametrize(
+    ("result_count", "search_tools_expected"),
+    [(8, False), (6, True)],
+    ids=["full-result-cap", "partial-results"],
+)
+def test_web_agent_hides_new_search_only_after_research_web_fills_limit(
+    monkeypatch,
+    result_count,
+    search_tools_expected,
+):
+    """Full bounded results stop new searches; partial results may be supplemented."""
+    from core.agents import web_agent_node
+
+    class FakeBoundLLM:
+        def __init__(self, tools):
+            self.tool_names = {getattr(tool, "name", "") for tool in tools}
+
+        def invoke(self, messages):
+            return AIMessage(content="Research synthesis")
+
+    class FakeLLM:
+        def __init__(self):
+            self.bound = None
+
+        def bind_tools(self, tools):
+            self.bound = FakeBoundLLM(tools)
+            return self.bound
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+    monkeypatch.setattr("core.utils.load_agent_prompt", lambda *args, **kwargs: "test prompt")
+
+    payload = {
+        "results": [
+            {"title": f"Thread {index}", "url": f"https://reddit.com/r/test/{index}", "content": "", "source": "reddit"}
+            for index in range(result_count)
+        ],
+        "providers": {"reddit": {"available": True, "detail": "ready"}},
+        "fallback_used": False,
+    }
+    result = web_agent_node({
+        "messages": [
+            HumanMessage(content="Find up to 8 Reddit discussions."),
+            AIMessage(content="", tool_calls=[{
+                "name": "research_web",
+                "args": {"query": "Gemini CLI Windows", "sources": ["reddit"], "max_results": 8},
+                "id": "research-1",
+            }]),
+            ToolMessage(
+                tool_call_id="research-1",
+                name="research_web",
+                content="[RESEARCH_RESULTS]\n" + json.dumps(payload),
+            ),
+        ],
+        "channel": "web",
+    })
+
+    assert result["messages"][-1].content == "Research synthesis"
+    assert ("research_web" in fake_llm.bound.tool_names) is search_tools_expected
+    assert ("duckduckgo_search" in fake_llm.bound.tool_names) is search_tools_expected
+    assert "browse_url" in fake_llm.bound.tool_names
+
+
 def test_recent_web_results_include_multi_source_research():
     """Existing failure and synthesis guards observe the aggregate tool output."""
     from core.utils import filter_recent_web_tool_results
