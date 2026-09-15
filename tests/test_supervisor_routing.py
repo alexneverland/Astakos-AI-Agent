@@ -51,6 +51,23 @@ def test_supervisor_normal_routing_without_proposal(mock_safe_llm_invoke, mock_l
     assert result["next_agent"] == "Web_Agent"
     mock_safe_llm_invoke.assert_called_once()
 
+
+@patch("core.capability_lookup.lookup_agent")
+@patch("core.agents.safe_llm_invoke")
+def test_supervisor_exposes_llm_fallback_latency_to_execution_trace(
+    mock_safe_llm_invoke, mock_lookup_agent
+):
+    """The fallback router call must be visible when it dominates turn latency."""
+    mock_lookup_agent.return_value = None
+    mock_safe_llm_invoke.return_value = Router(next_agent="Home_Agent")
+    state = {"messages": [HumanMessage(content="change the sleep routine time")]}
+
+    with patch("core.agents.perf_counter", side_effect=[10.0, 155.0]):
+        result = supervisor_node(state)
+
+    assert result["next_agent"] == "Home_Agent"
+    assert result["trace_phase_timings"] == {"supervisor_invoke_ms": 145_000}
+
 @patch("core.capability_lookup.lookup_agent")
 @patch("core.agents.safe_llm_invoke")
 def test_supervisor_routes_to_dev_agent_with_timestamp_prefix(mock_safe_llm_invoke, mock_lookup_agent):

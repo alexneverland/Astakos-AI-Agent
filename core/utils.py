@@ -71,6 +71,7 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     next_agent: NotRequired[str]
     current_agent: NotRequired[str]
+    trace_phase_timings: NotRequired[dict[str, int]]
     approval_status: NotRequired[str]   # "ok" | "pending" | "blocked"
     plan_active: NotRequired[bool]                  # True if a plan is running
     plan_awaiting_confirmation: NotRequired[bool]   # True if waiting for "yes/no"
@@ -689,21 +690,38 @@ def build_prompt(
     identity = identity.replace("{BASE_DIR}", BASE_DIR)
 
     # clean_message already did its job correctly here, we leave it as is.
-    last_msg = clean_message(state_messages[-1].content) if state_messages else ""
+    latest_message = state_messages[-1] if state_messages else None
+    last_msg = clean_message(latest_message.content) if latest_message else ""
+    latest_is_tool_output = getattr(latest_message, "type", "") == "tool"
+    memory_query = last_msg
+    if latest_is_tool_output:
+        latest_human_message = next(
+            (
+                message
+                for message in reversed(state_messages)
+                if getattr(message, "type", "") == "human"
+            ),
+            None,
+        )
+        memory_query = (
+            clean_message(getattr(latest_human_message, "content", ""))
+            if latest_human_message
+            else ""
+        )
     has_photo_marker = any(
-        marker in last_msg
+        marker in memory_query
         for marker in ("[USER_UPLOADED_PHOTO]", "[PHOTO PATH]", "[CURRENT_PHOTO_PATH]")
     )
     is_vision = (
-        "[VISUAL ANALYSIS]" in last_msg
-        or t("prompts.ext_str_116") in last_msg
-        or "[CURRENT_PHOTO_PATH]" in last_msg
-        or (has_photo_marker and "[ANALYSIS]" in last_msg)
+        "[VISUAL ANALYSIS]" in memory_query
+        or t("prompts.ext_str_116") in memory_query
+        or "[CURRENT_PHOTO_PATH]" in memory_query
+        or (has_photo_marker and "[ANALYSIS]" in memory_query)
     )
-    has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
+    has_current_photo = "[CURRENT_PHOTO_PATH]" in memory_query
     
     memory_context_str = ""
-    clean_text = last_msg.lower()
+    clean_text = memory_query.lower()
     
     from core.nl_config import UTILS_IGNORE_WORDS
     ignore_words = UTILS_IGNORE_WORDS
@@ -715,12 +733,16 @@ def build_prompt(
     semantic_k = k_value if len(clean_text) > 10 and not is_routine_command and not has_skip_keyword else 0
     recent_limit = 6 if channel and not has_current_photo else 0
 
-    if include_persisted_context and (semantic_k > 0 or recent_limit > 0):
+    if (
+        include_persisted_context
+        and memory_query
+        and (semantic_k > 0 or recent_limit > 0)
+    ):
         try:
             from memory.context_builder import build_memory_context
 
             context = build_memory_context(
-                last_msg,
+                memory_query,
                 channel=channel or "telegram",
                 recent_limit=recent_limit,
                 semantic_k=semantic_k,

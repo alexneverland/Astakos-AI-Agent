@@ -382,12 +382,21 @@ def supervisor_node(state):
     else:
         full_prompt = f"{system_base}\n\nUser: '{str(last_content)[:500]}'\n\nIMPORTANT: Ignore the language of any internal tool outputs. You MUST respond EXCLUSIVELY in {RESPONSE_LANGUAGE}."
 
+    invoke_started = perf_counter()
     decision = safe_llm_invoke(router_llm, full_prompt)
+    invoke_ms = int((perf_counter() - invoke_started) * 1000)
+    trace_phase_timings = {"supervisor_invoke_ms": invoke_ms}
     if pending_capability_proposal and decision.next_agent == "Dev_Agent":
         print("\033[95m[Router]: -> Chat_Agent (capability draft not authorized)\033[0m")
-        return {"next_agent": "Chat_Agent"}
+        return {
+            "next_agent": "Chat_Agent",
+            "trace_phase_timings": trace_phase_timings,
+        }
     print(f"\033[95m[Router]: -> {decision.next_agent} (llm)\033[0m")
-    return {"next_agent": decision.next_agent}
+    return {
+        "next_agent": decision.next_agent,
+        "trace_phase_timings": trace_phase_timings,
+    }
 
 
 # ────────────────────────────────────────────────────────────────

@@ -168,6 +168,45 @@ def test_multiple_tools_recorded():
     assert [tc["tool"] for tc in t.tool_calls] == ["tool_0", "tool_1", "tool_2"]
 
 
+def test_repeated_phase_timings_preserve_each_agent_pass_and_total():
+    t = ExecutionTrace("web", "change the routine time")
+    first = _AIMsg(tool_calls=[])
+    first._astakos_phase_timings = {"home_invoke_ms": 145_000}
+    second = _AIMsg(tool_calls=[])
+    second._astakos_phase_timings = {"home_invoke_ms": 8_117}
+
+    t._process_message("Home_Agent", first)
+    t._process_message("Home_Agent", second)
+
+    assert t.phase_timings["home_invoke_ms"] == 153_117
+    assert t.phase_timings["home_invoke_1_ms"] == 145_000
+    assert t.phase_timings["home_invoke_2_ms"] == 8_117
+    assert t.phase_timings["home_invoke_total_ms"] == 153_117
+
+
+def test_single_phase_timing_keeps_compact_legacy_shape():
+    t = ExecutionTrace("web", "hello")
+    message = _AIMsg(tool_calls=[])
+    message._astakos_phase_timings = {"home_invoke_ms": 123}
+
+    t._process_message("Home_Agent", message)
+
+    assert t.phase_timings == {"home_invoke_ms": 123}
+
+
+def test_process_event_records_structured_node_phase_timings():
+    t = ExecutionTrace("web", "change the sleep routine time")
+
+    t.process_event({
+        "supervisor": {
+            "messages": [],
+            "trace_phase_timings": {"supervisor_invoke_ms": 145_000},
+        }
+    })
+
+    assert t.phase_timings["supervisor_invoke_ms"] == 145_000
+
+
 # ═══════════════════════════════════════════════════════════════
 # finalize
 # ═══════════════════════════════════════════════════════════════
