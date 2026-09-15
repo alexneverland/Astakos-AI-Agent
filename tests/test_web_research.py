@@ -1,9 +1,11 @@
 """Offline tests for the Web Agent research-provider layer."""
 
 from dataclasses import dataclass
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from services.web_providers import GitHubResearchProvider, WebSearchProvider
 from services.web_research import (
     ProviderHealth,
     ProviderUnavailableError,
@@ -141,3 +143,123 @@ def test_registry_rejects_unknown_provider_without_calling_known_sources() -> No
         registry.search("voice bug", sources=["reddit"], max_results=5)
 
     assert web.calls == 0
+
+
+def test_web_provider_normalizes_ddgs_results() -> None:
+    """The existing DDGS backend shape is converted to ``SearchResult``."""
+    with patch("ddgs.DDGS") as mock_ddgs:
+        instance = MagicMock()
+        instance.text.return_value = [{
+            "title": "Example",
+            "href": "https://example.com/article",
+            "body": "Article summary",
+        }]
+        mock_ddgs.return_value.__enter__.return_value = instance
+
+        results = WebSearchProvider().search("example", 1)
+
+    assert results == [SearchResult(
+        title="Example",
+        url="https://example.com/article",
+        content="Article summary",
+        source="web",
+        metadata={"backend": "duckduckgo"},
+    )]
+
+
+def test_web_provider_exposes_unverified_links_on_complete_failure() -> None:
+    """Provider outage returns navigation fallbacks without treating them as results."""
+    from ddgs.exceptions import DDGSException
+
+    with patch("ddgs.DDGS") as mock_ddgs:
+        instance = MagicMock()
+        instance.text.side_effect = DDGSException("offline")
+        mock_ddgs.return_value.__enter__.return_value = instance
+
+        with pytest.raises(ProviderUnavailableError) as error:
+            WebSearchProvider().search("voice bug", 5)
+
+    assert error.value.provider == "web"
+    assert error.value.fallback_urls == (
+        "https://www.google.com/search?q=voice+bug",
+        "https://www.bing.com/search?q=voice+bug",
+    )
+
+
+def test_web_provider_treats_accent_only_rewrite_as_same_query(capsys) -> None:
+    """The provider preserves the legacy accent-insensitive rewrite guard."""
+    response = MagicMock(text='{"query": "δοκιμη"}')
+    with patch("ddgs.DDGS") as mock_ddgs, patch(
+        "services.gemini.safe_gemini_call",
+        return_value=response,
+    ):
+        instance = MagicMock()
+        instance.text.return_value = []
+        mock_ddgs.return_value.__enter__.return_value = instance
+
+        with pytest.raises(ProviderUnavailableError):
+            WebSearchProvider().search("δοκιμή", 5)
+
+    assert instance.text.call_count == 4
+    assert "Gemini returned the original query." in capsys.readouterr().out
+
+
+def test_github_provider_normalizes_public_issue_results(monkeypatch) -> None:
+    """GitHub's raw issue response is hidden behind the shared result contract."""
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {
+        "items": [{
+            "title": "Audio decoder fails",
+            "html_url": "https://github.com/example/repo/issues/7",
+            "body": "WebM cannot be decoded.",
+            "user": {"login": "octocat"},
+            "created_at": "2026-09-15T00:00:00Z",
+            "score": 12.0,
+            "state": "open",
+            "comments": 4,
+            "repository_url": "https://api.github.com/repos/example/repo",
+        }]
+    }
+    get = MagicMock(return_value=response)
+    monkeypatch.setattr("services.web_providers.requests.get", get)
+
+    results = GitHubResearchProvider().search("audio decoder is:issue", 5)
+
+    assert results == [SearchResult(
+        title="Audio decoder fails",
+        url="https://github.com/example/repo/issues/7",
+        content="WebM cannot be decoded.",
+        source="github",
+        author="octocat",
+        published_at="2026-09-15T00:00:00Z",
+        score=12.0,
+        metadata={
+            "state": "open",
+            "comments": 4,
+            "repository": "example/repo",
+            "kind": "issue",
+        },
+    )]
+    get.assert_called_once()
+    assert get.call_args.kwargs["params"] == {
+        "q": "audio decoder is:issue",
+        "per_page": 5,
+        "sort": "updated",
+        "order": "desc",
+    }
+
+
+def test_github_provider_reports_rate_limit_without_retrying(monkeypatch) -> None:
+    """A bounded GitHub request fails honestly when its public quota is exhausted."""
+    response = MagicMock()
+    response.status_code = 403
+    response.headers = {"x-ratelimit-remaining": "0"}
+    response.json.return_value = {"message": "API rate limit exceeded"}
+    get = MagicMock(return_value=response)
+    monkeypatch.setattr("services.web_providers.requests.get", get)
+
+    with pytest.raises(ProviderUnavailableError, match="rate limit"):
+        GitHubResearchProvider().search("audio decoder is:issue", 5)
+
+    get.assert_called_once()

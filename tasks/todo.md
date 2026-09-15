@@ -5,7 +5,7 @@
   - Verify: focused offline unit tests.
   - Files: `services/web_research.py`, `tests/test_web_research.py`.
 
-- [ ] Adapt existing Web search and add read-only GitHub search.
+- [x] Adapt existing Web search and add read-only GitHub search.
   - Acceptance: Web behavior remains compatible; GitHub public results normalize into the shared contract; no credentials are required.
   - Verify: provider tests plus unchanged `tests/test_duckduckgo_search.py`.
   - Files: `services/web_providers.py`, `tools/web.py`, `tests/test_web_research.py`.
