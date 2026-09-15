@@ -5,11 +5,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 import core.i18n
 import core.utils as utils
 from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
 from core.i18n import load_locale, t
+from memory.context_builder import MemoryContext
 from core.utils import build_prompt, load_agent_prompt
 
 
@@ -42,8 +44,8 @@ def test_prompt_includes_draft_verification_rule_for_historical_memory() -> None
     assert t("core.approval.draft_verification_rule") in prompt
 
 
-def test_prompt_skips_persisted_memory_for_structured_tool_output(monkeypatch) -> None:
-    """A routine lookup result must not trigger another semantic-memory search."""
+def test_prompt_skips_persisted_memory_for_orphan_tool_output(monkeypatch) -> None:
+    """A tool result without a user query must not trigger semantic memory."""
     build_memory_context = MagicMock()
     monkeypatch.setattr(
         "memory.context_builder.build_memory_context",
@@ -65,6 +67,111 @@ def test_prompt_skips_persisted_memory_for_structured_tool_output(monkeypatch) -
     )
 
     build_memory_context.assert_not_called()
+
+
+def test_prompt_uses_latest_human_query_after_structured_tool_output(
+    monkeypatch,
+) -> None:
+    """Post-tool synthesis rebuilds memory from the user query, not tool prose."""
+    context = MemoryContext([], [], ["[USER_FACT] prefers quiet routines"])
+    build_memory_context = MagicMock(return_value=context)
+    monkeypatch.setattr(
+        "memory.context_builder.build_memory_context",
+        build_memory_context,
+    )
+    user_query = "Compare my saved preference with the current routine"
+
+    prompt = build_prompt(
+        state_messages=[
+            HumanMessage(content=user_query),
+            AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "search_routines",
+                    "args": {"event_name": "sleep"},
+                    "id": "routine-1",
+                }],
+            ),
+            ToolMessage(
+                content="Found 1 matching routine: Sleep at 23:00",
+                name="search_routines",
+                tool_call_id="routine-1",
+            ),
+        ],
+        agent_role="Home_Agent",
+        channel="web",
+    )
+
+    assert "prefers quiet routines" in prompt
+    build_memory_context.assert_called_once_with(
+        user_query,
+        channel="web",
+        recent_limit=6,
+        semantic_k=8,
+        write_debug=True,
+    )
+
+
+def test_home_agent_final_post_tool_response_preserves_user_memory(
+    monkeypatch,
+) -> None:
+    """The final agent pass can combine a remembered fact with a tool result."""
+    import core.agents as agents
+
+    class BoundLLM:
+        def invoke(self, messages: list) -> AIMessage:
+            """Return a result that exposes whether memory reached synthesis."""
+            system_prompt = messages[0].content
+            reply = (
+                "Memory and current routine preserved"
+                if "prefers quiet routines" in system_prompt
+                else "Memory missing"
+            )
+            return AIMessage(content=reply)
+
+    class FakeLLM:
+        def bind_tools(self, _tools: list) -> BoundLLM:
+            """Return the offline bound model used by the final agent pass."""
+            return BoundLLM()
+
+    monkeypatch.setattr(agents, "llm", FakeLLM())
+    monkeypatch.setattr(
+        "memory.context_builder.build_memory_context",
+        MagicMock(
+            return_value=MemoryContext(
+                [],
+                [],
+                ["[USER_FACT] prefers quiet routines"],
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "core.agent_tools.get_registered_tools_for_agent",
+        lambda _agent, tools: tools,
+    )
+    state = {
+        "channel": "web",
+        "messages": [
+            HumanMessage(content="Compare my saved preference with the current routine"),
+            AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "search_routines",
+                    "args": {"event_name": "sleep"},
+                    "id": "routine-1",
+                }],
+            ),
+            ToolMessage(
+                content="Found 1 matching routine: Sleep at 23:00",
+                name="search_routines",
+                tool_call_id="routine-1",
+            ),
+        ],
+    }
+
+    result = agents.home_agent_node(state)
+
+    assert result["messages"][0].content == "Memory and current routine preserved"
 
 
 def test_prompt_keeps_persisted_memory_for_human_text_that_resembles_tool_output(

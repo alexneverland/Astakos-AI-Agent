@@ -693,6 +693,21 @@ def build_prompt(
     latest_message = state_messages[-1] if state_messages else None
     last_msg = clean_message(latest_message.content) if latest_message else ""
     latest_is_tool_output = getattr(latest_message, "type", "") == "tool"
+    memory_query = last_msg
+    if latest_is_tool_output:
+        latest_human_message = next(
+            (
+                message
+                for message in reversed(state_messages)
+                if getattr(message, "type", "") == "human"
+            ),
+            None,
+        )
+        memory_query = (
+            clean_message(getattr(latest_human_message, "content", ""))
+            if latest_human_message
+            else ""
+        )
     has_photo_marker = any(
         marker in last_msg
         for marker in ("[USER_UPLOADED_PHOTO]", "[PHOTO PATH]", "[CURRENT_PHOTO_PATH]")
@@ -706,7 +721,7 @@ def build_prompt(
     has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
     
     memory_context_str = ""
-    clean_text = last_msg.lower()
+    clean_text = memory_query.lower()
     
     from core.nl_config import UTILS_IGNORE_WORDS
     ignore_words = UTILS_IGNORE_WORDS
@@ -720,14 +735,14 @@ def build_prompt(
 
     if (
         include_persisted_context
-        and not latest_is_tool_output
+        and memory_query
         and (semantic_k > 0 or recent_limit > 0)
     ):
         try:
             from memory.context_builder import build_memory_context
 
             context = build_memory_context(
-                last_msg,
+                memory_query,
                 channel=channel or "telegram",
                 recent_limit=recent_limit,
                 semantic_k=semantic_k,
