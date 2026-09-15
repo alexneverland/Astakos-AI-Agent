@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from typing import Any
-from urllib.parse import quote_plus
+from typing import Any, Callable
+from urllib.parse import quote_plus, urlsplit
 
 import requests
 
@@ -42,7 +42,13 @@ class WebSearchProvider:
             return ProviderHealth(self.name, False, "ddgs is not installed")
         return ProviderHealth(self.name, True, "DDGS adapter ready")
 
-    def search(self, query: str, max_results: int) -> list[SearchResult]:
+    def search(
+        self,
+        query: str,
+        max_results: int,
+        *,
+        url_filter: Callable[[str], bool] | None = None,
+    ) -> list[SearchResult]:
         """Search bounded DDGS backends while preserving partial successes."""
         from ddgs import DDGS
         from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
@@ -74,6 +80,7 @@ class WebSearchProvider:
                         destination=collected,
                         seen_urls=seen_urls,
                         limit=limit,
+                        url_filter=url_filter,
                     )
                     if valid_count:
                         print(
@@ -148,6 +155,7 @@ class WebSearchProvider:
         destination: list[SearchResult],
         seen_urls: set[str],
         limit: int,
+        url_filter: Callable[[str], bool] | None = None,
     ) -> int:
         """Validate and normalize one DDGS backend response."""
         valid_count = 0
@@ -163,7 +171,13 @@ class WebSearchProvider:
                 continue
             title, url, content = title.strip(), url.strip(), content.strip()
             canonical = canonical_result_url(url)
-            if not title or not canonical or not content or canonical in seen_urls:
+            if (
+                not title
+                or not canonical
+                or not content
+                or canonical in seen_urls
+                or (url_filter is not None and not url_filter(url))
+            ):
                 continue
             seen_urls.add(canonical)
             destination.append(SearchResult(
@@ -224,6 +238,72 @@ class WebSearchProvider:
                 f"https://www.google.com/search?q={encoded}",
                 f"https://www.bing.com/search?q={encoded}",
             ),
+        )
+
+
+class RedditResearchProvider:
+    """Discover public Reddit discussions through bounded Web search results."""
+
+    name = "reddit"
+
+    def __init__(self, web_provider: WebSearchProvider | None = None) -> None:
+        self._web_provider = web_provider or WebSearchProvider()
+
+    def check(self) -> ProviderHealth:
+        """Map Web-search readiness to the Reddit discovery capability."""
+        health = self._web_provider.check()
+        if not health.available:
+            return ProviderHealth(
+                self.name,
+                False,
+                f"Reddit discovery unavailable: {health.detail}",
+            )
+        return ProviderHealth(
+            self.name,
+            True,
+            "Reddit discovery via Web search ready",
+        )
+
+    def search(self, query: str, max_results: int) -> list[SearchResult]:
+        """Return only Reddit-hosted results with normalized provenance."""
+        query = str(query or "").strip()
+        if not query:
+            return []
+        limit = _bounded_result_limit(max_results)
+        discovered = self._web_provider.search(
+            f"(site:reddit.com OR site:redd.it) {query}",
+            limit,
+            url_filter=self._is_reddit_url,
+        )
+        results: list[SearchResult] = []
+        for result in discovered:
+            if not self._is_reddit_url(result.url):
+                continue
+            results.append(SearchResult(
+                title=result.title,
+                url=result.url,
+                content=result.content,
+                source=self.name,
+                author=result.author,
+                published_at=result.published_at,
+                score=result.score,
+                metadata={
+                    **result.metadata,
+                    "discovered_via": "web_search",
+                },
+            ))
+            if len(results) >= limit:
+                break
+        return results
+
+    @staticmethod
+    def _is_reddit_url(url: str) -> bool:
+        """Accept canonical Reddit hosts and reject lookalike domains."""
+        hostname = (urlsplit(url).hostname or "").lower()
+        return (
+            hostname == "reddit.com"
+            or hostname.endswith(".reddit.com")
+            or hostname == "redd.it"
         )
 
 

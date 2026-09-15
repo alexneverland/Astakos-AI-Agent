@@ -1,8 +1,8 @@
 """Offline tests for the Web Agent research-provider layer."""
 
 import json
-
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -256,6 +256,39 @@ def test_web_provider_clamps_explicit_zero_limit_to_one() -> None:
     assert instance.text.call_args.kwargs["max_results"] == 1
 
 
+def test_web_provider_filters_results_before_backend_quota_is_exhausted() -> None:
+    """Rejected URLs do not prevent a later backend from supplying evidence."""
+    from services.web_providers import RedditResearchProvider
+
+    with patch("ddgs.DDGS") as mock_ddgs:
+        instance = MagicMock()
+
+        def results_for_backend(*args, **kwargs):
+            if kwargs["backend"] == "duckduckgo":
+                return [{
+                    "title": "Off domain",
+                    "href": "https://example.com/not-reddit",
+                    "body": "Irrelevant",
+                }]
+            return [{
+                "title": "Reddit discussion",
+                "href": "https://www.reddit.com/r/python/comments/abc/topic/",
+                "body": "Relevant",
+            }]
+
+        instance.text.side_effect = results_for_backend
+        mock_ddgs.return_value.__enter__.return_value = instance
+
+        results = WebSearchProvider().search(
+            "reddit topic",
+            1,
+            url_filter=RedditResearchProvider._is_reddit_url,
+        )
+
+    assert [result.title for result in results] == ["Reddit discussion"]
+    assert instance.text.call_count == 2
+
+
 def test_github_provider_normalizes_public_issue_results(monkeypatch) -> None:
     """GitHub's raw issue response is hidden behind the shared result contract."""
     response = MagicMock()
@@ -315,6 +348,86 @@ def test_github_provider_reports_rate_limit_without_retrying(monkeypatch) -> Non
         GitHubResearchProvider().search("audio decoder is:issue", 5)
 
     get.assert_called_once()
+
+
+def test_reddit_provider_discovers_and_normalizes_only_reddit_urls() -> None:
+    """Reddit discovery rejects unrelated Web results and keeps provenance."""
+    from services.web_providers import RedditResearchProvider
+
+    web = MagicMock()
+    web.search.return_value = [
+        SearchResult(
+            title="Useful discussion",
+            url="https://www.reddit.com/r/LocalLLaMA/comments/abc/topic/",
+            content="Community feedback",
+            source="web",
+            metadata={"backend": "bing"},
+        ),
+        SearchResult(
+            title="Unrelated result",
+            url="https://example.com/not-reddit",
+            content="Not Reddit",
+            source="web",
+        ),
+    ]
+
+    results = RedditResearchProvider(web_provider=web).search("voice agents", 5)
+
+    assert results == [SearchResult(
+        title="Useful discussion",
+        url="https://www.reddit.com/r/LocalLLaMA/comments/abc/topic/",
+        content="Community feedback",
+        source="reddit",
+        metadata={"backend": "bing", "discovered_via": "web_search"},
+    )]
+    web.search.assert_called_once()
+    args, kwargs = web.search.call_args
+    assert args == ("(site:reddit.com OR site:redd.it) voice agents", 5)
+    url_filter = kwargs["url_filter"]
+    assert url_filter("https://redd.it/abc") is True
+    assert url_filter("https://example.com/not-reddit") is False
+
+
+def test_reddit_provider_maps_web_unavailability_to_reddit() -> None:
+    """A failed discovery backend reports the selected provider as Reddit."""
+    from services.web_providers import RedditResearchProvider
+
+    web = MagicMock()
+    web.check.return_value = ProviderHealth("web", False, "DDGS unavailable")
+    provider = RedditResearchProvider(web_provider=web)
+
+    assert provider.check() == ProviderHealth(
+        "reddit",
+        False,
+        "Reddit discovery unavailable: DDGS unavailable",
+    )
+
+
+def test_default_research_registry_includes_reddit_provider() -> None:
+    """The canonical research skill accepts Reddit as a selectable source."""
+    from astakos_skills.research_web import _default_research_registry
+
+    registry = _default_research_registry()
+
+    assert "reddit" in registry._providers
+
+
+def test_web_agent_guidance_describes_reddit_discovery_boundary() -> None:
+    """Agent guidance advertises Reddit without promising full thread access."""
+    root = Path(__file__).resolve().parents[1]
+    prompt = (root / "core" / "prompts.md").read_text(encoding="utf-8")
+    capabilities = json.loads(
+        (root / "core" / "capability_registry.json").read_text(encoding="utf-8")
+    )
+    web_search = next(
+        capability
+        for capability in capabilities
+        if capability.get("name") == "web_search"
+    )
+
+    assert "Use `reddit` for public Reddit discussion discovery" in prompt
+    assert "not full post/comment retrieval" in prompt
+    assert "Web/GitHub/Reddit" in web_search["description"]
 
 
 def test_research_web_tool_serializes_results_and_provider_status(monkeypatch) -> None:

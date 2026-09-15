@@ -18,3 +18,19 @@
 - [x] Final verification and PR.
   - Acceptance: relevant and full test suites pass, `git diff --check` is clean, staged diff contains only this slice.
   - Verify: commands in `tasks/plan.md`.
+
+## Slice 2: Reddit discovery
+
+- [x] Add the Reddit provider with URL filtering and normalized provenance.
+  - Acceptance: bounded site search returns only Reddit URLs and isolates failures.
+  - Verify: focused offline provider tests written before implementation.
+  - Files: `services/web_providers.py`, `tests/test_web_research.py`.
+
+- [x] Register Reddit in the existing research skill and Web Agent guidance.
+  - Acceptance: `sources=["reddit"]` is valid without changing agent ownership.
+  - Verify: registry/tool boundary tests.
+  - Files: `astakos_skills/research_web.py`, `core/prompts.md`, `core/capability_registry.json`, tests.
+
+- [x] Final verification and PR.
+  - Acceptance: focused/full suites pass and the diff contains only this slice.
+  - Verify: isolated pytest basetemp and `git diff --check`.
