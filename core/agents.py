@@ -6,6 +6,7 @@
 
 from copy import copy
 from core.i18n import t
+import json
 import os
 import config
 import re
@@ -776,6 +777,73 @@ def _has_exhausted_web_research_budget(messages: list) -> bool:
     return _count_web_research_calls(messages) >= _WEB_RESEARCH_CALL_BUDGET
 
 
+def _research_web_filled_requested_limit(messages: list) -> bool:
+    """Return true when every aggregate search in the turn reached its result cap."""
+    requested_limits: dict[str, int] = {}
+    completed_call_ids: set[str] = set()
+    filled_call_ids: set[str] = set()
+    turn_start = 0
+    for index, message in enumerate(messages or []):
+        if getattr(message, "type", "") == "human":
+            turn_start = index + 1
+
+    for message in (messages or [])[turn_start:]:
+        if getattr(message, "type", "") == "ai":
+            for tool_call in getattr(message, "tool_calls", []) or []:
+                if _web_research_tool_call_name(tool_call) != "research_web":
+                    continue
+                if isinstance(tool_call, dict):
+                    call_id = tool_call.get("id")
+                    args = tool_call.get("args", {}) or {}
+                else:
+                    call_id = getattr(tool_call, "id", None)
+                    args = getattr(tool_call, "args", {}) or {}
+                if not call_id or not isinstance(args, dict):
+                    continue
+                sources = args.get("sources") or ["web"]
+                if not isinstance(sources, (list, tuple, set)):
+                    return False
+                normalized_sources = {
+                    str(source).strip().lower()
+                    for source in sources
+                    if str(source).strip()
+                }
+                if len(normalized_sources) != 1:
+                    return False
+                try:
+                    requested_limits[str(call_id)] = max(
+                        1,
+                        min(int(args.get("max_results", 10)), 10),
+                    )
+                except (TypeError, ValueError):
+                    requested_limits[str(call_id)] = 10
+
+        if (
+            getattr(message, "type", "") == "tool"
+            and getattr(message, "name", "") == "research_web"
+        ):
+            call_id = str(getattr(message, "tool_call_id", "") or "")
+            requested_limit = requested_limits.get(call_id)
+            content = getattr(message, "content", "")
+            if requested_limit is None or not isinstance(content, str):
+                continue
+            marker, separator, payload_text = content.partition("\n")
+            if marker != "[RESEARCH_RESULTS]" or not separator:
+                continue
+            try:
+                results = json.loads(payload_text).get("results", [])
+            except (AttributeError, json.JSONDecodeError, TypeError):
+                continue
+            completed_call_ids.add(call_id)
+            if isinstance(results, list) and len(results) >= requested_limit:
+                filled_call_ids.add(call_id)
+
+    expected_call_ids = set(requested_limits)
+    return bool(expected_call_ids) and (
+        expected_call_ids == completed_call_ids == filled_call_ids
+    )
+
+
 def _trim_web_research_tool_calls(response, messages: list):
     """Keep generic Web research calls within the remaining turn budget."""
     tool_calls = getattr(response, "tool_calls", []) or []
@@ -1080,6 +1148,13 @@ def web_agent_node(state: AgentState):
     web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)
     if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
         web_tools = _draft_edit_tools_only(web_tools)
+    elif _research_web_filled_requested_limit(history):
+        web_tools = [
+            tool
+            for tool in web_tools
+            if getattr(tool, "name", "") not in {"research_web", "duckduckgo_search"}
+        ]
+        print("[Web Search]: requested result limit reached; hiding additional search tools.")
 
     if web_errors and not web_successes:
         guarded_reply = build_web_failure_reply(

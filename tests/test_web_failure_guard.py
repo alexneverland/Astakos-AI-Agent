@@ -656,6 +656,89 @@ def test_multi_source_research_counts_toward_existing_budget():
     assert _has_exhausted_web_research_budget(history) is True
 
 
+@pytest.mark.parametrize(
+    ("result_counts", "requested_limits", "sources_by_call", "search_tools_expected"),
+    [
+        ([8], [8], [["reddit"]], False),
+        ([6], [8], [["reddit"]], True),
+        ([1, 0], [1, 2], [["reddit"], ["reddit"]], True),
+        ([1, 2], [1, 2], [["reddit"], ["reddit"]], False),
+        ([8], [8], [["web", "github"]], True),
+    ],
+    ids=[
+        "full-result-cap",
+        "partial-results",
+        "independent-partial-subquery",
+        "all-independent-subqueries-full",
+        "multi-source-global-cap",
+    ],
+)
+def test_web_agent_hides_new_search_only_after_research_web_fills_limit(
+    monkeypatch,
+    result_counts,
+    requested_limits,
+    sources_by_call,
+    search_tools_expected,
+):
+    """Full bounded results stop new searches; partial results may be supplemented."""
+    from core.agents import web_agent_node
+
+    class FakeBoundLLM:
+        def __init__(self, tools):
+            self.tool_names = {getattr(tool, "name", "") for tool in tools}
+
+        def invoke(self, messages):
+            return AIMessage(content="Research synthesis")
+
+    class FakeLLM:
+        def __init__(self):
+            self.bound = None
+
+        def bind_tools(self, tools):
+            self.bound = FakeBoundLLM(tools)
+            return self.bound
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+    monkeypatch.setattr("core.utils.load_agent_prompt", lambda *args, **kwargs: "test prompt")
+
+    messages = [HumanMessage(content="Find Reddit discussions for each subquestion.")]
+    for call_index, (result_count, requested_limit, sources) in enumerate(
+        zip(result_counts, requested_limits, sources_by_call)
+    ):
+        call_id = f"research-{call_index}"
+        payload = {
+            "results": [
+                {"title": f"Thread {call_index}-{index}", "url": f"https://reddit.com/r/test/{call_index}-{index}", "content": "", "source": "reddit"}
+                for index in range(result_count)
+            ],
+            "providers": {"reddit": {"available": True, "detail": "ready"}},
+            "fallback_used": False,
+        }
+        messages.extend([
+            AIMessage(content="", tool_calls=[{
+                "name": "research_web",
+                "args": {"query": f"subquestion {call_index}", "sources": sources, "max_results": requested_limit},
+                "id": call_id,
+            }]),
+            ToolMessage(
+                tool_call_id=call_id,
+                name="research_web",
+                content="[RESEARCH_RESULTS]\n" + json.dumps(payload),
+            ),
+        ])
+
+    result = web_agent_node({
+        "messages": messages,
+        "channel": "web",
+    })
+
+    assert result["messages"][-1].content == "Research synthesis"
+    assert ("research_web" in fake_llm.bound.tool_names) is search_tools_expected
+    assert ("duckduckgo_search" in fake_llm.bound.tool_names) is search_tools_expected
+    assert "browse_url" in fake_llm.bound.tool_names
+
+
 def test_recent_web_results_include_multi_source_research():
     """Existing failure and synthesis guards observe the aggregate tool output."""
     from core.utils import filter_recent_web_tool_results
