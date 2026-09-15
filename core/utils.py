@@ -709,16 +709,16 @@ def build_prompt(
             else ""
         )
     has_photo_marker = any(
-        marker in last_msg
+        marker in memory_query
         for marker in ("[USER_UPLOADED_PHOTO]", "[PHOTO PATH]", "[CURRENT_PHOTO_PATH]")
     )
     is_vision = (
-        "[VISUAL ANALYSIS]" in last_msg
-        or t("prompts.ext_str_116") in last_msg
-        or "[CURRENT_PHOTO_PATH]" in last_msg
-        or (has_photo_marker and "[ANALYSIS]" in last_msg)
+        "[VISUAL ANALYSIS]" in memory_query
+        or t("prompts.ext_str_116") in memory_query
+        or "[CURRENT_PHOTO_PATH]" in memory_query
+        or (has_photo_marker and "[ANALYSIS]" in memory_query)
     )
-    has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
+    has_current_photo = "[CURRENT_PHOTO_PATH]" in memory_query
     
     memory_context_str = ""
     clean_text = memory_query.lower()

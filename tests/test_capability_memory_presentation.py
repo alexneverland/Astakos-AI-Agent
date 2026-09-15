@@ -112,6 +112,55 @@ def test_prompt_uses_latest_human_query_after_structured_tool_output(
     )
 
 
+def test_prompt_preserves_vision_classification_after_tool_output(
+    monkeypatch,
+) -> None:
+    """Post-tool photo synthesis keeps bounded retrieval and current-image priority."""
+    context = MemoryContext([], [], [])
+    build_memory_context = MagicMock(return_value=context)
+    monkeypatch.setattr(
+        "memory.context_builder.build_memory_context",
+        build_memory_context,
+    )
+    photo_query = (
+        "[USER_UPLOADED_PHOTO]: insect.jpg\n"
+        "[PHOTO PATH]: C:/photos/insect.jpg\n"
+        "[VISUAL ANALYSIS]: A large wasp on concrete.\n"
+        "What is it?"
+    )
+
+    prompt = build_prompt(
+        state_messages=[
+            HumanMessage(content=photo_query),
+            AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "identify_species",
+                    "args": {"description": "large wasp"},
+                    "id": "vision-1",
+                }],
+            ),
+            ToolMessage(
+                content="Possible match: Vespa orientalis",
+                name="identify_species",
+                tool_call_id="vision-1",
+            ),
+        ],
+        agent_role="Chat_Agent",
+        channel="telegram",
+    )
+
+    build_memory_context.assert_called_once_with(
+        photo_query,
+        channel="telegram",
+        recent_limit=6,
+        semantic_k=3,
+        write_debug=True,
+    )
+    assert "REALITY RULE (CRITICAL)" in prompt
+    assert "CURRENT reality" in prompt
+
+
 def test_home_agent_final_post_tool_response_preserves_user_memory(
     monkeypatch,
 ) -> None:
