@@ -995,7 +995,7 @@
             return `<br><img src="/photos/${encodeURIComponent(filename)}" class="chat-img" />`;
         });
 
-        const inlineContentRegex = /`([^`\r\n]+)`|\[([^\]\r\n]+)\]\((https?:\/\/[^\s<>"']+?)\)|(https?:\/\/[^\s<>"'()[\]`]+)/g;
+        const inlineContentRegex = /`([^`\r\n]+)`|\[([^\]\r\n]+)\]\((https?:\/\/[^\s<>"']+?)\)|(https?:\/\/[^\s<>"'()*\[\]`]+)/g;
         processedText = processedText.replace(
             inlineContentRegex,
             (match, codeText, label, markdownUrl, bareUrl) => {

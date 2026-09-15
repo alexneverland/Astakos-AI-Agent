@@ -66,7 +66,8 @@ def format_for_telegram(text: str) -> str:
         text = text.replace(placeholder, tag)
 
     text = re.sub(
-        r'\[([^\]\r\n]+)\]\((https?://[^\s<>()[\]"\']+)\)',
+        r'\[([^\]\r\n]+)\]\('
+        r'(https?://(?:[^\s<>()\[\]"\']+|\([^()\s<>]*\))+)\)',
         r'<a href="\2">\1</a>',
         text,
     )

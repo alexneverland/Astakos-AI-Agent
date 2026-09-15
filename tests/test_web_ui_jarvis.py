@@ -216,6 +216,31 @@ def test_message_renderer_keeps_urls_inside_inline_code_inert(
     assert result["codeText"] == "https://example.com"
 
 
+def test_message_renderer_keeps_bold_delimiters_outside_bare_links(
+    jarvis_browser_page: Page,
+) -> None:
+    """A bare URL inside bold text must not consume its Markdown delimiters."""
+    result = jarvis_browser_page.evaluate(
+        """
+        () => {
+            appendMessage('**Source: https://example.com/article**', 'ai', 'Web_Agent');
+            const messages = document.querySelectorAll('#chat-box .msg-ai');
+            const message = messages[messages.length - 1];
+            const link = message.querySelector('a');
+            return {
+                href: link?.getAttribute('href'),
+                linkText: link?.innerText,
+                strongText: message.querySelector('strong')?.innerText,
+            };
+        }
+        """
+    )
+
+    assert result["href"] == "https://example.com/article"
+    assert result["linkText"] == "https://example.com/article"
+    assert result["strongText"] == "Source: https://example.com/article"
+
+
 def test_no_debug_urls_in_normal_frontend(index_html_content: str) -> None:
     """Normal frontend must not reference or call protected /debug endpoints."""
     # Ensure no /debug endpoint is queried or linked

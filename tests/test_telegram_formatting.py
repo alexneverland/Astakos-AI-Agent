@@ -38,6 +38,24 @@ def test_format_for_telegram_does_not_create_links_for_unsafe_schemes():
     assert result == text
 
 
+def test_format_for_telegram_preserves_balanced_parentheses_in_link_targets():
+    text = "[Function](https://en.wikipedia.org/wiki/Function_(mathematics))"
+
+    result = format_for_telegram(text)
+
+    assert result == (
+        '<a href="https://en.wikipedia.org/wiki/Function_(mathematics)">Function</a>'
+    )
+
+
+def test_format_for_telegram_leaves_unbalanced_parenthesis_links_inert():
+    text = "[Broken](https://example.com/foo_(bar)"
+
+    result = format_for_telegram(text)
+
+    assert result == text
+
+
 def test_plain_fallback_removes_telegram_tags():
     result = _plain_telegram_fallback(
         '<b>Τίτλος</b> <a href="https://example.com">Πηγή</a> &lt;0,5g'
