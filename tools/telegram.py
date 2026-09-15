@@ -65,6 +65,11 @@ def format_for_telegram(text: str) -> str:
     for tag, placeholder in allowed_tags.items():
         text = text.replace(placeholder, tag)
 
+    text = re.sub(
+        r'\[([^\]\r\n]+)\]\((https?://[^\s<>()[\]"\']+)\)',
+        r'<a href="\2">\1</a>',
+        text,
+    )
     text = re.sub(r'^#{1,3}\s+(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'^[\*\-]\s+', r'• ', text, flags=re.MULTILINE)
@@ -72,7 +77,7 @@ def format_for_telegram(text: str) -> str:
 
 
 def _plain_telegram_fallback(text: str) -> str:
-    text = re.sub(r'</?(?:b|i|u|s|code|pre)>', '', text)
+    text = re.sub(r'</?(?:b|i|u|s|code|pre|a)(?:\s+[^>]*)?>', '', text)
     return html.unescape(text)
 
 def send_telegram_msg(text: str, disable_notification: bool = False) -> int | None:

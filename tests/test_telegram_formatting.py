@@ -20,7 +20,27 @@ def test_format_for_telegram_converts_markdown_after_escaping_html():
     assert "• κάτω από &lt;1g ζάχαρη" in result
 
 
-def test_plain_fallback_removes_telegram_tags():
-    result = _plain_telegram_fallback("<b>Τίτλος</b> &lt;0,5g")
+def test_format_for_telegram_converts_safe_markdown_links():
+    text = "Πηγή: [Issue 42](https://github.com/example/project/issues/42)"
 
-    assert result == "Τίτλος <0,5g"
+    result = format_for_telegram(text)
+
+    assert result == (
+        'Πηγή: <a href="https://github.com/example/project/issues/42">Issue 42</a>'
+    )
+
+
+def test_format_for_telegram_does_not_create_links_for_unsafe_schemes():
+    text = "[Άνοιξε](javascript:alert(1))"
+
+    result = format_for_telegram(text)
+
+    assert result == text
+
+
+def test_plain_fallback_removes_telegram_tags():
+    result = _plain_telegram_fallback(
+        '<b>Τίτλος</b> <a href="https://example.com">Πηγή</a> &lt;0,5g'
+    )
+
+    assert result == "Τίτλος Πηγή <0,5g"

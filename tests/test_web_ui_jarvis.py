@@ -138,6 +138,42 @@ def test_tts_speaker_control_per_assistant_message(index_html_content: str) -> N
     assert "if (isDrawerOpen) speakText" not in index_html_content
 
 
+def test_message_renderer_makes_bare_search_urls_clickable_and_keeps_unsafe_text_inert(
+    jarvis_browser_page: Page,
+) -> None:
+    """Search-result URLs are safe links even when the model returns bare URLs."""
+    result = jarvis_browser_page.evaluate(
+        """
+        () => {
+            appendMessage(
+                'Πηγή: https://github.com/example/project/issues/42\\n' +
+                'Μη ασφαλές: javascript:alert(1) <img src=x onerror=alert(1)>',
+                'ai',
+                'Web_Agent',
+            );
+            const messages = document.querySelectorAll('#chat-box .msg-ai');
+            const message = messages[messages.length - 1];
+            const link = message.querySelector('a');
+            return {
+                href: link?.getAttribute('href'),
+                target: link?.getAttribute('target'),
+                rel: link?.getAttribute('rel'),
+                linkCount: message.querySelectorAll('a').length,
+                imageCount: message.querySelectorAll('img').length,
+                text: message.innerText,
+            };
+        }
+        """
+    )
+
+    assert result["href"] == "https://github.com/example/project/issues/42"
+    assert result["target"] == "_blank"
+    assert result["rel"] == "noopener noreferrer"
+    assert result["linkCount"] == 1
+    assert result["imageCount"] == 0
+    assert "javascript:alert(1)" in result["text"]
+
+
 def test_no_debug_urls_in_normal_frontend(index_html_content: str) -> None:
     """Normal frontend must not reference or call protected /debug endpoints."""
     # Ensure no /debug endpoint is queried or linked

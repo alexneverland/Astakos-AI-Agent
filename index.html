@@ -995,8 +995,14 @@
             return `<br><img src="/photos/${encodeURIComponent(filename)}" class="chat-img" />`;
         });
 
-        const linkRegex = /\[(.*?)\]\((https?:\/\/.*?)\)/g;
-        processedText = processedText.replace(linkRegex, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        const externalLinkRegex = /\[([^\]\r\n]+)\]\((https?:\/\/[^\s<>"']+?)\)|(https?:\/\/[^\s<>"'()[\]]+)/g;
+        processedText = processedText.replace(
+            externalLinkRegex,
+            (match, label, markdownUrl, bareUrl) => {
+                const url = markdownUrl || bareUrl;
+                return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label || url}</a>`;
+            },
+        );
         processedText = processedText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         processedText = processedText.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;color:#dbeafe">$1</code>');
         processedText = processedText.replace(/\n/g, '<br>');
