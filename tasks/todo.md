@@ -1,6 +1,6 @@
 # Tasks: Web Research Providers, Slice 1
 
-- [ ] Define normalized provider contracts and registry.
+- [x] Define normalized provider contracts and registry.
   - Acceptance: selective provider IDs are validated; duplicate canonical URLs are removed; failures are isolated.
   - Verify: focused offline unit tests.
   - Files: `services/web_research.py`, `tests/test_web_research.py`.

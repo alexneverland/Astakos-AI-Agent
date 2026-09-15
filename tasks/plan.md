@@ -58,4 +58,3 @@ read-only public GitHub search without changing Supervisor ownership or current
 - GitHub rate limiting: use one bounded request, expose availability/failure honestly, and fall back to Web results.
 - Tool loops: count `research_web` within the existing three-call research budget.
 - Untrusted content: retain provider provenance and pass results through existing external-content boundaries.
-
