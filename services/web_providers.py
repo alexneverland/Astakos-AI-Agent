@@ -365,7 +365,10 @@ class YouTubeResearchProvider:
     @staticmethod
     def _is_youtube_url(url: str) -> bool:
         """Accept canonical YouTube video URLs and reject pages or lookalikes."""
-        parsed = urlsplit(url)
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return False
         hostname = (parsed.hostname or "").lower()
         if hostname == "youtu.be":
             return bool(parsed.path.strip("/").split("/", 1)[0])

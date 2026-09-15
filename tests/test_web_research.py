@@ -470,6 +470,7 @@ def test_youtube_provider_discovers_and_normalizes_only_youtube_urls() -> None:
     assert url_filter("https://www.youtube.com/live/abc") is True
     assert url_filter("https://www.youtube.com/playlist?list=abc") is False
     assert url_filter("https://youtube.com.example.com/watch?v=bad") is False
+    assert url_filter("https://[invalid/watch?v=bad") is False
 
 
 def test_youtube_provider_maps_web_unavailability_to_youtube() -> None:
