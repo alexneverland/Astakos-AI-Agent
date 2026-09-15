@@ -258,6 +258,8 @@ def test_web_provider_clamps_explicit_zero_limit_to_one() -> None:
 
 def test_web_provider_filters_results_before_backend_quota_is_exhausted() -> None:
     """Rejected URLs do not prevent a later backend from supplying evidence."""
+    from services.web_providers import RedditResearchProvider
+
     with patch("ddgs.DDGS") as mock_ddgs:
         instance = MagicMock()
 
@@ -280,7 +282,7 @@ def test_web_provider_filters_results_before_backend_quota_is_exhausted() -> Non
         results = WebSearchProvider().search(
             "reddit topic",
             1,
-            url_filter=lambda url: "reddit.com" in url,
+            url_filter=RedditResearchProvider._is_reddit_url,
         )
 
     assert [result.title for result in results] == ["Reddit discussion"]
