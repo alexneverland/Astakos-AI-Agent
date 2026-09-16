@@ -26,7 +26,9 @@ astakos/
 2. **Skill Creation:** New capabilities should be created as skills inside `astakos_skills/` using the `@tool` decorator.
 3. **Database Integrity:** Do not interact directly with `.db` files using raw SQL or Python scripts. Always use the provided abstractions in `memory/`.
 4. **Environment Constraints:** Never expose, leak, or modify `.env` or `credentials.json` directly.
-5. **Agent Skills (Addy Osmani):** You MUST strictly adhere to the workflows outlined in `vendor/agent-skills/AGENTS.md`. Specifically:
+5. **Agent Skills (Addy Osmani):** The vendored repository root `AGENTS.md` governs upstream development and is not Astakos project policy. Start with `vendor/agent-skills/skills/using-agent-skills/SKILL.md`, select the smallest workflow set that covers the task's scope and risk, then read and follow every selected `SKILL.md` completely before acting.
+   - **Feature order:** For non-trivial new functionality, use `spec-driven-development`, then `planning-and-task-breakdown`, then pair `incremental-implementation` with `test-driven-development` for each behavioral slice.
+   - **Verification:** Apply acceptance criteria, relevant checks, and the project-wide Definition of Done. Use `debugging-and-error-recovery` when verification exposes a failure, not as a substitute for normal verification.
    - **Doubt-Driven Development:** Never make blind global changes (e.g., changing global variables, configurations, or limits) without explicitly verifying the consequences across the entire codebase.
    - **Search Before Edit:** Always use tools like `grep_search` and `view_file` to understand the surrounding context and existing logic before modifying any file.
    - **Zero-Tolerance for Hacks:** Do not implement quick hacks. If a specialized mechanism exists (like `context_builder.py` logic), extend it rather than bypassing it with global overrides.

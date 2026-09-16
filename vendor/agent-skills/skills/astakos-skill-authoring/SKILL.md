@@ -1,6 +1,6 @@
 ---
 name: astakos-skill-authoring
-description: Guides agents through safe custom Astakos skill drafting and registration. Use when a user asks for a new Astakos tool or an agent identifies a capability gap.
+description: Registers custom Astakos tools through approval-gated creation and dry-run review. Use when the user explicitly asks to add a new tool to Astakos or a concrete missing Astakos tool is proposed.
 ---
 
 # Astakos Skill Authoring

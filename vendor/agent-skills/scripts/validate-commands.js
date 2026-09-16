@@ -145,6 +145,21 @@ function main() {
     const descGemini = byTool.gemini[tomlStem];
     const descAgy    = byTool.antigravity[tomlStem];
 
+    const malformed = [
+      ['.claude/commands', byTool.claude, claudeStem],
+      ['.gemini/commands', byTool.gemini, tomlStem],
+      ['commands/', byTool.antigravity, tomlStem],
+    ].filter(([, commands, stem]) => Object.prototype.hasOwnProperty.call(commands, stem) && commands[stem] == null);
+
+    if (malformed.length) {
+      console.log(`  ✗  ${claudeStem}`);
+      for (const [toolDir, , stem] of malformed) {
+        console.log(`       ${toolDir}/${stem} — missing or malformed description`);
+      }
+      errors++;
+      continue;
+    }
+
     if (descClaude == null || descGemini == null || descAgy == null) {
       // Missing file already flagged by parity check
       continue;
