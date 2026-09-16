@@ -106,7 +106,7 @@
                             <div><strong>Voice setup needed:</strong> Anthropic does not provide speech input or output. Select OpenAI, Gemini API, or Google Cloud for voice.</div>
                         </div>
 
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
+                        <div class="grid grid-cols-1 gap-6 mb-4">
                             <div>
                                 <label id="api_key_label" class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
                                     Chat API Key / GCP Credentials
@@ -116,26 +116,6 @@
                                     </div>
                                 </label>
                                 <input type="password" id="api_key" placeholder="..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
-                                    Telegram Bot Token
-                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
-                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
-                                        Create a bot via @BotFather on Telegram and paste the HTTP API Token here.
-                                    </div>
-                                </label>
-                                <input type="password" id="telegram_token" placeholder="123456789:ABCdefGHI..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-400 mb-2 flex items-center group relative cursor-help">
-                                    Telegram Chat ID
-                                    <svg class="w-4 h-4 ml-1 text-gray-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
-                                    <div class="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-800 border border-gray-600 shadow-xl rounded-lg text-xs text-gray-300 z-50">
-                                        Your personal Telegram User ID, so the bot only talks to you.
-                                    </div>
-                                </label>
-                                <input type="text" id="telegram_chat_id" placeholder="12345678" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
                             </div>
                         </div>
 
@@ -166,9 +146,73 @@
                     <hr class="border-gray-700">
 
 
-                    <!-- 2. Personalization -->
+                    <!-- 2. External Messaging -->
                     <div>
-                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-green-500/20 text-green-400 p-2 rounded-lg mr-3">👤</span> 2. Personalization</h2>
+                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-purple-500/20 text-purple-400 p-2 rounded-lg mr-3">💬</span> 2. External Messaging</h2>
+                        <p class="text-sm text-gray-400 mb-4">Choose one external app for Astakos. The Web UI remains available, and credentials for the inactive app are kept so you can switch later.</p>
+                        <div class="mb-5 max-w-md">
+                            <label for="external_channel" class="block text-sm font-medium text-gray-400 mb-2">Active External App</label>
+                            <select id="external_channel" onchange="onExternalChannelChanged()" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
+                                <option value="telegram" selected>Telegram</option>
+                                <option value="matrix">Element / Matrix</option>
+                            </select>
+                        </div>
+
+                        <div id="telegram_settings" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label for="telegram_token" class="block text-sm font-medium text-gray-400 mb-2">Telegram Bot Token</label>
+                                <input type="password" id="telegram_token" placeholder="123456789:ABCdefGHI..." autocomplete="new-password" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
+                                <p class="mt-1 text-xs text-gray-500">Create the bot with @BotFather. Leave blank if you use only the Web UI for now.</p>
+                            </div>
+                            <div>
+                                <label for="telegram_chat_id" class="block text-sm font-medium text-gray-400 mb-2">Telegram Chat ID</label>
+                                <input type="text" id="telegram_chat_id" placeholder="12345678" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500">
+                                <p class="mt-1 text-xs text-gray-500">The single Telegram account allowed to control Astakos.</p>
+                            </div>
+                        </div>
+
+                        <div id="matrix_settings" class="hidden space-y-5">
+                            <div class="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm text-blue-200">
+                                <strong>Before first use:</strong> install Element on your phone, sign in to your private homeserver, create a separate Matrix account for Astakos, and invite that account only to the encrypted Astakos room. Keep ordinary family chats in a different room without the Astakos account.
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label for="matrix_homeserver_url" class="block text-sm font-medium text-gray-400 mb-2">Homeserver URL</label>
+                                    <input type="url" id="matrix_homeserver_url" placeholder="https://matrix.example.com" class="matrix-required w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label for="matrix_service_user_id" class="block text-sm font-medium text-gray-400 mb-2">Astakos Matrix User ID</label>
+                                    <input type="text" id="matrix_service_user_id" placeholder="@astakos:example.com" class="matrix-required w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label for="matrix_access_token" class="block text-sm font-medium text-gray-400 mb-2">Astakos Access Token</label>
+                                    <input type="password" id="matrix_access_token" placeholder="syt_..." autocomplete="new-password" class="matrix-required w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <p class="mt-1 text-xs text-gray-500">Use the token of the dedicated Astakos account. It is masked after saving.</p>
+                                </div>
+                                <div>
+                                    <label for="matrix_allowed_user_id" class="block text-sm font-medium text-gray-400 mb-2">Allowed Owner User ID</label>
+                                    <input type="text" id="matrix_allowed_user_id" placeholder="@owner:example.com" class="matrix-required w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label for="matrix_room_id" class="block text-sm font-medium text-gray-400 mb-2">Encrypted Astakos Room ID</label>
+                                    <input type="text" id="matrix_room_id" placeholder="!room-id:example.com" class="matrix-required w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label for="matrix_store_path" class="block text-sm font-medium text-gray-400 mb-2">Persistent Crypto Store</label>
+                                    <input type="text" id="matrix_store_path" value="matrix_store" placeholder="matrix_store" class="matrix-required w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <p class="mt-1 text-xs text-gray-500">Keep this directory persistent; it stores the encrypted-session state.</p>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-500">See “Element / Matrix external messaging” in the Beginner Setup Guide for the full account, room, and family-chat instructions.</p>
+                        </div>
+                    </div>
+
+                    <hr class="border-gray-700">
+
+
+                    <!-- 3. Personalization -->
+                    <div>
+                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-green-500/20 text-green-400 p-2 rounded-lg mr-3">👤</span> 3. Personalization</h2>
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                             <div>
                                 <label class="block text-sm text-gray-400 mb-1 flex items-center group relative cursor-help">
@@ -234,10 +278,10 @@
 
                     <hr class="border-gray-700">
 
-                    <!-- 3. Google Workspace -->
+                    <!-- 4. Google Workspace -->
                     <div>
                         <h2 class="text-xl font-semibold text-white mb-4 flex items-center justify-between">
-                            <span class="flex items-center"><span class="bg-indigo-500/20 text-indigo-400 p-2 rounded-lg mr-3">🌐</span> 3. Google Workspace & Integrations</span>
+                            <span class="flex items-center"><span class="bg-indigo-500/20 text-indigo-400 p-2 rounded-lg mr-3">🌐</span> 4. Google Workspace & Integrations</span>
                             <span id="ws_status_badge" class="text-xs px-3 py-1 rounded-full bg-gray-800 text-gray-400 border border-gray-700">Checking status...</span>
                         </h2>
                         <div class="bg-gray-800/60 border border-gray-700 rounded-xl p-5 mb-4">
@@ -264,9 +308,9 @@
 
                     <hr class="border-gray-700">
 
-                    <!-- 4. Core Files -->
+                    <!-- 5. Core Files -->
                     <div>
-                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-orange-500/20 text-orange-400 p-2 rounded-lg mr-3">⚙️</span> 4. Core Config Files</h2>
+                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-orange-500/20 text-orange-400 p-2 rounded-lg mr-3">⚙️</span> 5. Core Config Files</h2>
 
                         <div class="space-y-6">
                             <div>
@@ -394,6 +438,15 @@
 
         function closeInstructions() {
             document.getElementById('instructionsModal').classList.add('hidden');
+        }
+
+        function onExternalChannelChanged() {
+            const useMatrix = document.getElementById('external_channel').value === 'matrix';
+            document.getElementById('telegram_settings').classList.toggle('hidden', useMatrix);
+            document.getElementById('matrix_settings').classList.toggle('hidden', !useMatrix);
+            document.querySelectorAll('.matrix-required').forEach(input => {
+                input.required = useMatrix;
+            });
         }
 
         function switchTab(tab) {
@@ -679,9 +732,20 @@
                     }
                     if (envMap['TELEGRAM_TOKEN']) document.getElementById('telegram_token').value = envMap['TELEGRAM_TOKEN'];
                     if (envMap['TELEGRAM_CHAT_ID']) document.getElementById('telegram_chat_id').value = envMap['TELEGRAM_CHAT_ID'];
+                    const externalChannel = (envMap['ASTAKOS_EXTERNAL_CHANNEL'] || 'telegram').toLowerCase();
+                    if (externalChannel === 'telegram' || externalChannel === 'matrix') {
+                        document.getElementById('external_channel').value = externalChannel;
+                    }
+                    if (envMap['MATRIX_HOMESERVER_URL']) document.getElementById('matrix_homeserver_url').value = envMap['MATRIX_HOMESERVER_URL'];
+                    if (envMap['MATRIX_SERVICE_USER_ID']) document.getElementById('matrix_service_user_id').value = envMap['MATRIX_SERVICE_USER_ID'];
+                    if (envMap['MATRIX_ACCESS_TOKEN']) document.getElementById('matrix_access_token').value = envMap['MATRIX_ACCESS_TOKEN'];
+                    if (envMap['MATRIX_ALLOWED_USER_ID']) document.getElementById('matrix_allowed_user_id').value = envMap['MATRIX_ALLOWED_USER_ID'];
+                    if (envMap['MATRIX_ROOM_ID']) document.getElementById('matrix_room_id').value = envMap['MATRIX_ROOM_ID'];
+                    if (envMap['MATRIX_STORE_PATH']) document.getElementById('matrix_store_path').value = envMap['MATRIX_STORE_PATH'];
                 }
 
                 onProviderChanged();
+                onExternalChannelChanged();
 
                 // Populate Settings basics
                 loadedSettings = data.settings || {};
@@ -773,8 +837,15 @@
                     api_key: document.getElementById('api_key').value,
                     embeddings_api_key: document.getElementById('embeddings_api_key').value,
                     voice_api_key: document.getElementById('voice_api_key').value,
+                    external_channel: document.getElementById('external_channel').value,
                     telegram_token: document.getElementById('telegram_token').value,
                     telegram_chat_id: document.getElementById('telegram_chat_id').value,
+                    matrix_homeserver_url: document.getElementById('matrix_homeserver_url').value,
+                    matrix_service_user_id: document.getElementById('matrix_service_user_id').value,
+                    matrix_access_token: document.getElementById('matrix_access_token').value,
+                    matrix_allowed_user_id: document.getElementById('matrix_allowed_user_id').value,
+                    matrix_room_id: document.getElementById('matrix_room_id').value,
+                    matrix_store_path: document.getElementById('matrix_store_path').value,
                     persona: document.getElementById('persona_content').value,
                     intents: document.getElementById('intents_content').value,
                     env: document.getElementById('env_content').value,

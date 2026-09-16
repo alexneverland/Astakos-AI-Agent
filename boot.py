@@ -21,6 +21,22 @@ def is_configured(run_mode="cli"):
     return is_chat_provider_configured(provider)
 
 
+def start_external_transport() -> subprocess.Popen | None:
+    """Start only the selected external messaging transport."""
+    from core.messaging_channel import resolve_external_channel
+
+    active_channel = resolve_external_channel()
+    if active_channel == "matrix":
+        print("\033[92m[Boot]: Active external channel is Matrix.\033[0m")
+        return None
+
+    if os.getenv("TELEGRAM_TOKEN"):
+        return subprocess.Popen([sys.executable, "clients/telegram_bot.py"])
+
+    print("\033[93m[Boot]: TELEGRAM_TOKEN not set - starting Web/API only.\033[0m")
+    return None
+
+
 
 if __name__ == "__main__":
     # Read-only and non-blocking: failures never prevent Astakos from starting.
@@ -49,11 +65,7 @@ if __name__ == "__main__":
                 [sys.executable, "-m", "uvicorn", "api.server:server", "--host", "0.0.0.0", "--port", "8000"]
             )
 
-            bot_proc = None
-            if os.getenv("TELEGRAM_TOKEN"):
-                bot_proc = subprocess.Popen([sys.executable, "clients/telegram_bot.py"])
-            else:
-                print("\033[93m[Boot]: TELEGRAM_TOKEN not set - starting Web/API only.\033[0m")
+            bot_proc = start_external_transport()
 
             try:
                 api_proc.wait()

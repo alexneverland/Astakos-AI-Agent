@@ -329,6 +329,62 @@ def list_pending() -> list[dict]:
     return [v for v in _load_pending().values() if v["status"] == "pending"]
 
 
+def record_pending_delivery(
+    tool_call_id: str,
+    *,
+    delivery_channel: str,
+    external_message_id: str,
+) -> dict:
+    """Attach one external approval-message id to a pending tool call."""
+    normalized_channel = str(delivery_channel or "").strip().lower()
+    if normalized_channel not in {"telegram", "matrix"}:
+        raise ValueError("delivery_channel must be telegram or matrix")
+    normalized_message_id = str(external_message_id or "").strip()
+    if not normalized_message_id:
+        raise ValueError("external_message_id is required")
+
+    pending = _load_pending()
+    item = pending.get(tool_call_id)
+    if not item or item.get("status") != "pending":
+        raise KeyError("pending approval was not found")
+
+    for existing_id, existing in pending.items():
+        if existing_id == tool_call_id or existing.get("status") != "pending":
+            continue
+        if (
+            existing.get("delivery_channel") == normalized_channel
+            and str(existing.get("external_message_id") or "") == normalized_message_id
+        ):
+            raise ValueError("external approval message is already mapped")
+
+    item["delivery_channel"] = normalized_channel
+    item["external_message_id"] = normalized_message_id
+    _save_pending(pending)
+    return dict(item)
+
+
+def find_pending_by_delivery(
+    *,
+    delivery_channel: str,
+    external_message_id: str,
+) -> dict | None:
+    """Resolve an actionable external approval message to its pending call."""
+    normalized_channel = str(delivery_channel or "").strip().lower()
+    normalized_message_id = str(external_message_id or "").strip()
+    if normalized_channel not in {"telegram", "matrix"} or not normalized_message_id:
+        return None
+
+    for tool_call_id, item in _load_pending().items():
+        if item.get("status") != "pending":
+            continue
+        if (
+            item.get("delivery_channel") == normalized_channel
+            and str(item.get("external_message_id") or "") == normalized_message_id
+        ):
+            return {**item, "tool_call_id": tool_call_id}
+    return None
+
+
 def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
     """
     Executes a pending action that has been approved by the UI/Telegram.
@@ -656,8 +712,8 @@ def approval_check_node(state):
         save_pending(tc["name"], pending_args, tc["id"], channel=current_channel)
         print(f"\033[91m[Approval]: 🚨 CRITICAL — {tc['name']} blocked, awaiting approval\033[0m")
 
-        # We send a Telegram notification
-        _notify_telegram(tc)
+        # Deliver through exactly one configured external channel.
+        _notify_selected_approval(tc)
 
         # We return a ToolMessage so that the graph does not get stuck
         tool_messages.append(ToolMessage(
@@ -717,6 +773,47 @@ def _notify_telegram_notify(tool_call: dict):
         send_telegram_msg(text)
     except Exception as e:
         print(f"\033[93m[Approval]: Telegram notify error: {e}\033[0m")
+
+
+def _notify_selected_approval(tool_call: dict) -> None:
+    """Deliver one approval through the selected external channel only."""
+    from core.messaging_channel import resolve_external_channel
+
+    channel = resolve_external_channel()
+    if channel == "telegram":
+        _notify_telegram(tool_call)
+        return
+
+    from core.i18n import t
+    from services.external_delivery import (
+        ApprovalDeliveryRequest,
+        external_delivery_router,
+    )
+
+    tool_name = str(tool_call["name"])
+    call_id = str(tool_call["id"])
+    args_preview = _args_preview(tool_call.get("args", {}))
+    prompt = t(
+        "core.approval.req_approval",
+        tool_name=tool_name,
+        args_prev=args_preview,
+    )
+    if tool_name == "register_tool":
+        prompt += t("core.approval.register_tool_hint")
+    try:
+        external_delivery_router.send_approval(
+            ApprovalDeliveryRequest(
+                call_id=call_id,
+                tool_name=tool_name,
+                args_preview=args_preview,
+                prompt=prompt,
+            )
+        )
+    except Exception as exc:
+        print(
+            "\033[91m[Approval]: Selected external approval delivery failed "
+            f"({type(exc).__name__})\033[0m"
+        )
 
 
 def _notify_telegram(tool_call: dict):

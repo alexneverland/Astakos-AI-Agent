@@ -744,14 +744,22 @@ def load_recent_context(
     global_limit: int = 12,
     channel_limit: int = 10,
     total_limit: int = 20,
+    same_channel_only: bool = False,
     db_path: str = CONVERSATION_DB_FILE,
 ) -> list[dict[str, Any]]:
     """
-    Returns a small mixed context window.
+    Return a small mixed or explicitly same-channel context window.
 
-    It includes recent messages from all channels plus extra recent messages from
-    the current channel, then de-duplicates and returns them chronologically.
+    The default preserves the existing Web/Telegram behavior: recent messages
+    from all channels plus extra messages from the current channel. Matrix uses
+    the opt-in same-channel mode so its recent conversation remains isolated.
     """
+    if same_channel_only:
+        messages = load_messages(limit=channel_limit, channel=channel, db_path=db_path)
+        if total_limit and len(messages) > total_limit:
+            messages = messages[-total_limit:]
+        return messages
+
     mixed = load_messages(limit=global_limit, db_path=db_path)
     current_channel = load_messages(limit=channel_limit, channel=channel, db_path=db_path)
 

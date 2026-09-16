@@ -638,6 +638,64 @@ def test_setup_wizard_exposes_voice_provider_credentials_and_wake_name() -> None
     assert "voice_wake_name: document.getElementById('voice_wake_name').value" in setup_html
 
 
+def test_setup_wizard_exposes_external_channel_and_matrix_configuration() -> None:
+    """The guided UI exposes one external-channel selector and the Matrix contract."""
+    setup_html = (Path(config.BASE_DIR) / "api" / "static" / "setup.html").read_text(
+        encoding="utf-8"
+    )
+
+    for field_id in (
+        "external_channel",
+        "telegram_settings",
+        "matrix_settings",
+        "matrix_homeserver_url",
+        "matrix_service_user_id",
+        "matrix_access_token",
+        "matrix_allowed_user_id",
+        "matrix_room_id",
+        "matrix_store_path",
+    ):
+        assert f'id="{field_id}"' in setup_html
+
+    assert "function onExternalChannelChanged()" in setup_html
+    assert "external_channel: document.getElementById('external_channel').value" in setup_html
+    assert "matrix_access_token: document.getElementById('matrix_access_token').value" in setup_html
+
+
+def test_setup_wizard_toggles_external_channel_fields() -> None:
+    """Only the selected external transport is visible and Matrix fields become required."""
+    setup_html = (Path(config.BASE_DIR) / "api" / "static" / "setup.html").read_text(
+        encoding="utf-8"
+    )
+    with sync_playwright() as playwright:
+        try:
+            browser = playwright.chromium.launch(headless=True)
+        except PlaywrightError as exc:
+            pytest.skip(f"Chromium is unavailable for browser regression coverage: {exc}")
+        context = browser.new_context()
+        context.add_init_script(
+            "window.fetch = async () => ({ ok: true, json: async () => ({}) });"
+        )
+        page = context.new_page()
+        page.set_content(setup_html, wait_until="load")
+
+        assert "hidden" not in page.locator("#telegram_settings").get_attribute("class")
+        assert "hidden" in page.locator("#matrix_settings").get_attribute("class")
+
+        page.select_option("#external_channel", "matrix")
+        assert "hidden" in page.locator("#telegram_settings").get_attribute("class")
+        assert "hidden" not in page.locator("#matrix_settings").get_attribute("class")
+        assert page.locator("#matrix_access_token").get_attribute("required") is not None
+
+        page.select_option("#external_channel", "telegram")
+        assert "hidden" not in page.locator("#telegram_settings").get_attribute("class")
+        assert "hidden" in page.locator("#matrix_settings").get_attribute("class")
+        assert page.locator("#matrix_access_token").get_attribute("required") is None
+
+        context.close()
+        browser.close()
+
+
 def test_setup_wizard_clears_stale_voice_credentials_when_provider_changes() -> None:
     """Changing or sharing the voice provider never submits the previous provider's key."""
     setup_html = (Path(config.BASE_DIR) / "api" / "static" / "setup.html").read_text(
@@ -966,6 +1024,7 @@ def test_setup_wizard_raw_files_masks_secrets(monkeypatch: pytest.MonkeyPatch, t
         "LLM_PROVIDER=openai\n"
         "OPENAI_API_KEY=sk-real-super-secret-key-123\n"
         "TELEGRAM_TOKEN=123456:secret-token\n"
+        "MATRIX_ACCESS_TOKEN=syt_matrix-secret-token\n"
         "PROJECT_ID=my-project\n"
     )
     (tmp_path / ".env").write_text(raw_env, encoding="utf-8")
@@ -975,9 +1034,130 @@ def test_setup_wizard_raw_files_masks_secrets(monkeypatch: pytest.MonkeyPatch, t
 
     assert "sk-real-super-secret-key-123" not in env_out
     assert "secret-token" not in env_out
+    assert "matrix-secret-token" not in env_out
     assert "OPENAI_API_KEY=********" in env_out
     assert "TELEGRAM_TOKEN=********" in env_out
+    assert "MATRIX_ACCESS_TOKEN=********" in env_out
     assert "PROJECT_ID=my-project" in env_out
+
+
+def test_setup_wizard_saves_complete_matrix_configuration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Selecting Matrix persists the canonical non-secret settings and token."""
+    import api.setup_wizard as wizard
+
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+    payload = wizard.SetupPayload(
+        basic={
+            "external_channel": "matrix",
+            "matrix_homeserver_url": "https://matrix.neverland.test",
+            "matrix_service_user_id": "@astakos:neverland.test",
+            "matrix_access_token": "syt_matrix-secret-token",
+            "matrix_allowed_user_id": "@lazaros:neverland.test",
+            "matrix_room_id": "!private-room:neverland.test",
+            "matrix_store_path": "matrix_store",
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    result = asyncio.run(wizard.save_setup(payload))
+
+    assert result["status"] == "success"
+    saved_env = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "ASTAKOS_EXTERNAL_CHANNEL=matrix" in saved_env
+    assert "MATRIX_HOMESERVER_URL=https://matrix.neverland.test" in saved_env
+    assert "MATRIX_SERVICE_USER_ID=@astakos:neverland.test" in saved_env
+    assert "MATRIX_ACCESS_TOKEN=syt_matrix-secret-token" in saved_env
+    assert "MATRIX_ALLOWED_USER_ID=@lazaros:neverland.test" in saved_env
+    assert "MATRIX_ROOM_ID=!private-room:neverland.test" in saved_env
+    assert "MATRIX_STORE_PATH=matrix_store" in saved_env
+
+
+def test_setup_wizard_preserves_masked_matrix_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Re-saving Matrix setup never replaces its stored access token with the mask."""
+    import api.setup_wizard as wizard
+
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+    (tmp_path / ".env").write_text(
+        "ASTAKOS_EXTERNAL_CHANNEL=matrix\n"
+        "MATRIX_HOMESERVER_URL=https://matrix.neverland.test\n"
+        "MATRIX_SERVICE_USER_ID=@astakos:neverland.test\n"
+        "MATRIX_ACCESS_TOKEN=syt_existing-secret\n"
+        "MATRIX_ALLOWED_USER_ID=@lazaros:neverland.test\n"
+        "MATRIX_ROOM_ID=!private-room:neverland.test\n"
+        "MATRIX_STORE_PATH=matrix_store\n",
+        encoding="utf-8",
+    )
+    payload = wizard.SetupPayload(
+        basic={
+            "external_channel": "matrix",
+            "matrix_homeserver_url": "https://matrix.neverland.test",
+            "matrix_service_user_id": "@astakos:neverland.test",
+            "matrix_access_token": "********",
+            "matrix_allowed_user_id": "@lazaros:neverland.test",
+            "matrix_room_id": "!private-room:neverland.test",
+            "matrix_store_path": "matrix_store",
+            "env": (
+                "ASTAKOS_EXTERNAL_CHANNEL=matrix\n"
+                "MATRIX_ACCESS_TOKEN=********\n"
+            ),
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    asyncio.run(wizard.save_setup(payload))
+
+    saved_env = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "MATRIX_ACCESS_TOKEN=syt_existing-secret" in saved_env
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("matrix_access_token", ""),
+        ("matrix_store_path", ""),
+        ("matrix_homeserver_url", "not-a-url"),
+        ("matrix_service_user_id", "astakos"),
+        ("matrix_allowed_user_id", "lazaros"),
+        ("matrix_room_id", "private-room"),
+    ],
+)
+def test_setup_wizard_rejects_invalid_selected_matrix_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    """Invalid selected Matrix settings fail before any local configuration is written."""
+    import api.setup_wizard as wizard
+
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+    original = "LLM_PROVIDER=openai\n"
+    (tmp_path / ".env").write_text(original, encoding="utf-8")
+    basic = {
+        "external_channel": "matrix",
+        "matrix_homeserver_url": "https://matrix.neverland.test",
+        "matrix_service_user_id": "@astakos:neverland.test",
+        "matrix_access_token": "syt_matrix-secret-token",
+        "matrix_allowed_user_id": "@lazaros:neverland.test",
+        "matrix_room_id": "!private-room:neverland.test",
+        "matrix_store_path": "matrix_store",
+    }
+    basic[field] = value
+    payload = wizard.SetupPayload(basic=basic, advanced={}, prompts={}, routines="")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(wizard.save_setup(payload))
+
+    assert exc_info.value.status_code == 422
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == original
 
 
 def test_setup_wizard_save_setup_preserves_masked_secrets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

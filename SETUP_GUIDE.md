@@ -84,7 +84,44 @@ Choose a **Chat Provider** and enter its credential. Then choose an **Embeddings
 - For Gemini API, OpenAI, or Vertex AI, leave Embeddings Provider on **Auto** for the simplest setup.
 - For Anthropic, choose Vertex AI, Gemini API, OpenAI, or Local Multilingual E5 explicitly. Anthropic does not offer native embeddings.
 - Leave Voice Provider on **Auto** when chat uses Vertex AI, Gemini API, or OpenAI. With Anthropic chat, explicitly choose one of those three voice providers and provide its credential.
-- Telegram is optional. You can save and use the Web UI first, then add a BotFather token and your Telegram chat ID later.
+- Choose **Telegram** or **Element / Matrix** as Astakos's active external app. The Web UI remains available either way. The Setup Wizard retains the inactive app's settings so you can switch later without re-entering them.
+
+### External messaging: Telegram or Element / Matrix
+
+Astakos uses one external messaging transport at a time. This avoids duplicate
+approvals, reminders, and routine messages. Switching the active app is done in
+the Setup Wizard; it does not merge histories between Web, Telegram, and Matrix.
+
+#### Telegram
+
+Telegram is optional. You can save and use the Web UI first, then add a
+BotFather token and your Telegram chat ID later. Select **Telegram** in the
+Setup Wizard when you want it to receive Astakos messages again.
+
+#### Element / Matrix
+
+Matrix gives you a private mobile app through Element while keeping the server
+under your control. Before selecting **Element / Matrix** in the Setup Wizard:
+
+1. Install **Element** or **Element X** on each phone and sign in to your
+   private homeserver. Each person needs their own Matrix account.
+2. Create a dedicated Matrix account for Astakos, separate from every family
+   member's account.
+3. Create one private encrypted room for Astakos, invite only your owner
+   account and the dedicated Astakos account, then copy the exact room ID
+   (`!room:server`).
+4. Obtain an access token for the dedicated Astakos account through your
+   homeserver's secure administration procedure. Treat it like a password:
+   do not share it or commit it to Git.
+5. In the Setup Wizard, choose **Element / Matrix** and enter the homeserver
+   URL, Astakos user ID, access token, owner user ID, encrypted room ID, and a
+   persistent crypto-store path. The default `matrix_store` is suitable when
+   it is kept on persistent storage.
+
+For a normal family conversation, create a **different encrypted room** for
+you, Sofia, and Alexandros and do **not** invite the Astakos account. Astakos
+can only see rooms to which its own account is invited; the family room stays
+separate from the assistant.
 
 The wizard's diagnostics show whether chat, semantic memory, and optional Google Workspace integrations are ready. A missing embeddings provider does not stop basic chat and tools, but long-term semantic recall remains unavailable until it is configured.
 

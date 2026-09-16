@@ -37,9 +37,12 @@ http://localhost:8000
 
 The Setup Wizard is local-only by default. Docker keeps port 8000 bound to `127.0.0.1`; do not expose it publicly without a trusted authenticated reverse proxy.
 
-The Web Setup Wizard guides you through provider selection and configuration.
+The Web Setup Wizard guides you through provider selection, configuration, and
+choosing one active external app: Telegram or Element / Matrix. The Web UI stays
+available with either choice; the complete private Matrix and family-room setup
+is in the [Beginner Setup Guide](SETUP_GUIDE.md#external-messaging-telegram-or-element--matrix).
 
-> **Note:** Web/API setup works with only one configured AI provider. Telegram is optional until `TELEGRAM_TOKEN` is configured. Docker can start Astakos in Web/API mode even before Telegram is configured. If `TELEGRAM_TOKEN` is missing, Astakos starts the Web Setup Wizard and Web UI only; Telegram features become available after Telegram is configured.
+> **Note:** Web/API setup works with only one configured AI provider. Telegram is optional until `TELEGRAM_TOKEN` is configured. Docker can start Astakos in Web/API mode even before Telegram is configured. Select Matrix only after its dedicated service account, encrypted room, and persistent crypto store are configured in the Setup Wizard.
 
 > **Vertex AI + Docker note:** if you choose `Vertex AI`, you must mount a real Google service-account JSON file into the container and set `GOOGLE_APPLICATION_CREDENTIALS` to the in-container path. A local Windows/macOS/Linux path by itself is not enough for the release Docker setup.
 

@@ -2,6 +2,7 @@ import os
 import sys
 import sqlite3
 import config
+from services.external_delivery import DeliveryReceipt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -138,6 +139,28 @@ def test_run_reflection_dedupes_same_run_duplicates(monkeypatch, tmp_path):
     assert stats["analyzed"] == 2
     assert stats["applied"] == 1
     assert stats["skipped"] == 1
+
+
+def test_reflection_digest_uses_selected_external_delivery(monkeypatch):
+    import services.reflection_engine as re
+
+    delivered = []
+    monkeypatch.setattr(
+        re,
+        "deliver_external_assistant_text",
+        lambda text, **kwargs: delivered.append((text, kwargs))
+        or DeliveryReceipt(channel="matrix", external_id="$digest"),
+        raising=False,
+    )
+
+    re._send_reflection_digest("nightly digest")
+
+    assert delivered == [
+        (
+            "nightly digest",
+            {"agent": "Reflection_Agent", "silent": True},
+        )
+    ]
 
 def test_reflection_increase_cooldown_clamps_to_min(monkeypatch, tmp_path):
     re = _set_temp_db(monkeypatch, tmp_path)

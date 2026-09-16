@@ -39,6 +39,7 @@ import config
 import core.i18n
 from core.i18n import t
 from core.voice_delivery import build_voice_delivery_context
+from core.messaging_channel import resolve_external_channel
 
 
 logger = logging.getLogger(__name__)
@@ -131,6 +132,8 @@ from memory.session_memory import (
     _maybe_trigger_auto_session_summary,
 )
 from tools.telegram import send_telegram_msg, send_telegram_voice, send_telegram_msg_full
+from clients.telegram_delivery import TelegramExternalTransport
+from services.external_delivery import external_delivery_router
 from services.gemini import safe_gemini_call
 from services.embeddings import embeddings
 from memory.pending_followups import (
@@ -145,6 +148,28 @@ from memory.pending_followups import (
     build_followup_arc_key,
 )
 from core.event_bus import bus
+
+def _register_telegram_external_transport() -> None:
+    """Bind the canonical router to this process's existing Telegram senders."""
+    external_delivery_router.register(
+        "telegram",
+        TelegramExternalTransport(
+            send_message=lambda text, silent: (
+                send_telegram_msg(text, disable_notification=True)
+                if silent
+                else send_telegram_msg(text)
+            ),
+            send_full_message=lambda text, silent: (
+                send_telegram_msg_full(text, disable_notification=True)
+                if silent
+                else send_telegram_msg_full(text)
+            ),
+        ),
+    )
+
+
+_register_telegram_external_transport()
+
 # ────────────────────────────────────────────────────────────────
 # GLOBALS
 # ────────────────────────────────────────────────────────────────
@@ -214,6 +239,13 @@ pending_partner_until = 0.0   # ka→el mode (Sophia writes Georgian)
 voice_mode_enabled = False
 # Scheduler reference (set in __main__, used by /status command)
 astakos_scheduler = None
+_external_background_runtime_lock = threading.Lock()
+_external_background_runtime_channel: str | None = None
+
+
+def _current_external_runtime_channel() -> str:
+    """Return the active scheduler channel, or the validated configured default."""
+    return _external_background_runtime_channel or resolve_external_channel()
 # ── Rate Limiting ─────────────────────────────────────────────
 QUIET_HOURS          = (0, 8)    # 00:00 → 08:00 without proactive
 MAX_PROACTIVE_PER_HOUR = 3       # max proactive messages/hour
@@ -953,8 +985,12 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         file_name = os.path.basename(raw_file_name)
         file_ext = os.path.splitext(file_name)[1].lower()
 
-        ALLOWED_TG_DOC_EXTS = {".txt", ".csv", ".json", ".md", ".pdf", ".docx", ".xlsx", ".xls"}
-        if file_ext not in ALLOWED_TG_DOC_EXTS:
+        from services.document_input import (
+            SUPPORTED_DOCUMENT_EXTENSIONS,
+            extract_document_preview,
+        )
+
+        if file_ext not in SUPPORTED_DOCUMENT_EXTENSIONS:
             send_telegram_msg(t("api.server.invalid_file_type", file_ext=file_ext))
             return
 
@@ -1030,20 +1066,7 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         file_ext = os.path.splitext(file_name)[1].lower()
         doc_text = ""
         try:
-            if file_ext in (".txt", ".csv", ".json", ".md"):
-                from core.utils import extract_text_preview
-                doc_text = extract_text_preview(local_path, max_chars=8000)
-            elif file_ext == ".pdf":
-                from core.utils import extract_pdf_preview
-                doc_text = extract_pdf_preview(local_path, max_chars=8000)
-            elif file_ext in (".docx",):
-                from core.utils import extract_docx_preview
-                doc_text = extract_docx_preview(local_path, max_chars=8000)
-            elif file_ext in (".xlsx", ".xls"):
-                from core.utils import extract_xlsx_preview
-                doc_text = extract_xlsx_preview(local_path, max_chars=8000)
-            else:
-                doc_text = f"Unsupported document type: {file_ext}"
+            doc_text = extract_document_preview(local_path, max_chars=8000)
         except Exception as read_err:
             doc_text = f"[Could not read content: {read_err}]"
 
@@ -1052,26 +1075,29 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
             external_content_history_metadata,
             format_untrusted_tool_result,
         )
-        doc_text = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, doc_text)
-        from memory.conversation_history import build_asset_context_text
-        conversation_context = build_asset_context_text("telegram")
+        from services.document_analysis import summarize_document_text
 
-        sum_prompt = core.i18n.load_prompt("telegram_bot_document_analysis.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, 
-            conversation_context=conversation_context or t("clients.telegram_bot.bot_msg_98937a"),
-            caption=caption or t("clients.telegram_bot.bot_msg_05a606"),
+        detailed_analysis = summarize_document_text(
+            document_text=doc_text,
             file_name=file_name,
-            doc_text=doc_text
+            caption=caption,
+            channel="telegram",
+            language=config.RESPONSE_LANGUAGE,
+            user_name=config.USER_NAME,
+            missing_context=t("clients.telegram_bot.bot_msg_98937a"),
+            missing_caption=t("clients.telegram_bot.bot_msg_05a606"),
+            empty_reply=t("clients.telegram_bot.bot_msg_33d466"),
+            llm_model=llm,
+            llm_invoke=safe_llm_invoke,
         )
-        from langchain_core.messages import HumanMessage as _HM
-        sum_resp = safe_llm_invoke(llm, [_HM(content=sum_prompt)])
-        detailed_analysis = clean_message(sum_resp.content).strip() if sum_resp and sum_resp.content else t("clients.telegram_bot.bot_msg_33d466")
         memory_analysis = detailed_analysis[:500]
+
+        from services.pending_asset_confirmation import build_asset_archive_prompt
 
         chat_ai_msg = (
             f"📄 **Document:** `{file_name}`\n\n"
-            f"{detailed_analysis}\n\n"
-            "**Should I save it to memory permanently?**\n"
-            "Answer only with: yes or no."
+            f"{detailed_analysis}"
+            f"{build_asset_archive_prompt('document')}"
         )
         
         send_telegram_msg(chat_ai_msg)
@@ -1144,17 +1170,19 @@ def handle_voice(voice_obj: dict, chat_id: str):
 
         print(f"\033[96m[Voice]: Analyzing audio...\033[0m")
 
-        from core.brain import get_voice_provider_adapter
         from core.ai_provider import (
             CapabilityNotSupportedError,
             ProviderAuthError,
             RateLimitError,
             VoiceProviderSetupRequired,
         )
+        from services.voice_input import transcribe_voice_audio
 
         try:
-            adapter = get_voice_provider_adapter()
-            transcribed_text = adapter.transcribe_audio(audio_data, mime_type="audio/ogg")
+            transcribed_text = transcribe_voice_audio(
+                audio_data,
+                mime_type="audio/ogg",
+            )
         except VoiceProviderSetupRequired as exc:
             print(f"\033[93m[Voice Setup]: {exc}\033[0m")
             send_telegram_msg(f"⚠️ {exc}")
@@ -1217,17 +1245,11 @@ def send_telegram_document(file_path, chat_id=None):
 def handle_end_session(chat_id: str):
     """Closes the session, saves the summary and clears the working memory."""
     try:
-        from memory.session_memory import _run_session_summary
-        from config import WORKING_MEMORY_FILE
+        from services.session_end import finalize_session
         
         send_telegram_msg(t("clients.telegram_bot.bot_msg_139ed4"))
         
-        # 1. We run the main summary (as in server.py)
-        _run_session_summary(channel="telegram")
-        
-        # 2. Clear the Post-it (Working Memory)
-        with open(WORKING_MEMORY_FILE, "w", encoding="utf-8") as f:
-            f.write(t("clients.telegram_bot.bot_msg_4cd007"))
+        finalize_session(channel="telegram")
             
         print("\033[92m[Telegram]: Session closed and archived successfully.\033[0m")
         send_telegram_msg(t("clients.telegram_bot.bot_msg_bfe08b"))
@@ -1274,19 +1296,15 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
             RateLimitError,
             AIProviderError,
         )
-        from core.brain import get_active_provider_adapter, safe_adapter_call
+        from services.image_input import analyze_image_bytes
 
         vision_prompt = t("clients.telegram_bot.bot_msg_dec305")
         print(f"\033[94m[Vision]: Visual analysis...\033[0m")
         try:
-            adapter = get_active_provider_adapter()
-            memory_analysis = clean_message(
-                safe_adapter_call(
-                    adapter.analyze_vision,
-                    vision_prompt,
-                    img_data,
-                    mime_type="image/jpeg",
-                )
+            memory_analysis = analyze_image_bytes(
+                img_data,
+                mime_type="image/jpeg",
+                prompt=vision_prompt,
             )
             if not memory_analysis:
                 memory_analysis = "No visual analysis available."
@@ -1470,25 +1488,28 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     except Exception as e:
         print(f"[PendingAssets]: {e}")
 
-    # Interceptor for CREATED_FILE
-    file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_response)
-    if file_match:
-        file_path = file_match.group(1).strip()
-        final_response = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", "", final_response).strip()
-        if final_response:
-            send_telegram_msg(final_response)
+    from services.created_file import extract_created_files
+
+    generated = extract_created_files(final_response)
+    final_response = generated.text
+    if final_response:
+        send_telegram_msg(final_response)
+    for output in generated.outputs:
         try:
-            from tools.telegram import send_telegram_document
-            send_telegram_document(file_path)
+            if output.kind == "photo":
+                _send_photo_to_telegram(output.path, chat_id)
+            else:
+                from tools.telegram import send_telegram_document
+
+                send_telegram_document(output.path)
         except Exception:
             pass
-    else:
-        send_telegram_msg(final_response)
 def _run_nutrition(image_path: str, chat_id: str):
     """Runs the nutrition analyzer and sends the result."""
     try:
-        from astakos_skills.nutrition_analyzer import analyze_nutrition
-        result = analyze_nutrition(image_path)
+        from services.photo_commands import analyze_nutrition_photo
+
+        result = analyze_nutrition_photo(image_path)
         _send_and_record_assistant(result, chat_id)
     except Exception as e:
         _send_and_record_assistant(f"❌ Nutrition analysis error: {e}", chat_id)
@@ -1497,8 +1518,9 @@ def _run_nutrition(image_path: str, chat_id: str):
 def _run_receipt(image_path: str, chat_id: str):
     """Runs the receipt scanner and sends the result."""
     try:
-        from astakos_skills.scan_receipt import scan_receipt
-        result = scan_receipt.invoke({"image_path": image_path})
+        from services.photo_commands import scan_receipt_photo
+
+        result = scan_receipt_photo(image_path)
         _send_and_record_assistant(result, chat_id)
     except Exception as e:
         _send_and_record_assistant(f"❌ Receipt scan error: {e}", chat_id)
@@ -1507,9 +1529,9 @@ def _run_receipt(image_path: str, chat_id: str):
 def _run_story_maker(theme: str, characters: str, chat_id: str):
     """Generates a fairy tale + images and sends them to Telegram."""
     try:
-        from astakos_skills.story_maker import make_story
+        from services.story_generation import generate_story
         from tools.telegram import send_telegram_photo
-        result = make_story(theme, characters)
+        result = generate_story(theme, characters)
 
         if result.get("error") or not result.get("story"):
             send_telegram_msg(f"❌ {result.get('error', t("clients.telegram_bot.bot_msg_cf83ee"))}")
@@ -1671,17 +1693,41 @@ def _send_and_record_assistant(
     chat_id: str | None = None,
     agent: str | None = "Chat_Agent",
 ):
-    """Sends an assistant reply to Telegram and writes it to the shared history."""
-    if len(content) <= 3500:
-        message_id = send_telegram_msg(content)
-    else:
-        from tools.telegram import send_telegram_msg_full
-        message_id = send_telegram_msg_full(content)
-    if message_id:
-        _append_to_analytics_log("ai", content, agent=agent)
-    else:
-        print(f"[TelegramSend]: outbound send failed for agent={agent}")
-    return message_id
+    """Send assistant text through the selected external channel and record it."""
+    from memory.conversation_history import append_message
+    from services.external_assistant_delivery import deliver_external_assistant_text
+
+    def _record_delivery(channel, text, handling_agent, external_id):
+        metadata = {
+            "transport": channel,
+            "external_message_id": external_id,
+        }
+        if channel == "telegram":
+            _append_to_analytics_log(
+                "ai",
+                text,
+                agent=handling_agent,
+                metadata=metadata,
+            )
+            return
+        append_message(
+            role="assistant",
+            content=text,
+            channel=channel,
+            agent=handling_agent,
+            metadata=metadata,
+        )
+
+    try:
+        receipt = deliver_external_assistant_text(
+            content,
+            agent=agent,
+            record_message=_record_delivery,
+        )
+    except Exception as exc:
+        print(f"[ExternalSend]: outbound send failed for agent={agent}: {exc}")
+        return None
+    return receipt.external_id
 
 
 def _arm_pending_georgian():
@@ -2850,13 +2896,16 @@ def handle_message(
             send_telegram_msg(t("clients.telegram_bot.bot_msg_125f2d"))
             return
 
-        file_path_to_send = None
-        if final_ai_response:
-            # --- MASTRO INTERCEPTOR FOR DOCUMENTS ---
-            file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_ai_response)
-            if file_match:
-                file_path_to_send = file_match.group(1).strip()
-                final_ai_response = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", "", final_ai_response).strip()
+        from services.created_file import extract_created_files
+
+        generated = extract_created_files(final_ai_response)
+        generated_outputs = generated.outputs
+        final_ai_response = generated.text
+        if not final_ai_response and generated_outputs:
+            final_ai_response = t(
+                "clients.telegram_bot.bot_msg_file",
+                file=os.path.basename(generated_outputs[0].path),
+            )
 
         final_response_build_ms = int((perf_counter() - response_build_started) * 1000)
         _trace.mark_phase("final_response_build_ms", final_response_build_ms)
@@ -2866,44 +2915,37 @@ def handle_message(
 
         if final_ai_response:
             final_ai_response = _strip_existing_time_prefix(final_ai_response)
-            if file_path_to_send:
-                if final_ai_response:
-                    if is_voice_mode:
-                        import asyncio
-                        t_voice_0 = perf_counter()
-                        asyncio.run(send_telegram_voice(final_ai_response))
-                        voice_send_ms = int((perf_counter() - t_voice_0) * 1000)
-                        _trace.mark_phase("telegram_voice_send_ms", voice_send_ms)
-                    else:
-                        t_send_0 = perf_counter()
-                        _mid = send_telegram_msg(final_ai_response)
-                        send_ms = int((perf_counter() - t_send_0) * 1000)
-                        _trace.mark_phase("telegram_send_ms", send_ms)
-                        _cache_bot_message(_mid, final_ai_response)
-
-                # Send the file to Telegram as a document
-                try:
-                    from tools.telegram import send_telegram_document
-                    import os as _os
-                    _fname = _os.path.basename(file_path_to_send)
-                    send_telegram_document(file_path_to_send, caption=f"📎 <b>{_fname}</b>")
-                except Exception as _de:
-                    print(f"❌ [Doc send error]: {_de}")
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_file", file=file_path_to_send))
+            if is_voice_mode:
+                import asyncio
+                t_voice_0 = perf_counter()
+                asyncio.run(send_telegram_voice(final_ai_response))
+                voice_send_ms = int((perf_counter() - t_voice_0) * 1000)
+                _trace.mark_phase("telegram_voice_send_ms", voice_send_ms)
             else:
-                # Normal Flow (No Documents)
-                if is_voice_mode:
-                    import asyncio
-                    t_voice_0 = perf_counter()
-                    asyncio.run(send_telegram_voice(final_ai_response))
-                    voice_send_ms = int((perf_counter() - t_voice_0) * 1000)
-                    _trace.mark_phase("telegram_voice_send_ms", voice_send_ms)
-                else:
-                    t_send_0 = perf_counter()
-                    _mid = send_telegram_msg(final_ai_response)
-                    send_ms = int((perf_counter() - t_send_0) * 1000)
-                    _trace.mark_phase("telegram_send_ms", send_ms)
-                    _cache_bot_message(_mid, final_ai_response)
+                t_send_0 = perf_counter()
+                _mid = send_telegram_msg(final_ai_response)
+                send_ms = int((perf_counter() - t_send_0) * 1000)
+                _trace.mark_phase("telegram_send_ms", send_ms)
+                _cache_bot_message(_mid, final_ai_response)
+
+            for output in generated_outputs:
+                try:
+                    if output.kind == "photo":
+                        _send_photo_to_telegram(output.path, chat_id)
+                    else:
+                        from tools.telegram import send_telegram_document
+                        import os as _os
+
+                        _fname = _os.path.basename(output.path)
+                        send_telegram_document(
+                            output.path,
+                            caption=f"📎 <b>{_fname}</b>",
+                        )
+                except Exception as output_error:
+                    print(f"❌ [Generated output send error]: {output_error}")
+                    send_telegram_msg(
+                        t("clients.telegram_bot.bot_msg_file", file=output.path)
+                    )
             # We keep context for the next message
             _typing_active["on"] = False  # We stop typing
             user_rowid = _append_to_analytics_log("user", clean_user_text)
@@ -2920,16 +2962,6 @@ def handle_message(
                 )
             else:
                 _append_to_analytics_log("ai", final_ai_response)
-            # Photos
-            if "[SEND_PHOTO:" in final_ai_response:
-                match = re.search(r"\[SEND_PHOTO:\s*(.+?)\]", final_ai_response)
-                if match:
-                    photo_path = match.group(1).strip()
-                    try:
-                        _send_photo_to_telegram(photo_path, chat_id)
-                    except:
-                        pass
-
             # Background Tasks
             t_bg_0 = perf_counter()
             from core.untrusted_content import external_content_source_names
@@ -3501,6 +3533,87 @@ def _send_system_doctor_report() -> None:
     send_telegram_msg_full(_run_system_doctor_command())
 
 
+def handle_external_admin_command(user_text: str) -> str | None:
+    """Execute one channel-neutral text/admin command and return its reply."""
+    cmd = str(user_text or "").strip().lower()
+
+    if cmd == "/pause":
+        with _override_lock:
+            _override_state["pause_reminders"] = True
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_4c769a")
+
+    if cmd == "/mute":
+        with _override_lock:
+            _override_state["mute_proactive"] = True
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_c9478b")
+
+    if cmd.startswith("/sleep"):
+        parts = cmd.split()
+        hours = float(parts[1]) if len(parts) > 1 else 8.0
+        with _override_lock:
+            _override_state["sleep_until"] = _time.time() + hours * 3600
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_sleep_mode", hours=f"{hours:.0f}")
+
+    if cmd == "/resume":
+        with _override_lock:
+            _override_state.update(
+                {
+                    "pause_reminders": False,
+                    "mute_proactive": False,
+                    "sleep_until": None,
+                    "routine_pause_until": None,
+                }
+            )
+        _reset_vacation_pause_skip_log()
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_b33ab5")
+
+    if cmd == "/vacation_resume":
+        with _override_lock:
+            _override_state["routine_pause_until"] = None
+        _reset_vacation_pause_skip_log()
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_vacation_resumed")
+
+    if cmd == "/vacation" or cmd.startswith("/vacation "):
+        parts = cmd.split()
+        try:
+            days = int(parts[1]) if len(parts) == 2 else 0
+        except ValueError:
+            days = 0
+        if not 1 <= days <= 365:
+            return t("clients.telegram_bot.bot_msg_vacation_usage")
+        _reset_vacation_pause_skip_log()
+        with _override_lock:
+            _override_state["routine_pause_until"] = _time.time() + days * 86400
+        _clear_pending_routine_confirmations_for_vacation()
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_vacation_paused", days=days)
+
+    if cmd == "/help":
+        voice_status = "🔊 ON" if voice_mode_enabled else "✍️ OFF"
+        return (
+            t("clients.telegram_bot.bot_msg_commands_title", bot_name=config.BOT_NAME)
+            + t("clients.telegram_bot.bot_msg_help_menu", voice_status=voice_status)
+        )
+
+    if cmd == "/doctor":
+        try:
+            return _run_system_doctor_command()
+        except Exception as exc:
+            return t("clients.telegram_bot.bot_msg_doctor_error", e=exc)
+
+    if cmd == "/status":
+        if astakos_scheduler:
+            return astakos_scheduler.status()
+        return t("clients.telegram_bot.bot_msg_8c16dd")
+
+    return None
+
+
 def run_polling():
     """Long-polling loop — reads updates from the Telegram API."""
     global voice_mode_enabled
@@ -3644,63 +3757,12 @@ def run_polling():
                     _clear_pending_georgian()
                     _clear_pending_partner()
 
-                if cmd == "/pause":
-                    with _override_lock:
-                        _override_state["pause_reminders"] = True
-                    _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_4c769a"))
-                    continue
-
-                if cmd == "/mute":
-                    with _override_lock:
-                        _override_state["mute_proactive"] = True
-                    _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_c9478b"))
-                    continue
-
-                if cmd.startswith("/sleep"):
-                    parts = cmd.split()
-                    hours = float(parts[1]) if len(parts) > 1 else 8.0
-                    with _override_lock:
-                        _override_state["sleep_until"] = _time.time() + hours * 3600
-                    _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_sleep_mode", hours=f"{hours:.0f}"))
-                    continue
-
-                if cmd == "/resume":
-                    with _override_lock:
-                        _override_state.update({
-                            "pause_reminders": False,
-                            "mute_proactive": False,
-                            "sleep_until": None,
-                            "routine_pause_until": None,
-                        })
-                    _reset_vacation_pause_skip_log()
-                    _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_b33ab5"))
-                    continue
-                if cmd == "/vacation_resume":
-                    with _override_lock:
-                        _override_state["routine_pause_until"] = None
-                    _reset_vacation_pause_skip_log()
-                    _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_vacation_resumed"))
-                    continue
-                if cmd == "/vacation" or cmd.startswith("/vacation "):
-                    parts = cmd.split()
-                    try:
-                        days = int(parts[1]) if len(parts) == 2 else 0
-                    except ValueError:
-                        days = 0
-                    if not 1 <= days <= 365:
-                        send_telegram_msg(t("clients.telegram_bot.bot_msg_vacation_usage"))
-                        continue
-                    _reset_vacation_pause_skip_log()
-                    with _override_lock:
-                        _override_state["routine_pause_until"] = _time.time() + days * 86400
-                    _clear_pending_routine_confirmations_for_vacation()
-                    _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_vacation_paused", days=days))
+                admin_reply = handle_external_admin_command(user_text)
+                if admin_reply is not None:
+                    if len(admin_reply) <= 3500:
+                        send_telegram_msg(admin_reply)
+                    else:
+                        send_telegram_msg_full(admin_reply)
                     continue
                 if user_text.lower().startswith("/confirm"):
                     cmd_to_confirm = user_text[len("/confirm"):].strip()
@@ -3712,28 +3774,6 @@ def run_polling():
                         t("clients.telegram_bot.bot_msg_confirm_req", cmd=cmd_to_confirm)
                     )
                     continue
-                if cmd == "/help":
-                    voice_status = "🔊 ON" if voice_mode_enabled else "✍️ OFF"
-                    send_telegram_msg(
-                        t("clients.telegram_bot.bot_msg_commands_title", bot_name=config.BOT_NAME) +
-                        t("clients.telegram_bot.bot_msg_help_menu", voice_status=voice_status)
-                    )
-                    continue
-
-                if cmd == "/doctor":
-                    try:
-                        _send_system_doctor_report()
-                    except Exception as e:
-                        send_telegram_msg(t("clients.telegram_bot.bot_msg_doctor_error", e=e))
-                    continue
-
-                if cmd == "/status":
-                    if astakos_scheduler:
-                        send_telegram_msg(astakos_scheduler.status())
-                    else:
-                        send_telegram_msg(t("clients.telegram_bot.bot_msg_8c16dd"))
-                    continue
-
                 if cmd == "/voice":
                     voice_mode_enabled = not voice_mode_enabled
                     if voice_mode_enabled:
@@ -3890,7 +3930,7 @@ def _load_recent_proactive_context(limit: int = 10) -> str:
 
         context = build_memory_context(
             "",
-            channel="telegram",
+            channel=_current_external_runtime_channel(),
             recent_limit=limit,
             semantic_k=0,
             write_debug=True,
@@ -3914,7 +3954,7 @@ def _build_proactive_memory_context(event_name: str) -> str:
         )
         context = build_memory_context(
             recall_query,
-            channel="telegram",
+            channel=_current_external_runtime_channel(),
             recent_limit=18,
             temporal_limit=12,
             semantic_k=6,
@@ -4493,7 +4533,7 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
         from memory.context_builder import build_memory_context
         memory_context = build_memory_context(
             event_name,
-            channel="telegram",
+            channel=_current_external_runtime_channel(),
             recent_limit=8,
             semantic_k=4,
             write_debug=True,
@@ -4668,7 +4708,7 @@ def startup_check_missed_routines():
                 log_event("routines", "routine_silent_skip", routine_id=r_id, event=event_name,
                           deferred=True, muted_until=muted_until, debug_type="proactive_policy", debug_source="scheduler", debug_effect="silent_skip")
                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name,
-                         deferred=True, channel="telegram")
+                         deferred=True, channel=_current_external_runtime_channel())
                 print(f"\033[90m[MissedRoutines]: SILENT_SKIP '{event_name}' ({missed_min} minutes late)\033[0m")
                 continue
 
@@ -4687,7 +4727,7 @@ def startup_check_missed_routines():
                           deferred=True, missed_minutes=missed_min,
                           muted_until=muted_until, preview=(context_skip_preview or msg)[:160], debug_type="proactive_policy", debug_source="scheduler", debug_effect="context_skip")
                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name,
-                         deferred=True, channel="telegram")
+                         deferred=True, channel=_current_external_runtime_channel())
                 print(f"\033[90m[MissedRoutines]: CONTEXT_SKIP '{event_name}' ({missed_min} minutes late) → '{msg[:80]}'\033[0m")
                 continue
 
@@ -4705,7 +4745,7 @@ def startup_check_missed_routines():
                       routine_id=r_id, event=event_name,
                       missed_minutes=missed_min, preview=msg[:160])
             bus.emit("routine_triggered", routine_id=r_id, event=event_name,
-                     confidence=confidence, deferred=True, channel="telegram")
+                     confidence=confidence, deferred=True, channel=_current_external_runtime_channel())
             print(f"\033[92m[MissedRoutines]: ✅ Deferred '{event_name}' ({missed_min} minutes late) → '{msg[:80]}'\033[0m")
 
             if len(missed) > 1:
@@ -5075,7 +5115,7 @@ def job_check_routines():
                                 debug_source="scheduler",
                                 debug_effect="notification_skipped",
                             )
-                            bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
+                            bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel=_current_external_runtime_channel())
                             _clear_routine_pending_confirmation(r_id)
                             _apply_context_mute(r_id, event_name, ctx)
                         conn.commit()
@@ -5112,7 +5152,7 @@ def job_check_routines():
                                     debug_source="scheduler",
                                     debug_effect="notification_skipped",
                                 )
-                                bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
+                                bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel=_current_external_runtime_channel())
                             else:
                                 _send_and_record_assistant(msg, agent="Routine_Agent")
                                 sent_at = datetime.now()
@@ -5133,7 +5173,7 @@ def job_check_routines():
                                     "draft_offer": False,
                                 }
                                 save_pending_confirmation(r_id, event_name, sent_at, draft_offer=False)
-                                bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel="telegram")
+                                bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel=_current_external_runtime_channel())
                         conn.commit()
                 else:
                     # One routine → personalized message
@@ -5163,7 +5203,7 @@ def job_check_routines():
                             debug_source="scheduler",
                             debug_effect="notification_skipped",
                         )
-                        bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
+                        bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel=_current_external_runtime_channel())
                         _clear_routine_pending_confirmation(r_id)
                         _apply_context_mute(r_id, event_name, ctx)
                     else:
@@ -5217,7 +5257,7 @@ def job_check_routines():
                                 debug_effect="notification_skipped",
                             )
                             # DO NOT mark as pending, just keep it active.
-                            bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
+                            bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel=_current_external_runtime_channel())
                         else:
                             _send_and_record_assistant(msg, agent="Routine_Agent")
                             mark_routine_notified(r_id)
@@ -5239,7 +5279,7 @@ def job_check_routines():
                                 "draft_offer": draft_offer,
                             }
                             save_pending_confirmation(r_id, event_name, sent_at, draft_offer=draft_offer)
-                            bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=False, channel="telegram")
+                            bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=False, channel=_current_external_runtime_channel())
 
 
                 conn.close()
@@ -5308,10 +5348,11 @@ def job_analytics_engine():
         from services.analytics_engine import run_analytics
         stats = run_analytics()
         if stats.get("created", 0) + stats.get("merged", 0) > 0:
-            send_telegram_msg(
+            _send_and_record_assistant(
                 f"🧠 [Analytics]: Detected new routines!\n"
                 f"✅ New: {stats['created']} | 🔗 Merged: {stats['merged']} | "
-                f"📊 Detected: {stats['detected']}"
+                f"📊 Detected: {stats['detected']}",
+                agent="Analytics_Agent",
             )
     except Exception as e:
         print(f"[Analytics Job Error]: {e}")
@@ -5659,7 +5700,10 @@ class AstakosScheduler:
                         job["disabled"] = True
                         log_event(job["name"], "disabled", reason="db_crash", error=str(crash))
                         print(f"\033[91m\U0001f6ab [Scheduler]: {crash}\033[0m")
-                        send_telegram_msg(f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 (DB errors).\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}")
+                        _send_and_record_assistant(
+                            f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 (DB errors).\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}",
+                            agent="Scheduler_Agent",
+                        )
                 except Exception as e:
                     job["fail_count"] += 1
                     job["last_error"] = str(e)
@@ -5670,7 +5714,10 @@ class AstakosScheduler:
                         job["disabled"] = True
                         log_event(job["name"], "disabled", reason="max_failures", error=str(crash))
                         print(f"\033[91m\U0001f6ab [Scheduler]: {crash}\033[0m")
-                        send_telegram_msg(f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 \u03bc\u03b5\u03c4\u03ac \u03b1\u03c0\u03cc {self.MAX_FAILURES} \u03c3\u03c6\u03ac\u03bb\u03bc\u03b1\u03c4\u03b1.\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}")
+                        _send_and_record_assistant(
+                            f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 \u03bc\u03b5\u03c4\u03ac \u03b1\u03c0\u03cc {self.MAX_FAILURES} \u03c3\u03c6\u03ac\u03bb\u03bc\u03b1\u03c4\u03b1.\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}",
+                            agent="Scheduler_Agent",
+                        )
                 job["last_run"]      = time.time()
                 job["last_duration"] = time.time() - t_start
 
@@ -5724,6 +5771,98 @@ class AstakosScheduler:
         return "\n".join(lines)
 
 
+def _initialize_external_background_state() -> None:
+    """Initialize stores and recover scheduler state without starting polling."""
+    _load_override_state()
+    try:
+        from memory.pending_assets import init_pending_assets_table
+        from memory.list_store import init_list_store
+        from memory.reminder_store import init_reminder_store
+
+        init_pending_assets_table()
+        init_list_store()
+        init_reminder_store()
+        ensure_pending_followups_table()
+    except Exception as exc:
+        print(f"[PendingAssets]: Init failed: {exc}")
+
+    from memory.routine_db import load_pending_confirmations
+
+    pending_routine_confirmations.update(load_pending_confirmations())
+    if pending_routine_confirmations:
+        print(
+            f"\033[93m[Recovery]: \u03a6\u03bf\u03c1\u03c4\u03ce\u03b8\u03b7\u03ba\u03b1\u03bd "
+            f"{len(pending_routine_confirmations)} pending confirmations.\033[0m"
+        )
+
+
+def _build_external_scheduler() -> AstakosScheduler:
+    """Register the single shared set of external-channel background jobs."""
+    scheduler = AstakosScheduler()
+    scheduler.register(job_check_reminders, interval_seconds=20, name="reminders", verbose=False)
+    scheduler.register(job_check_routines, interval_seconds=60, name="routines", verbose=False)
+    scheduler.register(job_proactive_scan, interval_seconds=43200, name="proactive", verbose=True)
+    scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics", verbose=True)
+    scheduler.register(job_check_pending_followups, interval_seconds=600, name="pending_followups", verbose=False)
+    scheduler.register(job_morning_fit_briefing, interval_seconds=3600, name="fit_briefing", verbose=True)
+    scheduler.register(job_morning_calendar_briefing, interval_seconds=3600, name="cal_briefing", verbose=True)
+    scheduler.register(job_morning_ai_briefing, interval_seconds=3600, name="ai_briefing", verbose=True)
+    scheduler.register(job_morning_hn_briefing, interval_seconds=3600, name="hn_briefing", verbose=True)
+    scheduler.register(job_goal_followup, interval_seconds=3600, name="goal_followup", verbose=True)
+    return scheduler
+
+
+def start_external_background_runtime(channel: str) -> AstakosScheduler:
+    """Start shared queues and scheduled jobs once, independently of polling."""
+    global astakos_scheduler, _external_background_runtime_channel
+
+    normalized_channel = str(channel or "").strip().lower()
+    if normalized_channel not in {"telegram", "matrix"}:
+        raise ValueError("External background runtime requires telegram or matrix")
+
+    with _external_background_runtime_lock:
+        if _external_background_runtime_channel is not None:
+            if _external_background_runtime_channel != normalized_channel:
+                raise RuntimeError(
+                    "External background runtime already started for "
+                    f"{_external_background_runtime_channel}"
+                )
+            if astakos_scheduler is None:
+                raise RuntimeError("External background runtime has invalid state")
+            return astakos_scheduler
+
+        shutdown_event.clear()
+        _initialize_external_background_state()
+        scheduler = _build_external_scheduler()
+        startup_stale_cleanup(channel=normalized_channel)
+        _maybe_trigger_auto_session_summary(channel=normalized_channel)
+        astakos_scheduler = scheduler
+        _external_background_runtime_channel = normalized_channel
+
+        threading.Thread(target=fast_queue_worker, daemon=True).start()
+        threading.Thread(target=slow_queue_worker, daemon=True).start()
+        threading.Thread(target=scheduler.run, daemon=True).start()
+
+        def _delayed_missed_check() -> None:
+            import time as _t
+
+            _t.sleep(10)
+            startup_check_missed_routines()
+
+        threading.Thread(target=_delayed_missed_check, daemon=True).start()
+        return scheduler
+
+
+def _reset_external_background_runtime_for_tests() -> None:
+    """Reset process-local startup state for deterministic offline tests."""
+    global astakos_scheduler, _external_background_runtime_channel
+
+    with _external_background_runtime_lock:
+        astakos_scheduler = None
+        _external_background_runtime_channel = None
+        shutdown_event.clear()
+
+
 # ────────────────────────────────────────────────────────────────
 # ENTRY POINT
 # ────────────────────────────────────────────────────────────────
@@ -5740,51 +5879,7 @@ if __name__ == "__main__":
     if hasattr(_signal, "SIGBREAK"):
         _signal.signal(_signal.SIGBREAK, _handle_exit)
 
-    threading.Thread(target=fast_queue_worker, daemon=True).start()
-    threading.Thread(target=slow_queue_worker, daemon=True).start()
-
-    _load_override_state()
-    try:
-        from memory.pending_assets import init_pending_assets_table
-        from memory.list_store import init_list_store
-        from memory.reminder_store import init_reminder_store
-        init_pending_assets_table()
-        init_list_store()
-        init_reminder_store()
-        ensure_pending_followups_table()
-    except Exception as e:
-        print(f"[PendingAssets]: Init failed: {e}")
-    from memory.routine_db import load_pending_confirmations
-    pending_routine_confirmations.update(load_pending_confirmations())
-    if pending_routine_confirmations:
-        print(f"\033[93m[Recovery]: \u03a6\u03bf\u03c1\u03c4\u03ce\u03b8\u03b7\u03ba\u03b1\u03bd {len(pending_routine_confirmations)} pending confirmations.\033[0m")
-
-    astakos_scheduler = AstakosScheduler()
-    astakos_scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders",   verbose=False)
-    astakos_scheduler.register(job_check_routines,  interval_seconds=60,    name="routines",    verbose=False)
-    astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive",   verbose=True)
-    astakos_scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics",   verbose=True)
-    astakos_scheduler.register(job_check_pending_followups, interval_seconds=600, name="pending_followups", verbose=False)
-    astakos_scheduler.register(job_morning_fit_briefing,       interval_seconds=3600, name="fit_briefing",      verbose=True)
-    astakos_scheduler.register(job_morning_calendar_briefing,  interval_seconds=3600, name="cal_briefing",      verbose=True)
-    astakos_scheduler.register(job_morning_ai_briefing,        interval_seconds=3600, name="ai_briefing",       verbose=True)
-    astakos_scheduler.register(job_morning_hn_briefing,        interval_seconds=3600, name="hn_briefing",       verbose=True)
-    astakos_scheduler.register(job_goal_followup,              interval_seconds=3600, name="goal_followup",     verbose=True)
-    # astakos_scheduler.register(job_daily_backup,               interval_seconds=3600, name="daily_backup",      verbose=True) # User runs this from Windows Scheduler
-    threading.Thread(target=astakos_scheduler.run, daemon=True).start()
-
-    # Startup check for lost routines (10s delay for full initialization)
-    def _delayed_missed_check():
-        import time as _t
-        _t.sleep(10)
-        startup_check_missed_routines()
-    threading.Thread(target=_delayed_missed_check, daemon=True).start()
-
-    # Stale working memory cleanup (hard restart recovery)
-    startup_stale_cleanup(channel="telegram")
-    
-    # Resume pending summaries that might have crashed mid-flight or piled up
-    _maybe_trigger_auto_session_summary(channel="telegram")
+    start_external_background_runtime("telegram")
 
 
     print("\u2501" * 50)

@@ -51,9 +51,13 @@ def test_nightly_routine_analytics_notification_is_unchanged(monkeypatch: Any) -
         def now(cls) -> SimpleNamespace:
             return SimpleNamespace(hour=3)
 
-    notifications: list[str] = []
+    notifications: list[tuple[str, str | None]] = []
     monkeypatch.setattr(bot, "datetime", ThreeAm)
-    monkeypatch.setattr(bot, "send_telegram_msg", lambda message: notifications.append(message))
+    monkeypatch.setattr(
+        bot,
+        "_send_and_record_assistant",
+        lambda message, agent=None: notifications.append((message, agent)),
+    )
     monkeypatch.setitem(
         sys.modules,
         "services.analytics_engine",
@@ -62,6 +66,7 @@ def test_nightly_routine_analytics_notification_is_unchanged(monkeypatch: Any) -
     bot.job_analytics_engine()
 
     assert len(notifications) == 1
+    assert notifications[0][1] == "Analytics_Agent"
 
 
 def test_nightly_routine_analytics_failure_is_contained(monkeypatch: Any) -> None:

@@ -1,6 +1,7 @@
 import os
 import threading
 import time
+from urllib.parse import urlparse
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -43,6 +44,7 @@ _SENSITIVE_ENV_KEYS = frozenset({
     "GOOGLE_API_KEY",
     "TELEGRAM_TOKEN",
     "TELEGRAM_CHAT_ID",
+    "MATRIX_ACCESS_TOKEN",
     "GOOGLE_APPLICATION_CREDENTIALS",
     "SPOTIFY_CLIENT_SECRET",
     "SPOTIFY_CLIENT_ID",
@@ -58,6 +60,15 @@ _PROVIDER_SECRET_KEYS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "vertex": "GOOGLE_APPLICATION_CREDENTIALS",
+}
+
+_MATRIX_ENV_FIELDS = {
+    "matrix_homeserver_url": "MATRIX_HOMESERVER_URL",
+    "matrix_service_user_id": "MATRIX_SERVICE_USER_ID",
+    "matrix_access_token": "MATRIX_ACCESS_TOKEN",
+    "matrix_allowed_user_id": "MATRIX_ALLOWED_USER_ID",
+    "matrix_room_id": "MATRIX_ROOM_ID",
+    "matrix_store_path": "MATRIX_STORE_PATH",
 }
 
 
@@ -85,6 +96,86 @@ def _resolve_provider_secrets(basic: dict) -> dict[str, str]:
         _PROVIDER_SECRET_KEYS[provider]: next(iter(values))
         for provider, values in provider_values.items()
     }
+
+
+def _parse_env_text(raw_env: str) -> dict[str, str]:
+    """Parse simple KEY=VALUE lines from Setup Wizard environment text."""
+    parsed: dict[str, str] = {}
+    for line in raw_env.splitlines():
+        if "=" in line and not line.strip().startswith("#"):
+            key, value = line.split("=", 1)
+            parsed[key.strip()] = value.strip()
+    return parsed
+
+
+def _validate_external_channel_setup(
+    basic: dict,
+    submitted_env: dict[str, str],
+    existing_env: dict[str, str],
+) -> str:
+    """Validate the selected external transport before writing configuration."""
+    from core.messaging_channel import (
+        ExternalChannelConfigurationError,
+        resolve_external_channel,
+    )
+
+    raw_channel = (
+        basic.get("external_channel")
+        or submitted_env.get("ASTAKOS_EXTERNAL_CHANNEL")
+        or existing_env.get("ASTAKOS_EXTERNAL_CHANNEL")
+    )
+    try:
+        channel = resolve_external_channel(raw_channel)
+    except ExternalChannelConfigurationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    if channel != "matrix":
+        return channel
+
+    def _effective(field: str) -> str:
+        env_key = _MATRIX_ENV_FIELDS[field]
+        submitted = str(basic.get(field, "")).strip()
+        if submitted and submitted != "********":
+            return submitted
+        raw_value = submitted_env.get(env_key, "").strip()
+        if raw_value and raw_value != "********":
+            return raw_value
+        return existing_env.get(env_key, "").strip()
+
+    values = {field: _effective(field) for field in _MATRIX_ENV_FIELDS}
+    missing = [field for field, value in values.items() if not value]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail="Matrix setup is incomplete. Fill every required Matrix field.",
+        )
+
+    homeserver = urlparse(values["matrix_homeserver_url"])
+    if homeserver.scheme not in {"http", "https"} or not homeserver.netloc:
+        raise HTTPException(
+            status_code=422,
+            detail="Matrix homeserver must be a valid HTTP or HTTPS URL.",
+        )
+
+    for field, label in (
+        ("matrix_service_user_id", "Matrix service user ID"),
+        ("matrix_allowed_user_id", "Matrix allowed user ID"),
+    ):
+        value = values[field]
+        if not value.startswith("@") or ":" not in value[1:]:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{label} must use the full @user:server format.",
+            )
+
+    room_id = values["matrix_room_id"]
+    if not room_id.startswith("!") or ":" not in room_id[1:]:
+        raise HTTPException(
+            status_code=422,
+            detail="Matrix room ID must use the full !room:server format.",
+        )
+
+    return channel
 
 def sanitize_env_text(raw_env: str) -> str:
     """Masks secret values in .env so raw keys/tokens are never exposed over the API/UI."""
@@ -264,11 +355,18 @@ OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 GEMINI_API_KEY=
 
-# --- Core Settings (Google Cloud & Telegram) ---
+# --- Core Settings (Google Cloud & External Messaging) ---
 PROJECT_ID=your-gcp-project-id
 LOCATION=us-central1
+ASTAKOS_EXTERNAL_CHANNEL=telegram
 TELEGRAM_TOKEN=
 TELEGRAM_CHAT_ID=
+MATRIX_HOMESERVER_URL=
+MATRIX_SERVICE_USER_ID=
+MATRIX_ACCESS_TOKEN=
+MATRIX_ALLOWED_USER_ID=
+MATRIX_ROOM_ID=
+MATRIX_STORE_PATH=matrix_store
 """
 
         prompts_data = {}
@@ -324,10 +422,14 @@ async def save_setup(payload: SetupPayload):
         existing_env_raw = get_file_content(ENV_FILE)
         existing_env_map: dict[str, str] = {}
         if existing_env_raw:
-            for line in existing_env_raw.splitlines():
-                if "=" in line and not line.strip().startswith("#"):
-                    k, v = line.split("=", 1)
-                    existing_env_map[k.strip()] = v.strip()
+            existing_env_map = _parse_env_text(existing_env_raw)
+
+        submitted_env_map = _parse_env_text(new_env)
+        external_channel = _validate_external_channel_setup(
+            basic,
+            submitted_env_map,
+            existing_env_map,
+        )
 
         env_map: dict[str, str] = {}
         if (
@@ -335,13 +437,11 @@ async def save_setup(payload: SetupPayload):
             or basic.get("embeddings_provider")
             or basic.get("voice_provider")
             or basic.get("telegram_token")
+            or basic.get("external_channel")
+            or basic.get("matrix_access_token")
             or new_env
         ):
-            env_lines = new_env.split('\n') if new_env else []
-            for line in env_lines:
-                if '=' in line and not line.strip().startswith('#'):
-                    k, v = line.split('=', 1)
-                    env_map[k.strip()] = v.strip()
+            env_map.update(submitted_env_map)
 
             # Merge unmentioned existing env keys
             for k, v in existing_env_map.items():
@@ -389,6 +489,15 @@ async def save_setup(payload: SetupPayload):
                 _set_secret("TELEGRAM_TOKEN", basic["telegram_token"])
             if basic.get("telegram_chat_id"):
                 _set_secret("TELEGRAM_CHAT_ID", basic["telegram_chat_id"])
+
+            env_map["ASTAKOS_EXTERNAL_CHANNEL"] = external_channel
+            _set_secret("MATRIX_ACCESS_TOKEN", basic.get("matrix_access_token"))
+            for field, env_key in _MATRIX_ENV_FIELDS.items():
+                if field == "matrix_access_token":
+                    continue
+                value = str(basic.get(field, "")).strip()
+                if value:
+                    env_map[env_key] = value
 
             # If Vertex is selected anywhere, resolve the project ID from its credentials.
             if (

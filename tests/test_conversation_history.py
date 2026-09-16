@@ -287,6 +287,35 @@ def test_load_recent_context_deduplicates_overlap(tmp_path):
     assert [m["content"] for m in messages] == ["web only once"]
 
 
+def test_load_recent_context_can_be_strictly_channel_scoped(tmp_path):
+    from memory.conversation_history import append_message, load_recent_context
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(role="user", content="web secret", channel="web", db_path=db_path)
+    append_message(
+        role="user",
+        content="telegram secret",
+        channel="telegram",
+        db_path=db_path,
+    )
+    append_message(
+        role="user",
+        content="matrix context",
+        channel="matrix",
+        db_path=db_path,
+    )
+
+    messages = load_recent_context(
+        channel="matrix",
+        channel_limit=10,
+        total_limit=10,
+        same_channel_only=True,
+        db_path=db_path,
+    )
+
+    assert [message["content"] for message in messages] == ["matrix context"]
+
+
 def test_purge_history_by_substrings_removes_matching_messages_and_exchanges(tmp_path):
     from memory.conversation_history import (
         append_exchange,
