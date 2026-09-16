@@ -19,25 +19,26 @@ const fs = require('fs');
 
 const payload = JSON.parse(fs.readFileSync(process.env.PAYLOAD_PATH, 'utf8'));
 const hasJq = process.env.HAS_JQ === '1';
+const hookOutput = payload.hookSpecificOutput;
+
+if (!hookOutput || hookOutput.hookEventName !== 'SessionStart') {
+  throw new Error('payload is missing the standard SessionStart envelope');
+}
+
+if (typeof hookOutput.additionalContext !== 'string') {
+  throw new Error('payload is missing additionalContext');
+}
 
 if (hasJq) {
-  if (payload.priority !== 'IMPORTANT') {
-    throw new Error(`expected IMPORTANT priority, got ${payload.priority}`);
-  }
-
-  if (!payload.message.includes('agent-skills loaded.')) {
+  if (!hookOutput.additionalContext.includes('agent-skills loaded.')) {
     throw new Error('message is missing startup preface');
   }
 
-  if (!payload.message.includes('# Using Agent Skills')) {
+  if (!hookOutput.additionalContext.includes('# Using Agent Skills')) {
     throw new Error('message is missing using-agent-skills content');
   }
 } else {
-  if (payload.priority !== 'INFO') {
-    throw new Error(`expected INFO priority when jq is missing, got ${payload.priority}`);
-  }
-
-  if (!payload.message.includes('jq is required')) {
+  if (!hookOutput.additionalContext.includes('jq is required')) {
     throw new Error('message is missing jq fallback guidance');
   }
 }
