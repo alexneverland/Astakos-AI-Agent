@@ -14,6 +14,6 @@ Astakos-owned additions are retained and validated against the current schema:
 Astakos-specific workflow policy belongs in the repository-root `AGENTS.md`,
 not in the upstream repository's own `AGENTS.md`.
 
-Run `scripts/validate-versions.js` in a standalone checkout of the upstream
-tag. Inside this vendored directory Git resolves the parent Astakos release
-tag, so that validator cannot determine the Agent Skills version correctly.
+`scripts/validate-versions.js` reads the release above when run from this
+vendored layout. In a standalone upstream checkout it continues to validate
+against the latest Git release tag.

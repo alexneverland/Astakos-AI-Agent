@@ -16,6 +16,9 @@ token.json
 !astakos_nlp.json
 !astakos_context_schema.json
 !locales/*.json
+# Versioned source data in the vendored Agent Skills snapshot
+!vendor/agent-skills/*.json
+!vendor/agent-skills/**/*.json
 # Databases and vector stores
 *.db
 *.sqlite
