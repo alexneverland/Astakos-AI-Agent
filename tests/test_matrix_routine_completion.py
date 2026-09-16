@@ -79,3 +79,40 @@ def test_matrix_non_confirmation_passes_through_without_mutation(monkeypatch) ->
     )
 
     assert process_pending_routine_confirmation("Τι καιρό κάνει;", channel="matrix") is None
+
+
+def test_matrix_draft_offer_returns_deferred_authorization(monkeypatch) -> None:
+    """A selected draft offer is authorized but not consumed before tool success."""
+    from datetime import datetime
+
+    import memory.routine_db as routine_db
+    import services.routine_completion_selector as completion_selector
+    from services.matrix_routine_completion import (
+        MatrixRoutineDraftOffer,
+        process_pending_routine_confirmation,
+    )
+
+    sent_at = datetime(2026, 9, 17, 8, 0)
+    monkeypatch.setattr(
+        routine_db,
+        "load_pending_confirmations",
+        lambda: {5: {"event": "Message Sofia", "draft_offer": True, "sent_at": sent_at}},
+    )
+    monkeypatch.setattr(
+        completion_selector,
+        "select_routine",
+        lambda user_text, candidates, pool: RoutineSelection("draft", 5),
+    )
+    acknowledged: list[tuple[int, datetime]] = []
+    monkeypatch.setattr(
+        routine_db,
+        "acknowledge_pending_draft_offer",
+        lambda routine_id, offered_at: acknowledged.append((routine_id, offered_at)) or True,
+    )
+
+    result = process_pending_routine_confirmation("Ετοίμασέ το", channel="matrix")
+
+    assert isinstance(result, MatrixRoutineDraftOffer)
+    assert result.routine_id == 5
+    assert result.sent_at == sent_at
+    assert acknowledged == []

@@ -619,3 +619,19 @@ def test_conversation_history_deterministic_ordering(tmp_path):
     )
     last_user = load_last_user_activity(channel="telegram", db_path=db_path)
     assert last_user["content"] == "user turn 2"
+
+
+def test_web_and_telegram_context_excludes_matrix_history(tmp_path) -> None:
+    """Private Matrix turns never enter the legacy Web/Telegram mixed window."""
+    from memory.conversation_history import append_message, load_recent_context
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(role="user", content="web context", channel="web", db_path=db_path)
+    append_message(role="user", content="private matrix context", channel="matrix", db_path=db_path)
+    append_message(role="user", content="telegram context", channel="telegram", db_path=db_path)
+
+    web = load_recent_context(channel="web", db_path=db_path)
+    telegram = load_recent_context(channel="telegram", db_path=db_path)
+
+    assert {item["content"] for item in web} == {"web context", "telegram context"}
+    assert {item["content"] for item in telegram} == {"web context", "telegram context"}

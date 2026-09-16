@@ -2,14 +2,27 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
+
 from langchain_core.messages import SystemMessage
+
+
+@dataclass(frozen=True)
+class MatrixRoutineDraftOffer:
+    """Deferred trusted authorization for one persisted routine draft offer."""
+
+    routine_id: int
+    sent_at: datetime
+    event_name: str
+    context: SystemMessage
 
 
 def process_pending_routine_confirmation(
     user_text: str,
     *,
     channel: str = "matrix",
-) -> SystemMessage | None:
+) -> SystemMessage | MatrixRoutineDraftOffer | None:
     """Apply one validated pending-routine decision and return trusted graph context."""
     if channel != "matrix":
         raise ValueError("Matrix routine completion requires channel='matrix'")
@@ -42,8 +55,24 @@ def process_pending_routine_confirmation(
         semantic_selector=select_routine,
         draft_offer_ids=draft_offer_ids,
     )
-    if decision.routine_id is None or decision.action in {"pass_through", "draft"}:
+    if decision.routine_id is None or decision.action == "pass_through":
         return None
+
+    if decision.action == "draft":
+        from services.routine_completion_context import get_pending_messenger_draft_offer
+
+        accepted = get_pending_messenger_draft_offer(pending, decision.routine_id)
+        pending_data = pending.get(decision.routine_id, {})
+        sent_at = pending_data.get("sent_at") if isinstance(pending_data, dict) else None
+        if accepted is None or not isinstance(sent_at, datetime):
+            return None
+        event_name = str(pending_data.get("event") or "").strip()
+        return MatrixRoutineDraftOffer(
+            routine_id=decision.routine_id,
+            sent_at=sent_at,
+            event_name=event_name,
+            context=accepted.context,
+        )
 
     completion_context = build_routine_completion_context()
     routine_id = decision.routine_id

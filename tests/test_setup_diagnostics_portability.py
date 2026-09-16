@@ -1471,3 +1471,35 @@ def test_format_boot_diagnostics_text_non_sensitive(monkeypatch: pytest.MonkeyPa
     assert "Semantic Memory:" in text
     assert "Google Workspace:" in text
     assert "sk-secret-key-to-not-leak" not in text
+
+
+def test_setup_wizard_rejects_remote_plaintext_matrix_homeserver(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Bearer credentials are never saved for a remote plaintext homeserver."""
+    import api.setup_wizard as wizard
+
+    _configure_isolated_wizard(monkeypatch, tmp_path)
+    original = "LLM_PROVIDER=openai\n"
+    (tmp_path / ".env").write_text(original, encoding="utf-8")
+    payload = wizard.SetupPayload(
+        basic={
+            "external_channel": "matrix",
+            "matrix_homeserver_url": "http://matrix.neverland.test",
+            "matrix_service_user_id": "@astakos:neverland.test",
+            "matrix_access_token": "syt_matrix-secret-token",
+            "matrix_allowed_user_id": "@lazaros:neverland.test",
+            "matrix_room_id": "!private-room:neverland.test",
+            "matrix_store_path": "matrix_store",
+        },
+        advanced={},
+        prompts={},
+        routines="",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(wizard.save_setup(payload))
+
+    assert exc_info.value.status_code == 422
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == original

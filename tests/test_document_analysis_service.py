@@ -58,3 +58,34 @@ def test_empty_model_reply_uses_explicit_fallback() -> None:
     )
 
     assert result == "No analysis available."
+
+
+def test_default_matrix_document_context_is_same_channel_only(monkeypatch) -> None:
+    """Matrix document analysis requests the isolated asset-context window."""
+    import memory.conversation_history as history
+
+    captured: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        history,
+        "build_asset_context_text",
+        lambda channel, *, same_channel_only=False: captured.append(
+            (channel, same_channel_only)
+        ) or "matrix-only context",
+    )
+
+    summarize_document_text(
+        document_text="content",
+        file_name="notes.txt",
+        caption="",
+        channel="matrix",
+        language="Greek",
+        user_name="User",
+        llm_model=object(),
+        llm_invoke=lambda model, messages: FakeResponse(),
+        prompt_loader=lambda name: "{conversation_context} {caption} {file_name} {doc_text}",
+        missing_context="none",
+        missing_caption="none",
+        empty_reply="empty",
+    )
+
+    assert captured == [("matrix", True)]

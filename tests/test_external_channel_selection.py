@@ -73,20 +73,22 @@ def test_explicit_value_can_be_validated_without_mutating_environment(
 def test_boot_matrix_selection_never_spawns_telegram(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Preserved Telegram credentials stay inactive when Matrix is selected."""
+    """Matrix starts its own entrypoint and never the preserved Telegram one."""
     import boot
+    import sys
 
     spawned: list[list[str]] = []
+    process = object()
     monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "matrix")
     monkeypatch.setenv("TELEGRAM_TOKEN", "preserved-inactive-token")
     monkeypatch.setattr(
         boot.subprocess,
         "Popen",
-        lambda command: spawned.append(command) or object(),
+        lambda command: spawned.append(command) or process,
     )
 
-    assert boot.start_external_transport() is None
-    assert spawned == []
+    assert boot.start_external_transport() is process
+    assert spawned == [[sys.executable, "clients/matrix_bot.py"]]
 
 
 def test_matrix_runtime_directories_are_gitignored() -> None:

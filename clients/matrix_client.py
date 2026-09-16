@@ -176,6 +176,7 @@ class MatrixTextTransport:
             room_id=room_id,
             message_type="m.room.message",
             content={"msgtype": "m.text", "body": reply_text},
+            ignore_unverified_devices=True,
         )
         if self._send_error_types and isinstance(response, self._send_error_types):
             return False

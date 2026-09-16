@@ -85,6 +85,7 @@ async def test_voice_reply_is_synthesized_uploaded_encrypted_and_sent() -> None:
                 },
                 "info": {"mimetype": "audio/mpeg", "size": len(b"mp3-bytes")},
             },
+            "ignore_unverified_devices": True,
         }
     ]
 

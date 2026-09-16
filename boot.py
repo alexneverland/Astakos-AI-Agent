@@ -28,7 +28,7 @@ def start_external_transport() -> subprocess.Popen | None:
     active_channel = resolve_external_channel()
     if active_channel == "matrix":
         print("\033[92m[Boot]: Active external channel is Matrix.\033[0m")
-        return None
+        return subprocess.Popen([sys.executable, "clients/matrix_bot.py"])
 
     if os.getenv("TELEGRAM_TOKEN"):
         return subprocess.Popen([sys.executable, "clients/telegram_bot.py"])
@@ -60,7 +60,7 @@ if __name__ == "__main__":
     if is_configured(run_mode=run_mode):
         print("\033[92m[Boot]: Starting Astakos Systems...\033[0m")
         if "--server" in sys.argv:
-            # Start API always; start Telegram only when configured.
+            # Start API always and exactly one selected external transport.
             api_proc = subprocess.Popen(
                 [sys.executable, "-m", "uvicorn", "api.server:server", "--host", "0.0.0.0", "--port", "8000"]
             )

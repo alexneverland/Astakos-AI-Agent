@@ -449,6 +449,7 @@ def load_messages(
     *,
     limit: int = 50,
     channel: str | None = None,
+    exclude_channels: tuple[str, ...] = (),
     session_id: str | None = None,
     db_path: str = CONVERSATION_DB_FILE,
 ) -> list[dict[str, Any]]:
@@ -458,6 +459,13 @@ def load_messages(
     if channel:
         clauses.append("channel = ?")
         params.append(channel)
+    normalized_exclusions = tuple(
+        str(item or "").strip() for item in exclude_channels if str(item or "").strip()
+    )
+    if normalized_exclusions:
+        placeholders = ",".join("?" for _ in normalized_exclusions)
+        clauses.append(f"channel NOT IN ({placeholders})")
+        params.extend(normalized_exclusions)
     if session_id:
         clauses.append("session_id = ?")
         params.append(session_id)
@@ -760,7 +768,12 @@ def load_recent_context(
             messages = messages[-total_limit:]
         return messages
 
-    mixed = load_messages(limit=global_limit, db_path=db_path)
+    excluded_channels = ("matrix",) if channel in {"web", "telegram"} else ()
+    mixed = load_messages(
+        limit=global_limit,
+        exclude_channels=excluded_channels,
+        db_path=db_path,
+    )
     current_channel = load_messages(limit=channel_limit, channel=channel, db_path=db_path)
 
     by_id = {message["id"]: message for message in mixed}
@@ -918,12 +931,18 @@ def _row_to_exchange(row: sqlite3.Row) -> dict[str, Any]:
         "summarized_at": row["summarized_at"],
     }
 
-def build_asset_context_text(channel: str, limit: int = 8) -> str:
+def build_asset_context_text(
+    channel: str,
+    limit: int = 8,
+    *,
+    same_channel_only: bool = False,
+) -> str:
     entries = load_recent_context(
         channel=channel,
         global_limit=limit,
         channel_limit=limit,
         total_limit=limit,
+        same_channel_only=same_channel_only,
     )
 
     lines = []

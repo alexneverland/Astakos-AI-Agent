@@ -84,3 +84,36 @@ def test_default_selection_preserves_existing_telegram_approval(
 
     assert result["approval_status"] == "pending"
     assert telegram_calls == [tool_call]
+
+
+def test_matrix_selection_routes_notify_without_telegram(monkeypatch) -> None:
+    """NOTIFY-risk arguments stay on the selected Matrix channel."""
+    monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "matrix")
+    telegram_calls = []
+    monkeypatch.setattr(
+        approval,
+        "_notify_telegram_notify",
+        lambda tool_call: telegram_calls.append(tool_call),
+    )
+    matrix = FakeMatrixDelivery()
+    external_delivery_router.register("matrix", matrix)
+    tool_call = {
+        "name": "drive_manager",
+        "args": {"action": "upload", "path": "private.txt"},
+        "id": "call-notify",
+        "type": "tool_call",
+    }
+    message = AIMessage(content="", tool_calls=[tool_call])
+
+    try:
+        result = approval.approval_check_node(
+            {"messages": [message], "channel": "matrix"}
+        )
+    finally:
+        external_delivery_router.unregister("matrix")
+
+    assert result["approval_status"] == "ok"
+    assert telegram_calls == []
+    assert len(matrix.texts) == 1
+    assert "drive_manager" in matrix.texts[0][0]
+    assert "private.txt" in matrix.texts[0][0]

@@ -156,6 +156,12 @@ def _validate_external_channel_setup(
             status_code=422,
             detail="Matrix homeserver must be a valid HTTP or HTTPS URL.",
         )
+    loopback_hosts = {"localhost", "127.0.0.1", "::1"}
+    if homeserver.scheme != "https" and homeserver.hostname not in loopback_hosts:
+        raise HTTPException(
+            status_code=422,
+            detail="Remote Matrix homeserver URLs must use HTTPS.",
+        )
 
     for field, label in (
         ("matrix_service_user_id", "Matrix service user ID"),

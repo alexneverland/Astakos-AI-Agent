@@ -680,7 +680,7 @@ def approval_check_node(state):
             for tc in tool_calls:
                 if _effective_risk(tc) == "NOTIFY":
                     print(f"\033[96m[Approval]: 📣 NOTIFY tool: {tc['name']}\033[0m")
-                    _notify_telegram_notify(tc)
+                    _notify_selected_notify(tc)
 
         # WARNING: executes + logs only in the console, without Telegram
         elif "WARNING" in risk_levels:
@@ -773,6 +773,27 @@ def _notify_telegram_notify(tool_call: dict):
         send_telegram_msg(text)
     except Exception as e:
         print(f"\033[93m[Approval]: Telegram notify error: {e}\033[0m")
+
+
+def _notify_selected_notify(tool_call: dict) -> None:
+    """Deliver a non-blocking tool notice through only the selected channel."""
+    from core.messaging_channel import resolve_external_channel
+
+    if resolve_external_channel() == "telegram":
+        _notify_telegram_notify(tool_call)
+        return
+
+    from services.external_delivery import external_delivery_router
+
+    tool_name = str(tool_call["name"])
+    args_preview = _args_preview(tool_call.get("args", {}))
+    try:
+        external_delivery_router.send_text(f"📣 {tool_name}\n{args_preview}")
+    except Exception as exc:
+        print(
+            "\033[93m[Approval]: Selected external notify delivery failed "
+            f"({type(exc).__name__})\033[0m"
+        )
 
 
 def _notify_selected_approval(tool_call: dict) -> None:

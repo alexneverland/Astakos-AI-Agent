@@ -21,7 +21,7 @@ UserPersistedHook = Callable[[dict[str, Any]], None]
 ExchangeCompletedHook = Callable[[str, str, str, str], None]
 ToolChannelSelector = Callable[[str], None]
 CommandHandler = Callable[[str], str | MatrixReply | None]
-RoutineConfirmationHandler = Callable[[str], SystemMessage | None]
+RoutineConfirmationHandler = Callable[[str], Any | None]
 
 
 def _select_default_tool_channel(channel: str) -> None:
@@ -188,9 +188,17 @@ class MatrixTurnService:
                 return normalized_reply
 
         routine_completion_context = None
+        routine_draft_offer = None
         if self._routine_confirmation_handler is not None:
             try:
-                routine_completion_context = self._routine_confirmation_handler(clean_user_text)
+                routine_result = self._routine_confirmation_handler(clean_user_text)
+                from services.matrix_routine_completion import MatrixRoutineDraftOffer
+
+                if isinstance(routine_result, MatrixRoutineDraftOffer):
+                    routine_draft_offer = routine_result
+                    routine_completion_context = routine_result.context
+                else:
+                    routine_completion_context = routine_result
             except Exception as exc:
                 print(
                     "[MatrixTurn]: routine confirmation failed: "
@@ -232,14 +240,30 @@ class MatrixTurnService:
         graph_messages = context + [current]
         if routine_completion_context is not None:
             graph_messages.append(routine_completion_context)
+        graph_state: dict[str, Any] = {
+            "messages": graph_messages,
+            "channel": "matrix",
+        }
+        if routine_draft_offer is not None:
+            graph_state["routine_draft_offer_authorized"] = True
+        tool_results: list[str] = []
         for event in self._graph.stream(
-            {"messages": graph_messages, "channel": "matrix"},
+            graph_state,
             {"recursion_limit": 100},
         ):
             for node, data in event.items():
-                if data is None or node in {"supervisor", "tools"}:
+                if data is None:
                     continue
                 messages = data.get("messages", [])
+                if node == "tools":
+                    tool_results.extend(
+                        clean_message(getattr(message, "content", "")).strip()
+                        for message in messages
+                        if getattr(message, "type", "") == "tool"
+                    )
+                    continue
+                if node == "supervisor":
+                    continue
                 if not messages:
                     continue
                 last_message = messages[-1]
@@ -252,6 +276,28 @@ class MatrixTurnService:
 
         if not final_reply:
             raise RuntimeError("Matrix graph produced no final reply")
+
+        if routine_draft_offer is not None:
+            from core.utils import looks_like_terminal_messenger_draft_result
+            from memory.routine_db import acknowledge_pending_draft_offer
+            from memory.event_log import log_event
+
+            if any(
+                looks_like_terminal_messenger_draft_result(result)
+                for result in tool_results
+            ) and acknowledge_pending_draft_offer(
+                routine_draft_offer.routine_id,
+                routine_draft_offer.sent_at,
+            ):
+                log_event(
+                    "routines",
+                    "routine_acknowledged",
+                    routine_id=routine_draft_offer.routine_id,
+                    event=routine_draft_offer.event_name,
+                    debug_type="manual_control",
+                    debug_source="user_message",
+                    debug_effect="routine_changed",
+                )
 
         from services.created_file import extract_created_files
 

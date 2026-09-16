@@ -24,7 +24,7 @@ def summarize_document_text(
     empty_reply: str,
     llm_model: Any | None = None,
     llm_invoke: Callable[..., Any] | None = None,
-    context_loader: Callable[[str], str] | None = None,
+    context_loader: Callable[..., str] | None = None,
     prompt_loader: Callable[[str], str] | None = None,
 ) -> str:
     """Summarize bounded document text while preserving external provenance."""
@@ -33,7 +33,8 @@ def summarize_document_text(
 
         llm_model = llm_model or llm
         llm_invoke = llm_invoke or safe_llm_invoke
-    if context_loader is None:
+    uses_default_context_loader = context_loader is None
+    if uses_default_context_loader:
         from memory.conversation_history import build_asset_context_text
 
         context_loader = build_asset_context_text
@@ -46,7 +47,10 @@ def summarize_document_text(
         USER_PROVIDED_ASSET_SOURCE,
         str(document_text or ""),
     )
-    conversation_context = context_loader(channel)
+    if channel == "matrix" and uses_default_context_loader:
+        conversation_context = context_loader(channel, same_channel_only=True)
+    else:
+        conversation_context = context_loader(channel)
     prompt = prompt_loader("telegram_bot_document_analysis.md").format(
         language=language,
         user_name=user_name,

@@ -220,6 +220,69 @@ async def test_matrix_routine_confirmation_is_resolved_before_graph(tmp_path) ->
 
 
 @pytest.mark.asyncio
+async def test_matrix_draft_offer_is_consumed_only_after_draft_tool_success(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Matrix carries trusted draft authorization and consumes it after tool success."""
+    from datetime import datetime
+
+    from langchain_core.messages import ToolMessage
+    import memory.routine_db as routine_db
+    from services.matrix_routine_completion import MatrixRoutineDraftOffer
+
+    class DraftGraph(FakeGraph):
+        def stream(self, state: dict[str, Any], config: dict[str, Any]):
+            self.states.append(state)
+            self.configs.append(config)
+            yield {
+                "tools": {
+                    "messages": [
+                        ToolMessage(
+                            content="Draft created successfully",
+                            tool_call_id="draft-call",
+                            name="relay_local_payload",
+                        )
+                    ]
+                }
+            }
+            yield {"Chat_Agent": {"messages": [AIMessage(content=self.reply)]}}
+
+    sent_at = datetime(2026, 9, 17, 8, 0)
+    offer_context = SystemMessage(content="trusted draft offer")
+    handled = MatrixRoutineDraftOffer(
+        routine_id=5,
+        sent_at=sent_at,
+        event_name="Message Sofia",
+        context=offer_context,
+    )
+    acknowledged: list[tuple[int, datetime]] = []
+    import core.utils as core_utils
+    monkeypatch.setattr(
+        core_utils,
+        "looks_like_terminal_messenger_draft_result",
+        lambda text: text == "Draft created successfully",
+    )
+    monkeypatch.setattr(
+        routine_db,
+        "acknowledge_pending_draft_offer",
+        lambda routine_id, offered_at: acknowledged.append((routine_id, offered_at)) or True,
+    )
+    graph = DraftGraph()
+    service = MatrixTurnService(
+        graph=graph,
+        conversation_db_path=str(tmp_path / "conversation.db"),
+        routine_confirmation_handler=lambda text: handled,
+    )
+
+    await service("Ετοίμασέ το", "$event-draft")
+
+    assert graph.states[0]["routine_draft_offer_authorized"] is True
+    assert offer_context in graph.states[0]["messages"]
+    assert acknowledged == [(5, sent_at)]
+
+
+@pytest.mark.asyncio
 async def test_matrix_asset_question_persists_clean_question_with_model_only_context(
     tmp_path,
 ) -> None:
