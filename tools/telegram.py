@@ -255,7 +255,6 @@ async def send_telegram_voice(text: str):
     if _suppress_test_delivery("voice delivery"):
         return
 
-    import re
     from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
     from core.ai_provider import (
         CapabilityNotSupportedError,
@@ -263,7 +262,7 @@ async def send_telegram_voice(text: str):
         RateLimitError,
         VoiceProviderSetupRequired,
     )
-    from core.text_to_speech import synthesize_speech
+    from services.voice_output import clean_voice_reply, synthesize_voice_reply
     
     token = TELEGRAM_TOKEN
     chat_id = TELEGRAM_CHAT_ID
@@ -272,12 +271,7 @@ async def send_telegram_voice(text: str):
         return
 
     try:
-        # Text cleaning Transcribed as: Text cleaning_
-        clean_text = text
-        clean_text = re.sub(r'```.*?```', '', clean_text, flags=re.DOTALL)
-        clean_text = re.sub(r'\[.*?\]', '', clean_text)
-        clean_text = re.sub(r'[*_#`~]', '', clean_text)
-        clean_text = " ".join(clean_text.split())
+        clean_text = clean_voice_reply(text)
         
         if not clean_text.strip():
             clean_text = "Boss, I sent you something technical in the chat, check it there."
@@ -287,7 +281,11 @@ async def send_telegram_voice(text: str):
         from core.i18n import LANG
         import asyncio
 
-        audio_bytes = await asyncio.to_thread(synthesize_speech, clean_text, LANG)
+        audio_bytes = await asyncio.to_thread(
+            synthesize_voice_reply,
+            clean_text,
+            locale=LANG,
+        )
         
         if not audio_bytes:
             raise RuntimeError("The configured voice provider produced no audio.")

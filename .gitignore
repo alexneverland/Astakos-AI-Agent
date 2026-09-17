@@ -39,6 +39,8 @@ run_telegram.lock
 # User uploads, generated output, and local browser profiles
 telegram_photos/
 telegram_uploads/
+matrix_store/
+matrix_media/
 outputs/
 watch_folder/
 astakos_skills/messenger_profile/

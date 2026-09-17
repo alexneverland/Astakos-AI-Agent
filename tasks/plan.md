@@ -143,3 +143,110 @@ job listings, while preserving the separate authenticated post-publishing flow.
 ## Open Questions
 
 - None for this public-discovery slice. Official Talent API access remains deferred.
+
+---
+
+# Implementation Plan: Private Matrix Server, Phase 1
+
+## Objective
+
+Deploy an isolated Synapse/PostgreSQL homeserver on Neverland for private
+Element X access over Tailscale. Keep all Astakos integration out of this
+phase.
+
+## Build Order
+
+1. Enroll Neverland in Tailscale and confirm its permanent MagicDNS identity.
+2. Generate Synapse configuration only after the immutable `server_name` is
+   approved.
+3. Validate and start the isolated Compose project with no published database
+   port and a loopback-only Synapse listener.
+4. Add private HTTPS through Tailscale, then create accounts and smoke-test
+   Element X.
+5. Document the backup boundary for signing keys, configuration, and database
+   data.
+
+## Risks and Mitigations
+
+- Wrong permanent Matrix identity: do not generate Synapse config before the
+  Tailscale DNS name is confirmed.
+- Accidental exposure: keep Synapse on loopback and PostgreSQL only on the
+  internal Compose network; use Tailscale for remote access.
+- Secret leakage: store runtime secrets only under `C:\Neverland-Matrix` and
+  never print or commit them.
+- Astakos regression: use a separate directory, Compose project, containers,
+  network, and volumes.
+
+## Verification Checkpoints
+
+- After enrollment: Tailscale reports `Running` and a stable MagicDNS name.
+- Before startup: Compose renders successfully and exposes no PostgreSQL port.
+- After startup: both services are healthy and local Synapse health responds.
+- After HTTPS: the homeserver is reachable only from the tailnet.
+
+---
+
+# Implementation Plan: Matrix Channel Selection
+
+Module id: `channel-selection`
+
+## Overview
+
+Implement the approved `ASTAKOS_EXTERNAL_CHANNEL` contract as a pure resolver.
+This is an additive foundation for later Matrix startup wiring; it does not
+change the running Web or Telegram processes.
+
+## Architecture decisions
+
+- Put the contract in `core/messaging_channel.py`, not `config.py`, so it can be
+  imported and tested without loading provider credentials or transports.
+- Default only a genuinely missing environment variable to `telegram`.
+  Configured blank or unknown values fail closed.
+- Keep this slice side-effect free. `boot.py` integration waits for the
+  `matrix-text` module to provide a real Matrix entry point.
+
+## Dependency order
+
+1. Add failing offline tests for the approved configuration contract.
+2. Add the minimal typed resolver that makes those tests pass.
+3. Run the focused suite, nearby startup regressions, and diff validation.
+
+## Risks and mitigations
+
+- Backward-compatibility regression: prove the missing-variable default remains
+  `telegram`.
+- Accidental runtime change: do not edit `boot.py`, `.env`, `config.py`, or any
+  transport in this slice.
+- Permissive misconfiguration: reject blank and unsupported configured values.
+
+## Verification checkpoint
+
+- Focused channel-selection tests pass offline.
+- Existing setup/Telegram-watchdog startup tests pass unchanged.
+- `git diff --check` is clean and only the approved files belong to this slice.
+
+---
+
+# Implementation Plan: Trusted Matrix Text Channel
+
+The approved implementation plan lives in `tasks/matrix-text-plan.md`.
+
+Build order:
+
+1. Durable Matrix event/reply lifecycle in the existing state-store boundary.
+2. Encrypted allowlisted Matrix transport with an injected turn handler.
+3. Matrix-only application turn pipeline using the existing graph and memory
+   abstractions.
+4. External-channel startup wiring and private encrypted smoke test.
+
+## Final media-output slice
+
+1. Parse generated-file markers into a typed Matrix reply while persisting only
+   the clean assistant text.
+2. Persist text/file delivery progress with the existing Matrix event lifecycle.
+3. Encrypt and send approved `outputs/` files, then verify retry behavior and
+   the complete offline Matrix parity suite.
+
+Runtime credentials and startup wiring remain the final explicit gate. The
+current application-parity evidence and remaining Telegram-only behaviors are
+tracked in `tasks/matrix-parity-audit.md`.

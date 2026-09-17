@@ -167,7 +167,11 @@ def test_golden_path_allowed_document(monkeypatch, tmp_path, mock_telegram_api):
     assert files[0].startswith("tg_")
 
     assert any("report.pdf" in msg for msg in mock_telegram_api.sent_messages)
-    assert any("yes or no" in msg for msg in mock_telegram_api.sent_messages)
+    from memory.pending_assets import looks_like_asset_confirmation_prompt
+    assert any(
+        looks_like_asset_confirmation_prompt(msg)
+        for msg in mock_telegram_api.sent_messages
+    )
     assert len(mock_telegram_api.append_message) == 2
     assert len(mock_telegram_api.fast_tasks) == 3
     # The memory sifter is deliberately a fast task; follow-ups and context

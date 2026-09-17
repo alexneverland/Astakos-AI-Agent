@@ -355,6 +355,8 @@ def _run_handle_message(
     pending_reflections=None,
     pending_command=None,
     active_draft_status=(False, "missing", None),
+    graph_reply="Natural graph reply.",
+    output_calls=None,
 ):
     """
     Call ``bot.handle_message`` with controlled state.
@@ -384,7 +386,7 @@ def _run_handle_message(
     graph_mock = sys.modules["core.graph"].graph
     graph_mock.stream = MagicMock(return_value=[{
         "Chat_Agent": {"messages": [types.SimpleNamespace(
-            content="Natural graph reply.", tool_calls=None, type="ai"
+            content=graph_reply, tool_calls=None, type="ai"
         )]}
     }])
 
@@ -404,6 +406,20 @@ def _run_handle_message(
         patch.object(bot, "_append_to_analytics_log", return_value=1),
         patch.object(bot, "_cache_bot_message", create=True),
         patch.object(bot, "_safe_active_draft_status", return_value=active_draft_status),
+        patch.object(
+            bot,
+            "_send_photo_to_telegram",
+            side_effect=lambda path, chat_id: (
+                output_calls.append(("photo", path)) if output_calls is not None else None
+            ),
+        ),
+        patch(
+            "tools.telegram.send_telegram_document",
+            side_effect=lambda path, **kwargs: (
+                output_calls.append(("file", path)) if output_calls is not None else None
+            ),
+            create=True,
+        ),
     ):
         try:
             bot.handle_message(text, "123456")
@@ -413,6 +429,40 @@ def _run_handle_message(
             # Other AssertionErrors from internal logic are acceptable.
 
     return sent
+
+
+def test_telegram_generated_photo_marker_is_hidden_and_photo_is_sent() -> None:
+    outputs = []
+
+    sent = _run_handle_message(
+        "φτιάξε εικόνα",
+        graph_reply="Έτοιμη.\n[SEND_PHOTO: C:/astakos_v2/outputs/scene.jpg]",
+        output_calls=outputs,
+    )
+
+    assert sent == ["Έτοιμη."]
+    assert outputs == [("photo", "C:/astakos_v2/outputs/scene.jpg")]
+    assert all("SEND_PHOTO" not in message for message in sent)
+
+
+def test_telegram_sends_every_created_file_in_marker_order() -> None:
+    outputs = []
+
+    sent = _run_handle_message(
+        "φτιάξε αρχεία",
+        graph_reply=(
+            "Έτοιμα.\n"
+            "[CREATED_FILE: C:/astakos_v2/outputs/one.pdf]\n"
+            "[CREATED_FILE: C:/astakos_v2/outputs/two.xlsx]"
+        ),
+        output_calls=outputs,
+    )
+
+    assert sent == ["Έτοιμα."]
+    assert outputs == [
+        ("file", "C:/astakos_v2/outputs/one.pdf"),
+        ("file", "C:/astakos_v2/outputs/two.xlsx"),
+    ]
 
 
 # ─────────────────────────────────────────────────────────────

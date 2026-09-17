@@ -27,6 +27,8 @@ from memory.routine_db import (
     COOLDOWN_MAX_HOURS,
     clamp_cooldown_hours,
 )
+from services.external_assistant_delivery import deliver_external_assistant_text
+from services.external_delivery import ExternalDeliveryError
 
 _BASE    = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR  = os.path.join(_BASE, "..", "logs", "events")
@@ -427,13 +429,22 @@ def _apply_action(reflection: dict) -> bool:
 
 # ── Main Entry Point ──────────────────────────────────────────────
 
+def _send_reflection_digest(message: str) -> None:
+    """Send the nightly digest through only the selected external channel."""
+    try:
+        deliver_external_assistant_text(
+            message,
+            agent="Reflection_Agent",
+            silent=True,
+        )
+    except ExternalDeliveryError as exc:
+        print(f"[Reflection]: digest delivery failed: {exc}")
+
 def run_reflection() -> dict:
     """
     Main function. Runs after the analytics engine.
     Returns stats: {analyzed, applied, pending, skipped}
     """
-    from tools.telegram import send_telegram_msg
-
     print("[Reflection]: Starting self-evaluation...")
     _ensure_table()
 
@@ -532,7 +543,7 @@ def run_reflection() -> dict:
         msg    = header + "\n\n---\n\n".join(telegram_lines)
         if len(msg) > 4000:
             msg = msg[:3990] + "..."
-        send_telegram_msg(msg, disable_notification=True)
+        _send_reflection_digest(msg)
 
     stats = {
         "analyzed": len(reflections), "applied": applied, "pending": pending,

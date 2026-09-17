@@ -290,14 +290,21 @@ def mark_pending_asset_cancelled(asset_id: int):
         conn.close()
 
 
-def is_reply_to_recent_asset_prompt(channel: str, limit: int = 3) -> bool:
+def is_reply_to_recent_asset_prompt(
+    channel: str,
+    limit: int = 3,
+    *,
+    db_path: str | None = None,
+) -> bool:
     from memory.conversation_history import load_recent_context
 
+    db_kwargs = {"db_path": db_path} if db_path is not None else {}
     entries = load_recent_context(
         channel=channel,
         global_limit=limit,
         channel_limit=limit,
         total_limit=limit,
+        **db_kwargs,
     )
 
     for entry in reversed(entries):
