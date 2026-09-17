@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import sys
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from nio import AsyncClientConfig
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -21,6 +27,104 @@ load_dotenv(ROOT_DIR / ".env")
 
 class MatrixRuntimeConfigurationError(ValueError):
     """Raised before connecting when the private Matrix setup is incomplete."""
+
+
+@contextmanager
+def _graceful_shutdown_signals(
+    *,
+    loop: asyncio.AbstractEventLoop,
+    request_shutdown: Callable[[], None],
+    signal_numbers: tuple[int, ...],
+):
+    """Translate process signals into one clean Matrix sync-loop exit."""
+    previous_handlers = {
+        signal_number: signal.getsignal(signal_number)
+        for signal_number in signal_numbers
+    }
+    shutdown_requested = False
+
+    def handle_shutdown(received_signal: int, frame: object) -> None:
+        del received_signal, frame
+        nonlocal shutdown_requested
+        if shutdown_requested:
+            return
+        shutdown_requested = True
+        loop.call_soon_threadsafe(request_shutdown)
+
+    for signal_number in signal_numbers:
+        signal.signal(signal_number, handle_shutdown)
+    try:
+        yield
+    finally:
+        for signal_number, previous_handler in previous_handlers.items():
+            signal.signal(signal_number, previous_handler)
+
+
+def _graceful_shutdown_shared_runtime(
+    runtime: object,
+    *,
+    channel: str,
+    drain_timeout: float = 5,
+) -> bool:
+    """Drain queued memory work and close persistent stores before process exit."""
+    import threading
+
+    runtime.shutdown_event.set()
+    drained = threading.Event()
+
+    def drain_queues() -> None:
+        try:
+            runtime.fast_queue.join()
+            runtime.slow_queue.join()
+        finally:
+            drained.set()
+
+    threading.Thread(target=drain_queues, daemon=True).start()
+    success = drained.wait(timeout=drain_timeout)
+
+    try:
+        from services.session_end import finalize_session
+
+        finalize_session(channel=channel)
+    except Exception as exc:
+        success = False
+        print(f"[Matrix]: Session-finalization warning: {exc}")
+
+    try:
+        from memory.vector_store import close_vector_store
+
+        close_vector_store()
+    except Exception as exc:
+        success = False
+        print(f"[Matrix]: Vector-store shutdown warning: {exc}")
+
+    return success
+
+
+async def _archive_matrix_session_with_notifications(
+    *,
+    send_text: Callable[[str], Awaitable[str]],
+    runtime: object,
+    cleanup: Callable[..., bool] = _graceful_shutdown_shared_runtime,
+) -> None:
+    """Expose the Matrix archive lifecycle without compromising cleanup."""
+    from core.i18n import t
+
+    try:
+        await send_text(t("clients.matrix_bot.session_archiving"))
+    except Exception as exc:
+        print(f"[Matrix]: Archive-start notification warning: {exc}")
+
+    success = await asyncio.to_thread(cleanup, runtime, channel="matrix")
+    message_key = (
+        "clients.matrix_bot.session_archived"
+        if success
+        else "clients.matrix_bot.session_archive_failed"
+    )
+    try:
+        await send_text(t(message_key))
+    except Exception as exc:
+        print(f"[Matrix]: Archive-result notification warning: {exc}")
 
 
 @dataclass(frozen=True)
@@ -119,6 +223,19 @@ async def _discover_device_id(settings: MatrixRuntimeConfig) -> str:
         await probe.close()
 
 
+def _build_client_config() -> AsyncClientConfig:
+    """Use SQLite for device trust so Matrix IDs never become filenames."""
+    from nio import AsyncClientConfig
+    from nio.store import SqliteStore
+
+    return AsyncClientConfig(
+        encryption_enabled=True,
+        store=SqliteStore,
+        store_name="matrix_store.db",
+        store_sync_tokens=True,
+    )
+
+
 def _approval_result_text(result: object | None) -> str | None:
     """Render a bounded acknowledgement for one trusted approval reaction."""
     if result is None:
@@ -169,7 +286,6 @@ async def run_matrix() -> None:
     """Compose the existing Matrix adapters and run the encrypted sync loop."""
     from nio import (
         AsyncClient,
-        AsyncClientConfig,
         KeysQueryError,
         RoomSendError,
         SyncError,
@@ -192,10 +308,7 @@ async def run_matrix() -> None:
     settings.media_path.mkdir(parents=True, exist_ok=True)
     device_id = await _discover_device_id(settings)
 
-    client_config = AsyncClientConfig(
-        encryption_enabled=True,
-        store_sync_tokens=True,
-    )
+    client_config = _build_client_config()
     client = AsyncClient(
         settings.homeserver_url,
         settings.service_user_id,
@@ -258,7 +371,10 @@ async def run_matrix() -> None:
         "matrix",
         MatrixExternalTransport(
             send_text=send_text_from_worker,
-            approval_reaction_hint="React with ✅ to execute or ❌ to reject.",
+            approval_reaction_hint=(
+                "React with 👍 to execute or 👎 to reject "
+                "(✅/❌ also work)."
+            ),
         ),
     )
     channel_services = build_matrix_channel_services(
@@ -298,15 +414,33 @@ async def run_matrix() -> None:
         voice_sender=voice_sender.send,
         attachment_sender=attachment_sender.send,
         location_handler=channel_services.location_handler,
+        close_client_on_exit=False,
     )
 
     shared_runtime.start_external_background_runtime("matrix")
     print("🦞 [Matrix]: Encrypted Element channel started.")
-    try:
-        await transport.run()
-    finally:
+    shutdown_signals = [signal.SIGTERM, signal.SIGINT]
+    if os.name == "nt" and hasattr(signal, "SIGBREAK"):
+        shutdown_signals.append(signal.SIGBREAK)
+
+    def request_matrix_shutdown() -> None:
         shared_runtime.shutdown_event.set()
+        client.stop_sync_forever()
+
+    try:
+        with _graceful_shutdown_signals(
+            loop=loop,
+            request_shutdown=request_matrix_shutdown,
+            signal_numbers=tuple(shutdown_signals),
+        ):
+            await transport.run()
+    finally:
         external_delivery_router.unregister("matrix")
+        await _archive_matrix_session_with_notifications(
+            send_text=send_room_text,
+            runtime=shared_runtime,
+        )
+        await client.close()
 
 
 def main() -> None:

@@ -38,9 +38,20 @@ class FakeClient:
     def __init__(self) -> None:
         self.sent: list[dict[str, Any]] = []
         self.callbacks: list[tuple[Any, Any]] = []
+        self.typing: list[bool] = []
 
     async def room_send(self, **kwargs: Any) -> object:
         self.sent.append(kwargs)
+        return object()
+
+    async def room_typing(
+        self,
+        room_id: str,
+        typing_state: bool = True,
+        timeout: int = 30_000,
+    ) -> object:
+        del room_id, timeout
+        self.typing.append(typing_state)
         return object()
 
     async def sync(self, **kwargs: Any) -> object:
@@ -98,6 +109,7 @@ async def test_media_callback_uses_same_durable_reply_lifecycle(tmp_path) -> Non
     await transport.handle_media_event(FakeRoom(), FakeMediaEvent())
 
     assert handled == [asset]
+    assert client.typing == [True, False]
     assert [item["content"]["body"] for item in client.sent] == [
         "Είδα τη φωτογραφία."
     ]

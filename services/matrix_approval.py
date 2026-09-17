@@ -13,6 +13,21 @@ from core.approval import (
 )
 
 
+APPROVE_REACTION_KEYS = frozenset({"👍", "✅"})
+REJECT_REACTION_KEYS = frozenset({"👎", "❌"})
+_EMOJI_VARIATION_SELECTORS = {"\ufe0e", "\ufe0f"}
+
+
+def normalize_approval_reaction_key(key: str) -> str:
+    """Normalize presentation selectors and skin tones on approval reactions."""
+    normalized = "".join(
+        char for char in str(key or "") if char not in _EMOJI_VARIATION_SELECTORS
+    )
+    return "".join(
+        char for char in normalized if not 0x1F3FB <= ord(char) <= 0x1F3FF
+    )
+
+
 @dataclass(frozen=True)
 class ApprovalReactionResult:
     """Channel-neutral outcome of one trusted approval reaction."""
@@ -54,14 +69,15 @@ class MatrixApprovalReactionService:
         reacts_to: str,
         key: str,
     ) -> ApprovalReactionResult | None:
-        """Handle a trusted exact ✅/❌ reaction; ignore everything else."""
+        """Handle a trusted approval/rejection reaction; ignore everything else."""
         if encrypted is not True:
             return None
         if str(room_id or "") != self._allowed_room_id:
             return None
         if str(sender_id or "") != self._allowed_user_id:
             return None
-        if key not in {"✅", "❌"}:
+        normalized_key = normalize_approval_reaction_key(key)
+        if normalized_key not in APPROVE_REACTION_KEYS | REJECT_REACTION_KEYS:
             return None
 
         pending = find_pending_by_delivery(
@@ -74,7 +90,7 @@ class MatrixApprovalReactionService:
         tool_call_id = str(pending["tool_call_id"])
         tool_name = str(pending.get("tool_name") or "")
         origin_channel = str(pending.get("channel") or "matrix")
-        if key == "❌":
+        if normalized_key in REJECT_REACTION_KEYS:
             popped = pop_pending(tool_call_id)
             if popped is None:
                 return None
