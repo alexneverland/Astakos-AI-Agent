@@ -83,7 +83,6 @@ class MatrixVoiceSender:
                     },
                     "info": {"mimetype": "audio/mpeg", "size": len(audio)},
                 },
-                ignore_unverified_devices=True,
             )
             if self._send_error_types and isinstance(send_response, self._send_error_types):
                 return MatrixVoiceSendResult(False, "⚠️ Matrix voice delivery failed.")

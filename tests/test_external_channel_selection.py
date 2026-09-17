@@ -102,3 +102,45 @@ def test_matrix_runtime_directories_are_gitignored() -> None:
 
     assert "matrix_store/" in ignore_lines
     assert "matrix_media/" in ignore_lines
+
+
+class FakeProcess:
+    def __init__(self, poll_results: list[int | None]) -> None:
+        self._poll_results = iter(poll_results)
+        self.terminated = False
+        self.waited = False
+
+    def poll(self) -> int | None:
+        return next(self._poll_results)
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self, timeout: int | None = None) -> int:
+        del timeout
+        self.waited = True
+        return 0
+
+
+def test_server_supervisor_propagates_matrix_startup_failure() -> None:
+    """A failed selected transport stops the API instead of going unnoticed."""
+    import boot
+
+    api = FakeProcess([None, None])
+    matrix = FakeProcess([1])
+
+    assert boot.supervise_server_processes(api, matrix, sleep=lambda _: None) == 1
+    assert api.terminated is True
+    assert api.waited is True
+
+
+def test_server_supervisor_stops_transport_when_api_exits() -> None:
+    """A normal API exit does not leave an orphan external transport."""
+    import boot
+
+    api = FakeProcess([0])
+    matrix = FakeProcess([None, None])
+
+    assert boot.supervise_server_processes(api, matrix, sleep=lambda _: None) == 0
+    assert matrix.terminated is True
+    assert matrix.waited is True

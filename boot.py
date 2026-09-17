@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import time
 from dotenv import load_dotenv
 
 from core.version_check import check_for_updates
@@ -37,6 +38,43 @@ def start_external_transport() -> subprocess.Popen | None:
     return None
 
 
+def _terminate_child(process: subprocess.Popen | None) -> None:
+    """Stop one still-running child without masking the original exit reason."""
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def supervise_server_processes(
+    api_process: subprocess.Popen,
+    external_process: subprocess.Popen | None,
+    *,
+    sleep=time.sleep,
+) -> int:
+    """Watch both server children and fail when the selected transport exits."""
+    while True:
+        api_exit = api_process.poll()
+        if api_exit is not None:
+            _terminate_child(external_process)
+            return int(api_exit)
+
+        if external_process is not None:
+            external_exit = external_process.poll()
+            if external_exit is not None:
+                print(
+                    "\033[91m[Boot]: Selected external transport stopped "
+                    f"(exit={external_exit}). Stopping API.\033[0m"
+                )
+                _terminate_child(api_process)
+                return int(external_exit) if external_exit else 1
+        sleep(0.25)
+
+
 
 if __name__ == "__main__":
     # Read-only and non-blocking: failures never prevent Astakos from starting.
@@ -68,20 +106,14 @@ if __name__ == "__main__":
             bot_proc = start_external_transport()
 
             try:
-                api_proc.wait()
-                if bot_proc is not None:
-                    bot_proc.wait()
+                exit_code = supervise_server_processes(api_proc, bot_proc)
             except KeyboardInterrupt:
                 print("\n[Boot]: Graceful shutdown initiated. Waiting up to 10s for child processes...")
-                try:
-                    api_proc.wait(timeout=10)
-                    if bot_proc is not None:
-                        bot_proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    print("\033[93m[Boot]: Timeout waiting for graceful exit. Terminating processes.\033[0m")
-                    api_proc.terminate()
-                    if bot_proc is not None:
-                        bot_proc.terminate()
+                _terminate_child(api_proc)
+                _terminate_child(bot_proc)
+            else:
+                if exit_code:
+                    sys.exit(exit_code)
         else:
             # Start main.py CLI
             subprocess.run([sys.executable, "main.py"])

@@ -118,9 +118,38 @@ def _approval_result_text(result: object | None) -> str | None:
     return f"⚠️ `{tool_name}` could not be executed ({status or 'failed'})."
 
 
+def pin_initial_owner_devices(client: object, owner_user_id: str) -> int:
+    """Trust the initial owner devices once and never auto-trust later devices.
+
+    The verified state is persisted in the Matrix crypto store. If at least one
+    owner device is already verified, newly observed devices remain unverified
+    and encrypted sends fail closed until the operator reviews them.
+    """
+    try:
+        devices = list(client.device_store.active_user_devices(owner_user_id))
+    except KeyError:
+        devices = []
+    if not devices:
+        raise RuntimeError("Matrix owner has no encryption devices to trust")
+    if any(bool(getattr(device, "verified", False)) for device in devices):
+        return 0
+
+    pinned = 0
+    for device in devices:
+        if client.verify_device(device):
+            pinned += 1
+    return pinned
+
+
 async def run_matrix() -> None:
     """Compose the existing Matrix adapters and run the encrypted sync loop."""
-    from nio import AsyncClient, AsyncClientConfig, RoomSendError, SyncError
+    from nio import (
+        AsyncClient,
+        AsyncClientConfig,
+        KeysQueryError,
+        RoomSendError,
+        SyncError,
+    )
 
     import config
     from clients.matrix_attachment import MatrixAttachmentSender
@@ -155,10 +184,19 @@ async def run_matrix() -> None:
         device_id=device_id,
         access_token=settings.access_token,
     )
-    initial_sync = await client.sync(timeout=0, full_state=True)
-    if isinstance(initial_sync, SyncError):
+    try:
+        initial_sync = await client.sync(timeout=0, full_state=True)
+        if isinstance(initial_sync, SyncError):
+            raise RuntimeError("Matrix initial encrypted sync failed")
+        key_query = await client.keys_query()
+        if isinstance(key_query, KeysQueryError):
+            raise RuntimeError("Matrix device-key discovery failed")
+        pinned_devices = pin_initial_owner_devices(client, settings.allowed_user_id)
+    except Exception:
         await client.close()
-        raise RuntimeError("Matrix initial encrypted sync failed")
+        raise
+    if pinned_devices:
+        print(f"🔐 [Matrix]: Pinned {pinned_devices} initial owner device(s).")
     loop = asyncio.get_running_loop()
 
     async def send_room_text(text: str) -> str:
@@ -166,7 +204,6 @@ async def run_matrix() -> None:
             room_id=settings.room_id,
             message_type="m.room.message",
             content={"msgtype": "m.text", "body": text},
-            ignore_unverified_devices=True,
         )
         if isinstance(response, RoomSendError):
             raise RuntimeError("Matrix text delivery failed")

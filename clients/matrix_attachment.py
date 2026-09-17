@@ -108,7 +108,6 @@ class MatrixAttachmentSender:
                     },
                     "info": {"mimetype": mime_type, "size": len(payload)},
                 },
-                ignore_unverified_devices=True,
             )
             if self._send_error_types and isinstance(send_response, self._send_error_types):
                 return MatrixAttachmentSendResult(sent=False, retryable=True)

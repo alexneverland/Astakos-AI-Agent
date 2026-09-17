@@ -122,7 +122,6 @@ async def test_trusted_encrypted_text_invokes_handler_once_and_sends_once(tmp_pa
             "room_id": "!private-room:example.test",
             "message_type": "m.room.message",
             "content": {"msgtype": "m.text", "body": "Καλημέρα φίλε"},
-            "ignore_unverified_devices": True,
         }
     ]
     assert get_matrix_event(

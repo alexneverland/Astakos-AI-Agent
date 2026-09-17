@@ -48,9 +48,16 @@ def process_pending_routine_confirmation(
         for routine_id, data in pending.items()
         if isinstance(data, dict) and data.get("draft_offer") is True
     )
+    selector_candidates = {
+        routine_id: (
+            f"{event_name}\n[MESSENGER_DRAFT_OFFER]"
+            if routine_id in draft_offer_ids else event_name
+        )
+        for routine_id, event_name in candidates.items()
+    }
     decision = decide_completion(
         user_text=user_text,
-        candidates=candidates,
+        candidates=selector_candidates,
         pool="pending",
         semantic_selector=select_routine,
         draft_offer_ids=draft_offer_ids,

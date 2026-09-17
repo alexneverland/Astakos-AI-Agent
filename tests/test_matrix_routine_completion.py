@@ -116,3 +116,39 @@ def test_matrix_draft_offer_returns_deferred_authorization(monkeypatch) -> None:
     assert result.routine_id == 5
     assert result.sent_at == sent_at
     assert acknowledged == []
+
+
+def test_matrix_draft_offer_reaches_the_real_selector_boundary(monkeypatch) -> None:
+    """The production selector sees the canonical persisted draft marker."""
+    from datetime import datetime
+
+    import memory.routine_db as routine_db
+    import services.routine_completion_selector as completion_selector
+    from services.matrix_routine_completion import MatrixRoutineDraftOffer
+    from services.matrix_routine_completion import process_pending_routine_confirmation
+
+    monkeypatch.setattr(
+        routine_db,
+        "load_pending_confirmations",
+        lambda: {
+            5: {
+                "event": "Message Sofia",
+                "draft_offer": True,
+                "sent_at": datetime(2026, 9, 17, 8, 0),
+            }
+        },
+    )
+
+    def select_from_prompt(prompt: str):
+        assert "[MESSENGER_DRAFT_OFFER]" in prompt
+        return type(
+            "Response",
+            (),
+            {"text": '{"action":"draft","routine_id":5}'},
+        )()
+
+    monkeypatch.setattr(completion_selector, "safe_gemini_call", select_from_prompt)
+
+    result = process_pending_routine_confirmation("Ετοίμασέ το", channel="matrix")
+
+    assert isinstance(result, MatrixRoutineDraftOffer)
