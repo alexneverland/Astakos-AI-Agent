@@ -31,6 +31,7 @@ class MatrixRuntimeConfig:
     service_user_id: str
     access_token: str
     allowed_user_id: str
+    allowed_device_ids: tuple[str, ...]
     room_id: str
     store_path: Path
     media_path: Path
@@ -47,6 +48,7 @@ def load_runtime_config(
         "MATRIX_SERVICE_USER_ID",
         "MATRIX_ACCESS_TOKEN",
         "MATRIX_ALLOWED_USER_ID",
+        "MATRIX_ALLOWED_DEVICE_IDS",
         "MATRIX_ROOM_ID",
         "MATRIX_STORE_PATH",
     )
@@ -76,11 +78,23 @@ def load_runtime_config(
     media_value = str(env.get("MATRIX_MEDIA_PATH", "matrix_media") or "").strip()
     if not media_value:
         media_value = "matrix_media"
+    allowed_device_ids = tuple(
+        dict.fromkeys(
+            device_id.strip()
+            for device_id in values["MATRIX_ALLOWED_DEVICE_IDS"].split(",")
+            if device_id.strip()
+        )
+    )
+    if not allowed_device_ids:
+        raise MatrixRuntimeConfigurationError(
+            "MATRIX_ALLOWED_DEVICE_IDS must contain at least one Element device ID"
+        )
     return MatrixRuntimeConfig(
         homeserver_url=homeserver_url,
         service_user_id=values["MATRIX_SERVICE_USER_ID"],
         access_token=values["MATRIX_ACCESS_TOKEN"],
         allowed_user_id=values["MATRIX_ALLOWED_USER_ID"],
+        allowed_device_ids=allowed_device_ids,
         room_id=values["MATRIX_ROOM_ID"],
         store_path=runtime_path(values["MATRIX_STORE_PATH"]),
         media_path=runtime_path(media_value),
@@ -118,25 +132,35 @@ def _approval_result_text(result: object | None) -> str | None:
     return f"⚠️ `{tool_name}` could not be executed ({status or 'failed'})."
 
 
-def pin_initial_owner_devices(client: object, owner_user_id: str) -> int:
-    """Trust the initial owner devices once and never auto-trust later devices.
-
-    The verified state is persisted in the Matrix crypto store. If at least one
-    owner device is already verified, newly observed devices remain unverified
-    and encrypted sends fail closed until the operator reviews them.
-    """
+def verify_configured_owner_devices(
+    client: object,
+    owner_user_id: str,
+    allowed_device_ids: tuple[str, ...],
+) -> int:
+    """Trust only owner device IDs verified separately in Element settings."""
     try:
         devices = list(client.device_store.active_user_devices(owner_user_id))
     except KeyError:
         devices = []
-    if not devices:
-        raise RuntimeError("Matrix owner has no encryption devices to trust")
-    if any(bool(getattr(device, "verified", False)) for device in devices):
-        return 0
+    devices_by_id = {
+        str(getattr(device, "id", "") or "").strip(): device
+        for device in devices
+        if str(getattr(device, "id", "") or "").strip()
+    }
+    missing = [
+        device_id
+        for device_id in allowed_device_ids
+        if device_id not in devices_by_id
+    ]
+    if missing:
+        raise RuntimeError(
+            "Configured Matrix owner device ID is not present: " + ", ".join(missing)
+        )
 
     pinned = 0
-    for device in devices:
-        if client.verify_device(device):
+    for device_id in allowed_device_ids:
+        device = devices_by_id[device_id]
+        if not bool(getattr(device, "verified", False)) and client.verify_device(device):
             pinned += 1
     return pinned
 
@@ -191,7 +215,11 @@ async def run_matrix() -> None:
         key_query = await client.keys_query()
         if isinstance(key_query, KeysQueryError):
             raise RuntimeError("Matrix device-key discovery failed")
-        pinned_devices = pin_initial_owner_devices(client, settings.allowed_user_id)
+        pinned_devices = verify_configured_owner_devices(
+            client,
+            settings.allowed_user_id,
+            settings.allowed_device_ids,
+        )
     except Exception:
         await client.close()
         raise

@@ -113,10 +113,15 @@ under your control. Before selecting **Element / Matrix** in the Setup Wizard:
 4. Obtain an access token for the dedicated Astakos account through your
    homeserver's secure administration procedure. Treat it like a password:
    do not share it or commit it to Git.
-5. In the Setup Wizard, choose **Element / Matrix** and enter the homeserver
-   URL, Astakos user ID, access token, owner user ID, encrypted room ID, and a
-   persistent crypto-store path. The default `matrix_store` is suitable when
-   it is kept on persistent storage.
+5. In Element, open **Settings → Security & Privacy → Sessions**, select your
+   current trusted phone/session, and copy its exact **Device ID**. Repeat for
+   any other owner device that Astakos may send encrypted replies to.
+6. In the Setup Wizard, choose **Element / Matrix** and enter the homeserver
+   URL, Astakos user ID, access token, owner user ID, trusted owner Device IDs
+   (comma-separated), encrypted room ID, and a persistent crypto-store path.
+   The default `matrix_store` is suitable when it is kept on persistent
+   storage. A new Element session remains blocked until you explicitly add its
+   Device ID and restart Astakos.
 
 For a normal family conversation, create a **different encrypted room** for
 you, Sofia, and Alexandros and do **not** invite the Astakos account. Astakos

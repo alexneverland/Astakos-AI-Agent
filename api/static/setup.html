@@ -194,6 +194,11 @@
                                     <input type="text" id="matrix_allowed_user_id" placeholder="@owner:example.com" class="matrix-required w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 </div>
                                 <div>
+                                    <label for="matrix_allowed_device_ids" class="block text-sm font-medium text-gray-400 mb-2">Trusted Owner Device IDs</label>
+                                    <input type="text" id="matrix_allowed_device_ids" placeholder="DEVICEID1, DEVICEID2" class="matrix-required w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <p class="mt-1 text-xs text-gray-500">Copy the Device ID for each trusted Element session from Settings → Security &amp; Privacy → Sessions. Separate multiple IDs with commas.</p>
+                                </div>
+                                <div>
                                     <label for="matrix_room_id" class="block text-sm font-medium text-gray-400 mb-2">Encrypted Astakos Room ID</label>
                                     <input type="text" id="matrix_room_id" placeholder="!room-id:example.com" class="matrix-required w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 </div>
@@ -740,6 +745,7 @@
                     if (envMap['MATRIX_SERVICE_USER_ID']) document.getElementById('matrix_service_user_id').value = envMap['MATRIX_SERVICE_USER_ID'];
                     if (envMap['MATRIX_ACCESS_TOKEN']) document.getElementById('matrix_access_token').value = envMap['MATRIX_ACCESS_TOKEN'];
                     if (envMap['MATRIX_ALLOWED_USER_ID']) document.getElementById('matrix_allowed_user_id').value = envMap['MATRIX_ALLOWED_USER_ID'];
+                    if (envMap['MATRIX_ALLOWED_DEVICE_IDS']) document.getElementById('matrix_allowed_device_ids').value = envMap['MATRIX_ALLOWED_DEVICE_IDS'];
                     if (envMap['MATRIX_ROOM_ID']) document.getElementById('matrix_room_id').value = envMap['MATRIX_ROOM_ID'];
                     if (envMap['MATRIX_STORE_PATH']) document.getElementById('matrix_store_path').value = envMap['MATRIX_STORE_PATH'];
                 }
@@ -844,6 +850,7 @@
                     matrix_service_user_id: document.getElementById('matrix_service_user_id').value,
                     matrix_access_token: document.getElementById('matrix_access_token').value,
                     matrix_allowed_user_id: document.getElementById('matrix_allowed_user_id').value,
+                    matrix_allowed_device_ids: document.getElementById('matrix_allowed_device_ids').value,
                     matrix_room_id: document.getElementById('matrix_room_id').value,
                     matrix_store_path: document.getElementById('matrix_store_path').value,
                     persona: document.getElementById('persona_content').value,

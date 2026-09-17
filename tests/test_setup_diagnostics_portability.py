@@ -652,6 +652,7 @@ def test_setup_wizard_exposes_external_channel_and_matrix_configuration() -> Non
         "matrix_service_user_id",
         "matrix_access_token",
         "matrix_allowed_user_id",
+        "matrix_allowed_device_ids",
         "matrix_room_id",
         "matrix_store_path",
     ):
@@ -1055,6 +1056,7 @@ def test_setup_wizard_saves_complete_matrix_configuration(
             "matrix_service_user_id": "@astakos:neverland.test",
             "matrix_access_token": "syt_matrix-secret-token",
             "matrix_allowed_user_id": "@lazaros:neverland.test",
+            "matrix_allowed_device_ids": "LAZAROSPHONE",
             "matrix_room_id": "!private-room:neverland.test",
             "matrix_store_path": "matrix_store",
         },
@@ -1072,6 +1074,7 @@ def test_setup_wizard_saves_complete_matrix_configuration(
     assert "MATRIX_SERVICE_USER_ID=@astakos:neverland.test" in saved_env
     assert "MATRIX_ACCESS_TOKEN=syt_matrix-secret-token" in saved_env
     assert "MATRIX_ALLOWED_USER_ID=@lazaros:neverland.test" in saved_env
+    assert "MATRIX_ALLOWED_DEVICE_IDS=LAZAROSPHONE" in saved_env
     assert "MATRIX_ROOM_ID=!private-room:neverland.test" in saved_env
     assert "MATRIX_STORE_PATH=matrix_store" in saved_env
 
@@ -1089,6 +1092,7 @@ def test_setup_wizard_preserves_masked_matrix_token(
         "MATRIX_SERVICE_USER_ID=@astakos:neverland.test\n"
         "MATRIX_ACCESS_TOKEN=syt_existing-secret\n"
         "MATRIX_ALLOWED_USER_ID=@lazaros:neverland.test\n"
+        "MATRIX_ALLOWED_DEVICE_IDS=LAZAROSPHONE\n"
         "MATRIX_ROOM_ID=!private-room:neverland.test\n"
         "MATRIX_STORE_PATH=matrix_store\n",
         encoding="utf-8",
@@ -1100,6 +1104,7 @@ def test_setup_wizard_preserves_masked_matrix_token(
             "matrix_service_user_id": "@astakos:neverland.test",
             "matrix_access_token": "********",
             "matrix_allowed_user_id": "@lazaros:neverland.test",
+            "matrix_allowed_device_ids": "LAZAROSPHONE",
             "matrix_room_id": "!private-room:neverland.test",
             "matrix_store_path": "matrix_store",
             "env": (
@@ -1126,6 +1131,7 @@ def test_setup_wizard_preserves_masked_matrix_token(
         ("matrix_homeserver_url", "not-a-url"),
         ("matrix_service_user_id", "astakos"),
         ("matrix_allowed_user_id", "lazaros"),
+        ("matrix_allowed_device_ids", ""),
         ("matrix_room_id", "private-room"),
     ],
 )
@@ -1147,6 +1153,7 @@ def test_setup_wizard_rejects_invalid_selected_matrix_configuration(
         "matrix_service_user_id": "@astakos:neverland.test",
         "matrix_access_token": "syt_matrix-secret-token",
         "matrix_allowed_user_id": "@lazaros:neverland.test",
+        "matrix_allowed_device_ids": "LAZAROSPHONE",
         "matrix_room_id": "!private-room:neverland.test",
         "matrix_store_path": "matrix_store",
     }
@@ -1490,6 +1497,7 @@ def test_setup_wizard_rejects_remote_plaintext_matrix_homeserver(
             "matrix_service_user_id": "@astakos:neverland.test",
             "matrix_access_token": "syt_matrix-secret-token",
             "matrix_allowed_user_id": "@lazaros:neverland.test",
+            "matrix_allowed_device_ids": "LAZAROSPHONE",
             "matrix_room_id": "!private-room:neverland.test",
             "matrix_store_path": "matrix_store",
         },

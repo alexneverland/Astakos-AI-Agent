@@ -67,6 +67,7 @@ _MATRIX_ENV_FIELDS = {
     "matrix_service_user_id": "MATRIX_SERVICE_USER_ID",
     "matrix_access_token": "MATRIX_ACCESS_TOKEN",
     "matrix_allowed_user_id": "MATRIX_ALLOWED_USER_ID",
+    "matrix_allowed_device_ids": "MATRIX_ALLOWED_DEVICE_IDS",
     "matrix_room_id": "MATRIX_ROOM_ID",
     "matrix_store_path": "MATRIX_STORE_PATH",
 }
@@ -179,6 +180,17 @@ def _validate_external_channel_setup(
         raise HTTPException(
             status_code=422,
             detail="Matrix room ID must use the full !room:server format.",
+        )
+
+    device_ids = [
+        value.strip()
+        for value in values["matrix_allowed_device_ids"].split(",")
+        if value.strip()
+    ]
+    if not device_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="Add at least one trusted owner Device ID from Element.",
         )
 
     return channel
