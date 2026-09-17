@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
+from nio import UnknownEvent
 
 
 @dataclass
@@ -147,3 +148,44 @@ async def test_live_location_update_is_processed_without_chat_reply(tmp_path) ->
 
     assert handled == [(40.64, 22.94, True)]
     assert client.sent == []
+
+
+@pytest.mark.asyncio
+async def test_default_transport_accepts_decrypted_element_live_beacon(tmp_path) -> None:
+    from clients.matrix_client import MatrixTextTransport
+
+    handled: list[tuple[float, float, bool]] = []
+
+    async def location_handler(lat: float, lon: float, live_update: bool):
+        handled.append((lat, lon, live_update))
+        return None
+
+    class Client:
+        async def room_send(self, **kwargs):
+            raise AssertionError("live GPS updates must remain silent")
+
+    event = UnknownEvent.from_dict(
+        {
+            "event_id": "$live-element-1",
+            "sender": "@owner:example.test",
+            "origin_server_ts": 1,
+            "type": "m.beacon",
+            "content": {"m.location": {"uri": "geo:40.64,22.94"}},
+        }
+    )
+    event.decrypted = True
+    transport = MatrixTextTransport(
+        client=Client(),
+        allowed_user_id="@owner:example.test",
+        allowed_room_id="!private-room:example.test",
+        service_user_id="@astakos:example.test",
+        turn_handler=lambda text, event_id: None,
+        state_db_path=str(tmp_path / "state.db"),
+        text_event_type=type("Text", (), {}),
+        location_handler=location_handler,
+        send_error_types=(),
+    )
+
+    await transport.handle_location_event(FakeRoom(), event)
+
+    assert handled == [(40.64, 22.94, True)]

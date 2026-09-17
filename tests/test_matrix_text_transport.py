@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 import pytest
+from nio.exceptions import OlmUnverifiedDeviceError
 
 from clients.matrix_client import MatrixReply, MatrixTextTransport
 from clients.matrix_voice import MatrixVoiceSendResult
@@ -52,6 +53,7 @@ class FakeMatrixClient:
         self.calls: list[str] = []
         self.sent: list[dict[str, Any]] = []
         self.send_results: list[Any] = []
+        self.typing: list[tuple[str, bool, int]] = []
 
     async def sync(self, **kwargs: Any) -> object:
         self.calls.append("initial_sync")
@@ -75,6 +77,16 @@ class FakeMatrixClient:
             return result
         return object()
 
+    async def room_typing(
+        self,
+        room_id: str,
+        typing_state: bool = True,
+        timeout: int = 30_000,
+    ) -> object:
+        self.calls.append(f"typing:{'on' if typing_state else 'off'}")
+        self.typing.append((room_id, typing_state, timeout))
+        return object()
+
     async def close(self) -> None:
         self.calls.append("close")
 
@@ -87,6 +99,7 @@ def _transport(
     approval_reaction_handler=None,
     voice_sender=None,
     attachment_sender=None,
+    close_client_on_exit=True,
 ) -> MatrixTextTransport:
     return MatrixTextTransport(
         client=client,
@@ -100,6 +113,7 @@ def _transport(
         approval_reaction_handler=approval_reaction_handler,
         voice_sender=voice_sender,
         attachment_sender=attachment_sender,
+        close_client_on_exit=close_client_on_exit,
         send_error_types=(FakeSendError,),
     )
 
@@ -127,6 +141,65 @@ async def test_trusted_encrypted_text_invokes_handler_once_and_sends_once(tmp_pa
     assert get_matrix_event(
         "$event-1", db_path=str(tmp_path / "state.db")
     )["status"] == "replied"
+
+
+@pytest.mark.asyncio
+async def test_trusted_text_shows_typing_until_reply_is_ready(tmp_path) -> None:
+    client = FakeMatrixClient()
+
+    async def handler(text: str, event_id: str) -> str:
+        client.calls.append("handler")
+        return "Έτοιμη απάντηση"
+
+    transport = _transport(tmp_path, client, handler)
+    await transport.handle_event(FakeRoom(), FakeTextEvent())
+
+    assert client.typing == [
+        ("!private-room:example.test", True, 30_000),
+        ("!private-room:example.test", False, 30_000),
+    ]
+    assert client.calls == ["typing:on", "handler", "typing:off", "room_send"]
+
+
+@pytest.mark.asyncio
+async def test_handler_failure_always_stops_typing(tmp_path) -> None:
+    client = FakeMatrixClient()
+
+    async def handler(text: str, event_id: str) -> str:
+        raise RuntimeError("graph failed")
+
+    transport = _transport(tmp_path, client, handler)
+
+    with pytest.raises(RuntimeError, match="graph failed"):
+        await transport.handle_event(FakeRoom(), FakeTextEvent())
+
+    assert [typing_state for _, typing_state, _ in client.typing] == [True, False]
+    assert client.sent == []
+
+
+@pytest.mark.asyncio
+async def test_typing_api_failure_does_not_block_reply(tmp_path) -> None:
+    class TypingFailureClient(FakeMatrixClient):
+        async def room_typing(
+            self,
+            room_id: str,
+            typing_state: bool = True,
+            timeout: int = 30_000,
+        ) -> object:
+            del room_id, typing_state, timeout
+            raise RuntimeError("typing unavailable")
+
+    client = TypingFailureClient()
+
+    async def handler(text: str, event_id: str) -> str:
+        return "Η απάντηση συνεχίζει κανονικά"
+
+    transport = _transport(tmp_path, client, handler)
+    await transport.handle_event(FakeRoom(), FakeTextEvent())
+
+    assert [item["content"]["body"] for item in client.sent] == [
+        "Η απάντηση συνεχίζει κανονικά"
+    ]
 
 
 @pytest.mark.asyncio
@@ -273,6 +346,24 @@ async def test_send_failure_retries_saved_reply_without_rerunning_handler(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_unverified_owner_device_keeps_reply_pending_without_stopping_transport(
+    tmp_path,
+) -> None:
+    client = FakeMatrixClient()
+    client.send_results = [OlmUnverifiedDeviceError(object())]
+
+    async def handler(text: str, event_id: str) -> str:
+        return "Αποθηκευμένη απάντηση"
+
+    transport = _transport(tmp_path, client, handler)
+    await transport.handle_event(FakeRoom(), FakeTextEvent())
+
+    pending = get_matrix_event("$event-1", db_path=str(tmp_path / "state.db"))
+    assert pending["status"] == "reply_pending"
+    assert pending["reply_text"] == "Αποθηκευμένη απάντηση"
+
+
+@pytest.mark.asyncio
 async def test_retry_resumes_after_sent_text_and_first_attachment(tmp_path) -> None:
     from clients.matrix_attachment import MatrixAttachmentSendResult
 
@@ -338,6 +429,26 @@ async def test_run_establishes_initial_sync_before_registering_live_callback(tmp
 
 
 @pytest.mark.asyncio
+async def test_run_can_leave_client_open_for_composer_shutdown_messages(tmp_path) -> None:
+    """The production composer can notify the room before it closes the client."""
+    client = FakeMatrixClient()
+
+    async def handler(text: str, event_id: str) -> str:
+        raise AssertionError("initial sync backlog must not reach the turn handler")
+
+    transport = _transport(
+        tmp_path,
+        client,
+        handler,
+        close_client_on_exit=False,
+    )
+    await transport.run()
+
+    assert client.calls[:3] == ["initial_sync", "add_callback", "sync_forever"]
+    assert "close" not in client.calls
+
+
+@pytest.mark.asyncio
 async def test_blank_handler_reply_stays_processing_and_is_not_sent(tmp_path) -> None:
     client = FakeMatrixClient()
 
@@ -385,6 +496,41 @@ async def test_trusted_approval_reaction_handler_can_send_one_result(tmp_path) -
         }
     ]
     assert client.sent[0]["content"]["body"] == "✅ Η ενέργεια εκτελέστηκε."
+
+
+@pytest.mark.asyncio
+async def test_cleartext_reaction_in_encrypted_room_reaches_approval_handler(tmp_path) -> None:
+    """Matrix reactions stay actionable when Element leaves their metadata cleartext."""
+    client = FakeMatrixClient()
+    handled: list[dict[str, Any]] = []
+
+    async def turn_handler(text: str, event_id: str) -> str:
+        raise AssertionError("reaction must not enter the text graph")
+
+    async def reaction_handler(**kwargs: Any) -> None:
+        handled.append(kwargs)
+        return None
+
+    transport = _transport(
+        tmp_path,
+        client,
+        turn_handler,
+        approval_reaction_handler=reaction_handler,
+    )
+    await transport.handle_reaction_event(
+        FakeRoom(),
+        FakeReactionEvent(key="👍", decrypted=False),
+    )
+
+    assert handled == [
+        {
+            "room_id": "!private-room:example.test",
+            "sender_id": "@owner:example.test",
+            "encrypted": True,
+            "reacts_to": "$approval-event",
+            "key": "👍",
+        }
+    ]
 
 
 @pytest.mark.asyncio

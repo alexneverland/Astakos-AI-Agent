@@ -7,6 +7,7 @@ Astakos graph, routines, approvals, or Telegram.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -20,7 +21,9 @@ from nio import (
     RoomMessageUnknown,
     RoomSendError,
     SyncError,
+    UnknownEvent,
 )
+from nio.exceptions import OlmUnverifiedDeviceError
 
 from clients.matrix_media import MatrixMediaAsset
 
@@ -49,6 +52,9 @@ MatrixApprovalReactionHandler = Callable[..., Awaitable[str | None]]
 MatrixMediaHandler = Callable[[MatrixMediaAsset], Awaitable[str]]
 MatrixAttachmentSender = Callable[[str], Awaitable[Any]]
 MatrixLocationHandler = Callable[[float, float, bool], Awaitable[str | None]]
+
+_TYPING_TIMEOUT_MS = 30_000
+_TYPING_REFRESH_SECONDS = 20.0
 
 
 class MatrixTransportError(RuntimeError):
@@ -80,9 +86,10 @@ class MatrixTextTransport:
         voice_sender: Callable[[str], Awaitable[Any]] | None = None,
         attachment_sender: MatrixAttachmentSender | None = None,
         location_handler: MatrixLocationHandler | None = None,
-        location_event_types: tuple[type, ...] = (RoomMessageUnknown,),
+        location_event_types: tuple[type, ...] = (RoomMessageUnknown, UnknownEvent),
         send_error_types: tuple[type, ...] = (RoomSendError,),
         sync_error_types: tuple[type, ...] = (SyncError,),
+        close_client_on_exit: bool = True,
     ) -> None:
         self._client = client
         self._allowed_user_id = self._required_id(allowed_user_id, "allowed_user_id")
@@ -106,6 +113,7 @@ class MatrixTextTransport:
         self._location_event_types = location_event_types
         self._send_error_types = send_error_types
         self._sync_error_types = sync_error_types
+        self._close_client_on_exit = bool(close_client_on_exit)
 
     @staticmethod
     def _required_id(value: str, field: str) -> str:
@@ -172,14 +180,58 @@ class MatrixTextTransport:
 
     async def _send_text(self, room_id: str, reply_text: str) -> bool:
         """Send one Matrix text event, returning false for SDK send errors."""
-        response = await self._client.room_send(
-            room_id=room_id,
-            message_type="m.room.message",
-            content={"msgtype": "m.text", "body": reply_text},
-        )
+        try:
+            response = await self._client.room_send(
+                room_id=room_id,
+                message_type="m.room.message",
+                content={"msgtype": "m.text", "body": reply_text},
+            )
+        except OlmUnverifiedDeviceError as exc:
+            device = getattr(exc, "device", None)
+            device_id = str(getattr(device, "id", "") or "unknown")
+            print(
+                "[Matrix]: Reply kept pending; owner device "
+                f"{device_id} is not trusted."
+            )
+            return False
         if self._send_error_types and isinstance(response, self._send_error_types):
             return False
         return True
+
+    async def _set_typing(self, typing_state: bool) -> None:
+        """Best-effort typing state that never blocks an assistant reply."""
+        try:
+            await self._client.room_typing(
+                self._allowed_room_id,
+                typing_state=typing_state,
+                timeout=_TYPING_TIMEOUT_MS,
+            )
+        except Exception as exc:
+            print(f"[Matrix]: Typing notice failed: {type(exc).__name__}")
+
+    async def _refresh_typing(self, stop: asyncio.Event) -> None:
+        """Refresh Matrix typing before its server-side timeout expires."""
+        while True:
+            try:
+                await asyncio.wait_for(
+                    stop.wait(),
+                    timeout=_TYPING_REFRESH_SECONDS,
+                )
+                return
+            except TimeoutError:
+                await self._set_typing(True)
+
+    async def _run_while_typing(self, operation: Awaitable[Any]) -> Any:
+        """Keep typing visible for one newly accepted application turn."""
+        await self._set_typing(True)
+        stop = asyncio.Event()
+        refresher = asyncio.create_task(self._refresh_typing(stop))
+        try:
+            return await operation
+        finally:
+            stop.set()
+            await refresher
+            await self._set_typing(False)
 
     async def _send_reply(
         self,
@@ -261,7 +313,7 @@ class MatrixTextTransport:
             return
 
         reply_text, reply_mode, attachment_paths = self._normalize_reply(
-            await self._turn_handler(text, event_id)
+            await self._run_while_typing(self._turn_handler(text, event_id))
         )
         store_matrix_event_reply(
             event_id,
@@ -288,7 +340,7 @@ class MatrixTextTransport:
             await self._deliver_pending(item)
 
     async def handle_reaction_event(self, room: Any, event: Any) -> None:
-        """Forward one trusted encrypted reaction to the approval boundary."""
+        """Forward one trusted reaction from the encrypted room to approval."""
         if self._approval_reaction_handler is None:
             return
         if str(getattr(room, "room_id", "")) != self._allowed_room_id:
@@ -297,22 +349,25 @@ class MatrixTextTransport:
             return
         if not isinstance(event, self._reaction_event_type):
             return
-        if getattr(event, "decrypted", False) is not True:
-            return
         sender = str(getattr(event, "sender", ""))
         if sender != self._allowed_user_id or sender == self._service_user_id:
             return
+
+        reaction_key = str(getattr(event, "key", "") or "")
+        print(f"[Matrix Approval]: Trusted reaction received key={reaction_key!r}")
 
         response = await self._approval_reaction_handler(
             room_id=self._allowed_room_id,
             sender_id=sender,
             encrypted=True,
             reacts_to=str(getattr(event, "reacts_to", "") or "").strip(),
-            key=str(getattr(event, "key", "") or ""),
+            key=reaction_key,
         )
         response_text = str(response or "").strip()
         if response_text:
             await self._send_reply(self._allowed_room_id, response_text)
+        else:
+            print("[Matrix Approval]: No matching active approval for reaction.")
 
     async def handle_media_event(self, room: Any, event: Any) -> None:
         """Download one trusted encrypted attachment and process it at most once."""
@@ -340,7 +395,7 @@ class MatrixTextTransport:
             return
 
         reply_text, reply_mode, attachment_paths = self._normalize_reply(
-            await self._media_handler(asset)
+            await self._run_while_typing(self._media_handler(asset))
         )
         store_matrix_event_reply(
             event_id,
@@ -458,4 +513,5 @@ class MatrixTextTransport:
             await self.resend_pending_replies()
             await self._client.sync_forever(timeout=30_000, full_state=True)
         finally:
-            await self._client.close()
+            if self._close_client_on_exit:
+                await self._client.close()

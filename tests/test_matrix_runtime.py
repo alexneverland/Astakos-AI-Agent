@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import signal
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -71,6 +74,168 @@ def test_matrix_runtime_config_preserves_complete_setup() -> None:
     assert config.allowed_device_ids == ("PHONE", "DESKTOP")
     assert config.room_id == "!private:example.test"
     assert config.store_path.name == "matrix_store"
+
+
+def test_matrix_runtime_uses_portable_sqlite_trust_store() -> None:
+    """Matrix IDs with colons never become Windows trust-state filenames."""
+    from nio.store import SqliteStore
+
+    from clients.matrix_bot import _build_client_config
+
+    config = _build_client_config()
+
+    assert config.store is SqliteStore
+    assert config.store_name == "matrix_store.db"
+
+
+def test_matrix_shutdown_drains_queues_and_closes_persistent_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A watched restart preserves queued memory work and closes Chroma cleanly."""
+    from clients.matrix_bot import _graceful_shutdown_shared_runtime
+
+    calls: list[str] = []
+
+    class FakeEvent:
+        def set(self) -> None:
+            calls.append("shutdown")
+
+    class FakeQueue:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def join(self) -> None:
+            calls.append(self.name)
+
+    runtime = SimpleNamespace(
+        shutdown_event=FakeEvent(),
+        fast_queue=FakeQueue("fast"),
+        slow_queue=FakeQueue("slow"),
+    )
+    monkeypatch.setattr(
+        "memory.vector_store.close_vector_store",
+        lambda: calls.append("close_vector_store"),
+    )
+    monkeypatch.setattr(
+        "services.session_end.finalize_session",
+        lambda *, channel: calls.append(f"finalize:{channel}"),
+    )
+
+    result = _graceful_shutdown_shared_runtime(
+        runtime,
+        channel="matrix",
+        drain_timeout=1,
+    )
+
+    assert result is True
+    assert calls[0] == "shutdown"
+    assert set(calls[1:3]) == {"fast", "slow"}
+    assert calls[3:] == ["finalize:matrix", "close_vector_store"]
+
+
+@pytest.mark.asyncio
+async def test_matrix_shutdown_notifies_before_and_after_archiving(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Element receives the same visible archive lifecycle as Telegram."""
+    from clients.matrix_bot import _archive_matrix_session_with_notifications
+
+    calls: list[tuple[str, object]] = []
+
+    async def send_text(message: str) -> str:
+        calls.append(("send", message))
+        return "$event"
+
+    def cleanup(runtime: object, *, channel: str) -> bool:
+        calls.append(("cleanup", (runtime, channel)))
+        return True
+
+    monkeypatch.setattr("core.i18n.t", lambda key: key)
+    runtime = object()
+
+    await _archive_matrix_session_with_notifications(
+        send_text=send_text,
+        runtime=runtime,
+        cleanup=cleanup,
+    )
+
+    assert calls == [
+        ("send", "clients.matrix_bot.session_archiving"),
+        ("cleanup", (runtime, "matrix")),
+        ("send", "clients.matrix_bot.session_archived"),
+    ]
+
+
+def test_matrix_shutdown_signal_requests_clean_sync_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The watchdog signal stops sync without cancelling archive notifications."""
+    from clients.matrix_bot import _graceful_shutdown_signals
+
+    callbacks: list[object] = []
+    installed: list[tuple[int, object]] = []
+
+    class FakeLoop:
+        def call_soon_threadsafe(self, callback: object) -> None:
+            callbacks.append(callback)
+
+    previous_handler = object()
+    monkeypatch.setattr(signal, "getsignal", lambda signal_number: previous_handler)
+    monkeypatch.setattr(
+        signal,
+        "signal",
+        lambda signal_number, handler: installed.append((signal_number, handler)),
+    )
+
+    requested: list[str] = []
+    watched_signals = [signal.SIGTERM, signal.SIGINT]
+    if hasattr(signal, "SIGBREAK"):
+        watched_signals.append(signal.SIGBREAK)
+    watched_signals = tuple(watched_signals)
+    with _graceful_shutdown_signals(
+        loop=FakeLoop(),
+        request_shutdown=lambda: requested.append("stop"),
+        signal_numbers=watched_signals,
+    ):
+        active_handler = installed[0][1]
+        active_handler(watched_signals[-1], None)
+        callbacks[-1]()
+
+    assert requested == ["stop"]
+    signal_count = len(watched_signals)
+    assert installed[:signal_count] == [
+        (signal_number, active_handler) for signal_number in watched_signals
+    ]
+    assert installed[signal_count:] == [
+        (signal_number, previous_handler) for signal_number in watched_signals
+    ]
+
+
+@pytest.mark.asyncio
+async def test_matrix_shutdown_reports_failed_archive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Element never claims that persistence succeeded when cleanup failed."""
+    from clients.matrix_bot import _archive_matrix_session_with_notifications
+
+    messages: list[str] = []
+
+    async def send_text(message: str) -> str:
+        messages.append(message)
+        return "$event"
+
+    monkeypatch.setattr("core.i18n.t", lambda key: key)
+
+    await _archive_matrix_session_with_notifications(
+        send_text=send_text,
+        runtime=object(),
+        cleanup=lambda runtime, *, channel: False,
+    )
+
+    assert messages == [
+        "clients.matrix_bot.session_archiving",
+        "clients.matrix_bot.session_archive_failed",
+    ]
 
 
 def test_matrix_runtime_rejects_remote_plaintext_homeserver() -> None:

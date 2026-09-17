@@ -43,7 +43,11 @@ def approval_state(tmp_path, monkeypatch):
     return service, tool
 
 
-def test_trusted_approve_reaction_executes_exact_pending_action_once(approval_state) -> None:
+@pytest.mark.parametrize("approval_key", ["👍", "👍️", "👍🏽", "✅"])
+def test_trusted_approve_reaction_executes_exact_pending_action_once(
+    approval_state,
+    approval_key: str,
+) -> None:
     service, tool = approval_state
 
     result = service.handle_reaction(
@@ -51,14 +55,14 @@ def test_trusted_approve_reaction_executes_exact_pending_action_once(approval_st
         sender_id="@owner:example.test",
         encrypted=True,
         reacts_to="$approval-event",
-        key="✅",
+        key=approval_key,
     )
     duplicate = service.handle_reaction(
         room_id="!private-room:example.test",
         sender_id="@owner:example.test",
         encrypted=True,
         reacts_to="$approval-event",
-        key="✅",
+        key=approval_key,
     )
 
     assert result is not None
@@ -114,14 +118,25 @@ def test_unrelated_reaction_or_message_is_inert(approval_state) -> None:
         sender_id="@owner:example.test",
         encrypted=True,
         reacts_to="$approval-event",
-        key="👍",
+        key="🙂",
+    ) is None
+    assert service.handle_reaction(
+        room_id="!private-room:example.test",
+        sender_id="@owner:example.test",
+        encrypted=True,
+        reacts_to="$approval-event",
+        key="ναι",
     ) is None
 
     assert tool.calls == 0
     assert approval.get_pending("call-1") is not None
 
 
-def test_trusted_reject_reaction_removes_pending_without_execution(approval_state) -> None:
+@pytest.mark.parametrize("rejection_key", ["👎", "👎️", "👎🏻", "❌"])
+def test_trusted_reject_reaction_removes_pending_without_execution(
+    approval_state,
+    rejection_key: str,
+) -> None:
     service, tool = approval_state
 
     result = service.handle_reaction(
@@ -129,7 +144,7 @@ def test_trusted_reject_reaction_removes_pending_without_execution(approval_stat
         sender_id="@owner:example.test",
         encrypted=True,
         reacts_to="$approval-event",
-        key="❌",
+        key=rejection_key,
     )
 
     assert result is not None

@@ -91,6 +91,19 @@ def test_boot_matrix_selection_never_spawns_telegram(
     assert spawned == [[sys.executable, "clients/matrix_bot.py"]]
 
 
+def test_windows_launcher_full_choice_isolates_both_reloaders() -> None:
+    """Choice 1 starts Web and the selected channel in separate consoles."""
+    from pathlib import Path
+
+    source = Path("start_astakos.bat").read_text(encoding="utf-8")
+
+    assert ":full" in source
+    full_section = source.split(":full", 1)[1].split(":web", 1)[0]
+    assert 'start "Astakos Web Server"' in full_section
+    assert "uvicorn api.server:server" in full_section
+    assert "python run_external.py" in full_section
+
+
 def test_matrix_runtime_directories_are_gitignored() -> None:
     """Matrix encryption state and downloaded media cannot be staged accidentally."""
     from pathlib import Path

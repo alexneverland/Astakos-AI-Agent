@@ -36,6 +36,7 @@ scheduler_state.json
 last_location.json
 linkedin_draft.json
 run_telegram.lock
+run_matrix.lock
 # User uploads, generated output, and local browser profiles
 telegram_photos/
 telegram_uploads/

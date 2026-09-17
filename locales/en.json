@@ -1220,6 +1220,11 @@
     ]
   },
   "clients": {
+    "matrix_bot": {
+      "session_archiving": "⌛ **Archiving...** I am collecting the session memories and clearing the workbench.",
+      "session_archived": "✅ **Done!** The session was archived safely. See you next shift! 🦞",
+      "session_archive_failed": "❌ I could not archive the session safely. The active memory was not deleted."
+    },
     "telegram_bot": {
       "bot_msg_32a4bf": "Είσαι ΑΠΟΚΛΕΙΣΤΙΚΑ εργαλείο Speech-to-Text. Μετέγραψε ΜΟΝΟ αυτό που ακούς, λέξη προς λέξη, χωρίς σχόλια ή απαντήσεις. Αν δεν ακούς τίποτα, γράψε: [ΣΙΩΠΗ].",
       "bot_msg_dec305": "Περίγραψε αναλυτικά τι δείχνει η φωτογραφία (αντικείμενα, κείμενο, χρώματα, πλαίσιο). Απάντησε στα Ελληνικά, 3-5 προτάσεις.",
