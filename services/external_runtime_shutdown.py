@@ -42,6 +42,12 @@ def drain_and_archive_external_runtime(
         print(f"[{channel}]: Background queues did not drain; archive skipped.")
         return False
 
+    from memory.session_memory import wait_for_auto_session_summary
+
+    if not wait_for_auto_session_summary(max(0, deadline - time.monotonic())):
+        print(f"[{channel}]: Auto-summary still running; archive skipped.")
+        return False
+
     runtime._external_worker_stop_event.set()
     success = True
     try:

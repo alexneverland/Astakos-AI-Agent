@@ -247,6 +247,147 @@ def test_matrix_shutdown_does_not_archive_while_queue_is_still_busy(
     assert not runtime._external_worker_stop_event.is_set()
 
 
+def test_shutdown_waits_for_auto_summary_save_before_closing_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A summary spawned by the final exchange must persist before Chroma closes."""
+    import json
+    import queue
+    import threading
+
+    from memory import session_memory
+    from services.external_runtime_shutdown import drain_and_archive_external_runtime
+
+    exchanges = [
+        {
+            "id": f"exchange-{index}",
+            "time": "10:00",
+            "channel": "matrix",
+            "agent": "Chat_Agent",
+            "user": f"question {index}",
+            "ai": f"answer {index}",
+        }
+        for index in range(20)
+    ]
+    save_started = threading.Event()
+    allow_save = threading.Event()
+    store_closed = threading.Event()
+    persisted: list[str] = []
+    marked: list[str] = []
+    working_memory = tmp_path / "working_memory.txt"
+    working_memory.write_text("active context", encoding="utf-8")
+
+    class Response:
+        text = json.dumps({
+            "date": "2026-09-23 10:00",
+            "summary": "Conversation archived",
+            "pending": [],
+            "next_session_hint": "",
+            "mood": "neutral",
+        })
+
+    def save_summary(**kwargs: object) -> bool:
+        save_started.set()
+        if not allow_save.wait(timeout=3):
+            return False
+        persisted.append(str(kwargs["session_text"]))
+        return True
+
+    def mark_summarized(ids: list[str]) -> None:
+        marked.extend(ids)
+        exchanges.clear()
+
+    monkeypatch.setattr(session_memory, "_auto_summary_lock", threading.Lock())
+    monkeypatch.setattr(session_memory, "SESSION_LOGS", [])
+    monkeypatch.setattr(session_memory, "is_summarizing", False)
+    monkeypatch.setattr(
+        session_memory,
+        "load_unsummarized_exchanges",
+        lambda limit=200: exchanges[:limit],
+    )
+    monkeypatch.setattr(session_memory, "safe_gemini_call", lambda prompt: Response())
+    monkeypatch.setattr(session_memory, "append_exchange", lambda **kwargs: {"id": "last"})
+    monkeypatch.setattr(session_memory.memory, "save", save_summary)
+    monkeypatch.setattr(session_memory, "mark_exchanges_summarized", mark_summarized)
+    monkeypatch.setattr(session_memory.bus, "emit", lambda *args, **kwargs: None)
+    monkeypatch.setattr("config.WORKING_MEMORY_FILE", working_memory)
+    monkeypatch.setattr("memory.vector_store.close_vector_store", store_closed.set)
+
+    runtime = SimpleNamespace(
+        shutdown_event=threading.Event(),
+        _external_worker_stop_event=threading.Event(),
+        fast_queue=queue.Queue(),
+        slow_queue=queue.Queue(),
+    )
+    session_memory.log_exchange("last question", "last answer", "Chat_Agent", channel="matrix")
+    assert save_started.wait(timeout=1)
+
+    results: list[bool] = []
+    cleanup = threading.Thread(
+        target=lambda: results.append(
+            drain_and_archive_external_runtime(runtime, channel="matrix", drain_timeout=2)
+        ),
+        daemon=True,
+    )
+    cleanup.start()
+    try:
+        assert runtime.shutdown_event.wait(timeout=1)
+        assert not store_closed.wait(timeout=0.1)
+    finally:
+        allow_save.set()
+        cleanup.join(timeout=3)
+        assert session_memory._auto_summary_lock.acquire(timeout=3)
+        session_memory._auto_summary_lock.release()
+
+    assert results == [True]
+    assert len(persisted) == 1
+    assert len(marked) == 20
+    assert store_closed.is_set()
+    assert working_memory.read_text(encoding="utf-8") != "active context"
+
+
+def test_shutdown_skips_archive_and_close_when_auto_summary_exceeds_drain_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stuck auto-summary must not race with finalization or Chroma close."""
+    import queue
+    import threading
+
+    from memory import session_memory
+    from services.external_runtime_shutdown import drain_and_archive_external_runtime
+
+    summary_lock = threading.Lock()
+    summary_lock.acquire()
+    monkeypatch.setattr(session_memory, "_auto_summary_lock", summary_lock)
+    archive_calls: list[str] = []
+    monkeypatch.setattr(
+        "services.session_end.finalize_session",
+        lambda *, channel: archive_calls.append("finalize"),
+    )
+    monkeypatch.setattr(
+        "memory.vector_store.close_vector_store",
+        lambda: archive_calls.append("close"),
+    )
+    runtime = SimpleNamespace(
+        shutdown_event=threading.Event(),
+        _external_worker_stop_event=threading.Event(),
+        fast_queue=queue.Queue(),
+        slow_queue=queue.Queue(),
+    )
+
+    try:
+        success = drain_and_archive_external_runtime(
+            runtime, channel="matrix", drain_timeout=0.05
+        )
+    finally:
+        summary_lock.release()
+
+    assert success is False
+    assert archive_calls == []
+    assert not runtime._external_worker_stop_event.is_set()
+
+
 @pytest.mark.asyncio
 async def test_matrix_shutdown_notifies_before_and_after_archiving(
     monkeypatch: pytest.MonkeyPatch,

@@ -88,6 +88,14 @@ def _maybe_trigger_auto_session_summary(channel: str) -> None:
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def wait_for_auto_session_summary(timeout: float) -> bool:
+    """Wait until a previously spawned auto-summary has finished persisting."""
+    if not _auto_summary_lock.acquire(timeout=max(0, timeout)):
+        return False
+    _auto_summary_lock.release()
+    return True
+
+
 def load_last_session_hint(channel: str = "web") -> str:
     """Loads the hint from the last session."""
     conn = None
