@@ -243,3 +243,27 @@ async def test_supported_file_and_audio_types_are_classified(
 
     assert asset.kind == kind
     assert asset.path.suffix == suffix
+
+
+@pytest.mark.asyncio
+async def test_generic_file_mime_uses_supported_original_filename_suffix(tmp_path) -> None:
+    downloader = _downloader(tmp_path, FakeClient())
+    event = FakeEncryptedFile(
+        mimetype="application/octet-stream",
+        source={
+            "type": "m.room.message",
+            "content": {
+                "msgtype": "m.file",
+                "body": "Quarterly report",
+                "filename": "../../quarterly-report.pdf",
+                "file": {},
+            },
+        },
+    )
+
+    asset = await downloader.download(FakeRoom(), event)
+
+    assert asset is not None
+    assert asset.path.suffix == ".pdf"
+    assert asset.original_name == "../../quarterly-report.pdf"
+    assert "quarterly-report" not in asset.path.name

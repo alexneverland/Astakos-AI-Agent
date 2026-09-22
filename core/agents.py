@@ -107,7 +107,7 @@ def _food_tools_for_latest_user_text(tools: list[Any], latest_user_text: str) ->
     ]
 # TOOLS
 from tools.system import (
-    search_memory, save_to_memory, delete_from_memory, retrieve_photo,
+    search_memory, save_to_memory, delete_from_memory, retrieve_photo, retrieve_document,
     set_local_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool, register_tool,
@@ -563,7 +563,7 @@ def chat_agent_node(state: AgentState):
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
 
 
-    from tools.system import archive_file, retrieve_photo, save_to_memory, delete_from_memory, search_memory, control_spotify, get_current_location, read_local_file
+    from tools.system import archive_file, retrieve_photo, retrieve_document, save_to_memory, delete_from_memory, search_memory, control_spotify, get_current_location, read_local_file
     from tools.web import (
         execute_local_pipeline,
         has_known_messenger_contact_reference,
@@ -583,7 +583,7 @@ def chat_agent_node(state: AgentState):
 
     static_chat_tools = [
         get_current_location, control_spotify,
-        search_memory, save_to_memory, delete_from_memory, retrieve_photo, duckduckgo_search,
+        search_memory, save_to_memory, delete_from_memory, retrieve_photo, retrieve_document, duckduckgo_search,
         recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
         read_local_file, generate_image_tool, get_fit_summary,
         *([archive_file] if not _is_farewell else []),
@@ -1102,7 +1102,7 @@ def web_agent_node(state: AgentState):
 
 
     from tools.system import (
-        retrieve_photo, read_local_file, post_to_linkedin,
+        retrieve_photo, retrieve_document, read_local_file, post_to_linkedin,
         generate_image_tool, search_memory, get_current_location
     )
     from tools.web import (
@@ -1122,7 +1122,7 @@ def web_agent_node(state: AgentState):
     static_web_tools = [
         get_current_location,
         get_news, get_weather_forecast, duckduckgo_search, research_web,
-        search_memory, get_navigation_info, retrieve_photo, read_local_file,
+        search_memory, get_navigation_info, retrieve_photo, retrieve_document, read_local_file,
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
         process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices,
         morning_briefing, hn_briefing,
@@ -1535,7 +1535,7 @@ all_tools = [
     manage_list, set_local_reminder, read_local_file, github_manager,
     mail_manager, get_news, drive_manager, get_weather_forecast,
     google_calendar_tool, save_to_memory, google_tasks_tool, delete_from_memory,
-    search_memory, retrieve_photo, write_code, run_code, write_custom_tool,
+    search_memory, retrieve_photo, retrieve_document, write_code, run_code, write_custom_tool,
     control_vacuum, get_navigation_info,
     control_spotify, search_goldmall_offers, execute_local_pipeline, get_current_location,
     recipe_expert, log_meal, create_file_tool, run_terminal_command, search_google_places, search_flights, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url, duckduckgo_search, manage_context_flag,

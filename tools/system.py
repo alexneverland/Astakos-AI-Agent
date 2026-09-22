@@ -32,7 +32,7 @@ import docx
 import pandas as pd
 import sqlite3
 from config import (
-    STATE_DB, WORKSPACE_DIR, PHOTOS_INDEX_FILE, PHOTOS_DIR,
+    STATE_DB, WORKSPACE_DIR, PHOTOS_INDEX_FILE, DOCS_INDEX_FILE, PHOTOS_DIR,
     EMAIL_ADDRESS, EMAIL_PASSWORD, GITHUB_TOKEN, VACUUM_IP, VACUUM_TOKEN, GPS_STORAGE_FILE
 )
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
@@ -110,6 +110,7 @@ def archive_file(filename: str, content_summary: str) -> str:
         import os
         from config import BASE_DIR, PHOTOS_DIR
         from memory.vector_store import memory
+        from services.pending_asset_confirmation import save_confirmed_asset
 
         search_dirs = [
             PHOTOS_DIR,
@@ -132,11 +133,15 @@ def archive_file(filename: str, content_summary: str) -> str:
         ext = os.path.splitext(full_path)[1].lower()
         m_type = "photo" if ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"] else "document"
 
-        memory.save(
-            memory_type=m_type,
-            file_path=full_path,
-            analysis=content_summary,
-            caption=f"Archive ({m_type}): {filename}"
+        save_confirmed_asset(
+            memory,
+            {
+                "asset_type": m_type,
+                "file_path": full_path,
+                "filename": filename,
+                "analysis": content_summary,
+                "caption": f"Archive ({m_type}): {filename}",
+            },
         )
         return t("tools.system.archive_success", filename=filename, m_type=m_type)
     except Exception as e:
@@ -273,7 +278,7 @@ def search_memory(query: str, category: str = "") -> str:
         query: Keywords (e.g., 'kid food', 'project backend')
         category: Optional filter: 'lazaros', 'family', 'projects', 'home', 'lesson', 'photos'
     """
-    VALID_CATS = {"lazaros", "family", "projects", "home", "lesson", "session", "photos"}
+    VALID_CATS = {"lazaros", "family", "projects", "home", "lesson", "session", "photos", "documents"}
     try:
         search_queries, inferred_category = _expand_memory_query(query)
         primary_query = search_queries[-1]
@@ -759,6 +764,87 @@ def retrieve_photo(query: str) -> str:
 
     except Exception as e:
         return f"Error: Failed to retrieve photo: {str(e)}"
+
+
+def _document_query_match_score(query_tokens: list[str], description: str) -> int:
+    """Count query terms corroborated by document content, excluding its type marker."""
+    content = str(description or "").removeprefix("[DOCUMENT]:")
+    words = re.findall(
+        t("tools.system.greek_words_regex"),
+        _normalize_memory_query(content),
+    )
+    return sum(
+        any(word.startswith(_stem_token(token)) for word in words)
+        for token in set(query_tokens)
+    )
+
+
+@tool
+def retrieve_document(query: str) -> str:
+    """Retrieve an archived document and return its original file for delivery."""
+    try:
+        tokens = _memory_query_tokens(query)
+        if not tokens:
+            return "System: Document not found."
+        required_matches = min(2, len(set(tokens)))
+        query_emb = None
+        try:
+            query_emb = embeddings.embed_query(query)
+        except Exception as exc:
+            from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+            if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                print(f"[retrieve_document]: semantic query unavailable: {type(exc).__name__}")
+
+        if query_emb is not None:
+            try:
+                with vector_lock:
+                    results = vector_memory.safe_similarity_search(
+                        query,
+                        k=8,
+                        filter={"category": "documents"},
+                        query_embedding=query_emb,
+                    )
+                for document in results:
+                    file_path = str(document.metadata.get("file_path") or "")
+                    if (
+                        file_path
+                        and os.path.isfile(file_path)
+                        and _document_query_match_score(tokens, document.page_content)
+                        >= required_matches
+                    ):
+                        return (
+                            f"Found archived document: {document.page_content}\n"
+                            f"[CREATED_FILE: {file_path}]"
+                        )
+            except Exception as exc:
+                from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+                if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                    raise
+
+        if os.path.exists(DOCS_INDEX_FILE):
+            with open(DOCS_INDEX_FILE, "r", encoding="utf-8") as index_file:
+                index = json.load(index_file)
+            matches: list[tuple[int, int, dict]] = []
+            for position, entry in enumerate(index if isinstance(index, list) else []):
+                candidate = f"{entry.get('caption', '')} {entry.get('summary', '')}"
+                score = _document_query_match_score(tokens, candidate)
+                file_path = str(entry.get("file_path") or "")
+                if score >= required_matches and os.path.isfile(file_path):
+                    matches.append((score, position, entry))
+            if matches:
+                _, _, entry = max(matches, key=lambda item: (item[0], item[1]))
+                file_path = str(entry["file_path"])
+                caption = str(entry.get("caption") or os.path.basename(file_path))
+                return (
+                    f"Found archived document: {caption}\n"
+                    f"[CREATED_FILE: {file_path}]"
+                )
+
+        return "System: Document not found."
+    except Exception as exc:
+        return f"Error: Failed to retrieve document: {exc}"
 
 
 def _find_archived_photo_without_embeddings(index: list[dict], query: str) -> tuple[dict, str] | None:
@@ -4133,7 +4219,7 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
 
 
 all_tools = [
-    search_memory, save_to_memory, delete_from_memory, retrieve_photo, update_pending_linkedin_post, process_and_clear_linkedin_post,
+    search_memory, save_to_memory, delete_from_memory, retrieve_photo, retrieve_document, update_pending_linkedin_post, process_and_clear_linkedin_post,
     set_local_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,

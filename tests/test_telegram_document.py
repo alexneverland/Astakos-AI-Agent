@@ -52,6 +52,10 @@ def mock_telegram_api(monkeypatch):
     monkeypatch.setitem(handle_document.__globals__, "send_telegram_msg", mock_send)
 
     monkeypatch.setattr("pypdf.PdfReader", lambda x: type("MockReader", (), {"pages": []}))
+    monkeypatch.setattr(
+        "services.document_input.extract_document_preview",
+        lambda *args, **kwargs: "Mocked document text",
+    )
 
     class MockLLMResponse:
         content = "Mocked LLM Analysis"
@@ -179,6 +183,36 @@ def test_golden_path_allowed_document(monkeypatch, tmp_path, mock_telegram_api):
     assert len(mock_telegram_api.slow_tasks) == 2
     assert len(mock_telegram_api.create_archive) == 1
     assert mock_telegram_api.create_archive[0].get("filename") == "report.pdf"
+
+
+def test_unreadable_document_is_not_summarized_or_offered_for_archive(
+    monkeypatch, tmp_path, mock_telegram_api
+):
+    from services.document_input import DocumentPreviewError
+
+    monkeypatch.setattr("config.BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "services.document_input.extract_document_preview",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            DocumentPreviewError("The PDF is unreadable.")
+        ),
+    )
+
+    def mock_get(url, **kwargs):
+        if "getFile" in url:
+            return MockResponse(None)
+        return MockResponse(b"broken-pdf")
+
+    monkeypatch.setattr("requests.get", mock_get)
+    handle_document({"file_id": "123", "file_name": "broken.pdf"}, "", "chat_id")
+
+    assert any("unreadable" in message for message in mock_telegram_api.sent_messages)
+    assert mock_telegram_api.create_archive == []
+    from memory.pending_assets import looks_like_asset_confirmation_prompt
+    assert not any(
+        looks_like_asset_confirmation_prompt(message)
+        for message in mock_telegram_api.sent_messages
+    )
 
 def test_malformed_content_length(monkeypatch, tmp_path, mock_telegram_api):
     monkeypatch.setattr("config.BASE_DIR", str(tmp_path))

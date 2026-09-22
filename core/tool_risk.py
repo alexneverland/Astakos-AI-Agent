@@ -60,6 +60,7 @@ TOOL_RISK: dict[str, str] = {
     # ── SAFE: reads / queries / zero side-effects ────────────────
     "search_memory":            "SAFE",
     "retrieve_photo":           "SAFE",
+    "retrieve_document":        "SAFE",
     "read_local_file":          "SAFE",
     "get_news":                 "SAFE",
     "get_weather_forecast":     "SAFE",

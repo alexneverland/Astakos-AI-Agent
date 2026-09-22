@@ -32,11 +32,15 @@ def analyze_matrix_document(asset: MatrixMediaAsset) -> str:
     try:
         document_text = extract_document_preview(asset.path, max_chars=8000)
     except Exception as exc:
-        document_text = f"[Could not read content: {exc}]"
+        from services.document_input import DocumentPreviewError
+
+        if isinstance(exc, DocumentPreviewError):
+            raise
+        raise DocumentPreviewError(f"Could not read the document: {exc}") from exc
     return summarize_document_text(
         document_text=document_text,
         file_name=asset.original_name or asset.path.name,
-        caption="",
+        caption=asset.caption,
         channel="matrix",
         language=config.RESPONSE_LANGUAGE,
         user_name=config.USER_NAME,
@@ -104,16 +108,23 @@ class MatrixDocumentTurnService:
         if suffix not in SUPPORTED_DOCUMENT_EXTENSIONS:
             return f"⚠️ Unsupported document type: {suffix or '(none)'}"
 
-        analysis = str(
-            await asyncio.to_thread(self._analyze_document, asset) or ""
-        ).strip()
+        from services.document_input import DocumentPreviewError
+
+        archive_available = True
+        try:
+            analysis = str(
+                await asyncio.to_thread(self._analyze_document, asset) or ""
+            ).strip()
+        except DocumentPreviewError as exc:
+            analysis = f"⚠️ {exc}"
+            archive_available = False
         if not analysis:
             analysis = "No document analysis available."
         display_name = self._display_name(asset)
         reply = (
             f"📄 **Document:** `{display_name}`\n\n"
             f"{analysis}"
-            f"{build_asset_archive_prompt('document')}"
+            f"{build_asset_archive_prompt('document') if archive_available else ''}"
         )
         metadata = {
             "transport": "matrix",
@@ -123,6 +134,7 @@ class MatrixDocumentTurnService:
         user_log = (
             f"[USER_UPLOADED_FILE]: {display_name}\n"
             f"[FILE PATH]: {asset.path}\n"
+            f"[USER_CAPTION]: {asset.caption}\n"
             "[ANALYSIS]: "
             f"{format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, analysis[:500])}\n"
             "[CONTENT_SOURCE]: uploaded_document"
@@ -142,16 +154,17 @@ class MatrixDocumentTurnService:
             metadata=metadata,
             db_path=self._conversation_db_path,
         )
-        init_pending_assets_table()
-        create_pending_asset_archive(
-            channel="matrix",
-            asset_type="document",
-            file_path=str(asset.path),
-            filename=display_name,
-            analysis=analysis[:500],
-            caption="",
-            external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
-        )
+        if archive_available:
+            init_pending_assets_table()
+            create_pending_asset_archive(
+                channel="matrix",
+                asset_type="document",
+                file_path=str(asset.path),
+                filename=display_name,
+                analysis=analysis[:500],
+                caption=asset.caption,
+                external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
+            )
         self._run_hook(self._on_user_persisted, saved_user)
         self._run_hook(
             self._on_exchange_completed,

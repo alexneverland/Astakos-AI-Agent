@@ -1281,7 +1281,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     try:
         from memory.pending_assets import (
             clear_expired_pending_assets,
-            get_latest_pending_asset,
+            get_latest_pending_asset_any,
             mark_pending_asset_confirmed,
             mark_pending_asset_cancelled,
             classify_pending_asset_reply,
@@ -1289,9 +1289,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         )
         clear_expired_pending_assets()
         from memory.pending_assets import is_reply_to_recent_asset_prompt
-        pending_photo_asset = get_latest_pending_asset("web", "photo")
-        pending_doc_asset = get_latest_pending_asset("web", "document")
-        pending_asset = None if routine_action_consumed else (pending_photo_asset or pending_doc_asset)
+        pending_asset = None if routine_action_consumed else get_latest_pending_asset_any("web")
         reply_kind = classify_pending_asset_reply(user_input) if pending_asset else None
         asset_prompt_active = is_reply_to_recent_asset_prompt("web") if pending_asset else False
 
@@ -1964,25 +1962,23 @@ def _looks_like_recent_asset_followup(text: str) -> bool:
     return any(m in t for m in short_followup_markers)
 
 def _read_document_text_for_analysis(file_path: str, file_ext: str) -> str:
-    doc_text = ""
-    try:
-        if file_ext in (".txt", ".csv", ".json", ".py", ".md", ".log"):
-            from core.utils import extract_text_preview
-            doc_text = _prepare_document_excerpt(extract_text_preview(file_path, max_chars=16000))
-        elif file_ext == ".pdf":
-            from core.utils import extract_pdf_preview
-            doc_text = _prepare_document_excerpt(extract_pdf_preview(file_path, max_chars=16000))
-        elif file_ext in (".docx",):
-            from core.utils import extract_docx_preview
-            doc_text = _prepare_document_excerpt(extract_docx_preview(file_path, max_chars=16000))
-        elif file_ext in (".xlsx", ".xls"):
-            from core.utils import extract_xlsx_preview
-            doc_text = _prepare_document_excerpt(extract_xlsx_preview(file_path, max_chars=16000))
-        else:
-            doc_text = t("api.server.unsupported_inline_type", file_ext=file_ext)
-    except Exception as read_err:
-        doc_text = t("api.server.unreadable_content", read_err=read_err)
-    return doc_text
+    from services.document_input import (
+        SUPPORTED_DOCUMENT_EXTENSIONS,
+        DocumentPreviewError,
+        ensure_document_preview_readable,
+        extract_document_preview,
+    )
+
+    if file_ext in SUPPORTED_DOCUMENT_EXTENSIONS:
+        return _prepare_document_excerpt(
+            extract_document_preview(file_path, max_chars=16000)
+        )
+    if file_ext in {".py", ".log"}:
+        from core.utils import extract_text_preview
+
+        preview = extract_text_preview(file_path, max_chars=16000)
+        return _prepare_document_excerpt(ensure_document_preview_readable(preview))
+    raise DocumentPreviewError(t("api.server.unsupported_inline_type", file_ext=file_ext))
 
 @server.post("/upload")
 async def upload_file(
@@ -2088,48 +2084,64 @@ async def upload_file(
                 user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
         elif file_ext in doc_exts:
             # We read the content of the document
-            doc_text = _read_document_text_for_analysis(file_path, file_ext)
-            from core.untrusted_content import (
-                USER_PROVIDED_ASSET_SOURCE,
-                format_untrusted_tool_result,
-            )
-            doc_text = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, doc_text)
+            from services.document_input import DocumentPreviewError
+
+            try:
+                doc_text = _read_document_text_for_analysis(file_path, file_ext)
+            except DocumentPreviewError as exc:
+                detailed_analysis = f"⚠️ {exc}"
+                memory_analysis = ""
+                chat_ai_msg = f"📄 **{file.filename}**\n\n{detailed_analysis}"
+                user_log_msg = (
+                    f"[USER_UPLOADED_FILE]: {filename}\n"
+                    f"[FILE PATH]: {file_path}\n"
+                    f"[USER_CAPTION]: {user_caption}\n"
+                    f"[DOCUMENT_ANALYSIS_UNAVAILABLE]: {exc}"
+                )
+                doc_text = None
+
+            if doc_text is not None:
+                from core.untrusted_content import (
+                    USER_PROVIDED_ASSET_SOURCE,
+                    format_untrusted_tool_result,
+                )
+                doc_text = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, doc_text)
 
             # We send to the LLM for summary/analysis
-            from memory.conversation_history import build_asset_context_text
-            conversation_context = build_asset_context_text("web")
+                from memory.conversation_history import build_asset_context_text
+                conversation_context = build_asset_context_text("web")
 
-            caption_text = user_caption or t("api.server.no_caption_provided")
+                caption_text = user_caption or t("api.server.no_caption_provided")
 
-            from core.i18n import load_prompt
-            sum_prompt = load_prompt("web_document_context.md").format(
-                conversation_context=conversation_context or "No recent context exists.",
-                caption_text=caption_text,
-                summary_rules=t('api.server.summary_rules'),
-                file_filename=file.filename,
-                doc_text=doc_text
-            )
-            from langchain_core.messages import HumanMessage as _HM
-            sum_resp = safe_llm_invoke(llm, [_HM(content=sum_prompt)])
-            detailed_analysis = clean_message(sum_resp.content).strip() if sum_resp and sum_resp.content else t("api.server.analysis_failed")
-            memory_analysis = detailed_analysis[:500]
+                from core.i18n import load_prompt
+                sum_prompt = load_prompt("web_document_context.md").format(
+                    conversation_context=conversation_context or "No recent context exists.",
+                    caption_text=caption_text,
+                    summary_rules=t('api.server.summary_rules'),
+                    file_filename=file.filename,
+                    doc_text=doc_text
+                )
+                from langchain_core.messages import HumanMessage as _HM
+                sum_resp = safe_llm_invoke(llm, [_HM(content=sum_prompt)])
+                detailed_analysis = clean_message(sum_resp.content).strip() if sum_resp and sum_resp.content else t("api.server.analysis_failed")
+                memory_analysis = detailed_analysis[:500]
 
-            asset_label = t("api.server.asset_text") if is_virtual_paste else t("api.server.asset_doc")
+                asset_label = t("api.server.asset_text") if is_virtual_paste else t("api.server.asset_doc")
 
-            chat_ai_msg = (
-                f"📄 **{asset_label}:** `{file.filename}`\n\n" +
-                f"{detailed_analysis}\n\n" +
-                t("api.server.save_prompt").split("\n")[0] + "\n" +
-                t("api.server.save_prompt").split("\n")[1]
-            )
-            source_tag = "pasted_text" if is_virtual_paste else "uploaded_document"
-            user_log_msg = (
-                f"[USER_UPLOADED_FILE]: {filename}\n" +
-                f"[FILE PATH]: {file_path}\n" +
-                f"[USER_CAPTION]: {user_caption}\n" +
-                t("api.server.visual_analysis_prefix", memory_analysis=memory_analysis) +
-                f"[CONTENT_SOURCE]: {source_tag}"
-            )
+                chat_ai_msg = (
+                    f"📄 **{asset_label}:** `{file.filename}`\n\n" +
+                    f"{detailed_analysis}\n\n" +
+                    t("api.server.save_prompt").split("\n")[0] + "\n" +
+                    t("api.server.save_prompt").split("\n")[1]
+                )
+                source_tag = "pasted_text" if is_virtual_paste else "uploaded_document"
+                user_log_msg = (
+                    f"[USER_UPLOADED_FILE]: {filename}\n" +
+                    f"[FILE PATH]: {file_path}\n" +
+                    f"[USER_CAPTION]: {user_caption}\n" +
+                    t("api.server.visual_analysis_prefix", memory_analysis=memory_analysis) +
+                    f"[CONTENT_SOURCE]: {source_tag}"
+                )
         else:
             memory_analysis = t("api.server.memory_analysis_format", file_ext=file_ext, filename=file.filename)
             detailed_analysis = t("api.server.detailed_analysis_format", file_ext=file_ext)
@@ -3166,11 +3178,11 @@ async def upload_to_drive_endpoint(request: Request, _=Depends(require_token)):
     """Uploads a local file to Google Drive, returns the shareable URL."""
     try:
         body     = await request.json()
-        from config import UPLOADS_DIR
+        from config import DOCUMENTS_DIR, UPLOADS_DIR
 
         filepath = resolve_allowed_file(
             body.get("path"),
-            (PHOTOS_DIR, UPLOADS_DIR),
+            (PHOTOS_DIR, UPLOADS_DIR, DOCUMENTS_DIR),
         )
         if not filepath:
             return JSONResponse({"ok": False, "error": t("api.server.file_not_found")}, status_code=404)

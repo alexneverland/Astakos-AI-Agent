@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import memory.pending_assets as pending_assets
+import services.pending_asset_confirmation as confirmation_module
 from clients.matrix_media import MatrixMediaAsset
 from memory.conversation_history import load_messages
 from services.matrix_document_turn import MatrixDocumentTurnService
@@ -81,16 +82,15 @@ async def test_document_analysis_is_persisted_and_staged_only_for_matrix(
         confirm_reply="Αποθηκεύτηκε.",
         cancel_reply="Δεν αποθηκεύτηκε.",
     )
+    documents_dir = tmp_path / "documents_archive"
+    monkeypatch.setattr(confirmation_module, "DOCUMENTS_DIR", str(documents_dir))
     assert await confirmation("ναι", "$confirm-1") == "Αποθηκεύτηκε."
-    assert saved_assets == [
-        {
-            "memory_type": "document",
-            "file_path": str(document_path),
-            "analysis": "Περιέχει τα βασικά οικονομικά στοιχεία.",
-            "caption": "reportfinal.pdf",
-            "external_content_sources": ["user_provided_asset"],
-        }
-    ]
+    assert saved_assets[0]["memory_type"] == "document"
+    assert Path(saved_assets[0]["file_path"]).parent == documents_dir.resolve()
+    assert Path(saved_assets[0]["file_path"]).read_bytes() == b"pdf"
+    assert saved_assets[0]["analysis"] == "Περιέχει τα βασικά οικονομικά στοιχεία."
+    assert saved_assets[0]["caption"] == "reportfinal.pdf"
+    assert saved_assets[0]["external_content_sources"] == ["user_provided_asset"]
     assert pending_assets.get_latest_pending_asset("matrix", "document") is None
 
 
@@ -131,3 +131,69 @@ async def test_non_file_asset_is_rejected(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="file asset"):
         await service(asset)
+
+
+@pytest.mark.asyncio
+async def test_matrix_document_caption_is_preserved_for_analysis_and_archive(
+    tmp_path, monkeypatch
+) -> None:
+    conversation_db = str(tmp_path / "conversation.db")
+    monkeypatch.setattr(pending_assets, "STATE_DB", str(tmp_path / "state.db"))
+    document_path = tmp_path / "report.pdf"
+    document_path.write_bytes(b"pdf")
+    asset = MatrixMediaAsset(
+        event_id="$captioned-document",
+        kind="file",
+        path=document_path,
+        mime_type="application/pdf",
+        original_name="report.pdf",
+        caption="Έλεγξε ιδιαίτερα τα σύνολα.",
+    )
+    seen_captions: list[str] = []
+
+    def analyze(item: MatrixMediaAsset) -> str:
+        seen_captions.append(item.caption)
+        return "Τα σύνολα ελέγχθηκαν."
+
+    service = MatrixDocumentTurnService(
+        analyze_document=analyze,
+        conversation_db_path=conversation_db,
+    )
+
+    await service(asset)
+
+    pending = pending_assets.get_latest_pending_asset("matrix", "document")
+    assert seen_captions == ["Έλεγξε ιδιαίτερα τα σύνολα."]
+    assert pending is not None
+    assert pending["caption"] == "Έλεγξε ιδιαίτερα τα σύνολα."
+
+
+@pytest.mark.asyncio
+async def test_unreadable_matrix_document_does_not_create_archive_prompt(
+    tmp_path, monkeypatch
+) -> None:
+    from services.document_input import DocumentPreviewError
+
+    monkeypatch.setattr(pending_assets, "STATE_DB", str(tmp_path / "state.db"))
+    pending_assets.init_pending_assets_table()
+    path = tmp_path / "broken.pdf"
+    path.write_bytes(b"broken")
+    asset = MatrixMediaAsset(
+        "$broken",
+        "file",
+        path,
+        "application/pdf",
+        "broken.pdf",
+    )
+    service = MatrixDocumentTurnService(
+        analyze_document=lambda _: (_ for _ in ()).throw(
+            DocumentPreviewError("The PDF is unreadable.")
+        ),
+        conversation_db_path=str(tmp_path / "conversation.db"),
+    )
+
+    reply = await service(asset)
+
+    assert "unreadable" in reply
+    assert not pending_assets.looks_like_asset_confirmation_prompt(reply)
+    assert pending_assets.get_latest_pending_asset("matrix", "document") is None

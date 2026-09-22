@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from services.document_input import (
+    DocumentPreviewError,
     SUPPORTED_DOCUMENT_EXTENSIONS,
     extract_document_preview,
 )
@@ -54,3 +55,13 @@ def test_unsupported_document_suffix_is_rejected(tmp_path) -> None:
 def test_missing_document_is_rejected(tmp_path) -> None:
     with pytest.raises(FileNotFoundError):
         extract_document_preview(tmp_path / "missing.pdf")
+
+
+def test_malformed_document_raises_preview_error_instead_of_returning_error_text(
+    tmp_path,
+) -> None:
+    path = tmp_path / "broken.pdf"
+    path.write_bytes(b"not-a-pdf")
+
+    with pytest.raises(DocumentPreviewError):
+        extract_document_preview(path)

@@ -65,6 +65,41 @@ def test_pasted_text_upload_reaches_document_summary_without_unbound_error(clien
         }
         assert any(call.args[2] == "" for call in mock_fast_queue.call_args_list)
 
+
+def test_unreadable_web_document_is_not_summarized_or_offered_for_archive(
+    client, tmp_path
+):
+    from services.document_input import DocumentPreviewError
+    from memory.pending_assets import looks_like_asset_confirmation_prompt
+
+    mock_uploads_dir = tmp_path / "uploads"
+    mock_uploads_dir.mkdir()
+    headers = {"Authorization": f"Bearer {LOCAL_TOKEN}"}
+    with patch("config.UPLOADS_DIR", str(mock_uploads_dir)), \
+         patch(
+             "api.server._read_document_text_for_analysis",
+             side_effect=DocumentPreviewError("The PDF is unreadable."),
+         ), \
+         patch("api.server.safe_llm_invoke") as mock_invoke, \
+         patch("api.server.append_to_chat_history"), \
+         patch("api.server.enqueue_fast_task"), \
+         patch("api.server.enqueue_slow_task"), \
+         patch("memory.pending_assets.create_pending_asset_archive") as create_pending:
+        response = client.post(
+            "/upload",
+            files={"file": ("broken.pdf", b"broken", "application/pdf")},
+            data={"message": "Read this"},
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert "unreadable" in body["ai_message"]
+    assert not looks_like_asset_confirmation_prompt(body["ai_message"])
+    mock_invoke.assert_not_called()
+    create_pending.assert_not_called()
+
 def test_lifespan_timeout_race(monkeypatch):
     import asyncio
     import time

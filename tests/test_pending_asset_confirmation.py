@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -50,8 +51,8 @@ def _prepare_confirmed_photo(
     monkeypatch.setattr(confirmation_module, "PHOTOS_DIR", str(photos_dir), raising=False)
     monkeypatch.setattr(
         confirmation_module,
-        "get_latest_pending_asset",
-        lambda channel, asset_type: pending if asset_type == "photo" else None,
+        "get_latest_pending_asset_any",
+        lambda channel: pending,
     )
     monkeypatch.setattr(confirmation_module, "init_pending_assets_table", lambda: None)
     monkeypatch.setattr(confirmation_module, "clear_expired_pending_assets", lambda: None)
@@ -210,3 +211,205 @@ async def test_rejected_photo_index_returns_retry_reply_and_remains_pending(
 
     assert response == "Δεν αποθηκεύτηκε· δοκίμασε ξανά."
     assert confirmed == []
+
+
+@pytest.mark.asyncio
+async def test_confirmed_document_is_copied_to_common_document_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_dir = tmp_path / "matrix_media"
+    source_dir.mkdir()
+    source = source_dir / "matrix_report.pdf"
+    source.write_bytes(b"document-bytes")
+    documents_dir = tmp_path / "documents_archive"
+    memory = _RecordingMemory()
+    confirmed: list[int] = []
+    pending = {
+        "id": 23,
+        "asset_type": "document",
+        "file_path": str(source),
+        "filename": "quarterly-report.pdf",
+        "analysis": "Quarterly report",
+        "caption": "Report",
+        "external_content_sources": ["user_provided_asset"],
+    }
+    monkeypatch.setattr(
+        confirmation_module, "DOCUMENTS_DIR", str(documents_dir), raising=False
+    )
+    monkeypatch.setattr(
+        confirmation_module,
+        "get_latest_pending_asset_any",
+        lambda channel: pending,
+        raising=False,
+    )
+    monkeypatch.setattr(confirmation_module, "init_pending_assets_table", lambda: None)
+    monkeypatch.setattr(confirmation_module, "clear_expired_pending_assets", lambda: None)
+    monkeypatch.setattr(confirmation_module, "classify_pending_asset_reply", lambda _: "yes")
+    monkeypatch.setattr(
+        confirmation_module,
+        "is_reply_to_recent_asset_prompt",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        confirmation_module,
+        "mark_pending_asset_confirmed",
+        lambda asset_id: confirmed.append(asset_id),
+    )
+    monkeypatch.setattr(confirmation_module, "append_message", lambda **kwargs: kwargs)
+    service = PendingAssetConfirmationService(
+        channel="matrix",
+        memory_store=memory,
+        confirm_reply="Saved.",
+        cancel_reply="Cancelled.",
+        conversation_db_path=str(tmp_path / "conversation.db"),
+    )
+
+    assert await service("yes", "$confirm-document") == "Saved."
+
+    saved_path = Path(memory.saved[0]["file_path"])
+    assert confirmed == [23]
+    assert saved_path.parent == documents_dir.resolve()
+    assert saved_path.name.startswith("document_")
+    assert saved_path.suffix == ".pdf"
+    assert saved_path.read_bytes() == b"document-bytes"
+    assert source.read_bytes() == b"document-bytes"
+    assert memory.saved[0]["caption"] == "quarterly-report.pdf — Report"
+
+
+def test_retrieve_document_returns_original_archived_file_without_embeddings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools import system
+
+    document = tmp_path / "document_abc.pdf"
+    document.write_bytes(b"report")
+    index_path = tmp_path / "astakos_docs_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "file_path": str(document),
+                    "caption": "Quarterly logistics report",
+                    "summary": "Warehouse performance and deliveries",
+                    "date": "2026-09-22",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(system, "DOCS_INDEX_FILE", str(index_path), raising=False)
+    monkeypatch.setattr(
+        system.embeddings,
+        "embed_query",
+        lambda _: (_ for _ in ()).throw(
+            EmbeddingsProviderSetupRequired("offline", provider="offline-test")
+        ),
+    )
+
+    result = system.retrieve_document.func("logistics report")
+
+    assert "Quarterly logistics report" in result
+    assert f"[CREATED_FILE: {document}]" in result
+
+
+@pytest.mark.parametrize(
+    ("query", "description"),
+    [
+        ("missing annual budget", "Quarterly logistics report | Warehouse deliveries"),
+        ("missing document", "Quarterly logistics report | Warehouse deliveries"),
+        ("annual budget", "Annual logistics report | Warehouse deliveries"),
+    ],
+)
+def test_retrieve_document_does_not_deliver_unrelated_semantic_neighbor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    query: str,
+    description: str,
+) -> None:
+    from tools import system
+
+    unrelated = tmp_path / "quarterly-logistics.pdf"
+    unrelated.write_bytes(b"report")
+    monkeypatch.setattr(system, "DOCS_INDEX_FILE", str(tmp_path / "no-index.json"))
+    monkeypatch.setattr(system.embeddings, "embed_query", lambda _: [0.1, 0.2])
+    monkeypatch.setattr(
+        system.vector_memory,
+        "safe_similarity_search",
+        lambda *args, **kwargs: [
+            SimpleNamespace(
+                page_content=f"[DOCUMENT]: {description}",
+                metadata={"file_path": str(unrelated)},
+            )
+        ],
+    )
+
+    result = system.retrieve_document.func(query)
+
+    assert result == "System: Document not found."
+    assert "[CREATED_FILE:" not in result
+
+
+def test_retrieve_document_skips_unrelated_neighbor_for_relevant_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools import system
+
+    unrelated = tmp_path / "logistics.pdf"
+    relevant = tmp_path / "budget.pdf"
+    unrelated.write_bytes(b"logistics")
+    relevant.write_bytes(b"budget")
+    monkeypatch.setattr(system, "DOCS_INDEX_FILE", str(tmp_path / "no-index.json"))
+    monkeypatch.setattr(system.embeddings, "embed_query", lambda _: [0.1, 0.2])
+    monkeypatch.setattr(
+        system.vector_memory,
+        "safe_similarity_search",
+        lambda *args, **kwargs: [
+            SimpleNamespace(
+                page_content="[DOCUMENT]: Annual logistics report | Warehouse deliveries",
+                metadata={"file_path": str(unrelated)},
+            ),
+            SimpleNamespace(
+                page_content="[DOCUMENT]: Annual budget | Operating expenses",
+                metadata={"file_path": str(relevant)},
+            ),
+        ],
+    )
+
+    result = system.retrieve_document.func("annual budget")
+
+    assert f"[CREATED_FILE: {relevant}]" in result
+    assert str(unrelated) not in result
+
+
+def test_retrieve_document_lexical_fallback_rejects_partial_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools import system
+
+    unrelated = tmp_path / "annual-logistics.pdf"
+    unrelated.write_bytes(b"logistics")
+    index_path = tmp_path / "documents-index.json"
+    index_path.write_text(
+        json.dumps([{
+            "file_path": str(unrelated),
+            "caption": "Annual logistics report",
+            "summary": "Warehouse deliveries",
+        }]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(system, "DOCS_INDEX_FILE", str(index_path))
+    monkeypatch.setattr(
+        system.embeddings,
+        "embed_query",
+        lambda _: (_ for _ in ()).throw(
+            EmbeddingsProviderSetupRequired("offline", provider="offline-test")
+        ),
+    )
+
+    result = system.retrieve_document.func("annual budget")
+
+    assert result == "System: Document not found."

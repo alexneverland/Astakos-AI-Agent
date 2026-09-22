@@ -11,12 +11,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from config import CONVERSATION_DB_FILE, PHOTOS_DIR
+from config import CONVERSATION_DB_FILE, DOCUMENTS_DIR, PHOTOS_DIR
 from memory.conversation_history import append_message
 from memory.pending_assets import (
     classify_pending_asset_reply,
     clear_expired_pending_assets,
-    get_latest_pending_asset,
+    get_latest_pending_asset_any,
     init_pending_assets_table,
     is_reply_to_recent_asset_prompt,
     mark_pending_asset_cancelled,
@@ -79,17 +79,73 @@ def _canonical_photo_archive_path(file_path: str) -> str:
     return str(target)
 
 
+def _canonical_document_archive_path(file_path: str) -> str:
+    """Copy a confirmed document into the shared permanent document directory."""
+    source = Path(file_path).resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"Confirmed document does not exist: {source}")
+
+    archive_dir = Path(DOCUMENTS_DIR).resolve()
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    if source.parent == archive_dir:
+        return str(source)
+
+    digest = hashlib.sha256()
+    with source.open("rb") as source_file:
+        for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+
+    suffix = source.suffix.lower()
+    if (
+        len(suffix) <= 1
+        or len(suffix) > 10
+        or any(not (character.isascii() and character.isalnum()) for character in suffix[1:])
+    ):
+        suffix = ".bin"
+    target = archive_dir / f"document_{digest.hexdigest()[:24]}{suffix}"
+    if target.is_file():
+        return str(target)
+
+    temporary_path: Path | None = None
+    try:
+        with source.open("rb") as source_file, tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=archive_dir,
+            prefix=".document-",
+            suffix=".part",
+            delete=False,
+        ) as temporary_file:
+            shutil.copyfileobj(source_file, temporary_file)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+            temporary_path = Path(temporary_file.name)
+        os.replace(temporary_path, target)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return str(target)
+
+
 def save_confirmed_asset(memory_store: Any, pending: dict[str, Any]) -> Any:
     """Persist one confirmed asset through the canonical channel-neutral path."""
     try:
         archive_path = pending["file_path"]
+        caption = str(pending.get("caption") or "").strip()
         if pending["asset_type"] == "photo":
             archive_path = _canonical_photo_archive_path(archive_path)
+        elif pending["asset_type"] == "document":
+            archive_path = _canonical_document_archive_path(archive_path)
+            filename = str(pending.get("filename") or Path(archive_path).name).strip()
+            if caption and caption != filename:
+                caption = f"{filename} — {caption}"
+            else:
+                caption = filename
         saved = memory_store.save(
             memory_type=pending["asset_type"],
             file_path=archive_path,
             analysis=pending.get("analysis", ""),
-            caption=pending.get("caption", "") or pending["filename"],
+            caption=caption or pending["filename"],
             external_content_sources=pending.get("external_content_sources", []),
         )
     except Exception as exc:
@@ -178,9 +234,7 @@ class PendingAssetConfirmationService:
         """Confirm/cancel a recent channel-local asset prompt, or decline handling."""
         init_pending_assets_table()
         clear_expired_pending_assets()
-        pending = get_latest_pending_asset(self._channel, "photo")
-        if pending is None:
-            pending = get_latest_pending_asset(self._channel, "document")
+        pending = get_latest_pending_asset_any(self._channel)
         if pending is None:
             return None
 

@@ -1068,7 +1068,13 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         try:
             doc_text = extract_document_preview(local_path, max_chars=8000)
         except Exception as read_err:
-            doc_text = f"[Could not read content: {read_err}]"
+            from services.document_input import DocumentPreviewError
+
+            if isinstance(read_err, DocumentPreviewError):
+                send_telegram_msg(f"⚠️ {read_err}")
+                return
+            send_telegram_msg(t("api.server.document_download_failed"))
+            return
 
         from core.untrusted_content import (
             USER_PROVIDED_ASSET_SOURCE,
@@ -2502,7 +2508,7 @@ def handle_message(
     # ── PENDING ASSET CONFIRMATION ──────────────────────────────
     from memory.pending_assets import (
         clear_expired_pending_assets,
-        get_latest_pending_asset,
+        get_latest_pending_asset_any,
         mark_pending_asset_confirmed,
         mark_pending_asset_cancelled,
         create_pending_asset_archive,
@@ -2511,9 +2517,7 @@ def handle_message(
     )
     clear_expired_pending_assets()
     from memory.pending_assets import is_reply_to_recent_asset_prompt
-    pending_photo_asset = get_latest_pending_asset("telegram", "photo")
-    pending_doc_asset = get_latest_pending_asset("telegram", "document")
-    pending_asset = None if routine_action_consumed else (pending_photo_asset or pending_doc_asset)
+    pending_asset = None if routine_action_consumed else get_latest_pending_asset_any("telegram")
     reply_kind = classify_pending_asset_reply(clean_user_text) if pending_asset else None
     asset_prompt_active = is_reply_to_recent_asset_prompt("telegram") if pending_asset else False
 

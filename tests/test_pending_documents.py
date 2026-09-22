@@ -82,3 +82,62 @@ def test_document_pending_flow():
         status = cur.fetchone()[0]
         assert status == "confirmed"
         conn.close()
+
+
+@pytest.mark.asyncio
+async def test_confirmation_uses_newest_asset_across_photo_and_document(
+    tmp_path, monkeypatch
+) -> None:
+    import memory.pending_assets as pending_assets
+    from memory.conversation_history import append_message
+    from pathlib import Path
+    from services.pending_asset_confirmation import (
+        PendingAssetConfirmationService,
+        build_asset_archive_prompt,
+    )
+
+    monkeypatch.setattr(pending_assets, "STATE_DB", str(tmp_path / "state.db"))
+    conversation_db = str(tmp_path / "conversation.db")
+    pending_assets.init_pending_assets_table()
+    photo = tmp_path / "photo.jpg"
+    document = tmp_path / "latest.pdf"
+    photo.write_bytes(b"photo")
+    document.write_bytes(b"document")
+    pending_assets.create_pending_asset_archive(
+        channel="matrix",
+        asset_type="photo",
+        file_path=str(photo),
+        filename=photo.name,
+        analysis="photo",
+    )
+    pending_assets.create_pending_asset_archive(
+        channel="matrix",
+        asset_type="document",
+        file_path=str(document),
+        filename=document.name,
+        analysis="document",
+    )
+    append_message(
+        role="assistant",
+        content=build_asset_archive_prompt("document"),
+        channel="matrix",
+        db_path=conversation_db,
+    )
+    saved: list[dict] = []
+
+    class Memory:
+        def save(self, **kwargs):
+            saved.append(kwargs)
+            return True
+
+    service = PendingAssetConfirmationService(
+        channel="matrix",
+        memory_store=Memory(),
+        confirm_reply="saved",
+        cancel_reply="cancelled",
+        conversation_db_path=conversation_db,
+    )
+
+    assert await service("yes", "$confirm") == "saved"
+    assert saved[0]["memory_type"] == "document"
+    assert Path(saved[0]["file_path"]).read_bytes() == b"document"

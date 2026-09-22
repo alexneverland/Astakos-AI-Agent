@@ -46,13 +46,14 @@ WORKSPACE_DIR     = os.path.join(BASE_DIR, "astakos_skills")
 PHOTOS_DIR        = os.path.join(BASE_DIR, "telegram_photos")
 CHROMA_DB_DIR     = os.path.join(BASE_DIR, "chroma_db")
 UPLOADS_DIR       = os.path.join(BASE_DIR, "telegram_uploads")  # ← main uploads folder
+DOCUMENTS_DIR     = os.path.join(BASE_DIR, "outputs", "documents_archive")
 MEMORY_AUDIT_DIR  = os.path.join(BASE_DIR, "logs", "memory_audit")
 WATCH_DIR         = os.path.join(BASE_DIR, "watch_folder")
 CREDENTIALS_DIR   = os.path.join(BASE_DIR, "credentials")
 TOKEN_PATH        = os.path.join(CREDENTIALS_DIR, "token.json")
 CREDENTIALS_PATH  = os.path.join(CREDENTIALS_DIR, "credentials.json")
 
-for directory in [WORKSPACE_DIR, PHOTOS_DIR, CHROMA_DB_DIR, UPLOADS_DIR, MEMORY_AUDIT_DIR, WATCH_DIR, CREDENTIALS_DIR]:
+for directory in [WORKSPACE_DIR, PHOTOS_DIR, CHROMA_DB_DIR, UPLOADS_DIR, DOCUMENTS_DIR, MEMORY_AUDIT_DIR, WATCH_DIR, CREDENTIALS_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # ==========================================
