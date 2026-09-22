@@ -2151,8 +2151,8 @@ async def upload_file(
         append_to_chat_history("assistant", chat_ai_msg, metadata=asset_metadata)
         print("[Security]: upload-derived reply - use trusted user text only for background state")
         enqueue_fast_task(log_exchange, user_caption, "", "Chat_Agent", "web")
-        enqueue_fast_task(update_working_memory, user_caption, "")
-        enqueue_fast_task(_enqueue_slow_memory_sifter, user_caption, "", "Chat_Agent", "web", None, True)
+        enqueue_fast_task(update_working_memory, user_caption, "", [USER_PROVIDED_ASSET_SOURCE])
+        enqueue_fast_task(_enqueue_slow_memory_sifter, user_caption, "", "Chat_Agent", "web", {USER_PROVIDED_ASSET_SOURCE}, True)
         enqueue_slow_task(_enqueue_followup_pipeline, user_caption, "", "Chat_Agent", "web")
         enqueue_slow_task(extract_and_update_context_flags, user_caption, "", "web")
 

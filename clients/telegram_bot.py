@@ -1117,8 +1117,8 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
             append_message("assistant", chat_ai_msg, "telegram", agent="Chat_Agent", metadata=asset_metadata, timestamp=now)
             print("[Security]: upload-derived reply - use trusted user text only for background state")
             enqueue_fast_task(log_exchange, caption or "", "", "Chat_Agent", "telegram")
-            enqueue_fast_task(update_working_memory, caption or "", "")
-            enqueue_fast_task(_enqueue_slow_memory_sifter, caption or "", "", "Chat_Agent", "telegram", None, True)
+            enqueue_fast_task(update_working_memory, caption or "", "", [USER_PROVIDED_ASSET_SOURCE])
+            enqueue_fast_task(_enqueue_slow_memory_sifter, caption or "", "", "Chat_Agent", "telegram", {USER_PROVIDED_ASSET_SOURCE}, True)
             enqueue_slow_task(_enqueue_followup_pipeline, caption or "", "", "Chat_Agent", "telegram")
             enqueue_slow_task(extract_and_update_context_flags, caption or "", "")
         except Exception as e:
@@ -1470,8 +1470,8 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     if external_content_sources:
         print("[Security]: external-derived photo reply - use trusted user text only for background state")
         enqueue_fast_task(log_exchange, question or "", "", handling_agent, "telegram")
-        enqueue_fast_task(update_working_memory, question or "", "")
-        enqueue_fast_task(_enqueue_slow_memory_sifter, question or "", "", handling_agent, "telegram", None, True)
+        enqueue_fast_task(update_working_memory, question or "", "", external_content_sources)
+        enqueue_fast_task(_enqueue_slow_memory_sifter, question or "", "", handling_agent, "telegram", set(external_content_sources), True)
         enqueue_slow_task(_enqueue_followup_pipeline, question or "", "", handling_agent, "telegram")
         enqueue_slow_task(extract_and_update_context_flags, question or "", "")
     else:

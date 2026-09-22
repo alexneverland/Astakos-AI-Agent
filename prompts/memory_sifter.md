@@ -35,6 +35,7 @@ RULES:
 11. Content with [CONTENT_SOURCE] or untrusted documents is reference material, NOT a fact about the user.
 12. DO NOT save live navigation calculations, distances, ETA. These are ephemeral -> EMPTY.
 13. Output MUST be ONLY valid, parseable JSON. Do not include markdown codeblocks (```json) or any conversational text. Just the raw JSON array.
+14. DO NOT extract scenes, people, or activities depicted in shared photos ([USER_UPLOADED_PHOTO] or [PHOTO PATH]) as live user or family events happening today ("On {today_date}, ..."). A photograph depicts visual content from when the photo was taken, NOT a real-time event taking place today, unless the user explicitly stated so in their text message. Photo memories belong under "photos" ([PHOTO]), never as live [USER_FACT] events.
 
 {recent_context_block}
 [CURRENT EXCHANGE — here and ONLY here extract new facts]

@@ -110,11 +110,24 @@ class MatrixTurnService:
         return reply
 
     @staticmethod
-    def _run_hook(hook: Callable[..., None] | None, *args: Any) -> None:
+    def _run_hook(hook: Callable[..., None] | None, *args: Any, **kwargs: Any) -> None:
         """Keep an optional background hook failure from losing the reply."""
         if hook is None:
             return
         try:
+            if kwargs:
+                import inspect
+                try:
+                    sig = inspect.signature(hook)
+                    has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+                    if has_var_kw:
+                        hook(*args, **kwargs)
+                        return
+                    accepted_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+                    hook(*args, **accepted_kwargs)
+                    return
+                except (ValueError, TypeError):
+                    pass
             hook(*args)
         except Exception as exc:
             print(f"[MatrixTurn]: post-turn hook failed: {type(exc).__name__}")
@@ -328,12 +341,14 @@ class MatrixTurnService:
             metadata=assistant_metadata,
             db_path=self._conversation_db_path,
         )
+        external_sources = [USER_PROVIDED_ASSET_SOURCE] if external_derived else None
         self._run_hook(
             self._on_exchange_completed,
             clean_user_text,
             "" if external_derived else visible_reply,
             handling_agent,
             "matrix",
+            external_content_sources=external_sources,
         )
         if created_files.paths:
             return MatrixReply(

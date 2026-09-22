@@ -404,6 +404,7 @@ def format_model_history_content(
     model_content = (
         f"[USER_UPLOADED_PHOTO]: {filename[:255]}\n"
         f"[PHOTO PATH]: {file_path[:1024]}\n"
+        "[ASSET NOTE]: This describes visual content captured in a shared photo file, not an ongoing real-time event.\n"
         f"[ANALYSIS]: {analysis[:8000]}\n"
         f"Question: {str(content or '')}"
     )

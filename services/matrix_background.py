@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -94,6 +94,7 @@ class MatrixBackgroundHooks:
         ai_text: str,
         agent_name: str,
         channel: str,
+        external_content_sources: Iterable[str] | None = None,
     ) -> None:
         """Queue the same memory, follow-up, and context pipelines as other channels."""
         if channel != "matrix":
@@ -106,27 +107,50 @@ class MatrixBackgroundHooks:
             agent_name,
             channel,
         )
-        self._enqueue_fast_task(update_working_memory, user_text, ai_text)
-        self._enqueue_fast_task(
-            run_slow_memory_pipeline,
-            user_text,
-            ai_text,
-            agent_name,
-            channel,
-            self._enqueue_slow_task,
-        )
-        self._enqueue_slow_task(
-            run_followup_pipeline,
-            user_text,
-            ai_text,
-            agent_name,
-            channel,
-        )
-        self._enqueue_slow_task(
-            extract_and_update_context_flags,
-            user_text,
-            ai_text,
-        )
+        if external_content_sources is not None:
+            self._enqueue_fast_task(
+                update_working_memory,
+                user_text,
+                ai_text,
+                external_content_sources,
+            )
+        else:
+            self._enqueue_fast_task(update_working_memory, user_text, ai_text)
+
+        if not external_content_sources:
+            self._enqueue_fast_task(
+                run_slow_memory_pipeline,
+                user_text,
+                ai_text,
+                agent_name,
+                channel,
+                self._enqueue_slow_task,
+            )
+            self._enqueue_slow_task(
+                run_followup_pipeline,
+                user_text,
+                ai_text,
+                agent_name,
+                channel,
+            )
+            self._enqueue_slow_task(
+                extract_and_update_context_flags,
+                user_text,
+                ai_text,
+            )
+        else:
+            self._enqueue_slow_task(
+                run_followup_pipeline,
+                user_text,
+                "",
+                agent_name,
+                channel,
+            )
+            self._enqueue_slow_task(
+                extract_and_update_context_flags,
+                user_text,
+                "",
+            )
 
 
 def build_matrix_turn_service(
