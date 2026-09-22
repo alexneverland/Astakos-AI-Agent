@@ -110,42 +110,97 @@ def test_session_memory_sifter_skips_direct_photo_fact_saving(monkeypatch: pytes
 def test_telegram_photo_turn_passes_external_sources_to_working_memory_and_sifter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Telegram photo turns pass external sources so foreground memory and sifter are skipped."""
+    """The production Telegram photo turn forwards asset provenance to background work."""
     import clients.telegram_bot as telegram_bot
 
     fast_tasks: list[tuple[Any, tuple[Any, ...]]] = []
     slow_tasks: list[tuple[Any, tuple[Any, ...]]] = []
 
+    class FakeTrace:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def process_event(self, _event: object) -> None:
+            pass
+
+        def finalize(self, **_kwargs: object) -> None:
+            pass
+
+        def save(self) -> None:
+            pass
+
     monkeypatch.setattr(telegram_bot, "enqueue_fast_task", lambda fn, *args: fast_tasks.append((fn, args)))
     monkeypatch.setattr(telegram_bot, "enqueue_slow_task", lambda fn, *args: slow_tasks.append((fn, args)))
+    monkeypatch.setattr(telegram_bot, "_load_shared_context_messages", lambda _channel: [])
+    monkeypatch.setattr(
+        telegram_bot.graph,
+        "stream",
+        lambda *_args, **_kwargs: iter([{
+            "Chat_Agent": {"messages": [AIMessage(content="I see Alexander in the snow.")]},
+        }]),
+    )
+    monkeypatch.setattr("memory.execution_trace.ExecutionTrace", FakeTrace)
+    monkeypatch.setattr(telegram_bot, "send_telegram_msg", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("memory.conversation_history.append_message", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        "memory.pending_assets.looks_like_asset_confirmation_prompt",
+        lambda _content: False,
+    )
 
-    # Simulate external sources check in handle_photo
-    external_sources = [USER_PROVIDED_ASSET_SOURCE]
     question = "Alexander in snow"
-    handling_agent = "Chat_Agent"
+    telegram_bot._process_photo_with_question(
+        "snow.jpg",
+        "C:/photos/snow.jpg",
+        "Alexander is playing in the snow.",
+        question,
+        "chat-1",
+    )
 
-    if external_sources:
-        telegram_bot.enqueue_fast_task(telegram_bot.log_exchange, question, "", handling_agent, "telegram")
-        telegram_bot.enqueue_fast_task(telegram_bot.update_working_memory, question, "", external_sources)
-        telegram_bot.enqueue_fast_task(
-            telegram_bot._enqueue_slow_memory_sifter,
-            question,
-            "",
-            handling_agent,
-            "telegram",
-            set(external_sources),
-            True,
-        )
-
-    # Verify update_working_memory was queued with external_sources
     wm_calls = [args for fn, args in fast_tasks if fn == telegram_bot.update_working_memory]
     assert len(wm_calls) == 1
-    assert wm_calls[0] == (question, "", external_sources)
+    assert wm_calls[0] == (question, "", {USER_PROVIDED_ASSET_SOURCE})
 
-    # Verify _enqueue_slow_memory_sifter was queued with external_sources set
     sifter_calls = [args for fn, args in fast_tasks if fn == telegram_bot._enqueue_slow_memory_sifter]
     assert len(sifter_calls) == 1
-    assert sifter_calls[0] == (question, "", handling_agent, "telegram", {USER_PROVIDED_ASSET_SOURCE}, True)
+    assert sifter_calls[0] == (
+        question,
+        "",
+        "Chat_Agent",
+        "telegram",
+        {USER_PROVIDED_ASSET_SOURCE},
+        True,
+    )
+
+
+@pytest.mark.parametrize(
+    "service_path",
+    [
+        "services.matrix_turn.MatrixTurnService",
+        "services.matrix_document_turn.MatrixDocumentTurnService",
+    ],
+)
+def test_matrix_hook_type_error_does_not_retry_without_asset_provenance(service_path: str) -> None:
+    """A hook that raises TypeError is not invoked again without provenance."""
+    from importlib import import_module
+
+    module_name, class_name = service_path.rsplit(".", 1)
+    service_class = getattr(import_module(module_name), class_name)
+    calls: list[dict[str, Any]] = []
+
+    def failing_hook(*_args: Any, **kwargs: Any) -> None:
+        calls.append(kwargs)
+        raise TypeError("hook failed internally")
+
+    service_class._run_hook(
+        failing_hook,
+        "user text",
+        "",
+        "Chat_Agent",
+        "matrix",
+        external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
+    )
+
+    assert calls == [{"external_content_sources": [USER_PROVIDED_ASSET_SOURCE]}]
 
 
 def test_matrix_turn_passes_external_sources_to_background_hooks(tmp_path) -> None:
