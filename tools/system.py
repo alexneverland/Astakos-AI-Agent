@@ -766,10 +766,27 @@ def retrieve_photo(query: str) -> str:
         return f"Error: Failed to retrieve photo: {str(e)}"
 
 
+def _document_query_match_score(query_tokens: list[str], description: str) -> int:
+    """Count query terms corroborated by document content, excluding its type marker."""
+    content = str(description or "").removeprefix("[DOCUMENT]:")
+    words = re.findall(
+        t("tools.system.greek_words_regex"),
+        _normalize_memory_query(content),
+    )
+    return sum(
+        any(word.startswith(_stem_token(token)) for word in words)
+        for token in set(query_tokens)
+    )
+
+
 @tool
 def retrieve_document(query: str) -> str:
     """Retrieve an archived document and return its original file for delivery."""
     try:
+        tokens = _memory_query_tokens(query)
+        if not tokens:
+            return "System: Document not found."
+        required_matches = min(2, len(set(tokens)))
         query_emb = None
         try:
             query_emb = embeddings.embed_query(query)
@@ -790,7 +807,12 @@ def retrieve_document(query: str) -> str:
                     )
                 for document in results:
                     file_path = str(document.metadata.get("file_path") or "")
-                    if file_path and os.path.isfile(file_path):
+                    if (
+                        file_path
+                        and os.path.isfile(file_path)
+                        and _document_query_match_score(tokens, document.page_content)
+                        >= required_matches
+                    ):
                         return (
                             f"Found archived document: {document.page_content}\n"
                             f"[CREATED_FILE: {file_path}]"
@@ -804,15 +826,12 @@ def retrieve_document(query: str) -> str:
         if os.path.exists(DOCS_INDEX_FILE):
             with open(DOCS_INDEX_FILE, "r", encoding="utf-8") as index_file:
                 index = json.load(index_file)
-            tokens = _memory_query_tokens(query)
             matches: list[tuple[int, int, dict]] = []
             for position, entry in enumerate(index if isinstance(index, list) else []):
-                candidate = _normalize_memory_query(
-                    f"{entry.get('caption', '')} {entry.get('summary', '')}"
-                )
-                score = sum(1 for token in tokens if _stem_token(token) in candidate)
+                candidate = f"{entry.get('caption', '')} {entry.get('summary', '')}"
+                score = _document_query_match_score(tokens, candidate)
                 file_path = str(entry.get("file_path") or "")
-                if score and os.path.isfile(file_path):
+                if score >= required_matches and os.path.isfile(file_path):
                     matches.append((score, position, entry))
             if matches:
                 _, _, entry = max(matches, key=lambda item: (item[0], item[1]))

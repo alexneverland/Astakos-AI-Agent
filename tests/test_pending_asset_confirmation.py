@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -311,3 +312,104 @@ def test_retrieve_document_returns_original_archived_file_without_embeddings(
 
     assert "Quarterly logistics report" in result
     assert f"[CREATED_FILE: {document}]" in result
+
+
+@pytest.mark.parametrize(
+    ("query", "description"),
+    [
+        ("missing annual budget", "Quarterly logistics report | Warehouse deliveries"),
+        ("missing document", "Quarterly logistics report | Warehouse deliveries"),
+        ("annual budget", "Annual logistics report | Warehouse deliveries"),
+    ],
+)
+def test_retrieve_document_does_not_deliver_unrelated_semantic_neighbor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    query: str,
+    description: str,
+) -> None:
+    from tools import system
+
+    unrelated = tmp_path / "quarterly-logistics.pdf"
+    unrelated.write_bytes(b"report")
+    monkeypatch.setattr(system, "DOCS_INDEX_FILE", str(tmp_path / "no-index.json"))
+    monkeypatch.setattr(system.embeddings, "embed_query", lambda _: [0.1, 0.2])
+    monkeypatch.setattr(
+        system.vector_memory,
+        "safe_similarity_search",
+        lambda *args, **kwargs: [
+            SimpleNamespace(
+                page_content=f"[DOCUMENT]: {description}",
+                metadata={"file_path": str(unrelated)},
+            )
+        ],
+    )
+
+    result = system.retrieve_document.func(query)
+
+    assert result == "System: Document not found."
+    assert "[CREATED_FILE:" not in result
+
+
+def test_retrieve_document_skips_unrelated_neighbor_for_relevant_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools import system
+
+    unrelated = tmp_path / "logistics.pdf"
+    relevant = tmp_path / "budget.pdf"
+    unrelated.write_bytes(b"logistics")
+    relevant.write_bytes(b"budget")
+    monkeypatch.setattr(system, "DOCS_INDEX_FILE", str(tmp_path / "no-index.json"))
+    monkeypatch.setattr(system.embeddings, "embed_query", lambda _: [0.1, 0.2])
+    monkeypatch.setattr(
+        system.vector_memory,
+        "safe_similarity_search",
+        lambda *args, **kwargs: [
+            SimpleNamespace(
+                page_content="[DOCUMENT]: Annual logistics report | Warehouse deliveries",
+                metadata={"file_path": str(unrelated)},
+            ),
+            SimpleNamespace(
+                page_content="[DOCUMENT]: Annual budget | Operating expenses",
+                metadata={"file_path": str(relevant)},
+            ),
+        ],
+    )
+
+    result = system.retrieve_document.func("annual budget")
+
+    assert f"[CREATED_FILE: {relevant}]" in result
+    assert str(unrelated) not in result
+
+
+def test_retrieve_document_lexical_fallback_rejects_partial_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools import system
+
+    unrelated = tmp_path / "annual-logistics.pdf"
+    unrelated.write_bytes(b"logistics")
+    index_path = tmp_path / "documents-index.json"
+    index_path.write_text(
+        json.dumps([{
+            "file_path": str(unrelated),
+            "caption": "Annual logistics report",
+            "summary": "Warehouse deliveries",
+        }]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(system, "DOCS_INDEX_FILE", str(index_path))
+    monkeypatch.setattr(
+        system.embeddings,
+        "embed_query",
+        lambda _: (_ for _ in ()).throw(
+            EmbeddingsProviderSetupRequired("offline", provider="offline-test")
+        ),
+    )
+
+    result = system.retrieve_document.func("annual budget")
+
+    assert result == "System: Document not found."
