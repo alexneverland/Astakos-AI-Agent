@@ -252,3 +252,33 @@ def test_confirmed_asset_save_preserves_nonsemantic_archive_without_embeddings(
     entries = json.loads(index_path.read_text(encoding="utf-8"))
     assert entries[0]["file_path"] == "C:/example/file.pdf"
     assert entries[0][entry_key] == "Confirmed archive content"
+
+
+@pytest.mark.parametrize("invalid_index", ["{not valid json", '{"unexpected": "object"}'])
+def test_document_save_recovers_a_malformed_archive_index(
+    monkeypatch,
+    tmp_path,
+    invalid_index,
+):
+    """A damaged lexical index must not make a confirmed document half-save."""
+    index_path = tmp_path / "documents_index.json"
+    index_path.write_text(invalid_index, encoding="utf-8")
+    monkeypatch.setattr("config.DOCS_INDEX_FILE", str(index_path))
+    semantic_add = MagicMock()
+    monkeypatch.setattr(vs.vector_store, "add_texts", semantic_add)
+
+    saved = AstakosMemoryManager().save(
+        "document",
+        file_path="C:/example/report.pdf",
+        analysis="Quarterly warehouse report",
+        caption="report.pdf",
+    )
+
+    assert saved is True
+    semantic_add.assert_called_once()
+    entries = json.loads(index_path.read_text(encoding="utf-8"))
+    assert len(entries) == 1
+    assert entries[0]["file_path"] == "C:/example/report.pdf"
+    assert entries[0]["summary"] == "Quarterly warehouse report"
+    assert entries[0]["caption"] == "report.pdf"
+    assert entries[0]["external_content_sources"] == []

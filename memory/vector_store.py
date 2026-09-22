@@ -1389,9 +1389,12 @@ class AstakosMemoryManager:
         index = []
         if os.path.exists(DOCS_INDEX_FILE):
             with open(DOCS_INDEX_FILE, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
-                if not isinstance(loaded, list):
-                    raise ValueError("Document archive index must contain a list")
+                try:
+                    loaded = json.load(f)
+                    if not isinstance(loaded, list):
+                        raise ValueError("Document archive index must contain a list")
+                except (json.JSONDecodeError, ValueError):
+                    loaded = []
                 index = loaded
         index.append(entry)
         index_path = os.path.abspath(DOCS_INDEX_FILE)
