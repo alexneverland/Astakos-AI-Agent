@@ -109,7 +109,7 @@ def test_integration_max_chars():
     telegram_src = Path('clients/telegram_bot.py').read_text(encoding='utf-8')
     shared_src = Path('services/document_input.py').read_text(encoding='utf-8')
 
-    assert 'extract_xlsx_preview(file_path, max_chars=16000)' in server_src
+    assert 'extract_document_preview(file_path, max_chars=16000)' in server_src
     assert 'extract_document_preview(local_path, max_chars=8000)' in telegram_src
     assert 'extract_xlsx_preview' in shared_src
 

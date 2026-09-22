@@ -1,6 +1,7 @@
 import pytest
 import os
 import zipfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from core.utils import extract_docx_preview
 
@@ -195,3 +196,33 @@ def test_extract_docx_too_many_members(monkeypatch, mock_i18n):
     res = extract_docx_preview("dummy.docx", max_chars=8000)
     assert res == "OVERSIZED"
     assert not mock_doc.called
+
+
+def test_extract_docx_preview_includes_table_cell_text(tmp_path):
+    import subprocess
+    import sys
+
+    script = """
+from pathlib import Path
+from docx import Document
+from core.utils import extract_docx_preview
+path = Path(r'%s')
+document = Document()
+document.add_paragraph('Paragraph text')
+table = document.add_table(rows=1, cols=2)
+table.cell(0, 0).text = 'Product'
+table.cell(0, 1).text = 'Quantity'
+document.save(path)
+print(extract_docx_preview(str(path), max_chars=8000))
+""" % (tmp_path / "table.docx")
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "Paragraph text" in result.stdout
+    assert "Product" in result.stdout
+    assert "Quantity" in result.stdout

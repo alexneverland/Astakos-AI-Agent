@@ -124,11 +124,25 @@ class MatrixMediaDownloader:
         normalized = normalized.strip().lower() or "application/octet-stream"
         return mimetypes.guess_extension(normalized, strict=False) or ".bin"
 
-    def _target_path(self, event: Any, mime_type: str) -> Path:
+    def _target_path(
+        self,
+        event: Any,
+        mime_type: str,
+        *,
+        kind: str,
+        original_name: str,
+    ) -> Path:
         digest = hashlib.sha256(
             f"{event.event_id}\0{event.url}".encode("utf-8")
         ).hexdigest()
-        return self._storage_dir / f"matrix_{digest}{self._safe_extension(mime_type)}"
+        extension = self._safe_extension(mime_type)
+        if kind == "file" and extension == ".bin":
+            from services.document_input import SUPPORTED_DOCUMENT_EXTENSIONS
+
+            filename_suffix = Path(original_name).suffix.lower()
+            if filename_suffix in SUPPORTED_DOCUMENT_EXTENSIONS:
+                extension = filename_suffix
+        return self._storage_dir / f"matrix_{digest}{extension}"
 
     async def download(self, room: Any, event: Any) -> MatrixMediaAsset | None:
         """Download, authenticate, decrypt, and atomically store one attachment."""
@@ -147,7 +161,12 @@ class MatrixMediaDownloader:
             str(getattr(event, "mimetype", "") or "").split(";", 1)[0].strip().lower()
             or "application/octet-stream"
         )
-        target = self._target_path(event, mime_type)
+        target = self._target_path(
+            event,
+            mime_type,
+            kind=kind,
+            original_name=original_name,
+        )
         if target.is_file() and target.stat().st_size <= self._max_bytes:
             return MatrixMediaAsset(
                 event_id=str(event.event_id).strip(),

@@ -50,8 +50,8 @@ def _prepare_confirmed_photo(
     monkeypatch.setattr(confirmation_module, "PHOTOS_DIR", str(photos_dir), raising=False)
     monkeypatch.setattr(
         confirmation_module,
-        "get_latest_pending_asset",
-        lambda channel, asset_type: pending if asset_type == "photo" else None,
+        "get_latest_pending_asset_any",
+        lambda channel: pending,
     )
     monkeypatch.setattr(confirmation_module, "init_pending_assets_table", lambda: None)
     monkeypatch.setattr(confirmation_module, "clear_expired_pending_assets", lambda: None)
@@ -210,3 +210,104 @@ async def test_rejected_photo_index_returns_retry_reply_and_remains_pending(
 
     assert response == "Δεν αποθηκεύτηκε· δοκίμασε ξανά."
     assert confirmed == []
+
+
+@pytest.mark.asyncio
+async def test_confirmed_document_is_copied_to_common_document_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_dir = tmp_path / "matrix_media"
+    source_dir.mkdir()
+    source = source_dir / "matrix_report.pdf"
+    source.write_bytes(b"document-bytes")
+    documents_dir = tmp_path / "documents_archive"
+    memory = _RecordingMemory()
+    confirmed: list[int] = []
+    pending = {
+        "id": 23,
+        "asset_type": "document",
+        "file_path": str(source),
+        "filename": "quarterly-report.pdf",
+        "analysis": "Quarterly report",
+        "caption": "Report",
+        "external_content_sources": ["user_provided_asset"],
+    }
+    monkeypatch.setattr(
+        confirmation_module, "DOCUMENTS_DIR", str(documents_dir), raising=False
+    )
+    monkeypatch.setattr(
+        confirmation_module,
+        "get_latest_pending_asset_any",
+        lambda channel: pending,
+        raising=False,
+    )
+    monkeypatch.setattr(confirmation_module, "init_pending_assets_table", lambda: None)
+    monkeypatch.setattr(confirmation_module, "clear_expired_pending_assets", lambda: None)
+    monkeypatch.setattr(confirmation_module, "classify_pending_asset_reply", lambda _: "yes")
+    monkeypatch.setattr(
+        confirmation_module,
+        "is_reply_to_recent_asset_prompt",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        confirmation_module,
+        "mark_pending_asset_confirmed",
+        lambda asset_id: confirmed.append(asset_id),
+    )
+    monkeypatch.setattr(confirmation_module, "append_message", lambda **kwargs: kwargs)
+    service = PendingAssetConfirmationService(
+        channel="matrix",
+        memory_store=memory,
+        confirm_reply="Saved.",
+        cancel_reply="Cancelled.",
+        conversation_db_path=str(tmp_path / "conversation.db"),
+    )
+
+    assert await service("yes", "$confirm-document") == "Saved."
+
+    saved_path = Path(memory.saved[0]["file_path"])
+    assert confirmed == [23]
+    assert saved_path.parent == documents_dir.resolve()
+    assert saved_path.name.startswith("document_")
+    assert saved_path.suffix == ".pdf"
+    assert saved_path.read_bytes() == b"document-bytes"
+    assert source.read_bytes() == b"document-bytes"
+    assert memory.saved[0]["caption"] == "quarterly-report.pdf — Report"
+
+
+def test_retrieve_document_returns_original_archived_file_without_embeddings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools import system
+
+    document = tmp_path / "document_abc.pdf"
+    document.write_bytes(b"report")
+    index_path = tmp_path / "astakos_docs_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "file_path": str(document),
+                    "caption": "Quarterly logistics report",
+                    "summary": "Warehouse performance and deliveries",
+                    "date": "2026-09-22",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(system, "DOCS_INDEX_FILE", str(index_path), raising=False)
+    monkeypatch.setattr(
+        system.embeddings,
+        "embed_query",
+        lambda _: (_ for _ in ()).throw(
+            EmbeddingsProviderSetupRequired("offline", provider="offline-test")
+        ),
+    )
+
+    result = system.retrieve_document.func("logistics report")
+
+    assert "Quarterly logistics report" in result
+    assert f"[CREATED_FILE: {document}]" in result

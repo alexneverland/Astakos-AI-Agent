@@ -851,6 +851,7 @@ def build_prompt(
         "MEMORY RULE: If asked for missing info, call 'search_memory' once. "
         "If you already have memory results in context, answer from it and DO NOT call search_memory again in the same turn.\n"
         "PHOTO RULE: If a photo is requested, call 'retrieve_photo' and include [SEND_PHOTO: path] in the response.\n"
+        "DOCUMENT RULE: If an archived document is requested, call 'retrieve_document' and include [CREATED_FILE: path] in the response.\n"
         "FILE RULE: When creating a file with create_file_tool, ALWAYS include [CREATED_FILE: path] as-is in your response. DO NOT replace it with the path as text.\n"
         f"{draft_verification_rule}\n\n"
     )
@@ -1276,22 +1277,37 @@ def extract_docx_preview(file_path: str, max_chars: int) -> str:
         current_len = 0
         clipped = False
 
+        def append_fragment(fragment: str) -> bool:
+            nonlocal current_len, clipped
+            normalized = str(fragment or "").strip()
+            if not normalized:
+                return True
+            space_needed = len(normalized) if not fragments else 1 + len(normalized)
+            if current_len + space_needed <= budget:
+                fragments.append(normalized)
+                current_len += space_needed
+                return True
+            allowed = budget - current_len - (1 if fragments else 0)
+            if allowed > 0:
+                fragments.append(normalized[:allowed])
+                current_len += allowed + (1 if len(fragments) > 1 else 0)
+            clipped = True
+            return False
+
         for p in doc.paragraphs:
-            paragraph_text = p.text
-            if paragraph_text:
-                space_needed = len(paragraph_text) if not fragments else 1 + len(paragraph_text)
-                if current_len + space_needed > budget:
-                    if not fragments:
-                        fragments.append(paragraph_text[:budget])
-                    else:
-                        allowed = budget - current_len - 1
-                        if allowed > 0:
-                            fragments.append(paragraph_text[:allowed])
-                    clipped = True
+            if not append_fragment(p.text):
+                break
+
+        if not clipped:
+            for table in doc.tables:
+                for row in table.rows:
+                    row_text = " | ".join(
+                        cell.text.strip() for cell in row.cells if cell.text.strip()
+                    )
+                    if not append_fragment(row_text):
+                        break
+                if clipped:
                     break
-                else:
-                    fragments.append(paragraph_text)
-                    current_len += space_needed
 
         final_text = "\n".join(fragments)
         if not final_text.strip():

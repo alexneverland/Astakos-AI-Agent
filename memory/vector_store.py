@@ -1389,13 +1389,23 @@ class AstakosMemoryManager:
         index = []
         if os.path.exists(DOCS_INDEX_FILE):
             with open(DOCS_INDEX_FILE, "r", encoding="utf-8") as f:
-                try:
-                    index = json.load(f)
-                except:
-                    pass
+                loaded = json.load(f)
+                if not isinstance(loaded, list):
+                    raise ValueError("Document archive index must contain a list")
+                index = loaded
         index.append(entry)
-        with open(DOCS_INDEX_FILE, "w", encoding="utf-8") as f:
-            json.dump(index, f, ensure_ascii=False, indent=2)
+        index_path = os.path.abspath(DOCS_INDEX_FILE)
+        os.makedirs(os.path.dirname(index_path), exist_ok=True)
+        temporary_path = f"{index_path}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        try:
+            with open(temporary_path, "w", encoding="utf-8") as f:
+                json.dump(index, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary_path, index_path)
+        finally:
+            if os.path.exists(temporary_path):
+                os.unlink(temporary_path)
         return True
 
     def _save_session(self, summary: dict, session_text: str):

@@ -258,6 +258,31 @@ def get_latest_pending_asset(channel: str, asset_type: str = "photo"):
         conn.close()
 
 
+def get_latest_pending_asset_any(channel: str) -> dict[str, Any] | None:
+    """Return the newest unexpired pending photo or document for one channel."""
+    clear_expired_pending_assets()
+    now_iso = datetime.now().isoformat()
+    conn = _get_conn()
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT *
+            FROM pending_asset_archives
+            WHERE channel = ?
+              AND asset_type IN ('photo', 'document')
+              AND status = 'pending'
+              AND expires_at > ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (channel, now_iso),
+        ).fetchone()
+        return _pending_asset_row(row)
+    finally:
+        conn.close()
+
+
 def mark_pending_asset_confirmed(asset_id: int):
     conn = _get_conn()
     try:

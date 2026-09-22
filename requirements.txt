@@ -19,6 +19,7 @@ langgraph>=1.1.5,<1.2.0
 matrix-nio[e2e]==0.26.0
 numpy==2.4.6
 openpyxl==3.1.5
+xlrd==2.0.2
 pandas==3.0.3
 Pillow==12.3.0
 playwright==1.59.0
