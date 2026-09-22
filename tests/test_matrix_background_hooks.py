@@ -172,7 +172,7 @@ def test_matrix_turn_factory_cannot_omit_background_hooks(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_matrix_channel_factory_connects_photo_to_next_text_turn(
+async def test_matrix_channel_factory_comments_on_photo_then_keeps_followup_context(
     tmp_path, monkeypatch
 ) -> None:
     from services.matrix_background import build_matrix_channel_services
@@ -215,10 +215,17 @@ async def test_matrix_channel_factory_connects_photo_to_next_text_turn(
             memory_store=FakeMemory(),
         )
 
-        assert "Φωτό" in await services.media_handler(asset)
-        assert await services.text_handler("Τι είναι;", "$question") == "Είναι σφήκα."
-        assert len(graph.states) == 1
+        immediate_reply = await services.media_handler(asset)
+        assert immediate_reply.startswith("Είναι σφήκα.")
+        assert pending_assets.looks_like_asset_confirmation_prompt(immediate_reply)
+        followup_reply = await services.text_handler("Τι είναι;", "$question")
+        assert getattr(followup_reply, "text", followup_reply) == "Είναι σφήκα."
+        assert len(graph.states) == 2
         assert "USER_UPLOADED_PHOTO" in str(graph.states[0]["messages"][-1].content)
+        assert any(
+            "USER_UPLOADED_PHOTO" in str(message.content)
+            for message in graph.states[1]["messages"]
+        )
     finally:
         _reset_scheduler_for_tests()
 

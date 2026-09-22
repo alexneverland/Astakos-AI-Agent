@@ -1300,22 +1300,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         if pending_asset and reply_kind == "yes" and asset_prompt_active:
             from memory.vector_store import memory
-            if pending_asset["asset_type"] == "photo":
-                memory.save(
-                    memory_type="photo",
-                    file_path=pending_asset["file_path"],
-                    analysis=pending_asset.get("analysis", ""),
-                    caption=pending_asset.get("caption", "") or pending_asset["filename"],
-                    external_content_sources=pending_asset.get("external_content_sources", []),
-                )
-            else:
-                memory.save(
-                    memory_type="document",
-                    file_path=pending_asset["file_path"],
-                    analysis=pending_asset.get("analysis", ""),
-                    caption=pending_asset.get("caption", "") or pending_asset["filename"],
-                    external_content_sources=pending_asset.get("external_content_sources", []),
-                )
+            from services.pending_asset_confirmation import save_confirmed_asset
+
+            save_confirmed_asset(memory, pending_asset)
                 
             mark_pending_asset_confirmed(pending_asset["id"])
 

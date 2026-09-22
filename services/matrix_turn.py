@@ -85,30 +85,28 @@ class MatrixTurnService:
             asset_metadata,
             True,
             False,
+            "photo",
         )
         from memory.pending_assets import (
             create_pending_asset_archive,
             init_pending_assets_table,
-            looks_like_asset_confirmation_prompt,
         )
         from core.untrusted_content import USER_PROVIDED_ASSET_SOURCE
 
-        reply_text = reply.text if isinstance(reply, MatrixReply) else reply
-        if looks_like_asset_confirmation_prompt(reply_text):
-            raw_name = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1]
-            safe_name = "".join(
-                ch for ch in raw_name if ch.isprintable() and ch != "`"
-            ).strip()[:255]
-            init_pending_assets_table()
-            create_pending_asset_archive(
-                channel="matrix",
-                asset_type="photo",
-                file_path=file_path,
-                filename=safe_name or "matrix_photo",
-                analysis=analysis,
-                caption=question,
-                external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
-            )
+        raw_name = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+        safe_name = "".join(
+            ch for ch in raw_name if ch.isprintable() and ch != "`"
+        ).strip()[:255]
+        init_pending_assets_table()
+        create_pending_asset_archive(
+            channel="matrix",
+            asset_type="photo",
+            file_path=file_path,
+            filename=safe_name or "matrix_photo",
+            analysis=analysis,
+            caption=question,
+            external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
+        )
         return reply
 
     @staticmethod
@@ -163,6 +161,7 @@ class MatrixTurnService:
         user_metadata_extra: dict[str, Any] | None = None,
         external_derived: bool = False,
         allow_commands: bool = True,
+        ensure_asset_prompt_type: str | None = None,
     ) -> str | MatrixReply:
         clean_user_text = str(user_text or "").strip()
         if not clean_user_text:
@@ -276,6 +275,14 @@ class MatrixTurnService:
 
         if not final_reply:
             raise RuntimeError("Matrix graph produced no final reply")
+
+        if ensure_asset_prompt_type is not None:
+            from services.pending_asset_confirmation import ensure_asset_archive_prompt
+
+            final_reply = ensure_asset_archive_prompt(
+                final_reply,
+                ensure_asset_prompt_type,
+            )
 
         if routine_draft_offer is not None:
             from core.utils import looks_like_terminal_messenger_draft_result

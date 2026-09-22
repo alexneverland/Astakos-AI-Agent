@@ -601,14 +601,15 @@ class TestTelegramPhotoHandlerMigration:
         assert cid == "chat_999"
         assert captured_vision["bytes"] == b"fake_downloaded_photo_bytes"
 
-    def test_handle_photo_without_caption_saves_pending_photo(
+    def test_handle_photo_without_caption_comments_immediately(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Verifies photo without caption is analyzed and staged into pending_photo state."""
+        """Verifies an uncaptioned photo enters the normal asset-aware turn immediately."""
         import clients.telegram_bot as tb
 
         monkeypatch.setattr("clients.telegram_bot.PHOTOS_DIR", str(tmp_path))
         monkeypatch.setattr("clients.telegram_bot.TELEGRAM_TOKEN", "fake_bot_token")
+        monkeypatch.setattr("clients.telegram_bot.pending_photo", None)
 
         def mock_get(url: str, *args: Any, **kwargs: Any) -> MagicMock:
             resp = MagicMock()
@@ -619,7 +620,13 @@ class TestTelegramPhotoHandlerMigration:
             return resp
 
         monkeypatch.setattr("requests.get", mock_get)
-        monkeypatch.setattr("clients.telegram_bot.send_telegram_msg", lambda msg: None)
+        processed_calls: list[tuple[str, str, str, str, str]] = []
+        monkeypatch.setattr(
+            "clients.telegram_bot._process_photo_with_question",
+            lambda fn, lp, analysis, question, cid: processed_calls.append(
+                (fn, lp, analysis, question, cid)
+            ),
+        )
 
         class FlowerVisionAdapter(MockOpenAIAdapter):
             def analyze_vision(
@@ -636,9 +643,16 @@ class TestTelegramPhotoHandlerMigration:
         photo_list: list[dict[str, Any]] = [{"file_id": "photo_456", "file_size": 8000}]
         tb.handle_photo(photo_list, caption="", chat_id="chat_999")
 
+        assert len(processed_calls) == 1
+        filename, local_path, analysis, question, chat_id = processed_calls[0]
+        assert filename.endswith(".jpg")
+        assert local_path == str(tmp_path / filename)
+        assert analysis == "A vibrant yellow sunflower in full bloom."
+        assert "signature" not in analysis
+        assert question
+        assert chat_id == "chat_999"
         assert tb.pending_photo is not None
-        assert tb.pending_photo["analysis"] == "A vibrant yellow sunflower in full bloom."
-        assert "signature" not in tb.pending_photo["analysis"]
+        assert tb.pending_photo["path"] == local_path
 
     def test_handle_photo_auth_error_sends_safe_telegram_message(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

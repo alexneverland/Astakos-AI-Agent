@@ -284,8 +284,11 @@ async def test_matrix_draft_offer_is_consumed_only_after_draft_tool_success(
 
 @pytest.mark.asyncio
 async def test_matrix_asset_question_persists_clean_question_with_model_only_context(
-    tmp_path,
+    tmp_path, monkeypatch
 ) -> None:
+    import memory.pending_assets as pending_assets
+
+    monkeypatch.setattr(pending_assets, "STATE_DB", str(tmp_path / "state.db"))
     db_path = str(tmp_path / "conversation.db")
     graph = FakeGraph(reply="Είναι μια σφήκα.")
     completed: list[tuple[str, str, str, str]] = []
@@ -303,19 +306,27 @@ async def test_matrix_asset_question_persists_clean_question_with_model_only_con
         analysis="Μεγάλη κοκκινοκαφέ σφήκα.",
     )
 
-    assert reply == "Είναι μια σφήκα."
+    assert str(reply).startswith("Είναι μια σφήκα.")
+    assert pending_assets.looks_like_asset_confirmation_prompt(str(reply))
     graph_text = [str(message.content) for message in graph.states[0]["messages"]]
     assert any("&#91;USER_UPLOADED_PHOTO&#93;: photo.png" in text for text in graph_text)
     assert any("Question: Τι είναι;" in text for text in graph_text)
 
     stored = load_messages(channel="matrix", db_path=db_path)
-    assert [item["content"] for item in stored] == ["Τι είναι;", "Είναι μια σφήκα."]
+    assert [item["content"] for item in stored] == ["Τι είναι;", str(reply)]
     assert stored[0]["metadata"]["matrix_event_id"] == "$question-1"
     assert stored[0]["metadata"]["astakos_model_asset_context"]["analysis"] == (
         "Μεγάλη κοκκινοκαφέ σφήκα."
     )
     assert "astakos_model_asset_context" not in stored[1]["metadata"]
     assert completed == [("Τι είναι;", "", "Chat_Agent", "matrix")]
+    assert pending_assets.get_latest_pending_asset("matrix", "photo") is not None
+
+    await service("Κι εμένα μου έκανε εντύπωση το χρώμα της.", "$followup")
+    followup_history = [
+        str(message.content) for message in graph.states[1]["messages"]
+    ]
+    assert any("Μεγάλη κοκκινοκαφέ σφήκα." in text for text in followup_history)
 
 
 @pytest.mark.asyncio
