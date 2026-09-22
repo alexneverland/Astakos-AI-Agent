@@ -1300,26 +1300,22 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         if pending_asset and reply_kind == "yes" and asset_prompt_active:
             from memory.vector_store import memory
-            if pending_asset["asset_type"] == "photo":
-                memory.save(
-                    memory_type="photo",
-                    file_path=pending_asset["file_path"],
-                    analysis=pending_asset.get("analysis", ""),
-                    caption=pending_asset.get("caption", "") or pending_asset["filename"],
-                    external_content_sources=pending_asset.get("external_content_sources", []),
-                )
-            else:
-                memory.save(
-                    memory_type="document",
-                    file_path=pending_asset["file_path"],
-                    analysis=pending_asset.get("analysis", ""),
-                    caption=pending_asset.get("caption", "") or pending_asset["filename"],
-                    external_content_sources=pending_asset.get("external_content_sources", []),
-                )
-                
-            mark_pending_asset_confirmed(pending_asset["id"])
+            from services.pending_asset_confirmation import (
+                ConfirmedAssetSaveError,
+                save_confirmed_asset,
+            )
 
-            reply = t("api.server.saved_to_memory")
+            try:
+                save_confirmed_asset(memory, pending_asset)
+            except ConfirmedAssetSaveError as exc:
+                print(
+                    "[PendingAssets]: Web save failed; pending retained "
+                    f"({type(exc.__cause__ or exc).__name__})"
+                )
+                reply = t("services.pending_asset_confirmation.save_failed_retry")
+            else:
+                mark_pending_asset_confirmed(pending_asset["id"])
+                reply = t("api.server.saved_to_memory")
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply

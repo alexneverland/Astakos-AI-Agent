@@ -1265,7 +1265,8 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
     """
     [MASTRO-PARITY]: Analyzes a photo via Vision LLM.
     - With caption: processes immediately using the caption as the prompt.
-    - Without caption: saves the analysis as pending and waits for the next message (30s).
+    - Without caption: comments immediately using a localized natural prompt.
+    - Keeps the latest photo briefly for /nutrition or /receipt.
     """
     global pending_photo
     try:
@@ -1341,16 +1342,24 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
             else:
                 _process_photo_with_question(filename, local_path, memory_analysis, caption, chat_id)
 
-        # 4b. WITHOUT caption → save as pending, notify
+        # 4b. WITHOUT caption → comment naturally now and keep the photo in history
         else:
+            from services.pending_asset_confirmation import build_photo_share_request
+
             with pending_photo_lock:
                 pending_photo = {
-                    "analysis":  memory_analysis,
-                    "filename":  filename,
-                    "path":      local_path,
-                    "timestamp": time.time()
+                    "analysis": memory_analysis,
+                    "filename": filename,
+                    "path": local_path,
+                    "timestamp": time.time(),
                 }
-            send_telegram_msg(t("clients.telegram_bot.bot_msg_477e48"))
+            _process_photo_with_question(
+                filename,
+                local_path,
+                memory_analysis,
+                build_photo_share_request(),
+                chat_id,
+            )
 
     except Exception as e:
         import traceback
@@ -1414,9 +1423,9 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         send_telegram_msg(t("clients.telegram_bot.bot_msg_226c6b"))
         return
 
-    from memory.pending_assets import looks_like_asset_confirmation_prompt
-    if not looks_like_asset_confirmation_prompt(final_response):
-        final_response += t("clients.telegram_bot.bot_msg_2d5d94")
+    from services.pending_asset_confirmation import ensure_asset_archive_prompt
+
+    final_response = ensure_asset_archive_prompt(final_response, "photo")
 
     # ── Photo persistence / Pending asset ──
     from core.untrusted_content import (
@@ -2487,21 +2496,6 @@ def handle_message(
     with memory_lock:
         last_interaction_time = time.time()
 
-    # ── Pending photo: if a photo arrived without a caption recently, combine it ──
-    global pending_photo
-    photo_prefix = ""
-    with pending_photo_lock:
-        if (
-            not routine_action_consumed
-            and pending_photo
-            and (time.time() - pending_photo["timestamp"]) < 30
-        ):
-            p = pending_photo
-            pending_photo = None
-            print(f"\033[94m[Photo+Msg]: Combination of pending photo + message\033[0m")
-            _process_photo_with_question(p["filename"], p["path"], p["analysis"], clean_user_text, chat_id)
-            return  # The _process_photo_with_question sent the response
-
     final_ai_response = ""
     handling_agent = "Chat_Agent"
 
@@ -2527,25 +2521,22 @@ def handle_message(
         print("[PendingAssetGuard]: ignored generic yes/no because no recent archive prompt was active")
 
     if pending_asset and reply_kind == "yes" and asset_prompt_active:
-        if pending_asset["asset_type"] == "photo":
-            memory.save(
-                memory_type="photo",
-                file_path=pending_asset["file_path"],
-                analysis=pending_asset.get("analysis", ""),
-                caption=pending_asset.get("caption", "") or pending_asset["filename"],
-                external_content_sources=pending_asset.get("external_content_sources", []),
+        from services.pending_asset_confirmation import (
+            ConfirmedAssetSaveError,
+            save_confirmed_asset,
+        )
+
+        try:
+            save_confirmed_asset(memory, pending_asset)
+        except ConfirmedAssetSaveError as exc:
+            print(
+                "[PendingAssets]: Telegram save failed; pending retained "
+                f"({type(exc.__cause__ or exc).__name__})"
             )
+            confirm_reply = t("services.pending_asset_confirmation.save_failed_retry")
         else:
-            memory.save(
-                memory_type="document",
-                file_path=pending_asset["file_path"],
-                analysis=pending_asset.get("analysis", ""),
-                caption=pending_asset.get("caption", "") or pending_asset["filename"],
-                external_content_sources=pending_asset.get("external_content_sources", []),
-            )
-            
-        mark_pending_asset_confirmed(pending_asset["id"])
-        confirm_reply = t("clients.telegram_bot.bot_msg_7e53ac")
+            mark_pending_asset_confirmed(pending_asset["id"])
+            confirm_reply = t("clients.telegram_bot.bot_msg_7e53ac")
         _send_and_record_assistant(confirm_reply, chat_id)
         enqueue_fast_task(log_exchange, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
         enqueue_fast_task(update_working_memory, clean_user_text, confirm_reply)

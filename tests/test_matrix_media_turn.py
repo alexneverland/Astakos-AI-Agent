@@ -120,7 +120,9 @@ async def test_non_audio_asset_is_not_silently_processed(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_image_is_staged_then_next_question_uses_asset_turn(tmp_path) -> None:
+async def test_image_is_commented_immediately_and_remains_available_for_followup(
+    tmp_path,
+) -> None:
     path = tmp_path / "photo.png"
     path.write_bytes(b"png-bytes")
     asset = MatrixMediaAsset("$image", "image", path, "image/png", "photo.png")
@@ -144,60 +146,94 @@ async def test_image_is_staged_then_next_question_uses_asset_turn(tmp_path) -> N
         silence_reply="silence",
         analyze_image=analyze,
         vision_prompt="Περιέγραψε αντικειμενικά.",
-        photo_received_reply="📷 Φωτό ελήφθη! Τι θέλεις να κάνω με αυτή;",
+        default_photo_question="Μοιράζομαι αυτή τη φωτογραφία μαζί σου.",
         asset_question_turn=asset_turn,
     )
 
-    assert await service(asset) == "📷 Φωτό ελήφθη! Τι θέλεις να κάνω με αυτή;"
+    assert await service(asset) == "Είναι ανατολικός σκούρκος."
     assert analysis_calls == [
         (b"png-bytes", "image/png", "Περιέγραψε αντικειμενικά.")
     ]
-    assert await service.consume_pending_photo("Τι είναι;", "$question") == (
-        "Είναι ανατολικός σκούρκος."
-    )
     assert question_calls == [
         (
-            "Τι είναι;",
-            "$question",
+            "Μοιράζομαι αυτή τη φωτογραφία μαζί σου.",
+            "$image",
             "photo.png",
             str(path),
             "Μια μεγάλη σφήκα.",
         )
     ]
-    assert await service.consume_pending_photo("ξανά", "$question-2") is None
 
 
 @pytest.mark.asyncio
-async def test_command_does_not_consume_pending_photo_and_expired_photo_is_dropped(
-    tmp_path,
+async def test_image_caption_becomes_the_immediate_asset_question(tmp_path) -> None:
+    path = tmp_path / "photo.png"
+    path.write_bytes(b"png-bytes")
+    asset = MatrixMediaAsset(
+        "$image-caption",
+        "image",
+        path,
+        "image/png",
+        "photo.png",
+        "Τι φτιάξαμε εδώ;",
+    )
+    questions: list[str] = []
+
+    async def asset_turn(**kwargs) -> str:
+        questions.append(kwargs["question"])
+        return "Φτιάξατε μια όμορφη κατασκευή."
+
+    service = MatrixMediaTurnService(
+        matrix_turn=lambda text, event_id: None,
+        transcribe_audio=lambda data, *, mime_type: "unused",
+        silence_reply="silence",
+        analyze_image=lambda data, *, mime_type, prompt: "μια κατασκευή",
+        vision_prompt="Describe",
+        default_photo_question="Shared photo",
+        asset_question_turn=asset_turn,
+    )
+
+    assert await service(asset) == "Φτιάξατε μια όμορφη κατασκευή."
+    assert questions == ["Τι φτιάξαμε εδώ;"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("caption", "expected"),
+    [("/nutrition", "nutrition result"), ("/receipt", "receipt result")],
+)
+async def test_image_command_caption_runs_the_matching_photo_tool(
+    tmp_path, caption, expected
 ) -> None:
     path = tmp_path / "photo.png"
     path.write_bytes(b"png-bytes")
-    asset = MatrixMediaAsset("$image", "image", path, "image/png", "photo.png")
-    now = [100.0]
+    asset = MatrixMediaAsset(
+        "$image-command",
+        "image",
+        path,
+        "image/png",
+        "photo.png",
+        caption,
+    )
 
-    async def matrix_turn(text: str, event_id: str) -> str:
-        return "unused"
-
-    async def asset_turn(**kwargs):
-        return "answered"
+    async def asset_turn(**kwargs) -> str:
+        raise AssertionError("command captions must not enter the graph")
 
     service = MatrixMediaTurnService(
-        matrix_turn=matrix_turn,
+        matrix_turn=lambda text, event_id: None,
         transcribe_audio=lambda data, *, mime_type: "unused",
         silence_reply="silence",
         analyze_image=lambda data, *, mime_type, prompt: "analysis",
         vision_prompt="Describe",
-        photo_received_reply="received",
+        default_photo_question="Shared photo",
         asset_question_turn=asset_turn,
-        pending_photo_ttl_seconds=30,
-        clock=lambda: now[0],
+        analyze_nutrition=lambda photo_path: "nutrition result",
+        scan_receipt=lambda photo_path: "receipt result",
+        missing_nutrition_photo_reply="missing nutrition photo",
+        missing_receipt_photo_reply="missing receipt photo",
     )
-    await service(asset)
 
-    assert await service.consume_pending_photo("/status", "$command") is None
-    now[0] = 131.0
-    assert await service.consume_pending_photo("Τι είναι;", "$late") is None
+    assert await service(asset) == expected
 
 
 @pytest.mark.asyncio
@@ -224,7 +260,7 @@ async def test_photo_commands_consume_only_the_matching_fresh_pending_photo(
         silence_reply="silence",
         analyze_image=lambda data, *, mime_type, prompt: "analysis",
         vision_prompt="Describe",
-        photo_received_reply="received",
+        default_photo_question="Shared photo",
         asset_question_turn=asset_turn,
         analyze_nutrition=lambda photo_path: calls.append(("nutrition", photo_path))
         or "nutrition result",
@@ -243,7 +279,7 @@ async def test_photo_commands_consume_only_the_matching_fresh_pending_photo(
 
 
 @pytest.mark.asyncio
-async def test_inbound_router_prefers_pending_photo_then_returns_to_normal_turn(
+async def test_inbound_router_keeps_ordinary_followup_on_normal_text_turn(
     tmp_path,
 ) -> None:
     from services.matrix_media_turn import MatrixInboundTurnRouter
@@ -258,7 +294,7 @@ async def test_inbound_router_prefers_pending_photo_then_returns_to_normal_turn(
         return "normal"
 
     async def asset_turn(**kwargs) -> str:
-        return f"photo:{kwargs['question']}"
+        return "initial photo reply"
 
     media = MatrixMediaTurnService(
         matrix_turn=normal_turn,
@@ -266,16 +302,20 @@ async def test_inbound_router_prefers_pending_photo_then_returns_to_normal_turn(
         silence_reply="silence",
         analyze_image=lambda data, *, mime_type, prompt: "analysis",
         vision_prompt="Describe",
-        photo_received_reply="received",
+        default_photo_question="Shared photo",
         asset_question_turn=asset_turn,
     )
     router = MatrixInboundTurnRouter(text_turn=normal_turn, media_turn=media)
     await media(asset)
 
     assert await router("/status", "$command") == "normal"
-    assert await router("Τι είναι;", "$question") == "photo:Τι είναι;"
+    assert await router("Τι είναι;", "$question") == "normal"
     assert await router("Μετά", "$next") == "normal"
-    assert normal_calls == [("/status", "$command"), ("Μετά", "$next")]
+    assert normal_calls == [
+        ("/status", "$command"),
+        ("Τι είναι;", "$question"),
+        ("Μετά", "$next"),
+    ]
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,7 @@ class MatrixMediaAsset:
     path: Path
     mime_type: str
     original_name: str
+    caption: str = ""
 
 
 class MatrixMediaDownloader:
@@ -136,12 +137,17 @@ class MatrixMediaDownloader:
             return None
         kind, _ = trusted
 
+        content = event.source["content"]
+        body = str(content.get("body") or getattr(event, "body", "") or "").strip()
+        filename = str(content.get("filename") or "").strip()
+        original_name = filename or body
+        caption = body if filename and body and filename != body else ""
+
         mime_type = (
             str(getattr(event, "mimetype", "") or "").split(";", 1)[0].strip().lower()
             or "application/octet-stream"
         )
         target = self._target_path(event, mime_type)
-        original_name = str(getattr(event, "body", "") or "")
         if target.is_file() and target.stat().st_size <= self._max_bytes:
             return MatrixMediaAsset(
                 event_id=str(event.event_id).strip(),
@@ -149,6 +155,7 @@ class MatrixMediaDownloader:
                 path=target,
                 mime_type=mime_type,
                 original_name=original_name,
+                caption=caption,
             )
 
         response = await self._client.download(str(event.url))
@@ -199,4 +206,5 @@ class MatrixMediaDownloader:
             path=target,
             mime_type=mime_type,
             original_name=original_name,
+            caption=caption,
         )

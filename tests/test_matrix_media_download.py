@@ -105,7 +105,7 @@ async def test_trusted_encrypted_image_is_decrypted_to_safe_local_path(tmp_path)
         kind="image",
         path=asset.path,
         mime_type="image/png",
-        original_name="../../credentials.json",
+        original_name="photo.png",
     )
     assert asset.path.parent == (tmp_path / "matrix_media").resolve()
     assert asset.path.suffix == ".png"
@@ -114,6 +114,34 @@ async def test_trusted_encrypted_image_is_decrypted_to_safe_local_path(tmp_path)
     assert client.downloaded == ["mxc://example.test/image"]
 
     cached = await downloader.download(FakeRoom(), FakeEncryptedImage())
+    assert cached == asset
+    assert client.downloaded == ["mxc://example.test/image"]
+
+
+@pytest.mark.asyncio
+async def test_matrix_image_caption_is_separated_from_original_filename(tmp_path) -> None:
+    client = FakeClient()
+    downloader = _downloader(tmp_path, client)
+    event = FakeEncryptedImage(
+        body="Τι φτιάξαμε εδώ;",
+        source={
+            "type": "m.room.message",
+            "content": {
+                "msgtype": "m.image",
+                "body": "Τι φτιάξαμε εδώ;",
+                "filename": "construction.jpg",
+                "file": {},
+            },
+        },
+    )
+
+    asset = await downloader.download(FakeRoom(), event)
+
+    assert asset is not None
+    assert asset.original_name == "construction.jpg"
+    assert asset.caption == "Τι φτιάξαμε εδώ;"
+
+    cached = await downloader.download(FakeRoom(), event)
     assert cached == asset
     assert client.downloaded == ["mxc://example.test/image"]
 

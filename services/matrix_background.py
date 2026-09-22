@@ -186,7 +186,10 @@ def build_matrix_channel_services(
     from services.matrix_georgian_turn import MatrixGeorgianTurnRouter
     from services.location_update import record_location_update
     from services.matrix_voice_mode import MatrixVoiceModeRouter
-    from services.pending_asset_confirmation import PendingAssetConfirmationService
+    from services.pending_asset_confirmation import (
+        PendingAssetConfirmationService,
+        build_photo_share_request,
+    )
     from services.photo_commands import analyze_nutrition_photo, scan_receipt_photo
     from services.session_end import finalize_session
     from services.story_generation import generate_story
@@ -286,7 +289,7 @@ def build_matrix_channel_services(
         transcribe_audio=transcribe_audio or transcribe_voice_audio,
         analyze_image=analyze_image or analyze_image_bytes,
         vision_prompt=t("clients.telegram_bot.bot_msg_dec305"),
-        photo_received_reply=t("clients.telegram_bot.bot_msg_477e48"),
+        default_photo_question=build_photo_share_request(),
         asset_question_turn=text_turn.run_asset_question,
         document_turn=document_turn,
         analyze_nutrition=analyze_nutrition_photo,

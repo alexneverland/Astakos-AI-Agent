@@ -38,7 +38,7 @@ class MatrixMediaTurnService:
         transcribe_audio: AudioTranscriber = transcribe_voice_audio,
         analyze_image: ImageAnalyzer | None = None,
         vision_prompt: str | None = None,
-        photo_received_reply: str | None = None,
+        default_photo_question: str | None = None,
         asset_question_turn: AssetQuestionTurn | None = None,
         pending_photo_ttl_seconds: float = 30.0,
         clock: Callable[[], float] = time.monotonic,
@@ -57,7 +57,7 @@ class MatrixMediaTurnService:
         image_config = (
             analyze_image,
             str(vision_prompt or "").strip() or None,
-            str(photo_received_reply or "").strip() or None,
+            str(default_photo_question or "").strip() or None,
             asset_question_turn,
         )
         if any(value is not None for value in image_config) and not all(
@@ -68,7 +68,7 @@ class MatrixMediaTurnService:
             raise ValueError("Matrix pending photo TTL must be positive")
         self._analyze_image = analyze_image
         self._vision_prompt = image_config[1]
-        self._photo_received_reply = image_config[2]
+        self._default_photo_question = image_config[2]
         self._asset_question_turn = asset_question_turn
         self._pending_photo_ttl_seconds = float(pending_photo_ttl_seconds)
         self._clock = clock
@@ -164,28 +164,18 @@ class MatrixMediaTurnService:
             normalized_analysis = "No visual analysis available."
         with self._pending_photo_lock:
             self._pending_photo = (asset, normalized_analysis, self._clock())
-        return str(self._photo_received_reply)
+        caption = str(asset.caption or "").strip()
+        if caption.lower() in {"/nutrition", "/receipt"}:
+            command_reply = await self.consume_pending_photo_command(caption)
+            if command_reply is not None:
+                return command_reply
 
-    async def consume_pending_photo(
-        self,
-        question: str,
-        event_id: str,
-    ) -> str | None:
-        """Consume a fresh pending photo for the next non-command Matrix message."""
-        normalized_question = str(question or "").strip()
-        if not normalized_question or normalized_question.startswith("/"):
-            return None
-
-        pending = self._take_fresh_pending_photo()
-        if pending is None:
-            return None
-        asset, analysis = pending
         return await self._asset_question_turn(
-            question=normalized_question,
-            event_id=str(event_id or "").strip(),
+            question=caption or self._default_photo_question,
+            event_id=asset.event_id,
             filename=asset.original_name or asset.path.name,
             file_path=str(asset.path),
-            analysis=analysis,
+            analysis=normalized_analysis,
         )
 
     def _take_fresh_pending_photo(self) -> tuple[MatrixMediaAsset, str] | None:
@@ -236,7 +226,7 @@ class MatrixInboundTurnRouter:
         self._pending_asset_confirmation = pending_asset_confirmation
 
     async def __call__(self, user_text: str, event_id: str) -> str:
-        """Use fresh pending photo context, otherwise run the normal text turn."""
+        """Resolve confirmations/commands, then run an ordinary Matrix text turn."""
         if self._pending_asset_confirmation is not None:
             confirmation_reply = await self._pending_asset_confirmation(
                 user_text,
@@ -249,10 +239,4 @@ class MatrixInboundTurnRouter:
         )
         if photo_command_reply is not None:
             return photo_command_reply
-        media_reply = await self._media_turn.consume_pending_photo(
-            user_text,
-            event_id,
-        )
-        if media_reply is not None:
-            return media_reply
         return await self._text_turn(user_text, event_id)
