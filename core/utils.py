@@ -780,8 +780,9 @@ def build_prompt(
     if is_vision:
         prompt += (
             "🚨 REALITY RULE (CRITICAL):\n"
-            "Right now you have a VISUAL ANALYSIS in front of you. This is the CURRENT reality.\n"
-            "If past memories conflict with what you see, ignore the history.\n\n"
+            "Right now you have a VISUAL ANALYSIS in front of you. This is the CURRENT reality of the referenced visual asset or document.\n"
+            "If past memories conflict with what you see in the image, trust the visual content of the image over historical assumptions.\n"
+            "TEMPORAL REALITY GUARD: The scene, people, actions, or weather depicted in the photo represent the moment the photograph was captured, NOT necessarily the user's live physical surroundings or activities right now. Do NOT assume that events depicted in the photo are happening today or currently taking place unless the user explicitly stated so in their message.\n\n"
         )
 
     session_hint = load_last_session_hint() if include_persisted_context else ""

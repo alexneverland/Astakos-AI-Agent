@@ -2063,6 +2063,7 @@ def run_memory_sifter_slow(
                 # Permanent saving (Chroma + PHOTOS_INDEX_FILE) is done only
                 # via memory.save(memory_type="photo", ...) after explicit confirm.
                 print("\033[90m[MemorySifterSlow]: photo fact detected — skip direct photo index write\033[0m")
+                continue
 
             # 3. Save to ChromaDB
             memory.save(**candidate)

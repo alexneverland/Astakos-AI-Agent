@@ -70,11 +70,29 @@ class MatrixDocumentTurnService:
         return cleaned.strip()[:255] or asset.path.name
 
     @staticmethod
-    def _run_hook(hook: Callable[..., None] | None, *args: Any) -> None:
+    def _run_hook(hook: Callable[..., None] | None, *args: Any, **kwargs: Any) -> None:
         if hook is None:
             return
+        accepted_kwargs: dict[str, Any] = {}
+        if kwargs:
+            import inspect
+
+            try:
+                signature = inspect.signature(hook)
+            except (ValueError, TypeError):
+                pass
+            else:
+                has_var_keyword = any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
+                accepted_kwargs = (
+                    kwargs
+                    if has_var_keyword
+                    else {key: value for key, value in kwargs.items() if key in signature.parameters}
+                )
         try:
-            hook(*args)
+            hook(*args, **accepted_kwargs)
         except Exception as exc:
             print(f"[MatrixDocument]: post-turn hook failed: {type(exc).__name__}")
 
@@ -141,5 +159,6 @@ class MatrixDocumentTurnService:
             "",
             "Chat_Agent",
             "matrix",
+            external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
         )
         return reply
