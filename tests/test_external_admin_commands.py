@@ -74,3 +74,81 @@ def test_telegram_end_session_uses_shared_finalizer(monkeypatch) -> None:
         bot.t("clients.telegram_bot.bot_msg_139ed4"),
         bot.t("clients.telegram_bot.bot_msg_bfe08b"),
     ]
+
+
+def test_telegram_process_shutdown_drains_before_archive_and_store_close(
+    monkeypatch,
+) -> None:
+    """Watchdog restart must preserve queued work before archiving Telegram."""
+    from types import SimpleNamespace
+
+    import clients.telegram_bot as bot
+
+    calls: list[str] = []
+    sent: list[str] = []
+
+    class FakeEvent:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def set(self) -> None:
+            calls.append(self.name)
+
+    class FakeQueue:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def join(self) -> None:
+            calls.append(self.name)
+
+    runtime = SimpleNamespace(
+        shutdown_event=FakeEvent("stop-scheduler"),
+        _external_worker_stop_event=FakeEvent("stop-workers"),
+        fast_queue=FakeQueue("fast"),
+        slow_queue=FakeQueue("slow"),
+    )
+    monkeypatch.setattr(
+        "services.session_end.finalize_session",
+        lambda *, channel: calls.append(f"archive:{channel}"),
+    )
+    monkeypatch.setattr(
+        "memory.vector_store.close_vector_store",
+        lambda: calls.append("close-store"),
+    )
+
+    result = bot.archive_telegram_runtime(
+        runtime,
+        send_message=sent.append,
+        drain_timeout=1,
+    )
+
+    assert result is True
+    assert calls == [
+        "stop-scheduler", "fast", "slow", "stop-workers",
+        "archive:telegram", "close-store",
+    ]
+    assert sent == [
+        bot.t("clients.telegram_bot.bot_msg_139ed4"),
+        bot.t("clients.telegram_bot.bot_msg_bfe08b"),
+    ]
+
+
+def test_telegram_shutdown_archives_even_if_notification_fails(monkeypatch) -> None:
+    """Telegram delivery failures must not prevent local memory shutdown."""
+    import clients.telegram_bot as bot
+
+    archived: list[str] = []
+    monkeypatch.setattr(
+        "services.external_runtime_shutdown.drain_and_archive_external_runtime",
+        lambda runtime, *, channel, drain_timeout: archived.append(channel) or True,
+    )
+
+    def unavailable_telegram(message: str) -> None:
+        raise RuntimeError("Telegram unavailable")
+
+    assert bot.archive_telegram_runtime(
+        object(),
+        send_message=unavailable_telegram,
+        drain_timeout=1,
+    ) is True
+    assert archived == ["telegram"]

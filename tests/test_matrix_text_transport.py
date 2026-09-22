@@ -203,6 +203,38 @@ async def test_typing_api_failure_does_not_block_reply(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_stalled_typing_api_does_not_delay_turn_or_reply(tmp_path) -> None:
+    """A hanging homeserver typing endpoint cannot stall the real answer."""
+    import asyncio
+
+    class StalledTypingClient(FakeMatrixClient):
+        async def room_typing(
+            self,
+            room_id: str,
+            typing_state: bool = True,
+            timeout: int = 30_000,
+        ) -> object:
+            del room_id, typing_state, timeout
+            await asyncio.Event().wait()
+
+    client = StalledTypingClient()
+    handler_started = asyncio.Event()
+
+    async def handler(text: str, event_id: str) -> str:
+        handler_started.set()
+        return "Η απάντηση συνεχίζει κανονικά"
+
+    transport = _transport(tmp_path, client, handler)
+    await asyncio.wait_for(
+        transport.handle_event(FakeRoom(), FakeTextEvent()),
+        timeout=1.5,
+    )
+
+    assert handler_started.is_set()
+    assert client.sent[0]["content"]["body"] == "Η απάντηση συνεχίζει κανονικά"
+
+
+@pytest.mark.asyncio
 async def test_voice_reply_uses_voice_sender_and_persists_delivery_mode(tmp_path) -> None:
     client = FakeMatrixClient()
     voice_calls: list[str] = []
@@ -499,8 +531,8 @@ async def test_trusted_approval_reaction_handler_can_send_one_result(tmp_path) -
 
 
 @pytest.mark.asyncio
-async def test_cleartext_reaction_in_encrypted_room_reaches_approval_handler(tmp_path) -> None:
-    """Matrix reactions stay actionable when Element leaves their metadata cleartext."""
+async def test_cleartext_reaction_in_encrypted_room_cannot_approve(tmp_path) -> None:
+    """A room's E2EE setting cannot authenticate a cleartext reaction event."""
     client = FakeMatrixClient()
     handled: list[dict[str, Any]] = []
 
@@ -522,15 +554,7 @@ async def test_cleartext_reaction_in_encrypted_room_reaches_approval_handler(tmp
         FakeReactionEvent(key="👍", decrypted=False),
     )
 
-    assert handled == [
-        {
-            "room_id": "!private-room:example.test",
-            "sender_id": "@owner:example.test",
-            "encrypted": True,
-            "reacts_to": "$approval-event",
-            "key": "👍",
-        }
-    ]
+    assert handled == []
 
 
 @pytest.mark.asyncio

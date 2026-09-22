@@ -146,7 +146,7 @@ def test_run_session_summary_save_failure_keeps_exchanges(monkeypatch, capsys):
     monkeypatch.setattr(session_memory.memory, "save", lambda **kwargs: False)
     monkeypatch.setattr(session_memory.bus, "emit", lambda *args, **kwargs: emitted.append((args, kwargs)))
 
-    session_memory._run_session_summary(channel="web")
+    assert session_memory._run_session_summary(channel="web") is False
 
     # The save failed, so exchanges should NOT be marked as summarized
     assert marked == []

@@ -13,7 +13,7 @@ from watchfiles import watch
 
 ROOT_DIR = Path(__file__).resolve().parent
 WATCH_PATHS = ("clients", "core", "tools", "memory", "services", "prompts.md")
-SHUTDOWN_TIMEOUT_SECONDS = 50
+SHUTDOWN_TIMEOUT_SECONDS = 120
 LOCK_PATH = ROOT_DIR / "run_matrix.lock"
 _lock_file = None
 

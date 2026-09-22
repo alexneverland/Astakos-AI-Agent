@@ -109,6 +109,7 @@ def test_matrix_shutdown_drains_queues_and_closes_persistent_memory(
 
     runtime = SimpleNamespace(
         shutdown_event=FakeEvent(),
+        _external_worker_stop_event=FakeEvent(),
         fast_queue=FakeQueue("fast"),
         slow_queue=FakeQueue("slow"),
     )
@@ -130,7 +131,120 @@ def test_matrix_shutdown_drains_queues_and_closes_persistent_memory(
     assert result is True
     assert calls[0] == "shutdown"
     assert set(calls[1:3]) == {"fast", "slow"}
-    assert calls[3:] == ["finalize:matrix", "close_vector_store"]
+    assert calls[3:] == ["shutdown", "finalize:matrix", "close_vector_store"]
+
+
+def test_matrix_shutdown_finishes_work_queued_behind_active_memory_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A watched restart must not abandon work waiting behind an active task."""
+    import queue
+    import threading
+
+    from clients import telegram_bot as runtime
+    from clients.matrix_bot import _graceful_shutdown_shared_runtime
+
+    started = threading.Event()
+    release = threading.Event()
+    completed: list[str] = []
+    fast_queue: queue.Queue = queue.Queue()
+    monkeypatch.setattr(runtime, "fast_queue", fast_queue)
+    monkeypatch.setattr(runtime, "slow_queue", queue.Queue())
+    monkeypatch.setattr(runtime, "shutdown_event", threading.Event())
+    worker_stop_event = threading.Event()
+    monkeypatch.setattr(runtime, "_external_worker_stop_event", worker_stop_event)
+    monkeypatch.setattr(runtime, "_external_scheduler_thread", None, raising=False)
+    monkeypatch.setattr(
+        "services.session_end.finalize_session",
+        lambda *, channel: completed.append(f"finalize:{channel}"),
+    )
+    monkeypatch.setattr(
+        "memory.vector_store.close_vector_store",
+        lambda: completed.append("close"),
+    )
+
+    def first_task() -> None:
+        started.set()
+        assert release.wait(timeout=2)
+        completed.append("first")
+
+    def second_task() -> None:
+        completed.append("second")
+
+    fast_queue.put((first_task, ()))
+    fast_queue.put((second_task, ()))
+    worker = threading.Thread(
+        target=runtime.fast_queue_worker,
+        args=(worker_stop_event,),
+        daemon=True,
+    )
+    worker.start()
+    assert started.wait(timeout=1)
+
+    result: list[bool] = []
+    cleanup = threading.Thread(
+        target=lambda: result.append(
+            _graceful_shutdown_shared_runtime(runtime, channel="matrix", drain_timeout=1)
+        ),
+        daemon=True,
+    )
+    cleanup.start()
+    assert runtime.shutdown_event.wait(timeout=1)
+    release.set()
+    cleanup.join(timeout=2)
+    worker_stop_event.set()
+    worker.join(timeout=3)
+
+    assert result == [True]
+    assert completed == ["first", "second", "finalize:matrix", "close"]
+
+
+def test_matrix_shutdown_does_not_archive_while_queue_is_still_busy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out drain must not claim success or close storage under a writer."""
+    import threading
+
+    from clients.matrix_bot import _graceful_shutdown_shared_runtime
+
+    release = threading.Event()
+    archive_calls: list[str] = []
+
+    class BusyQueue:
+        def join(self) -> None:
+            release.wait(timeout=2)
+
+    class EmptyQueue:
+        def join(self) -> None:
+            return None
+
+    runtime = SimpleNamespace(
+        shutdown_event=threading.Event(),
+        _external_worker_stop_event=threading.Event(),
+        fast_queue=BusyQueue(),
+        slow_queue=EmptyQueue(),
+    )
+    monkeypatch.setattr(
+        "services.session_end.finalize_session",
+        lambda *, channel: archive_calls.append("finalize"),
+    )
+    monkeypatch.setattr(
+        "memory.vector_store.close_vector_store",
+        lambda: archive_calls.append("close"),
+    )
+
+    try:
+        result = _graceful_shutdown_shared_runtime(
+            runtime,
+            channel="matrix",
+            drain_timeout=0.05,
+        )
+    finally:
+        release.set()
+
+    assert result is False
+    assert archive_calls == []
+    assert not runtime._external_worker_stop_event.is_set()
 
 
 @pytest.mark.asyncio

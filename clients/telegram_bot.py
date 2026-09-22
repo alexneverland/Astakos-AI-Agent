@@ -23,6 +23,7 @@ import requests
 import re
 import threading
 import queue
+from collections.abc import Callable
 from datetime import datetime
 from time import perf_counter
 from zoneinfo import ZoneInfo
@@ -241,6 +242,9 @@ voice_mode_enabled = False
 astakos_scheduler = None
 _external_background_runtime_lock = threading.Lock()
 _external_background_runtime_channel: str | None = None
+_external_scheduler_thread: threading.Thread | None = None
+_external_missed_check_thread: threading.Thread | None = None
+_external_worker_stop_event: threading.Event | None = None
 
 
 def _current_external_runtime_channel() -> str:
@@ -878,10 +882,11 @@ def _save_override_state():
     except Exception:
         pass
 
-def fast_queue_worker():
+def fast_queue_worker(stop_event: threading.Event | None = None) -> None:
     """Executes fast background tasks (e.g., UI updates, deterministic memory)."""
+    stop_event = stop_event or shutdown_event
     print("\033[90m[System]: Telegram Fast Queue Worker Started!\033[0m")
-    while not shutdown_event.is_set():
+    while not stop_event.is_set():
         try:
             task_func, args = fast_queue.get(timeout=2)
             try:
@@ -894,10 +899,11 @@ def fast_queue_worker():
         except queue.Empty:
             continue
 
-def slow_queue_worker():
+def slow_queue_worker(stop_event: threading.Event | None = None) -> None:
     """Performs slow background tasks (e.g., LLM memory sifting)."""
+    stop_event = stop_event or shutdown_event
     print("\033[90m[System]: Telegram Slow Queue Worker Started!\033[0m")
-    while not shutdown_event.is_set():
+    while not stop_event.is_set():
         try:
             task_func, args = slow_queue.get(timeout=2)
             try:
@@ -1263,6 +1269,36 @@ def handle_end_session(chat_id: str):
     except Exception as e:
         print(f"\033[91m[End Session Error]: {e}\033[0m")
         send_telegram_msg(f"❌ Something went wrong on close: {str(e)}")       
+
+
+def archive_telegram_runtime(
+    runtime: object,
+    *,
+    send_message: Callable[[str], object],
+    drain_timeout: float = 30,
+) -> bool:
+    """Notify the owner while the shared runtime drains and archives safely."""
+    from services.external_runtime_shutdown import drain_and_archive_external_runtime
+
+    try:
+        send_message(t("clients.telegram_bot.bot_msg_139ed4"))
+    except Exception as exc:
+        print(f"[Telegram]: Archive-start notification warning: {exc}")
+    success = drain_and_archive_external_runtime(
+        runtime,
+        channel="telegram",
+        drain_timeout=drain_timeout,
+    )
+    try:
+        send_message(t(
+            "clients.telegram_bot.bot_msg_bfe08b"
+            if success else "clients.matrix_bot.session_archive_failed"
+        ))
+    except Exception as exc:
+        print(f"[Telegram]: Archive-result notification warning: {exc}")
+    return success
+
+
 # ────────────────────────────────────────────────────────────────
 # PHOTO HANDLER
 # ────────────────────────────────────────────────────────────────
@@ -5810,6 +5846,8 @@ def _build_external_scheduler() -> AstakosScheduler:
 def start_external_background_runtime(channel: str) -> AstakosScheduler:
     """Start shared queues and scheduled jobs once, independently of polling."""
     global astakos_scheduler, _external_background_runtime_channel
+    global _external_scheduler_thread, _external_missed_check_thread
+    global _external_worker_stop_event
 
     normalized_channel = str(channel or "").strip().lower()
     if normalized_channel not in {"telegram", "matrix"}:
@@ -5834,27 +5872,45 @@ def start_external_background_runtime(channel: str) -> AstakosScheduler:
         astakos_scheduler = scheduler
         _external_background_runtime_channel = normalized_channel
 
-        threading.Thread(target=fast_queue_worker, daemon=True).start()
-        threading.Thread(target=slow_queue_worker, daemon=True).start()
-        threading.Thread(target=scheduler.run, daemon=True).start()
+        _external_worker_stop_event = threading.Event()
+        threading.Thread(
+            target=fast_queue_worker,
+            args=(_external_worker_stop_event,),
+            daemon=True,
+        ).start()
+        threading.Thread(
+            target=slow_queue_worker,
+            args=(_external_worker_stop_event,),
+            daemon=True,
+        ).start()
+        _external_scheduler_thread = threading.Thread(target=scheduler.run, daemon=True)
+        _external_scheduler_thread.start()
 
         def _delayed_missed_check() -> None:
-            import time as _t
-
-            _t.sleep(10)
+            if shutdown_event.wait(timeout=10):
+                return
             startup_check_missed_routines()
 
-        threading.Thread(target=_delayed_missed_check, daemon=True).start()
+        _external_missed_check_thread = threading.Thread(
+            target=_delayed_missed_check,
+            daemon=True,
+        )
+        _external_missed_check_thread.start()
         return scheduler
 
 
 def _reset_external_background_runtime_for_tests() -> None:
     """Reset process-local startup state for deterministic offline tests."""
     global astakos_scheduler, _external_background_runtime_channel
+    global _external_scheduler_thread, _external_missed_check_thread
+    global _external_worker_stop_event
 
     with _external_background_runtime_lock:
         astakos_scheduler = None
         _external_background_runtime_channel = None
+        _external_scheduler_thread = None
+        _external_missed_check_thread = None
+        _external_worker_stop_event = None
         shutdown_event.clear()
 
 
@@ -5887,27 +5943,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         _handle_exit()
     finally:
-        shutdown_event.set()
-        # Drain queue before summary (max 5s)
-        try:
-            import threading as _th
-            _done = _th.Event()
-            def _drain(): 
-                fast_queue.join()
-                slow_queue.join()
-                _done.set()
-            _th.Thread(target=_drain, daemon=True).start()
-            _done.wait(timeout=5)
-        except Exception:
-            pass
-        # Graceful ChromaDB shutdown — wait for any pending writes to finish
-        try:
-            from memory.vector_store import close_vector_store
-            close_vector_store()
-        except Exception:
-            pass
-        try:
-            handle_end_session(TELEGRAM_CHAT_ID)
-        except Exception:
-            pass
+        archive_telegram_runtime(
+            sys.modules[__name__],
+            send_message=send_telegram_msg,
+        )
         print('[TelegramBot]: Terminated.')
