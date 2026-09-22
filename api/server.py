@@ -1300,13 +1300,22 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         if pending_asset and reply_kind == "yes" and asset_prompt_active:
             from memory.vector_store import memory
-            from services.pending_asset_confirmation import save_confirmed_asset
+            from services.pending_asset_confirmation import (
+                ConfirmedAssetSaveError,
+                save_confirmed_asset,
+            )
 
-            save_confirmed_asset(memory, pending_asset)
-                
-            mark_pending_asset_confirmed(pending_asset["id"])
-
-            reply = t("api.server.saved_to_memory")
+            try:
+                save_confirmed_asset(memory, pending_asset)
+            except ConfirmedAssetSaveError as exc:
+                print(
+                    "[PendingAssets]: Web save failed; pending retained "
+                    f"({type(exc.__cause__ or exc).__name__})"
+                )
+                reply = t("services.pending_asset_confirmation.save_failed_retry")
+            else:
+                mark_pending_asset_confirmed(pending_asset["id"])
+                reply = t("api.server.saved_to_memory")
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply

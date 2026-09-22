@@ -2521,12 +2521,22 @@ def handle_message(
         print("[PendingAssetGuard]: ignored generic yes/no because no recent archive prompt was active")
 
     if pending_asset and reply_kind == "yes" and asset_prompt_active:
-        from services.pending_asset_confirmation import save_confirmed_asset
+        from services.pending_asset_confirmation import (
+            ConfirmedAssetSaveError,
+            save_confirmed_asset,
+        )
 
-        save_confirmed_asset(memory, pending_asset)
-            
-        mark_pending_asset_confirmed(pending_asset["id"])
-        confirm_reply = t("clients.telegram_bot.bot_msg_7e53ac")
+        try:
+            save_confirmed_asset(memory, pending_asset)
+        except ConfirmedAssetSaveError as exc:
+            print(
+                "[PendingAssets]: Telegram save failed; pending retained "
+                f"({type(exc.__cause__ or exc).__name__})"
+            )
+            confirm_reply = t("services.pending_asset_confirmation.save_failed_retry")
+        else:
+            mark_pending_asset_confirmed(pending_asset["id"])
+            confirm_reply = t("clients.telegram_bot.bot_msg_7e53ac")
         _send_and_record_assistant(confirm_reply, chat_id)
         enqueue_fast_task(log_exchange, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
         enqueue_fast_task(update_working_memory, clean_user_text, confirm_reply)

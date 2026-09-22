@@ -72,6 +72,7 @@ async def test_document_analysis_is_persisted_and_staged_only_for_matrix(
     class FakeMemory:
         def save(self, **kwargs):
             saved_assets.append(kwargs)
+            return True
 
     confirmation = PendingAssetConfirmationService(
         channel="matrix",

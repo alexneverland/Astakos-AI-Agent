@@ -41,9 +41,13 @@ with the photo context available in channel history.
 - Matrix media captions behave like Telegram captions: ordinary text becomes the
   photo question, while exact `/nutrition` and `/receipt` captions run their
   existing photo tools.
-- Every successful photo reply ends with one canonical save question.
+- Every successful ordinary photo reply ends with one canonical save question.
+- Exact `/nutrition` and `/receipt` photo commands keep their existing tool-only
+  behavior and do not create an archive prompt.
 - A pending photo archive exists before the user answers yes/no.
 - Confirmed photos from every channel use the shared `PHOTOS_DIR` archive before
   the canonical Chroma and JSON indexes are written.
+- Archive or indexing failures return a retry response and leave the pending
+  confirmation active instead of reporting false success.
 - The photo analysis remains available to later channel conversation.
 - Nutrition/receipt commands and provider-error behavior remain unchanged.

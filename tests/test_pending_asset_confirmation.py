@@ -24,6 +24,11 @@ class _RecordingMemory:
         return True
 
 
+class _RejectingMemory:
+    def save(self, **kwargs) -> bool:
+        return False
+
+
 def _prepare_confirmed_photo(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -68,6 +73,7 @@ def _prepare_confirmed_photo(
         memory_store=memory,
         confirm_reply="Αποθηκεύτηκε.",
         cancel_reply="Δεν αποθηκεύτηκε.",
+        failure_reply="Δεν αποθηκεύτηκε· δοκίμασε ξανά.",
         conversation_db_path=str(photos_dir.parent / "conversation.db"),
     )
     return service, memory, confirmed
@@ -165,3 +171,42 @@ async def test_confirmed_matrix_photo_is_indexed_and_retrievable_from_shared_arc
     result = system.retrieve_photo.func("Αλέξανδρος κατασκευή")
 
     assert f"[SEND_PHOTO: {canonical_path}]" in result
+
+
+@pytest.mark.asyncio
+async def test_missing_confirmed_photo_returns_retry_reply_and_remains_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "matrix_media" / "missing.jpg"
+    photos_dir = tmp_path / "telegram_photos"
+    service, _, confirmed = _prepare_confirmed_photo(
+        monkeypatch,
+        source=source,
+        photos_dir=photos_dir,
+    )
+    response = await service("ναι", "$confirm")
+
+    assert response == "Δεν αποθηκεύτηκε· δοκίμασε ξανά."
+    assert confirmed == []
+
+
+@pytest.mark.asyncio
+async def test_rejected_photo_index_returns_retry_reply_and_remains_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    photos_dir = tmp_path / "telegram_photos"
+    photos_dir.mkdir()
+    source = photos_dir / "photo.jpg"
+    source.write_bytes(b"photo-bytes")
+    service, _, confirmed = _prepare_confirmed_photo(
+        monkeypatch,
+        source=source,
+        photos_dir=photos_dir,
+        memory_store=_RejectingMemory(),
+    )
+    response = await service("ναι", "$confirm")
+
+    assert response == "Δεν αποθηκεύτηκε· δοκίμασε ξανά."
+    assert confirmed == []

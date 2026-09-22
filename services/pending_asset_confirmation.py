@@ -27,6 +27,10 @@ PersistedHook = Callable[[dict[str, Any]], None]
 CompletedHook = Callable[[str, str, str, str], None]
 
 
+class ConfirmedAssetSaveError(RuntimeError):
+    """A confirmed asset could not be archived and indexed safely."""
+
+
 def _canonical_photo_archive_path(file_path: str) -> str:
     """Copy a confirmed photo into the shared permanent photo directory."""
     source = Path(file_path).resolve()
@@ -77,16 +81,22 @@ def _canonical_photo_archive_path(file_path: str) -> str:
 
 def save_confirmed_asset(memory_store: Any, pending: dict[str, Any]) -> Any:
     """Persist one confirmed asset through the canonical channel-neutral path."""
-    archive_path = pending["file_path"]
-    if pending["asset_type"] == "photo":
-        archive_path = _canonical_photo_archive_path(archive_path)
-    return memory_store.save(
-        memory_type=pending["asset_type"],
-        file_path=archive_path,
-        analysis=pending.get("analysis", ""),
-        caption=pending.get("caption", "") or pending["filename"],
-        external_content_sources=pending.get("external_content_sources", []),
-    )
+    try:
+        archive_path = pending["file_path"]
+        if pending["asset_type"] == "photo":
+            archive_path = _canonical_photo_archive_path(archive_path)
+        saved = memory_store.save(
+            memory_type=pending["asset_type"],
+            file_path=archive_path,
+            analysis=pending.get("analysis", ""),
+            caption=pending.get("caption", "") or pending["filename"],
+            external_content_sources=pending.get("external_content_sources", []),
+        )
+    except Exception as exc:
+        raise ConfirmedAssetSaveError("Confirmed asset persistence failed") from exc
+    if saved is not True:
+        raise ConfirmedAssetSaveError("Confirmed asset persistence was not committed")
+    return True
 
 
 def build_asset_archive_prompt(asset_type: str) -> str:
@@ -132,6 +142,7 @@ class PendingAssetConfirmationService:
         memory_store: Any,
         confirm_reply: str,
         cancel_reply: str,
+        failure_reply: str | None = None,
         conversation_db_path: str = CONVERSATION_DB_FILE,
         on_user_persisted: PersistedHook | None = None,
         on_exchange_completed: CompletedHook | None = None,
@@ -144,8 +155,13 @@ class PendingAssetConfirmationService:
         self._conversation_db_path = conversation_db_path
         self._confirm_reply = str(confirm_reply or "").strip()
         self._cancel_reply = str(cancel_reply or "").strip()
-        if not self._confirm_reply or not self._cancel_reply:
-            raise ValueError("Pending asset confirmation requires both replies")
+        if failure_reply is None:
+            from core.i18n import t
+
+            failure_reply = t("services.pending_asset_confirmation.save_failed_retry")
+        self._failure_reply = str(failure_reply or "").strip()
+        if not self._confirm_reply or not self._cancel_reply or not self._failure_reply:
+            raise ValueError("Pending asset confirmation requires success, cancel, and failure replies")
         self._on_user_persisted = on_user_persisted
         self._on_exchange_completed = on_exchange_completed
 
@@ -182,13 +198,21 @@ class PendingAssetConfirmationService:
             return None
 
         if reply_kind == "yes":
-            await asyncio.to_thread(
-                save_confirmed_asset,
-                self._memory_store,
-                pending,
-            )
-            mark_pending_asset_confirmed(pending["id"])
-            response = self._confirm_reply
+            try:
+                await asyncio.to_thread(
+                    save_confirmed_asset,
+                    self._memory_store,
+                    pending,
+                )
+            except ConfirmedAssetSaveError as exc:
+                print(
+                    "[PendingAsset]: confirmed save failed; pending retained "
+                    f"({type(exc.__cause__ or exc).__name__})"
+                )
+                response = self._failure_reply
+            else:
+                mark_pending_asset_confirmed(pending["id"])
+                response = self._confirm_reply
         else:
             mark_pending_asset_cancelled(pending["id"])
             response = self._cancel_reply

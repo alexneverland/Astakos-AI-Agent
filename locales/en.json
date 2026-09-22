@@ -3841,7 +3841,8 @@
   },
   "services": {
     "pending_asset_confirmation": {
-      "photo_share_request": "I'm sharing this photo with you. Take a look and respond naturally."
+      "photo_share_request": "I'm sharing this photo with you. Take a look and respond naturally.",
+      "save_failed_retry": "❌ I couldn't save the file safely. It remains pending; please try again."
     },
     "session_end": {
       "error": "❌ I couldn't close the session safely. The active memory was left unchanged; please try again."
