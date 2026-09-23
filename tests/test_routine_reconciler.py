@@ -122,16 +122,22 @@ def test_infer_summer_break_pause_directive():
 
 def test_infer_camp_absence_mute_directive():
     fact = "[USER_FACT]: Ο Kid1 λείπει σε κατασκήνωση από τις 16/06/2026 και επιστρέφει στις 25/06/2026."
-    directives = infer_routine_reconciliation_directives(
-        fact,
-        category="family",
-        reason="user_stated",
-        now=datetime(2026, 6, 17, 12, 0, 0),
-    )
+    with patch("services.routine_reconciler._infer_llm_reconciliation_candidates", return_value=[]):
+        directives = infer_routine_reconciliation_directives(
+            fact,
+            category="family",
+            reason="user_stated",
+            now=datetime(2026, 6, 17, 12, 0, 0),
+        )
 
     assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_from_home" and d["value"] == "true" and d["until_date"] == "2026-06-25" for d in directives)
     assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_reason" and d["value"] == "camp" and d["until_date"] == "2026-06-25" for d in directives)
     assert any(d["kind"] == "condition_add" for d in directives)
+    assert any(
+        d["kind"] == "condition_add"
+        and d["condition_payload"] == {"flag": "kid1_unavailable_for_routine", "equals": True}
+        for d in directives
+    )
 
 def test_infer_return_home_unmute_directive():
     fact = "[USER_FACT]: Ο Kid1 γύρισε από την κατασκήνωση και είναι πάλι σπίτι."

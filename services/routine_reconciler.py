@@ -350,7 +350,7 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
         include_tokens=[],
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         condition_type="context_flag",
-        condition_payload={"flag": "kid1_away_from_home", "equals": True},
+        condition_payload={"flag": "kid1_unavailable_for_routine", "equals": True},
         condition_mode="suppress_when_true",
         reason="camp_absence_condition",
     )
@@ -626,7 +626,7 @@ def _rule_kid1_away_general(normalized: str, dates: list[str], now: datetime) ->
         include_tokens=[],
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         condition_type="context_flag",
-        condition_payload={"flag": "kid1_away_from_home", "equals": True},
+        condition_payload={"flag": "kid1_unavailable_for_routine", "equals": True},
         condition_mode="suppress_when_true",
         reason="away_general_condition",
     )
