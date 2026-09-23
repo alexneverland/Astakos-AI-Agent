@@ -2177,6 +2177,11 @@ def _condition_conflicts_with_existing(new_condition: dict, existing_conditions:
         new_mode = new_condition.get("condition_mode") or "allow_when_true"
         if existing_mode == new_mode == "allow_when_true" and payload["equals"] != new_payload["equals"]:
             return True
+        if (existing_mode == new_mode == "suppress_when_true"
+                and isinstance(payload["equals"], bool)
+                and isinstance(new_payload["equals"], bool)
+                and payload["equals"] != new_payload["equals"]):
+            return True
         if existing_mode != new_mode and payload["equals"] == new_payload["equals"]:
             return True
     return False
@@ -2213,11 +2218,15 @@ def replace_routine_conditions(
                     conn.rollback()
                     return False
             elif c_type:
-                current = [{
-                    "condition_type": c_type,
-                    "condition_payload": json.loads(c_payload) if c_payload else None,
-                    "condition_mode": c_mode,
-                }]
+                try:
+                    current = [{
+                        "condition_type": c_type,
+                        "condition_payload": json.loads(c_payload) if c_payload else None,
+                        "condition_mode": c_mode,
+                    }]
+                except json.JSONDecodeError:
+                    conn.rollback()
+                    return False
             else:
                 current = []
             if current != expected_conditions:
