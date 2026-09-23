@@ -57,7 +57,7 @@
   - Acceptance: Synapse is reachable from Element X over Tailscale HTTPS with
     registration/federation disabled and no Astakos runtime changes.
   - Verified: local Compose health, tailnet-only HTTPS proxy, and owner-tested
-    encrypted Element conversation. See `tasks/matrix-server-phase-1-todo.md`.
+    encrypted Element conversation.
 
 - [ ] Document and verify private Matrix backup/recovery prerequisites.
   - Acceptance: Synapse signing key/config and PostgreSQL data have a tested,
@@ -188,6 +188,10 @@
 - [x] Owner verifies a live Web → Element text exchange before PR/deploy.
   - Verified: the owner observed the Web message and one assistant answer in
     Element, with the original Web history retained.
+- [x] Reconcile the merged Web/Element conversation and delivery regressions.
+  - Verified in PR #195: repeated Web turns retain separate history/outbox rows;
+    Telegram mirror chunks are acknowledged only after every send succeeds;
+    Web upload turns keep compact text summaries without mirroring media bytes.
 
 ## Matrix channel integration: `external-delivery`
 
@@ -206,8 +210,20 @@
   - Acceptance: only the allowlisted owner reacting ✅/❌ to the exact encrypted
     approval event can execute or reject its pending action; stale or unrelated
     reactions are inert.
-  - Verified offline: prompt/event correlation and trusted reaction handling
-    are covered; live Matrix callback registration remains in checkpoint 4.
+  - Verified offline: prompt/event correlation, current device allowlisting,
+    authenticated decrypted reactions, and duplicate/untrusted rejection are
+    covered. The owner has exercised Matrix approval in a live conversation.
+
+- [x] Queue Web-origin approvals for delivery by the active Matrix process.
+  - Acceptance: the Web process does not claim direct Element delivery; the
+    Matrix process retries queued prompts with a stable transaction ID, then
+    correlates the sent event before a trusted reaction can execute the action.
+  - Verified in PR #195: cross-process pending-file writes, queued delivery,
+    scheduler registration, retry identity, and Web → Matrix → approval/reject
+    boundaries pass offline. Telegram's existing callback path is unchanged.
+- [ ] Exercise one Web-origin critical-tool approval live in Element.
+  - Confirm one prompt arrives, an allowlisted owner reaction executes once,
+    and the resulting status appears correctly in both channel views.
 
 - [x] Move routine, proactive, reflection, and follow-up outbound sends onto
   the canonical router without changing the active Telegram runtime.
