@@ -58,6 +58,7 @@ def test_pasted_text_upload_reaches_document_summary_without_unbound_error(clien
         fake_resp = MagicMock()
         fake_resp.content = "Fake document summary."
         mock_invoke.return_value = fake_resp
+        mock_history.return_value = {"rowid": None}
 
         # 3. Perform the request
         payload = b"This is a pasted upload text payload. " * 50
@@ -96,13 +97,14 @@ def test_pasted_text_upload_reaches_document_summary_without_unbound_error(clien
 def test_web_document_upload_mirrors_text_not_file_to_selected_channel(
     client, tmp_path,
 ) -> None:
-    from memory.conversation_history import append_message, load_pending_web_mirrors
+    from memory.conversation_history import append_message, load_messages, load_pending_web_mirrors
 
     mock_uploads_dir = tmp_path / "uploads"
     mock_uploads_dir.mkdir()
     conversation_db = str(tmp_path / "conversation.db")
 
     def persist_web_history(role: str, content: str, **kwargs):
+        kwargs.pop("return_saved", None)
         return append_message(
             role=role, content=content, channel="web", db_path=conversation_db,
             **kwargs,
@@ -128,6 +130,10 @@ def test_web_document_upload_mirrors_text_not_file_to_selected_channel(
 
     assert response.status_code == 200
     assert response.json()["status"] == "success"
+    saved_rows = load_messages(db_path=conversation_db)
+    assert response.json()["user_rowid"] == saved_rows[0]["rowid"]
+    assert response.json()["assistant_rowid"] == saved_rows[1]["rowid"]
+    assert response.json()["user_message"] == saved_rows[0]["content"]
     assert [call.kwargs.get("mirror_target") for call in mock_history.call_args_list] == [
         "matrix", "matrix",
     ]
@@ -144,7 +150,7 @@ def test_web_document_upload_mirrors_text_not_file_to_selected_channel(
 def test_web_photo_upload_queues_description_without_binary_media(
     client, tmp_path,
 ) -> None:
-    from memory.conversation_history import append_message, load_pending_web_mirrors
+    from memory.conversation_history import append_message, load_messages, load_pending_web_mirrors
 
     photo_dir = tmp_path / "photos"
     photo_dir.mkdir()
@@ -153,6 +159,7 @@ def test_web_photo_upload_queues_description_without_binary_media(
     Image.new("RGB", (2, 2), "blue").save(image_bytes, format="PNG")
 
     def persist_web_history(role: str, content: str, **kwargs):
+        kwargs.pop("return_saved", None)
         return append_message(
             role=role, content=content, channel="web", db_path=conversation_db,
             **kwargs,
@@ -174,6 +181,10 @@ def test_web_photo_upload_queues_description_without_binary_media(
 
     assert response.status_code == 200
     assert response.json()["status"] == "success"
+    saved_rows = load_messages(db_path=conversation_db)
+    assert response.json()["user_rowid"] == saved_rows[0]["rowid"]
+    assert response.json()["assistant_rowid"] == saved_rows[1]["rowid"]
+    assert response.json()["user_message"] == saved_rows[0]["content"]
     queued = load_pending_web_mirrors("matrix", db_path=conversation_db)
     assert [item["role"] for item in queued] == ["user", "assistant"]
     assert queued[0]["content"] == "📷 Έστειλα φωτογραφία από το Web."
@@ -198,7 +209,7 @@ def test_unreadable_web_document_is_not_summarized_or_offered_for_archive(
              side_effect=DocumentPreviewError("The PDF is unreadable."),
          ), \
          patch("api.server.safe_llm_invoke") as mock_invoke, \
-         patch("api.server.append_to_chat_history"), \
+         patch("api.server.append_to_chat_history", return_value={"rowid": None}), \
          patch("api.server.enqueue_fast_task"), \
          patch("api.server.enqueue_slow_task"), \
          patch("memory.pending_assets.create_pending_asset_archive") as create_pending:

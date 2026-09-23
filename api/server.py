@@ -1345,15 +1345,24 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
-            append_to_chat_history("user", user_input, mirror_target=mirror_target)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent", mirror_target=mirror_target)
+            user_saved = append_to_chat_history(
+                "user", user_input, return_saved=True, mirror_target=mirror_target,
+            )
+            assistant_saved = append_to_chat_history(
+                "assistant", reply, agent="Chat_Agent", return_saved=True,
+                mirror_target=mirror_target,
+            )
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
-            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+            return JSONResponse({
+                "agent": "Chat_Agent", "response": reply,
+                "user_rowid": user_saved["rowid"],
+                "assistant_rowid": assistant_saved["rowid"],
+            })
 
         if pending_asset and reply_kind == "no" and asset_prompt_active:
             mark_pending_asset_cancelled(pending_asset["id"])
@@ -1362,15 +1371,24 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
-            append_to_chat_history("user", user_input, mirror_target=mirror_target)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent", mirror_target=mirror_target)
+            user_saved = append_to_chat_history(
+                "user", user_input, return_saved=True, mirror_target=mirror_target,
+            )
+            assistant_saved = append_to_chat_history(
+                "assistant", reply, agent="Chat_Agent", return_saved=True,
+                mirror_target=mirror_target,
+            )
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
-            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+            return JSONResponse({
+                "agent": "Chat_Agent", "response": reply,
+                "user_rowid": user_saved["rowid"],
+                "assistant_rowid": assistant_saved["rowid"],
+            })
     except Exception as e:
         print(f"[PendingAssets]: Web text handler error: {e}")
 
@@ -1398,8 +1416,13 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
 
-            append_to_chat_history("user", user_input, mirror_target=mirror_target)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent", mirror_target=mirror_target)
+            user_saved = append_to_chat_history(
+                "user", user_input, return_saved=True, mirror_target=mirror_target,
+            )
+            assistant_saved = append_to_chat_history(
+                "assistant", reply, agent="Chat_Agent", return_saved=True,
+                mirror_target=mirror_target,
+            )
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
@@ -1411,7 +1434,11 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             _trace.mark_phase("messenger_intent_clear_intercept", 1)
             _trace.finalize(response=reply)
             _trace.save()
-            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+            return JSONResponse({
+                "agent": "Chat_Agent", "response": reply,
+                "user_rowid": user_saved["rowid"],
+                "assistant_rowid": assistant_saved["rowid"],
+            })
 
         if draft_intent and draft_intent.intent == "clarify_draft":
             if draft_active and draft_data and draft_data.get("message"):
@@ -1431,8 +1458,13 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
 
-            append_to_chat_history("user", user_input, mirror_target=mirror_target)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent", mirror_target=mirror_target)
+            user_saved = append_to_chat_history(
+                "user", user_input, return_saved=True, mirror_target=mirror_target,
+            )
+            assistant_saved = append_to_chat_history(
+                "assistant", reply, agent="Chat_Agent", return_saved=True,
+                mirror_target=mirror_target,
+            )
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
@@ -1444,7 +1476,11 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             _trace.mark_phase("messenger_intent_clarify_intercept", 1)
             _trace.finalize(response=reply)
             _trace.save()
-            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+            return JSONResponse({
+                "agent": "Chat_Agent", "response": reply,
+                "user_rowid": user_saved["rowid"],
+                "assistant_rowid": assistant_saved["rowid"],
+            })
     except Exception as e:
         print(f"[MessengerIntent Web]: {e}")
 
@@ -2197,8 +2233,8 @@ async def upload_file(
             external_content_history_metadata,
         )
         asset_metadata = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
-        append_to_chat_history(
-            "user", upload_history_msg, metadata=asset_metadata,
+        user_saved = append_to_chat_history(
+            "user", upload_history_msg, metadata=asset_metadata, return_saved=True,
             mirror_target=mirror_target,
             mirror_content=(
                 "📷 Έστειλα φωτογραφία από το Web."
@@ -2209,8 +2245,8 @@ async def upload_file(
         mirror_ai_msg = chat_ai_msg
         if archive_prompt and mirror_ai_msg.endswith(archive_prompt):
             mirror_ai_msg = mirror_ai_msg[:-len(archive_prompt)].rstrip()
-        append_to_chat_history(
-            "assistant", chat_ai_msg, metadata=asset_metadata,
+        assistant_saved = append_to_chat_history(
+            "assistant", chat_ai_msg, metadata=asset_metadata, return_saved=True,
             mirror_target=mirror_target,
             mirror_content=mirror_ai_msg,
         )
@@ -2244,6 +2280,9 @@ async def upload_file(
             "url":       _private_asset_url(request, "photos", filename) if is_image else None,
             "ai_message": chat_ai_msg,
             "analysis":  memory_analysis,
+            "user_message": upload_history_msg,
+            "user_rowid": user_saved["rowid"],
+            "assistant_rowid": assistant_saved["rowid"],
         })
     except Exception as e:
         return JSONResponse({"status": "error", "message": _api_internal_error("upload")}, status_code=500)

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
 
 from memory.conversation_history import append_message, load_messages
 from services.external_delivery import ExternalDeliveryRouter
@@ -144,6 +147,53 @@ def test_web_chat_route_marks_every_text_history_write_for_mirroring() -> None:
     ]
     assert len(writes) >= 2
     assert all(any(key.arg == "mirror_target" for key in call.keywords) for call in writes)
+
+
+@pytest.mark.parametrize("mode", ["yes", "no", "clear_draft", "clarify_draft"])
+def test_web_chat_early_saved_replies_return_both_history_row_ids(mode: str) -> None:
+    """Exercise all four early /chat replies without a live DB or transport."""
+    from api.server import LOCAL_TOKEN, server
+    from services.routine_completion_helper import RoutineSelection
+
+    saved_roles: list[str] = []
+
+    def save_history(role: str, _content: str, **kwargs: object) -> dict[str, int]:
+        assert kwargs["return_saved"] is True
+        saved_roles.append(role)
+        return {"rowid": 700 + len(saved_roles)}
+
+    is_asset = mode in {"yes", "no"}
+    with (
+        patch("core.messaging_channel.resolve_external_channel", return_value="matrix"),
+        patch("memory.pending_assets.get_latest_recent_asset", return_value=None),
+        patch("memory.routine_db.load_pending_confirmations", return_value={}),
+        patch("memory.routine_db.get_eligible_preemptive_routines_for_day", return_value=[]),
+        patch("memory.routine_db.get_active_routine_catalog", return_value=[]),
+        patch("services.routine_completion_helper.decide_completion", return_value=RoutineSelection(action="none", routine_id=None)),
+        patch("memory.pending_assets.clear_expired_pending_assets"),
+        patch("memory.pending_assets.get_latest_pending_asset_any", return_value={"id": 1} if is_asset else None),
+        patch("memory.pending_assets.classify_pending_asset_reply", return_value=mode if is_asset else None),
+        patch("memory.pending_assets.is_reply_to_recent_asset_prompt", return_value=is_asset),
+        patch("memory.pending_assets.mark_pending_asset_confirmed"),
+        patch("memory.pending_assets.mark_pending_asset_cancelled"),
+        patch("services.pending_asset_confirmation.save_confirmed_asset"),
+        patch("core.messenger_draft.active_draft_status", return_value=(True, "active", {"message": "Draft"})),
+        patch("core.messenger_draft.clear_draft", return_value=True),
+        patch("services.messenger_intent.classify_messenger_intent", return_value=SimpleNamespace(intent=mode)),
+        patch("memory.execution_trace.ExecutionTrace.save"),
+        patch("api.server.append_to_chat_history", side_effect=save_history),
+        patch("api.server.enqueue_fast_task"),
+        patch("api.server.enqueue_slow_task"),
+    ):
+        response = TestClient(server).post(
+            "/chat", json={"message": "Ναι" if mode == "yes" else "Όχι"},
+            headers={"Authorization": f"Bearer {LOCAL_TOKEN}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["user_rowid"] == 701
+    assert response.json()["assistant_rowid"] == 702
+    assert saved_roles == ["user", "assistant"]
 
 
 def test_external_scheduler_registers_mirror_consumer_without_importing_bot() -> None:

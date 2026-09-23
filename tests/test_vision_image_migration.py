@@ -768,7 +768,7 @@ class TestWebUploadPhotoMigration:
 
         with patch("api.server.PHOTOS_DIR", str(mock_uploads_dir)), \
              patch("config.PHOTOS_DIR", str(mock_uploads_dir)), \
-             patch("api.server.append_to_chat_history"), \
+             patch("api.server.append_to_chat_history", return_value={"rowid": None}), \
              patch("api.server.enqueue_fast_task"), \
              patch("api.server.enqueue_slow_task"), \
              patch("memory.pending_assets.create_pending_asset_archive", lambda **kw: created_archives.append(kw)), \
@@ -807,7 +807,7 @@ class TestWebUploadPhotoMigration:
 
         with patch("api.server.PHOTOS_DIR", str(mock_uploads_dir)), \
              patch("config.PHOTOS_DIR", str(mock_uploads_dir)), \
-             patch("api.server.append_to_chat_history"), \
+             patch("api.server.append_to_chat_history", return_value={"rowid": None}), \
              patch("api.server.enqueue_fast_task"), \
              patch("api.server.enqueue_slow_task"), \
              patch("memory.pending_assets.create_pending_asset_archive", lambda **kw: created_archives.append(kw)), \
@@ -850,7 +850,7 @@ class TestWebUploadPhotoMigration:
 
         with patch("api.server.PHOTOS_DIR", str(mock_uploads_dir)), \
              patch("config.PHOTOS_DIR", str(mock_uploads_dir)), \
-             patch("api.server.append_to_chat_history"), \
+             patch("api.server.append_to_chat_history", return_value={"rowid": None}), \
              patch("api.server.enqueue_fast_task"), \
              patch("api.server.enqueue_slow_task"), \
              patch("memory.pending_assets.create_pending_asset_archive", lambda **kw: created_archives.append(kw)), \
@@ -894,7 +894,7 @@ class TestWebUploadPhotoMigration:
 
         with patch("api.server.PHOTOS_DIR", str(mock_uploads_dir)), \
              patch("config.PHOTOS_DIR", str(mock_uploads_dir)), \
-             patch("api.server.append_to_chat_history"), \
+             patch("api.server.append_to_chat_history", return_value={"rowid": None}), \
              patch("api.server.enqueue_fast_task"), \
              patch("api.server.enqueue_slow_task"), \
              patch("memory.pending_assets.create_pending_asset_archive", lambda **kw: created_archives.append(kw)), \

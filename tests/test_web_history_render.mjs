@@ -6,7 +6,10 @@ import vm from 'node:vm';
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const start = html.indexOf('    let lastKnownMsgId = 0;');
 const end = html.indexOf('    async function fetchNewMessages()', start);
+const sendStart = html.indexOf('    async function sendMessage()');
+const sendEnd = html.indexOf("    sendBtn.addEventListener('click', sendMessage);", sendStart);
 assert.ok(start >= 0 && end > start, 'Web history renderer must be present');
+assert.ok(sendStart >= 0 && sendEnd > sendStart, 'Web send handler must be present');
 
 function renderer() {
     const displayed = [];
@@ -19,6 +22,49 @@ function renderer() {
     });
     vm.runInContext(html.slice(start, end), context);
     return { context, displayed, run: (source) => vm.runInContext(source, context) };
+}
+
+function uploadRenderer() {
+    const displayed = [];
+    let completeUpload;
+    const uploadResponse = new Promise((resolve) => { completeUpload = resolve; });
+    const chatBox = {
+        appendChild: (element) => { element.parentNode = chatBox; },
+        removeChild: (element) => { element.parentNode = null; },
+        scrollHeight: 0,
+        scrollTop: 0,
+    };
+    const context = vm.createContext({
+        appendMessage: (text, role) => displayed.push({ text, role }),
+        AbortController,
+        FormData,
+        fetch: () => uploadResponse,
+        document: { createElement: () => ({ parentNode: null }) },
+        userInput: { value: '', focus() {} },
+        fileInput: { files: [{ name: 'photo.png' }] },
+        pastedVirtualFile: null,
+        clearPendingAttachmentUI() {},
+        setCoreState() {},
+        isRecording: false,
+        isLiveVoiceMode: false,
+        currentPhotoPath: null,
+        chatBox,
+        setTimeout,
+        clearTimeout,
+    });
+    vm.runInContext(html.slice(start, end) + '\n' + html.slice(sendStart, sendEnd), context);
+    return {
+        displayed,
+        run: (source) => vm.runInContext(source, context),
+        completeUpload: () => completeUpload({ok: true, json: async () => ({
+            status: 'success',
+            user_rowid: 501,
+            assistant_rowid: 502,
+            user_message: '📎 Ανέβασα αρχείο: photo.png',
+            ai_message: 'Ωραία φωτογραφία!',
+        })}),
+        failUpload: () => completeUpload({ok: false, json: async () => ({status: 'error', message: 'Upload failed'})}),
+    };
 }
 
 test('two intentional identical Web sends remain visible', () => {
@@ -71,4 +117,26 @@ test('two identical Web turns survive HTTP, WebSocket and polling replay', () =>
          }`);
     assert.deepEqual(displayed.map(({ text }) => text),
         ['Ίδιο μήνυμα', 'Ίδιο μήνυμα', 'Ίδια απάντηση', 'Ίδια απάντηση']);
+});
+
+for (const historyFirst of [false, true]) {
+    test(`Web upload shows one user and one assistant when ${historyFirst ? 'history' : 'HTTP'} arrives first`, async () => {
+        const { displayed, run, completeUpload } = uploadRenderer();
+        const upload = run('sendMessage()');
+        const history = () => run(`renderHistoryMsg({rowid: 501, role: 'user', content: '📎 Ανέβασα αρχείο: photo.png', channel: 'web'});
+            renderHistoryMsg({rowid: 502, role: 'assistant', content: 'Ωραία φωτογραφία!', channel: 'web'});`);
+        if (historyFirst) history();
+        completeUpload();
+        await upload;
+        if (!historyFirst) history();
+        assert.deepEqual(displayed.map(({ role }) => role), ['user', 'ai']);
+    });
+}
+
+test('failed Web upload does not leave a phantom user or assistant message', async () => {
+    const { displayed, run, failUpload } = uploadRenderer();
+    const upload = run('sendMessage()');
+    failUpload();
+    await upload;
+    assert.deepEqual(displayed.map(({ role }) => role), ['ai']);
 });

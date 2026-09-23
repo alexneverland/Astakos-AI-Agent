@@ -1458,7 +1458,7 @@
         if (file && !text) displayUserMsg = `[File sent: ${file.name}]`;
         if (file && text)  displayUserMsg = `[File: ${file.name}]<br>${text}`;
 
-        appendUserMessageOnce(displayUserMsg);
+        if (!file) appendUserMessageOnce(displayUserMsg);
         userInput.value = '';
         clearPendingAttachmentUI();
         if (!isRecording && !isLiveVoiceMode) userInput.focus();
@@ -1485,8 +1485,13 @@
                 formData.append('message', apiText);
                 response = await fetch('/upload', { method: 'POST', body: formData });
                 const data = await response.json();
+                if (!response.ok || data.status !== 'success') throw new Error(data.message || 'Upload failed');
                 if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
-                appendAssistantResponseOnce(data.ai_message, 'Chat_Agent');
+                renderHistoryMsg({
+                    rowid: data.user_rowid, role: 'user', channel: 'web',
+                    content: data.user_message,
+                });
+                appendAssistantResponseOnce(data.ai_message, 'Chat_Agent', data.assistant_rowid);
                 currentPhotoPath = null;
                 setCoreState('idle');
                 return data.ai_message;
