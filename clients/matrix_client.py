@@ -55,6 +55,7 @@ MatrixLocationHandler = Callable[[float, float, bool], Awaitable[str | None]]
 
 _TYPING_TIMEOUT_MS = 30_000
 _TYPING_REFRESH_SECONDS = 20.0
+_TYPING_REQUEST_TIMEOUT_SECONDS = 0.25
 
 
 class MatrixTransportError(RuntimeError):
@@ -201,10 +202,13 @@ class MatrixTextTransport:
     async def _set_typing(self, typing_state: bool) -> None:
         """Best-effort typing state that never blocks an assistant reply."""
         try:
-            await self._client.room_typing(
-                self._allowed_room_id,
-                typing_state=typing_state,
-                timeout=_TYPING_TIMEOUT_MS,
+            await asyncio.wait_for(
+                self._client.room_typing(
+                    self._allowed_room_id,
+                    typing_state=typing_state,
+                    timeout=_TYPING_TIMEOUT_MS,
+                ),
+                timeout=_TYPING_REQUEST_TIMEOUT_SECONDS,
             )
         except Exception as exc:
             print(f"[Matrix]: Typing notice failed: {type(exc).__name__}")
@@ -348,6 +352,8 @@ class MatrixTextTransport:
         if getattr(room, "encrypted", False) is not True:
             return
         if not isinstance(event, self._reaction_event_type):
+            return
+        if getattr(event, "decrypted", False) is not True:
             return
         sender = str(getattr(event, "sender", ""))
         if sender != self._allowed_user_id or sender == self._service_user_id:

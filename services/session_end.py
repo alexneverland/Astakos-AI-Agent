@@ -6,7 +6,7 @@ from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
 
-SummaryRunner = Callable[..., None]
+SummaryRunner = Callable[..., bool | None]
 
 
 def finalize_session(
@@ -34,5 +34,6 @@ def finalize_session(
 
         reset_text = t("clients.telegram_bot.bot_msg_4cd007")
 
-    summary_runner(channel=normalized_channel)
+    if summary_runner(channel=normalized_channel) is False:
+        raise RuntimeError(f"Session archive failed for {normalized_channel}")
     Path(working_memory_file).write_text(reset_text, encoding="utf-8")

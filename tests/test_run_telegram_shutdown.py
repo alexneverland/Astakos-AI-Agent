@@ -21,5 +21,5 @@ def test_watchdog_timeout_allows_poll_and_cleanup_budget():
         and isinstance(node.value.value, int)
     )
 
-    # Telegram requests can block for 35s; bot shutdown then has bounded drain/close work.
-    assert timeout >= 50
+    # One 35s poll, two bounded 20s notifications, a 30s drain, and summary work.
+    assert timeout >= 140

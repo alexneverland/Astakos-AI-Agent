@@ -23,6 +23,9 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 load_dotenv(ROOT_DIR / ".env")
+from services.external_runtime_shutdown import (
+    drain_and_archive_external_runtime as _graceful_shutdown_shared_runtime,
+)
 
 
 class MatrixRuntimeConfigurationError(ValueError):
@@ -58,47 +61,6 @@ def _graceful_shutdown_signals(
     finally:
         for signal_number, previous_handler in previous_handlers.items():
             signal.signal(signal_number, previous_handler)
-
-
-def _graceful_shutdown_shared_runtime(
-    runtime: object,
-    *,
-    channel: str,
-    drain_timeout: float = 5,
-) -> bool:
-    """Drain queued memory work and close persistent stores before process exit."""
-    import threading
-
-    runtime.shutdown_event.set()
-    drained = threading.Event()
-
-    def drain_queues() -> None:
-        try:
-            runtime.fast_queue.join()
-            runtime.slow_queue.join()
-        finally:
-            drained.set()
-
-    threading.Thread(target=drain_queues, daemon=True).start()
-    success = drained.wait(timeout=drain_timeout)
-
-    try:
-        from services.session_end import finalize_session
-
-        finalize_session(channel=channel)
-    except Exception as exc:
-        success = False
-        print(f"[Matrix]: Session-finalization warning: {exc}")
-
-    try:
-        from memory.vector_store import close_vector_store
-
-        close_vector_store()
-    except Exception as exc:
-        success = False
-        print(f"[Matrix]: Vector-store shutdown warning: {exc}")
-
-    return success
 
 
 async def _archive_matrix_session_with_notifications(

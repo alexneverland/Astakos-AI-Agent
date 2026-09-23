@@ -45,4 +45,4 @@ def test_matrix_watchdog_stops_child_gracefully_before_restart() -> None:
         signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT
     )
     assert process.signals == [expected_signal]
-    assert process.wait_timeouts == [50]
+    assert process.wait_timeouts == [120]

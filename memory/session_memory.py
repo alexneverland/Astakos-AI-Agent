@@ -88,6 +88,14 @@ def _maybe_trigger_auto_session_summary(channel: str) -> None:
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def wait_for_auto_session_summary(timeout: float) -> bool:
+    """Wait until a previously spawned auto-summary has finished persisting."""
+    if not _auto_summary_lock.acquire(timeout=max(0, timeout)):
+        return False
+    _auto_summary_lock.release()
+    return True
+
+
 def load_last_session_hint(channel: str = "web") -> str:
     """Loads the hint from the last session."""
     conn = None
@@ -1085,7 +1093,7 @@ def _extract_confirmed_memory_candidate(
     }, now=ts)
 
 
-def _run_session_summary(channel: str = "web"):
+def _run_session_summary(channel: str = "web") -> bool:
     """Archives the session (per channel) with protection against duplicate entries."""
     global is_summarizing, SESSION_LOGS
 
@@ -1097,8 +1105,10 @@ def _run_session_summary(channel: str = "web"):
     using_persistent_log = bool(persistent_log)
     current_log = persistent_log if using_persistent_log else list(SESSION_LOGS)
     # 1. Shield: If it is already running or if there are no messages, exit immediately
-    if is_summarizing or not current_log:
-        return
+    if is_summarizing:
+        return False
+    if not current_log:
+        return True
 
     try:
         is_summarizing = True
@@ -1138,7 +1148,7 @@ def _run_session_summary(channel: str = "web"):
                 print("\033[91m[Session]: Invalid format. Messages returned to log.\033[0m")
             else:
                 print("\033[91m[Session]: Invalid format. Shared exchanges left unsummarized.\033[0m")
-            return
+            return False
 
         # 4. Enrichment of the text for the Vector DB
         session_text = (
@@ -1155,12 +1165,14 @@ def _run_session_summary(channel: str = "web"):
             mark_exchanges_summarized([e["id"] for e in current_batch])
         print(f"\033[92m[Session]: ✅ Archived successfully! Mood: {summary.get('mood', '?')}\033[0m")
         bus.emit("session_ended", channel=summary_channel, mood=summary.get("mood", "unknown"), summary=summary.get("summary", ""))
+        return True
 
     except Exception as e:
         # Recovery in case of error
         if not using_persistent_log:
             SESSION_LOGS[:0] = current_batch  # Reset to the beginning
         print(f"\033[91m[Session Error]: {e}\033[0m")
+        return False
     finally:
         is_summarizing = False
 

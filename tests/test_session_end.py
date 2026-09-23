@@ -44,3 +44,20 @@ def test_finalize_session_preserves_working_memory_when_archive_fails(tmp_path) 
         )
 
     assert working_memory.read_text(encoding="utf-8") == "keep this"
+
+
+def test_finalize_session_preserves_working_memory_when_archive_reports_failure(tmp_path) -> None:
+    from services.session_end import finalize_session
+
+    working_memory = tmp_path / "working_memory.txt"
+    working_memory.write_text("keep this", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="archive failed"):
+        finalize_session(
+            channel="telegram",
+            summary_runner=lambda *, channel: False,
+            working_memory_file=working_memory,
+            reset_text="EMPTY",
+        )
+
+    assert working_memory.read_text(encoding="utf-8") == "keep this"
