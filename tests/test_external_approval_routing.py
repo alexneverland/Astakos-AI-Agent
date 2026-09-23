@@ -93,6 +93,30 @@ def test_default_selection_preserves_existing_telegram_approval(
     assert "Telegram" in result["messages"][0].content
 
 
+def test_web_matrix_approval_without_matrix_transport_reports_delivery_failure(
+    tmp_path, monkeypatch,
+) -> None:
+    """The Web process must not claim that Element received an approval."""
+    monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "matrix")
+    monkeypatch.setattr(approval, "PENDING_FILE", str(tmp_path / "pending.json"))
+    external_delivery_router.unregister("matrix")
+    tool_call = {
+        "name": "mail_manager", "args": {"action": "send"},
+        "id": "call-undelivered", "type": "tool_call",
+    }
+
+    result = approval.approval_check_node({
+        "messages": [AIMessage(content="", tool_calls=[tool_call])],
+        "channel": "web",
+    })
+
+    assert result["approval_status"] == "blocked"
+    assert "Element" in result["messages"][0].content
+    assert "έγκριση" in result["messages"][0].content.lower()
+    assert "Έλεγξε" not in result["messages"][0].content
+    assert approval.get_pending("call-undelivered") is None
+
+
 def test_matrix_selection_routes_notify_without_telegram(monkeypatch) -> None:
     """NOTIFY-risk arguments stay on the selected Matrix channel."""
     monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "matrix")

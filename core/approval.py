@@ -499,10 +499,12 @@ def approval_check_node(state):
     Runs before the ToolNode.
     - SAFE / WARNING → state["approval_status"] = "ok" → continues to tools
     - BLOCKED        → immediately cut off by safe executor, sets "blocked"
-    - CRITICAL       → saves pending, sends Telegram, sets "pending"
+    - CRITICAL       → sends through the selected channel, then stays pending
+                       only if delivery was confirmed
     """
     from langchain_core.messages import AIMessage, ToolMessage
     from core.i18n import t
+    from core.messaging_channel import resolve_external_channel
 
     last_msg = state["messages"][-1]
     tool_calls = getattr(last_msg, "tool_calls", [])
@@ -692,6 +694,7 @@ def approval_check_node(state):
 
     # There are CRITICAL calls — we save them and request approval
     tool_messages = []
+    delivery_failed = False
     current_channel = state.get("channel", "telegram")
     for tc in critical_calls:
         pending_args = dict(tc.get("args", {}))
@@ -715,19 +718,30 @@ def approval_check_node(state):
         # Deliver through exactly one configured external channel.
         delivery_channel = _notify_selected_approval(tc)
 
-        # We return a ToolMessage so that the graph does not get stuck
-        tool_messages.append(ToolMessage(
-            content=t(
+        if delivery_channel is None:
+            pop_pending(tc["id"])
+            delivery_failed = True
+            content = t(
+                "core.approval.delivery_failed",
+                name=tc["name"],
+                channel="Element" if resolve_external_channel() == "matrix" else "Telegram",
+            )
+        else:
+            content = t(
                 "core.approval.waiting",
                 name=tc["name"],
                 channel="Element" if delivery_channel == "matrix" else "Telegram",
-            ),
+            )
+
+        # We return a ToolMessage so that the graph does not get stuck
+        tool_messages.append(ToolMessage(
+            content=content,
             tool_call_id=tc["id"],
             name=tc["name"],
         ))
 
     return {
-        "approval_status": "pending",
+        "approval_status": "blocked" if delivery_failed else "pending",
         "messages": tool_messages,
     }
 
@@ -800,7 +814,7 @@ def _notify_selected_notify(tool_call: dict) -> None:
         )
 
 
-def _notify_selected_approval(tool_call: dict) -> str:
+def _notify_selected_approval(tool_call: dict) -> str | None:
     """Deliver one approval through the selected external channel only."""
     from core.messaging_channel import resolve_external_channel
 
@@ -839,6 +853,7 @@ def _notify_selected_approval(tool_call: dict) -> str:
             "\033[91m[Approval]: Selected external approval delivery failed "
             f"({type(exc).__name__})\033[0m"
         )
+        return None
     return channel
 
 

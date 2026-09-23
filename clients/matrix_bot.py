@@ -357,7 +357,8 @@ async def run_matrix() -> None:
             send_text=send_text_from_worker,
             approval_reaction_hint=(
                 "Reply to this message with 👍 to execute or 👎 to reject "
-                "(✅/❌ also work). Reactions alone cannot approve."
+                "(✅/❌ also work). Only encrypted reactions from an "
+                "allowlisted, verified device can approve."
             ),
         ),
     )
@@ -390,6 +391,7 @@ async def run_matrix() -> None:
         allowed_user_id=settings.allowed_user_id,
         allowed_room_id=settings.room_id,
         service_user_id=settings.service_user_id,
+        allowed_approval_device_ids=settings.allowed_device_ids,
         turn_handler=channel_services.text_handler,
         state_db_path=config.STATE_DB,
         approval_reaction_handler=handle_approval_reaction,

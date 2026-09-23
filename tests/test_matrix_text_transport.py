@@ -27,6 +27,7 @@ class FakeTextEvent:
     body: str = "Καλημέρα"
     decrypted: bool = True
     verified: bool = True
+    sender_key: str = "owner-curve-key"
     source: dict[str, Any] = field(
         default_factory=lambda: {
             "type": "m.room.message",
@@ -43,14 +44,32 @@ class FakeReactionEvent:
     key: str = "✅"
     decrypted: bool = True
     verified: bool = True
+    sender_key: str = "owner-curve-key"
 
 
 class FakeSendError:
     message = "temporary failure"
 
 
+@dataclass
+class FakeDevice:
+    id: str = "OWNERDEVICE"
+    curve25519: str = "owner-curve-key"
+    verified: bool = True
+
+
+class FakeDeviceStore:
+    def __init__(self, devices: list[FakeDevice]) -> None:
+        self.devices = devices
+
+    def active_user_devices(self, user_id: str) -> list[FakeDevice]:
+        assert user_id == "@owner:example.test"
+        return self.devices
+
+
 class FakeMatrixClient:
     def __init__(self) -> None:
+        self.device_store = FakeDeviceStore([FakeDevice()])
         self.callback: Callable[[Any, Any], Awaitable[None]] | None = None
         self.callbacks: list[tuple[Callable[[Any, Any], Awaitable[None]], Any]] = []
         self.calls: list[str] = []
@@ -109,6 +128,7 @@ def _transport(
         allowed_user_id="@owner:example.test",
         allowed_room_id="!private-room:example.test",
         service_user_id="@astakos:example.test",
+        allowed_approval_device_ids=("OWNERDEVICE",),
         turn_handler=handler,
         state_db_path=str(tmp_path / "state.db"),
         text_event_type=FakeTextEvent,
@@ -597,6 +617,42 @@ async def test_decrypted_reaction_from_unverified_device_cannot_approve(tmp_path
         FakeRoom(), FakeReactionEvent(decrypted=True, verified=False),
     )
 
+    assert handled == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("approval_kind", ["reaction", "reply"])
+async def test_previously_verified_device_removed_from_allowlist_cannot_approve(
+    tmp_path, approval_kind: str,
+) -> None:
+    """Persisted Olm trust must not override the current device allowlist."""
+    client = FakeMatrixClient()
+    client.device_store = FakeDeviceStore([FakeDevice(id="OLDDEVICE")])
+    handled: list[dict[str, Any]] = []
+
+    async def turn_handler(text: str, event_id: str) -> str:
+        raise AssertionError("approval must not enter the text graph")
+
+    async def approval_handler(**kwargs: Any) -> None:
+        handled.append(kwargs)
+
+    transport = _transport(
+        tmp_path, client, turn_handler,
+        approval_reaction_handler=approval_handler,
+    )
+    if approval_kind == "reaction":
+        await transport.handle_reaction_event(FakeRoom(), FakeReactionEvent())
+    else:
+        await transport.handle_event(
+            FakeRoom(),
+            FakeTextEvent(
+                body="👍",
+                source={"type": "m.room.message", "content": {
+                    "msgtype": "m.text", "body": "👍",
+                    "m.relates_to": {"m.in_reply_to": {"event_id": "$approval-event"}},
+                }},
+            ),
+        )
     assert handled == []
 
 

@@ -10,6 +10,12 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _select_telegram_for_legacy_approval_contract(monkeypatch):
+    """Keep legacy Telegram approval tests independent of the host's channel."""
+    monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "telegram")
+
+
 # -- Pending store (save/get/pop/list) ----------------------------
 
 def _make_approval_with_tmp():

@@ -74,6 +74,7 @@ class MatrixTextTransport:
         service_user_id: str,
         turn_handler: MatrixTurnHandler,
         state_db_path: str,
+        allowed_approval_device_ids: tuple[str, ...] = (),
         text_event_type: type = RoomMessageText,
         reaction_event_type: type = ReactionEvent,
         approval_reaction_handler: MatrixApprovalReactionHandler | None = None,
@@ -96,6 +97,7 @@ class MatrixTextTransport:
         self._allowed_user_id = self._required_id(allowed_user_id, "allowed_user_id")
         self._allowed_room_id = self._required_id(allowed_room_id, "allowed_room_id")
         self._service_user_id = self._required_id(service_user_id, "service_user_id")
+        self._allowed_approval_device_ids = frozenset(allowed_approval_device_ids)
         self._turn_handler = turn_handler
         self._state_db_path = state_db_path
         self._text_event_type = text_event_type
@@ -122,6 +124,26 @@ class MatrixTextTransport:
         if not normalized:
             raise ValueError(f"Matrix transport requires {field}")
         return normalized
+
+    def _trusted_approval_device(self, event: Any) -> bool:
+        """Require current device allowlisting as well as Olm verification."""
+        if getattr(event, "decrypted", False) is not True:
+            return False
+        if getattr(event, "verified", False) is not True:
+            return False
+        sender_key = str(getattr(event, "sender_key", "") or "")
+        if not sender_key or not self._allowed_approval_device_ids:
+            return False
+        try:
+            devices = self._client.device_store.active_user_devices(self._allowed_user_id)
+        except (AttributeError, KeyError):
+            return False
+        return any(
+            getattr(device, "id", None) in self._allowed_approval_device_ids
+            and getattr(device, "verified", False) is True
+            and getattr(device, "curve25519", None) == sender_key
+            for device in devices
+        )
 
     @staticmethod
     def _normalize_reply(raw_reply: Any) -> tuple[str, str, tuple[str, ...]]:
@@ -312,7 +334,7 @@ class MatrixTextTransport:
             reply_id = reply.get("event_id") if isinstance(reply, dict) else None
             decision = normalize_approval_reaction_key(text.rsplit("\n\n", 1)[-1].strip())
             if reply_id and decision in APPROVE_REACTION_KEYS | REJECT_REACTION_KEYS:
-                if getattr(event, "verified", False) is True:
+                if self._trusted_approval_device(event):
                     response = await self._approval_reaction_handler(
                         room_id=self._allowed_room_id,
                         sender_id=self._allowed_user_id,
@@ -378,9 +400,7 @@ class MatrixTextTransport:
             return
         if not isinstance(event, self._reaction_event_type):
             return
-        if getattr(event, "decrypted", False) is not True:
-            return
-        if getattr(event, "verified", False) is not True:
+        if not self._trusted_approval_device(event):
             return
         sender = str(getattr(event, "sender", ""))
         if sender != self._allowed_user_id or sender == self._service_user_id:
