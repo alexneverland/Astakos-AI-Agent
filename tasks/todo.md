@@ -53,10 +53,17 @@
 
 ## Private Matrix server, Phase 1
 
-- [ ] Complete the isolated private Matrix server tasks.
+- [x] Complete the isolated private Matrix server and Element smoke test.
   - Acceptance: Synapse is reachable from Element X over Tailscale HTTPS with
     registration/federation disabled and no Astakos runtime changes.
-  - Verify: follow `tasks/matrix-server-phase-1-todo.md`.
+  - Verified: local Compose health, tailnet-only HTTPS proxy, and owner-tested
+    encrypted Element conversation. See `tasks/matrix-server-phase-1-todo.md`.
+
+- [ ] Document and verify private Matrix backup/recovery prerequisites.
+  - Acceptance: Synapse signing key/config and PostgreSQL data have a tested,
+    recoverable backup boundary without exposing secrets in Git.
+  - Verify: dry-run inventory and restore-prerequisite review; keep this server
+    maintenance task separate from Astakos conversation changes.
 
 ## Matrix channel integration: `channel-selection`
 
@@ -120,10 +127,12 @@
     strict Matrix-only recent context is opt-in; 45 focused pipeline/history
     tests pass offline. Runtime queue hooks are connected in checkpoint 4.
 
-- [ ] Checkpoint 4: wire the selected transport and run the private smoke test.
+- [x] Checkpoint 4: wire the selected transport and run the private smoke test.
   - Acceptance: Web always starts; only Telegram or Matrix starts externally;
     an encrypted Element round trip succeeds without duplicate processing.
-  - Approval required: runtime credentials/settings and `boot.py` change.
+  - Verified: `run_external.py` selects one watchdog, `boot.py` selects one
+    transport, 70 focused startup/Matrix tests pass, and the owner exercised
+    encrypted Element conversations. Runtime credentials remain outside Git.
 
 - [ ] Final gate: verify complete Telegram-to-Matrix capability parity.
   - Acceptance: every supported Telegram text, approval, routine, proactive,
@@ -131,6 +140,54 @@
     path has a tested Matrix equivalent or an explicit user-approved exception.
   - Verify: inventory the current Telegram handler/send entry points at that
     time; do not rely on this planning snapshot alone.
+  - Scope: separate Matrix-wide parity audit; the unified text-conversation
+    work below must not silently mark this broader gate complete.
+
+## Unified conversation: `shared-conversation-context`
+
+- [x] Reproduce the Matrix/Web context isolation with offline regression tests.
+  - Acceptance: tests show that a recent Matrix turn is absent from Web context
+    and a recent Web turn is absent from Matrix context on the current code.
+  - Verify: focused RED run using temporary history stores and mocked graph.
+  - Files: `tests/test_conversation_history.py`, `tests/test_matrix_turn.py`.
+
+- [x] Use one bounded cross-channel recent-context policy.
+  - Acceptance: Web, Matrix, and Telegram text turns can use recent messages
+    from all three channels; provenance, ordering, limits, and one-row-per-turn
+    storage remain intact.
+  - Verify: focused GREEN tests and nearby Web/Telegram history regressions.
+  - Files: `memory/conversation_history.py`, `services/matrix_turn.py`, tests.
+
+### Checkpoint: shared conversation context
+
+- [x] Focused and nearby offline tests pass (74 tests); `git diff --check` is clean.
+- [ ] Verify live model-context continuity across Web and Element with the owner.
+  - Visibility of messages in both UIs is confirmed; a cross-channel follow-up
+    that demonstrably uses the earlier turn has not yet been run.
+- [x] Review the `selected-channel-mirroring` spec and plan as the next module.
+  - Verified: the owner approved the persistent selected-channel outbox before
+    implementation; its offline delivery and isolation checks pass.
+
+## Unified conversation: `selected-channel-mirroring`
+
+- [x] Persist one selected-channel outbox item with each eligible Web `/chat` row.
+  - Acceptance: user and assistant text are each queued once, atomically with
+    their history rows; voice and debug messages are excluded. Web uploads
+    enqueue only compact text summaries, never media bytes or private paths.
+  - Verify: offline SQLite tests including repeated writes and channel switch.
+
+- [x] Drain the outbox in the active external process.
+  - Acceptance: ordered, attributed display messages use the existing Matrix
+    encryption or Telegram sender; failure stays pending for retry and no
+    display copy re-enters conversation history or the graph.
+  - Verify: offline Matrix/Telegram transport fakes and restart test.
+
+### Checkpoint: selected-channel-mirroring
+
+- [x] Focused and nearby offline tests pass (59 tests); `git diff --check` is clean.
+- [x] Owner verifies a live Web → Element text exchange before PR/deploy.
+  - Verified: the owner observed the Web message and one assistant answer in
+    Element, with the original Web history retained.
 
 ## Matrix channel integration: `external-delivery`
 

@@ -25,7 +25,7 @@ class FakeGraph:
 
 
 @pytest.mark.asyncio
-async def test_matrix_turn_uses_matrix_only_context_and_channel_state(tmp_path) -> None:
+async def test_matrix_turn_uses_shared_context_and_matrix_channel_state(tmp_path) -> None:
     db_path = str(tmp_path / "conversation.db")
     append_message(role="user", content="web context", channel="web", db_path=db_path)
     append_message(
@@ -50,8 +50,8 @@ async def test_matrix_turn_uses_matrix_only_context_and_channel_state(tmp_path) 
     graph_text = [str(message.content) for message in graph.states[0]["messages"]]
     assert any("matrix previous" in text for text in graph_text)
     assert any("καινούριο matrix μήνυμα" in text for text in graph_text)
-    assert all("web context" not in text for text in graph_text)
-    assert all("telegram context" not in text for text in graph_text)
+    assert any("web context" in text for text in graph_text)
+    assert any("telegram context" in text for text in graph_text)
 
 
 @pytest.mark.asyncio

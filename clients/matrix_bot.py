@@ -204,11 +204,31 @@ def _approval_result_text(result: object | None) -> str | None:
         return None
     status = str(getattr(result, "status", "") or "").strip()
     tool_name = str(getattr(result, "tool_name", "") or "action").strip()
+    if tool_name == "execute_local_pipeline":
+        from core.i18n import t
+
+        return t(
+            "core.approval.messenger_sent" if status == "executed"
+            else "core.approval.messenger_rejected" if status == "rejected"
+            else "core.approval.messenger_send_failed"
+        )
     if status == "executed":
         return f"✅ `{tool_name}` executed."
     if status == "rejected":
         return f"❌ `{tool_name}` rejected."
     return f"⚠️ `{tool_name}` could not be executed ({status or 'failed'})."
+
+
+def _record_web_approval_result(result: object | None, text: str | None) -> None:
+    """Show the result in Web when its approval originated from a Web turn."""
+    if result is None or not text or getattr(result, "origin_channel", "") != "web":
+        return
+    try:
+        from api.server import append_to_chat_history
+
+        append_to_chat_history("assistant", text, agent="Web_Agent")
+    except Exception as exc:
+        print(f"[Matrix Approval]: Web result history failed ({type(exc).__name__})")
 
 
 def verify_configured_owner_devices(
@@ -302,11 +322,12 @@ async def run_matrix() -> None:
         print(f"🔐 [Matrix]: Pinned {pinned_devices} initial owner device(s).")
     loop = asyncio.get_running_loop()
 
-    async def send_room_text(text: str) -> str:
+    async def send_room_text(text: str, tx_id: str | None = None) -> str:
         response = await client.room_send(
             room_id=settings.room_id,
             message_type="m.room.message",
             content={"msgtype": "m.text", "body": text},
+            tx_id=tx_id,
         )
         if isinstance(response, RoomSendError):
             raise RuntimeError("Matrix text delivery failed")
@@ -319,6 +340,10 @@ async def run_matrix() -> None:
         future = asyncio.run_coroutine_threadsafe(send_room_text(text), loop)
         return future.result(timeout=30)
 
+    def send_approval_from_worker(text: str, tx_id: str) -> str:
+        future = asyncio.run_coroutine_threadsafe(send_room_text(text, tx_id), loop)
+        return future.result(timeout=30)
+
     approval_service = MatrixApprovalReactionService(
         allowed_user_id=settings.allowed_user_id,
         allowed_room_id=settings.room_id,
@@ -327,15 +352,19 @@ async def run_matrix() -> None:
 
     async def handle_approval_reaction(**kwargs: object) -> str | None:
         result = await asyncio.to_thread(approval_service.handle_reaction, **kwargs)
-        return _approval_result_text(result)
+        text = _approval_result_text(result)
+        await asyncio.to_thread(_record_web_approval_result, result, text)
+        return text
 
     external_delivery_router.register(
         "matrix",
         MatrixExternalTransport(
             send_text=send_text_from_worker,
+            send_approval_text=send_approval_from_worker,
             approval_reaction_hint=(
-                "React with 👍 to execute or 👎 to reject "
-                "(✅/❌ also work)."
+                "Reply to this message with 👍 to execute or 👎 to reject "
+                "(✅/❌ also work). Only encrypted reactions from an "
+                "allowlisted, verified device can approve."
             ),
         ),
     )
@@ -368,6 +397,7 @@ async def run_matrix() -> None:
         allowed_user_id=settings.allowed_user_id,
         allowed_room_id=settings.room_id,
         service_user_id=settings.service_user_id,
+        allowed_approval_device_ids=settings.allowed_device_ids,
         turn_handler=channel_services.text_handler,
         state_db_path=config.STATE_DB,
         approval_reaction_handler=handle_approval_reaction,

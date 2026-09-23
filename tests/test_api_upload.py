@@ -1,8 +1,35 @@
 import pytest
+from io import BytesIO
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from api.server import server, LOCAL_TOKEN
+
+
+def test_matrix_document_history_hides_internal_path_from_web() -> None:
+    from api.server import _render_persisted_asset_markers_for_client
+
+    stored = (
+        "[USER_UPLOADED_FILE]: report.pdf\n"
+        "[FILE PATH]: C:\\astakos_v2\\matrix_media\\secret.pdf\n"
+        "[USER_CAPTION]: Δες το\n"
+        "[ANALYSIS]: Private source text"
+    )
+
+    rendered = _render_persisted_asset_markers_for_client(stored, "127.0.0.1")
+
+    assert "report.pdf" in rendered
+    assert "Δες το" in rendered
+    assert "C:\\astakos_v2" not in rendered
+    assert "Private source text" not in rendered
+
+
+def test_plain_user_text_is_not_rewritten_as_document_history() -> None:
+    from api.server import _render_persisted_asset_markers_for_client
+
+    text = "[USER_UPLOADED_FILE]: example.pdf is only a quoted example"
+    assert _render_persisted_asset_markers_for_client(text, "127.0.0.1") == text
 
 @pytest.fixture
 def client():
@@ -31,6 +58,7 @@ def test_pasted_text_upload_reaches_document_summary_without_unbound_error(clien
         fake_resp = MagicMock()
         fake_resp.content = "Fake document summary."
         mock_invoke.return_value = fake_resp
+        mock_history.return_value = {"rowid": None}
 
         # 3. Perform the request
         payload = b"This is a pasted upload text payload. " * 50
@@ -66,6 +94,106 @@ def test_pasted_text_upload_reaches_document_summary_without_unbound_error(clien
         assert any(call.args[2] == "" for call in mock_fast_queue.call_args_list)
 
 
+def test_web_document_upload_mirrors_text_not_file_to_selected_channel(
+    client, tmp_path,
+) -> None:
+    from memory.conversation_history import append_message, load_messages, load_pending_web_mirrors
+
+    mock_uploads_dir = tmp_path / "uploads"
+    mock_uploads_dir.mkdir()
+    conversation_db = str(tmp_path / "conversation.db")
+
+    def persist_web_history(role: str, content: str, **kwargs):
+        kwargs.pop("return_saved", None)
+        return append_message(
+            role=role, content=content, channel="web", db_path=conversation_db,
+            **kwargs,
+        )
+
+    headers = {"Authorization": f"Bearer {LOCAL_TOKEN}"}
+    with patch("config.UPLOADS_DIR", str(mock_uploads_dir)), \
+         patch("core.messaging_channel.resolve_external_channel", return_value="matrix"), \
+         patch("api.server.safe_llm_invoke") as mock_invoke, \
+         patch("api.server.append_to_chat_history") as mock_history, \
+         patch("api.server.enqueue_fast_task"), \
+         patch("api.server.enqueue_slow_task"), \
+         patch("memory.conversation_history.build_asset_context_text", return_value=""), \
+         patch("memory.pending_assets.create_pending_asset_archive"):
+        mock_history.side_effect = persist_web_history
+        mock_invoke.return_value.content = "Σύντομη ανάλυση εγγράφου."
+        response = client.post(
+            "/upload",
+            files={"file": ("report.txt", b"A report to summarize.", "text/plain")},
+            data={"message": "Δες το"},
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    saved_rows = load_messages(db_path=conversation_db)
+    assert response.json()["user_rowid"] == saved_rows[0]["rowid"]
+    assert response.json()["assistant_rowid"] == saved_rows[1]["rowid"]
+    assert response.json()["user_message"] == saved_rows[0]["content"]
+    assert [call.kwargs.get("mirror_target") for call in mock_history.call_args_list] == [
+        "matrix", "matrix",
+    ]
+    assert "Ανέβασα αρχείο" in mock_history.call_args_list[0].args[1]
+    assert "Σύντομη ανάλυση" in mock_history.call_args_list[1].args[1]
+    queued = load_pending_web_mirrors("matrix", db_path=conversation_db)
+    assert [item["role"] for item in queued] == ["user", "assistant"]
+    assert queued[0]["content"] == "📄 Έστειλα αρχείο από το Web."
+    assert "Σύντομη ανάλυση" in queued[1]["content"]
+    assert "Απάντησέ μου μόνο" not in queued[1]["content"]
+    assert "Απάντησέ μου μόνο" in response.json()["ai_message"]
+
+
+def test_web_photo_upload_queues_description_without_binary_media(
+    client, tmp_path,
+) -> None:
+    from memory.conversation_history import append_message, load_messages, load_pending_web_mirrors
+
+    photo_dir = tmp_path / "photos"
+    photo_dir.mkdir()
+    conversation_db = str(tmp_path / "conversation.db")
+    image_bytes = BytesIO()
+    Image.new("RGB", (2, 2), "blue").save(image_bytes, format="PNG")
+
+    def persist_web_history(role: str, content: str, **kwargs):
+        kwargs.pop("return_saved", None)
+        return append_message(
+            role=role, content=content, channel="web", db_path=conversation_db,
+            **kwargs,
+        )
+
+    with patch("api.server.PHOTOS_DIR", str(photo_dir)), \
+         patch("core.messaging_channel.resolve_external_channel", return_value="matrix"), \
+         patch("core.brain.get_active_provider_adapter", return_value=MagicMock()), \
+         patch("core.brain.safe_adapter_call", return_value="Μια μπλε εικόνα."), \
+         patch("api.server.append_to_chat_history", side_effect=persist_web_history), \
+         patch("api.server.enqueue_fast_task"), \
+         patch("api.server.enqueue_slow_task"), \
+         patch("memory.pending_assets.create_pending_asset_archive"):
+        response = client.post(
+            "/upload",
+            files={"file": ("photo.png", image_bytes.getvalue(), "image/png")},
+            headers={"Authorization": f"Bearer {LOCAL_TOKEN}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    saved_rows = load_messages(db_path=conversation_db)
+    assert response.json()["user_rowid"] == saved_rows[0]["rowid"]
+    assert response.json()["assistant_rowid"] == saved_rows[1]["rowid"]
+    assert response.json()["user_message"] == saved_rows[0]["content"]
+    queued = load_pending_web_mirrors("matrix", db_path=conversation_db)
+    assert [item["role"] for item in queued] == ["user", "assistant"]
+    assert queued[0]["content"] == "📷 Έστειλα φωτογραφία από το Web."
+    assert "Μια μπλε εικόνα" in queued[1]["content"]
+    assert "Απάντησέ μου μόνο" not in queued[1]["content"]
+    assert "Απάντησέ μου μόνο" in response.json()["ai_message"]
+    assert all("data:image" not in item["content"] for item in queued)
+
+
 def test_unreadable_web_document_is_not_summarized_or_offered_for_archive(
     client, tmp_path
 ):
@@ -81,7 +209,7 @@ def test_unreadable_web_document_is_not_summarized_or_offered_for_archive(
              side_effect=DocumentPreviewError("The PDF is unreadable."),
          ), \
          patch("api.server.safe_llm_invoke") as mock_invoke, \
-         patch("api.server.append_to_chat_history"), \
+         patch("api.server.append_to_chat_history", return_value={"rowid": None}), \
          patch("api.server.enqueue_fast_task"), \
          patch("api.server.enqueue_slow_task"), \
          patch("memory.pending_assets.create_pending_asset_archive") as create_pending:

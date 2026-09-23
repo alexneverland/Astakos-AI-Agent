@@ -8,6 +8,99 @@ from types import SimpleNamespace
 import pytest
 
 
+def test_matrix_messenger_approval_reports_completed_send() -> None:
+    """A completed Messenger send is acknowledged in human language."""
+    from clients.matrix_bot import _approval_result_text
+    from services.matrix_approval import ApprovalReactionResult
+
+    result = ApprovalReactionResult(
+        status="executed",
+        tool_name="execute_local_pipeline",
+        origin_channel="matrix",
+        execution_result="✅ Το μήνυμα στάλθηκε στη Σοφία!",
+    )
+
+    rendered = _approval_result_text(result)
+    assert rendered is not None
+    assert "Στάλθηκε" in rendered
+    assert "pipeline" not in rendered
+
+
+def test_matrix_messenger_approval_does_not_claim_failed_send() -> None:
+    """A transport failure must never be rendered as a completed send."""
+    from clients.matrix_bot import _approval_result_text
+    from services.matrix_approval import ApprovalReactionResult
+
+    result = ApprovalReactionResult(
+        status="failed",
+        tool_name="execute_local_pipeline",
+        origin_channel="matrix",
+        execution_result="❌ Error Messenger: unavailable",
+        error="❌ Error Messenger: unavailable",
+    )
+
+    rendered = _approval_result_text(result)
+    assert rendered is not None
+    assert "Στάλθηκε" not in rendered
+    assert "pipeline" not in rendered
+
+
+def test_web_origin_matrix_approval_result_is_added_to_web_history(
+    monkeypatch, tmp_path,
+) -> None:
+    """A Matrix approval of a Web request leaves one visible Web outcome."""
+    from clients.matrix_bot import _record_web_approval_result
+    import memory.conversation_history as history
+    from services.matrix_approval import ApprovalReactionResult
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message = history.append_message
+    monkeypatch.setattr(
+        history,
+        "append_message",
+        lambda **kwargs: append_message(**kwargs, db_path=db_path),
+    )
+    broadcasts: list[dict] = []
+    monkeypatch.setattr("api.server._broadcast_ws", broadcasts.append)
+    result = ApprovalReactionResult(
+        status="executed",
+        tool_name="execute_local_pipeline",
+        origin_channel="web",
+    )
+
+    _record_web_approval_result(result, "✅ Στάλθηκε, μάστορα.")
+
+    saved = history.load_messages(db_path=db_path)
+    assert [(item["role"], item["content"], item["agent"]) for item in saved] == [
+        ("assistant", "✅ Στάλθηκε, μάστορα.", "Web_Agent")
+    ]
+    assert broadcasts[0]["content"] == "✅ Στάλθηκε, μάστορα."
+    assert history.load_pending_web_mirrors("matrix", db_path=db_path) == []
+
+
+def test_matrix_origin_approval_result_is_not_repeated_in_web_history(
+    monkeypatch,
+) -> None:
+    """A Matrix-origin confirmation stays in its room without a Web duplicate."""
+    from clients.matrix_bot import _record_web_approval_result
+    from services.matrix_approval import ApprovalReactionResult
+
+    recorded: list[str] = []
+    monkeypatch.setattr(
+        "api.server.append_to_chat_history",
+        lambda role, content, *, agent: recorded.append(content),
+    )
+    result = ApprovalReactionResult(
+        status="executed",
+        tool_name="execute_local_pipeline",
+        origin_channel="matrix",
+    )
+
+    _record_web_approval_result(result, "✅ Στάλθηκε, μάστορα.")
+
+    assert recorded == []
+
+
 class FakeDevice:
     def __init__(self, device_id: str, *, verified: bool = False) -> None:
         self.id = device_id

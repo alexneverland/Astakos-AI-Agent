@@ -1,14 +1,16 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Action Approval — CRITICAL tool gate
-# If tool is CRITICAL → saves as pending, sends Telegram message
+# If tool is CRITICAL → saves as pending, requests external approval
 # If SAFE/WARNING → lets the graph continue normally
 # ================================================================
 
 import os
 import json
+import tempfile
 from datetime import datetime, timedelta
 from typing import Sequence
+from filelock import FileLock
 from langchain_core.messages import BaseMessage
 from langchain_core.messages.tool import ToolCall
 from core.tool_risk import get_risk as _get_risk
@@ -289,18 +291,29 @@ def requires_plan_per_action_approval(tool_call: dict) -> bool:
 # Pending approval store
 # ────────────────────────────────────────────────────────────────
 
-def save_pending(tool_name: str, tool_args: dict, tool_call_id: str, channel: str = "telegram"):
+def save_pending(
+    tool_name: str,
+    tool_args: dict,
+    tool_call_id: str,
+    channel: str = "telegram",
+    delivery_target_channel: str | None = None,
+):
     """Saves CRITICAL tool call for later."""
-    pending = _load_pending()
-    pending[tool_call_id] = {
-        "tool_name":   tool_name,
-        "tool_args":   tool_args,
-        "tool_call_id": tool_call_id,
-        "created_at":  datetime.now().isoformat(timespec="seconds"),
-        "status":      "pending",
-        "channel":     channel,
-    }
-    _save_pending(pending)
+    with _pending_lock():
+        pending = _load_pending_raw()
+        _expire_stale_pending_unlocked(pending)
+        pending[tool_call_id] = {
+            "tool_name": tool_name,
+            "tool_args": tool_args,
+            "tool_call_id": tool_call_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "status": "pending",
+            "channel": channel,
+        }
+        if delivery_target_channel == "matrix":
+            pending[tool_call_id]["delivery_target_channel"] = "matrix"
+            pending[tool_call_id]["delivery_status"] = "queued"
+        _save_pending_unlocked(pending)
 
 
 def get_pending(tool_call_id: str) -> dict | None:
@@ -309,24 +322,39 @@ def get_pending(tool_call_id: str) -> dict | None:
 
 def resolve_pending(tool_call_id: str, approved: bool):
     """Marks as approved/rejected."""
-    pending = _load_pending()
-    if tool_call_id in pending:
-        pending[tool_call_id]["status"] = "approved" if approved else "rejected"
-        pending[tool_call_id]["resolved_at"] = datetime.now().isoformat(timespec="seconds")
-        _save_pending(pending)
+    with _pending_lock():
+        pending = _load_pending_raw()
+        _expire_stale_pending_unlocked(pending)
+        if tool_call_id in pending:
+            pending[tool_call_id]["status"] = "approved" if approved else "rejected"
+            pending[tool_call_id]["resolved_at"] = datetime.now().isoformat(timespec="seconds")
+            _save_pending_unlocked(pending)
 
 
 def pop_pending(tool_call_id: str) -> dict | None:
     """Reads and removes from the pending store."""
-    pending = _load_pending()
-    item = pending.pop(tool_call_id, None)
-    if item:
-        _save_pending(pending)
-    return item
+    with _pending_lock():
+        pending = _load_pending_raw()
+        _expire_stale_pending_unlocked(pending)
+        item = pending.pop(tool_call_id, None)
+        if item:
+            _save_pending_unlocked(pending)
+        return item
 
 
 def list_pending() -> list[dict]:
     return [v for v in _load_pending().values() if v["status"] == "pending"]
+
+
+def list_queued_matrix_approvals() -> list[dict]:
+    """Return undelivered Matrix approvals created by another process."""
+    return [
+        dict(item)
+        for item in list_pending()
+        if item.get("delivery_target_channel") == "matrix"
+        and item.get("delivery_status") == "queued"
+        and not item.get("external_message_id")
+    ]
 
 
 def record_pending_delivery(
@@ -343,24 +371,27 @@ def record_pending_delivery(
     if not normalized_message_id:
         raise ValueError("external_message_id is required")
 
-    pending = _load_pending()
-    item = pending.get(tool_call_id)
-    if not item or item.get("status") != "pending":
-        raise KeyError("pending approval was not found")
+    with _pending_lock():
+        pending = _load_pending_raw()
+        _expire_stale_pending_unlocked(pending)
+        item = pending.get(tool_call_id)
+        if not item or item.get("status") != "pending":
+            raise KeyError("pending approval was not found")
 
-    for existing_id, existing in pending.items():
-        if existing_id == tool_call_id or existing.get("status") != "pending":
-            continue
-        if (
-            existing.get("delivery_channel") == normalized_channel
-            and str(existing.get("external_message_id") or "") == normalized_message_id
-        ):
-            raise ValueError("external approval message is already mapped")
+        for existing_id, existing in pending.items():
+            if existing_id == tool_call_id or existing.get("status") != "pending":
+                continue
+            if (
+                existing.get("delivery_channel") == normalized_channel
+                and str(existing.get("external_message_id") or "") == normalized_message_id
+            ):
+                raise ValueError("external approval message is already mapped")
 
-    item["delivery_channel"] = normalized_channel
-    item["external_message_id"] = normalized_message_id
-    _save_pending(pending)
-    return dict(item)
+        item["delivery_channel"] = normalized_channel
+        item["external_message_id"] = normalized_message_id
+        item["delivery_status"] = "sent"
+        _save_pending_unlocked(pending)
+        return dict(item)
 
 
 def find_pending_by_delivery(
@@ -457,7 +488,16 @@ def expire_stale_pending() -> list:
     Returns a list of the tool_call_ids that expired.
     Called automatically on every _load_pending().
     """
-    pending = _load_pending_raw()
+    with _pending_lock():
+        pending = _load_pending_raw()
+        expired_ids = _expire_stale_pending_unlocked(pending)
+        if expired_ids:
+            _save_pending_unlocked(pending)
+        return expired_ids
+
+
+def _expire_stale_pending_unlocked(pending: dict) -> list[str]:
+    """Mark expired calls while the caller holds the pending-file lock."""
     now = datetime.now()
     expired_ids = []
     for call_id, item in list(pending.items()):
@@ -474,20 +514,42 @@ def expire_stale_pending() -> list:
             item["expired_at"] = now.isoformat(timespec="seconds")
             expired_ids.append(call_id)
             print(f"\033[93m[Approval]: \u23f0 Expired stale pending: {item['tool_name']} (age={int(age)}s)\033[0m")
-    if expired_ids:
-        _save_pending(pending)
     return expired_ids
 
 
 def _load_pending() -> dict:
     """Loads only active (non-expired, non-resolved) pending entries."""
-    expire_stale_pending()
-    return _load_pending_raw()
+    with _pending_lock():
+        pending = _load_pending_raw()
+        if _expire_stale_pending_unlocked(pending):
+            _save_pending_unlocked(pending)
+        return pending
 
 
 def _save_pending(data: dict):
-    with open(PENDING_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Persist pending state atomically under the shared process lock."""
+    with _pending_lock():
+        _save_pending_unlocked(data)
+
+
+def _pending_lock() -> FileLock:
+    """Coordinate pending-state writers in the Web and external processes."""
+    return FileLock(f"{PENDING_FILE}.lock", timeout=10)
+
+
+def _save_pending_unlocked(data: dict) -> None:
+    """Replace the JSON file atomically while the caller holds its lock."""
+    parent = os.path.dirname(os.path.abspath(PENDING_FILE))
+    fd, temporary_path = tempfile.mkstemp(prefix=".approval-", suffix=".tmp", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary_path, PENDING_FILE)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -499,10 +561,12 @@ def approval_check_node(state):
     Runs before the ToolNode.
     - SAFE / WARNING → state["approval_status"] = "ok" → continues to tools
     - BLOCKED        → immediately cut off by safe executor, sets "blocked"
-    - CRITICAL       → saves pending, sends Telegram, sets "pending"
+    - CRITICAL       → sends through the selected channel, then stays pending
+                       only if delivery was confirmed
     """
     from langchain_core.messages import AIMessage, ToolMessage
     from core.i18n import t
+    from core.messaging_channel import resolve_external_channel
 
     last_msg = state["messages"][-1]
     tool_calls = getattr(last_msg, "tool_calls", [])
@@ -692,7 +756,9 @@ def approval_check_node(state):
 
     # There are CRITICAL calls — we save them and request approval
     tool_messages = []
+    delivery_failed = False
     current_channel = state.get("channel", "telegram")
+    selected_external_channel = resolve_external_channel()
     for tc in critical_calls:
         pending_args = dict(tc.get("args", {}))
         if tc["name"] in {
@@ -709,21 +775,42 @@ def approval_check_node(state):
             pending_args["external_content_sources_json"] = json.dumps(
                 sorted(active_external_content_tool_names(state["messages"])),
             )
-        save_pending(tc["name"], pending_args, tc["id"], channel=current_channel)
+        queue_for_matrix = selected_external_channel == "matrix" and current_channel == "web"
+        save_pending(
+            tc["name"], pending_args, tc["id"], channel=current_channel,
+            delivery_target_channel="matrix" if queue_for_matrix else None,
+        )
         print(f"\033[91m[Approval]: 🚨 CRITICAL — {tc['name']} blocked, awaiting approval\033[0m")
 
         # Deliver through exactly one configured external channel.
-        _notify_selected_approval(tc)
+        delivery_channel = "queued" if queue_for_matrix else _notify_selected_approval(tc)
+
+        if delivery_channel is None:
+            pop_pending(tc["id"])
+            delivery_failed = True
+            content = t(
+                "core.approval.delivery_failed",
+                name=tc["name"],
+                channel="Element" if resolve_external_channel() == "matrix" else "Telegram",
+            )
+        elif delivery_channel == "queued":
+            content = t("core.approval.queued", name=tc["name"], channel="Element")
+        else:
+            content = t(
+                "core.approval.waiting",
+                name=tc["name"],
+                channel="Element" if delivery_channel == "matrix" else "Telegram",
+            )
 
         # We return a ToolMessage so that the graph does not get stuck
         tool_messages.append(ToolMessage(
-            content=t("core.approval.waiting", name=tc["name"]),
+            content=content,
             tool_call_id=tc["id"],
             name=tc["name"],
         ))
 
     return {
-        "approval_status": "pending",
+        "approval_status": "blocked" if delivery_failed else "pending",
         "messages": tool_messages,
     }
 
@@ -796,45 +883,43 @@ def _notify_selected_notify(tool_call: dict) -> None:
         )
 
 
-def _notify_selected_approval(tool_call: dict) -> None:
+def _notify_selected_approval(tool_call: dict) -> str | None:
     """Deliver one approval through the selected external channel only."""
     from core.messaging_channel import resolve_external_channel
 
     channel = resolve_external_channel()
     if channel == "telegram":
         _notify_telegram(tool_call)
-        return
+        return channel
 
-    from core.i18n import t
     from services.external_delivery import (
-        ApprovalDeliveryRequest,
         external_delivery_router,
     )
-
-    tool_name = str(tool_call["name"])
-    call_id = str(tool_call["id"])
-    args_preview = _args_preview(tool_call.get("args", {}))
-    prompt = t(
-        "core.approval.req_approval",
-        tool_name=tool_name,
-        args_prev=args_preview,
-    )
-    if tool_name == "register_tool":
-        prompt += t("core.approval.register_tool_hint")
     try:
-        external_delivery_router.send_approval(
-            ApprovalDeliveryRequest(
-                call_id=call_id,
-                tool_name=tool_name,
-                args_preview=args_preview,
-                prompt=prompt,
-            )
-        )
+        external_delivery_router.send_approval(build_approval_delivery_request(tool_call))
     except Exception as exc:
         print(
             "\033[91m[Approval]: Selected external approval delivery failed "
             f"({type(exc).__name__})\033[0m"
         )
+        return None
+    return channel
+
+
+def build_approval_delivery_request(tool_call: dict):
+    """Render the canonical Matrix prompt for direct or queued delivery."""
+    from core.i18n import t
+    from services.external_delivery import ApprovalDeliveryRequest
+
+    tool_name = str(tool_call["name"])
+    args_preview = _args_preview(tool_call.get("args", {}))
+    prompt = t("core.approval.req_approval", tool_name=tool_name, args_prev=args_preview)
+    if tool_name == "register_tool":
+        prompt += t("core.approval.register_tool_hint")
+    return ApprovalDeliveryRequest(
+        call_id=str(tool_call["id"]), tool_name=tool_name,
+        args_preview=args_preview, prompt=prompt,
+    )
 
 
 def _notify_telegram(tool_call: dict):

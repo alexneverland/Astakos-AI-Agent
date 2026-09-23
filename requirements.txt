@@ -2,6 +2,7 @@ tzdata>=2025.2
 chromadb==1.5.9
 ddgs==9.14.4
 fastapi==0.139.0
+filelock==3.29.0
 fpdf2==2.8.7
 google-genai==2.22.0
 google_api_python_client==2.194.0

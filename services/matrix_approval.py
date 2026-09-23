@@ -65,12 +65,12 @@ class MatrixApprovalReactionService:
         *,
         room_id: str,
         sender_id: str,
-        encrypted: bool,
+        authenticated: bool,
         reacts_to: str,
         key: str,
     ) -> ApprovalReactionResult | None:
-        """Handle a trusted approval/rejection reaction; ignore everything else."""
-        if encrypted is not True:
+        """Handle a device-verified, decrypted decision from the allowed user."""
+        if authenticated is not True:
             return None
         if str(room_id or "") != self._allowed_room_id:
             return None
@@ -102,6 +102,16 @@ class MatrixApprovalReactionService:
 
         execution = execute_approved_pending(tool_call_id, list(self._tools_provider()))
         if execution.get("ok"):
+            if tool_name == "execute_local_pipeline":
+                from tools.web import messenger_send_result_succeeded
+
+                if not messenger_send_result_succeeded(execution.get("result")):
+                    return ApprovalReactionResult(
+                        status="failed",
+                        tool_name=tool_name,
+                        origin_channel=origin_channel,
+                        error=str(execution.get("result") or "Messenger send failed"),
+                    )
             return ApprovalReactionResult(
                 status="executed",
                 tool_name=tool_name,

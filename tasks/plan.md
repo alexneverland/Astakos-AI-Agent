@@ -247,6 +247,61 @@ Build order:
 3. Encrypt and send approved `outputs/` files, then verify retry behavior and
    the complete offline Matrix parity suite.
 
-Runtime credentials and startup wiring remain the final explicit gate. The
-current application-parity evidence and remaining Telegram-only behaviors are
-tracked in `tasks/matrix-parity-audit.md`.
+Runtime selection and encrypted Element conversations are operational. The
+Matrix-wide parity audit remains a separate, broader final gate in
+`tasks/todo.md`; `tasks/matrix-parity-audit.md` is an older evidence snapshot,
+not proof that every current behavior has been rechecked.
+
+---
+
+# Implementation Plan: Unified Conversation, Shared Context
+
+Module id: `shared-conversation-context`. The approved scope and acceptance
+criteria are in `tasks/shared-conversation-context-spec.md`; module ordering is
+in `tasks/unified-conversation-map.md`. This plan covers only the first module.
+
+## Architecture decisions
+
+- Reuse the existing SQLite conversation history and its canonical bounded
+  context loader. Do not migrate, duplicate, or backfill persisted messages.
+- Preserve each entry's role, timestamp/order, and source channel in the model
+  context. Web, Matrix, and Telegram already write to the shared store.
+- Keep transport sends out of this slice. Web and the selected external channel
+  run in separate processes; mirroring needs its own reviewed contract.
+
+## Task order and checkpoint
+
+1. Add offline RED tests for Matrix → Web and Web → Matrix context, including
+   a Telegram turn, duplicate suppression, provenance, and window bounds.
+2. Make the smallest change to `memory/conversation_history.py` and the Matrix
+   caller so all three channels use the canonical cross-channel policy.
+3. Run the focused and nearby history/turn suites and check the diff. The
+   owner has verified cross-channel message visibility; a live test of whether
+   the assistant uses prior context from the other channel remains open.
+
+Tasks and verification checkboxes are tracked under
+`Unified conversation: shared-conversation-context` in `tasks/todo.md`.
+
+## Risks and mitigations
+
+- Context contamination: preserve existing untrusted-content formatting and
+  source labels; test roles, order, and bounded windows.
+- Duplicate history: reuse persisted message IDs for merging; no new writes or
+  mirrored rows in this module.
+- Scope creep: do not touch approvals, routines, media, credentials, runtime
+  startup, or the broader Matrix parity gate.
+
+## Mirroring decision
+
+External user text mirrored from Web is attributed as a relay from the owner,
+not impersonated as a native Element/Telegram user message. The reviewed
+delivery/retry contract is in `tasks/selected-channel-mirroring-spec.md`.
+
+## Next module: selected-channel-mirroring
+
+The owner approved the persistent SQLite outbox described in
+`tasks/selected-channel-mirroring-spec.md`. Web display deliveries are inserted
+atomically with their source history rows and drained by the selected external
+process. Mirror copies stay out of conversation history and the inbound graph.
+Offline tests cover queue ordering, retry, restart, and channel switching;
+the owner confirmed a live Web → Element text exchange.

@@ -287,6 +287,28 @@ def test_load_recent_context_deduplicates_overlap(tmp_path):
     assert [m["content"] for m in messages] == ["web only once"]
 
 
+def test_load_recent_context_includes_all_channels_for_web_and_telegram(tmp_path):
+    from memory.conversation_history import append_message, load_recent_context
+
+    db_path = str(tmp_path / "conversation.db")
+    for channel, content in (
+        ("web", "web question"),
+        ("matrix", "element answer"),
+        ("telegram", "telegram follow-up"),
+    ):
+        append_message(role="user", content=content, channel=channel, db_path=db_path)
+
+    for channel in ("web", "telegram"):
+        messages = load_recent_context(
+            channel=channel, global_limit=3, channel_limit=3, db_path=db_path
+        )
+        assert [(item["channel"], item["content"]) for item in messages] == [
+            ("web", "web question"),
+            ("matrix", "element answer"),
+            ("telegram", "telegram follow-up"),
+        ]
+
+
 def test_load_recent_context_can_be_strictly_channel_scoped(tmp_path):
     from memory.conversation_history import append_message, load_recent_context
 
@@ -621,17 +643,17 @@ def test_conversation_history_deterministic_ordering(tmp_path):
     assert last_user["content"] == "user turn 2"
 
 
-def test_web_and_telegram_context_excludes_matrix_history(tmp_path) -> None:
-    """Private Matrix turns never enter the legacy Web/Telegram mixed window."""
+def test_web_and_telegram_context_includes_matrix_history(tmp_path) -> None:
+    """Both callers can continue a conversation started in Element."""
     from memory.conversation_history import append_message, load_recent_context
 
     db_path = str(tmp_path / "conversation.db")
     append_message(role="user", content="web context", channel="web", db_path=db_path)
-    append_message(role="user", content="private matrix context", channel="matrix", db_path=db_path)
+    append_message(role="user", content="matrix context", channel="matrix", db_path=db_path)
     append_message(role="user", content="telegram context", channel="telegram", db_path=db_path)
 
     web = load_recent_context(channel="web", db_path=db_path)
     telegram = load_recent_context(channel="telegram", db_path=db_path)
 
-    assert {item["content"] for item in web} == {"web context", "telegram context"}
-    assert {item["content"] for item in telegram} == {"web context", "telegram context"}
+    assert {item["content"] for item in web} == {"web context", "matrix context", "telegram context"}
+    assert {item["content"] for item in telegram} == {"web context", "matrix context", "telegram context"}

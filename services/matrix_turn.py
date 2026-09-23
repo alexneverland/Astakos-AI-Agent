@@ -140,9 +140,9 @@ class MatrixTurnService:
     def _history_messages(self, *, exclude_message_id: str) -> list[Any]:
         entries = load_recent_context(
             channel="matrix",
+            global_limit=12,
             channel_limit=10,
-            total_limit=10,
-            same_channel_only=True,
+            total_limit=20,
             db_path=self._conversation_db_path,
         )
         messages: list[Any] = []

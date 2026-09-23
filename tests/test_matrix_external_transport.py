@@ -53,6 +53,28 @@ def test_matrix_approval_records_exact_sent_event_id(pending_file) -> None:
     assert pending["external_message_id"] == "$matrix-approval"
 
 
+def test_matrix_approval_retry_reuses_transaction_id(pending_file) -> None:
+    """A crash after send must not create a second Matrix prompt on retry."""
+    approval.save_pending("mail_manager", {}, "call-retry", channel="web")
+    sent: list[tuple[str, str]] = []
+    transport = MatrixExternalTransport(
+        send_text=lambda text: "$ordinary",
+        send_approval_text=lambda text, tx_id: sent.append((text, tx_id)) or "$approval",
+        approval_reaction_hint="Reply 👍 or 👎.",
+    )
+    request = ApprovalDeliveryRequest(
+        call_id="call-retry", tool_name="mail_manager",
+        args_preview="—", prompt="Approve?",
+    )
+
+    transport.send_approval(request)
+    transport.send_approval(request)
+
+    assert len(sent) == 2
+    assert sent[0][1] == sent[1][1]
+    assert sent[0][1].startswith("astakos-approval-")
+
+
 def test_matrix_approval_without_confirmed_event_id_does_not_create_mapping(
     pending_file,
 ) -> None:

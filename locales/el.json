@@ -1804,7 +1804,12 @@
     "approval": {
       "req_approval": "🚨 <b>Απαιτείται Έγκριση</b>\n\nTool: <code>{tool_name}</code>\nArgs: <code>{args_prev}</code>\n\nΕκτελώ;",
       "blocked": "🛡️ Η εντολή `{name}` μπλοκαρίστηκε από τον safe executor και δεν μπορεί να εγκριθεί.",
-      "waiting": "⏳ Αναμονή έγκρισης για `{name}`. Σου έστειλα Telegram για επιβεβαίωση.",
+      "waiting": "⏳ Αναμονή έγκρισης για `{name}`. Έλεγξε το {channel} για επιβεβαίωση.",
+      "queued": "⏳ Το αίτημα έγκρισης για `{name}` μπήκε στην ουρά για το {channel}. Θα μπορέσεις να το εγκρίνεις μόλις παραδοθεί εκεί.",
+      "delivery_failed": "⚠️ Δεν στάλθηκε αίτημα έγκρισης για `{name}` στο {channel}. Η ενέργεια δεν εκτελέστηκε· δοκίμασε ξανά όταν το κανάλι είναι διαθέσιμο.",
+      "messenger_sent": "✅ Στάλθηκε, μάστορα.",
+      "messenger_rejected": "❌ Δεν στάλθηκε το μήνυμα στο Messenger — η έγκριση απορρίφθηκε.",
+      "messenger_send_failed": "⚠️ Δεν στάλθηκε το μήνυμα στο Messenger. Η αποστολή απέτυχε.",
       "register_tool_hint": "\n\n⚠️ <i>Hint: Ελέγξτε το <code>outputs/draft_diff_*.md</code> artifact για τις πλήρεις αλλαγές κώδικα πριν εγκρίνετε.</i>",
       "draft_markers": [
         "φτιαξε draft",
@@ -3845,6 +3850,10 @@
     }
   },
   "services": {
+    "web_mirror_delivery": {
+      "user_label": "Web / {owner_name}",
+      "assistant_label": "Web / {bot_name}"
+    },
     "pending_asset_confirmation": {
       "photo_share_request": "Μοιράζομαι αυτή τη φωτογραφία μαζί σου. Δες την και σχολίασέ την φυσικά.",
       "save_failed_retry": "❌ Δεν μπόρεσα να αποθηκεύσω το αρχείο με ασφάλεια. Έμεινε σε αναμονή· δοκίμασε ξανά."
