@@ -1801,6 +1801,7 @@
       "req_approval": "🚨 <b>Approval Required</b>\n\nTool: <code>{tool_name}</code>\nArgs: <code>{args_prev}</code>\n\nExecute?",
       "blocked": "🛡️ Command `{name}` blocked by safe executor.",
       "waiting": "⏳ Waiting for approval of `{name}`. Check {channel} to confirm.",
+      "queued": "⏳ The approval request for `{name}` is queued for {channel}. You can approve it once it arrives there.",
       "delivery_failed": "⚠️ Could not send the approval request for `{name}` to {channel}. The action was not executed; retry when the channel is available.",
       "messenger_sent": "✅ Message sent.",
       "messenger_rejected": "❌ Messenger message not sent — approval was rejected.",

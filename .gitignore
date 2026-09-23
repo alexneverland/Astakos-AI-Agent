@@ -37,6 +37,8 @@ last_location.json
 linkedin_draft.json
 run_telegram.lock
 run_matrix.lock
+astakos_pending_approval.json.lock
+.approval-*.tmp
 # User uploads, generated output, and local browser profiles
 telegram_photos/
 telegram_uploads/

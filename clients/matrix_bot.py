@@ -322,11 +322,12 @@ async def run_matrix() -> None:
         print(f"🔐 [Matrix]: Pinned {pinned_devices} initial owner device(s).")
     loop = asyncio.get_running_loop()
 
-    async def send_room_text(text: str) -> str:
+    async def send_room_text(text: str, tx_id: str | None = None) -> str:
         response = await client.room_send(
             room_id=settings.room_id,
             message_type="m.room.message",
             content={"msgtype": "m.text", "body": text},
+            tx_id=tx_id,
         )
         if isinstance(response, RoomSendError):
             raise RuntimeError("Matrix text delivery failed")
@@ -337,6 +338,10 @@ async def run_matrix() -> None:
 
     def send_text_from_worker(text: str) -> str:
         future = asyncio.run_coroutine_threadsafe(send_room_text(text), loop)
+        return future.result(timeout=30)
+
+    def send_approval_from_worker(text: str, tx_id: str) -> str:
+        future = asyncio.run_coroutine_threadsafe(send_room_text(text, tx_id), loop)
         return future.result(timeout=30)
 
     approval_service = MatrixApprovalReactionService(
@@ -355,6 +360,7 @@ async def run_matrix() -> None:
         "matrix",
         MatrixExternalTransport(
             send_text=send_text_from_worker,
+            send_approval_text=send_approval_from_worker,
             approval_reaction_hint=(
                 "Reply to this message with 👍 to execute or 👎 to reject "
                 "(✅/❌ also work). Only encrypted reactions from an "

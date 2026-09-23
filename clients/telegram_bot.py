@@ -5832,6 +5832,7 @@ def _initialize_external_background_state() -> None:
 def _build_external_scheduler() -> AstakosScheduler:
     """Register the single shared set of external-channel background jobs."""
     from services.web_mirror_delivery import drain_web_mirrors
+    from services.pending_approval_delivery import drain_queued_matrix_approvals
 
     def drain_selected_web_mirrors() -> None:
         """Retry display-only Web copies through this process's selected transport."""
@@ -5840,6 +5841,12 @@ def _build_external_scheduler() -> AstakosScheduler:
 
     scheduler = AstakosScheduler()
     scheduler.register(drain_selected_web_mirrors, interval_seconds=10, name="web_mirror", verbose=False)
+    scheduler.register(
+        drain_queued_matrix_approvals,
+        interval_seconds=5,
+        name="matrix_approvals",
+        verbose=False,
+    )
     scheduler.register(job_check_reminders, interval_seconds=20, name="reminders", verbose=False)
     scheduler.register(job_check_routines, interval_seconds=60, name="routines", verbose=False)
     scheduler.register(job_proactive_scan, interval_seconds=43200, name="proactive", verbose=True)

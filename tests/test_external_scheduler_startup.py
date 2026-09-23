@@ -23,6 +23,24 @@ class FakeScheduler:
         return None
 
 
+def test_external_scheduler_registers_queued_matrix_approval_delivery(monkeypatch) -> None:
+    """The active external runtime regularly drains Web-origin approvals."""
+    import clients.telegram_bot as bot
+
+    class CapturingScheduler:
+        def __init__(self) -> None:
+            self.jobs: dict[str, tuple[object, int]] = {}
+
+        def register(self, func, interval_seconds: int, name: str, verbose: bool) -> None:
+            self.jobs[name] = (func, interval_seconds)
+
+    monkeypatch.setattr(bot, "AstakosScheduler", CapturingScheduler)
+    scheduler = bot._build_external_scheduler()
+
+    assert scheduler.jobs["matrix_approvals"][1] == 5
+    assert scheduler.jobs["matrix_approvals"][0].__name__ == "drain_queued_matrix_approvals"
+
+
 def test_external_background_runtime_starts_once_for_matrix(monkeypatch) -> None:
     import clients.telegram_bot as bot
 
