@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 import pytest
+from nio import ReactionEvent
 from nio.exceptions import OlmUnverifiedDeviceError
 
 from clients.matrix_client import MatrixReply, MatrixTextTransport
@@ -531,8 +532,8 @@ async def test_trusted_approval_reaction_handler_can_send_one_result(tmp_path) -
 
 
 @pytest.mark.asyncio
-async def test_cleartext_reaction_in_encrypted_room_cannot_approve(tmp_path) -> None:
-    """A room's E2EE setting cannot authenticate a cleartext reaction event."""
+async def test_element_cleartext_reaction_in_encrypted_room_reaches_approval(tmp_path) -> None:
+    """Element's authenticated reaction reaches approval despite no E2EE payload."""
     client = FakeMatrixClient()
     handled: list[dict[str, Any]] = []
 
@@ -549,9 +550,56 @@ async def test_cleartext_reaction_in_encrypted_room_cannot_approve(tmp_path) -> 
         turn_handler,
         approval_reaction_handler=reaction_handler,
     )
+    transport._reaction_event_type = ReactionEvent
+    reaction = ReactionEvent.from_dict(
+        {
+            "type": "m.reaction",
+            "event_id": "$reaction-1",
+            "sender": "@owner:example.test",
+            "origin_server_ts": 1,
+            "content": {
+                "m.relates_to": {
+                    "rel_type": "m.annotation",
+                    "event_id": "$approval-event",
+                    "key": "👍",
+                }
+            },
+        }
+    )
+    assert isinstance(reaction, ReactionEvent)
+    assert reaction.decrypted is False
     await transport.handle_reaction_event(
         FakeRoom(),
-        FakeReactionEvent(key="👍", decrypted=False),
+        reaction,
+    )
+
+    assert handled == [
+        {
+            "room_id": "!private-room:example.test",
+            "sender_id": "@owner:example.test",
+            "encrypted": True,
+            "reacts_to": "$approval-event",
+            "key": "👍",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reaction_in_unencrypted_room_cannot_approve(tmp_path) -> None:
+    client = FakeMatrixClient()
+    handled: list[dict[str, Any]] = []
+
+    async def turn_handler(text: str, event_id: str) -> str:
+        raise AssertionError("reaction must not enter the text graph")
+
+    async def reaction_handler(**kwargs: Any) -> None:
+        handled.append(kwargs)
+
+    transport = _transport(
+        tmp_path, client, turn_handler, approval_reaction_handler=reaction_handler
+    )
+    await transport.handle_reaction_event(
+        FakeRoom(encrypted=False), FakeReactionEvent(key="👍", decrypted=False)
     )
 
     assert handled == []

@@ -145,6 +145,29 @@ def init_db(db_path: str = CONVERSATION_DB_FILE) -> None:
             ON session_exchanges(channel, timestamp)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS web_mirror_outbox (
+                message_id TEXT PRIMARY KEY,
+                target_channel TEXT NOT NULL CHECK(target_channel IN ('matrix', 'telegram')),
+                content TEXT,
+                external_id TEXT,
+                created_at TEXT NOT NULL,
+                delivered_at TEXT
+            )
+            """
+        )
+        mirror_columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(web_mirror_outbox)")
+        }
+        if "content" not in mirror_columns:
+            conn.execute("ALTER TABLE web_mirror_outbox ADD COLUMN content TEXT")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_web_mirror_pending
+            ON web_mirror_outbox(target_channel, delivered_at, created_at)
+            """
+        )
 
 
 def default_session_id(ts: datetime | None = None) -> str:
@@ -204,9 +227,16 @@ def append_message(
     session_id: str | None = None,
     agent: str | None = None,
     metadata: dict[str, Any] | None = None,
+    mirror_target: str | None = None,
+    mirror_content: str | None = None,
     timestamp: datetime | None = None,
     db_path: str = CONVERSATION_DB_FILE,
 ) -> dict[str, Any]:
+    if mirror_target is not None and (
+        channel != "web" or role not in {"user", "assistant"}
+        or mirror_target not in {"matrix", "telegram"}
+    ):
+        raise ValueError("Web mirror requires a Web user/assistant row and supported target")
     ts = timestamp or datetime.now()
     message = {
         "id": str(uuid.uuid4()),
@@ -252,7 +282,69 @@ def append_message(
         )
         if cursor.rowcount == 1:
             message["rowid"] = cursor.lastrowid
+            if mirror_target is not None:
+                conn.execute(
+                    """
+                    INSERT INTO web_mirror_outbox
+                        (message_id, target_channel, content, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        message["id"], mirror_target,
+                        content if mirror_content is None else mirror_content,
+                        message["timestamp"],
+                    ),
+                )
     return message
+
+
+def load_pending_web_mirrors(
+    channel: str,
+    *,
+    limit: int = 20,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> list[dict[str, Any]]:
+    """Read undelivered Web display copies for one external channel in row order."""
+    if channel not in {"matrix", "telegram"}:
+        raise ValueError("Unsupported Web mirror target")
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT o.message_id, o.target_channel, m.role,
+                   COALESCE(o.content, m.content) AS content, m.rowid
+            FROM web_mirror_outbox AS o
+            JOIN conversation_messages AS m ON m.id = o.message_id
+            WHERE o.target_channel = ? AND o.delivered_at IS NULL
+            ORDER BY m.rowid ASC
+            LIMIT ?
+            """,
+            (channel, max(1, min(limit, 100))),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_web_mirror_delivered(
+    message_id: str,
+    channel: str,
+    external_id: str,
+    *,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> bool:
+    """Acknowledge only a confirmed send to its original selected channel."""
+    if channel not in {"matrix", "telegram"} or not str(external_id).strip():
+        raise ValueError("Web mirror acknowledgement requires channel and external ID")
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE web_mirror_outbox
+            SET external_id = ?, delivered_at = ?
+            WHERE message_id = ? AND target_channel = ? AND delivered_at IS NULL
+            """,
+            (str(external_id), datetime.now().isoformat(timespec="seconds"), message_id, channel),
+        )
+    return cursor.rowcount == 1
 
 
 def import_legacy_message(
@@ -758,9 +850,8 @@ def load_recent_context(
     """
     Return a small mixed or explicitly same-channel context window.
 
-    The default preserves the existing Web/Telegram behavior: recent messages
-    from all channels plus extra messages from the current channel. Matrix uses
-    the opt-in same-channel mode so its recent conversation remains isolated.
+    The default includes recent messages from all channels plus extra messages
+    from the current channel. Callers can explicitly request same-channel mode.
     """
     if same_channel_only:
         messages = load_messages(limit=channel_limit, channel=channel, db_path=db_path)
@@ -768,12 +859,7 @@ def load_recent_context(
             messages = messages[-total_limit:]
         return messages
 
-    excluded_channels = ("matrix",) if channel in {"web", "telegram"} else ()
-    mixed = load_messages(
-        limit=global_limit,
-        exclude_channels=excluded_channels,
-        db_path=db_path,
-    )
+    mixed = load_messages(limit=global_limit, db_path=db_path)
     current_channel = load_messages(limit=channel_limit, channel=channel, db_path=db_path)
 
     by_id = {message["id"]: message for message in mixed}

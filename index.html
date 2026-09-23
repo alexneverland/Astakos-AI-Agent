@@ -1218,7 +1218,6 @@
     let lastKnownMsgId = 0;
     const renderedHistoryRowIds = new Set();
     const pendingLocalEchoes = [];
-    const recentRenderedMessages = [];
     let isFetchingMessages = false;
     let isInitialCursorInitialized = false;
     const INITIAL_HISTORY_TIMEOUT_MS = 10000;
@@ -1283,51 +1282,29 @@
         return false;
     }
 
-    function markRecentlyRendered(role, text) {
-        const normalized = normalizeEchoText(text);
-        const now = Date.now();
-        for (let i = recentRenderedMessages.length - 1; i >= 0; i--) {
-            if (recentRenderedMessages[i].expiresAt < now) recentRenderedMessages.splice(i, 1);
-        }
-        recentRenderedMessages.push({
-            role,
-            text: normalized,
-            expiresAt: now + 60000,
-        });
+    function acknowledgeLocalEcho(role, text, rowid) {
+        const stableId = Number(rowid) || rowid;
+        if (!stableId || renderedHistoryRowIds.has(stableId)) return;
+        consumeMatchingLocalEcho(role, text);
+        markRenderedRowId(stableId);
     }
 
-    function wasRecentlyRendered(role, text) {
-        const normalized = normalizeEchoText(text);
-        const now = Date.now();
-        for (let i = recentRenderedMessages.length - 1; i >= 0; i--) {
-            const item = recentRenderedMessages[i];
-            if (item.expiresAt < now) {
-                recentRenderedMessages.splice(i, 1);
-                continue;
-            }
-            if (item.role === role && item.text === normalized) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    function appendAssistantResponseOnce(text, agentName = "") {
-        if (wasRecentlyRendered('ai', text)) return;
-        pushLocalEcho('ai', text);
+    function appendAssistantResponseOnce(text, agentName = "", rowid = null) {
+        const stableId = Number(rowid) || rowid;
+        if (stableId && renderedHistoryRowIds.has(stableId)) return;
+        if (!stableId) pushLocalEcho('ai', text);
         appendMessage(text, 'ai', agentName);
-        markRecentlyRendered('ai', text);
+        if (stableId) markRenderedRowId(stableId);
     }
 
     function appendUserMessageOnce(text) {
-        if (wasRecentlyRendered('user', text)) return;
         pushLocalEcho('user', text);
         appendMessage(text, 'user');
-        markRecentlyRendered('user', text);
     }
 
     function renderHistoryMsg(msg) {
-        const stableId = getMessageStableId(msg);
+        const rawId = getMessageStableId(msg);
+        const stableId = Number(rawId) || rawId;
         if (stableId && renderedHistoryRowIds.has(stableId)) return;
 
         const sender = (msg.role === 'user' || msg.role === 'Human') ? 'user' : 'ai';
@@ -1335,17 +1312,13 @@
         const channelName = msg.channel ? `${msg.channel.charAt(0).toUpperCase()}${msg.channel.slice(1)}` : '';
         const label = channelName ? `${channelName} / ${msg.agent || defaultName}` : (msg.agent || defaultName);
 
-        if (wasRecentlyRendered(sender, msg.content) || consumeMatchingLocalEcho(sender, msg.content)) {
-            if (stableId) renderedHistoryRowIds.add(stableId);
-            if (msg.rowid && msg.rowid > lastKnownMsgId) lastKnownMsgId = msg.rowid;
+        if (consumeMatchingLocalEcho(sender, msg.content)) {
+            if (stableId) markRenderedRowId(stableId);
             return;
         }
 
         appendMessage(msg.content, sender, label);
-        markRecentlyRendered(sender, msg.content);
-
-        if (stableId) renderedHistoryRowIds.add(stableId);
-        if (msg.rowid && msg.rowid > lastKnownMsgId) lastKnownMsgId = msg.rowid;
+        if (stableId) markRenderedRowId(stableId);
     }
 
     async function fetchNewMessages() {
@@ -1529,9 +1502,8 @@
                 });
                 const data = await response.json();
                 if (loadingDiv.parentNode) chatBox.removeChild(loadingDiv);
-                markRenderedRowId(data.user_rowid);
-                markRenderedRowId(data.assistant_rowid);
-                appendAssistantResponseOnce(data.response, data.agent);
+                acknowledgeLocalEcho('user', displayUserMsg, data.user_rowid);
+                appendAssistantResponseOnce(data.response, data.agent, data.assistant_rowid);
                 currentPhotoPath = null;
                 setCoreState('idle');
                 return data.response;

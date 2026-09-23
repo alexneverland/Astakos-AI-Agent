@@ -353,8 +353,6 @@ class MatrixTextTransport:
             return
         if not isinstance(event, self._reaction_event_type):
             return
-        if getattr(event, "decrypted", False) is not True:
-            return
         sender = str(getattr(event, "sender", ""))
         if sender != self._allowed_user_id or sender == self._service_user_id:
             return
@@ -365,7 +363,7 @@ class MatrixTextTransport:
         response = await self._approval_reaction_handler(
             room_id=self._allowed_room_id,
             sender_id=sender,
-            encrypted=True,
+            encrypted=room.encrypted,
             reacts_to=str(getattr(event, "reacts_to", "") or "").strip(),
             key=reaction_key,
         )

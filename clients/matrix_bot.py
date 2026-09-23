@@ -204,11 +204,31 @@ def _approval_result_text(result: object | None) -> str | None:
         return None
     status = str(getattr(result, "status", "") or "").strip()
     tool_name = str(getattr(result, "tool_name", "") or "action").strip()
+    if tool_name == "execute_local_pipeline":
+        from core.i18n import t
+
+        return t(
+            "core.approval.messenger_sent" if status == "executed"
+            else "core.approval.messenger_rejected" if status == "rejected"
+            else "core.approval.messenger_send_failed"
+        )
     if status == "executed":
         return f"✅ `{tool_name}` executed."
     if status == "rejected":
         return f"❌ `{tool_name}` rejected."
     return f"⚠️ `{tool_name}` could not be executed ({status or 'failed'})."
+
+
+def _record_web_approval_result(result: object | None, text: str | None) -> None:
+    """Show the result in Web when its approval originated from a Web turn."""
+    if result is None or not text or getattr(result, "origin_channel", "") != "web":
+        return
+    try:
+        from api.server import append_to_chat_history
+
+        append_to_chat_history("assistant", text, agent="Web_Agent")
+    except Exception as exc:
+        print(f"[Matrix Approval]: Web result history failed ({type(exc).__name__})")
 
 
 def verify_configured_owner_devices(
@@ -327,7 +347,9 @@ async def run_matrix() -> None:
 
     async def handle_approval_reaction(**kwargs: object) -> str | None:
         result = await asyncio.to_thread(approval_service.handle_reaction, **kwargs)
-        return _approval_result_text(result)
+        text = _approval_result_text(result)
+        await asyncio.to_thread(_record_web_approval_result, result, text)
+        return text
 
     external_delivery_router.register(
         "matrix",

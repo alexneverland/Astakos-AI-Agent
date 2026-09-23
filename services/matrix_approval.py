@@ -69,7 +69,11 @@ class MatrixApprovalReactionService:
         reacts_to: str,
         key: str,
     ) -> ApprovalReactionResult | None:
-        """Handle a trusted approval/rejection reaction; ignore everything else."""
+        """Handle a reaction in the encrypted room from the allowed Matrix user.
+
+        ``encrypted`` describes the room, not the reaction event: Element may
+        send m.reaction in cleartext even when room messages use E2EE.
+        """
         if encrypted is not True:
             return None
         if str(room_id or "") != self._allowed_room_id:
@@ -102,6 +106,16 @@ class MatrixApprovalReactionService:
 
         execution = execute_approved_pending(tool_call_id, list(self._tools_provider()))
         if execution.get("ok"):
+            if tool_name == "execute_local_pipeline":
+                from tools.web import messenger_send_result_succeeded
+
+                if not messenger_send_result_succeeded(execution.get("result")):
+                    return ApprovalReactionResult(
+                        status="failed",
+                        tool_name=tool_name,
+                        origin_channel=origin_channel,
+                        error=str(execution.get("result") or "Messenger send failed"),
+                    )
             return ApprovalReactionResult(
                 status="executed",
                 tool_name=tool_name,

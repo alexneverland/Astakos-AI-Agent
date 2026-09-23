@@ -285,7 +285,21 @@ def _render_persisted_asset_markers_for_client(
     content: str,
     client_host: str,
 ) -> str:
-    """Mint per-client URLs from stable or legacy image references for the Web UI."""
+    """Render private asset references and compact document logs for the Web UI."""
+    lines = content.splitlines()
+    if (
+        len(lines) >= 2
+        and lines[0].startswith("[USER_UPLOADED_FILE]: ")
+        and lines[1].startswith("[FILE PATH]: ")
+    ):
+        filename = lines[0].removeprefix("[USER_UPLOADED_FILE]: ").strip()
+        caption = next(
+            (line.removeprefix("[USER_CAPTION]: ").strip()
+             for line in lines[2:] if line.startswith("[USER_CAPTION]: ")),
+            "",
+        )
+        return f"📄 Έστειλα αρχείο: {filename}" + (f"\n{caption}" if caption else "")
+
     normalized_content = _replace_bracketed_markers(
         content,
         "[SEND_PHOTO:",
@@ -445,6 +459,8 @@ def append_to_chat_history(
     *,
     return_saved: bool = False,
     metadata: dict | None = None,
+    mirror_target: str | None = None,
+    mirror_content: str | None = None,
 ):
     """Add message to the shared SQLite conversation history (web channel) and websocket push."""
     now = datetime.now()
@@ -458,6 +474,8 @@ def append_to_chat_history(
             channel="web",
             agent=agent,
             metadata=metadata,
+            mirror_target=mirror_target,
+            mirror_content=mirror_content,
             timestamp=now,
         )
         shared_message_id = saved.get("id")
@@ -953,6 +971,16 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     if not user_input:
         return JSONResponse({"error": t("api.server.empty_message")}, status_code=400)
 
+    # Pin the display target for this entire Web text turn, including its reply.
+    mirror_target = None
+    if not is_voice_mode:
+        from core.messaging_channel import resolve_external_channel
+
+        try:
+            mirror_target = resolve_external_channel()
+        except ValueError as exc:
+            print(f"[WebMirror]: No valid external channel: {exc}")
+
     # 1. --- PROMPT INJECTION FIREWALL ---
     # We catch malicious intents before they ever touch the LLM or cost API tokens.
     if detect_prompt_injection(user_input):
@@ -1317,8 +1345,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
-            append_to_chat_history("user", user_input)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            append_to_chat_history("user", user_input, mirror_target=mirror_target)
+            append_to_chat_history("assistant", reply, agent="Chat_Agent", mirror_target=mirror_target)
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
@@ -1334,8 +1362,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
-            append_to_chat_history("user", user_input)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            append_to_chat_history("user", user_input, mirror_target=mirror_target)
+            append_to_chat_history("assistant", reply, agent="Chat_Agent", mirror_target=mirror_target)
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
@@ -1370,8 +1398,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
 
-            append_to_chat_history("user", user_input)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            append_to_chat_history("user", user_input, mirror_target=mirror_target)
+            append_to_chat_history("assistant", reply, agent="Chat_Agent", mirror_target=mirror_target)
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
@@ -1403,8 +1431,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
 
-            append_to_chat_history("user", user_input)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            append_to_chat_history("user", user_input, mirror_target=mirror_target)
+            append_to_chat_history("assistant", reply, agent="Chat_Agent", mirror_target=mirror_target)
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
@@ -1426,7 +1454,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     # ── Save user message to history ────────────────────
     # Note: We save the original `user_input` to the UI chat history, 
     # not the XML-wrapped version, to keep the frontend looking clean.
-    current_history_saved = append_to_chat_history("user", user_input, return_saved=True)
+    current_history_saved = append_to_chat_history(
+        "user", user_input, return_saved=True, mirror_target=mirror_target
+    )
     current_history_id = current_history_saved.get("id")
     current_history_rowid = current_history_saved.get("rowid")
 
@@ -1741,6 +1771,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             assistant_history_saved = append_to_chat_history(
                 "assistant",
                 clean_ai,
+                mirror_target=mirror_target,
                 **assistant_history_kwargs,
             )
             assistant_history_rowid = assistant_history_saved.get("rowid")
@@ -1989,6 +2020,13 @@ async def upload_file(
 ):
     """Endpoint for uploading files (photos & documents) from the Web UI."""
     try:
+        from core.messaging_channel import resolve_external_channel
+
+        try:
+            mirror_target = resolve_external_channel()
+        except ValueError as exc:
+            print(f"[WebMirror]: No valid external channel: {exc}")
+            mirror_target = None
         file_ext  = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
         if file_ext not in ALLOWED_EXTENSIONS:
             return JSONResponse({"status": "error", "message": t("api.server.invalid_file_type", file_ext=file_ext)}, status_code=400)
@@ -2159,8 +2197,23 @@ async def upload_file(
             external_content_history_metadata,
         )
         asset_metadata = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
-        append_to_chat_history("user", upload_history_msg, metadata=asset_metadata)
-        append_to_chat_history("assistant", chat_ai_msg, metadata=asset_metadata)
+        append_to_chat_history(
+            "user", upload_history_msg, metadata=asset_metadata,
+            mirror_target=mirror_target,
+            mirror_content=(
+                "📷 Έστειλα φωτογραφία από το Web."
+                if is_image else "📄 Έστειλα αρχείο από το Web."
+            ),
+        )
+        archive_prompt = "\n".join(t("api.server.save_prompt").splitlines()[:2])
+        mirror_ai_msg = chat_ai_msg
+        if archive_prompt and mirror_ai_msg.endswith(archive_prompt):
+            mirror_ai_msg = mirror_ai_msg[:-len(archive_prompt)].rstrip()
+        append_to_chat_history(
+            "assistant", chat_ai_msg, metadata=asset_metadata,
+            mirror_target=mirror_target,
+            mirror_content=mirror_ai_msg,
+        )
         print("[Security]: upload-derived reply - use trusted user text only for background state")
         enqueue_fast_task(log_exchange, user_caption, "", "Chat_Agent", "web")
         enqueue_fast_task(update_working_memory, user_caption, "", [USER_PROVIDED_ASSET_SOURCE])

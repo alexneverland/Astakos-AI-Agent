@@ -1800,7 +1800,10 @@
     "approval": {
       "req_approval": "🚨 <b>Approval Required</b>\n\nTool: <code>{tool_name}</code>\nArgs: <code>{args_prev}</code>\n\nExecute?",
       "blocked": "🛡️ Command `{name}` blocked by safe executor.",
-      "waiting": "⏳ Waiting approval for `{name}`. Sent to Telegram.",
+      "waiting": "⏳ Waiting for approval of `{name}`. Check {channel} to confirm.",
+      "messenger_sent": "✅ Message sent.",
+      "messenger_rejected": "❌ Messenger message not sent — approval was rejected.",
+      "messenger_send_failed": "⚠️ Messenger message not sent. Delivery failed.",
       "register_tool_hint": "\n\n⚠️ <i>Hint: Check the <code>outputs/draft_diff_*.md</code> artifact for the full code changes before approving.</i>",
       "draft_markers": [
         "create draft",
@@ -3840,6 +3843,10 @@
     }
   },
   "services": {
+    "web_mirror_delivery": {
+      "user_label": "Web / {owner_name}",
+      "assistant_label": "Web / {bot_name}"
+    },
     "pending_asset_confirmation": {
       "photo_share_request": "I'm sharing this photo with you. Take a look and respond naturally.",
       "save_failed_retry": "❌ I couldn't save the file safely. It remains pending; please try again."

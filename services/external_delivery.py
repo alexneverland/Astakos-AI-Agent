@@ -112,6 +112,24 @@ class ExternalDeliveryRouter:
             ) from exc
         return self._receipt(channel, external_id)
 
+    def send_text_to(
+        self, channel: ExternalChannel, text: str, *, silent: bool = False
+    ) -> DeliveryReceipt:
+        """Send only if a queued item's original channel is still selected."""
+        selected, transport = self._selected_transport()
+        if channel != selected:
+            raise ExternalDeliveryError("Queued external channel is not selected")
+        normalized = str(text or "").strip()
+        if not normalized:
+            raise ValueError("External delivery requires text")
+        try:
+            external_id = transport.send_text(normalized, silent=silent)
+        except Exception as exc:
+            raise ExternalDeliveryError(
+                f"Selected external transport '{channel}' failed"
+            ) from exc
+        return self._receipt(channel, external_id)
+
     def send_approval(self, request: ApprovalDeliveryRequest) -> DeliveryReceipt:
         """Send an approval only through the selected channel."""
         channel, transport = self._selected_transport()

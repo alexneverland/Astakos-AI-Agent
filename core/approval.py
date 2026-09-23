@@ -713,11 +713,15 @@ def approval_check_node(state):
         print(f"\033[91m[Approval]: 🚨 CRITICAL — {tc['name']} blocked, awaiting approval\033[0m")
 
         # Deliver through exactly one configured external channel.
-        _notify_selected_approval(tc)
+        delivery_channel = _notify_selected_approval(tc)
 
         # We return a ToolMessage so that the graph does not get stuck
         tool_messages.append(ToolMessage(
-            content=t("core.approval.waiting", name=tc["name"]),
+            content=t(
+                "core.approval.waiting",
+                name=tc["name"],
+                channel="Element" if delivery_channel == "matrix" else "Telegram",
+            ),
             tool_call_id=tc["id"],
             name=tc["name"],
         ))
@@ -796,14 +800,14 @@ def _notify_selected_notify(tool_call: dict) -> None:
         )
 
 
-def _notify_selected_approval(tool_call: dict) -> None:
+def _notify_selected_approval(tool_call: dict) -> str:
     """Deliver one approval through the selected external channel only."""
     from core.messaging_channel import resolve_external_channel
 
     channel = resolve_external_channel()
     if channel == "telegram":
         _notify_telegram(tool_call)
-        return
+        return channel
 
     from core.i18n import t
     from services.external_delivery import (
@@ -835,6 +839,7 @@ def _notify_selected_approval(tool_call: dict) -> None:
             "\033[91m[Approval]: Selected external approval delivery failed "
             f"({type(exc).__name__})\033[0m"
         )
+    return channel
 
 
 def _notify_telegram(tool_call: dict):

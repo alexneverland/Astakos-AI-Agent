@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage
+import pytest
 
 import core.approval as approval
 from services.external_delivery import external_delivery_router
@@ -22,9 +23,11 @@ class FakeMatrixDelivery:
         return "$approval"
 
 
+@pytest.mark.parametrize("origin_channel", ["web", "matrix"])
 def test_matrix_selection_routes_critical_approval_without_telegram(
     tmp_path,
     monkeypatch,
+    origin_channel: str,
 ) -> None:
     monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "matrix")
     monkeypatch.setattr(approval, "PENDING_FILE", str(tmp_path / "pending.json"))
@@ -46,7 +49,7 @@ def test_matrix_selection_routes_critical_approval_without_telegram(
 
     try:
         result = approval.approval_check_node(
-            {"messages": [message], "channel": "matrix"}
+            {"messages": [message], "channel": origin_channel}
         )
     finally:
         external_delivery_router.unregister("matrix")
@@ -56,6 +59,9 @@ def test_matrix_selection_routes_critical_approval_without_telegram(
     assert len(matrix.approvals) == 1
     assert matrix.approvals[0].call_id == "call-matrix"
     assert matrix.approvals[0].tool_name == "mail_manager"
+    waiting = result["messages"][0].content
+    assert "Element" in waiting
+    assert "Telegram" not in waiting
 
 
 def test_default_selection_preserves_existing_telegram_approval(
@@ -84,6 +90,7 @@ def test_default_selection_preserves_existing_telegram_approval(
 
     assert result["approval_status"] == "pending"
     assert telegram_calls == [tool_call]
+    assert "Telegram" in result["messages"][0].content
 
 
 def test_matrix_selection_routes_notify_without_telegram(monkeypatch) -> None:
