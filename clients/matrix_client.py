@@ -299,6 +299,31 @@ class MatrixTextTransport:
         if text is None:
             return
 
+        if self._approval_reaction_handler is not None:
+            from services.matrix_approval import (
+                APPROVE_REACTION_KEYS,
+                REJECT_REACTION_KEYS,
+                normalize_approval_reaction_key,
+            )
+
+            content = event.source["content"]
+            relation = content.get("m.relates_to")
+            reply = relation.get("m.in_reply_to") if isinstance(relation, dict) else None
+            reply_id = reply.get("event_id") if isinstance(reply, dict) else None
+            decision = normalize_approval_reaction_key(text.rsplit("\n\n", 1)[-1].strip())
+            if reply_id and decision in APPROVE_REACTION_KEYS | REJECT_REACTION_KEYS:
+                if getattr(event, "verified", False) is True:
+                    response = await self._approval_reaction_handler(
+                        room_id=self._allowed_room_id,
+                        sender_id=self._allowed_user_id,
+                        authenticated=True,
+                        reacts_to=str(reply_id),
+                        key=decision,
+                    )
+                    if response:
+                        await self._send_reply(self._allowed_room_id, str(response))
+                return
+
         event_id = str(event.event_id).strip()
         reservation = reserve_matrix_event(
             event_id=event_id,
@@ -344,7 +369,7 @@ class MatrixTextTransport:
             await self._deliver_pending(item)
 
     async def handle_reaction_event(self, room: Any, event: Any) -> None:
-        """Forward one trusted reaction from the encrypted room to approval."""
+        """Forward only device-verified encrypted reactions to approval."""
         if self._approval_reaction_handler is None:
             return
         if str(getattr(room, "room_id", "")) != self._allowed_room_id:
@@ -352,6 +377,10 @@ class MatrixTextTransport:
         if getattr(room, "encrypted", False) is not True:
             return
         if not isinstance(event, self._reaction_event_type):
+            return
+        if getattr(event, "decrypted", False) is not True:
+            return
+        if getattr(event, "verified", False) is not True:
             return
         sender = str(getattr(event, "sender", ""))
         if sender != self._allowed_user_id or sender == self._service_user_id:
@@ -363,7 +392,7 @@ class MatrixTextTransport:
         response = await self._approval_reaction_handler(
             room_id=self._allowed_room_id,
             sender_id=sender,
-            encrypted=room.encrypted,
+            authenticated=True,
             reacts_to=str(getattr(event, "reacts_to", "") or "").strip(),
             key=reaction_key,
         )

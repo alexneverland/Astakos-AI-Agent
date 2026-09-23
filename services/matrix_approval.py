@@ -65,16 +65,12 @@ class MatrixApprovalReactionService:
         *,
         room_id: str,
         sender_id: str,
-        encrypted: bool,
+        authenticated: bool,
         reacts_to: str,
         key: str,
     ) -> ApprovalReactionResult | None:
-        """Handle a reaction in the encrypted room from the allowed Matrix user.
-
-        ``encrypted`` describes the room, not the reaction event: Element may
-        send m.reaction in cleartext even when room messages use E2EE.
-        """
-        if encrypted is not True:
+        """Handle a device-verified, decrypted decision from the allowed user."""
+        if authenticated is not True:
             return None
         if str(room_id or "") != self._allowed_room_id:
             return None

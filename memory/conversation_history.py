@@ -253,7 +253,7 @@ def append_message(
 
     # [DEDUP GUARD]: Prevents rapid double-writes
     _key = _dedup_key(channel, role, content, message["metadata"], db_path)
-    if _is_recent_duplicate(_key):
+    if channel != "web" and _is_recent_duplicate(_key):
         print(f"\033[93m[ConvHistory]: Dedup skip — {channel}/{role} '{content[:40]}'[0m")
         return message
 

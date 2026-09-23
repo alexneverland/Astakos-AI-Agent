@@ -53,14 +53,14 @@ def test_trusted_approve_reaction_executes_exact_pending_action_once(
     result = service.handle_reaction(
         room_id="!private-room:example.test",
         sender_id="@owner:example.test",
-        encrypted=True,
+        authenticated=True,
         reacts_to="$approval-event",
         key=approval_key,
     )
     duplicate = service.handle_reaction(
         room_id="!private-room:example.test",
         sender_id="@owner:example.test",
-        encrypted=True,
+        authenticated=True,
         reacts_to="$approval-event",
         key=approval_key,
     )
@@ -75,7 +75,7 @@ def test_trusted_approve_reaction_executes_exact_pending_action_once(
 
 
 @pytest.mark.parametrize(
-    ("room_id", "sender_id", "encrypted"),
+    ("room_id", "sender_id", "authenticated"),
     [
         ("!other:example.test", "@owner:example.test", True),
         ("!private-room:example.test", "@other:example.test", True),
@@ -86,14 +86,14 @@ def test_untrusted_reaction_is_inert(
     approval_state,
     room_id: str,
     sender_id: str,
-    encrypted: bool,
+    authenticated: bool,
 ) -> None:
     service, tool = approval_state
 
     result = service.handle_reaction(
         room_id=room_id,
         sender_id=sender_id,
-        encrypted=encrypted,
+        authenticated=authenticated,
         reacts_to="$approval-event",
         key="✅",
     )
@@ -109,21 +109,21 @@ def test_unrelated_reaction_or_message_is_inert(approval_state) -> None:
     assert service.handle_reaction(
         room_id="!private-room:example.test",
         sender_id="@owner:example.test",
-        encrypted=True,
+        authenticated=True,
         reacts_to="$unrelated",
         key="✅",
     ) is None
     assert service.handle_reaction(
         room_id="!private-room:example.test",
         sender_id="@owner:example.test",
-        encrypted=True,
+        authenticated=True,
         reacts_to="$approval-event",
         key="🙂",
     ) is None
     assert service.handle_reaction(
         room_id="!private-room:example.test",
         sender_id="@owner:example.test",
-        encrypted=True,
+        authenticated=True,
         reacts_to="$approval-event",
         key="ναι",
     ) is None
@@ -156,7 +156,7 @@ def test_messenger_tool_error_is_not_treated_as_sent(tmp_path, monkeypatch) -> N
     result = service.handle_reaction(
         room_id="!private-room:example.test",
         sender_id="@owner:example.test",
-        encrypted=True,
+        authenticated=True,
         reacts_to="$send",
         key="👍",
     )
@@ -190,7 +190,7 @@ def test_messenger_tool_success_is_reported_as_sent(tmp_path, monkeypatch) -> No
     result = service.handle_reaction(
         room_id="!private-room:example.test",
         sender_id="@owner:example.test",
-        encrypted=True,
+        authenticated=True,
         reacts_to="$send",
         key="👍",
     )
@@ -211,7 +211,7 @@ def test_trusted_reject_reaction_removes_pending_without_execution(
     result = service.handle_reaction(
         room_id="!private-room:example.test",
         sender_id="@owner:example.test",
-        encrypted=True,
+        authenticated=True,
         reacts_to="$approval-event",
         key=rejection_key,
     )

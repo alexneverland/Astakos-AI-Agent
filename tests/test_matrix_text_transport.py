@@ -26,6 +26,7 @@ class FakeTextEvent:
     sender: str = "@owner:example.test"
     body: str = "Καλημέρα"
     decrypted: bool = True
+    verified: bool = True
     source: dict[str, Any] = field(
         default_factory=lambda: {
             "type": "m.room.message",
@@ -41,6 +42,7 @@ class FakeReactionEvent:
     reacts_to: str = "$approval-event"
     key: str = "✅"
     decrypted: bool = True
+    verified: bool = True
 
 
 class FakeSendError:
@@ -523,7 +525,7 @@ async def test_trusted_approval_reaction_handler_can_send_one_result(tmp_path) -
         {
             "room_id": "!private-room:example.test",
             "sender_id": "@owner:example.test",
-            "encrypted": True,
+            "authenticated": True,
             "reacts_to": "$approval-event",
             "key": "✅",
         }
@@ -532,8 +534,8 @@ async def test_trusted_approval_reaction_handler_can_send_one_result(tmp_path) -
 
 
 @pytest.mark.asyncio
-async def test_element_cleartext_reaction_in_encrypted_room_reaches_approval(tmp_path) -> None:
-    """Element's authenticated reaction reaches approval despite no E2EE payload."""
+async def test_element_cleartext_reaction_in_encrypted_room_cannot_approve(tmp_path) -> None:
+    """A room setting cannot authenticate a cleartext reaction."""
     client = FakeMatrixClient()
     handled: list[dict[str, Any]] = []
 
@@ -573,15 +575,99 @@ async def test_element_cleartext_reaction_in_encrypted_room_reaches_approval(tmp
         reaction,
     )
 
-    assert handled == [
-        {
-            "room_id": "!private-room:example.test",
-            "sender_id": "@owner:example.test",
-            "encrypted": True,
-            "reacts_to": "$approval-event",
-            "key": "👍",
-        }
-    ]
+    assert handled == []
+
+
+@pytest.mark.asyncio
+async def test_decrypted_reaction_from_unverified_device_cannot_approve(tmp_path) -> None:
+    client = FakeMatrixClient()
+    handled: list[dict[str, Any]] = []
+
+    async def turn_handler(text: str, event_id: str) -> str:
+        raise AssertionError("reaction must not enter the text graph")
+
+    async def approval_handler(**kwargs: Any) -> None:
+        handled.append(kwargs)
+
+    transport = _transport(
+        tmp_path, client, turn_handler,
+        approval_reaction_handler=approval_handler,
+    )
+    await transport.handle_reaction_event(
+        FakeRoom(), FakeReactionEvent(decrypted=True, verified=False),
+    )
+
+    assert handled == []
+
+
+@pytest.mark.asyncio
+async def test_verified_encrypted_reply_to_approval_executes_without_graph(tmp_path) -> None:
+    client = FakeMatrixClient()
+    handled: list[dict[str, Any]] = []
+
+    async def turn_handler(text: str, event_id: str) -> str:
+        raise AssertionError("approval must not enter the text graph")
+
+    async def approval_handler(**kwargs: Any) -> str:
+        handled.append(kwargs)
+        return "✅ Η ενέργεια εκτελέστηκε."
+
+    transport = _transport(
+        tmp_path, client, turn_handler,
+        approval_reaction_handler=approval_handler,
+    )
+    event = FakeTextEvent(
+        body="> <@astakos:example.test> approve this\n\n👍",
+        source={
+            "type": "m.room.message",
+            "content": {
+                "msgtype": "m.text",
+                "body": "> <@astakos:example.test> approve this\n\n👍",
+                "m.relates_to": {"m.in_reply_to": {"event_id": "$approval-event"}},
+            },
+        },
+    )
+    await transport.handle_event(FakeRoom(), event)
+
+    assert handled == [{
+        "room_id": "!private-room:example.test",
+        "sender_id": "@owner:example.test",
+        "authenticated": True,
+        "reacts_to": "$approval-event",
+        "key": "👍",
+    }]
+    assert client.sent[0]["content"]["body"] == "✅ Η ενέργεια εκτελέστηκε."
+
+
+@pytest.mark.asyncio
+async def test_unverified_encrypted_reply_cannot_approve(tmp_path) -> None:
+    client = FakeMatrixClient()
+    handled: list[dict[str, Any]] = []
+
+    async def turn_handler(text: str, event_id: str) -> str:
+        raise AssertionError("unverified approval must not enter the text graph")
+
+    async def approval_handler(**kwargs: Any) -> None:
+        handled.append(kwargs)
+
+    transport = _transport(
+        tmp_path, client, turn_handler,
+        approval_reaction_handler=approval_handler,
+    )
+    event = FakeTextEvent(
+        body="👍", verified=False,
+        source={
+            "type": "m.room.message",
+            "content": {
+                "msgtype": "m.text", "body": "👍",
+                "m.relates_to": {"m.in_reply_to": {"event_id": "$approval-event"}},
+            },
+        },
+    )
+    await transport.handle_event(FakeRoom(), event)
+
+    assert handled == []
+    assert client.sent == []
 
 
 @pytest.mark.asyncio

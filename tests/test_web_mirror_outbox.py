@@ -50,6 +50,27 @@ def test_web_chat_rows_enqueue_only_the_selected_channel(tmp_path) -> None:
     assert len(load_messages(db_path=db_path)) == 3
 
 
+@pytest.mark.parametrize("role", ["user", "assistant"])
+def test_repeated_web_turns_each_get_a_persisted_row_and_mirror(tmp_path, role: str) -> None:
+    from memory.conversation_history import load_pending_web_mirrors
+
+    db_path = str(tmp_path / "conversation.db")
+    first = append_message(
+        role=role, content="ίδιο", channel="web",
+        mirror_target="matrix", db_path=db_path,
+    )
+    second = append_message(
+        role=role, content="ίδιο", channel="web",
+        mirror_target="matrix", db_path=db_path,
+    )
+
+    assert first["rowid"] != second["rowid"]
+    assert len(load_messages(db_path=db_path)) == 2
+    assert [item["message_id"] for item in load_pending_web_mirrors("matrix", db_path=db_path)] == [
+        first["id"], second["id"],
+    ]
+
+
 def test_pending_mirror_keeps_original_target_after_channel_switch(tmp_path) -> None:
     from memory.conversation_history import load_pending_web_mirrors
 

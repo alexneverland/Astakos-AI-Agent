@@ -356,8 +356,8 @@ async def run_matrix() -> None:
         MatrixExternalTransport(
             send_text=send_text_from_worker,
             approval_reaction_hint=(
-                "React with 👍 to execute or 👎 to reject "
-                "(✅/❌ also work)."
+                "Reply to this message with 👍 to execute or 👎 to reject "
+                "(✅/❌ also work). Reactions alone cannot approve."
             ),
         ),
     )

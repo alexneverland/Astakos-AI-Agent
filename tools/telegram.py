@@ -33,6 +33,8 @@ def send_telegram_msg_full(text: str, prefix: str = "", max_len: int = 3500, dis
     for idx, chunk in enumerate(chunks, 1):
         suffix = f"\n\n[{idx}/{len(chunks)}]" if len(chunks) > 1 else ""
         last_id = send_telegram_msg(chunk + suffix, disable_notification=disable_notification)
+        if last_id is None:
+            return None
     return last_id
 
 
