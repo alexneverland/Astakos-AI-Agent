@@ -13,7 +13,8 @@ def _make_db(path: Path) -> None:
             condition_type TEXT,
             condition_payload TEXT,
             condition_mode TEXT,
-            conditions_json TEXT
+            conditions_json TEXT,
+            source_memory_ref TEXT
         )
         """
     )
@@ -203,3 +204,41 @@ def test_existing_reconciler_absence_condition_uses_confirmed_absence(tmp_path):
     camp_context = {"kid1_away_from_home": True, "kid1_unavailable_for_routine": True}
     assert evaluate_routine_conditions(persisted, school_context)["allowed"] is True
     assert evaluate_routine_conditions(persisted, camp_context)["allowed"] is False
+
+
+def test_legacy_absence_condition_preserves_row_provenance(tmp_path, monkeypatch):
+    """The old single-condition columns retain their source on read."""
+    import memory.routine_db as rdb
+    from services.routine_conditions import evaluate_routine_conditions
+
+    monkeypatch.setattr(rdb, "DB_PATH", str(tmp_path / "legacy_routines.db"))
+    rdb.setup_db()
+    conn = rdb.get_connection(write=True)
+    conn.execute(
+        """INSERT INTO routines
+           (id, condition_type, condition_payload, condition_mode, source_memory_ref)
+           VALUES (?, ?, ?, ?, ?)""",
+        (765, "context_flag", '{"flag":"kid1_away_from_home","equals":true}',
+         "suppress_when_true", "reconciler"),
+    )
+    conn.execute(
+        """INSERT INTO routines
+           (id, condition_type, condition_payload, condition_mode, source_memory_ref)
+           VALUES (?, ?, ?, ?, ?)""",
+        (766, "context_flag", '{"flag":"kid1_away_from_home","equals":true}',
+         "suppress_when_true", "manual"),
+    )
+    conn.commit()
+    conn.close()
+
+    persisted = rdb.get_routine_conditions(765)
+    school_context = {"kid1_away_from_home": True, "kid1_unavailable_for_routine": False}
+    camp_context = {"kid1_away_from_home": True, "kid1_unavailable_for_routine": True}
+
+    assert persisted[0]["source_memory_ref"] == "reconciler"
+    assert evaluate_routine_conditions(persisted, school_context)["allowed"] is True
+    assert evaluate_routine_conditions(persisted, camp_context)["allowed"] is False
+
+    manual_condition = rdb.get_routine_conditions(766)
+    assert manual_condition[0]["source_memory_ref"] == "manual"
+    assert evaluate_routine_conditions(manual_condition, school_context)["allowed"] is False

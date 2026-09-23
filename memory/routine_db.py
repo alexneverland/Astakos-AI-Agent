@@ -2130,14 +2130,14 @@ def get_routine_conditions(routine_id: int) -> list[dict]:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT conditions_json, condition_type, condition_payload, condition_mode FROM routines WHERE id = ?",
+            "SELECT conditions_json, condition_type, condition_payload, condition_mode, source_memory_ref FROM routines WHERE id = ?",
             (routine_id,)
         )
         row = cursor.fetchone()
         if not row:
             return []
             
-        c_json, c_type, c_payload, c_mode = row
+        c_json, c_type, c_payload, c_mode, c_source = row
         
         # 1. New multi-condition JSON
         if c_json:
@@ -2150,11 +2150,14 @@ def get_routine_conditions(routine_id: int) -> list[dict]:
                 
         # 2. Fallback to legacy single condition
         if c_type:
-            return [{
+            condition = {
                 "condition_type": c_type,
                 "condition_payload": json.loads(c_payload) if c_payload else None,
-                "condition_mode": c_mode
-            }]
+                "condition_mode": c_mode,
+            }
+            if c_source:
+                condition["source_memory_ref"] = c_source
+            return [condition]
             
         return []
 
