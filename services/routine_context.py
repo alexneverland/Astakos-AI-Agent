@@ -43,6 +43,7 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
     away_state = resolve_kid1_away_state(current)
+    away_reason = resolve_kid1_away_reason(current)
 
     ctx = {}
     try:
@@ -69,7 +70,8 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
     ctx.update({
         "today": today,
         "kid1_away_from_home": away_state,
-        "kid1_away_reason": resolve_kid1_away_reason(current),
+        "kid1_away_reason": away_reason,
+        "kid1_unavailable_for_routine": kid1_unavailable_for_routine(away_state, away_reason),
         "kid1_with_user": resolve_context_bool("kid1_with_user", current),
         "kid1_with_partner": resolve_context_bool("kid1_with_partner", current),
         "partner_with_user": resolve_context_bool("partner_with_user", current),
@@ -84,6 +86,11 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
     })
     ctx["kid1_present"] = not bool(away_state)
     return ctx
+
+
+def kid1_unavailable_for_routine(away_state: bool | None, away_reason: str | None) -> bool:
+    """Distinguish an explicit absence from school or a short outing."""
+    return bool(away_state and away_reason in {"camp", "grandmother", "trip", "away"})
 
 def resolve_context_bool(key: str, now: datetime | None = None) -> bool | None:
     current = now or datetime.now()

@@ -2,6 +2,15 @@ from datetime import datetime
 import services.routine_context as rc
 
 
+def test_kid1_routine_unavailability_needs_explicit_absence_reason():
+    """A normal outing/school day is not a long absence from family routines."""
+    assert rc.kid1_unavailable_for_routine(True, "camp") is True
+    assert rc.kid1_unavailable_for_routine(True, "grandmother") is True
+    assert rc.kid1_unavailable_for_routine(True, None) is False
+    assert rc.kid1_unavailable_for_routine(True, "school") is False
+    assert rc.kid1_unavailable_for_routine(False, "camp") is False
+
+
 def test_build_runtime_routine_context_returns_expected_keys(monkeypatch):
     monkeypatch.setattr(rc, "resolve_kid1_away_state", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_kid1_away_reason", lambda now=None: "camp")

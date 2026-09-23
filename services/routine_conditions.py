@@ -87,6 +87,16 @@ def evaluate_routine_condition(condition: dict, context: dict, now: datetime | N
         }
 
     if condition_type == "context_flag":
+        if (
+            condition.get("source_memory_ref") == "reconciler"
+            and mode == "suppress_when_true"
+            and payload.get("flag") == "kid1_away_from_home"
+            and payload.get("equals") is True
+            and "kid1_unavailable_for_routine" in context
+        ):
+            # Older reconciler conditions persist the broad flag; retain their
+            # intended absence meaning without rewriting stored routine data.
+            payload = {**payload, "flag": "kid1_unavailable_for_routine"}
         return _evaluate_context_flag(payload, mode, context)
 
     if condition_type == "shift_mode":

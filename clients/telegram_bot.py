@@ -4075,6 +4075,8 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     # Shared state
     away = state_value("kid1_away_from_home") == "true"
     away_reason = state_value("kid1_away_reason")
+    from services.routine_context import kid1_unavailable_for_routine
+    confirmed_absence = kid1_unavailable_for_routine(away, away_reason)
     football_season = state_value("football_season")
     school_open = state_value("school_open")
     user_at_work = state_value("user_at_work") == "true"
@@ -4093,7 +4095,7 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     if t("clients.telegram_bot.bot_msg_48ded7") in event_l or "park" in event_l or t("clients.telegram_bot.bot_msg_09fd55") in event_l:
         if outing_state in {"in_progress", "done"}:
             return "[SILENT_SKIP] outing already handled"
-        if away:
+        if confirmed_absence:
             return t("clients.telegram_bot.bot_msg_9b132d")
         if kid1_with_partner and not kid1_with_user:
             return t("clients.telegram_bot.bot_msg_00c825")
@@ -4131,7 +4133,7 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
             return "[SILENT_SKIP] sports training already handled or paused"
         if football_season == "false":
             return "[SILENT_SKIP] not football season"
-        if away:
+        if confirmed_absence:
             return t("clients.telegram_bot.bot_msg_9fbd6e")
         if kid1_with_partner and not kid1_with_user:
             return t("clients.telegram_bot.bot_msg_9ba3e7")

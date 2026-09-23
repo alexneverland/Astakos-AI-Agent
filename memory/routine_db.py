@@ -2130,14 +2130,14 @@ def get_routine_conditions(routine_id: int) -> list[dict]:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT conditions_json, condition_type, condition_payload, condition_mode FROM routines WHERE id = ?",
+            "SELECT conditions_json, condition_type, condition_payload, condition_mode, source_memory_ref FROM routines WHERE id = ?",
             (routine_id,)
         )
         row = cursor.fetchone()
         if not row:
             return []
             
-        c_json, c_type, c_payload, c_mode = row
+        c_json, c_type, c_payload, c_mode, c_source = row
         
         # 1. New multi-condition JSON
         if c_json:
@@ -2150,13 +2150,102 @@ def get_routine_conditions(routine_id: int) -> list[dict]:
                 
         # 2. Fallback to legacy single condition
         if c_type:
-            return [{
+            condition = {
                 "condition_type": c_type,
                 "condition_payload": json.loads(c_payload) if c_payload else None,
-                "condition_mode": c_mode
-            }]
+                "condition_mode": c_mode,
+            }
+            if c_source:
+                condition["source_memory_ref"] = c_source
+            return [condition]
             
         return []
+
+
+def _condition_conflicts_with_existing(new_condition: dict, existing_conditions: list[dict]) -> bool:
+    """Detect incompatible additive checks on the same single-valued context flag."""
+    if new_condition.get("condition_type") not in ("shift_mode", "context_flag"):
+        return False
+    new_payload = new_condition.get("condition_payload")
+    if not isinstance(new_payload, dict) or not new_payload.get("flag") or "equals" not in new_payload:
+        return False
+
+    for existing in existing_conditions:
+        if existing.get("condition_type") not in ("shift_mode", "context_flag"):
+            continue
+        payload = existing.get("condition_payload")
+        if not isinstance(payload, dict) or payload.get("flag") != new_payload["flag"] or "equals" not in payload:
+            continue
+        existing_mode = existing.get("condition_mode") or "allow_when_true"
+        new_mode = new_condition.get("condition_mode") or "allow_when_true"
+        if existing_mode == new_mode == "allow_when_true" and payload["equals"] != new_payload["equals"]:
+            return True
+        if (existing_mode == new_mode == "suppress_when_true"
+                and isinstance(payload["equals"], bool)
+                and isinstance(new_payload["equals"], bool)
+                and payload["equals"] != new_payload["equals"]):
+            return True
+        if existing_mode != new_mode and payload["equals"] == new_payload["equals"]:
+            return True
+    return False
+
+
+def replace_routine_conditions(
+    routine_id: int,
+    expected_conditions: list[dict],
+    replacement_conditions: list[dict],
+) -> bool:
+    """Atomically replace an inspected condition list, refusing concurrent changes."""
+    if not isinstance(expected_conditions, list) or not isinstance(replacement_conditions, list):
+        raise ValueError("Routine conditions must be lists")
+    for index, condition in enumerate(replacement_conditions):
+        if not isinstance(condition, dict) or _condition_conflicts_with_existing(condition, replacement_conditions[:index]):
+            raise ValueError("Replacement routine conditions conflict")
+
+    with db_write_lock:
+        conn = get_connection(write=True)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT conditions_json, condition_type, condition_payload, condition_mode FROM routines WHERE id = ?",
+                (routine_id,),
+            ).fetchone()
+            if not row:
+                conn.rollback()
+                return False
+            c_json, c_type, c_payload, c_mode = row
+            if c_json:
+                try:
+                    current = json.loads(c_json)
+                except json.JSONDecodeError:
+                    conn.rollback()
+                    return False
+            elif c_type:
+                try:
+                    current = [{
+                        "condition_type": c_type,
+                        "condition_payload": json.loads(c_payload) if c_payload else None,
+                        "condition_mode": c_mode,
+                    }]
+                except json.JSONDecodeError:
+                    conn.rollback()
+                    return False
+            else:
+                current = []
+            if current != expected_conditions:
+                conn.rollback()
+                return False
+            conn.execute(
+                """UPDATE routines
+                   SET conditions_json = ?, condition_type = NULL,
+                       condition_payload = NULL, condition_mode = NULL
+                   WHERE id = ?""",
+                (json.dumps(replacement_conditions, ensure_ascii=False), routine_id),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
 
 def append_routine_condition(
     routine_id: int,
@@ -2221,6 +2310,9 @@ def append_routine_condition(
                     and cond.get("condition_mode") == condition_mode
                 ):
                     return False
+
+            if _condition_conflicts_with_existing(new_cond, existing_conditions):
+                return False
 
             existing_conditions.append(new_cond)
             cursor.execute(
