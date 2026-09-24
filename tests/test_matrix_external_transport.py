@@ -59,7 +59,7 @@ def test_matrix_approval_retry_reuses_transaction_id(pending_file) -> None:
     sent: list[tuple[str, str]] = []
     transport = MatrixExternalTransport(
         send_text=lambda text: "$ordinary",
-        send_approval_text=lambda text, tx_id: sent.append((text, tx_id)) or "$approval",
+        send_transaction_text=lambda text, tx_id: sent.append((text, tx_id)) or "$approval",
         approval_reaction_hint="Reply 👍 or 👎.",
     )
     request = ApprovalDeliveryRequest(
