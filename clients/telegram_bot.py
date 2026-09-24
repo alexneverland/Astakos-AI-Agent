@@ -3060,31 +3060,9 @@ def _haversine_distance_meters(lat1, lon1, lat2, lon2) -> float:
 
 def _sync_live_location_out_of_home_state(lat: float, lon: float) -> None:
     """Synchronize the current out-of-home flag from a valid live home geofence."""
-    from config import HOME_COORDS, HOME_RADIUS_M
-    from memory.routine_db import get_context_state, set_context_state
+    from services.location_update import sync_live_location_out_of_home_state
 
-    try:
-        home_lat, home_lon = (float(HOME_COORDS[0]), float(HOME_COORDS[1]))
-        home_radius_m = float(HOME_RADIUS_M)
-    except (IndexError, TypeError, ValueError):
-        return
-
-    if (home_lat, home_lon) == (0.0, 0.0) or home_radius_m <= 0:
-        return
-
-    is_out_of_home = (
-        _haversine_distance_meters(lat, lon, home_lat, home_lon) > home_radius_m
-    )
-    desired_value = "true" if is_out_of_home else "false"
-    state = get_context_state("user_out_of_home") or {}
-    current_value = str(state.get("value") or "").strip().lower()
-    expires_at = str(state.get("expires_at") or "").strip()
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    if current_value == desired_value and (not expires_at or expires_at >= today):
-        return
-
-    set_context_state("user_out_of_home", desired_value, expires_at=today)
+    sync_live_location_out_of_home_state(lat, lon)
 
 
 def handle_location(msg, live_update=False):

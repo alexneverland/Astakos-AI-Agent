@@ -36,10 +36,14 @@ def test_parse_matrix_geo_uri_validates_coordinate_bounds() -> None:
     assert parse_geo_uri("geo:91,22") is None
 
 
-def test_record_location_update_preserves_anchor_and_silences_live_updates(tmp_path) -> None:
+def test_record_location_update_preserves_anchor_and_silences_live_updates(
+    tmp_path, monkeypatch
+) -> None:
     import json
+    import config
     from services.location_update import record_location_update
 
+    monkeypatch.setattr(config, "HOME_COORDS", (0.0, 0.0))
     location_file = tmp_path / "last_location.json"
 
     static_reply = record_location_update(
@@ -62,6 +66,38 @@ def test_record_location_update_preserves_anchor_and_silences_live_updates(tmp_p
     assert live_reply is None
     assert stored["lat"] == 40.65 and stored["lon"] == 22.95
     assert stored["anchor_lat"] == 40.6401
+
+
+def test_live_matrix_location_updates_home_context_without_repeating_same_state(
+    tmp_path, monkeypatch
+) -> None:
+    import config
+    from memory import routine_db
+    from services.location_update import record_location_update
+
+    monkeypatch.setattr(config, "HOME_COORDS", (40.0, 22.0))
+    monkeypatch.setattr(config, "HOME_RADIUS_M", 150)
+    monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "routines.db"))
+    routine_db.setup_db()
+    updates: list[tuple[str, str]] = []
+    original_set = routine_db.set_context_state
+
+    def capture_context(key: str, value: str, **kwargs) -> None:
+        updates.append((key, value))
+        original_set(key, value, **kwargs)
+
+    monkeypatch.setattr(routine_db, "set_context_state", capture_context)
+    storage_file = tmp_path / "location.json"
+    record_location_update(40.0, 22.0, live_update=True, storage_file=storage_file)
+    record_location_update(40.01, 22.0, live_update=True, storage_file=storage_file)
+    record_location_update(40.01, 22.0, live_update=True, storage_file=storage_file)
+    record_location_update(40.0, 22.0, live_update=True, storage_file=storage_file)
+
+    assert updates == [
+        ("user_out_of_home", "false"),
+        ("user_out_of_home", "true"),
+        ("user_out_of_home", "false"),
+    ]
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ import math
 import os
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 
 
@@ -28,6 +29,39 @@ def parse_geo_uri(value: str) -> tuple[float, float] | None:
     if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
         return None
     return latitude, longitude
+
+
+def sync_live_location_out_of_home_state(latitude: float, longitude: float) -> None:
+    """Update the routine home-context flag from a trusted live GPS point."""
+    from config import HOME_COORDS, HOME_RADIUS_M
+    from memory.routine_db import get_context_state, set_context_state
+
+    try:
+        home_lat, home_lon = float(HOME_COORDS[0]), float(HOME_COORDS[1])
+        home_radius_m = float(HOME_RADIUS_M)
+    except (IndexError, TypeError, ValueError):
+        return
+    if (home_lat, home_lon) == (0.0, 0.0) or home_radius_m <= 0:
+        return
+
+    earth_radius_m = 6_371_000
+    lat_delta = math.radians(latitude - home_lat)
+    lon_delta = math.radians(longitude - home_lon)
+    arc = (
+        math.sin(lat_delta / 2) ** 2
+        + math.cos(math.radians(home_lat))
+        * math.cos(math.radians(latitude))
+        * math.sin(lon_delta / 2) ** 2
+    )
+    distance_m = 2 * earth_radius_m * math.asin(math.sqrt(arc))
+    desired_value = "true" if distance_m > home_radius_m else "false"
+    state = get_context_state("user_out_of_home") or {}
+    current_value = str(state.get("value") or "").strip().lower()
+    expires_at = str(state.get("expires_at") or "").strip()
+    today = datetime.now().strftime("%Y-%m-%d")
+    if current_value == desired_value and (not expires_at or expires_at >= today):
+        return
+    set_context_state("user_out_of_home", desired_value, expires_at=today)
 
 
 def record_location_update(
@@ -79,6 +113,7 @@ def record_location_update(
             temporary_path.unlink(missing_ok=True)
 
     if live_update:
+        sync_live_location_out_of_home_state(latitude, longitude)
         return None
     from core.i18n import t
 
