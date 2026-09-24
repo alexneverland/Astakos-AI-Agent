@@ -11,9 +11,16 @@ def test_kid1_routine_unavailability_needs_explicit_absence_reason():
     assert rc.kid1_unavailable_for_routine(False, "camp") is False
 
 
+def test_canonical_absence_scope_overrides_legacy_flags():
+    """One scoped state decides availability even when old flags disagree."""
+    assert rc.kid1_unavailable_for_routine(True, "camp", "temporary") is False
+    assert rc.kid1_unavailable_for_routine(False, None, "extended") is True
+
+
 def test_build_runtime_routine_context_returns_expected_keys(monkeypatch):
     monkeypatch.setattr(rc, "resolve_kid1_away_state", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_kid1_away_reason", lambda now=None: "camp")
+    monkeypatch.setattr(rc, "resolve_kid1_absence_scope", lambda now=None: "extended")
     monkeypatch.setattr(rc, "resolve_football_season", lambda now=None: False)
     monkeypatch.setattr(rc, "resolve_school_open", lambda now=None: False)
     monkeypatch.setattr(rc, "resolve_current_shift", lambda now=None: "afternoon")
@@ -26,6 +33,7 @@ def test_build_runtime_routine_context_returns_expected_keys(monkeypatch):
 
     assert result["kid1_away_from_home"] is True
     assert result["kid1_away_reason"] == "camp"
+    assert result["kid1_unavailable_for_routine"] is True
     assert result["football_season"] is False
     assert result["school_open"] is False
     assert result["current_shift"] == "afternoon"

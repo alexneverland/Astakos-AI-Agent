@@ -22,6 +22,56 @@ def _state_calls(mock_set) -> dict[str, str]:
     return {call.args[0]: call.args[1] for call in mock_set.call_args_list}
 
 
+def test_explicit_extended_child_absence_is_saved_as_one_scope(mocked_context_pipeline):
+    """A stay away from the family must suppress child-dependent routines."""
+    mock_llm, mock_set, _ = mocked_context_pipeline
+    mock_llm.return_value = MagicMock(
+        text='{"kid1_away_from_home": true, "kid1_absence_scope": "extended"}'
+    )
+
+    extract_and_update_context_flags("Ο Αλέξανδρος μένει απόψε σε φίλο του.")
+
+    assert _state_calls(mock_set)["kid1_absence_scope"] == "extended"
+
+
+def test_new_school_absence_replaces_older_extended_scope(mocked_context_pipeline):
+    """A later ordinary outing must not inherit an old confirmed absence."""
+    mock_llm, mock_set, _ = mocked_context_pipeline
+    mock_llm.return_value = MagicMock(text='{"kid1_away_from_home": true}')
+
+    extract_and_update_context_flags("Ο Αλέξανδρος είναι στο σχολείο τώρα.")
+
+    assert _state_calls(mock_set)["kid1_absence_scope"] == "temporary"
+    assert _state_calls(mock_set)["kid1_away_reason"] == ""
+
+
+def test_child_absence_replacement_reaches_persisted_routine_decision(tmp_path, monkeypatch):
+    """The final routine decision reads the new state, not a stale legacy reason."""
+    import memory.routine_db as routine_db
+    from services.routine_context import kid1_unavailable_for_routine, resolve_kid1_absence_scope
+
+    monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "routines.db"))
+    routine_db.setup_db()
+    with (
+        patch("services.context_extractor.safe_gemini_call") as mock_llm,
+        patch("services.context_extractor.load_recent_trusted_user_messages", return_value=[]),
+        patch("services.context_extractor.infer_routine_reconciliation_directives", return_value=[]),
+    ):
+        mock_llm.return_value = MagicMock(
+            text='{"kid1_away_from_home": true, "kid1_absence_scope": "extended"}'
+        )
+        extract_and_update_context_flags("Ο Αλέξανδρος μένει σε φίλο του τώρα.")
+        assert kid1_unavailable_for_routine(True, "", resolve_kid1_absence_scope()) is True
+
+        routine_db.set_context_state("kid1_away_reason", "camp", expires_at="2099-01-01")
+        mock_llm.return_value = MagicMock(text='{"kid1_away_from_home": true}')
+        extract_and_update_context_flags("Ο Αλέξανδρος είναι στο σχολείο τώρα.")
+
+    assert routine_db.get_context_state("kid1_absence_scope")["value"] == "temporary"
+    assert routine_db.get_context_state("kid1_away_reason")["value"] == ""
+    assert kid1_unavailable_for_routine(True, "camp", resolve_kid1_absence_scope()) is False
+
+
 def test_context_extractor_persists_llm_confirmed_family_state(mocked_context_pipeline):
     mock_llm, mock_set, _ = mocked_context_pipeline
     mock_llm.return_value = MagicMock(

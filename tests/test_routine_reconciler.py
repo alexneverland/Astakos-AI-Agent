@@ -132,6 +132,7 @@ def test_infer_camp_absence_mute_directive():
 
     assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_from_home" and d["value"] == "true" and d["until_date"] == "2026-06-25" for d in directives)
     assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_reason" and d["value"] == "camp" and d["until_date"] == "2026-06-25" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_absence_scope" and d["value"] == "extended" and d["until_date"] == "2026-06-25" for d in directives)
     assert any(d["kind"] == "condition_add" for d in directives)
     assert any(
         d["kind"] == "condition_add"
@@ -141,15 +142,38 @@ def test_infer_camp_absence_mute_directive():
 
 def test_infer_return_home_unmute_directive():
     fact = "[USER_FACT]: Ο Kid1 γύρισε από την κατασκήνωση και είναι πάλι σπίτι."
-    directives = infer_routine_reconciliation_directives(
-        fact,
-        category="family",
-        reason="user_stated",
-        now=datetime(2026, 6, 25, 18, 0, 0),
-    )
+    with patch("services.routine_reconciler._infer_llm_reconciliation_candidates", return_value=[]):
+        directives = infer_routine_reconciliation_directives(
+            fact,
+            category="family",
+            reason="user_stated",
+            now=datetime(2026, 6, 25, 18, 0, 0),
+        )
 
     assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_from_home" and d["value"] == "false" for d in directives)
     assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_reason" and d["value"] == "" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_absence_scope" and d["value"] == "home" for d in directives)
+
+
+def test_temporary_absence_directive_retires_old_extended_reason(tmp_path, monkeypatch):
+    """A reconciled family outing must not revive an obsolete camp absence."""
+    import memory.routine_db as routine_db
+    from services.routine_reconciler import apply_routine_reconciliation_directives
+
+    monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "routines.db"))
+    routine_db.setup_db()
+    routine_db.set_context_state("kid1_away_reason", "camp", "2099-01-01")
+
+    with patch("memory.event_log.log_event"):
+        apply_routine_reconciliation_directives([{
+            "kind": "context_state_set",
+            "key": "kid1_absence_scope",
+            "value": "temporary",
+            "until_date": "2099-01-01",
+        }])
+
+    assert routine_db.get_context_state("kid1_absence_scope")["value"] == "temporary"
+    assert routine_db.get_context_state("kid1_away_reason")["value"] == ""
 
 
 def test_infer_school_break_requires_child_subject():
@@ -899,6 +923,11 @@ def test_family_outing_in_progress_adds_outing_and_home_conditions():
     )
 
     condition_directives = [d for d in directives if d.get("kind") == "condition_add"]
+
+    assert any(
+        d.get("key") == "kid1_absence_scope" and d.get("value") == "temporary"
+        for d in directives
+    )
 
     assert any(
         d.get("condition_payload") == {"flag": "state:kid1:outing", "equals": "in_progress"}

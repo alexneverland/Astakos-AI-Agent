@@ -389,6 +389,7 @@ def _build_followup_state_snapshot() -> dict:
         "family_at_home",
         "kid1_away_from_home",
         "kid1_away_reason",
+        "kid1_absence_scope",
         "kid1_with_user",
         "kid1_with_partner",
         "quiet_hours",
@@ -4006,6 +4007,7 @@ def _proactive_state_keys_for_event(event_name: str) -> list[str]:
     keys.extend([
         "kid1_away_from_home",
         "kid1_away_reason",
+        "kid1_absence_scope",
         "kid1_with_user",
         "kid1_with_partner",
         "football_season",
@@ -4076,7 +4078,9 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     away = state_value("kid1_away_from_home") == "true"
     away_reason = state_value("kid1_away_reason")
     from services.routine_context import kid1_unavailable_for_routine
-    confirmed_absence = kid1_unavailable_for_routine(away, away_reason)
+    confirmed_absence = kid1_unavailable_for_routine(
+        away, away_reason, state_value("kid1_absence_scope") or None,
+    )
     football_season = state_value("football_season")
     school_open = state_value("school_open")
     user_at_work = state_value("user_at_work") == "true"

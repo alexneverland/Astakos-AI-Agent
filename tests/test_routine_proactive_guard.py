@@ -52,3 +52,16 @@ def test_sleep_guard_requires_confirmed_absence() -> None:
 
     assert guard("sleep", school_day) is None
     assert guard("sleep", camp) == "[CONTEXT_SKIP]"
+
+
+def test_sleep_guard_prefers_single_absence_scope_over_stale_reason() -> None:
+    """A fresh semantic decision must win over an unrelated old reason."""
+    guard = _load_proactive_guard()
+    base = {"kid1_away_from_home": {"value": "true"},
+            "kid1_away_reason": {"value": "camp"}}
+    temporary = {**base, "kid1_absence_scope": {"value": "temporary"}}
+    extended = {**base, "kid1_away_reason": {"value": ""},
+                "kid1_absence_scope": {"value": "extended"}}
+
+    assert guard("sleep", temporary) is None
+    assert guard("sleep", extended) == "[CONTEXT_SKIP]"
