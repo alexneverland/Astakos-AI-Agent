@@ -36,7 +36,7 @@ def test_parse_matrix_geo_uri_validates_coordinate_bounds() -> None:
     assert parse_geo_uri("geo:91,22") is None
 
 
-def test_record_location_update_preserves_anchor_and_silences_live_updates(
+def test_record_location_update_resets_short_stop_anchor_and_silences_live_updates(
     tmp_path, monkeypatch
 ) -> None:
     import json
@@ -65,7 +65,7 @@ def test_record_location_update_preserves_anchor_and_silences_live_updates(
     assert "40.6401" in static_reply and "22.9444" in static_reply
     assert live_reply is None
     assert stored["lat"] == 40.65 and stored["lon"] == 22.95
-    assert stored["anchor_lat"] == 40.6401
+    assert stored["anchor_lat"] == 40.65
 
 
 def test_live_matrix_location_updates_home_context_without_repeating_same_state(
@@ -185,6 +185,49 @@ def test_matrix_location_leaving_anchor_sends_once_and_failed_delivery_stays_pen
         )
     assert len(sent) == 1 and "Πάρε ψωμί" in sent[0]
     assert _row_status(str(state_db), "Πάρε ψωμί") == "done"
+
+
+def test_matrix_live_departure_creates_one_followup_and_retries_failed_create(
+    tmp_path, monkeypatch
+) -> None:
+    import json
+    import sqlite3
+    import config
+    from services.location_update import process_location_update
+
+    monkeypatch.setattr(config, "HOME_COORDS", (0.0, 0.0))
+    monkeypatch.setattr(config, "STATE_DB", str(tmp_path / "missing.db"))
+    storage_file = tmp_path / "location.json"
+    process_location_update(
+        40.0, 22.0, live_update=True, source_channel="matrix",
+        send_reminder=lambda _text: None, storage_file=storage_file, now_ts=100.0,
+    )
+    created: list[dict] = []
+
+    def failed_create(**_kwargs):
+        raise sqlite3.OperationalError("temporarily locked")
+
+    monkeypatch.setattr("memory.pending_followups.create_pending_followup", failed_create)
+    process_location_update(
+        40.01, 22.0, live_update=True, source_channel="matrix",
+        send_reminder=lambda _text: None, storage_file=storage_file, now_ts=2900.0,
+    )
+    assert json.loads(storage_file.read_text(encoding="utf-8"))["anchor_lat"] == 40.0
+
+    monkeypatch.setattr(
+        "memory.pending_followups.create_pending_followup",
+        lambda **kwargs: created.append(kwargs) or 1,
+    )
+    for timestamp in (2901.0, 2902.0):
+        process_location_update(
+            40.01, 22.0, live_update=True, source_channel="matrix",
+            send_reminder=lambda _text: None, storage_file=storage_file,
+            now_ts=timestamp,
+        )
+    assert len(created) == 1
+    assert created[0]["source_channel"] == "matrix"
+    assert created[0]["topic"] == "departure"
+    assert json.loads(storage_file.read_text(encoding="utf-8"))["anchor_lat"] == 40.01
 
 
 @pytest.mark.asyncio

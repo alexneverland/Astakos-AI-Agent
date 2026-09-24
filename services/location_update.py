@@ -11,6 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+_DEPARTURE_ANCHOR_SECONDS = 45 * 60
+_DEPARTURE_DISTANCE_METERS = 300
+_DEPARTURE_FOLLOWUP_TTL_HOURS = 1
+
 
 def parse_geo_uri(value: str) -> tuple[float, float] | None:
     """Parse a bounded RFC 5870 latitude/longitude pair."""
@@ -72,6 +76,7 @@ def record_location_update(
     live_update: bool,
     storage_file: str | os.PathLike[str] | None = None,
     now_ts: float | None = None,
+    departure_handler: Callable[[dict[str, int]], bool] | None = None,
 ) -> str | None:
     """Persist one trusted GPS point atomically and acknowledge static pins."""
     if parse_geo_uri(f"geo:{latitude},{longitude}") is None:
@@ -89,11 +94,54 @@ def record_location_update(
     except (OSError, ValueError, json.JSONDecodeError):
         pass
     timestamp = time.time() if now_ts is None else float(now_ts)
-    existing.update({"lat": latitude, "lon": longitude, "timestamp": timestamp})
-    existing.setdefault("anchor_lat", latitude)
-    existing.setdefault("anchor_lon", longitude)
-    existing.setdefault("anchor_timestamp", timestamp)
+    try:
+        anchor_lat = float(existing.get("anchor_lat", latitude))
+        anchor_lon = float(existing.get("anchor_lon", longitude))
+        anchor_ts = float(existing.get("anchor_timestamp", timestamp))
+    except (TypeError, ValueError):
+        anchor_lat, anchor_lon, anchor_ts = latitude, longitude, timestamp
+    distance_m = _haversine_distance_meters(
+        anchor_lat, anchor_lon, latitude, longitude
+    )
+    anchored_seconds = max(0, timestamp - anchor_ts)
+    departure_event: dict[str, int] | None = None
+    if distance_m > _DEPARTURE_DISTANCE_METERS:
+        if anchored_seconds >= _DEPARTURE_ANCHOR_SECONDS:
+            departure_event = {
+                "anchor_minutes": int(anchored_seconds // 60),
+                "distance_meters": int(distance_m),
+            }
+            if not live_update:
+                anchor_lat, anchor_lon, anchor_ts = latitude, longitude, timestamp
+        else:
+            anchor_lat, anchor_lon, anchor_ts = latitude, longitude, timestamp
+    existing.update({
+        "lat": latitude,
+        "lon": longitude,
+        "timestamp": timestamp,
+        "anchor_lat": anchor_lat,
+        "anchor_lon": anchor_lon,
+        "anchor_timestamp": anchor_ts,
+    })
+    _write_location_state(target, existing)
 
+    if live_update:
+        sync_live_location_out_of_home_state(latitude, longitude)
+        if departure_event and departure_handler and departure_handler(departure_event):
+            existing.update({
+                "anchor_lat": latitude,
+                "anchor_lon": longitude,
+                "anchor_timestamp": timestamp,
+            })
+            _write_location_state(target, existing)
+        return None
+    from core.i18n import t
+
+    return t("clients.telegram_bot.bot_msg_location", lat=latitude, lon=longitude)
+
+
+def _write_location_state(target: Path, data: dict) -> None:
+    """Atomically replace the persisted current point and departure anchor."""
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
     try:
@@ -105,21 +153,13 @@ def record_location_update(
             suffix=".tmp",
             delete=False,
         ) as temporary:
-            json.dump(existing, temporary, ensure_ascii=False)
+            json.dump(data, temporary, ensure_ascii=False)
             temporary_path = Path(temporary.name)
         os.replace(temporary_path, target)
         temporary_path = None
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
-
-    if live_update:
-        sync_live_location_out_of_home_state(latitude, longitude)
-        return None
-    from core.i18n import t
-
-    return t("clients.telegram_bot.bot_msg_location", lat=latitude, lon=longitude)
-
 
 def process_location_update(
     latitude: float,
@@ -129,12 +169,49 @@ def process_location_update(
     source_channel: str,
     send_reminder: Callable[[str], object],
     storage_file: str | os.PathLike[str] | None = None,
+    now_ts: float | None = None,
 ) -> str | None:
     """Persist a trusted point and deliver matching location reminders."""
     if source_channel not in {"telegram", "matrix"}:
         raise ValueError("Location source must be an active external channel")
+    def create_departure_followup(event: dict[str, int]) -> bool:
+        """Persist a deduplicated departure; retain the anchor if SQLite fails."""
+        import sqlite3
+        from memory.pending_followups import _local_now, create_pending_followup
+
+        try:
+            create_pending_followup(
+                source_channel=source_channel,
+                source_agent="Location_Event",
+                topic="departure",
+                subject="stable_location_departure",
+                source_user_text=(
+                    "Live location detected departure after a stable stay of "
+                    f"{event['anchor_minutes']} minutes."
+                ),
+                source_ai_text="",
+                followup_after_ts=_local_now().isoformat(timespec="seconds"),
+                confidence=0.70,
+                metadata={
+                    "reason": "live_location_departure",
+                    "anchor_duration_minutes": event["anchor_minutes"],
+                    "departure_distance_meters": event["distance_meters"],
+                    "defer_count": 0,
+                },
+                ttl_hours=_DEPARTURE_FOLLOWUP_TTL_HOURS,
+            )
+        except sqlite3.Error as exc:
+            print(f"[DepartureFollowUp Error]: {exc}")
+            return False
+        return True
+
     reply = record_location_update(
-        latitude, longitude, live_update=live_update, storage_file=storage_file
+        latitude,
+        longitude,
+        live_update=live_update,
+        storage_file=storage_file,
+        now_ts=now_ts,
+        departure_handler=create_departure_followup,
     )
     dispatch_location_reminders(latitude, longitude, send_reminder=send_reminder)
     return reply
