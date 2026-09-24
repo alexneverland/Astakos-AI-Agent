@@ -9,7 +9,7 @@ from core.approval import record_pending_delivery
 from services.external_delivery import ApprovalDeliveryRequest
 
 MatrixTextSender = Callable[[str], str | int | None]
-MatrixApprovalSender = Callable[[str, str], str | int | None]
+MatrixTransactionSender = Callable[[str, str], str | int | None]
 
 
 class MatrixExternalTransport:
@@ -19,11 +19,11 @@ class MatrixExternalTransport:
         self,
         *,
         send_text: MatrixTextSender,
-        send_approval_text: MatrixApprovalSender | None = None,
+        send_transaction_text: MatrixTransactionSender | None = None,
         approval_reaction_hint: str,
     ) -> None:
         self._send_text = send_text
-        self._send_approval_text = send_approval_text
+        self._send_transaction_text = send_transaction_text
         self._approval_reaction_hint = str(approval_reaction_hint or "").strip()
         if not self._approval_reaction_hint:
             raise ValueError("Matrix approval delivery requires a reaction hint")
@@ -36,6 +36,12 @@ class MatrixExternalTransport:
             raise ValueError("Matrix delivery requires text")
         return self._send_text(normalized)
 
+    def send_mirror_chunk(self, text: str, *, transaction_id: str) -> str | int:
+        """Send one mirror chunk idempotently through the Matrix room sender."""
+        if self._send_transaction_text is None:
+            raise RuntimeError("Matrix transaction-aware sender is unavailable")
+        return self._send_transaction_text(text, transaction_id)
+
     def send_approval(self, request: ApprovalDeliveryRequest) -> str | int:
         """Send and durably correlate one actionable Matrix approval prompt."""
         text = f"{request.prompt.strip()}\n\n{self._approval_reaction_hint}"
@@ -43,8 +49,8 @@ class MatrixExternalTransport:
             request.call_id.encode("utf-8")
         ).hexdigest()
         external_id = (
-            self._send_approval_text(text, transaction_id)
-            if self._send_approval_text is not None
+            self._send_transaction_text(text, transaction_id)
+            if self._send_transaction_text is not None
             else self.send_text(text)
         )
         if external_id is None or not str(external_id).strip():

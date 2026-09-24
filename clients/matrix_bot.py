@@ -340,7 +340,7 @@ async def run_matrix() -> None:
         future = asyncio.run_coroutine_threadsafe(send_room_text(text), loop)
         return future.result(timeout=30)
 
-    def send_approval_from_worker(text: str, tx_id: str) -> str:
+    def send_transaction_from_worker(text: str, tx_id: str) -> str:
         future = asyncio.run_coroutine_threadsafe(send_room_text(text, tx_id), loop)
         return future.result(timeout=30)
 
@@ -360,7 +360,7 @@ async def run_matrix() -> None:
         "matrix",
         MatrixExternalTransport(
             send_text=send_text_from_worker,
-            send_approval_text=send_approval_from_worker,
+            send_transaction_text=send_transaction_from_worker,
             approval_reaction_hint=(
                 "Reply to this message with 👍 to execute or 👎 to reject "
                 "(✅/❌ also work). Only encrypted reactions from an "

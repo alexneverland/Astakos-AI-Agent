@@ -1750,10 +1750,14 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         # doesn't memorize the XML tags as part of your data.
         clean_user = clean_message(user_input)
         clean_ai   = clean_message(final_ai_response)
+        mirror_ai: str | None = None
 
         # 1. --- MASTER INTERCEPTOR FOR REGISTRATION LINKS (Web UI) ---
         file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", clean_ai)
         if file_match:
+            from services.created_file import extract_created_files
+
+            mirror_ai = extract_created_files(clean_ai).text
             file_path = file_match.group(1).strip()
             filename  = os.path.basename(file_path)
             base_url  = str(request.base_url).rstrip("/")
@@ -1790,6 +1794,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             clean_ai = sanitize_messenger_draft_claims(clean_ai)
             clean_ai = strip_operational_assistant_paragraphs(clean_ai).strip() or clean_ai
+            if mirror_ai is not None:
+                mirror_ai = strip_operational_assistant_paragraphs(
+                    sanitize_messenger_draft_claims(mirror_ai)
+                ).strip()
             client_ai = _render_persisted_asset_markers(clean_ai, request)
             from core.untrusted_content import derived_external_content_history_metadata
             assistant_metadata = derived_external_content_history_metadata(
@@ -1807,7 +1815,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             assistant_history_saved = append_to_chat_history(
                 "assistant",
                 clean_ai,
-                mirror_target=mirror_target,
+                mirror_target=mirror_target if mirror_ai != "" else None,
+                mirror_content=mirror_ai,
                 **assistant_history_kwargs,
             )
             assistant_history_rowid = assistant_history_saved.get("rowid")

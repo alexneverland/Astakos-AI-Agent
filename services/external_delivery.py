@@ -130,6 +130,22 @@ class ExternalDeliveryRouter:
             ) from exc
         return self._receipt(channel, external_id)
 
+    def send_matrix_mirror_chunk_to(
+        self, text: str, *, transaction_id: str
+    ) -> DeliveryReceipt:
+        """Send a retriable Matrix mirror chunk with a stable transaction ID."""
+        selected, transport = self._selected_transport()
+        if selected != "matrix":
+            raise ExternalDeliveryError("Matrix mirror target is not selected")
+        sender = getattr(transport, "send_mirror_chunk", None)
+        if not callable(sender):
+            raise ExternalDeliveryError("Selected Matrix transport cannot send mirror chunks")
+        try:
+            external_id = sender(text, transaction_id=transaction_id)
+        except Exception as exc:
+            raise ExternalDeliveryError("Selected Matrix mirror chunk failed") from exc
+        return self._receipt("matrix", external_id)
+
     def send_approval(self, request: ApprovalDeliveryRequest) -> DeliveryReceipt:
         """Send an approval only through the selected channel."""
         channel, transport = self._selected_transport()

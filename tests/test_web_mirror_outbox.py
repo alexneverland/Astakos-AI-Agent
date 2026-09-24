@@ -113,12 +113,63 @@ def test_drain_retries_after_failure_without_duplicating_history(tmp_path) -> No
     assert len(load_messages(db_path=db_path)) == 2
 
 
-def test_drain_never_falls_back_to_inactive_channel(tmp_path) -> None:
+def test_oversized_matrix_mirror_retries_chunks_without_blocking_later_turns(tmp_path) -> None:
+    """A partial Matrix send must retry idempotently before acknowledging the row."""
+    from clients.matrix_delivery import MatrixExternalTransport
     from memory.conversation_history import load_pending_web_mirrors
     from services.web_mirror_delivery import drain_web_mirrors
 
     db_path = str(tmp_path / "conversation.db")
-    append_message(role="user", content="For Element", channel="web", mirror_target="matrix", db_path=db_path)
+    long_reply = "α" * 15000
+    append_message(
+        role="assistant", content=long_reply, channel="web",
+        mirror_target="matrix", db_path=db_path,
+    )
+    append_message(
+        role="user", content="Next turn", channel="web",
+        mirror_target="matrix", db_path=db_path,
+    )
+    events: dict[str, tuple[str, str]] = {}
+    failed_once = False
+
+    def send_with_transaction(text: str, tx_id: str) -> str:
+        nonlocal failed_once
+        assert len(text) <= 7000
+        if tx_id in events:
+            assert events[tx_id][1] == text
+            return events[tx_id][0]
+        if len(events) == 1 and not failed_once:
+            failed_once = True
+            raise RuntimeError("temporary Matrix delivery failure")
+        event_id = f"event-{len(events) + 1}"
+        events[tx_id] = (event_id, text)
+        return event_id
+
+    router = ExternalDeliveryRouter(channel_selector=lambda: "matrix")
+    router.register(
+        "matrix",
+        MatrixExternalTransport(
+            send_text=lambda text: "short-event" if len(text) <= 7000 else None,
+            send_transaction_text=send_with_transaction,
+            approval_reaction_hint="Approve or reject",
+        ),
+    )
+
+    assert drain_web_mirrors("matrix", router=router, db_path=db_path) == 0
+    assert len(load_pending_web_mirrors("matrix", db_path=db_path)) == 2
+    assert drain_web_mirrors("matrix", router=router, db_path=db_path) == 2
+    assert len(events) == 3
+    assert "".join(text for _, text in events.values()).endswith(long_reply)
+    assert load_pending_web_mirrors("matrix", db_path=db_path) == []
+
+
+@pytest.mark.parametrize("content", ["For Element", "x" * 15000])
+def test_drain_never_falls_back_to_inactive_channel(tmp_path, content: str) -> None:
+    from memory.conversation_history import load_pending_web_mirrors
+    from services.web_mirror_delivery import drain_web_mirrors
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(role="user", content=content, channel="web", mirror_target="matrix", db_path=db_path)
     telegram = FakeTransport()
     router = ExternalDeliveryRouter(channel_selector=lambda: "telegram")
     router.register("telegram", telegram)
@@ -232,3 +283,70 @@ def test_external_scheduler_registers_mirror_consumer_without_importing_bot() ->
                 and key.value.value == "web_mirror" for key in node.keywords)
     ]
     assert len(jobs) == 1
+
+
+@pytest.mark.parametrize(
+    ("reply_template", "assistant_mirrored"),
+    [
+        ("Έτοιμη η αναφορά. [CREATED_FILE: {path}]", True),
+        ("[CREATED_FILE: {path}]", False),
+    ],
+)
+def test_created_file_web_card_never_enters_external_mirror(
+    tmp_path, reply_template: str, assistant_mirrored: bool
+) -> None:
+    """A generated-file reply keeps its Web card but mirrors no local path."""
+    from api.server import LOCAL_TOKEN, server
+    from memory.conversation_history import load_pending_web_mirrors
+
+    db_path = str(tmp_path / "conversation.db")
+    private_path = r"C:\astakos_v2\outputs\private-report.pdf"
+
+    def save_history(role: str, content: str, **kwargs: object) -> dict[str, object]:
+        return append_message(
+            role=role, content=content, channel="web", db_path=db_path,
+            mirror_target=kwargs.get("mirror_target"),
+            mirror_content=kwargs.get("mirror_content"),
+        )
+
+    graph_result = {
+        "final_ai_response": reply_template.format(path=private_path),
+        "handling_agent": "Dev_Agent",
+        "tool_result_fallbacks": [],
+        "external_tool_names": [],
+        "graph_elapsed_ms": 0,
+    }
+    with (
+        patch("core.messaging_channel.resolve_external_channel", return_value="matrix"),
+        patch("memory.pending_assets.get_latest_recent_asset", return_value=None),
+        patch("memory.routine_db.load_pending_confirmations", return_value={}),
+        patch("memory.routine_db.get_eligible_preemptive_routines_for_day", return_value=[]),
+        patch("memory.routine_db.get_active_routine_catalog", return_value=[]),
+        patch("memory.pending_assets.clear_expired_pending_assets"),
+        patch("memory.pending_assets.get_latest_pending_asset_any", return_value=None),
+        patch("core.messenger_draft.active_draft_status", return_value=(False, "", None)),
+        patch("services.messenger_intent.classify_messenger_intent", return_value=SimpleNamespace(intent="general_chat")),
+        patch("core.planner.get_fresh_pending_plan_confirmation", return_value=None),
+        patch("core.utils.is_ultra_light_ack", return_value=False),
+        patch("core.utils.is_simple_chat_fast_path_candidate", return_value=False),
+        patch("core.utils.is_medium_web_chat_path_candidate", return_value=False),
+        patch("api.server._load_shared_context_messages", return_value=[]),
+        patch("api.server._run_web_graph_stream_sync", return_value=graph_result),
+        patch("api.server.append_to_chat_history", side_effect=save_history),
+        patch("api.server.enqueue_fast_task"),
+        patch("api.server.enqueue_slow_task"),
+        patch("memory.execution_trace.ExecutionTrace.save"),
+    ):
+        response = TestClient(server).post(
+            "/chat", json={"message": "Φτιάξε μου μια αναφορά"},
+            headers={"Authorization": f"Bearer {LOCAL_TOKEN}"},
+        )
+
+    assert response.status_code == 200
+    assert "data-path=" in response.json()["response"]
+    mirror = load_pending_web_mirrors("matrix", db_path=db_path)
+    assert len(mirror) == (2 if assistant_mirrored else 1)
+    if assistant_mirrored:
+        assert "Έτοιμη η αναφορά." in mirror[1]["content"]
+        assert "astakos_v2" not in mirror[1]["content"]
+        assert "<div" not in mirror[1]["content"]
