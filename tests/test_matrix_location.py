@@ -100,6 +100,93 @@ def test_live_matrix_location_updates_home_context_without_repeating_same_state(
     ]
 
 
+def test_matrix_location_fires_home_reminder_once_and_ignores_time_reminder(
+    tmp_path, monkeypatch
+) -> None:
+    import config
+    from services.location_update import process_location_update
+    from tests.test_reminders_sql import _make_reminders_db, _row_status
+
+    state_db = tmp_path / "state.db"
+    _make_reminders_db(
+        str(state_db),
+        [
+            {"task": "Βγάλε το κουνέλι", "time": "loc:home"},
+            {"task": "Πλήρωσε λογαριασμό", "time": "2099-01-01 00:00"},
+        ],
+    )
+    monkeypatch.setattr(config, "HOME_COORDS", (40.0, 22.0))
+    monkeypatch.setattr(config, "HOME_RADIUS_M", 150)
+    monkeypatch.setattr(config, "STATE_DB", str(state_db))
+    sent: list[str] = []
+
+    def deliver(text: str) -> None:
+        sent.append(text)
+
+    process_location_update(
+        40.0,
+        22.0,
+        live_update=False,
+        source_channel="matrix",
+        send_reminder=deliver,
+        storage_file=tmp_path / "location.json",
+    )
+    process_location_update(
+        40.0,
+        22.0,
+        live_update=False,
+        source_channel="matrix",
+        send_reminder=deliver,
+        storage_file=tmp_path / "location.json",
+    )
+
+    assert len(sent) == 1 and "Βγάλε το κουνέλι" in sent[0]
+    assert _row_status(str(state_db), "Βγάλε το κουνέλι") == "done"
+    assert _row_status(str(state_db), "Πλήρωσε λογαριασμό") == "pending"
+
+
+def test_matrix_location_leaving_anchor_sends_once_and_failed_delivery_stays_pending(
+    tmp_path, monkeypatch
+) -> None:
+    import sqlite3
+    import config
+    from memory.location_reminders import save_leave_current_location_anchor
+    from services.location_update import process_location_update
+    from tests.test_reminders_sql import _make_reminders_db, _row_status
+
+    state_db = tmp_path / "state.db"
+    _make_reminders_db(
+        str(state_db),
+        [{"task": "Πάρε ψωμί", "time": "loc:leave_current_location"}],
+    )
+    with sqlite3.connect(state_db) as conn:
+        save_leave_current_location_anchor(
+            conn, reminder_id=1, anchor_lat=40.0, anchor_lon=22.0
+        )
+    monkeypatch.setattr(config, "HOME_COORDS", (0.0, 0.0))
+    monkeypatch.setattr(config, "STATE_DB", str(state_db))
+
+    def failed_delivery(_message: str) -> None:
+        raise ConnectionError("offline")
+
+    with pytest.raises(ConnectionError, match="offline"):
+        process_location_update(
+            40.01, 22.0, live_update=False, source_channel="matrix",
+            send_reminder=failed_delivery, storage_file=tmp_path / "location.json"
+        )
+    assert _row_status(str(state_db), "Πάρε ψωμί") == "pending"
+
+    sent: list[str] = []
+    for _ in range(2):
+        process_location_update(
+            40.01, 22.0, live_update=False, source_channel="matrix",
+            send_reminder=lambda message: sent.append(message),
+            storage_file=tmp_path / "location.json",
+        )
+    assert len(sent) == 1 and "Πάρε ψωμί" in sent[0]
+    assert _row_status(str(state_db), "Πάρε ψωμί") == "done"
+
+
 @pytest.mark.asyncio
 async def test_transport_accepts_trusted_static_location_once(tmp_path) -> None:
     from clients.matrix_client import MatrixTextTransport

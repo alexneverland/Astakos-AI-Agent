@@ -9,6 +9,7 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 
 def parse_geo_uri(value: str) -> tuple[float, float] | None:
@@ -118,3 +119,69 @@ def record_location_update(
     from core.i18n import t
 
     return t("clients.telegram_bot.bot_msg_location", lat=latitude, lon=longitude)
+
+
+def process_location_update(
+    latitude: float,
+    longitude: float,
+    *,
+    live_update: bool,
+    source_channel: str,
+    send_reminder: Callable[[str], object],
+    storage_file: str | os.PathLike[str] | None = None,
+) -> str | None:
+    """Persist a trusted point and deliver matching location reminders."""
+    if source_channel not in {"telegram", "matrix"}:
+        raise ValueError("Location source must be an active external channel")
+    reply = record_location_update(
+        latitude, longitude, live_update=live_update, storage_file=storage_file
+    )
+    dispatch_location_reminders(latitude, longitude, send_reminder=send_reminder)
+    return reply
+
+
+def dispatch_location_reminders(
+    latitude: float,
+    longitude: float,
+    *,
+    send_reminder: Callable[[str], object],
+) -> None:
+    """Deliver and complete location reminders through one shared path."""
+    from config import HOME_COORDS, HOME_RADIUS_M, STATE_DB
+    from core.i18n import t
+    from memory.location_reminders import (
+        find_triggered_location_reminders,
+        finish_location_reminder,
+    )
+
+    for reminder_id, task, kind in find_triggered_location_reminders(
+        db_path=STATE_DB,
+        lat=latitude,
+        lon=longitude,
+        home_coords=(float(HOME_COORDS[0]), float(HOME_COORDS[1])),
+        home_radius_m=float(HOME_RADIUS_M),
+        distance_meters=_haversine_distance_meters,
+    ):
+        message = (
+            f"📍 REMINDER (You reached home!): {task}"
+            if kind == "home"
+            else t("clients.telegram_bot.bot_msg_reminder_leave_current", task=task)
+        )
+        send_reminder(message)
+        finish_location_reminder(db_path=STATE_DB, reminder_id=reminder_id)
+
+
+def _haversine_distance_meters(
+    lat1: float, lon1: float, lat2: float, lon2: float
+) -> float:
+    """Return the distance between two GPS points in metres."""
+    radius_m = 6_371_000
+    lat_delta = math.radians(lat2 - lat1)
+    lon_delta = math.radians(lon2 - lon1)
+    arc = (
+        math.sin(lat_delta / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(lon_delta / 2) ** 2
+    )
+    return 2 * radius_m * math.asin(math.sqrt(arc))

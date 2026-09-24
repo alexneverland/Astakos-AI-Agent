@@ -376,3 +376,44 @@ async def test_matrix_channel_factory_exposes_location_application_handler(
         assert recorded == [(40.64, 22.94, False), (40.65, 22.95, True)]
     finally:
         _reset_scheduler_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_matrix_channel_factory_default_location_delivers_home_reminder(
+    tmp_path, monkeypatch
+) -> None:
+    import config
+    from services.matrix_background import build_matrix_channel_services
+    from services.behavioral_event_scheduler import _reset_scheduler_for_tests
+    from tests.test_reminders_sql import _make_reminders_db, _row_status
+
+    state_db = tmp_path / "state.db"
+    _make_reminders_db(
+        str(state_db), [{"task": "Βγάλε το κουνέλι", "time": "loc:home"}]
+    )
+    monkeypatch.setattr(config, "STATE_DB", str(state_db))
+    monkeypatch.setattr(config, "GPS_STORAGE_FILE", str(tmp_path / "gps.json"))
+    monkeypatch.setattr(config, "HOME_COORDS", (40.0, 22.0))
+    monkeypatch.setattr(config, "HOME_RADIUS_M", 150)
+    delivered: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "services.external_assistant_delivery.deliver_external_assistant_text",
+        lambda message, *, agent: delivered.append((message, agent)),
+    )
+
+    _reset_scheduler_for_tests()
+    try:
+        services = build_matrix_channel_services(
+            conversation_db_path=str(tmp_path / "conversation.db"),
+            enqueue_fast_task=CapturingQueue(),
+            enqueue_slow_task=CapturingQueue(),
+            memory_store=object(),
+        )
+        await services.location_handler(40.0, 22.0, False)
+    finally:
+        _reset_scheduler_for_tests()
+
+    assert len(delivered) == 1
+    assert "Βγάλε το κουνέλι" in delivered[0][0]
+    assert delivered[0][1] == "Reminder_Agent"
+    assert _row_status(str(state_db), "Βγάλε το κουνέλι") == "done"

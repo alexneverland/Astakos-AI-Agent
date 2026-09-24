@@ -1,6 +1,7 @@
 """Durable GPS anchors for reminders that fire after leaving the current place."""
 
 import json
+import os
 import sqlite3
 import time
 from typing import Any, Callable
@@ -103,3 +104,39 @@ def complete_location_reminder(conn: sqlite3.Connection, reminder_id: int) -> No
     _ensure_location_reminder_anchors_table(conn)
     conn.execute("UPDATE reminders SET status='done' WHERE id=?", (reminder_id,))
     conn.execute("DELETE FROM location_reminder_anchors WHERE reminder_id=?", (reminder_id,))
+
+
+def find_triggered_location_reminders(
+    *,
+    db_path: str,
+    lat: float,
+    lon: float,
+    home_coords: tuple[float, float],
+    home_radius_m: float,
+    distance_meters: Callable[[float, float, float, float], float],
+) -> list[tuple[int, str, str]]:
+    """Read only location reminders reached by one trusted GPS point."""
+    if not os.path.isfile(db_path):
+        return []
+    with sqlite3.connect(db_path) as conn:
+        at_home = [
+            (reminder_id, task, "home")
+            for reminder_id, task in conn.execute(
+                "SELECT id, task FROM reminders "
+                "WHERE status='pending' AND time='loc:home'"
+            )
+            if distance_meters(lat, lon, *home_coords) <= home_radius_m
+        ]
+        departed = [
+            (reminder_id, task, LEAVE_CURRENT_LOCATION)
+            for reminder_id, task in find_departed_current_location_reminders(
+                conn, lat=lat, lon=lon, distance_meters=distance_meters
+            )
+        ]
+    return at_home + departed
+
+
+def finish_location_reminder(*, db_path: str, reminder_id: int) -> None:
+    """Mark one delivered location reminder complete through the memory layer."""
+    with sqlite3.connect(db_path) as conn:
+        complete_location_reminder(conn, reminder_id)

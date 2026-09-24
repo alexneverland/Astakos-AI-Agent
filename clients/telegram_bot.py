@@ -3137,61 +3137,17 @@ def handle_location(msg, live_update=False):
         print(f"\033[91m[Location State Error]: {exc}\033[0m")
     #print(f"\033[94m[Location]: {lat}, {lon}\033[0m")
 
-    # ── Location Reminders (SQL: time = 'loc:<name>' convention) ──
+    # ── Shared location reminders (home and leaving the current place) ──
     try:
-        import sqlite3
-        from config import HOME_COORDS, HOME_RADIUS_M, STATE_DB
+        from services.location_update import dispatch_location_reminders
 
-        def haversine(lat1, lon1, lat2, lon2):
-            R = 6371000
-            p = math.pi / 180
-            a = (math.sin((lat2-lat1)*p/2)**2 +
-                 math.cos(lat1*p) * math.cos(lat2*p) *
-                 math.sin((lon2-lon1)*p/2)**2)
-            return 2 * R * math.asin(math.sqrt(a))
-
-        if os.path.exists(STATE_DB):
-            conn = sqlite3.connect(STATE_DB)
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT id, task, time FROM reminders WHERE status='pending' AND time LIKE 'loc:%'"
-                )
-                pending = cursor.fetchall()
-                if pending:
-                    pass # print("HANDLE_LOCATION PENDING:", pending)
-                for rid, task, tm in pending:
-                    target = tm.split(":", 1)[1] if tm and ":" in tm else "home"
-                    if target == "home":
-                        dist = haversine(lat, lon, HOME_COORDS[0], HOME_COORDS[1])
-                        if dist <= HOME_RADIUS_M:
-                            _send_and_record_assistant(
-                                f"📍 REMINDER (You reached home!): {task}",
-                                agent="Reminder_Agent",
-                            )
-                            print(f"\033[93m[Location Reminder]: {task} fired ({dist:.0f}m)\033[0m")
-                            cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
-
-                from memory.location_reminders import (
-                    complete_location_reminder,
-                    find_departed_current_location_reminders,
-                )
-
-                for rid, task in find_departed_current_location_reminders(
-                    conn,
-                    lat=lat,
-                    lon=lon,
-                    distance_meters=haversine,
-                ):
-                    _send_and_record_assistant(
-                        t("clients.telegram_bot.bot_msg_reminder_leave_current", task=task),
-                        agent="Reminder_Agent",
-                    )
-                    print(f"\033[93m[Location Reminder]: {task} fired after leaving current place\033[0m")
-                    complete_location_reminder(conn, rid)
-                conn.commit()
-            finally:
-                conn.close()
+        dispatch_location_reminders(
+            lat,
+            lon,
+            send_reminder=lambda message: _send_and_record_assistant(
+                message, agent="Reminder_Agent"
+            ),
+        )
     except Exception as e:
         print(f"\033[91m[Location Reminder Error]: {e}\033[0m")
 
