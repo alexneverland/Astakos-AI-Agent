@@ -355,7 +355,8 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
         reason="camp_absence_condition",
     )
     
-    return [d_state_home, d_state_reason] + ([cond] if cond else [])
+    d_state_scope = {**d_state_reason, "key": "kid1_absence_scope", "value": "extended"}
+    return [d_state_scope, d_state_home, d_state_reason] + ([cond] if cond else [])
 
 
 def _rule_return_home(normalized: str) -> list[dict]:
@@ -387,7 +388,8 @@ def _rule_return_home(normalized: str) -> list[dict]:
         "include_tokens": [],
         "exclude_tokens": [],
     }
-    return [d_state_home, d_state_reason]
+    d_state_scope = {**d_state_reason, "key": "kid1_absence_scope", "value": "home"}
+    return [d_state_scope, d_state_home, d_state_reason]
 
 def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     t("prompts.ext_family_outing_already_outside_")
@@ -422,6 +424,16 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
     out.append(d_user_out)
 
     if has_child:
+        out.append({
+            "kind": "context_state_set",
+            "key": "kid1_absence_scope",
+            "value": "temporary",
+            "until_date": until,
+            "reason": "family_outing_in_progress",
+            "subject_tokens": _KID1_TOKENS,
+            "include_tokens": _OUTING_TOKENS,
+            "exclude_tokens": [],
+        })
         out.append({
             "kind": "context_state_set",
             "key": "kid1_with_user",
@@ -631,7 +643,8 @@ def _rule_kid1_away_general(normalized: str, dates: list[str], now: datetime) ->
         reason="away_general_condition",
     )
     
-    return [d_state_home, d_state_reason] + ([cond] if cond else [])
+    d_state_scope = {**d_state_reason, "key": "kid1_absence_scope", "value": "extended"}
+    return [d_state_scope, d_state_home, d_state_reason] + ([cond] if cond else [])
 
 
 def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list[dict]:
@@ -877,6 +890,16 @@ def _rule_kid1_with_partner_without_user(normalized: str, dates: list[str], now:
     until = max(dates) if dates else now.strftime("%Y-%m-%d")
 
     return [
+        {
+            "kind": "context_state_set",
+            "key": "kid1_absence_scope",
+            "value": "temporary",
+            "until_date": until,
+            "reason": "partner_with_child_without_user",
+            "subject_tokens": _KID1_TOKENS,
+            "include_tokens": _OUTING_TOKENS,
+            "exclude_tokens": [],
+        },
         {
             "kind": "context_state_set",
             "key": "partner_with_user",
@@ -1774,6 +1797,10 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
                 value = str(value) if value is not None else ""
             until_date = directive.get("until_date")
             set_context_state(key, value, until_date)
+            if key == "kid1_absence_scope" and value in {"temporary", "home"}:
+                # A newer ordinary outing/return supersedes legacy absence
+                # provenance even after this scoped decision expires.
+                set_context_state("kid1_away_reason", "", until_date)
             stats["context_states_set"] += 1
             log_event(
                 "routines", "auto_context_state_set",

@@ -44,6 +44,7 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
     today = current.strftime("%Y-%m-%d")
     away_state = resolve_kid1_away_state(current)
     away_reason = resolve_kid1_away_reason(current)
+    absence_scope = resolve_kid1_absence_scope(current)
 
     ctx = {}
     try:
@@ -71,7 +72,8 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
         "today": today,
         "kid1_away_from_home": away_state,
         "kid1_away_reason": away_reason,
-        "kid1_unavailable_for_routine": kid1_unavailable_for_routine(away_state, away_reason),
+        "kid1_absence_scope": absence_scope,
+        "kid1_unavailable_for_routine": kid1_unavailable_for_routine(away_state, away_reason, absence_scope),
         "kid1_with_user": resolve_context_bool("kid1_with_user", current),
         "kid1_with_partner": resolve_context_bool("kid1_with_partner", current),
         "partner_with_user": resolve_context_bool("partner_with_user", current),
@@ -88,9 +90,28 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
     return ctx
 
 
-def kid1_unavailable_for_routine(away_state: bool | None, away_reason: str | None) -> bool:
+def kid1_unavailable_for_routine(
+    away_state: bool | None, away_reason: str | None, absence_scope: str | None = None,
+) -> bool:
     """Distinguish an explicit absence from school or a short outing."""
+    if absence_scope is not None:
+        return absence_scope == "extended"
     return bool(away_state and away_reason in {"camp", "grandmother", "trip", "away"})
+
+
+def resolve_kid1_absence_scope(now: datetime | None = None) -> str | None:
+    """Read the canonical child-absence decision when it is still current."""
+    current = now or datetime.now()
+    from memory.routine_db import get_context_state
+
+    state_data = get_context_state("kid1_absence_scope")
+    if not state_data:
+        return None
+    expires_at = state_data.get("expires_at")
+    if expires_at and expires_at < current.strftime("%Y-%m-%d"):
+        return None
+    value = str(state_data.get("value", "")).lower()
+    return value if value in {"extended", "temporary", "home"} else None
 
 def resolve_context_bool(key: str, now: datetime | None = None) -> bool | None:
     current = now or datetime.now()
