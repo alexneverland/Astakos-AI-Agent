@@ -4118,7 +4118,7 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     if (t("clients.telegram_bot.bot_msg_ebba28") in event_l or t("clients.telegram_bot.bot_msg_c11689") in event_l or "sleep" in event_l) and t("clients.telegram_bot.bot_msg_560d13") not in event_l and t("clients.telegram_bot.bot_msg_0b50a2") not in event_l:
         if sleep_state in {"in_progress", "done"}:
             return "[SILENT_SKIP] sleep already handled"
-        if away:
+        if confirmed_absence:
             return t("clients.telegram_bot.bot_msg_06027b")
         if kid1_with_partner and not kid1_with_user:
             return t("clients.telegram_bot.bot_msg_00c825")

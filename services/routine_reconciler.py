@@ -1315,34 +1315,6 @@ def _rule_user_at_work(normalized: str, dates: list[str], now) -> list[dict]:
     return [d_state]
 
 
-def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
-    """
-    Quiet hours / sleep:
-    Facts: "The little one is sleeping", "Quiet now"
-    """
-    has_sleep = _contains_any(normalized, _inline.get("sleep_extra", []))
-    has_quiet = _contains_any_whole_token(normalized, _inline.get("quiet", []))
-    has_child = _contains_any(normalized, _KID1_TOKENS)
-    
-    if not ((has_sleep and has_child) or has_quiet):
-        return []
-        
-    # Usually lasts a few hours, so until=today
-    until = now.strftime("%Y-%m-%d")
-            
-    d_state = {
-        "kind": "context_state_set",
-        "key": "quiet_hours",
-        "value": "true",
-        "until_date": until,
-        "reason": "quiet_hours_requested",
-        "subject_tokens": _KID1_TOKENS if has_child else [],
-        "include_tokens": _inline.get("quiet", []) + _inline.get("sleep_extra", []),
-        "exclude_tokens": [],
-    }
-    return [d_state]
-
-
 def _safe_json_list(raw: str) -> list[dict]:
     try:
         from core.utils import extract_json_from_text
@@ -1716,7 +1688,6 @@ def infer_routine_reconciliation_candidates(
         ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, dates, current)),
         ("partner_work_mode",                _rule_partner_work_mode,                (normalized_fact, dates, current)),
         ("user_at_work",                   _rule_user_at_work,                   (normalized_fact, dates, current)),
-        ("quiet_hours",                    _rule_quiet_hours,                    (normalized_fact, dates, current)),
     ]
     for rule_name, rule_fn, args in rules:
         for directive in rule_fn(*args):

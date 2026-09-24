@@ -16,7 +16,7 @@ def _load_proactive_guard() -> Callable[[str, dict], str | None]:
     )
     module = ast.Module(body=[guard], type_ignores=[])
     namespace = {
-        "t": lambda key: "[CONTEXT_SKIP]" if key.endswith(("9b132d", "9fbd6e")) else "__not_event__",
+        "t": lambda key: "[CONTEXT_SKIP]" if key.endswith(("9b132d", "9fbd6e", "06027b")) else "__not_event__",
         "config": SimpleNamespace(PARTNER_NAME="__partner__"),
     }
     exec(compile(module, str(source), "exec"), namespace)
@@ -37,3 +37,18 @@ def test_park_and_football_guard_require_confirmed_absence() -> None:
         }
         assert guard(event_name, school) is None
         assert guard(event_name, camp) == "[CONTEXT_SKIP]"
+
+
+def test_sleep_guard_requires_confirmed_absence() -> None:
+    """An expired family update plus unknown school-day absence must not silence bedtime."""
+    guard = _load_proactive_guard()
+    school_day = {
+        "kid1_away_from_home": {"value": "true"},
+        "kid1_away_reason": {"value": ""},
+        "user_out_of_home": {"value": "false"},
+        "user_at_work": {"value": "false"},
+    }
+    camp = {**school_day, "kid1_away_reason": {"value": "camp"}}
+
+    assert guard("sleep", school_day) is None
+    assert guard("sleep", camp) == "[CONTEXT_SKIP]"

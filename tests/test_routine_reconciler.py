@@ -1154,3 +1154,20 @@ def test_cigarette_does_not_enable_quiet_hours():
         candidate.get("key") == "quiet_hours"
         for candidate in candidates
     )
+
+
+def test_future_bedtime_does_not_enable_quiet_hours():
+    """Routine reconciliation must not turn an upcoming bedtime into quiet time now."""
+    with patch("services.routine_reconciler._infer_llm_reconciliation_candidates", return_value=[]):
+        candidates = infer_routine_reconciliation_candidates(
+            "Είμαστε σπίτι, τρώμε και σε λίγο ύπνο με τον Αλέξανδρο.",
+            category="family",
+            reason="user_stated",
+            now=datetime(2026, 9, 23, 21, 48),
+        )
+
+    assert not any(
+        candidate.get("kind") == "context_state_set"
+        and candidate.get("key") == "quiet_hours"
+        for candidate in candidates
+    )

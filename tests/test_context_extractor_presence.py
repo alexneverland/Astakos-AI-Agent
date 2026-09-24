@@ -7,10 +7,10 @@ def test_context_extractor_uses_llm_relationship_state_without_phrase_overrides(
     with (
         patch("services.context_extractor.safe_gemini_call") as mock_llm,
         patch("services.context_extractor.set_context_state") as mock_set,
-        patch("services.context_extractor.reconcile_fact_to_routines") as mock_reconcile,
+        patch("services.context_extractor.infer_routine_reconciliation_directives") as mock_reconcile,
         patch("services.context_extractor.apply_routine_reconciliation_directives"),
     ):
-        mock_reconcile.return_value = {"scored_directives": []}
+        mock_reconcile.return_value = []
         mock_llm.return_value = MagicMock(
             text='{"partner_with_user": true, "kid1_with_user": true}'
         )
@@ -28,10 +28,10 @@ def test_context_extractor_work_state_overrides_only_incompatible_relationships(
     with (
         patch("services.context_extractor.safe_gemini_call") as mock_llm,
         patch("services.context_extractor.set_context_state") as mock_set,
-        patch("services.context_extractor.reconcile_fact_to_routines") as mock_reconcile,
+        patch("services.context_extractor.infer_routine_reconciliation_directives") as mock_reconcile,
         patch("services.context_extractor.apply_routine_reconciliation_directives"),
     ):
-        mock_reconcile.return_value = {"scored_directives": []}
+        mock_reconcile.return_value = []
         mock_llm.return_value = MagicMock(
             text=(
                 '{"user_at_work": true, "partner_with_user": true, '
