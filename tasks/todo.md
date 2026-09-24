@@ -142,6 +142,14 @@
     time; do not rely on this planning snapshot alone.
   - Scope: separate Matrix-wide parity audit; the unified text-conversation
     work below must not silently mark this broader gate complete.
+  - Offline parity slices completed 2026-09-24: shared Matrix/Telegram live
+    location lifecycle, location reminders and departure follow-ups; Matrix
+    preemptive/catalog routine decisions; Messenger draft guard and preview;
+    tool-result fallback; Matrix-aware `/help` voice state. Focused group:
+    54 passed. Keep this gate open for the live checks in
+    `tasks/matrix-parity-audit.md`.
+  - Owner-approved exceptions: no heart-to-memory reaction, no legacy Matrix
+    `/confirm`, and critical approvals only via encrypted Reply to the prompt.
 
 ## Unified conversation: `shared-conversation-context`
 
@@ -221,9 +229,10 @@
   - Verified in PR #195: cross-process pending-file writes, queued delivery,
     scheduler registration, retry identity, and Web → Matrix → approval/reject
     boundaries pass offline. Telegram's existing callback path is unchanged.
-- [ ] Exercise one Web-origin critical-tool approval live in Element.
-  - Confirm one prompt arrives, an allowlisted owner reaction executes once,
-    and the resulting status appears correctly in both channel views.
+- [x] Exercise one Web-origin critical-tool approval live in Element.
+  - Owner confirmed live: one prompt arrived in Element, an encrypted Reply
+    with 👍 approved it once, and the result appeared correctly in both views.
+    A direct emoji reaction was not the working approval path in this test.
 
 - [x] Move routine, proactive, reflection, and follow-up outbound sends onto
   the canonical router without changing the active Telegram runtime.
