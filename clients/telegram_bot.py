@@ -3039,175 +3039,27 @@ def _send_photo_to_telegram(photo_path: str, chat_id: str):
     except Exception as e:
         print(f"\033[91m[TelegramBot Photo Send Error]: {e}\033[0m")
         send_telegram_msg(t("clients.telegram_bot.bot_msg_photo_send_fail", e=str(e)))
-_DEPARTURE_ANCHOR_SECONDS = 45 * 60
-_DEPARTURE_DISTANCE_METERS = 300
-_DEPARTURE_FOLLOWUP_TTL_HOURS = 1
-
-
-def _haversine_distance_meters(lat1, lon1, lat2, lon2) -> float:
-    import math
-
-    radius_m = 6_371_000
-    radians = math.pi / 180
-    a = (
-        math.sin((lat2 - lat1) * radians / 2) ** 2
-        + math.cos(lat1 * radians)
-        * math.cos(lat2 * radians)
-        * math.sin((lon2 - lon1) * radians / 2) ** 2
-    )
-    return 2 * radius_m * math.asin(math.sqrt(a))
-
-
-def _sync_live_location_out_of_home_state(lat: float, lon: float) -> None:
-    """Synchronize the current out-of-home flag from a valid live home geofence."""
-    from services.location_update import sync_live_location_out_of_home_state
-
-    sync_live_location_out_of_home_state(lat, lon)
-
-
 def handle_location(msg, live_update=False):
-    """Receives live location and checks for location-based reminders."""
-    import math
-
-    chat_id = str(msg.get("chat", {}).get("id", ""))
-    loc     = msg.get("location", {})
-    lat     = loc.get("latitude")
-    lon     = loc.get("longitude")
+    """Process a trusted Telegram point through the shared location path."""
+    loc = msg.get("location", {})
+    lat, lon = loc.get("latitude"), loc.get("longitude")
     if lat is None or lon is None:
         return
+    from services.location_update import process_location_update
 
-    if live_update:
-        _sync_live_location_out_of_home_state(lat, lon)
-
-    departure_event = None
     try:
-        from config import GPS_STORAGE_FILE
-        import time
-
-        now_ts = time.time()
-        gps_data = {}
-
-        if os.path.exists(GPS_STORAGE_FILE):
-            try:
-                with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
-                    stored_data = json.load(f)
-                if isinstance(stored_data, dict):
-                    gps_data = stored_data
-            except (OSError, ValueError, json.JSONDecodeError):
-                gps_data = {}
-
-        try:
-            anchor_lat = float(gps_data.get("anchor_lat", lat))
-            anchor_lon = float(gps_data.get("anchor_lon", lon))
-            anchor_ts = float(gps_data.get("anchor_timestamp", now_ts))
-        except (TypeError, ValueError):
-            anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
-
-        distance_m = _haversine_distance_meters(anchor_lat, anchor_lon, lat, lon)
-        anchored_seconds = max(0, now_ts - anchor_ts)
-
-        if distance_m > _DEPARTURE_DISTANCE_METERS:
-            if anchored_seconds >= _DEPARTURE_ANCHOR_SECONDS:
-                departure_event = {
-                    "anchor_minutes": int(anchored_seconds // 60),
-                    "distance_meters": int(distance_m),
-                }
-
-                # For live departures, preserve the old anchor until persistence
-                # succeeds so a transient database error can be retried.
-                if not live_update:
-                    anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
-            else:
-                # A short stop is not a departure event; begin a new anchor now.
-                anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
-
-        gps_data.update(
-            {
-                "lat": lat,
-                "lon": lon,
-                "timestamp": now_ts,
-                "anchor_lat": anchor_lat,
-                "anchor_lon": anchor_lon,
-                "anchor_timestamp": anchor_ts,
-            }
-        )
-        with open(GPS_STORAGE_FILE, "w", encoding="utf-8") as f:
-            json.dump(gps_data, f, ensure_ascii=False)
-    except OSError as exc:
-        print(f"\033[91m[Location State Error]: {exc}\033[0m")
-    #print(f"\033[94m[Location]: {lat}, {lon}\033[0m")
-
-    # ── Shared location reminders (home and leaving the current place) ──
-    try:
-        from services.location_update import dispatch_location_reminders
-
-        dispatch_location_reminders(
+        process_location_update(
             lat,
             lon,
+            live_update=live_update,
+            source_channel="telegram",
             send_reminder=lambda message: _send_and_record_assistant(
                 message, agent="Reminder_Agent"
             ),
         )
-    except Exception as e:
-        print(f"\033[91m[Location Reminder Error]: {e}\033[0m")
-
-    # ── Web Agent only for manual location (no live updates) ──
+    except Exception as exc:
+        print(f"[Location Handler Error]: {exc}")
     if live_update:
-        if departure_event:
-            from memory.pending_followups import _local_now
-
-            event_now = _local_now()
-            from memory.pending_followups import create_pending_followup
-
-            import sqlite3
-
-            try:
-                followup_id = create_pending_followup(
-                    source_channel="telegram",
-                    source_agent="Location_Event",
-                    topic="departure",
-                    subject="stable_location_departure",
-                    source_user_text=(
-                        "Live location detected departure after a stable stay of "
-                        f"{departure_event['anchor_minutes']} minutes."
-                    ),
-                    source_ai_text="",
-                    followup_after_ts=event_now.isoformat(timespec="seconds"),
-                    confidence=0.70,
-                    metadata={
-                        "reason": "live_location_departure",
-                        "anchor_duration_minutes": departure_event["anchor_minutes"],
-                        "departure_distance_meters": departure_event["distance_meters"],
-                        "defer_count": 0,
-                    },
-                    ttl_hours=_DEPARTURE_FOLLOWUP_TTL_HOURS,
-                )
-            except sqlite3.Error as exc:
-                print(f"\033[91m[DepartureFollowUp Error]: {exc}\033[0m")
-                return
-
-            # Successful create or active-arc dedupe consumes this departure.
-            anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
-            gps_data.update(
-                {
-                    "anchor_lat": anchor_lat,
-                    "anchor_lon": anchor_lon,
-                    "anchor_timestamp": anchor_ts,
-                }
-            )
-            try:
-                with open(GPS_STORAGE_FILE, "w", encoding="utf-8") as f:
-                    json.dump(gps_data, f, ensure_ascii=False)
-            except OSError as exc:
-                print(f"\033[91m[Location State Error]: {exc}\033[0m")
-
-            if followup_id:
-                print(
-                    f"[DepartureFollowUp]: created #{followup_id} "
-                    f"after {departure_event['anchor_minutes']}m / "
-                    f"{departure_event['distance_meters']}m"
-                )
-
         return
 
     from core.graph import graph
