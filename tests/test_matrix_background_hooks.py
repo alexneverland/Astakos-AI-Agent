@@ -271,6 +271,38 @@ async def test_matrix_channel_factory_applies_voice_mode_to_normal_turns(
 
 
 @pytest.mark.asyncio
+async def test_matrix_help_reports_matrix_voice_mode_not_telegram(
+    tmp_path, monkeypatch,
+) -> None:
+    """Matrix /help follows its own /voice toggle without changing Telegram state."""
+    import clients.telegram_bot as telegram_bot
+    from services.matrix_background import build_matrix_channel_services
+    from services.behavioral_event_scheduler import _reset_scheduler_for_tests
+
+    monkeypatch.setattr(telegram_bot, "voice_mode_enabled", False)
+    _reset_scheduler_for_tests()
+    try:
+        services = build_matrix_channel_services(
+            conversation_db_path=str(tmp_path / "conversation.db"),
+            enqueue_fast_task=CapturingQueue(),
+            enqueue_slow_task=CapturingQueue(),
+            command_handler=telegram_bot.handle_external_admin_command,
+            memory_store=object(),
+        )
+
+        off = await services.text_handler("/help", "$help-off")
+        await services.text_handler("/voice", "$voice-on")
+        on = await services.text_handler("/help", "$help-on")
+
+        assert "✍️ OFF" in off.text
+        assert "🔊 ON" in on.text
+        assert "/confirm" not in on.text
+        assert telegram_bot.voice_mode_enabled is False
+    finally:
+        _reset_scheduler_for_tests()
+
+
+@pytest.mark.asyncio
 async def test_matrix_channel_factory_finalizes_session_for_exact_end_command(
     tmp_path,
 ) -> None:

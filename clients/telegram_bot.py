@@ -3351,6 +3351,18 @@ def _send_system_doctor_report() -> None:
     send_telegram_msg_full(_run_system_doctor_command())
 
 
+def render_external_help(*, voice_enabled: bool, include_legacy_confirm: bool = True) -> str:
+    """Render the shared command menu for the active channel's voice state."""
+    voice_status = "🔊 ON" if voice_enabled else "✍️ OFF"
+    menu = t("clients.telegram_bot.bot_msg_help_menu", voice_status=voice_status)
+    if not include_legacy_confirm:
+        menu = "\n".join(
+            line for line in menu.splitlines()
+            if not line.strip().startswith("<code>/confirm ")
+        )
+    return t("clients.telegram_bot.bot_msg_commands_title", bot_name=config.BOT_NAME) + menu
+
+
 def handle_external_admin_command(user_text: str) -> str | None:
     """Execute one channel-neutral text/admin command and return its reply."""
     cmd = str(user_text or "").strip().lower()
@@ -3412,11 +3424,7 @@ def handle_external_admin_command(user_text: str) -> str | None:
         return t("clients.telegram_bot.bot_msg_vacation_paused", days=days)
 
     if cmd == "/help":
-        voice_status = "🔊 ON" if voice_mode_enabled else "✍️ OFF"
-        return (
-            t("clients.telegram_bot.bot_msg_commands_title", bot_name=config.BOT_NAME)
-            + t("clients.telegram_bot.bot_msg_help_menu", voice_status=voice_status)
-        )
+        return render_external_help(voice_enabled=voice_mode_enabled)
 
     if cmd == "/doctor":
         try:

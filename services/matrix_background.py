@@ -267,6 +267,13 @@ def build_matrix_channel_services(
         """Handle Matrix-owned commands before delegating shared admin commands."""
         normalized = str(user_text or "").strip()
         command = normalized.lower()
+        if command == "/help":
+            from clients.telegram_bot import render_external_help
+
+            return render_external_help(
+                voice_enabled=voice_turn.enabled,
+                include_legacy_confirm=False,
+            )
         if command == "/story" or command.startswith("/story "):
             rest = normalized[len("/story") :].strip()
             if "|" in rest:
