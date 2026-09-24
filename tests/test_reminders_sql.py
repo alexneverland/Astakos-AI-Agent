@@ -351,7 +351,11 @@ class TestLocationReminders:
             patch.object(cfg, "GPS_STORAGE_FILE", gps_path),
             patch.object(cfg, "HOME_COORDS", self.HOME),
             patch.object(cfg, "HOME_RADIUS_M", radius_m),
-            patch.object(bot, "send_telegram_msg", side_effect=lambda m: sent.append(m)),
+            patch.object(
+                bot,
+                "_send_and_record_assistant",
+                side_effect=lambda message, **_kwargs: sent.append(message),
+            ),
         ):
             print("STATE_DB path:", cfg.STATE_DB, "Exists:", os.path.exists(cfg.STATE_DB))
             bot.handle_location(msg, live_update=True)

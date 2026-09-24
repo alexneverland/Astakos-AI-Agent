@@ -36,10 +36,14 @@ def test_parse_matrix_geo_uri_validates_coordinate_bounds() -> None:
     assert parse_geo_uri("geo:91,22") is None
 
 
-def test_record_location_update_preserves_anchor_and_silences_live_updates(tmp_path) -> None:
+def test_record_location_update_resets_short_stop_anchor_and_silences_live_updates(
+    tmp_path, monkeypatch
+) -> None:
     import json
+    import config
     from services.location_update import record_location_update
 
+    monkeypatch.setattr(config, "HOME_COORDS", (0.0, 0.0))
     location_file = tmp_path / "last_location.json"
 
     static_reply = record_location_update(
@@ -61,7 +65,169 @@ def test_record_location_update_preserves_anchor_and_silences_live_updates(tmp_p
     assert "40.6401" in static_reply and "22.9444" in static_reply
     assert live_reply is None
     assert stored["lat"] == 40.65 and stored["lon"] == 22.95
-    assert stored["anchor_lat"] == 40.6401
+    assert stored["anchor_lat"] == 40.65
+
+
+def test_live_matrix_location_updates_home_context_without_repeating_same_state(
+    tmp_path, monkeypatch
+) -> None:
+    import config
+    from memory import routine_db
+    from services.location_update import record_location_update
+
+    monkeypatch.setattr(config, "HOME_COORDS", (40.0, 22.0))
+    monkeypatch.setattr(config, "HOME_RADIUS_M", 150)
+    monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "routines.db"))
+    routine_db.setup_db()
+    updates: list[tuple[str, str]] = []
+    original_set = routine_db.set_context_state
+
+    def capture_context(key: str, value: str, **kwargs) -> None:
+        updates.append((key, value))
+        original_set(key, value, **kwargs)
+
+    monkeypatch.setattr(routine_db, "set_context_state", capture_context)
+    storage_file = tmp_path / "location.json"
+    record_location_update(40.0, 22.0, live_update=True, storage_file=storage_file)
+    record_location_update(40.01, 22.0, live_update=True, storage_file=storage_file)
+    record_location_update(40.01, 22.0, live_update=True, storage_file=storage_file)
+    record_location_update(40.0, 22.0, live_update=True, storage_file=storage_file)
+
+    assert updates == [
+        ("user_out_of_home", "false"),
+        ("user_out_of_home", "true"),
+        ("user_out_of_home", "false"),
+    ]
+
+
+def test_matrix_location_fires_home_reminder_once_and_ignores_time_reminder(
+    tmp_path, monkeypatch
+) -> None:
+    import config
+    from services.location_update import process_location_update
+    from tests.test_reminders_sql import _make_reminders_db, _row_status
+
+    state_db = tmp_path / "state.db"
+    _make_reminders_db(
+        str(state_db),
+        [
+            {"task": "Βγάλε το κουνέλι", "time": "loc:home"},
+            {"task": "Πλήρωσε λογαριασμό", "time": "2099-01-01 00:00"},
+        ],
+    )
+    monkeypatch.setattr(config, "HOME_COORDS", (40.0, 22.0))
+    monkeypatch.setattr(config, "HOME_RADIUS_M", 150)
+    monkeypatch.setattr(config, "STATE_DB", str(state_db))
+    sent: list[str] = []
+
+    def deliver(text: str) -> None:
+        sent.append(text)
+
+    process_location_update(
+        40.0,
+        22.0,
+        live_update=False,
+        source_channel="matrix",
+        send_reminder=deliver,
+        storage_file=tmp_path / "location.json",
+    )
+    process_location_update(
+        40.0,
+        22.0,
+        live_update=False,
+        source_channel="matrix",
+        send_reminder=deliver,
+        storage_file=tmp_path / "location.json",
+    )
+
+    assert len(sent) == 1 and "Βγάλε το κουνέλι" in sent[0]
+    assert _row_status(str(state_db), "Βγάλε το κουνέλι") == "done"
+    assert _row_status(str(state_db), "Πλήρωσε λογαριασμό") == "pending"
+
+
+def test_matrix_location_leaving_anchor_sends_once_and_failed_delivery_stays_pending(
+    tmp_path, monkeypatch
+) -> None:
+    import sqlite3
+    import config
+    from memory.location_reminders import save_leave_current_location_anchor
+    from services.location_update import process_location_update
+    from tests.test_reminders_sql import _make_reminders_db, _row_status
+
+    state_db = tmp_path / "state.db"
+    _make_reminders_db(
+        str(state_db),
+        [{"task": "Πάρε ψωμί", "time": "loc:leave_current_location"}],
+    )
+    with sqlite3.connect(state_db) as conn:
+        save_leave_current_location_anchor(
+            conn, reminder_id=1, anchor_lat=40.0, anchor_lon=22.0
+        )
+    monkeypatch.setattr(config, "HOME_COORDS", (0.0, 0.0))
+    monkeypatch.setattr(config, "STATE_DB", str(state_db))
+
+    def failed_delivery(_message: str) -> None:
+        raise ConnectionError("offline")
+
+    with pytest.raises(ConnectionError, match="offline"):
+        process_location_update(
+            40.01, 22.0, live_update=False, source_channel="matrix",
+            send_reminder=failed_delivery, storage_file=tmp_path / "location.json"
+        )
+    assert _row_status(str(state_db), "Πάρε ψωμί") == "pending"
+
+    sent: list[str] = []
+    for _ in range(2):
+        process_location_update(
+            40.01, 22.0, live_update=False, source_channel="matrix",
+            send_reminder=lambda message: sent.append(message),
+            storage_file=tmp_path / "location.json",
+        )
+    assert len(sent) == 1 and "Πάρε ψωμί" in sent[0]
+    assert _row_status(str(state_db), "Πάρε ψωμί") == "done"
+
+
+def test_matrix_live_departure_creates_one_followup_and_retries_failed_create(
+    tmp_path, monkeypatch
+) -> None:
+    import json
+    import sqlite3
+    import config
+    from services.location_update import process_location_update
+
+    monkeypatch.setattr(config, "HOME_COORDS", (0.0, 0.0))
+    monkeypatch.setattr(config, "STATE_DB", str(tmp_path / "missing.db"))
+    storage_file = tmp_path / "location.json"
+    process_location_update(
+        40.0, 22.0, live_update=True, source_channel="matrix",
+        send_reminder=lambda _text: None, storage_file=storage_file, now_ts=100.0,
+    )
+    created: list[dict] = []
+
+    def failed_create(**_kwargs):
+        raise sqlite3.OperationalError("temporarily locked")
+
+    monkeypatch.setattr("memory.pending_followups.create_pending_followup", failed_create)
+    process_location_update(
+        40.01, 22.0, live_update=True, source_channel="matrix",
+        send_reminder=lambda _text: None, storage_file=storage_file, now_ts=2900.0,
+    )
+    assert json.loads(storage_file.read_text(encoding="utf-8"))["anchor_lat"] == 40.0
+
+    monkeypatch.setattr(
+        "memory.pending_followups.create_pending_followup",
+        lambda **kwargs: created.append(kwargs) or 1,
+    )
+    for timestamp in (2901.0, 2902.0):
+        process_location_update(
+            40.01, 22.0, live_update=True, source_channel="matrix",
+            send_reminder=lambda _text: None, storage_file=storage_file,
+            now_ts=timestamp,
+        )
+    assert len(created) == 1
+    assert created[0]["source_channel"] == "matrix"
+    assert created[0]["topic"] == "departure"
+    assert json.loads(storage_file.read_text(encoding="utf-8"))["anchor_lat"] == 40.01
 
 
 @pytest.mark.asyncio

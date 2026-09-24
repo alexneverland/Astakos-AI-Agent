@@ -208,7 +208,7 @@ def build_matrix_channel_services(
     from services.matrix_turn import MatrixTurnService
     from services.matrix_routine_completion import process_pending_routine_confirmation
     from services.matrix_georgian_turn import MatrixGeorgianTurnRouter
-    from services.location_update import record_location_update
+    from services.location_update import process_location_update
     from services.matrix_voice_mode import MatrixVoiceModeRouter
     from services.pending_asset_confirmation import (
         PendingAssetConfirmationService,
@@ -231,7 +231,22 @@ def build_matrix_channel_services(
     )
     finalize = session_finalizer or finalize_session
     make_story = story_maker or generate_story
-    save_location = record_location or record_location_update
+    if record_location is None:
+        from services.external_assistant_delivery import deliver_external_assistant_text
+
+        def save_location(latitude: float, longitude: float, *, live_update: bool):
+            """Use the shared location path and the selected external delivery."""
+            return process_location_update(
+                latitude,
+                longitude,
+                live_update=live_update,
+                source_channel="matrix",
+                send_reminder=lambda message: deliver_external_assistant_text(
+                    message, agent="Reminder_Agent"
+                ),
+            )
+    else:
+        save_location = record_location
 
     async def matrix_location_handler(
         latitude: float,
@@ -252,6 +267,13 @@ def build_matrix_channel_services(
         """Handle Matrix-owned commands before delegating shared admin commands."""
         normalized = str(user_text or "").strip()
         command = normalized.lower()
+        if command == "/help":
+            from clients.telegram_bot import render_external_help
+
+            return render_external_help(
+                voice_enabled=voice_turn.enabled,
+                include_legacy_confirm=False,
+            )
         if command == "/story" or command.startswith("/story "):
             rest = normalized[len("/story") :].strip()
             if "|" in rest:

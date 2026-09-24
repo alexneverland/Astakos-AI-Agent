@@ -3039,241 +3039,27 @@ def _send_photo_to_telegram(photo_path: str, chat_id: str):
     except Exception as e:
         print(f"\033[91m[TelegramBot Photo Send Error]: {e}\033[0m")
         send_telegram_msg(t("clients.telegram_bot.bot_msg_photo_send_fail", e=str(e)))
-_DEPARTURE_ANCHOR_SECONDS = 45 * 60
-_DEPARTURE_DISTANCE_METERS = 300
-_DEPARTURE_FOLLOWUP_TTL_HOURS = 1
-
-
-def _haversine_distance_meters(lat1, lon1, lat2, lon2) -> float:
-    import math
-
-    radius_m = 6_371_000
-    radians = math.pi / 180
-    a = (
-        math.sin((lat2 - lat1) * radians / 2) ** 2
-        + math.cos(lat1 * radians)
-        * math.cos(lat2 * radians)
-        * math.sin((lon2 - lon1) * radians / 2) ** 2
-    )
-    return 2 * radius_m * math.asin(math.sqrt(a))
-
-
-def _sync_live_location_out_of_home_state(lat: float, lon: float) -> None:
-    """Synchronize the current out-of-home flag from a valid live home geofence."""
-    from config import HOME_COORDS, HOME_RADIUS_M
-    from memory.routine_db import get_context_state, set_context_state
-
-    try:
-        home_lat, home_lon = (float(HOME_COORDS[0]), float(HOME_COORDS[1]))
-        home_radius_m = float(HOME_RADIUS_M)
-    except (IndexError, TypeError, ValueError):
-        return
-
-    if (home_lat, home_lon) == (0.0, 0.0) or home_radius_m <= 0:
-        return
-
-    is_out_of_home = (
-        _haversine_distance_meters(lat, lon, home_lat, home_lon) > home_radius_m
-    )
-    desired_value = "true" if is_out_of_home else "false"
-    state = get_context_state("user_out_of_home") or {}
-    current_value = str(state.get("value") or "").strip().lower()
-    expires_at = str(state.get("expires_at") or "").strip()
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    if current_value == desired_value and (not expires_at or expires_at >= today):
-        return
-
-    set_context_state("user_out_of_home", desired_value, expires_at=today)
-
-
 def handle_location(msg, live_update=False):
-    """Receives live location and checks for location-based reminders."""
-    import math
-
-    chat_id = str(msg.get("chat", {}).get("id", ""))
-    loc     = msg.get("location", {})
-    lat     = loc.get("latitude")
-    lon     = loc.get("longitude")
+    """Process a trusted Telegram point through the shared location path."""
+    loc = msg.get("location", {})
+    lat, lon = loc.get("latitude"), loc.get("longitude")
     if lat is None or lon is None:
         return
+    from services.location_update import process_location_update
 
-    if live_update:
-        _sync_live_location_out_of_home_state(lat, lon)
-
-    departure_event = None
     try:
-        from config import GPS_STORAGE_FILE
-        import time
-
-        now_ts = time.time()
-        gps_data = {}
-
-        if os.path.exists(GPS_STORAGE_FILE):
-            try:
-                with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
-                    stored_data = json.load(f)
-                if isinstance(stored_data, dict):
-                    gps_data = stored_data
-            except (OSError, ValueError, json.JSONDecodeError):
-                gps_data = {}
-
-        try:
-            anchor_lat = float(gps_data.get("anchor_lat", lat))
-            anchor_lon = float(gps_data.get("anchor_lon", lon))
-            anchor_ts = float(gps_data.get("anchor_timestamp", now_ts))
-        except (TypeError, ValueError):
-            anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
-
-        distance_m = _haversine_distance_meters(anchor_lat, anchor_lon, lat, lon)
-        anchored_seconds = max(0, now_ts - anchor_ts)
-
-        if distance_m > _DEPARTURE_DISTANCE_METERS:
-            if anchored_seconds >= _DEPARTURE_ANCHOR_SECONDS:
-                departure_event = {
-                    "anchor_minutes": int(anchored_seconds // 60),
-                    "distance_meters": int(distance_m),
-                }
-
-                # For live departures, preserve the old anchor until persistence
-                # succeeds so a transient database error can be retried.
-                if not live_update:
-                    anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
-            else:
-                # A short stop is not a departure event; begin a new anchor now.
-                anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
-
-        gps_data.update(
-            {
-                "lat": lat,
-                "lon": lon,
-                "timestamp": now_ts,
-                "anchor_lat": anchor_lat,
-                "anchor_lon": anchor_lon,
-                "anchor_timestamp": anchor_ts,
-            }
+        process_location_update(
+            lat,
+            lon,
+            live_update=live_update,
+            source_channel="telegram",
+            send_reminder=lambda message: _send_and_record_assistant(
+                message, agent="Reminder_Agent"
+            ),
         )
-        with open(GPS_STORAGE_FILE, "w", encoding="utf-8") as f:
-            json.dump(gps_data, f, ensure_ascii=False)
-    except OSError as exc:
-        print(f"\033[91m[Location State Error]: {exc}\033[0m")
-    #print(f"\033[94m[Location]: {lat}, {lon}\033[0m")
-
-    # ── Location Reminders (SQL: time = 'loc:<name>' convention) ──
-    try:
-        import sqlite3
-        from config import HOME_COORDS, HOME_RADIUS_M, STATE_DB
-
-        def haversine(lat1, lon1, lat2, lon2):
-            R = 6371000
-            p = math.pi / 180
-            a = (math.sin((lat2-lat1)*p/2)**2 +
-                 math.cos(lat1*p) * math.cos(lat2*p) *
-                 math.sin((lon2-lon1)*p/2)**2)
-            return 2 * R * math.asin(math.sqrt(a))
-
-        if os.path.exists(STATE_DB):
-            conn = sqlite3.connect(STATE_DB)
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT id, task, time FROM reminders WHERE status='pending' AND time LIKE 'loc:%'"
-                )
-                pending = cursor.fetchall()
-                if pending:
-                    pass # print("HANDLE_LOCATION PENDING:", pending)
-                for rid, task, tm in pending:
-                    target = tm.split(":", 1)[1] if tm and ":" in tm else "home"
-                    if target == "home":
-                        dist = haversine(lat, lon, HOME_COORDS[0], HOME_COORDS[1])
-                        if dist <= HOME_RADIUS_M:
-                            _send_and_record_assistant(
-                                f"📍 REMINDER (You reached home!): {task}",
-                                agent="Reminder_Agent",
-                            )
-                            print(f"\033[93m[Location Reminder]: {task} fired ({dist:.0f}m)\033[0m")
-                            cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
-
-                from memory.location_reminders import (
-                    complete_location_reminder,
-                    find_departed_current_location_reminders,
-                )
-
-                for rid, task in find_departed_current_location_reminders(
-                    conn,
-                    lat=lat,
-                    lon=lon,
-                    distance_meters=haversine,
-                ):
-                    _send_and_record_assistant(
-                        t("clients.telegram_bot.bot_msg_reminder_leave_current", task=task),
-                        agent="Reminder_Agent",
-                    )
-                    print(f"\033[93m[Location Reminder]: {task} fired after leaving current place\033[0m")
-                    complete_location_reminder(conn, rid)
-                conn.commit()
-            finally:
-                conn.close()
-    except Exception as e:
-        print(f"\033[91m[Location Reminder Error]: {e}\033[0m")
-
-    # ── Web Agent only for manual location (no live updates) ──
+    except Exception as exc:
+        print(f"[Location Handler Error]: {exc}")
     if live_update:
-        if departure_event:
-            from memory.pending_followups import _local_now
-
-            event_now = _local_now()
-            from memory.pending_followups import create_pending_followup
-
-            import sqlite3
-
-            try:
-                followup_id = create_pending_followup(
-                    source_channel="telegram",
-                    source_agent="Location_Event",
-                    topic="departure",
-                    subject="stable_location_departure",
-                    source_user_text=(
-                        "Live location detected departure after a stable stay of "
-                        f"{departure_event['anchor_minutes']} minutes."
-                    ),
-                    source_ai_text="",
-                    followup_after_ts=event_now.isoformat(timespec="seconds"),
-                    confidence=0.70,
-                    metadata={
-                        "reason": "live_location_departure",
-                        "anchor_duration_minutes": departure_event["anchor_minutes"],
-                        "departure_distance_meters": departure_event["distance_meters"],
-                        "defer_count": 0,
-                    },
-                    ttl_hours=_DEPARTURE_FOLLOWUP_TTL_HOURS,
-                )
-            except sqlite3.Error as exc:
-                print(f"\033[91m[DepartureFollowUp Error]: {exc}\033[0m")
-                return
-
-            # Successful create or active-arc dedupe consumes this departure.
-            anchor_lat, anchor_lon, anchor_ts = lat, lon, now_ts
-            gps_data.update(
-                {
-                    "anchor_lat": anchor_lat,
-                    "anchor_lon": anchor_lon,
-                    "anchor_timestamp": anchor_ts,
-                }
-            )
-            try:
-                with open(GPS_STORAGE_FILE, "w", encoding="utf-8") as f:
-                    json.dump(gps_data, f, ensure_ascii=False)
-            except OSError as exc:
-                print(f"\033[91m[Location State Error]: {exc}\033[0m")
-
-            if followup_id:
-                print(
-                    f"[DepartureFollowUp]: created #{followup_id} "
-                    f"after {departure_event['anchor_minutes']}m / "
-                    f"{departure_event['distance_meters']}m"
-                )
-
         return
 
     from core.graph import graph
@@ -3565,6 +3351,18 @@ def _send_system_doctor_report() -> None:
     send_telegram_msg_full(_run_system_doctor_command())
 
 
+def render_external_help(*, voice_enabled: bool, include_legacy_confirm: bool = True) -> str:
+    """Render the shared command menu for the active channel's voice state."""
+    voice_status = "🔊 ON" if voice_enabled else "✍️ OFF"
+    menu = t("clients.telegram_bot.bot_msg_help_menu", voice_status=voice_status)
+    if not include_legacy_confirm:
+        menu = "\n".join(
+            line for line in menu.splitlines()
+            if not line.strip().startswith("<code>/confirm ")
+        )
+    return t("clients.telegram_bot.bot_msg_commands_title", bot_name=config.BOT_NAME) + menu
+
+
 def handle_external_admin_command(user_text: str) -> str | None:
     """Execute one channel-neutral text/admin command and return its reply."""
     cmd = str(user_text or "").strip().lower()
@@ -3626,11 +3424,7 @@ def handle_external_admin_command(user_text: str) -> str | None:
         return t("clients.telegram_bot.bot_msg_vacation_paused", days=days)
 
     if cmd == "/help":
-        voice_status = "🔊 ON" if voice_mode_enabled else "✍️ OFF"
-        return (
-            t("clients.telegram_bot.bot_msg_commands_title", bot_name=config.BOT_NAME)
-            + t("clients.telegram_bot.bot_msg_help_menu", voice_status=voice_status)
-        )
+        return render_external_help(voice_enabled=voice_mode_enabled)
 
     if cmd == "/doctor":
         try:

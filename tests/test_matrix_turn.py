@@ -12,6 +12,128 @@ from memory.conversation_history import append_message, load_messages
 from services.matrix_turn import MatrixTurnService
 
 
+@pytest.mark.asyncio
+async def test_matrix_draft_clear_and_clarify_intercept_without_graph(
+    tmp_path, monkeypatch,
+) -> None:
+    """Draft management must not become a graph send or an external action."""
+    from core import messenger_draft
+
+    graph = FakeGraph()
+    db_path = str(tmp_path / "conversation.db")
+    monkeypatch.setattr(
+        messenger_draft, "active_draft_status",
+        lambda: (True, "active", {"target_name": "Σοφία", "message": "Καλημέρα!"}),
+    )
+    cleared: list[bool] = []
+    monkeypatch.setattr(messenger_draft, "clear_draft", lambda: cleared.append(True) or True)
+    service = MatrixTurnService(graph=graph, conversation_db_path=db_path)
+
+    preview = await service("ποιο μήνυμα;", "$draft-preview")
+    result = await service("κλείσε το draft", "$draft-clear")
+
+    assert "Καλημέρα!" in preview
+    assert result
+    assert cleared == [True]
+    assert graph.states == []
+    assert [entry["role"] for entry in load_messages(db_path=db_path)] == [
+        "user", "assistant", "user", "assistant",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_matrix_historical_message_mention_keeps_active_draft(
+    tmp_path, monkeypatch,
+) -> None:
+    """An aside about a past send remains a graph turn, not draft deletion."""
+    from core import messenger_draft
+
+    monkeypatch.setattr(
+        messenger_draft, "active_draft_status",
+        lambda: (True, "active", {"target_name": "Σοφία", "message": "Καλημέρα!"}),
+    )
+    cleared: list[bool] = []
+    monkeypatch.setattr(messenger_draft, "clear_draft", lambda: cleared.append(True) or True)
+    graph = FakeGraph()
+    service = MatrixTurnService(
+        graph=graph,
+        conversation_db_path=str(tmp_path / "conversation.db"),
+    )
+
+    reply = await service(
+        "Το μήνυμα το στείλαμε χθες, αλλά σήμερα θέλω να συζητήσουμε κάτι άλλο",
+        "$historical-send",
+    )
+
+    assert reply == graph.reply
+    assert cleared == []
+    assert len(graph.states) == 1
+
+
+@pytest.mark.asyncio
+async def test_matrix_draft_confirm_requires_selected_approval(
+    tmp_path, monkeypatch,
+) -> None:
+    """A short send confirmation queues approval, never runs Messenger itself."""
+    from core import approval, messenger_draft
+
+    monkeypatch.setattr(
+        messenger_draft, "active_draft_status",
+        lambda: (True, "active", {"target_name": "Σοφία", "message": "Καλημέρα!"}),
+    )
+    saved: list[tuple] = []
+    delivered: list[dict] = []
+    monkeypatch.setattr(approval, "save_pending", lambda *args, **kwargs: saved.append((args, kwargs)))
+    monkeypatch.setattr(
+        approval, "_notify_selected_approval",
+        lambda call: delivered.append(call) or "matrix",
+    )
+    graph = FakeGraph()
+    service = MatrixTurnService(
+        graph=graph,
+        conversation_db_path=str(tmp_path / "conversation.db"),
+    )
+
+    reply = await service("στείλε", "$draft-send")
+
+    assert saved[0][0][:2] == ("execute_local_pipeline", {})
+    assert saved[0][1]["channel"] == "matrix"
+    assert delivered[0]["id"] == saved[0][0][2]
+    assert "execute_local_pipeline" in reply
+    assert graph.states == []
+
+
+@pytest.mark.asyncio
+async def test_matrix_draft_confirmation_delivery_failure_removes_pending(
+    tmp_path, monkeypatch,
+) -> None:
+    """An undelivered approval cannot leave an executable Messenger send queued."""
+    from core import approval, messenger_draft
+
+    monkeypatch.setattr(
+        messenger_draft, "active_draft_status",
+        lambda: (True, "active", {"target_name": "Σοφία", "message": "Καλημέρα!"}),
+    )
+    saved: list[str] = []
+    removed: list[str] = []
+    monkeypatch.setattr(
+        approval, "save_pending",
+        lambda name, args, call_id, **kwargs: saved.append(call_id),
+    )
+    monkeypatch.setattr(approval, "_notify_selected_approval", lambda call: None)
+    monkeypatch.setattr(approval, "pop_pending", lambda call_id: removed.append(call_id))
+    graph = FakeGraph()
+    service = MatrixTurnService(
+        graph=graph, conversation_db_path=str(tmp_path / "conversation.db"),
+    )
+
+    reply = await service("στείλε", "$draft-undelivered")
+
+    assert saved == removed
+    assert reply
+    assert graph.states == []
+
+
 class FakeGraph:
     def __init__(self, reply: str = "Απάντηση από τον Αστακό") -> None:
         self.reply = reply
@@ -143,6 +265,59 @@ async def test_matrix_turn_fails_closed_when_graph_has_no_user_reply(tmp_path) -
     assert [(item["role"], item["content"]) for item in stored] == [
         ("user", "δοκιμή")
     ]
+
+
+@pytest.mark.asyncio
+async def test_matrix_tool_only_graph_uses_shared_fallback(tmp_path, monkeypatch) -> None:
+    """A useful tool result must not strand a durable Matrix event."""
+    from langchain_core.messages import ToolMessage
+    import clients.telegram_bot as telegram_bot
+
+    class ToolOnlyGraph(FakeGraph):
+        def stream(self, state: dict[str, Any], config: dict[str, Any]):
+            yield {"tools": {"messages": [ToolMessage(
+                content="result", tool_call_id="tool-call", name="lookup",
+            )]}}
+
+    monkeypatch.setattr(
+        telegram_bot, "_tool_results_fallback_response",
+        lambda user, results: "Σύνοψη: " + ", ".join(results),
+    )
+    db_path = str(tmp_path / "conversation.db")
+    service = MatrixTurnService(graph=ToolOnlyGraph(), conversation_db_path=db_path)
+
+    assert await service("βρες το", "$event-tool-only") == "Σύνοψη: result"
+    assert load_messages(channel="matrix", db_path=db_path)[-1]["content"] == "Σύνοψη: result"
+
+
+@pytest.mark.asyncio
+async def test_matrix_saved_messenger_draft_uses_shared_preview(tmp_path, monkeypatch) -> None:
+    """A staged draft is shown for review rather than claimed to be sent."""
+    from langchain_core.messages import ToolMessage
+    import core.utils as core_utils
+
+    class DraftGraph(FakeGraph):
+        def stream(self, state: dict[str, Any], config: dict[str, Any]):
+            yield {"tools": {"messages": [ToolMessage(
+                content="draft_saved", tool_call_id="draft-call", name="relay_local_payload",
+            )]}}
+            yield {"Chat_Agent": {"messages": [AIMessage(content="Έγινε.")]}}
+
+    monkeypatch.setattr(
+        core_utils, "looks_like_terminal_messenger_draft_result",
+        lambda value: value == "draft_saved",
+    )
+    monkeypatch.setattr(
+        core_utils, "build_messenger_draft_ready_reply",
+        lambda results: "Προσχέδιο έτοιμο για έλεγχο.",
+    )
+    service = MatrixTurnService(
+        graph=DraftGraph(), conversation_db_path=str(tmp_path / "conversation.db"),
+    )
+
+    assert await service("φτιάξε προσχέδιο", "$event-draft-preview") == (
+        "Προσχέδιο έτοιμο για έλεγχο."
+    )
 
 
 @pytest.mark.asyncio

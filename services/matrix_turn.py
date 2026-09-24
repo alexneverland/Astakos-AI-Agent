@@ -237,6 +237,95 @@ class MatrixTurnService:
         )
         self._run_hook(self._on_user_persisted, saved_user)
 
+        draft_reply = None
+        if routine_completion_context is None and not external_derived:
+            from core.messenger_draft import active_draft_status, clear_draft
+            from services.messenger_intent import classify_messenger_intent
+            from core.i18n import t
+
+            draft_active, _, draft_data = active_draft_status()
+            draft_intent = classify_messenger_intent(
+                clean_user_text, has_active_draft=draft_active,
+            ).intent
+            if draft_intent == "clear_draft":
+                draft_reply = (
+                    t("server.draft_cleared")
+                    if clear_draft() else t("api.server.no_active_draft_to_clear")
+                )
+            elif draft_intent == "clarify_draft":
+                if draft_active and draft_data and draft_data.get("message"):
+                    draft_reply = (
+                        t("api.server.draft_preview")
+                        + str(draft_data["message"]).strip()
+                        + "\n\n"
+                        + t("api.server.draft_action_prompt")
+                    )
+                else:
+                    draft_reply = (
+                        t("api.server.no_active_draft")
+                        + t("server.draft_clarification")
+                    )
+            elif (
+                draft_intent == "confirm_send"
+                and draft_active
+                and draft_data
+                and draft_data.get("message")
+                and draft_data.get("target_name")
+            ):
+                import uuid
+                from core import approval
+
+                call_id = f"call_{uuid.uuid4().hex[:12]}"
+                approval.save_pending(
+                    "execute_local_pipeline", {}, call_id, channel="matrix",
+                )
+                tool_call = {
+                    "name": "execute_local_pipeline", "id": call_id, "args": {},
+                }
+                try:
+                    delivery_channel = approval._notify_selected_approval(tool_call)
+                except Exception:
+                    delivery_channel = None
+                if delivery_channel != "matrix":
+                    approval.pop_pending(call_id)
+                    draft_reply = t(
+                        "core.approval.delivery_failed",
+                        name="execute_local_pipeline", channel="Element",
+                    )
+                else:
+                    draft_reply = t(
+                        "core.approval.waiting",
+                        name="execute_local_pipeline", channel="Element",
+                    )
+
+        if draft_reply is not None:
+            from core.utils import (
+                sanitize_messenger_draft_claims,
+                strip_operational_assistant_paragraphs,
+            )
+
+            visible_draft_reply = (
+                strip_operational_assistant_paragraphs(
+                    sanitize_messenger_draft_claims(draft_reply)
+                ).strip() or draft_reply
+            )
+            append_message(
+                role="assistant",
+                content=visible_draft_reply,
+                channel="matrix",
+                agent="Chat_Agent",
+                metadata=provenance,
+                db_path=self._conversation_db_path,
+            )
+            self._run_hook(
+                self._on_exchange_completed,
+                clean_user_text,
+                visible_draft_reply,
+                "Chat_Agent",
+                "matrix",
+            )
+            return visible_draft_reply
+
         context = self._history_messages(exclude_message_id=str(saved_user["id"]))
         from core.untrusted_content import (
             external_content_history_metadata,
@@ -290,6 +379,26 @@ class MatrixTurnService:
                 if candidate and not candidate.startswith("[Tool Call:"):
                     handling_agent = node
                     final_reply = candidate
+
+        import core.utils as response_utils
+
+        if response_utils.should_attach_linkedin_draft_reply(
+            clean_user_text,
+            tool_results,
+            recent_linkedin_prompt_active=response_utils.is_reply_to_recent_linkedin_prompt(context),
+        ):
+            final_reply = response_utils.build_linkedin_draft_ready_reply(tool_results)
+
+        if any(
+            response_utils.looks_like_terminal_messenger_draft_result(result)
+            for result in tool_results
+        ):
+            final_reply = response_utils.build_messenger_draft_ready_reply(tool_results)
+
+        if not final_reply and tool_results:
+            from clients.telegram_bot import _tool_results_fallback_response
+
+            final_reply = _tool_results_fallback_response(clean_user_text, tool_results)
 
         if not final_reply:
             raise RuntimeError("Matrix graph produced no final reply")
