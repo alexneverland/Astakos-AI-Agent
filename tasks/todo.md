@@ -145,8 +145,10 @@
   - Offline parity slices completed 2026-09-24: shared Matrix/Telegram live
     location lifecycle, location reminders and departure follow-ups; Matrix
     preemptive/catalog routine decisions; Messenger draft guard and preview;
-    tool-result fallback; Matrix-aware `/help` voice state. Focused group:
-    54 passed. Keep this gate open for the live checks in
+    tool-result fallback; Matrix-aware `/help` voice state. PR #200 merged;
+    its parity group passed 54 focused tests. The final review fixes for active
+    draft protection and explicit draft cleanup passed 97 focused
+    Matrix/Messenger/Web tests. Keep this gate open for the live checks in
     `tasks/matrix-parity-audit.md`.
   - Owner-approved exceptions: no heart-to-memory reaction, no legacy Matrix
     `/confirm`, and critical approvals only via encrypted Reply to the prompt.
