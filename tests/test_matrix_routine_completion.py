@@ -14,10 +14,12 @@ def test_matrix_pending_completion_updates_routine_before_returning_context(
     import memory.event_log as event_log
     import memory.routine_db as routine_db
     import clients.telegram_bot as telegram_bot
+    import core.messenger_draft as messenger_draft
     import services.routine_completion_selector as completion_selector
     from services.matrix_routine_completion import process_pending_routine_confirmation
 
     calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(messenger_draft, "active_draft_status", lambda: (True, "active", {}))
     monkeypatch.setattr(
         routine_db,
         "load_pending_confirmations",
@@ -124,6 +126,48 @@ def test_matrix_draft_offer_returns_deferred_authorization(monkeypatch) -> None:
     assert result.routine_id == 5
     assert result.sent_at == sent_at
     assert acknowledged == []
+
+
+def test_matrix_routine_offer_cannot_replace_an_active_messenger_draft(
+    monkeypatch,
+) -> None:
+    """An existing reviewed draft excludes new routine-draft authorization."""
+    from datetime import datetime
+
+    import core.messenger_draft as messenger_draft
+    import memory.routine_db as routine_db
+    import services.routine_completion_selector as completion_selector
+    from services.matrix_routine_completion import process_pending_routine_confirmation
+
+    monkeypatch.setattr(
+        messenger_draft,
+        "active_draft_status",
+        lambda: (True, "active", {"target_name": "Σοφία", "message": "Παλιό draft"}),
+    )
+    monkeypatch.setattr(
+        routine_db,
+        "load_pending_confirmations",
+        lambda: {5: {
+            "event": "Message Sofia",
+            "draft_offer": True,
+            "sent_at": datetime(2026, 9, 17, 8, 0),
+        }},
+    )
+    monkeypatch.setattr(routine_db, "get_eligible_preemptive_routines_for_day", lambda _day: [])
+    monkeypatch.setattr(routine_db, "get_active_routine_catalog", lambda: [])
+    seen_candidates: list[dict[int, str]] = []
+
+    def select_offer(_text: str, candidates: dict[int, str], _pool: str) -> RoutineSelection:
+        seen_candidates.append(candidates)
+        return RoutineSelection("draft", 5)
+
+    monkeypatch.setattr(completion_selector, "select_routine", select_offer)
+
+    result = process_pending_routine_confirmation("Ετοίμασέ το", channel="matrix")
+
+    assert result is None
+    assert seen_candidates
+    assert "[MESSENGER_DRAFT_OFFER]" not in seen_candidates[0][5]
 
 
 def test_matrix_draft_offer_reaches_the_real_selector_boundary(monkeypatch) -> None:

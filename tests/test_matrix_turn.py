@@ -42,6 +42,35 @@ async def test_matrix_draft_clear_and_clarify_intercept_without_graph(
 
 
 @pytest.mark.asyncio
+async def test_matrix_historical_message_mention_keeps_active_draft(
+    tmp_path, monkeypatch,
+) -> None:
+    """An aside about a past send remains a graph turn, not draft deletion."""
+    from core import messenger_draft
+
+    monkeypatch.setattr(
+        messenger_draft, "active_draft_status",
+        lambda: (True, "active", {"target_name": "Σοφία", "message": "Καλημέρα!"}),
+    )
+    cleared: list[bool] = []
+    monkeypatch.setattr(messenger_draft, "clear_draft", lambda: cleared.append(True) or True)
+    graph = FakeGraph()
+    service = MatrixTurnService(
+        graph=graph,
+        conversation_db_path=str(tmp_path / "conversation.db"),
+    )
+
+    reply = await service(
+        "Το μήνυμα το στείλαμε χθες, αλλά σήμερα θέλω να συζητήσουμε κάτι άλλο",
+        "$historical-send",
+    )
+
+    assert reply == graph.reply
+    assert cleared == []
+    assert len(graph.states) == 1
+
+
+@pytest.mark.asyncio
 async def test_matrix_draft_confirm_requires_selected_approval(
     tmp_path, monkeypatch,
 ) -> None:

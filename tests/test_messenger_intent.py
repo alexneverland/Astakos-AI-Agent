@@ -68,6 +68,16 @@ def test_explicit_clear_draft_still_works():
     assert result.intent == "clear_draft"
 
 
+def test_mention_of_sent_message_does_not_clear_active_draft() -> None:
+    """A historical aside must not silently erase an unrelated pending draft."""
+    result = classify_messenger_intent(
+        "Το μήνυμα το στείλαμε χθες, αλλά σήμερα θέλω να συζητήσουμε κάτι άλλο",
+        has_active_draft=True,
+    )
+
+    assert result.intent == "general_chat"
+
+
 def test_explicit_clear_draft_is_intercepted_without_active_draft() -> None:
     """A draft-clear request must not fall through to unrelated capability routing."""
     result = classify_messenger_intent("καθάρισε draft", has_active_draft=False)

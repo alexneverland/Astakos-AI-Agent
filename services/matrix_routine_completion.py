@@ -27,6 +27,7 @@ def process_pending_routine_confirmation(
     if channel != "matrix":
         raise ValueError("Matrix routine completion requires channel='matrix'")
 
+    from core.messenger_draft import active_draft_status
     from memory import routine_db
     from memory.event_log import log_event
     from services.routine_completion_context import build_routine_completion_context
@@ -43,10 +44,11 @@ def process_pending_routine_confirmation(
         )
         for routine_id, data in pending.items()
     }
+    active_draft, _, _ = active_draft_status()
     draft_offer_ids = frozenset(
         routine_id
         for routine_id, data in pending.items()
-        if isinstance(data, dict) and data.get("draft_offer") is True
+        if not active_draft and isinstance(data, dict) and data.get("draft_offer") is True
     )
     selector_candidates = {
         routine_id: (
