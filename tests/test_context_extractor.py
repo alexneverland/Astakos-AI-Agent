@@ -11,10 +11,10 @@ def mocked_context_pipeline():
         patch("services.context_extractor.safe_gemini_call") as mock_llm,
         patch("services.context_extractor.load_recent_trusted_user_messages", return_value=[]),
         patch("services.context_extractor.set_context_state") as mock_set,
-        patch("services.context_extractor.reconcile_fact_to_routines") as mock_reconcile,
+        patch("services.context_extractor.infer_routine_reconciliation_directives") as mock_reconcile,
         patch("services.context_extractor.apply_routine_reconciliation_directives") as mock_apply,
     ):
-        mock_reconcile.return_value = {"scored_directives": []}
+        mock_reconcile.return_value = []
         yield mock_llm, mock_set, mock_apply
 
 
@@ -167,20 +167,13 @@ def test_context_extractor_does_not_allow_reconciler_to_override_live_work_state
 
     # The legacy reconciler may still recognize schedule wording, but it must
     # never replace the LLM's decision about the user's present whereabouts.
-    from services.context_extractor import reconcile_fact_to_routines
+    from services.context_extractor import infer_routine_reconciliation_directives
 
-    reconcile_fact_to_routines.return_value = {
-        "scored_directives": [
-            {
-                "decision": "auto_apply",
-                "directive": {
-                    "kind": "context_state_set",
-                    "key": "user_at_work",
-                    "value": "true",
-                },
-            }
-        ]
-    }
+    infer_routine_reconciliation_directives.return_value = [{
+        "kind": "context_state_set",
+        "key": "user_at_work",
+        "value": "true",
+    }]
 
     extract_and_update_context_flags("Έφυγα για τη δουλειά.")
 
@@ -201,6 +194,51 @@ def test_context_extractor_home_state_is_consistent(mocked_context_pipeline):
     assert calls["user_out_of_home"] == "false"
     assert calls["user_at_work"] == "false"
     assert calls["kid1_away_from_home"] == "false"
+    assert calls["kid1_with_user"] == "true"
+
+
+def test_context_extractor_user_home_alone_does_not_clear_child_absence(mocked_context_pipeline):
+    """The user's home location alone says nothing about the child's whereabouts."""
+    mock_llm, mock_set, _ = mocked_context_pipeline
+    mock_llm.return_value = MagicMock(text='{"user_out_of_home": false}')
+
+    extract_and_update_context_flags("Γύρισα σπίτι, αλλά ο Αλέξανδρος λείπει.")
+
+    calls = _state_calls(mock_set)
+    assert calls["user_out_of_home"] == "false"
+    assert "kid1_away_from_home" not in calls
+
+
+def test_future_bedtime_does_not_apply_reconciler_quiet_hours(mocked_context_pipeline):
+    """A future bedtime must not activate a live quiet-hours flag."""
+    mock_llm, mock_set, mock_apply = mocked_context_pipeline
+    mock_llm.return_value = MagicMock(text="{}")
+    with patch(
+        "services.context_extractor.infer_routine_reconciliation_directives",
+        return_value=[{
+            "kind": "context_state_set",
+            "key": "quiet_hours",
+            "value": "true",
+            "until_date": "2026-09-23",
+        }],
+    ) as mock_infer:
+        extract_and_update_context_flags(
+            "Είμαστε σπίτι και σε λίγο θα πάμε για ύπνο με τον Αλέξανδρο."
+        )
+
+    mock_infer.assert_called_once()
+    assert "quiet_hours" not in _state_calls(mock_set)
+    mock_apply.assert_not_called()
+
+
+def test_explicit_current_quiet_hours_are_persisted(mocked_context_pipeline):
+    """A current quiet request can still silence proactive messages."""
+    mock_llm, mock_set, _ = mocked_context_pipeline
+    mock_llm.return_value = MagicMock(text='{"quiet_hours": true}')
+
+    extract_and_update_context_flags("Θέλω ησυχία τώρα, μην έρθουν ειδοποιήσεις.")
+
+    assert _state_calls(mock_set)["quiet_hours"] == "true"
 
 
 def test_context_extractor_records_partner_at_work_without_assuming_child_location(

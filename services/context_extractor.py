@@ -6,7 +6,7 @@ from memory.conversation_history import load_recent_trusted_user_messages
 from memory.routine_db import set_context_state
 from datetime import datetime
 from services.routine_reconciler import (
-    reconcile_fact_to_routines,
+    infer_routine_reconciliation_directives,
     apply_routine_reconciliation_directives,
 )
 
@@ -25,6 +25,7 @@ Available flags:
 8. "current_shift": one of "morning", "afternoon", or "night" only when the user directly confirms their active work shift now.
 9. "partner_at_work": (boolean) The partner is at work now.
 10. "partner_work_mode": "office" or "remote" only when the user directly states that the partner is working at their workplace or remotely/from home.
+11. "quiet_hours": (boolean) The user requests quiet or no interruptions now, or clearly says the child is already asleep now. A future bedtime does not activate quiet hours.
 
 Rules:
 - Return ONLY a JSON object.
@@ -44,6 +45,7 @@ Rules:
 - If the user directly confirms they are at work now, their active shift may be current_shift="morning", current_shift="afternoon", or current_shift="night". Do not infer a shift from a routine name, a future plan, or a past shift.
 - An active work statement supersedes older co-presence: do not leave partner_with_user=true or kid1_with_user=true unless the user explicitly says they are also at work with the user.
 - If the user directly says the partner is at work now, set partner_at_work=true, partner_with_user=false, kid1_with_partner=false, and family_at_home=false. If the user says the partner is not at work, set only partner_at_work=false; do not assume that the partner is home or with the user.
+- Treat a clear, current statement that the whole household is home as family_at_home=true. The user's own presence at home alone does not establish anyone else's location.
 
 - If the user says they are with {kid1_name} now, then kid1_with_user=true may apply.
 - If the user says {kid1_name} is with {partner_name} now, then kid1_with_partner=true may apply.
@@ -182,6 +184,7 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             "kid1_with_user",
             "kid1_with_partner",
             "partner_at_work",
+            "quiet_hours",
         }
         valid_shifts = {"morning", "afternoon", "night"}
         valid_partner_work_modes = {"office", "remote"}
@@ -232,6 +235,7 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             
         if payload.get("family_at_home") is True and payload.get("user_at_work") is not True:
             payload["kid1_away_from_home"] = False
+            payload["kid1_with_user"] = True
             payload["user_out_of_home"] = False
             payload["user_at_work"] = False
 
@@ -260,7 +264,7 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
                 f"{payload['partner_work_mode']}"
             )
 
-        recon = reconcile_fact_to_routines(
+        reconciled_directives = infer_routine_reconciliation_directives(
             user_text,
             category="family",
             reason="live_message_context",
@@ -280,19 +284,15 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             "kid1_with_user",
             "kid1_with_partner",
             "partner_at_work",
+            "quiet_hours",
         }
         directives = []
-        for item in recon.get("scored_directives", []):
-            if item.get("decision") == "auto_apply":
-                directive = item.get("directive")
-                if (
-                    directive
-                    and not (
-                        directive.get("kind") == "context_state_set"
-                        and directive.get("key") in llm_owned_live_state_keys
-                    )
-                ):
-                    directives.append(directive)
+        for directive in reconciled_directives:
+            if not (
+                directive.get("kind") == "context_state_set"
+                and directive.get("key") in llm_owned_live_state_keys
+            ):
+                directives.append(directive)
 
         if directives:
             apply_routine_reconciliation_directives(directives)
