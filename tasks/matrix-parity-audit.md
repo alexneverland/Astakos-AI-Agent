@@ -46,5 +46,7 @@ completed and observed in both conversation views:
 - One generated file or image attachment.
 - One static/live location update plus a location reminder or departure follow-up.
 
-The related offline parity group passed 54 focused tests on 2026-09-24. This is
-not a claim that those remaining live paths have been exercised.
+PR #200 is merged. Its offline parity group passed 54 focused tests on
+2026-09-24; the final active-draft and draft-cleanup fixes passed 97 focused
+Matrix/Messenger/Web tests. Neither result claims that the remaining live
+paths have been exercised.
