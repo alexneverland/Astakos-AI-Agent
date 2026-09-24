@@ -35,7 +35,7 @@ def process_pending_routine_confirmation(
 
     pending = routine_db.load_pending_confirmations()
     if not pending:
-        return None
+        return _process_nonpending_routine(user_text)
 
     candidates = {
         routine_id: (
@@ -63,7 +63,7 @@ def process_pending_routine_confirmation(
         draft_offer_ids=draft_offer_ids,
     )
     if decision.routine_id is None or decision.action == "pass_through":
-        return None
+        return _process_nonpending_routine(user_text)
 
     if decision.action == "draft":
         from services.routine_completion_context import get_pending_messenger_draft_offer
@@ -109,6 +109,7 @@ def process_pending_routine_confirmation(
             cooldown_applied=skip_result["cooldown_applied"],
         )
         routine_db.remove_pending_confirmation(routine_id)
+        _drop_pending_runtime_confirmation(routine_id)
         return completion_context
     elif decision.action == "pause":
         routine_db.pause_routine_indefinitely(routine_id)
@@ -117,6 +118,7 @@ def process_pending_routine_confirmation(
         return None
 
     routine_db.remove_pending_confirmation(routine_id)
+    _drop_pending_runtime_confirmation(routine_id)
     log_event(
         "routines",
         event_type,
@@ -124,3 +126,72 @@ def process_pending_routine_confirmation(
         event=event_name,
     )
     return completion_context
+
+
+def _drop_pending_runtime_confirmation(routine_id: int) -> None:
+    """Keep the shared scheduler snapshot consistent with persisted resolution."""
+    from clients.telegram_bot import pending_routine_confirmations
+
+    pending_routine_confirmations.pop(routine_id, None)
+
+
+def _process_nonpending_routine(user_text: str) -> SystemMessage | None:
+    """Resolve preemptive today or catalogue decisions without a pending prompt."""
+    from memory import routine_db
+    from memory.event_log import log_event
+    from services.routine_completion_context import build_routine_completion_context
+    from services.routine_completion_helper import decide_completion, relevant_catalog_candidates
+    from services.routine_completion_selector import select_routine
+
+    day_name = datetime.now().strftime("%A")
+    today_candidates = {
+        routine["id"]: routine["event"]
+        for routine in routine_db.get_eligible_preemptive_routines_for_day(day_name)
+    }
+    decision = decide_completion(
+        user_text=user_text,
+        candidates=today_candidates,
+        pool="today",
+        semantic_selector=select_routine,
+    )
+    if decision.routine_id is not None and decision.action != "pass_through":
+        routine_id = decision.routine_id
+        event_name = today_candidates[routine_id]
+        if decision.action == "complete":
+            routine_db.mark_routine_triggered_today(routine_id)
+            event_type = "preemptive_completed"
+        elif decision.action == "acknowledge":
+            routine_db.mark_routine_acknowledged(routine_id)
+            event_type = "routine_acknowledged"
+        elif decision.action == "skip_today":
+            skip = routine_db.record_routine_skip_today(routine_id)
+            event_type = "routine_skipped_today"
+        elif decision.action == "pause":
+            routine_db.pause_routine_indefinitely(routine_id)
+            event_type = "routine_paused"
+        else:
+            return None
+        details = {"skip_streak": skip["skip_streak"]} if decision.action == "skip_today" else {}
+        log_event("routines", event_type, routine_id=routine_id, event=event_name, **details)
+        return build_routine_completion_context()
+
+    catalog = {
+        routine["id"]: routine["event"]
+        for routine in routine_db.get_active_routine_catalog()
+    }
+    pause_candidates = relevant_catalog_candidates(user_text, catalog)
+    catalog_decision = decide_completion(
+        user_text=user_text,
+        candidates=pause_candidates,
+        pool="catalog",
+        semantic_selector=select_routine,
+    )
+    if catalog_decision.action != "pause" or catalog_decision.routine_id is None:
+        return None
+    routine_id = catalog_decision.routine_id
+    routine_db.pause_routine_indefinitely(routine_id)
+    log_event(
+        "routines", "routine_paused", routine_id=routine_id,
+        event=pause_candidates[routine_id],
+    )
+    return build_routine_completion_context()
