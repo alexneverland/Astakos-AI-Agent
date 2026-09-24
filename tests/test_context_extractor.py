@@ -275,7 +275,7 @@ def test_context_extractor_home_state_is_consistent(mocked_context_pipeline):
     mock_llm, mock_set, _ = mocked_context_pipeline
     mock_llm.return_value = MagicMock(text='{"family_at_home": true}')
 
-    extract_and_update_context_flags("Γυρίσαμε σπίτι.")
+    extract_and_update_context_flags("Γυρίσαμε όλοι σπίτι.")
 
     calls = _state_calls(mock_set)
     assert calls["family_at_home"] == "true"
@@ -283,6 +283,8 @@ def test_context_extractor_home_state_is_consistent(mocked_context_pipeline):
     assert calls["user_at_work"] == "false"
     assert calls["kid1_away_from_home"] == "false"
     assert calls["kid1_with_user"] == "true"
+    assert calls["partner_with_user"] == "true"
+    assert calls["kid1_with_partner"] == "true"
 
 
 def test_context_extractor_user_home_alone_does_not_clear_child_absence(mocked_context_pipeline):
@@ -295,6 +297,7 @@ def test_context_extractor_user_home_alone_does_not_clear_child_absence(mocked_c
     calls = _state_calls(mock_set)
     assert calls["user_out_of_home"] == "false"
     assert "kid1_away_from_home" not in calls
+    assert "partner_with_user" not in calls
 
 
 def test_future_bedtime_does_not_apply_reconciler_quiet_hours(mocked_context_pipeline):
