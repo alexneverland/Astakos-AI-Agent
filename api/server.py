@@ -1751,13 +1751,15 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         clean_user = clean_message(user_input)
         clean_ai   = clean_message(final_ai_response)
         mirror_ai: str | None = None
+        from services.created_file import extract_created_files
+
+        visible_output = extract_created_files(clean_ai).text
+        if visible_output != clean_ai:
+            mirror_ai = visible_output
 
         # 1. --- MASTER INTERCEPTOR FOR REGISTRATION LINKS (Web UI) ---
         file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", clean_ai)
         if file_match:
-            from services.created_file import extract_created_files
-
-            mirror_ai = extract_created_files(clean_ai).text
             file_path = file_match.group(1).strip()
             filename  = os.path.basename(file_path)
             base_url  = str(request.base_url).rstrip("/")

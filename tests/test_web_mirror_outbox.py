@@ -286,21 +286,23 @@ def test_external_scheduler_registers_mirror_consumer_without_importing_bot() ->
 
 
 @pytest.mark.parametrize(
-    ("reply_template", "assistant_mirrored"),
+    ("reply_template", "assistant_mirrored", "web_marker"),
     [
-        ("Έτοιμη η αναφορά. [CREATED_FILE: {path}]", True),
-        ("[CREATED_FILE: {path}]", False),
+        ("Έτοιμη η αναφορά. [CREATED_FILE: {path}]", True, "data-path="),
+        ("[CREATED_FILE: {path}]", False, "data-path="),
+        ("Έτοιμη η εικόνα. [SEND_PHOTO: {path}]", True, "ASTAKOS_ASSET_URL"),
+        ("[SEND_PHOTO: {path}]", False, "ASTAKOS_ASSET_URL"),
     ],
 )
-def test_created_file_web_card_never_enters_external_mirror(
-    tmp_path, reply_template: str, assistant_mirrored: bool
+def test_generated_output_marker_never_enters_external_mirror(
+    tmp_path, reply_template: str, assistant_mirrored: bool, web_marker: str
 ) -> None:
-    """A generated-file reply keeps its Web card but mirrors no local path."""
+    """Generated outputs stay visible on Web without leaking paths or markers."""
     from api.server import LOCAL_TOKEN, server
     from memory.conversation_history import load_pending_web_mirrors
 
     db_path = str(tmp_path / "conversation.db")
-    private_path = r"C:\astakos_v2\outputs\private-report.pdf"
+    private_path = r"C:\astakos_v2\outputs\private-output.png"
 
     def save_history(role: str, content: str, **kwargs: object) -> dict[str, object]:
         return append_message(
@@ -343,10 +345,11 @@ def test_created_file_web_card_never_enters_external_mirror(
         )
 
     assert response.status_code == 200
-    assert "data-path=" in response.json()["response"]
+    assert web_marker in response.json()["response"]
     mirror = load_pending_web_mirrors("matrix", db_path=db_path)
     assert len(mirror) == (2 if assistant_mirrored else 1)
     if assistant_mirrored:
-        assert "Έτοιμη η αναφορά." in mirror[1]["content"]
+        assert mirror[1]["content"].startswith("Έτοιμη η ")
         assert "astakos_v2" not in mirror[1]["content"]
         assert "<div" not in mirror[1]["content"]
+        assert "ASTAKOS_ASSET" not in mirror[1]["content"]
