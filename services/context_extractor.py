@@ -26,7 +26,7 @@ Available flags:
 9. "partner_at_work": (boolean) The partner is at work now.
 10. "partner_work_mode": "office" or "remote" only when the user directly states that the partner is working at their workplace or remotely/from home.
 11. "quiet_hours": (boolean) The user requests quiet or no interruptions now, or clearly says the child is already asleep now. A future bedtime does not activate quiet hours.
-12. "kid1_absence_scope": "extended" when the child is explicitly away from the family for a stay/overnight period and cannot take part in their routines; "temporary" for school or a short outing; "home" when the child has returned or is with the user. Do not infer an extended absence merely from being outside the house.
+12. "kid1_absence_scope": "extended" when the child is explicitly away from the family for a stay/overnight period and cannot take part in their routines; "temporary" for school or a short outing; "home" when the child has returned or is with the user. Do not infer an extended absence merely from being outside the house. Omit this key when the new message does not establish a different absence scope.
 
 Rules:
 - Return ONLY a JSON object.
@@ -248,9 +248,6 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         # independently updated whereabouts/reason flags.
         if payload.get("kid1_away_from_home") is False:
             payload["kid1_absence_scope"] = "home"
-        elif payload.get("kid1_away_from_home") is True:
-            if payload.get("kid1_absence_scope") not in {"extended", "temporary"}:
-                payload["kid1_absence_scope"] = "temporary"
         elif payload.get("kid1_absence_scope") == "extended":
             payload["kid1_away_from_home"] = True
         elif payload.get("kid1_absence_scope") not in valid_absence_scopes:
@@ -264,9 +261,12 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
                 print(f"[ContextExtractor] Updated {key} = {str_val}")
 
         if "kid1_absence_scope" in payload:
-            set_context_state("kid1_absence_scope", payload["kid1_absence_scope"], expires_at=today_str)
-            # Retire any older legacy reason so it cannot reappear when this
-            # day's canonical scope expires.
+            # An explicitly confirmed stay remains in force until a later
+            # explicit temporary/home state replaces it.
+            scope_expiry = None if payload["kid1_absence_scope"] == "extended" else today_str
+            set_context_state("kid1_absence_scope", payload["kid1_absence_scope"], expires_at=scope_expiry)
+            # Retire any older legacy reason so it cannot reappear after the
+            # canonical scope is updated.
             set_context_state("kid1_away_reason", "", expires_at=today_str)
 
         if "current_shift" in payload:
