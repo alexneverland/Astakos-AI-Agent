@@ -356,3 +356,15 @@
     shared `/story` generation with encrypted image attachments, and trusted
     static/live location event validation and deduplication are covered offline.
     Heart reactions intentionally do not write memory.
+
+- [x] Implement the existing-bug investigation handoff in
+  `tasks/bug-investigation-flow-spec.md`.
+  - [x] Reproduce accepted, declined, stale, and unrelated responses with
+    focused offline tests before changing routing.
+  - [x] Route only an accepted current bug offer to read-only Dev_Agent and
+    enforce the tool boundary in `approval_check`.
+  - [x] Require a later explicit fix instruction; retain normal approval gates
+    and block vague assent. Verify relevant suites and `git diff --check`.
+  - Verified offline: 179 focused routing, approval, project-access, Web,
+    Telegram, and Matrix tests passed. Live Web/Element validation remains a
+    separate owner check.

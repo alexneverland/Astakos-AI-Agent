@@ -1,9 +1,18 @@
 import re
+from typing import Any, Callable
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from core.i18n import t
 from core.utils import clean_message, strip_transport_metadata
+
+
+BUG_DIAGNOSIS_READ_TOOLS = frozenset({
+    "list_project_files",
+    "read_project_file",
+    "grep_project_files",
+    "list_recent_files",
+})
 
 
 def is_capability_proposal_text(content: object) -> bool:
@@ -23,6 +32,49 @@ def is_bug_proposal_text(content: object) -> bool:
         return False
     text = strip_transport_metadata(clean_message(content)).casefold()
     return text.startswith(proposal_prefix.strip().casefold())
+
+
+def is_bug_diagnosis_text(content: object) -> bool:
+    """Recognize the canonical final diagnostic report, not an intermediate read."""
+    prefix = t("core.approval.bug_diagnosis_prefix")
+    if not isinstance(prefix, str) or not prefix.strip():
+        return False
+    text = strip_transport_metadata(clean_message(content)).casefold()
+    return text.startswith(prefix.strip().casefold())
+
+
+def _has_current_assistant_offer(
+    state: dict[str, Any], predicate: Callable[[object], bool]
+) -> bool:
+    """Require the newest owner turn to immediately follow a canonical offer."""
+    messages = [
+        message for message in state.get("messages", [])
+        if getattr(message, "type", "") != "system"
+    ]
+    if len(messages) < 2:
+        return False
+    latest = messages[-1]
+    if not (getattr(latest, "type", "") == "human" or isinstance(latest, HumanMessage)):
+        return False
+    preceding = messages[-2]
+    if not (getattr(preceding, "type", "") == "ai" or isinstance(preceding, AIMessage)):
+        return False
+    return predicate(getattr(preceding, "content", ""))
+
+
+def has_pending_bug_proposal(state: dict[str, Any]) -> bool:
+    """Return whether the latest owner turn follows a current bug offer."""
+    return _has_current_assistant_offer(state, is_bug_proposal_text)
+
+
+def has_pending_bug_diagnosis(state: dict[str, Any]) -> bool:
+    """Return whether the latest owner turn follows a final bug diagnosis."""
+    return _has_current_assistant_offer(state, is_bug_diagnosis_text)
+
+
+def has_pending_bug_followup(state: dict[str, Any]) -> bool:
+    """Keep current bug consent and fix replies out of transport ACK shortcuts."""
+    return has_pending_bug_proposal(state) or has_pending_bug_diagnosis(state)
 
 
 def render_capability_followup(kind: str, description: str) -> str | None:

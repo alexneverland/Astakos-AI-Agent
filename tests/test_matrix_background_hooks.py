@@ -210,6 +210,26 @@ def test_matrix_capability_followup_sends_once_and_persists_proposal(
     assert len(router.sent) == 1
 
 
+def test_matrix_capability_followup_does_not_reclassify_bug_diagnosis(
+    tmp_path, monkeypatch
+) -> None:
+    """A final diagnostic report must not trigger another Matrix bug offer."""
+    import services.matrix_background as background
+    from core.i18n import t
+
+    db_path = str(tmp_path / "conversation.db")
+    user = append_message(role="user", content="please investigate", channel="matrix", db_path=db_path)
+
+    def fail_classifier(*args, **kwargs):
+        raise AssertionError("diagnosis must not be classified again")
+
+    monkeypatch.setattr(background, "update_capabilities_from_exchange", fail_classifier)
+    background.run_matrix_capability_followup(
+        "please investigate", f"{t('core.approval.bug_diagnosis_prefix')} the timestamp is stale.",
+        "Dev_Agent", user["rowid"], db_path,
+    )
+
+
 def test_matrix_capability_followup_skips_stale_turn_and_uncertain_classification(
     tmp_path, monkeypatch
 ) -> None:

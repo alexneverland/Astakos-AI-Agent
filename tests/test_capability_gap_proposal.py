@@ -10,6 +10,7 @@ def _fake_translate(key: str, **kwargs: str) -> str | list[str]:
     value = {
         "core.approval.capability_proposal_prefix": "New tool proposal:",
         "core.approval.bug_proposal_prefix": "Possible bug in existing behavior:",
+        "core.approval.bug_diagnosis_prefix": "Bug diagnosis:",
         "core.approval.bug_proposal": "Possible bug in existing behavior: {description} Ask me to investigate before any fix.",
         "core.approval.draft_markers": ["create draft"],
     }.get(key, key)
@@ -60,6 +61,16 @@ def test_web_wrapper_does_not_duplicate_an_agent_capability_proposal(mock_depend
 
     mock_dependencies["append_chat"].assert_not_called()
 
+
+def test_web_wrapper_does_not_reclassify_a_completed_bug_diagnosis(mock_dependencies):
+    """The diagnostic report must not generate another offer for the same bug."""
+    _enqueue_capability_gap_web(
+        "please investigate", "Bug diagnosis: the timestamp is stale.",
+        "Dev_Agent", "web", 100,
+    )
+    mock_dependencies["update_caps"].assert_not_called()
+    mock_dependencies["append_chat"].assert_not_called()
+
 def test_telegram_wrapper_records_only_after_send_success(mock_dependencies):
     _enqueue_capability_gap_telegram("user text", "ai text", "Chat_Agent", "telegram", 100, "chat123")
 
@@ -93,6 +104,16 @@ def test_telegram_wrapper_does_not_duplicate_an_agent_capability_proposal(mock_d
         "chat123",
     )
 
+    mock_dependencies["send_and_record"].assert_not_called()
+
+
+def test_telegram_wrapper_does_not_reclassify_a_completed_bug_diagnosis(mock_dependencies):
+    """Telegram cannot turn its diagnostic answer into a new proposal."""
+    _enqueue_capability_gap_telegram(
+        "please investigate", "Bug diagnosis: the timestamp is stale.",
+        "Dev_Agent", "telegram", 100, "chat123",
+    )
+    mock_dependencies["update_caps"].assert_not_called()
     mock_dependencies["send_and_record"].assert_not_called()
 
 def test_detector_returns_missing_capability_only_for_newly_inserted_cannot_do(monkeypatch):

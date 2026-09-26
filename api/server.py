@@ -928,6 +928,9 @@ async def manual_session_save(_=Depends(require_token)):
     return JSONResponse({"status": "Archiving started!"})
 
 def _enqueue_capability_gap_web(user_text: str, ai_text: str, agent: str, channel: str, correlation_rowid: int):
+    from core.capability_draft import is_bug_diagnosis_text
+    if is_bug_diagnosis_text(ai_text):
+        return
     from memory.working_memory import update_capabilities_from_exchange
     observation = update_capabilities_from_exchange(user_text, ai_text, agent)
     if not observation:
@@ -1621,6 +1624,10 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         )
         
         is_ultra_ack = is_ultra_light_ack(isolated_user_input)
+        from core.capability_draft import has_pending_bug_followup
+        pending_bug_followup = has_pending_bug_followup(
+            {"messages": context_msgs + [human_msg]}
+        )
         tool_result_fallbacks = []
         external_tool_names: list[str] = []
         provenance_messages_for_reply: list = []
@@ -1643,6 +1650,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         if (
             is_ultra_ack
+            and not pending_bug_followup
             and routine_completion_context is None
             and not mail_prompt_active
             and not pending_plan_confirmation
