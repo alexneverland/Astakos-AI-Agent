@@ -1654,6 +1654,9 @@ def send_voice_reply(text, chat_id):
         send_telegram_msg(f"Master, I lost my voice... (Error: {e})")
 
 def _enqueue_capability_gap_telegram(user_text: str, ai_text: str, agent: str, channel: str, correlation_rowid: int, chat_id: str | None = None):
+    from core.capability_draft import is_bug_diagnosis_text
+    if is_bug_diagnosis_text(ai_text):
+        return
     from memory.working_memory import update_capabilities_from_exchange
     observation = update_capabilities_from_exchange(user_text, ai_text, agent)
     if not observation:
@@ -2736,6 +2739,10 @@ def handle_message(
         )
         
         is_ultra_ack = is_ultra_light_ack(clean_user_text)
+        from core.capability_draft import has_pending_bug_followup
+        pending_bug_followup = has_pending_bug_followup(
+            {"messages": context_msgs + [current_msg]}
+        )
         fast_path_used = False
         medium_path_used = False
         provenance_messages_for_reply: list = []
@@ -2745,7 +2752,7 @@ def handle_message(
 
         mail_prompt_active = is_reply_to_recent_mail_prompt(context_msgs)
         
-        if is_ultra_ack and routine_completion_context is None and not mail_prompt_active:
+        if is_ultra_ack and not pending_bug_followup and routine_completion_context is None and not mail_prompt_active:
             _trace.mark_phase("ultra_light_ack_used", 1)
             handling_agent = "UltraLightACK"
             final_ai_response = get_ultra_light_ack_response()

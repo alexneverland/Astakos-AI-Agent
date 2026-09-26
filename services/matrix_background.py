@@ -9,6 +9,7 @@ from typing import Any
 from config import CONVERSATION_DB_FILE
 from core.capability_draft import (
     is_bug_proposal_text,
+    is_bug_diagnosis_text,
     is_capability_proposal_text,
     render_capability_followup,
 )
@@ -85,7 +86,7 @@ def run_matrix_capability_followup(
     conversation_db_path: str,
 ) -> None:
     """Deliver one classified proposal only while its Matrix turn is current."""
-    if is_capability_proposal_text(ai_text) or is_bug_proposal_text(ai_text):
+    if is_capability_proposal_text(ai_text) or is_bug_proposal_text(ai_text) or is_bug_diagnosis_text(ai_text):
         return
     newer = load_messages_after_rowid(
         after_rowid=correlation_rowid,

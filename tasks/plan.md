@@ -326,3 +326,23 @@ permanent record for transient/uncertain failures.
 
 The full bug diagnosis-to-fix workflow and remaining live Matrix parity checks
 remain separate tasks. The task checklist is in `tasks/todo.md`.
+
+---
+
+# Implementation Plan: Existing-Bug Investigation Handoff
+
+Objective: honor a current bug-investigation offer with a read-only diagnostic
+turn, then require a separate explicit owner instruction before any fix. The
+acceptance contract and exclusions are in `tasks/bug-investigation-flow-spec.md`.
+
+1. Add focused offline RED tests for current-offer acceptance, refusal/question
+   and stale/unrelated replies, with shared Web/Telegram/Matrix graph routing.
+2. Route affirmative intent semantically to Dev_Agent in diagnosis-only mode.
+   Bind read-only project inspection tools and enforce the same boundary in
+   `approval_check` against injected or looped mutating calls.
+3. Cover the second explicit fix request and vague-assent negative case;
+   preserve normal access and tool approvals. Run focused routing/approval
+   regressions, relevant channel tests, and `git diff --check`.
+
+No live cloud calls, credentials, database migrations, runtime edits, or PR
+actions are part of this implementation. Live owner testing remains separate.

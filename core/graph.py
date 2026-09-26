@@ -191,6 +191,9 @@ def _route_supervisor(state: AgentState) -> str:
     import re as _re
     from core.utils import clean_message
 
+    if state.get("bug_followup_routed") is True:
+        return state.get("next_agent", "Chat_Agent")
+
     last_msg = clean_message(state["messages"][-1].content)
 
     # ── 1. Explicit /plan ────────────────────────────────────────

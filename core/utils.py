@@ -87,6 +87,10 @@ class AgentState(TypedDict):
     active_draft_edit_context_isolated: NotRequired[bool]
     # Set only when an active Messenger draft revision is invoked without
     # externally derived prompt context or read tools.
+    bug_diagnosis_read_only: NotRequired[bool]
+    # Set by the Supervisor only for the current accepted bug-investigation turn.
+    bug_followup_routed: NotRequired[bool]
+    # Prevent automatic planning from overriding a classified bug follow-up.
 
 # ────────────────────────────────────────────────────────────────
 # 2. MESSAGE HELPERS (Mastro-Shield & Smart Parser)

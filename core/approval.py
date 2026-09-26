@@ -579,6 +579,23 @@ def approval_check_node(state):
     if not tool_calls:
         return {"approval_status": "ok"}
 
+    if state.get("bug_diagnosis_read_only") is True:
+        from core.capability_draft import BUG_DIAGNOSIS_READ_TOOLS
+        forbidden = [tc for tc in tool_calls if tc["name"] not in BUG_DIAGNOSIS_READ_TOOLS]
+        if forbidden:
+            return {
+                "approval_status": "blocked",
+                "messages": [ToolMessage(
+                    content=t("core.approval.bug_diagnosis_tool_blocked", name=tc["name"]),
+                    tool_call_id=tc["id"],
+                    name=tc["name"],
+                ) for tc in forbidden] + [AIMessage(content=t(
+                    "core.approval.bug_diagnosis_interrupted",
+                    name=forbidden[0]["name"],
+                    bug_offer_prefix=t("core.approval.bug_proposal_prefix"),
+                ))],
+            }
+
     blocked_entries = [
         (tc, "core.approval.blocked", "rejected by safe executor")
         for tc in tool_calls
