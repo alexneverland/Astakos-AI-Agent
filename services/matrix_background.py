@@ -20,7 +20,11 @@ from memory.session_memory import (
     run_memory_sifter_fast,
     run_memory_sifter_slow,
 )
-from memory.working_memory import update_capabilities_from_exchange, update_working_memory
+from memory.working_memory import (
+    record_missing_capability,
+    update_capabilities_from_exchange,
+    update_working_memory,
+)
 from services.behavioral_event_scheduler import schedule_persisted_user_intake
 from services.context_extractor import extract_and_update_context_flags
 from services.external_delivery import external_delivery_router
@@ -91,10 +95,19 @@ def run_matrix_capability_followup(
     if any(message.get("role") == "user" for message in newer):
         return
 
-    observation = update_capabilities_from_exchange(user_text, ai_text, agent_name)
+    observation = update_capabilities_from_exchange(
+        user_text, ai_text, agent_name, defer_missing_persistence=True
+    )
     if observation is None:
         return
     proposal = render_capability_followup(observation.kind, observation.description)
+    newer = load_messages_after_rowid(
+        after_rowid=correlation_rowid,
+        channel="matrix",
+        db_path=conversation_db_path,
+    )
+    if any(message.get("role") == "user" for message in newer):
+        return
     if not proposal or any(
         message.get("agent") == "Dev_Agent" and message.get("content") == proposal
         for message in newer
@@ -102,6 +115,8 @@ def run_matrix_capability_followup(
         return
 
     receipt = external_delivery_router.send_text_to("matrix", proposal)
+    if observation.kind == "missing_capability":
+        record_missing_capability(observation.description)
     append_message(
         role="assistant",
         content=proposal,

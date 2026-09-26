@@ -173,8 +173,9 @@ def test_matrix_capability_followup_sends_once_and_persists_proposal(
     description = "Astakos cannot do X" if kind == "missing_capability" else "partner state is wrong"
     monkeypatch.setattr(
         background, "update_capabilities_from_exchange",
-        lambda *args: CapabilityObservation(kind, description), raising=False,
+        lambda *args, **kwargs: CapabilityObservation(kind, description), raising=False,
     )
+    monkeypatch.setattr(background, "record_missing_capability", lambda description: "inserted")
 
     class FakeRouter:
         sent: list[tuple[str, str]] = []
@@ -226,17 +227,101 @@ def test_matrix_capability_followup_skips_stale_turn_and_uncertain_classificatio
     monkeypatch.setattr(background, "external_delivery_router", FailRouter(), raising=False)
     monkeypatch.setattr(
         background, "update_capabilities_from_exchange",
-        lambda *args: CapabilityObservation("missing_capability", "Astakos cannot do X"),
+        lambda *args, **kwargs: CapabilityObservation("missing_capability", "Astakos cannot do X"),
         raising=False,
     )
     background.run_matrix_capability_followup("First", "answer", "Chat_Agent", user["rowid"], db_path)
 
     newer = append_message(role="user", content="Third", channel="matrix", db_path=db_path)
     monkeypatch.setattr(
-        background, "update_capabilities_from_exchange", lambda *args: None,
+        background, "update_capabilities_from_exchange", lambda *args, **kwargs: None,
         raising=False,
     )
     background.run_matrix_capability_followup("Third", "answer", "Chat_Agent", newer["rowid"], db_path)
+
+
+def test_matrix_capability_followup_skips_user_turn_arriving_during_classification(
+    tmp_path, monkeypatch
+) -> None:
+    """A slow classifier cannot send a proposal after a newer owner message."""
+    import services.matrix_background as background
+
+    db_path = str(tmp_path / "conversation.db")
+    user = append_message(role="user", content="First", channel="matrix", db_path=db_path)
+
+    def classify(*args, **kwargs):
+        append_message(role="user", content="Newer", channel="matrix", db_path=db_path)
+        return CapabilityObservation("existing_behavior_bug", "partner flag is wrong")
+
+    class FailRouter:
+        def send_text_to(self, *args, **kwargs):
+            raise AssertionError("stale Matrix proposal was sent")
+
+    monkeypatch.setattr(background, "update_capabilities_from_exchange", classify)
+    monkeypatch.setattr(background, "external_delivery_router", FailRouter())
+    background.run_matrix_capability_followup("First", "answer", "Chat_Agent", user["rowid"], db_path)
+
+
+def test_matrix_capability_followup_retries_missing_capability_after_failed_send(
+    tmp_path, monkeypatch
+) -> None:
+    """A failed send leaves the real capability registry uncommitted for retry."""
+    import sqlite3
+    from unittest.mock import MagicMock
+
+    import memory.working_memory as working_memory
+    import services.matrix_background as background
+    from services.external_delivery import DeliveryReceipt
+
+    db_path = str(tmp_path / "conversation.db")
+    capability_db = tmp_path / "capabilities.db"
+    with sqlite3.connect(capability_db) as conn:
+        conn.execute(
+            "CREATE TABLE capabilities (id INTEGER PRIMARY KEY, type TEXT NOT NULL, "
+            "description TEXT NOT NULL UNIQUE, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+        )
+    monkeypatch.setattr(working_memory, "STATE_DB", str(capability_db))
+    monkeypatch.setattr(
+        working_memory, "is_semantically_duplicate",
+        lambda description, existing, **kwargs: description in existing,
+    )
+    monkeypatch.setattr(
+        "services.gemini.safe_gemini_call",
+        MagicMock(return_value=MagicMock(text='{"issue_type":"missing_capability","cannot_do":"Astakos cannot do X"}')),
+    )
+
+    user = append_message(role="user", content="Need X", channel="matrix", db_path=db_path)
+
+    class Router:
+        fail = True
+        sent: list[str] = []
+
+        def send_text_to(self, channel, text):
+            if self.fail:
+                raise RuntimeError("offline transport failure")
+            self.sent.append(text)
+            return DeliveryReceipt(channel="matrix", external_id="$proposal")
+
+    router = Router()
+    monkeypatch.setattr(background, "external_delivery_router", router)
+    with pytest.raises(RuntimeError, match="offline transport failure"):
+        background.run_matrix_capability_followup(
+            "Need X", "cannot do X", "Chat_Agent", user["rowid"], db_path
+        )
+    assert working_memory._load_capabilities()["cannot_do"] == []
+
+    router.fail = False
+    background.run_matrix_capability_followup(
+        "Need X", "cannot do X", "Chat_Agent", user["rowid"], db_path
+    )
+    assert len(router.sent) == 1
+    assert working_memory._load_capabilities()["cannot_do"] == ["Astakos cannot do X"]
+
+    newer = append_message(role="user", content="Need X again", channel="matrix", db_path=db_path)
+    background.run_matrix_capability_followup(
+        "Need X again", "cannot do X", "Chat_Agent", newer["rowid"], db_path
+    )
+    assert len(router.sent) == 1
 
 
 def test_matrix_capability_followup_does_not_persist_failed_delivery(
@@ -249,7 +334,7 @@ def test_matrix_capability_followup_does_not_persist_failed_delivery(
     user = append_message(role="user", content="Need help", channel="matrix", db_path=db_path)
     monkeypatch.setattr(
         background, "update_capabilities_from_exchange",
-        lambda *args: CapabilityObservation("existing_behavior_bug", "partner flag is wrong"),
+        lambda *args, **kwargs: CapabilityObservation("existing_behavior_bug", "partner flag is wrong"),
     )
 
     class FailingRouter:
