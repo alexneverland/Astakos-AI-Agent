@@ -5334,7 +5334,7 @@ def job_morning_hn_briefing():
 
 def job_goal_followup():
     """
-    Checks active goals that have not been reported in the last 7 days.
+    Checks goals with no recorded activity or related memory for seven days.
     Runs once a day at 10:00.
     """
     now_hour = datetime.now().hour
@@ -5357,44 +5357,49 @@ def job_goal_followup():
         if not goals:
             return
 
-        # Semantic search: we search if there are recent memories for each goal
+        # Check the goal's own activity first; semantic memory is a secondary guard.
         from datetime import timedelta
         from memory.vector_store import vector_store, vector_lock
-        cutoff_ts = (datetime.now() - timedelta(days=7)).timestamp()
+        from services.goal_followup_timing import (
+            format_goal_followup_context,
+            select_goals_for_followup,
+        )
+        now = datetime.now()
+        cutoff_ts = (now - timedelta(days=7)).timestamp()
 
-        stale_goals = []
-        for g in goals:
-            try:
-                emb = vector_store.embeddings.embed_query(g["project"] + " " + g["description"])
-                with vector_lock:
-                    results = vector_store._collection.query(
-                        query_embeddings=[emb],
-                        n_results=3,
-                        where={"timestamp": {"$gte": cutoff_ts}},
-                    )
-                # If nothing recent was found → stale
-                if not results["ids"] or not results["ids"][0]:
-                    stale_goals.append(g)
-                    print(f"[GoalFollowup]: '{g['project']}' → stale (0 recent memories)")
-                else:
-                    print(f"[GoalFollowup]: '{g['project']}' → active ({len(results['ids'][0])} recent memories)")
-            except Exception as _e:
-                print(f"[GoalFollowup]: semantic check error for '{g['project']}': {_e}")
-                stale_goals.append(g)
+        def has_recent_memory(goal: dict) -> bool:
+            """Check fresh semantic memory after the goal's own date is due."""
+            emb = vector_store.embeddings.embed_query(goal["project"] + " " + goal["description"])
+            with vector_lock:
+                results = vector_store._collection.query(
+                    query_embeddings=[emb],
+                    n_results=3,
+                    where={"timestamp": {"$gte": cutoff_ts}},
+                )
+            ids = results.get("ids") or []
+            found = bool(ids and ids[0])
+            print(
+                f"[GoalFollowup]: '{goal['project']}' → "
+                f"{'active' if found else 'stale'} "
+                f"(recent memories: {len(ids[0]) if ids else 0})"
+            )
+            return found
+
+        stale_goals = select_goals_for_followup(
+            goals, now=now, has_recent_memory=has_recent_memory,
+        )
 
         if not stale_goals:
             return
 
         # LLM crafts natural follow-up message
         from services.gemini import safe_gemini_call
+        from core.untrusted_content import format_untrusted_persisted_content
         goals_text_lines = []
         for g in stale_goals[:3]:
-            line = f"- {g['project']}: {g['description']}"
-            if g.get('progress'):
-                line += t("clients.telegram_bot.bot_msg_progress_percent", progress=g["progress"])
-            if g.get('milestones'):
-                line += f"\n  Milestones: {g['milestones']}"
-            goals_text_lines.append(line)
+            goals_text_lines.append(format_untrusted_persisted_content(
+                format_goal_followup_context(g), g.get("metadata"),
+            ))
         goals_text = "\n".join(goals_text_lines)
 
         prompt = core.i18n.load_prompt("telegram_bot_goal_followup.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, goals_text=goals_text)
