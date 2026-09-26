@@ -139,6 +139,24 @@ def test_existing_behavior_bug_does_not_become_cannot_do(monkeypatch):
     save_cap_mock.assert_not_called()
 
 
+def test_family_context_bug_still_offers_investigation(monkeypatch):
+    """A family-role word in a bug description is not a user-fact capability."""
+    monkeypatch.setattr("services.gemini.safe_gemini_call", MagicMock(
+        return_value=MagicMock(text='{"issue_type":"existing_behavior_bug","bug":"partner presence is shown incorrectly"}')
+    ))
+    save_cap_mock = MagicMock()
+    monkeypatch.setattr("memory.working_memory._save_capability", save_cap_mock)
+
+    result = update_capabilities_from_exchange(
+        "Sofia is home but the partner flag is wrong", "I showed the wrong state", "Chat_Agent"
+    )
+
+    assert result == CapabilityObservation(
+        "existing_behavior_bug", "partner presence is shown incorrectly"
+    )
+    save_cap_mock.assert_not_called()
+
+
 @pytest.mark.parametrize("issue_type", ["transient_failure", "uncertain", "unknown"])
 def test_transient_or_uncertain_issue_creates_no_capability_or_proposal(monkeypatch, issue_type):
     monkeypatch.setattr("services.gemini.safe_gemini_call", MagicMock(

@@ -63,3 +63,29 @@ def test_capability_cleanup_refuses_stale_row_without_deleting(capability_db, tm
 
     assert [item["id"] for item in capability_db.list_capability_records()] == [1, 2, 3]
     assert not backup_path.exists()
+
+
+def test_capability_cleanup_delete_failure_leaves_no_completed_backup(
+    capability_db, tmp_path
+):
+    """A rolled-back deletion cannot leave an archive claiming success."""
+    records = capability_db.list_capability_records()
+    backup_path = tmp_path / "removed.json"
+    with sqlite3.connect(capability_db.STATE_DB) as conn:
+        conn.execute(
+            "CREATE TRIGGER fail_capability_delete BEFORE DELETE ON capabilities "
+            "BEGIN SELECT RAISE(ABORT, 'delete blocked'); END"
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="delete blocked"):
+        capability_db.remove_capability_records([records[1]], backup_path)
+
+    assert [item["id"] for item in capability_db.list_capability_records()] == [1, 2, 3]
+    assert not backup_path.exists()
+    assert not list(tmp_path.glob("removed.json.*.pending"))
+
+    with sqlite3.connect(capability_db.STATE_DB) as conn:
+        conn.execute("DROP TRIGGER fail_capability_delete")
+    assert capability_db.remove_capability_records([records[1]], backup_path) == 1
+    assert backup_path.exists()
+    assert [item["id"] for item in capability_db.list_capability_records()] == [1, 3]

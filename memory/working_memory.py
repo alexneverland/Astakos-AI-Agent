@@ -13,6 +13,7 @@ import re
 import threading
 from datetime import datetime
 import sqlite3
+import tempfile
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -210,33 +211,50 @@ def remove_capability_records(
     if not expected_records:
         return 0
     backup_path = Path(backup_path)
-    if backup_path.exists():
-        raise FileExistsError(backup_path)
     ids = [item["id"] for item in expected_records]
     if len(ids) != len(set(ids)):
         raise ValueError("Duplicate capability IDs in cleanup request")
 
     with memory_lock, closing(sqlite3.connect(STATE_DB, timeout=30)) as conn:
-        with conn:
-            conn.execute("BEGIN IMMEDIATE")
-            for item in expected_records:
-                row = conn.execute(
-                    "SELECT type, description FROM capabilities WHERE id=?", (item["id"],)
-                ).fetchone()
-                if row != (item["type"], item["description"]):
-                    raise ValueError(f"Capability row {item['id']} is stale; no rows removed")
+        if backup_path.exists():
+            raise FileExistsError(backup_path)
+        pending_path = None
+        deletes_finished = False
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                for item in expected_records:
+                    row = conn.execute(
+                        "SELECT type, description FROM capabilities WHERE id=?", (item["id"],)
+                    ).fetchone()
+                    if row != (item["type"], item["description"]):
+                        raise ValueError(f"Capability row {item['id']} is stale; no rows removed")
 
-            backup_path.parent.mkdir(parents=True, exist_ok=True)
-            with backup_path.open("x", encoding="utf-8") as backup:
-                json.dump(
-                    {"removed_at": datetime.now().isoformat(), "records": expected_records},
-                    backup, ensure_ascii=False, indent=2,
+                backup_path.parent.mkdir(parents=True, exist_ok=True)
+                fd, name = tempfile.mkstemp(
+                    prefix=f"{backup_path.name}.", suffix=".pending", dir=backup_path.parent
                 )
-                backup.flush()
-                os.fsync(backup.fileno())
+                pending_path = Path(name)
+                with os.fdopen(fd, "w", encoding="utf-8") as backup:
+                    json.dump(
+                        {"removed_at": datetime.now().isoformat(), "records": expected_records},
+                        backup, ensure_ascii=False, indent=2,
+                    )
+                    backup.flush()
+                    os.fsync(backup.fileno())
 
-            for item in expected_records:
-                conn.execute("DELETE FROM capabilities WHERE id=?", (item["id"],))
+                for item in expected_records:
+                    conn.execute("DELETE FROM capabilities WHERE id=?", (item["id"],))
+                deletes_finished = True
+        except Exception:
+            if pending_path is not None and not deletes_finished:
+                pending_path.unlink(missing_ok=True)
+            raise
+
+        # Expose a completed archive only after the database commit succeeds.
+        # A finalization error leaves the staged file recoverable, never a false archive.
+        os.link(pending_path, backup_path)
+        pending_path.unlink()
     return len(expected_records)
 
 def _load_capabilities() -> dict:
@@ -397,7 +415,7 @@ def update_capabilities_from_exchange(
         issue_type = data.get("issue_type")
         if issue_type == "existing_behavior_bug" and isinstance(data.get("bug"), str):
             description = data["bug"].strip()
-            if description and description.casefold() != "null" and not _looks_like_user_fact_not_capability(description):
+            if description and description.casefold() != "null":
                 return CapabilityObservation("existing_behavior_bug", description[:500])
 
         if issue_type == "missing_capability" and data.get("cannot_do") and str(data["cannot_do"]).lower() != "null":
