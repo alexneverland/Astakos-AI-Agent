@@ -13,7 +13,11 @@ import re
 import threading
 from datetime import datetime
 import sqlite3
-from typing import Iterable
+import tempfile
+from contextlib import closing
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Literal
 from langchain_core.messages import HumanMessage
 from config import WORKING_MEMORY_FILE, STATE_DB
 from memory.vector_store import memory, is_semantically_duplicate, memory_lock  # [MASTRO-FIX]: ONE lock, not two
@@ -188,6 +192,71 @@ def update_working_memory(
 # CAPABILITIES LOG — "Self-awareness"
 # ════════════════════════════════════════════════════════════════
 
+def list_capability_records() -> list[dict[str, object]]:
+    """List every capability row for an exact, human-auditable maintenance pass."""
+    with closing(sqlite3.connect(STATE_DB, timeout=30)) as conn:
+        rows = conn.execute(
+            "SELECT id, type, description, created_at FROM capabilities ORDER BY id"
+        ).fetchall()
+    return [
+        {"id": row[0], "type": row[1], "description": row[2], "created_at": row[3]}
+        for row in rows
+    ]
+
+
+def remove_capability_records(
+    expected_records: list[dict[str, object]], backup_path: Path
+) -> int:
+    """Archive and remove only exact capability rows in one SQLite transaction."""
+    if not expected_records:
+        return 0
+    backup_path = Path(backup_path)
+    ids = [item["id"] for item in expected_records]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Duplicate capability IDs in cleanup request")
+
+    with memory_lock, closing(sqlite3.connect(STATE_DB, timeout=30)) as conn:
+        if backup_path.exists():
+            raise FileExistsError(backup_path)
+        pending_path = None
+        deletes_finished = False
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                for item in expected_records:
+                    row = conn.execute(
+                        "SELECT type, description FROM capabilities WHERE id=?", (item["id"],)
+                    ).fetchone()
+                    if row != (item["type"], item["description"]):
+                        raise ValueError(f"Capability row {item['id']} is stale; no rows removed")
+
+                backup_path.parent.mkdir(parents=True, exist_ok=True)
+                fd, name = tempfile.mkstemp(
+                    prefix=f"{backup_path.name}.", suffix=".pending", dir=backup_path.parent
+                )
+                pending_path = Path(name)
+                with os.fdopen(fd, "w", encoding="utf-8") as backup:
+                    json.dump(
+                        {"removed_at": datetime.now().isoformat(), "records": expected_records},
+                        backup, ensure_ascii=False, indent=2,
+                    )
+                    backup.flush()
+                    os.fsync(backup.fileno())
+
+                for item in expected_records:
+                    conn.execute("DELETE FROM capabilities WHERE id=?", (item["id"],))
+                deletes_finished = True
+        except Exception:
+            if pending_path is not None and not deletes_finished:
+                pending_path.unlink(missing_ok=True)
+            raise
+
+        # Expose a completed archive only after the database commit succeeds.
+        # A finalization error leaves the staged file recoverable, never a false archive.
+        os.link(pending_path, backup_path)
+        pending_path.unlink()
+    return len(expected_records)
+
 def _load_capabilities() -> dict:
     default = {"can_do": [], "cannot_do": []}
     conn = None
@@ -297,7 +366,18 @@ def get_capability_context() -> str:
     return "\n".join(parts) if parts else ""
 
 
-def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str) -> str | None:
+@dataclass(frozen=True)
+class CapabilityObservation:
+    """A narrowly classified follow-up from one completed conversation turn."""
+
+    kind: Literal["missing_capability", "existing_behavior_bug"]
+    description: str
+
+
+def update_capabilities_from_exchange(
+    user_text: str, ai_text: str, agent: str
+) -> CapabilityObservation | None:
+    """Persist proven capabilities and return only actionable, classified observations."""
     import re
     import json
     try:
@@ -332,14 +412,20 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str) 
                 elif result == "duplicate":
                     print(f"\033[90m[Self-awareness]: skip duplicate can_do: {data['can_do']}\033[0m")
             
-        if data.get("cannot_do") and str(data["cannot_do"]).lower() != "null":
+        issue_type = data.get("issue_type")
+        if issue_type == "existing_behavior_bug" and isinstance(data.get("bug"), str):
+            description = data["bug"].strip()
+            if description and description.casefold() != "null":
+                return CapabilityObservation("existing_behavior_bug", description[:500])
+
+        if issue_type == "missing_capability" and data.get("cannot_do") and str(data["cannot_do"]).lower() != "null":
             if _looks_like_user_fact_not_capability(data["cannot_do"]):
                 print(f"\033[90m[Self-awareness]: skip user fact, not cannot_do: {data['cannot_do']}\033[0m")
             else:
                 result = _save_capability("cannot", data["cannot_do"])
                 if result == "inserted":
                     print(f"\033[91m[Self-awareness]: ❌ cannot_do: {data['cannot_do']}\033[0m")
-                    return str(data["cannot_do"])
+                    return CapabilityObservation("missing_capability", str(data["cannot_do"]))
                 elif result == "duplicate":
                     print(f"\033[90m[Self-awareness]: skip duplicate cannot_do: {data['cannot_do']}\033[0m")
             

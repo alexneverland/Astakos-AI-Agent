@@ -1655,12 +1655,12 @@ def send_voice_reply(text, chat_id):
 
 def _enqueue_capability_gap_telegram(user_text: str, ai_text: str, agent: str, channel: str, correlation_rowid: int, chat_id: str | None = None):
     from memory.working_memory import update_capabilities_from_exchange
-    description = update_capabilities_from_exchange(user_text, ai_text, agent)
-    if not description:
+    observation = update_capabilities_from_exchange(user_text, ai_text, agent)
+    if not observation:
         return
 
-    from core.capability_draft import is_capability_proposal_text
-    if is_capability_proposal_text(ai_text):
+    from core.capability_draft import is_bug_proposal_text, is_capability_proposal_text
+    if is_capability_proposal_text(ai_text) or is_bug_proposal_text(ai_text):
         return
 
     from memory.conversation_history import load_messages_after_rowid
@@ -1669,9 +1669,14 @@ def _enqueue_capability_gap_telegram(user_text: str, ai_text: str, agent: str, c
         return
 
     from core.i18n import t
-    prefix = t("core.approval.capability_proposal_prefix")
-    marker = t("core.approval.draft_markers")[0]
-    proposal = f"{prefix} {description} {marker}"
+    if observation.kind == "missing_capability":
+        prefix = t("core.approval.capability_proposal_prefix")
+        marker = t("core.approval.draft_markers")[0]
+        proposal = f"{prefix} {observation.description} {marker}"
+    elif observation.kind == "existing_behavior_bug":
+        proposal = t("core.approval.bug_proposal", description=observation.description)
+    else:
+        return
 
     try:
         _send_and_record_assistant(proposal, chat_id, agent="Dev_Agent")
