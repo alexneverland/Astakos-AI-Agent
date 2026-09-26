@@ -16,6 +16,15 @@ def is_capability_proposal_text(content: object) -> bool:
     return text.startswith(proposal_prefix.strip().casefold())
 
 
+def is_bug_proposal_text(content: object) -> bool:
+    """Recognize a diagnosis offer without granting capability-draft authority."""
+    proposal_prefix = t("core.approval.bug_proposal_prefix")
+    if not isinstance(proposal_prefix, str) or not proposal_prefix.strip():
+        return False
+    text = strip_transport_metadata(clean_message(content)).casefold()
+    return text.startswith(proposal_prefix.strip().casefold())
+
+
 def has_pending_capability_proposal(state: dict) -> bool:
     """Return whether the newest user turn immediately follows a capability proposal."""
     messages = state.get("messages", [])
