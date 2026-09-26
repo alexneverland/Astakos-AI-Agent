@@ -305,3 +305,24 @@ atomically with their source history rows and drained by the selected external
 process. Mirror copies stay out of conversation history and the inbound graph.
 Offline tests cover queue ordering, retry, restart, and channel switching;
 the owner confirmed a live Web → Element text exchange.
+
+---
+
+# Implementation Plan: Matrix Capability Proposal Parity
+
+Objective: after a trusted ordinary Matrix text turn, deliver the same
+classified capability-gap proposal or existing-bug investigation offer used by
+Web/Telegram, without granting draft authority for bugs or creating a
+permanent record for transient/uncertain failures.
+
+1. Add offline regression tests for a missing capability, an existing bug,
+   stale/duplicate suppression, and no outbound delivery on uncertainty or
+   external-derived turns.
+2. Reuse one proposal renderer and the canonical self-awareness classifier;
+   pass the persisted Matrix user row ID through the completed-turn hook.
+3. Send through the selected Matrix delivery boundary, persist the delivered
+   assistant proposal with Matrix provenance, and verify focused Matrix and
+   capability suites. No new approval behavior, credentials, or runtime setup.
+
+The full bug diagnosis-to-fix workflow and remaining live Matrix parity checks
+remain separate tasks. The task checklist is in `tasks/todo.md`.

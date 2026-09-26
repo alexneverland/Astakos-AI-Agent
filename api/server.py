@@ -942,14 +942,9 @@ def _enqueue_capability_gap_web(user_text: str, ai_text: str, agent: str, channe
     if any(m.get("role") == "user" for m in newer):
         return
 
-    from core.i18n import t
-    if observation.kind == "missing_capability":
-        prefix = t("core.approval.capability_proposal_prefix")
-        marker = t("core.approval.draft_markers")[0]
-        proposal = f"{prefix} {observation.description} {marker}"
-    elif observation.kind == "existing_behavior_bug":
-        proposal = t("core.approval.bug_proposal", description=observation.description)
-    else:
+    from core.capability_draft import render_capability_followup
+    proposal = render_capability_followup(observation.kind, observation.description)
+    if not proposal:
         return
 
     append_to_chat_history("assistant", proposal, agent="Dev_Agent")

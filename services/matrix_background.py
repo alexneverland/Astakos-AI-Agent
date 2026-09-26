@@ -7,16 +7,23 @@ from dataclasses import dataclass
 from typing import Any
 
 from config import CONVERSATION_DB_FILE
+from core.capability_draft import (
+    is_bug_proposal_text,
+    is_capability_proposal_text,
+    render_capability_followup,
+)
 
+from memory.conversation_history import append_message, load_messages_after_rowid
 from memory.pending_followups import process_followup_exchange
 from memory.session_memory import (
     log_exchange,
     run_memory_sifter_fast,
     run_memory_sifter_slow,
 )
-from memory.working_memory import update_working_memory
+from memory.working_memory import update_capabilities_from_exchange, update_working_memory
 from services.behavioral_event_scheduler import schedule_persisted_user_intake
 from services.context_extractor import extract_and_update_context_flags
+from services.external_delivery import external_delivery_router
 
 TaskEnqueuer = Callable[..., None]
 SessionFinalizer = Callable[..., None]
@@ -66,6 +73,45 @@ def run_followup_pipeline(
     )
 
 
+def run_matrix_capability_followup(
+    user_text: str,
+    ai_text: str,
+    agent_name: str,
+    correlation_rowid: int,
+    conversation_db_path: str,
+) -> None:
+    """Deliver one classified proposal only while its Matrix turn is current."""
+    if is_capability_proposal_text(ai_text) or is_bug_proposal_text(ai_text):
+        return
+    newer = load_messages_after_rowid(
+        after_rowid=correlation_rowid,
+        channel="matrix",
+        db_path=conversation_db_path,
+    )
+    if any(message.get("role") == "user" for message in newer):
+        return
+
+    observation = update_capabilities_from_exchange(user_text, ai_text, agent_name)
+    if observation is None:
+        return
+    proposal = render_capability_followup(observation.kind, observation.description)
+    if not proposal or any(
+        message.get("agent") == "Dev_Agent" and message.get("content") == proposal
+        for message in newer
+    ):
+        return
+
+    receipt = external_delivery_router.send_text_to("matrix", proposal)
+    append_message(
+        role="assistant",
+        content=proposal,
+        channel="matrix",
+        agent="Dev_Agent",
+        metadata={"transport": "matrix", "matrix_event_id": receipt.external_id},
+        db_path=conversation_db_path,
+    )
+
+
 class MatrixBackgroundHooks:
     """Connect trusted Matrix turns to existing asynchronous background work."""
 
@@ -74,9 +120,11 @@ class MatrixBackgroundHooks:
         *,
         enqueue_fast_task: TaskEnqueuer,
         enqueue_slow_task: TaskEnqueuer,
+        conversation_db_path: str = CONVERSATION_DB_FILE,
     ) -> None:
         self._enqueue_fast_task = enqueue_fast_task
         self._enqueue_slow_task = enqueue_slow_task
+        self._conversation_db_path = conversation_db_path
 
     def on_user_persisted(self, saved_message: dict[str, Any]) -> None:
         """Schedule behavioral-pattern intake for a newly persisted Matrix user."""
@@ -95,6 +143,7 @@ class MatrixBackgroundHooks:
         agent_name: str,
         channel: str,
         external_content_sources: Iterable[str] | None = None,
+        correlation_rowid: int | None = None,
     ) -> None:
         """Queue the same memory, follow-up, and context pipelines as other channels."""
         if channel != "matrix":
@@ -138,6 +187,15 @@ class MatrixBackgroundHooks:
                 user_text,
                 ai_text,
             )
+            if correlation_rowid is not None:
+                self._enqueue_slow_task(
+                    run_matrix_capability_followup,
+                    user_text,
+                    ai_text,
+                    agent_name,
+                    correlation_rowid,
+                    self._conversation_db_path,
+                )
         else:
             self._enqueue_slow_task(
                 run_followup_pipeline,
@@ -168,6 +226,7 @@ def build_matrix_turn_service(
     hooks = MatrixBackgroundHooks(
         enqueue_fast_task=enqueue_fast_task,
         enqueue_slow_task=enqueue_slow_task,
+        conversation_db_path=conversation_db_path,
     )
     return MatrixTurnService(
         graph=graph,
@@ -228,6 +287,7 @@ def build_matrix_channel_services(
     hooks = MatrixBackgroundHooks(
         enqueue_fast_task=enqueue_fast_task,
         enqueue_slow_task=enqueue_slow_task,
+        conversation_db_path=conversation_db_path,
     )
     finalize = session_finalizer or finalize_session
     make_story = story_maker or generate_story

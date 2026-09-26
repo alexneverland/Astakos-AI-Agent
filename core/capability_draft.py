@@ -25,6 +25,17 @@ def is_bug_proposal_text(content: object) -> bool:
     return text.startswith(proposal_prefix.strip().casefold())
 
 
+def render_capability_followup(kind: str, description: str) -> str | None:
+    """Render one localized follow-up without granting bug reports draft authority."""
+    if kind == "missing_capability":
+        prefix = t("core.approval.capability_proposal_prefix")
+        marker = t("core.approval.draft_markers")[0]
+        return f"{prefix} {description} {marker}"
+    if kind == "existing_behavior_bug":
+        return t("core.approval.bug_proposal", description=description)
+    return None
+
+
 def has_pending_capability_proposal(state: dict) -> bool:
     """Return whether the newest user turn immediately follows a capability proposal."""
     messages = state.get("messages", [])
