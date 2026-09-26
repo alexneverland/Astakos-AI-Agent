@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime
 from core.utils import build_prompt
 
 class MockMessage:
@@ -52,6 +53,38 @@ def test_goal_injection_planner_role():
     msg = MockMessage("ΟΚ")
     prompt = build_prompt([msg], agent_role="Planner", channel="telegram")
     assert "GOALS IN PROGRESS" in prompt
+
+
+def test_goal_prompt_distinguishes_start_from_latest_activity(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "memory.context_builder.build_memory_context",
+        lambda *args, **kwargs: SimpleNamespace(render=lambda: "", semantic_error=None),
+    )
+    monkeypatch.setattr("memory.session_memory.load_last_session_hint", lambda: "")
+    monkeypatch.setattr("memory.working_memory.get_capability_context", lambda: "")
+    monkeypatch.setattr(
+        "memory.vector_store.get_active_goals",
+        lambda: [{
+            "project": "Kaggle", "description": "Submission scored 0.06",
+            "status": "active", "date": "2026-09-26", "progress": 25,
+            "milestones": "", "metadata": {
+                "created_at": datetime(2026, 9, 1, 9, 0).timestamp(),
+                "updated_at": datetime(2026, 9, 26, 9, 55).timestamp(),
+                "last_activity_at": datetime(2026, 9, 26, 9, 55).timestamp(),
+            },
+        }],
+    )
+
+    prompt = build_prompt(
+        [MockMessage("Τι κάναμε με το Kaggle;")],
+        agent_role="Chat_Agent", channel="web",
+    )
+
+    assert "created: 2026-09-01" in prompt
+    assert "last activity: 2026-09-26" in prompt
+    assert "since 2026-09-26" not in prompt
 
 
 def test_goal_injection_wraps_external_goal(monkeypatch: pytest.MonkeyPatch) -> None:

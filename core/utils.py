@@ -808,6 +808,8 @@ def build_prompt(
             from memory.vector_store import get_active_goals
             active_goals = get_active_goals()
             if active_goals:
+                from services.goal_followup_timing import goal_temporal_brief
+
                 prompt += "═══ GOALS IN PROGRESS ═══\n"
                 for g in active_goals:
                     from core.untrusted_content import format_untrusted_persisted_content
@@ -819,7 +821,7 @@ def build_prompt(
                         goal_text,
                         g.get("metadata"),
                     )
-                    prompt += " " + status_icon + " " + goal_text + " (since " + g['date'] + ")" + prog_str + "\n"
+                    prompt += " " + status_icon + " " + goal_text + goal_temporal_brief(g) + prog_str + "\n"
                     if g.get('milestones'):
                         milestones = format_untrusted_persisted_content(
                             str(g['milestones']),

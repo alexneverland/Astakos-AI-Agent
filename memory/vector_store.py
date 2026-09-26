@@ -1548,6 +1548,41 @@ def _merged_goal_external_content_sources(
     return sorted(set(existing_sources) | set(new_sources or []))
 
 
+def _goal_temporal_metadata(
+    old_meta: dict | None,
+    *,
+    now_ts: float,
+    changed: bool,
+    kind: str,
+    detail: str,
+) -> dict:
+    """Keep creation, activity, and a bounded record of actual goal changes."""
+    previous = old_meta or {}
+    temporal = {
+        "timestamp": now_ts,
+        "last_activity_at": now_ts,
+    }
+    if old_meta is None:
+        temporal["created_at"] = now_ts
+    elif previous.get("created_at"):
+        temporal["created_at"] = previous["created_at"]
+    if changed:
+        temporal["updated_at"] = now_ts
+        try:
+            events = json.loads(previous.get("goal_events_json") or "[]")
+        except (TypeError, ValueError):
+            events = []
+        if not isinstance(events, list):
+            events = []
+        events.append({"at": now_ts, "kind": kind, "detail": detail[:300]})
+        temporal["goal_events_json"] = json.dumps(events[-10:], ensure_ascii=False)
+    else:
+        for key in ("updated_at", "goal_events_json"):
+            if previous.get(key):
+                temporal[key] = previous[key]
+    return temporal
+
+
 def save_goal(
     project: str,
     description: str,
@@ -1561,8 +1596,10 @@ def save_goal(
         with vector_lock, _cross_process_lock():
             existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
             existing_metadata = None
+            old_doc = None
             if existing["ids"]:
                 existing_metadata = dict(existing["metadatas"][0])
+                old_doc = existing["documents"][0]
                 vector_store._collection.delete(ids=existing["ids"])
                 print(f"\033[94m[Goals]: Overwrite '{project}'\033[0m")
             merged_sources = _merged_goal_external_content_sources(
@@ -1570,13 +1607,30 @@ def save_goal(
                 external_content_sources,
             )
             text = f"[GOAL] {project}: {description}"
+            now_ts = datetime.now().timestamp()
+            changes = []
+            if existing_metadata is None:
+                changes.append("Goal created")
+            else:
+                if old_doc != text:
+                    changes.append(f"description: {description}")
+                for key, value in (("status", status), ("progress", progress), ("milestones", milestones)):
+                    if existing_metadata.get(key) != value:
+                        changes.append(f"{key}: {existing_metadata.get(key)} → {value}")
             metadata = {
                 "category": "goal", "project": project, "status": status,
                 "progress": progress, "milestones": milestones,
-                "agent": "GoalTracker", "timestamp": datetime.now().timestamp(),
+                "agent": "GoalTracker", "timestamp": now_ts,
                 "date": datetime.now().strftime("%Y-%m-%d"), "retrieval_count": 0,
-                "importance": 10, "confidence": 0.95, "last_accessed": datetime.now().timestamp(),
+                "importance": 10, "confidence": 0.95, "last_accessed": now_ts,
             }
+            metadata.update(_goal_temporal_metadata(
+                existing_metadata,
+                now_ts=now_ts,
+                changed=bool(changes),
+                kind="created" if existing_metadata is None else "updated",
+                detail="; ".join(changes),
+            ))
             if merged_sources:
                 from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
 
@@ -1600,7 +1654,12 @@ def update_goal_status(project: str, status: str) -> bool:
                 return False
             old_meta = dict(existing["metadatas"][0])
             vector_store._collection.delete(ids=existing["ids"])
-            new_meta = {**old_meta, "status": status, "timestamp": datetime.now().timestamp()}
+            now_ts = datetime.now().timestamp()
+            new_meta = {**old_meta, "status": status}
+            new_meta.update(_goal_temporal_metadata(
+                old_meta, now_ts=now_ts, changed=old_meta.get("status") != status,
+                kind="status", detail=f"status: {old_meta.get('status')} → {status}",
+            ))
             vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
             print(f"\033[92m[Goals]: '{project}' → {status}\033[0m")
             return True
@@ -1618,7 +1677,13 @@ def update_goal_progress(project: str, progress: int) -> bool:
                 return False
             old_meta = dict(existing["metadatas"][0])
             vector_store._collection.delete(ids=existing["ids"])
-            new_meta = {**old_meta, "progress": max(0, min(100, progress)), "timestamp": datetime.now().timestamp()}
+            now_ts = datetime.now().timestamp()
+            bounded_progress = max(0, min(100, progress))
+            new_meta = {**old_meta, "progress": bounded_progress}
+            new_meta.update(_goal_temporal_metadata(
+                old_meta, now_ts=now_ts, changed=old_meta.get("progress") != bounded_progress,
+                kind="progress", detail=f"progress: {old_meta.get('progress')}% → {bounded_progress}%",
+            ))
             vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
             print(f"\033[92m[Goals]: '{project}' progress → {progress}%\033[0m")
             return True
@@ -1640,7 +1705,12 @@ def update_goal_milestones(
                 return False
             old_meta = dict(existing["metadatas"][0])
             vector_store._collection.delete(ids=existing["ids"])
-            new_meta = {**old_meta, "milestones": milestones, "timestamp": datetime.now().timestamp()}
+            now_ts = datetime.now().timestamp()
+            new_meta = {**old_meta, "milestones": milestones}
+            new_meta.update(_goal_temporal_metadata(
+                old_meta, now_ts=now_ts, changed=old_meta.get("milestones") != milestones,
+                kind="milestones", detail=f"milestones: {milestones}",
+            ))
             merged_sources = _merged_goal_external_content_sources(
                 old_meta,
                 external_content_sources,
