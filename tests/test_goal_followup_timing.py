@@ -3,6 +3,7 @@
 import json
 from datetime import datetime, timedelta
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from services.goal_followup_timing import (
     format_goal_followup_context,
@@ -38,6 +39,24 @@ def test_newer_creation_or_change_wins_over_stale_legacy_timestamp():
 
     assert goal_followup_due({"metadata": {"timestamp": old, "created_at": recent}}, now=now) is False
     assert goal_followup_due({"metadata": {"timestamp": old, "updated_at": recent}}, now=now) is False
+
+
+def test_spring_clock_change_does_not_make_goal_due_after_only_167_hours():
+    athens = ZoneInfo("Europe/Athens")
+    activity = datetime(2026, 3, 23, 10, tzinfo=athens)
+    goal = {"metadata": {"last_activity_at": activity.timestamp()}}
+
+    assert goal_followup_due(goal, now=datetime(2026, 3, 30, 10, tzinfo=athens)) is False
+    assert goal_followup_due(goal, now=datetime(2026, 3, 30, 11, tzinfo=athens)) is True
+
+
+def test_autumn_clock_change_makes_goal_due_after_168_hours():
+    athens = ZoneInfo("Europe/Athens")
+    activity = datetime(2026, 10, 19, 10, tzinfo=athens)
+    goal = {"metadata": {"last_activity_at": activity.timestamp()}}
+
+    assert goal_followup_due(goal, now=datetime(2026, 10, 26, 8, 59, tzinfo=athens)) is False
+    assert goal_followup_due(goal, now=datetime(2026, 10, 26, 9, tzinfo=athens)) is True
 
 
 def test_context_includes_known_start_and_latest_change_without_inventing_legacy_start():

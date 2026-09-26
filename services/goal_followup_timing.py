@@ -1,6 +1,7 @@
 """Conservative timing and context for goal check-ins."""
 
 import json
+import math
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
@@ -17,6 +18,18 @@ def _recorded_time(value: object) -> datetime | None:
         return None
 
 
+def _recorded_timestamp(value: object) -> float | None:
+    """Return a representable Unix timestamp for elapsed-time comparisons."""
+    try:
+        stamp = float(value)
+        if stamp <= 0 or not math.isfinite(stamp):
+            return None
+        datetime.fromtimestamp(stamp)
+        return stamp
+    except (OverflowError, OSError, TypeError, ValueError):
+        return None
+
+
 def _last_recorded_goal_time(meta: dict[str, Any]) -> datetime | None:
     """Use the latest trustworthy creation, change, or activity marker."""
     times = [
@@ -28,10 +41,14 @@ def _last_recorded_goal_time(meta: dict[str, Any]) -> datetime | None:
 
 
 def goal_followup_due(goal: dict[str, Any], *, now: datetime) -> bool:
-    """Require seven full days since the latest recorded goal activity."""
+    """Require 168 elapsed hours since the latest recorded goal activity."""
     meta = goal.get("metadata") or {}
-    recorded = _last_recorded_goal_time(meta)
-    return recorded is not None and now - recorded >= timedelta(days=7)
+    recorded = [
+        stamp
+        for key in ("created_at", "updated_at", "last_activity_at", "timestamp")
+        if (stamp := _recorded_timestamp(meta.get(key))) is not None
+    ]
+    return bool(recorded) and now.timestamp() - max(recorded) >= timedelta(days=7).total_seconds()
 
 
 def select_goals_for_followup(
