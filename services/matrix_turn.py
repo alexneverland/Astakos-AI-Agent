@@ -323,6 +323,7 @@ class MatrixTurnService:
                 visible_draft_reply,
                 "Chat_Agent",
                 "matrix",
+                correlation_rowid=saved_user.get("rowid"),
             )
             return visible_draft_reply
 
@@ -463,6 +464,7 @@ class MatrixTurnService:
             handling_agent,
             "matrix",
             external_content_sources=external_sources,
+            correlation_rowid=saved_user.get("rowid"),
         )
         if created_files.paths:
             return MatrixReply(

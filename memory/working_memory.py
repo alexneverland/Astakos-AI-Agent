@@ -330,6 +330,18 @@ def _save_capability(capability_type: str, description: str) -> str:
     return "error"
 
 
+def missing_capability_is_recorded(description: str) -> bool:
+    """Check the canonical capability store before a deferred external delivery."""
+    with memory_lock:
+        recorded = _load_capabilities()["cannot_do"]
+        return is_semantically_duplicate(description, recorded, threshold=0.88)
+
+
+def record_missing_capability(description: str) -> str:
+    """Commit a missing capability after its external proposal was delivered."""
+    return _save_capability("cannot", description)
+
+
 _USER_SUBJECT_MARKERS = (
     t("prompts.ext_str_252"), t("prompts.ext_str_250"), t("prompts.ext_str_424"), t("prompts.ext_str_381"), t("prompts.ext_str_171"), t("prompts.ext_str_170"),
     t("prompts.ext_str_186"), t("prompts.ext_str_190"), t("prompts.ext_str_224"), t("prompts.ext_str_203"), t("prompts.ext_str_145"), t("prompts.ext_str_137"),
@@ -375,9 +387,9 @@ class CapabilityObservation:
 
 
 def update_capabilities_from_exchange(
-    user_text: str, ai_text: str, agent: str
+    user_text: str, ai_text: str, agent: str, *, defer_missing_persistence: bool = False
 ) -> CapabilityObservation | None:
-    """Persist proven capabilities and return only actionable, classified observations."""
+    """Classify an exchange, optionally deferring missing-capability persistence."""
     import re
     import json
     try:
@@ -422,10 +434,16 @@ def update_capabilities_from_exchange(
             if _looks_like_user_fact_not_capability(data["cannot_do"]):
                 print(f"\033[90m[Self-awareness]: skip user fact, not cannot_do: {data['cannot_do']}\033[0m")
             else:
-                result = _save_capability("cannot", data["cannot_do"])
+                description = str(data["cannot_do"])
+                if defer_missing_persistence:
+                    if not missing_capability_is_recorded(description):
+                        return CapabilityObservation("missing_capability", description)
+                    result = "duplicate"
+                else:
+                    result = record_missing_capability(description)
                 if result == "inserted":
                     print(f"\033[91m[Self-awareness]: ❌ cannot_do: {data['cannot_do']}\033[0m")
-                    return CapabilityObservation("missing_capability", str(data["cannot_do"]))
+                    return CapabilityObservation("missing_capability", description)
                 elif result == "duplicate":
                     print(f"\033[90m[Self-awareness]: skip duplicate cannot_do: {data['cannot_do']}\033[0m")
             

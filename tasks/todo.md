@@ -153,6 +153,14 @@
   - Owner-approved exceptions: no heart-to-memory reaction, no legacy Matrix
     `/confirm`, and critical approvals only via encrypted Reply to the prompt.
 
+- [x] Deliver classified capability-gap and existing-bug proposals in Matrix.
+  - Acceptance: trusted ordinary Matrix text turns produce the same localized
+    proposal as Web/Telegram; bug offers never authorize new-tool drafts;
+    transient/uncertain and external-derived turns produce no proposal.
+  - Verified offline: 50 focused Matrix/capability tests passed, including
+    stale-turn, duplicate, and failed-delivery cases. Live Element delivery is
+    still an explicit manual check under the open final parity gate.
+
 ## Unified conversation: `shared-conversation-context`
 
 - [x] Reproduce the Matrix/Web context isolation with offline regression tests.

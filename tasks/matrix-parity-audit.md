@@ -21,6 +21,7 @@ remaining live checks are listed below.
 | Georgian translation | Matrix-local direct and one-shot pending modes reuse the existing translation helper. |
 | `/story` | Shared story generation returns text plus bounded encrypted image attachments. |
 | Location events | Trusted static/live locations are deduplicated and persisted; live home state, home/leave reminders, and departure follow-ups use the shared Telegram/Matrix lifecycle. |
+| Capability proposals | Classified missing-capability and existing-bug follow-ups are queued after trusted ordinary Matrix text turns, delivered through the selected encrypted transport, and persisted with Matrix event provenance. Offline tests cover stale, duplicate, uncertain, external-derived, and failed-delivery cases; live delivery remains unverified. |
 
 ## User-approved exception
 
@@ -45,6 +46,8 @@ completed and observed in both conversation views:
 - One voice note and one `/voice` spoken reply.
 - One generated file or image attachment.
 - One static/live location update plus a location reminder or departure follow-up.
+- One genuine capability-gap or existing-bug follow-up proposal in Element;
+  confirm it appears once and only a missing-capability proposal offers a draft.
 
 PR #200 is merged. Its offline parity group passed 54 focused tests on
 2026-09-24; the final active-draft and draft-cleanup fixes passed 97 focused
