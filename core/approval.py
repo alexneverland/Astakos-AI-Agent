@@ -589,7 +589,11 @@ def approval_check_node(state):
                     content=t("core.approval.bug_diagnosis_tool_blocked", name=tc["name"]),
                     tool_call_id=tc["id"],
                     name=tc["name"],
-                ) for tc in forbidden],
+                ) for tc in forbidden] + [AIMessage(content=t(
+                    "core.approval.bug_diagnosis_interrupted",
+                    name=forbidden[0]["name"],
+                    bug_offer_prefix=t("core.approval.bug_proposal_prefix"),
+                ))],
             }
 
     blocked_entries = [

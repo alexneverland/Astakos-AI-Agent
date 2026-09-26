@@ -417,8 +417,6 @@ def supervisor_node(state):
             next_agent = decision.next_agent
         else:
             next_agent = "Chat_Agent"
-        if next_agent == "Dev_Agent":
-            next_agent = "Chat_Agent"
         print(f"[Router]: -> {next_agent} (bug follow-up without authorization)")
         return {"next_agent": next_agent, "bug_diagnosis_read_only": False, "bug_followup_routed": True}
 

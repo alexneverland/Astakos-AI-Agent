@@ -8,7 +8,11 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 import core.i18n as i18n
 from core.agents import Router, dev_agent_node, supervisor_node
 from core.approval import approval_check_node
-from core.capability_draft import has_pending_bug_followup, has_pending_bug_proposal
+from core.capability_draft import (
+    has_pending_bug_diagnosis,
+    has_pending_bug_followup,
+    has_pending_bug_proposal,
+)
 from core.graph import _route_supervisor
 
 
@@ -117,6 +121,50 @@ def test_diagnosis_tool_boundary_rejects_non_allowlisted_calls(tool_name):
     }]))
     result = approval_check_node(state)
     assert result["approval_status"] == "blocked"
+
+
+def test_blocked_diagnosis_has_channel_visible_terminal_reply_without_fix_authority():
+    """A forbidden call stops safely with a user-facing reply, not a tool result."""
+    state = _bug_offer_state("Please investigate")
+    state["bug_diagnosis_read_only"] = True
+    state["messages"].append(AIMessage(content="", tool_calls=[{
+        "name": "edit_project_file", "args": {}, "id": "forbidden-edit",
+    }]))
+
+    result = approval_check_node(state)
+    visible = result["messages"][-1]
+
+    assert result["approval_status"] == "blocked"
+    assert isinstance(visible, AIMessage)
+    assert "could not complete" in visible.content.lower()
+    assert "no changes" in visible.content.lower()
+    assert has_pending_bug_diagnosis({
+        "messages": [visible, HumanMessage(content="Fix it now")],
+    }) is False
+    assert has_pending_bug_proposal({
+        "messages": [visible, HumanMessage(content="Please investigate again")],
+    }) is True
+
+    from api import server
+
+    fake_graph = MagicMock()
+    fake_graph.stream.return_value = [{"approval_check": result}]
+    trace = MagicMock()
+    trace.phase_timings = {}
+    with patch.object(server, "graph", fake_graph):
+        web_result = server._run_web_graph_stream_sync([], 5, trace)
+    assert web_result["final_ai_response"] == visible.content
+
+
+def test_unrelated_dev_request_after_bug_offer_uses_normal_dev_route():
+    """Declining investigation cannot swallow an independent project request."""
+    state = _bug_offer_state("Instead, review core/agents.py")
+    with patch("core.agents.safe_llm_invoke", return_value=Router(
+        next_agent="Dev_Agent", bug_offer_intent="other",
+    )):
+        result = supervisor_node(state)
+    assert result["next_agent"] == "Dev_Agent"
+    assert result["bug_diagnosis_read_only"] is False
 
 
 def test_diagnosis_tool_boundary_allows_project_read():
