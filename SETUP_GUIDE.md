@@ -90,7 +90,10 @@ Choose a **Chat Provider** and enter its credential. Then choose an **Embeddings
 
 Astakos uses one external messaging transport at a time. This avoids duplicate
 approvals, reminders, and routine messages. Switching the active app is done in
-the Setup Wizard; it does not merge histories between Web, Telegram, and Matrix.
+the Setup Wizard. Web, Telegram, and Matrix use shared conversation history and
+context. Web messages are mirrored to the currently selected external app;
+switching that app does not erase the shared history. Original attachments and
+generated files are not copied between apps.
 
 #### Telegram
 

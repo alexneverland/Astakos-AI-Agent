@@ -4,7 +4,7 @@
 
 ### Your own proactive AI assistant, running from your computer.
 
-**Download it, start it with Docker, choose your AI provider, and chat through the Web UI or Telegram.**
+**Download it, start it with Docker, choose your AI provider, and chat through the Web UI and your selected external app: Telegram or Element / Matrix.**
 
 Astakos remembers useful context, learns recurring routines, follows up naturally, creates files and images, uses tools, supports Jarvis-style live voice, and keeps its long-term memory and runtime state on your machine.
 
@@ -115,7 +115,7 @@ Most assistants wait for a prompt, forget the conversation, and start from zero 
 | | Astakos |
 |---|---|
 | **Runs from your computer** | Long-term memory, databases, routines, logs, settings, and uploads remain in your local runtime storage. |
-| **Remembers across channels** | Telegram and Web UI share conversation history and long-term context. |
+| **Remembers across channels** | Web, Telegram, and Matrix share conversation history and long-term context. |
 | **Learns routines** | It detects recurring habits and can remind you before they happen. |
 | **Follows up naturally** | It can revisit purchases, outings, tasks, and goals when a follow-up still makes sense. |
 | **Uses real tools** | Files, Gmail, Calendar, web research, GitHub, local projects, reminders, and more. |
@@ -147,7 +147,8 @@ Astakos combines memory, agents, schedulers, approvals, analytics, and tools int
 
 ### Memory and proactive assistance
 
-- Shared Telegram and Web conversation history in SQLite.
+- Shared Web, Telegram, and Matrix conversation history in SQLite.
+- Web messages are mirrored to the selected external app; original attachments and generated files are not copied between apps.
 - ChromaDB semantic memory for facts, goals, sessions, documents, and photos.
 - Hybrid recall combining recent context, SQLite history, and semantic memory.
 - Isolated behavioral observations that classify trusted user reports and surface repeated pattern candidates in Debug before they can influence any future feature.
@@ -298,7 +299,7 @@ See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for full instructions.
 ## Architecture
 
 ```text
- Telegram Bot          Web UI             CLI
+ Telegram / Matrix     Web UI             CLI
       │                   │                │
       └──────────── Shared conversation ───┘
                           │
@@ -340,10 +341,19 @@ The release compose file tracks `latest`; Watchtower downloads a new image and r
 
 MIT — see [LICENSE](LICENSE).
 
+Copyright (c) 2026 Lazaros Avramidis (alexneverland). Third-party components
+retain their own licenses and attribution notices.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the fork/PR workflow and offline
+verification requirements. Report security issues privately as described in
+[SECURITY.md](SECURITY.md).
+
 <div align="center">
 
 *Built with care by a Maker, for Makers.*
 
-**[alexneverland](https://github.com/alexneverland)**
+**[Lazaros Avramidis (alexneverland)](https://github.com/alexneverland)**
 
 </div>

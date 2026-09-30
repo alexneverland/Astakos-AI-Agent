@@ -2,7 +2,8 @@
 # Project: Astakos AI Agent 🦞
 # Module:  Core AI Provider Adapter Contract & Implementations
 # Description: Central provider capability abstraction layer
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 from __future__ import annotations

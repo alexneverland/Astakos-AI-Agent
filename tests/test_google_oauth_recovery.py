@@ -2,7 +2,8 @@
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
 # Module: Tests for Google OAuth Refresh and Recovery Handling
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 from __future__ import annotations

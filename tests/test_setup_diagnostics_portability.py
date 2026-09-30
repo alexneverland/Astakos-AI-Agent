@@ -1,7 +1,8 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Test suite for Setup & Diagnostics Portability (PR 5)
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 from __future__ import annotations

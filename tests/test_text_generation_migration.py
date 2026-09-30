@@ -2,7 +2,8 @@
 # Project: Astakos AI Agent 🦞
 # Module:  Tests for Text Generation Migration (PR 3B)
 # Description: Offline deterministic tests for reflection_engine and story_maker migration
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 import json

@@ -3,7 +3,8 @@
 # Description: Mastro-Cleaner — Standalone maintenance script for
 #              the Astakos JSON memory files. Run periodically to
 #              compact and de-duplicate memory state.
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 #
 # Usage:

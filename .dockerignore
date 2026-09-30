@@ -13,16 +13,29 @@ env/
 
 # Environment files
 .env
+.env.*
+!.env.example
 credentials/
+credentials.json
+token.json
+local_only/
 persona.md
 astakos_settings.json
 astakos_custom_intents.json
+astakos_routines.json
 .astakos_token
 .calendar_briefing_sent
 .ai_briefing_sent
 .fit_briefing_sent
 .goal_followup_sent
 run_telegram.lock
+run_matrix.lock
+matrix_store/
+matrix_media/
+scheduler_state.json
+astakos_pending_approval.json
+astakos_pending_approval.json.lock
+.approval-*.tmp
 last_location.json
 linkedin_draft.json
 runtime_snapshot.json
@@ -34,7 +47,11 @@ agent-permissions.json
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 chroma_db/
+chroma_db - Copy/
+.vscode/chroma_db/
 logs/
 telegram_photos/
 telegram_uploads/
