@@ -1,8 +1,9 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: User
+# Developer: Lazaros Avramidis (alexneverland)
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 import os

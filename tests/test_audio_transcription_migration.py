@@ -2,7 +2,8 @@
 # Project: Astakos AI Agent 🦞
 # Module:  Tests for Audio Transcription Migration (PR 3A)
 # Description: Offline deterministic tests for Telegram and Web audio transcription
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 import io

@@ -2,7 +2,8 @@
 # Project: Astakos AI Agent 🦞
 # Module:  Test Provider Mocks
 # Description: Deterministic offline mock adapters for contract testing
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 from __future__ import annotations

@@ -2,7 +2,8 @@ from core.i18n import t
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Structured Exception Classes
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 

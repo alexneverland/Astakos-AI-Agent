@@ -2,7 +2,8 @@
 # Project: Astakos AI Agent 🦞
 # Module:  Tests for AI Provider Capability Adapter Contract
 # Description: Validates typed contracts, errors, thread-safety, and real adapter boundaries (offline)
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 import base64
