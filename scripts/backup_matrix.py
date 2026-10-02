@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 
 from services.matrix_backup import (
     BackupSettings, MatrixBackupError, create_encrypted_backup,
-    file_digest, upload_encrypted_artifact,
+    original_artifact_digest, upload_encrypted_artifact,
 )
 from services.matrix_snapshot import SnapshotSettings, captured_snapshot
 
@@ -54,7 +54,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.retry_artifact:
             artifact = args.retry_artifact
-            file_id = upload_encrypted_artifact(artifact, args.drive_folder, file_digest(artifact))
+            file_id = upload_encrypted_artifact(artifact, args.drive_folder,
+                                               original_artifact_digest(artifact))
         elif args.capture:
             settings = SnapshotSettings(
                 args.synapse_dir, args.bot_store_dir, args.compose_file,

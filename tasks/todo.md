@@ -34,7 +34,9 @@ Unchecked entries in that dated snapshot are historical, not the active backlog.
   production healthy/HTTP 200. Temporary Docker resources removed; owner removed
   plaintext rehearsal directory (absence verified) and confirmed removal of local
   secret identities/fixtures. Public recipient retained; secret is in the vault.
-  Next: first timed-run observation
+  PR #210 review corrections: durable original ciphertext checksum and correlated
+  boot-parent pause/restart that retains Web. Native signal fixture passed;
+  no live boot lifecycle rehearsal. Next: first timed-run observation
   and owner Element recovery-key/replacement-host limitations.
   Astakos's own `.env` and existing nightly task are unchanged.
   Existing Astakos backup is unchanged; full client/host-loss recovery is not claimed.

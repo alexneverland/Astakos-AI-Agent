@@ -61,7 +61,11 @@ Older audit/spec snapshots describe implementation stages, not current open gate
    key/fixture cleanup after vault verification. Next: first timed nightly run;
    full Element/replacement-host
    recovery remains a separately bounded verification, not an implied guarantee.
-   Astakos's own `.env` and original nightly task are unchanged.
+   PR #210 review corrections preserve the original ciphertext digest on retry
+   and coordinate boot-supervised Matrix pause/restart without stopping Web.
+   Native CTRL_BREAK was verified only on a disposable fixture child; no live
+   boot restart or full-suite run. Astakos's own `.env` and original nightly task
+   are unchanged.
 2. **Behavioral live observation.** Observe relevant normal commentary, topic
    opt-out/re-enable and one appropriate spontaneous opener during ordinary use.
    Do not manufacture live test messages or mark provider interpretation verified

@@ -220,6 +220,34 @@ def validate_ciphertext(path: Path) -> None:
             raise MatrixBackupError("encrypted_artifact_invalid")
 
 
+def record_artifact_digest(artifact: Path, digest: str) -> None:
+    """Publish the original encryption checksum before any upload attempt."""
+    destination = artifact.with_suffix(".age.sha256")
+    fd, name = tempfile.mkstemp(prefix="digest-", dir=artifact.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="ascii") as stream:
+            stream.write(digest + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, destination)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def original_artifact_digest(artifact: Path) -> str:
+    """Reject missing provenance or changed bytes; never bless a retry's new hash."""
+    try:
+        validate_ciphertext(artifact)
+        receipt = validate_path(artifact.with_suffix(".age.sha256"))
+        digest = receipt.read_text(encoding="ascii").strip()
+        if (len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)
+                or file_digest(artifact) != digest):
+            raise ValueError
+        return digest
+    except Exception:
+        raise MatrixBackupError("retry_artifact_integrity_failed") from None
+
+
 def create_encrypted_backup(
     settings: BackupSettings, *, runner: Callable = subprocess.run,
     uploader: Callable[[Path, str, str], str] | None = None,
@@ -277,6 +305,7 @@ def create_encrypted_backup(
             finally:
                 partial.unlink(missing_ok=True)
             result = BackupResult(artifact, file_digest(artifact))
+            record_artifact_digest(artifact, result.sha256)
             if uploader is not None:
                 file_id = uploader(artifact, drive_folder, result.sha256)
                 if not file_id:

@@ -85,6 +85,7 @@ class WindowsRuntime:
     def __init__(self, work: Path, drive_folder: str = "") -> None:
         self.work = work
         self.drive_folder = drive_folder
+        self.boot_pause = None
 
     @staticmethod
     def powershell(command: str) -> str:
@@ -100,7 +101,7 @@ class WindowsRuntime:
         """Select exact venv launchers, rejecting ambiguous local instances."""
         raw = self.powershell(
             "Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^python.*\\.exe$' } | "
-            "Select-Object ProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress")
+            "Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress")
         records = json.loads(raw or "[]")
         if isinstance(records, dict):
             records = [records]
@@ -116,8 +117,18 @@ class WindowsRuntime:
                 watchdogs.append(entry)
         if len(bots) > 1 or len(watchdogs) > 1:
             raise MatrixBackupError("ambiguous_matrix_runtime")
+        boot_pid = None
+        by_pid = {int(record["ProcessId"]): record for record in records}
+        if bots and not watchdogs:
+            parent = by_pid.get(by_pid[bots[0]].get("ParentProcessId"))
+            if parent and parent.get("ExecutablePath") and Path(parent["ExecutablePath"]) == python:
+                tokens = shlex.split(parent.get("CommandLine") or "", posix=False)[1:]
+                normalized = [token.strip('"').replace("\\", "/").casefold() for token in tokens]
+                if "--server" in normalized and any(token in {"boot.py", (ROOT / "boot.py").as_posix().casefold()}
+                                                      for token in normalized):
+                    boot_pid = int(parent["ProcessId"])
         return {"bot_pid": bots[0] if bots else None,
-                "watchdog": watchdogs[0] if watchdogs else None}
+                "watchdog": watchdogs[0] if watchdogs else None, "boot_pid": boot_pid}
 
     def preflight(self) -> dict:
         """Validate old-task exclusion and private destination before downtime."""
@@ -154,6 +165,15 @@ class WindowsRuntime:
 
     def stop(self, previous: dict) -> None:
         """Wait for graceful bot/watchdog exit; refuse an unquiesced capture."""
+        if previous.get("boot_pid"):
+            from services.matrix_backup_maintenance import BootBackupPause
+            runtime_dir = self.work / "runtime"
+            secure_directory(runtime_dir)
+            # Remove stale startup evidence before asking the parent to restart.
+            for name in ("nightly-matrix.out.log", "nightly-matrix.err.log"):
+                (runtime_dir / name).write_bytes(b"")
+            self.boot_pause = BootBackupPause(previous["boot_pid"], previous["bot_pid"], runtime_dir)
+            self.boot_pause.acquire()
         if previous["bot_pid"] is not None:
             self.signal_bot(previous["bot_pid"])
         deadline = time.monotonic() + 150
@@ -168,6 +188,25 @@ class WindowsRuntime:
 
     def restore(self, previous: dict) -> None:
         """Restore the prior entrypoint in a hidden console and verify startup."""
+        if self.boot_pause is not None:
+            try:
+                if self.discover()["bot_pid"] == previous["bot_pid"]:
+                    return  # Failed stop: keep the original supervised child.
+                self.boot_pause.resume()
+                deadline = time.monotonic() + 120
+                out = self.work / "runtime" / "nightly-matrix.out.log"
+                while time.monotonic() < deadline:
+                    text = out.read_text(encoding="utf-8", errors="replace")
+                    if "Startup failed" in text:
+                        raise MatrixBackupError("matrix_restart_failed")
+                    if "Encrypted Element channel started" in text and self.discover()["bot_pid"]:
+                        return
+                    time.sleep(2)
+                raise MatrixBackupError("matrix_restart_not_verified")
+            finally:
+                self.boot_pause.clear()
+                self.boot_pause = None
+            # boot owns the replacement; never spawn a detached duplicate here.
         if not previous["bot_pid"] and not previous["watchdog"]:
             return
         current = self.discover()

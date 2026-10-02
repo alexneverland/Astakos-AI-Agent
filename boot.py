@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import time
+from pathlib import Path
 from dotenv import load_dotenv
 
 from core.version_check import check_for_updates
@@ -22,14 +23,24 @@ def is_configured(run_mode="cli"):
     return is_chat_provider_configured(provider)
 
 
-def start_external_transport() -> subprocess.Popen | None:
+def start_external_transport(*, log_dir: Path | None = None) -> subprocess.Popen | None:
     """Start only the selected external messaging transport."""
     from core.messaging_channel import resolve_external_channel
 
     active_channel = resolve_external_channel()
     if active_channel == "matrix":
         print("\033[92m[Boot]: Active external channel is Matrix.\033[0m")
-        return subprocess.Popen([sys.executable, "clients/matrix_bot.py"])
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+        command = [sys.executable, "clients/matrix_bot.py"]
+        if log_dir is not None:
+            from services.matrix_backup import secure_directory, validate_path
+            log_dir = validate_path(log_dir)
+            secure_directory(log_dir)
+            with (log_dir / "nightly-matrix.out.log").open("wb") as stdout, \
+                    (log_dir / "nightly-matrix.err.log").open("wb") as stderr:
+                return subprocess.Popen(command, creationflags=flags, stdout=stdout, stderr=stderr,
+                                        env=dict(os.environ, PYTHONUNBUFFERED="1"))
+        return subprocess.Popen(command, creationflags=flags)
 
     if os.getenv("TELEGRAM_TOKEN"):
         return subprocess.Popen([sys.executable, "clients/telegram_bot.py"])
@@ -66,6 +77,16 @@ def supervise_server_processes(
         if external_process is not None:
             external_exit = external_process.poll()
             if external_exit is not None:
+                from services.matrix_backup_maintenance import boot_backup_request, backup_pause_held
+                request = boot_backup_request(getattr(external_process, "pid", None))
+                if request is not None:
+                    while backup_pause_held():
+                        api_exit = api_process.poll()
+                        if api_exit is not None:
+                            return int(api_exit)
+                        sleep(0.25)
+                    external_process = start_external_transport(log_dir=Path(request["log_dir"]))
+                    continue
                 print(
                     "\033[91m[Boot]: Selected external transport stopped "
                     f"(exit={external_exit}). Stopping API.\033[0m"

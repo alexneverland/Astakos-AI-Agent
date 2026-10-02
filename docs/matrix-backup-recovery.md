@@ -181,7 +181,12 @@ produces an `uploaded` status and success exit code. No remote retention/deletio
 policy is activated.
 
 If an upload response is ambiguous, preserve the encrypted artifact and its
-`.age.upload-id` receipt together. Retry the **same** artifact, not a new run:
+`.age.upload-id` and `.age.sha256` receipts together. The original encryption
+checksum is persisted before any upload. Retry rejects missing/invalid receipts
+or changed ciphertext before provider access; it never invents a new trusted hash.
+Legacy packages without a checksum receipt cannot use this automatic retry path;
+retain them for recovery using previously recorded, verified checksums.
+Retry the **same** artifact, not a new run:
 
 ```powershell
 .\venv\Scripts\python.exe scripts\backup_matrix.py --retry-artifact C:\PrivateBackupWork\matrix-backup-EXAMPLE.age --upload --drive-folder APPROVED_FOLDER_ID
@@ -250,6 +255,20 @@ A successful upload is **not** proof of recovery. Record an actual isolated
 rehearsal and its limitations before marking backup/recovery complete.
 
 ## Nightly Windows operation
+
+`boot.py --server` starts its Matrix child in a dedicated Windows signal group.
+For a backup, the coordinator publishes a local request correlated to that exact
+parent/child PID and holds a capture-pause lock. The boot supervisor keeps Web
+running during the pause, then restarts and owns the replacement Matrix child.
+The coordinator verifies fresh startup logs before upload and does not start a
+second detached bot. Unrelated exits still fail through normal supervision.
+Requests/locks are gitignored; requests contain no credentials and are removed
+after recovery. A coordinator crash releases its OS lock; the correlated boot
+parent can resume rather than remaining paused by a stale lock file.
+After updating this code, a previously running `boot.py` must be restarted through
+normal operator control before relying on the new supervision contract. That live
+restart is not part of this review correction. The existing watchdog launch path
+retains its previous coordination.
 
 Task: `Astakos_Matrix_Encrypted_Backup`, daily **03:00 local Windows time**.
 Runs as `PC`, interactive logon, limited privileges, using the venv's `pythonw.exe`.

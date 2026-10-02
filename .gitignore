@@ -103,3 +103,6 @@ astakos_settings.json
 astakos_custom_intents.json
 astakos_routines.json
 .hn_briefing_sent
+.matrix-backup-maintenance.json
+.matrix-backup-maintenance.lock
+.matrix-backup-request-*

@@ -174,3 +174,118 @@ def test_restore_does_not_start_duplicate_or_previously_stopped_bot(tmp_path, mo
     runtime.restore({"bot_pid": None, "watchdog": None})
     monkeypatch.setattr(runtime, "discover", lambda: {"bot_pid": 42, "watchdog": "run_external.py"})
     runtime.restore({"bot_pid": 42, "watchdog": "run_external.py"})
+
+
+def test_discovery_correlates_boot_parent_only_in_same_checkout(tmp_path, monkeypatch):
+    """Only the exact parent launcher may own the backup restart."""
+    import json
+    runtime = nightly.WindowsRuntime(tmp_path)
+    python = str(nightly.ROOT / "venv/Scripts/python.exe")
+    records = [{"ExecutablePath": python, "CommandLine": "python.exe clients/matrix_bot.py",
+                "ProcessId": 42, "ParentProcessId": 41},
+               {"ExecutablePath": python, "CommandLine": "python.exe boot.py --server", "ProcessId": 41}]
+    monkeypatch.setattr(runtime, "powershell", lambda command: json.dumps(records))
+    assert runtime.discover()["boot_pid"] == 41
+    records[1]["CommandLine"] = "python.exe C:/other/boot.py --server"
+    assert runtime.discover()["boot_pid"] is None
+
+
+def test_boot_restore_uses_parent_and_fresh_startup_evidence(tmp_path, monkeypatch):
+    """Boot owns restart; the coordinator must never launch a second bot."""
+    runtime = nightly.WindowsRuntime(tmp_path)
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    class Pause:
+        resumed = False
+        cleared = False
+        def resume(self):
+            self.resumed = True
+            (runtime_dir / "nightly-matrix.out.log").write_text("Encrypted Element channel started")
+        def clear(self):
+            self.cleared = True
+    pause = Pause()
+    runtime.boot_pause = pause
+    states = iter([{"bot_pid": None}, {"bot_pid": 43}])
+    monkeypatch.setattr(runtime, "discover", lambda: next(states))
+    monkeypatch.setattr(nightly.subprocess, "Popen", lambda *a, **k: pytest.fail("Parent owns restart"))
+    runtime.restore({"bot_pid": 42, "watchdog": None, "boot_pid": 41})
+    assert pause.resumed and pause.cleared
+
+
+def test_boot_pause_rejects_unrelated_pids_and_cleans_owned_request(tmp_path, monkeypatch):
+    """Real file-lock handoff is correlated and does not leave a stale request."""
+    import os
+    from services import matrix_backup_maintenance as maintenance
+    monkeypatch.setattr(maintenance, "ROOT", tmp_path)
+    monkeypatch.setattr(maintenance, "REQUEST_PATH", tmp_path / "request.json")
+    monkeypatch.setattr(maintenance, "LOCK_PATH", tmp_path / "pause.lock")
+    pause = maintenance.BootBackupPause(os.getpid(), 42, tmp_path / "runtime")
+    pause.acquire()
+    assert maintenance.backup_pause_held()
+    assert maintenance.boot_backup_request(42) is not None
+    assert maintenance.boot_backup_request(43) is None
+    pause.resume()
+    assert not maintenance.backup_pause_held()
+    # Parent may see the child's exit only after pause release; correlation survives.
+    assert maintenance.boot_backup_request(42) is not None
+    pause.clear()
+    assert maintenance.boot_backup_request(42) is None
+
+
+def test_boot_restore_timeout_releases_pause_without_spawning(tmp_path, monkeypatch):
+    """A missing parent cannot leave the capture lock held forever."""
+    runtime = nightly.WindowsRuntime(tmp_path)
+    class Pause:
+        cleared = False
+        def resume(self):
+            pass
+        def clear(self):
+            self.cleared = True
+    pause = Pause()
+    runtime.boot_pause = pause
+    monkeypatch.setattr(runtime, "discover", lambda: {"bot_pid": None})
+    clock = iter([0, 121])
+    monkeypatch.setattr(nightly.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(nightly.subprocess, "Popen", lambda *a, **k: pytest.fail("No detached bot"))
+    with pytest.raises(MatrixBackupError, match="matrix_restart_not_verified"):
+        runtime.restore({"bot_pid": 42, "watchdog": None, "boot_pid": 41})
+    assert pause.cleared and runtime.boot_pause is None
+
+
+@pytest.mark.skipif(nightly.os.name != "nt", reason="Native Windows CTRL_BREAK integration")
+def test_boot_process_group_receives_native_ctrl_break(tmp_path, monkeypatch):
+    """Signal only a disposable local child, never the real Matrix runtime."""
+    import boot
+    import subprocess
+    import sys
+    import time
+    ready, stopped = tmp_path / "ready", tmp_path / "stopped"
+    program = (
+        "import signal,time; from pathlib import Path; "
+        "signal.signal(signal.SIGBREAK, lambda *a: (Path(" + repr(str(stopped)) + ").touch(), exit(0))); "
+        "Path(" + repr(str(ready)) + ").touch()\n"
+        "for _ in range(400): time.sleep(0.05)"
+    )
+    actual_popen = subprocess.Popen
+    def launch(command, **kwargs):
+        startup = subprocess.STARTUPINFO()
+        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup.wShowWindow = 0
+        kwargs["creationflags"] |= subprocess.CREATE_NEW_CONSOLE
+        return actual_popen([sys.executable, "-c", program], startupinfo=startup,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
+    monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "matrix")
+    monkeypatch.setattr(boot.subprocess, "Popen", launch)
+    process = boot.start_external_transport()
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert ready.exists()
+        nightly.WindowsRuntime.signal_bot(process.pid)
+        process.wait(timeout=10)
+        assert stopped.exists()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5)

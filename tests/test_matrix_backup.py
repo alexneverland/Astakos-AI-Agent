@@ -326,3 +326,45 @@ def test_real_age_fixture_roundtrip_and_wrong_key(settings, tmp_path):
                                str(tmp_path / "tampered.tar.gz"), str(corrupted)],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     assert tampered.returncode != 0
+
+
+def test_cli_retry_rejects_corruption_against_original_digest(settings, monkeypatch, capsys):
+    """A retained artifact must not establish a new digest after a bit flip."""
+    from scripts import backup_matrix as cli
+    result = backup.create_encrypted_backup(settings, runner=fake_encrypt)
+    data = bytearray(result.artifact.read_bytes())
+    data[-1] ^= 1
+    result.artifact.write_bytes(data)
+    sent = []
+    monkeypatch.setattr(cli, "upload_encrypted_artifact", lambda *a: sent.append(a) or "fixture-id")
+    assert cli.main(["--retry-artifact", str(result.artifact), "--upload",
+                     "--drive-folder", "fixture-folder"]) == 1
+    assert sent == []
+    assert "retry_artifact_integrity_failed" in capsys.readouterr().out
+
+
+def test_cli_retry_preserves_digest_after_failed_initial_upload(settings, monkeypatch):
+    """The checksum must be durable before the first provider attempt."""
+    from scripts import backup_matrix as cli
+    def fail(*args):
+        raise OSError("synthetic provider failure")
+    with pytest.raises(backup.MatrixBackupError):
+        backup.create_encrypted_backup(settings, runner=fake_encrypt, uploader=fail,
+                                       drive_folder="fixture-folder")
+    artifact, = settings.work_dir.glob("*.age")
+    expected = backup.file_digest(artifact)
+    sent = []
+    monkeypatch.setattr(cli, "upload_encrypted_artifact", lambda *a: sent.append(a) or "fixture-id")
+    assert cli.main(["--retry-artifact", str(artifact), "--upload",
+                     "--drive-folder", "fixture-folder"]) == 0
+    assert sent == [(artifact, "fixture-folder", expected)]
+
+
+def test_cli_retry_without_original_digest_cannot_upload(tmp_path, monkeypatch):
+    """Legacy ciphertext without recorded provenance fails closed."""
+    from scripts import backup_matrix as cli
+    artifact = tmp_path / "legacy.age"
+    artifact.write_bytes(b"age-encryption.org/v1\nfixture")
+    monkeypatch.setattr(cli, "upload_encrypted_artifact", lambda *a: pytest.fail("No upload"))
+    assert cli.main(["--retry-artifact", str(artifact), "--upload",
+                     "--drive-folder", "fixture-folder"]) == 1

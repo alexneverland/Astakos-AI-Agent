@@ -84,11 +84,39 @@ def test_boot_matrix_selection_never_spawns_telegram(
     monkeypatch.setattr(
         boot.subprocess,
         "Popen",
-        lambda command: spawned.append(command) or process,
+        lambda command, **kwargs: spawned.append(command) or process,
     )
 
     assert boot.start_external_transport() is process
     assert spawned == [[sys.executable, "clients/matrix_bot.py"]]
+
+
+def test_boot_matrix_child_has_dedicated_windows_signal_group(monkeypatch):
+    """Nightly CTRL_BREAK must address the actual child process group."""
+    import boot
+    calls = []
+    monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "matrix")
+    monkeypatch.setattr(boot.subprocess, "Popen", lambda *a, **k: calls.append(k) or object())
+    boot.start_external_transport()
+    if boot.os.name == "nt":
+        assert calls[0].get("creationflags", 0) & boot.subprocess.CREATE_NEW_PROCESS_GROUP
+
+
+def test_boot_keeps_web_alive_for_owned_backup_then_adopts_restarted_child(monkeypatch, tmp_path):
+    """A planned backup exit is not an external-channel failure."""
+    import boot
+    import services.matrix_backup_maintenance as maintenance
+    api = FakeProcess([None, None, None, 0])
+    old = FakeProcess([0])
+    old.pid = 42
+    new = FakeProcess([None, None, None])
+    monkeypatch.setattr(maintenance, "boot_backup_request", lambda pid: {"log_dir": str(tmp_path)})
+    held = iter([True, False])
+    monkeypatch.setattr(maintenance, "backup_pause_held", lambda: next(held))
+    monkeypatch.setattr(boot, "start_external_transport", lambda **kw: new)
+    assert boot.supervise_server_processes(api, old, sleep=lambda _: None) == 0
+    assert not api.terminated
+    assert new.terminated
 
 
 def test_windows_launcher_full_choice_isolates_both_reloaders() -> None:
