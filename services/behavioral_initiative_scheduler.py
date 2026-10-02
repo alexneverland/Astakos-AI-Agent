@@ -51,6 +51,7 @@ def run_behavioral_initiative_job() -> None:
         from memory.behavioral_conversation_preferences import PreferenceStore
         from memory.behavioral_initiative_state import InitiativeStore
         from memory.conversation_history import append_message, load_messages
+        from memory.event_log import has_recent_reminder_delivery
         from services.behavioral_conversation_evidence import load_behavioral_evidence
         from services.behavioral_conversation_initiative import run_initiative
         from services.external_delivery import external_delivery_router as router
@@ -59,7 +60,8 @@ def run_behavioral_initiative_job() -> None:
         def unavailable() -> bool:
             """Reuse owner quiet/mute state and stop/inactive-process gates."""
             return (bot.shutdown_event.is_set() or bot._external_background_runtime_channel != resolve_external_channel()
-                    or bot.is_quiet_hours() or bot.is_proactive_muted())
+                    or bot.is_quiet_hours() or bot.is_proactive_muted()
+                    or has_recent_reminder_delivery(datetime.now()))
 
         def send(channel: str, text: str, identity: str) -> Any:
             """Use stable Matrix identity; Telegram is single-attempt only."""

@@ -225,3 +225,9 @@ must fail. No mobile UI tests are part of this backend feature.
   Uncertain Telegram or stale Matrix delivery is held for inspection; this first
   version has no automatic owner-facing recovery UI or unsafe resend mechanism.
 - Live owner verification remains pending. Git/PR work needs a separate request.
+- Reminder activity is checked independently through the canonical event log,
+  including the previous date across midnight, both before classification and
+  before delivery. Invalid logs fail closed for this optional opener; existing
+  event-log readers retain their default behavior. Offline regressions cover
+  reminders absent from history, reminders arriving during classification,
+  and the exact fifteen-minute boundary.

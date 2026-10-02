@@ -446,4 +446,10 @@
 - [x] Pre-PR combined focused verification: 153 passed, two dependency
   deprecation warnings; staged diff check clean. No full-suite or live sends.
 - [ ] Owner verifies normal commentary and one appropriate opener live.
+- [x] PR #208 reminder-activity review fix: use the canonical event log even
+  without a history row; recheck after classification and cover midnight and
+  the exact fifteen-minute boundary with focused offline regressions.
+  Verified: 28 initiative/wiring tests and 22 reminder/event-log tests pass;
+  the legacy missed-routine tests require their mocked Telegram selection.
+  No full-suite rerun or live sends; compilation and diff check pass.
 - [ ] Record remaining exceptions honestly; no full-suite run by default.

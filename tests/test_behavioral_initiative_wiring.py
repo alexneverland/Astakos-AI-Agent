@@ -47,7 +47,8 @@ def test_scheduler_only_enqueues_one_slow_worker(monkeypatch):
         service._reset_for_tests()
 
 
-def test_real_worker_delivers_and_records_via_shared_boundaries(tmp_path, monkeypatch):
+@pytest.mark.parametrize("reminder_phase", ["none", "before", "during"])
+def test_real_worker_delivers_and_records_via_shared_boundaries(tmp_path, monkeypatch, reminder_phase):
     """Run the production worker with real temp stores and real Matrix adapter."""
     from datetime import datetime, timedelta
     import config
@@ -79,8 +80,14 @@ def test_real_worker_delivers_and_records_via_shared_boundaries(tmp_path, monkey
                    negated=0, hypothetical=0, reported_by_user=1, source_message_id=str(day),
                    source_rowid=day, source_channel="web") for day in (1, 2, 3)]
     monkeypatch.setattr(evidence, "load_behavioral_evidence", lambda **kw: build_behavioral_evidence(events, **kw))
-    monkeypatch.setattr(worker, "_classify", lambda _: dict(selected_index=0, blocked=False,
-                                                          recently_discussed=False, message="Πώς πάνε οι βόλτες σου;"))
+    from memory.event_log import log_event
+    if reminder_phase == "before":
+        log_event("reminders", "sent", task="A reminder missing from conversation history")
+    def classify(_):
+        if reminder_phase == "during":
+            log_event("reminders", "sent", task="Reminder delivered during classification")
+        return dict(selected_index=0, blocked=False, recently_discussed=False, message="Πώς πάνε οι βόλτες σου;")
+    monkeypatch.setattr(worker, "_classify", classify)
     delivered = []
     transport = MatrixExternalTransport(send_text=lambda _: pytest.fail("Wrong sender"),
         send_transaction_text=lambda text, tx: delivered.append((text, tx)) or "$opener",
@@ -90,6 +97,10 @@ def test_real_worker_delivers_and_records_via_shared_boundaries(tmp_path, monkey
     monkeypatch.setattr("services.external_delivery.external_delivery_router", router)
     worker.run_behavioral_initiative_job()
     worker.run_behavioral_initiative_job()
+    if reminder_phase != "none":
+        assert delivered == []
+        assert len(original_load(db_path=db)) == 1
+        return
     assert len(delivered) == 1
     assert delivered[0][1].startswith("astakos-behavioral-")
     assert original_load(db_path=db)[-1]["content"] == "Πώς πάνε οι βόλτες σου;"

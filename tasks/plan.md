@@ -405,3 +405,8 @@ preferences and the existing proactive hourly budget remain authoritative.
 An unchanged skipped context is evaluated once/day, not on every scheduler poll.
 No routine, approval, database migration, Docker or watchdog change occurred.
 Offline verification passed; owner live model/opener assessment remains pending.
+
+PR #208 review correction: the worker also checks reminder sent events through
+the canonical event-log reader before classification and immediately before
+delivery. Missing history rows cannot bypass the fifteen-minute quiet interval;
+invalid logs conservatively skip the opener. No reminder behavior is changed.
