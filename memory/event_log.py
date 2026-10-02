@@ -155,7 +155,7 @@ def log_event(job: str, action: str, **kwargs):
         print(f"⚠️ [event_log]: {e}")
 
 
-def get_events(date_str: str = None, job: str = None, action: str = None) -> list:
+def get_events(date_str: str = None, job: str = None, action: str = None, *, strict: bool = False) -> list:
     """
     Returns events from the daily log.
     Usage: get_events("2026-05-22", job="routines", action="triggered")
@@ -167,13 +167,35 @@ def get_events(date_str: str = None, job: str = None, action: str = None) -> lis
             return []
         with open(log_file, "r", encoding="utf-8") as f:
             entries = json.load(f)
+        if strict and (not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries)):
+            raise ValueError("Invalid event log")
         if job:
             entries = [e for e in entries if e.get("job") == job]
         if action:
             entries = [e for e in entries if e.get("action") == action]
         return entries
     except Exception:
+        if strict:
+            raise
         return []
+
+
+def has_recent_reminder_delivery(now: datetime, *, grace_seconds: int = 900) -> bool:
+    """Read reminder activity independently of history; invalid logs fail closed.
+
+    Include yesterday across midnight. These existing sent records are a
+    conservative activity signal, not proof of external delivery success.
+    """
+    from datetime import timedelta
+
+    for day in (now.date(), (now - timedelta(seconds=grace_seconds)).date()):
+        for event in get_events(day.isoformat(), action="sent", strict=True):
+            if event.get("job") not in {"reminder", "reminders"}:
+                continue
+            sent_at = datetime.fromisoformat(event["timestamp"])
+            if now - sent_at < timedelta(seconds=grace_seconds):
+                return True
+    return False
 
 
 # ────────────────────────────────────────────────────────────────

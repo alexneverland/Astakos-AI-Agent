@@ -166,7 +166,11 @@ def _extract_event_batch(messages: list[Mapping[str, Any]]) -> list[Mapping[str,
     from core.utils import extract_json_from_text
 
     lines = [
-        {"idx": index, "text": str(message.get("content") or "")[:500]}
+        {
+            "idx": index,
+            "source_date": str(message.get("date") or ""),
+            "text": str(message.get("content") or "")[:500],
+        }
         for index, message in enumerate(messages)
     ]
     prompt = """Classify each user message below as at most one behavioral event.
@@ -182,6 +186,10 @@ other when none applies; do not invent a synonym or a new label.
 Use subject `user` only for the user's own completed/current report. Do not infer
 facts from questions, plans, third-party reports, quoted text, or ambiguity.
 Use null for a message with no event.
+Ground relative dates in that message's source_date, never the batch processing
+date. Set event_date only when the event's date is supported by the message;
+use source_date for an explicitly current event. Do not invent a date for an
+ambiguous historical report: return null instead.
 
 Messages:\n""" + json.dumps(lines, ensure_ascii=False)
     try:

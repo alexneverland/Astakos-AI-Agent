@@ -38,6 +38,12 @@ class MatrixExternalTransport:
 
     def send_mirror_chunk(self, text: str, *, transaction_id: str) -> str | int:
         """Send one mirror chunk idempotently through the Matrix room sender."""
+        return self.send_idempotent_text(text, transaction_id=transaction_id)
+
+    def send_idempotent_text(self, text: str, *, transaction_id: str) -> str | int | None:
+        """Reuse the encrypted sender for a durable transaction-aware message."""
+        if not text.strip() or not transaction_id.strip():
+            raise ValueError("Matrix idempotent delivery requires text and identity")
         if self._send_transaction_text is None:
             raise RuntimeError("Matrix transaction-aware sender is unavailable")
         return self._send_transaction_text(text, transaction_id)

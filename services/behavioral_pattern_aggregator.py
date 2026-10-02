@@ -99,11 +99,14 @@ def summarize_behavioral_pattern_progress(
 
 def aggregate_behavioral_pattern_candidates(
     events: Iterable[Mapping[str, Any]],
+    *,
+    include_evidence: bool = False,
 ) -> list[dict[str, Any]]:
     """Return evidence-only candidates from repeated confirmed event signatures.
 
     This function is pure: it does not persist, infer a routine, or invoke an
     LLM. A signature must occur on at least three distinct calendar dates.
+    Evidence is opt-in so the existing Debug response contract stays unchanged.
     """
     grouped_events: dict[tuple[str, ...], list[tuple[str, Mapping[str, Any]]]] = defaultdict(list)
     for event in events:
@@ -126,7 +129,7 @@ def aggregate_behavioral_pattern_candidates(
             key=lambda record: (record[0], _event_display_fields(record[1])),
         )
         event_type, action_kind, category, subject, item, status = _event_display_fields(representative_event)
-        candidates.append({
+        candidate = {
             "event_type": event_type,
             "action_kind": action_kind,
             "category": category,
@@ -136,7 +139,22 @@ def aggregate_behavioral_pattern_candidates(
             "occurrence_count": len(event_dates),
             "first_date": distinct_dates[0],
             "last_date": distinct_dates[-1],
-        })
+        }
+        if include_evidence:
+            candidate.update(
+                distinct_date_count=len(distinct_dates),
+                event_dates=distinct_dates,
+                source_refs=[
+                    {
+                        "message_id": event.get("source_message_id"),
+                        "rowid": event.get("source_rowid"),
+                        "channel": event.get("source_channel"),
+                        "event_date": event_date,
+                    }
+                    for event_date, event in sorted(grouped, key=lambda record: record[0])
+                ],
+            )
+        candidates.append(candidate)
 
     return sorted(
         candidates,

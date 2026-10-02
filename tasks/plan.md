@@ -346,3 +346,67 @@ acceptance contract and exclusions are in `tasks/bug-investigation-flow-spec.md`
 
 No live cloud calls, credentials, database migrations, runtime edits, or PR
 actions are part of this implementation. Live owner testing remains separate.
+
+---
+
+# Plan: Behavioral Conversation Initiative
+
+The owner clarified that behavioral observations are for natural commentary
+and spontaneous conversation, not new routines. Existing incomplete Matrix
+tasks remain intact. Scope and module contracts are recorded in
+`tasks/behavioral-conversation-spec.md`; ordinary chat implementation is complete
+offline together with unsolicited initiative and awaits owner live verification.
+
+Foundation audit completed: 76 focused offline tests passed across shared
+intake/storage/aggregation and channel hooks. The extractor now receives source
+dates after a failing regression exposed their absence. This is not a second
+detector. Reply/initiative integration was implemented in the subsequent slices.
+Collection stays message-triggered on the background queue, not nightly.
+
+Evidence slice completed: extend the existing aggregator through opt-in source
+references/dates and reuse it from a read-only evidence adapter. Window length
+is mandatory at the caller (no active policy default); output has three-pattern
+and twelve-reference technical caps. 99 focused offline tests pass. Source text
+retrieval remains deferred; ordinary replies now consume structured evidence,
+and no new detector exists.
+
+Build order: `behavioral-evidence` -> `behavioral-reply` ->
+`behavioral-initiative`. Review each module contract before its implementation.
+
+1. Agree evidence bounds and add an offline-tested recent-evidence packet with
+   distinct dates, source provenance and explicit unknown context. Reuse the
+   observational store read-only; no backfill or migration.
+2. Specify shared topic suppression and integrate optional relevant commentary
+   through the canonical conversation context. The LLM interprets meaning;
+   no phrase lists or per-channel logic. Verify opt-out and ordinary replies.
+3. Specify durable suppression/delivery state and the dedicated habit opener.
+   Reuse quiet/mute/activity checks and selected-channel delivery, with freshness
+   rechecked before sending. Verify retries, restart and duplicate prevention.
+
+Each stage is a separate bounded slice with focused RED/GREEN tests and
+`git diff --check`. Storage-schema and scheduler changes need explicit approval.
+Do not alter nightly routine analytics, file-based proactive scanning,
+credentials, global limits, runtime startup, or Matrix approval behavior.
+
+Approved normal-reply policy: 30-day evidence window and common atomic JSON
+topic preferences, interpreted semantically. Shared prompt builder opts in only
+Chat_Agent; current/history-visible external sources cannot authorize automatic
+preference writes. Slow decisions recheck preference state before commentary.
+That reply slice has no scheduler/routine/approval/schema changes.
+
+Initiative policy approved on 2026-10-02: one opener/day, seven days/topic,
+fifteen minutes without any shared conversation/reminder message. Implemented
+in tested increments: separate atomic delivery ledger and stable history ID;
+fixed-clock selection/freshness/delivery lifecycle; coalesced slow-queue job on
+the shared external scheduler every ten minutes. Matrix uses the existing
+encrypted transaction-aware sender, Telegram uncertain sends are held without
+automatic retry. Confirmed receipts retry history recording only. Shared semantic
+preferences and the existing proactive hourly budget remain authoritative.
+An unchanged skipped context is evaluated once/day, not on every scheduler poll.
+No routine, approval, database migration, Docker or watchdog change occurred.
+Offline verification passed; owner live model/opener assessment remains pending.
+
+PR #208 review correction: the worker also checks reminder sent events through
+the canonical event-log reader before classification and immediately before
+delivery. Missing history rows cannot bypass the fifteen-minute quiet interval;
+invalid logs conservatively skip the opener. No reminder behavior is changed.
