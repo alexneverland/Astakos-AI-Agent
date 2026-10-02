@@ -240,8 +240,6 @@ through Task Scheduler completed with LastTaskResult 0 and durable uploaded stat
 the encrypted channel started and Synapse was healthy/HTTP 200. The original
 Astakos_Daily_Backup is unchanged. No Git commit, retention deletion or restore.
 
-## Sources
-
 ## Visible-terminal recovery amendment (owner approved 2026-10-02)
 
 Keep an existing Matrix watchdog alive during the cold backup pause. Correlate
@@ -256,6 +254,8 @@ credential changes or production process controls are part of offline testing.
 Verification order: reproduce adopted-child Ctrl+C failure; test visible output
 and private log tee; test correlated watchdog pause/restart and negative capture
 guards; run focused pytest plus compilation/diff checks, not the full suite.
+
+## Sources
 
 - https://github.com/FiloSottile/age
 - https://support.google.com/chrome/answer/95606?hl=en-GB

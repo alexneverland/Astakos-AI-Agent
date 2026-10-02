@@ -96,8 +96,6 @@ Unchecked entries in that dated snapshot are historical, not the active backlog.
   Review correction: all 73 combined link/guard tests pass; compilation and
   diff validation pass. No full-suite run or live outbound chat sends.
 
-## Historical work
-
 ## PR #210 visible-terminal recovery
 
 - [x] Fix Ctrl+C cleanup of the adopted boot child; prove with regression test.
@@ -107,6 +105,8 @@ Unchecked entries in that dated snapshot are historical, not the active backlog.
   112 focused tests passed, including disposable real-child output, native
   Windows signal and PowerShell filtering fixtures. No live backup run or full suite.
 - [ ] Owner-observed 03:00 run and terminal continuity remain live verification.
+
+## Historical work
 
 Web research providers, Matrix startup/media/delivery, capability-gap proposals
 and the two-stage existing-bug investigation flow are preserved in the archive
