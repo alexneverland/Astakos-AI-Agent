@@ -78,12 +78,20 @@ def assert_bot_stopped() -> None:
     """
     if os.name != "nt":
         raise MatrixBackupError("bot_quiescence_check_not_supported")
+    from services.matrix_backup_maintenance import paused_watchdog_ids
+    allowed_ids = paused_watchdog_ids()
+    # Exemption is narrow: only acknowledged idle watchdog PIDs, never a bot.
+    allowed_literal = ",".join(str(pid) for pid in allowed_ids)
     command = (
         "$ErrorActionPreference='Stop'; "
         "$p=Get-CimInstance Win32_Process; "
         r"$r='(?i)(?:^|[\s\x22\x27\\/])(run_matrix\.py|run_external\.py|matrix_bot\.py)(?:[\s\x22\x27]|$)'; "
+        f"$allowed=@({allowed_literal}); "
         r"if(@($p | Where-Object { $_.Name -match '^python(?:w|[0-9.]*)?\.exe$' "
-        "-and $_.CommandLine -match $r }).Count){exit 2}"
+        "-and $_.CommandLine -match $r -and ("
+        "$_.ProcessId -notin $allowed "
+        r"-or $_.CommandLine -match '(?i)(?:^|[\s\x22\x27\\/])matrix_bot\.py(?:[\s\x22\x27]|$)'"
+        ") }).Count){exit 2}"
     )
     try:
         result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],

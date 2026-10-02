@@ -117,18 +117,30 @@ class WindowsRuntime:
                 watchdogs.append(entry)
         if len(bots) > 1 or len(watchdogs) > 1:
             raise MatrixBackupError("ambiguous_matrix_runtime")
-        boot_pid = None
+        boot_pid, watchdog_pid, watchdog_pids = None, None, []
         by_pid = {int(record["ProcessId"]): record for record in records}
-        if bots and not watchdogs:
+        if bots:
             parent = by_pid.get(by_pid[bots[0]].get("ParentProcessId"))
-            if parent and parent.get("ExecutablePath") and Path(parent["ExecutablePath"]) == python:
+            # Windows venv launchers may proxy a base-interpreter worker. Only
+            # accept a bounded same-command ancestry rooted in this venv.
+            chain = [parent] if parent else []
+            if parent and Path(parent.get("ExecutablePath") or "") != python:
+                shim = by_pid.get(parent.get("ParentProcessId"))
+                if shim and shim.get("CommandLine") == parent.get("CommandLine"):
+                    chain.append(shim)
+            owned = bool(chain and Path(chain[-1].get("ExecutablePath") or "") == python)
+            if owned and process_entry(parent.get("CommandLine") or "") in {"run_external.py", "run_matrix.py"}:
+                watchdog_pid = int(parent["ProcessId"])
+                watchdog_pids = [int(record["ProcessId"]) for record in chain]
+            if owned and not watchdogs:
                 tokens = shlex.split(parent.get("CommandLine") or "", posix=False)[1:]
                 normalized = [token.strip('"').replace("\\", "/").casefold() for token in tokens]
                 if "--server" in normalized and any(token in {"boot.py", (ROOT / "boot.py").as_posix().casefold()}
                                                       for token in normalized):
                     boot_pid = int(parent["ProcessId"])
         return {"bot_pid": bots[0] if bots else None,
-                "watchdog": watchdogs[0] if watchdogs else None, "boot_pid": boot_pid}
+                "watchdog": watchdogs[0] if watchdogs else None, "boot_pid": boot_pid,
+                "watchdog_pid": watchdog_pid, "watchdog_pids": watchdog_pids}
 
     def preflight(self) -> dict:
         """Validate old-task exclusion and private destination before downtime."""
@@ -147,7 +159,12 @@ class WindowsRuntime:
         if (folder.get("mimeType") != "application/vnd.google-apps.folder" or folder.get("trashed")
                 or not permissions or any(p["type"] != "user" or p["role"] != "owner" for p in permissions)):
             raise MatrixBackupError("backup_destination_not_owner_only")
-        return self.discover()
+        previous = self.discover()
+        if previous["bot_pid"] and not (previous.get("boot_pid") or previous.get("watchdog_pid")):
+            raise MatrixBackupError("visible_matrix_parent_required")
+        if previous["watchdog"] and not previous["bot_pid"]:
+            raise MatrixBackupError("matrix_startup_in_progress")
+        return previous
 
     @staticmethod
     def signal_bot(pid: int) -> None:
@@ -165,14 +182,16 @@ class WindowsRuntime:
 
     def stop(self, previous: dict) -> None:
         """Wait for graceful bot/watchdog exit; refuse an unquiesced capture."""
-        if previous.get("boot_pid"):
+        parent_pid = previous.get("boot_pid") or previous.get("watchdog_pid")
+        if parent_pid:
             from services.matrix_backup_maintenance import BootBackupPause
             runtime_dir = self.work / "runtime"
             secure_directory(runtime_dir)
             # Remove stale startup evidence before asking the parent to restart.
             for name in ("nightly-matrix.out.log", "nightly-matrix.err.log"):
                 (runtime_dir / name).write_bytes(b"")
-            self.boot_pause = BootBackupPause(previous["boot_pid"], previous["bot_pid"], runtime_dir)
+            self.boot_pause = BootBackupPause(parent_pid, previous["bot_pid"], runtime_dir,
+                                             watchdog_pids=previous.get("watchdog_pids"))
             self.boot_pause.acquire()
         if previous["bot_pid"] is not None:
             self.signal_bot(previous["bot_pid"])
@@ -187,7 +206,7 @@ class WindowsRuntime:
                 time.sleep(2)
 
     def restore(self, previous: dict) -> None:
-        """Restore the prior entrypoint in a hidden console and verify startup."""
+        """Let an existing parent restart in its console; verify fresh startup."""
         if self.boot_pause is not None:
             try:
                 if self.discover()["bot_pid"] == previous["bot_pid"]:
@@ -212,31 +231,9 @@ class WindowsRuntime:
         current = self.discover()
         if current["bot_pid"]:
             return  # Stop failed; never create a duplicate live bot.
-        if current["watchdog"]:
-            raise MatrixBackupError("watchdog_still_running")
-        runtime_dir = self.work / "runtime"
-        secure_directory(runtime_dir)
-        out, err = runtime_dir / "nightly-matrix.out.log", runtime_dir / "nightly-matrix.err.log"
-        startup = subprocess.STARTUPINFO()
-        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startup.wShowWindow = 0
-        entry = previous["watchdog"] or "clients/matrix_bot.py"
-        with out.open("wb") as stdout, err.open("wb") as stderr:
-            process = subprocess.Popen([str(ROOT / "venv/Scripts/python.exe"), "-u", entry],
-                cwd=ROOT, stdout=stdout, stderr=stderr,
-                env=dict(os.environ, PYTHONUNBUFFERED="1"), startupinfo=startup,
-                creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP)
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                raise MatrixBackupError("matrix_restart_failed")
-            text = out.read_text(encoding="utf-8", errors="replace")
-            if "Encrypted Element channel started" in text:
-                return
-            if "Startup failed" in text:
-                raise MatrixBackupError("matrix_restart_failed")
-            time.sleep(2)
-        raise MatrixBackupError("matrix_restart_not_verified")
+        # A parent handoff is required by preflight. Never replace an operator's
+        # visible session with a detached hidden launcher after an unexpected exit.
+        raise MatrixBackupError("visible_matrix_parent_required")
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -25,8 +25,10 @@ Decryption with the previously owner-retrieved vault identity passed, with outpu
 discarded rather than extracted. Owned plaintext capture/archive staging was
 absent after the run. Synapse was healthy and its client versions endpoint
 returned HTTP 200; the restarted bot logged encrypted-channel startup without a
-startup failure. The watchdog now runs in a hidden background window with logs
-in the private work root. The owner subsequently confirmed normal Element replies.
+startup failure. That historical rehearsal restarted the watchdog hidden with
+private logs; the owner later stopped it and reopened the visible launcher.
+Current nightly behavior keeps the existing parent/terminal (see below).
+The owner subsequently confirmed normal Element replies.
 
 No `.env` was copied or modified. Deployment environment capture must be explicitly
 approved before claiming full host-loss recovery. No Drive upload, scheduled-task
@@ -147,8 +149,11 @@ Filesystem deletion is not guaranteed secure erasure on SSDs.
 
 `--capture` requires explicit source paths, both container names, the public
 recipient, private work root and `--allow-server-pause`. It refuses to run while
-any Matrix bot/watchdog entry point is running. The owner must keep those writers
-stopped for the entire capture; process checks are not an automatic lock/lease.
+any Matrix bot/watchdog entry point is running, except the nightly coordinator's
+exact watchdog PIDs after that parent acknowledges its child has exited, while
+the coordinator's capture lock is held. A live bot always blocks capture.
+The standalone capture CLI has no such lease and still requires all launchers
+stopped for the entire capture.
 This low-level capture CLI never terminates the bot. Nightly coordination uses
 the separate coordinator described below; no forced termination is implemented.
 
@@ -260,15 +265,21 @@ rehearsal and its limitations before marking backup/recovery complete.
 For a backup, the coordinator publishes a local request correlated to that exact
 parent/child PID and holds a capture-pause lock. The boot supervisor keeps Web
 running during the pause, then restarts and owns the replacement Matrix child.
+Ctrl+C cleanup runs in the scope that owns the current replacement process.
+With launcher choice 1 (`run_external.py` / `run_matrix.py`), the watchdog stays
+alive in its original terminal, acknowledges the stopped child, waits for capture
+to finish, then restarts under the same parent and console. Recovery stdout/stderr
+are copied both to that visible terminal and private startup-evidence logs.
 The coordinator verifies fresh startup logs before upload and does not start a
 second detached bot. Unrelated exits still fail through normal supervision.
 Requests/locks are gitignored; requests contain no credentials and are removed
 after recovery. A coordinator crash releases its OS lock; the correlated boot
 parent can resume rather than remaining paused by a stale lock file.
-After updating this code, a previously running `boot.py` must be restarted through
-normal operator control before relying on the new supervision contract. That live
-restart is not part of this review correction. The existing watchdog launch path
-retains its previous coordination.
+After updating this code, previously running boot/watchdog parents must be normally
+restarted before relying on this contract (a source reload replaces only the bot,
+not the watchdog's own loaded code). No live parent restart was performed as part
+of the correction tests. Direct bot launches without a supported owning parent are
+rejected before downtime; they cannot be safely restored into an existing terminal.
 
 Task: `Astakos_Matrix_Encrypted_Backup`, daily **03:00 local Windows time**.
 Runs as `PC`, interactive logon, limited privileges, using the venv's `pythonw.exe`.
@@ -280,9 +291,10 @@ in task arguments. Only the public recipient is used by encryption.
 
 `scripts/nightly_matrix_backup.py` checks that the old Astakos backup is not running
 and that the Drive folder is owner-only before downtime. It gracefully signals
-the discovered local venv bot group, waits for bot/watchdog exit, reuses the cold
-collector/encrypter, then restores the previously running entrypoint in a hidden
-console. Startup must be observed before upload; Web stays running. A previously
+the discovered local venv bot group, waits for the bot to exit and its watchdog to
+acknowledge the capture pause, reuses the cold collector/encrypter, then releases
+the parent to restart in the same terminal. No detached hidden recovery fallback
+is used. Startup must be observed before upload; Web stays running. A previously
 stopped Matrix channel is left stopped. No force kill on timeout. Existing backups
 are retained; no retention deletion or automatic retry of old failed uploads.
 

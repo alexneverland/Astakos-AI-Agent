@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -399,3 +400,30 @@ def test_cli_runtime_capture_requires_capture_mode():
     with pytest.raises(SystemExit) as result:
         cli.main(["--retry-artifact", "fixture.age", "--include-bot-runtime"])
     assert result.value.code == 2
+
+
+@pytest.mark.skipif(os.name != "nt", reason="PowerShell guard syntax and PID filtering")
+@pytest.mark.parametrize("pid,entry,allowed,blocked", [
+    (41, "run_external.py", [41], False),
+    (41, "run_external.py", [], True),
+    (99, "run_external.py", [41], True),
+    (41, "clients/matrix_bot.py", [41], True),
+])
+def test_native_cold_guard_only_exempts_paused_watchdog(monkeypatch, pid, entry, allowed, blocked):
+    """Evaluate the real PowerShell guard with fixture records, not live runtime."""
+    from services import matrix_backup_maintenance as maintenance
+    real_run = subprocess.run
+    monkeypatch.setattr(maintenance, "paused_watchdog_ids", lambda: allowed)
+    def evaluate(args, **kwargs):
+        command = args[-1].replace(
+            "$p=Get-CimInstance Win32_Process;",
+            "$p=@([pscustomobject]@{Name='python.exe';ProcessId=" + str(pid)
+            + ";CommandLine='python.exe " + entry + "'});",
+        )
+        return real_run([*args[:-1], command], **kwargs)
+    monkeypatch.setattr(capture.subprocess, "run", evaluate)
+    if blocked:
+        with pytest.raises(backup.MatrixBackupError, match="matrix_bot_or_watchdog_running"):
+            capture.assert_bot_stopped()
+    else:
+        capture.assert_bot_stopped()

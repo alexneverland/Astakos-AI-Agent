@@ -98,6 +98,16 @@ Unchecked entries in that dated snapshot are historical, not the active backlog.
 
 ## Historical work
 
+## PR #210 visible-terminal recovery
+
+- [x] Fix Ctrl+C cleanup of the adopted boot child; prove with regression test.
+- [x] Keep the watchdog and original terminal through the backup pause, with
+  startup evidence logged as well as displayed; reject unrelated/live writers.
+- [x] Run focused lifecycle/capture tests and update the operator runbook.
+  112 focused tests passed, including disposable real-child output, native
+  Windows signal and PowerShell filtering fixtures. No live backup run or full suite.
+- [ ] Owner-observed 03:00 run and terminal continuity remain live verification.
+
 Web research providers, Matrix startup/media/delivery, capability-gap proposals
 and the two-stage existing-bug investigation flow are preserved in the archive
 with their contracts and test evidence. Historical phase-specific deferrals do

@@ -105,6 +105,17 @@ failed-page reporting is verified offline.
 
 ## Verification and scope
 
+### PR #210 visible-terminal amendment
+
+Owner approved keeping the existing watchdog/terminal through backup. Build in
+three slices: (1) current-child shutdown and visible recovery logs; (2) exact
+watchdog maintenance handoff and cold-capture guard; (3) focused verification
+and runbook updates. No changes to the scheduled task, credentials or live data.
+All three slices are implemented: 112 focused tests passed, compilation and diff
+checks passed. Same-terminal output was verified with a disposable subprocess;
+live overnight terminal continuity is still pending. An already running watchdog
+must be normally restarted to load its own updated maintenance logic.
+
 Keep focused tests offline using temporary stores and mocked outbound boundaries.
 Run only the checks relevant to a behavioral/code change; no full-suite rerun
 by default. Documentation-only reconciliation does not require runtime tests.

@@ -232,6 +232,81 @@ def test_boot_pause_rejects_unrelated_pids_and_cleans_owned_request(tmp_path, mo
     assert maintenance.boot_backup_request(42) is None
 
 
+def test_watchdog_quiescence_requires_live_lock_and_matching_ack(tmp_path, monkeypatch):
+    """Only an acknowledged idle watchdog can be exempted from the cold guard."""
+    import os
+    import json
+    from services import matrix_backup_maintenance as maintenance
+    monkeypatch.setattr(maintenance, "ROOT", tmp_path)
+    monkeypatch.setattr(maintenance, "REQUEST_PATH", tmp_path / "request.json")
+    monkeypatch.setattr(maintenance, "ACK_PATH", tmp_path / "ack.json")
+    monkeypatch.setattr(maintenance, "LOCK_PATH", tmp_path / "pause.lock")
+    pause = maintenance.BootBackupPause(os.getpid(), 42, tmp_path / "runtime", watchdog_pids=[os.getpid()])
+    pause.acquire()
+    try:
+        assert maintenance.paused_watchdog_ids() == []
+        maintenance.acknowledge_watchdog_pause(pause.data)
+        assert maintenance.paused_watchdog_ids() == [os.getpid()]
+        ack = json.loads(maintenance.ACK_PATH.read_text())
+        ack["nonce"] = "wrong"
+        maintenance.ACK_PATH.write_text(json.dumps(ack))
+        assert maintenance.paused_watchdog_ids() == []
+        maintenance.acknowledge_watchdog_pause(pause.data)
+        pause.resume()
+        assert maintenance.paused_watchdog_ids() == []
+    finally:
+        pause.clear()
+
+
+def test_discovery_correlates_venv_watchdog_worker_chain(tmp_path, monkeypatch):
+    """Windows venv shim and worker are one watchdog, not two launchers."""
+    import json
+    runtime = nightly.WindowsRuntime(tmp_path)
+    python = str(nightly.ROOT / "venv/Scripts/python.exe")
+    records = [
+        {"ExecutablePath": python, "CommandLine": "python.exe -u run_external.py", "ProcessId": 40},
+        {"ExecutablePath": "C:/Python/python.exe", "CommandLine": "python.exe -u run_external.py",
+         "ProcessId": 41, "ParentProcessId": 40},
+        {"ExecutablePath": python, "CommandLine": "python.exe clients/matrix_bot.py",
+         "ProcessId": 42, "ParentProcessId": 41},
+    ]
+    monkeypatch.setattr(runtime, "powershell", lambda command: json.dumps(records))
+    state = runtime.discover()
+    assert state["watchdog_pid"] == 41
+    assert state["watchdog_pids"] == [41, 40]
+    records[1]["ParentProcessId"] = 999
+    assert runtime.discover()["watchdog_pid"] is None
+
+
+def test_watchdog_restore_uses_existing_parent_not_hidden_launcher(tmp_path, monkeypatch):
+    """Coordinator releases its pause; the original watchdog owns recovery."""
+    runtime = nightly.WindowsRuntime(tmp_path)
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    class Pause:
+        cleared = False
+        def resume(self):
+            (runtime_dir / "nightly-matrix.out.log").write_text("Encrypted Element channel started")
+        def clear(self):
+            self.cleared = True
+    pause = Pause()
+    runtime.boot_pause = pause
+    states = iter([{"bot_pid": None}, {"bot_pid": 43, "watchdog_pid": 41}])
+    monkeypatch.setattr(runtime, "discover", lambda: next(states))
+    monkeypatch.setattr(nightly.subprocess, "Popen", lambda *a, **k: pytest.fail("No hidden recovery"))
+    runtime.restore({"bot_pid": 42, "watchdog": "run_external.py", "watchdog_pid": 41})
+    assert pause.cleared
+
+
+def test_unowned_recovery_refuses_hidden_fallback(tmp_path, monkeypatch):
+    """Never silently replace a vanished interactive launcher."""
+    runtime = nightly.WindowsRuntime(tmp_path)
+    monkeypatch.setattr(runtime, "discover", lambda: {"bot_pid": None, "watchdog": None})
+    monkeypatch.setattr(nightly.subprocess, "Popen", lambda *a, **k: pytest.fail("No hidden fallback"))
+    with pytest.raises(MatrixBackupError, match="visible_matrix_parent_required"):
+        runtime.restore({"bot_pid": 42, "watchdog": None})
+
+
 def test_boot_restore_timeout_releases_pause_without_spawning(tmp_path, monkeypatch):
     """A missing parent cannot leave the capture lock held forever."""
     runtime = nightly.WindowsRuntime(tmp_path)

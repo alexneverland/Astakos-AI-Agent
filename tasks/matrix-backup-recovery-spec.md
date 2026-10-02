@@ -242,6 +242,21 @@ Astakos_Daily_Backup is unchanged. No Git commit, retention deletion or restore.
 
 ## Sources
 
+## Visible-terminal recovery amendment (owner approved 2026-10-02)
+
+Keep an existing Matrix watchdog alive during the cold backup pause. Correlate
+the request to its exact child and process ancestry; the live capture lock must
+hold before the guard allows that specific idle watchdog. Unrelated launchers
+and every live bot still block capture. The same parent restarts its child in
+the existing terminal, with stdout/stderr also copied to private startup logs.
+Boot and watchdog shutdown must clean up their current adopted child, not the
+pre-backup process. A previously stopped channel stays stopped. No live backup,
+credential changes or production process controls are part of offline testing.
+
+Verification order: reproduce adopted-child Ctrl+C failure; test visible output
+and private log tee; test correlated watchdog pause/restart and negative capture
+guards; run focused pytest plus compilation/diff checks, not the full suite.
+
 - https://github.com/FiloSottile/age
 - https://support.google.com/chrome/answer/95606?hl=en-GB
 - https://www.postgresql.org/docs/17/app-pgdump.html

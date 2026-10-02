@@ -132,6 +132,24 @@ def test_windows_launcher_full_choice_isolates_both_reloaders() -> None:
     assert "python run_external.py" in full_section
 
 
+def test_boot_interrupt_cleans_adopted_child(monkeypatch, tmp_path):
+    """Ctrl+C after backup stops the replacement, not only the old Popen."""
+    import boot
+    import services.matrix_backup_maintenance as maintenance
+    api = FakeProcess([None, None, None])
+    old = FakeProcess([0])
+    old.pid = 42
+    new = FakeProcess([None, None])
+    monkeypatch.setattr(maintenance, "boot_backup_request", lambda pid: {"log_dir": str(tmp_path)})
+    monkeypatch.setattr(maintenance, "backup_pause_held", lambda: False)
+    monkeypatch.setattr(boot, "start_external_transport", lambda **kw: new)
+    def interrupt(_):
+        raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        boot.supervise_server_processes(api, old, sleep=interrupt)
+    assert new.terminated and api.terminated
+
+
 def test_matrix_runtime_directories_are_gitignored() -> None:
     """Matrix encryption state and downloaded media cannot be staged accidentally."""
     from pathlib import Path

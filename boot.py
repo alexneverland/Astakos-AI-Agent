@@ -33,13 +33,8 @@ def start_external_transport(*, log_dir: Path | None = None) -> subprocess.Popen
         flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
         command = [sys.executable, "clients/matrix_bot.py"]
         if log_dir is not None:
-            from services.matrix_backup import secure_directory, validate_path
-            log_dir = validate_path(log_dir)
-            secure_directory(log_dir)
-            with (log_dir / "nightly-matrix.out.log").open("wb") as stdout, \
-                    (log_dir / "nightly-matrix.err.log").open("wb") as stderr:
-                return subprocess.Popen(command, creationflags=flags, stdout=stdout, stderr=stderr,
-                                        env=dict(os.environ, PYTHONUNBUFFERED="1"))
+            from services.matrix_backup_maintenance import start_logged_matrix_process
+            return start_logged_matrix_process(command, log_dir=log_dir)
         return subprocess.Popen(command, creationflags=flags)
 
     if os.getenv("TELEGRAM_TOKEN"):
@@ -68,32 +63,40 @@ def supervise_server_processes(
     sleep=time.sleep,
 ) -> int:
     """Watch both server children and fail when the selected transport exits."""
-    while True:
-        api_exit = api_process.poll()
-        if api_exit is not None:
-            _terminate_child(external_process)
-            return int(api_exit)
+    try:
+        while True:
+            api_exit = api_process.poll()
+            if api_exit is not None:
+                _terminate_child(external_process)
+                return int(api_exit)
 
-        if external_process is not None:
-            external_exit = external_process.poll()
-            if external_exit is not None:
-                from services.matrix_backup_maintenance import boot_backup_request, backup_pause_held
-                request = boot_backup_request(getattr(external_process, "pid", None))
-                if request is not None:
-                    while backup_pause_held():
-                        api_exit = api_process.poll()
-                        if api_exit is not None:
-                            return int(api_exit)
-                        sleep(0.25)
-                    external_process = start_external_transport(log_dir=Path(request["log_dir"]))
-                    continue
-                print(
-                    "\033[91m[Boot]: Selected external transport stopped "
-                    f"(exit={external_exit}). Stopping API.\033[0m"
-                )
-                _terminate_child(api_process)
-                return int(external_exit) if external_exit else 1
-        sleep(0.25)
+            if external_process is not None:
+                external_exit = external_process.poll()
+                if external_exit is not None:
+                    from services.matrix_backup_maintenance import boot_backup_request, backup_pause_held
+                    request = boot_backup_request(getattr(external_process, "pid", None))
+                    if request is not None:
+                        from services.matrix_backup_maintenance import drain_matrix_output
+                        drain_matrix_output(external_process)
+                        while backup_pause_held():
+                            api_exit = api_process.poll()
+                            if api_exit is not None:
+                                return int(api_exit)
+                            sleep(0.25)
+                        external_process = start_external_transport(log_dir=Path(request["log_dir"]))
+                        continue
+                    print(
+                        "\033[91m[Boot]: Selected external transport stopped "
+                        f"(exit={external_exit}). Stopping API.\033[0m"
+                    )
+                    _terminate_child(api_process)
+                    return int(external_exit) if external_exit else 1
+            sleep(0.25)
+    except BaseException:
+        # This scope owns the replacement as well as the initial transport.
+        _terminate_child(external_process)
+        _terminate_child(api_process)
+        raise
 
 
 
