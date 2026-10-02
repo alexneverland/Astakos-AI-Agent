@@ -668,10 +668,9 @@ def _bounded_web_graph_events(messages_for_graph: list, limit: int) -> Iterator[
     except GraphRecursionError:
         print("[Web->Graph]: Step budget exhausted; preserving terminal approval"
               if terminal_approval else "[Web->Graph]: Step budget exhausted; turn incomplete")
-        if not terminal_approval:
-            yield {"graph_limit": {"graph_budget_exhausted": True, "messages": [
+        yield {"graph_limit": {"graph_budget_exhausted": True, "messages": [] if terminal_approval else [
                 AIMessage(content=t("api.server.graph_budget_exhausted")),
-            ]}}
+        ]}}
 
 
 def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
@@ -696,6 +695,8 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
             if data is None:
                 continue
             graph_budget_exhausted = graph_budget_exhausted or bool(data.get("graph_budget_exhausted"))
+            if node == "graph_limit" and not data.get("messages"):
+                continue
             for event_message in data.get("messages", []):
                 for tool_call in getattr(event_message, "tool_calls", None) or []:
                     tool_call_id = str(tool_call.get("id", ""))

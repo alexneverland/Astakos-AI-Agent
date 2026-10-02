@@ -32,6 +32,8 @@ def test_web_preserves_terminal_approval_at_budget(monkeypatch: pytest.MonkeyPat
     result = server._run_web_graph_stream_sync([], 12, trace)
     if status in ("blocked", "pending"):
         assert result["final_ai_response"] == "terminal approval result"
+        assert result["graph_budget_exhausted"] is True
+        assert result["handling_agent"] == "approval_check"
     else:
         assert result["final_ai_response"] == server.t("api.server.graph_budget_exhausted")
         assert result["graph_budget_exhausted"] is True

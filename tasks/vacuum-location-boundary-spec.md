@@ -32,6 +32,10 @@ graph turn reaches its existing step budget. No vocabulary/phrase matching.
   real finite LangGraph exhaustion. No physical vacuum or provider was contacted.
   Final Web extraction/endpoint coverage: 23 passed after guarding draft-result
   formatting from overwriting the incomplete-turn warning. Syntax/diff checks pass.
+  PR #211 Codex follow-up: exact-budget terminal approvals also propagate the
+  exhaustion marker without replacing their message/agent. Combined real-graph
+  extraction plus Web endpoint regressions reproduced both blocked/pending draft
+  overwrite before repair; 25 focused Web tests pass after repair.
 - [ ] Owner-controlled live test after review; model wording is not proved offline.
 
 ## Commands and conventions

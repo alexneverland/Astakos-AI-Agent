@@ -48,9 +48,10 @@ def _post_chat(
     saved_local_draft: bool = False,
     voice_mode: bool = False,
     graph_budget_exhausted: bool = False,
+    graph_runner: MagicMock | None = None,
 ) -> tuple[object, dict[str, MagicMock]]:
     """Run one Web message under isolated completion and graph dependencies."""
-    graph_runner = MagicMock(side_effect=lambda *args, **kwargs: {
+    graph_runner = graph_runner if graph_runner is not None else MagicMock(side_effect=lambda *args, **kwargs: {
         **_graph_result(*args, **kwargs),
         "saved_local_draft": saved_local_draft,
         "graph_budget_exhausted": graph_budget_exhausted,
@@ -124,6 +125,56 @@ def test_web_preemptive_completion_continues_to_graph(client: TestClient) -> Non
     system_messages = [message for message in graph_messages if isinstance(message, SystemMessage)]
     assert len(system_messages) == 1
     assert "dynamic routine" not in str(system_messages[0].content)
+
+
+@pytest.mark.parametrize("status", ["blocked", "pending"])
+def test_draft_then_exact_budget_approval_preserves_visible_result(client: TestClient, status: str) -> None:
+    """Real graph extraction and endpoint formatting preserve the terminal approval."""
+    from langchain_core.messages import AIMessage, ToolMessage
+    from langgraph.graph import StateGraph, START, END
+    from core.utils import AgentState
+    from api import server as api_server
+
+    builder = StateGraph(AgentState)
+    builder.add_node("tools", lambda state: {"messages": [ToolMessage(
+        name="relay_local_payload", tool_call_id="draft",
+        content=api_server.t("prompts.ext_draft_2") + "\nMessage: fixture draft",
+    )]})
+    builder.add_edge(START, "tools")
+    previous = "tools"
+    for index in range(10):
+        name = f"step_{index}"
+        builder.add_node(name, lambda state: {})
+        builder.add_edge(previous, name)
+        previous = name
+    visible = f"{status}: terminal approval result"
+    builder.add_node("approval_check", lambda state: {
+        "approval_status": status, "messages": [AIMessage(content=visible)],
+    })
+    builder.add_edge(previous, "approval_check")
+    builder.add_edge("approval_check", END)
+    real_runner = api_server._run_web_graph_stream_sync
+    results = []
+
+    def run(messages: list, limit: int, trace: object) -> dict:
+        """Capture real extraction at exactly twelve steps without tool I/O."""
+        result = real_runner(messages, 12, trace)
+        results.append(result)
+        return result
+
+    runner = MagicMock(side_effect=run)
+    with (
+        patch.object(api_server, "graph", builder.compile()),
+        patch("core.utils.build_messenger_draft_ready_reply", return_value="wrong draft success"),
+        patch("core.utils.should_attach_linkedin_draft_reply", return_value=True),
+        patch("core.utils.build_linkedin_draft_ready_reply", return_value="wrong LinkedIn draft success"),
+    ):
+        response, _ = _post_chat(client, graph_runner=runner)
+    assert response.status_code == 200
+    assert results[0]["tool_result_fallbacks"]
+    assert results[0]["final_ai_response"] == visible
+    assert results[0]["saved_local_draft"] is True
+    assert response.json()["response"] == visible
 
 
 def test_web_empty_eligible_pool_does_not_call_selector(client: TestClient) -> None:
