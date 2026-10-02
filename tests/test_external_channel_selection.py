@@ -84,11 +84,39 @@ def test_boot_matrix_selection_never_spawns_telegram(
     monkeypatch.setattr(
         boot.subprocess,
         "Popen",
-        lambda command: spawned.append(command) or process,
+        lambda command, **kwargs: spawned.append(command) or process,
     )
 
     assert boot.start_external_transport() is process
     assert spawned == [[sys.executable, "clients/matrix_bot.py"]]
+
+
+def test_boot_matrix_child_has_dedicated_windows_signal_group(monkeypatch):
+    """Nightly CTRL_BREAK must address the actual child process group."""
+    import boot
+    calls = []
+    monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "matrix")
+    monkeypatch.setattr(boot.subprocess, "Popen", lambda *a, **k: calls.append(k) or object())
+    boot.start_external_transport()
+    if boot.os.name == "nt":
+        assert calls[0].get("creationflags", 0) & boot.subprocess.CREATE_NEW_PROCESS_GROUP
+
+
+def test_boot_keeps_web_alive_for_owned_backup_then_adopts_restarted_child(monkeypatch, tmp_path):
+    """A planned backup exit is not an external-channel failure."""
+    import boot
+    import services.matrix_backup_maintenance as maintenance
+    api = FakeProcess([None, None, None, 0])
+    old = FakeProcess([0])
+    old.pid = 42
+    new = FakeProcess([None, None, None])
+    monkeypatch.setattr(maintenance, "boot_backup_request", lambda pid: {"log_dir": str(tmp_path)})
+    held = iter([True, False])
+    monkeypatch.setattr(maintenance, "backup_pause_held", lambda: next(held))
+    monkeypatch.setattr(boot, "start_external_transport", lambda **kw: new)
+    assert boot.supervise_server_processes(api, old, sleep=lambda _: None) == 0
+    assert not api.terminated
+    assert new.terminated
 
 
 def test_windows_launcher_full_choice_isolates_both_reloaders() -> None:
@@ -102,6 +130,63 @@ def test_windows_launcher_full_choice_isolates_both_reloaders() -> None:
     assert 'start "Astakos Web Server"' in full_section
     assert "uvicorn api.server:server" in full_section
     assert "python run_external.py" in full_section
+
+
+def test_boot_interrupt_cleans_adopted_child(monkeypatch, tmp_path):
+    """Ctrl+C after backup stops the replacement, not only the old Popen."""
+    import boot
+    import services.matrix_backup_maintenance as maintenance
+    api = FakeProcess([None, None, None])
+    old = FakeProcess([0])
+    old.pid = 42
+    new = FakeProcess([None, None])
+    monkeypatch.setattr(maintenance, "boot_backup_request", lambda pid: {"log_dir": str(tmp_path)})
+    monkeypatch.setattr(maintenance, "backup_pause_held", lambda: False)
+    monkeypatch.setattr(boot, "start_external_transport", lambda **kw: new)
+    def interrupt(_):
+        raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        boot.supervise_server_processes(api, old, sleep=interrupt)
+    assert new.terminated and api.terminated
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="Windows Matrix group shutdown")
+@pytest.mark.parametrize("failure", ["timeout", "signal"])
+def test_matrix_group_fallback_targets_only_owned_tree(monkeypatch, failure):
+    """Never kill a shim first and lose the ability to stop its descendants."""
+    import boot
+    import services.windows_process_tree as windows_tree
+    class Group:
+        pid = 80
+        matrix_process_group = True
+        running = True
+        waits = []
+        def poll(self):
+            return None if self.running else 0
+        def send_signal(self, value):
+            assert value == boot.signal.CTRL_BREAK_EVENT
+            if failure == "signal":
+                raise OSError("fixture")
+        def wait(self, timeout):
+            self.waits.append(timeout)
+            return 0
+        def terminate(self):
+            pytest.fail("Do not terminate the shim before its descendants")
+    process = Group()
+    called = []
+    class Tree:
+        def __init__(self, pid):
+            called.append(pid)
+        def wait(self, timeout):
+            return not process.running
+        def terminate(self):
+            process.running = False
+        def close(self):
+            called.append("closed")
+    monkeypatch.setattr(windows_tree, "WindowsProcessTree", Tree)
+    boot._terminate_child(process)
+    assert not process.running
+    assert called == [80, "closed"]
 
 
 def test_matrix_runtime_directories_are_gitignored() -> None:

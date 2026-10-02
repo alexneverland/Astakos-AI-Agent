@@ -30,10 +30,42 @@ Older audit/spec snapshots describe implementation stages, not current open gate
 
 ## Remaining work: await owner direction
 
-1. **Private Matrix backup/recovery.** Document the signing-key, configuration
-   and PostgreSQL backup boundary and review restore prerequisites. This remains
-   a separate server-maintenance task; do not touch runtime, credentials or data
-   without a scoped owner instruction.
+1. **Private Matrix backup/recovery.** Read-only inventory is complete; the
+   proposed contract and ordered checkpoints are in
+   [matrix-backup-recovery-spec.md](matrix-backup-recovery-spec.md).
+   The owner chose Google Drive and Google Password Manager and approved age.
+   age 1.3.2, restricted local key setup and a harmless cryptographic round trip
+   are verified. Owner-mediated vault retrieval also decrypted the fixture
+   successfully. Package/encrypt/explicit-upload implementation is covered by
+   focused fixtures. The guarded collector and capture CLI are implemented with
+   mocked Docker; they require stopped bot/watchdog and explicit Synapse pause.
+   First approved local live capture passed on 2026-10-02, including vault-key
+   decryption, plaintext staging cleanup, healthy Synapse/HTTP 200 and bot startup.
+   The owner confirmed normal Element replies. Subsequent approved capture includes
+   only the deployment `.env` inside ciphertext, with hash-verified private Drive
+   upload/download. The existing configured Drive parent is publicly link-readable;
+   it was left unchanged and a separate owner-only My Drive folder was created.
+   Opt-in bot-runtime configuration export is now implemented and tested through
+   CLI packaging; only validated Matrix fields enter the encrypted archive.
+   Live recapture with bot settings and private Drive download/hash verification
+   passed on 2026-10-02. Synapse is healthy and bot/watchdog processes restarted;
+   owner chat confirmation for this latest restart is pending.
+   Separate task `Astakos_Matrix_Encrypted_Backup` is now registered for 03:00,
+   interactive current user/limited privileges, no daytime catch-up or forced
+   termination. Its actual Scheduler invocation passed: exit 0, verified upload,
+   encrypted channel startup, Synapse healthy/HTTP 200. 72 focused tests passed.
+   Isolated restore of the scheduled artifact passed on 2026-10-02: PostgreSQL,
+   pinned Synapse, token/room/sync and copied bot crypto loading. No outbound
+   sends or production changes. Temporary Docker resources removed; the owner
+   removed the plaintext directory (absence verified) and confirmed local secret
+   key/fixture cleanup after vault verification. Next: first timed nightly run;
+   full Element/replacement-host
+   recovery remains a separately bounded verification, not an implied guarantee.
+   PR #210 review corrections preserve the original ciphertext digest on retry
+   and coordinate boot-supervised Matrix pause/restart without stopping Web.
+   Native CTRL_BREAK was verified only on a disposable fixture child; no live
+   boot restart or full-suite run. Astakos's own `.env` and original nightly task
+   are unchanged.
 2. **Behavioral live observation.** Observe relevant normal commentary, topic
    opt-out/re-enable and one appropriate spontaneous opener during ordinary use.
    Do not manufacture live test messages or mark provider interpretation verified
@@ -72,6 +104,23 @@ unchanged. The owner reported successful reading on the next normal-chat attempt
 failed-page reporting is verified offline.
 
 ## Verification and scope
+
+### PR #210 visible-terminal amendment
+
+Owner approved keeping the existing watchdog/terminal through backup. Build in
+three slices: (1) current-child shutdown and visible recovery logs; (2) exact
+watchdog maintenance handoff and cold-capture guard; (3) focused verification
+and runbook updates. No changes to the scheduled task, credentials or live data.
+All three slices are implemented: 112 focused tests passed, compilation and diff
+checks passed. Same-terminal output was verified with a disposable subprocess.
+The subsequent venv-worker cleanup review is addressed: 54 focused lifecycle
+tests pass, including native group shutdown of initial and recovery shim/workers.
+The launcher-exits-first follow-up retains process handles before signaling and
+awaits every captured identity, using those same handles for timeout cleanup.
+58 focused tests pass; early launcher departure is explicitly emulated in native
+fixtures (not claimed as naturally reproduced on this installed Python build).
+Live overnight terminal continuity is still pending. An already running watchdog
+must be normally restarted to load its own updated maintenance logic.
 
 Keep focused tests offline using temporary stores and mocked outbound boundaries.
 Run only the checks relevant to a behavioral/code change; no full-suite rerun

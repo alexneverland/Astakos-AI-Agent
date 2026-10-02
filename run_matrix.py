@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from watchfiles import watch
@@ -68,7 +69,7 @@ def stop_process(process: subprocess.Popen | None) -> None:
         process.wait(timeout=5)
 
 
-def _start_process() -> subprocess.Popen:
+def _start_process(*, log_dir: Path | None = None) -> subprocess.Popen:
     """Start Matrix in a process group that can receive a graceful interrupt."""
     creationflags = (
         getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -76,11 +77,29 @@ def _start_process() -> subprocess.Popen:
         else 0
     )
     print("\033[92m[Matrix Watchdog]: Starting encrypted Matrix channel...\033[0m")
+    if log_dir is not None:
+        from services.matrix_backup_maintenance import start_logged_matrix_process
+        return start_logged_matrix_process([sys.executable, "clients/matrix_bot.py"], log_dir=log_dir)
     return subprocess.Popen(
         [sys.executable, "clients/matrix_bot.py"],
         cwd=ROOT_DIR,
         creationflags=creationflags,
     )
+
+
+def resume_after_backup(process: subprocess.Popen) -> subprocess.Popen | None:
+    """Keep this watchdog and console alive for a correlated cold backup pause."""
+    from services.matrix_backup_maintenance import (
+        boot_backup_request, backup_pause_held, acknowledge_watchdog_pause, drain_matrix_output,
+    )
+    request = boot_backup_request(process.pid)
+    if request is None:
+        return None
+    drain_matrix_output(process)
+    acknowledge_watchdog_pause(request)
+    while backup_pause_held():
+        time.sleep(0.25)
+    return _start_process(log_dir=Path(request["log_dir"]))
 
 
 def run() -> int:
@@ -101,6 +120,10 @@ def run() -> int:
         ):
             exit_code = process.poll() if process is not None else 1
             if exit_code is not None:
+                replacement = resume_after_backup(process)
+                if replacement is not None:
+                    process = replacement
+                    continue
                 print(
                     "\033[91m[Matrix Watchdog]: Matrix stopped unexpectedly "
                     f"(exit={exit_code}).\033[0m"

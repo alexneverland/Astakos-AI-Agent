@@ -1,7 +1,9 @@
 import os
 import sys
 import subprocess
+import signal
 import time
+from pathlib import Path
 from dotenv import load_dotenv
 
 from core.version_check import check_for_updates
@@ -22,14 +24,22 @@ def is_configured(run_mode="cli"):
     return is_chat_provider_configured(provider)
 
 
-def start_external_transport() -> subprocess.Popen | None:
+def start_external_transport(*, log_dir: Path | None = None) -> subprocess.Popen | None:
     """Start only the selected external messaging transport."""
     from core.messaging_channel import resolve_external_channel
 
     active_channel = resolve_external_channel()
     if active_channel == "matrix":
         print("\033[92m[Boot]: Active external channel is Matrix.\033[0m")
-        return subprocess.Popen([sys.executable, "clients/matrix_bot.py"])
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+        command = [sys.executable, "clients/matrix_bot.py"]
+        if log_dir is not None:
+            from services.matrix_backup_maintenance import start_logged_matrix_process
+            return start_logged_matrix_process(command, log_dir=log_dir)
+        process = subprocess.Popen(command, creationflags=flags)
+        if hasattr(process, "pid"):
+            process.matrix_process_group = os.name == "nt"
+        return process
 
     if os.getenv("TELEGRAM_TOKEN"):
         return subprocess.Popen([sys.executable, "clients/telegram_bot.py"])
@@ -42,6 +52,23 @@ def _terminate_child(process: subprocess.Popen | None) -> None:
     """Stop one still-running child without masking the original exit reason."""
     if process is None or process.poll() is not None:
         return
+    if os.name == "nt" and getattr(process, "matrix_process_group", False):
+        from services.windows_process_tree import WindowsProcessTree
+        tree = WindowsProcessTree(process.pid)
+        try:
+            try:
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+                graceful = tree.wait(120)
+            except OSError:
+                graceful = False
+            if not graceful:
+                tree.terminate()
+            if not tree.wait(5):
+                raise RuntimeError("matrix_group_shutdown_failed")
+            process.wait(timeout=5)
+            return
+        finally:
+            tree.close()
     process.terminate()
     try:
         process.wait(timeout=10)
@@ -57,22 +84,42 @@ def supervise_server_processes(
     sleep=time.sleep,
 ) -> int:
     """Watch both server children and fail when the selected transport exits."""
-    while True:
-        api_exit = api_process.poll()
-        if api_exit is not None:
-            _terminate_child(external_process)
-            return int(api_exit)
+    try:
+        while True:
+            api_exit = api_process.poll()
+            if api_exit is not None:
+                _terminate_child(external_process)
+                return int(api_exit)
 
-        if external_process is not None:
-            external_exit = external_process.poll()
-            if external_exit is not None:
-                print(
-                    "\033[91m[Boot]: Selected external transport stopped "
-                    f"(exit={external_exit}). Stopping API.\033[0m"
-                )
-                _terminate_child(api_process)
-                return int(external_exit) if external_exit else 1
-        sleep(0.25)
+            if external_process is not None:
+                external_exit = external_process.poll()
+                if external_exit is not None:
+                    from services.matrix_backup_maintenance import boot_backup_request, backup_pause_held
+                    request = boot_backup_request(getattr(external_process, "pid", None))
+                    if request is not None:
+                        from services.matrix_backup_maintenance import drain_matrix_output
+                        drain_matrix_output(external_process)
+                        while backup_pause_held():
+                            api_exit = api_process.poll()
+                            if api_exit is not None:
+                                return int(api_exit)
+                            sleep(0.25)
+                        external_process = start_external_transport(log_dir=Path(request["log_dir"]))
+                        continue
+                    print(
+                        "\033[91m[Boot]: Selected external transport stopped "
+                        f"(exit={external_exit}). Stopping API.\033[0m"
+                    )
+                    _terminate_child(api_process)
+                    return int(external_exit) if external_exit else 1
+            sleep(0.25)
+    except BaseException:
+        # This scope owns the replacement as well as the initial transport.
+        try:
+            _terminate_child(external_process)
+        finally:
+            _terminate_child(api_process)
+        raise
 
 
 
