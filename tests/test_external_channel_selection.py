@@ -150,6 +150,43 @@ def test_boot_interrupt_cleans_adopted_child(monkeypatch, tmp_path):
     assert new.terminated and api.terminated
 
 
+@pytest.mark.skipif(__import__("os").name != "nt", reason="Windows Matrix group shutdown")
+@pytest.mark.parametrize("failure", ["timeout", "signal"])
+def test_matrix_group_fallback_targets_only_owned_tree(monkeypatch, failure):
+    """Never kill a shim first and lose the ability to stop its descendants."""
+    import boot
+    import subprocess
+    from types import SimpleNamespace
+    class Group:
+        pid = 80
+        matrix_process_group = True
+        running = True
+        waits = []
+        def poll(self):
+            return None if self.running else 0
+        def send_signal(self, value):
+            assert value == boot.signal.CTRL_BREAK_EVENT
+            if failure == "signal":
+                raise OSError("fixture")
+        def wait(self, timeout):
+            self.waits.append(timeout)
+            if self.running:
+                raise subprocess.TimeoutExpired("fixture", timeout)
+            return 0
+        def terminate(self):
+            pytest.fail("Do not terminate the shim before its descendants")
+    process = Group()
+    called = []
+    def stop_tree(command, **kwargs):
+        called.append(command)
+        process.running = False
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(boot.subprocess, "run", stop_tree)
+    boot._terminate_child(process)
+    assert not process.running
+    assert called == [["taskkill.exe", "/PID", "80", "/T", "/F"]]
+
+
 def test_matrix_runtime_directories_are_gitignored() -> None:
     """Matrix encryption state and downloaded media cannot be staged accidentally."""
     from pathlib import Path

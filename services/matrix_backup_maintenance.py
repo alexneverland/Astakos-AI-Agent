@@ -41,6 +41,7 @@ def start_logged_matrix_process(command: list[str], *, log_dir: Path) -> subproc
         for stream in logs:
             stream.close()
         raise
+    process.matrix_process_group = os.name == "nt"
 
     def relay(source: TextIO, logfile: TextIO, console: TextIO | None) -> None:
         """Keep draining even if a console cannot represent one output line."""

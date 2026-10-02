@@ -266,6 +266,11 @@ For a backup, the coordinator publishes a local request correlated to that exact
 parent/child PID and holds a capture-pause lock. The boot supervisor keeps Web
 running during the pause, then restarts and owns the replacement Matrix child.
 Ctrl+C cleanup runs in the scope that owns the current replacement process.
+For Windows Matrix children, boot signals their dedicated group with CTRL_BREAK
+and allows up to 120 seconds for archival shutdown, rather than terminating only
+the venv shim. If explicit launcher shutdown cannot complete gracefully, it stops
+only that still-owned shim's descendant tree. This fallback is not used by the
+nightly capture coordinator, which continues to refuse force-kill on timeout.
 With launcher choice 1 (`run_external.py` / `run_matrix.py`), the watchdog stays
 alive in its original terminal, acknowledges the stopped child, waits for capture
 to finish, then restarts under the same parent and console. Recovery stdout/stderr

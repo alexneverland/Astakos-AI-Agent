@@ -112,8 +112,10 @@ three slices: (1) current-child shutdown and visible recovery logs; (2) exact
 watchdog maintenance handoff and cold-capture guard; (3) focused verification
 and runbook updates. No changes to the scheduled task, credentials or live data.
 All three slices are implemented: 112 focused tests passed, compilation and diff
-checks passed. Same-terminal output was verified with a disposable subprocess;
-live overnight terminal continuity is still pending. An already running watchdog
+checks passed. Same-terminal output was verified with a disposable subprocess.
+The subsequent venv-worker cleanup review is addressed: 54 focused lifecycle
+tests pass, including native group shutdown of initial and recovery shim/workers.
+Live overnight terminal continuity is still pending. An already running watchdog
 must be normally restarted to load its own updated maintenance logic.
 
 Keep focused tests offline using temporary stores and mocked outbound boundaries.

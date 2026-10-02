@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import signal
 import time
 from pathlib import Path
 from dotenv import load_dotenv
@@ -35,7 +36,10 @@ def start_external_transport(*, log_dir: Path | None = None) -> subprocess.Popen
         if log_dir is not None:
             from services.matrix_backup_maintenance import start_logged_matrix_process
             return start_logged_matrix_process(command, log_dir=log_dir)
-        return subprocess.Popen(command, creationflags=flags)
+        process = subprocess.Popen(command, creationflags=flags)
+        if hasattr(process, "pid"):
+            process.matrix_process_group = os.name == "nt"
+        return process
 
     if os.getenv("TELEGRAM_TOKEN"):
         return subprocess.Popen([sys.executable, "clients/telegram_bot.py"])
@@ -48,6 +52,24 @@ def _terminate_child(process: subprocess.Popen | None) -> None:
     """Stop one still-running child without masking the original exit reason."""
     if process is None or process.poll() is not None:
         return
+    if os.name == "nt" and getattr(process, "matrix_process_group", False):
+        try:
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+            process.wait(timeout=120)
+            return
+        except (OSError, subprocess.TimeoutExpired):
+            if process.poll() is not None:
+                return
+            # Only this still-owned launcher's descendants, never arbitrary
+            # Python processes. Do not terminate the shim before its tree.
+            result = subprocess.run(
+                ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
+            )
+            if result.returncode and process.poll() is None:
+                raise RuntimeError("matrix_group_shutdown_failed")
+            process.wait(timeout=5)
+            return
     process.terminate()
     try:
         process.wait(timeout=10)
@@ -94,8 +116,10 @@ def supervise_server_processes(
             sleep(0.25)
     except BaseException:
         # This scope owns the replacement as well as the initial transport.
-        _terminate_child(external_process)
-        _terminate_child(api_process)
+        try:
+            _terminate_child(external_process)
+        finally:
+            _terminate_child(api_process)
         raise
 
 

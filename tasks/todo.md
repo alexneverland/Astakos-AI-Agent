@@ -99,6 +99,10 @@ Unchecked entries in that dated snapshot are historical, not the active backlog.
 ## PR #210 visible-terminal recovery
 
 - [x] Fix Ctrl+C cleanup of the adopted boot child; prove with regression test.
+  Follow-up venv-worker review addressed with group CTRL_BREAK and bounded owned
+  tree fallback. 54 focused lifecycle tests passed. Native venv fixtures verify
+  actual worker handler/exits for both initial and recovery launches; permanent
+  orphaning was not reproduced on this installed Python build.
 - [x] Keep the watchdog and original terminal through the backup pause, with
   startup evidence logged as well as displayed; reject unrelated/live writers.
 - [x] Run focused lifecycle/capture tests and update the operator runbook.
