@@ -118,6 +118,8 @@ def run() -> int:
             rust_timeout=1000,
             yield_on_timeout=True,
         ):
+            from services.daily_backup_runtime import checkpoint
+            process = checkpoint("matrix", process, lambda: _start_process(log_dir=ROOT_DIR / "logs" / "daily_backup" / "matrix"))
             exit_code = process.poll() if process is not None else 1
             if exit_code is not None:
                 replacement = resume_after_backup(process)
